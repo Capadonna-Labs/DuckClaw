@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=42", "cmake>=3.18", "pybind11>=2.6"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "duckclaw"
+version = "0.1.0"
+description = "High-performance C++ analytical memory layer for sovereign AI agents."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"

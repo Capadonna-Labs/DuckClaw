@@ -1,4 +1,9 @@
-"""Adapter LangGraph: grafo ReAct simple con herramientas SQL."""
+"""Adapter LangGraph: grafo ReAct simple con herramientas SQL.
+
+Deprecated: the main Telegram bot now uses the entry router graph
+(duckclaw.agents.router.build_entry_router_graph). This adapter is kept for
+backward compatibility and may be removed in a future release.
+"""
 
 from __future__ import annotations
 

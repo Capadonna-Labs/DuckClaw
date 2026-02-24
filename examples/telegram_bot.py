@@ -15,6 +15,7 @@ if str(_repo_root) not in __import__("sys").path:
 import duckclaw
 from duckclaw.integrations import TelegramBotBase
 from duckclaw.integrations.llm_providers import build_agent_graph, build_llm
+from duckclaw.agents.router import build_entry_router_graph
 
 
 class EchoDuckBot(TelegramBotBase):
@@ -43,9 +44,8 @@ class EchoDuckBot(TelegramBotBase):
 
 
 class LangGraphDuckBot(TelegramBotBase):
-    """Bot powered by LangGraph with optional LLM provider (or none_llm: memory + rules).
-    Si store_db_path está definido (ruta absoluta a store.duckdb), usa el grafo retail
-    (Contador Soberano) y SlayerConsole para resaltar en MAGENTA las consultas DuckClaw."""
+    """Bot powered by LangGraph entry router (retail vs general). Uses duckclaw.agents.router.
+    Si store_db_path está definido, usa el grafo retail (Contador Soberano) cuando aplique."""
 
     def __init__(
         self,
@@ -54,22 +54,26 @@ class LangGraphDuckBot(TelegramBotBase):
         model: str = "",
         base_url: str = "",
         store_db_path: str = "",
+        system_prompt: str = "",
     ) -> None:
         super().__init__(db=db)
         self.provider = (provider or "none_llm").strip().lower()
         self.model = (model or "").strip()
         self.base_url = (base_url or "").strip()
         llm = build_llm(self.provider, self.model, self.base_url)
-        store_abs = (Path(store_db_path).resolve() if store_db_path else None)
-        if store_abs and store_abs.exists():
-            from duckclaw.utils import SlayerConsole
-            from src.agent.router import build_router_graph
-            store_db = duckclaw.DuckClaw(str(store_abs))
-            self._console = SlayerConsole()
-            self.graph = build_router_graph(db, llm, store_db=store_db, console=self._console)
+        store_abs = Path(store_db_path).resolve() if store_db_path else None
+        store_db = duckclaw.DuckClaw(str(store_abs)) if store_abs and store_abs.exists() else None
+        if llm is not None:
+            self.graph = build_entry_router_graph(
+                db, llm,
+                store_db=store_db,
+                console=None,
+                system_prompt=system_prompt or "",
+            )
+            self._use_history = True
         else:
-            self._console = None
-            self.graph = build_agent_graph(db, llm)
+            self.graph = build_agent_graph(db, None)
+            self._use_history = False
 
     def handle_message(self, update):  # type: ignore[override]
         message = getattr(update, "effective_message", None)
@@ -84,14 +88,16 @@ class LangGraphDuckBot(TelegramBotBase):
             f"[DuckClaw][IN][langgraph] chat_id={chat_id} user={username} text={incoming!r}",
             flush=True,
         )
-        # Pasar el texto del usuario al grafo de LangGraph (retail o estándar)
         run_config: Dict[str, Any] = {}
         if os.environ.get("LANGCHAIN_TRACING_V2", "").lower() in ("true", "1"):
             run_config = {
                 "tags": ["duckclaw", "telegram", self.provider],
                 "run_name": "telegram_langgraph",
             }
-        result = self.graph.invoke({"incoming": incoming}, config=run_config)
+        state: Dict[str, Any] = {"incoming": incoming}
+        if getattr(self, "_use_history", False):
+            state["history"] = []  # Example does not persist history; main bot does.
+        result = self.graph.invoke(state, config=run_config)
         reply = str(result.get("reply") or "LangGraph no generó respuesta.")
         asyncio.create_task(message.reply_text(reply))
         print(

@@ -217,6 +217,25 @@ def build_llm(
             temperature=0.2,
         )
 
+    if provider == "groq":
+        key = os.environ.get("GROQ_API_KEY", "").strip()
+        if not key:
+            raise RuntimeError(
+                "Proveedor Groq requiere GROQ_API_KEY. "
+                "Exporta: export GROQ_API_KEY='tu-api-key'"
+            )
+        try:
+            from langchain_groq import ChatGroq
+        except ImportError as e:
+            raise RuntimeError(
+                "Para Groq instala: pip install langchain-groq"
+            ) from e
+        return ChatGroq(
+            model=(model or "llama-3.3-70b-versatile").strip(),
+            api_key=key,
+            temperature=0.2,
+        )
+
     if provider == "ollama":
         url = _ensure_url_scheme(base_url or "http://localhost:11434")
         if not url:
@@ -280,11 +299,16 @@ def build_llm(
 
 
 def _strip_eot(reply: str) -> str:
-    """Remove MLM/MLX end-of-sequence tokens from the end of the reply."""
+    """Remove MLM/MLX end-of-sequence tokens from the reply."""
     if not isinstance(reply, str):
         return str(reply)
-    for token in ("<|eot_id|>", "<|end|>", "<|end_of_text|>"):
-        if reply.endswith(token):
+    reply = reply.strip()
+    # Strip <|python_tag|> from start (MLX/Slayer)
+    if reply.startswith("<|python_tag|>"):
+        reply = reply[len("<|python_tag|>"):].strip()
+    # Strip end tokens repeatedly
+    for token in ("<|eot_id|>", "<|end|>", "<|end_of_text|>", "<|eom_id|>"):
+        while reply.endswith(token):
             reply = reply[: -len(token)].strip()
     return reply.strip()
 

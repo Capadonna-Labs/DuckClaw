@@ -56,6 +56,32 @@ def _log(msg: str) -> None:
     print(msg, flush=True)
 
 
+def _normalize_reply(reply: str) -> str:
+    """Strip EOT tokens; hide raw tool-call JSON and error JSON so they never reach Telegram or logs."""
+    import json
+    from duckclaw.integrations.llm_providers import _strip_eot
+    from duckclaw.utils import friendly_query_error
+
+    s = _strip_eot(str(reply or "")).strip()
+    # If graph returned raw tool-call JSON (e.g. Slayer-8B text output), don't send to user
+    if s.startswith("{") and '"name"' in s and ("parameters" in s or '"args"' in s):
+        return "El asistente está procesando. Si no ves resultado, intenta de nuevo."
+    # If graph returned raw {"error": "..."}, show a short message instead
+    if s.startswith('{"error"') or (s.startswith("{") and '"error"' in s[:20]):
+        try:
+            data = json.loads(s)
+            err = str((data or {}).get("error", ""))
+            friendly = friendly_query_error(err)
+            if friendly:
+                return friendly
+            if "Catalog Error" in err or "Table" in err or "does not exist" in err:
+                return "Esa tabla no existe. Pregunta por las tablas disponibles."
+            return "No se pudo completar la operación."
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return s or ""
+
+
 def _get_db_path() -> str:
     path = os.environ.get("DUCKCLAW_DB_PATH", "").strip()
     if path:
@@ -136,27 +162,47 @@ def _set_config(db: Any, key: str, value: str) -> None:
     )
 
 
-def _build_adapter(
+def _get_store_db(config: dict) -> Any:
+    """Return DuckClaw instance for store DB if path is set and exists, else None."""
+    path = (config.get("store_db_path") or os.environ.get("DUCKCLAW_STORE_DB_PATH", "")).strip()
+    if not path:
+        return None
+    resolved = Path(path).resolve()
+    if not resolved.exists():
+        return None
+    from duckclaw import DuckClaw
+    return DuckClaw(str(resolved))
+
+
+def _build_entry_router(
     db: Any,
-    framework: str,
     system_prompt: str,
     llm_provider: str = "",
     llm_model: str = "",
     llm_base_url: str = "",
+    store_db: Optional[Any] = None,
 ) -> Any:
-    from .adapters.base import BaseAgent
-    from .adapters.langgraph_adapter import LangGraphAdapter
-    from .adapters.openai_adapter import OpenAIAdapter
+    """Build compiled entry router graph (LangGraph). Requires a valid LLM."""
+    from duckclaw.integrations.llm_providers import build_llm
+    from duckclaw.agents.router import build_entry_router_graph
 
-    framework = (framework or _DEFAULT_FRAMEWORK).strip().lower()
-    provider = (llm_provider or "").strip().lower()
-    model = (llm_model or "").strip()
-    base_url = (llm_base_url or "").strip()
-    if framework == "openai":
-        a: BaseAgent = OpenAIAdapter(db, system_prompt=system_prompt)
-    else:
-        a = LangGraphAdapter(db, system_prompt=system_prompt, provider=provider, model=model, base_url=base_url)
-    return a
+    llm = build_llm(
+        (llm_provider or "").strip().lower(),
+        (llm_model or "").strip(),
+        (llm_base_url or "").strip(),
+    )
+    if llm is None:
+        raise RuntimeError(
+            "Configura llm_provider en /setup (openai, anthropic, mlx, iotcorelabs). "
+            "O añade OPENAI_API_KEY / ANTHROPIC_API_KEY en .env."
+        )
+    return build_entry_router_graph(
+        db,
+        llm,
+        store_db=store_db,
+        console=None,
+        system_prompt=system_prompt,
+    )
 
 
 def _run_bot() -> None:
@@ -209,30 +255,46 @@ def _run_bot() -> None:
                 self._handle_setup(message, text, chat_id)
                 return
 
+            # Saludo corto: responder sin invocar el grafo para evitar que el modelo devuelva tool calls
+            _greetings = (
+                "hola", "hey", "hi", "hello", "buenas", "qué tal", "que tal",
+                "buenos días", "buenos dias", "buenas tardes", "buenas noches",
+                "ola", "saludos",
+            )
+            if text and len(text) <= 25 and text.lower().strip() in _greetings:
+                reply = "Hola, ¿en qué puedo ayudarte?"
+                _log(f"📤 Respuesta chat={chat_id}: {reply}")
+                asyncio.create_task(message.reply_text(reply))
+                return
+
             # Cargar config desde agent_config (y wizard si falta llm_*)
             config = _get_config(self.db)
             system_prompt = config.get("system_prompt") or _DEFAULT_SYSTEM_PROMPT
-            framework = config.get("framework") or _DEFAULT_FRAMEWORK
             llm_provider = config.get("llm_provider") or ""
             llm_model = config.get("llm_model") or ""
             llm_base_url = config.get("llm_base_url") or ""
+            store_db = _get_store_db(config)
 
             t0 = time.perf_counter()
             try:
-                adapter = _build_adapter(
-                    self.db, framework, system_prompt,
-                    llm_provider=llm_provider, llm_model=llm_model, llm_base_url=llm_base_url,
+                graph = _build_entry_router(
+                    self.db,
+                    system_prompt,
+                    llm_provider=llm_provider,
+                    llm_model=llm_model,
+                    llm_base_url=llm_base_url,
+                    store_db=store_db,
                 )
                 history = self._get_history(chat_id, limit=10)
-                reply = adapter.invoke(text, history=history)
+                result = graph.invoke({"incoming": text, "history": history})
+                reply = result.get("reply") or ""
             except RuntimeError as e:
                 reply = str(e)
             except Exception as e:
                 reply = f"Error del agente: {e}"
                 import traceback
                 traceback.print_exc()
-            from duckclaw.integrations.llm_providers import _strip_eot
-            reply = _strip_eot(str(reply)) if reply else ""
+            reply = _normalize_reply(reply)
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
             reply_preview = (reply[:160] + "...") if len(reply) > 160 else reply
             _log(f"📤 Respuesta chat={chat_id} ({elapsed_ms} ms): {reply_preview}")
@@ -250,8 +312,9 @@ def _run_bot() -> None:
                         f"Config actual:\nframework={config.get('framework', _DEFAULT_FRAMEWORK)}\n"
                         f"llm_provider={config.get('llm_provider', '')}\n"
                         f"llm_model={config.get('llm_model', '')}\n"
+                        f"store_db_path={config.get('store_db_path', '') or '(vacío)'}\n"
                         f"system_prompt={config.get('system_prompt', '')[:150]}...\n\n"
-                        "Para cambiar: /setup framework=langgraph | llm_provider=openai | system_prompt=..."
+                        "Para cambiar: /setup llm_provider=openai | system_prompt=... | store_db_path=/ruta/store.duckdb"
                     )
                 )
                 return
@@ -259,7 +322,7 @@ def _run_bot() -> None:
                 key, _, value = body.partition("=")
                 key = key.strip().lower()
                 value = value.strip()
-                allowed = ("framework", "system_prompt", "llm_provider", "llm_model", "llm_base_url")
+                allowed = ("framework", "system_prompt", "llm_provider", "llm_model", "llm_base_url", "store_db_path")
                 if key in allowed:
                     _set_config(self.db, key, value)
                     asyncio.create_task(message.reply_text(f"Config actualizado: {key}={value[:80]}..."))

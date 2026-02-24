@@ -62,6 +62,61 @@ print(results)
 # Output: [{"x":"100.5","y":"64.0","z":"-200.1","event":"Zombie Attack"}]
 ```
 
+## Entregable BI (Olist) – funciones en notebooks
+
+El módulo `duckclaw.bi` expone funciones DuckClaw para la **prueba técnica BI iData Global** (dataset Olist): carga de CSVs y consultas de negocio listas para ejecutar en celdas de Jupyter/notebook.
+
+### Requisitos
+
+- DuckClaw instalado y directorio `data/` con los CSV de Olist (p. ej. `olist_orders_dataset.csv`, `olist_customers_dataset.csv`, etc.).
+
+### Uso en un notebook
+
+```python
+import duckclaw
+from duckclaw.bi import (
+    load_olist_data,
+    get_top_customers_by_sales,
+    get_customers_to_retain,
+    get_top_sellers,
+    get_delivery_metrics,
+    get_delivery_critical_cases,
+    get_sales_summary,
+    get_review_metrics,
+    get_category_sales,
+)
+
+db = duckclaw.DuckClaw("olist_bi.duckdb")
+load_olist_data(db, "data")
+
+# Preguntas de negocio (cada una en su celda)
+get_top_customers_by_sales(db, limit=15)
+get_customers_to_retain(db, limit=15, min_orders=2)
+get_top_sellers(db, limit=15)
+get_delivery_metrics(db)
+get_delivery_critical_cases(db, days_threshold=20)
+get_sales_summary(db)
+get_review_metrics(db)
+get_category_sales(db, limit=15)
+```
+
+### Preguntas en lenguaje natural con LLM (Groq)
+
+Un LLM interpreta la pregunta y usa las funciones BI como herramientas (tools). Por defecto usa **Groq** (`GROQ_API_KEY`):
+
+```python
+from duckclaw.bi import ask_bi
+
+respuesta = ask_bi(db, "¿Cuáles son los clientes que más ventas generan? Dame un resumen.", provider="groq")
+print(respuesta)
+```
+
+Instalación para Groq: `pip install -e ".[groq]"` o `pip install langchain-groq langgraph langchain-core`.
+
+### Notebook de ejemplo
+
+En `notebooks/olist_bi_entregable.ipynb` hay un ejemplo completo: carga, las 4 preguntas obligatorias del enunciado, preguntas adicionales y una sección con **preguntas en lenguaje natural** vía Groq. Ejecuta las celdas en orden desde la raíz del repo o desde `notebooks/` (el notebook detecta la ruta a `data/`).
+
 ## Security Testing (Strix)
 
 Use Strix for manual security assessments against this repository.

@@ -44,11 +44,21 @@ def format_tool_reply(raw: str) -> str:
             return f"Se encontraron {len(data)} registro(s)." if len(data) > 3 else s
         except (json.JSONDecodeError, TypeError, IndexError, KeyError):
             pass
-    # Si es un objeto JSON
+    # Si es un objeto JSON con "error", mensaje amigable para el usuario
     if s.startswith("{"):
         try:
-            json.loads(s)
-            return s  # dejamos JSON si es objeto (puede ser inventario, etc.)
-        except json.JSONDecodeError:
+            data = json.loads(s)
+            if isinstance(data, dict) and "error" in data:
+                err = str(data.get("error", ""))
+                friendly = friendly_query_error(err)
+                if friendly:
+                    return friendly
+                if "Catalog Error" in err or "Table" in err or "does not exist" in err:
+                    return "Esa tabla no existe en la base de datos. Pregunta por las tablas disponibles o revisa el nombre."
+                if "Query vacío" in err or "vacío" in err:
+                    return "No se envió ninguna consulta."
+                return "No se pudo completar la operación. Revisa la consulta o los datos."
+            return s  # dejamos JSON si es objeto (inventario, etc.)
+        except (json.JSONDecodeError, TypeError):
             pass
     return s

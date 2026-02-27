@@ -66,16 +66,16 @@ def _confirm_with_nav(
         return default, None
     return default, None
 
-CONFIG_KEYS = ("mode", "channel", "bot_mode", "llm_provider", "llm_model", "llm_base_url", "db_path")
+CONFIG_KEYS = ("mode", "channel", "bot_mode", "llm_provider", "llm_model", "llm_base_url", "db_path", "save_grpo_traces", "send_to_langsmith")
 DEPLOY_PROVIDERS = ("auto", "pm2", "systemd", "windows", "cron")
 DEPLOY_SERVICE_NAME = "DuckClaw-Brain"
 INFERENCE_SERVICE_NAME = "DuckClaw-Inference"
-# Orden: IoTCoreLabs, OpenAI, Anthropic, MLX (principales); luego Ollama y none_llm
-LLM_PROVIDERS = ("iotcorelabs", "openai", "anthropic", "mlx", "ollama", "none_llm")
+# Orden: IoTCoreLabs, OpenAI, Anthropic, DeepSeek, MLX (principales); luego Ollama y none_llm
+LLM_PROVIDERS = ("iotcorelabs", "openai", "anthropic", "deepseek", "mlx", "ollama", "none_llm")
 TELEGRAM_TOKEN_PATTERN = re.compile(r"^\d+:[A-Za-z0-9_-]{20,}$")
 API_VALIDATION_TIMEOUT = 8
 
-# Bienvenida → Canal → Modo del bot → Proveedor → … (provider/validate_provider se saltan si bot_mode != "langgraph")
+# Bienvenida → Canal → Modo del bot → Proveedor → … (provider/validate_provider/grpo_traces se saltan si bot_mode != "langgraph")
 SECTION_IDS = (
     "welcome",
     "channel",
@@ -85,6 +85,7 @@ SECTION_IDS = (
     "deps",
     "token",
     "db_path",
+    "grpo_traces",
     "validate_provider",
     "summary",
     "save_launch",
@@ -148,6 +149,8 @@ def load_config() -> dict[str, Any] | None:
             v = data[k]
             if k == "db_path":
                 out["db_path"] = v if _valid_db_path(v) else "telegram.duckdb"
+            elif k in ("save_grpo_traces", "send_to_langsmith"):
+                out[k] = bool(v) if isinstance(v, bool) else str(v).strip().lower() in ("true", "1", "yes", "y", "sí", "si")
             else:
                 out[k] = v if v is not None else ""
         if "last_deploy_provider" in data and isinstance(data["last_deploy_provider"], str):
@@ -260,6 +263,8 @@ def save_config(
     llm_provider: str = "",
     llm_model: str = "",
     llm_base_url: str = "",
+    save_grpo_traces: bool = False,
+    send_to_langsmith: bool = False,
 ) -> None:
     path = _config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -271,6 +276,8 @@ def save_config(
         "llm_provider": llm_provider or "",
         "llm_model": llm_model or "",
         "llm_base_url": llm_base_url or "",
+        "save_grpo_traces": save_grpo_traces,
+        "send_to_langsmith": send_to_langsmith,
     }
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -379,6 +386,10 @@ def _validate_provider_config(
         if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
             return False, "Anthropic requiere ANTHROPIC_API_KEY. Exporta la variable."
         return True, ""
+    if provider == "deepseek":
+        if not os.environ.get("DEEPSEEK_API_KEY", "").strip():
+            return False, "DeepSeek requiere DEEPSEEK_API_KEY. Exporta la variable."
+        return True, ""
     if provider == "ollama":
         if not base_url.strip():
             return False, "Ollama requiere URL (ej. http://localhost:11434)."
@@ -398,7 +409,7 @@ def _validate_provider_config(
 
 def _ask_provider(console: Console, state: dict[str, Any]) -> str | None:
     """Devuelve nav (next/prev/quit) si el usuario escribe s/a/q en el primer prompt, o None."""
-    provider_table = Table(title="Model provider (elige: Anthropic, OpenAI, MLX, IoTCoreLabs)", border_style="cyan")
+    provider_table = Table(title="Model provider (elige: Anthropic, OpenAI, DeepSeek, MLX, IoTCoreLabs)", border_style="cyan")
     provider_table.add_column("Opción", style="bold cyan")
     provider_table.add_column("Descripción", style="white")
     for p in LLM_PROVIDERS:
@@ -406,6 +417,7 @@ def _ask_provider(console: Console, state: dict[str, Any]) -> str | None:
             "iotcorelabs": "IoTCoreLabs",
             "openai": "OpenAI API",
             "anthropic": "Anthropic API",
+            "deepseek": "DeepSeek API",
             "mlx": "MLX (servidor local OpenAI-compatible)",
             "ollama": "Ollama local",
             "none_llm": "Sin LLM (reglas + memoria DuckClaw)",
@@ -428,6 +440,9 @@ def _ask_provider(console: Console, state: dict[str, Any]) -> str | None:
         state["llm_model"] = Prompt.ask("Modelo OpenAI", default=model or "gpt-4o-mini").strip()
     elif state["llm_provider"] == "anthropic":
         state["llm_model"] = Prompt.ask("Modelo Anthropic", default=model or "claude-3-5-haiku-20241022").strip()
+    elif state["llm_provider"] == "deepseek":
+        default_model = model or os.environ.get("DEEPSEEK_MODEL", "").strip() or "deepseek-chat"
+        state["llm_model"] = Prompt.ask("Modelo DeepSeek", default=default_model).strip()
     elif state["llm_provider"] == "ollama":
         state["llm_base_url"] = Prompt.ask("URL Ollama", default=base_url or "http://localhost:11434").strip()
         state["llm_model"] = Prompt.ask("Modelo Ollama", default=model or "llama3.2").strip()
@@ -465,6 +480,9 @@ def _next_index(i: int, state: dict[str, Any]) -> int | None:
     # Saltar provider si no langgraph
     if SECTION_IDS[n] == "provider" and state.get("bot_mode") != "langgraph":
         n += 1
+    # Saltar grpo_traces si no langgraph
+    if SECTION_IDS[n] == "grpo_traces" and state.get("bot_mode") != "langgraph":
+        n += 1
     # Saltar validate_provider si no langgraph
     if SECTION_IDS[n] == "validate_provider" and state.get("bot_mode") != "langgraph":
         n += 1
@@ -479,6 +497,8 @@ def _prev_index(i: int, state: dict[str, Any]) -> int:
     p = i - 1
     if SECTION_IDS[p] == "validate_provider" and state.get("bot_mode") != "langgraph":
         p -= 1
+    if SECTION_IDS[p] == "grpo_traces" and state.get("bot_mode") != "langgraph":
+        p -= 1
     if SECTION_IDS[p] == "provider" and state.get("bot_mode") != "langgraph":
         p -= 1
     return max(0, p)
@@ -490,6 +510,8 @@ def _section_progress(idx: int, state: dict[str, Any]) -> tuple[int, int]:
     for i in range(len(SECTION_IDS)):
         sid = SECTION_IDS[i]
         if sid == "provider" and state.get("bot_mode") != "langgraph":
+            continue
+        if sid == "grpo_traces" and state.get("bot_mode") != "langgraph":
             continue
         if sid == "validate_provider" and state.get("bot_mode") != "langgraph":
             continue
@@ -512,7 +534,7 @@ def _run_section(
     if section_id == "welcome":
         console.print(
             Panel(
-                "[bold green]DuckClaw 🦆⚔️[/]\n[dim]s = siguiente · a = anterior · q = salir[/]",
+                "[bold green]DuckClaw 🦆⚔️[/]",
                 border_style="green",
             )
         )
@@ -625,16 +647,40 @@ def _run_section(
 
     if section_id == "db_path":
         console.print(Panel("Ruta de la base de datos", title="DB", border_style="cyan"))
-        default_db = (
-            os.environ.get("DUCKCLAW_DB_PATH")
-            or (state.get("db_path") if _valid_db_path(state.get("db_path")) else None)
-            or "telegram.duckdb"
-        )
+        # Prioridad: última ruta guardada en config (JSON) → env DUCKCLAW_DB_PATH → fallback
+        saved_path = state.get("db_path") if _valid_db_path(state.get("db_path")) else None
+        env_path = (os.environ.get("DUCKCLAW_DB_PATH") or "").strip() or None
+        default_db = saved_path or env_path or "telegram.duckdb"
         val, nav = _prompt_with_nav(console, "DUCKCLAW_DB_PATH", default=default_db)
         if nav:
             return True, "", nav
         raw = (val or "").strip() or "telegram.duckdb"
         state["db_path"] = raw if _valid_db_path(raw) else "telegram.duckdb"
+        return True, "", None
+
+    if section_id == "grpo_traces":
+        console.print(Panel("Trazas GRPO y LangSmith", title="Trazas GRPO", border_style="cyan"))
+        console.print("[dim]Guarda trazas en train/grpo_olist_traces.jsonl. Tras classify_traces(), usa train/grpo_olist_rewarded.jsonl (con rewards) por defecto.[/]")
+        console.print("[dim]LangSmith requiere LANGCHAIN_API_KEY en .env o entorno.[/]")
+        default_save = state.get("save_grpo_traces", True)
+        if isinstance(default_save, str):
+            default_save = default_save.lower() in ("true", "1", "yes", "y", "sí", "si")
+        save_yes, nav = _confirm_with_nav(console, "¿Guardar trazas GRPO en train/grpo_olist_traces.jsonl?", default=default_save)
+        if nav:
+            return True, "", nav
+        state["save_grpo_traces"] = save_yes
+        if save_yes:
+            default_langsmith = state.get("send_to_langsmith", True)
+            if isinstance(default_langsmith, str):
+                default_langsmith = default_langsmith.lower() in ("true", "1", "yes", "y", "sí", "si")
+            langsmith_yes, nav2 = _confirm_with_nav(
+                console, "¿Subir trazas a LangSmith? (requiere LANGCHAIN_API_KEY)", default=default_langsmith
+            )
+            if nav2:
+                return True, "", nav2
+            state["send_to_langsmith"] = langsmith_yes
+        else:
+            state["send_to_langsmith"] = False
         return True, "", None
 
     if section_id == "validate_provider":
@@ -663,6 +709,16 @@ def _run_section(
                 t.add_row("Modelo", state.get("llm_model"))
         t.add_row("Token (censurado)", _censor_token(state.get("token", "")))
         t.add_row("DB path", state.get("db_path", ""))
+        if state.get("bot_mode") == "langgraph":
+            save_tr = state.get("save_grpo_traces", False)
+            if isinstance(save_tr, str):
+                save_tr = str(save_tr).lower() in ("true", "1", "yes", "y", "sí", "si")
+            t.add_row("Guardar trazas GRPO", "sí" if save_tr else "no")
+            if save_tr:
+                send_ls = state.get("send_to_langsmith", False)
+                if isinstance(send_ls, str):
+                    send_ls = str(send_ls).lower() in ("true", "1", "yes", "y", "sí", "si")
+                t.add_row("Subir a LangSmith", "sí" if send_ls else "no")
         t.add_row("Modo setup", state.get("mode", ""))
         console.print(t)
         return True, "", None
@@ -677,6 +733,12 @@ def _run_section(
                 db_path_save = state.get("db_path", "telegram.duckdb")
                 if not _valid_db_path(db_path_save):
                     db_path_save = "telegram.duckdb"
+                save_tr = state.get("save_grpo_traces", False)
+                if isinstance(save_tr, str):
+                    save_tr = str(save_tr).lower() in ("true", "1", "yes", "y", "sí", "si")
+                send_ls = state.get("send_to_langsmith", False)
+                if isinstance(send_ls, str):
+                    send_ls = str(send_ls).lower() in ("true", "1", "yes", "y", "sí", "si")
                 save_config(
                     mode=state.get("mode", "quick"),
                     channel=state.get("channel", "telegram"),
@@ -685,6 +747,8 @@ def _run_section(
                     llm_provider=state.get("llm_provider", ""),
                     llm_model=state.get("llm_model", ""),
                     llm_base_url=state.get("llm_base_url", ""),
+                    save_grpo_traces=save_tr,
+                    send_to_langsmith=send_ls,
                 )
         state.pop("_used_preferences_skip", None)
         console.print()
@@ -714,7 +778,7 @@ def _run_section(
             console.print(t)
             console.print("[dim]Si despliegas, el bot quedará registrado como servicio y se reiniciará solo.[/]")
             console.print()
-            deploy_yes, nav = _confirm_with_nav(console, "¿Desplegar bot como servicio persistente con duckops?", default=True)
+            deploy_yes, nav = _confirm_with_nav(console, "¿Desplegar bot como servicio persistente con duckops?", default=False)
             if nav is not None:
                 return True, "", nav
             deploy_provider = None
@@ -782,6 +846,16 @@ def _run_section(
             env["DUCKCLAW_LLM_PROVIDER"] = state.get("llm_provider") or "none_llm"
             env["DUCKCLAW_LLM_MODEL"] = state.get("llm_model", "")
             env["DUCKCLAW_LLM_BASE_URL"] = state.get("llm_base_url", "")
+            save_tr = state.get("save_grpo_traces", False)
+            if isinstance(save_tr, str):
+                save_tr = str(save_tr).lower() in ("true", "1", "yes", "y", "sí", "si")
+            if save_tr:
+                env["DUCKCLAW_SAVE_GRPO_TRACES"] = "true"
+                send_ls = state.get("send_to_langsmith", False)
+                if isinstance(send_ls, str):
+                    send_ls = str(send_ls).lower() in ("true", "1", "yes", "y", "sí", "si")
+                if send_ls:
+                    env["DUCKCLAW_SEND_TO_LANGSMITH"] = "true"
         console.print(Panel("Arrancando bot en modo polling...", border_style="cyan"))
         try:
             ret = subprocess.call(
@@ -800,7 +874,13 @@ def _run_section(
 
 
 def main() -> int:
-    console = Console()
+    # Limitar ancho para evitar duplicación de bordes en terminales muy anchos (ej. Cursor IDE)
+    try:
+        import shutil
+        w = min(120, shutil.get_terminal_size().columns)
+    except Exception:
+        w = 100
+    console = Console(width=w)
     repo_root = Path(__file__).resolve().parent.parent
     bot_script = repo_root / "examples" / "telegram_bot.py"
 
@@ -821,12 +901,17 @@ def main() -> int:
     state.setdefault("llm_provider", "")
     state.setdefault("llm_model", "")
     state.setdefault("llm_base_url", "")
+    state.setdefault("save_grpo_traces", True)
+    state.setdefault("send_to_langsmith", True)
     idx = 0
 
     try:
         while True:
             section_id = SECTION_IDS[idx]
             if section_id == "provider" and state.get("bot_mode") != "langgraph":
+                idx = _next_index(idx, state) or idx
+                continue
+            if section_id == "grpo_traces" and state.get("bot_mode") != "langgraph":
                 idx = _next_index(idx, state) or idx
                 continue
             if section_id == "validate_provider" and state.get("bot_mode") != "langgraph":
@@ -843,6 +928,7 @@ def main() -> int:
                 "deps": "Dependencias",
                 "token": "Token",
                 "db_path": "DB",
+                "grpo_traces": "Trazas GRPO",
                 "validate_provider": "Validar proveedor",
                 "summary": "Resumen",
                 "save_launch": "Finalizar",

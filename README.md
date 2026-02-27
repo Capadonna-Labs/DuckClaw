@@ -100,18 +100,33 @@ get_review_metrics(db)
 get_category_sales(db, limit=15)
 ```
 
-### Preguntas en lenguaje natural con LLM (Groq)
+### Preguntas en lenguaje natural con LLM (Groq, DeepSeek o MLX)
 
-Un LLM interpreta la pregunta y usa las funciones BI como herramientas (tools). Por defecto usa **Groq** (`GROQ_API_KEY`):
+Un LLM interpreta la pregunta y usa las funciones BI como herramientas (tools). Proveedores: **Groq** (`GROQ_API_KEY`), **DeepSeek** (`DEEPSEEK_API_KEY`) o **MLX** local. Por defecto: Groq.
 
 ```python
 from duckclaw.bi import ask_bi
 
 respuesta = ask_bi(db, "¿Cuáles son los clientes que más ventas generan? Dame un resumen.", provider="groq")
+# O con DeepSeek: provider="deepseek" (requiere DEEPSEEK_API_KEY)
 print(respuesta)
 ```
 
-Instalación para Groq: `pip install -e ".[groq]"` o `pip install langchain-groq langgraph langchain-core`.
+Instalación: `pip install -e ".[groq]"` (Groq) o `pip install -e ".[langgraph]"` (DeepSeek usa langchain-openai, ya incluido).
+
+### MLX con PM2 (motor de inferencia local)
+
+Para usar **MLX** como proveedor (sin depender de Groq/OpenAI), levanta el servidor de inferencia con PM2:
+
+```bash
+# Desde la raíz del repo
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
+El proceso **DuckClaw-Inference** ejecuta `mlx/start_mlx.sh` (API OpenAI-compatible en `http://127.0.0.1:8080/v1`). Opcional: define en `.env` o antes de arrancar `MLX_PYTHON`, `MLX_MODEL_PATH`, `MLX_PORT`.
+
+Luego en notebook o bot: `ask_bi(db, "…", provider="mlx")` o `llm_provider=mlx`. Ver [docs/pm2-migration.md](docs/pm2-migration.md).
 
 ### Notebook de ejemplo
 

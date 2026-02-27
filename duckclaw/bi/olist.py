@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 # Tablas y archivos CSV esperados
 _CSV_MAP = [
@@ -28,6 +28,80 @@ _CSV_MAP = [
     ("product_category_name_translation.csv", "product_category_name_translation"),
     ("olist_geolocation_dataset.csv", "olist_geolocation"),
 ]
+
+# Esquema explícito por CSV (columnas y tipos DuckDB) para carga controlada
+_CSV_SCHEMAS: dict[str, dict[str, str]] = {
+    "olist_orders_dataset.csv": {
+        "order_id": "VARCHAR",
+        "customer_id": "VARCHAR",
+        "order_status": "VARCHAR",
+        "order_purchase_timestamp": "VARCHAR",
+        "order_approved_at": "VARCHAR",
+        "order_delivered_carrier_date": "VARCHAR",
+        "order_delivered_customer_date": "VARCHAR",
+        "order_estimated_delivery_date": "VARCHAR",
+    },
+    "olist_customers_dataset.csv": {
+        "customer_id": "VARCHAR",
+        "customer_unique_id": "VARCHAR",
+        "customer_zip_code_prefix": "INTEGER",
+        "customer_city": "VARCHAR",
+        "customer_state": "VARCHAR",
+    },
+    "olist_order_items_dataset.csv": {
+        "order_id": "VARCHAR",
+        "order_item_id": "INTEGER",
+        "product_id": "VARCHAR",
+        "seller_id": "VARCHAR",
+        "shipping_limit_date": "VARCHAR",
+        "price": "DECIMAL(10,2)",
+        "freight_value": "DECIMAL(10,2)",
+    },
+    "olist_order_payments_dataset.csv": {
+        "order_id": "VARCHAR",
+        "payment_sequential": "INTEGER",
+        "payment_type": "VARCHAR",
+        "payment_installments": "INTEGER",
+        "payment_value": "DECIMAL(10,2)",
+    },
+    "olist_order_reviews_dataset.csv": {
+        "review_id": "VARCHAR",
+        "order_id": "VARCHAR",
+        "review_score": "INTEGER",
+        "review_comment_title": "VARCHAR",
+        "review_comment_message": "VARCHAR",
+        "review_creation_date": "VARCHAR",
+        "review_answer_timestamp": "VARCHAR",
+    },
+    "olist_products_dataset.csv": {
+        "product_id": "VARCHAR",
+        "product_category_name": "VARCHAR",
+        "product_name_lenght": "INTEGER",
+        "product_description_lenght": "INTEGER",
+        "product_photos_qty": "INTEGER",
+        "product_weight_g": "DECIMAL(10,2)",
+        "product_length_cm": "DECIMAL(10,2)",
+        "product_height_cm": "DECIMAL(10,2)",
+        "product_width_cm": "DECIMAL(10,2)",
+    },
+    "olist_sellers_dataset.csv": {
+        "seller_id": "VARCHAR",
+        "seller_zip_code_prefix": "INTEGER",
+        "seller_city": "VARCHAR",
+        "seller_state": "VARCHAR",
+    },
+    "product_category_name_translation.csv": {
+        "product_category_name": "VARCHAR",
+        "product_category_name_english": "VARCHAR",
+    },
+    "olist_geolocation_dataset.csv": {
+        "geolocation_zip_code_prefix": "INTEGER",
+        "geolocation_lat": "DOUBLE",
+        "geolocation_lng": "DOUBLE",
+        "geolocation_city": "VARCHAR",
+        "geolocation_state": "VARCHAR",
+    },
+}
 
 
 def _path_csv(data_dir: str, filename: str) -> str:
@@ -46,13 +120,26 @@ def _parse_query_result(db: Any, sql: str) -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
-def load_olist_data(db: Any, data_dir: str, *, skip_missing: bool = False) -> dict[str, int]:
+def _build_columns_sql(schema: dict[str, str]) -> str:
+    """Construye el literal DuckDB para el parámetro columns de read_csv."""
+    parts = [f"'{k}': '{v}'" for k, v in schema.items()]
+    return "{" + ", ".join(parts) + "}"
+
+
+def load_olist_data(
+    db: Any,
+    data_dir: str,
+    *,
+    skip_missing: bool = False,
+    use_schema: bool = True,
+) -> dict[str, int]:
     """
     Carga todos los CSV de Olist en la base DuckClaw.
 
     - db: instancia de duckclaw.DuckClaw (o compatible execute/query).
     - data_dir: ruta al directorio que contiene los CSV (ej. "data" o "./data").
     - skip_missing: si True, no falla si falta un CSV (ej. geolocation).
+    - use_schema: si True (por defecto), usa esquema explícito para tipos correctos.
 
     Devuelve un dict con el nombre de cada tabla y la cantidad de filas cargadas.
     """
@@ -67,10 +154,19 @@ def load_olist_data(db: Any, data_dir: str, *, skip_missing: bool = False) -> di
             raise FileNotFoundError(f"No se encontró: {csv_path}")
 
         path_str = _path_csv(data_dir, filename)
+        path_str_esc = path_str.replace("'", "''")
         db.execute(f"DROP TABLE IF EXISTS {table}")
-        db.execute(
-            f"CREATE TABLE {table} AS SELECT * FROM read_csv_auto('{path_str}')"
-        )
+
+        if use_schema and filename in _CSV_SCHEMAS:
+            cols_sql = _build_columns_sql(_CSV_SCHEMAS[filename])
+            db.execute(
+                f"CREATE TABLE {table} AS SELECT * FROM read_csv('{path_str_esc}', "
+                f"columns={cols_sql}, header=true)"
+            )
+        else:
+            db.execute(
+                f"CREATE TABLE {table} AS SELECT * FROM read_csv_auto('{path_str_esc}')"
+            )
         r = _parse_query_result(db, f"SELECT COUNT(*) AS n FROM {table}")
         counts[table] = int(r[0]["n"]) if r else 0
 
@@ -258,6 +354,55 @@ def get_review_metrics(db: Any) -> list[dict[str, Any]]:
         SUM(CASE WHEN review_score >= 4 THEN 1 ELSE 0 END) AS good_reviews,
         SUM(CASE WHEN review_score <= 2 THEN 1 ELSE 0 END) AS bad_reviews
     FROM olist_order_reviews
+    """
+    return _parse_query_result(db, sql)
+
+
+def list_tables(db: Any) -> list[dict[str, Any]]:
+    """Lista las tablas disponibles en la base de datos."""
+    sql = (
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = 'main' ORDER BY table_name"
+    )
+    return _parse_query_result(db, sql)
+
+
+def describe_table(db: Any, table_name: str) -> list[dict[str, Any]]:
+    """Describe las columnas de una tabla. table_name: solo letras, números y _."""
+    import re
+    safe = (table_name or "").strip()
+    if not safe or not re.match(r"^[a-zA-Z0-9_]+$", safe):
+        return []
+    sql = (
+        "SELECT column_name, data_type FROM information_schema.columns "
+        f"WHERE table_schema = 'main' AND table_name = '{safe}' ORDER BY ordinal_position"
+    )
+    return _parse_query_result(db, sql)
+
+
+def get_sales_by_month(
+    db: Any,
+    year: Optional[int] = None,
+    limit: int = 24,
+) -> list[dict[str, Any]]:
+    """
+    Ventas totales por mes (pedidos entregados).
+    year: filtrar por año (ej. 2018). Si None, todos los años.
+    """
+    where = "WHERE o.order_status = 'delivered'"
+    if year is not None:
+        where += f" AND strftime(o.order_purchase_timestamp::TIMESTAMP, '%Y') = '{int(year)}'"
+    sql = f"""
+    SELECT
+        strftime(o.order_purchase_timestamp::TIMESTAMP, '%Y-%m') AS month,
+        ROUND(SUM(oi.price + oi.freight_value)::DECIMAL(14,2), 2) AS total_sales,
+        COUNT(DISTINCT o.order_id) AS num_orders
+    FROM olist_orders o
+    JOIN olist_order_items oi ON oi.order_id = o.order_id
+    {where}
+    GROUP BY strftime(o.order_purchase_timestamp::TIMESTAMP, '%Y-%m')
+    ORDER BY month
+    LIMIT {int(limit)}
     """
     return _parse_query_result(db, sql)
 

@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from duckclaw.agents.tools import run_sql, inspect_schema, manage_memory
+
+
+_DB_INTENT_RE = re.compile(
+    r"\b(sql|tabla|tablas|schema|esquema|columna|columnas|base de datos|db|"
+    r"ventas|vendedor|clientes|productos|pedidos|orders|seller|count|cu[aá]nt[ao]s?)\b",
+    re.IGNORECASE,
+)
+
+
+def _needs_db_tool(incoming: str) -> bool:
+    text = (incoming or "").strip()
+    if not text:
+        return False
+    return bool(_DB_INTENT_RE.search(text)) or "?" in text
 
 
 def build_general_graph(
@@ -43,6 +58,7 @@ def build_general_graph(
         ),
     ]
     llm_with_tools = llm.bind_tools(tools)
+    llm_with_required_tool = llm.bind_tools(tools, tool_choice="required")
     tools_by_name = {t.name: t for t in tools}
 
     def prepare_node(state: dict) -> dict:
@@ -58,7 +74,9 @@ def build_general_graph(
         return {"messages": messages}
 
     def agent_node(state: dict) -> dict:
-        resp = llm_with_tools.invoke(state["messages"])
+        incoming = state.get("incoming") or ""
+        llm_runner = llm_with_required_tool if _needs_db_tool(incoming) else llm_with_tools
+        resp = llm_runner.invoke(state["messages"])
         return {"messages": state["messages"] + [resp]}
 
     def tools_node(state: dict) -> dict:

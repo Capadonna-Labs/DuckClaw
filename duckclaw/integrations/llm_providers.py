@@ -236,6 +236,35 @@ def build_llm(
             temperature=0.2,
         )
 
+    if provider == "deepseek":
+        key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        if not key:
+            raise RuntimeError(
+                "Proveedor DeepSeek requiere DEEPSEEK_API_KEY. "
+                "Exporta: export DEEPSEEK_API_KEY='tu-api-key'"
+            )
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as e:
+            raise RuntimeError(
+                "Para DeepSeek instala: pip install langchain-openai"
+            ) from e
+        selected_model = (model or "deepseek-chat").strip()
+        if selected_model == "deepseek-reasoner":
+            raise RuntimeError(
+                "deepseek-reasoner no es compatible con tool-calls actuales en DuckClaw "
+                "(requiere reenviar reasoning_content). Usa DEEPSEEK_MODEL=deepseek-chat."
+            )
+        return ChatOpenAI(
+            base_url="https://api.deepseek.com/v1",
+            model=selected_model,
+            api_key=key,
+            temperature=0.2,
+            # Evita errores 400 por reasoning_content faltante en tool-calls.
+            # DeepSeek exige reenviar reasoning_content en thinking mode.
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+
     if provider == "ollama":
         url = _ensure_url_scheme(base_url or "http://localhost:11434")
         if not url:

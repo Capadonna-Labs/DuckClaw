@@ -34,11 +34,17 @@ agents = [
     "langchain-core>=0.3.0",
     "langchain-openai>=0.2.0",
     "python-telegram-bot>=21,<22",
+    "openpyxl>=3.1.0",
+    "matplotlib>=3.7.0",
 ]
 groq = [
     "langchain-groq>=0.2.0",
     "langgraph>=0.2.0",
     "langchain-core>=0.3.0",
+]
+fabric = [
+    "azure-storage-file-datalake>=12.14.0",
+    "azure-identity>=1.15.0",
 ]
 # all = telegram + dashboard + langgraph + openai (sin crewai: conflictos de deps con openai/langchain)
 all = [

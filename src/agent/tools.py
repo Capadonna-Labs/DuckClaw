@@ -13,15 +13,47 @@ def _esc(s: str) -> str:
     return str(s).replace("'", "''")
 
 
+def _inspect_schema_impl(db: Any) -> str:
+    """Obtiene el esquema de la DB. Usa get_schema_context si existe, sino consulta information_schema."""
+    if hasattr(db, "get_schema_context") and callable(getattr(db, "get_schema_context")):
+        return db.get_schema_context()
+    try:
+        tables = json.loads(
+            db.query(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'main' ORDER BY table_name"
+            )
+        )
+        out = []
+        for t in tables if isinstance(tables, list) else []:
+            name = t.get("table_name") if isinstance(t, dict) else None
+            if not name:
+                continue
+            name_esc = str(name).replace("'", "''")
+            cols = db.query(
+                f"SELECT column_name, data_type FROM information_schema.columns "
+                f"WHERE table_schema = 'main' AND table_name = '{name_esc}' ORDER BY ordinal_position"
+            )
+            out.append({"table": name, "columns": json.loads(cols)})
+        return json.dumps(out, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 def build_store_tools(
     store_db: Any,
     console: Optional[Any] = None,
 ) -> list[Any]:
-    """Construye las herramientas de tienda (register_sale, check_inventory, record_expense)."""
+    """Construye las herramientas de tienda (inspect_schema, register_sale, check_inventory, record_expense)."""
 
     def _log_db(sql: str, count: int = 0) -> None:
         if console is not None and hasattr(console, "print_db_action"):
             console.print_db_action(sql, count)
+
+    @tool
+    def inspect_schema() -> str:
+        """Returns the database schema (tables, columns, relations). Use this before writing SQL."""
+        return _inspect_schema_impl(store_db)
 
     @tool
     def register_sale(item_name: str, size: str, price: float, method: str) -> str:
@@ -99,4 +131,4 @@ def build_store_tools(
         except Exception as e:
             return f"Error al registrar gasto: {e}"
 
-    return [register_sale, check_inventory, record_expense]
+    return [inspect_schema, register_sale, check_inventory, record_expense]

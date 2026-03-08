@@ -32,53 +32,85 @@ def _needs_sandbox_tool(incoming: str) -> bool:
     return bool(_SANDBOX_INTENT_RE.search(incoming or ""))
 
 
+_DEFAULT_SYSTEM_PROMPT = (
+    "Eres un asistente útil con acceso a una base de datos DuckDB y a un sandbox de ejecución Python/Bash. "
+    "Cuando uses una herramienta, interpreta el resultado y responde en lenguaje natural claro y conciso. "
+    "Nunca copies el resultado crudo de una herramienta. "
+    "Si hay una lista de tablas, menciónalas de forma legible. "
+    "Si hay datos de una consulta, preséntelos de forma organizada. "
+    "Usa run_sandbox para ejecutar código Python o Bash arbitrario cuando el usuario lo pida."
+)
+
+_DEFAULT_TOOLS = ["run_sql", "inspect_schema", "manage_memory", "run_sandbox"]
+
+
 def build_general_graph(
     db: Any,
     llm: Any,
     *,
     system_prompt: str = "",
+    tools_spec: list[str] | None = None,
 ) -> Any:
     """
     Build LangGraph for general assistant: state has 'incoming', optional 'history'; result has 'reply'.
     Uses run_sql, inspect_schema, manage_memory, run_sandbox (Strix).
+    system_prompt y tools_spec vienen del YAML o del caller (AgentAssembler).
     """
     from langgraph.graph import END, StateGraph
     from langchain_core.tools import StructuredTool
     from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
-    prompt = system_prompt or (
-        "Eres un asistente útil con acceso a una base de datos DuckDB y a un sandbox de ejecución Python/Bash. "
-        "Cuando uses una herramienta, interpreta el resultado y responde en lenguaje natural claro y conciso. "
-        "Nunca copies el resultado crudo de una herramienta. "
-        "Si hay una lista de tablas, menciónalas de forma legible. "
-        "Si hay datos de una consulta, preséntelos de forma organizada. "
-        "Usa run_sandbox para ejecutar código Python o Bash arbitrario cuando el usuario lo pida."
-    )
-    tools = [
-        StructuredTool.from_function(
-            lambda q: run_sql(db, q),
-            name="run_sql",
-            description="Ejecuta una consulta SQL y retorna JSON. Usa para leer o escribir datos.",
-        ),
-        StructuredTool.from_function(
-            lambda: inspect_schema(db),
-            name="inspect_schema",
-            description="Lista tablas y columnas de la base de datos actual.",
-        ),
-        StructuredTool.from_function(
-            lambda action, key, value="": manage_memory(db, action, key, value),
-            name="manage_memory",
-            description="Preferencias del usuario: action=get|set|delete, key, value (solo para set).",
-        ),
-    ]
+    prompt = system_prompt or _DEFAULT_SYSTEM_PROMPT
+    tool_names = tools_spec if tools_spec is not None else _DEFAULT_TOOLS
+    tool_names_set = frozenset(str(t).strip() for t in tool_names if t is not None and str(t).strip())
 
-    # Sandbox (Strix) — opcional: solo se añade si Docker está disponible
-    try:
-        from duckclaw.agents.sandbox import sandbox_tool_factory, _docker_available
-        if _docker_available():
-            tools.append(sandbox_tool_factory(db, llm))
-    except Exception:
-        pass
+    tools: list[Any] = []
+    if "run_sql" in tool_names_set:
+        tools.append(
+            StructuredTool.from_function(
+                lambda q: run_sql(db, q),
+                name="run_sql",
+                description="Ejecuta una consulta SQL y retorna JSON. Usa para leer o escribir datos.",
+            )
+        )
+    if "inspect_schema" in tool_names_set:
+        tools.append(
+            StructuredTool.from_function(
+                lambda: inspect_schema(db),
+                name="inspect_schema",
+                description="Lista tablas y columnas de la base de datos actual.",
+            )
+        )
+    if "manage_memory" in tool_names_set:
+        tools.append(
+            StructuredTool.from_function(
+                lambda action, key, value="": manage_memory(db, action, key, value),
+                name="manage_memory",
+                description="Preferencias del usuario: action=get|set|delete, key, value (solo para set).",
+            )
+        )
+
+    # Sandbox (Strix) — solo si está en tools_spec y Docker está disponible
+    if "run_sandbox" in tool_names_set:
+        try:
+            from duckclaw.agents.sandbox import sandbox_tool_factory, _docker_available
+            if _docker_available():
+                tools.append(sandbox_tool_factory(db, llm))
+        except Exception:
+            pass
+
+    # Research (Tavily + Browser-Use) — opcional vía tools_spec
+    if "tavily_search" in tool_names_set or "browser_navigate" in tool_names_set:
+        try:
+            from duckclaw.forge.skills.research_bridge import register_research_skill
+            research_cfg = {
+                "tavily_enabled": "tavily_search" in tool_names_set,
+                "browser_enabled": "browser_navigate" in tool_names_set,
+            }
+            register_research_skill(tools, research_cfg, llm=llm)
+        except Exception:
+            pass
+
     llm_with_tools = llm.bind_tools(tools)
     llm_with_required_tool = llm.bind_tools(tools, tool_choice="required")
     tools_by_name = {t.name: t for t in tools}

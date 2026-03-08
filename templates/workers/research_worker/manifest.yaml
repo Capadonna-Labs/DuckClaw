@@ -1,0 +1,18 @@
+# ResearchWorker — Agente de Investigación Activa (Tavily + Browser-Use)
+# Spec: specs/Pipeline_de_Investigación_y_Navegacion_Autonoma_(Tavily+Browser-Use).md
+name: ResearchWorker
+id: research_worker
+schema_name: research_worker
+topology: general
+read_only: false
+llm:
+  required: true
+  temperature: 0.3
+skills:
+  - research:
+      tavily_enabled: true
+      browser_enabled: false  # Phase 2: requiere Strix + Playwright en Docker
+      audit_langsmith: true
+      search_depth: advanced
+      include_answer: true
+      max_results: 10

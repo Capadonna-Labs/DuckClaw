@@ -234,7 +234,7 @@ def build_entry_router_graph(
     model = (llm_model or "").strip()
 
     retail_graph = (
-        build_retail_graph(store_db or db, llm, console=console) if has_retail else None
+        build_retail_graph(store_db or db, llm, console=console, system_prompt=system_prompt) if has_retail else None
     )
     general_graph = build_general_graph(db, llm, system_prompt=system_prompt)
 

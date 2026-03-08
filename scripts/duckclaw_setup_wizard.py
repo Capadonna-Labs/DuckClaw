@@ -71,7 +71,7 @@ DEPLOY_PROVIDERS = ("auto", "pm2", "systemd", "windows", "cron")
 DEPLOY_SERVICE_NAME = "DuckClaw-Brain"
 INFERENCE_SERVICE_NAME = "DuckClaw-Inference"
 # Orden: IoTCoreLabs, OpenAI, Anthropic, DeepSeek, MLX (principales); luego Ollama y none_llm
-LLM_PROVIDERS = ("iotcorelabs", "openai", "anthropic", "deepseek", "mlx", "ollama", "none_llm")
+LLM_PROVIDERS = ("iotcorelabs", "openai", "anthropic", "deepseek", "huggingface", "mlx", "ollama", "none_llm")
 TELEGRAM_TOKEN_PATTERN = re.compile(r"^\d+:[A-Za-z0-9_-]{20,}$")
 API_VALIDATION_TIMEOUT = 8
 
@@ -325,13 +325,13 @@ def _pm2_edit_service_settings(
     state["db_path"] = new_db
 
     # ── Token ────────────────────────────────────────────────────────
-    console.print("[dim]Déjalo en blanco para leer TELEGRAM_BOT_TOKEN desde .env[/]")
     cur_tok = state.get("token", "")
-    new_tok = Prompt.ask(
-        "Token Telegram",
-        default=_censor_token(cur_tok) if cur_tok else "",
-    ).strip()
-    if new_tok and not new_tok.endswith("…") and "***" not in new_tok:
+    if cur_tok:
+        console.print(f"[dim]Token actual: {_censor_token(cur_tok)} — deja en blanco para conservarlo[/]")
+    else:
+        console.print("[dim]Déjalo en blanco para leer TELEGRAM_BOT_TOKEN desde .env[/]")
+    new_tok = Prompt.ask("Token Telegram (Enter para mantener)", default="", password=True).strip()
+    if new_tok:
         state["token"] = new_tok
         _write_env_file(repo_root, "TELEGRAM_BOT_TOKEN", new_tok)
 
@@ -424,19 +424,19 @@ module.exports = {{
 
 
 def _write_env_file(repo_root: Path, key: str, value: str) -> None:
-    """Write or update a key=value in .env (project root)."""
+    """Write or update a key=value in .env (project root), without adding quotes."""
     env_path = repo_root / ".env"
     lines: list[str] = []
     found = False
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
             if line.startswith(f"{key}="):
-                lines.append(f'{key}="{value}"')
+                lines.append(f"{key}={value}")
                 found = True
             else:
                 lines.append(line)
     if not found:
-        lines.append(f'{key}="{value}"')
+        lines.append(f"{key}={value}")
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -584,6 +584,11 @@ def _validate_provider_config(
         if not os.environ.get("DEEPSEEK_API_KEY", "").strip():
             return False, "DeepSeek requiere DEEPSEEK_API_KEY. Exporta la variable."
         return True, ""
+    if provider == "huggingface":
+        key = os.environ.get("HUGGINGFACE_API_KEY", "").strip() or os.environ.get("HF_TOKEN", "").strip()
+        if not key:
+            return False, "HuggingFace requiere HUGGINGFACE_API_KEY o HF_TOKEN. Exporta la variable."
+        return True, ""
     if provider == "ollama":
         if not base_url.strip():
             return False, "Ollama requiere URL (ej. http://localhost:11434)."
@@ -612,6 +617,7 @@ def _ask_provider(console: Console, state: dict[str, Any]) -> str | None:
             "openai": "OpenAI API",
             "anthropic": "Anthropic API",
             "deepseek": "DeepSeek API",
+            "huggingface": "HuggingFace Inference API / Dedicated Endpoints",
             "mlx": "MLX (servidor local OpenAI-compatible)",
             "ollama": "Ollama local",
             "none_llm": "Sin LLM (reglas + memoria DuckClaw)",
@@ -637,6 +643,16 @@ def _ask_provider(console: Console, state: dict[str, Any]) -> str | None:
     elif state["llm_provider"] == "deepseek":
         default_model = model or os.environ.get("DEEPSEEK_MODEL", "").strip() or "deepseek-chat"
         state["llm_model"] = Prompt.ask("Modelo DeepSeek", default=default_model).strip()
+    elif state["llm_provider"] == "huggingface":
+        hf_key = os.environ.get("HUGGINGFACE_API_KEY", "").strip() or os.environ.get("HF_TOKEN", "").strip()
+        if not hf_key:
+            console.print("[yellow]Agrega HUGGINGFACE_API_KEY o HF_TOKEN en .env[/]")
+        state["llm_model"] = Prompt.ask(
+            "Modelo HuggingFace (repo_id)",
+            default=model or "mistralai/Mistral-7B-Instruct-v0.3",
+        ).strip()
+        console.print("[dim]URL opcional: deja en blanco para Serverless API, o pega la URL de un Inference Endpoint dedicado[/]")
+        state["llm_base_url"] = Prompt.ask("URL endpoint (opcional)", default=base_url or "").strip()
     elif state["llm_provider"] == "ollama":
         state["llm_base_url"] = Prompt.ask("URL Ollama", default=base_url or "http://localhost:11434").strip()
         state["llm_model"] = Prompt.ask("Modelo Ollama", default=model or "llama3.2").strip()

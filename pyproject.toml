@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 dependencies = [
+    "langgraph-cli[inmem]>=0.4.3",
     "rich>=13.0.0",
 ]
 
@@ -51,8 +52,17 @@ ollama = [
     "langchain-ollama>=0.2.0",
 ]
 
-# all = telegram + dashboard + langgraph + openai (sin crewai: conflictos de deps con openai/langchain)
+huggingface = [
+    "langchain-huggingface>=0.1.0",
+    "huggingface-hub>=0.23.0",
+]
 
+serve = [
+    "fastapi>=0.128.8",
+    "uvicorn[standard]>=0.39.0",
+]
+
+# all = telegram + dashboard + langgraph + openai (sin crewai: conflictos de deps con openai/langchain)
 all = [
     "python-telegram-bot>=21,<22",
     "streamlit>=1.28",

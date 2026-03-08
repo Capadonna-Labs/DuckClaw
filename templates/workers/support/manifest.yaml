@@ -1,0 +1,13 @@
+# SupportWorker — Atención al Cliente / RAG
+# Topología: Interpreter -> RAG_Retriever -> Validator -> Explainer (read-only)
+name: SupportWorker
+id: support
+schema_name: support_worker
+topology: general
+read_only: true
+llm:
+  required: true
+  temperature: 0.3
+skills:
+  - search_knowledge_base
+  - get_ticket_status

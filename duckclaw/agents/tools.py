@@ -8,10 +8,13 @@ from typing import Any
 
 # Solo lectura para run_sql cuando no es escritura
 _READ_ONLY = re.compile(r"^\s*(SELECT|WITH|SHOW|DESCRIBE)\s", re.IGNORECASE)
+# Operaciones destructivas o de acceso al sistema de archivos — siempre bloqueadas
 _BLOCKED = re.compile(
-    r"\b(DROP|ALTER|TRUNCATE|CREATE|ATTACH|DETACH|COPY|EXPORT|IMPORT)\b",
+    r"\b(DROP|TRUNCATE|ATTACH|DETACH|COPY|EXPORT|IMPORT)\b",
     re.IGNORECASE,
 )
+# ALTER solo se bloquea si modifica estructura de tabla existente (no CREATE)
+_ALTER_BLOCKED = re.compile(r"^\s*ALTER\s", re.IGNORECASE)
 
 _MEMORY_TABLE = "agent_memory"
 
@@ -29,12 +32,16 @@ def _ensure_memory_table(db: Any) -> None:
 
 
 def run_sql(db: Any, query: str) -> str:
-    """Ejecuta SQL y retorna JSON. Para SELECT/WITH/SHOW/DESCRIBE devuelve filas; para escritura devuelve {\"status\":\"ok\"}."""
+    """Ejecuta SQL. SELECT/WITH/SHOW/DESCRIBE devuelve filas; INSERT/UPDATE/CREATE/etc. devuelve {\"status\":\"ok\"}."""
     if not query or not query.strip():
         return json.dumps({"error": "Query vacío."})
     q = query.strip()
     if _BLOCKED.search(q):
-        return json.dumps({"error": "Comando no permitido (DROP, ALTER, etc.)."})
+        blocked = re.search(r"\b(DROP|TRUNCATE|ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", q, re.IGNORECASE)
+        cmd = blocked.group(0).upper() if blocked else "comando"
+        return json.dumps({"error": f"{cmd} no está permitido por política de seguridad."})
+    if _ALTER_BLOCKED.search(q):
+        return json.dumps({"error": "ALTER no está permitido. Usa CREATE TABLE IF NOT EXISTS para crear tablas nuevas."})
     try:
         if _READ_ONLY.search(q):
             return db.query(q)

@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "duckclaw": "./duckclaw/agents/graph_server.py:get_graph"
+  },
+  "env": ".env"
+}

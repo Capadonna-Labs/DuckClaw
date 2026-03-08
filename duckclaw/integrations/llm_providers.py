@@ -286,6 +286,41 @@ def build_llm(
             extra_body={"thinking": {"type": "disabled"}},
         )
 
+    if provider == "huggingface":
+        key = os.environ.get("HUGGINGFACE_API_KEY", "").strip() or os.environ.get("HF_TOKEN", "").strip()
+        if not key:
+            raise RuntimeError(
+                "Proveedor HuggingFace requiere HUGGINGFACE_API_KEY o HF_TOKEN. "
+                "Exporta: export HUGGINGFACE_API_KEY='hf_...'"
+            )
+        selected_model = (model or "mistralai/Mistral-7B-Instruct-v0.3").strip()
+        try:
+            from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+        except ImportError as e:
+            raise RuntimeError(
+                "Para HuggingFace instala: pip install langchain-huggingface"
+            ) from e
+        # Si se pasa base_url, usar como endpoint dedicado (Inference Endpoints)
+        if base_url and base_url.strip():
+            endpoint_url = _ensure_url_scheme(base_url)
+            endpoint = HuggingFaceEndpoint(
+                endpoint_url=endpoint_url,
+                huggingfacehub_api_token=key,
+                task="text-generation",
+                temperature=0.2,
+                max_new_tokens=1024,
+            )
+        else:
+            # Serverless Inference API
+            endpoint = HuggingFaceEndpoint(
+                repo_id=selected_model,
+                huggingfacehub_api_token=key,
+                task="text-generation",
+                temperature=0.2,
+                max_new_tokens=1024,
+            )
+        return ChatHuggingFace(llm=endpoint, verbose=False)
+
     if provider == "ollama":
         url = _ensure_url_scheme(base_url or "http://localhost:11434")
         if not url:

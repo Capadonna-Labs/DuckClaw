@@ -1,310 +1,358 @@
-# DuckClaw 🦆🦞
+# DuckClaw 🦆⚔️
 
-High-performance C++ analytical memory layer for sovereign AI agents. 
+**High-performance C++ analytical memory layer for sovereign AI agents.**
 
-## Overview
-DuckClaw is a native bridge between **DuckDB** and **Python**, optimized for **Apple Silicon (M4)**. It provides AI agents with a structured, high-speed analytical memory, allowing them to execute complex SQL queries and manage state with sub-millisecond latency.
+Built by [IoTCoreLabs](https://iotcorelabs.io) · Optimized for Apple Silicon · Powered by DuckDB
 
-Built by **IoTCoreLabs** for the Sovereign Agentic Ecosystem.
+---
 
-## Core Features
-- **Native Performance**: Written in C++17 for minimal overhead.
-- **Sovereign by Design**: Operates entirely on local `.duckdb` files, ensuring 100% data privacy.
-- **Agent-Friendly**: Returns query results as **JSON** by default, ideal for LLM context injection and GRPO training loops.
-- **Optimized for M4**: Leverages Apple Silicon's unified memory architecture for zero-copy data transfers.
+## What is DuckClaw?
 
-## Installation
+DuckClaw is a native C++17 bridge between **DuckDB** and Python AI agents. It gives agents a structured, high-speed analytical memory: SQL queries, state management, and full data sovereignty — all local, all fast.
+
+- **Zero cloud dependency** — operates entirely on local `.duckdb` files
+- **Sub-millisecond latency** — C++ core with zero-copy data transfers on Apple Silicon
+- **Agent-ready** — query results return as JSON, ideal for LLM context injection
+- **LangGraph native** — bicameral memory architecture with OLAP + semantic graph layers
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   DuckClaw Stack                    │
+├─────────────────────────────────────────────────────┤
+│  Telegram Bot  │  LangGraph API  │  LangSmith       │
+│  (pm2)         │  (duckops serve)│  (tracing)       │
+├─────────────────────────────────────────────────────┤
+│           LangGraph Agent (general_graph)           │
+│   run_sql │ inspect_schema │ manage_memory          │
+├─────────────────────────────────────────────────────┤
+│         Bicameral Memory (BicameralOrchestrator)    │
+│    OLAP Layer (DuckDB)  │  Semantic Graph Layer     │
+├─────────────────────────────────────────────────────┤
+│              DuckClaw C++ Core (_duckclaw.so)        │
+│                   DuckDB Engine                     │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+## Quick Start
 
 ### Prerequisites
+
 - macOS (Apple Silicon M1/M2/M3/M4)
-- CMake >= 3.18
-- DuckDB (`brew install duckdb`)
-- Pybind11 (`pip install pybind11`)
+- Python ≥ 3.9
+- CMake ≥ 3.18
+- [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
-### Build from source
-
-Con **pip** (evita el error “No module named pip” en entornos aislados usando `--no-build-isolation`):
+### Install
 
 ```bash
 git clone https://github.com/Arevalojj2020/duckclaw.git
 cd duckclaw
-pip install cmake pybind11   # dependencias de build en tu venv
-pip install -e . --no-build-isolation
-# Con extra Telegram:
-pip install -e ".[telegram]" --no-build-isolation
+
+# Recommended
+uv sync --extra agents
+
+# Or with pip
+pip install cmake pybind11
+pip install -e ".[agents]" --no-build-isolation
 ```
 
-Con **uv** (recomendado):
+> First build downloads and compiles DuckDB (~5–7 min). Subsequent installs are instant.
+
+### Python usage
+
+```python
+import duckclaw
+
+db = duckclaw.DuckClaw("memory.duckdb")
+
+db.execute("CREATE TABLE IF NOT EXISTS events (id INTEGER, label TEXT)")
+db.execute("INSERT INTO events VALUES (1, 'startup')")
+
+results = db.query("SELECT * FROM events")
+print(results)
+# [{"id": "1", "label": "startup"}]
+```
+
+---
+
+## Telegram Bot
+
+DuckClaw ships with an intelligent Telegram bot powered by LangGraph and bicameral memory.
+
+### Setup wizard
 
 ```bash
-uv pip install -e .
+./scripts/install_duckclaw.sh
 ```
 
-**Nota:** La primera compilación puede tardar **~5–7 minutos** porque se descarga y compila DuckDB. Para intentar usar DuckDB de Homebrew: `CMAKE_ARGS="-DDUCKDB_ROOT=/opt/homebrew/opt/duckdb" pip install -e . --no-build-isolation` (Intel: `/usr/local/opt/duckdb`).
+The wizard detects existing PM2 services, guides you through LLM provider selection, and generates the PM2 ecosystem config.
 
-### Quick Start (Python)
+### Manual start
+
+```bash
+# Set env vars
+export TELEGRAM_BOT_TOKEN="your_token"
+export DUCKCLAW_DB_PATH="db/telegram.duckdb"
+export DUCKCLAW_LLM_PROVIDER="mlx"           # openai | anthropic | deepseek | huggingface | mlx | ollama | none_llm
+export DUCKCLAW_LLM_BASE_URL="http://127.0.0.1:8080/v1"
+
+# Run
+python -m duckclaw.agents.telegram_bot
+```
+
+### Bot commands
+
+| Command | Description |
+|---------|-------------|
+| `/setup` | Change framework and system_prompt on the fly |
+| **On-the-Fly CLI** (reconfig without restart) | |
+| `/role <worker_id>` | Switch agent role to a Virtual Worker template (e.g. `personal_finance`, `support`). Uses Worker Factory. |
+| `/skills` | List the tools (skills) currently enabled for the agent. |
+| `/forget` | Clear conversation history for this chat and reset graph state (Habeas Data). |
+| `/context on` \| `/context off` | Enable or disable long-term context (number of messages in history). |
+| `/audit` | Show last execution evidence: latency, SQL (if any), LangSmith run_id. |
+| `/health` | Check DuckDB and inference endpoint (MLX) status and latency. |
+| `/approve` \| `/reject` | Human-in-the-loop: approve or reject a pending operation (when graph is in interrupt state). |
+| Any other message | Processed by LangGraph agent (or by the active worker if `/role` was set). |
+
+### Supported LLM providers
+
+| Provider | Env var | Notes |
+|----------|---------|-------|
+| `openai` | `OPENAI_API_KEY` | GPT-4o, GPT-4, etc. |
+| `anthropic` | `ANTHROPIC_API_KEY` | Claude 3.5, etc. |
+| `deepseek` | `DEEPSEEK_API_KEY` | DeepSeek-Chat |
+| `huggingface` | `HUGGINGFACE_API_KEY` or `HF_TOKEN` | Serverless Inference API or Dedicated Endpoints |
+| `mlx` | `MLX_MODEL_PATH` / `MLX_MODEL_ID` | Local Apple Silicon inference |
+| `ollama` | — | Local Ollama server |
+| `iotcorelabs` | `IOTCORELABS_API_KEY` (optional) | IoTCoreLabs endpoint |
+| `none_llm` | — | Rules + DuckClaw memory only |
+
+---
+
+## LangGraph Agent Tools
+
+In `langgraph` mode the agent has direct access to DuckDB:
+
+| Tool | Description |
+|------|-------------|
+| `run_sql` | Execute SQL — SELECT, INSERT, UPDATE, CREATE TABLE, etc. |
+| `inspect_schema` | List all tables and their columns |
+| `manage_memory` | Get/set/delete user preferences (`action`, `key`, `value`) |
+
+**Write policy:** `DROP`, `TRUNCATE`, `ATTACH`, `DETACH`, `COPY`, `EXPORT` are blocked. `CREATE TABLE`, `INSERT`, `UPDATE`, `DELETE` are allowed.
+
+---
+
+## Persistence with PM2
+
+DuckClaw uses PM2 to keep the bot and inference server alive across reboots.
+
+### Start services
+
+```bash
+pm2 start ecosystem.core.config.cjs   # Telegram bot (DuckClaw-Brain)
+pm2 start ecosystem.config.cjs        # MLX inference server (DuckClaw-Inference)
+pm2 save && pm2 startup
+```
+
+### Monitor
+
+```bash
+duckops status                         # Rich table summary
+pm2 logs DuckClaw-Brain                # Live logs
+pm2 restart DuckClaw-Brain --update-env
+```
+
+### ecosystem.core.config.cjs (generated by wizard)
+
+The wizard generates this file automatically. Edit it to change the bot name, DB path, LLM provider, or any env variable, then run `pm2 restart DuckClaw-Brain --update-env`.
+
+---
+
+## LangGraph API Server (LangSmith Studio)
+
+Expose the LangGraph agent as a REST API for external tools, LangSmith Studio, or internet access.
+
+### Start server
+
+```bash
+# Direct (blocks terminal)
+duckops serve --port 8123
+
+# As persistent PM2 service
+duckops serve --pm2 --name DuckClaw-API --port 8123
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Server info, active model, tracing status |
+| `GET` | `/health` | Health check |
+| `GET` | `/docs` | Swagger UI |
+| `POST` | `/invoke` | Invoke graph: `{"message": "...", "chat_id": "...", "history": [...]}` |
+| `POST` | `/stream` | Streaming SSE response |
+| `GET` | `/graph` | Graph structure (nodes/edges) |
+
+### Connect to LangSmith Studio
+
+```bash
+# Starts server + Cloudflare tunnel (works from Safari and over internet)
+.venv/bin/langgraph dev --tunnel
+```
+
+Then open [smith.langchain.com/studio](https://smith.langchain.com/studio) and connect to the tunnel URL.
+
+> **Note:** Use Chrome/Firefox for `localhost`. For Safari or internet access, always use `--tunnel`.
+
+---
+
+## LangSmith Tracing
+
+Add these to your `.env` to send all LangGraph runs to LangSmith:
+
+```env
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=lsv2_pt_...
+LANGCHAIN_PROJECT=MyProject
+```
+
+Traces include: LLM calls, tool invocations, graph node steps, latency, and token usage.
+
+---
+
+## Environment Variables
+
+All variables go in `.env` at the project root. They are loaded automatically by the bot, wizard, and API server.
+
+```env
+# Telegram
+TELEGRAM_BOT_TOKEN=...
+
+# Database
+DUCKCLAW_DB_PATH=/path/to/db/telegram.duckdb
+
+# LLM
+DUCKCLAW_LLM_PROVIDER=mlx
+DUCKCLAW_LLM_MODEL=
+DUCKCLAW_LLM_BASE_URL=http://127.0.0.1:8080/v1
+
+# MLX local inference
+MLX_MODEL_PATH=/path/to/models/Slayer-8B-V1.1
+MLX_MODEL_ID=/path/to/models/Slayer-8B-V1.1
+MLX_PYTHON=/path/to/mlx_env/bin/python
+MLX_PORT=8080
+
+# LangSmith
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=lsv2_pt_...
+LANGCHAIN_PROJECT=Finanz
+```
+
+> `.env` is git-ignored. Never commit tokens or API keys.
+
+---
+
+## duckops CLI
+
+```bash
+duckops status                          # Show all PM2 services
+duckops status --name DuckClaw-Brain    # Filter by name
+duckops serve --port 8123               # Start LangGraph API server
+duckops serve --pm2 --name DuckClaw-API # Deploy API server via PM2
+duckops deploy --name ... --command ... # Deploy any command as persistent service
+```
+
+---
+
+## MLX Local Inference (Apple Silicon)
+
+Run a local LLM on Apple Silicon using `mlx_lm`:
+
+```bash
+# Set model path in .env
+MLX_MODEL_PATH=/path/to/models/Slayer-8B-V1.1
+
+# Start via PM2
+pm2 start ecosystem.config.cjs
+
+# Or manually
+./mlx/start_mlx.sh
+```
+
+The MLX server exposes an OpenAI-compatible API at `http://127.0.0.1:8080/v1`. The bot and API server automatically detect the running model via `MLX_MODEL_ID`.
+
+---
+
+## BI Module (Olist Dataset)
+
+The `duckclaw.bi` module includes ready-to-use business intelligence functions for the Olist e-commerce dataset.
 
 ```python
 import duckclaw
-
-# Initialize Sovereign Memory
-db = duckclaw.DuckClaw("vfs/agent_memory.duckdb")
-
-# Execute DDL
-db.execute("CREATE TABLE IF NOT EXISTS telemetry (x DOUBLE, y DOUBLE, z DOUBLE, event TEXT)")
-
-# Insert Data
-db.execute("INSERT INTO telemetry VALUES (100.5, 64.0, -200.1, 'Zombie Attack')")
-
-# Query Data (returns JSON string by default)
-results = db.query("SELECT * FROM telemetry")
-print(results)
-# Output: [{"x":"100.5","y":"64.0","z":"-200.1","event":"Zombie Attack"}]
-```
-
-## Entregable BI (Olist) – funciones en notebooks
-
-El módulo `duckclaw.bi` expone funciones DuckClaw para la **prueba técnica BI iData Global** (dataset Olist): carga de CSVs y consultas de negocio listas para ejecutar en celdas de Jupyter/notebook.
-
-### Requisitos
-
-- DuckClaw instalado y directorio `data/` con los CSV de Olist (p. ej. `olist_orders_dataset.csv`, `olist_customers_dataset.csv`, etc.).
-
-### Uso en un notebook
-
-```python
-import duckclaw
-from duckclaw.bi import (
-    load_olist_data,
-    get_top_customers_by_sales,
-    get_customers_to_retain,
-    get_top_sellers,
-    get_delivery_metrics,
-    get_delivery_critical_cases,
-    get_sales_summary,
-    get_review_metrics,
-    get_category_sales,
-)
+from duckclaw.bi import load_olist_data, get_top_customers_by_sales, get_top_sellers
 
 db = duckclaw.DuckClaw("olist_bi.duckdb")
-load_olist_data(db, "data")
+load_olist_data(db, "data")           # Load all CSVs from data/ folder
 
-# Preguntas de negocio (cada una en su celda)
 get_top_customers_by_sales(db, limit=15)
-get_customers_to_retain(db, limit=15, min_orders=2)
 get_top_sellers(db, limit=15)
-get_delivery_metrics(db)
-get_delivery_critical_cases(db, days_threshold=20)
-get_sales_summary(db)
-get_review_metrics(db)
-get_category_sales(db, limit=15)
 ```
 
-### Preguntas en lenguaje natural con LLM (Groq, DeepSeek o MLX)
+Available functions: `get_top_customers_by_sales`, `get_customers_to_retain`, `get_top_sellers`, `get_delivery_metrics`, `get_delivery_critical_cases`, `get_sales_summary`, `get_review_metrics`, `get_category_sales`.
 
-Un LLM interpreta la pregunta y usa las funciones BI como herramientas (tools). Proveedores: **Groq** (`GROQ_API_KEY`), **DeepSeek** (`DEEPSEEK_API_KEY`) o **MLX** local. Por defecto: Groq.
+### Natural language queries
 
 ```python
 from duckclaw.bi import ask_bi
-
-respuesta = ask_bi(db, "¿Cuáles son los clientes que más ventas generan? Dame un resumen.", provider="groq")
-# O con DeepSeek: provider="deepseek" (requiere DEEPSEEK_API_KEY)
+respuesta = ask_bi(db, "¿Cuáles son los vendedores con más retrasos?", provider="mlx")
 print(respuesta)
 ```
 
-Instalación: `pip install -e ".[groq]"` (Groq) o `pip install -e ".[langgraph]"` (DeepSeek usa langchain-openai, ya incluido).
+Supported providers: `groq` (`GROQ_API_KEY`), `deepseek` (`DEEPSEEK_API_KEY`), `mlx` (local).
 
-### MLX con PM2 (motor de inferencia local)
+---
 
-Para usar **MLX** como proveedor (sin depender de Groq/OpenAI), levanta el servidor de inferencia con PM2:
+## Project Structure
 
-```bash
-# Desde la raíz del repo
-pm2 start ecosystem.config.cjs
-pm2 save
+```
+duckclaw/
+├── duckclaw/
+│   ├── agents/
+│   │   ├── telegram_bot.py      # Telegram bot (LangGraph + bicameral memory)
+│   │   ├── general_graph.py     # LangGraph graph with DuckDB tools
+│   │   ├── graph_server.py      # FastAPI server for LangSmith Studio
+│   │   ├── router.py            # Entry router graph
+│   │   └── tools.py             # run_sql, inspect_schema, manage_memory
+│   ├── bi/                      # BI functions (Olist dataset)
+│   ├── integrations/
+│   │   ├── telegram.py          # Telegram base class
+│   │   └── llm_providers.py     # LLM provider factory (build_llm)
+│   ├── ops/
+│   │   ├── cli.py               # duckops CLI
+│   │   └── manager.py           # deploy / status / serve
+│   └── utils/
+│       └── format.py            # Reply formatting, tool output helpers
+├── scripts/
+│   ├── duckclaw_setup_wizard.py # Interactive setup wizard
+│   └── install_duckclaw.sh      # One-line installer
+├── mlx/
+│   └── start_mlx.sh             # MLX inference server launcher
+├── ecosystem.core.config.cjs    # PM2 config for Telegram bot
+├── ecosystem.config.cjs         # PM2 config for MLX inference
+├── langgraph.json               # LangGraph Studio config
+└── .env                         # Environment variables (git-ignored)
 ```
 
-El proceso **DuckClaw-Inference** ejecuta `mlx/start_mlx.sh` (API OpenAI-compatible en `http://127.0.0.1:8080/v1`). Opcional: define en `.env` o antes de arrancar `MLX_PYTHON`, `MLX_MODEL_PATH`, `MLX_PORT`.
-
-Luego en notebook o bot: `ask_bi(db, "…", provider="mlx")` o `llm_provider=mlx`. Ver [docs/pm2-migration.md](docs/pm2-migration.md).
-
-### Notebook de ejemplo
-
-En `notebooks/olist_bi_entregable.ipynb` hay un ejemplo completo: carga, las 4 preguntas obligatorias del enunciado, preguntas adicionales y una sección con **preguntas en lenguaje natural** vía Groq. Ejecuta las celdas en orden desde la raíz del repo o desde `notebooks/` (el notebook detecta la ruta a `data/`).
-
-## Security Testing (Strix)
-
-Use Strix for manual security assessments against this repository.
-
-### Prerequisites
-- Docker running locally
-- Strix CLI installed
-- `STRIX_LLM` configured (example: `openai/gpt-5`)
-- `LLM_API_KEY` configured
-
-### Base command
-```bash
-strix -n --target ./
-```
-
-### Standardized manual runs
-```bash
-# Quick triage
-./scripts/pentest_strix.sh quick
-
-# Deeper manual assessment
-./scripts/pentest_strix.sh deep
-```
-
-### Artifacts and review criteria
-- CLI logs are written to `.security/pentest-logs/`
-- Strix run artifacts are written to `strix_runs/`
-- Prioritize remediation for `critical` and `high` findings first
-- Re-run the same mode after fixes to validate closure
-
-## Third-Party Integration: Telegram (Polling)
-
-DuckClaw includes a reusable Telegram base class at `duckclaw/integrations/telegram.py` that automatically persists incoming updates/messages into DuckDB.
-
-### Prerequisites
-- Telegram bot token from BotFather
-- Optional dependency: `python-telegram-bot`
-- DuckClaw installed in editable mode
-
-```bash
-pip install -e ".[telegram]" --no-build-isolation
-```
-
-### Quick start (local polling)
-1. Create and export your token:
-   ```bash
-   export TELEGRAM_BOT_TOKEN="your_bot_token"
-   export DUCKCLAW_DB_PATH="telegram.duckdb"
-   ```
-2. Run the runnable example:
-   ```bash
-   python examples/telegram_bot.py
-   ```
-   Or run the one-line interactive wizard (asks token input if missing):
-   ```bash
-   ./scripts/install_duckclaw.sh
-   ```
-   The wizard uses `rich` and starts with two modes:
-   - `quick`: minimal prompts and default values
-   - `manual`: full step-by-step setup
-
-   It guides you with:
-   - dependency checks
-   - token input (secure prompt)
-   - DB path selection
-   - launch confirmation
-3. Send a message to your bot from Telegram.
-4. Validate persistence in DuckClaw:
-   ```python
-   import duckclaw
-   db = duckclaw.DuckClaw("telegram.duckdb")
-   print(db.query("SELECT chat_id, username, text, received_at FROM telegram_messages ORDER BY received_at DESC LIMIT 10"))
-   ```
-
-### What is persisted automatically
-Each incoming update stores:
-- `message_id`, `chat_id`, `user_id`, `username`
-- message `text`
-- full `raw_update_json`
-- `received_at` timestamp
-
-For complete setup and troubleshooting, see `docs/telegram-integration.md`.
-
-## Bot inteligente (LangGraph y proveedores)
-
-El wizard y el ejemplo de Telegram permiten elegir un **modo del bot** (echo o langgraph) y, en modo langgraph, un **proveedor** para respuestas inteligentes:
-
-| Proveedor     | Descripción                    | Variables de entorno / configuración                    |
-|---------------|--------------------------------|---------------------------------------------------------|
-| **none_llm**  | Sin LLM (reglas + memoria DuckClaw) | Ninguna. Usa solo contexto guardado en DuckClaw.        |
-| **openai**    | OpenAI API                     | `OPENAI_API_KEY` (obligatorio)                          |
-| **anthropic** | Anthropic API                  | `ANTHROPIC_API_KEY` (obligatorio)                       |
-| **ollama**    | Ollama local                   | URL en wizard (ej. `http://localhost:11434`) + modelo   |
-| **iotcorelabs** | IoTCoreLabs | URL en wizard; opcional `IOTCORELABS_API_KEY`          |
-| **mlx**       | MLX (servidor local OpenAI-compatible) | URL base y nombre del modelo en wizard; opcional `MLX_LLM_API_KEY`   |
-
-Si faltan credenciales o URL requeridos, el wizard y el bot hacen **fail-fast** con un mensaje claro.
-
-### Herramientas DuckClaw en el agente (modo langgraph)
-
-En modo **langgraph** con cualquier proveedor LLM (openai, anthropic, ollama, mlx, etc.), el agente tiene herramientas para consultar y modificar la base DuckDB según los mensajes de Telegram:
-
-| Herramienta       | Descripción |
-|-------------------|-------------|
-| `list_tables`     | Lista las tablas de la base de datos. |
-| `describe_table`  | Describe las columnas de una tabla (argumento: `table_name`, solo letras, números y `_`). |
-| `run_read_sql`    | Ejecuta consultas de solo lectura: `SELECT`, `WITH`, `SHOW`, `DESCRIBE`. Devuelve JSON. |
-| `run_write_sql`   | Ejecuta escrituras permitidas: `INSERT`, `UPDATE`, `DELETE`. |
-
-**Política safe_write:** no se permiten `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `ATTACH`, `COPY`, etc. Solo lectura con `run_read_sql` y escritura limitada a `INSERT`/`UPDATE`/`DELETE` con `run_write_sql`. Si el usuario pide una operación no permitida, el agente debe responder que no está disponible.
-
-**Ejemplos de uso desde Telegram:**
-- *"¿Qué tablas hay?"* → el agente usa `list_tables` y responde con la lista.
-- *"Describe telegram_messages"* → `describe_table("telegram_messages")`.
-- *"Dame los últimos 5 mensajes"* → `run_read_sql("SELECT text FROM telegram_messages ORDER BY received_at DESC LIMIT 5")`.
-- *"Inserta un registro en la tabla X"* → el agente puede usar `run_write_sql` con un `INSERT` válido (si la tabla existe y el usuario lo pide explícitamente).
-
-### Instalación por proveedor
-
-- Solo Telegram (echo o langgraph con `none_llm`). LangGraph viene incluido en el paquete:
-  ```bash
-  pip install -e ".[telegram]" --no-build-isolation
-  ```
-- Con todos los proveedores (OpenAI, Anthropic, Ollama, etc.):
-  ```bash
-  pip install -e ".[all]" --no-build-isolation
-  ```
-- Solo un proveedor: instala el paquete correspondiente además de `.[telegram]` (ej. `pip install langchain-openai` para OpenAI).
-
-### Ejecución
-
-1. Ejecuta el wizard y elige modo **langgraph** y el proveedor deseado:
-   ```bash
-   ./scripts/install_duckclaw.sh
-   ```
-2. Para OpenAI o Anthropic, exporta la API key antes de arrancar (o cuando el wizard lo pida no habrá token en env y fallará la validación):
-   ```bash
-   export OPENAI_API_KEY="sk-..."
-   ./scripts/install_duckclaw.sh
-   ```
-3. El bot muestra en logs el proveedor y modelo activos al iniciar.
-
-### Dashboard de monitoreo
-
-Tras configurar con el wizard (`./scripts/install_duckclaw.sh`), puedes levantar un dashboard Streamlit que muestra la configuración guardada y los últimos mensajes de la tabla `telegram_messages`:
-
-```bash
-pip install -e ".[dashboard]" --no-build-isolation
-streamlit run scripts/dashboard.py
-```
-
-El dashboard lee la configuración en `~/.config/duckclaw/wizard_config.json` y, si hay `db_path`, abre la base DuckClaw y muestra tablas y mensajes recientes.
-
-### Trazabilidad con LangSmith
-
-En modo **langgraph**, puedes enviar trazas a [LangSmith](https://smith.langchain.com/) para depurar y analizar ejecuciones del agente (LLM, herramientas, pasos del grafo).
-
-1. Crea una cuenta en [smith.langchain.com](https://smith.langchain.com/) y obtén tu API key.
-2. Instala el extra que incluye LangSmith (ya está en `.[agent]` y `.[all]`):
-   ```bash
-   pip install -e ".[agent]" --no-build-isolation
-   ```
-3. Activa la trazabilidad y arranca el bot:
-   ```bash
-   export LANGCHAIN_TRACING_V2=true
-   export LANGCHAIN_API_KEY="tu_langsmith_api_key"
-   # Opcional: nombre del proyecto en LangSmith (por defecto: duckclaw)
-   export LANGCHAIN_PROJECT="duckclaw"
-   python examples/telegram_bot.py
-   ```
-
-Las ejecuciones del grafo se etiquetan con `duckclaw`, `telegram` y el proveedor LLM. Si no defines `LANGCHAIN_PROJECT`, se usa el proyecto `duckclaw` por defecto.
+---
 
 ## License
 
-MIT License. See LICENSE for more information.
+MIT License — see [LICENSE](LICENSE) for details.

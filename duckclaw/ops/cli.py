@@ -42,6 +42,20 @@ def main(args: list[str] | None = None) -> int:
         help="Filter by service name (default: show all DuckClaw services)",
     )
 
+    serve_parser = subparsers.add_parser("serve", help="Start the LangGraph API server (LangSmith compatible)")
+    serve_parser.add_argument("--host",   default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
+    serve_parser.add_argument("--port",   default=8123, type=int, help="Port (default: 8123)")
+    serve_parser.add_argument("--reload", action="store_true", help="Auto-reload on file changes (dev mode)")
+    serve_parser.add_argument("--pm2",    action="store_true", help="Deploy as PM2 service instead of running directly")
+    serve_parser.add_argument("--name",   default="DuckClaw-API", help="PM2 service name (default: DuckClaw-API)")
+    serve_parser.add_argument("--cwd",    default=None, help="Working directory (default: current)")
+
+    hire_parser = subparsers.add_parser("hire", help="Deploy a Virtual Worker from template (Plug & Play)")
+    hire_parser.add_argument("worker_id", nargs="?", default="", help="Template id (e.g. personal_finance, support)")
+    hire_parser.add_argument("--name", "--instance", dest="instance_name", default=None, help="PM2 instance name (default: worker_id)")
+    hire_parser.add_argument("--cwd", default=None, help="Working directory (default: current)")
+    hire_parser.add_argument("--list", dest="list_workers", action="store_true", help="List available worker templates and exit")
+
     parsed = parser.parse_args(args)
     if not parsed.subcommand:
         parser.print_help()
@@ -65,6 +79,33 @@ def main(args: list[str] | None = None) -> int:
     if parsed.subcommand == "status":
         from duckclaw.ops.manager import status
         return status(provider=parsed.provider, name=parsed.name)
+
+    if parsed.subcommand == "serve":
+        from duckclaw.ops.manager import serve
+        return serve(
+            host=parsed.host,
+            port=parsed.port,
+            reload=parsed.reload,
+            pm2=parsed.pm2,
+            name=parsed.name,
+            cwd=parsed.cwd,
+        )
+
+    if parsed.subcommand == "hire":
+        from duckclaw.ops.manager import hire
+        if getattr(parsed, "list_workers", False):
+            from duckclaw.workers.factory import list_workers
+            for w in list_workers():
+                print(w)
+            return 0
+        if not (parsed.worker_id or "").strip():
+            hire_parser.print_help()
+            return 1
+        return hire(
+            worker_id=(parsed.worker_id or "").strip(),
+            instance_name=parsed.instance_name,
+            cwd=parsed.cwd,
+        )
 
     return 0
 

@@ -310,6 +310,14 @@ def _run_bot() -> None:
                 self._handle_setup(message, text, chat_id)
                 return
 
+            # On-the-Fly CLI (spec: interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md)
+            from duckclaw.agents.on_the_fly_commands import handle_command
+            cmd_reply = handle_command(self.db, chat_id, text)
+            if cmd_reply is not None:
+                _log(f"📋 Comando ejecutado chat={chat_id}")
+                asyncio.create_task(message.reply_text(cmd_reply, parse_mode="Markdown"))
+                return
+
             # Saludo corto: responder sin invocar el grafo para evitar que el modelo devuelva tool calls
             _greetings = (
                 "hola", "hey", "hi", "hello", "buenas", "qué tal", "que tal",
@@ -357,19 +365,39 @@ def _run_bot() -> None:
             display_model = _resolve_display_model(llm_provider, llm_model, llm_base_url)
             _log(f"🤔 [{display_model}] pensando...")
 
+            from duckclaw.agents.on_the_fly_commands import (
+                get_history_limit_for_chat,
+                get_worker_id_for_chat,
+                save_last_audit,
+            )
+            history_limit = get_history_limit_for_chat(self.db, chat_id, default=10)
+            worker_id = get_worker_id_for_chat(self.db, chat_id)
+
             t0 = time.perf_counter()
             try:
-                graph = _build_entry_router(
-                    self.db,
-                    system_prompt,
-                    llm_provider=llm_provider,
-                    llm_model=llm_model,
-                    llm_base_url=llm_base_url,
-                    store_db=store_db,
-                    save_traces=save_tr,
-                    send_to_langsmith=send_ls,
-                )
-                history = self._get_history(chat_id, limit=10)
+                if worker_id:
+                    from duckclaw.workers.factory import WorkerFactory
+                    db_path = _get_db_path()
+                    graph = WorkerFactory().create(
+                        worker_id,
+                        db_path=db_path,
+                        instance_name=None,
+                        llm_provider=llm_provider or None,
+                        llm_model=llm_model or None,
+                        llm_base_url=llm_base_url or None,
+                    )
+                else:
+                    graph = _build_entry_router(
+                        self.db,
+                        system_prompt,
+                        llm_provider=llm_provider,
+                        llm_model=llm_model,
+                        llm_base_url=llm_base_url,
+                        store_db=store_db,
+                        save_traces=save_tr,
+                        send_to_langsmith=send_ls,
+                    )
+                history = self._get_history(chat_id, limit=history_limit)
                 _persist_conversation(self.db, chat_id, "user", text)
                 result = graph.invoke({"incoming": text, "history": history})
                 reply = result.get("reply") or ""
@@ -381,6 +409,10 @@ def _run_bot() -> None:
                 traceback.print_exc()
             reply = _normalize_reply(reply) or ""
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            try:
+                save_last_audit(self.db, chat_id, elapsed_ms)
+            except Exception:
+                pass
             reply_for_user = reply
             try:
                 from duckclaw.utils.format import strip_paths_from_reply

@@ -55,10 +55,12 @@ def main():
         print("DUCKCLAW_WORKER_ID is required", file=sys.stderr)
         sys.exit(1)
 
-    from duckclaw.workers.factory import WorkerFactory
-    factory = WorkerFactory()
-    graph = factory.create(
-        worker_id=WORKER_ID,
+    from duckclaw.forge import AgentAssembler, WORKERS_TEMPLATES_DIR
+
+    yaml_path = WORKERS_TEMPLATES_DIR / WORKER_ID / "manifest.yaml"
+    graph = AgentAssembler.from_yaml(yaml_path).build(
+        db=None,
+        llm=None,
         db_path=os.environ.get("DUCKCLAW_DB_PATH"),
         instance_name=INSTANCE or None,
     )

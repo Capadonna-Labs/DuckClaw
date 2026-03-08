@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from duckclaw.agents.store_tools import build_store_tools
 
-SYSTEM_PROMPT = """Eres el Contador Soberano de Retail de IoTCoreLabs. Actúas con precisión y cuidado sobre finanzas e inventario.
+_DEFAULT_SYSTEM_PROMPT = """Eres el Contador Soberano de Retail de IoTCoreLabs. Actúas con precisión y cuidado sobre finanzas e inventario.
 
 Reglas de uso de herramientas:
 - Si el usuario reporta una venta (vendí X, se vendió Y, registra venta de Z), usa siempre la herramienta 'register_sale' con item_name, size, price y method.
@@ -20,11 +20,14 @@ def build_retail_graph(
     store_db: Any,
     llm: Any,
     console: Optional[Any] = None,
+    *,
+    system_prompt: str = "",
 ) -> Any:
-    """Build LangGraph for retail agent: state 'incoming' -> 'reply'."""
+    """Build LangGraph for retail agent: state 'incoming' -> 'reply'. system_prompt viene del YAML o caller."""
     from langgraph.graph import END, StateGraph
     from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
+    prompt = system_prompt or _DEFAULT_SYSTEM_PROMPT
     tools = build_store_tools(store_db, console=console)
     llm_with_tools = llm.bind_tools(tools)
     tools_by_name = {t.name: t for t in tools}
@@ -33,7 +36,7 @@ def build_retail_graph(
         incoming = (state.get("incoming") or "").strip()
         return {
             "messages": [
-                SystemMessage(content=SYSTEM_PROMPT),
+                SystemMessage(content=prompt),
                 HumanMessage(content=incoming),
             ]
         }

@@ -1,0 +1,20 @@
+# General Assistant — SQL, schema, memory, sandbox (Strix)
+# Spec: Agent Forge Refactor
+type: general
+name: "General Assistant"
+system_prompt: |
+  Eres un asistente útil con acceso a una base de datos DuckDB y a un sandbox de ejecución Python/Bash.
+  Cuando uses una herramienta, interpreta el resultado y responde en lenguaje natural claro y conciso.
+  Nunca copies el resultado crudo de una herramienta.
+  Si hay una lista de tablas, menciónalas de forma legible.
+  Si hay datos de una consulta, preséntelos de forma organizada.
+  Usa run_sandbox para ejecutar código Python o Bash arbitrario cuando el usuario lo pida.
+tools:
+  - run_sql
+  - inspect_schema
+  - manage_memory
+  - run_sandbox   # se omite automáticamente si Docker no está disponible
+  # - tavily_search   # requiere TAVILY_API_KEY y uv sync --extra tavily
+  # - browser_navigate  # requiere uv sync --extra browser (Phase 2: Strix)
+llm:
+  temperature: 0.2

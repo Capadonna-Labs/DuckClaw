@@ -109,6 +109,15 @@ def _get_db_path() -> str:
     return str(Path.cwd() / "duckclaw_agents.duckdb")
 
 
+def _worker_db_path() -> str:
+    """Ruta a la DB de workers. Por defecto usa la misma que el agente (backward compat).
+    Si DUCKCLAW_WORKERS_DB_PATH está definida, usa esa ruta para una DB separada."""
+    env_path = os.environ.get("DUCKCLAW_WORKERS_DB_PATH", "").strip()
+    if env_path:
+        return str(Path(env_path).resolve())
+    return _get_db_path()
+
+
 def _load_wizard_config() -> dict:
     """Carga la config guardada por la TUI (scripts/install_duckclaw.sh → wizard)."""
     import json
@@ -216,7 +225,7 @@ def _get_store_db(config: dict) -> Any:
     return DuckClaw(str(resolved))
 
 
-def _build_entry_router(
+def _build_graph_via_forge(
     db: Any,
     system_prompt: str,
     llm_provider: str = "",
@@ -225,31 +234,36 @@ def _build_entry_router(
     store_db: Optional[Any] = None,
     save_traces: bool = False,
     send_to_langsmith: bool = False,
+    worker_id: Optional[str] = None,
 ) -> Any:
-    """Build compiled entry router graph (LangGraph). Requires a valid LLM."""
+    """Build compiled LangGraph via AgentAssembler (forge). Requires a valid LLM."""
     from duckclaw.integrations.llm_providers import build_llm
-    from duckclaw.agents.router import build_entry_router_graph
+    from duckclaw.forge import AgentAssembler, ENTRY_ROUTER_YAML, WORKERS_TEMPLATES_DIR
 
-    llm = build_llm(
-        (llm_provider or "").strip().lower(),
-        (llm_model or "").strip(),
-        (llm_base_url or "").strip(),
-    )
-    if llm is None:
+    provider = (llm_provider or "").strip().lower() or "none_llm"
+    llm = build_llm(provider, (llm_model or "").strip(), (llm_base_url or "").strip())
+    # Workers support none_llm (llm=None); entry router requires an LLM
+    if llm is None and not worker_id:
         raise RuntimeError(
             "Configura llm_provider en /setup (openai, anthropic, deepseek, mlx, iotcorelabs). "
             "O añade OPENAI_API_KEY / ANTHROPIC_API_KEY en .env."
         )
-    return build_entry_router_graph(
-        db,
-        llm,
+
+    if worker_id:
+        yaml_path = WORKERS_TEMPLATES_DIR / worker_id / "manifest.yaml"
+    else:
+        yaml_path = ENTRY_ROUTER_YAML
+
+    return AgentAssembler.from_yaml(yaml_path).build(
+        db=db,
+        llm=llm,
         store_db=store_db,
-        console=None,
         system_prompt=system_prompt,
         llm_provider=(llm_provider or "").strip(),
         llm_model=(llm_model or "").strip(),
         save_traces=save_traces,
         send_to_langsmith=send_to_langsmith,
+        db_path=_worker_db_path() if worker_id else None,
     )
 
 
@@ -383,28 +397,17 @@ def _run_bot() -> None:
 
             t0 = time.perf_counter()
             try:
-                if worker_id:
-                    from duckclaw.workers.factory import WorkerFactory
-                    db_path = _get_db_path()
-                    graph = WorkerFactory().create(
-                        worker_id,
-                        db_path=db_path,
-                        instance_name=None,
-                        llm_provider=llm_provider or None,
-                        llm_model=llm_model or None,
-                        llm_base_url=llm_base_url or None,
-                    )
-                else:
-                    graph = _build_entry_router(
-                        self.db,
-                        system_prompt,
-                        llm_provider=llm_provider,
-                        llm_model=llm_model,
-                        llm_base_url=llm_base_url,
-                        store_db=store_db,
-                        save_traces=save_tr,
-                        send_to_langsmith=send_ls,
-                    )
+                graph = _build_graph_via_forge(
+                    self.db,
+                    system_prompt,
+                    llm_provider=llm_provider,
+                    llm_model=llm_model,
+                    llm_base_url=llm_base_url,
+                    store_db=store_db,
+                    save_traces=save_tr,
+                    send_to_langsmith=send_ls,
+                    worker_id=worker_id or None,
+                )
                 history = self._get_history(chat_id, limit=history_limit)
                 _persist_conversation(self.db, chat_id, "user", text)
                 state = {"incoming": text, "history": history}

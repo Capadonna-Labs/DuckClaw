@@ -93,119 +93,155 @@ class WorkerFactory:
     ) -> Any:
         """
         Build and return a compiled LangGraph for the worker.
-
-        1. Load and validate manifest.yaml
-        2. Connect DuckDB, create schema, run schema.sql
-        3. Load system_prompt.md and skills from skills/
-        4. Build LLM (from env or args) and graph
-        5. Return compiled graph (state: incoming, history; output: reply)
+        Shim: delega a build_worker_graph (compatible con AgentAssembler).
         """
-        spec = load_manifest(worker_id, self.templates_root)
-        path = _get_db_path(worker_id, instance_name, db_path)
+        return build_worker_graph(
+            worker_id,
+            db_path,
+            None,
+            templates_root=self.templates_root,
+            instance_name=instance_name,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_base_url=llm_base_url,
+        )
 
-        from duckclaw import DuckClaw
-        db = DuckClaw(path)
-        run_schema(db, spec)
 
-        system_prompt = load_system_prompt(spec)
-        tools = _build_worker_tools(db, spec)
-        tools_by_name = {t.name: t for t in tools}
+def build_worker_graph(
+    worker_id: str,
+    db_path: Optional[str],
+    llm: Optional[Any],
+    *,
+    templates_root: Optional[Path] = None,
+    instance_name: Optional[str] = None,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_base_url: Optional[str] = None,
+) -> Any:
+    """
+    Build a compiled LangGraph for a worker. Used by AgentAssembler._build_worker
+    and by WorkerFactory.create() (shim).
+    """
+    spec = load_manifest(worker_id, templates_root)
+    path = _get_db_path(worker_id, instance_name, db_path)
 
-        provider = (llm_provider or os.environ.get("DUCKCLAW_LLM_PROVIDER") or "none_llm").strip().lower()
-        model = (llm_model or os.environ.get("DUCKCLAW_LLM_MODEL") or "").strip()
-        base_url = (llm_base_url or os.environ.get("DUCKCLAW_LLM_BASE_URL") or "").strip()
+    from duckclaw import DuckClaw
+    db = DuckClaw(path)
+    run_schema(db, spec)
 
-        if provider == "none_llm":
-            llm = None
-        else:
-            from duckclaw.integrations.llm_providers import build_llm
-            llm = build_llm(provider, model, base_url)
+    system_prompt = load_system_prompt(spec)
+    tools = _build_worker_tools(db, spec)
+    if getattr(spec, "github_config", None):
+        try:
+            from duckclaw.forge.skills.github_bridge import register_github_skill
+            register_github_skill(tools, spec.github_config)
+        except Exception:
+            pass
+    tools_by_name = {t.name: t for t in tools}
 
-        from langgraph.graph import END, StateGraph
-        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
+    provider = (llm_provider or os.environ.get("DUCKCLAW_LLM_PROVIDER") or "none_llm").strip().lower()
+    model = (llm_model or os.environ.get("DUCKCLAW_LLM_MODEL") or "").strip()
+    base_url = (llm_base_url or os.environ.get("DUCKCLAW_LLM_BASE_URL") or "").strip()
 
-        def prepare_node(state: dict) -> dict:
-            messages = [SystemMessage(content=system_prompt)]
-            for h in (state.get("history") or []):
-                role = (h.get("role") or "").lower()
-                content = h.get("content") or ""
-                if role == "user":
-                    messages.append(HumanMessage(content=content))
-                elif role == "assistant":
-                    messages.append(AIMessage(content=content))
-            messages.append(HumanMessage(content=state.get("incoming") or ""))
-            return {"messages": messages}
+    if llm is None and provider != "none_llm":
+        from duckclaw.integrations.llm_providers import build_llm
+        llm = build_llm(provider, model, base_url)
+    elif llm is None:
+        llm = None
 
-        if llm is None:
-            def agent_node(state: dict) -> dict:
-                return {"messages": state["messages"] + [AIMessage(content="Sin LLM configurado. Configura DUCKCLAW_LLM_PROVIDER.")]}
-        else:
-            llm_with_tools = llm.bind_tools(tools)
+    if getattr(spec, "research_config", None):
+        try:
+            from duckclaw.forge.skills.research_bridge import register_research_skill
+            register_research_skill(tools, spec.research_config, llm=llm)
+            tools_by_name = {t.name: t for t in tools}
+        except Exception:
+            pass
 
-            def agent_node(state: dict) -> dict:
-                resp = llm_with_tools.invoke(state["messages"])
-                return {"messages": state["messages"] + [resp]}
+    from langgraph.graph import END, StateGraph
+    from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
-        def tools_node(state: dict) -> dict:
-            messages = state["messages"]
-            last = messages[-1]
-            tool_calls = getattr(last, "tool_calls", None) or []
-            new_msgs = list(messages)
-            for tc in tool_calls:
-                name = (tc.get("name") or "").strip()
-                args = tc.get("args") or {}
-                tid = tc.get("id") or ""
-                tool = tools_by_name.get(name)
-                if tool:
-                    try:
-                        result = tool.invoke(args)
-                        content = str(result) if result is not None else "OK"
-                    except Exception as e:
-                        content = f"Error: {e}"
-                else:
-                    content = f"Herramienta desconocida: {name}"
-                new_msgs.append(ToolMessage(content=content, tool_call_id=tid))
-            return {"messages": new_msgs}
+    def prepare_node(state: dict) -> dict:
+        messages = [SystemMessage(content=system_prompt)]
+        for h in (state.get("history") or []):
+            role = (h.get("role") or "").lower()
+            content = h.get("content") or ""
+            if role == "user":
+                messages.append(HumanMessage(content=content))
+            elif role == "assistant":
+                messages.append(AIMessage(content=content))
+        messages.append(HumanMessage(content=state.get("incoming") or ""))
+        return {"messages": messages}
 
-        def set_reply(state: dict) -> dict:
-            from duckclaw.integrations.llm_providers import _strip_eot
-            msgs = state["messages"]
-            last = msgs[-1]
-            reply = getattr(last, "content", None) or str(last)
-            reply = _strip_eot(reply or "").strip()
-            if reply.startswith("{") and '"name"' in reply and ("parameters" in reply or '"args"' in reply):
+    if llm is None:
+        def agent_node(state: dict) -> dict:
+            return {"messages": state["messages"] + [AIMessage(content="Sin LLM configurado. Configura DUCKCLAW_LLM_PROVIDER.")]}
+    else:
+        llm_with_tools = llm.bind_tools(tools)
+
+        def agent_node(state: dict) -> dict:
+            resp = llm_with_tools.invoke(state["messages"])
+            return {"messages": state["messages"] + [resp]}
+
+    def tools_node(state: dict) -> dict:
+        messages = state["messages"]
+        last = messages[-1]
+        tool_calls = getattr(last, "tool_calls", None) or []
+        new_msgs = list(messages)
+        for tc in tool_calls:
+            name = (tc.get("name") or "").strip()
+            args = tc.get("args") or {}
+            tid = tc.get("id") or ""
+            tool = tools_by_name.get(name)
+            if tool:
                 try:
-                    from duckclaw.utils import format_tool_reply
-                    data = json.loads(reply)
-                    name = data.get("name") or data.get("tool")
-                    params = data.get("parameters") or data.get("args") or {}
-                    if name and name in tools_by_name:
-                        result = tools_by_name[name].invoke(params)
-                        text = str(result) if result else "Listo."
-                        return {"reply": format_tool_reply(text)}
-                except (json.JSONDecodeError, TypeError, KeyError, Exception):
-                    pass
-            return {"reply": reply or ""}
+                    result = tool.invoke(args)
+                    content = str(result) if result is not None else "OK"
+                except Exception as e:
+                    content = f"Error: {e}"
+            else:
+                content = f"Herramienta desconocida: {name}"
+            new_msgs.append(ToolMessage(content=content, tool_call_id=tid))
+        return {"messages": new_msgs}
 
-        def should_continue(state: dict) -> str:
-            last = state["messages"][-1]
-            return "tools" if getattr(last, "tool_calls", None) else "end"
+    def set_reply(state: dict) -> dict:
+        from duckclaw.integrations.llm_providers import _strip_eot
+        msgs = state["messages"]
+        last = msgs[-1]
+        reply = getattr(last, "content", None) or str(last)
+        reply = _strip_eot(reply or "").strip()
+        if reply.startswith("{") and '"name"' in reply and ("parameters" in reply or '"args"' in reply):
+            try:
+                from duckclaw.utils import format_tool_reply
+                data = json.loads(reply)
+                name = data.get("name") or data.get("tool")
+                params = data.get("parameters") or data.get("args") or {}
+                if name and name in tools_by_name:
+                    result = tools_by_name[name].invoke(params)
+                    text = str(result) if result else "Listo."
+                    return {"reply": format_tool_reply(text)}
+            except (json.JSONDecodeError, TypeError, KeyError, Exception):
+                pass
+        return {"reply": reply or ""}
 
-        graph = StateGraph(dict)
-        graph.add_node("prepare", prepare_node)
-        graph.add_node("agent", agent_node)
-        graph.add_node("tools", tools_node)
-        graph.add_node("set_reply", set_reply)
-        graph.set_entry_point("prepare")
-        graph.add_edge("prepare", "agent")
-        graph.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": "set_reply"})
-        graph.add_edge("tools", "agent")
-        graph.add_edge("set_reply", END)
+    def should_continue(state: dict) -> str:
+        last = state["messages"][-1]
+        return "tools" if getattr(last, "tool_calls", None) else "end"
 
-        compiled = graph.compile()
-        compiled._worker_spec = spec
-        compiled._worker_db = db
-        return compiled
+    graph = StateGraph(dict)
+    graph.add_node("prepare", prepare_node)
+    graph.add_node("agent", agent_node)
+    graph.add_node("tools", tools_node)
+    graph.add_node("set_reply", set_reply)
+    graph.set_entry_point("prepare")
+    graph.add_edge("prepare", "agent")
+    graph.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": "set_reply"})
+    graph.add_edge("tools", "agent")
+    graph.add_edge("set_reply", END)
+
+    compiled = graph.compile()
+    compiled._worker_spec = spec
+    compiled._worker_db = db
+    return compiled
 
 
 def list_workers(templates_root: Optional[Path] = None) -> list[str]:

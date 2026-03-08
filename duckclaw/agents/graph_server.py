@@ -91,19 +91,18 @@ _graph_init_error: Optional[Exception] = None
 
 
 def _get_or_build_graph() -> Any:
-    """Build/cache the compiled LangGraph. Safe to call from sync context."""
+    """Build/cache the compiled LangGraph via AgentAssembler. Safe to call from sync context."""
     if _graph_state.get("graph") is not None:
         return _graph_state["graph"]
 
     from duckclaw import DuckClaw
     from duckclaw.integrations.llm_providers import build_llm
-    from duckclaw.agents.router import build_entry_router_graph
+    from duckclaw.forge import AgentAssembler, ENTRY_ROUTER_YAML
 
     db_path = (os.environ.get("DUCKCLAW_DB_PATH") or "").strip()
     if not db_path:
         db_path = str(Path(__file__).resolve().parent.parent.parent / "db" / "telegram.duckdb")
 
-    # Crear directorio de forma segura (sync, no blocking issue en contexto normal)
     import os as _os
     _os.makedirs(str(Path(db_path).parent), exist_ok=True)
 
@@ -120,8 +119,9 @@ def _get_or_build_graph() -> Any:
             "Configura DUCKCLAW_LLM_PROVIDER y DUCKCLAW_LLM_BASE_URL en .env."
         )
 
-    graph = build_entry_router_graph(
-        db, llm,
+    graph = AgentAssembler.from_yaml(ENTRY_ROUTER_YAML).build(
+        db=db,
+        llm=llm,
         system_prompt=system_prompt,
         llm_provider=provider,
         llm_model=model,

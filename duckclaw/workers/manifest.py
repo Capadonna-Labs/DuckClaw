@@ -59,6 +59,20 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
     skills_list = data.get("skills") or []
     if isinstance(skills_list, str):
         skills_list = [s.strip() for s in skills_list.split(",") if s.strip()]
+    # skills: strings (nombres) o dicts (ej. {github: {...}}, {research: {...}})
+    skills_names = [s for s in skills_list if isinstance(s, str)]
+    github_config = None
+    research_config = None
+    for s in skills_list:
+        if isinstance(s, dict):
+            if "github" in s and github_config is None:
+                github_config = s["github"] if isinstance(s.get("github"), dict) else {}
+            if "research" in s and research_config is None:
+                research_config = s["research"] if isinstance(s.get("research"), dict) else {}
+    if github_config is None and isinstance(data.get("github"), dict):
+        github_config = data["github"]
+    if research_config is None and isinstance(data.get("research"), dict):
+        research_config = data["research"]
     allowed_tables = data.get("allowed_tables") or []
     if isinstance(allowed_tables, str):
         allowed_tables = [t.strip() for t in allowed_tables.split(",") if t.strip()]
@@ -71,10 +85,12 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         llm_required=llm_required or None,
         temperature=temperature,
         topology=topology,
-        skills_list=skills_list,
+        skills_list=skills_names,
         allowed_tables=allowed_tables,
         read_only=read_only,
         worker_dir=worker_dir,
+        github_config=github_config,
+        research_config=research_config,
     )
 
 
@@ -110,6 +126,7 @@ class WorkerSpec:
     __slots__ = (
         "worker_id", "name", "schema_name", "llm_required", "temperature",
         "topology", "skills_list", "allowed_tables", "read_only", "worker_dir",
+        "github_config", "research_config",
     )
 
     def __init__(
@@ -124,6 +141,8 @@ class WorkerSpec:
         allowed_tables: list,
         read_only: bool,
         worker_dir: Path,
+        github_config: Optional[dict] = None,
+        research_config: Optional[dict] = None,
     ):
         self.worker_id = worker_id
         self.name = name
@@ -135,3 +154,5 @@ class WorkerSpec:
         self.allowed_tables = allowed_tables
         self.read_only = read_only
         self.worker_dir = worker_dir
+        self.github_config = github_config
+        self.research_config = research_config

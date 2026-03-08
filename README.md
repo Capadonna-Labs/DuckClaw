@@ -116,6 +116,7 @@ python -m duckclaw.agents.telegram_bot
 | `/skills` | List the tools (skills) currently enabled for the agent. |
 | `/forget` | Clear conversation history for this chat and reset graph state (Habeas Data). |
 | `/context on` \| `/context off` | Enable or disable long-term context (number of messages in history). |
+| `/prompt` \| `/prompt <texto>` | Show current system prompt, or set a new one (replaces the SYSTEM instruction). |
 | `/audit` | Show last execution evidence: latency, SQL (if any), LangSmith run_id. |
 | `/health` | Check DuckDB and inference endpoint (MLX) status and latency. |
 | `/approve` \| `/reject` | Human-in-the-loop: approve or reject a pending operation (when graph is in interrupt state). |

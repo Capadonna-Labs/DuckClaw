@@ -191,6 +191,46 @@ def execute_approve_reject(db: Any, chat_id: Any, approved: bool) -> str:
     return "No hay operación pendiente de aprobación. (El grafo no está en estado interrupt en esta versión.)"
 
 
+def _get_global_config(db: Any, key: str) -> str:
+    """Read a global config key from agent_config (e.g. system_prompt)."""
+    _ensure_agent_config(db)
+    k = str(key).replace("'", "''")[:128]
+    try:
+        r = db.query(f"SELECT value FROM {_AGENT_CONFIG_TABLE} WHERE key = '{k}' LIMIT 1")
+        rows = json.loads(r) if isinstance(r, str) else (r or [])
+        if rows and isinstance(rows[0], dict):
+            return (rows[0].get("value") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _set_global_config(db: Any, key: str, value: str) -> None:
+    """Write a global config key to agent_config."""
+    _ensure_agent_config(db)
+    k = str(key).replace("'", "''")[:128]
+    v = str(value).replace("'", "''")[:16384]
+    db.execute(
+        f"""
+        INSERT INTO {_AGENT_CONFIG_TABLE} (key, value) VALUES ('{k}', '{v}')
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+        """
+    )
+
+
+def execute_prompt(db: Any, new_prompt: str) -> str:
+    """/prompt [nuevo system prompt]: cambia el system prompt en caliente. Sin argumentos muestra el actual."""
+    if not new_prompt:
+        current = _get_global_config(db, "system_prompt")
+        if not current:
+            return "System prompt actual: (vacío — se usa el por defecto del bot).\nPara cambiar: /prompt <tu texto>"
+        preview = current[:400] + "…" if len(current) > 400 else current
+        return f"**System prompt actual:**\n{preview}\n\nPara cambiar: /prompt <nuevo texto>"
+    _set_global_config(db, "system_prompt", new_prompt)
+    preview = new_prompt[:200] + "…" if len(new_prompt) > 200 else new_prompt
+    return f"✅ System prompt actualizado.\nVista previa: {preview}"
+
+
 def handle_command(db: Any, chat_id: Any, text: str) -> Optional[str]:
     """
     Middleware: si el mensaje es un comando on-the-fly, ejecuta y retorna la respuesta.
@@ -215,6 +255,8 @@ def handle_command(db: Any, chat_id: Any, text: str) -> Optional[str]:
         return execute_approve_reject(db, chat_id, True)
     if name == "reject":
         return execute_approve_reject(db, chat_id, False)
+    if name in ("prompt", "system_prompt", "system"):
+        return execute_prompt(db, args)
     return None
 
 

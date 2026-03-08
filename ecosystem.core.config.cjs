@@ -19,7 +19,7 @@ module.exports = {
         DUCKCLAW_DB_PATH: "/Users/juanjosearevalocamargo/desktop/finanz/finanz.duckdb",
         DUCKCLAW_BOT_MODE: "langgraph",
         DUCKCLAW_LLM_PROVIDER: "mlx",
-        DUCKCLAW_LLM_MODEL: "/Users/juanjosearevalocamargo/Desktop/models/Slayer-8B-V1.1",
+        DUCKCLAW_LLM_MODEL: "Slayer-8B-v1.1",
         DUCKCLAW_LLM_BASE_URL: "http://127.0.0.1:8080/v1",
       },
     },

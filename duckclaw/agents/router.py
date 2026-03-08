@@ -246,8 +246,10 @@ def build_entry_router_graph(
         # 2) LLM fallback only when ambiguous (no keyword match and short/neutral message)
         if route == "general" and has_retail and _is_ambiguous(incoming):
             route = _route_by_llm(llm, incoming, history)
-        # Mantener incoming en el state para que general_node lo reciba (LangGraph puede no propagar keys no retornados)
-        return {"route": route or "general", "incoming": incoming, "history": history}
+        out = {"route": route or "general", "incoming": incoming, "history": history}
+        if "graph_context" in state:
+            out["graph_context"] = state.get("graph_context") or ""
+        return out
 
     def retail_node(state: dict) -> dict:
         result = retail_graph.invoke({
@@ -307,6 +309,7 @@ def build_entry_router_graph(
         result = general_graph.invoke({
             "incoming": incoming,
             "history": state.get("history") or [],
+            "graph_context": state.get("graph_context") or "",
         })
         return {"reply": result.get("reply") or "Sin respuesta."}
 

@@ -101,6 +101,7 @@ async def command_handler(message: Message, state: GraphState):
 | `/skills` | Lista las herramientas actuales (del rol asignado o por defecto). |
 | `/forget` | Borra el historial de la conversación y reinicia estado (Habeas Data). |
 | `/context on\|off` | Activa/desactiva historial largo (más o menos mensajes en contexto). |
+| `/prompt` \| `/prompt <texto>` | Muestra el system prompt actual o lo reemplaza por el nuevo texto (instrucción SYSTEM del grafo). |
 | `/audit` | Muestra latencia y datos de la última ejecución (run_id si LangSmith está activo). |
 | `/health` | Comprueba DuckDB y endpoint de inferencia (MLX). |
 | `/approve` / `/reject` | HITL: mensaje informativo si el grafo no está en estado interrupt. |

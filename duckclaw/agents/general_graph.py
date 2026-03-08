@@ -1,4 +1,4 @@
-"""General agent graph: SQL + schema + memory tools, supports incoming + history."""
+"""General agent graph: SQL + schema + memory + sandbox tools, supports incoming + history."""
 
 from __future__ import annotations
 
@@ -14,12 +14,22 @@ _DB_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+_SANDBOX_INTENT_RE = re.compile(
+    r"\b(ejecuta|corre|run|script|código|codigo|python|bash|programa|simula|modela|"
+    r"predic|forecast|entren|train|modelo|model|análisis\s+libre|sandbox)\b",
+    re.IGNORECASE,
+)
+
 
 def _needs_db_tool(incoming: str) -> bool:
     text = (incoming or "").strip()
     if not text:
         return False
     return bool(_DB_INTENT_RE.search(text)) or "?" in text
+
+
+def _needs_sandbox_tool(incoming: str) -> bool:
+    return bool(_SANDBOX_INTENT_RE.search(incoming or ""))
 
 
 def build_general_graph(
@@ -30,18 +40,19 @@ def build_general_graph(
 ) -> Any:
     """
     Build LangGraph for general assistant: state has 'incoming', optional 'history'; result has 'reply'.
-    Uses run_sql, inspect_schema, manage_memory.
+    Uses run_sql, inspect_schema, manage_memory, run_sandbox (Strix).
     """
     from langgraph.graph import END, StateGraph
     from langchain_core.tools import StructuredTool
     from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
     prompt = system_prompt or (
-        "Eres un asistente útil con acceso a una base de datos DuckDB. "
+        "Eres un asistente útil con acceso a una base de datos DuckDB y a un sandbox de ejecución Python/Bash. "
         "Cuando uses una herramienta, interpreta el resultado y responde en lenguaje natural claro y conciso. "
         "Nunca copies el resultado crudo de una herramienta. "
         "Si hay una lista de tablas, menciónalas de forma legible. "
-        "Si hay datos de una consulta, preséntelos de forma organizada."
+        "Si hay datos de una consulta, preséntelos de forma organizada. "
+        "Usa run_sandbox para ejecutar código Python o Bash arbitrario cuando el usuario lo pida."
     )
     tools = [
         StructuredTool.from_function(
@@ -60,12 +71,24 @@ def build_general_graph(
             description="Preferencias del usuario: action=get|set|delete, key, value (solo para set).",
         ),
     ]
+
+    # Sandbox (Strix) — opcional: solo se añade si Docker está disponible
+    try:
+        from duckclaw.agents.sandbox import sandbox_tool_factory, _docker_available
+        if _docker_available():
+            tools.append(sandbox_tool_factory(db, llm))
+    except Exception:
+        pass
     llm_with_tools = llm.bind_tools(tools)
     llm_with_required_tool = llm.bind_tools(tools, tool_choice="required")
     tools_by_name = {t.name: t for t in tools}
 
     def prepare_node(state: dict) -> dict:
-        messages = [SystemMessage(content=prompt)]
+        base_prompt = prompt
+        graph_ctx = (state.get("graph_context") or "").strip()
+        if graph_ctx:
+            base_prompt = base_prompt + "\n\n" + graph_ctx
+        messages = [SystemMessage(content=base_prompt)]
         for h in (state.get("history") or []):
             role = (h.get("role") or "").lower()
             content = h.get("content") or ""
@@ -78,8 +101,17 @@ def build_general_graph(
 
     def agent_node(state: dict) -> dict:
         incoming = state.get("incoming") or ""
-        llm_runner = llm_with_required_tool if _needs_db_tool(incoming) else llm_with_tools
-        resp = llm_runner.invoke(state["messages"])
+        has_sandbox = "run_sandbox" in tools_by_name
+        if _needs_sandbox_tool(incoming) and has_sandbox:
+            llm_runner = llm.bind_tools(tools, tool_choice={"type": "function", "function": {"name": "run_sandbox"}})
+        elif _needs_db_tool(incoming):
+            llm_runner = llm_with_required_tool
+        else:
+            llm_runner = llm_with_tools
+        try:
+            resp = llm_runner.invoke(state["messages"])
+        except Exception:
+            resp = llm_with_tools.invoke(state["messages"])
         return {"messages": state["messages"] + [resp]}
 
     def tools_node(state: dict) -> dict:

@@ -44,7 +44,18 @@ def run_sql(db: Any, query: str) -> str:
         return json.dumps({"error": "ALTER no está permitido. Usa CREATE TABLE IF NOT EXISTS para crear tablas nuevas."})
     try:
         if _READ_ONLY.search(q):
-            return db.query(q)
+            raw = db.query(q)
+            # Cuando hay muchas filas, serializar como markdown compacto para el LLM
+            # (spec Pipeline_de_Datos_Zero-Copy_con_PyArrow.md — LLMContextSerializer)
+            try:
+                from duckclaw.data.arrow_bridge import LLMContextSerializer, arrow_available  # noqa: PLC0415
+                if arrow_available():
+                    rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+                    if isinstance(rows, list) and len(rows) > 30:
+                        return LLMContextSerializer.from_json(raw, max_rows=30)
+            except Exception:
+                pass
+            return raw
         db.execute(q)
         return json.dumps({"status": "ok"})
     except Exception as e:

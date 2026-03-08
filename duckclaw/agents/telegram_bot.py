@@ -292,6 +292,12 @@ def _run_bot() -> None:
         )
         """
     )
+    # GraphRAG (spec: Estructura_Basada_en_Grafos_DuckDB_PGQ_GraphRAG.md): memory_nodes, memory_edges, duckclaw_kg
+    try:
+        from duckclaw.agents.graph_rag import ensure_graph_rag_schema
+        ensure_graph_rag_schema(db)
+    except Exception:
+        pass
 
     class DynamicAgentBot(TelegramBotBase):
         def handle_message(self, update: Any) -> None:
@@ -366,12 +372,14 @@ def _run_bot() -> None:
             _log(f"🤔 [{display_model}] pensando...")
 
             from duckclaw.agents.on_the_fly_commands import (
+                get_chat_state,
                 get_history_limit_for_chat,
                 get_worker_id_for_chat,
                 save_last_audit,
             )
             history_limit = get_history_limit_for_chat(self.db, chat_id, default=10)
             worker_id = get_worker_id_for_chat(self.db, chat_id)
+            use_rag = get_chat_state(self.db, chat_id, "use_rag") != "false"
 
             t0 = time.perf_counter()
             try:
@@ -399,7 +407,14 @@ def _run_bot() -> None:
                     )
                 history = self._get_history(chat_id, limit=history_limit)
                 _persist_conversation(self.db, chat_id, "user", text)
-                result = graph.invoke({"incoming": text, "history": history})
+                state = {"incoming": text, "history": history}
+                if use_rag:
+                    try:
+                        from duckclaw.agents.graph_rag import graph_context_retriever
+                        state["graph_context"] = graph_context_retriever(self.db, text) or ""
+                    except Exception:
+                        state["graph_context"] = ""
+                result = graph.invoke(state)
                 reply = result.get("reply") or ""
             except RuntimeError as e:
                 reply = str(e)
@@ -408,6 +423,14 @@ def _run_bot() -> None:
                 import traceback
                 traceback.print_exc()
             reply = _normalize_reply(reply) or ""
+            if use_rag and reply and text:
+                try:
+                    from duckclaw.agents.graph_rag import run_graph_memory_extractor_background
+                    from duckclaw.integrations.llm_providers import build_llm
+                    _llm = build_llm(provider=llm_provider or "", model=llm_model or "", base_url=llm_base_url or "")
+                    run_graph_memory_extractor_background(self.db, _llm, text, reply)
+                except Exception:
+                    pass
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
             try:
                 save_last_audit(self.db, chat_id, elapsed_ms)

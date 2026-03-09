@@ -237,13 +237,17 @@ def execute_prompt(db: Any, chat_id: Any, new_prompt: str) -> str:
                 except Exception:
                     pass
             if default_prompt:
-                preview = default_prompt[:400] + "…" if len(default_prompt) > 400 else default_prompt
+                preview = default_prompt[:400] + "..." if len(default_prompt) > 400 else default_prompt
+                # Escapar underscores para no romper markdown
+                preview = preview.replace("_", r"\_")
                 return f"System prompt actual (predeterminado de {wid}):\n{preview}\n\nPara cambiar: /prompt <tu texto>"
             return "System prompt actual: (vacío — se usa el por defecto del bot).\nPara cambiar: /prompt <tu texto>"
-        preview = current[:400] + "…" if len(current) > 400 else current
+        preview = current[:400] + "..." if len(current) > 400 else current
+        preview = preview.replace("_", r"\_")
         return f"System prompt actual (modificado):\n{preview}\n\nPara cambiar: /prompt <nuevo texto>"
     _set_global_config(db, "system_prompt", new_prompt)
-    preview = new_prompt[:200] + "…" if len(new_prompt) > 200 else new_prompt
+    preview = new_prompt[:200] + "..." if len(new_prompt) > 200 else new_prompt
+    preview = preview.replace("_", r"\_")
     return f"✅ System prompt actualizado.\nVista previa: {preview}"
 
 

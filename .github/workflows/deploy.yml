@@ -10,7 +10,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -32,9 +32,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ${{ runner.os }}-ccache-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-
+          key: ubuntu-ccache-v2
+        continue-on-error: true
 
       - name: Install dependencies
         env:

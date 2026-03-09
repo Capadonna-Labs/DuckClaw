@@ -87,30 +87,7 @@ async def audit_middleware(request: Any, call_next: Any):
         "status_code": getattr(response, "status_code", None),
     }
 
-    # Enviar a LangSmith si está habilitado (opcional, no falla si no disponible)
-    if os.environ.get("LANGCHAIN_TRACING_V2", "").lower() == "true":
-        try:
-            from langsmith import Client
-            from uuid import uuid4
-            import datetime
-            
-            client = Client()
-            run_id = str(uuid4())
-            
-            # Use explicit ID to guarantee we can update it, as create_run is often async in background
-            client.create_run(
-                id=run_id,
-                name="gateway_audit",
-                run_type="chain",
-                inputs=_mask_dict({"audit": audit_entry}),
-                extra={"audit": audit_entry},
-            )
-            client.update_run(
-                run_id=run_id, 
-                outputs={"status": "ok"},
-                end_time=datetime.datetime.now(datetime.timezone.utc)
-            )
-        except Exception:
-            pass
+    # (Eliminado) Ya no se envían trazas de gateway_audit a LangSmith para mantener el panel limpio
+    # y mostrar únicamente las interacciones internas del agente (LangGraph).
 
     return response

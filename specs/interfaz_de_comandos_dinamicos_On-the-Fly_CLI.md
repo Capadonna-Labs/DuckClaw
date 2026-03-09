@@ -97,7 +97,7 @@ async def command_handler(message: Message, state: GraphState):
 
 | Comando | Descripción |
 |---------|-------------|
-| `/role <worker_id>` | Cambia el rol (plantilla Worker Factory). Ej: `/role personal_finance`, `/role support`. |
+| `/role <worker_id>` | Cambia el rol (plantilla Worker Factory). Ej: `/role finanz`, `/role support`. |
 | `/skills` | Lista las herramientas actuales (del rol asignado o por defecto). |
 | `/forget` | Borra el historial de la conversación y reinicia estado (Habeas Data). |
 | `/context on\|off` | Activa/desactiva historial largo (más o menos mensajes en contexto). |

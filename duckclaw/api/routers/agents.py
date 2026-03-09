@@ -78,10 +78,23 @@ async def _ainvoke(graph: Any, message: str, history: list, chat_id: str) -> str
     """Invocación async del grafo (compatible con graph_server)."""
     state = {"incoming": message, "history": history or [], "chat_id": chat_id}
     loop = asyncio.get_event_loop()
+    
+    config = {"configurable": {"thread_id": chat_id}}
+    send_to_langsmith = os.environ.get("DUCKCLAW_SEND_TO_LANGSMITH", "false").lower() == "true"
+    if send_to_langsmith:
+        try:
+            from langchain_core.tracers import LangChainTracer
+            # Try to get project name from graph spec
+            spec = getattr(graph, "_worker_spec", None)
+            project_name = getattr(spec, "name", "DuckClaw") if spec else "DuckClaw"
+            config["callbacks"] = [LangChainTracer(project_name=project_name)]
+        except Exception:
+            pass
+
     if hasattr(graph, "ainvoke"):
-        result = await graph.ainvoke(state)
+        result = await graph.ainvoke(state, config=config)
     else:
-        result = await loop.run_in_executor(None, graph.invoke, state)
+        result = await loop.run_in_executor(None, graph.invoke, state, config)
     return str(result.get("reply") or result.get("output") or "Sin respuesta.")
 
 

@@ -10,7 +10,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -24,13 +24,6 @@ jobs:
         with:
           version: "latest"
           enable-cache: true
-
-      - name: Cache venv
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-ubuntu-py39-v1
-        continue-on-error: true
 
       - name: Install dependencies
         run: uv sync --extra agents --extra dev --extra serve

@@ -75,11 +75,15 @@ def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
     """/role <worker_id>: cambia el rol (worker template) en caliente."""
     from duckclaw.workers.factory import list_workers
     available = list_workers()
+    
     wid = (worker_id or "").strip().lower()
     if not wid:
-        return f"Uso: /role <worker_id>\nPlantillas: {', '.join(available) or 'ninguna'}."
+        # En vez de usar backticks de Markdown (que causan conflicto en parse_mode Markdown de Telegram), usamos formato limpio
+        avail_str = "\n- ".join(available) if available else "ninguna"
+        return f"Uso: /role <worker_id>\n\nPlantillas disponibles:\n- {avail_str}"
     if wid not in available:
-        return f"Rol desconocido: {worker_id}. Disponibles: {', '.join(available)}."
+        avail_str = "\n- ".join(available) if available else "ninguna"
+        return f"Rol desconocido: {wid}.\n\nPlantillas disponibles:\n- {avail_str}"
     try:
         from duckclaw.workers.manifest import load_manifest
         spec = load_manifest(wid)

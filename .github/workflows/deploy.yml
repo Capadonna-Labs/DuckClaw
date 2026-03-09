@@ -107,11 +107,21 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           envs: VPS_DEPLOY_PATH
           script: |
-            cd "${VPS_DEPLOY_PATH:-/opt/duckclaw-vps}"
+            cd "${VPS_DEPLOY_PATH:-$HOME/duckclaw}"
             git pull origin main
-            docker compose pull && docker compose up -d
-            if systemctl is-active --quiet n8n 2>/dev/null; then
-              sudo systemctl restart n8n
+            
+            # Reiniciar DuckClaw
+            if systemctl --user is-active --quiet duckclaw-brain 2>/dev/null || systemctl --user is-failed --quiet duckclaw-brain 2>/dev/null; then
+              systemctl --user restart duckclaw-brain
+            fi
+            
+            # Opcional: reiniciar n8n si existe en ~/n8n
+            if [ -d "$HOME/n8n" ] && [ -f "$HOME/n8n/docker-compose.yml" ]; then
+              cd "$HOME/n8n"
+              docker compose pull && docker compose up -d
+              if systemctl is-active --quiet n8n 2>/dev/null; then
+                sudo systemctl restart n8n
+              fi
             fi
 
   notify:

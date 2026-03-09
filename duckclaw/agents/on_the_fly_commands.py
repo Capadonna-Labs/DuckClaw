@@ -78,12 +78,11 @@ def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
     
     wid = (worker_id or "").strip().lower()
     if not wid:
-        # En vez de usar backticks de Markdown (que causan conflicto en parse_mode Markdown de Telegram), usamos formato limpio
-        avail_str = "\n- ".join(available) if available else "ninguna"
-        return f"Uso: /role <worker_id>\n\nPlantillas disponibles:\n- {avail_str}"
+        avail_str = "\n".join(f"- {w}" for w in available) if available else "ninguna"
+        return f"Uso: /role <worker_id>\n\nPlantillas disponibles:\n{avail_str}"
     if wid not in available:
-        avail_str = "\n- ".join(available) if available else "ninguna"
-        return f"Rol desconocido: {wid}.\n\nPlantillas disponibles:\n- {avail_str}"
+        avail_str = "\n".join(f"- {w}" for w in available) if available else "ninguna"
+        return f"Rol desconocido: {wid}.\n\nPlantillas disponibles:\n{avail_str}"
     try:
         from duckclaw.workers.manifest import load_manifest
         spec = load_manifest(wid)

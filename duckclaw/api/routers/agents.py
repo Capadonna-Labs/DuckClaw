@@ -75,7 +75,9 @@ def _get_or_build_worker_graph(worker_id: str) -> Any:
     return graph
 
 
-async def _ainvoke(graph: Any, message: str, history: list, chat_id: str, metadata: dict = None) -> str:
+async def _ainvoke(
+    graph: Any, message: str, history: list, chat_id: str, metadata: Optional[dict[Any, Any]] = None
+) -> str:
     """Invocación async del grafo (compatible con graph_server)."""
     # "input" va primero para que LangSmith muestre el mensaje del usuario en la columna Input (no el chat_id)
     state = {"input": message, "incoming": message, "history": history or [], "chat_id": chat_id}

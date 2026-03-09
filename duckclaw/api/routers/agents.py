@@ -77,7 +77,8 @@ def _get_or_build_worker_graph(worker_id: str) -> Any:
 
 async def _ainvoke(graph: Any, message: str, history: list, chat_id: str, metadata: dict = None) -> str:
     """Invocación async del grafo (compatible con graph_server)."""
-    state = {"incoming": message, "history": history or [], "chat_id": chat_id}
+    # "input" va primero para que LangSmith muestre el mensaje del usuario en la columna Input (no el chat_id)
+    state = {"input": message, "incoming": message, "history": history or [], "chat_id": chat_id}
     loop = asyncio.get_event_loop()
     
     metadata = metadata or {}

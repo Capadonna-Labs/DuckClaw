@@ -74,15 +74,18 @@ def _get_or_build_worker_graph(worker_id: str) -> Any:
     return graph
 
 
-async def _ainvoke(graph: Any, message: str, history: list, chat_id: str) -> str:
+async def _ainvoke(graph: Any, message: str, history: list, chat_id: str, channel: str = "api", username: str = "Unknown") -> str:
     """Invocación async del grafo (compatible con graph_server)."""
     state = {"incoming": message, "history": history or [], "chat_id": chat_id}
     loop = asyncio.get_event_loop()
     
+    clean_username = "".join(c if c.isalnum() else "_" for c in username)
+    run_name_prefix = f"{channel.capitalize()}_{clean_username}_{chat_id}"
+    
     config = {
         "configurable": {"thread_id": chat_id},
-        "metadata": {"session_id": chat_id, "thread_id": chat_id},
-        "run_name": f"Chat_{chat_id}"
+        "metadata": {"session_id": chat_id, "thread_id": chat_id, "channel": channel, "username": username},
+        "run_name": run_name_prefix
     }
     
     send_to_langsmith = os.environ.get("DUCKCLAW_SEND_TO_LANGSMITH", "false").lower() == "true"
@@ -145,6 +148,8 @@ class ChatRequest(BaseModel):
     """Payload para POST /agent/{worker_id}/chat."""
     message: str = Field(..., description="Mensaje del usuario")
     session_id: str = Field("default", description="ID de sesión para historial")
+    username: str = Field("Unknown", description="Nombre del usuario (para tracking)")
+    channel: str = Field("api", description="Canal de origen (ej. telegram)")
     history: list[dict] = Field(default_factory=list, description="Historial opcional [{role, content}]")
     stream: bool = Field(True, description="Si es True, retorna SSE. Si es False, retorna JSON.")
 
@@ -175,7 +180,7 @@ async def chat_with_agent(worker_id: str, payload: ChatRequest):
             if cmd_reply:
                 return {"response": cmd_reply, "session_id": session_id}
 
-            reply = await _ainvoke(graph, payload.message, history, session_id)
+            reply = await _ainvoke(graph, payload.message, history, session_id, channel=payload.channel, username=payload.username)
             _persist_turn(db, session_id, worker_id, "user", payload.message)
             _persist_turn(db, session_id, worker_id, "assistant", reply)
             return {"response": reply, "session_id": session_id}
@@ -194,7 +199,7 @@ async def chat_with_agent(worker_id: str, payload: ChatRequest):
                 yield "data: [DONE]\n\n"
                 return
 
-            reply = await _ainvoke(graph, payload.message, history, session_id)
+            reply = await _ainvoke(graph, payload.message, history, session_id, channel=payload.channel, username=payload.username)
             _persist_turn(db, session_id, worker_id, "user", payload.message)
             _persist_turn(db, session_id, worker_id, "assistant", reply)
             for word in reply.split(" "):

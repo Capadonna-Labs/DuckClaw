@@ -91,14 +91,25 @@ async def audit_middleware(request: Any, call_next: Any):
     if os.environ.get("LANGCHAIN_TRACING_V2", "").lower() == "true":
         try:
             from langsmith import Client
+            from uuid import uuid4
+            import datetime
+            
             client = Client()
-            run = client.create_run(
+            run_id = str(uuid4())
+            
+            # Use explicit ID to guarantee we can update it, as create_run is often async in background
+            client.create_run(
+                id=run_id,
                 name="gateway_audit",
                 run_type="chain",
                 inputs=_mask_dict({"audit": audit_entry}),
                 extra={"audit": audit_entry},
             )
-            client.update_run(run.id, outputs={"status": "ok"})
+            client.update_run(
+                run_id=run_id, 
+                outputs={"status": "ok"},
+                end_time=datetime.datetime.now(datetime.timezone.utc)
+            )
         except Exception:
             pass
 

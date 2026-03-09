@@ -25,6 +25,9 @@ jobs:
           version: "latest"
           enable-cache: true
 
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
       - name: Install dependencies
         run: uv sync --extra agents --extra dev --extra serve
 

@@ -50,8 +50,8 @@ def test_homeostasis_status(client: TestClient) -> None:
 
 
 def test_agent_history_requires_session(client: TestClient) -> None:
-    r = client.get("/api/v1/agent/personal_finance/history?session_id=s1")
+    r = client.get("/api/v1/agent/finanz/history?session_id=s1")
     assert r.status_code == 200
     data = r.json()
     assert "history" in data
-    assert data.get("worker_id") == "personal_finance"
+    assert data.get("worker_id") == "finanz"

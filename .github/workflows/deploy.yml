@@ -10,7 +10,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -19,29 +19,21 @@ jobs:
         with:
           python-version: "3.9"
 
-      - name: Install ccache
-        run: sudo apt-get update && sudo apt-get install -y ccache
-
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
           enable-cache: true
 
-      - name: Cache ccache
+      - name: Cache venv
         uses: actions/cache@v4
         with:
-          path: .ccache
-          key: ubuntu-ccache-v2
+          path: .venv
+          key: venv-ubuntu-py39-v1
         continue-on-error: true
 
       - name: Install dependencies
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/.ccache
-          CMAKE_ARGS: "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
-        run: |
-          mkdir -p $CCACHE_DIR
-          uv sync --extra agents --extra dev --extra serve
+        run: uv sync --extra agents --extra dev --extra serve
 
       - name: Run pytest
         run: uv run pytest tests/ -v

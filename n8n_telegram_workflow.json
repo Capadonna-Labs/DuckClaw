@@ -1,0 +1,112 @@
+{
+  "name": "DuckClaw 🦆⚔️ Telegram Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "27b72db5-d6c5-43ea-9ea1-92b4a1b04455",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        460,
+        340
+      ],
+      "webhookId": "edbafbdf-duckclaw-trigger-uuid",
+      "credentials": {
+        "telegramApi": {
+          "id": "COLOQUE_SU_ID_AQUI",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://100.97.151.69:8000/api/v1/agent/research_worker/chat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Tailscale-Auth-Key",
+              "value": "n8n_secret_key_12345"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": \"{{ $json.message.text }}\",\n  \"session_id\": \"{{ $json.message.chat.id }}\"\n}",
+        "options": {}
+      },
+      "id": "e9a7e089-cf73-4ea2-97b7-6ec7e052cf07",
+      "name": "DuckClaw API Gateway",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.session_id }}",
+        "text": "={{ $json.response }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "83c18b76-46c5-4a6c-9419-db2a9a834d85",
+      "name": "Responder Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        340
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "COLOQUE_SU_ID_AQUI",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "DuckClaw API Gateway",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DuckClaw API Gateway": {
+      "main": [
+        [
+          {
+            "node": "Responder Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6b3c95df-3a3f-4e6f-8a0b-19efb0a70198"
+}

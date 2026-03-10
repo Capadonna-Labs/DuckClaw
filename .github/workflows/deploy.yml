@@ -10,6 +10,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +23,10 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
 
       - name: Install dependencies
         run: uv sync --extra agents --extra dev --extra serve
@@ -38,6 +43,8 @@ jobs:
   deploy-mac:
     needs: test
     runs-on: [self-hosted, mac-mini]
+    timeout-minutes: 10
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -79,7 +86,18 @@ jobs:
   deploy-vps:
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
+      - name: Check VPS secrets
+        run: |
+          missing=""
+          [ -z "${{ secrets.VPS_IP }}" ] && missing="VPS_IP "
+          [ -z "${{ secrets.VPS_USER }}" ] && missing="${missing}VPS_USER "
+          [ -z "${{ secrets.VPS_SSH_KEY }}" ] && missing="${missing}VPS_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secrets: $missing. Add them in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
@@ -90,11 +108,21 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           envs: VPS_DEPLOY_PATH
           script: |
-            cd "${VPS_DEPLOY_PATH:-/opt/duckclaw-vps}"
+            cd "${VPS_DEPLOY_PATH:-$HOME/duckclaw}"
             git pull origin main
-            docker compose pull && docker compose up -d
-            if systemctl is-active --quiet n8n 2>/dev/null; then
-              sudo systemctl restart n8n
+            
+            # Reiniciar DuckClaw
+            if systemctl --user is-active --quiet duckclaw-brain 2>/dev/null || systemctl --user is-failed --quiet duckclaw-brain 2>/dev/null; then
+              systemctl --user restart duckclaw-brain
+            fi
+            
+            # Opcional: reiniciar n8n si existe en ~/n8n
+            if [ -d "$HOME/n8n" ] && [ -f "$HOME/n8n/docker-compose.yml" ]; then
+              cd "$HOME/n8n"
+              docker compose pull && docker compose up -d
+              if systemctl is-active --quiet n8n 2>/dev/null; then
+                sudo systemctl restart n8n
+              fi
             fi
 
   notify:
@@ -110,8 +138,12 @@ jobs:
           COMMIT_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
           MAC="${NEEDS_DEPLOY_MAC:-skipped}"
           VPS="${NEEDS_DEPLOY_VPS:-skipped}"
-          if [ "$MAC" = "success" ] && [ "$VPS" = "success" ]; then
-            MSG="✅ Deploy OK — commit $COMMIT_SHORT"
+          if [ "$VPS" = "success" ]; then
+            if [ "$MAC" = "success" ]; then
+              MSG="✅ Deploy OK — commit $COMMIT_SHORT"
+            else
+              MSG="✅ Deploy VPS OK — commit $COMMIT_SHORT (mac=$MAC)"
+            fi
           else
             MSG="❌ Deploy falló — commit $COMMIT_SHORT (mac=$MAC vps=$VPS)"
           fi

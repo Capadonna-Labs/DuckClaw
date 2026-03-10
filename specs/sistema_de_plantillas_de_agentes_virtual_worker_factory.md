@@ -9,7 +9,7 @@ Cada trabajador virtual se define como un paquete atómico y declarativo dentro 
 ### Estructura de Directorios:
 ```text
 templates/workers/
-└── personal_finance/
+└── finanz/
     ├── manifest.yaml       # Configuración core (LLM, temperatura, dependencias)
     ├── system_prompt.md    # Instrucciones del rol (Estilo Anthropic)
     ├── schema.sql          # DDL para inicializar las tablas en DuckDB
@@ -21,7 +21,7 @@ templates/workers/
 ## 3. Especificación de Módulos Core
 
 ### Módulo: `WorkerFactory`
-*   **Entrada:** `worker_id` (ej. `personal_finance`), `telegram_chat_id`.
+*   **Entrada:** `worker_id` (ej. `finanz`), `telegram_chat_id`.
 *   **Lógica:**
     1.  Leer `manifest.yaml` y validar dependencias del modelo local (ej. requerimiento de `Llama-3.2-3B-Instruct`).
     2.  Conectar a `DuckDB` y ejecutar `schema.sql` bajo un esquema aislado (ej. `CREATE SCHEMA IF NOT EXISTS finance_worker;`).
@@ -66,14 +66,14 @@ templates/workers/
 | **Manifest / Loader** | `duckclaw/workers/manifest.py`, `duckclaw/workers/loader.py` |
 | **WorkerCLI (hire)** | `duckops hire <worker_id> [--name <instance_name>]` en `duckclaw/ops/cli.py` y `manager.hire()` |
 | **Run worker (PM2)** | `duckclaw/workers/run_worker.py` (HTTP POST /invoke) |
-| **Plantilla FinanzWorker** | `templates/workers/personal_finance/` |
+| **Plantilla FinanzWorker** | `templates/workers/finanz/` |
 | **Plantilla SupportWorker** | `templates/workers/support/` |
 
 ### Comandos
 
 ```bash
 duckops hire --list                    # Listar plantillas disponibles
-duckops hire personal_finance --name FinanzBot   # Desplegar worker vía PM2
+duckops hire finanz --name FinanzBot   # Desplegar worker vía PM2
 pm2 logs FinanzBot                     # Logs del worker
 curl -X POST http://localhost:8124/invoke -d '{"message":"Resumen del mes"}'  # Invocar (puerto por instancia)
 ```

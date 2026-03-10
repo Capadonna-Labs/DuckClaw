@@ -1,118 +1,80 @@
-"""Activity router: estado (IDLE/BUSY/WAITING) y jobs en cola."""
+"""Módulo de actividad: estado (IDLE/BUSY) y feed de conversaciones recientes."""
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter
 
 router = APIRouter(prefix="/api/v1/activity", tags=["activity"])
 
-_manager: Any = None
+
+def _get_db_path() -> str:
+    p = os.environ.get("DUCKCLAW_DB_PATH", "").strip()
+    if p:
+        return str(Path(p).resolve())
+    return str(Path(__file__).resolve().parent.parent.parent.parent / "db" / "gateway.duckdb")
 
 
-def _get_manager() -> Any:
-    global _manager
-    if _manager is None:
-        try:
-            from duckclaw.activity.manager import ActivityManager
-
-            _manager = ActivityManager()
-        except Exception:
-            _manager = False
-    return _manager
+def _get_db() -> Any:
+    from duckclaw import DuckClaw
+    db_path = _get_db_path()
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    return DuckClaw(db_path)
 
 
-@router.get("/status", summary="Estado de disponibilidad")
+@router.get("/status", summary="Estado de disponibilidad (IDLE/BUSY)")
 async def get_activity_status():
     """
     Retorna el estado actual: IDLE, BUSY o WAITING.
-    Para Angular y n8n consultar disponibilidad antes de enviar tareas.
+    Si Redis está configurado, usa ActivityManager. Si no, retorna IDLE.
     """
-    manager = _get_manager()
-    if not manager:
-        return {"status": "IDLE", "queue_available": False}
     try:
-        state = manager.get_state()
+        from duckclaw.activity.manager import ActivityManager
+        mgr = ActivityManager()
+        state = mgr.get_state()
         return {"status": state, "queue_available": True}
     except Exception:
         return {"status": "IDLE", "queue_available": False}
 
 
-class ChatQueueRequest(BaseModel):
-    """Payload para POST /activity/chat/queue."""
-    worker_id: str = Field(..., description="ID del worker")
-    message: str = Field(..., description="Mensaje del usuario")
-    session_id: str = Field("default", description="ID de sesión")
-    history: list = Field(default_factory=list, description="Historial opcional")
-
-
-@router.post("/chat/queue", summary="Encolar chat (ARQ)")
-async def enqueue_chat(payload: ChatQueueRequest):
+@router.get("/recent", summary="Actividades recientes de los agentes")
+async def get_recent_activity(limit: int = 20):
     """
-    Encola un mensaje de chat en ARQ. Retorna job_id para polling.
-    Requiere REDIS_URL y worker ARQ en ejecución.
+    Retorna los últimos turnos de chat (user + assistant) de todos los workers.
+    Para mostrar en el dashboard Angular el feed de actividades.
     """
-    redis_url = os.environ.get("REDIS_URL") or os.environ.get("ARQ_REDIS_URL")
-    if not redis_url:
-        raise HTTPException(
-            status_code=503,
-            detail="REDIS_URL no configurado. Usa POST /api/v1/agent/{worker_id}/chat para modo síncrono.",
-        )
+    db = _get_db()
     try:
-        from arq import create_pool
-        from arq.connections import RedisSettings
-
-        settings = RedisSettings(host="localhost", port=6379)
-        if redis_url and redis_url.startswith("redis://"):
-            parts = redis_url.replace("redis://", "").split("/")[0].split(":")
-            settings = RedisSettings(host=parts[0], port=int(parts[1]) if len(parts) > 1 else 6379)
-        pool = await create_pool(settings)
-    except ImportError:
-        raise HTTPException(
-            status_code=503,
-            detail="arq no instalado. Ejecuta: uv sync --extra queue",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Redis no disponible: {e}")
-
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS api_conversation (
+                session_id VARCHAR NOT NULL,
+                worker_id VARCHAR NOT NULL,
+                role VARCHAR NOT NULL,
+                content TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+    except Exception:
+        pass
     try:
-        job = await pool.enqueue_job(
-            "run_chat_job",
-            payload.worker_id,
-            payload.message,
-            payload.history or [],
-            payload.session_id,
+        r = db.query(
+            "SELECT session_id, worker_id, role, content, created_at FROM api_conversation "
+            f"ORDER BY created_at DESC LIMIT {limit}"
         )
-        return {"job_id": job.job_id, "status": "queued"}
-    finally:
-        await pool.close()
-
-
-@router.get("/job/{job_id}", summary="Resultado de job")
-async def get_job_result(job_id: str):
-    """Obtiene el resultado de un job de chat cuando está listo."""
-    redis_url = os.environ.get("REDIS_URL") or os.environ.get("ARQ_REDIS_URL")
-    if not redis_url:
-        raise HTTPException(status_code=503, detail="REDIS_URL no configurado")
-    try:
-        from arq import create_pool
-        from arq.jobs import Job
-        from arq.connections import RedisSettings
-
-        parts = redis_url.replace("redis://", "").split("/")[0].split(":")
-        settings = RedisSettings(host=parts[0], port=int(parts[1]) if len(parts) > 1 else 6379)
-        pool = await create_pool(settings)
-        try:
-            job = Job(job_id, pool)
-            result = await job.result(timeout=0)
-            return {"job_id": job_id, "status": "completed", "reply": str(result) if result is not None else ""}
-        finally:
-            await pool.close()
-    except Exception as e:
-        err = str(e).lower()
-        if "not found" in err or "pending" in err or "timeout" in err or "arq" in err:
-            return {"job_id": job_id, "status": "pending", "reply": None}
-        raise HTTPException(status_code=500, detail=str(e))
+        rows = json.loads(r) if isinstance(r, str) else (r or [])
+    except Exception:
+        rows = []
+    out = []
+    for row in rows or []:
+        out.append({
+            "session_id": row.get("session_id", ""),
+            "worker_id": row.get("worker_id", ""),
+            "role": row.get("role", ""),
+            "content": (row.get("content") or "")[:500],
+            "created_at": str(row.get("created_at", "")),
+        })
+    return {"activities": out}

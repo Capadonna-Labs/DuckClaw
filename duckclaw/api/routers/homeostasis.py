@@ -147,7 +147,6 @@ async def homeostasis_ask_task(payload: Optional[AskTaskRequest] = Body(default=
     """
     Envía webhook a n8n para preguntar al usuario qué tarea hacer.
     Incluye objetivos sugeridos para priorizar (ventas, tiempo de respuesta, stock, etc.).
-    Usado por el timer systemd o invocación manual.
     """
     from duckclaw.forge.homeostasis.notify import notify_ask_task
 

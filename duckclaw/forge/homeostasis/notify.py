@@ -1,7 +1,6 @@
 """
 Notificación homeostasis: webhook a n8n para preguntar "¿Qué tarea hacer?".
 
-Spec: Plan Homeostasis Ask Task con n8n y systemd.
 Cuando termina una tarea o el timer dispara, envía POST a N8N_HOMEOSTASIS_ASK_TASK_WEBHOOK_URL.
 Incluye objetivos sugeridos para priorizar (aumentar ventas, disminuir tiempo de respuesta, etc.).
 """

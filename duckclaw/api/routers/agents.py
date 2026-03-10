@@ -23,6 +23,28 @@ async def list_workers():
     """Retorna los worker_id disponibles en templates/workers/."""
     from duckclaw.workers.factory import list_workers as _list_workers
     return {"workers": _list_workers()}
+
+
+@router.get("/llm-config", summary="Estado del LLM (debug)")
+async def llm_config():
+    """Retorna el proveedor configurado (sin exponer secrets)."""
+    provider = os.environ.get("DUCKCLAW_LLM_PROVIDER", "").strip()
+    has_key = bool(
+        (provider == "deepseek" and os.environ.get("DEEPSEEK_API_KEY"))
+        or (provider == "openai" and os.environ.get("OPENAI_API_KEY"))
+        or (provider == "anthropic" and os.environ.get("ANTHROPIC_API_KEY"))
+        or (provider in ("ollama", "mlx") and provider)
+    )
+    return {"llm_provider": provider or "none", "configured": bool(provider and (has_key or provider in ("ollama", "mlx")))}
+
+
+@router.post("/clear-cache", summary="Limpia caché de grafos (forzar rebuild con LLM actual)")
+async def clear_graph_cache():
+    """Invalida la caché de workers para que se reconstruyan con la config actual del LLM."""
+    _graph_cache.clear()
+    return {"ok": True, "message": "Cache cleared. Next request will rebuild graphs."}
+
+
 _graph_cache: dict[str, Any] = {}
 
 
@@ -71,19 +93,28 @@ def _get_or_build_worker_graph(worker_id: str) -> Any:
     if worker_id in _graph_cache:
         return _graph_cache[worker_id]
     from duckclaw.forge import AgentAssembler, WORKERS_TEMPLATES_DIR
+    from duckclaw.integrations.llm_providers import build_llm
+    import logging
     manifest_path = WORKERS_TEMPLATES_DIR / worker_id / "manifest.yaml"
     if not manifest_path.is_file():
         raise HTTPException(status_code=404, detail=f"Worker '{worker_id}' no encontrado")
     db_path = _get_db_path()
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    
+
     provider = os.environ.get("DUCKCLAW_LLM_PROVIDER", "").strip()
     model = os.environ.get("DUCKCLAW_LLM_MODEL", "").strip()
     base_url = os.environ.get("DUCKCLAW_LLM_BASE_URL", "").strip()
+    llm = None
+    if provider and provider != "none_llm":
+        try:
+            llm = build_llm(provider, model, base_url)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("build_llm failed for %s: %s", provider, e)
 
     graph = AgentAssembler.from_yaml(manifest_path).build(
         db=None,
-        llm=None,
+        llm=llm,
         db_path=db_path,
         llm_provider=provider if provider else None,
         llm_model=model if model else None,
@@ -273,12 +304,6 @@ async def chat_with_agent(worker_id: str, payload: ChatRequest):
             reply = _sanitize_for_telegram(reply)
             _persist_turn(db, session_id, worker_id, "user", payload.message)
             _persist_turn(db, session_id, worker_id, "assistant", reply)
-            try:
-                from duckclaw.forge.homeostasis.notify import notify_ask_task
-
-                notify_ask_task(worker_id=worker_id, session_id=session_id, trigger="task_complete")
-            except Exception:
-                pass
             for word in reply.split(" "):
                 yield f"data: {word} \n\n"
                 await asyncio.sleep(0.02)
@@ -304,3 +329,17 @@ async def get_history(worker_id: str, session_id: str, limit: int = 6):
     db = _get_db()
     history = _get_history(db, session_id, worker_id, limit=min(limit, 20))
     return {"worker_id": worker_id, "session_id": session_id, "history": history}
+
+
+@router.delete("/{worker_id}/history", summary="Borrar historial (Limpiar / /forget)")
+async def delete_history(worker_id: str, session_id: str):
+    """Borra el historial de la sesión para este worker. Usado por botón Limpiar."""
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id es requerido")
+    db = _get_db()
+    _ensure_api_conversation_table(db)
+    sid, wid = _safe_sql(session_id), _safe_sql(worker_id)
+    db.execute(
+        f"DELETE FROM api_conversation WHERE session_id = '{sid}' AND worker_id = '{wid}'"
+    )
+    return {"ok": True, "message": "Historial borrado"}

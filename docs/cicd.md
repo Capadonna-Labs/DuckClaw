@@ -59,45 +59,6 @@ El VPS debe tener:
 
 Si la estructura actual usa `~/n8n`, configurar `VPS_DEPLOY_PATH` en los secretos con la ruta correcta.
 
-## systemd (n8n, Postgres, DuckClaw-Brain, DuckClaw-Gateway)
-
-Si n8n, Postgres, DuckClaw-Brain o DuckClaw-Gateway se ejecutan como servicios (no Docker), usar los unit files. **Ejecutar desde el directorio del proyecto en el VPS** (ej. `cd /home/capadonna/duckclaw`):
-
-```bash
-sudo cp scripts/systemd/n8n.service /etc/systemd/system/
-sudo cp scripts/systemd/postgres.service /etc/systemd/system/  # opcional
-sudo cp scripts/systemd/DuckClaw-Brain.service /etc/systemd/system/
-sudo cp scripts/systemd/DuckClaw-Gateway.service /etc/systemd/system/
-sudo cp scripts/systemd/DuckClaw-Homeostasis-TaskAsk.service /etc/systemd/system/
-sudo cp scripts/systemd/DuckClaw-Homeostasis-TaskAsk.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable n8n DuckClaw-Brain DuckClaw-Gateway DuckClaw-Homeostasis-TaskAsk.timer
-sudo systemctl start n8n DuckClaw-Brain DuckClaw-Gateway
-sudo systemctl start DuckClaw-Homeostasis-TaskAsk.timer
-```
-
-Ajustar `User`, `WorkingDirectory` y `ExecStart` según la instalación (ej. DuckClaw-Brain usa `/home/capadonna/duckclaw`).
-
-**Homeostasis "Ask Task":** ver [docs/homeostasis_n8n.md](homeostasis_n8n.md) para configurar el webhook a n8n y el timer que pregunta "¿Qué tarea hacer?".
-
-**Ver logs:**
-```bash
-sudo journalctl -u DuckClaw-Brain -f    # logs en vivo (Ctrl+C para salir)
-sudo journalctl -u DuckClaw-Brain -n 100  # últimas 100 líneas
-```
-
-## Validación Tailscale (n8n -> DuckClaw)
-
-Desde el VPS, validar que n8n puede alcanzar la Mac Mini vía Tailscale:
-
-```bash
-# IP Tailscale de la Mac Mini (tailscale ip -4 en la Mac)
-export DUCKCLAW_TAILSCALE_IP=100.x.y.z
-bash scripts/validate_n8n_tailscale.sh
-```
-
-Flujo: n8n (VPS) → webhook HTTP → DuckClaw API (Mac Mini) vía IP Tailscale. El tráfico permanece cifrado E2EE en el túnel.
-
 ## Health Check y Rollback
 
 En el Mac Mini, tras `pm2 reload`, el workflow hace un health check contra:

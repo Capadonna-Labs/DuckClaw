@@ -102,7 +102,6 @@ async def root():
             "/api/v1/thread/{thread_id}/takeover",
             "/api/v1/thread/{thread_id}/release",
             "/api/v1/homeostasis/status",
-            "/api/v1/homeostasis/ask_task",
             "/api/v1/homeostasis/{worker_id}/action",
             "/api/v1/system/health",
             "/api/v1/system/logs",

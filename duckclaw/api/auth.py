@@ -10,6 +10,9 @@ PUBLIC_PATHS = frozenset({
     "/",
     "/health",
     "/api/v1/system/health",
+    "/api/v1/system/db-path",  # debug: ruta DB en uso
+    "/api/v1/agent/llm-config",  # debug: estado del LLM (sin secrets)
+    "/api/v1/agent/clear-cache",  # debug: limpiar caché de grafos
     "/docs",
     "/redoc",
     "/openapi.json",

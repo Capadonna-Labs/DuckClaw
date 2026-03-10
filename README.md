@@ -112,7 +112,7 @@ python -m duckclaw.agents.telegram_bot
 |---------|-------------|
 | `/setup` | Change framework and system_prompt on the fly |
 | **On-the-Fly CLI** (reconfig without restart) | |
-| `/role <worker_id>` | Switch agent role to a Virtual Worker template (e.g. `personal_finance`, `support`). Uses Worker Factory. |
+| `/role <worker_id>` | Switch agent role to a Virtual Worker template (e.g. `finanz`, `support`). Uses Worker Factory. |
 | `/skills` | List the tools (skills) currently enabled for the agent. |
 | `/forget` | Clear conversation history for this chat and reset graph state (Habeas Data). |
 | `/context on` \| `/context off` | Enable or disable long-term context (number of messages in history). |

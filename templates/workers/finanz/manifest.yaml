@@ -1,7 +1,7 @@
 # FinanzWorker — Gestor de Finanzas Personales
 # Topología: Planner -> Executor -> SQLValidator -> Explainer (via run_sql allow-list)
 name: FinanzWorker
-id: personal_finance
+id: finanz
 schema_name: finance_worker
 topology: general
 read_only: false

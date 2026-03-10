@@ -13,6 +13,35 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+# --write-systemd: generar unidad systemd sin importar Rich (salida temprana)
+if "--write-systemd" in sys.argv:
+    _repo = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(_repo))
+    for _base in (Path.cwd(), _repo):
+        _env = _base / ".env"
+        if _env.is_file():
+            for _line in _env.read_text(encoding="utf-8").splitlines():
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _, _v = _line.partition("=")
+                    if _k.strip():
+                        os.environ.setdefault(_k.strip(), _v.strip().strip("'\""))
+            break
+    from duckclaw.ops.providers.systemd import get_systemd_unit_content
+    _py = os.path.abspath(sys.executable)
+    _content, _fname = get_systemd_unit_content(
+        name="DuckClaw-Brain", command="-m duckclaw.agents.telegram_bot",
+        python_path=_py, cwd=str(_repo),
+    )
+    _out = _repo / _fname
+    _out.write_text(_content + "\n", encoding="utf-8")
+    print(f"Unidad systemd escrita en: {_out}")
+    print("Para instalar y activar:")
+    print(f"  sudo cp {_out} /etc/systemd/system/")
+    print("  sudo systemctl daemon-reload")
+    print("  sudo systemctl enable --now DuckClaw-Brain")
+    sys.exit(0)
+
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
@@ -270,19 +299,35 @@ def _pm2_app_status(name: str) -> str:
     return "no registrado"
 
 
-def _pm2_edit_service_settings(
+def _edit_service_settings(
     console: Console,
     state: dict[str, Any],
     repo_root: Path,
     service_name: str,
+    provider: str = "pm2",
 ) -> None:
-    """Interactive sub-menu to edit and apply PM2 service configuration."""
+    """Interactive sub-menu to edit and apply PM2 or Systemd service configuration."""
     _load_dotenv()
     venv_python = str(repo_root / ".venv" / "bin" / "python3")
-    status = _pm2_app_status(service_name)
+    
+    if provider == "pm2":
+        status = _pm2_app_status(service_name)
+    else:
+        status = "unknown"
+        if platform.system() == "Linux":
+            unit = service_name.lower().replace(" ", "-") + ".service"
+            r1 = subprocess.run(["systemctl", "--user", "is-active", unit], capture_output=True, text=True, timeout=3)
+            if r1.returncode != 4:
+                status = r1.stdout.strip()
+            else:
+                r2 = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True, timeout=3)
+                if r2.returncode != 4:
+                    status = r2.stdout.strip()
+            if status == "unknown":
+                status = "no registrado"
 
     console.print(Panel(
-        f"Servicio: [bold]{service_name}[/]  Estado: [{_status_style(status)}]{status}[/]",
+        f"Servicio ({provider}): [bold]{service_name}[/]  Estado: [{_status_style(status)}]{status}[/]",
         title="Editar servicio de persistencia",
         border_style="cyan",
     ))
@@ -291,7 +336,7 @@ def _pm2_edit_service_settings(
     cur = Table(title="Configuración actual", border_style="dim")
     cur.add_column("Parámetro", style="dim cyan")
     cur.add_column("Valor", style="white")
-    cur.add_row("Nombre app PM2", service_name)
+    cur.add_row(f"Nombre app {provider}", service_name)
     cur.add_row("Modo bot", state.get("bot_mode", "langgraph"))
     cur.add_row("DB path", state.get("db_path", "telegram.duckdb"))
     cur.add_row("Proveedor LLM", state.get("llm_provider") or "none_llm")
@@ -303,7 +348,7 @@ def _pm2_edit_service_settings(
         return
 
     # ── App name ──────────────────────────────────────────────────────
-    new_name = Prompt.ask("Nombre de la app PM2", default=service_name).strip() or service_name
+    new_name = Prompt.ask(f"Nombre de la app {provider}", default=service_name).strip() or service_name
 
     # ── Bot mode ──────────────────────────────────────────────────────
     t = Table(show_header=False, box=None)
@@ -355,7 +400,7 @@ def _pm2_edit_service_settings(
     summary = Table(title="Resumen del servicio", border_style="green")
     summary.add_column("Parámetro", style="bold green")
     summary.add_column("Valor", style="white")
-    summary.add_row("App PM2", new_name)
+    summary.add_row(f"App {provider}", new_name)
     summary.add_row("Modo bot", new_mode)
     summary.add_row("DB path", new_db)
     summary.add_row("Token", _censor_token(state.get("token", "")) or "(usa TELEGRAM_BOT_TOKEN de .env)")
@@ -365,13 +410,14 @@ def _pm2_edit_service_settings(
         summary.add_row("URL base LLM", new_url or "-")
     console.print(summary)
 
-    # ── Generar ecosystem.core.config.cjs ────────────────────────────
-    if not Confirm.ask("¿Generar/actualizar ecosystem.core.config.cjs?", default=True):
-        return
-
-    config_path = repo_root / "ecosystem.core.config.cjs"
-    cwd = str(repo_root)
-    config_content = f"""/**
+    if provider == "pm2":
+        # ── Generar ecosystem.core.config.cjs ────────────────────────────
+        if not Confirm.ask("¿Generar/actualizar ecosystem.core.config.cjs?", default=True):
+            return
+    
+        config_path = repo_root / "ecosystem.core.config.cjs"
+        cwd = str(repo_root)
+        config_content = f"""/**
  * PM2 config for DuckClaw Telegram bot (generated by wizard).
  * Start: pm2 start ecosystem.core.config.cjs
  * Token: guardado en .env (auto-cargado por el bot al iniciar).
@@ -381,7 +427,7 @@ module.exports = {{
     {{
       name: "{new_name}",
       script: "{venv_python}",
-      args: "-m core.integrations.telegram_bot",
+      args: "-m duckclaw.agents.telegram_bot",
       cwd: "{cwd}",
       interpreter: "none",
       autorestart: true,
@@ -399,10 +445,18 @@ module.exports = {{
   ],
 }};
 """
-    config_path.write_text(config_content, encoding="utf-8")
-    console.print(f"[green]✓[/] Config generado: [dim]{config_path}[/]")
+        config_path.write_text(config_content, encoding="utf-8")
+        console.print(f"[green]✓[/] Config generado: [dim]{config_path}[/]")
+    else:
+        # Systemd: guardar variables en .env
+        _write_env_file(repo_root, "DUCKCLAW_DB_PATH", new_db)
+        _write_env_file(repo_root, "DUCKCLAW_BOT_MODE", new_mode)
+        _write_env_file(repo_root, "DUCKCLAW_LLM_PROVIDER", new_provider)
+        _write_env_file(repo_root, "DUCKCLAW_LLM_MODEL", new_model)
+        _write_env_file(repo_root, "DUCKCLAW_LLM_BASE_URL", new_url)
+        console.print(f"[green]✓[/] Variables guardadas en: [dim]{repo_root / '.env'}[/]")
 
-    # ── Acción PM2 ────────────────────────────────────────────────────
+    # ── Acción del servicio ────────────────────────────────────────────────────
     action_table = Table(show_header=False, box=None)
     action_table.add_column("", style="bold cyan", width=3)
     action_table.add_column("")
@@ -411,16 +465,34 @@ module.exports = {{
     action_table.add_row("3", f"Detener    {new_name}")
     action_table.add_row("s", "Omitir (aplicar cambios más tarde)")
     console.print(action_table)
-    action = Prompt.ask("Acción PM2", choices=["1", "2", "3", "s"], default="s").strip().lower()
-    if action == "1":
-        subprocess.run(["pm2", "restart", new_name, "--update-env"], timeout=10)
-        console.print(f"[green]✓[/] Reiniciado.")
-    elif action == "2":
-        subprocess.run(["pm2", "start", str(config_path)], timeout=15)
-        console.print(f"[green]✓[/] Iniciado.")
-    elif action == "3":
-        subprocess.run(["pm2", "stop", new_name], timeout=10)
-        console.print(f"[green]✓[/] Detenido.")
+    action = Prompt.ask(f"Acción {provider}", choices=["1", "2", "3", "s"], default="s").strip().lower()
+    
+    if provider == "pm2":
+        if action == "1":
+            subprocess.run(["pm2", "restart", new_name, "--update-env"], timeout=10)
+            console.print(f"[green]✓[/] Reiniciado.")
+        elif action == "2":
+            subprocess.run(["pm2", "start", str(config_path)], timeout=15)
+            console.print(f"[green]✓[/] Iniciado.")
+        elif action == "3":
+            subprocess.run(["pm2", "stop", new_name], timeout=10)
+            console.print(f"[green]✓[/] Detenido.")
+    elif provider == "systemd":
+        unit = new_name.lower().replace(" ", "-") + ".service"
+        is_user = False
+        if subprocess.run(["systemctl", "--user", "is-active", "--quiet", unit], capture_output=True, timeout=3).returncode != 4:
+            is_user = True
+        
+        cmd_prefix = ["systemctl", "--user"] if is_user else ["sudo", "systemctl"]
+        if action == "1":
+            subprocess.run(cmd_prefix + ["restart", new_name], timeout=15)
+            console.print(f"[green]✓[/] Reiniciado.")
+        elif action == "2":
+            subprocess.run(cmd_prefix + ["start", new_name], timeout=15)
+            console.print(f"[green]✓[/] Iniciado.")
+        elif action == "3":
+            subprocess.run(cmd_prefix + ["stop", new_name], timeout=15)
+            console.print(f"[green]✓[/] Detenido.")
 
 
 def _write_env_file(repo_root: Path, key: str, value: str) -> None:
@@ -934,8 +1006,9 @@ def _run_section(
         # ── Edición de servicio (salto desde welcome) ──────────────────────
         if state.get("_edit_service"):
             svc_name = state.pop("_edit_service_name", DEPLOY_SERVICE_NAME)
+            svc_provider = state.pop("_edit_service_provider", "pm2")
             state.pop("_edit_service", None)
-            _pm2_edit_service_settings(console, state, repo_root, svc_name)
+            _edit_service_settings(console, state, repo_root, svc_name, provider=svc_provider)
             run_now, nav = _confirm_with_nav(console, "¿Arrancar el bot ahora?", default=False)
             if nav is not None:
                 return True, "", nav
@@ -1010,13 +1083,37 @@ def _run_section(
                 msg = deploy(
                     name=DEPLOY_SERVICE_NAME,
                     provider=deploy_provider,
-                    command="-m core.integrations.telegram_bot",
+                    command="-m duckclaw.agents.telegram_bot",
                     cwd=str(repo_root),
                 )
                 console.print(Panel(msg, title="duckops deploy", border_style="blue"))
+                # Si se usó auto, detectar el verdadero provider de deploy para generar la unidad
+                actual_deploy_provider = deploy_provider
+                if actual_deploy_provider == "auto":
+                    system = platform.system()
+                    if system == "Windows":
+                        actual_deploy_provider = "windows"
+                    elif system == "Linux":
+                        actual_deploy_provider = "systemd"
+                    else:
+                        actual_deploy_provider = "pm2"
+
+                if actual_deploy_provider == "systemd":
+                    from duckclaw.ops.providers.systemd import get_systemd_unit_content
+                    content, unit_name = get_systemd_unit_content(
+                        name=DEPLOY_SERVICE_NAME,
+                        command="-m duckclaw.agents.telegram_bot",
+                        python_path=os.path.abspath(sys.executable),
+                        cwd=str(repo_root),
+                    )
+                    unit_path = repo_root / unit_name
+                    unit_path.write_text(content + "\n", encoding="utf-8")
+                    console.print(f"[green]Unidad guardada en:[/] [bold]{unit_path}[/]")
+                    console.print("[dim]Instala con: sudo cp ... /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now DuckClaw-Brain[/]")
                 if "Error" in msg or "not implemented" in msg.lower():
                     console.print("[yellow]El despliegue falló. Puedes arrancar el bot manualmente después.[/]")
-            except ImportError:
+            except Exception as e:
+                console.print(f"[red]Error al desplegar el servicio o generar la unidad systemd: {e}[/]")
                 console.print("[yellow]Módulo duckclaw.ops no disponible. Instala el paquete y vuelve a intentar.[/]")
         llm_is_mlx = (state.get("llm_provider") or "").strip().lower() == "mlx"
         start_mlx = repo_root / "duckclaw" / "mlx" / "start_mlx.sh"
@@ -1079,7 +1176,7 @@ def _run_section(
         )
         try:
             ret = subprocess.call(
-                [sys.executable, "-m", "core.integrations.telegram_bot"],
+                [sys.executable, "-m", "duckclaw.agents.telegram_bot"],
                 cwd=str(repo_root),
                 env=env,
             )
@@ -1115,7 +1212,56 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
     _load_dotenv()
     # ── PASO 0: Detectar servicio de persistencia (SIEMPRE lo primero) ───
     console.print(Panel("[bold green]DuckClaw 🦆⚔️[/]", border_style="green"))
-    if shutil.which("pm2") is not None:
+
+    has_systemd = False
+    is_user_systemd = False
+    systemd_status = "no registrado"
+    if platform.system() == "Linux" and shutil.which("systemctl"):
+        unit = DEPLOY_SERVICE_NAME.lower().replace(" ", "-") + ".service"
+        # Check user service (exists if returncode != 4)
+        r_user = subprocess.run(["systemctl", "--user", "is-active", unit], capture_output=True, text=True, timeout=3)
+        if r_user.returncode != 4:
+            has_systemd = True
+            is_user_systemd = True
+            systemd_status = r_user.stdout.strip()
+        else:
+            # Check system service
+            r_sys = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True, timeout=3)
+            if r_sys.returncode != 4:
+                has_systemd = True
+                systemd_status = r_sys.stdout.strip()
+
+    if has_systemd:
+        t = Table(title="Servicio Systemd detectado", border_style="cyan")
+        t.add_column("Nombre", style="bold cyan")
+        t.add_column("Estado", style="white")
+        t.add_column("Tipo", style="dim")
+        color = _status_style("online" if systemd_status == "active" else systemd_status)
+        t.add_row(DEPLOY_SERVICE_NAME, f"[{color}]{systemd_status}[/]", "usuario" if is_user_systemd else "sistema")
+        console.print(t)
+
+        console.print(Panel(
+            "Se detectó un servicio Systemd de DuckClaw. Puedes gestionar o configurar\n"
+            "sus variables de entorno sin pasar por la configuración completa.",
+            title="Servicio de persistencia",
+            border_style="cyan",
+        ))
+        edit_svc, _ = _confirm_with_nav(
+            console,
+            "¿Gestionar servicio Systemd (omitir configuración completa)?",
+            default=False,
+        )
+        if edit_svc:
+            saved_for_edit = load_config() or {}
+            svc_state: dict[str, Any] = {}
+            for k in CONFIG_KEYS:
+                if k in saved_for_edit:
+                    svc_state[k] = saved_for_edit[k]
+            svc_state["token"] = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+            _edit_service_settings(console, svc_state, repo_root, DEPLOY_SERVICE_NAME, provider="systemd")
+            return 0
+
+    elif shutil.which("pm2") is not None:
         # Buscar cualquier proceso PM2 registrado (no solo nombres conocidos)
         pm2_procs: list[dict[str, Any]] = []
         try:
@@ -1180,7 +1326,7 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
                 if k in saved_for_edit:
                     svc_state[k] = saved_for_edit[k]
             svc_state["token"] = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-            _pm2_edit_service_settings(console, svc_state, repo_root, found_svc)
+            _edit_service_settings(console, svc_state, repo_root, found_svc, provider="pm2")
             return 0
 
     # ── PASO 1: Cargar configuración guardada ─────────────────────────────

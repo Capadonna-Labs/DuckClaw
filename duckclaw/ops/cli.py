@@ -52,7 +52,7 @@ def main(args: list[str] | None = None) -> int:
     serve_parser.add_argument("--gateway", action="store_true", help="Use API Gateway (duckclaw.api.gateway) instead of graph_server")
 
     hire_parser = subparsers.add_parser("hire", help="Deploy a Virtual Worker from template (Plug & Play)")
-    hire_parser.add_argument("worker_id", nargs="?", default="", help="Template id (e.g. personal_finance, support)")
+    hire_parser.add_argument("worker_id", nargs="?", default="", help="Template id (e.g. finanz, support)")
     hire_parser.add_argument("--name", "--instance", dest="instance_name", default=None, help="PM2 instance name (default: worker_id)")
     hire_parser.add_argument("--cwd", default=None, help="Working directory (default: current)")
     hire_parser.add_argument("--list", dest="list_workers", action="store_true", help="List available worker templates and exit")

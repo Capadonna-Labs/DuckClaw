@@ -16,7 +16,12 @@ _PREFIX = "chat_"
 
 
 def _chat_key(chat_id: Any, suffix: str) -> str:
-    return f"{_PREFIX}{int(chat_id)}_{suffix}"
+    """Key for agent_config; supports numeric (Telegram) and string (API session_id)."""
+    try:
+        cid = int(chat_id)
+        return f"{_PREFIX}{cid}_{suffix}"
+    except (TypeError, ValueError):
+        return f"{_PREFIX}{str(chat_id)[:64]}_{suffix}"
 
 
 _AGENT_CONFIG_TABLE = "agent_config"
@@ -75,17 +80,21 @@ def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
     """/role <worker_id>: cambia el rol (worker template) en caliente."""
     from duckclaw.workers.factory import list_workers
     available = list_workers()
+    
+    _esc = r"\_"
     wid = (worker_id or "").strip().lower()
     if not wid:
-        return f"Uso: /role <worker_id>\nPlantillas: {', '.join(available) or 'ninguna'}."
+        avail_str = "\n".join(f"- {w.replace('_', _esc)}" for w in available) if available else "ninguna"
+        return f"Uso: /role <worker\\_id>\n\nPlantillas disponibles:\n{avail_str}"
     if wid not in available:
-        return f"Rol desconocido: {worker_id}. Disponibles: {', '.join(available)}."
+        avail_str = "\n".join(f"- {w.replace('_', _esc)}" for w in available) if available else "ninguna"
+        return f"Rol desconocido: {wid.replace('_', _esc)}.\n\nPlantillas disponibles:\n{avail_str}"
     try:
         from duckclaw.workers.manifest import load_manifest
         spec = load_manifest(wid)
         set_chat_state(db, chat_id, "worker_id", wid)
         skills = ", ".join(spec.skills_list) if spec.skills_list else "run_sql"
-        return f"✅ Rol cambiado a **{spec.name}** ({wid}). Capacidades: {skills}."
+        return f"✅ Rol cambiado a {spec.name} ({wid}). Capacidades: {skills}."
     except Exception as e:
         return f"Error al cargar rol: {e}."
 
@@ -109,18 +118,27 @@ def execute_forget(db: Any, chat_id: Any) -> str:
     """/forget: borra historial de la conversación y reinicia estado."""
     try:
         cid = int(chat_id)
+        # Telegram: chat_id is numeric, use telegram_conversation
         db.execute(f"DELETE FROM telegram_conversation WHERE chat_id = {cid}")
+    except (TypeError, ValueError):
+        # API gateway: session_id is string (e.g. "default"), use api_conversation
+        sid = str(chat_id).replace("'", "''")[:256]
+        try:
+            db.execute(f"DELETE FROM api_conversation WHERE session_id = '{sid}'")
+        except Exception:
+            pass  # Table may not exist if only Telegram used
+    try:
         set_chat_state(db, chat_id, "last_audit", "")
-        if os.environ.get("LANGCHAIN_TRACING_V2", "").lower() == "true":
-            try:
-                import langsmith
-                # Log evento Habeas Data (opcional: run_id no disponible aquí)
-                pass
-            except Exception:
-                pass
-        return "✅ Historial borrado. Contexto reiniciado (Habeas Data: supresión solicitada por el usuario)."
-    except Exception as e:
-        return f"Error: {e}."
+    except Exception:
+        pass
+    if os.environ.get("LANGCHAIN_TRACING_V2", "").lower() == "true":
+        try:
+            import langsmith
+            # Log evento Habeas Data (opcional: run_id no disponible aquí)
+            pass
+        except Exception:
+            pass
+    return "✅ Historial borrado. Contexto reiniciado (Habeas Data: supresión solicitada por el usuario)."
 
 
 def execute_context_toggle(db: Any, chat_id: Any, on_off: str) -> str:
@@ -218,16 +236,33 @@ def _set_global_config(db: Any, key: str, value: str) -> None:
     )
 
 
-def execute_prompt(db: Any, new_prompt: str) -> str:
+def execute_prompt(db: Any, chat_id: Any, new_prompt: str) -> str:
     """/prompt [nuevo system prompt]: cambia el system prompt en caliente. Sin argumentos muestra el actual."""
     if not new_prompt:
         current = _get_global_config(db, "system_prompt")
         if not current:
+            wid = get_chat_state(db, chat_id, "worker_id")
+            default_prompt = ""
+            if wid:
+                try:
+                    from duckclaw.workers.manifest import load_manifest
+                    from duckclaw.workers.loader import load_system_prompt
+                    spec = load_manifest(wid)
+                    default_prompt = load_system_prompt(spec)
+                except Exception:
+                    pass
+            if default_prompt:
+                preview = default_prompt[:400] + "..." if len(default_prompt) > 400 else default_prompt
+                # Escapar underscores para no romper markdown
+                preview = preview.replace("_", r"\_")
+                return f"System prompt actual (predeterminado de {wid}):\n{preview}\n\nPara cambiar: /prompt <tu texto>"
             return "System prompt actual: (vacío — se usa el por defecto del bot).\nPara cambiar: /prompt <tu texto>"
-        preview = current[:400] + "…" if len(current) > 400 else current
-        return f"**System prompt actual:**\n{preview}\n\nPara cambiar: /prompt <nuevo texto>"
+        preview = current[:400] + "..." if len(current) > 400 else current
+        preview = preview.replace("_", r"\_")
+        return f"System prompt actual (modificado):\n{preview}\n\nPara cambiar: /prompt <nuevo texto>"
     _set_global_config(db, "system_prompt", new_prompt)
-    preview = new_prompt[:200] + "…" if len(new_prompt) > 200 else new_prompt
+    preview = new_prompt[:200] + "..." if len(new_prompt) > 200 else new_prompt
+    preview = preview.replace("_", r"\_")
     return f"✅ System prompt actualizado.\nVista previa: {preview}"
 
 
@@ -256,7 +291,7 @@ def handle_command(db: Any, chat_id: Any, text: str) -> Optional[str]:
     if name == "reject":
         return execute_approve_reject(db, chat_id, False)
     if name in ("prompt", "system_prompt", "system"):
-        return execute_prompt(db, args)
+        return execute_prompt(db, chat_id, args)
     return None
 
 

@@ -89,6 +89,17 @@ redis = [
     "redis>=5.0.0",
 ]
 
+# rag: DuckDB VSS + embeddings para CatalogRetriever. uv sync --extra rag
+rag = [
+    "sentence-transformers>=2.2.0",
+]
+
+# multimodal: voz (Whisper) y visión (VLM) locales. uv sync --extra multimodal
+multimodal = [
+    "mlx-whisper>=0.4.0",
+    "Pillow>=10.0.0",
+]
+
 # github: requiere Python>=3.10 (mcp). Instalar con: uv sync --extra github (python 3.10+)
 github = [
     "mcp>=1.0.0; python_version>='3.10'",

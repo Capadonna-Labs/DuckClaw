@@ -48,7 +48,7 @@ except ImportError as exc:
 from duckclaw.api.auth import auth_middleware
 from duckclaw.api.audit import audit_middleware
 from duckclaw.api.rate_limit import rate_limit_middleware
-from duckclaw.api.routers import activity, agents, homeostasis, system
+from duckclaw.api.routers import activity, agents, homeostasis, media, system, thread
 
 app = FastAPI(
     title="DuckClaw API Gateway",
@@ -79,7 +79,9 @@ app.middleware("http")(auth_middleware)
 
 # Routers
 app.include_router(agents.router)
+app.include_router(media.router)
 app.include_router(activity.router)
+app.include_router(thread.router)
 app.include_router(homeostasis.router)
 app.include_router(system.router)
 
@@ -92,9 +94,13 @@ async def root():
         "endpoints": [
             "/api/v1/agent/workers",
             "/api/v1/agent/{worker_id}/chat",
+            "/api/v1/agent/{worker_id}/media/{thread_id}",
             "/api/v1/agent/{worker_id}/history",
             "/api/v1/activity/status",
             "/api/v1/activity/chat/queue",
+            "/api/v1/thread/{thread_id}/status",
+            "/api/v1/thread/{thread_id}/takeover",
+            "/api/v1/thread/{thread_id}/release",
             "/api/v1/homeostasis/status",
             "/api/v1/homeostasis/{worker_id}/action",
             "/api/v1/system/health",

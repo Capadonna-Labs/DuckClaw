@@ -9,5 +9,7 @@ llm:
   required: true
   temperature: 0.3
 skills:
+  - catalog_retriever
+  - handoff_trigger
   - fetch_product_catalog
   - search_products

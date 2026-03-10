@@ -90,6 +90,7 @@ async def root():
         "service": "DuckClaw API Gateway",
         "version": "0.1.0",
         "endpoints": [
+            "/api/v1/agent/workers",
             "/api/v1/agent/{worker_id}/chat",
             "/api/v1/agent/{worker_id}/history",
             "/api/v1/activity/status",

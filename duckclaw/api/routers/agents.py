@@ -35,16 +35,27 @@ def _get_db() -> Any:
 
 
 def _ensure_api_conversation_table(db: Any) -> None:
-    """Crea tabla api_conversation si no existe."""
+    """Crea tabla api_conversation si no existe. author_type: AI|HUMAN (Habeas Data)."""
     db.execute("""
         CREATE TABLE IF NOT EXISTS api_conversation (
             session_id VARCHAR NOT NULL,
             worker_id VARCHAR NOT NULL,
             role VARCHAR NOT NULL,
             content TEXT,
+            author_type VARCHAR DEFAULT 'AI',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    try:
+        r = db.query(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name='api_conversation' AND column_name='author_type' LIMIT 1"
+        )
+        rows = json.loads(r) if isinstance(r, str) else (r or [])
+        if not rows:
+            db.execute("ALTER TABLE api_conversation ADD COLUMN author_type VARCHAR DEFAULT 'AI'")
+    except Exception:
+        pass
 
 
 def _get_db_path() -> str:
@@ -86,7 +97,13 @@ async def _ainvoke(
     graph: Any, message: str, history: list, chat_id: str, metadata: Optional[dict[Any, Any]] = None
 ) -> str:
     """Invocación async del grafo (compatible con graph_server)."""
-    # "input" va primero para que LangSmith muestre el mensaje del usuario en la columna Input (no el chat_id)
+    # Inyectar thread_id para handoff_trigger (HITL)
+    try:
+        from duckclaw.activity.handoff_context import set_handoff_thread_id
+        set_handoff_thread_id(chat_id)
+    except ImportError:
+        pass
+    # "input" va primero para que LangSmith muestre el mensaje del usuario en la columna Input
     state = {"input": message, "incoming": message, "history": history or [], "chat_id": chat_id}
     loop = asyncio.get_event_loop()
     
@@ -99,7 +116,7 @@ async def _ainvoke(
     
     full_metadata = {"session_id": chat_id, "thread_id": chat_id}
     full_metadata.update(metadata)
-    
+
     config = {
         "configurable": {"thread_id": chat_id},
         "metadata": full_metadata,
@@ -144,14 +161,17 @@ def _sanitize_for_telegram(text: str) -> str:
     return "\n".join(out).strip()
 
 
-def _persist_turn(db: Any, session_id: str, worker_id: str, role: str, content: str) -> None:
-    """Guarda un turno en api_conversation."""
+def _persist_turn(
+    db: Any, session_id: str, worker_id: str, role: str, content: str, author_type: str = "AI"
+) -> None:
+    """Guarda un turno en api_conversation. author_type: AI|HUMAN (Habeas Data)."""
     _ensure_api_conversation_table(db)
     sid, wid, r = _safe_sql(session_id), _safe_sql(worker_id), _safe_sql(role)
+    at = _safe_sql(author_type)[:16]
     esc = (content or "").replace("'", "''")[:16384]
     db.execute(
-        f"INSERT INTO api_conversation (session_id, worker_id, role, content) "
-        f"VALUES ('{sid}', '{wid}', '{r}', '{esc}')"
+        f"INSERT INTO api_conversation (session_id, worker_id, role, content, author_type) "
+        f"VALUES ('{sid}', '{wid}', '{r}', '{esc}', '{at}')"
     )
 
 
@@ -187,12 +207,27 @@ class ChatRequest(BaseModel):
     model_config = {"extra": "allow"}
 
 
+def _get_session_status(session_id: str) -> str:
+    """Estado de sesión (HITL). Retorna IDLE si Redis no disponible."""
+    try:
+        from duckclaw.activity.session_state import SessionStateManager, STATE_MANUAL_MODE
+        mgr = SessionStateManager()
+        return mgr.get_status(session_id)
+    except Exception:
+        return "IDLE"
+
+
 @router.post("/{worker_id}/chat", summary="Chat con agente (streaming SSE o JSON)")
 async def chat_with_agent(worker_id: str, payload: ChatRequest):
     """
     Envía un mensaje al agente. Retorna StreamingResponse (SSE) token por token o JSON.
-    Persiste en api_conversation para historial.
+    Si MANUAL_MODE (HITL), rechaza y retorna status=ignored.
     """
+    session_id = payload.session_id or "default"
+    status = _get_session_status(session_id)
+    if status == "MANUAL_MODE":
+        return {"status": "ignored", "reason": "manual_mode_active", "session_id": session_id}
+
     try:
         graph = _get_or_build_worker_graph(worker_id)
     except HTTPException:
@@ -201,7 +236,6 @@ async def chat_with_agent(worker_id: str, payload: ChatRequest):
         raise HTTPException(status_code=503, detail=f"Error inicializando worker: {exc}")
 
     db = _get_db()
-    session_id = payload.session_id or "default"
     history = payload.history or _get_history(db, session_id, worker_id, limit=6)
 
     if not payload.stream:

@@ -16,6 +16,43 @@ from typing import Any, Optional
 from arq.connections import RedisSettings
 
 
+async def process_multimodal_input(
+    ctx: dict,
+    worker_id: str,
+    thread_id: str,
+    file_path: str,
+    mime_type: str,
+) -> str:
+    """
+    Job ARQ: transcribe audio o describe imagen, inyecta en agente, borra archivo (Habeas Data).
+    """
+    from pathlib import Path
+
+    p = Path(file_path)
+    is_audio = mime_type and "audio" in mime_type.lower()
+
+    try:
+        if is_audio:
+            from duckclaw.multimodal import transcribe_audio
+            text = transcribe_audio(file_path)
+            wrapped = f"<audio_transcription>{text}</audio_transcription>" if text else "[Audio no transcrito]"
+        else:
+            from duckclaw.multimodal import describe_image
+            text = describe_image(file_path)
+            wrapped = f"<image_description>{text}</image_description>" if text else "[Imagen no descrita]"
+
+        user_message = f"[El usuario envió un {'audio' if is_audio else 'medio'} que dice:] {wrapped}"
+
+        result = await run_chat_job(ctx, worker_id, user_message, [], thread_id)
+        return result
+    finally:
+        if p.is_file():
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+
 async def run_chat_job(
     ctx: dict,
     worker_id: str,
@@ -89,7 +126,7 @@ def get_redis_settings() -> RedisSettings:
 
 class WorkerSettings:
     """Configuración ARQ. Ejecutar: arq duckclaw.activity.worker.WorkerSettings"""
-    functions = [run_chat_job]
+    functions = [run_chat_job, process_multimodal_input]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = get_redis_settings()

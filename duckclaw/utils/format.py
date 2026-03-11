@@ -442,20 +442,25 @@ def normalize_reply_for_user(reply: str) -> str:
     # "Resultado: X: null" en cualquier variante
     if re.search(r"Resultado:\s*\w+\([^)]+\):\s*(null|NULL|None)", s):
         return "No hay datos registrados aún. Registra transacciones para ver tu resumen."
-    # Tablas disponibles con dump de schema interno → filtrar a tablas de negocio
+    # Tablas disponibles con dump de schema interno → preferir tablas de negocio; si todo es interno, mostrar lista igual
     if "Tablas disponibles" in s or (s.startswith("- ") and (":" in s or "." in s)):
         lines = s.split("\n")
         user_tables = []
+        all_parsed = []
         for line in lines:
             # Formato "- schema.table" o "- name: cols"
             m = re.match(r"^-\s+([a-zA-Z0-9_.]+)(?::|$)", line.strip())
             if m:
                 full = m.group(1)
+                all_parsed.append(full)
                 t = full.split(".")[-1].lower() if "." in full else full.lower()
                 if not any(t.startswith(p) for p in _INTERNAL_TABLE_PREFIXES):
                     user_tables.append(full)
         if user_tables:
             return f"Tablas disponibles: {', '.join(user_tables)}."
+        # Si hay tablas listadas pero todas son internas, mostrar la lista completa (no decir "no hay tablas")
+        if all_parsed:
+            return f"Tablas disponibles: {', '.join(all_parsed)}."
         if "Tablas disponibles" in s:
             return "No hay tablas de datos disponibles."
     # Intentar format_tool_reply para JSON

@@ -291,7 +291,7 @@ def build_worker_graph(
     crm_enabled = bool(crm_config.get("enabled", False))
     effective_prompt = (system_prompt or "").strip() + "\n\n" + _TASK_AWARENESS_PROMPT.strip()
 
-    def prepare_node(state: dict, config: RunnableConfig | None = None) -> dict:
+    def prepare_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         cfg = config or {}
         conf_obj = cfg.get("configurable")
         meta = cfg.get("metadata") or {}
@@ -337,7 +337,7 @@ def build_worker_graph(
         return {"messages": messages, "incoming": incoming}
 
     if llm is None:
-        def agent_node(state: dict) -> dict:
+        def agent_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
             return {"messages": state["messages"] + [AIMessage(content="Sin LLM configurado. Configura DUCKCLAW_LLM_PROVIDER.")]}
     else:
         llm_with_tools = llm.bind_tools(tools)
@@ -353,6 +353,12 @@ def build_worker_graph(
             # Excluir: tablas DuckDB, esquema o estructura de base de datos
             if any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas")):
                 return False
+            # Excluir: cuenta bancaria concreta (Bancolombia, etc.) -> debe usar run_sql sobre .duckdb
+            if any(k in t for k in ("cuenta de ", "cuenta bancolombia", "bancolombia", "en bancolombia", "saldo en mi cuenta")):
+                return False
+            # "Portfolio total" / "cuánto tengo en total" -> no forzar solo IBKR; el agente debe usar get_ibkr_portfolio + run_sql (cuentas en .duckdb)
+            if any(k in t for k in ("portfolio total", "en total", "resumen de todo", "cuánto tengo en total", "cuanto tengo en total")):
+                return False
             # "acciones" como palabra completa (no subcadena de "transacciones")
             kw = ("portfolio", "portafolio", "cuanto dinero", "cuánto dinero", "saldo ibkr", "dinero en bolsa", "resumen de mi portfolio", "estado de mis cuentas", "estado de cuenta", "mis cuentas")
             if any(k in t for k in kw):
@@ -365,7 +371,7 @@ def build_worker_graph(
             t = text.strip().lower()
             return any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas"))
 
-        def agent_node(state: dict, config: RunnableConfig | None = None) -> dict:
+        def agent_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
             cfg = config or {}
             incoming = (
                 (state.get("incoming") or state.get("input") or "").strip()
@@ -383,17 +389,23 @@ def build_worker_graph(
                         break
             is_schema = _is_schema_query(incoming)
             is_portfolio = has_ibkr and _is_portfolio_query(incoming)
+            # No forzar herramienta si el último mensaje ya es ToolMessage (ya ejecutamos la tool):
+            # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
+            last_msg = (state.get("messages") or [])[-1] if state.get("messages") else None
+            already_has_tool_result = last_msg is not None and isinstance(last_msg, ToolMessage)
+            force_schema = is_schema and not already_has_tool_result
+            force_portfolio = is_portfolio and not already_has_tool_result
             _log.info(
                 "[finanz] incoming=%r | is_schema=%s | is_portfolio=%s | forced_tool=%s",
                 incoming[:80] + ("..." if len(incoming) > 80 else ""),
                 is_schema,
                 is_portfolio,
-                "inspect_schema" if is_schema else ("get_ibkr_portfolio" if is_portfolio else "auto"),
+                "inspect_schema" if force_schema else ("get_ibkr_portfolio" if force_portfolio else "auto"),
             )
-            if is_schema:
+            if force_schema:
                 llm_forced = llm.bind_tools(tools, tool_choice={"type": "function", "function": {"name": "inspect_schema"}})
                 resp = llm_forced.invoke(state["messages"])
-            elif is_portfolio:
+            elif force_portfolio:
                 llm_forced = llm.bind_tools(tools, tool_choice={"type": "function", "function": {"name": "get_ibkr_portfolio"}})
                 resp = llm_forced.invoke(state["messages"])
             else:
@@ -403,7 +415,7 @@ def build_worker_graph(
                 _log.info("[finanz] LLM tool_calls=%s", [tc.get("name") for tc in tool_calls])
             return {"messages": state["messages"] + [resp]}
 
-    def tools_node(state: dict) -> dict:
+    def tools_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         messages = state["messages"]
         last = messages[-1]
         tool_calls = getattr(last, "tool_calls", None) or []
@@ -427,7 +439,7 @@ def build_worker_graph(
             new_msgs.append(ToolMessage(content=content, tool_call_id=tid))
         return {"messages": new_msgs}
 
-    def set_reply(state: dict) -> dict:
+    def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.integrations.llm_providers import _strip_eot
         msgs = state.get("messages") or []
         last = msgs[-1]
@@ -461,22 +473,22 @@ def build_worker_graph(
     )
     max_retries = int(context_guard_config.get("max_retries", 2))
 
-    def fact_check_node(state: dict) -> dict:
+    def fact_check_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.forge.atoms.validators import fact_checker_node as _fc
         return _fc(state, llm, max_retries=max_retries)
 
-    def self_correction_node(state: dict) -> dict:
+    def self_correction_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.forge.atoms.validators import self_correction_node as _sc
         return _sc(state, llm)
 
-    def handoff_reply_node(state: dict) -> dict:
+    def handoff_reply_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.forge.atoms.validators import handoff_reply_node as _hr
         return _hr(state)
 
     def route_after_fact_check(state: dict) -> str:
         return state.get("context_guard_route", "approved")
 
-    def homeostasis_node(state: dict) -> dict:
+    def homeostasis_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         """HomeostasisNode: Percepción-Sorpresa-Restauración-Actualización. Fase 1: pass-through (tabla ya creada en run_schema).
         IMPORTANTE: retornar state para preservar input/incoming; retornar {} vacío hace que LangGraph pierda el estado."""
         return state

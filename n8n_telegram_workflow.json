@@ -47,7 +47,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"message\": \"{{ $json.message.text }}\",\n  \"session_id\": \"{{ $json.message.chat.id }}\",\n  \"stream\": false\n}",
+        "jsonBody": "={{ { message: $json.message.text, session_id: String($json.message.chat.id), stream: false } }}",
         "options": {}
       },
       "id": "e9a7e089-cf73-4ea2-97b7-6ec7e052cf07",

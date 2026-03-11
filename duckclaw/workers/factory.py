@@ -8,15 +8,22 @@ Output: Compiled LangGraph with persistent state, ready for events.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+
+_log = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any, Optional
+
+try:
+    from langchain_core.runnables import RunnableConfig
+except ImportError:
+    RunnableConfig = Any  # type: ignore[misc, assignment]
 
 from duckclaw.workers.manifest import WorkerSpec, load_manifest, get_worker_dir
 from duckclaw.workers.loader import load_system_prompt, load_skills, run_schema
 
-# Patrones que indican ausencia de tarea concreta (saludos genéricos)
 _NO_TASK_PATTERN = re.compile(
     r"^(hola|hi|hey|buenos?\s*d[ií]as?|buenas?\s*tardes?|buenas?\s*noches?|"
     r"qu[eé]\s*tal|qu[eé]\s*hay|saludos?|hello|ciao|adios?|chao)\s*[!.]?$",
@@ -60,23 +67,32 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
     """Build tool list: template skills + optional run_sql with allow-list."""
     from langchain_core.tools import StructuredTool
 
-    from duckclaw.security import SQLValidator
-
     tools = load_skills(spec, db)
     schema = spec.schema_name
-    validator = SQLValidator(
-        read_only=spec.read_only,
-        allowed_tables=spec.allowed_tables or None,
-        schema_name=schema,
-    )
 
     def _run_sql_worker(query: str) -> str:
         if not query or not query.strip():
             return json.dumps({"error": "Query vacío."})
         q = query.strip()
-        ok, err = validator.validate(q)
-        if not ok:
-            return json.dumps({"error": err})
+        if spec.read_only:
+            if any(kw in q.upper() for kw in ("INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER")):
+                return json.dumps({"error": "Este trabajador es solo lectura. No se permiten escrituras."})
+        if spec.allowed_tables:
+            # Allow-list: only these tables (optionally schema-qualified)
+            # Permitir siempre information_schema (SHOW TABLES, esquema, etc.)
+            upper = q.upper()
+            if "INFORMATION_SCHEMA" in upper or "SHOW TABLES" in upper or "SHOW " in upper:
+                pass  # skip allow-list
+            else:
+                for t in spec.allowed_tables:
+                    if t.upper() in upper or f"{schema}.{t}".upper() in upper:
+                        break
+                else:
+                    # No allowed table mentioned; check if query touches any table
+                    if "FROM" in upper or "INTO" in upper or "UPDATE" in upper or "JOIN" in upper:
+                        return json.dumps({
+                            "error": f"Solo se permiten las tablas: {', '.join(spec.allowed_tables)}."
+                        })
         try:
             if q.upper().startswith(("SELECT", "WITH", "SHOW", "DESCRIBE")):
                 return db.query(q)
@@ -90,6 +106,32 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
             _run_sql_worker,
             name="run_sql",
             description="Ejecuta SQL en el esquema del trabajador. Respeta restricciones de tablas permitidas.",
+        )
+    )
+    def _inspect_schema_worker() -> str:
+        """Lista tablas de todos los esquemas (main, finance_worker, etc.)."""
+        try:
+            r = json.loads(db.query(
+                "SELECT table_schema, table_name FROM information_schema.tables "
+                "WHERE table_schema NOT IN ('information_schema','pg_catalog') ORDER BY table_schema, table_name"
+            ))
+            if not r or not isinstance(r, list):
+                return "No hay tablas en la base de datos."
+            lines = []
+            for row in r:
+                sch = row.get("table_schema", "")
+                tbl = row.get("table_name", "")
+                if sch and tbl:
+                    lines.append(f"- {sch}.{tbl}")
+            return "Tablas disponibles:\n" + "\n".join(lines) if lines else "No hay tablas."
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    tools.append(
+        StructuredTool.from_function(
+            _inspect_schema_worker,
+            name="inspect_schema",
+            description="Lista las tablas disponibles en la base de datos. Usar para preguntas sobre tablas, esquema o estructura.",
         )
     )
     return tools
@@ -205,6 +247,14 @@ def build_worker_graph(
         except Exception:
             pass
 
+    if getattr(spec, "ibkr_config", None) is not None:
+        try:
+            from duckclaw.forge.skills.ibkr_bridge import register_ibkr_skill
+            register_ibkr_skill(tools, spec.ibkr_config)
+            tools_by_name = {t.name: t for t in tools}
+        except Exception:
+            pass
+
     if getattr(spec, "sft_config", None):
         try:
             from duckclaw.forge.skills.sft_bridge import register_sft_skill
@@ -241,7 +291,22 @@ def build_worker_graph(
     crm_enabled = bool(crm_config.get("enabled", False))
     effective_prompt = (system_prompt or "").strip() + "\n\n" + _TASK_AWARENESS_PROMPT.strip()
 
-    def prepare_node(state: dict) -> dict:
+    def prepare_node(state: dict, config: RunnableConfig | None = None) -> dict:
+        cfg = config or {}
+        conf_obj = cfg.get("configurable")
+        meta = cfg.get("metadata") or {}
+        conf_incoming = (conf_obj.get("incoming") if isinstance(conf_obj, dict) else None) or (meta.get("incoming") if meta else None)
+        incoming = (
+            (state.get("incoming") or state.get("input") or "").strip()
+            or (str(conf_incoming).strip() if conf_incoming else "")
+        )
+        if not incoming and state.get("messages"):
+            for m in reversed(state["messages"]):
+                if isinstance(m, HumanMessage) and getattr(m, "content", None):
+                    incoming = (str(m.content) or "").strip()
+                    break
+        if not isinstance(incoming, str):
+            incoming = str(incoming or "").strip()
         prompt = effective_prompt
         if crm_enabled:
             try:
@@ -260,7 +325,6 @@ def build_worker_graph(
                 messages.append(HumanMessage(content=content))
             elif role == "assistant":
                 messages.append(AIMessage(content=content))
-        incoming = state.get("incoming") or ""
         needs_task = state.get("homeostasis_hint") == "ask_task" or _is_no_task(incoming)
         if needs_task:
             user_content = (
@@ -270,16 +334,73 @@ def build_worker_graph(
         else:
             user_content = incoming
         messages.append(HumanMessage(content=user_content))
-        return {"messages": messages}
+        return {"messages": messages, "incoming": incoming}
 
     if llm is None:
         def agent_node(state: dict) -> dict:
             return {"messages": state["messages"] + [AIMessage(content="Sin LLM configurado. Configura DUCKCLAW_LLM_PROVIDER.")]}
     else:
         llm_with_tools = llm.bind_tools(tools)
+        has_ibkr = "get_ibkr_portfolio" in tools_by_name
 
-        def agent_node(state: dict) -> dict:
-            resp = llm_with_tools.invoke(state["messages"])
+        def _is_portfolio_query(text: str) -> bool:
+            if not text or not text.strip():
+                return False
+            t = text.strip().lower()
+            # Excluir: gastos/transacciones locales (evitar que "acciones" en "transacciones" dispare IBKR)
+            if any(k in t for k in ("transacciones", "gastos", "compras", "presupuesto")):
+                return False
+            # Excluir: tablas DuckDB, esquema o estructura de base de datos
+            if any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas")):
+                return False
+            # "acciones" como palabra completa (no subcadena de "transacciones")
+            kw = ("portfolio", "portafolio", "cuanto dinero", "cuánto dinero", "saldo ibkr", "dinero en bolsa", "resumen de mi portfolio", "estado de mis cuentas", "estado de cuenta", "mis cuentas")
+            if any(k in t for k in kw):
+                return True
+            return bool(re.search(r"\bacciones\b", t))
+
+        def _is_schema_query(text: str) -> bool:
+            if not text or not text.strip():
+                return False
+            t = text.strip().lower()
+            return any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas"))
+
+        def agent_node(state: dict, config: RunnableConfig | None = None) -> dict:
+            cfg = config or {}
+            incoming = (
+                (state.get("incoming") or state.get("input") or "").strip()
+                or (cfg.get("configurable") or {}).get("incoming") or ""
+            )
+            if isinstance(incoming, str):
+                incoming = incoming.strip()
+            else:
+                incoming = str(incoming or "").strip()
+            # Fallback: extraer del último HumanMessage
+            if not incoming and state.get("messages"):
+                for m in reversed(state["messages"]):
+                    if isinstance(m, HumanMessage) and getattr(m, "content", None):
+                        incoming = (str(m.content) or "").strip()
+                        break
+            is_schema = _is_schema_query(incoming)
+            is_portfolio = has_ibkr and _is_portfolio_query(incoming)
+            _log.info(
+                "[finanz] incoming=%r | is_schema=%s | is_portfolio=%s | forced_tool=%s",
+                incoming[:80] + ("..." if len(incoming) > 80 else ""),
+                is_schema,
+                is_portfolio,
+                "inspect_schema" if is_schema else ("get_ibkr_portfolio" if is_portfolio else "auto"),
+            )
+            if is_schema:
+                llm_forced = llm.bind_tools(tools, tool_choice={"type": "function", "function": {"name": "inspect_schema"}})
+                resp = llm_forced.invoke(state["messages"])
+            elif is_portfolio:
+                llm_forced = llm.bind_tools(tools, tool_choice={"type": "function", "function": {"name": "get_ibkr_portfolio"}})
+                resp = llm_forced.invoke(state["messages"])
+            else:
+                resp = llm_with_tools.invoke(state["messages"])
+            tool_calls = getattr(resp, "tool_calls", None) or []
+            if tool_calls:
+                _log.info("[finanz] LLM tool_calls=%s", [tc.get("name") for tc in tool_calls])
             return {"messages": state["messages"] + [resp]}
 
     def tools_node(state: dict) -> dict:
@@ -296,10 +417,13 @@ def build_worker_graph(
                 try:
                     result = tool.invoke(args)
                     content = str(result) if result is not None else "OK"
+                    _log.info("[finanz] tool=%s | result_len=%d | preview=%r", name, len(content), content[:120] + ("..." if len(content) > 120 else ""))
                 except Exception as e:
                     content = f"Error: {e}"
+                    _log.warning("[finanz] tool=%s failed: %s", name, e)
             else:
                 content = f"Herramienta desconocida: {name}"
+                _log.warning("[finanz] unknown tool: %s", name)
             new_msgs.append(ToolMessage(content=content, tool_call_id=tid))
         return {"messages": new_msgs}
 
@@ -353,12 +477,9 @@ def build_worker_graph(
         return state.get("context_guard_route", "approved")
 
     def homeostasis_node(state: dict) -> dict:
-        """HomeostasisNode: Percepción-Sorpresa-Restauración-Actualización.
-        Detecta ausencia de tarea (incoming vacío o saludo genérico) y señala ask_task."""
-        incoming = state.get("incoming") or ""
-        if _is_no_task(incoming):
-            return {"homeostasis_hint": "ask_task"}
-        return {}
+        """HomeostasisNode: Percepción-Sorpresa-Restauración-Actualización. Fase 1: pass-through (tabla ya creada en run_schema).
+        IMPORTANTE: retornar state para preservar input/incoming; retornar {} vacío hace que LangGraph pierda el estado."""
+        return state
 
     graph = StateGraph(dict)
     graph.add_node("prepare", prepare_node)

@@ -24,6 +24,12 @@ def _get_db_path() -> str:
     return str(_PROJECT_ROOT / "db" / "gateway.duckdb")
 
 
+@router.get("/db-path", summary="Ruta de la base DuckDB en uso (debug)")
+async def get_db_path():
+    """Retorna la ruta de la DB que usa el API Gateway (conversaciones + workers)."""
+    return {"db_path": _get_db_path()}
+
+
 @router.get("/health", summary="Estado de conectividad (Tailscale, DuckDB, MLX)")
 async def system_health():
     """

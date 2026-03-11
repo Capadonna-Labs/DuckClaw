@@ -10,6 +10,9 @@ PUBLIC_PATHS = frozenset({
     "/",
     "/health",
     "/api/v1/system/health",
+    "/api/v1/system/db-path",  # debug: ruta DB en uso
+    "/api/v1/agent/llm-config",  # debug: estado del LLM (sin secrets)
+    "/api/v1/agent/clear-cache",  # debug: limpiar caché de grafos
     "/docs",
     "/redoc",
     "/openapi.json",
@@ -96,17 +99,21 @@ async def auth_middleware(request: Any, call_next: Any):
     """
     Middleware que valida autenticación para rutas protegidas.
     Rutas públicas: /, /health, /api/v1/system/health, /docs, /redoc.
+    Guarda request.state.auth_source para audit: "public" | "tailscale" | "jwt".
     """
     from starlette.responses import JSONResponse
 
     path = request.url.path.rstrip("/") or "/"
     if _path_is_public(path):
+        request.state.auth_source = "public"
         return await call_next(request)
 
     if verify_tailscale_key(request):
+        request.state.auth_source = "tailscale"
         return await call_next(request)
 
     if verify_jwt(request) is not None:
+        request.state.auth_source = "jwt"
         return await call_next(request)
 
     return JSONResponse(

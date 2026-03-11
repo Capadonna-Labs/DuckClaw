@@ -291,7 +291,7 @@ def build_worker_graph(
     crm_enabled = bool(crm_config.get("enabled", False))
     effective_prompt = (system_prompt or "").strip() + "\n\n" + _TASK_AWARENESS_PROMPT.strip()
 
-    def prepare_node(state: dict, config: RunnableConfig | None = None) -> dict:
+    def prepare_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         cfg = config or {}
         conf_obj = cfg.get("configurable")
         meta = cfg.get("metadata") or {}
@@ -337,7 +337,7 @@ def build_worker_graph(
         return {"messages": messages, "incoming": incoming}
 
     if llm is None:
-        def agent_node(state: dict) -> dict:
+        def agent_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
             return {"messages": state["messages"] + [AIMessage(content="Sin LLM configurado. Configura DUCKCLAW_LLM_PROVIDER.")]}
     else:
         llm_with_tools = llm.bind_tools(tools)
@@ -371,7 +371,7 @@ def build_worker_graph(
             t = text.strip().lower()
             return any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas"))
 
-        def agent_node(state: dict, config: RunnableConfig | None = None) -> dict:
+        def agent_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
             cfg = config or {}
             incoming = (
                 (state.get("incoming") or state.get("input") or "").strip()
@@ -415,7 +415,7 @@ def build_worker_graph(
                 _log.info("[finanz] LLM tool_calls=%s", [tc.get("name") for tc in tool_calls])
             return {"messages": state["messages"] + [resp]}
 
-    def tools_node(state: dict) -> dict:
+    def tools_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         messages = state["messages"]
         last = messages[-1]
         tool_calls = getattr(last, "tool_calls", None) or []
@@ -439,7 +439,7 @@ def build_worker_graph(
             new_msgs.append(ToolMessage(content=content, tool_call_id=tid))
         return {"messages": new_msgs}
 
-    def set_reply(state: dict) -> dict:
+    def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.integrations.llm_providers import _strip_eot
         msgs = state.get("messages") or []
         last = msgs[-1]
@@ -473,22 +473,22 @@ def build_worker_graph(
     )
     max_retries = int(context_guard_config.get("max_retries", 2))
 
-    def fact_check_node(state: dict) -> dict:
+    def fact_check_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.forge.atoms.validators import fact_checker_node as _fc
         return _fc(state, llm, max_retries=max_retries)
 
-    def self_correction_node(state: dict) -> dict:
+    def self_correction_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.forge.atoms.validators import self_correction_node as _sc
         return _sc(state, llm)
 
-    def handoff_reply_node(state: dict) -> dict:
+    def handoff_reply_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.forge.atoms.validators import handoff_reply_node as _hr
         return _hr(state)
 
     def route_after_fact_check(state: dict) -> str:
         return state.get("context_guard_route", "approved")
 
-    def homeostasis_node(state: dict) -> dict:
+    def homeostasis_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         """HomeostasisNode: Percepción-Sorpresa-Restauración-Actualización. Fase 1: pass-through (tabla ya creada en run_schema).
         IMPORTANTE: retornar state para preservar input/incoming; retornar {} vacío hace que LangGraph pierda el estado."""
         return state

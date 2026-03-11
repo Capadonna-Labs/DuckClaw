@@ -6,6 +6,11 @@ from pathlib import Path
 _root = Path(__file__).resolve().parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_root / ".env")
+except ImportError:
+    pass
 
 def main():
     try:

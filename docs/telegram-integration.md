@@ -88,9 +88,14 @@ print(db.query("SELECT chat_id, username, text, received_at FROM telegram_messag
 
 ## Which DB is used when you ask from Telegram (Gateway)
 
-The Gateway uses **one** DuckDB file for everything: conversation history and all agent SQL (Finanz, etc.). Resolution: **`DUCKCLAW_DB_PATH`** if set, otherwise **`db/gateway.duckdb`**.
+**One** .duckdb is used for the full flow: Telegram → DuckClaw-Gateway → agent SQL → response in Telegram. When you analyze the DB later (scripts or SQL), it is the same file.
 
-- **main**: `api_conversation`, `agent_config`, etc.
-- **finance_worker** (and other worker schemas): `transactions`, `categories`, `cuentas`, `presupuestos`, `deudas`, `agent_beliefs`, etc.
+- **Path:** `DUCKCLAW_DB_PATH` if set (e.g. in `.env` or pm2), otherwise **`db/gateway.duckdb`**.
+- **Contents:** main (`api_conversation`, `agent_config`), finance_worker (`transactions`, `categories`, `cuentas`, `presupuestos`, `deudas`, `agent_beliefs`), etc.
 
-To see which file is used: `python3 scripts/where_gateway_writes.py`. To inspect that DB (no argument = same path as the Gateway): `python3 scripts/inspect_telegram_db.py` or `python3 scripts/validate_cuentas_gateway.py`. To inspect another file: pass the path as first argument.
+**To analyze the same DB:** Run scripts from the repo root; they load `.env` and use the same path as the Gateway. Or set `DUCKCLAW_DB_PATH` to match the Gateway process.
+
+- Which file: `python3 scripts/where_gateway_writes.py`
+- Inspect: `python3 scripts/inspect_telegram_db.py` or `python3 scripts/validate_cuentas_gateway.py` (no argument = Gateway path; or pass path as first argument)
+
+**To recreate the DB from scratch:** `python3 scripts/recreate_gateway_db.py`. The current file is renamed to `{path}.bak.{timestamp}` and a new DB is created with the full schema (main + finance_worker).

@@ -47,3 +47,6 @@ ecosystem.*.config.cjs
 
 # LangGraph dev / Studio local state
 .langgraph_api/
+
+.cusorignore
+.cursorrules

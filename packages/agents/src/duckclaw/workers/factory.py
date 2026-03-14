@@ -360,7 +360,8 @@ def build_worker_graph(
             if any(k in t for k in ("portfolio total", "en total", "resumen de todo", "cuánto tengo en total", "cuanto tengo en total")):
                 return False
             # "acciones" como palabra completa (no subcadena de "transacciones")
-            kw = ("portfolio", "portafolio", "cuanto dinero", "cuánto dinero", "saldo ibkr", "dinero en bolsa", "resumen de mi portfolio", "estado de mis cuentas", "estado de cuenta", "mis cuentas")
+            # "ibkr", "en ibkr" -> consultas explícitas al broker
+            kw = ("portfolio", "portafolio", "cuanto dinero", "cuánto dinero", "saldo ibkr", "dinero en bolsa", "resumen de mi portfolio", "estado de mis cuentas", "estado de cuenta", "mis cuentas", "en ibkr", "ibkr", "interactive brokers")
             if any(k in t for k in kw):
                 return True
             return bool(re.search(r"\bacciones\b", t))

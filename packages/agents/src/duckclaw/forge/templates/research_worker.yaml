@@ -1,5 +1,0 @@
-# Research Worker — Tavily + Browser-Use
-# Spec: specs/Pipeline_de_Investigación_y_Navegacion_Autonoma_(Tavily+Browser-Use).md
-# Carga el worker desde templates/workers/research_worker/manifest.yaml
-type: worker
-id: research_worker

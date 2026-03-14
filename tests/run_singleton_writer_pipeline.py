@@ -78,14 +78,15 @@ def start_db_writer():
 
 
 def start_api_gateway():
-    """Arranca el API Gateway con uvicorn en segundo plano."""
+    """Arranca el microservicio services/api-gateway con uvicorn en segundo plano."""
     if not (API_GATEWAY_DIR / "main.py").exists():
         return None
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(API_GATEWAY_DIR)
+    env["PYTHONPATH"] = str(REPO_ROOT)  # repo root para imports duckclaw
+    env["DUCKCLAW_TAILSCALE_AUTH_KEY"] = ""  # integración sin auth (spec 04)
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"],
-        cwd=API_GATEWAY_DIR,
+        [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000", "--app-dir", str(API_GATEWAY_DIR)],
+        cwd=REPO_ROOT,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -202,19 +203,21 @@ def test_ensure_redis_returns_false_when_connection_fails() -> None:
 
 @pytest.fixture
 def gateway_app():
-    """App FastAPI del Gateway con Redis mockeado (para no depender de Redis real)."""
-    sys.path.insert(0, str(API_GATEWAY_DIR))
-    try:
-        with patch("redis.asyncio.Redis.from_url") as mock_from_url:
-            mock_conn = MagicMock()
-            mock_conn.lpush = AsyncMock(return_value=1)
-            mock_conn.aclose = AsyncMock(return_value=None)
-            mock_from_url.return_value = mock_conn
-            import main as gateway_main
-            yield gateway_main.app
-    finally:
-        if str(API_GATEWAY_DIR) in sys.path:
-            sys.path.remove(str(API_GATEWAY_DIR))
+    """App FastAPI del microservicio services/api-gateway/main.py con Redis mockeado."""
+    # Sin DUCKCLAW_TAILSCALE_AUTH_KEY el middleware no exige auth (spec 04_Singleton_Writer)
+    with patch.dict(os.environ, {"DUCKCLAW_TAILSCALE_AUTH_KEY": ""}, clear=False):
+        sys.path.insert(0, str(API_GATEWAY_DIR))
+        try:
+            with patch("redis.asyncio.Redis.from_url") as mock_from_url:
+                mock_conn = MagicMock()
+                mock_conn.lpush = AsyncMock(return_value=1)
+                mock_conn.aclose = AsyncMock(return_value=None)
+                mock_from_url.return_value = mock_conn
+                import main as gateway_main
+                yield gateway_main.app
+        finally:
+            if str(API_GATEWAY_DIR) in sys.path:
+                sys.path.remove(str(API_GATEWAY_DIR))
 
 
 def test_gateway_health_returns_ok(gateway_app) -> None:

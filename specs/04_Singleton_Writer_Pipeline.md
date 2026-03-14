@@ -20,7 +20,7 @@ Especificación del flujo **API Gateway → Redis → DB Writer → DuckDB** y d
 | Componente       | Ubicación               | Función |
 |------------------|-------------------------|--------|
 | **Redis**        | `localhost:6379` (o `REDIS_URL`) | Cola `duckdb_write_queue`: lista por la que el Gateway empuja mensajes y el DB Writer hace pop bloqueante. |
-| **API Gateway**  | `services/api-gateway/` | Acepta `POST /api/v1/db/write` con cuerpo JSON; valida que no sea `SELECT`; genera `task_id`; serializa payload y hace **LPUSH** a la cola. Responde 202 con `{ "status": "enqueued", "task_id": "..." }`. |
+| **API Gateway**  | `services/api-gateway/main.py` | Microservicio unificado. Acepta `POST /api/v1/db/write` con cuerpo JSON; valida que no sea `SELECT`; genera `task_id`; serializa payload y hace **LPUSH** a la cola. Responde 202 con `{ "status": "enqueued", "task_id": "..." }`. |
 | **DB Writer**    | `services/db-writer/`   | Bucle infinito: **BRPOP** bloqueante sobre `duckdb_write_queue`; por cada mensaje, parsea JSON (`task_id`, `query`, `params`), ejecuta `conn.execute(query, params)` sobre DuckDB (en hilo con `asyncio.to_thread`), registra éxito/error en logs. Una sola conexión DuckDB en modo lectura-escritura. |
 | **DuckDB**       | `db/duckclaw.duckdb` (por defecto, respecto a la raíz del repo) | Base única escrita exclusivamente por el DB Writer; los agentes y lectores pueden abrirla en solo lectura. |
 
@@ -97,7 +97,7 @@ Los tests unitarios comprueban:
 - Construcción del payload (`query`, `params`, `tenant_id`) y que los payloads de `CREATE TABLE` e `INSERT` usados en el pipeline cumplen el contrato del Gateway.
 - Comportamiento de `wait_health` cuando el servidor devuelve 200 (mock de `urllib.request.urlopen`).
 - Comportamiento de `ensure_redis` cuando Redis y Docker no están disponibles (mocks).
-- Endpoints del Gateway con `fastapi.testclient.TestClient` y Redis mockeado:
+- Endpoints del Gateway con `fastapi.testclient.TestClient` y Redis mockeado (fixture `gateway_app` desactiva auth con `DUCKCLAW_TAILSCALE_AUTH_KEY=""`):
   - `GET /health` → 200 + `{ "status": "ok", "service": ... }`
   - `POST /api/v1/db/write` con `SELECT` → 400
   - `POST /api/v1/db/write` con `INSERT` → 202 + `{"status": "enqueued", "task_id": "..." }`
@@ -190,7 +190,7 @@ En los logs del DB Writer (Terminal 2) deben aparecer las dos escrituras correct
 ## 5. Configuración y variables de entorno
 
 - **API Gateway** (`services/api-gateway/core/config.py`): `REDIS_URL` (por defecto `redis://localhost:6379/0`). Para desarrollo, `JWT_SECRET` y `N8N_AUTH_KEY` tienen valores por defecto; en producción deben definirse en `.env`.
-- **DB Writer** (`services/db-writer/core/config.py`): `REDIS_URL`, `QUEUE_NAME` (por defecto `duckdb_write_queue`), `DUCKDB_PATH` (por defecto `{raíz_repo}/db/duckclaw.duckclaw.duckdb`).
+- **DB Writer** (`services/db-writer/core/config.py`): `REDIS_URL`, `QUEUE_NAME` (por defecto `duckdb_write_queue`), `DUCKDB_PATH` (por defecto `{raíz_repo}/db/duckclaw.duckdb`).
 - **Tests de pipeline:** asumen que el Gateway expone `http://127.0.0.1:8000` y que la ruta de la base sigue la convención anterior.
 
 ---

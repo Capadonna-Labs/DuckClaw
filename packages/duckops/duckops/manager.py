@@ -336,13 +336,20 @@ def serve(
             "DUCKCLAW_DB_PATH", "MLX_MODEL_ID", "MLX_MODEL_PATH",
             "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
             "DUCKCLAW_REDIS_URL", "DUCKCLAW_WRITE_QUEUE_URL",
+            "REDIS_URL", "DUCKCLAW_TAILSCALE_AUTH_KEY",
         ):
             val = os.environ.get(key, "")
             if val:
                 env_vars[key] = val
+        # API Gateway microservicio usa REDIS_URL (fallback desde DUCKCLAW_REDIS_URL)
+        if gateway and not env_vars.get("REDIS_URL") and env_vars.get("DUCKCLAW_REDIS_URL"):
+            env_vars["REDIS_URL"] = env_vars["DUCKCLAW_REDIS_URL"]
 
-        module = "duckclaw.api.gateway" if gateway else "duckclaw.agents.graph_server"
-        args_cmd = f"-m uvicorn {module}:app --host {host} --port {port}"
+        if gateway:
+            # Microservicio unificado: services/api-gateway (agente + db/write)
+            args_cmd = f"-m uvicorn main:app --host {host} --port {port} --app-dir services/api-gateway"
+        else:
+            args_cmd = f"-m uvicorn duckclaw.agents.graph_server:app --host {host} --port {port}"
         gateway_cwd = effective_cwd
         env_str = json.dumps(env_vars, indent=8)
         config_content = f"""/**
@@ -407,8 +414,15 @@ module.exports = {{
 
     # Run directly
     if gateway:
-        from duckclaw.api.gateway import run_gateway
-        run_gateway(host=host, port=port, reload=reload)
+        import uvicorn
+        uvicorn.run(
+            "main:app",
+            host=host,
+            port=port,
+            reload=reload,
+            app_dir=str(Path(effective_cwd) / "services" / "api-gateway"),
+            log_level="info",
+        )
     else:
         from duckclaw.agents.graph_server import _run_server
         _run_server(host=host, port=port, reload=reload)

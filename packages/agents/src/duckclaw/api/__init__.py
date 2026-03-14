@@ -1,1 +1,0 @@
-"""DuckClaw API Gateway."""

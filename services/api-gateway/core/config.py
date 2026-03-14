@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "DuckClaw API Gateway"
     VERSION: str = "0.0.1"
     
-    # Configuración de Redis (Valida automáticamente que sea una URL válida de Redis)
+    # Configuración de Redis (REDIS_URL o DUCKCLAW_REDIS_URL en .env)
     REDIS_URL: RedisDsn = "redis://localhost:6379/0"
     
     # Configuración de Seguridad (valores por defecto para desarrollo/local; en producción definir en .env)

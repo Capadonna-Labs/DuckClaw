@@ -61,7 +61,7 @@ Documento detallado del ciclo de vida de los datos: API Gateway, DB Writer, cola
 | `services/api-gateway/core/config.py` | Config: `REDIS_URL` (o `DUCKCLAW_REDIS_URL`).                           |
 
 
-**Endpoints (todos definidos en `main.py`):**
+**Endpoints (todos definidos en `services/api-gateway/main.py`):**
 
 - `GET /`, `GET /health` — Root y health check.
 - `POST /api/v1/db/write` — Encola escrituras en Redis.
@@ -74,38 +74,39 @@ Documento detallado del ciclo de vida de los datos: API Gateway, DB Writer, cola
 
 ---
 
-### 2.2 Dependencias del agente (usadas por el Gateway)
+### 2.2 Dependencias del agente (usadas por el microservicio)
 
 
 | Ruta                                                  | Descripción                                                                 |
 | ----------------------------------------------------- | --------------------------------------------------------------------------- |
-| `packages/agents/src/duckclaw/api/gateway.py`         | Re-export de la app para compatibilidad (tests, `run_gateway`).             |
-| `packages/agents/src/duckclaw/agents/graph_server.py` | Grafo LangGraph, `get_db()`, `_ainvoke()` — importado desde `main.py`.      |
-| `packages/agents/src/duckclaw/gateway_db.py`          | Ruta de la `.duckdb` (`DUCKCLAW_DB_PATH`).                                  |
+| `services/api-gateway/main.py`                        | Microservicio: importa `graph_server`, `gateway_db`, `on_the_fly_commands`. |
+| `packages/agents/src/duckclaw/agents/graph_server.py` | Grafo LangGraph, `get_db()`, `_ainvoke()`.                                 |
+| `services/db-writer/core/config.py`                    | Ruta de la `.duckdb` (`DUCKDB_PATH`; por defecto `db/duckclaw.duckdb`).     |
 
 
 ---
 
-### 2.3 Singleton Writer Bridge (agente → Redis → DuckDB)
+### 2.3 Singleton Writer Bridge (API Gateway → Redis → DB Writer)
 
 
-| Ruta                                                                 | Descripción                                                             |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `packages/agents/src/duckclaw/forge/homeostasis/singleton_writer.py` | `enqueue_write()`, `run_consumer()`. Cola `duckdb_write_queue`.         |
-| `packages/agents/src/duckclaw/agents/tools.py`                       | `run_sql()` llama a `enqueue_write()` para INSERT/UPDATE/DELETE/CREATE. |
+| Ruta                                 | Descripción                                                                 |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| `services/api-gateway/main.py`      | `POST /api/v1/db/write` encola en Redis. Rechaza SELECT.                    |
+| `services/db-writer/main.py`        | Consumidor: BRPOP `duckdb_write_queue`, ejecuta `conn.execute(query, params)`. |
+| `packages/agents/src/duckclaw/agents/tools.py` | `run_sql()` para escrituras (agente dentro del Gateway).              |
 
 
 **Flujo:**
 
-1. `run_sql()` en `tools.py` detecta escritura (no SELECT/WITH/SHOW/DESCRIBE).
-2. Si `DUCKCLAW_WRITE_QUEUE_URL` está definido → `enqueue_write(sql)`.
-3. Redis `LPUSH duckdb_write_queue` con `{"sql": "...", "db_path": "..."}`.
-4. `run_consumer()` hace `BRPOP` y ejecuta `db.execute(sql)`.
+1. Cliente envía `POST /api/v1/db/write` con `{"query", "params", "tenant_id"}`.
+2. Gateway valida que no sea SELECT; genera `task_id`; hace `LPUSH duckdb_write_queue` con `{"task_id", "tenant_id", "query", "params"}`.
+3. Redis mantiene la cola.
+4. `services/db-writer` hace `BRPOP` y ejecuta `conn.execute(query, params)` en DuckDB.
 
 **Arranque del consumidor:**
 
 ```bash
-python -m duckclaw.forge.homeostasis.singleton_writer --consume
+cd services/db-writer && python main.py
 ```
 
 O como PM2: `DuckClaw-DB-Writer`.
@@ -121,9 +122,9 @@ O como PM2: `DuckClaw-DB-Writer`.
 | `services/db-writer/core/config.py` | `REDIS_URL`, `QUEUE_NAME`, `DUCKDB_PATH`.                       |
 
 
-**Formato de mensaje esperado:** `{"task_id", "tenant_id", "query", "params"}` (diferente al de `singleton_writer` que usa `{"sql", "db_path"}`).
+**Formato de mensaje esperado:** `{"task_id", "tenant_id", "query", "params"}`.
 
-**Uso:** Pensado para el pipeline `services/api-gateway` → Redis → `services/db-writer`. Si solo usas el agente, el consumidor relevante es `singleton_writer`.
+**Uso:** Pensado para el pipeline `services/api-gateway` → Redis → `services/db-writer`.
 
 ---
 
@@ -147,7 +148,7 @@ O como PM2: `DuckClaw-DB-Writer`.
 | ----------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `packages/agents/src/duckclaw/workers/loader.py`      | `run_schema(db, spec)` — crea schema, `agent_beliefs`, ejecuta `schema.sql`. |
 | `packages/agents/templates/workers/finanz/schema.sql` | DDL de tablas (cuentas, presupuestos, deudas, transacciones, etc.).          |
-| `packages/shared/scripts/duckclaw_setup_wizard.py`    | Wizard CLI: crea `db/<nombre>.duckdb` si no existe.                          |
+| `scripts/duckclaw_setup_wizard.py`                   | Wizard CLI: crea `db/<nombre>.duckdb` si no existe; gestiona PM2 (Gateway, DB Writer). |
 | `packages/shared/scripts/recreate_gateway_db.py`      | Recrea la DB del Gateway con schema Finanz.                                  |
 | `packages/shared/scripts/apply_finanz_schema.py`      | Aplica tablas Finanz a una `.duckdb` existente.                              |
 
@@ -280,8 +281,65 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 | **run_sql**                               | `packages/agents/src/duckclaw/agents/tools.py`                                         |
 | **Crear schema**                          | `packages/agents/src/duckclaw/workers/loader.py` (`run_schema`)                        |
 | **Schema Finanz**                         | `packages/agents/templates/workers/finanz/schema.sql`                                  |
-| **Ruta DB**                               | `packages/agents/src/duckclaw/gateway_db.py`                                           |
+| **Ruta DB**                               | `services/db-writer/core/config.py` (`DUCKDB_PATH`)                                   |
 | **Sincronizar VPS**                       | `packages/shared/scripts/sync_telegram_duckdb.sh`                                      |
 | **Tests pipeline**                        | `tests/run_singleton_writer_pipeline.py`                                               |
+
+---
+
+## 6. Wizard y pipeline completo
+
+El wizard (`duckops init` → `scripts/duckclaw_setup_wizard.py`) es el punto de entrada para configurar y desplegar todo el pipeline. Sustituye scripts `.sh` por un CLI en Python: mantenible, cross-platform (macOS, Linux, Windows) y con control de datos sensibles (Habeas Data).
+
+### 6.1 Comandos duckops
+
+| Comando | Descripción |
+|---------|-------------|
+| `duckops init [tenant_id]` | Ejecuta el wizard interactivo (Rich). Invoca `scripts/duckclaw_setup_wizard.py`. |
+| `duckops serve [--pm2] [--gateway]` | Arranca el API Gateway (`services/api-gateway`) o servidor LangGraph. Con `--gateway` genera `ecosystem.api.config.cjs` y despliega DuckClaw-Gateway en PM2. Carga `.env` para propagar `DUCKCLAW_LLM_PROVIDER`, `REDIS_URL`, etc. |
+| `duckops deploy [--provider]` | Despliega DuckClaw-Brain (bot Telegram) como servicio persistente (PM2, systemd, Windows). |
+| `duckops audit` | Muestra configuración con datos sensibles enmascarados. |
+
+### 6.2 Cómo el wizard lleva a cabo el pipeline
+
+**Paso 0 — Detección de servicios PM2**
+
+Al iniciar, el wizard lista los procesos PM2 detectados. Si el usuario elige "Gestionar servicio de persistencia", puede editar:
+
+- **DuckClaw-Gateway**: Regenera `ecosystem.api.config.cjs` vía `duckops serve --pm2 --gateway`. Escribe `DUCKCLAW_DB_PATH` y `DUCKDB_PATH` en `.env`. El Gateway encola escrituras en Redis y sirve el agente.
+- **DuckClaw-DB-Writer**: Genera `ecosystem.db-writer.config.cjs` con `cwd=services/db-writer`, `REDIS_URL` y `DUCKDB_PATH`. El consumidor hace BRPOP sobre `duckdb_write_queue` y escribe en DuckDB.
+- **DuckClaw-Brain**: Genera `ecosystem.core.config.cjs` para el bot Telegram (polling directo, sin pasar por n8n).
+
+**Configuración de la base de datos**
+
+- **Prioridad:** `DUCKCLAW_DB_PATH` en `.env` → `~/.config/duckclaw/wizard_config.json` → `db/duckclaw.duckdb`.
+- **Normalización:** Cualquier ruta se normaliza a `db/<nombre>.duckdb` respecto a la raíz del repo.
+- **Compatibilidad:** Al escribir `DUCKCLAW_DB_PATH`, el wizard escribe también `DUCKDB_PATH` para que `services/db-writer` use la misma ruta.
+- **Creación automática:** Al confirmar o guardar, se crea el archivo `.duckdb` en `db/` si no existe.
+
+**Flujo completo (wizard → pipeline operativo)**
+
+1. Usuario ejecuta `duckops init`.
+2. Wizard detecta PM2 y ofrece gestionar DuckClaw-Gateway, DuckClaw-DB-Writer o DuckClaw-Brain.
+3. Si gestiona **Gateway**: regenera config, escribe `.env`, reinicia PM2. El Gateway queda listo para recibir tráfico de n8n.
+4. Si gestiona **DB Writer**: genera `ecosystem.db-writer.config.cjs`, inicia o reinicia el consumidor. Redis → DuckDB queda operativo.
+5. Si gestiona **Brain** o completa el wizard: configura token, LLM, DB; despliega con PM2/systemd; opcionalmente arranca el bot.
+6. Pipeline operativo: n8n → Gateway → (agente / db/write) → Redis → DB Writer → DuckDB.
+
+### 6.3 Estructura del CLI duckops
+
+```
+packages/duckops/
+├── pyproject.toml
+└── duckops/
+    ├── cli.py              # Punto de entrada Typer (app)
+    └── commands/
+        ├── init.py         # duckops init → scripts/duckclaw_setup_wizard.py
+        ├── serve.py        # duckops serve (Gateway, LangGraph)
+        ├── deploy.py       # duckops deploy (PM2, systemd, Windows)
+        └── audit.py        # duckops audit (Habeas Data)
+```
+
+El script `install_duckclaw.sh` usa `duckops init` cuando está instalado; si no, ejecuta el wizard directamente.
 
 

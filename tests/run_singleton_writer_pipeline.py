@@ -1,6 +1,12 @@
 """
 Tests para el pipeline Singleton Writer Bridge (API Gateway → Redis → DB Writer → DuckDB).
 
+Spec: specs/FLUJO_VIDA_DATO_PIPELINE.md, specs/04_Singleton_Writer_Pipeline.md
+
+Flujo: services/api-gateway/main.py → Redis duckdb_write_queue → services/db-writer → DuckDB
+
+Ruta DB: services/db-writer/core/config.py (DUCKDB_PATH; por defecto db/duckclaw.duckdb).
+
 Incluye:
 - Tests unitarios con mocks (payload, health check, gateway endpoint).
 - Test de integración opcional (marcado para ejecución explícita si Redis está disponible).
@@ -21,9 +27,9 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVICES = REPO_ROOT / "services"
 DB_WRITER_DIR = SERVICES / "db-writer"
-API_GATEWAY_DIR = SERVICES / "api-gateway"
+API_GATEWAY_DIR = SERVICES / "api-gateway"  # microservicio unificado (spec FLUJO_VIDA_DATO)
 GATEWAY_URL = "http://127.0.0.1:8000"
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL", "redis://localhost:6379/0")
 
 
 # ─── Funciones del pipeline (reutilizadas por tests de integración y unitarios) ─────────────────
@@ -60,11 +66,13 @@ def ensure_redis() -> bool:
 
 
 def start_db_writer():
-    """Arranca el DB Writer en segundo plano."""
+    """Arranca services/db-writer en segundo plano (consumidor de duckdb_write_queue)."""
     if not (DB_WRITER_DIR / "main.py").exists():
         return None
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(DB_WRITER_DIR)
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    env.setdefault("REDIS_URL", REDIS_URL)
+    env.setdefault("DUCKDB_PATH", str(REPO_ROOT / "db" / "duckclaw.duckdb"))
     proc = subprocess.Popen(
         [sys.executable, "main.py"],
         cwd=DB_WRITER_DIR,
@@ -84,6 +92,7 @@ def start_api_gateway():
     env = os.environ.copy()
     env["PYTHONPATH"] = str(REPO_ROOT)  # repo root para imports duckclaw
     env["DUCKCLAW_TAILSCALE_AUTH_KEY"] = ""  # integración sin auth (spec 04)
+    env.setdefault("REDIS_URL", REDIS_URL)
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000", "--app-dir", str(API_GATEWAY_DIR)],
         cwd=REPO_ROOT,
@@ -203,7 +212,7 @@ def test_ensure_redis_returns_false_when_connection_fails() -> None:
 
 @pytest.fixture
 def gateway_app():
-    """App FastAPI del microservicio services/api-gateway/main.py con Redis mockeado."""
+    """App FastAPI del microservicio services/api-gateway/main.py con Redis mockeado (spec FLUJO_VIDA_DATO 2.1)."""
     # Sin DUCKCLAW_TAILSCALE_AUTH_KEY el middleware no exige auth (spec 04_Singleton_Writer)
     with patch.dict(os.environ, {"DUCKCLAW_TAILSCALE_AUTH_KEY": ""}, clear=False):
         sys.path.insert(0, str(API_GATEWAY_DIR))
@@ -291,10 +300,20 @@ def test_full_pipeline_e2e() -> None:
     assert db_writer_proc is not None
     gateway_proc = start_api_gateway()
     assert gateway_proc is not None
+    db_path = REPO_ROOT / "db" / "duckclaw.duckdb"
     try:
         assert wait_health(GATEWAY_URL, timeout=15.0), "Gateway /health did not respond"
         assert post_write(), "POST /api/v1/db/write failed"
         time.sleep(3)
+        # Verificación opcional: que la escritura llegó a DuckDB (spec 04)
+        if db_path.exists():
+            import duckdb
+            conn = duckdb.connect(str(db_path), read_only=True)
+            rows = conn.execute("SELECT id, msg FROM _pipeline_test WHERE id = 1").fetchall()
+            conn.close()
+            assert len(rows) == 1 and rows[0][1] == "Singleton Writer Bridge OK", (
+                f"Verificación DuckDB fallida: esperado (1, 'Singleton Writer Bridge OK'), obtuvo {rows}"
+            )
     finally:
         gateway_proc.terminate()
         db_writer_proc.terminate()

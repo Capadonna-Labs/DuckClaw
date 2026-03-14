@@ -298,9 +298,14 @@ def serve(
     gateway: bool = False,
 ) -> int:
     """
-    Start the DuckClaw LangGraph API server.
-    If --pm2: deploy as a persistent PM2 service.
-    Otherwise: run directly (blocking).
+    Start the DuckClaw API server.
+
+    - gateway=True: microservicio services/api-gateway/main.py (uvicorn --app-dir services/api-gateway).
+      Usado por duckops serve --gateway y por _edit_gateway_service en el wizard.
+    - gateway=False: duckclaw.agents.graph_server (LangGraph legacy).
+
+    Si pm2=True: genera ecosystem.api.config.cjs y despliega en PM2.
+    Si no: ejecuta uvicorn directamente (bloqueante).
     """
     effective_cwd = str(Path(cwd or os.getcwd()).resolve())
 
@@ -346,7 +351,8 @@ def serve(
             env_vars["REDIS_URL"] = env_vars["DUCKCLAW_REDIS_URL"]
 
         if gateway:
-            # Microservicio unificado: services/api-gateway (agente + db/write)
+            # Microservicio unificado: services/api-gateway/main.py (agente + db/write)
+            # cwd=repo_root → --app-dir services/api-gateway resuelve a repo/services/api-gateway
             args_cmd = f"-m uvicorn main:app --host {host} --port {port} --app-dir services/api-gateway"
         else:
             args_cmd = f"-m uvicorn duckclaw.agents.graph_server:app --host {host} --port {port}"
@@ -412,15 +418,17 @@ module.exports = {{
         print(f"   Logs → pm2 logs {name}", flush=True)
         return 0
 
-    # Run directly
+    # Run directly (sin PM2)
     if gateway:
         import uvicorn
+        # services/api-gateway/main.py — microservicio unificado (spec FLUJO_VIDA_DATO)
+        app_dir = str(Path(effective_cwd) / "services" / "api-gateway")
         uvicorn.run(
             "main:app",
             host=host,
             port=port,
             reload=reload,
-            app_dir=str(Path(effective_cwd) / "services" / "api-gateway"),
+            app_dir=app_dir,
             log_level="info",
         )
     else:

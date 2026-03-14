@@ -17,7 +17,9 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent.parent.parent
 
 
+@app.callback(invoke_without_command=True)
 def cmd_init(
+    ctx: typer.Context,
     tenant_id: str = typer.Argument(
         default="default",
         help="ID del tenant (para futura multi-tenancy).",
@@ -29,8 +31,10 @@ def cmd_init(
     ),
 ) -> None:
     """Inicializa un nuevo tenant con su base de datos y configuración."""
+    if ctx.invoked_subcommand is not None:
+        return
     repo = _repo_root()
-    wizard_script = repo / "packages" / "shared" / "scripts" / "duckclaw_setup_wizard.py"
+    wizard_script = repo / "scripts" / "duckclaw_setup_wizard.py"
 
     if not wizard_script.is_file():
         typer.echo(f"[red]No se encontró el wizard: {wizard_script}[/]", err=True)

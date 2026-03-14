@@ -52,3 +52,4 @@ ecosystem.*.config.cjs
 .cursorrules
 
 /db/
+dump.rdb

@@ -1,9 +1,0 @@
-# Entry Router — ruteo retail vs general
-# Spec: Agent Forge Refactor
-type: entry_router
-name: "Entry Router"
-routing:
-  llm_fallback: true
-sub_graphs:
-  general: general.yaml
-  retail: retail.yaml

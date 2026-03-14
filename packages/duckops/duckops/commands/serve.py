@@ -20,7 +20,7 @@ def cmd_serve(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host para escuchar."),
     port: int = typer.Option(8000, "--port", "-p", help="Puerto."),
     pm2: bool = typer.Option(False, "--pm2", help="Desplegar como servicio PM2."),
-    gateway: bool = typer.Option(False, "--gateway", "-g", help="Usar duckclaw.api.gateway (n8n, Telegram)."),
+    gateway: bool = typer.Option(False, "--gateway", "-g", help="Usar microservicio services/api-gateway (n8n, Telegram)."),
     name: str = typer.Option(
         None,
         "--name",

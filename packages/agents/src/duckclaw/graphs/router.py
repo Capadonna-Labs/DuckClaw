@@ -225,8 +225,8 @@ def build_entry_router_graph(
     """
     from langgraph.graph import END, StateGraph
 
-    from duckclaw.agents.general_graph import build_general_graph
-    from duckclaw.agents.retail_graph import build_retail_graph
+    from duckclaw.graphs.general_graph import build_general_graph
+    from duckclaw.graphs.retail_graph import build_retail_graph
 
     has_retail = store_db is not None
     has_olist = _has_olist_schema(db)

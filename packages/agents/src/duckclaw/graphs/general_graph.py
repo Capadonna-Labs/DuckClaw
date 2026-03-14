@@ -9,7 +9,7 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
-from duckclaw.agents.tools import run_sql, inspect_schema, manage_memory
+from duckclaw.graphs.tools import run_sql, inspect_schema, manage_memory
 
 
 _DB_INTENT_RE = re.compile(
@@ -97,7 +97,7 @@ def build_general_graph(
     # Sandbox (Strix) — solo si está en tools_spec y Docker está disponible
     if "run_sandbox" in tool_names_set:
         try:
-            from duckclaw.agents.sandbox import sandbox_tool_factory, _docker_available
+            from duckclaw.graphs.sandbox import sandbox_tool_factory, _docker_available
             if _docker_available():
                 tools.append(sandbox_tool_factory(db, llm))
         except Exception:

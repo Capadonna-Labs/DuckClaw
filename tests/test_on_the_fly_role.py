@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from duckclaw.agents.on_the_fly_commands import (
+from duckclaw.graphs.on_the_fly_commands import (
     execute_role_switch,
     get_worker_id_for_chat,
     handle_command,

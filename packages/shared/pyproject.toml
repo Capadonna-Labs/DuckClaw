@@ -10,8 +10,12 @@ requires-python = ">=3.9"
 dependencies = [
     "requests>=2.28.0",
     "langchain-core>=0.3.0",
+    "langchain-openai>=0.3.35",
 ]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-packages = ["duckclaw", "duckclaw.integrations", "duckclaw.utils", "duckclaw.bi", "duckclaw.ops", "duckclaw.ops.providers"]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["duckclaw*"]
+
+[tool.setuptools.package-dir]
+"" = "src"

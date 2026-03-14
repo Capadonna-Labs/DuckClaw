@@ -301,7 +301,7 @@ def execute_goals(db: Any, chat_id: Any, args: str) -> str:
 
 def execute_tasks(db: Any, chat_id: Any) -> str:
     """/tasks: estado del ActivityManager (Redis): IDLE, BUSY, tarea actual, tiempo en ejecución."""
-    from duckclaw.agents.activity import get_activity
+    from duckclaw.graphs.activity import get_activity
     data = get_activity(chat_id)
     if data is None:
         return _telegram_safe("Estado: IDLE (sin Redis para ActivityManager). Configura DUCKCLAW_WRITE_QUEUE_URL o DUCKCLAW_REDIS_URL.")

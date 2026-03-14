@@ -3,11 +3,11 @@ Bot de Telegram dinámico: configuración desde DuckDB (agent_config) y /setup e
 
 Uso:
   uv sync --extra agents   # instala telegram + langgraph
-  uv run python -m duckclaw.agents.telegram_bot
+  uv run python -m duckclaw.graphs.telegram_bot
 
   # o con pip (en zsh/bash usa comillas):
   pip install 'duckclaw[agents]'
-  python -m duckclaw.agents.telegram_bot
+  python -m duckclaw.graphs.telegram_bot
 
 Requiere: TELEGRAM_BOT_TOKEN y opcionalmente DUCKCLAW_DB_PATH.
 Lee variables desde .env en el directorio actual o en la raíz del proyecto.
@@ -308,7 +308,7 @@ def _run_bot() -> None:
     )
     # GraphRAG (spec: Estructura_Basada_en_Grafos_DuckDB_PGQ_GraphRAG.md): memory_nodes, memory_edges, duckclaw_kg
     try:
-        from duckclaw.agents.graph_rag import ensure_graph_rag_schema
+        from duckclaw.graphs.graph_rag import ensure_graph_rag_schema
         ensure_graph_rag_schema(db)
     except Exception:
         pass
@@ -331,7 +331,7 @@ def _run_bot() -> None:
                 return
 
             # On-the-Fly CLI (spec: interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md)
-            from duckclaw.agents.on_the_fly_commands import handle_command
+            from duckclaw.graphs.on_the_fly_commands import handle_command
             cmd_reply = handle_command(self.db, chat_id, text)
             if cmd_reply is not None:
                 _log(f"📋 Comando ejecutado chat={chat_id}")
@@ -385,7 +385,7 @@ def _run_bot() -> None:
             display_model = _resolve_display_model(llm_provider, llm_model, llm_base_url)
             _log(f"🤔 [{display_model}] pensando...")
 
-            from duckclaw.agents.on_the_fly_commands import (
+            from duckclaw.graphs.on_the_fly_commands import (
                 append_task_audit,
                 get_chat_state,
                 get_history_limit_for_chat,
@@ -397,7 +397,7 @@ def _run_bot() -> None:
             use_rag = get_chat_state(self.db, chat_id, "use_rag") != "false"
 
             try:
-                from duckclaw.agents.activity import set_busy, set_idle
+                from duckclaw.graphs.activity import set_busy, set_idle
                 set_busy(chat_id, task=text)
             except Exception:
                 pass
@@ -420,7 +420,7 @@ def _run_bot() -> None:
                 state = {"incoming": text, "history": history}
                 if use_rag:
                     try:
-                        from duckclaw.agents.graph_rag import graph_context_retriever
+                        from duckclaw.graphs.graph_rag import graph_context_retriever
                         state["graph_context"] = graph_context_retriever(self.db, text) or ""
                     except Exception:
                         state["graph_context"] = ""
@@ -436,14 +436,14 @@ def _run_bot() -> None:
                 traceback.print_exc()
             finally:
                 try:
-                    from duckclaw.agents.activity import set_idle
+                    from duckclaw.graphs.activity import set_idle
                     set_idle(chat_id)
                 except Exception:
                     pass
             reply = _normalize_reply(reply) or ""
             if use_rag and reply and text:
                 try:
-                    from duckclaw.agents.graph_rag import run_graph_memory_extractor_background
+                    from duckclaw.graphs.graph_rag import run_graph_memory_extractor_background
                     from duckclaw.integrations.llm_providers import build_llm
                     _llm = build_llm(provider=llm_provider or "", model=llm_model or "", base_url=llm_base_url or "")
                     run_graph_memory_extractor_background(self.db, _llm, text, reply)

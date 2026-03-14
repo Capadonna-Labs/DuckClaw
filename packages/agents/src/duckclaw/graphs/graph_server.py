@@ -5,9 +5,9 @@ Expone el grafo LangGraph como una API REST para uso desde LangSmith,
 aplicaciones externas o integración en internet.
 
 Uso directo:
-  python -m duckclaw.agents.graph_server               # puerto 8123
-  python -m duckclaw.agents.graph_server --port 9000
-  python -m duckclaw.agents.graph_server --host 0.0.0.0 --port 8123
+  python -m duckclaw.graphs.graph_server               # puerto 8123
+  python -m duckclaw.graphs.graph_server --port 9000
+  python -m duckclaw.graphs.graph_server --host 0.0.0.0 --port 8123
 
 Via duckops:
   duckops serve --port 8123
@@ -349,7 +349,7 @@ def _run_server(host: str = "0.0.0.0", port: int = 8123, reload: bool = False) -
     elif tracing != "true":
         print("   LangSmith → trazas DESACTIVADAS (añade LANGCHAIN_TRACING_V2=true a .env)", flush=True)
     uvicorn.run(
-        "duckclaw.agents.graph_server:app",
+        "duckclaw.graphs.graph_server:app",
         host=host,
         port=port,
         reload=reload,

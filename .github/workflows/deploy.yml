@@ -32,3 +32,6 @@ jobs:
 
       - name: Run singleton writer pipeline integration test with logs
         run: RUN_SINGLETON_PIPELINE_INTEGRATION=1 uv run pytest tests/run_singleton_writer_pipeline.py -v -m integration --capture=no
+
+      - name: Run final smoke test
+        run: uv run pytest tests/test_final.py -v

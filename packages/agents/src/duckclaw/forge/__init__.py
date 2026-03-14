@@ -18,10 +18,9 @@ ENTRY_ROUTER_YAML = TEMPLATES_DIR / "entry_router.yaml"
 GENERAL_YAML = TEMPLATES_DIR / "general.yaml"
 RETAIL_YAML = TEMPLATES_DIR / "retail.yaml"
 
-# Ruta a templates de workers (packages/agents/templates/workers/)
-# forge está en packages/agents/src/duckclaw/forge -> parent³ = packages/agents
-_PROJECT_ROOT = FORGE_DIR.parent.parent.parent
-WORKERS_TEMPLATES_DIR = _PROJECT_ROOT / "templates" / "workers"
+# Ruta a plantillas de workers: forge/templates/ (cada subdir con manifest.yaml es un worker)
+# finanz, personalizable, powerseal, research_worker, support, etc.
+WORKERS_TEMPLATES_DIR = TEMPLATES_DIR
 
 __all__ = [
     "AgentAssembler",

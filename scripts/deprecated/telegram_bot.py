@@ -15,7 +15,7 @@ if str(_repo_root) not in __import__("sys").path:
 import duckclaw
 from duckclaw.integrations import TelegramBotBase
 from duckclaw.integrations.llm_providers import build_agent_graph, build_llm
-from duckclaw.agents.router import build_entry_router_graph
+from duckclaw.graphs.router import build_entry_router_graph
 
 
 class EchoDuckBot(TelegramBotBase):
@@ -44,7 +44,7 @@ class EchoDuckBot(TelegramBotBase):
 
 
 class LangGraphDuckBot(TelegramBotBase):
-    """Bot powered by LangGraph entry router (retail vs general). Uses duckclaw.agents.router.
+    """Bot powered by LangGraph entry router (retail vs general). Uses duckclaw.graphs.router.
     Si store_db_path está definido, usa el grafo retail (Contador Soberano) cuando aplique."""
 
     def __init__(

@@ -80,7 +80,7 @@ Documento detallado del ciclo de vida de los datos: API Gateway, DB Writer, cola
 | Ruta                                                  | Descripción                                                                 |
 | ----------------------------------------------------- | --------------------------------------------------------------------------- |
 | `services/api-gateway/main.py`                        | Microservicio: importa `graph_server`, `gateway_db`, `on_the_fly_commands`. |
-| `packages/agents/src/duckclaw/agents/graph_server.py` | Grafo LangGraph, `get_db()`, `_ainvoke()`.                                 |
+| `packages/agents/src/duckclaw/graphs/graph_server.py` | Grafo LangGraph, `get_db()`, `_ainvoke()`.                                 |
 | `services/db-writer/core/config.py`                    | Ruta de la `.duckdb` (`DUCKDB_PATH`; por defecto `db/duckclaw.duckdb`).     |
 
 
@@ -93,7 +93,7 @@ Documento detallado del ciclo de vida de los datos: API Gateway, DB Writer, cola
 | ------------------------------------ | --------------------------------------------------------------------------- |
 | `services/api-gateway/main.py`      | `POST /api/v1/db/write` encola en Redis. Rechaza SELECT.                    |
 | `services/db-writer/main.py`        | Consumidor: BRPOP `duckdb_write_queue`, ejecuta `conn.execute(query, params)`. |
-| `packages/agents/src/duckclaw/agents/tools.py` | `run_sql()` para escrituras (agente dentro del Gateway).              |
+| `packages/agents/src/duckclaw/graphs/tools.py` | `run_sql()` para escrituras (grafo dentro del Gateway).              |
 
 
 **Flujo:**
@@ -274,11 +274,10 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 | Función                                   | Scripts                                                                                |
 | ----------------------------------------- | -------------------------------------------------------------------------------------- |
 | **API Gateway (microservicio unificado)** | `services/api-gateway/main.py`                                                         |
-| **Re-export compatibilidad**            | `packages/agents/src/duckclaw/api/gateway.py`                                          |
 | **Encolar escrituras**                    | `packages/agents/src/duckclaw/forge/homeostasis/singleton_writer.py` (`enqueue_write`) |
-| **Consumir cola (agente)**                | `python -m duckclaw.forge.homeostasis.singleton_writer --consume`                      |
+| **Consumir cola (forge)**                 | `python -m duckclaw.forge.homeostasis.singleton_writer --consume`                     |
 | **Consumir cola (api-gateway)**           | `services/db-writer/main.py`                                                           |
-| **run_sql**                               | `packages/agents/src/duckclaw/agents/tools.py`                                         |
+| **run_sql**                               | `packages/agents/src/duckclaw/graphs/tools.py`                                         |
 | **Crear schema**                          | `packages/agents/src/duckclaw/workers/loader.py` (`run_schema`)                        |
 | **Schema Finanz**                         | `packages/agents/templates/workers/finanz/schema.sql`                                  |
 | **Ruta DB**                               | `services/db-writer/core/config.py` (`DUCKDB_PATH`)                                   |

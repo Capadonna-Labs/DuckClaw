@@ -18,7 +18,7 @@ def _resolve_command(command: str, cwd: Optional[str] = None) -> str:
     """
     Resolve command to an absolute form when it looks like a script path.
     If command is a single path (no spaces or starts with / or .), resolve to absolute.
-    Otherwise return as-is (e.g. "-m duckclaw.agents.telegram_bot" or "python script.py").
+    Otherwise return as-is (e.g. "-m duckclaw.graphs.telegram_bot" or "python script.py").
     """
     base = (cwd or os.getcwd()) if cwd else os.getcwd()
     cmd = command.strip()
@@ -293,7 +293,7 @@ def serve(
     port: int = 8123,
     reload: bool = False,
     pm2: bool = False,
-    name: str = "DuckClaw-API",
+    name: Optional[str] = None,
     cwd: Optional[str] = None,
     gateway: bool = False,
 ) -> int:
@@ -302,11 +302,12 @@ def serve(
 
     - gateway=True: microservicio services/api-gateway/main.py (uvicorn --app-dir services/api-gateway).
       Usado por duckops serve --gateway y por _edit_gateway_service en el wizard.
-    - gateway=False: duckclaw.agents.graph_server (LangGraph legacy).
+    - gateway=False: duckclaw.graphs.graph_server (LangGraph legacy).
 
     Si pm2=True: genera ecosystem.api.config.cjs y despliega en PM2.
     Si no: ejecuta uvicorn directamente (bloqueante).
     """
+    effective_name = name or ("DuckClaw-Gateway" if gateway else "DuckClaw-API")
     effective_cwd = str(Path(cwd or os.getcwd()).resolve())
 
     if pm2:
@@ -355,7 +356,7 @@ def serve(
             # cwd=repo_root → --app-dir services/api-gateway resuelve a repo/services/api-gateway
             args_cmd = f"-m uvicorn main:app --host {host} --port {port} --app-dir services/api-gateway"
         else:
-            args_cmd = f"-m uvicorn duckclaw.agents.graph_server:app --host {host} --port {port}"
+            args_cmd = f"-m uvicorn duckclaw.graphs.graph_server:app --host {host} --port {port}"
         gateway_cwd = effective_cwd
         env_str = json.dumps(env_vars, indent=8)
         config_content = f"""/**
@@ -367,7 +368,7 @@ def serve(
 module.exports = {{
   apps: [
     {{
-      name: "{name}",
+      name: "{effective_name}",
       script: "{python_path}",
       args: "{args_cmd}",
       cwd: "{effective_cwd}",
@@ -405,17 +406,17 @@ module.exports = {{
                     print(f"⚠️  No se pudo crear la BD en {_db_file}: {_e}", flush=True)
 
         # Start or restart
-        existing = sp.run(["pm2", "id", name], capture_output=True, text=True)
+        existing = sp.run(["pm2", "id", effective_name], capture_output=True, text=True)
         if existing.returncode == 0 and existing.stdout.strip() not in ("", "[]"):
-            sp.run(["pm2", "restart", name, "--update-env"], check=False)
-            print(f"🔄  PM2: {name} reiniciado.", flush=True)
+            sp.run(["pm2", "restart", effective_name, "--update-env"], check=False)
+            print(f"🔄  PM2: {effective_name} reiniciado.", flush=True)
         else:
             sp.run(["pm2", "start", str(config_path)], check=False)
-            print(f"🚀  PM2: {name} iniciado.", flush=True)
+            print(f"🚀  PM2: {effective_name} iniciado.", flush=True)
 
         print(f"\n   API →  http://localhost:{port}", flush=True)
         print(f"   Docs → http://localhost:{port}/docs", flush=True)
-        print(f"   Logs → pm2 logs {name}", flush=True)
+        print(f"   Logs → pm2 logs {effective_name}", flush=True)
         return 0
 
     # Run directly (sin PM2)
@@ -432,7 +433,7 @@ module.exports = {{
             log_level="info",
         )
     else:
-        from duckclaw.agents.graph_server import _run_server
+        from duckclaw.graphs.graph_server import _run_server
         _run_server(host=host, port=port, reload=reload)
     return 0
 

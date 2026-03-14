@@ -33,7 +33,7 @@ if "--write-systemd" in sys.argv:
     from duckclaw.ops.providers.systemd import get_systemd_unit_content
     _py = os.path.abspath(sys.executable)
     _content, _fname = get_systemd_unit_content(
-        name="DuckClaw-Brain", command="-m duckclaw.agents.telegram_bot",
+        name="DuckClaw-Brain", command="-m duckclaw.graphs.telegram_bot",
         python_path=_py, cwd=str(_repo),
     )
     _out = _repo / _fname
@@ -331,7 +331,14 @@ def _edit_gateway_service(console: Console, state: dict[str, Any], repo_root: Pa
         _write_env_file(repo_root, "REDIS_URL", os.environ.get("DUCKCLAW_REDIS_URL", ""))
     try:
         from duckclaw.ops.manager import serve
-        code = serve(host="0.0.0.0", port=8000, pm2=True, gateway=True, cwd=str(repo_root))
+        code = serve(
+            host="0.0.0.0",
+            port=8000,
+            pm2=True,
+            gateway=True,
+            name=GATEWAY_SERVICE_NAME,
+            cwd=str(repo_root),
+        )
         if code == 0:
             console.print("[green]✓[/] Gateway configurado y reiniciado.")
         else:
@@ -582,7 +589,7 @@ module.exports = {{
     {{
       name: "{new_name}",
       script: "{venv_python}",
-      args: "-m duckclaw.agents.telegram_bot",
+      args: "-m duckclaw.graphs.telegram_bot",
       cwd: "{cwd}",
       interpreter: "none",
       autorestart: true,
@@ -1273,7 +1280,7 @@ def _run_section(
                 msg = deploy(
                     name=DEPLOY_SERVICE_NAME,
                     provider=deploy_provider,
-                    command="-m duckclaw.agents.telegram_bot",
+                    command="-m duckclaw.graphs.telegram_bot",
                     cwd=str(repo_root),
                 )
                 console.print(Panel(msg, title="duckops deploy", border_style="blue"))
@@ -1292,7 +1299,7 @@ def _run_section(
                     from duckclaw.ops.providers.systemd import get_systemd_unit_content
                     content, unit_name = get_systemd_unit_content(
                         name=DEPLOY_SERVICE_NAME,
-                        command="-m duckclaw.agents.telegram_bot",
+                        command="-m duckclaw.graphs.telegram_bot",
                         python_path=os.path.abspath(sys.executable),
                         cwd=str(repo_root),
                     )
@@ -1366,7 +1373,7 @@ def _run_section(
         )
         try:
             ret = subprocess.call(
-                [sys.executable, "-m", "duckclaw.agents.telegram_bot"],
+                [sys.executable, "-m", "duckclaw.graphs.telegram_bot"],
                 cwd=str(repo_root),
                 env=env,
             )
@@ -1504,10 +1511,14 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
                     for i, n in enumerate(names, 1):
                         name_table.add_row(str(i), n)
                     console.print(name_table)
+                    # Default: DuckClaw-Gateway si está en la lista, si no el primero
+                    default_idx = 1
+                    if GATEWAY_SERVICE_NAME in names:
+                        default_idx = names.index(GATEWAY_SERVICE_NAME) + 1
                     choice = Prompt.ask(
                         "Selecciona el servicio a editar",
                         choices=[str(i) for i in range(1, len(names) + 1)],
-                        default="1",
+                        default=str(default_idx),
                     )
                     found_svc = names[int(choice) - 1]
             # Cargar config guardada como base

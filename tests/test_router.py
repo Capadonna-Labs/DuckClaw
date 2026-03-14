@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import duckclaw
-from duckclaw.agents.router import get_route, build_entry_router_graph, RETAIL_KEYWORDS
+from duckclaw.graphs.router import get_route, build_entry_router_graph, RETAIL_KEYWORDS
 
 
 def test_get_route_no_retail_always_general() -> None:
@@ -30,7 +30,7 @@ def test_get_route_general_when_no_keywords() -> None:
 
 
 def test_router_imports() -> None:
-    from duckclaw.agents import build_entry_router_graph as build_graph, get_route as gr
+    from duckclaw.graphs import build_entry_router_graph as build_graph, get_route as gr
 
     assert build_graph is not None
     assert gr("inventario", True) == "retail"

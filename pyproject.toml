@@ -24,8 +24,8 @@ duckclaw-agents = { path = "packages/agents", editable = true }
 duckclaw-core = { path = "packages/core", editable = true }
 duckclaw-shared = { path = "packages/shared", editable = true }
 
-[tool.uv]
-dev-dependencies = ["pytest>=7.0.0", "httpx>=0.25.0"]
+[dependency-groups]
+dev = ["pytest>=7.0.0", "httpx>=0.25.0"]
 
 [tool.pytest.ini_options]
 markers = [

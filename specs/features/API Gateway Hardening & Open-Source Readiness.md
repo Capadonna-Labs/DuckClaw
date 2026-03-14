@@ -88,7 +88,7 @@ El `api-gateway` **no debe importar `mlx` directamente**. MLX es exclusivo de Ap
 ### B. CLI de Inicialización (`duckops`)
 Comandos del CLI para facilitar el *onboarding* de nuevos usuarios open-source:
 *   `uv run duckops init`: Genera el `.env` con claves criptográficas seguras automáticamente (`openssl rand -hex 32`).
-*   `uv run duckops serve --gateway`: Levanta el servidor Uvicorn (`duckclaw.api.gateway`) detectando el SO automáticamente.
+*   `uv run duckops serve --gateway`: Levanta el servidor Uvicorn (microservicio `services/api-gateway`) detectando el SO automáticamente.
 *   `uv run duckops serve --pm2 --gateway`: Genera `ecosystem.api.config.cjs` y despliega el Gateway en PM2 como `DuckClaw-Gateway`. Carga `.env` de la raíz para propagar `DUCKCLAW_LLM_PROVIDER`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `DUCKCLAW_DB_PATH`, etc., evitando "Connection refused" cuando el proveedor por defecto (mlx) no está disponible. El wizard (`duckops init`) escribe `DUCKCLAW_DB_PATH` en `.env` al guardar la configuración.
 
 ## 6. Contrato de Integración (Endpoints Core)

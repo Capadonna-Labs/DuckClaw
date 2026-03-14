@@ -1,7 +1,7 @@
 """Adapter LangGraph: grafo ReAct simple con herramientas SQL.
 
 Deprecated: the main Telegram bot now uses the entry router graph
-(duckclaw.agents.router.build_entry_router_graph). This adapter is kept for
+(duckclaw.graphs.router.build_entry_router_graph). This adapter is kept for
 backward compatibility and may be removed in a future release.
 """
 
@@ -42,7 +42,7 @@ class LangGraphAdapter(BaseAgent):
         except ImportError as e:
             return f"Error: instala el extra langgraph. {e}"
 
-        from duckclaw.agents.tools import run_sql, inspect_schema, manage_memory
+        from duckclaw.graphs.tools import run_sql, inspect_schema, manage_memory
 
         db = self.db
         system_prompt = self._system_prompt

@@ -324,28 +324,42 @@ def _edit_gateway_service(console: Console, state: dict[str, Any], repo_root: Pa
     )
     redis_url = os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL", "redis://localhost:6379/0")
     console.print(f"DB path: [dim]{db_path}[/]  Redis: [dim]{redis_url}[/]")
-    if not Confirm.ask("¿Regenerar config y reiniciar Gateway?", default=True):
-        return
-    _write_env_file(repo_root, "DUCKCLAW_DB_PATH", db_path)
-    if not os.environ.get("REDIS_URL") and os.environ.get("DUCKCLAW_REDIS_URL"):
-        _write_env_file(repo_root, "REDIS_URL", os.environ.get("DUCKCLAW_REDIS_URL", ""))
-    try:
-        from duckclaw.ops.manager import serve
-        code = serve(
-            host="0.0.0.0",
-            port=8000,
-            pm2=True,
-            gateway=True,
-            name=GATEWAY_SERVICE_NAME,
-            cwd=str(repo_root),
-        )
-        if code == 0:
-            console.print("[green]✓[/] Gateway configurado y reiniciado.")
-        else:
-            console.print("[yellow]Revisa los logs: pm2 logs DuckClaw-Gateway[/]")
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/]")
-        console.print("[dim]Ejecuta manualmente: duckops serve --pm2 --gateway[/]")
+
+    while True:
+        if Confirm.ask("¿Regenerar config y reiniciar Gateway?", default=True):
+            _write_env_file(repo_root, "DUCKCLAW_DB_PATH", db_path)
+            _write_env_file(repo_root, "REDIS_URL", redis_url)
+            try:
+                from duckclaw.ops.manager import serve
+                code = serve(
+                    host="0.0.0.0",
+                    port=8000,
+                    pm2=True,
+                    gateway=True,
+                    name=GATEWAY_SERVICE_NAME,
+                    cwd=str(repo_root),
+                )
+                if code == 0:
+                    console.print("[green]✓[/] Gateway configurado y reiniciado.")
+                else:
+                    console.print("[yellow]Revisa los logs: pm2 logs DuckClaw-Gateway[/]")
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/]")
+                console.print("[dim]Ejecuta manualmente: duckops serve --pm2 --gateway[/]")
+            return
+        # No regenerar: permitir editar ruta DB, Redis, etc.
+        console.print("[dim]Edita los valores (Enter = mantener actual).[/]")
+        new_db = Prompt.ask("DUCKCLAW_DB_PATH", default=db_path).strip() or db_path
+        db_path = _normalize_db_to_db_folder(new_db, repo_root)
+        new_redis = Prompt.ask("REDIS_URL", default=redis_url).strip() or redis_url
+        redis_url = new_redis
+        _write_env_file(repo_root, "DUCKCLAW_DB_PATH", db_path)
+        _write_env_file(repo_root, "REDIS_URL", redis_url)
+        os.environ["DUCKCLAW_DB_PATH"] = db_path
+        os.environ["REDIS_URL"] = redis_url
+        console.print(f"[green]✓[/] .env actualizado: DUCKCLAW_DB_PATH={db_path}, REDIS_URL=[dim]...[/]")
+        if not Confirm.ask("¿Seguir editando este servicio?", default=False):
+            return
 
 
 def _edit_db_writer_service(console: Console, state: dict[str, Any], repo_root: Path) -> None:
@@ -1489,39 +1503,36 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
             console.print("[dim]PM2 disponible. No hay procesos registrados aún.[/]")
 
         console.print(Panel(
-            "Se detectó PM2. Puedes gestionar servicios del pipeline (spec FLUJO_VIDA_DATO):\n"
-            "• DuckClaw-Gateway (API), DuckClaw-DB-Writer (cola Redis→DuckDB), DuckClaw-Brain (bot).",
+            "Se detectó PM2. Puedes editar un servicio del pipeline (spec FLUJO_VIDA_DATO) o continuar con la configuración completa.",
             title="Servicio de persistencia",
             border_style="cyan",
         ))
-        edit_svc, _ = _confirm_with_nav(
-            console,
-            "¿Gestionar servicio de persistencia (omitir configuración completa)?",
-            default=False,
-        )
-        if edit_svc:
-            # Elegir qué proceso editar si hay varios
-            found_svc = DEPLOY_SERVICE_NAME
-            if pm2_procs:
-                if len(pm2_procs) == 1:
-                    found_svc = pm2_procs[0].get("name", DEPLOY_SERVICE_NAME)
-                else:
-                    names = [p.get("name", "") for p in pm2_procs if p.get("name")]
-                    name_table = Table(show_header=False, box=None)
-                    for i, n in enumerate(names, 1):
-                        name_table.add_row(str(i), n)
-                    console.print(name_table)
-                    # Default: DuckClaw-Gateway si está en la lista, si no el primero
-                    default_idx = 1
-                    if GATEWAY_SERVICE_NAME in names:
-                        default_idx = names.index(GATEWAY_SERVICE_NAME) + 1
-                    choice = Prompt.ask(
-                        "Selecciona el servicio a editar",
-                        choices=[str(i) for i in range(1, len(names) + 1)],
-                        default=str(default_idx),
-                    )
-                    found_svc = names[int(choice) - 1]
-            # Cargar config guardada como base
+        # Siempre mostrar menú: 0 = configuración completa, 1..N = editar ese servicio
+        found_svc: str | None = None
+        if pm2_procs:
+            names = [p.get("name", "") for p in pm2_procs if p.get("name")]
+            name_table = Table(show_header=False, box=None)
+            name_table.add_row("0", "Continuar con configuración completa (no editar)")
+            for i, n in enumerate(names, 1):
+                name_table.add_row(str(i), n)
+            console.print(name_table)
+            default_idx = 1
+            if GATEWAY_SERVICE_NAME in names:
+                default_idx = names.index(GATEWAY_SERVICE_NAME) + 1
+            choice = Prompt.ask(
+                "Selecciona el servicio a editar [0=config completa]",
+                choices=[str(i) for i in range(0, len(names) + 1)],
+                default=str(default_idx),
+            )
+            idx = int(choice)
+            if idx == 0:
+                found_svc = None  # continuar con configuración completa
+            else:
+                found_svc = names[idx - 1]
+        else:
+            # Sin procesos PM2 listados: ir a configuración completa
+            found_svc = None
+        if found_svc is not None:
             saved_for_edit = load_config() or {}
             svc_state: dict[str, Any] = {}
             for k in CONFIG_KEYS:

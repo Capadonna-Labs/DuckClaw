@@ -112,16 +112,16 @@ def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
         except Exception:
             current_display = _telegram_safe(current)
         avail_str = "\n".join(f"\\- {_telegram_safe(w)}" for w in available) if available else "ninguna"
-        return f"{_telegram_safe('Rol actual:')} {current_display}\n\n{_telegram_safe('Plantillas disponibles:')}\n{avail_str}\n\n{_telegram_safe('Uso: /role <worker_id>')}"
+        return f"🦆 {_telegram_safe('Rol:')} {current_display}\n\n{_telegram_safe('Disponibles:')}\n{avail_str}\n{_telegram_safe('/role <id>')}"
     if wid not in available:
         avail_str = "\n".join(f"\\- {_telegram_safe(w)}" for w in available) if available else "ninguna"
-        return _telegram_safe(f"Rol desconocido: {wid}.") + f"\n\n{_telegram_safe('Plantillas disponibles:')}\n{avail_str}"
+        return _telegram_safe(f"Rol '{wid}' no existe.") + f"\n{_telegram_safe('Disponibles:')}\n{avail_str}"
     try:
         from duckclaw.workers.manifest import load_manifest
         spec = load_manifest(wid)
         set_chat_state(db, chat_id, "worker_id", wid)
         skills = ", ".join(_telegram_safe(s) for s in (spec.skills_list or [])) or "run_sql"
-        return _telegram_safe(f"✅ Rol cambiado a {spec.name} ({wid}). Capacidades: {skills}.")
+        return _telegram_safe(f"✅ {spec.name} ({wid}). Herramientas: {skills}")
     except Exception as e:
         return f"Error al cargar rol: {e}."
 
@@ -138,10 +138,10 @@ def execute_skills_list(db: Any, chat_id: Any) -> str:
             lines.append(f"- {_telegram_safe('run_sql')}")
             lines = [f"\\- {s}" for s in skills_safe]
             lines.append(f"\\- {_telegram_safe('run_sql')}")
-            return _telegram_safe(f"Rol: {spec.name}\nHerramientas:") + "\n" + "\n".join(lines)
+            return _telegram_safe(f"🔧 {spec.name}\n") + "\n".join(lines)
         except Exception as e:
             return f"Error: {e}."
-    return _telegram_safe("Herramientas por defecto: run_sql, inspect_schema, manage_memory.\nUsa /role <worker_id> para cambiar de rol.")
+    return _telegram_safe("🔧 run_sql, inspect_schema, manage_memory. /role <id> para cambiar.")
 
 
 def execute_forget(db: Any, chat_id: Any) -> str:
@@ -168,7 +168,7 @@ def execute_forget(db: Any, chat_id: Any) -> str:
             pass
         except Exception:
             pass
-    return _telegram_safe("✅ Historial borrado. Contexto reiniciado (Habeas Data: supresión solicitada por el usuario).")
+    return _telegram_safe("✅ Historial borrado.")
 
 
 def execute_context_toggle(db: Any, chat_id: Any, on_off: str) -> str:
@@ -235,8 +235,13 @@ def execute_approve_reject(db: Any, chat_id: Any, approved: bool) -> str:
     return _telegram_safe("No hay operación pendiente de aprobación. (El grafo no está en estado interrupt en esta versión.)")
 
 
+def _normalize_belief_key(key: str) -> str:
+    """Normaliza key para DB: alfanumérico y guión bajo."""
+    return "".join(c if c.isalnum() or c == "_" else "_" for c in (key or "").strip())
+
+
 def execute_goals(db: Any, chat_id: Any, args: str) -> str:
-    """/goals [--reset]: consulta creencias del HomeostasisManager. --reset borra observed_value."""
+    """/goals [--reset] | /goals <goal>: listar creencias, resetear todas, o añadir una goal por nombre (ej. /goals presupuesto_mensual)."""
     wid = get_chat_state(db, chat_id, "worker_id")
     if not wid:
         return _telegram_safe("Usa /role <worker_id> para asignar un rol con homeostasis (ej. finanz, powerseal).")
@@ -246,7 +251,6 @@ def execute_goals(db: Any, chat_id: Any, args: str) -> str:
         from duckclaw.forge.homeostasis.belief_registry import BeliefRegistry
         from duckclaw.forge.homeostasis.surprise import compute_surprise
         spec = load_manifest(wid)
-        run_schema(db, spec)  # Asegura que schema y agent_beliefs existan
         schema = spec.schema_name
         config = getattr(spec, "homeostasis_config", None) or {}
         registry = BeliefRegistry.from_config(config)
@@ -255,48 +259,85 @@ def execute_goals(db: Any, chat_id: Any, args: str) -> str:
     except Exception as e:
         return _telegram_safe(f"Error al cargar homeostasis: {e}.")
 
-    do_reset = (args or "").strip().lower() == "--reset"
+    raw = (args or "").strip()
+    do_reset = raw.lower() == "--reset"
+
     if do_reset:
         try:
-            for b in registry.beliefs:
-                key_safe = "".join(c if c.isalnum() or c == "_" else "_" for c in b.key.strip())
-                db.execute(
-                    f"UPDATE {schema}.agent_beliefs SET observed_value = NULL WHERE belief_key = '{key_safe}'"
-                )
-            return _telegram_safe("✅ Creencias reiniciadas (observed_value borrado).")
+            run_schema(db, spec, seed_beliefs=True)  # Asegura que la tabla exista antes de borrar
+            db.execute(f"DELETE FROM {schema}.agent_beliefs")
+            valid_goals = ", ".join(b.key for b in registry.beliefs[:5])
+            return _telegram_safe(
+                f"✅ Creencias reiniciadas. No hay goals. Crea nuevas con /goals <goal>, ej. /goals {valid_goals}"
+            )
         except Exception as e:
             return _telegram_safe(f"Error al resetear: {e}.")
 
-    lines = [f"Objetivos ({wid}):"]
-    try:
-        for b in registry.beliefs:
-            key_safe = "".join(c if c.isalnum() or c == "_" else "_" for c in b.key.strip())
-            r = db.query(
-                f"SELECT belief_key, target_value, observed_value, threshold FROM {schema}.agent_beliefs "
-                f"WHERE belief_key = '{key_safe}' LIMIT 1"
+    # Añadir una goal: /goals <goal>
+    if raw and not raw.startswith("--"):
+        run_schema(db, spec, seed_beliefs=False)
+        key_norm = _normalize_belief_key(raw)
+        # Buscar en registry por key exacto o por key normalizado
+        belief = registry.get_belief(raw.strip())
+        if not belief:
+            for b in registry.beliefs:
+                if _normalize_belief_key(b.key) == key_norm:
+                    belief = b
+                    break
+        if not belief:
+            valid = ", ".join(b.key for b in registry.beliefs)
+            return _telegram_safe(f"Goal desconocida: '{raw}'. Válidas: {valid}")
+        key_safe = _normalize_belief_key(belief.key)
+        try:
+            db.execute(
+                f"""
+                INSERT INTO {schema}.agent_beliefs (belief_key, target_value, observed_value, threshold)
+                VALUES ('{key_safe}', {belief.target}, NULL, {belief.threshold})
+                ON CONFLICT (belief_key) DO UPDATE SET
+                    target_value = EXCLUDED.target_value,
+                    threshold = EXCLUDED.threshold
+                """
             )
-            rows = json.loads(r) if isinstance(r, str) else (r or [])
-            observed = None
-            if rows and isinstance(rows[0], dict):
-                row = rows[0]
-                try:
-                    observed = float(row.get("observed_value")) if row.get("observed_value") is not None else None
-                except (TypeError, ValueError):
-                    pass
-            target = b.target
-            thresh = b.threshold
-            if observed is not None:
+        except Exception as e:
+            return _telegram_safe(f"Error al añadir goal: {e}.")
+        return _telegram_safe(f"✅ Goal añadida: {belief.key} (target={belief.target}, thresh={belief.threshold})")
+
+    run_schema(db, spec, seed_beliefs=False)  # No re-seed: tras reset la lista debe quedar vacía
+    r = db.query(
+        f"SELECT belief_key, target_value, observed_value, threshold FROM {schema}.agent_beliefs ORDER BY belief_key"
+    )
+    rows = json.loads(r) if isinstance(r, str) else (r or [])
+    if not rows or not isinstance(rows[0], dict):
+        valid_goals = ", ".join(b.key for b in registry.beliefs[:5])
+        return _telegram_safe(
+            f"🎯 {wid}\nNo hay goals. Crea nuevas con /goals <goal>, ej. /goals {valid_goals}"
+        )
+
+    lines = [f"🎯 {wid}"]
+    try:
+        key_to_belief = {b.key.strip(): b for b in registry.beliefs}
+        for row in rows:
+            key = (row.get("belief_key") or "").strip()
+            b = key_to_belief.get(key)
+            target = float(row.get("target_value")) if row.get("target_value") is not None else None
+            thresh = float(row.get("threshold")) if row.get("threshold") is not None else None
+            if b is not None:
+                target = target if target is not None else b.target
+                thresh = thresh if thresh is not None else b.threshold
+            try:
+                observed = float(row.get("observed_value")) if row.get("observed_value") is not None else None
+            except (TypeError, ValueError):
+                observed = None
+            label = _telegram_safe(b.key if b else key)
+            if observed is not None and target is not None and thresh is not None:
                 res = compute_surprise(observed, target, thresh)
-                status = "⚠️ anomalía" if res.is_anomaly else "✅ equilibrio"
-                lines.append(
-                    f"\\- {_telegram_safe(b.key)}: target={target}, observed={observed}, delta={res.delta:.4f} {status}"
-                )
+                st = "⚠️" if res.is_anomaly else "✓"
+                lines.append(f"\\- {label}: {target} (obs: {observed}) {st}")
             else:
-                lines.append(f"\\- {_telegram_safe(b.key)}: target={target}, threshold={thresh} (sin dato observado)")
+                lines.append(f"\\- {label}: target={target}, thresh={thresh} (sin dato)")
     except Exception as e:
-        return _telegram_safe(f"Error al leer creencias: {e}.")
-    full = "\n".join(lines) + "\n\n/goals --reset para reiniciar."
-    return _telegram_safe(full)
+        return _telegram_safe(f"Error: {e}.")
+    return _telegram_safe("\n".join(lines) + "\n\n/goals --reset")
 
 
 def execute_tasks(db: Any, chat_id: Any) -> str:
@@ -304,19 +345,19 @@ def execute_tasks(db: Any, chat_id: Any) -> str:
     from duckclaw.graphs.activity import get_activity
     data = get_activity(chat_id)
     if data is None:
-        return _telegram_safe("Estado: IDLE (sin Redis para ActivityManager). Configura DUCKCLAW_WRITE_QUEUE_URL o DUCKCLAW_REDIS_URL.")
+        return _telegram_safe("⏸ IDLE (Redis no configurado).")
     status = data.get("status", "IDLE")
     task = data.get("task", "")
     started_at = data.get("started_at", 0)
-    elapsed = ""
+    elapsed_s = ""
     if started_at and status == "BUSY":
         try:
-            elapsed_sec = int(time.time()) - int(started_at)
-            elapsed = _telegram_safe(f"\nTiempo: {elapsed_sec} s")
+            elapsed_s = f" · {int(time.time()) - int(started_at)}s"
         except Exception:
             pass
-    task_preview = _telegram_safe(str(task)[:80]) if task else _telegram_safe("—")
-    return _telegram_safe(f"Estado: {status}") + elapsed + "\n" + _telegram_safe("Tarea: ") + task_preview
+    task_preview = _telegram_safe(str(task)[:60]) if task else _telegram_safe("—")
+    icon = "▶" if status == "BUSY" else "⏸"
+    return _telegram_safe(f"{icon} {status}{elapsed_s}\n") + task_preview
 
 
 def _get_global_config(db: Any, key: str) -> str:
@@ -601,7 +642,7 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
         return _telegram_safe(f"Error al cargar historial: {e}.")
 
     if not rows:
-        return _telegram_safe("No hay tareas registradas.")
+        return _telegram_safe("📋 Sin tareas registradas.")
 
     # Filtrar: tareas complejas + como máximo 1 saludo simple
     complex_rows = []
@@ -618,14 +659,13 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
         filtered.append(one_greeting)
 
     if not filtered:
-        return _telegram_safe("No hay tareas complejas registradas (solo saludos o consultas muy breves).")
+        return _telegram_safe("📋 Sin tareas complejas.")
 
-    lines = [f"Historial de tareas complejas (últimas {len(filtered)}):"]
+    lines = [f"📋 Últimas {len(filtered)}"]
     for i, row in enumerate(filtered, 1):
         if not isinstance(row, dict):
             continue
-        task_id = row.get("task_id") or "—"
-        prefix = (row.get("query_prefix") or "").strip()[:60]
+        prefix = (row.get("query_prefix") or "").strip()[:50]
         status = (row.get("status") or "UNKNOWN").upper()
         try:
             dur_ms = int(row.get("duration_ms") or 0)
@@ -633,11 +673,8 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
             dur_ms = 0
         dur_s = f"{dur_ms / 1000:.1f}s"
         icon = "✅" if status == "SUCCESS" else "❌"
-        lines.append(f"{i}. {_telegram_safe(str(task_id)[:20])} | {icon} {status} | ⏱️ {dur_s}")
-        if prefix:
-            lines.append(f"   Acción: {_telegram_safe(prefix)}")
+        lines.append(f"{i}. {icon} {dur_s} · {_telegram_safe(prefix) or '—'}")
 
-    # Promedio de tareas exitosas (solo las mostradas)
     success_rows = [r for r in filtered if isinstance(r, dict) and (r.get("status") or "").upper() == "SUCCESS"]
     def _dur(r):
         try:
@@ -645,9 +682,6 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
         except (TypeError, ValueError):
             return 0
     avg_ms = sum(_dur(r) for r in success_rows) / len(success_rows) if success_rows else 0
-    lines.append(f"---\nPromedio de ejecución: {avg_ms/1000:.2f}s")
-
-    # Fallidas últimas 24h
     try:
         r24 = db.query(
             f"""
@@ -660,6 +694,6 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
         failed_24h = rows24[0].get("cnt", 0) if rows24 else 0
     except Exception:
         failed_24h = 0
-    lines.append(f"Tareas fallidas (últimas 24h): {failed_24h}")
+    lines.append(f"— avg {avg_ms/1000:.1f}s · fallidas 24h: {failed_24h}")
 
     return _telegram_safe("\n".join(lines))

@@ -14,7 +14,8 @@ except ImportError:
         """Fallback DuckDB wrapper cuando el extension C++ no está compilado."""
 
         def __init__(self, db_path: str):
-            self._con = duckdb.connect(db_path or ":memory:")
+            self._path = db_path or ":memory:"
+            self._con = duckdb.connect(self._path)
 
         def query(self, sql: str) -> str:
             result = self._con.execute(sql)

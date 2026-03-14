@@ -305,17 +305,19 @@ def test_full_pipeline_e2e() -> None:
         assert wait_health(GATEWAY_URL, timeout=15.0), "Gateway /health did not respond"
         assert post_write(), "POST /api/v1/db/write failed"
         time.sleep(3)
-        # Verificación opcional: que la escritura llegó a DuckDB (spec 04)
-        if db_path.exists():
-            import duckdb
-            conn = duckdb.connect(str(db_path), read_only=True)
-            rows = conn.execute("SELECT id, msg FROM _pipeline_test WHERE id = 1").fetchall()
-            conn.close()
-            assert len(rows) == 1 and rows[0][1] == "Singleton Writer Bridge OK", (
-                f"Verificación DuckDB fallida: esperado (1, 'Singleton Writer Bridge OK'), obtuvo {rows}"
-            )
     finally:
+        # Terminar procesos antes de abrir DuckDB para evitar IOException por lock en conflicto
         gateway_proc.terminate()
         db_writer_proc.terminate()
         gateway_proc.wait(timeout=5)
         db_writer_proc.wait(timeout=5)
+
+    # Verificación: que la escritura llegó a DuckDB (spec 04). Tras cerrar writer/gateway no hay lock.
+    if db_path.exists():
+        import duckdb
+        conn = duckdb.connect(str(db_path), read_only=True)
+        rows = conn.execute("SELECT id, msg FROM _pipeline_test WHERE id = 1").fetchall()
+        conn.close()
+        assert len(rows) == 1 and rows[0][1] == "Singleton Writer Bridge OK", (
+            f"Verificación DuckDB fallida: esperado (1, 'Singleton Writer Bridge OK'), obtuvo {rows}"
+        )

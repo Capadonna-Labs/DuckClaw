@@ -69,6 +69,18 @@ def run_sql(db: Any, query: str) -> str:
         return json.dumps({"error": str(e)})
 
 
+def get_db_path(db: Any) -> str:
+    """Retorna la ruta o nombre del archivo .duckdb al que tiene acceso el agente."""
+    path = getattr(db, "_path", None) or getattr(db, "path", None)
+    if path and str(path).strip() and str(path) != ":memory:":
+        return str(path).strip()
+    try:
+        from duckclaw.gateway_db import get_gateway_db_path
+        return get_gateway_db_path()
+    except Exception:
+        return "(ruta no disponible)"
+
+
 def inspect_schema(db: Any) -> str:
     """Retorna la estructura de la DB: lista de tablas con sus columnas en formato legible."""
     try:
@@ -79,7 +91,7 @@ def inspect_schema(db: Any) -> str:
             )
         )
         if not tables or not isinstance(tables, list):
-            return "No hay tablas en la base de datos."
+            return "Sin tablas."
         lines = []
         for t in tables:
             name = t.get("table_name") if isinstance(t, dict) else None
@@ -91,8 +103,8 @@ def inspect_schema(db: Any) -> str:
                 f"WHERE table_schema = 'main' AND table_name = '{name_esc}' ORDER BY ordinal_position"
             ))
             col_names = [c.get("column_name", "") for c in cols_raw if isinstance(c, dict)]
-            lines.append(f"- {name}: {', '.join(col_names)}")
-        return "Tablas disponibles:\n" + "\n".join(lines)
+            lines.append(f"{name}: {', '.join(col_names)}")
+        return "Tablas:\n" + "\n".join(lines)
     except Exception as e:
         return json.dumps({"error": str(e)})
 

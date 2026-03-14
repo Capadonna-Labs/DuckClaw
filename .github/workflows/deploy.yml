@@ -10,13 +10,24 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -30,8 +41,11 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run singleton writer pipeline integration test with logs
-        run: RUN_SINGLETON_PIPELINE_INTEGRATION=1 uv run pytest tests/run_singleton_writer_pipeline.py -v -m integration --capture=no
+      - name: Run tests (unit + smoke)
+        run: uv run pytest tests/test_final.py tests/test_router.py tests/test_on_the_fly_forget.py tests/test_on_the_fly_role.py -v
 
-      - name: Run final smoke test
-        run: uv run pytest tests/test_final.py -v
+      - name: Run singleton writer pipeline integration test with logs
+        env:
+          REDIS_URL: redis://localhost:6379/0
+          RUN_SINGLETON_PIPELINE_INTEGRATION: "1"
+        run: uv run pytest tests/run_singleton_writer_pipeline.py -v -m integration --capture=no

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -209,6 +210,13 @@ def _truncate_log(s: str, max_len: int = 200) -> str:
     return s if len(s) <= max_len else s[:max_len] + "..."
 
 
+def _strip_markdown_bold(s: str) -> str:
+    """Quita asteriscos de negrita Markdown (**texto**) para respuesta más limpia."""
+    if not s or not isinstance(s, str):
+        return s
+    return re.sub(r"\*\*([^*]*)\*\*", r"\1", s)
+
+
 async def _invoke_chat(message: str, session_id: str, history: list, worker_id: str):
     _gateway_log.info("in: %s", _truncate_log(message))
 
@@ -269,6 +277,7 @@ async def _invoke_chat(message: str, session_id: str, history: list, worker_id: 
     except Exception:
         pass
     _gateway_log.info("out: %s", _truncate_log(result))
+    result = _strip_markdown_bold(result or "")
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     try:
         from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat

@@ -40,12 +40,45 @@ def _ensure_agent_beliefs(db: Any, schema: str) -> None:
     """)
 
 
-def run_schema(db: Any, spec: WorkerSpec) -> None:
-    """Create isolated schema and run schema.sql."""
+def _seed_agent_beliefs(db: Any, spec: WorkerSpec) -> None:
+    """Inserta filas iniciales en agent_beliefs desde homeostasis_config para que /goals y --reset funcionen."""
+    config = getattr(spec, "homeostasis_config", None)
+    if not config or not isinstance(config, dict):
+        return
+    try:
+        from duckclaw.forge.homeostasis.belief_registry import BeliefRegistry
+        registry = BeliefRegistry.from_config(config)
+        if not registry.beliefs:
+            return
+        schema = _safe_ident(spec.schema_name)
+        for b in registry.beliefs:
+            key_safe = "".join(c if c.isalnum() or c == "_" else "_" for c in (b.key or "").strip())
+            if not key_safe:
+                continue
+            try:
+                db.execute(
+                    f"""
+                    INSERT INTO {schema}.agent_beliefs (belief_key, target_value, observed_value, threshold)
+                    VALUES ('{key_safe}', {b.target}, NULL, {b.threshold})
+                    ON CONFLICT (belief_key) DO UPDATE SET
+                        target_value = EXCLUDED.target_value,
+                        threshold = EXCLUDED.threshold
+                    """
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def run_schema(db: Any, spec: WorkerSpec, seed_beliefs: bool = True) -> None:
+    """Create isolated schema and run schema.sql. seed_beliefs=False evita rellenar agent_beliefs (p. ej. tras /goals --reset)."""
     schema = spec.schema_name
     # DuckDB: CREATE SCHEMA IF NOT EXISTS name;
     db.execute(f"CREATE SCHEMA IF NOT EXISTS {_safe_ident(schema)}")
     _ensure_agent_beliefs(db, schema)
+    if seed_beliefs:
+        _seed_agent_beliefs(db, spec)
     sql = load_schema_sql(spec)
     if not sql:
         return

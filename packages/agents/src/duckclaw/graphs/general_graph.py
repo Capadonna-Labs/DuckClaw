@@ -9,7 +9,7 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
-from duckclaw.graphs.tools import run_sql, inspect_schema, manage_memory
+from duckclaw.graphs.tools import run_sql, inspect_schema, manage_memory, get_db_path
 
 
 _DB_INTENT_RE = re.compile(
@@ -42,10 +42,11 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Nunca copies el resultado crudo de una herramienta. "
     "Si hay una lista de tablas, menciónalas de forma legible. "
     "Si hay datos de una consulta, preséntelos de forma organizada. "
-    "Usa run_sandbox para ejecutar código Python o Bash arbitrario cuando el usuario lo pida."
+    "Usa run_sandbox para ejecutar código Python o Bash arbitrario cuando el usuario lo pida. "
+    "Estilo de respuesta: sé conciso y directo; usa como máximo 1 o 2 emojis por mensaje si aportan claridad; evita listas largas sin resumir, encabezados markdown (##) y relleno; responde con lo esencial."
 )
 
-_DEFAULT_TOOLS = ["run_sql", "inspect_schema", "manage_memory", "run_sandbox"]
+_DEFAULT_TOOLS = ["run_sql", "inspect_schema", "manage_memory", "get_db_path", "run_sandbox"]
 
 
 def build_general_graph(
@@ -64,7 +65,9 @@ def build_general_graph(
     from langchain_core.tools import StructuredTool
     from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
-    prompt = system_prompt or _DEFAULT_SYSTEM_PROMPT
+    prompt = (system_prompt or _DEFAULT_SYSTEM_PROMPT).strip()
+    if prompt and "estilo" not in prompt.lower() and "conciso" not in prompt.lower():
+        prompt += "\n\nEstilo: respuestas concisas, 1-2 emojis como máximo, sin relleno ni listas largas innecesarias."
     tool_names = tools_spec if tools_spec is not None else _DEFAULT_TOOLS
     tool_names_set = frozenset(str(t).strip() for t in tool_names if t is not None and str(t).strip())
 
@@ -83,6 +86,14 @@ def build_general_graph(
                 lambda: inspect_schema(db),
                 name="inspect_schema",
                 description="Lista tablas y columnas de la base de datos actual.",
+            )
+        )
+    if "get_db_path" in tool_names_set:
+        tools.append(
+            StructuredTool.from_function(
+                lambda: get_db_path(db),
+                name="get_db_path",
+                description="Devuelve la ruta o nombre del archivo .duckdb al que tienes acceso. Úsala cuando pregunten qué base de datos usas o el nombre del archivo.",
             )
         )
     if "manage_memory" in tool_names_set:

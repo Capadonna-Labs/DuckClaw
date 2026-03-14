@@ -1,51 +1,17 @@
-import sys
-import os
-import subprocess
-import click
-from pathlib import Path
+"""DuckClaw Operations CLI — Wizard, deploy y auditoría."""
 
-@click.group()
-def cli():
-    """DuckClaw Operations CLI - Cross-platform (Win/Lin/Mac)"""
-    pass
+from __future__ import annotations
 
-@cli.command()
-@click.option("--port", default=8000, help="Port to run the API gateway")
-def serve(port):
-    """Start the DuckClaw API Gateway (microservicio services/api-gateway)"""
-    click.echo(f"Starting API Gateway on port {port}...")
-    try:
-        repo_root = Path(__file__).resolve().parents[4]
-        app_dir = repo_root / "services" / "api-gateway"
-        subprocess.run(
-            ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", str(port), "--app-dir", str(app_dir)],
-            check=True,
-            cwd=str(repo_root),
-        )
-    except Exception as e:
-        click.echo(f"Error starting server: {e}")
+import typer
 
-@cli.command()
-@click.option("--name", default="DuckClaw", help="Name of the service")
-def status(name):
-    """Show status of DuckClaw services (PM2 or Docker)"""
-    # Try PM2 first
-    try:
-        subprocess.run(["pm2", "status", name], check=False)
-    except FileNotFoundError:
-        # Fallback to docker
-        click.echo("PM2 not found. Checking Docker containers...")
-        subprocess.run(["docker", "ps", "--filter", f"name={name}"], check=False)
+from duckops.commands import audit, deploy, init, serve
 
-@cli.command()
-def setup():
-    """Run the interactive setup wizard (Cross-platform)"""
-    # Logic from scripts/duckclaw_setup_wizard.py would be ported here
-    click.echo("Running setup wizard...")
-    # ... implementation ...
+app = typer.Typer(
+    name="duckops",
+    help="DuckClaw Operations CLI — Wizard, deploy y auditoría Habeas Data.",
+)
 
-def _entrypoint():
-    cli()
-
-if __name__ == "__main__":
-    _entrypoint()
+app.add_typer(init.app, name="init", help="Inicializa tenant y ejecuta el wizard de configuración.")
+app.add_typer(serve.app, name="serve", help="Arranca el API Gateway o servidor LangGraph.")
+app.add_typer(deploy.app, name="deploy", help="Despliega DuckClaw como servicio (PM2, systemd, etc.).")
+app.add_typer(audit.app, name="audit", help="Auditoría Habeas Data (config, enmascaramiento).")

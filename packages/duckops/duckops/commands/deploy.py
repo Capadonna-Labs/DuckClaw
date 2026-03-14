@@ -14,7 +14,9 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent.parent.parent
 
 
+@app.callback(invoke_without_command=True)
 def cmd_deploy(
+    ctx: typer.Context,
     provider: str = typer.Option(
         "auto",
         "--provider",
@@ -29,6 +31,8 @@ def cmd_deploy(
     ),
 ) -> None:
     """Despliega el bot DuckClaw como servicio persistente."""
+    if ctx.invoked_subcommand is not None:
+        return
     repo = _repo_root()
     try:
         from duckclaw.ops.manager import deploy as deploy_fn

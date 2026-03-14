@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""DuckClaw setup wizard: interactive install and Telegram bootstrap with Rich."""
+"""DuckClaw setup wizard: interactive install with Rich.
+
+Spec: specs/FLUJO_VIDA_DATO_PIPELINE.md — gestiona DuckClaw-Gateway & DuckClaw-DB-Writer.
+"""
 
 from __future__ import annotations
 
@@ -98,6 +101,8 @@ def _confirm_with_nav(
 CONFIG_KEYS = ("mode", "channel", "bot_mode", "llm_provider", "llm_model", "llm_base_url", "db_path", "save_grpo_traces", "send_to_langsmith")
 DEPLOY_PROVIDERS = ("auto", "pm2", "systemd", "windows", "cron")
 DEPLOY_SERVICE_NAME = "DuckClaw-Brain"
+GATEWAY_SERVICE_NAME = "DuckClaw-Gateway"  # spec FLUJO_VIDA_DATO: services/api-gateway
+DB_WRITER_SERVICE_NAME = "DuckClaw-DB-Writer"  # spec FLUJO_VIDA_DATO: services/db-writer
 INFERENCE_SERVICE_NAME = "DuckClaw-Inference"
 # Orden: IoTCoreLabs, OpenAI, Anthropic, DeepSeek, MLX (principales); luego Ollama y none_llm
 LLM_PROVIDERS = ("iotcorelabs", "openai", "anthropic", "deepseek", "huggingface", "mlx", "ollama", "none_llm")
@@ -128,7 +133,7 @@ def _config_path() -> Path:
 def _load_dotenv() -> None:
     """Carga .env en os.environ si existe (busca en cwd y en la raíz del monorepo)."""
     _script_dir = Path(__file__).resolve().parent
-    _repo_root = _script_dir.parent.parent.parent.parent  # packages/shared/scripts -> ../../../..
+    _repo_root = _script_dir.parent  # scripts/ -> repo root
     for base in (Path.cwd(), _repo_root, _script_dir.parent):
         env_file = base / ".env"
         if env_file.is_file():
@@ -305,6 +310,105 @@ def _save_last_deploy_provider(provider: str) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def _edit_gateway_service(console: Console, state: dict[str, Any], repo_root: Path) -> None:
+    """Gestiona DuckClaw-Gateway (spec FLUJO_VIDA_DATO: services/api-gateway)."""
+    console.print(Panel(
+        f"API Gateway (microservicio unificado)\n"
+        f"services/api-gateway → Redis → DB Writer → DuckDB",
+        title=GATEWAY_SERVICE_NAME,
+        border_style="cyan",
+    ))
+    db_path = _normalize_db_to_db_folder(
+        state.get("db_path") or os.environ.get("DUCKCLAW_DB_PATH", "db/duckclaw.duckdb"),
+        repo_root,
+    )
+    redis_url = os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL", "redis://localhost:6379/0")
+    console.print(f"DB path: [dim]{db_path}[/]  Redis: [dim]{redis_url}[/]")
+    if not Confirm.ask("¿Regenerar config y reiniciar Gateway?", default=True):
+        return
+    _write_env_file(repo_root, "DUCKCLAW_DB_PATH", db_path)
+    if not os.environ.get("REDIS_URL") and os.environ.get("DUCKCLAW_REDIS_URL"):
+        _write_env_file(repo_root, "REDIS_URL", os.environ.get("DUCKCLAW_REDIS_URL", ""))
+    try:
+        from duckclaw.ops.manager import serve
+        code = serve(host="0.0.0.0", port=8000, pm2=True, gateway=True, cwd=str(repo_root))
+        if code == 0:
+            console.print("[green]✓[/] Gateway configurado y reiniciado.")
+        else:
+            console.print("[yellow]Revisa los logs: pm2 logs DuckClaw-Gateway[/]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/]")
+        console.print("[dim]Ejecuta manualmente: duckops serve --pm2 --gateway[/]")
+
+
+def _edit_db_writer_service(console: Console, state: dict[str, Any], repo_root: Path) -> None:
+    """Gestiona DuckClaw-DB-Writer (spec FLUJO_VIDA_DATO: services/db-writer)."""
+    console.print(Panel(
+        "Consumidor de duckdb_write_queue (Redis → DuckDB)",
+        title=DB_WRITER_SERVICE_NAME,
+        border_style="cyan",
+    ))
+    db_path = _normalize_db_to_db_folder(
+        state.get("db_path") or os.environ.get("DUCKCLAW_DB_PATH", "db/duckclaw.duckdb"),
+        repo_root,
+    )
+    redis_url = os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL", "redis://localhost:6379/0")
+    new_db = Prompt.ask("DUCKDB_PATH", default=db_path).strip() or db_path
+    new_db = _normalize_db_to_db_folder(new_db, repo_root)
+    new_redis = Prompt.ask("REDIS_URL", default=redis_url).strip() or redis_url
+    _write_env_file(repo_root, "DUCKCLAW_DB_PATH", new_db)
+    _write_env_file(repo_root, "REDIS_URL", new_redis)
+    if not Confirm.ask("¿Generar/actualizar ecosystem.db-writer.config.cjs?", default=True):
+        return
+    venv_python = os.path.abspath(sys.executable)
+    db_writer_dir = repo_root / "services" / "db-writer"
+    abs_db = str((repo_root / new_db).resolve()) if not Path(new_db).is_absolute() else new_db
+    config_content = f"""/**
+ * PM2 config for DuckClaw DB Writer (spec FLUJO_VIDA_DATO).
+ * Consumidor: Redis duckdb_write_queue → DuckDB.
+ */
+module.exports = {{
+  apps: [
+    {{
+      name: "{DB_WRITER_SERVICE_NAME}",
+      script: "{venv_python}",
+      args: "main.py",
+      cwd: "{db_writer_dir}",
+      interpreter: "none",
+      autorestart: true,
+      watch: false,
+      env: {{
+        PYTHONPATH: "{repo_root}",
+        REDIS_URL: "{new_redis}",
+        DUCKDB_PATH: "{abs_db}",
+      }},
+    }},
+  ],
+}};
+"""
+    config_path = repo_root / "ecosystem.db-writer.config.cjs"
+    config_path.write_text(config_content, encoding="utf-8")
+    console.print(f"[green]✓[/] Config: [dim]{config_path}[/]")
+    action_table = Table(show_header=False, box=None)
+    action_table.add_column("", style="bold cyan", width=3)
+    action_table.add_column("")
+    action_table.add_row("1", "Reiniciar")
+    action_table.add_row("2", "Iniciar")
+    action_table.add_row("3", "Detener")
+    action_table.add_row("s", "Omitir")
+    console.print(action_table)
+    action = Prompt.ask("Acción", choices=["1", "2", "3", "s"], default="s").strip().lower()
+    if action == "1":
+        subprocess.run(["pm2", "restart", DB_WRITER_SERVICE_NAME, "--update-env"], timeout=10)
+        console.print("[green]✓[/] Reiniciado.")
+    elif action == "2":
+        subprocess.run(["pm2", "start", str(config_path)], timeout=15)
+        console.print("[green]✓[/] Iniciado.")
+    elif action == "3":
+        subprocess.run(["pm2", "stop", DB_WRITER_SERVICE_NAME], timeout=10)
+        console.print("[green]✓[/] Detenido.")
+
+
 def _pm2_app_status(name: str) -> str:
     """Return PM2 status string for a named app, or 'no registrado'."""
     try:
@@ -329,6 +433,13 @@ def _edit_service_settings(
 ) -> None:
     """Interactive sub-menu to edit and apply PM2 or Systemd service configuration."""
     _load_dotenv()
+    # Pipeline (spec FLUJO_VIDA_DATO): Gateway y DB Writer tienen flujos específicos
+    if service_name == GATEWAY_SERVICE_NAME and provider == "pm2":
+        _edit_gateway_service(console, state, repo_root)
+        return
+    if service_name == DB_WRITER_SERVICE_NAME and provider == "pm2":
+        _edit_db_writer_service(console, state, repo_root)
+        return
     venv_python = str(repo_root / ".venv" / "bin" / "python3")
     
     if provider == "pm2":
@@ -540,6 +651,8 @@ module.exports = {{
 
 def _write_env_file(repo_root: Path, key: str, value: str) -> None:
     """Write or update a key=value in .env (project root), without adding quotes."""
+    if key == "DUCKCLAW_DB_PATH":
+        _write_env_file(repo_root, "DUCKDB_PATH", value)  # spec FLUJO_VIDA_DATO: db-writer usa DUCKDB_PATH
     env_path = repo_root / ".env"
     lines: list[str] = []
     found = False
@@ -1275,8 +1388,8 @@ def main() -> int:
     except Exception:
         w = 100
     console = Console(width=w)
-    # Raíz del monorepo (packages/shared/scripts -> ../../../)
-    repo_root = Path(__file__).resolve().parent.parent.parent.parent
+    # Raíz del monorepo (scripts/ -> parent)
+    repo_root = Path(__file__).resolve().parent.parent
     bot_script = repo_root / "packages" / "agents" / "src" / "duckclaw" / "agents" / "telegram_bot.py"
 
     try:
@@ -1369,8 +1482,8 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
             console.print("[dim]PM2 disponible. No hay procesos registrados aún.[/]")
 
         console.print(Panel(
-            "Se detectó PM2 en este equipo. Puedes gestionar o configurar\n"
-            "el servicio de persistencia del bot sin pasar por la configuración completa.",
+            "Se detectó PM2. Puedes gestionar servicios del pipeline (spec FLUJO_VIDA_DATO):\n"
+            "• DuckClaw-Gateway (API), DuckClaw-DB-Writer (cola Redis→DuckDB), DuckClaw-Brain (bot).",
             title="Servicio de persistencia",
             border_style="cyan",
         ))

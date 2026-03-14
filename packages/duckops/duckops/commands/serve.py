@@ -14,7 +14,9 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent.parent.parent
 
 
+@app.callback(invoke_without_command=True)
 def cmd_serve(
+    ctx: typer.Context,
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host para escuchar."),
     port: int = typer.Option(8000, "--port", "-p", help="Puerto."),
     pm2: bool = typer.Option(False, "--pm2", help="Desplegar como servicio PM2."),
@@ -28,6 +30,8 @@ def cmd_serve(
     reload: bool = typer.Option(False, "--reload", help="Recargar al cambiar código (solo sin --pm2)."),
 ) -> None:
     """Arranca el API Gateway o el servidor LangGraph."""
+    if ctx.invoked_subcommand is not None:
+        return
     effective_name = name or ("DuckClaw-Gateway" if gateway else "DuckClaw-API")
     repo = _repo_root()
     try:

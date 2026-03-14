@@ -25,7 +25,9 @@ def _censor(value: str, show_last: int = 4) -> str:
     return "***" + value[-show_last:]
 
 
+@app.callback(invoke_without_command=True)
 def cmd_audit(
+    ctx: typer.Context,
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -34,6 +36,8 @@ def cmd_audit(
     ),
 ) -> None:
     """Auditoría de Habeas Data: configuración, enmascaramiento de datos sensibles."""
+    if ctx.invoked_subcommand is not None:
+        return
     config_path = _config_path()
     if not config_path.is_file():
         console.print(Panel(

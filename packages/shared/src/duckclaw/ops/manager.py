@@ -17,20 +17,16 @@ def _resolve_python() -> str:
 def _resolve_command(command: str, cwd: Optional[str] = None) -> str:
     """
     Resolve command to an absolute form when it looks like a script path.
-    If command is a single path (no spaces or starts with / or .), resolve to absolute.
-    Otherwise return as-is (e.g. "-m duckclaw.graphs.telegram_bot" or "python script.py").
     """
     base = (cwd or os.getcwd()) if cwd else os.getcwd()
     cmd = command.strip()
     if not cmd:
         return cmd
-    # If it's clearly a path (existing file or starts with . or /), resolve
     if cmd.startswith("/") or cmd.startswith("."):
         p = Path(cmd) if cmd.startswith("/") else Path(base) / cmd.lstrip("./")
         if p.exists():
             return str(p.resolve())
         return str(Path(cmd).resolve() if cmd.startswith("/") else (Path(base) / cmd.lstrip("./")).resolve())
-    # If first token looks like a script path
     first = cmd.split(None, 1)[0] if cmd.split() else cmd
     if not first.startswith("-") and (first.endswith(".py") or "/" in first or "\\" in first):
         p = Path(first) if Path(first).is_absolute() else Path(base) / first
@@ -49,10 +45,7 @@ def deploy(
     windows_trigger: str = "onlogon",
     **kwargs: Any,
 ) -> str:
-    """
-    Deploy a long-running command under the given provider.
-    Returns a human-readable status message.
-    """
+    """Deploy a long-running command under the given provider."""
     python_path = _resolve_python()
     resolved_cmd = _resolve_command(command, cwd=cwd)
     effective_cwd = str(Path(cwd or os.getcwd()).resolve())
@@ -63,9 +56,9 @@ def deploy(
         if system == "Windows":
             prov = "windows"
         elif system == "Linux":
-            prov = "systemd"  # default for Linux; could add detection for systemd
+            prov = "systemd"
         else:
-            prov = "pm2"  # macOS and others use PM2 if available
+            prov = "pm2"
 
     if prov == "cron":
         return _cron_not_implemented(name, resolved_cmd, schedule)
@@ -92,10 +85,7 @@ def deploy(
 
 
 def status(provider: str = "auto", name: Optional[str] = None) -> int:
-    """
-    Print a Rich summary of the active persistence service.
-    Returns 0 on success, 1 if no provider found.
-    """
+    """Print a Rich summary of the active persistence service."""
     import shutil
 
     try:
@@ -125,7 +115,6 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
             _print("[yellow]No se detectó ningún proveedor de persistencia (pm2, systemd, Windows).[/]")
             return 1
 
-    # ── PM2 ──────────────────────────────────────────────────────────────────
     if prov == "pm2":
         import json
         import subprocess as sp
@@ -137,7 +126,6 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
             _print(f"[red]Error consultando pm2: {e}[/]")
             return 1
 
-        # Filter: if name provided → exact match; else → all processes
         if name:
             processes = [p for p in processes if p.get("name") == name]
         if not processes:
@@ -154,30 +142,25 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
                 title="[bold green]DuckClaw — Servicios de Persistencia (PM2)[/]",
                 title_justify="left",
             )
-            table.add_column("ID",     style="dim",         width=4)
-            table.add_column("Nombre", style="bold white",  min_width=18)
-            table.add_column("Estado", justify="center",    width=10)
-            table.add_column("Uptime", justify="right",     width=12)
-            table.add_column("Reinicios", justify="right",  width=10)
-            table.add_column("CPU",    justify="right",     width=7)
-            table.add_column("Memoria", justify="right",    width=10)
-            table.add_column("Módulo / Script",             min_width=30)
+            table.add_column("ID", style="dim", width=4)
+            table.add_column("Nombre", style="bold white", min_width=18)
+            table.add_column("Estado", justify="center", width=10)
+            table.add_column("Uptime", justify="right", width=12)
+            table.add_column("Reinicios", justify="right", width=10)
+            table.add_column("CPU", justify="right", width=7)
+            table.add_column("Memoria", justify="right", width=10)
+            table.add_column("Módulo / Script", min_width=30)
 
             for p in processes:
                 pm2_env = p.get("pm2_env", {})
-                pid = str(p.get("pid", "—"))
-                pname = p.get("name", "—")
                 raw_status = pm2_env.get("status", "—")
                 status_icon = {
-                    "online":  "[green]● online[/]",
+                    "online": "[green]● online[/]",
                     "stopped": "[dim]○ stopped[/]",
                     "errored": "[red]✗ errored[/]",
                     "launching": "[yellow]◎ launching[/]",
                 }.get(raw_status, f"[dim]{raw_status}[/]")
-
                 restarts = str(pm2_env.get("restart_time", "—"))
-
-                # Uptime: pm2 stores created_at as ms epoch
                 uptime_str = "—"
                 created_at = pm2_env.get("created_at")
                 if created_at and raw_status == "online":
@@ -190,33 +173,23 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
                         uptime_str = f"{s // 60}m {s % 60}s"
                     else:
                         uptime_str = f"{s // 3600}h {(s % 3600) // 60}m"
-
                 monit = p.get("monit", {})
                 cpu = f"{monit.get('cpu', 0)}%"
                 mem_bytes = monit.get("memory", 0)
-                if mem_bytes >= 1024 ** 2:
-                    mem = f"{mem_bytes / 1024 ** 2:.1f} MB"
-                elif mem_bytes > 0:
-                    mem = f"{mem_bytes / 1024:.0f} KB"
-                else:
-                    mem = "—"
-
-                # Script / module
+                mem = f"{mem_bytes / 1024 ** 2:.1f} MB" if mem_bytes >= 1024 ** 2 else ("—" if mem_bytes == 0 else f"{mem_bytes / 1024:.0f} KB")
                 script = pm2_env.get("pm_exec_path", "") or ""
                 script_args = " ".join(pm2_env.get("args", []) or [])
                 module_str = f"{script} {script_args}".strip()
-                # Shorten path: keep last 2 segments
-                from pathlib import Path as _P
                 try:
-                    parts = _P(script).parts
-                    short = str(_P(*parts[-2:])) if len(parts) >= 2 else script
+                    parts = Path(script).parts
+                    short = str(Path(*parts[-2:])) if len(parts) >= 2 else script
                     module_str = f"{short} {script_args}".strip()
                 except Exception:
                     pass
 
                 table.add_row(
                     str(p.get("pm_id", "—")),
-                    pname,
+                    p.get("name", "—"),
                     status_icon,
                     uptime_str,
                     restarts,
@@ -227,17 +200,13 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
 
             console.print()
             console.print(table)
-
-            # Footer: proveedor info
             pm2_bin = shutil.which("pm2") or "pm2"
-            console.print(
-                Panel(
-                    f"[dim]Proveedor:[/] [bold]PM2[/]  [dim]·[/]  [dim]bin:[/] {pm2_bin}\n"
-                    "[dim]Comandos:[/]  pm2 logs <nombre>  ·  pm2 restart <nombre>  ·  pm2 save",
-                    border_style="dim",
-                    padding=(0, 1),
-                )
-            )
+            console.print(Panel(
+                f"[dim]Proveedor:[/] [bold]PM2[/]  [dim]·[/]  [dim]bin:[/] {pm2_bin}\n"
+                "[dim]Comandos:[/]  pm2 logs <nombre>  ·  pm2 restart <nombre>  ·  pm2 save",
+                border_style="dim",
+                padding=(0, 1),
+            ))
             console.print()
         else:
             for p in processes:
@@ -246,15 +215,12 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
                       f"(restarts: {pm2_env.get('restart_time', 0)})")
         return 0
 
-    # ── systemd ───────────────────────────────────────────────────────────────
     if prov == "systemd":
         import subprocess as sp
         unit = f"{name}.service" if name else "duckclaw*.service"
         try:
-            r = sp.run(
-                ["systemctl", "--user", "status", unit, "--no-pager"],
-                capture_output=True, text=True, timeout=10,
-            )
+            r = sp.run(["systemctl", "--user", "status", unit, "--no-pager"],
+                       capture_output=True, text=True, timeout=10)
             output = (r.stdout or r.stderr or "").strip()
         except Exception as e:
             _print(f"[red]Error consultando systemd: {e}[/]")
@@ -265,15 +231,12 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
             print(output)
         return 0
 
-    # ── Windows ───────────────────────────────────────────────────────────────
     if prov == "windows":
         import subprocess as sp
         task = name or "DuckClaw*"
         try:
-            r = sp.run(
-                ["schtasks", "/query", "/fo", "LIST", "/tn", task],
-                capture_output=True, text=True, timeout=10,
-            )
+            r = sp.run(["schtasks", "/query", "/fo", "LIST", "/tn", task],
+                       capture_output=True, text=True, timeout=10)
             output = (r.stdout or r.stderr or "").strip()
         except Exception as e:
             _print(f"[red]Error consultando schtasks: {e}[/]")
@@ -299,26 +262,22 @@ def serve(
 ) -> int:
     """
     Start the DuckClaw API server.
-
-    - gateway=True: microservicio services/api-gateway/main.py (uvicorn --app-dir services/api-gateway).
-      Usado por duckops serve --gateway y por _edit_gateway_service en el wizard.
-    - gateway=False: duckclaw.graphs.graph_server (LangGraph legacy).
-
-    Si pm2=True: genera ecosystem.api.config.cjs y despliega en PM2.
-    Si no: ejecuta uvicorn directamente (bloqueante).
+    gateway=True: services/api-gateway/main.py (uvicorn --app-dir services/api-gateway).
+    Default name: DuckClaw-Gateway con gateway=True, DuckClaw-API si no.
     """
-    effective_name = name or ("DuckClaw-Gateway" if gateway else "DuckClaw-API")
+    effective_name = name if name is not None else ("DuckClaw-Gateway" if gateway else "DuckClaw-API")
     effective_cwd = str(Path(cwd or os.getcwd()).resolve())
 
     if pm2:
         from duckclaw.ops.providers.pm2 import is_pm2_available
-        import shutil, json, subprocess as sp
+        import shutil
+        import json
+        import subprocess as sp
 
         if not is_pm2_available():
             print("PM2 no está instalado. Instala con: npm install -g pm2")
             return 1
 
-        # Load .env from repo root so LLM vars are available for PM2 config
         _env_file = Path(effective_cwd) / ".env"
         if _env_file.is_file():
             for _line in _env_file.read_text(encoding="utf-8").splitlines():
@@ -331,11 +290,7 @@ def serve(
         python_path = _resolve_python()
         config_path = Path(effective_cwd) / "ecosystem.api.config.cjs"
 
-        # Collect env vars for the API server
-        env_vars: dict = {
-            "PYTHONPATH": effective_cwd,
-        }
-        # Propagate LangSmith + LLM + Redis vars if set
+        env_vars: dict = {"PYTHONPATH": effective_cwd}
         for key in (
             "LANGCHAIN_TRACING_V2", "LANGCHAIN_API_KEY", "LANGCHAIN_PROJECT",
             "DUCKCLAW_LLM_PROVIDER", "DUCKCLAW_LLM_MODEL", "DUCKCLAW_LLM_BASE_URL",
@@ -347,23 +302,18 @@ def serve(
             val = os.environ.get(key, "")
             if val:
                 env_vars[key] = val
-        # API Gateway microservicio usa REDIS_URL (fallback desde DUCKCLAW_REDIS_URL)
         if gateway and not env_vars.get("REDIS_URL") and env_vars.get("DUCKCLAW_REDIS_URL"):
             env_vars["REDIS_URL"] = env_vars["DUCKCLAW_REDIS_URL"]
 
         if gateway:
-            # Microservicio unificado: services/api-gateway/main.py (agente + db/write)
-            # cwd=repo_root → --app-dir services/api-gateway resuelve a repo/services/api-gateway
             args_cmd = f"-m uvicorn main:app --host {host} --port {port} --app-dir services/api-gateway"
         else:
             args_cmd = f"-m uvicorn duckclaw.graphs.graph_server:app --host {host} --port {port}"
-        gateway_cwd = effective_cwd
+
         env_str = json.dumps(env_vars, indent=8)
         config_content = f"""/**
  * PM2 config for DuckClaw API server (generated by duckops serve --pm2).
  * Start:  pm2 start ecosystem.api.config.cjs
- * Docs:   http://localhost:{port}/docs
- * Health: http://localhost:{port}/health
  */
 module.exports = {{
   apps: [
@@ -384,7 +334,6 @@ module.exports = {{
         config_path.write_text(config_content, encoding="utf-8")
         print(f"✅  ecosystem.api.config.cjs generado: {config_path}", flush=True)
 
-        # Crear la BD en db/ si DUCKCLAW_DB_PATH está definida y el archivo no existe
         _db_path = env_vars.get("DUCKCLAW_DB_PATH", "").strip()
         if _db_path:
             _db_file = Path(_db_path)
@@ -394,7 +343,6 @@ module.exports = {{
             _db_file.parent.mkdir(parents=True, exist_ok=True)
             if not _db_file.exists():
                 try:
-                    import sys
                     _sys_path = sys.path.copy()
                     sys.path.insert(0, effective_cwd)
                     from duckclaw import DuckClaw
@@ -405,7 +353,6 @@ module.exports = {{
                 except Exception as _e:
                     print(f"⚠️  No se pudo crear la BD en {_db_file}: {_e}", flush=True)
 
-        # Start or restart
         existing = sp.run(["pm2", "id", effective_name], capture_output=True, text=True)
         if existing.returncode == 0 and existing.stdout.strip() not in ("", "[]"):
             sp.run(["pm2", "restart", effective_name, "--update-env"], check=False)
@@ -419,19 +366,10 @@ module.exports = {{
         print(f"   Logs → pm2 logs {effective_name}", flush=True)
         return 0
 
-    # Run directly (sin PM2)
     if gateway:
         import uvicorn
-        # services/api-gateway/main.py — microservicio unificado (spec FLUJO_VIDA_DATO)
         app_dir = str(Path(effective_cwd) / "services" / "api-gateway")
-        uvicorn.run(
-            "main:app",
-            host=host,
-            port=port,
-            reload=reload,
-            app_dir=app_dir,
-            log_level="info",
-        )
+        uvicorn.run("main:app", host=host, port=port, reload=reload, app_dir=app_dir, log_level="info")
     else:
         from duckclaw.graphs.graph_server import _run_server
         _run_server(host=host, port=port, reload=reload)
@@ -443,10 +381,7 @@ def hire(
     instance_name: Optional[str] = None,
     cwd: Optional[str] = None,
 ) -> int:
-    """
-    Deploy a Virtual Worker from template (Plug & Play).
-    Validates template, generates .env.<instance_name>, injects into ecosystem.workers.config.cjs, starts PM2.
-    """
+    """Deploy a Virtual Worker from template."""
     import json
     import subprocess as sp
 
@@ -455,11 +390,8 @@ def hire(
     from duckclaw.workers.manifest import load_manifest
 
     effective_cwd = str(Path(cwd or os.getcwd()).resolve())
-    instance = (instance_name or worker_id).strip()
-    if not instance:
-        instance = worker_id
+    instance = (instance_name or worker_id).strip() or worker_id
 
-    # 1. Validate template
     try:
         spec = load_manifest(worker_id, Path(effective_cwd))
     except Exception as e:
@@ -474,7 +406,6 @@ def hire(
     db_path = str(Path(effective_cwd) / "db" / f"workers_{instance}.duckdb")
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # 2. Generate .env.<instance_name>
     env_file = Path(effective_cwd) / f".env.{instance}"
     env_lines = [
         f"DUCKCLAW_WORKER_ID={worker_id}",
@@ -494,12 +425,10 @@ def hire(
     env_file.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
     print(f"✅  {env_file}", flush=True)
 
-    # 3. Generate ecosystem.workers.config.cjs (single app for this instance)
     config_path = Path(effective_cwd) / "ecosystem.workers.config.cjs"
     port = 8124 + (hash(instance) % 1000)
     config_content = f"""/**
  * PM2 config for DuckClaw Virtual Workers (generated by duckops hire).
- * Start:  pm2 start ecosystem.workers.config.cjs --only {instance}
  */
 module.exports = {{
   apps: [
@@ -525,7 +454,6 @@ module.exports = {{
     config_path.write_text(config_content, encoding="utf-8")
     print(f"✅  {config_path}", flush=True)
 
-    # 4. pm2 start --only <instance_name>
     existing = sp.run(["pm2", "id", instance], capture_output=True, text=True, cwd=effective_cwd)
     if existing.returncode == 0 and existing.stdout.strip() not in ("", "[]"):
         sp.run(["pm2", "restart", instance, "--update-env"], check=False, cwd=effective_cwd)
@@ -533,7 +461,7 @@ module.exports = {{
     else:
         sp.run(["pm2", "start", str(config_path), "--only", instance], check=False, cwd=effective_cwd)
         print(f"🚀  PM2: {instance} iniciado.", flush=True)
-    print(f"   Worker → http://localhost:{port}/invoke  (POST message, history)", flush=True)
+    print(f"   Worker → http://localhost:{port}/invoke", flush=True)
     print(f"   Logs   → pm2 logs {instance}", flush=True)
     return 0
 

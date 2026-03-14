@@ -1,8 +1,10 @@
-"""Tests for DuckClaw API Gateway."""
+"""Tests for DuckClaw API Gateway (microservicio services/api-gateway)."""
 
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 # Set auth key before app loads so middleware accepts test requests
 os.environ.setdefault("DUCKCLAW_TAILSCALE_AUTH_KEY", "test-key-for-tests")
@@ -10,7 +12,13 @@ os.environ.setdefault("DUCKCLAW_TAILSCALE_AUTH_KEY", "test-key-for-tests")
 import pytest
 from fastapi.testclient import TestClient
 
-from duckclaw.api.gateway import app
+# Cargar app del microservicio services/api-gateway
+REPO_ROOT = Path(__file__).resolve().parent.parent
+API_GATEWAY_DIR = REPO_ROOT / "services" / "api-gateway"
+if str(API_GATEWAY_DIR) not in sys.path:
+    sys.path.insert(0, str(API_GATEWAY_DIR))
+import main as gateway_main
+app = gateway_main.app
 
 _AUTH_HEADERS = {"X-Tailscale-Auth-Key": "test-key-for-tests"}
 

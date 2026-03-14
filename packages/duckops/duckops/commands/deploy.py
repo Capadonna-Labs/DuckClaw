@@ -45,7 +45,7 @@ def cmd_deploy(
     msg = deploy_fn(
         name=name,
         provider=provider,
-        command="-m duckclaw.agents.telegram_bot",
+        command="-m duckclaw.graphs.telegram_bot",
         cwd=str(repo),
     )
     typer.echo(msg)

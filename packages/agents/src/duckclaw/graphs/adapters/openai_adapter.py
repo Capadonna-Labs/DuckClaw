@@ -65,7 +65,7 @@ class OpenAIAdapter(BaseAgent):
         except ImportError:
             return "Error: instala el extra openai (pip install duckclaw[openai])."
 
-        from duckclaw.agents.tools import run_sql, inspect_schema, manage_memory
+        from duckclaw.graphs.tools import run_sql, inspect_schema, manage_memory
 
         client = OpenAI()
         db = self.db

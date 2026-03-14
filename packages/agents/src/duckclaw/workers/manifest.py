@@ -26,9 +26,16 @@ def _find_templates_root() -> Path:
 
 
 def get_worker_dir(worker_id: str, templates_root: Optional[Path] = None) -> Path:
-    """Return templates/workers/<worker_id>/."""
-    root = templates_root or _find_templates_root()
-    path = root / "templates" / "workers" / worker_id.strip()
+    """Return worker dir: forge/templates/<worker_id>/ or templates_root/templates/workers/<worker_id>/."""
+    if templates_root is not None:
+        path = templates_root / "templates" / "workers" / worker_id.strip()
+    else:
+        try:
+            from duckclaw.forge import WORKERS_TEMPLATES_DIR
+            path = WORKERS_TEMPLATES_DIR / worker_id.strip()
+        except ImportError:
+            root = _find_templates_root()
+            path = root / "templates" / "workers" / worker_id.strip()
     if not path.is_dir():
         raise FileNotFoundError(f"Worker template not found: {path}")
     return path

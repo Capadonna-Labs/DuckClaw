@@ -107,7 +107,7 @@ class AgentAssembler:
 
     def _build_general(self, db: Any, llm: Any, **overrides) -> Any:
         """Construye el grafo general (SQL, schema, memory, sandbox)."""
-        from duckclaw.agents.general_graph import build_general_graph
+        from duckclaw.graphs.general_graph import build_general_graph
 
         system_prompt = overrides.get("system_prompt") or self.spec.get("system_prompt") or ""
         tools_spec = overrides.get("tools_spec") or self.spec.get("tools") or None
@@ -126,7 +126,7 @@ class AgentAssembler:
         **overrides,
     ) -> Any:
         """Construye el grafo retail (Contador Soberano)."""
-        from duckclaw.agents.retail_graph import build_retail_graph
+        from duckclaw.graphs.retail_graph import build_retail_graph
 
         system_prompt = overrides.get("system_prompt") or self.spec.get("system_prompt") or ""
         return build_retail_graph(
@@ -148,7 +148,7 @@ class AgentAssembler:
         **overrides,
     ) -> Any:
         """Construye el grafo entry_router (ruteo retail/general)."""
-        from duckclaw.agents.router import build_entry_router_graph
+        from duckclaw.graphs.router import build_entry_router_graph
 
         system_prompt = overrides.get("system_prompt") or self.spec.get("system_prompt") or ""
         llm_provider = overrides.get("llm_provider") or ""

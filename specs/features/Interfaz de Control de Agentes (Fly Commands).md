@@ -12,9 +12,9 @@ Exponer comandos de chat que permitan al usuario **mutar el estado del agente en
 
 | Componente | Ubicación | Responsabilidad |
 |------------|-----------|------------------|
-| **Lógica de comandos** | `packages/agents/src/duckclaw/agents/on_the_fly_commands.py` | `handle_command()`, `parse_command()`, ejecutores por comando |
-| **Telegram bot** | `packages/agents/src/duckclaw/agents/telegram_bot.py` | Intercepta `/` antes del grafo; llama `handle_command(db, chat_id, text)` |
-| **API Gateway** | `packages/agents/src/duckclaw/api/gateway.py` | Intercepta `/` en `_invoke_chat`; llama `handle_command(db, session_id, message)` |
+| **Lógica de comandos** | `packages/agents/src/duckclaw/graphs/on_the_fly_commands.py` | `handle_command()`, `parse_command()`, ejecutores por comando |
+| **Telegram bot** | `packages/agents/src/duckclaw/graphs/telegram_bot.py` | Intercepta `/` antes del grafo; llama `handle_command(db, chat_id, text)` |
+| **API Gateway** | `services/api-gateway/main.py` | Intercepta `/` en `_invoke_chat`; llama `handle_command(db, session_id, message)` |
 | **Persistencia** | Tabla `agent_config` en DuckDB | Claves por chat/sesión: `chat_{id}_worker_id`, `chat_{id}_llm_provider`, etc. |
 
 **Flujo:** Mensaje → ¿Empieza por `/`? → `handle_command()` → Si retorna string, enviar y terminar. Si retorna `None`, invocar el grafo.

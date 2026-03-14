@@ -13,7 +13,7 @@ DuckClaw está organizado como monorepo para escalabilidad y despliegues indepen
 | Origen (Legacy) | Destino (Monorepo) | Responsabilidad |
 |:---|:---|:---|
 | `src/`, `include/` | `packages/core/` | Núcleo nativo C++ y bindings DuckDB. |
-| `duckclaw/agents/` | `packages/agents/src/duckclaw/agents/` | Grafos LangGraph y flujos de decisión. |
+| `duckclaw/graphs/` | `packages/agents/src/duckclaw/graphs/` | Grafos LangGraph y flujos de decisión. |
 | `duckclaw/workers/` | `packages/agents/src/duckclaw/workers/` | Plantillas de trabajadores virtuales. |
 | `duckclaw/utils/` | `packages/shared/src/duckclaw/utils/` | Formateo y funciones comunes. |
 | `duckclaw/integrations/` | `packages/shared/src/duckclaw/integrations/` | Telegram, build_llm, proveedores LLM. |
@@ -22,7 +22,7 @@ DuckClaw está organizado como monorepo para escalabilidad y despliegues indepen
 
 ### Organización de la raíz
 
-- **`packages/`**: Lógica de negocio (core, agents, shared); cada subpaquete tiene su `pyproject.toml`.
+- **`packages/`**: Lógica de negocio (core, agents → duckclaw.graphs, shared); cada subpaquete tiene su `pyproject.toml`.
 - **`services/`**: Puntos de despliegue (API Gateway, DB Writer).
 - **`config/`**: Archivos `.json`, `.ini`, `.cjs` centralizados.
 - **`data/`**: Datalake y snapshots locales.

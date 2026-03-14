@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from duckclaw.agents.on_the_fly_commands import execute_forget
+from duckclaw.graphs.on_the_fly_commands import execute_forget
 
 
 def _mock_db() -> MagicMock:

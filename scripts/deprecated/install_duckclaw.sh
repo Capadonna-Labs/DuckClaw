@@ -70,5 +70,5 @@ if [ -n "${PM2_SERVICE}" ]; then
 else
   echo ""
   echo "Arrancando bot DuckClaw..."
-  exec "${PYTHON}" -m duckclaw.agents.telegram_bot
+  exec "${PYTHON}" -m duckclaw.graphs.telegram_bot
 fi

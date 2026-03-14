@@ -51,7 +51,7 @@ except ImportError:
 
 # Logs para PM2
 def _ensure_log_handler():
-    for name in ("duckclaw.api.gateway", "duckclaw.agents.general_graph", "duckclaw.agents.retail_graph", "duckclaw.bi.agent"):
+    for name in ("duckclaw.gateway", "duckclaw.graphs.general_graph", "duckclaw.graphs.retail_graph", "duckclaw.bi.agent"):
         log = logging.getLogger(name)
         if not log.handlers:
             h = logging.StreamHandler(sys.stdout)
@@ -60,7 +60,7 @@ def _ensure_log_handler():
             log.addHandler(h)
             log.setLevel(logging.INFO)
 _ensure_log_handler()
-_gateway_log = logging.getLogger("duckclaw.api.gateway")
+_gateway_log = logging.getLogger("duckclaw.gateway")
 
 
 @asynccontextmanager
@@ -215,8 +215,8 @@ async def _invoke_chat(message: str, session_id: str, history: list, worker_id: 
     msg_stripped = (message or "").strip()
     if msg_stripped.startswith("/"):
         try:
-            from duckclaw.agents.on_the_fly_commands import handle_command
-            from duckclaw.agents.graph_server import get_db
+            from duckclaw.graphs.on_the_fly_commands import handle_command
+            from duckclaw.graphs.graph_server import get_db
             db = get_db()
             cmd_reply = handle_command(db, session_id, message)
             if cmd_reply is not None:
@@ -231,14 +231,14 @@ async def _invoke_chat(message: str, session_id: str, history: list, worker_id: 
             _gateway_log.error("fly command failed: %s", exc)
 
     try:
-        from duckclaw.agents.graph_server import _get_or_build_graph, _ainvoke
+        from duckclaw.graphs.graph_server import _get_or_build_graph, _ainvoke
         graph = _get_or_build_graph()
     except Exception as exc:
         _gateway_log.error("graph init failed: %s\n%s", exc, traceback.format_exc())
         raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
     try:
-        from duckclaw.agents.activity import set_busy, set_idle
+        from duckclaw.graphs.activity import set_busy, set_idle
         set_busy(session_id, task=message)
     except Exception:
         pass
@@ -247,13 +247,13 @@ async def _invoke_chat(message: str, session_id: str, history: list, worker_id: 
         result = await _ainvoke(graph, message, history or [], session_id)
     except Exception as exc:
         try:
-            from duckclaw.agents.activity import set_idle
+            from duckclaw.graphs.activity import set_idle
             set_idle(session_id)
         except Exception:
             pass
         try:
-            from duckclaw.agents.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
-            from duckclaw.agents.graph_server import get_db
+            from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
+            from duckclaw.graphs.graph_server import get_db
             db = get_db()
             wid = get_worker_id_for_chat(db, session_id) or worker_id
             elapsed_fail = int((time.monotonic() - t0) * 1000)
@@ -264,22 +264,22 @@ async def _invoke_chat(message: str, session_id: str, history: list, worker_id: 
         raise HTTPException(status_code=500, detail=str(exc))
 
     try:
-        from duckclaw.agents.activity import set_idle
+        from duckclaw.graphs.activity import set_idle
         set_idle(session_id)
     except Exception:
         pass
     _gateway_log.info("out: %s", _truncate_log(result))
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     try:
-        from duckclaw.agents.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
-        from duckclaw.agents.graph_server import get_db
+        from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
+        from duckclaw.graphs.graph_server import get_db
         db = get_db()
         wid = get_worker_id_for_chat(db, session_id) or worker_id
         append_task_audit(db, session_id, wid, message, "SUCCESS", elapsed_ms)
     except Exception:
         pass
     try:
-        from duckclaw.agents.on_the_fly_commands import _telegram_safe
+        from duckclaw.graphs.on_the_fly_commands import _telegram_safe
         result = _telegram_safe(result)
     except Exception:
         pass
@@ -324,10 +324,10 @@ async def enqueue_write(req: WriteRequest):
         )
 
 
-# ── Quotes router ────────────────────────────────────────────────────────────
+# ── Quotes router (microservicio: routers en services/api-gateway) ───────────
 
 try:
-    from duckclaw.api.routers import quotes
-    app.include_router(quotes.router)
+    from routers.quotes import router as quotes_router
+    app.include_router(quotes_router)
 except ImportError:
     pass

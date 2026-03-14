@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from duckclaw.agents.store_tools import build_store_tools
+from duckclaw.graphs.store_tools import build_store_tools
 
 _DEFAULT_SYSTEM_PROMPT = """Eres el Contador Soberano de Retail de IoTCoreLabs. Actúas con precisión y cuidado sobre finanzas e inventario.
 

@@ -67,14 +67,17 @@ def test_role_unknown_worker_rejects(db) -> None:
 
 
 def test_handle_command_processes_role(db) -> None:
-    """handle_command processes /role and returns reply."""
+    """handle_command with /role returns redirect to /team (role deprecated)."""
     chat_id = "test_role_cmd"
     set_chat_state(db, chat_id, "worker_id", "")
 
     reply = handle_command(db, chat_id, "/role finanz")
     assert reply is not None
-    assert "finanz" in (reply or "").lower()
-    assert get_worker_id_for_chat(db, chat_id) == "finanz"
+    # /role was removed; reply must redirect to /team
+    reply_lower = (reply or "").lower()
+    assert "role" in reply_lower and ("team" in reply_lower or "ya no existe" in reply_lower)
+    # worker stays default (manager), not changed to finanz
+    assert get_worker_id_for_chat(db, chat_id) == "manager"
 
 
 def test_role_no_args_shows_usage(db) -> None:

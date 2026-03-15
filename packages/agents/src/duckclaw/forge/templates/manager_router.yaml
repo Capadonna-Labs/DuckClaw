@@ -1,0 +1,5 @@
+# Manager orquestador: punto de entrada único que asigna tareas a subagentes (workers).
+# Router lee worker_id del chat (agent_config); invoke_worker ejecuta el grafo del worker.
+# Usado por graph_server y API Gateway cuando se configura tipo manager.
+type: manager
+system_prompt: ""

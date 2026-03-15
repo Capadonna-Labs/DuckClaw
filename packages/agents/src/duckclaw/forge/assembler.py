@@ -101,6 +101,8 @@ class AgentAssembler:
                 send_to_langsmith=send_to_langsmith,
                 **overrides,
             )
+        if t == "manager":
+            return self._build_manager(db, llm, **overrides)
         if t == "worker":
             return self._build_worker(db, llm, **overrides)
         raise ValueError(f"Tipo de agente desconocido: {t!r}")
@@ -163,6 +165,31 @@ class AgentAssembler:
             llm_model=llm_model,
             save_traces=save_traces,
             send_to_langsmith=send_to_langsmith,
+        )
+
+    def _build_manager(self, db: Any, llm: Any, **overrides) -> Any:
+        """Construye el grafo manager (orquestador de subagentes)."""
+        from duckclaw.graphs.manager_graph import build_manager_graph
+
+        # None => build_manager_graph usa WORKERS_TEMPLATES_DIR (forge/templates)
+        templates_root = overrides.get("templates_root")
+        db_path = overrides.get("db_path")
+        if db_path is None and db is not None:
+            db_path = getattr(db, "_path", None) or getattr(db, "path", None)
+        if db_path is None or (isinstance(db_path, str) and not db_path.strip()):
+            from duckclaw.gateway_db import get_gateway_db_path
+            db_path = get_gateway_db_path()
+        llm_provider = overrides.get("llm_provider") or ""
+        llm_model = overrides.get("llm_model") or ""
+        llm_base_url = overrides.get("llm_base_url") or ""
+        return build_manager_graph(
+            db,
+            llm,
+            templates_root=templates_root,  # None => forge/templates
+            db_path=db_path,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_base_url=llm_base_url,
         )
 
     def _build_worker(self, db: Any, llm: Any, **overrides) -> Any:

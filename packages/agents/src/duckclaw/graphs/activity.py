@@ -28,19 +28,22 @@ def _activity_key(chat_id: Any) -> str:
     return f"{_ACTIVITY_KEY_PREFIX}{chat_id}"
 
 
-def set_busy(chat_id: Any, task: str = "") -> None:
-    """Marca el chat como BUSY con la tarea actual."""
+def set_busy(chat_id: Any, task: str = "", worker_id: Optional[str] = None) -> None:
+    """Marca el chat como BUSY con la tarea actual y opcionalmente el worker/subagente."""
     url = _get_redis_url()
     if not url:
         return
     try:
         import redis
         r = redis.from_url(url)
-        payload = json.dumps({
+        data: Dict[str, Any] = {
             "status": "BUSY",
             "task": (task or "")[:256],
             "started_at": int(time.time()),
-        })
+        }
+        if worker_id and str(worker_id).strip():
+            data["worker_id"] = str(worker_id).strip()[:64]
+        payload = json.dumps(data)
         r.setex(_activity_key(chat_id), 3600, payload)  # TTL 1h
     except Exception:
         pass
@@ -63,6 +66,7 @@ def get_activity(chat_id: Any) -> Optional[Dict[str, Any]]:
     """
     Obtiene el estado de actividad del chat.
     Retorna None si no hay Redis o no hay dato (IDLE implícito).
+    Incluye worker_id si fue pasado a set_busy (subagente ejecutando la tarea).
     """
     url = _get_redis_url()
     if not url:
@@ -72,7 +76,10 @@ def get_activity(chat_id: Any) -> Optional[Dict[str, Any]]:
         r = redis.from_url(url)
         raw = r.get(_activity_key(chat_id))
         if raw:
-            return json.loads(raw)
-        return {"status": "IDLE", "task": "", "started_at": 0}
+            data = json.loads(raw)
+            if isinstance(data, dict) and "worker_id" not in data:
+                data["worker_id"] = ""
+            return data
+        return {"status": "IDLE", "task": "", "started_at": 0, "worker_id": ""}
     except Exception:
         return None

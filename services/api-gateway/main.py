@@ -52,7 +52,7 @@ except ImportError:
 
 # Logs para PM2
 def _ensure_log_handler():
-    for name in ("duckclaw.gateway", "duckclaw.graphs.general_graph", "duckclaw.graphs.retail_graph", "duckclaw.bi.agent"):
+    for name in ("duckclaw.gateway", "duckclaw.graphs.general_graph", "duckclaw.graphs.retail_graph", "duckclaw.graphs.manager_graph", "duckclaw.bi.agent"):
         log = logging.getLogger(name)
         if not log.handlers:
             h = logging.StreamHandler(sys.stdout)
@@ -221,6 +221,14 @@ async def _invoke_chat(message: str, session_id: str, history: list, worker_id: 
     _gateway_log.info("in: %s", _truncate_log(message))
 
     msg_stripped = (message or "").strip()
+    # No invocar el grafo con mensaje vacío (evita plan vacío y respuesta "¿Cuál es mi tarea?")
+    if not msg_stripped:
+        return {
+            "response": "No recibí ningún mensaje. Escribe tu consulta o comando (por ejemplo /tasks).",
+            "session_id": session_id,
+            "worker_id": worker_id,
+            "elapsed_ms": 0,
+        }
     if msg_stripped.startswith("/"):
         try:
             from duckclaw.graphs.on_the_fly_commands import handle_command
@@ -268,6 +276,21 @@ async def _invoke_chat(message: str, session_id: str, history: list, worker_id: 
             append_task_audit(db, session_id, wid, message, "FAILED", elapsed_fail)
         except Exception:
             pass
+        try:
+            if os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES", "true").strip().lower() in ("true", "1", "yes"):
+                from duckclaw.graphs.conversation_traces import append_conversation_trace
+                from duckclaw.graphs.on_the_fly_commands import get_effective_system_prompt
+                from duckclaw.graphs.graph_server import get_db
+                _db = get_db()
+                _sys = (get_effective_system_prompt(_db, worker_id) or "").strip()
+                _sys = _sys or (os.environ.get("DUCKCLAW_SYSTEM_PROMPT") or "").strip() or None
+                append_conversation_trace(
+                    session_id, message, str(exc)[:8192],
+                    worker_id=worker_id, elapsed_ms=elapsed_fail, status="FAILED",
+                    system_prompt=_sys,
+                )
+        except Exception:
+            pass
         _gateway_log.error("agent_chat failed: %s\n%s", exc, traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -276,26 +299,47 @@ async def _invoke_chat(message: str, session_id: str, history: list, worker_id: 
         set_idle(session_id)
     except Exception:
         pass
-    _gateway_log.info("out: %s", _truncate_log(result))
-    result = _strip_markdown_bold(result or "")
+    reply_text = result.get("reply", "") if isinstance(result, dict) else (result or "")
+    _gateway_log.info("out: %s", _truncate_log(reply_text))
+    reply_text = _strip_markdown_bold(reply_text or "")
     elapsed_ms = int((time.monotonic() - t0) * 1000)
+    # Grafo manager devuelve assigned_worker_id; usarlo para respuesta y trazas
+    effective_worker_id = result.get("assigned_worker_id", worker_id) if isinstance(result, dict) else worker_id
     try:
-        from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
-        from duckclaw.graphs.graph_server import get_db
-        db = get_db()
-        wid = get_worker_id_for_chat(db, session_id) or worker_id
-        append_task_audit(db, session_id, wid, message, "SUCCESS", elapsed_ms)
+        if not result.get("_audit_done"):
+            from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
+            from duckclaw.graphs.graph_server import get_db
+            db = get_db()
+            wid = get_worker_id_for_chat(db, session_id) or worker_id
+            append_task_audit(db, session_id, wid, message, "SUCCESS", elapsed_ms)
+    except Exception:
+        pass
+    try:
+        if os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES", "true").strip().lower() in ("true", "1", "yes"):
+            from duckclaw.graphs.conversation_traces import append_conversation_trace
+            from duckclaw.graphs.on_the_fly_commands import get_effective_system_prompt
+            from duckclaw.graphs.graph_server import get_db
+            trace_messages = result.get("messages") if isinstance(result, dict) else None
+            db = get_db()
+            system_from_prompt = (get_effective_system_prompt(db, effective_worker_id) or "").strip()
+            system_for_trace = system_from_prompt or (os.environ.get("DUCKCLAW_SYSTEM_PROMPT") or "").strip() or None
+            append_conversation_trace(
+                session_id, message, reply_text or "",
+                worker_id=effective_worker_id, elapsed_ms=elapsed_ms, status="SUCCESS",
+                system_prompt=system_for_trace,
+                messages=trace_messages,
+            )
     except Exception:
         pass
     try:
         from duckclaw.graphs.on_the_fly_commands import _telegram_safe
-        result = _telegram_safe(result)
+        reply_text = _telegram_safe(reply_text)
     except Exception:
         pass
     return {
-        "response": result,
+        "response": reply_text,
         "session_id": session_id,
-        "worker_id": worker_id,
+        "worker_id": effective_worker_id or worker_id,
         "elapsed_ms": elapsed_ms,
     }
 

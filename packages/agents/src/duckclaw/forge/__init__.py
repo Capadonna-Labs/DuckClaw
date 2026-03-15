@@ -15,6 +15,7 @@ from .assembler import AgentAssembler
 FORGE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = FORGE_DIR / "templates"
 ENTRY_ROUTER_YAML = TEMPLATES_DIR / "entry_router.yaml"
+MANAGER_ROUTER_YAML = TEMPLATES_DIR / "manager_router.yaml"
 GENERAL_YAML = TEMPLATES_DIR / "general.yaml"
 RETAIL_YAML = TEMPLATES_DIR / "retail.yaml"
 
@@ -25,6 +26,7 @@ WORKERS_TEMPLATES_DIR = TEMPLATES_DIR
 __all__ = [
     "AgentAssembler",
     "ENTRY_ROUTER_YAML",
+    "MANAGER_ROUTER_YAML",
     "GENERAL_YAML",
     "RETAIL_YAML",
     "WORKERS_TEMPLATES_DIR",

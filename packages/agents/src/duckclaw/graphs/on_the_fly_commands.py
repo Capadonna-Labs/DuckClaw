@@ -94,25 +94,108 @@ def parse_command(text: str) -> Tuple[str, str]:
     return name, args
 
 
-_DEFAULT_WORKER = "personalizable"
+def get_team_templates(db: Any, chat_id: Any) -> list:
+    """Templates disponibles en el equipo para este chat. Vacío = todos los de list_workers()."""
+    raw = get_chat_state(db, chat_id, "team_templates")
+    if not raw:
+        return []
+    try:
+        out = json.loads(raw)
+        return out if isinstance(out, list) else []
+    except Exception:
+        return []
+
+
+def set_team_templates(db: Any, chat_id: Any, template_ids: list) -> None:
+    """Define los templates del equipo para este chat. Lista vacía = usar todos (list_workers)."""
+    set_chat_state(db, chat_id, "team_templates", json.dumps([str(x).strip().lower() for x in template_ids]))
+
+
+def execute_team(db: Any, chat_id: Any, args: str) -> str:
+    """/team [id1 id2 ...] [--add id...] [--rm worker_id]: equipo del chat. Sin args: lista. Con ids: reemplaza. --add: añade; --rm: quita uno."""
+    from duckclaw.workers.factory import list_workers
+    all_templates = list_workers()
+    team = get_team_templates(db, chat_id)
+    if not args or not args.strip():
+        display_list = team if team else all_templates
+        if not display_list:
+            return _telegram_safe("No hay templates en forge/templates. Añade al menos uno.")
+        label = _telegram_safe("Equipo (este chat):") if team else _telegram_safe("Equipo: todos los templates")
+        lines = "\n".join(f"\\- {_telegram_safe(w)}" for w in display_list)
+        hint = _telegram_safe("Reemplazar: /team id1 id2 | Añadir: /team --add id | Quitar: /team --rm id | Ver todos: /roles")
+        return f"🦆 {label}\n{lines}\n\n{hint}"
+    raw = args.strip()
+    # --rm <worker_id>
+    if raw.startswith("--rm "):
+        wid = raw[5:].strip().lower().split()[0]
+        current = team if team else list(all_templates)
+        if wid not in current:
+            return _telegram_safe(f"'{wid}' no está en el equipo. Equipo actual: {', '.join(current) or 'todos'}")
+        new_team = [x for x in current if x != wid]
+        set_team_templates(db, chat_id, new_team)
+        return _telegram_safe(f"✅ Quitado {wid} del equipo. Quedan: {', '.join(new_team) or 'ninguno (el manager usará todos)'}.")
+    # --add id1 id2 ... (insert/appendix al equipo actual)
+    if raw.startswith("--add ") or raw.strip() == "--add":
+        ids_str = raw[6:].strip() if raw.startswith("--add ") else ""
+        ids = [x.strip().lower() for x in ids_str.split() if x.strip()]
+        valid = [i for i in ids if i in all_templates]
+        invalid = [i for i in ids if i not in all_templates]
+        if invalid:
+            return _telegram_safe(f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}")
+        current = team if team else list(all_templates)
+        for i in valid:
+            if i not in current:
+                current.append(i)
+        set_team_templates(db, chat_id, current)
+        return _telegram_safe(f"✅ Añadidos al equipo: {', '.join(valid)}. Equipo: {', '.join(current)}.")
+    # id1 id2 ... → reemplazar equipo
+    ids = [x.strip().lower() for x in raw.split() if x.strip()]
+    valid = [i for i in ids if i in all_templates]
+    invalid = [i for i in ids if i not in all_templates]
+    if invalid:
+        return _telegram_safe(f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}")
+    set_team_templates(db, chat_id, valid)
+    return _telegram_safe(f"✅ Equipo de este chat: {', '.join(valid)}. El manager delegará solo a estos.")
+
+
+def execute_roles(db: Any, chat_id: Any) -> str:
+    """/roles: lista todos los trabajadores virtuales (templates) disponibles. El manager solo delegará a los que estén en /team."""
+    from duckclaw.workers.factory import list_workers
+    all_templates = list_workers()
+    if not all_templates:
+        return _telegram_safe("No hay templates en forge/templates. Añade al menos uno.")
+    lines = "\n".join(f"\\- {_telegram_safe(w)}" for w in all_templates)
+    return (
+        f"🦆 {_telegram_safe('Trabajadores virtuales (templates) disponibles:')}\n\n{lines}\n\n"
+        f"{_telegram_safe('El manager solo delegará a los que estén en tu equipo. Para añadirlos: /team id1 id2 ...')}"
+    )
+
+
+# Worker por defecto: el manager orquesta y delega a los trabajadores en forge/templates
+_DEFAULT_WORKER = "manager"
 
 
 def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
-    """/role <worker_id>: cambia el rol (worker template) en caliente. Sin args: muestra rol actual y disponibles."""
+    """/role <worker_id>: cambia el rol. Por defecto 'manager' delega a los templates. Sin args: muestra rol actual y disponibles."""
     from duckclaw.workers.factory import list_workers
-    available = list_workers()
-    available = [_DEFAULT_WORKER] + [w for w in available if w != _DEFAULT_WORKER]
+    available = list_workers()  # solo templates (finanz, research_worker, etc.)
     wid = (worker_id or "").strip().lower()
     if not wid:
         current = get_chat_state(db, chat_id, "worker_id") or _DEFAULT_WORKER
-        try:
-            from duckclaw.workers.manifest import load_manifest
-            spec = load_manifest(current)
-            current_display = _telegram_safe(f"{spec.name} ({current})")
-        except Exception:
-            current_display = _telegram_safe(current)
+        if current == "manager":
+            current_display = _telegram_safe("Manager (delega a trabajadores en templates)")
+        else:
+            try:
+                from duckclaw.workers.manifest import load_manifest
+                spec = load_manifest(current)
+                current_display = _telegram_safe(f"{spec.name} ({current})")
+            except Exception:
+                current_display = _telegram_safe(current)
         avail_str = "\n".join(f"\\- {_telegram_safe(w)}" for w in available) if available else "ninguna"
-        return f"🦆 {_telegram_safe('Rol:')} {current_display}\n\n{_telegram_safe('Disponibles:')}\n{avail_str}\n{_telegram_safe('/role <id>')}"
+        return f"🦆 {_telegram_safe('Rol:')} {current_display}\n\n{_telegram_safe('Disponibles:')} {_telegram_safe('manager (por defecto)')}\n{avail_str}\n{_telegram_safe('/role <id>')}"
+    if wid == "manager":
+        set_chat_state(db, chat_id, "worker_id", "manager")
+        return _telegram_safe("✅ Manager. Delega a los trabajadores en templates.")
     if wid not in available:
         avail_str = "\n".join(f"\\- {_telegram_safe(w)}" for w in available) if available else "ninguna"
         return _telegram_safe(f"Rol '{wid}' no existe.") + f"\n{_telegram_safe('Disponibles:')}\n{avail_str}"
@@ -126,22 +209,26 @@ def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
         return f"Error al cargar rol: {e}."
 
 
-def execute_skills_list(db: Any, chat_id: Any) -> str:
-    """/skills: lista herramientas actuales del agente. Texto seguro para Telegram (n8n)."""
-    wid = get_chat_state(db, chat_id, "worker_id")
-    if wid:
-        try:
-            from duckclaw.workers.manifest import load_manifest
-            spec = load_manifest(wid)
-            skills_safe = [_telegram_safe(s) for s in (spec.skills_list or [])]
-            lines = [f"- {s}" for s in skills_safe]
-            lines.append(f"- {_telegram_safe('run_sql')}")
-            lines = [f"\\- {s}" for s in skills_safe]
-            lines.append(f"\\- {_telegram_safe('run_sql')}")
-            return _telegram_safe(f"🔧 {spec.name}\n") + "\n".join(lines)
-        except Exception as e:
-            return f"Error: {e}."
-    return _telegram_safe("🔧 run_sql, inspect_schema, manage_memory. /role <id> para cambiar.")
+def execute_skills_list(db: Any, chat_id: Any, args: str) -> str:
+    """/skills <worker_id>: lista herramientas del template. worker_id debe ser uno de /roles."""
+    from duckclaw.workers.factory import list_workers
+    available = list_workers()
+    wid = (args or "").strip().lower()
+    if not wid:
+        return _telegram_safe("Uso: /skills <worker_id>. Ver templates: /roles")
+    if wid.startswith("--"):
+        return _telegram_safe("Indica un worker_id (ej. finanz, research_worker). Ver templates: /roles")
+    if wid not in available:
+        return _telegram_safe(f"Template '{wid}' no encontrado. Disponibles (usa /roles): {', '.join(available)}")
+    try:
+        from duckclaw.workers.manifest import load_manifest
+        spec = load_manifest(wid)
+        skills_safe = [_telegram_safe(s) for s in (spec.skills_list or [])]
+        lines = [f"\\- {s}" for s in skills_safe]
+        lines.append(f"\\- {_telegram_safe('run_sql')}")
+        return _telegram_safe(f"🔧 {spec.name} ({wid})\n") + "\n".join(lines)
+    except Exception as e:
+        return f"Error: {e}."
 
 
 def execute_forget(db: Any, chat_id: Any) -> str:
@@ -240,114 +327,196 @@ def _normalize_belief_key(key: str) -> str:
     return "".join(c if c.isalnum() or c == "_" else "_" for c in (key or "").strip())
 
 
-def execute_goals(db: Any, chat_id: Any, args: str) -> str:
-    """/goals [--reset] | /goals <goal>: listar creencias, resetear todas, o añadir una goal por nombre (ej. /goals presupuesto_mensual)."""
-    wid = get_chat_state(db, chat_id, "worker_id")
-    if not wid:
-        return _telegram_safe("Usa /role <worker_id> para asignar un rol con homeostasis (ej. finanz, powerseal).")
+def _get_goals_registry_for_manager() -> Optional[Any]:
+    """Registro de goals válidos para el manager (desde el primer template con homeostasis, ej. finanz)."""
     try:
+        from duckclaw.workers.factory import list_workers
         from duckclaw.workers.manifest import load_manifest
-        from duckclaw.workers.loader import run_schema
         from duckclaw.forge.homeostasis.belief_registry import BeliefRegistry
-        from duckclaw.forge.homeostasis.surprise import compute_surprise
-        spec = load_manifest(wid)
-        schema = spec.schema_name
-        config = getattr(spec, "homeostasis_config", None) or {}
-        registry = BeliefRegistry.from_config(config)
-        if not registry.beliefs:
-            return _telegram_safe(f"El rol {wid} no tiene creencias definidas en homeostasis.")
-    except Exception as e:
-        return _telegram_safe(f"Error al cargar homeostasis: {e}.")
+        for wid in list_workers():
+            try:
+                spec = load_manifest(wid)
+                config = getattr(spec, "homeostasis_config", None) or {}
+                registry = BeliefRegistry.from_config(config)
+                if registry.beliefs:
+                    return registry
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def get_manager_goals(db: Any, chat_id: Any) -> list:
+    """Goals del chat guardados por el manager. Por defecto vacío."""
+    raw = get_chat_state(db, chat_id, "goals")
+    if not raw:
+        return []
+    try:
+        out = json.loads(raw)
+        return out if isinstance(out, list) else []
+    except Exception:
+        return []
+
+
+def set_manager_goals(db: Any, chat_id: Any, goals: list) -> None:
+    """Guarda la lista de goals del chat (manager). Cada item: belief_key, target_value, threshold, observed_value opcional, title (resumen)."""
+    set_chat_state(db, chat_id, "goals", json.dumps(goals))
+
+
+def _goal_title(goal: dict, fallback_key: str) -> str:
+    """Título resumen del goal para listar en /goals."""
+    t = (goal.get("title") or "").strip()
+    if t:
+        return t[:80] + ("…" if len((goal.get("title") or "").strip()) > 80 else "")
+    return (goal.get("belief_key") or fallback_key or "").strip()
+
+
+def _natural_language_goal_to_params(db: Any, chat_id: Any, text: str) -> Optional[dict]:
+    """Convierte un objetivo en lenguaje natural a parámetros homeostasis (belief_key, target_value, threshold, title). Usa LLM del manager."""
+    text = (text or "").strip()[:500]
+    if not text:
+        return None
+    try:
+        from langchain_core.messages import HumanMessage
+        provider = get_chat_state(db, chat_id, "llm_provider") or _get_global_config(db, "llm_provider") or os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx")
+        model = get_chat_state(db, chat_id, "llm_model") or _get_global_config(db, "llm_model") or os.environ.get("DUCKCLAW_LLM_MODEL", "")
+        base_url = get_chat_state(db, chat_id, "llm_base_url") or _get_global_config(db, "llm_base_url") or os.environ.get("DUCKCLAW_LLM_BASE_URL", "http://127.0.0.1:8080")
+        from duckclaw.integrations.llm_providers import build_llm
+        llm = build_llm(provider, model, base_url)
+        if llm is None:
+            return None
+        prompt = (
+            "Convierte este objetivo en lenguaje natural a parámetros para homeostasis (Active Inference). "
+            "Responde ÚNICAMENTE un JSON válido con estas claves: belief_key (slug en snake_case, inglés o español), "
+            "target_value (número; 0 si el objetivo es minimizar o cualitativo), threshold (número >= 0, tolerancia), "
+            "title (resumen corto en español, máx 60 caracteres). Sin explicación, solo el JSON.\n\nObjetivo: "
+        ) + text
+        resp = llm.invoke([HumanMessage(content=prompt)])
+        content = (getattr(resp, "content", None) or "").strip()
+        if not content:
+            return None
+        # Extraer JSON si viene envuelto en ```json ... ```
+        if "```" in content:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            if start >= 0 and end > start:
+                content = content[start:end]
+        data = json.loads(content)
+        if not isinstance(data, dict):
+            return None
+        key = (data.get("belief_key") or "").strip() or _normalize_belief_key(text)
+        key = _normalize_belief_key(key) or "objetivo"
+        target = float(data.get("target_value", 0))
+        thresh = max(0.0, float(data.get("threshold", 0)))
+        title = (data.get("title") or text)[:120].strip()
+        return {"belief_key": key, "target_value": target, "threshold": thresh, "title": title}
+    except Exception:
+        return None
+
+
+def execute_goals(db: Any, chat_id: Any, args: str) -> str:
+    """/goals [--reset] | /goals <goal>: listar, resetear o añadir. Acepta clave (presupuesto_mensual) o lenguaje natural; el manager convierte a parámetros homeostasis."""
+    from duckclaw.forge.homeostasis.surprise import compute_surprise
+    registry = _get_goals_registry_for_manager()
+    valid_keys = [b.key for b in (registry.beliefs if registry else [])]
+    goals = get_manager_goals(db, chat_id)
 
     raw = (args or "").strip()
     do_reset = raw.lower() == "--reset"
 
     if do_reset:
-        try:
-            run_schema(db, spec, seed_beliefs=True)  # Asegura que la tabla exista antes de borrar
-            db.execute(f"DELETE FROM {schema}.agent_beliefs")
-            valid_goals = ", ".join(b.key for b in registry.beliefs[:5])
-            return _telegram_safe(
-                f"✅ Creencias reiniciadas. No hay goals. Crea nuevas con /goals <goal>, ej. /goals {valid_goals}"
-            )
-        except Exception as e:
-            return _telegram_safe(f"Error al resetear: {e}.")
+        set_manager_goals(db, chat_id, [])
+        return _telegram_safe("✅ Objetivos reiniciados. Crea con /goals <objetivo en lenguaje natural o clave>.")
 
-    # Añadir una goal: /goals <goal>
+    # Añadir: /goals <clave o lenguaje natural>
     if raw and not raw.startswith("--"):
-        run_schema(db, spec, seed_beliefs=False)
         key_norm = _normalize_belief_key(raw)
-        # Buscar en registry por key exacto o por key normalizado
-        belief = registry.get_belief(raw.strip())
-        if not belief:
-            for b in registry.beliefs:
-                if _normalize_belief_key(b.key) == key_norm:
-                    belief = b
-                    break
-        if not belief:
-            valid = ", ".join(b.key for b in registry.beliefs)
-            return _telegram_safe(f"Goal desconocida: '{raw}'. Válidas: {valid}")
-        key_safe = _normalize_belief_key(belief.key)
-        try:
-            db.execute(
-                f"""
-                INSERT INTO {schema}.agent_beliefs (belief_key, target_value, observed_value, threshold)
-                VALUES ('{key_safe}', {belief.target}, NULL, {belief.threshold})
-                ON CONFLICT (belief_key) DO UPDATE SET
-                    target_value = EXCLUDED.target_value,
-                    threshold = EXCLUDED.threshold
-                """
-            )
-        except Exception as e:
-            return _telegram_safe(f"Error al añadir goal: {e}.")
-        return _telegram_safe(f"✅ Goal añadida: {belief.key} (target={belief.target}, thresh={belief.threshold})")
+        belief = None
+        if registry:
+            belief = registry.get_belief(raw.strip())
+            if not belief:
+                for b in registry.beliefs:
+                    if _normalize_belief_key(b.key) == key_norm:
+                        belief = b
+                        break
+        if belief:
+            new_goal = {
+                "belief_key": belief.key,
+                "target_value": belief.target,
+                "threshold": belief.threshold,
+                "observed_value": None,
+                "title": belief.key,
+            }
+        else:
+            # Lenguaje natural: manager convierte a parámetros homeostasis vía LLM
+            params = _natural_language_goal_to_params(db, chat_id, raw)
+            if params:
+                new_goal = {
+                    "belief_key": params["belief_key"],
+                    "target_value": params["target_value"],
+                    "threshold": params["threshold"],
+                    "observed_value": None,
+                    "title": params["title"],
+                }
+            else:
+                new_goal = {
+                    "belief_key": key_norm or "objetivo",
+                    "target_value": 0.0,
+                    "threshold": 0.0,
+                    "observed_value": None,
+                    "title": raw[:120].strip(),
+                }
+        existing = [g for g in goals if (g.get("belief_key") or "").strip() == new_goal["belief_key"]]
+        if existing:
+            goals = [g for g in goals if (g.get("belief_key") or "").strip() != new_goal["belief_key"]]
+        goals.append(new_goal)
+        set_manager_goals(db, chat_id, goals)
+        title_display = _telegram_safe(new_goal.get("title") or new_goal["belief_key"])
+        return _telegram_safe(f"✅ Objetivo añadido: {title_display}")
 
-    run_schema(db, spec, seed_beliefs=False)  # No re-seed: tras reset la lista debe quedar vacía
-    r = db.query(
-        f"SELECT belief_key, target_value, observed_value, threshold FROM {schema}.agent_beliefs ORDER BY belief_key"
-    )
-    rows = json.loads(r) if isinstance(r, str) else (r or [])
-    if not rows or not isinstance(rows[0], dict):
-        valid_goals = ", ".join(b.key for b in registry.beliefs[:5])
-        return _telegram_safe(
-            f"🎯 {wid}\nNo hay goals. Crea nuevas con /goals <goal>, ej. /goals {valid_goals}"
-        )
+    # Listar (por defecto vacío)
+    if not goals:
+        return _telegram_safe("🎯 Manager\nNo hay goals. Crea con /goals <objetivo>, ej. /goals disminuir gasto en recreación.")
 
-    lines = [f"🎯 {wid}"]
+    lines = ["🎯 Manager"]
     try:
-        key_to_belief = {b.key.strip(): b for b in registry.beliefs}
-        for row in rows:
-            key = (row.get("belief_key") or "").strip()
+        key_to_belief = {b.key.strip(): b for b in (registry.beliefs if registry else [])}
+        for g in goals:
+            key = (g.get("belief_key") or "").strip()
             b = key_to_belief.get(key)
-            target = float(row.get("target_value")) if row.get("target_value") is not None else None
-            thresh = float(row.get("threshold")) if row.get("threshold") is not None else None
+            target = float(g.get("target_value")) if g.get("target_value") is not None else None
+            thresh = float(g.get("threshold")) if g.get("threshold") is not None else None
             if b is not None:
                 target = target if target is not None else b.target
                 thresh = thresh if thresh is not None else b.threshold
             try:
-                observed = float(row.get("observed_value")) if row.get("observed_value") is not None else None
+                observed = float(g.get("observed_value")) if g.get("observed_value") is not None else None
             except (TypeError, ValueError):
                 observed = None
-            label = _telegram_safe(b.key if b else key)
-            if observed is not None and target is not None and thresh is not None:
+            title = _telegram_safe(_goal_title(g, key))
+            if observed is not None and target is not None and thresh is not None and (target != 0 or thresh != 0):
                 res = compute_surprise(observed, target, thresh)
                 st = "⚠️" if res.is_anomaly else "✓"
-                lines.append(f"\\- {label}: {target} (obs: {observed}) {st}")
+                lines.append(f"\\- {title}: target={target} (obs: {observed}) {st}")
+            elif target is not None and thresh is not None:
+                lines.append(f"\\- {title}: target={target}, thresh={thresh} (sin dato)")
             else:
-                lines.append(f"\\- {label}: target={target}, thresh={thresh} (sin dato)")
+                lines.append(f"\\- {title}")
     except Exception as e:
         return _telegram_safe(f"Error: {e}.")
     return _telegram_safe("\n".join(lines) + "\n\n/goals --reset")
 
 
 def execute_tasks(db: Any, chat_id: Any) -> str:
-    """/tasks: estado del ActivityManager (Redis): IDLE, BUSY, tarea actual, tiempo en ejecución."""
+    """/tasks: estado del ActivityManager (Redis): IDLE, BUSY, subagente, tarea actual, tiempo en ejecución."""
     from duckclaw.graphs.activity import get_activity
     data = get_activity(chat_id)
     if data is None:
         return _telegram_safe("⏸ IDLE (Redis no configurado).")
     status = data.get("status", "IDLE")
     task = data.get("task", "")
+    worker_id = data.get("worker_id", "") or ""
     started_at = data.get("started_at", 0)
     elapsed_s = ""
     if started_at and status == "BUSY":
@@ -355,9 +524,10 @@ def execute_tasks(db: Any, chat_id: Any) -> str:
             elapsed_s = f" · {int(time.time()) - int(started_at)}s"
         except Exception:
             pass
+    worker_s = f" · {_telegram_safe(worker_id)}" if worker_id else ""
     task_preview = _telegram_safe(str(task)[:60]) if task else _telegram_safe("—")
     icon = "▶" if status == "BUSY" else "⏸"
-    return _telegram_safe(f"{icon} {status}{elapsed_s}\n") + task_preview
+    return _telegram_safe(f"{icon} {status}{elapsed_s}{worker_s}\n") + task_preview
 
 
 def _get_global_config(db: Any, key: str) -> str:
@@ -385,6 +555,29 @@ def _set_global_config(db: Any, key: str, value: str) -> None:
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
         """
     )
+
+
+def get_effective_system_prompt(db: Any, worker_id: Optional[str] = None) -> str:
+    """
+    Devuelve el system prompt efectivo para un worker:
+    - Si worker_id está definido: 1) override system_prompt_<worker_id>, 2) system_prompt.md del template. No usa global.
+    - Si worker_id vacío: global system_prompt o "".
+    """
+    wid = (worker_id or "").strip()
+    if wid:
+        override = _get_global_config(db, f"system_prompt_{wid}")
+        if override:
+            return override
+        try:
+            from duckclaw.workers.manifest import load_manifest
+            from duckclaw.workers.loader import load_system_prompt
+            spec = load_manifest(wid)
+            return (load_system_prompt(spec) or "").strip()
+        except Exception:
+            pass
+        return ""
+    current = _get_global_config(db, "system_prompt")
+    return current if current else ""
 
 
 _PROVIDERS = ("mlx", "ollama", "openai", "anthropic", "deepseek", "groq")
@@ -433,30 +626,59 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
     return _telegram_safe("✅ Modelo actualizado. Los próximos mensajes usarán esta config.")
 
 
-def execute_prompt(db: Any, chat_id: Any, new_prompt: str) -> str:
-    """/prompt [nuevo system prompt]: cambia el system prompt en caliente. Sin argumentos muestra el actual."""
-    if not new_prompt:
-        current = _get_global_config(db, "system_prompt")
-        if not current:
-            wid = get_chat_state(db, chat_id, "worker_id")
-            default_prompt = ""
-            if wid:
-                try:
-                    from duckclaw.workers.manifest import load_manifest
-                    from duckclaw.workers.loader import load_system_prompt
-                    spec = load_manifest(wid)
-                    default_prompt = load_system_prompt(spec)
-                except Exception:
-                    pass
-            if default_prompt:
-                preview = default_prompt[:400] + "..." if len(default_prompt) > 400 else default_prompt
-                return _telegram_safe(f"System prompt actual (predeterminado de {wid}):\n{preview}\n\nPara cambiar: /prompt <tu texto>")
-            return _telegram_safe("System prompt actual: (vacío — se usa el por defecto del bot).\nPara cambiar: /prompt <tu texto>")
-        preview = current[:400] + "..." if len(current) > 400 else current
-        return _telegram_safe(f"System prompt actual (modificado):\n{preview}\n\nPara cambiar: /prompt <nuevo texto>")
-    _set_global_config(db, "system_prompt", new_prompt)
-    preview = new_prompt[:200] + "..." if len(new_prompt) > 200 else new_prompt
-    return _telegram_safe(f"✅ System prompt actualizado.\nVista previa: {preview}")
+def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
+    """/prompt <worker_id> [--change <nuevo prompt>]: ver o cambiar el system prompt del template. worker_id debe ser uno de /roles."""
+    from duckclaw.workers.factory import list_workers
+    all_templates = list_workers()
+    raw = (args or "").strip()
+    if not raw:
+        return _telegram_safe("Uso: /prompt <worker_id> [--change <texto>]. Ver templates: /roles")
+    if raw.startswith("--"):
+        return _telegram_safe("Indica un worker_id (ej. finanz, research_worker). Ver templates: /roles")
+    change_marker = " --change "
+    idx = raw.lower().find(change_marker)
+    if idx >= 0:
+        worker_id = raw[:idx].strip().lower()
+        new_prompt = raw[idx + len(change_marker):].strip()
+    else:
+        worker_id = raw.split()[0].strip().lower() if raw.split() else ""
+        new_prompt = ""
+    if not worker_id:
+        return _telegram_safe("Uso: /prompt <worker_id> [--change <texto>]. Ver templates: /roles")
+    if worker_id not in all_templates:
+        return _telegram_safe(f"Template '{worker_id}' no encontrado. Disponibles (usa /roles): {', '.join(all_templates)}")
+    if new_prompt:
+        _set_global_config(db, f"system_prompt_{worker_id}", new_prompt)
+        preview = new_prompt[:200] + "..." if len(new_prompt) > 200 else new_prompt
+        return _telegram_safe(f"✅ System prompt de {worker_id} actualizado.\nVista previa: {preview}")
+    current = get_effective_system_prompt(db, worker_id)
+    if not current:
+        return _telegram_safe(f"System prompt de {worker_id}: (vacío o por defecto del template).\nPara cambiar: /prompt {worker_id} --change <texto>")
+    preview = current[:400] + "..." if len(current) > 400 else current
+    return _telegram_safe(f"System prompt de {worker_id}:\n{preview}\n\nPara cambiar: /prompt {worker_id} --change <texto>")
+
+
+def execute_help(db: Any, chat_id: Any) -> str:
+    """/help: lista los fly commands disponibles."""
+    lines = [
+        (_telegram_safe("/team"), _telegram_safe("Ver o definir equipo (solo a estos delega el manager)")),
+        (_telegram_safe("/roles"), _telegram_safe("Ver todos los trabajadores virtuales (templates)")),
+        (_telegram_safe("/tasks"), _telegram_safe("Estado actual: BUSY/IDLE, subagente, tarea")),
+        (_telegram_safe("/history"), _telegram_safe("Historial de tareas (quién hizo qué)")),
+        (_telegram_safe("/goals"), _telegram_safe("Objetivos de homeostasis")),
+        (_telegram_safe("/prompt <worker_id>"), _telegram_safe("Ver prompt; --change <texto> para cambiar")),
+        (_telegram_safe("/model"), _telegram_safe("Ver o cambiar LLM (provider/model)")),
+        (_telegram_safe("/skills <worker_id>"), _telegram_safe("Herramientas del template")),
+        (_telegram_safe("/forget"), _telegram_safe("Borrar historial de la conversación")),
+        (_telegram_safe("/context"), _telegram_safe("Toggle contexto largo/corto")),
+        (_telegram_safe("/audit"), _telegram_safe("Última auditoría de ejecución")),
+        (_telegram_safe("/health"), _telegram_safe("Estado del servicio")),
+        (_telegram_safe("/setup"), _telegram_safe("Config key=value")),
+        (_telegram_safe("/approve"), _telegram_safe("Aprobar última acción")),
+        (_telegram_safe("/reject"), _telegram_safe("Rechazar última acción")),
+    ]
+    block = "\n".join(f"{cmd} \\- {desc}" for cmd, desc in lines)
+    return f"🦆 {_telegram_safe('Fly commands:')}\n\n{block}"
 
 
 def handle_command(db: Any, chat_id: Any, text: str) -> Optional[str]:
@@ -467,10 +689,16 @@ def handle_command(db: Any, chat_id: Any, text: str) -> Optional[str]:
     name, args = parse_command(text)
     if not name:
         return None
+    if name == "help":
+        return execute_help(db, chat_id)
     if name == "role":
-        return execute_role_switch(db, chat_id, args)
+        return _telegram_safe("El comando /role ya no existe. Usa /team para ver o definir el equipo, /help para ver todos los comandos.")
+    if name == "roles":
+        return execute_roles(db, chat_id)
+    if name == "team":
+        return execute_team(db, chat_id, args)
     if name == "skills":
-        return execute_skills_list(db, chat_id)
+        return execute_skills_list(db, chat_id, args)
     if name == "forget":
         return execute_forget(db, chat_id)
     if name == "context":
@@ -539,7 +767,7 @@ def get_history_limit_for_chat(db: Any, chat_id: Any, default: int = 10) -> int:
 
 
 def get_worker_id_for_chat(db: Any, chat_id: Any) -> str:
-    """Devuelve el worker_id asignado a este chat. Por defecto: personalizable."""
+    """Devuelve el worker_id asignado a este chat. Por defecto: manager (orquesta y delega a templates)."""
     return get_chat_state(db, chat_id, "worker_id") or _DEFAULT_WORKER
 
 
@@ -630,7 +858,7 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
     try:
         r = db.query(
             f"""
-            SELECT task_id, query_prefix, status, duration_ms, created_at
+            SELECT task_id, query_prefix, status, duration_ms, created_at, worker_id
             FROM {_TASK_AUDIT_TABLE}
             WHERE tenant_id = '{tenant_s}'
             ORDER BY created_at DESC
@@ -667,13 +895,15 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
             continue
         prefix = (row.get("query_prefix") or "").strip()[:50]
         status = (row.get("status") or "UNKNOWN").upper()
+        wid = (row.get("worker_id") or "").strip()
         try:
             dur_ms = int(row.get("duration_ms") or 0)
         except (TypeError, ValueError):
             dur_ms = 0
         dur_s = f"{dur_ms / 1000:.1f}s"
         icon = "✅" if status == "SUCCESS" else "❌"
-        lines.append(f"{i}. {icon} {dur_s} · {_telegram_safe(prefix) or '—'}")
+        subagente = f"[{_telegram_safe(wid)}] " if wid else ""
+        lines.append(f"{i}. {icon} {dur_s} · {subagente}{_telegram_safe(prefix) or '—'}")
 
     success_rows = [r for r in filtered if isinstance(r, dict) and (r.get("status") or "").upper() == "SUCCESS"]
     def _dur(r):

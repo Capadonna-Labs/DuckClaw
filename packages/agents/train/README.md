@@ -126,3 +126,4 @@ Para enviar trazas a [LangSmith](https://smith.langchain.com/):
 | `adapters/` | Pesos LoRA tras `mlx/train_sft.py`. |
 | `model_finetuned/` | Modelo fusionado tras `scripts/mlx_hotswap.sh`. |
 | **`golden_dataset.jsonl`** | **Golden dataset para Model-Guard.** 10-20 consultas sintéticas validadas. |
+| **`conversation_traces/YYYY/MM/DD/traces.jsonl`** | **Trazas de conversaciones (datalake).** Una línea por turno; un archivo por día. Escrito por el API Gateway. Raíz configurable con `DUCKCLAW_CONVERSATION_TRACES_DIR` (por defecto: `train/conversation_traces`). |

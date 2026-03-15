@@ -205,7 +205,7 @@ def build_general_graph(
                     content = f"Error: {e}"
             else:
                 content = f"Herramienta desconocida: {name}"
-            new_msgs.append(ToolMessage(content=content, tool_call_id=tid))
+            new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
         return {"messages": new_msgs}
 
     def set_reply(state: dict) -> dict:
@@ -228,10 +228,10 @@ def build_general_graph(
                 if name and name in tools_by_name:
                     result = tools_by_name[name].invoke(params)
                     text = str(result) if result else "Listo."
-                    return {"reply": format_tool_reply(text)}
+                    return {"reply": format_tool_reply(text), "messages": msgs}
             except (json.JSONDecodeError, TypeError, KeyError, Exception):
                 pass
-        return {"reply": reply or ""}
+        return {"reply": reply or "", "messages": msgs}
 
     def should_continue(state: dict) -> str:
         last = state["messages"][-1]

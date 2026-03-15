@@ -30,6 +30,16 @@ _NO_TASK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Preguntas sobre DB/tablas/esquema son siempre tarea concreta (evitar "¿Cuál es mi tarea?")
+_CONCRETE_TASK_KEYWORDS = re.compile(
+    r"\b(db|database|base\s+de\s+datos|tablas?|tables?|esquema|schema|nombre\s+de\s+la\s+db|"
+    r"qu[eé]\s+tablas|estructura|get_db_path|run_sql|consultar|cuenta|saldo|portfolio)\b",
+    re.IGNORECASE,
+)
+
+# Tarea explícita del manager (plan): nunca tratar como "sin tarea"
+_PLANNED_TASK_PREFIX = ("TAREA:", "TAREA ", "Ejecuta la herramienta", "Ejecuta run_sql", "Usa run_sql", "usa get_db_path")
+
 
 def _is_no_task(incoming: str) -> bool:
     """True si el mensaje está vacío o es solo un saludo genérico (sin tarea concreta)."""
@@ -38,13 +48,19 @@ def _is_no_task(incoming: str) -> bool:
         return True
     if len(text) < 4:
         return True
+    # Tarea planificada por el manager (instrucción explícita)
+    if any(text.startswith(p) or p in text for p in _PLANNED_TASK_PREFIX):
+        return False
+    # Preguntas sobre db/tablas/esquema/nombre son tarea concreta
+    if _CONCRETE_TASK_KEYWORDS.search(text):
+        return False
     return bool(_NO_TASK_PATTERN.match(text))
 
 
 _TASK_AWARENESS_PROMPT = """
 Además:
 - Si no recibes una tarea concreta (mensaje vacío o solo saludos), pregunta: "¿Cuál es mi tarea?" y ofrece ejemplos de lo que puedes hacer según tu rol.
-- Mientras resuelves una tarea, al final sugiere 1-3 tareas similares que podrías hacer a continuación.
+- En tu cierre proactivo invita a usar fly commands: si hablaste de datos o ejecución sugiere /tasks o /team; invita a crear objetivos con /goals (por defecto están vacíos); si de configuración /prompt o /skills; en general /help para ver todos los comandos.
 """
 
 
@@ -132,6 +148,19 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
             _inspect_schema_worker,
             name="inspect_schema",
             description="Lista las tablas disponibles en la base de datos. Usar para preguntas sobre tablas, esquema o estructura.",
+        )
+    )
+
+    from duckclaw.graphs.tools import get_db_path as _get_db_path_tool
+
+    def _get_db_path_worker() -> str:
+        return _get_db_path_tool(db)
+
+    tools.append(
+        StructuredTool.from_function(
+            _get_db_path_worker,
+            name="get_db_path",
+            description="Devuelve la ruta o nombre del archivo .duckdb al que tiene acceso el agente. Usar cuando pregunten por el nombre de la base de datos.",
         )
     )
     return tools
@@ -437,14 +466,14 @@ def build_worker_graph(
             else:
                 content = f"Herramienta desconocida: {name}"
                 _log.warning("[finanz] unknown tool: %s", name)
-            new_msgs.append(ToolMessage(content=content, tool_call_id=tid))
+            new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
         return {"messages": new_msgs}
 
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.integrations.llm_providers import _strip_eot
         msgs = state.get("messages") or []
-        last = msgs[-1]
-        reply = getattr(last, "content", None) or str(last)
+        last = msgs[-1] if msgs else None
+        reply = getattr(last, "content", None) or str(last) if last else ""
         reply = _strip_eot(reply or "").strip()
         if not msgs:
             return {"reply": "Sin respuesta generada."}
@@ -457,10 +486,10 @@ def build_worker_graph(
                 if name and name in tools_by_name:
                     result = tools_by_name[name].invoke(params)
                     text = str(result) if result else "Listo."
-                    return {"reply": format_tool_reply(text)}
+                    return {"reply": format_tool_reply(text), "messages": msgs}
             except (json.JSONDecodeError, TypeError, KeyError, Exception):
                 pass
-        return {"reply": reply or ""}
+        return {"reply": reply or "", "messages": msgs}
 
     def should_continue(state: dict) -> str:
         last = state["messages"][-1]

@@ -98,7 +98,7 @@ def _confirm_with_nav(
         return default, None
     return default, None
 
-CONFIG_KEYS = ("mode", "channel", "bot_mode", "llm_provider", "llm_model", "llm_base_url", "db_path", "save_grpo_traces", "send_to_langsmith")
+CONFIG_KEYS = ("mode", "channel", "bot_mode", "llm_provider", "llm_model", "llm_base_url", "db_path", "save_grpo_traces", "send_to_langsmith", "save_conversation_traces", "conversation_traces_format")
 DEPLOY_PROVIDERS = ("auto", "pm2", "systemd", "windows", "cron")
 DEPLOY_SERVICE_NAME = "DuckClaw-Brain"
 GATEWAY_SERVICE_NAME = "DuckClaw-Gateway"  # spec FLUJO_VIDA_DATO: services/api-gateway
@@ -120,6 +120,7 @@ SECTION_IDS = (
     "token",
     "db_path",
     "grpo_traces",
+    "conversation_traces",
     "validate_provider",
     "summary",
     "save_launch",
@@ -204,8 +205,11 @@ def load_config() -> dict[str, Any] | None:
                     out["db_path"] = env_db
                 else:
                     out["db_path"] = v if _valid_db_path(v) else "telegram.duckdb"
-            elif k in ("save_grpo_traces", "send_to_langsmith"):
+            elif k in ("save_grpo_traces", "send_to_langsmith", "save_conversation_traces"):
                 out[k] = bool(v) if isinstance(v, bool) else str(v).strip().lower() in ("true", "1", "yes", "y", "sí", "si")
+            elif k == "conversation_traces_format":
+                raw = (str(v).strip().lower() if v else "sft")
+                out[k] = raw if raw in ("grpo", "sft") else "sft"
             else:
                 out[k] = v if v is not None else ""
         if "last_deploy_provider" in data and isinstance(data["last_deploy_provider"], str):
@@ -323,12 +327,19 @@ def _edit_gateway_service(console: Console, state: dict[str, Any], repo_root: Pa
         repo_root,
     )
     redis_url = os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL", "redis://localhost:6379/0")
-    console.print(f"DB path: [dim]{db_path}[/]  Redis: [dim]{redis_url}[/]")
+    save_traces_env = os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES", "true").strip().lower()
+    save_traces_current = save_traces_env in ("true", "1", "yes")
+    traces_fmt = (os.environ.get("DUCKCLAW_CONVERSATION_TRACES_FORMAT", "sft") or "sft").strip().lower()
+    if traces_fmt not in ("grpo", "sft"):
+        traces_fmt = "sft"
+    console.print(f"DB path: [dim]{db_path}[/]  Redis: [dim]{redis_url}[/]  Trazas: [dim]{'sí' if save_traces_current else 'no'}[/]  Formato: [dim]{traces_fmt}[/]")
 
     while True:
         if Confirm.ask("¿Regenerar config y reiniciar Gateway?", default=True):
             _write_env_file(repo_root, "DUCKCLAW_DB_PATH", db_path)
             _write_env_file(repo_root, "REDIS_URL", redis_url)
+            _write_env_file(repo_root, "DUCKCLAW_SAVE_CONVERSATION_TRACES", "true" if save_traces_current else "false")
+            _write_env_file(repo_root, "DUCKCLAW_CONVERSATION_TRACES_FORMAT", traces_fmt)
             try:
                 from duckclaw.ops.manager import serve
                 code = serve(
@@ -347,17 +358,29 @@ def _edit_gateway_service(console: Console, state: dict[str, Any], repo_root: Pa
                 console.print(f"[red]Error: {e}[/]")
                 console.print("[dim]Ejecuta manualmente: duckops serve --pm2 --gateway[/]")
             return
-        # No regenerar: permitir editar ruta DB, Redis, etc.
+        # No regenerar: permitir editar ruta DB, Redis, guardar trazas, etc.
         console.print("[dim]Edita los valores (Enter = mantener actual).[/]")
         new_db = Prompt.ask("DUCKCLAW_DB_PATH", default=db_path).strip() or db_path
         db_path = _normalize_db_to_db_folder(new_db, repo_root)
         new_redis = Prompt.ask("REDIS_URL", default=redis_url).strip() or redis_url
         redis_url = new_redis
+        save_traces_yes = Confirm.ask(
+            "¿Guardar trazas de conversaciones en train/conversation_traces/ (datalake año/mes/día)?",
+            default=save_traces_current,
+        )
+        save_traces_current = save_traces_yes
+        if save_traces_yes:
+            fmt_prompt = Prompt.ask("Formato de trazas (sft | grpo)", default=traces_fmt).strip().lower() or traces_fmt
+            traces_fmt = "grpo" if fmt_prompt == "grpo" else "sft"
         _write_env_file(repo_root, "DUCKCLAW_DB_PATH", db_path)
         _write_env_file(repo_root, "REDIS_URL", redis_url)
+        _write_env_file(repo_root, "DUCKCLAW_SAVE_CONVERSATION_TRACES", "true" if save_traces_yes else "false")
+        _write_env_file(repo_root, "DUCKCLAW_CONVERSATION_TRACES_FORMAT", traces_fmt)
         os.environ["DUCKCLAW_DB_PATH"] = db_path
         os.environ["REDIS_URL"] = redis_url
-        console.print(f"[green]✓[/] .env actualizado: DUCKCLAW_DB_PATH={db_path}, REDIS_URL=[dim]...[/]")
+        os.environ["DUCKCLAW_SAVE_CONVERSATION_TRACES"] = "true" if save_traces_yes else "false"
+        os.environ["DUCKCLAW_CONVERSATION_TRACES_FORMAT"] = traces_fmt
+        console.print(f"[green]✓[/] .env actualizado: DUCKCLAW_DB_PATH={db_path}, REDIS_URL=[dim]...[/], trazas={'sí' if save_traces_yes else 'no'}, formato={traces_fmt}")
         if not Confirm.ask("¿Seguir editando este servicio?", default=False):
             return
 
@@ -572,6 +595,9 @@ def _edit_service_settings(
     console.print(summary)
 
     # Persistir siempre (wizard_config.json + .env) para que la próxima vez recuerde la última BD
+    fmt_traces = (state.get("conversation_traces_format", "sft") or "sft").strip().lower()
+    if fmt_traces not in ("grpo", "sft"):
+        fmt_traces = "sft"
     save_config(
         mode=state.get("mode", "quick"),
         channel=state.get("channel", "telegram"),
@@ -582,8 +608,15 @@ def _edit_service_settings(
         llm_base_url=new_url,
         save_grpo_traces=state.get("save_grpo_traces", False),
         send_to_langsmith=state.get("send_to_langsmith", False),
+        save_conversation_traces=state.get("save_conversation_traces", True),
+        conversation_traces_format=fmt_traces,
     )
     _write_env_file(repo_root, "DUCKCLAW_DB_PATH", new_db)
+    save_conv = state.get("save_conversation_traces", True)
+    if isinstance(save_conv, str):
+        save_conv = str(save_conv).lower() in ("true", "1", "yes", "y", "sí", "si")
+    _write_env_file(repo_root, "DUCKCLAW_SAVE_CONVERSATION_TRACES", "true" if save_conv else "false")
+    _write_env_file(repo_root, "DUCKCLAW_CONVERSATION_TRACES_FORMAT", fmt_traces)
     _ensure_db_file_exists(repo_root, new_db, console)
 
     if provider == "pm2":
@@ -735,9 +768,13 @@ def save_config(
     llm_base_url: str = "",
     save_grpo_traces: bool = False,
     send_to_langsmith: bool = False,
+    save_conversation_traces: bool = True,
+    conversation_traces_format: str = "sft",
 ) -> None:
     path = _config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    fmt = (conversation_traces_format or "sft").strip().lower()
+    fmt = fmt if fmt in ("grpo", "sft") else "sft"
     data = {
         "mode": mode,
         "channel": channel,
@@ -748,6 +785,8 @@ def save_config(
         "llm_base_url": llm_base_url or "",
         "save_grpo_traces": save_grpo_traces,
         "send_to_langsmith": send_to_langsmith,
+        "save_conversation_traces": save_conversation_traces,
+        "conversation_traces_format": fmt,
     }
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -1165,6 +1204,27 @@ def _run_section(
             state["send_to_langsmith"] = False
         return True, "", None
 
+    if section_id == "conversation_traces":
+        console.print(Panel("Trazas de conversaciones", title="Trazas de conversaciones (Gateway/API)", border_style="cyan"))
+        console.print("[dim]Guarda cada turno en train/conversation_traces/YYYY/MM/DD/traces.jsonl cuando se use el API Gateway (n8n, Telegram vía Gateway).[/]")
+        default_save = state.get("save_conversation_traces", True)
+        if isinstance(default_save, str):
+            default_save = default_save.lower() in ("true", "1", "yes", "y", "sí", "si")
+        save_yes, nav = _confirm_with_nav(
+            console, "¿Guardar trazas de conversaciones en train/conversation_traces/ (datalake año/mes/día)?", default=default_save
+        )
+        if nav:
+            return True, "", nav
+        state["save_conversation_traces"] = save_yes
+        if save_yes:
+            default_fmt = state.get("conversation_traces_format", "sft").strip().lower()
+            if default_fmt not in ("grpo", "sft"):
+                default_fmt = "sft"
+            console.print("[dim]SFT: messages (system, user, assistant) para mlx_lm. GRPO: prompt + reward_metadata para TRL/Unsloth.[/]")
+            fmt_prompt = Prompt.ask("Formato de trazas (sft | grpo)", default=default_fmt).strip().lower() or default_fmt
+            state["conversation_traces_format"] = "grpo" if fmt_prompt == "grpo" else "sft"
+        return True, "", None
+
     if section_id == "validate_provider":
         console.print(Panel("Validar proveedor", title="Validar proveedor", border_style="cyan"))
         prov = (state.get("llm_provider") or "none_llm").strip().lower()
@@ -1201,6 +1261,12 @@ def _run_section(
                 if isinstance(send_ls, str):
                     send_ls = str(send_ls).lower() in ("true", "1", "yes", "y", "sí", "si")
                 t.add_row("Subir a LangSmith", "sí" if send_ls else "no")
+        save_conv = state.get("save_conversation_traces", True)
+        if isinstance(save_conv, str):
+            save_conv = str(save_conv).lower() in ("true", "1", "yes", "y", "sí", "si")
+        t.add_row("Guardar trazas de conversaciones", "sí" if save_conv else "no")
+        if save_conv:
+            t.add_row("Formato trazas", state.get("conversation_traces_format", "sft").upper())
         t.add_row("Modo setup", state.get("mode", ""))
         console.print(t)
         return True, "", None
@@ -1238,6 +1304,12 @@ def _run_section(
                 send_ls = state.get("send_to_langsmith", False)
                 if isinstance(send_ls, str):
                     send_ls = str(send_ls).lower() in ("true", "1", "yes", "y", "sí", "si")
+                save_conv = state.get("save_conversation_traces", True)
+                if isinstance(save_conv, str):
+                    save_conv = str(save_conv).lower() in ("true", "1", "yes", "y", "sí", "si")
+                fmt_traces = (state.get("conversation_traces_format", "sft") or "sft").strip().lower()
+                if fmt_traces not in ("grpo", "sft"):
+                    fmt_traces = "sft"
                 save_config(
                     mode=state.get("mode", "quick"),
                     channel=state.get("channel", "telegram"),
@@ -1248,8 +1320,12 @@ def _run_section(
                     llm_base_url=state.get("llm_base_url", ""),
                     save_grpo_traces=save_tr,
                     send_to_langsmith=send_ls,
+                    save_conversation_traces=save_conv,
+                    conversation_traces_format=fmt_traces,
                 )
                 _write_env_file(repo_root, "DUCKCLAW_DB_PATH", db_path_save)
+                _write_env_file(repo_root, "DUCKCLAW_SAVE_CONVERSATION_TRACES", "true" if save_conv else "false")
+                _write_env_file(repo_root, "DUCKCLAW_CONVERSATION_TRACES_FORMAT", fmt_traces)
                 _ensure_db_file_exists(repo_root, db_path_save, console)
         state.pop("_used_preferences_skip", None)
         console.print()
@@ -1560,6 +1636,8 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
     state.setdefault("llm_model", "")
     state.setdefault("llm_base_url", "")
     state.setdefault("save_grpo_traces", True)
+    state.setdefault("save_conversation_traces", True)
+    state.setdefault("conversation_traces_format", "sft")
     state.setdefault("send_to_langsmith", True)
     idx = 0
 
@@ -1586,6 +1664,7 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
             "token": "Token",
             "db_path": "DB",
             "grpo_traces": "Trazas GRPO",
+            "conversation_traces": "Trazas de conversaciones",
             "validate_provider": "Validar proveedor",
             "summary": "Resumen",
             "save_launch": "Finalizar",

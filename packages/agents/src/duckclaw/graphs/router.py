@@ -312,7 +312,10 @@ def build_entry_router_graph(
             "history": state.get("history") or [],
             "graph_context": state.get("graph_context") or "",
         })
-        return {"reply": result.get("reply") or "Sin respuesta."}
+        out = {"reply": result.get("reply") or "Sin respuesta."}
+        if result.get("messages"):
+            out["messages"] = result["messages"]
+        return out
 
     graph = StateGraph(dict)
     graph.add_node("route", route_node)

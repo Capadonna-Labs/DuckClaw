@@ -118,7 +118,7 @@ def _get_or_build_graph() -> Any:
 
     from duckclaw import DuckClaw
     from duckclaw.integrations.llm_providers import build_llm
-    from duckclaw.forge import AgentAssembler, ENTRY_ROUTER_YAML
+    from duckclaw.forge import AgentAssembler, MANAGER_ROUTER_YAML
 
     from duckclaw.gateway_db import get_gateway_db_path
     db_path = get_gateway_db_path()
@@ -139,12 +139,15 @@ def _get_or_build_graph() -> Any:
             "Configura DUCKCLAW_LLM_PROVIDER y DUCKCLAW_LLM_BASE_URL en .env."
         )
 
-    graph = AgentAssembler.from_yaml(ENTRY_ROUTER_YAML).build(
+    # Grafo manager: orquestador que asigna tareas a subagentes (workers); state incluye chat_id
+    graph = AgentAssembler.from_yaml(MANAGER_ROUTER_YAML).build(
         db=db,
         llm=llm,
         system_prompt=system_prompt,
         llm_provider=provider,
         llm_model=model,
+        llm_base_url=base_url,
+        db_path=db_path,
     )
 
     _graph_state["graph"]    = graph
@@ -238,7 +241,7 @@ async def invoke(req: InvokeRequest):
 
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     return InvokeResponse(
-        reply=result,
+        reply=result.get("reply", ""),
         model=_resolve_display_model(),
         elapsed_ms=elapsed_ms,
         chat_id=req.chat_id,
@@ -259,7 +262,8 @@ async def stream(req: InvokeRequest):
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
-            reply = await _ainvoke(graph, req.message, req.history, req.chat_id)
+            invoke_result = await _ainvoke(graph, req.message, req.history, req.chat_id)
+            reply = invoke_result.get("reply", "") or ""
             for word in reply.split(" "):
                 yield f"data: {word} \n\n"
                 await _async_sleep(0.02)
@@ -293,7 +297,11 @@ async def graph_info():
 
 # ── Helpers async ──────────────────────────────────────────────────────────────
 
-async def _ainvoke(graph: Any, message: str, history: list, chat_id: str) -> str:
+async def _ainvoke(graph: Any, message: str, history: list, chat_id: str) -> dict:
+    """
+    Invoca el grafo y retorna {"reply": str, "messages": list | None}.
+    messages (cuando existe) es la secuencia completa del turno para trazas SFT (tool_calls, tool, assistant).
+    """
     import asyncio
 
     state = {"incoming": message, "history": history or [], "chat_id": chat_id}
@@ -304,7 +312,8 @@ async def _ainvoke(graph: Any, message: str, history: list, chat_id: str) -> str
     else:
         result = await loop.run_in_executor(None, graph.invoke, state)
 
-    return str(result.get("reply") or result.get("output") or "Sin respuesta.")
+    reply = str(result.get("reply") or result.get("output") or "Sin respuesta.")
+    return {"reply": reply, "messages": result.get("messages")}
 
 
 async def _async_sleep(seconds: float) -> None:

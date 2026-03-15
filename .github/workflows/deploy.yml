@@ -1,13 +1,16 @@
-# CI para Singleton Writer Pipeline (sin deploy)
+# CI: tests unitarios, smoke y pipeline singleton (sin deploy)
 
-name: CI - Singleton Writer Pipeline
+name: CI
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   test:
+    name: test
     runs-on: ubuntu-latest
     timeout-minutes: 35
     services:

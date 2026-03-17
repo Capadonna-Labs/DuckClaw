@@ -48,6 +48,9 @@ ecosystem.*.config.cjs
 # LangGraph dev / Studio local state
 .langgraph_api/
 
+# Agent training conversation traces
+packages/agents/train/conversation_traces/
+
 .cusorignore
 .cursorrules
 

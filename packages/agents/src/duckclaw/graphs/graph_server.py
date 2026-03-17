@@ -193,6 +193,8 @@ class InvokeRequest(BaseModel):
     chat_id: str = Field("api", description="ID de sesión (para memoria de conversación)")
     history: list[dict] = Field(default_factory=list, description="Historial [{role, content}]")
     stream: bool = Field(False, description="Si true, usar /stream en su lugar")
+    username: str | None = Field(None, description="Nombre del usuario (para grupos)")
+    chat_type: str | None = Field(None, description="Tipo de chat: private, group, supergroup, etc.")
 
 
 class InvokeResponse(BaseModel):
@@ -233,9 +235,19 @@ async def invoke(req: InvokeRequest):
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
+    # Enriquecer el estado con identidad (username/chat_type) para general_graph.
+    history = req.history or []
+    state = {
+        "incoming": req.message,
+        "history": history,
+        "username": req.username or "",
+        "chat_type": (req.chat_type or "").lower() if req.chat_type else "",
+    }
+
     t0 = time.monotonic()
     try:
-        result = await _ainvoke(graph, req.message, req.history, req.chat_id)
+        # El grafo manager se encarga de mapear state → subgrafos; general_graph usará username/chat_type.
+        result = await _ainvoke(graph, state["incoming"], history, req.chat_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error en el grafo: {exc}")
 
@@ -297,14 +309,26 @@ async def graph_info():
 
 # ── Helpers async ──────────────────────────────────────────────────────────────
 
-async def _ainvoke(graph: Any, message: str, history: list, chat_id: str) -> dict:
+async def _ainvoke(
+    graph: Any,
+    message: str,
+    history: list,
+    chat_id: str,
+    is_system_prompt: bool | None = False,
+) -> dict:
     """
     Invoca el grafo y retorna {"reply": str, "messages": list | None}.
     messages (cuando existe) es la secuencia completa del turno para trazas SFT (tool_calls, tool, assistant).
     """
     import asyncio
 
-    state = {"incoming": message, "history": history or [], "chat_id": chat_id}
+    state = {
+        "incoming": message,
+        "history": history or [],
+        "chat_id": chat_id,
+    }
+    if is_system_prompt:
+        state["is_system_prompt"] = True
     loop = asyncio.get_event_loop()
 
     if hasattr(graph, "ainvoke"):

@@ -61,7 +61,11 @@ LIMIT ?;
 
 - **Fly command:** `execute_history()` en `on_the_fly_commands.py`; `handle_command` despacha `/history [n]`.
 - **Persistencia:** `append_task_audit()` se llama desde el Gateway (`_invoke_chat`) y el Telegram bot tras cada invocación del grafo.
-- **Tabla:** `task_audit_log` (task_id, tenant_id, worker_id, query_prefix, status, duration_ms, created_at).
+- **Tabla:** `task_audit_log` (task_id, tenant_id, worker_id, query_prefix, status, duration_ms, created_at, plan_title).
+
+### Título de plan (plan_title)
+
+Desde la feature *Plan Title Generation*, cada fila puede incluir un `plan_title` (título semántico de la tarea, p. ej. "Consulta de Saldo Total"). El comando `/history` muestra cada entrada en la forma `[worker_id] [plan_title] · ⏱️ Xs`. Si `plan_title` es NULL (registros antiguos), se usa un fallback derivado de `query_prefix`. Así la auditoría refleja la intención estratégica del usuario en lugar de solo el mensaje literal.
 
 ## 6. Ventajas de Cumplimiento (Habeas Data)
 *   **Auditoría de Rendimiento:** Al mostrar la duración (`duration_ms`), estás demostrando eficiencia operativa.

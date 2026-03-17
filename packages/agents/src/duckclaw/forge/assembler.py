@@ -112,6 +112,17 @@ class AgentAssembler:
         from duckclaw.graphs.general_graph import build_general_graph
 
         system_prompt = overrides.get("system_prompt") or self.spec.get("system_prompt") or ""
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo("America/Bogota")
+            now = datetime.now(tz)
+            time_context = f"\n[CONTEXTO TEMPORAL]: Hoy es {now.strftime('%A %d de %B de %Y, %H:%M %Z')}.\n"
+            system_prompt = (system_prompt or "") + time_context
+        except Exception:
+            # Si no se puede obtener la hora/zona, continuar sin contexto temporal.
+            pass
         tools_spec = overrides.get("tools_spec") or self.spec.get("tools") or None
         return build_general_graph(
             db,

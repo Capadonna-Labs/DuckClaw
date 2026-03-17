@@ -24,8 +24,16 @@ except ImportError:
             out = [dict(zip(names, (str(v) for v in row))) for row in rows]
             return json.dumps(out, ensure_ascii=False)
 
-        def execute(self, sql: str) -> None:
-            self._con.execute(sql)
+        def execute(self, sql: str, params=None) -> None:
+            """Ejecuta comandos sin retorno (INSERT, UPDATE, CREATE).
+
+            Acepta opcionalmente parámetros para compatibilidad con llamadas que usan
+            db.execute(sql, params).
+            """
+            if params is not None:
+                self._con.execute(sql, params)
+            else:
+                self._con.execute(sql)
 
         def get_version(self) -> str:
             return str(self._con.execute("SELECT version()").fetchone()[0])

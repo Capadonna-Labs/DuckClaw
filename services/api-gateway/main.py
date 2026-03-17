@@ -28,6 +28,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import redis.asyncio as redis
 
+from core.models import ChatRequest
+
 # Cargar .env desde repo root
 _repo_root = Path(__file__).resolve().parent.parent.parent
 for _base in (_repo_root, Path.cwd()):
@@ -106,6 +108,37 @@ async def _tailscale_auth_middleware(request: Request, call_next):
 
 
 app.middleware("http")(_tailscale_auth_middleware)
+
+
+# ── Locks por chat (concurrencia por grupo) ────────────────────────────────────
+
+@asynccontextmanager
+async def _chat_lock(chat_id: str):
+    """
+    Mutex por chat_id usando Redis (si está disponible).
+
+    - Clave: lock:chat:{chat_id}
+    - timeout: evita locks huérfanos si el proceso muere durante la ejecución.
+    - blocking_timeout: tiempo máximo esperando el lock antes de soltar y continuar.
+    """
+    redis_client = getattr(app.state, "redis", None)
+    if redis_client is None:
+        # Sin Redis configurado: no aplicar mutex, pero no romper el flujo.
+        yield
+        return
+    lock_key = f"lock:chat:{chat_id}"
+    lock = redis_client.lock(lock_key, timeout=10, blocking_timeout=15)
+    acquired = False
+    try:
+        acquired = await lock.acquire()
+        yield
+    finally:
+        if acquired:
+            try:
+                await lock.release()
+            except Exception:
+                # No romper si no se puede liberar; expirará por timeout.
+                pass
 
 
 # ── Root y health ─────────────────────────────────────────────────────────────
@@ -190,19 +223,18 @@ async def agent_history(worker_id: str, session_id: str = "default"):
     return {"history": [], "worker_id": worker_id}
 
 
-class ChatBody(BaseModel):
-    message: str = Field(..., description="Mensaje del usuario")
-    session_id: str = Field("default", description="ID de sesión")
-    history: list[dict] = Field(default_factory=list)
-    stream: bool = Field(False, description="Streaming SSE")
-
-
 @app.post("/api/v1/agent/chat")
 @app.post("/api/v1/agent/{worker_id}/chat")
-async def agent_chat(worker_id: Optional[str] = None, body: ChatBody = None):
+async def agent_chat(worker_id: Optional[str] = None, body: ChatRequest | None = None):
+    """
+    Endpoint de chat multi-usuario.
+
+    Recibe ChatRequest (message, chat_id, user_id, username, chat_type, history, stream)
+    y mapea chat_id → session_id interno.
+    """
     if body is None:
-        body = ChatBody(message="", session_id="default")
-    return await _invoke_chat(body.message, body.session_id, body.history, worker_id or "finanz")
+        body = ChatRequest(message="", chat_id="default", user_id="system", username="system", chat_type="private")
+    return await _invoke_chat(body, worker_id or "finanz")
 
 
 def _truncate_log(s: str, max_len: int = 200) -> str:
@@ -217,7 +249,41 @@ def _strip_markdown_bold(s: str) -> str:
     return re.sub(r"\*\*([^*]*)\*\*", r"\1", s)
 
 
-async def _invoke_chat(message: str, session_id: str, history: list, worker_id: str):
+def clean_agent_response(response: str) -> str:
+    """
+    Limpia menús residuales del LLM para que la respuesta final sea concisa.
+    Elimina bloques tipo \"¿Cuál es mi tarea?\", \"Puedo ayudarte con:\" y menús de resumen financiero.
+    """
+    if not response or not isinstance(response, str):
+        return response
+    text = str(response)
+    patterns = [
+        r"¿Cuál\s+es\s+mi\s+tarea\?.*",
+        r"Puedo\s+ayudarte\s+con:.*",
+        r"¿Qué\s+te\s+gustaría\s+hacer\s+ahora\?.*",
+        r"-\s*📊\s*Resumen\s+financiero.*",
+        r"-\s*💰\s*Registrar\s+transacciones.*",
+    ]
+    for pattern in patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.DOTALL)
+    return text.strip()
+
+
+async def _invoke_chat(request: ChatRequest, worker_id: str):
+    """
+    Orquesta la llamada al grafo LangGraph a partir de un ChatRequest.
+
+    - Usa chat_id como session_id interno para gestionar memoria y concurrencia por grupo.
+    """
+    message = (request.message or "").strip()
+    session_id = (request.chat_id or "default").strip() or "default"
+    # Campos opcionales: defaults resilientes
+    chat_type = (request.chat_type or "private").strip().lower() or "private"
+    username = (request.username or "Usuario").strip() or "Usuario"
+    user_id = (request.user_id or "").strip()
+    history = request.history or []
+    is_system_prompt = bool(request.is_system_prompt or False)
+
     _gateway_log.info("in: %s", _truncate_log(message))
 
     msg_stripped = (message or "").strip()
@@ -248,60 +314,75 @@ async def _invoke_chat(message: str, session_id: str, history: list, worker_id: 
 
     try:
         from duckclaw.graphs.graph_server import _get_or_build_graph, _ainvoke
-        graph = _get_or_build_graph()
     except Exception as exc:
         _gateway_log.error("graph init failed: %s\n%s", exc, traceback.format_exc())
         raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
-    try:
-        from duckclaw.graphs.activity import set_busy, set_idle
-        set_busy(session_id, task=message)
-    except Exception:
-        pass
-    t0 = time.monotonic()
-    try:
-        result = await _ainvoke(graph, message, history or [], session_id)
-    except Exception as exc:
+    # Concurrencia: procesar un solo mensaje por chat_id a la vez.
+    async with _chat_lock(session_id):
+        try:
+            graph = _get_or_build_graph()
+        except Exception as exc:
+            _gateway_log.error("graph init failed: %s\n%s", exc, traceback.format_exc())
+            raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
+
+        try:
+            from duckclaw.graphs.activity import set_busy, set_idle
+            set_busy(session_id, task=message)
+        except Exception:
+            pass
+        t0 = time.monotonic()
+        try:
+            result = await _ainvoke(
+                graph,
+                message,
+                history or [],
+                session_id,
+                is_system_prompt=is_system_prompt,
+            )
+        except Exception as exc:
+            try:
+                from duckclaw.graphs.activity import set_idle
+                set_idle(session_id)
+            except Exception:
+                pass
+            try:
+                from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
+                from duckclaw.graphs.graph_server import get_db
+                db = get_db()
+                wid = get_worker_id_for_chat(db, session_id) or worker_id
+                elapsed_fail = int((time.monotonic() - t0) * 1000)
+                append_task_audit(db, session_id, wid, message, "FAILED", elapsed_fail)
+            except Exception:
+                pass
+            try:
+                if os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES", "true").strip().lower() in ("true", "1", "yes"):
+                    from duckclaw.graphs.conversation_traces import append_conversation_trace
+                    from duckclaw.graphs.on_the_fly_commands import get_effective_system_prompt
+                    from duckclaw.graphs.graph_server import get_db
+                    _db = get_db()
+                    _sys = (get_effective_system_prompt(_db, worker_id) or "").strip()
+                    _sys = _sys or (os.environ.get("DUCKCLAW_SYSTEM_PROMPT") or "").strip() or None
+                    append_conversation_trace(
+                        session_id, message, str(exc)[:8192],
+                        worker_id=worker_id, elapsed_ms=elapsed_fail, status="FAILED",
+                        system_prompt=_sys,
+                    )
+            except Exception:
+                pass
+            _gateway_log.error("agent_chat failed: %s\n%s", exc, traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(exc))
+
         try:
             from duckclaw.graphs.activity import set_idle
             set_idle(session_id)
         except Exception:
             pass
-        try:
-            from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
-            from duckclaw.graphs.graph_server import get_db
-            db = get_db()
-            wid = get_worker_id_for_chat(db, session_id) or worker_id
-            elapsed_fail = int((time.monotonic() - t0) * 1000)
-            append_task_audit(db, session_id, wid, message, "FAILED", elapsed_fail)
-        except Exception:
-            pass
-        try:
-            if os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES", "true").strip().lower() in ("true", "1", "yes"):
-                from duckclaw.graphs.conversation_traces import append_conversation_trace
-                from duckclaw.graphs.on_the_fly_commands import get_effective_system_prompt
-                from duckclaw.graphs.graph_server import get_db
-                _db = get_db()
-                _sys = (get_effective_system_prompt(_db, worker_id) or "").strip()
-                _sys = _sys or (os.environ.get("DUCKCLAW_SYSTEM_PROMPT") or "").strip() or None
-                append_conversation_trace(
-                    session_id, message, str(exc)[:8192],
-                    worker_id=worker_id, elapsed_ms=elapsed_fail, status="FAILED",
-                    system_prompt=_sys,
-                )
-        except Exception:
-            pass
-        _gateway_log.error("agent_chat failed: %s\n%s", exc, traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    try:
-        from duckclaw.graphs.activity import set_idle
-        set_idle(session_id)
-    except Exception:
-        pass
     reply_text = result.get("reply", "") if isinstance(result, dict) else (result or "")
     _gateway_log.info("out: %s", _truncate_log(reply_text))
     reply_text = _strip_markdown_bold(reply_text or "")
+    # Filtro UX: eliminar menús residuales del LLM antes de devolver al cliente
+    reply_text = clean_agent_response(reply_text or "")
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     # Grafo manager devuelve assigned_worker_id; usarlo para respuesta y trazas
     effective_worker_id = result.get("assigned_worker_id", worker_id) if isinstance(result, dict) else worker_id
@@ -311,7 +392,8 @@ async def _invoke_chat(message: str, session_id: str, history: list, worker_id: 
             from duckclaw.graphs.graph_server import get_db
             db = get_db()
             wid = get_worker_id_for_chat(db, session_id) or worker_id
-            append_task_audit(db, session_id, wid, message, "SUCCESS", elapsed_ms)
+            plan_title = result.get("plan_title") if isinstance(result, dict) else None
+            append_task_audit(db, session_id, wid, message, "SUCCESS", elapsed_ms, plan_title=plan_title)
     except Exception:
         pass
     try:

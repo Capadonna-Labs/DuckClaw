@@ -86,6 +86,15 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
     tools = load_skills(spec, db)
     schema = spec.schema_name
 
+    # TimeContextSkill: si el manifest declara get_current_time o time_context, añadir la tool
+    skills_list = getattr(spec, "skills_list", None) or []
+    if "get_current_time" in skills_list or "time_context" in skills_list:
+        try:
+            from duckclaw.forge.skills.time_context import get_current_time
+            tools.append(get_current_time)
+        except Exception:
+            pass
+
     def _run_sql_worker(query: str) -> str:
         if not query or not query.strip():
             return json.dumps({"error": "Query vacío."})

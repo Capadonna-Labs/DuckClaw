@@ -8,11 +8,14 @@ Spec: Plan manager orquestador de subagentes.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+from duckclaw.forge.atoms.state import ManagerAgentState
 
 _log = logging.getLogger(__name__)
 _worker_graph_cache: dict[str, Any] = {}
@@ -58,6 +61,38 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
         )
         return task, override
     return text, override
+
+
+def _llm_plan(incoming: str) -> tuple[str, list[str]]:
+    """
+    Planner ligero basado en heurísticas que emula la salida estructurada esperada:
+    {
+      "plan_title": string,
+      "tasks": [string]
+    }
+
+    Nota: en esta primera versión no se invoca un LLM explícito; se estructura
+    el plan de forma determinista a partir del mensaje, dejando el contrato y
+    el estado preparados para una futura integración con LLM.
+    """
+    text = (incoming or "").strip()
+    if not text:
+        return "Interacción sin contenido", []
+
+    lower = text.lower()
+    if "saldo" in lower or "dinero" in lower or "cuenta" in lower:
+        title = "Consulta de Saldo Total"
+    elif "tabla" in lower or "tablas" in lower or "schema" in lower or "esquema" in lower:
+        title = "Inspección de Esquema de DB"
+    elif "hora" in lower or "fecha" in lower or "hoy" in lower:
+        title = "Consulta de Contexto Temporal"
+    else:
+        # Fallback: primeras ~5 palabras como título
+        words = text.split()
+        title = " ".join(words[:5]) if words else "Interacción del Usuario"
+
+    tasks: list[str] = [f"Resolver la solicitud del usuario: {text}"]
+    return title, tasks
 
 
 def _task_summary_for_activity(incoming: str, planned_task: str) -> str:
@@ -130,8 +165,8 @@ def build_manager_graph(
             out["chat_id"] = state["chat_id"]
         return out
 
-    def plan_node(state: dict) -> dict:
-        """Formula un plan / tarea clara y opcionalmente asigna finanz para intenciones DB/tablas."""
+    def plan_node(state: ManagerAgentState) -> ManagerAgentState:
+        """Formula un plan / tarea clara, genera plan_title/tasks y opcionalmente asigna finanz para intenciones DB/tablas."""
         # Preservar incoming por si el estado no lo propaga (fallback: input, message)
         incoming = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
         available_plan = state.get("available_templates") or list_workers(troot)
@@ -139,14 +174,32 @@ def build_manager_graph(
         assigned = (state.get("assigned_worker_id") or default_worker or "").strip() or default_worker
         if not incoming:
             _log.warning("manager plan: incoming vacío en state (keys=%s)", list(state.keys()))
+
+        # Planner semántico: título + lista de tareas
+        plan_title, tasks = _llm_plan(incoming)
+
+        # Mantener lógica existente de ruteo / planned_task
         planned, override_worker = _plan_task(incoming, assigned)
         planned_final = planned or incoming
+
+        # Derivar task_summary a partir del mensaje original / planned_task
         task_summary = _task_summary_for_activity(incoming, planned_final)
-        out = {"planned_task": planned_final, "incoming": incoming, "task_summary": task_summary}
+
+        out: ManagerAgentState = {
+            "planned_task": planned_final,
+            "incoming": incoming,
+            "task_summary": task_summary,
+            "plan_title": plan_title or None,
+            "tasks": tasks or [],
+        }  # type: ignore[assignment]
+
         if override_worker and override_worker in available_plan:
             out["assigned_worker_id"] = override_worker
         elif assigned not in available_plan and available_plan:
             out["assigned_worker_id"] = available_plan[0]
+        else:
+            out["assigned_worker_id"] = assigned
+
         out["available_templates"] = available_plan
         # Preservar estado para invoke_worker
         out["incoming"] = incoming or state.get("incoming") or state.get("input") or state.get("message") or ""
@@ -154,20 +207,34 @@ def build_manager_graph(
             out["history"] = state["history"]
         if "chat_id" in state:
             out["chat_id"] = state["chat_id"]
-        # Actualizar activity para /tasks con el resumen (no el planned_task completo)
-        set_busy(state.get("chat_id") or "", task=task_summary, worker_id=out.get("assigned_worker_id", assigned))
-        # Log del plan para PM2 / stdout
-        plan_preview = (planned_final or incoming).strip()
-        if len(plan_preview) > 200:
-            plan_preview = plan_preview[:200] + "..."
-        _log.info("manager plan: planned_task=%s", plan_preview or "(vacío)")
+        # Actualizar activity para /tasks usando solo el título del plan cuando esté disponible
+        plan_for_task = (plan_title or "").strip()
+        if plan_for_task:
+            # Mostrar únicamente el título del plan en /tasks (sin corchetes)
+            activity_task = plan_for_task
+        else:
+            activity_task = task_summary
+        set_busy(state.get("chat_id") or "", task=activity_task, worker_id=out.get("assigned_worker_id", assigned))
+
+        # Log del plan para PM2 / stdout, incluyendo plan_title + tasks (compacto)
+        safe_title = (plan_title or "Sin título de plan").strip()
+        if len(safe_title) > 80:
+            safe_title = safe_title[:80] + "..."
+        try:
+            tasks_preview = ", ".join((tasks or [])[:3])
+        except Exception:
+            tasks_preview = ""
+        if len(tasks_preview) > 160:
+            tasks_preview = tasks_preview[:160] + "..."
+        _log.info("manager plan: [%s] | tasks: [%s]", safe_title or "(vacío)", tasks_preview or "(sin tareas)")
         return out
 
-    def invoke_worker_node(state: dict) -> dict:
+    def invoke_worker_node(state: ManagerAgentState) -> ManagerAgentState:
         """Invoca el grafo del worker asignado; set_busy/set_idle y append_task_audit. Solo invoca si el worker existe en templates."""
         chat_id = state.get("chat_id") or ""
         incoming = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
         planned_task = (state.get("planned_task") or "").strip() or incoming
+        plan_title = (state.get("plan_title") or "").strip() or None
         history = state.get("history") or []
         available = state.get("available_templates") or list_workers(troot)
         assigned = (state.get("assigned_worker_id") or "").strip() or None
@@ -183,8 +250,6 @@ def build_manager_graph(
                 "assigned_worker_id": None,
             }
         task_summary = (state.get("task_summary") or "").strip() or _task_summary_for_activity(incoming, planned_task)
-
-        set_busy(chat_id, task=task_summary, worker_id=assigned)
         t0 = time.monotonic()
         reply = ""
         messages = None
@@ -228,7 +293,7 @@ def build_manager_graph(
         finally:
             set_idle(chat_id)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
-            append_task_audit(db, chat_id, assigned, incoming, status, elapsed_ms)
+            append_task_audit(db, chat_id, assigned, incoming, status, elapsed_ms, plan_title=plan_title)
 
         # El manager ya registró en task_audit_log; el Gateway no debe duplicar.
         # assigned_worker_id para que el Gateway lo use en respuesta y trazas.
@@ -237,9 +302,10 @@ def build_manager_graph(
             "messages": messages,
             "_audit_done": True,
             "assigned_worker_id": assigned,
+            "plan_title": plan_title,
         }
 
-    graph = StateGraph(dict)
+    graph = StateGraph(ManagerAgentState)
     graph.add_node("router", router_node)
     graph.add_node("plan", plan_node)
     graph.add_node("invoke_worker", invoke_worker_node)

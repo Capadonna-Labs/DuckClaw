@@ -23,3 +23,5 @@ skills:
   - get_presupuesto_vs_real
   - categorize_expense
   - ibkr: {}  # Activa get_ibkr_portfolio (credenciales vía IBKR_PORTFOLIO_API_URL e IBKR_PORTFOLIO_API_KEY)
+  - send_proactive_message
+  - get_current_time

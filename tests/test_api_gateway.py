@@ -74,6 +74,23 @@ def test_homeostasis_ask_task_with_objectives(client: TestClient) -> None:
     assert r.json().get("ok") is True
 
 
+def test_clean_agent_response_removes_menus() -> None:
+    from services.api-gateway import main as gateway_main  # type: ignore[import-not-found]
+
+    raw = (
+        "Tu saldo total es 1.234.567 COP.\n\n"
+        "¿Qué te gustaría hacer ahora?\n"
+        "1. Ver resumen financiero\n"
+        "2. Registrar un gasto\n"
+        "- 📊 Resumen financiero\n"
+        "- Otras opciones..."
+    )
+    cleaned = gateway_main.clean_agent_response(raw)
+    assert "¿Qué te gustaría hacer ahora?" not in cleaned
+    assert "Resumen financiero" not in cleaned
+    assert "Tu saldo total es 1.234.567 COP." in cleaned
+
+
 def test_agent_history_requires_session(client: TestClient) -> None:
     r = client.get("/api/v1/agent/finanz/history?session_id=s1")
     assert r.status_code == 200
@@ -95,7 +112,15 @@ def test_forget_command_via_api_succeeds(client: TestClient) -> None:
     """POST /forget with session_id='default' succeeds (fix for API gateway bug)."""
     r = client.post(
         "/api/v1/agent/finanz/chat",
-        json={"message": "/forget", "session_id": "default", "stream": False},
+        json={
+            "message": "/forget",
+            "chat_id": "default",
+            "user_id": "test-user",
+            "username": "test",
+            "chat_type": "private",
+            "history": [],
+            "stream": False,
+        },
     )
     assert r.status_code == 200
     data = r.json()

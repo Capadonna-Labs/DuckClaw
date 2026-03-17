@@ -107,8 +107,19 @@ def get_team_templates(db: Any, chat_id: Any) -> list:
 
 
 def set_team_templates(db: Any, chat_id: Any, template_ids: list) -> None:
-    """Define los templates del equipo para este chat. Lista vacía = usar todos (list_workers)."""
-    set_chat_state(db, chat_id, "team_templates", json.dumps([str(x).strip().lower() for x in template_ids]))
+    """Define los templates del equipo para este chat. Lista vacía = usar todos (list_workers). Guarda ids canónicos (case del filesystem)."""
+    set_chat_state(db, chat_id, "team_templates", json.dumps([str(x).strip() for x in template_ids]))
+
+
+def _resolve_template_id(available: list, user_input: str) -> Optional[str]:
+    """Resuelve el input del usuario (p. ej. 'themindcrupier') al id canónico del template (p. ej. 'ThemindCrupier'). Case-insensitive."""
+    if not available or not (user_input or "").strip():
+        return None
+    key = (user_input or "").strip().lower()
+    for a in available:
+        if (a or "").strip().lower() == key:
+            return (a or "").strip()
+    return None
 
 
 def execute_team(db: Any, chat_id: Any, args: str) -> str:
@@ -127,31 +138,46 @@ def execute_team(db: Any, chat_id: Any, args: str) -> str:
     raw = args.strip()
     # --rm <worker_id>
     if raw.startswith("--rm "):
-        wid = raw[5:].strip().lower().split()[0]
+        wid_raw = raw[5:].strip().split()[0]
+        canonical = _resolve_template_id(all_templates, wid_raw)
+        if not canonical:
+            return _telegram_safe(f"'{wid_raw}' no es un template. Equipo actual: {', '.join(team or all_templates) or 'todos'}")
         current = team if team else list(all_templates)
-        if wid not in current:
-            return _telegram_safe(f"'{wid}' no está en el equipo. Equipo actual: {', '.join(current) or 'todos'}")
-        new_team = [x for x in current if x != wid]
+        new_team = [x for x in current if (x or "").strip().lower() != canonical.lower()]
+        if len(new_team) == len(current):
+            return _telegram_safe(f"'{canonical}' no está en el equipo. Equipo actual: {', '.join(current) or 'todos'}")
         set_team_templates(db, chat_id, new_team)
-        return _telegram_safe(f"✅ Quitado {wid} del equipo. Quedan: {', '.join(new_team) or 'ninguno (el manager usará todos)'}.")
+        return _telegram_safe(f"✅ Quitado {canonical} del equipo. Quedan: {', '.join(new_team) or 'ninguno (el manager usará todos)'}.")
     # --add id1 id2 ... (insert/appendix al equipo actual)
     if raw.startswith("--add ") or raw.strip() == "--add":
         ids_str = raw[6:].strip() if raw.startswith("--add ") else ""
-        ids = [x.strip().lower() for x in ids_str.split() if x.strip()]
-        valid = [i for i in ids if i in all_templates]
-        invalid = [i for i in ids if i not in all_templates]
+        ids_raw = [x.strip() for x in ids_str.split() if x.strip()]
+        valid = []
+        invalid = []
+        for i in ids_raw:
+            c = _resolve_template_id(all_templates, i)
+            if c:
+                valid.append(c)
+            else:
+                invalid.append(i)
         if invalid:
             return _telegram_safe(f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}")
-        current = team if team else list(all_templates)
-        for i in valid:
-            if i not in current:
-                current.append(i)
+        current = list(team) if team else list(all_templates)
+        for c in valid:
+            if not any((x or "").strip().lower() == c.lower() for x in current):
+                current.append(c)
         set_team_templates(db, chat_id, current)
         return _telegram_safe(f"✅ Añadidos al equipo: {', '.join(valid)}. Equipo: {', '.join(current)}.")
     # id1 id2 ... → reemplazar equipo
-    ids = [x.strip().lower() for x in raw.split() if x.strip()]
-    valid = [i for i in ids if i in all_templates]
-    invalid = [i for i in ids if i not in all_templates]
+    ids_raw = [x.strip() for x in raw.split() if x.strip()]
+    valid = []
+    invalid = []
+    for i in ids_raw:
+        c = _resolve_template_id(all_templates, i)
+        if c:
+            valid.append(c)
+        else:
+            invalid.append(i)
     if invalid:
         return _telegram_safe(f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}")
     set_team_templates(db, chat_id, valid)
@@ -179,8 +205,8 @@ def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
     """/role <worker_id>: cambia el rol. Por defecto 'manager' delega a los templates. Sin args: muestra rol actual y disponibles."""
     from duckclaw.workers.factory import list_workers
     available = list_workers()  # solo templates (finanz, research_worker, etc.)
-    wid = (worker_id or "").strip().lower()
-    if not wid:
+    wid_raw = (worker_id or "").strip()
+    if not wid_raw:
         current = get_chat_state(db, chat_id, "worker_id") or _DEFAULT_WORKER
         if current == "manager":
             current_display = _telegram_safe("Manager (delega a trabajadores en templates)")
@@ -193,18 +219,19 @@ def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
                 current_display = _telegram_safe(current)
         avail_str = "\n".join(f"\\- {_telegram_safe(w)}" for w in available) if available else "ninguna"
         return f"🦆 {_telegram_safe('Rol:')} {current_display}\n\n{_telegram_safe('Disponibles:')} {_telegram_safe('manager (por defecto)')}\n{avail_str}\n{_telegram_safe('/role <id>')}"
-    if wid == "manager":
+    if wid_raw.lower() == "manager":
         set_chat_state(db, chat_id, "worker_id", "manager")
         return _telegram_safe("✅ Manager. Delega a los trabajadores en templates.")
-    if wid not in available:
+    canonical = _resolve_template_id(available, wid_raw)
+    if not canonical:
         avail_str = "\n".join(f"\\- {_telegram_safe(w)}" for w in available) if available else "ninguna"
-        return _telegram_safe(f"Rol '{wid}' no existe.") + f"\n{_telegram_safe('Disponibles:')}\n{avail_str}"
+        return _telegram_safe(f"Rol '{wid_raw}' no existe.") + f"\n{_telegram_safe('Disponibles:')}\n{avail_str}"
     try:
         from duckclaw.workers.manifest import load_manifest
-        spec = load_manifest(wid)
-        set_chat_state(db, chat_id, "worker_id", wid)
+        spec = load_manifest(canonical)
+        set_chat_state(db, chat_id, "worker_id", canonical)
         skills = ", ".join(_telegram_safe(s) for s in (spec.skills_list or [])) or "run_sql"
-        return _telegram_safe(f"✅ {spec.name} ({wid}). Herramientas: {skills}")
+        return _telegram_safe(f"✅ {spec.name} ({canonical}). Herramientas: {skills}")
     except Exception as e:
         return f"Error al cargar rol: {e}."
 
@@ -213,20 +240,21 @@ def execute_skills_list(db: Any, chat_id: Any, args: str) -> str:
     """/skills <worker_id>: lista herramientas del template. worker_id debe ser uno de /roles."""
     from duckclaw.workers.factory import list_workers
     available = list_workers()
-    wid = (args or "").strip().lower()
-    if not wid:
+    wid_raw = (args or "").strip()
+    if not wid_raw:
         return _telegram_safe("Uso: /skills <worker_id>. Ver templates: /roles")
-    if wid.startswith("--"):
+    if wid_raw.startswith("--"):
         return _telegram_safe("Indica un worker_id (ej. finanz, research_worker). Ver templates: /roles")
-    if wid not in available:
-        return _telegram_safe(f"Template '{wid}' no encontrado. Disponibles (usa /roles): {', '.join(available)}")
+    canonical = _resolve_template_id(available, wid_raw)
+    if not canonical:
+        return _telegram_safe(f"Template '{wid_raw}' no encontrado. Disponibles (usa /roles): {', '.join(available)}")
     try:
         from duckclaw.workers.manifest import load_manifest
-        spec = load_manifest(wid)
+        spec = load_manifest(canonical)
         skills_safe = [_telegram_safe(s) for s in (spec.skills_list or [])]
         lines = [f"\\- {s}" for s in skills_safe]
         lines.append(f"\\- {_telegram_safe('run_sql')}")
-        return _telegram_safe(f"🔧 {spec.name} ({wid})\n") + "\n".join(lines)
+        return _telegram_safe(f"🔧 {spec.name} ({canonical})\n") + "\n".join(lines)
     except Exception as e:
         return f"Error: {e}."
 
@@ -257,6 +285,317 @@ def execute_forget(db: Any, chat_id: Any) -> str:
             pass
     return _telegram_safe("✅ Historial borrado.")
 
+
+def execute_start_mind(db: Any, chat_id: Any) -> str:
+    """/start_mind: inicializa el esquema del juego The Mind (modo legado por chat)."""
+    try:
+        # Mantener compatibilidad con versiones anteriores que usaban chat_id/level como columnas.
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS the_mind_games ("
+            "game_id VARCHAR PRIMARY KEY, "
+            "status VARCHAR, "
+            "current_level INTEGER, "
+            "lives INTEGER, "
+            "shurikens INTEGER, "
+            "cards_played INTEGER[])"
+        )
+        # Migración ligera: si existe una tabla antigua con columnas chat_id/level, renombrarlas.
+        try:
+            import json as _json
+
+            info = db.query("PRAGMA table_info('the_mind_games')")
+            rows = _json.loads(info) if isinstance(info, str) else (info or [])
+            col_names = {str(r.get("name")) for r in rows if isinstance(r, dict)}
+            if "chat_id" in col_names and "game_id" not in col_names:
+                db.execute("ALTER TABLE the_mind_games RENAME COLUMN chat_id TO game_id")
+            if "level" in col_names and "current_level" not in col_names:
+                db.execute("ALTER TABLE the_mind_games RENAME COLUMN level TO current_level")
+            # Asegurar columna status con default
+            if "status" not in col_names:
+                db.execute(
+                    "ALTER TABLE the_mind_games ADD COLUMN status VARCHAR DEFAULT 'waiting'"
+                )
+        except Exception:
+            # Si la migración falla no debe romper el comando; el INSERT detectará el problema.
+            pass
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS the_mind_players ("
+            "game_id VARCHAR, "
+            "chat_id VARCHAR, "
+            "username VARCHAR, "
+            "cards INTEGER[], "
+            "is_ready BOOLEAN, "
+            "PRIMARY KEY (game_id, chat_id))"
+        )
+        return _telegram_safe(
+            "🧠 The Mind: esquema inicializado. Usa /new_game the_mind para crear una partida."
+        )
+    except Exception as e:
+        return _telegram_safe(f"No se pudo inicializar el esquema de The Mind: {e}")
+
+
+def _new_game_id() -> str:
+    """Genera un identificador de partida único (game_id)."""
+    # timestamp en segundos + sufijo aleatorio corto
+    import time
+    import random
+    import string
+
+    ts = int(time.time())
+    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=4))
+    return f"game_{ts}_{suffix}"
+
+
+def execute_new_game(db: Any, chat_id: Any, args: str) -> str:
+    """/new_game the_mind: crea una nueva partida de The Mind y devuelve el game_id."""
+    game_type = (args or "").strip().lower()
+    if game_type not in ("the_mind", "themind", "themindcrupier"):
+        return _telegram_safe("Uso: /new_game the_mind")
+    try:
+        # Asegurar esquema y migración por si existen tablas antiguas.
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS the_mind_games ("
+            "game_id VARCHAR PRIMARY KEY, "
+            "status VARCHAR, "
+            "current_level INTEGER, "
+            "lives INTEGER, "
+            "shurikens INTEGER, "
+            "cards_played INTEGER[])"
+        )
+        try:
+            import json as _json
+
+            info = db.query("PRAGMA table_info('the_mind_games')")
+            rows = _json.loads(info) if isinstance(info, str) else (info or [])
+            col_names = {str(r.get("name")) for r in rows if isinstance(r, dict)}
+            if "chat_id" in col_names and "game_id" not in col_names:
+                db.execute("ALTER TABLE the_mind_games RENAME COLUMN chat_id TO game_id")
+            if "level" in col_names and "current_level" not in col_names:
+                db.execute("ALTER TABLE the_mind_games RENAME COLUMN level TO current_level")
+            if "status" not in col_names:
+                db.execute(
+                    "ALTER TABLE the_mind_games ADD COLUMN status VARCHAR DEFAULT 'waiting'"
+                )
+        except Exception:
+            pass
+        game_id = _new_game_id()
+        db.execute(
+            "INSERT INTO the_mind_games (game_id, status, current_level, lives, shurikens, cards_played) "
+            "VALUES (?, 'waiting', 1, 3, 1, ARRAY[]::INTEGER[])",
+            (game_id,),
+        )
+        return _telegram_safe(
+            f"🧠 The Mind: partida creada con id {game_id}. Dile a tus amigos que me envíen `/join {game_id}` por DM."
+        )
+    except Exception as e:
+        return _telegram_safe(f"No se pudo crear la partida de The Mind: {e}")
+
+
+def execute_join_game(db: Any, chat_id: Any, args: str) -> str:
+    """/join <game_id>: añade al jugador (este chat) a la partida indicada."""
+    game_id = (args or "").strip()
+    if not game_id:
+        return _telegram_safe("Uso: /join <game_id>. Ejemplo: /join game_1234")
+    try:
+        # Verificar que la partida existe
+        rows = list(
+            db.execute(
+                "SELECT game_id, status FROM the_mind_games WHERE game_id = ?", (game_id,)
+            )
+        )
+        if not rows:
+            return _telegram_safe(f"No existe ninguna partida con id {game_id}.")
+        status = str(rows[0][1] or "").strip().lower()
+        if status not in ("waiting", "playing"):
+            return _telegram_safe(
+                f"La partida {game_id} no acepta más jugadores (estado actual: {status or 'desconocido'})."
+            )
+        cid = str(chat_id).replace("'", "''")[:256]
+        uname = get_chat_state(db, chat_id, "username") or ""
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS the_mind_players ("
+            "game_id VARCHAR, "
+            "chat_id VARCHAR, "
+            "username VARCHAR, "
+            "cards INTEGER[], "
+            "is_ready BOOLEAN, "
+            "PRIMARY KEY (game_id, chat_id))"
+        )
+        db.execute(
+            "INSERT OR REPLACE INTO the_mind_players "
+            "(game_id, chat_id, username, cards, is_ready) "
+            "VALUES (?, ?, ?, COALESCE(cards, ARRAY[]::INTEGER[]), COALESCE(is_ready, FALSE))",
+            (game_id, cid, uname, None, None),
+        )
+        return _telegram_safe(
+            f"✅ Te has unido a la partida {game_id}. Espera a que el crupier la inicie con /start_game."
+        )
+    except Exception as e:
+        return _telegram_safe(f"No se pudo unir a la partida: {e}")
+
+
+def execute_start_game(db: Any, chat_id: Any, args: str) -> str:
+    """/start_game [game_id]: cambia el estado de la partida a 'playing' para comenzar el nivel 1."""
+    game_id = (args or "").strip()
+    try:
+        if not game_id:
+            # Inferir: última partida 'waiting' creada
+            rows = list(
+                db.execute(
+                    "SELECT game_id FROM the_mind_games WHERE status = 'waiting' ORDER BY rowid DESC LIMIT 1"
+                )
+            )
+            if not rows:
+                return _telegram_safe(
+                    "No encontré ninguna partida en estado 'waiting'. Usa /new_game the_mind para crear una."
+                )
+            game_id = str(rows[0][0])
+        rows = list(
+            db.execute(
+                "SELECT status FROM the_mind_games WHERE game_id = ?", (game_id,)
+            )
+        )
+        if not rows:
+            return _telegram_safe(f"No existe ninguna partida con id {game_id}.")
+        status = str(rows[0][0] or "").strip().lower()
+        if status == "playing":
+            return _telegram_safe(f"La partida {game_id} ya está en juego.")
+        if status not in ("waiting",):
+            return _telegram_safe(
+                f"No se puede iniciar la partida {game_id} desde el estado {status or 'desconocido'}."
+            )
+        db.execute(
+            "UPDATE the_mind_games SET status = 'playing', current_level = COALESCE(current_level, 1) "
+            "WHERE game_id = ?",
+            (game_id,),
+        )
+        return _telegram_safe(
+            f"🧠 The Mind: partida {game_id} iniciada. El nivel 1 está listo. El crupier usará broadcast_message/deal_cards para coordinar."
+        )
+    except Exception as e:
+        return _telegram_safe(f"No se pudo iniciar la partida: {e}")
+
+
+def execute_deal(db: Any, chat_id: Any, args: str) -> str:
+    """/deal: reparte cartas para el nivel actual (stub, sin lógica completa)."""
+    # Implementación mínima: solo mensaje de placeholder; la lógica real se añadirá después.
+    return _telegram_safe("🃏 (stub) Cartas repartidas por DM a cada jugador. La lógica completa de The Mind se implementará en una iteración posterior.")
+
+
+def execute_play_mind(db: Any, chat_id: Any, args: str) -> str:
+    """/play <numero>: juega una carta en The Mind usando the_mind_games/the_mind_players."""
+    num_str = (args or "").strip()
+    if not num_str:
+        return _telegram_safe("Uso: /play <numero>. Ejemplo: /play 15")
+    try:
+        num = int(num_str)
+    except Exception:
+        return _telegram_safe("La carta debe ser un número entero. Ejemplo: /play 15")
+    if num <= 0 or num > 100:
+        return _telegram_safe("La carta debe estar entre 1 y 100.")
+
+    cid = str(chat_id).replace("'", "''")[:256]
+    try:
+        # Encontrar la partida en juego donde participa este chat
+        rows = list(
+            db.execute(
+                """
+                SELECT g.game_id, g.cards_played, g.current_level
+                FROM the_mind_games g
+                JOIN the_mind_players p ON g.game_id = p.game_id
+                WHERE g.status = 'playing' AND p.chat_id = ?
+                ORDER BY g.rowid DESC
+                LIMIT 1
+                """,
+                (cid,),
+            )
+        )
+        if not rows:
+            return _telegram_safe(
+                "No encontré ninguna partida en juego asociada a este chat. Asegúrate de haber usado /join <game_id> y /start_game."
+            )
+        game_id, cards_played_arr, current_level = rows[0]
+        cards_played = list(cards_played_arr or [])
+
+        # Obtener la mano del jugador
+        prow = list(
+            db.execute(
+                "SELECT cards FROM the_mind_players WHERE game_id = ? AND chat_id = ?",
+                (game_id, cid),
+            )
+        )
+        if not prow:
+            return _telegram_safe(
+                "No encontré tu mano en esta partida. Asegúrate de haberte unido y que el crupier haya repartido cartas."
+            )
+        hand = list(prow[0][0] or [])
+        if num not in hand:
+            return _telegram_safe(
+                f"No tienes la carta {num} en tu mano actual. Verifica tus cartas privadas."
+            )
+
+        # Validación simple: comprobar si existe alguna carta menor en manos de otros jugadores
+        lower_exists = False
+        other_rows = list(
+            db.execute(
+                "SELECT cards FROM the_mind_players WHERE game_id = ? AND chat_id <> ?",
+                (game_id, cid),
+            )
+        )
+        for (ocards,) in other_rows:
+            if ocards:
+                for c in ocards:
+                    if c < num:
+                        lower_exists = True
+                        break
+            if lower_exists:
+                break
+
+        uname = get_chat_state(db, chat_id, "username") or ""
+        uname_display = f"@{uname}" if uname else "Un jugador"
+
+        if lower_exists:
+            # Error: alguien tenía una carta menor sin jugar -> perder una vida y limpiar cartas menores
+            life_row = list(
+                db.execute(
+                    "SELECT lives FROM the_mind_games WHERE game_id = ?", (game_id,)
+                )
+            )
+            lives = int(life_row[0][0] or 0) if life_row else 0
+            new_lives = max(lives - 1, 0)
+            # Eliminar todas las cartas < num de todas las manos
+            db.execute(
+                "UPDATE the_mind_players "
+                "SET cards = list_filter(cards, ?) "
+                "WHERE game_id = ?",
+                (num, game_id),
+            )
+            db.execute(
+                "UPDATE the_mind_games SET lives = ? WHERE game_id = ?",
+                (new_lives, game_id),
+            )
+            return _telegram_safe(
+                f"❌ ¡ERROR! {uname_display} jugó el {num}, pero alguien tenía una carta menor. Pierden 1 vida. Vidas restantes: {new_lives}."
+            )
+
+        # Éxito: mover carta a cards_played y quitarla de la mano del jugador
+        hand.remove(num)
+        db.execute(
+            "UPDATE the_mind_players SET cards = ? WHERE game_id = ? AND chat_id = ?",
+            (hand, game_id, cid),
+        )
+        cards_played.append(num)
+        cards_played_sorted = sorted(cards_played)
+        db.execute(
+            "UPDATE the_mind_games SET cards_played = ? WHERE game_id = ?",
+            (cards_played_sorted, game_id),
+        )
+
+        return _telegram_safe(
+            f"✅ {uname_display} jugó el {num}. Cartas jugadas hasta ahora: {cards_played_sorted}."
+        )
+    except Exception as e:
+        return _telegram_safe(f"No se pudo registrar la jugada: {e}")
 
 def execute_context_toggle(db: Any, chat_id: Any, on_off: str) -> str:
     """/context on|off: activa o desactiva inyección de memoria a largo plazo."""
@@ -525,7 +864,8 @@ def execute_tasks(db: Any, chat_id: Any) -> str:
         except Exception:
             pass
     worker_s = f" · {_telegram_safe(worker_id)}" if worker_id else ""
-    task_preview = _telegram_safe(str(task)[:60]) if task else _telegram_safe("—")
+    # Segunda línea: solo el título del plan (task), precedido por un bullet grande
+    task_preview = f"• {_telegram_safe(str(task)[:60])}" if task else _telegram_safe("—")
     icon = "▶" if status == "BUSY" else "⏸"
     return _telegram_safe(f"{icon} {status}{elapsed_s}{worker_s}\n") + task_preview
 
@@ -701,6 +1041,18 @@ def handle_command(db: Any, chat_id: Any, text: str) -> Optional[str]:
         return execute_skills_list(db, chat_id, args)
     if name == "forget":
         return execute_forget(db, chat_id)
+    if name == "start_mind":
+        return execute_start_mind(db, chat_id)
+    if name == "new_game":
+        return execute_new_game(db, chat_id, args)
+    if name == "join":
+        return execute_join_game(db, chat_id, args)
+    if name == "start_game":
+        return execute_start_game(db, chat_id, args)
+    if name == "deal":
+        return execute_deal(db, chat_id, args)
+    if name == "play":
+        return execute_play_mind(db, chat_id, args)
     if name == "context":
         return execute_context_toggle(db, chat_id, args)
     if name == "audit":
@@ -781,6 +1133,7 @@ _TASK_AUDIT_TABLE = "task_audit_log"
 
 
 def _ensure_task_audit_log(db: Any) -> None:
+    """Crea task_audit_log y aplica migraciones suaves (plan_title)."""
     db.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {_TASK_AUDIT_TABLE} (
@@ -790,10 +1143,21 @@ def _ensure_task_audit_log(db: Any) -> None:
             query_prefix VARCHAR,
             status VARCHAR NOT NULL,
             duration_ms INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            plan_title VARCHAR
         )
         """
     )
+    # Migración suave: añadir plan_title si la tabla existe sin esta columna (bases antiguas)
+    try:
+        info = db.query(f"PRAGMA table_info({_TASK_AUDIT_TABLE})")
+        rows = json.loads(info) if isinstance(info, str) else (info or [])
+        cols = {str(r.get("name") or "") for r in rows if isinstance(r, dict)}
+        if "plan_title" not in cols:
+            db.execute(f"ALTER TABLE {_TASK_AUDIT_TABLE} ADD COLUMN plan_title VARCHAR")
+    except Exception:
+        # No romper si PRAGMA/ALTER falla; la feature seguirá funcionando sin plan_title persistente.
+        pass
 
 
 def append_task_audit(
@@ -803,8 +1167,9 @@ def append_task_audit(
     query_prefix: str,
     status: str,
     duration_ms: int,
+    plan_title: Optional[str] = None,
 ) -> None:
-    """Append a task to task_audit_log for /history. Spec: Fly comando history (Auditoría de Rendimiento)."""
+    """Append a task to task_audit_log for /history. plan_title es el identificador semántico para auditoría y /history."""
     import uuid
     _ensure_task_audit_log(db)
     task_id = f"TASK-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
@@ -813,10 +1178,11 @@ def append_task_audit(
     prefix_s = (query_prefix or "")[:256].replace("'", "''")
     status_s = (status or "SUCCESS").upper().replace("'", "''")[:32]
     status_s = "SUCCESS" if status_s not in ("SUCCESS", "FAILED") else status_s
+    plan_title_s = (plan_title or "")[:256].replace("'", "''") if plan_title else ""
     db.execute(
         f"""
-        INSERT INTO {_TASK_AUDIT_TABLE} (task_id, tenant_id, worker_id, query_prefix, status, duration_ms)
-        VALUES ('{task_id}', '{tenant_s}', '{worker_s}', '{prefix_s}', '{status_s}', {int(duration_ms)})
+        INSERT INTO {_TASK_AUDIT_TABLE} (task_id, tenant_id, worker_id, query_prefix, status, duration_ms, plan_title)
+        VALUES ('{task_id}', '{tenant_s}', '{worker_s}', '{prefix_s}', '{status_s}', {int(duration_ms)}, '{plan_title_s}')
         """
     )
 
@@ -858,7 +1224,7 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
     try:
         r = db.query(
             f"""
-            SELECT task_id, query_prefix, status, duration_ms, created_at, worker_id
+            SELECT task_id, query_prefix, status, duration_ms, created_at, worker_id, plan_title
             FROM {_TASK_AUDIT_TABLE}
             WHERE tenant_id = '{tenant_s}'
             ORDER BY created_at DESC
@@ -872,13 +1238,14 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
     if not rows:
         return _telegram_safe("📋 Sin tareas registradas.")
 
-    # Filtrar: tareas complejas + como máximo 1 saludo simple
+    # Filtrar: tareas complejas con título de plan + como máximo 1 saludo simple
     complex_rows = []
     one_greeting = None
     for row in rows:
         if not isinstance(row, dict):
             continue
-        if _is_complex_task(row):
+        plan_title_raw = (row.get("plan_title") or "").strip()
+        if _is_complex_task(row) and plan_title_raw:
             complex_rows.append(row)
         elif one_greeting is None and _is_simple_greeting(row.get("query_prefix") or ""):
             one_greeting = row
@@ -889,11 +1256,57 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
     if not filtered:
         return _telegram_safe("📋 Sin tareas complejas.")
 
-    lines = [f"📋 Últimas {len(filtered)}"]
-    for i, row in enumerate(filtered, 1):
+    # Evitar duplicados: si hay varias filas con mismo worker/status/duración y
+    # solo algunas tienen plan_title explícito, preferir las que sí lo tienen.
+    deduped = []
+    for idx, row in enumerate(filtered):
         if not isinstance(row, dict):
             continue
-        prefix = (row.get("query_prefix") or "").strip()[:50]
+        raw_plan = (row.get("plan_title") or "").strip()
+        if not raw_plan:
+            wid = (row.get("worker_id") or "").strip()
+            status = (row.get("status") or "UNKNOWN").upper()
+            try:
+                dur_ms = int(row.get("duration_ms") or 0)
+            except (TypeError, ValueError):
+                dur_ms = 0
+            has_better = False
+            for j, other in enumerate(filtered):
+                if j == idx or not isinstance(other, dict):
+                    continue
+                other_plan = (other.get("plan_title") or "").strip()
+                if not other_plan:
+                    continue
+                wid2 = (other.get("worker_id") or "").strip()
+                status2 = (other.get("status") or "UNKNOWN").upper()
+                try:
+                    dur2 = int(other.get("duration_ms") or 0)
+                except (TypeError, ValueError):
+                    dur2 = 0
+                if wid2 == wid and status2 == status and dur2 == dur_ms:
+                    has_better = True
+                    break
+            if has_better:
+                continue
+        deduped.append(row)
+
+    if not deduped:
+        return _telegram_safe("📋 Sin tareas complejas.")
+
+    lines = [f"📋 Últimas {len(deduped)}"]
+    for i, row in enumerate(deduped, 1):
+        if not isinstance(row, dict):
+            continue
+        prefix = (row.get("query_prefix") or "").strip()[:80]
+        # Título del plan (guardado por el Manager): se muestra después del subagente
+        plan_title = (row.get("plan_title") or "").strip()
+        if not plan_title:
+            # Fallback retrocompatible: derivar un pseudo-título desde query_prefix
+            if prefix:
+                words = prefix.split()
+                plan_title = " ".join(words[:5])
+            else:
+                plan_title = "Interacción del Usuario"
         status = (row.get("status") or "UNKNOWN").upper()
         wid = (row.get("worker_id") or "").strip()
         try:
@@ -901,9 +1314,10 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
         except (TypeError, ValueError):
             dur_ms = 0
         dur_s = f"{dur_ms / 1000:.1f}s"
-        icon = "✅" if status == "SUCCESS" else "❌"
-        subagente = f"[{_telegram_safe(wid)}] " if wid else ""
-        lines.append(f"{i}. {icon} {dur_s} · {subagente}{_telegram_safe(prefix) or '—'}")
+        # Formato: número. [subagente] Título del plan · ⏱️ duración
+        worker_part = f"[{_telegram_safe(wid)}] " if wid else ""
+        title_part = _telegram_safe(plan_title) if plan_title else ""
+        lines.append(f"{i}. {worker_part}{title_part} · ⏱️ {dur_s}")
 
     success_rows = [r for r in filtered if isinstance(r, dict) and (r.get("status") or "").upper() == "SUCCESS"]
     def _dur(r):

@@ -49,6 +49,24 @@ _DEFAULT_SYSTEM_PROMPT = (
 _DEFAULT_TOOLS = ["run_sql", "inspect_schema", "manage_memory", "get_db_path", "run_sandbox"]
 
 
+def _format_incoming_with_identity(state: dict) -> str:
+    """
+    Formatea el mensaje entrante inyectando identidad multi-usuario cuando haya metadatos.
+
+    - Si el estado incluye username/chat_type y es group/supergroup, devuelve "[username]: mensaje".
+    - En caso contrario, devuelve el incoming/message sin prefijo.
+    """
+    incoming = state.get("incoming")
+    if incoming is None:
+        incoming = state.get("message") or ""
+    incoming = str(incoming or "")
+    chat_type = str(state.get("chat_type") or "").strip().lower()
+    username = str(state.get("username") or "").strip()
+    if chat_type in ("group", "supergroup") and username:
+        return f"[{username}]: {incoming}"
+    return incoming
+
+
 def build_general_graph(
     db: Any,
     llm: Any,
@@ -151,6 +169,45 @@ def build_general_graph(
         except Exception:
             pass
 
+    # SendPrivateMessage / send_dm — opcional vía tools_spec
+    if "send_dm" in tool_names_set:
+        try:
+            from duckclaw.forge.skills.send_dm_bridge import register_send_dm_skill
+
+            register_send_dm_skill(tools, {"enabled": True})
+        except Exception:
+            pass
+
+    # The Mind broadcasting / reparto de cartas — opcional vía tools_spec
+    if "broadcast_message" in tool_names_set or "deal_cards" in tool_names_set:
+        try:
+            from duckclaw.forge.skills.broadcast import broadcast_message, deal_cards
+
+            if "broadcast_message" in tool_names_set:
+                tools.append(broadcast_message)
+            if "deal_cards" in tool_names_set:
+                tools.append(deal_cards)
+        except Exception:
+            pass
+
+    # Mensajería proactiva outbound (n8n) — opcional vía tools_spec
+    if "send_proactive_message" in tool_names_set:
+        try:
+            from duckclaw.forge.skills.outbound_messaging import send_proactive_message
+
+            tools.append(send_proactive_message)
+        except Exception:
+            pass
+
+    # TimeContextSkill — contexto temporal (America/Bogota) opcional vía tools_spec
+    if "get_current_time" in tool_names_set or "time_context" in tool_names_set:
+        try:
+            from duckclaw.forge.skills.time_context import get_current_time
+
+            tools.append(get_current_time)
+        except Exception:
+            pass
+
     llm_with_tools = llm.bind_tools(tools)
     llm_with_required_tool = llm.bind_tools(tools, tool_choice="required")
     tools_by_name = {t.name: t for t in tools}
@@ -168,7 +225,8 @@ def build_general_graph(
                 messages.append(HumanMessage(content=content))
             elif role == "assistant":
                 messages.append(AIMessage(content=content))
-        messages.append(HumanMessage(content=state.get("incoming") or ""))
+        incoming = _format_incoming_with_identity(state)
+        messages.append(HumanMessage(content=incoming))
         return {"messages": messages}
 
     def agent_node(state: dict) -> dict:
@@ -199,7 +257,30 @@ def build_general_graph(
             tool = tools_by_name.get(name)
             if tool:
                 try:
+                    import time as _time
+
+                    t0 = _time.monotonic()
                     result = tool.invoke(args)
+                    duration_ms = int((_time.monotonic() - t0) * 1000)
+                    # Auditoría específica para TimeContextSkill
+                    if name == "get_current_time":
+                        try:
+                            from duckclaw.graphs.on_the_fly_commands import append_task_audit
+                            from duckclaw.graphs.graph_server import get_db
+
+                            db = get_db()
+                            tenant_id = state.get("chat_id") or ""
+                            worker_id = state.get("assigned_worker_id") or ""
+                            append_task_audit(
+                                db,
+                                tenant_id,
+                                worker_id,
+                                "Consulta de contexto temporal",
+                                "SUCCESS",
+                                duration_ms,
+                            )
+                        except Exception:
+                            pass
                     content = str(result) if result is not None else "OK"
                 except Exception as e:
                     content = f"Error: {e}"

@@ -153,6 +153,7 @@ def build_manager_graph(
     def router_node(state: dict) -> dict:
         """Equipo del chat (get_team_templates) o todos los templates. El manager delega según el plan. Preserva incoming/history/chat_id."""
         chat_id = state.get("chat_id") or ""
+        tenant_id = state.get("tenant_id") or "default"
         available = get_team_templates(db, chat_id) or list_workers(troot)
         assigned = available[0] if available else None
         out = {"assigned_worker_id": assigned, "available_templates": available}
@@ -163,6 +164,8 @@ def build_manager_graph(
             out["history"] = state["history"]
         if "chat_id" in state:
             out["chat_id"] = state["chat_id"]
+        if "tenant_id" in state:
+            out["tenant_id"] = state["tenant_id"]
         return out
 
     def plan_node(state: ManagerAgentState) -> ManagerAgentState:
@@ -207,6 +210,8 @@ def build_manager_graph(
             out["history"] = state["history"]
         if "chat_id" in state:
             out["chat_id"] = state["chat_id"]
+        if "tenant_id" in state:
+            out["tenant_id"] = state["tenant_id"]
         # Actualizar activity para /tasks usando solo el título del plan cuando esté disponible
         plan_for_task = (plan_title or "").strip()
         if plan_for_task:
@@ -232,6 +237,7 @@ def build_manager_graph(
     def invoke_worker_node(state: ManagerAgentState) -> ManagerAgentState:
         """Invoca el grafo del worker asignado; set_busy/set_idle y append_task_audit. Solo invoca si el worker existe en templates."""
         chat_id = state.get("chat_id") or ""
+        tenant_id = state.get("tenant_id") or "default"
         incoming = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
         planned_task = (state.get("planned_task") or "").strip() or incoming
         plan_title = (state.get("plan_title") or "").strip() or None
@@ -256,8 +262,9 @@ def build_manager_graph(
         status = "SUCCESS"
         try:
             global _worker_graph_cache
-            if assigned not in _worker_graph_cache:
-                _worker_graph_cache[assigned] = _build_worker_graph(
+            worker_cache_key = f"{tenant_id}::{assigned}"
+            if worker_cache_key not in _worker_graph_cache:
+                _worker_graph_cache[worker_cache_key] = _build_worker_graph(
                     assigned,
                     db_path,
                     llm,
@@ -265,11 +272,12 @@ def build_manager_graph(
                     llm_provider=llm_provider or "",
                     llm_model=llm_model or "",
                     llm_base_url=llm_base_url or "",
+                    instance_name=tenant_id,  # Aislar por tenant (Forge/WorkerFactory)
                 )
-            worker_graph = _worker_graph_cache[assigned]
+            worker_graph = _worker_graph_cache[worker_cache_key]
             # Pasar la tarea planificada al worker para que use herramientas y no responda genérico
             # Incluimos chat_id para que el worker pueda leer sandbox_enabled por sesión.
-            worker_state = {"incoming": planned_task, "history": history, "chat_id": chat_id}
+            worker_state = {"incoming": planned_task, "history": history, "chat_id": chat_id, "tenant_id": tenant_id}
             result = worker_graph.invoke(worker_state)
             reply = str(result.get("reply") or result.get("output") or "Sin respuesta.")
             messages = result.get("messages")

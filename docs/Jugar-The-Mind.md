@@ -15,12 +15,12 @@ The Mind es un juego de cartas cooperativo. Los jugadores tienen cartas numerada
 1. **Añadir el crupier al equipo del chat**  
    En el grupo donde quieres jugar, escribe:
    ```
-   /team --add TheMindCrupier
+   /workers --add TheMindCrupier
    ```
    (También vale `themindcrupier` en minúsculas.)
 
 2. **Comprobar**  
-   Con `/team` verás que TheMindCrupier está en el equipo. Con `/roles` puedes ver que el template está disponible.
+   Con `/workers` verás que TheMindCrupier está en el equipo. Con `/roles` puedes ver que el template está disponible.
 
 3. **Requisitos**  
    - El bot debe poder enviar **mensajes directos (DM)** a cada jugador para repartir las cartas en secreto.  
@@ -89,7 +89,7 @@ El flujo nuevo separa la **creación de la partida** (con `game_id`) del chat co
 ## 6. Resumen rápido
 
 ```
-/team --add TheMindCrupier        → Añadir crupier al equipo
+/workers --add TheMindCrupier    → Añadir crupier al equipo
 /start_mind                       → Inicializar esquema de The Mind
 /new_game the_mind                → Crear partida y obtener game_id
 /join <game_id>                   → Unirse a la partida desde tu DM

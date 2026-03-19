@@ -67,6 +67,18 @@ def main():
         )
     """)
 
+    # Telegram Guard: whitelist per tenant/user for authorization checks.
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS main.authorized_users (
+            tenant_id VARCHAR,
+            user_id VARCHAR,
+            username VARCHAR,
+            role VARCHAR DEFAULT 'user',
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (tenant_id, user_id)
+        )
+    """)
+
     # Finance_worker: schema + agent_beliefs + schema.sql
     db.execute("CREATE SCHEMA IF NOT EXISTS finance_worker")
     db.execute("""

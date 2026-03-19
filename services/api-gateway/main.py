@@ -8,6 +8,7 @@ Endpoints: /api/v1/agent/chat, /api/v1/db/write, homeostasis, system health.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -21,6 +22,8 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
+from urllib import request as _url_request
+from urllib.error import URLError
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,10 +68,73 @@ def _ensure_log_handler():
 _ensure_log_handler()
 _gateway_log = logging.getLogger("duckclaw.gateway")
 
+_AUTHORIZED_USERS_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS main.authorized_users (
+    tenant_id VARCHAR,
+    user_id VARCHAR,
+    username VARCHAR,
+    role VARCHAR DEFAULT 'user',
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, user_id)
+);
+"""
+
+
+def _langsmith_auth_log(*, auth_status: str, user_id: str, tenant_id: str) -> None:
+    """
+    Best-effort audit a LangSmith para Telegram Guard.
+
+    Tags (según spec):
+      - `auth_status: authorized`
+      - `auth_status: unauthorized_attempt`
+    """
+    try:
+        api_key = os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("LANGSMITH_API_KEY")
+        if not api_key:
+            return
+        if os.environ.get("LANGCHAIN_TRACING_V2", "").lower() not in ("true", "1"):
+            return
+
+        from langsmith import Client  # noqa: PLC0415
+
+        client = Client(api_key=api_key)
+        tag = f"auth_status: {auth_status}"
+        client.create_run(
+            name="telegram_guard_auth",
+            run_type="chain",
+            inputs={"user_id": str(user_id), "tenant_id": str(tenant_id)},
+            outputs={"auth_status": auth_status},
+            tags=[tag, "telegram_guard"],
+        )
+    except Exception:
+        # Auditoría best-effort: nunca rompas el flujo de seguridad.
+        pass
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.redis = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
+    # Prepara el esquema de Telegram Guard (idempotente).
+    try:
+        # Importante: reutilizar la misma conexión DuckDB que mantiene graph_server
+        # para evitar conflictos de lock.
+        from duckclaw.graphs.graph_server import get_db
+
+        db = get_db()
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS main.authorized_users (
+                tenant_id VARCHAR,
+                user_id VARCHAR,
+                username VARCHAR,
+                role VARCHAR DEFAULT 'user',
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, user_id)
+            );
+            """
+        )
+    except Exception as exc:
+        _gateway_log.warning("Telegram Guard: no se pudo inicializar authorized_users: %s", exc)
     yield
     await app.state.redis.aclose()
 
@@ -244,6 +310,155 @@ def _resolve_chat_session_id(body: ChatRequest, req: Request) -> tuple[str, str]
     return "default", "default"
 
 
+def _escape_sql_literal(v: Any, max_len: int = 256) -> str:
+    """
+    Escape simple SQL string literals for DuckDB when we don't use parameterized queries.
+    """
+    s = "" if v is None else str(v)
+    return s.replace("'", "''")[:max_len]
+
+
+async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, user_id: str) -> Optional[str]:
+    """
+    Telegram Guard whitelist lookup with Redis cache (TTL=1h) + DuckDB source of truth.
+    """
+    key = f"whitelist:{tenant_id}:{user_id}"
+    if redis_client is not None:
+        try:
+            cached = await redis_client.get(key)
+            if cached:
+                return str(cached).strip() or None
+        except Exception:
+            pass
+
+    tid = _escape_sql_literal(tenant_id, max_len=128)
+    uid = _escape_sql_literal(user_id, max_len=128)
+    def _ensure_authorized_users_table() -> None:
+        # Best-effort: usa el mismo `db` en el que estamos para evitar lock.
+        try:
+            db.execute(_AUTHORIZED_USERS_TABLE_DDL)
+        except Exception:
+            # No rompemos; el SELECT de abajo dará None.
+            return
+
+    try:
+        raw = db.query(
+            f"SELECT role FROM main.authorized_users WHERE tenant_id='{tid}' AND user_id='{uid}' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if rows and isinstance(rows[0], dict):
+            role = (rows[0].get("role") or "").strip()
+            if role:
+                if redis_client is not None:
+                    try:
+                        await redis_client.set(key, role, ex=3600)
+                    except Exception:
+                        pass
+                return role
+    except Exception:
+        # Si la tabla no existe todavía, crearla y reintentar una vez.
+        _ensure_authorized_users_table()
+        try:
+            raw = db.query(
+                f"SELECT role FROM main.authorized_users WHERE tenant_id='{tid}' AND user_id='{uid}' LIMIT 1"
+            )
+            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            if rows and isinstance(rows[0], dict):
+                role = (rows[0].get("role") or "").strip()
+                if role:
+                    if redis_client is not None:
+                        try:
+                            await redis_client.set(key, role, ex=3600)
+                        except Exception:
+                            pass
+                    return role
+        except Exception:
+            pass
+    return None
+
+
+def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
+    """
+    Alert opcional al admin via webhook n8n (best-effort).
+    """
+    admin_chat_id = (os.getenv("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
+    webhook_url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
+    auth_key = (os.getenv("N8N_AUTH_KEY") or getattr(settings, "N8N_AUTH_KEY", "") or "").strip()
+
+    if not admin_chat_id or not webhook_url:
+        _gateway_log.warning(
+            "Telegram Guard: no se pudo enviar alerta (admin_chat_id=%r webhook=%r)",
+            admin_chat_id,
+            bool(webhook_url),
+        )
+        return
+
+    text = f"🚨 Alerta de Seguridad: El usuario {user_id} ha intentado acceder 3 veces sin autorización al tenant {tenant_id}."
+    headers: dict[str, Any] = {"Content-Type": "application/json"}
+    if auth_key:
+        headers["X-DuckClaw-Secret"] = auth_key
+
+    payload = {"chat_id": str(admin_chat_id), "text": text}
+    data = json.dumps(payload).encode("utf-8")
+    req = _url_request.Request(webhook_url, data=data, headers=headers, method="POST")
+
+    try:
+        with _url_request.urlopen(req, timeout=10) as resp:
+            _ = resp.read()
+    except URLError as exc:
+        _gateway_log.warning("Telegram Guard: error enviando alerta webhook: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        _gateway_log.warning("Telegram Guard: error enviando alerta webhook (unknown): %s", exc)
+
+
+async def _authorize_or_reject(*, tenant_id: str, user_id: str, is_owner: bool) -> None:
+    """
+    Raises HTTPException(403) for unauthorized access.
+    Also increments unauthorized attempts and triggers admin alert after 3 attempts.
+    """
+    # Check 1 (Bypass): owner bypass no DB/Redis access.
+    if is_owner:
+        _langsmith_auth_log(auth_status="authorized", user_id=user_id, tenant_id=tenant_id)
+        return
+
+    redis_client = getattr(app.state, "redis", None)
+    from duckclaw.graphs.graph_server import get_db
+
+    db = get_db()
+    role = await _lookup_whitelist_role(redis_client, db, tenant_id, user_id)
+    if role:
+        _langsmith_auth_log(auth_status="authorized", user_id=user_id, tenant_id=tenant_id)
+        return
+
+    # PM2 visibility: ruido en logs, pero respuesta silenciosa en Telegram (n8n no debería reenviar un texto).
+    _gateway_log.warning(
+        "[SECURITY_ALERT] Unauthorized access attempt: user_id='%s' tenant_id='%s'",
+        user_id,
+        tenant_id,
+    )
+    _langsmith_auth_log(auth_status="unauthorized_attempt", user_id=user_id, tenant_id=tenant_id)
+
+    # Contador para alertas del admin (best-effort).
+    if redis_client is not None:
+        attempts_key = f"authz_unauthorized_attempts:{tenant_id}:{user_id}"
+        try:
+            attempts = await redis_client.incr(attempts_key)
+            # TTL 1h para evitar crecimiento infinito
+            if attempts == 1:
+                await redis_client.expire(attempts_key, 3600)
+            if attempts >= 3 and attempts - 3 < 1:
+                await asyncio.get_running_loop().run_in_executor(
+                    None, _send_security_alert_to_admin, user_id, tenant_id
+                )
+        except Exception:
+            pass
+
+    raise HTTPException(
+        status_code=403,
+        detail="Acceso denegado. No tienes autorización para interactuar con este agente.",
+    )
+
+
 @app.post("/api/v1/agent/chat")
 @app.post("/api/v1/agent/{worker_id}/chat")
 async def agent_chat(
@@ -272,7 +487,8 @@ async def agent_chat(
         _gateway_log.info(
             "[session] chat_id resolved: %r (source=%s)", session_id, session_source
         )
-    return await _invoke_chat(body, worker_id or "finanz", session_id=session_id)
+    tenant_id = (body.tenant_id or "default").strip() or "default"
+    return await _invoke_chat(body, worker_id or "finanz", session_id=session_id, tenant_id=tenant_id)
 
 
 def _truncate_log(s: str, max_len: int = 200) -> str:
@@ -307,7 +523,7 @@ def clean_agent_response(response: str) -> str:
     return text.strip()
 
 
-async def _invoke_chat(payload: ChatRequest, worker_id: str, session_id: str):
+async def _invoke_chat(payload: ChatRequest, worker_id: str, session_id: str, tenant_id: str):
     """
     Orquesta la llamada al grafo LangGraph a partir de un ChatRequest.
 
@@ -315,6 +531,7 @@ async def _invoke_chat(payload: ChatRequest, worker_id: str, session_id: str):
     """
     message = (payload.message or "").strip()
     session_id = (session_id or "default").strip() or "default"
+    tenant_id = (tenant_id or "default").strip() or "default"
     # Campos opcionales: defaults resilientes
     chat_type = (payload.chat_type or "private").strip().lower() or "private"
     username = (payload.username or "Usuario").strip() or "Usuario"
@@ -323,6 +540,17 @@ async def _invoke_chat(payload: ChatRequest, worker_id: str, session_id: str):
     is_system_prompt = bool(payload.is_system_prompt or False)
 
     _gateway_log.info("in: %s", _truncate_log(message))
+
+    # Telegram Guard: autoriza antes de ejecutar comandos (/team, /sandbox, etc.)
+    # y antes de invocar cualquier lógica LangGraph.
+    if not is_system_prompt:
+        owner_user_id = (os.getenv("DUCKCLAW_OWNER_ID") or os.getenv("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
+        is_owner = bool(owner_user_id and user_id and str(user_id).strip() == str(owner_user_id).strip())
+        await _authorize_or_reject(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            is_owner=is_owner,
+        )
 
     msg_stripped = (message or "").strip()
     # No invocar el grafo con mensaje vacío (evita plan vacío y respuesta "¿Cuál es mi tarea?")
@@ -338,7 +566,13 @@ async def _invoke_chat(payload: ChatRequest, worker_id: str, session_id: str):
             from duckclaw.graphs.on_the_fly_commands import handle_command
             from duckclaw.graphs.graph_server import get_db
             db = get_db()
-            cmd_reply = handle_command(db, session_id, message)
+            cmd_reply = handle_command(
+                db,
+                session_id,
+                message,
+                requester_id=user_id,
+                tenant_id=tenant_id,
+            )
             if cmd_reply is not None:
                 _gateway_log.info("fly: %s", _truncate_log(cmd_reply))
                 return {
@@ -376,6 +610,7 @@ async def _invoke_chat(payload: ChatRequest, worker_id: str, session_id: str):
                 message,
                 history or [],
                 session_id,
+                tenant_id=tenant_id,
                 is_system_prompt=is_system_prompt,
             )
         except Exception as exc:

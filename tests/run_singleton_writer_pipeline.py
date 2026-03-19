@@ -45,8 +45,30 @@ def ensure_redis() -> bool:
         return True
     except Exception:
         try:
+            # Montamos `db/` del host para que Redis persista `dump.rdb` ahí.
+            host_db_dir = REPO_ROOT / "db"
+            host_db_dir.mkdir(parents=True, exist_ok=True)
             subprocess.run(
-                ["docker", "run", "-d", "--name", "duckclaw-redis", "-p", "6379:6379", "redis:7-alpine"],
+                [
+                    "docker",
+                    "run",
+                    "-d",
+                    "--name",
+                    "duckclaw-redis",
+                    "-p",
+                    "6379:6379",
+                    "-v",
+                    f"{str(host_db_dir)}:/data",
+                    "redis:7-alpine",
+                    "redis-server",
+                    "--dir",
+                    "/data",
+                    "--dbfilename",
+                    "dump.rdb",
+                    "--save",
+                    "1",
+                    "1",
+                ],
                 cwd=REPO_ROOT,
                 check=True,
                 capture_output=True,

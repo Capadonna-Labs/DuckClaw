@@ -33,6 +33,10 @@ class ChatRequest(BaseModel):
     user_id: str | None = Field(None, description="ID único del usuario que envió el mensaje")
     username: str | None = Field("Usuario", description="Nombre o alias del usuario")
     chat_type: str | None = Field("private", description="Tipo de chat: private, group, supergroup, etc.")
+    tenant_id: str | None = Field(
+        "default",
+        description="ID del tenant (cliente) para whitelist y aislamiento de workers.",
+    )
     history: list[Any] = Field(default_factory=list, description="Historial opcional de mensajes")
     stream: bool | None = Field(False, description="Streaming SSE")
     is_system_prompt: bool | None = Field(
@@ -72,4 +76,14 @@ class ChatRequest(BaseModel):
         # Fallback: cualquier otro tipo -> str()
         s = str(v).strip()
         return s if s else "Usuario"
+
+    @field_validator("tenant_id", mode="before")
+    @classmethod
+    def _strip_tenant_id(cls, v: Any) -> str | None:
+        if v is None:
+            return "default"
+        if isinstance(v, str):
+            s = v.strip()
+            return s if s else "default"
+        return str(v).strip() or "default"
 

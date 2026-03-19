@@ -9,7 +9,7 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
-from duckclaw.graphs.tools import run_sql, inspect_schema, manage_memory, get_db_path
+from duckclaw.graphs.tools import read_sql, admin_sql, inspect_schema, manage_memory, get_db_path
 
 
 _DB_INTENT_RE = re.compile(
@@ -46,7 +46,7 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Estilo de respuesta: sé conciso y directo; usa como máximo 1 o 2 emojis por mensaje si aportan claridad; evita listas largas sin resumir, encabezados markdown (##) y relleno; responde con lo esencial."
 )
 
-_DEFAULT_TOOLS = ["run_sql", "inspect_schema", "manage_memory", "get_db_path", "run_sandbox"]
+_DEFAULT_TOOLS = ["read_sql", "admin_sql", "inspect_schema", "manage_memory", "get_db_path", "run_sandbox"]
 
 
 def _format_incoming_with_identity(state: dict) -> str:
@@ -76,7 +76,7 @@ def build_general_graph(
 ) -> Any:
     """
     Build LangGraph for general assistant: state has 'incoming', optional 'history'; result has 'reply'.
-    Uses run_sql, inspect_schema, manage_memory, run_sandbox (Strix).
+    Usa read_sql/admin_sql, inspect_schema, manage_memory, run_sandbox (Strix).
     system_prompt y tools_spec vienen del YAML o del caller (AgentAssembler).
     """
     from langgraph.graph import END, StateGraph
@@ -90,14 +90,23 @@ def build_general_graph(
     tool_names_set = frozenset(str(t).strip() for t in tool_names if t is not None and str(t).strip())
 
     tools: list[Any] = []
-    if "run_sql" in tool_names_set:
+    if "read_sql" in tool_names_set:
         tools.append(
             StructuredTool.from_function(
-                lambda q: run_sql(db, q),
-                name="run_sql",
-                description="Ejecuta una consulta SQL y retorna JSON. Usa para leer o escribir datos.",
+                lambda q: read_sql(db, q),
+                name="read_sql",
+                description="Solo lectura SQL (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA).",
             )
         )
+    if "admin_sql" in tool_names_set:
+        tools.append(
+            StructuredTool.from_function(
+                lambda q: admin_sql(db, q),
+                name="admin_sql",
+                description="Admin SQL: lectura + escrituras (INSERT/UPDATE/DELETE/CREATE/ALTER/DROP si el contexto lo permite).",
+            )
+        )
+    # Nota: solo existen read_sql/admin_sql para la capa SQL.
     if "inspect_schema" in tool_names_set:
         tools.append(
             StructuredTool.from_function(

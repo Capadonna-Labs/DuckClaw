@@ -13,7 +13,7 @@ Para SFT, el modelo necesita ver la conversación completa, **incluyendo el uso 
   "messages":[
     {
       "role": "system",
-      "content": "Eres Finanz. Tienes acceso a la herramienta run_sql..."
+      "content": "Eres Finanz. Tienes acceso a la herramienta read_sql..."
     },
     {
       "role": "user",
@@ -21,11 +21,11 @@ Para SFT, el modelo necesita ver la conversación completa, **incluyendo el uso 
     },
     {
       "role": "assistant",
-      "tool_calls":[{"name": "run_sql", "arguments": {"query": "SELECT balance FROM cuentas WHERE name='Bancolombia'"}}]
+      "tool_calls":[{"name": "read_sql", "arguments": {"query": "SELECT balance FROM cuentas WHERE name='Bancolombia'"}}]
     },
     {
       "role": "tool",
-      "name": "run_sql",
+      "name": "read_sql",
       "content": "[{\"balance\": 5000000}]"
     },
     {
@@ -47,7 +47,7 @@ Para GRPO (Aprendizaje por Refuerzo), el formato es diferente. No le das la resp
   "prompt":[
     {
       "role": "system",
-      "content": "Eres Finanz. Tienes acceso a la herramienta run_sql..."
+      "content": "Eres Finanz. Tienes acceso a la herramienta read_sql..."
     },
     {
       "role": "user",

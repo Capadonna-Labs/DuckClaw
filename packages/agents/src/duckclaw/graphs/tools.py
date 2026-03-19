@@ -6,14 +6,15 @@ import json
 import re
 from typing import Any
 
-# Solo lectura para run_sql cuando no es escritura
-_READ_ONLY = re.compile(r"^\s*(SELECT|WITH|SHOW|DESCRIBE)\s", re.IGNORECASE)
-# Operaciones destructivas o de acceso al sistema de archivos — siempre bloqueadas
-_BLOCKED = re.compile(
-    r"\b(DROP|TRUNCATE|ATTACH|DETACH|COPY|EXPORT|IMPORT)\b",
-    re.IGNORECASE,
-)
-# ALTER solo se bloquea si modifica estructura de tabla existente (no CREATE)
+# Solo lectura: consultas que no modifican datos/estructura.
+_READ_ONLY = re.compile(r"^\s*(SELECT|WITH|SHOW|DESCRIBE|EXPLAIN|PRAGMA)\s", re.IGNORECASE)
+
+# Operaciones destructivas o de acceso al sistema de archivos — siempre bloqueadas.
+# Nota: dejamos CREATE/DELETE/UPDATE/INSERT/ALTER permitidos para admin_sql (si no está en read-only).
+_BLOCKED = re.compile(r"\b(ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", re.IGNORECASE)
+
+# ALTER estructura se permite en admin_sql. En read_sql se bloquea por tipo de consulta.
+# (Aquí solo mantenemos el regex para compatibilidad interna si existiera.)
 _ALTER_BLOCKED = re.compile(r"^\s*ALTER\s", re.IGNORECASE)
 
 _MEMORY_TABLE = "agent_memory"
@@ -31,31 +32,48 @@ def _ensure_memory_table(db: Any) -> None:
     )
 
 
-def run_sql(db: Any, query: str) -> str:
-    """Ejecuta SQL. SELECT/WITH/SHOW/DESCRIBE devuelve filas; INSERT/UPDATE/CREATE/etc. devuelve {\"status\":\"ok\"}."""
+def read_sql(db: Any, query: str) -> str:
+    """Solo lectura SQL: SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA. Retorna filas como JSON/string."""
     if not query or not query.strip():
         return json.dumps({"error": "Query vacío."})
     q = query.strip()
     if _BLOCKED.search(q):
-        blocked = re.search(r"\b(DROP|TRUNCATE|ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", q, re.IGNORECASE)
+        blocked = re.search(r"\b(ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", q, re.IGNORECASE)
         cmd = blocked.group(0).upper() if blocked else "comando"
         return json.dumps({"error": f"{cmd} no está permitido por política de seguridad."})
-    if _ALTER_BLOCKED.search(q):
-        return json.dumps({"error": "ALTER no está permitido. Usa CREATE TABLE IF NOT EXISTS para crear tablas nuevas."})
+    if not _READ_ONLY.search(q):
+        return json.dumps({"error": "read_sql es solo lectura. Usa admin_sql para escrituras (INSERT/UPDATE/DELETE/CREATE, etc.)."})
+    try:
+        raw = db.query(q)
+        # Cuando hay muchas filas, serializar como markdown compacto para el LLM
+        # (spec Pipeline_de_Datos_Zero-Copy_con_PyArrow.md — LLMContextSerializer)
+        try:
+            from duckclaw.data.arrow_bridge import LLMContextSerializer, arrow_available  # noqa: PLC0415
+            if arrow_available():
+                rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+                if isinstance(rows, list) and len(rows) > 30:
+                    return LLMContextSerializer.from_json(raw, max_rows=30)
+        except Exception:
+            pass
+        return raw
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def admin_sql(db: Any, query: str) -> str:
+    """Admin SQL: lectura + escrituras (INSERT/UPDATE/DELETE/CREATE/ALTER/...)."""
+    if not query or not query.strip():
+        return json.dumps({"error": "Query vacío."})
+    q = query.strip()
+    if _BLOCKED.search(q):
+        blocked = re.search(r"\b(ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", q, re.IGNORECASE)
+        cmd = blocked.group(0).upper() if blocked else "comando"
+        return json.dumps({"error": f"{cmd} no está permitido por política de seguridad."})
     try:
         if _READ_ONLY.search(q):
             raw = db.query(q)
-            # Cuando hay muchas filas, serializar como markdown compacto para el LLM
-            # (spec Pipeline_de_Datos_Zero-Copy_con_PyArrow.md — LLMContextSerializer)
-            try:
-                from duckclaw.data.arrow_bridge import LLMContextSerializer, arrow_available  # noqa: PLC0415
-                if arrow_available():
-                    rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-                    if isinstance(rows, list) and len(rows) > 30:
-                        return LLMContextSerializer.from_json(raw, max_rows=30)
-            except Exception:
-                pass
             return raw
+
         # SingletonWriterBridge: encolar si Redis configurado (spec Auditoria_Arquitectura)
         try:
             from duckclaw.forge.homeostasis.singleton_writer import enqueue_write

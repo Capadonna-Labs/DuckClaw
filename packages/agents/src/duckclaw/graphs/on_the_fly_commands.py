@@ -230,7 +230,7 @@ def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
         from duckclaw.workers.manifest import load_manifest
         spec = load_manifest(canonical)
         set_chat_state(db, chat_id, "worker_id", canonical)
-        skills = ", ".join(_telegram_safe(s) for s in (spec.skills_list or [])) or "run_sql"
+        skills = ", ".join(_telegram_safe(s) for s in (spec.skills_list or [])) or "read_sql, admin_sql"
         return _telegram_safe(f"✅ {spec.name} ({canonical}). Herramientas: {skills}")
     except Exception as e:
         return f"Error al cargar rol: {e}."
@@ -253,7 +253,8 @@ def execute_skills_list(db: Any, chat_id: Any, args: str) -> str:
         spec = load_manifest(canonical)
         skills_safe = [_telegram_safe(s) for s in (spec.skills_list or [])]
         lines = [f"\\- {s}" for s in skills_safe]
-        lines.append(f"\\- {_telegram_safe('run_sql')}")
+        lines.append(f"\\- {_telegram_safe('read_sql')} (solo lectura)")
+        lines.append(f"\\- {_telegram_safe('admin_sql')} (lectura + escrituras)")
         return _telegram_safe(f"🔧 {spec.name} ({canonical})\n") + "\n".join(lines)
     except Exception as e:
         return f"Error: {e}."
@@ -608,6 +609,49 @@ def execute_context_toggle(db: Any, chat_id: Any, on_off: str) -> str:
         return _telegram_safe("✅ Contexto largo desactivado (solo historial reciente).")
     current = get_chat_state(db, chat_id, "use_rag")
     return _telegram_safe(f"Uso: /context on | /context off\nEstado actual: {'on' if current != 'false' else 'off'}.")
+
+
+def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
+    """/sandbox on|off: habilita/deshabilita ejecución de código para este chat (por `agent_config`)."""
+    v = (on_off or "").strip().lower()
+
+    def _parse(v_: str) -> Optional[bool]:
+        vv = (v_ or "").strip().lower()
+        if vv in ("on", "1", "true", "sí", "si"):
+            return True
+        if vv in ("off", "0", "false"):
+            return False
+        return None
+
+    parsed = _parse(v)
+    if parsed is True:
+        set_chat_state(db, chat_id, "sandbox_enabled", "true")
+        db_path = getattr(db, "_path", None) or getattr(db, "path", None) or "(unknown_db_path)"
+        # Warning para asegurar que aparezca en logs de pm2.
+        import logging
+        logging.getLogger(__name__).warning(
+            "[sandbox-toggle] db_path=%r chat_id=%r sandbox_enabled=%r",
+            db_path,
+            chat_id,
+            "true",
+        )
+        return _telegram_safe("Entendido. He habilitado mis capacidades de ejecución de código para esta sesión.")
+    if parsed is False:
+        set_chat_state(db, chat_id, "sandbox_enabled", "false")
+        db_path = getattr(db, "_path", None) or getattr(db, "path", None) or "(unknown_db_path)"
+        import logging
+        logging.getLogger(__name__).warning(
+            "[sandbox-toggle] db_path=%r chat_id=%r sandbox_enabled=%r",
+            db_path,
+            chat_id,
+            "false",
+        )
+        return _telegram_safe("Entendido. He desactivado mis capacidades de ejecución de código para esta sesión.")
+
+    # Sin args válidos: mostrar estado actual.
+    current = _parse(get_chat_state(db, chat_id, "sandbox_enabled"))
+    status = "habilitado" if current is True else "desactivado"  # default OFF
+    return _telegram_safe(f"Uso: /sandbox on|off\nEstado actual: {status}.")
 
 
 def execute_audit(db: Any, chat_id: Any) -> str:
@@ -1011,6 +1055,8 @@ def execute_help(db: Any, chat_id: Any) -> str:
         (_telegram_safe("/skills <worker_id>"), _telegram_safe("Herramientas del template")),
         (_telegram_safe("/forget"), _telegram_safe("Borrar historial de la conversación")),
         (_telegram_safe("/context"), _telegram_safe("Toggle contexto largo/corto")),
+        (_telegram_safe("/sandbox"), _telegram_safe("Toggle ejecución de código (true|false) para esta sesión")),
+        (_telegram_safe("/sandox"), _telegram_safe("(Alias) /sandbox para tolerar errores de escritura.")),
         (_telegram_safe("/audit"), _telegram_safe("Última auditoría de ejecución")),
         (_telegram_safe("/health"), _telegram_safe("Estado del servicio")),
         (_telegram_safe("/setup"), _telegram_safe("Config key=value")),
@@ -1055,6 +1101,8 @@ def handle_command(db: Any, chat_id: Any, text: str) -> Optional[str]:
         return execute_play_mind(db, chat_id, args)
     if name == "context":
         return execute_context_toggle(db, chat_id, args)
+    if name in ("sandbox", "sandox"):
+        return execute_sandbox_toggle(db, chat_id, args)
     if name == "audit":
         return execute_audit(db, chat_id)
     if name == "health":
@@ -1177,7 +1225,8 @@ def append_task_audit(
     worker_s = (worker_id or "").replace("'", "''")[:64]
     prefix_s = (query_prefix or "")[:256].replace("'", "''")
     status_s = (status or "SUCCESS").upper().replace("'", "''")[:32]
-    status_s = "SUCCESS" if status_s not in ("SUCCESS", "FAILED") else status_s
+    status_allowed = ("SUCCESS", "FAILED", "PROACTIVE_MESSAGE_SENT", "SECURITY_VIOLATION_ATTEMPT")
+    status_s = "SUCCESS" if status_s not in status_allowed else status_s
     plan_title_s = (plan_title or "")[:256].replace("'", "''") if plan_title else ""
     db.execute(
         f"""

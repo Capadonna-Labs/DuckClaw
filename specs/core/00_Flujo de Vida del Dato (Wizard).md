@@ -93,7 +93,7 @@ Documento detallado del ciclo de vida de los datos: API Gateway, DB Writer, cola
 | ------------------------------------ | --------------------------------------------------------------------------- |
 | `services/api-gateway/main.py`      | `POST /api/v1/db/write` encola en Redis. Rechaza SELECT.                    |
 | `services/db-writer/main.py`        | Consumidor: BRPOP `duckdb_write_queue`, ejecuta `conn.execute(query, params)`. |
-| `packages/agents/src/duckclaw/graphs/tools.py` | `run_sql()` para escrituras (grafo dentro del Gateway).              |
+| `packages/agents/src/duckclaw/graphs/tools.py` | `admin_sql()` para escrituras (grafo dentro del Gateway).          |
 
 
 **Flujo:**
@@ -228,10 +228,10 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 5. `set_busy(session_id, task=message)` en Redis (ActivityManager).
 6. El grafo invoca el agente (Finanz, etc.) con herramientas.
 
-### 3.3 Ejecución del agente (run_sql)
+### 3.3 Ejecución del agente (admin_sql)
 
-1. El LLM decide usar `run_sql` con una query.
-2. `tools.run_sql(db, query)`:
+1. El LLM decide usar `admin_sql` con una query.
+2. `tools.admin_sql(db, query)`:
   - Si es SELECT/WITH/SHOW/DESCRIBE → `db.query(q)` directo.
   - Si es INSERT/UPDATE/DELETE/CREATE:
     - Si `DUCKCLAW_WRITE_QUEUE_URL` está definido → `enqueue_write(sql)` → Redis LPUSH.
@@ -277,7 +277,7 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 | **Encolar escrituras**                    | `packages/agents/src/duckclaw/forge/homeostasis/singleton_writer.py` (`enqueue_write`) |
 | **Consumir cola (forge)**                 | `python -m duckclaw.forge.homeostasis.singleton_writer --consume`                     |
 | **Consumir cola (api-gateway)**           | `services/db-writer/main.py`                                                           |
-| **run_sql**                               | `packages/agents/src/duckclaw/graphs/tools.py`                                         |
+| **admin_sql**                           | `packages/agents/src/duckclaw/graphs/tools.py`                                         |
 | **Crear schema**                          | `packages/agents/src/duckclaw/workers/loader.py` (`run_schema`)                        |
 | **Schema Finanz**                         | `packages/agents/templates/workers/finanz/schema.sql`                                  |
 | **Ruta DB**                               | `services/db-writer/core/config.py` (`DUCKDB_PATH`)                                   |

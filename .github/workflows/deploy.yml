@@ -45,7 +45,7 @@ jobs:
         run: uv sync
 
       - name: Run tests (unit + smoke)
-        run: uv run pytest tests/test_final.py tests/test_router.py tests/test_on_the_fly_forget.py tests/test_on_the_fly_role.py -v
+        run: uv run pytest tests/test_final.py tests/test_router.py tests/test_on_the_fly_forget.py tests/test_on_the_fly_role.py tests/test_strix_sandbox_security.py -v
 
       - name: Run singleton writer pipeline integration test with logs
         env:

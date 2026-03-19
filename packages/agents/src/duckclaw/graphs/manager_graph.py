@@ -57,7 +57,7 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     ) or "tablas" in t or "qué tablas" in t or "que tablas" in t:
         task = (
             "TAREA: El usuario quiere ver las tablas de la base de datos. "
-            "Ejecuta run_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /team, /tasks, /help y a crear objetivos con /goals."
+            "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /team, /tasks, /help y a crear objetivos con /goals."
         )
         return task, override
     return text, override
@@ -268,7 +268,8 @@ def build_manager_graph(
                 )
             worker_graph = _worker_graph_cache[assigned]
             # Pasar la tarea planificada al worker para que use herramientas y no responda genérico
-            worker_state = {"incoming": planned_task, "history": history}
+            # Incluimos chat_id para que el worker pueda leer sandbox_enabled por sesión.
+            worker_state = {"incoming": planned_task, "history": history, "chat_id": chat_id}
             result = worker_graph.invoke(worker_state)
             reply = str(result.get("reply") or result.get("output") or "Sin respuesta.")
             messages = result.get("messages")

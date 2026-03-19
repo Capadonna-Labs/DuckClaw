@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from duckclaw.forge.schema import SecurityPolicy, load_security_policy, security_policy_to_docker_kwargs
+
 # Imagen base por defecto; sobreescribible con STRIX_SANDBOX_IMAGE
 _DEFAULT_IMAGE = "duckclaw/sandbox:latest"
 _FALLBACK_IMAGE = "python:3.11-slim"
@@ -120,7 +122,14 @@ class StrixSandboxManager:
         out_dir.mkdir(parents=True, exist_ok=True)
         return data_dir, out_dir
 
-    def _get_or_create_container(self, session_id: str, data_dir: Path, out_dir: Path) -> Any:
+    def _get_or_create_container(
+        self,
+        session_id: str,
+        data_dir: Path,
+        out_dir: Path,
+        policy: SecurityPolicy | None = None,
+        secret_env: dict[str, str] | None = None,
+    ) -> Any:
         import docker  # noqa: PLC0415
 
         container_name = f"strix_sandbox_{session_id}"
@@ -147,28 +156,60 @@ class StrixSandboxManager:
         except Exception:
             pass
 
+        pol = policy or SecurityPolicy()
+        policy_kwargs = security_policy_to_docker_kwargs(pol)
+
+        # El sandbox siempre monta /workspace/data (RO) y /workspace/output (RW).
+        # Si la policy intenta montar esos mismos targets, ignoramos esos mounts para evitar
+        # errores 400 de Docker por "mount conflict".
+        core_targets = {"/workspace/data", "/workspace/output"}
+        volumes: dict[str, dict[str, str]] = {}
+        for host_path, cfg in (policy_kwargs.get("volumes") or {}).items():
+            bind = (cfg or {}).get("bind")
+            if bind and bind in core_targets:
+                continue
+            volumes[host_path] = cfg
+
+        # Montajes core del sandbox
+        volumes[str(data_dir.resolve())] = {"bind": "/workspace/data", "mode": "ro"}
+        volumes[str(out_dir.resolve())] = {"bind": "/workspace/output", "mode": "rw"}
+        env_vars = {"PYTHONUNBUFFERED": "1"}
+        if secret_env:
+            env_vars.update(secret_env)
+
         container = client.containers.run(
             image,
             command=["tail", "-f", "/dev/null"],
             name=container_name,
             detach=True,
-            mem_limit=self.memory,
-            nano_cpus=int(1e9),                  # 1 CPU
-            network_mode="none",                  # Zero-Trust: sin red
-            cap_drop=["ALL"],                     # Drop de capabilities
-            security_opt=["no-new-privileges"],
-            volumes={
-                str(data_dir.resolve()): {"bind": "/workspace/data", "mode": "ro"},
-                str(out_dir.resolve()): {"bind": "/workspace/output", "mode": "rw"},
+            mem_limit=str(policy_kwargs.get("mem_limit", self.memory)),
+            nano_cpus=int(policy_kwargs.get("nano_cpus", int(1e9))),  # 1 CPU
+            network_mode=str(policy_kwargs.get("network_mode", "none")),
+            cap_drop=policy_kwargs.get("cap_drop", ["ALL"]),
+            security_opt=policy_kwargs.get("security_opt", ["no-new-privileges"]),
+            user=str(policy_kwargs.get("user", "1000:1000")),
+            volumes=volumes,
+            # tmpfs solo para rutas no cubiertas por mounts core
+            tmpfs={
+                k: v
+                for k, v in (policy_kwargs.get("tmpfs") or {}).items()
+                if k not in core_targets
             },
             working_dir="/workspace",
-            environment={"PYTHONUNBUFFERED": "1"},
+            environment=env_vars,
             remove=False,
         )
         self._containers[session_id] = container
         return container
 
-    def execute(self, session_id: str, code: str, language: str = "python") -> ExecutionResult:
+    def execute(
+        self,
+        session_id: str,
+        code: str,
+        language: str = "python",
+        policy: SecurityPolicy | None = None,
+        secret_env: dict[str, str] | None = None,
+    ) -> ExecutionResult:
         """Ejecuta código arbitrario en el sandbox del session_id dado.
 
         Sección 4 de la spec: Execution + Monitoring + Artifact Retrieval.
@@ -176,7 +217,13 @@ class StrixSandboxManager:
         data_dir, out_dir = self._session_dirs(session_id)
 
         try:
-            container = self._get_or_create_container(session_id, data_dir, out_dir)
+            container = self._get_or_create_container(
+                session_id,
+                data_dir,
+                out_dir,
+                policy=policy,
+                secret_env=secret_env,
+            )
         except Exception as e:
             return ExecutionResult(exit_code=1, stdout="", stderr=f"Error al levantar sandbox: {e}")
 
@@ -312,6 +359,32 @@ def _correction_prompt(original_request: str, code: str, error: str, attempt: in
     )
 
 
+def _load_allowed_secrets(policy: SecurityPolicy) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for name in policy.secrets.allowed_secrets:
+        key = str(name or "").strip()
+        if not key:
+            continue
+        val = os.environ.get(key)
+        if val is not None:
+            out[key] = val
+    return out
+
+
+def _is_security_violation(result: ExecutionResult) -> bool:
+    txt = f"{result.stderr}\n{result.stdout}".lower()
+    return any(
+        p in txt
+        for p in (
+            "permission denied",
+            "read-only file system",
+            "temporary failure in name resolution",
+            "network is unreachable",
+            "urlerror",
+        )
+    )
+
+
 def run_in_sandbox(
     db: Any,
     llm: Any,
@@ -322,6 +395,7 @@ def run_in_sandbox(
     original_request: str = "",
     max_retries: int = _MAX_RETRIES_DEFAULT,
     langsmith_tags: list[str] | None = None,
+    worker_id: str = "",
 ) -> ExecutionResult:
     """Bucle de auto-corrección del spec (sección 5).
 
@@ -342,6 +416,8 @@ def run_in_sandbox(
 
     sid = session_id or uuid.uuid4().hex[:12]
     manager = _get_manager()
+    policy = load_security_policy(worker_id or "default")
+    secret_env = _load_allowed_secrets(policy)
 
     # Protocolo de firewall: inyectar datos si se requiere
     if data_sql:
@@ -352,7 +428,7 @@ def run_in_sandbox(
     tags = (langsmith_tags or []) + ["execution_environment:strix_sandbox"]
 
     for attempt in range(1, max_retries + 1):
-        result = manager.execute(sid, current_code, language)
+        result = manager.execute(sid, current_code, language, policy=policy, secret_env=secret_env)
         result.attempts = attempt
 
         _langsmith_log(
@@ -380,6 +456,20 @@ def run_in_sandbox(
             except Exception:
                 break
 
+    if _is_security_violation(result):
+        try:
+            from duckclaw.graphs.on_the_fly_commands import append_task_audit
+
+            append_task_audit(
+                db,
+                sid,
+                worker_id or "sandbox",
+                "strix sandbox security violation",
+                "SECURITY_VIOLATION_ATTEMPT",
+                0,
+            )
+        except Exception:
+            pass
     return result
 
 
@@ -419,6 +509,7 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
         language: str = "python",
         data_sql: str = "",
         session_id: str = "",
+        worker_id: str = "",
     ) -> str:
         result = run_in_sandbox(
             db=db,
@@ -428,6 +519,7 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
             session_id=session_id or uuid.uuid4().hex[:12],
             data_sql=data_sql or None,
             original_request=code,
+            worker_id=worker_id or "",
         )
         out = {"exit_code": result.exit_code, "output": result.stdout or result.stderr}
         if result.artifacts:
@@ -444,6 +536,6 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
         description=(
             "Ejecuta código Python o Bash en un sandbox Docker aislado (sin acceso a red ni al host). "
             "Usa cuando el usuario pida ejecutar scripts, análisis complejos, modelos, gráficos dinámicos o código libre. "
-            "Parámetros: code (str), language ('python'|'bash'), data_sql (SQL para inyectar datos), session_id (str)."
+            "Parámetros: code (str), language ('python'|'bash'), data_sql (SQL para inyectar datos), session_id (str), worker_id (str opcional para política)."
         ),
     )

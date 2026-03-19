@@ -177,8 +177,8 @@ def test_forget_command_via_api_succeeds(client: TestClient) -> None:
         json={
             "message": "/forget",
             "chat_id": "default",
-            "user_id": "test-user",
-            "username": "test",
+            "user_id": "1726618406",
+            "username": "admin",
             "chat_type": "private",
             "history": [],
             "stream": False,

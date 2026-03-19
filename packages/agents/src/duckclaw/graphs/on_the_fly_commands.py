@@ -44,6 +44,98 @@ def _chat_key(chat_id: Any, suffix: str) -> str:
 
 _AGENT_CONFIG_TABLE = "agent_config"
 
+# Telegram Guard whitelist persistence (DuckDB table in schema `main`)
+_AUTHORIZED_USERS_TABLE = "authorized_users"
+_AUTHORIZED_USERS_DDL = f"""
+CREATE TABLE IF NOT EXISTS main.{_AUTHORIZED_USERS_TABLE} (
+    tenant_id VARCHAR,
+    user_id VARCHAR,
+    username VARCHAR,
+    role VARCHAR DEFAULT 'user',
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, user_id)
+);
+"""
+
+
+def _sql_escape_literal(v: Any, max_len: int = 256) -> str:
+    s = "" if v is None else str(v)
+    return s.replace("'", "''")[:max_len]
+
+
+def _ensure_authorized_users_table(db: Any) -> None:
+    try:
+        db.execute(_AUTHORIZED_USERS_DDL)
+    except Exception:
+        # Best-effort: si falla, la whitelist mutación/consulta se comportará como “no autorizado”.
+        pass
+
+
+def _get_authorized_role(db: Any, *, tenant_id: str, user_id: str) -> str:
+    _ensure_authorized_users_table(db)
+    tid = _sql_escape_literal(tenant_id, max_len=128)
+    uid = _sql_escape_literal(user_id, max_len=128)
+    try:
+        raw = db.query(
+            f"SELECT role FROM main.{_AUTHORIZED_USERS_TABLE} WHERE tenant_id='{tid}' AND user_id='{uid}' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if rows and isinstance(rows[0], dict):
+            return (rows[0].get("role") or "").strip().lower()
+    except Exception:
+        pass
+    return ""
+
+
+def _list_authorized_users(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
+    _ensure_authorized_users_table(db)
+    tid = _sql_escape_literal(tenant_id, max_len=128)
+    try:
+        raw = db.query(
+            f"SELECT user_id, username, role FROM main.{_AUTHORIZED_USERS_TABLE} WHERE tenant_id='{tid}' ORDER BY user_id"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if isinstance(rows, list):
+            out: list[dict[str, str]] = []
+            for r in rows:
+                if isinstance(r, dict):
+                    out.append(
+                        {
+                            "user_id": str(r.get("user_id") or "").strip(),
+                            "username": str(r.get("username") or "").strip(),
+                            "role": str(r.get("role") or "").strip(),
+                        }
+                    )
+            return out
+    except Exception:
+        pass
+    return []
+
+
+def _upsert_authorized_user(db: Any, *, tenant_id: str, user_id: str, username: str, role: str = "user") -> None:
+    _ensure_authorized_users_table(db)
+    tid = _sql_escape_literal(tenant_id, max_len=128)
+    uid = _sql_escape_literal(user_id, max_len=128)
+    un = _sql_escape_literal(username or "Usuario", max_len=128)
+    rl = _sql_escape_literal(role or "user", max_len=16)
+    db.execute(
+        f"""
+        INSERT INTO main.{_AUTHORIZED_USERS_TABLE} (tenant_id, user_id, username, role)
+        VALUES ('{tid}', '{uid}', '{un}', '{rl}')
+        ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+          username = EXCLUDED.username,
+          role = EXCLUDED.role,
+          added_at = now()
+        """
+    )
+
+
+def _delete_authorized_user(db: Any, *, tenant_id: str, user_id: str) -> None:
+    _ensure_authorized_users_table(db)
+    tid = _sql_escape_literal(tenant_id, max_len=128)
+    uid = _sql_escape_literal(user_id, max_len=128)
+    db.execute(f"DELETE FROM main.{_AUTHORIZED_USERS_TABLE} WHERE tenant_id='{tid}' AND user_id='{uid}'")
+
 
 def _ensure_agent_config(db: Any) -> None:
     db.execute(
@@ -123,7 +215,7 @@ def _resolve_template_id(available: list, user_input: str) -> Optional[str]:
 
 
 def execute_team(db: Any, chat_id: Any, args: str) -> str:
-    """/team [id1 id2 ...] [--add id...] [--rm worker_id]: equipo del chat. Sin args: lista. Con ids: reemplaza. --add: añade; --rm: quita uno."""
+    """/workers [id1 id2 ...] [--add id...] [--rm worker_id]: equipo del chat. Sin args: lista. Con ids: reemplaza. --add: añade; --rm: quita uno."""
     from duckclaw.workers.factory import list_workers
     all_templates = list_workers()
     team = get_team_templates(db, chat_id)
@@ -133,7 +225,7 @@ def execute_team(db: Any, chat_id: Any, args: str) -> str:
             return _telegram_safe("No hay templates en forge/templates. Añade al menos uno.")
         label = _telegram_safe("Equipo (este chat):") if team else _telegram_safe("Equipo: todos los templates")
         lines = "\n".join(f"\\- {_telegram_safe(w)}" for w in display_list)
-        hint = _telegram_safe("Reemplazar: /team id1 id2 | Añadir: /team --add id | Quitar: /team --rm id | Ver todos: /roles")
+        hint = _telegram_safe("Reemplazar: /workers id1 id2 | Añadir: /workers --add id | Quitar: /workers --rm id | Ver todos: /roles")
         return f"🦆 {label}\n{lines}\n\n{hint}"
     raw = args.strip()
     # --rm <worker_id>
@@ -184,8 +276,63 @@ def execute_team(db: Any, chat_id: Any, args: str) -> str:
     return _telegram_safe(f"✅ Equipo de este chat: {', '.join(valid)}. El manager delegará solo a estos.")
 
 
+def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str) -> str:
+    """
+    Telegram Guard spec: /team lista y muta authorized_users por tenant.
+    - /team                           -> lista autorizados (para tenant)
+    - /team --add <user_id> [username] (admin-only)
+    - /team --rm <user_id>            (admin-only)
+    """
+    tid = str(tenant_id or "default").strip() or "default"
+    rid = str(requester_id or "").strip()
+
+    raw = (args or "").strip()
+    if not raw:
+        users = _list_authorized_users(db, tenant_id=tid)
+        if not users:
+            return _telegram_safe(f"No hay usuarios autorizados para tenant '{tid}'.")
+        lines = []
+        for u in users:
+            uid = u.get("user_id") or ""
+            uname = u.get("username") or ""
+            role = (u.get("role") or "user").lower()
+            # Breve y seguro para Telegram
+            lines.append(_telegram_safe(f"\\- {uid} \\(\\@{uname}\\) \\- role={role}"))
+        return _telegram_safe(f"🦆 Usuarios autorizados (tenant '{tid}'):\n") + "\n".join(lines)
+
+    if raw.startswith("--rm "):
+        if not rid:
+            return _telegram_safe("❌ Acceso denegado.")
+        # role admin-only
+        role = _get_authorized_role(db, tenant_id=tid, user_id=rid)
+        if role != "admin":
+            return _telegram_safe("❌ Acceso denegado: solo administradores pueden eliminar usuarios.")
+        target_uid = raw[5:].strip().split()[0]
+        if not target_uid:
+            return _telegram_safe("Uso: /team --rm <user_id>")
+        _delete_authorized_user(db, tenant_id=tid, user_id=target_uid)
+        return _telegram_safe(f"✅ Eliminado user_id={target_uid} del tenant '{tid}'.")
+
+    if raw.startswith("--add ") or raw.strip() == "--add":
+        if not rid:
+            return _telegram_safe("❌ Acceso denegado.")
+        role = _get_authorized_role(db, tenant_id=tid, user_id=rid)
+        if role != "admin":
+            return _telegram_safe("❌ Acceso denegado: solo administradores pueden agregar usuarios.")
+        ids_part = raw[6:].strip() if raw.startswith("--add ") else ""
+        tokens = [t for t in ids_part.split() if t.strip()]
+        if not tokens:
+            return _telegram_safe("Uso: /team --add <user_id> [username]")
+        target_uid = tokens[0]
+        uname = tokens[1] if len(tokens) > 1 else "Usuario"
+        _upsert_authorized_user(db, tenant_id=tid, user_id=target_uid, username=uname, role="user")
+        return _telegram_safe(f"✅ Añadido user_id={target_uid} (role=user) al tenant '{tid}'.")
+
+    return _telegram_safe("Uso: /team | /team --add <user_id> [username] | /team --rm <user_id>")
+
+
 def execute_roles(db: Any, chat_id: Any) -> str:
-    """/roles: lista todos los trabajadores virtuales (templates) disponibles. El manager solo delegará a los que estén en /team."""
+    """/roles: lista todos los trabajadores virtuales (templates) disponibles. El manager solo delegará a los que estén en /workers."""
     from duckclaw.workers.factory import list_workers
     all_templates = list_workers()
     if not all_templates:
@@ -193,7 +340,7 @@ def execute_roles(db: Any, chat_id: Any) -> str:
     lines = "\n".join(f"\\- {_telegram_safe(w)}" for w in all_templates)
     return (
         f"🦆 {_telegram_safe('Trabajadores virtuales (templates) disponibles:')}\n\n{lines}\n\n"
-        f"{_telegram_safe('El manager solo delegará a los que estén en tu equipo. Para añadirlos: /team id1 id2 ...')}"
+        f"{_telegram_safe('El manager solo delegará a los que estén en tu equipo. Para añadirlos: /workers id1 id2 ...')}"
     )
 
 
@@ -1045,7 +1192,8 @@ def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
 def execute_help(db: Any, chat_id: Any) -> str:
     """/help: lista los fly commands disponibles."""
     lines = [
-        (_telegram_safe("/team"), _telegram_safe("Ver o definir equipo (solo a estos delega el manager)")),
+        (_telegram_safe("/team"), _telegram_safe("Whitelist: ver o agregar/quitar autorizados del tenant")),
+        (_telegram_safe("/workers"), _telegram_safe("Equipo (templates): ver o definir workers para este chat")),
         (_telegram_safe("/roles"), _telegram_safe("Ver todos los trabajadores virtuales (templates)")),
         (_telegram_safe("/tasks"), _telegram_safe("Estado actual: BUSY/IDLE, subagente, tarea")),
         (_telegram_safe("/history"), _telegram_safe("Historial de tareas (quién hizo qué)")),
@@ -1067,7 +1215,14 @@ def execute_help(db: Any, chat_id: Any) -> str:
     return f"🦆 {_telegram_safe('Fly commands:')}\n\n{block}"
 
 
-def handle_command(db: Any, chat_id: Any, text: str) -> Optional[str]:
+def handle_command(
+    db: Any,
+    chat_id: Any,
+    text: str,
+    *,
+    requester_id: Any = None,
+    tenant_id: Any = None,
+) -> Optional[str]:
     """
     Middleware: si el mensaje es un comando on-the-fly, ejecuta y retorna la respuesta.
     Si no es comando o no es manejado, retorna None.
@@ -1078,10 +1233,14 @@ def handle_command(db: Any, chat_id: Any, text: str) -> Optional[str]:
     if name == "help":
         return execute_help(db, chat_id)
     if name == "role":
-        return _telegram_safe("El comando /role ya no existe. Usa /team para ver o definir el equipo, /help para ver todos los comandos.")
+        return _telegram_safe(
+            "El comando /role ya no existe. Usa /workers para ver o definir el equipo, /help para ver todos los comandos."
+        )
     if name == "roles":
         return execute_roles(db, chat_id)
     if name == "team":
+        return execute_team_whitelist(db, tenant_id, requester_id, args)
+    if name == "workers":
         return execute_team(db, chat_id, args)
     if name == "skills":
         return execute_skills_list(db, chat_id, args)

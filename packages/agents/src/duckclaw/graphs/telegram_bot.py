@@ -332,7 +332,16 @@ def _run_bot() -> None:
 
             # On-the-Fly CLI (spec: interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md)
             from duckclaw.graphs.on_the_fly_commands import handle_command
-            cmd_reply = handle_command(self.db, chat_id, text)
+            # tenant_id (por defecto) porque TelegramBot no define multi-tenant en este módulo.
+            # request identity para whitelist del comando /team.
+            user_id = getattr(getattr(message, "from_user", None), "id", None)
+            cmd_reply = handle_command(
+                self.db,
+                chat_id,
+                text,
+                requester_id=user_id,
+                tenant_id="default",
+            )
             if cmd_reply is not None:
                 _log(f"📋 Comando ejecutado chat={chat_id}")
                 asyncio.create_task(message.reply_text(cmd_reply, parse_mode="Markdown"))

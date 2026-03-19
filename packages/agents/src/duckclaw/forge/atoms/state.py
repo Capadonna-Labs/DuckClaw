@@ -13,6 +13,7 @@ class ManagerAgentState(TypedDict, total=False):
     Claves mínimas:
     - messages: historial de mensajes del grafo (opcional, para compatibilidad con LangGraph).
     - chat_id: identificador del chat / sesión (tenant_id en task_audit_log).
+    - tenant_id: identificador lógico del tenant (para whitelist y aislamiento de workers).
     - assigned_worker_id: worker al que se delegó la tarea (finanz, support, etc.).
     - incoming: mensaje original del usuario.
     - history: historial condensado de conversación (lista de mensajes o turnos).
@@ -27,6 +28,7 @@ class ManagerAgentState(TypedDict, total=False):
 
     messages: Annotated[List[BaseMessage], add_messages]
     chat_id: str
+    tenant_id: str
     assigned_worker_id: Optional[str]
 
     incoming: str

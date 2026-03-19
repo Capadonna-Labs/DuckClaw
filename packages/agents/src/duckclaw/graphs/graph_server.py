@@ -132,6 +132,28 @@ def _get_or_build_graph() -> Any:
     system_prompt = os.environ.get("DUCKCLAW_SYSTEM_PROMPT", "Eres un asistente útil con acceso a una base de datos.").strip()
 
     db  = DuckClaw(db_path)
+
+    # Telegram Guard (Telegram Guard / Whitelist): asegurar esquema persistente.
+    # Hacemos esto aquí para que funcione incluso cuando el pre-init de FastAPI
+    # o lifespan no llegue (y para usar la misma conexión DuckDB).
+    try:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS main.authorized_users (
+                tenant_id VARCHAR,
+                user_id VARCHAR,
+                username VARCHAR,
+                role VARCHAR DEFAULT 'user',
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, user_id)
+            )
+            """
+        )
+    except Exception as exc:
+        # No romper el server: si falla por lock/permiso, el guard bloqueará todo,
+        # y el problema se verá en logs/observabilidad.
+        print(f"[telegram_guard] Could not ensure authorized_users table: {exc}", flush=True)
+
     llm = build_llm(provider, model, base_url)
     if llm is None:
         raise RuntimeError(
@@ -191,6 +213,7 @@ def _resolve_display_model() -> str:
 class InvokeRequest(BaseModel):
     message: str = Field(..., description="Mensaje del usuario")
     chat_id: str = Field("api", description="ID de sesión (para memoria de conversación)")
+    tenant_id: str = Field("default", description="ID del tenant (para whitelist y aislamiento de workers)")
     history: list[dict] = Field(default_factory=list, description="Historial [{role, content}]")
     stream: bool = Field(False, description="Si true, usar /stream en su lugar")
     username: str | None = Field(None, description="Nombre del usuario (para grupos)")
@@ -247,7 +270,7 @@ async def invoke(req: InvokeRequest):
     t0 = time.monotonic()
     try:
         # El grafo manager se encarga de mapear state → subgrafos; general_graph usará username/chat_type.
-        result = await _ainvoke(graph, state["incoming"], history, req.chat_id)
+        result = await _ainvoke(graph, state["incoming"], history, req.chat_id, tenant_id=req.tenant_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error en el grafo: {exc}")
 
@@ -274,7 +297,13 @@ async def stream(req: InvokeRequest):
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
-            invoke_result = await _ainvoke(graph, req.message, req.history, req.chat_id)
+            invoke_result = await _ainvoke(
+                graph,
+                req.message,
+                req.history,
+                req.chat_id,
+                tenant_id=req.tenant_id,
+            )
             reply = invoke_result.get("reply", "") or ""
             for word in reply.split(" "):
                 yield f"data: {word} \n\n"
@@ -314,6 +343,8 @@ async def _ainvoke(
     message: str,
     history: list,
     chat_id: str,
+    *,
+    tenant_id: str = "default",
     is_system_prompt: bool | None = False,
 ) -> dict:
     """
@@ -326,6 +357,7 @@ async def _ainvoke(
         "incoming": message,
         "history": history or [],
         "chat_id": chat_id,
+        "tenant_id": tenant_id,
     }
     if is_system_prompt:
         state["is_system_prompt"] = True

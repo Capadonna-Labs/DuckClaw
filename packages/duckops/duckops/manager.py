@@ -9,6 +9,29 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+def _ensure_redis_and_security_artifacts_in_db_folder(repo_root: Path) -> None:
+    """
+    Normaliza artefactos locales que podrían terminar fuera de `db/`.
+
+    Objetivo: mantener consistencia para archivos como `db/SELECT` y `db/dump.rdb`.
+    """
+    import shutil
+
+    db_dir = repo_root / "db"
+    db_dir.mkdir(parents=True, exist_ok=True)
+
+    # Si aparecen en la raíz del repo, los movemos a db/ (sin sobrescribir).
+    for filename in ("SELECT", "dump.rdb"):
+        src = repo_root / filename
+        dst = db_dir / filename
+        if src.exists() and not dst.exists():
+            try:
+                shutil.move(str(src), str(dst))
+            except Exception:
+                # No romper el arranque si el move falla (permisos / locks, etc.).
+                pass
+
+
 def _resolve_python() -> str:
     """Current interpreter absolute path (respects venv/uv)."""
     return os.path.abspath(sys.executable)
@@ -309,6 +332,11 @@ def serve(
     """
     effective_name = name or ("DuckClaw-Gateway" if gateway else "DuckClaw-API")
     effective_cwd = str(Path(cwd or os.getcwd()).resolve())
+    # Asegura que artefactos persistentes queden en `db/`.
+    try:
+        _ensure_redis_and_security_artifacts_in_db_folder(Path(effective_cwd))
+    except Exception:
+        pass
 
     if pm2:
         from duckclaw.ops.providers.pm2 import is_pm2_available

@@ -13,7 +13,7 @@ from .base import BaseAgent
 
 
 class LangGraphAdapter(BaseAgent):
-    """Grafo ReAct con run_sql, inspect_schema y manage_memory sobre DuckClaw.
+    """Grafo ReAct con read_sql/admin_sql, inspect_schema y manage_memory sobre DuckClaw.
     provider/model/base_url se pueden configurar desde la TUI (wizard) o /setup."""
 
     def __init__(
@@ -42,16 +42,21 @@ class LangGraphAdapter(BaseAgent):
         except ImportError as e:
             return f"Error: instala el extra langgraph. {e}"
 
-        from duckclaw.graphs.tools import run_sql, inspect_schema, manage_memory
+        from duckclaw.graphs.tools import read_sql, admin_sql, inspect_schema, manage_memory
 
         db = self.db
         system_prompt = self._system_prompt
 
         tools = [
             StructuredTool.from_function(
-                lambda q: run_sql(db, q),
-                name="run_sql",
-                description="Ejecuta una consulta SQL y retorna JSON. Usa para leer o escribir datos.",
+                lambda q: read_sql(db, q),
+                name="read_sql",
+                description="Solo lectura SQL (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA).",
+            ),
+            StructuredTool.from_function(
+                lambda q: admin_sql(db, q),
+                name="admin_sql",
+                description="Admin SQL: lectura + escrituras (INSERT/UPDATE/DELETE/CREATE/ALTER/DROP).",
             ),
             StructuredTool.from_function(
                 lambda: inspect_schema(db),

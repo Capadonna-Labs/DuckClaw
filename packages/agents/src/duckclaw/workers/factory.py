@@ -33,12 +33,21 @@ _NO_TASK_PATTERN = re.compile(
 # Preguntas sobre DB/tablas/esquema son siempre tarea concreta (evitar "¿Cuál es mi tarea?")
 _CONCRETE_TASK_KEYWORDS = re.compile(
     r"\b(db|database|base\s+de\s+datos|tablas?|tables?|esquema|schema|nombre\s+de\s+la\s+db|"
-    r"qu[eé]\s+tablas|estructura|get_db_path|run_sql|consultar|cuenta|saldo|portfolio)\b",
+    r"qu[eé]\s+tablas|estructura|get_db_path|read_sql|admin_sql|consultar|cuenta|saldo|portfolio)\b",
     re.IGNORECASE,
 )
 
 # Tarea explícita del manager (plan): nunca tratar como "sin tarea"
-_PLANNED_TASK_PREFIX = ("TAREA:", "TAREA ", "Ejecuta la herramienta", "Ejecuta run_sql", "Usa run_sql", "usa get_db_path")
+_PLANNED_TASK_PREFIX = (
+    "TAREA:",
+    "TAREA ",
+    "Ejecuta la herramienta",
+    "Ejecuta read_sql",
+    "Ejecuta admin_sql",
+    "Usa read_sql",
+    "Usa admin_sql",
+    "usa get_db_path",
+)
 
 
 def _is_no_task(incoming: str) -> bool:
@@ -80,7 +89,7 @@ def _get_db_path(worker_id: str, instance_name: Optional[str], base_path: Option
 
 
 def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
-    """Build tool list: template skills + optional run_sql with allow-list."""
+    """Build tool list: template skills + read/admin SQL (with allow-list)."""
     from langchain_core.tools import StructuredTool
 
     tools = load_skills(spec, db)
@@ -95,32 +104,69 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
         except Exception:
             pass
 
-    def _run_sql_worker(query: str) -> str:
+    def _enforce_allowed_tables(q_upper: str) -> Optional[json]:
+        """Allow-list validation for queries touching DB tables."""
+        if not spec.allowed_tables:
+            return None
+        # Permitir siempre information_schema (SHOW TABLES, esquema, etc.)
+        if "INFORMATION_SCHEMA" in q_upper or "SHOW TABLES" in q_upper or "SHOW " in q_upper:
+            return None
+        for t in spec.allowed_tables:
+            if t.upper() in q_upper or f"{schema}.{t}".upper() in q_upper:
+                return None
+        # No allowed table mentioned; check if query likely touches tables.
+        if any(k in q_upper for k in ("FROM", "INTO", "UPDATE", "DELETE", "JOIN", "TABLE")):
+            return json.dumps({"error": f"Solo se permiten las tablas: {', '.join(spec.allowed_tables)}."})
+        return None
+
+    def _read_sql_worker(query: str) -> str:
         if not query or not query.strip():
             return json.dumps({"error": "Query vacío."})
         q = query.strip()
-        if spec.read_only:
-            if any(kw in q.upper() for kw in ("INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER")):
-                return json.dumps({"error": "Este trabajador es solo lectura. No se permiten escrituras."})
-        if spec.allowed_tables:
-            # Allow-list: only these tables (optionally schema-qualified)
-            # Permitir siempre information_schema (SHOW TABLES, esquema, etc.)
-            upper = q.upper()
-            if "INFORMATION_SCHEMA" in upper or "SHOW TABLES" in upper or "SHOW " in upper:
-                pass  # skip allow-list
-            else:
-                for t in spec.allowed_tables:
-                    if t.upper() in upper or f"{schema}.{t}".upper() in upper:
-                        break
-                else:
-                    # No allowed table mentioned; check if query touches any table
-                    if "FROM" in upper or "INTO" in upper or "UPDATE" in upper or "JOIN" in upper:
-                        return json.dumps({
-                            "error": f"Solo se permiten las tablas: {', '.join(spec.allowed_tables)}."
-                        })
+        upper = q.upper()
+        allowed_tables_error = _enforce_allowed_tables(upper)
+        if allowed_tables_error:
+            return allowed_tables_error
+        # Bloquear escrituras (read_sql es solo lectura).
+        if not upper.startswith(("SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN", "PRAGMA")):
+            return json.dumps({"error": "read_sql es solo lectura. Usa admin_sql para escrituras (INSERT/UPDATE/DELETE/CREATE, etc.)."})
         try:
-            if q.upper().startswith(("SELECT", "WITH", "SHOW", "DESCRIBE")):
+            # Siempre usamos query() para lecturas
+            return db.query(q)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    tools.append(
+        StructuredTool.from_function(
+            _read_sql_worker,
+            name="read_sql",
+            description="Solo lectura SQL. SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA. Restringe a tablas permitidas del worker.",
+        )
+    )
+
+    def _admin_sql_worker(query: str) -> str:
+        if not query or not query.strip():
+            return json.dumps({"error": "Query vacío."})
+        q = query.strip()
+        upper = q.upper()
+
+        allowed_tables_error = _enforce_allowed_tables(upper)
+        if allowed_tables_error:
+            return allowed_tables_error
+
+        # Respetar read_only del worker para operaciones destructivas/escrituras.
+        if spec.read_only and any(
+            kw in upper
+            for kw in ("INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE")
+        ):
+            return json.dumps({"error": "Este trabajador es solo lectura. No se permiten escrituras."})
+
+        try:
+            # Para cualquier query de lectura, usar query()
+            if upper.startswith(("SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN", "PRAGMA")):
                 return db.query(q)
+
+            # Para escrituras, usar execute()
             db.execute(q)
             return json.dumps({"status": "ok"})
         except Exception as e:
@@ -128,11 +174,12 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
 
     tools.append(
         StructuredTool.from_function(
-            _run_sql_worker,
-            name="run_sql",
-            description="Ejecuta SQL en el esquema del trabajador. Respeta restricciones de tablas permitidas.",
+            _admin_sql_worker,
+            name="admin_sql",
+            description="SQL con permisos admin: lectura + escrituras (INSERT/UPDATE/DELETE/CREATE/ALTER/DROP si el worker no es read_only). Respeta allow-list de tablas del worker si aplica.",
         )
     )
+
     def _inspect_schema_worker() -> str:
         """Lista tablas de todos los esquemas (main, finance_worker, etc.)."""
         try:
@@ -173,6 +220,15 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
         )
     )
     return tools
+
+
+def filter_tools_for_sandbox(tools: list[Any], enabled: bool) -> list[Any]:
+    """
+    Helper (unit-testable): si sandbox está OFF, elimina la herramienta `run_sandbox`.
+    """
+    if enabled:
+        return list(tools)
+    return [t for t in tools if getattr(t, "name", "") != "run_sandbox"]
 
 
 class WorkerFactory:
@@ -309,6 +365,17 @@ def build_worker_graph(
         except Exception:
             pass
 
+    # Strix Sandbox: solo agregar `run_sandbox` si el worker define policy.
+    try:
+        security_policy_path = spec.worker_dir / "security_policy.yaml"
+        if security_policy_path.is_file() and llm is not None and "run_sandbox" not in tools_by_name:
+            from duckclaw.graphs.sandbox import sandbox_tool_factory
+
+            tools.append(sandbox_tool_factory(db, llm))
+            tools_by_name = {t.name: t for t in tools}
+    except Exception:
+        pass
+
     # Aplicar LangSmith config al grafo final (no solo al llm) si está habilitado
     send_to_langsmith = os.environ.get("DUCKCLAW_SEND_TO_LANGSMITH", "false").lower() == "true"
     if send_to_langsmith:
@@ -372,14 +439,45 @@ def build_worker_graph(
         else:
             user_content = incoming
         messages.append(HumanMessage(content=user_content))
-        return {"messages": messages, "incoming": incoming}
+        # LangGraph puede reemplazar/limitar el state entre nodos; preservamos chat_id para
+        # que _sandbox_enabled_for_state (y otros flags por sesión) lean el ID correcto.
+        preserved_chat_id = state.get("chat_id") or state.get("session_id")
+        return {"messages": messages, "incoming": incoming, "chat_id": preserved_chat_id}
+
+    def _sandbox_enabled_for_state(state: dict) -> bool:
+        """Sandbox flag per chat/session (defaults to OFF)."""
+        from duckclaw.graphs.on_the_fly_commands import get_chat_state
+
+        chat_id = state.get("chat_id") or state.get("session_id") or "default"
+        raw = get_chat_state(db, chat_id, "sandbox_enabled")
+        v = (raw or "").strip().lower()
+        enabled = v in ("true", "1", "on", "sí", "si")
+        # Use warning so it always shows up in pm2 logs even if INFO is filtered.
+        db_path = getattr(db, "_path", None) or getattr(db, "path", None) or "(unknown_db_path)"
+        _log.warning("[sandbox] db_path=%r chat_id=%r sandbox_enabled_raw=%r enabled=%s", db_path, chat_id, raw, enabled)
+        return enabled
+
+    tools_sandbox_off = filter_tools_for_sandbox(tools, enabled=False)
+    tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}
 
     if llm is None:
         def agent_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
             return {"messages": state["messages"] + [AIMessage(content="Sin LLM configurado. Configura DUCKCLAW_LLM_PROVIDER.")]}
     else:
-        llm_with_tools = llm.bind_tools(tools)
+        # Cache de re-ligado por modo (evita re-bind costoso por chat/turno).
+        llm_with_tools_on = llm.bind_tools(tools)
+        llm_with_tools_off = llm.bind_tools(tools_sandbox_off)
+
         has_ibkr = "get_ibkr_portfolio" in tools_by_name
+        tool_choice_inspect_schema = {"type": "function", "function": {"name": "inspect_schema"}}
+        tool_choice_portfolio = {"type": "function", "function": {"name": "get_ibkr_portfolio"}}
+
+        llm_force_schema_on = llm.bind_tools(tools, tool_choice=tool_choice_inspect_schema)
+        llm_force_schema_off = llm.bind_tools(tools_sandbox_off, tool_choice=tool_choice_inspect_schema)
+        llm_force_portfolio_on = llm.bind_tools(tools, tool_choice=tool_choice_portfolio) if has_ibkr else None
+        llm_force_portfolio_off = (
+            llm.bind_tools(tools_sandbox_off, tool_choice=tool_choice_portfolio) if has_ibkr else None
+        )
 
         def _is_portfolio_query(text: str) -> bool:
             if not text or not text.strip():
@@ -391,10 +489,10 @@ def build_worker_graph(
             # Excluir: tablas DuckDB, esquema o estructura de base de datos
             if any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas")):
                 return False
-            # Excluir: cuenta bancaria concreta (Bancolombia, etc.) -> debe usar run_sql sobre .duckdb
+            # Excluir: cuenta bancaria concreta (Bancolombia, etc.) -> debe usar read_sql/admin_sql sobre .duckdb
             if any(k in t for k in ("cuenta de ", "cuenta bancolombia", "bancolombia", "en bancolombia", "saldo en mi cuenta")):
                 return False
-            # "Portfolio total" / "cuánto tengo en total" -> no forzar solo IBKR; el agente debe usar get_ibkr_portfolio + run_sql (cuentas en .duckdb)
+            # "Portfolio total" / "cuánto tengo en total" -> no forzar solo IBKR; el agente debe usar get_ibkr_portfolio + read_sql (cuentas en .duckdb)
             if any(k in t for k in ("portfolio total", "en total", "resumen de todo", "cuánto tengo en total", "cuanto tengo en total")):
                 return False
             # "acciones" como palabra completa (no subcadena de "transacciones")
@@ -434,6 +532,9 @@ def build_worker_graph(
             already_has_tool_result = last_msg is not None and isinstance(last_msg, ToolMessage)
             force_schema = is_schema and not already_has_tool_result
             force_portfolio = is_portfolio and not already_has_tool_result
+
+            sandbox_enabled = _sandbox_enabled_for_state(state)
+            llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
             _log.info(
                 "[finanz] incoming=%r | is_schema=%s | is_portfolio=%s | forced_tool=%s",
                 incoming[:80] + ("..." if len(incoming) > 80 else ""),
@@ -442,28 +543,31 @@ def build_worker_graph(
                 "inspect_schema" if force_schema else ("get_ibkr_portfolio" if force_portfolio else "auto"),
             )
             if force_schema:
-                llm_forced = llm.bind_tools(tools, tool_choice={"type": "function", "function": {"name": "inspect_schema"}})
-                resp = llm_forced.invoke(state["messages"])
+                resp = (llm_force_schema_on if sandbox_enabled else llm_force_schema_off).invoke(state["messages"])
             elif force_portfolio:
-                llm_forced = llm.bind_tools(tools, tool_choice={"type": "function", "function": {"name": "get_ibkr_portfolio"}})
-                resp = llm_forced.invoke(state["messages"])
+                forced = llm_force_portfolio_on if sandbox_enabled else llm_force_portfolio_off
+                # has_ibkr => forced should not be None
+                resp = (forced or llm_with_tools).invoke(state["messages"])
             else:
                 resp = llm_with_tools.invoke(state["messages"])
             tool_calls = getattr(resp, "tool_calls", None) or []
             if tool_calls:
                 _log.info("[finanz] LLM tool_calls=%s", [tc.get("name") for tc in tool_calls])
-            return {"messages": state["messages"] + [resp]}
+            preserved_chat_id = state.get("chat_id") or state.get("session_id")
+            return {"messages": state["messages"] + [resp], "chat_id": preserved_chat_id}
 
     def tools_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         messages = state["messages"]
         last = messages[-1]
         tool_calls = getattr(last, "tool_calls", None) or []
         new_msgs = list(messages)
+        sandbox_enabled = _sandbox_enabled_for_state(state)
+        tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
         for tc in tool_calls:
             name = (tc.get("name") or "").strip()
             args = tc.get("args") or {}
             tid = tc.get("id") or ""
-            tool = tools_by_name.get(name)
+            tool = tool_lookup.get(name)
             if tool:
                 try:
                     result = tool.invoke(args)
@@ -473,10 +577,14 @@ def build_worker_graph(
                     content = f"Error: {e}"
                     _log.warning("[finanz] tool=%s failed: %s", name, e)
             else:
-                content = f"Herramienta desconocida: {name}"
-                _log.warning("[finanz] unknown tool: %s", name)
+                if not sandbox_enabled and name == "run_sandbox":
+                    content = "Sandbox deshabilitado en esta sesión. Actívalo con /sandbox on."
+                else:
+                    content = f"Herramienta desconocida: {name}"
+                _log.warning("[finanz] unknown/unavailable tool: %s (sandbox_enabled=%s)", name, sandbox_enabled)
             new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
-        return {"messages": new_msgs}
+        preserved_chat_id = state.get("chat_id") or state.get("session_id")
+        return {"messages": new_msgs, "chat_id": preserved_chat_id}
 
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.integrations.llm_providers import _strip_eot
@@ -492,13 +600,16 @@ def build_worker_graph(
                 data = json.loads(reply)
                 name = data.get("name") or data.get("tool")
                 params = data.get("parameters") or data.get("args") or {}
-                if name and name in tools_by_name:
-                    result = tools_by_name[name].invoke(params)
+                sandbox_enabled = _sandbox_enabled_for_state(state)
+                tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
+                if name and name in tool_lookup:
+                    result = tool_lookup[name].invoke(params)
                     text = str(result) if result else "Listo."
                     return {"reply": format_tool_reply(text), "messages": msgs}
             except (json.JSONDecodeError, TypeError, KeyError, Exception):
                 pass
-        return {"reply": reply or "", "messages": msgs}
+        preserved_chat_id = state.get("chat_id") or state.get("session_id")
+        return {"reply": reply or "", "messages": msgs, "chat_id": preserved_chat_id}
 
     def should_continue(state: dict) -> str:
         last = state["messages"][-1]

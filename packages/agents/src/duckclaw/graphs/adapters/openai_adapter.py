@@ -12,8 +12,20 @@ def _openai_tools_spec() -> List[dict]:
         {
             "type": "function",
             "function": {
-                "name": "run_sql",
-                "description": "Ejecuta una consulta SQL y retorna JSON.",
+                "name": "read_sql",
+                "description": "Solo lectura SQL (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string", "description": "Sentencia SQL"}},
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "admin_sql",
+                "description": "Admin SQL: lectura + escrituras (INSERT/UPDATE/DELETE/CREATE/ALTER/DROP).",
                 "parameters": {
                     "type": "object",
                     "properties": {"query": {"type": "string", "description": "Sentencia SQL"}},
@@ -65,7 +77,7 @@ class OpenAIAdapter(BaseAgent):
         except ImportError:
             return "Error: instala el extra openai (pip install duckclaw[openai])."
 
-        from duckclaw.graphs.tools import run_sql, inspect_schema, manage_memory
+        from duckclaw.graphs.tools import read_sql, admin_sql, inspect_schema, manage_memory
 
         client = OpenAI()
         db = self.db
@@ -106,8 +118,10 @@ class OpenAIAdapter(BaseAgent):
                 for tc in msg.tool_calls:
                     name = tc.function.name
                     args = _json.loads(tc.function.arguments or "{}")
-                    if name == "run_sql":
-                        content = run_sql(db, args.get("query", ""))
+                    if name == "read_sql":
+                        content = read_sql(db, args.get("query", ""))
+                    elif name == "admin_sql":
+                        content = admin_sql(db, args.get("query", ""))
                     elif name == "inspect_schema":
                         content = inspect_schema(db)
                     elif name == "manage_memory":

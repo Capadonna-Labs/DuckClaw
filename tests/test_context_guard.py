@@ -51,7 +51,7 @@ def test_extract_raw_evidence_returns_none_when_no_catalog_call() -> None:
     msgs = [
         AIMessage(
             content="...",
-            tool_calls=[{"name": "run_sql", "id": "tc1", "args": {"query": "SELECT 1"}}],
+            tool_calls=[{"name": "read_sql", "id": "tc1", "args": {"query": "SELECT 1"}}],
         ),
         ToolMessage(content="[]", tool_call_id="tc1"),
     ]

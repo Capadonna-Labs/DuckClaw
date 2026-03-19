@@ -31,13 +31,13 @@ Cambia el rol (worker template) en caliente. Siempre hay un rol activo; por defe
 |-----|----------------|
 | `/role` | Muestra rol actual y plantillas disponibles (personalizable, finanz, support, powerseal, research_worker) |
 | `/role finanz` | Asigna worker `finanz`; confirma con nombre y capacidades |
-| `/role personalizable` | Rol base personalizable (run_sql, inspect_schema por defecto) |
+| `/role personalizable` | Rol base personalizable (read_sql, admin_sql, inspect_schema por defecto) |
 
 **Persistencia:** `agent_config` → `chat_{id}_worker_id`
 
 ### B. `/skills`
 
-Lista las herramientas habilitadas para el rol actual. Si hay `worker_id`, usa el manifest del worker; si no, muestra herramientas por defecto (run_sql, inspect_schema, manage_memory).
+Lista las herramientas habilitadas para el rol actual. Si hay `worker_id`, usa el manifest del worker; si no, muestra herramientas por defecto (read_sql, admin_sql, inspect_schema, manage_memory).
 
 ### C. `/forget`
 

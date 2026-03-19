@@ -194,7 +194,7 @@ def _get_ibkr_portfolio_tool(config: Optional[dict] = None) -> Any:
         description=(
             "Obtiene saldo, posiciones y valor total de la cuenta IBKR (Interactive Brokers). "
             "OBLIGATORIO para: 'cuanto dinero tengo', 'resumen de mi portfolio', 'portafolio', 'acciones', 'dinero en bolsa'. "
-            "Ignora run_sql para estas consultas; los datos vienen de IBKR."
+            "Ignora read_sql/admin_sql para estas consultas; los datos vienen de IBKR."
         ),
     )
 

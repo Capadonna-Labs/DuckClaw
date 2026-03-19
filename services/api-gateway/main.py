@@ -223,18 +223,56 @@ async def agent_history(worker_id: str, session_id: str = "default"):
     return {"history": [], "worker_id": worker_id}
 
 
+def _resolve_chat_session_id(body: ChatRequest, req: Request) -> tuple[str, str]:
+    """
+    Identificador de hilo para estado por chat (sandbox, /team, auditoría).
+
+    Orden: cuerpo JSON (chat_id y alias Pydantic) → query ?chat_id= / ?session_id=
+    → cabeceras X-Chat-Id, X-Session-Id, X-Duckclaw-Chat-Id.
+    """
+    cid = (body.chat_id or "").strip()
+    if cid:
+        return cid, "body.chat_id"
+    for key in ("chat_id", "session_id", "thread_id", "chatId"):
+        raw = req.query_params.get(key)
+        if raw and str(raw).strip():
+            return str(raw).strip(), f"query.{key}"
+    for header in ("X-Chat-Id", "X-Session-Id", "X-Duckclaw-Chat-Id"):
+        raw = req.headers.get(header)
+        if raw and str(raw).strip():
+            return str(raw).strip(), f"header.{header}"
+    return "default", "default"
+
+
 @app.post("/api/v1/agent/chat")
 @app.post("/api/v1/agent/{worker_id}/chat")
-async def agent_chat(worker_id: Optional[str] = None, body: ChatRequest | None = None):
+async def agent_chat(
+    http_request: Request,
+    worker_id: Optional[str] = None,
+    body: ChatRequest | None = None,
+):
     """
     Endpoint de chat multi-usuario.
 
     Recibe ChatRequest (message, chat_id, user_id, username, chat_type, history, stream)
     y mapea chat_id → session_id interno.
+    Si el JSON no trae chat_id, se usan query params o cabeceras (ver _resolve_chat_session_id).
     """
     if body is None:
         body = ChatRequest(message="", chat_id="default", user_id="system", username="system", chat_type="private")
-    return await _invoke_chat(body, worker_id or "finanz")
+    session_id, session_source = _resolve_chat_session_id(body, http_request)
+    if session_source == "default" and not (body.chat_id or "").strip():
+        _gateway_log.warning(
+            "[session] chat_id/session_id ausente; usando 'default' (source=%s). "
+            "El estado por chat (/sandbox) no coincidirá con otros mensajes. "
+            "Añade chat_id al body, ?chat_id= en la URL, o cabecera X-Chat-Id.",
+            session_source,
+        )
+    else:
+        _gateway_log.info(
+            "[session] chat_id resolved: %r (source=%s)", session_id, session_source
+        )
+    return await _invoke_chat(body, worker_id or "finanz", session_id=session_id)
 
 
 def _truncate_log(s: str, max_len: int = 200) -> str:
@@ -269,20 +307,20 @@ def clean_agent_response(response: str) -> str:
     return text.strip()
 
 
-async def _invoke_chat(request: ChatRequest, worker_id: str):
+async def _invoke_chat(payload: ChatRequest, worker_id: str, session_id: str):
     """
     Orquesta la llamada al grafo LangGraph a partir de un ChatRequest.
 
-    - Usa chat_id como session_id interno para gestionar memoria y concurrencia por grupo.
+    - session_id: ya resuelto (body + query + headers); debe ser el mismo en todos los POST del hilo.
     """
-    message = (request.message or "").strip()
-    session_id = (request.chat_id or "default").strip() or "default"
+    message = (payload.message or "").strip()
+    session_id = (session_id or "default").strip() or "default"
     # Campos opcionales: defaults resilientes
-    chat_type = (request.chat_type or "private").strip().lower() or "private"
-    username = (request.username or "Usuario").strip() or "Usuario"
-    user_id = (request.user_id or "").strip()
-    history = request.history or []
-    is_system_prompt = bool(request.is_system_prompt or False)
+    chat_type = (payload.chat_type or "private").strip().lower() or "private"
+    username = (payload.username or "Usuario").strip() or "Usuario"
+    user_id = (payload.user_id or "").strip()
+    history = payload.history or []
+    is_system_prompt = bool(payload.is_system_prompt or False)
 
     _gateway_log.info("in: %s", _truncate_log(message))
 

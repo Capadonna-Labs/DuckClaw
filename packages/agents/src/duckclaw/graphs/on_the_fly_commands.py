@@ -144,6 +144,29 @@ def _delete_authorized_user(db: Any, *, tenant_id: str, user_id: str) -> None:
     db.execute(f"DELETE FROM main.{_AUTHORIZED_USERS_TABLE} WHERE tenant_id='{tid}' AND user_id='{uid}'")
 
 
+def _invalidate_whitelist_redis_cache(*, tenant_id: str, user_id: str) -> None:
+    """
+    El Gateway cachea roles en Redis (TTL ~1h). Tras /team --rm o --add, hay que borrar la clave
+    o los usuarios revocados siguen pasando _lookup_whitelist_role hasta que expire el TTL.
+    Misma convención que services/api-gateway/main.py: whitelist:{tenant_id}:{user_id}
+    """
+    tid = str(tenant_id or "default").strip() or "default"
+    uid = str(user_id or "").strip()
+    if not uid:
+        return
+    url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
+    if not url:
+        return
+    key = f"whitelist:{tid}:{uid}"
+    try:
+        import redis as redis_sync  # noqa: PLC0415
+
+        client = redis_sync.Redis.from_url(url, decode_responses=True)
+        client.delete(key)
+    except Exception:
+        pass
+
+
 def _ensure_agent_config(db: Any) -> None:
     db.execute(
         f"""
@@ -379,6 +402,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         if not target_uid:
             return _telegram_safe("Uso: /team --rm <user_id>")
         _delete_authorized_user(db, tenant_id=tid, user_id=target_uid)
+        _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
         return _telegram_safe(f"✅ Eliminado user_id={target_uid} del tenant '{tid}'.")
 
     if raw.startswith("--add ") or raw.strip() == "--add":
@@ -394,6 +418,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         target_uid = tokens[0]
         uname = tokens[1] if len(tokens) > 1 else "Usuario"
         _upsert_authorized_user(db, tenant_id=tid, user_id=target_uid, username=uname, role="user")
+        _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
         return _telegram_safe(f"✅ Añadido user_id={target_uid} (role=user) al tenant '{tid}'.")
 
     return _telegram_safe("Uso: /team | /team --add <user_id> [username] | /team --rm <user_id>")

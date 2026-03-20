@@ -259,9 +259,9 @@ def build_manager_graph(
         if assigned is None:
             set_idle(chat_id)
             _log.warning("manager: no hay plantillas de worker disponibles en %s", getattr(troot, "__str__", lambda: "")() or "forge/templates")
+            # No incluir "messages": None — add_messages en ManagerAgentState exige valores no nulos.
             return {
                 "reply": "No hay plantillas de worker configuradas. Añade al menos una en forge/templates (con manifest.yaml).",
-                "messages": None,
                 "_audit_done": True,
                 "assigned_worker_id": None,
             }
@@ -323,13 +323,16 @@ def build_manager_graph(
 
         # El manager ya registró en task_audit_log; el Gateway no debe duplicar.
         # assigned_worker_id para que el Gateway lo use en respuesta y trazas.
-        return {
+        # Solo añadir messages si el worker devolvió lista: None rompe add_messages en el estado.
+        out: ManagerAgentState = {
             "reply": reply,
-            "messages": messages,
             "_audit_done": True,
             "assigned_worker_id": assigned,
             "plan_title": plan_title,
-        }
+        }  # type: ignore[assignment]
+        if messages is not None:
+            out["messages"] = messages
+        return out
 
     graph = StateGraph(ManagerAgentState)
     graph.add_node("router", router_node)

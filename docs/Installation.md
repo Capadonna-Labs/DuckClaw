@@ -23,7 +23,7 @@ Variables que el CLI inyecta al wizard (y que el wizard puede persistir en `.env
 | Variable | Uso |
 | :--- | :--- |
 | `DUCKCLAW_TENANT_ID` | Identificador Multi-Vault; bóveda por defecto en `db/private/<tenant>/default.duckdb`. |
-| `DUCKCLAW_INDUSTRY_TEMPLATE` | ID de plantilla bajo `forge/templates/industries/<id>/` (p. ej. `business_standard`). Al finalizar el wizard se aplica `schema.sql`, `seed_data.sql` y semillas en `main.agent_config`. |
+| `DUCKCLAW_INDUSTRY_TEMPLATE` | ID de plantilla bajo `forge/templates/industries/<id>/` (p. ej. `business_standard`). Al guardar, el wizard **alinea** `DUCKCLAW_DB_PATH` a `db/private/<tenant>/default.duckdb` (misma DB donde se aplica schema triple + seeds + `agent_config`). |
 
 **Nota:** `INSTALL duckpgq` / `INSTALL vss` pueden requerir red; en entornos offline el loader registra advertencias y continúa con lo que pueda aplicarse.
 

@@ -16,6 +16,8 @@ extensions:
   - name: vss
     install: "INSTALL vss; LOAD vss;"
 
+# Documentación / contrato. La inyección real de `unified_memory` va por
+# DUCKCLAW_INDUSTRY_TEMPLATE o `tools_spec` en YAML (spec §7).
 skills:
   - unified_memory
 

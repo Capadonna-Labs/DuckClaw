@@ -4,7 +4,6 @@
 Usa la misma ruta que el Gateway (get_gateway_db_path(), respeta .env).
 Uso: python3 scripts/recreate_gateway_db.py
 """
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -18,15 +17,7 @@ try:
 except ImportError:
     pass
 
-
-def _split_sql(sql: str):
-    """Split SQL by semicolon, skip empty and comments."""
-    stmts = []
-    for part in re.split(r";\s*", sql):
-        stmt = part.strip()
-        if stmt and not stmt.startswith("--"):
-            stmts.append(stmt)
-    return stmts
+from duckclaw.sql_split import split_sql_statements
 
 
 def main():
@@ -93,7 +84,7 @@ def main():
         )
     """)
     schema_sql = (root / "templates" / "workers" / "finanz" / "schema.sql").read_text(encoding="utf-8")
-    for stmt in _split_sql(schema_sql):
+    for stmt in split_sql_statements(schema_sql):
         if stmt.strip():
             db.execute(stmt)
 

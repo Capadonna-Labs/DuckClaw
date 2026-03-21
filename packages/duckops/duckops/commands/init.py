@@ -32,7 +32,7 @@ def cmd_init(
     industry: str | None = typer.Option(
         None,
         "--industry",
-        help="Plantilla Forge (p.ej. business_standard). Define DUCKCLAW_INDUSTRY_TEMPLATE en el wizard.",
+        help="Plantilla Forge (p. ej. business_standard). Valida contra plantillas instaladas si duckclaw-agents está disponible.",
     ),
 ) -> None:
     """Inicializa un nuevo tenant con su base de datos y configuración."""
@@ -46,6 +46,27 @@ def cmd_init(
         raise typer.Exit(1)
 
     typer.secho(f"Forjando agente para {tenant_id}...", fg=typer.colors.CYAN)
+
+    if industry and industry.strip():
+        tid = industry.strip()
+        _old_path = list(sys.path)
+        try:
+            sys.path.insert(0, str(repo))
+            try:
+                from duckclaw.forge.industries.loader import list_industry_templates
+            except ImportError:
+                list_industry_templates = None  # type: ignore[misc, assignment]
+            if list_industry_templates is not None:
+                known = list_industry_templates()
+                if known and tid not in known:
+                    typer.secho(
+                        f"Plantilla industry desconocida: {tid}. Disponibles: {', '.join(known)}",
+                        fg=typer.colors.RED,
+                        err=True,
+                    )
+                    raise typer.Exit(1)
+        finally:
+            sys.path[:] = _old_path
 
     if use_wizard:
         env = os.environ.copy()

@@ -26,6 +26,10 @@ from typing import Any, Optional
 from urllib import request as _url_request
 from urllib.error import URLError
 
+# Multi-Vault: mismo `db/` que el resto del monorepo aunque el cwd del proceso no sea la raíz.
+_REPO_ROOT_FOR_DB = Path(__file__).resolve().parent.parent.parent
+os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_REPO_ROOT_FOR_DB))
+
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

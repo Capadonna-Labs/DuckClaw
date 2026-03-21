@@ -1,8 +1,12 @@
 """
 UnifiedMemoryOrchestrator (spec Memoria Triple v3.0).
 
-Enruta la petición hacia SQL, PGQ (duckpgq) o VSS y devuelve un JSON unificado:
-{"sql_data": [...], "graph_relations": [...], "semantic_matches": [...]}
+**Alcance v1 (implementado):** heurística por palabras clave; capa SQL con consultas
+acotadas sobre esquemas industry; capa grafo vía GRAPH_TABLE (duckpgq) con fallback
+SQL join; capa VSS vacía hasta conectar servicio de embeddings.
+
+**Contrato de salida:** JSON `{"sql_data": [...], "graph_relations": [...], "semantic_matches": [...]}`.
+v2 previsto: routing por mini-LLM, embeddings de consulta y búsqueda HNSW.
 """
 
 from __future__ import annotations

@@ -140,8 +140,8 @@ def build_general_graph(
             from duckclaw.forge.skills.unified_memory_orchestrator import make_unified_memory_tool
 
             tools.append(make_unified_memory_tool(db))
-        except Exception:
-            pass
+        except Exception as e:
+            _log.warning("unified_memory: no se pudo registrar la herramienta: %s", e)
 
     # Sandbox (Strix) — solo si está en tools_spec y Docker está disponible
     if "run_sandbox" in tool_names_set:

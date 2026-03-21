@@ -22,6 +22,7 @@ RETAIL_YAML = TEMPLATES_DIR / "retail.yaml"
 # Ruta a plantillas de workers: forge/templates/ (cada subdir con manifest.yaml es un worker)
 # finanz, personalizable, powerseal, research_worker, support, etc.
 WORKERS_TEMPLATES_DIR = TEMPLATES_DIR
+# Plantillas Memoria Triple (misma ruta que usa `duckclaw.forge.industries.loader`)
 INDUSTRIES_TEMPLATES_DIR = TEMPLATES_DIR / "industries"
 
 __all__ = [

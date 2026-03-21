@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from duckclaw.forge import INDUSTRIES_TEMPLATES_DIR
 from duckclaw.forge.industries.loader import (
     INDUSTRIES_DIR,
     apply_industry_to_db,
@@ -12,6 +13,7 @@ from duckclaw.forge.industries.loader import (
 )
 
 __all__ = [
+    "INDUSTRIES_TEMPLATES_DIR",
     "INDUSTRIES_DIR",
     "apply_industry_to_db",
     "list_industry_templates",

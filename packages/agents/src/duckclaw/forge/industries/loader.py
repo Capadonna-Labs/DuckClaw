@@ -8,13 +8,13 @@ from typing import Any
 
 import yaml
 
-from duckclaw.workers.loader import _split_sql
+from duckclaw.forge import INDUSTRIES_TEMPLATES_DIR
+from duckclaw.sql_split import split_sql_statements
 
 _log = logging.getLogger(__name__)
 
-# Evita import circular con duckclaw.forge.__init__
-_FORGE_DIR = Path(__file__).resolve().parent.parent
-INDUSTRIES_DIR = _FORGE_DIR / "templates" / "industries"
+# Alias histórico; misma ruta que `INDUSTRIES_TEMPLATES_DIR` en `duckclaw.forge`.
+INDUSTRIES_DIR = INDUSTRIES_TEMPLATES_DIR
 
 
 def resolve_industry_dir(template_id: str) -> Path:
@@ -44,7 +44,7 @@ def load_industry_manifest(template_id: str) -> dict[str, Any]:
 
 def _executable_statements(sql: str) -> list[str]:
     out: list[str] = []
-    for s in _split_sql(sql):
+    for s in split_sql_statements(sql):
         s = s.strip()
         if not s:
             continue

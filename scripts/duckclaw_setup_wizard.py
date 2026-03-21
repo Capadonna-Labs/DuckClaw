@@ -749,6 +749,23 @@ def _ensure_db_file_exists(repo_root: Path, db_path: str, console: Console | Non
         sys.path[:] = _orig_path
 
 
+def _industry_canonical_db_path_relative(repo_root: Path, tenant_id: str) -> str | None:
+    """Ruta relativa al repo: `db/private/<tenant>/default.duckdb` (spec Memoria Triple / Multi-Vault)."""
+    tid = (tenant_id or "default").strip() or "default"
+    os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(repo_root.resolve()))
+    _orig_path = sys.path.copy()
+    try:
+        sys.path.insert(0, str(repo_root))
+        from duckclaw.vaults import vault_file_path
+
+        vp = vault_file_path(tid, "default")
+        return str(vp.resolve().relative_to(repo_root.resolve())).replace("\\", "/")
+    except Exception:
+        return None
+    finally:
+        sys.path[:] = _orig_path
+
+
 def _maybe_apply_industry_template(repo_root: Path, console: Console) -> None:
     """Spec Memoria Triple v3.0: aplica schema+seed en db/private/<tenant>/default.duckdb si hay plantilla."""
     tpl = (os.environ.get("DUCKCLAW_INDUSTRY_TEMPLATE") or "").strip()
@@ -1333,6 +1350,18 @@ def _run_section(
                 )
                 if not _valid_db_path(db_path_save):
                     db_path_save = "db/telegram.duckdb"
+                _it_save = (os.environ.get("DUCKCLAW_INDUSTRY_TEMPLATE") or "").strip()
+                if _it_save:
+                    _tid_save = (os.environ.get("DUCKCLAW_TENANT_ID") or "default").strip()
+                    _canon_save = _industry_canonical_db_path_relative(repo_root, _tid_save)
+                    if _canon_save:
+                        if _canon_save != db_path_save:
+                            console.print(
+                                "[cyan]Memoria industry:[/] se alinea [bold]DUCKCLAW_DB_PATH[/] a la bóveda del tenant "
+                                f"[dim]{_canon_save}[/] (misma DB que schema triple + seeds)."
+                            )
+                        db_path_save = _canon_save
+                        state["db_path"] = _canon_save
                 save_tr = state.get("save_grpo_traces", False)
                 if isinstance(save_tr, str):
                     save_tr = str(save_tr).lower() in ("true", "1", "yes", "y", "sí", "si")
@@ -1361,9 +1390,8 @@ def _run_section(
                 _write_env_file(repo_root, "DUCKCLAW_DB_PATH", db_path_save)
                 _write_env_file(repo_root, "DUCKCLAW_SAVE_CONVERSATION_TRACES", "true" if save_conv else "false")
                 _write_env_file(repo_root, "DUCKCLAW_CONVERSATION_TRACES_FORMAT", fmt_traces)
-                _it = (os.environ.get("DUCKCLAW_INDUSTRY_TEMPLATE") or "").strip()
-                if _it:
-                    _write_env_file(repo_root, "DUCKCLAW_INDUSTRY_TEMPLATE", _it)
+                if _it_save:
+                    _write_env_file(repo_root, "DUCKCLAW_INDUSTRY_TEMPLATE", _it_save)
                     _write_env_file(
                         repo_root,
                         "DUCKCLAW_TENANT_ID",
@@ -1686,25 +1714,10 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
 
     _ind_tpl = (os.environ.get("DUCKCLAW_INDUSTRY_TEMPLATE") or "").strip()
     if _ind_tpl:
-        os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(repo_root.resolve()))
-        _orig_ir = sys.path.copy()
-        try:
-            sys.path.insert(0, str(repo_root))
-            from duckclaw.vaults import vault_file_path
-
-            _tid = (os.environ.get("DUCKCLAW_TENANT_ID") or "default").strip()
-            _vp = vault_file_path(_tid, "default")
-            try:
-                _sug = str(_vp.resolve().relative_to(repo_root.resolve())).replace("\\", "/")
-            except ValueError:
-                _sug = str(_vp.resolve())
-            _prev = (state.get("db_path") or "").strip()
-            if not saved or _prev in ("telegram.duckdb", "db/telegram.duckdb", ""):
-                state["db_path"] = _sug
-        except Exception:
-            pass
-        finally:
-            sys.path[:] = _orig_ir
+        _tid = (os.environ.get("DUCKCLAW_TENANT_ID") or "default").strip()
+        _sug = _industry_canonical_db_path_relative(repo_root, _tid)
+        if _sug:
+            state["db_path"] = _sug
 
     while True:
         section_id = SECTION_IDS[idx]

@@ -2,6 +2,14 @@
 import asyncio
 import json
 import logging
+import os
+from pathlib import Path
+
+# Multi-Vault: rutas bajo db/ deben resolver igual que el Gateway (cwd suele ser services/db-writer).
+_writer_file = Path(__file__).resolve()
+_repo_root = _writer_file.parent.parent.parent  # db-writer -> services -> repo
+os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_repo_root))
+
 import duckdb
 import redis.asyncio as redis
 from core.config import settings

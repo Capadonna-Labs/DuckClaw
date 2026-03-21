@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,16 @@ def _slug_vault_id(name: Any) -> str:
 
 
 def db_root() -> Path:
+    """
+    Directorio `db/` del monorepo.
+
+    Si el proceso arranca con cwd distinto del repo (p. ej. `services/db-writer`),
+    definir `DUCKCLAW_REPO_ROOT` apuntando a la raíz del monorepo; si no, se usa
+    `Path(\"db\").resolve()` relativo al cwd (comportamiento legacy).
+    """
+    env_root = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
+    if env_root:
+        return (Path(env_root).expanduser().resolve() / "db")
     return Path("db").resolve()
 
 

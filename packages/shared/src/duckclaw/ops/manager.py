@@ -520,6 +520,7 @@ def serve(
             "DUCKCLAW_REDIS_URL", "DUCKCLAW_WRITE_QUEUE_URL",
             "REDIS_URL", "DUCKCLAW_TAILSCALE_AUTH_KEY",
             "DUCKCLAW_SAVE_CONVERSATION_TRACES", "DUCKCLAW_CONVERSATION_TRACES_FORMAT",
+            "N8N_OUTBOUND_WEBHOOK_URL", "N8N_AUTH_KEY",
         ):
             val = os.environ.get(key, "")
             if val:

@@ -372,6 +372,7 @@ def serve(
             "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
             "DUCKCLAW_REDIS_URL", "DUCKCLAW_WRITE_QUEUE_URL",
             "REDIS_URL", "DUCKCLAW_TAILSCALE_AUTH_KEY",
+            "N8N_OUTBOUND_WEBHOOK_URL", "N8N_AUTH_KEY",
         ):
             val = os.environ.get(key, "")
             if val:

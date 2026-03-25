@@ -16,7 +16,9 @@
         "DUCKCLAW_DB_PATH": "/path/to/db.duckdb",
         "DEEPSEEK_API_KEY": "<DEEPSEEK_API_KEY>",
         "DUCKCLAW_REDIS_URL": "redis://localhost:6379/0",
-        "REDIS_URL": "redis://localhost:6379/0"
+        "REDIS_URL": "redis://localhost:6379/0",
+        "N8N_OUTBOUND_WEBHOOK_URL": "<mismo webhook que mensajes proactivos; opcional si ya está en .env>",
+        "N8N_AUTH_KEY": "<opcional; cabecera X-DuckClaw-Secret / X-N8N-Auth>"
       }
     }
   ]

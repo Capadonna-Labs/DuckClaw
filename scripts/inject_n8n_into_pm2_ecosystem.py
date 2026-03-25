@@ -9,7 +9,9 @@ from pathlib import Path
 
 
 def main() -> int:
-    root = Path(__file__).resolve().parent.parent
+    # Prefer cwd when it looks like repo root (typical: `cd duckclaw && python3 scripts/...`)
+    here = Path(__file__).resolve().parent.parent
+    root = Path.cwd() if (Path.cwd() / ".env").is_file() else here
     env_path = root / ".env"
     eco_path = root / "config" / "ecosystem.api.config.cjs"
     if not env_path.is_file():
@@ -20,8 +22,10 @@ def main() -> int:
         return 1
 
     env: dict[str, str] = {}
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.replace("\r", "").strip()
+        if line.startswith("export "):
+            line = line[7:].strip()
         if line and not line.startswith("#") and "=" in line:
             k, _, v = line.partition("=")
             env[k.strip()] = v.strip().strip("'\"")

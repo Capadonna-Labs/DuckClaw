@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -48,18 +49,63 @@ _TELEGRAM_MD_ESCAPE = (
     ".",
     "!",
 )
+_TG_USER_LINK_RE = re.compile(r"\[[^\]]+\]\(tg://user\?id=\d+\)")
 
 
 def _telegram_safe(text: str) -> str:
     """Escapa texto para nodos outbound configurados con Markdown/MarkdownV2."""
     if not text:
         return ""
-    t = str(text).replace("\\", "\\\\")
+    t = str(text)
+    preserved: list[str] = []
+    def _stash_link(m: re.Match[str]) -> str:
+        preserved.append(m.group(0))
+        return f"TGLINKTOKEN{len(preserved)-1}"
+    t = _TG_USER_LINK_RE.sub(_stash_link, t)
+    t = t.replace("\\", "\\\\")
     for c in _TELEGRAM_MD_ESCAPE:
         if c == "\\":
             continue
         t = t.replace(c, "\\" + c)
+    for i, raw in enumerate(preserved):
+        t = t.replace(f"TGLINKTOKEN{i}", raw)
     return t
+
+
+def _team_username_by_user_id(db: Any, tenant_id: str, user_id: str) -> str:
+    """Best-effort lookup en whitelist para logs legibles."""
+    try:
+        rows = list(
+            db.execute(
+                """
+                SELECT username
+                FROM main.authorized_users
+                WHERE tenant_id = ? AND user_id = ?
+                LIMIT 1
+                """,
+                (tenant_id, user_id),
+            )
+        )
+        if rows and rows[0] and rows[0][0]:
+            return str(rows[0][0]).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _pm2_identity_label(
+    chat_id: str,
+    *,
+    username: str = "",
+    db: Any | None = None,
+    tenant_id: str | None = None,
+) -> str:
+    cid = str(chat_id or "").strip() or "unknown"
+    uname = str(username or "").strip()
+    if not uname and db is not None and cid:
+        tid = str(tenant_id or "default").strip() or "default"
+        uname = _team_username_by_user_id(db, tid, cid)
+    return f"@{uname} ({cid})" if uname else cid
 
 
 @dataclass(frozen=True)
@@ -154,7 +200,14 @@ def outbound_request_headers() -> dict[str, str]:
     return h
 
 
-def send_telegram_dm(chat_id: str, text: str) -> TelegramDmOutcome:
+def send_telegram_dm(
+    chat_id: str,
+    text: str,
+    *,
+    username: str = "",
+    db: Any | None = None,
+    tenant_id: str | None = None,
+) -> TelegramDmOutcome:
     """
     POST JSON {chat_id, text, user_id} al webhook de n8n / Telegram.
 
@@ -168,6 +221,7 @@ def send_telegram_dm(chat_id: str, text: str) -> TelegramDmOutcome:
         )
         return TelegramDmOutcome.skipped_no_url()
     cid = (chat_id or "").strip()
+    ident = _pm2_identity_label(cid, username=username, db=db, tenant_id=tenant_id)
     if not cid:
         _log.warning("The Mind outbound: chat_id vacío, no se envía DM")
         return TelegramDmOutcome.skipped_no_chat_id()
@@ -177,7 +231,8 @@ def send_telegram_dm(chat_id: str, text: str) -> TelegramDmOutcome:
     try:
         log_fly(
             _obs,
-            "outbound pre -> chat_id=%s url=%s text=%s",
+            "outbound pre -> to=%s chat_id=%s url=%s text=%s",
+            ident,
             cid,
             url,
             _preview_text(safe_text, max_len=50),
@@ -188,7 +243,8 @@ def send_telegram_dm(chat_id: str, text: str) -> TelegramDmOutcome:
         snippet = (resp.text or "").strip().replace("\n", " ")
         log_fly(
             _obs,
-            "outbound post -> chat_id=%s status=%s elapsed_ms=%s body=%s",
+            "outbound post -> to=%s chat_id=%s status=%s elapsed_ms=%s body=%s",
+            ident,
             cid,
             resp.status_code,
             elapsed_ms,
@@ -197,15 +253,17 @@ def send_telegram_dm(chat_id: str, text: str) -> TelegramDmOutcome:
         if resp.ok:
             return TelegramDmOutcome.success()
         _log.warning(
-            "The Mind outbound: webhook respondió %s para chat_id=%s — %s",
+            "The Mind outbound: webhook respondió %s para to=%s chat_id=%s — %s",
             resp.status_code,
+            ident,
             cid,
             snippet[:500],
         )
         return TelegramDmOutcome.http_error(resp.status_code, snippet)
     except Exception as exc:
         _log.warning(
-            "The Mind outbound: error enviando DM a chat_id=%s: %s",
+            "The Mind outbound: error enviando DM a to=%s chat_id=%s: %s",
+            ident,
             cid,
             exc,
             exc_info=_log.isEnabledFor(logging.DEBUG),
@@ -243,7 +301,8 @@ def broadcast_message_to_players(
 
     rows = list(
         db.execute(
-            "SELECT DISTINCT chat_id FROM the_mind_players WHERE game_id = ?", (game_id,)
+            "SELECT DISTINCT chat_id, username FROM the_mind_players WHERE game_id = ?",
+            (game_id,),
         )
     )
     if not rows:
@@ -254,10 +313,17 @@ def broadcast_message_to_players(
 
     outcomes: list[TelegramDmOutcome] = []
     exclude = (exclude_chat_id or "").strip()
-    for (chat_id,) in rows:
+    for chat_id, username in rows:
         cid = str(chat_id or "").strip()
         if cid and cid != exclude:
-            outcomes.append(send_telegram_dm(cid, message))
+            outcomes.append(
+                send_telegram_dm(
+                    cid,
+                    message,
+                    username=str(username or ""),
+                    db=db,
+                )
+            )
 
     line = _aggregate_dm_line("Avisos DM", outcomes)
     return BroadcastResult(line, outcomes)
@@ -324,7 +390,7 @@ def deal_cards_for_level(
                 if not uname
                 else f"{uname}, tus cartas para el Nivel {lvl} son: {hand}"
             )
-            outcomes.append(send_telegram_dm(cid, text))
+            outcomes.append(send_telegram_dm(cid, text, username=str(uname), db=db))
 
     db.execute(
         "UPDATE the_mind_games SET current_level = ? WHERE game_id = ?",

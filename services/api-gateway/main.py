@@ -608,6 +608,9 @@ async def agent_chat(
     if body is None:
         body = ChatRequest(message="", chat_id="default", user_id="system", username="system", chat_type="private")
     session_id, session_source = _resolve_chat_session_id(body, http_request)
+    tenant_id = (body.tenant_id or "default").strip() or "default"
+    chat_ident = _chat_identity_label(session_id, body.username)
+    set_log_context(tenant_id=tenant_id, worker_id="manager", chat_id=chat_ident)
     if session_source == "default" and not (body.chat_id or "").strip():
         _gateway_log.warning(
             "[session] chat_id/session_id ausente; usando 'default' (source=%s). "
@@ -620,16 +623,21 @@ async def agent_chat(
     else:
         _gateway_log.info(
             "[session] chat_id resolved: %s (source=%s)",
-            format_chat_id_for_terminal(session_id),
+            format_chat_id_for_terminal(chat_ident),
             session_source,
         )
-    tenant_id = (body.tenant_id or "default").strip() or "default"
     return await _invoke_chat(body, worker_id or "finanz", session_id=session_id, tenant_id=tenant_id)
 
 
 def _truncate_log(s: str, max_len: int = 200) -> str:
     s = (s or "").strip()
     return s if len(s) <= max_len else s[:max_len] + "..."
+
+
+def _chat_identity_label(chat_id: str, username: str | None) -> str:
+    cid = (chat_id or "").strip() or "unknown"
+    uname = (username or "").strip()
+    return f"@{uname} ({cid})" if uname else cid
 
 
 def _strip_markdown_bold(s: str) -> str:
@@ -687,7 +695,8 @@ async def _invoke_chat(payload: ChatRequest, worker_id: str, session_id: str, te
     is_system_prompt = bool(payload.is_system_prompt or False)
 
     # Observabilidad 2.1: fase orquestación HTTP → worker lógico "manager" (no el worker_id de ruta).
-    set_log_context(tenant_id=tenant_id, worker_id="manager", chat_id=session_id)
+    chat_ident = _chat_identity_label(session_id, username)
+    set_log_context(tenant_id=tenant_id, worker_id="manager", chat_id=chat_ident)
     log_req(_obs_log, "%s", _truncate_log(message), source="body")
 
     # Telegram Guard: autoriza antes de ejecutar comandos (/team, /sandbox, etc.)
@@ -838,7 +847,11 @@ async def _invoke_chat(payload: ChatRequest, worker_id: str, session_id: str, te
     reply_text = result.get("reply", "") if isinstance(result, dict) else (result or "")
     # Grafo manager devuelve assigned_worker_id; refinar contexto de log para [RES]
     effective_worker_id = result.get("assigned_worker_id", worker_id) if isinstance(result, dict) else worker_id
-    set_log_context(tenant_id=tenant_id, worker_id=effective_worker_id or worker_id, chat_id=session_id)
+    set_log_context(
+        tenant_id=tenant_id,
+        worker_id=effective_worker_id or worker_id,
+        chat_id=chat_ident,
+    )
     usage = result.get("usage_tokens") if isinstance(result, dict) else None
     tok_extra = ""
     if isinstance(usage, dict) and usage:

@@ -22,6 +22,7 @@ from duckclaw.vaults import (
 from duckclaw.forge.skills.the_mind_outbound import (
     broadcast_message_to_players,
     deal_cards_for_level,
+    send_telegram_dm,
 )
 from duckclaw.utils.logger import get_obs_logger, log_fly, structured_log_context
 
@@ -436,7 +437,8 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             uname = u.get("username") or ""
             role = (u.get("role") or "user").lower()
             # Breve y seguro para Telegram
-            lines.append(_telegram_safe(f"\\- {uid} \\(\\@{uname}\\) \\- role={role}"))
+            label = f"@{uname}" if uname else str(uid)
+            lines.append(_telegram_safe(f"\\- {label} \\- role={role}"))
         return _telegram_safe(f"🦆 Usuarios autorizados (tenant '{tid}'):\n") + "\n".join(lines)
 
     if raw.startswith("--rm "):
@@ -451,7 +453,8 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             return _telegram_safe("Uso: /team --rm <user_id>")
         _delete_authorized_user(db, tenant_id=tid, user_id=target_uid)
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
-        return _telegram_safe(f"✅ Eliminado user_id={target_uid} del tenant '{tid}'.")
+        target_label = _player_label("", target_uid, db=db, tenant_id=tid)
+        return _telegram_safe(f"✅ Eliminado {target_label} del tenant '{tid}'.")
 
     if raw.startswith("--add ") or raw.strip() == "--add":
         if not rid:
@@ -467,7 +470,8 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         uname = tokens[1] if len(tokens) > 1 else "Usuario"
         _upsert_authorized_user(db, tenant_id=tid, user_id=target_uid, username=uname, role="user")
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
-        return _telegram_safe(f"✅ Añadido user_id={target_uid} (role=user) al tenant '{tid}'.")
+        target_label = _player_label(uname, target_uid, db=db, tenant_id=tid)
+        return _telegram_safe(f"✅ Añadido {target_label} (role=user) al tenant '{tid}'.")
 
     return _telegram_safe("Uso: /team | /team --add <user_id> [username] | /team --rm <user_id>")
 
@@ -613,6 +617,16 @@ def _ensure_the_mind_schema(db: Any) -> None:
         db.execute("ALTER TABLE the_mind_players ADD COLUMN user_id VARCHAR")
     except Exception:
         pass
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS the_mind_moves ("
+        "game_id VARCHAR, "
+        "chat_id VARCHAR, "
+        "username VARCHAR, "
+        "move_type VARCHAR, "
+        "card_value INTEGER, "
+        "level INTEGER, "
+        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
 
 
 def _merge_the_mind_player(
@@ -675,6 +689,86 @@ def _mind_tx_rollback(db: Any) -> None:
         pass
 
 
+def _insert_mind_move(
+    db: Any,
+    *,
+    game_id: str,
+    chat_id: str,
+    username: str,
+    move_type: str,
+    card_value: int | None = None,
+    level: int | None = None,
+) -> None:
+    try:
+        db.execute(
+            """
+            INSERT INTO the_mind_moves (game_id, chat_id, username, move_type, card_value, level)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                game_id,
+                chat_id,
+                username or "",
+                move_type,
+                int(card_value) if card_value is not None else None,
+                int(level) if level is not None else None,
+            ),
+        )
+    except Exception:
+        pass
+
+
+def _team_username_by_user_id(db: Any, tenant_id: str | None, user_id: Any) -> str:
+    tid = str(tenant_id or "default").strip() or "default"
+    uid = str(user_id or "").strip()
+    if not uid:
+        return ""
+    for u in _list_authorized_users(db, tenant_id=tid):
+        if str(u.get("user_id") or "").strip() == uid:
+            return str(u.get("username") or "").strip()
+    return ""
+
+
+def _player_label(username: Any, chat_id: Any, *, db: Any | None = None, tenant_id: str | None = None) -> str:
+    uname = str(username or "").strip()
+    if not uname and db is not None:
+        uname = _team_username_by_user_id(db, tenant_id, chat_id)
+    if uname:
+        return f"@{uname}"
+    cid = str(chat_id or "").strip() or "unknown"
+    return cid
+
+
+def _notify_level_up_with_private_hands(
+    db: Any,
+    game_id: str,
+    completed_level: int,
+    next_level: int,
+    *,
+    exclude_chat_id: str | None = None,
+) -> None:
+    """Envía DM individual a cada jugador al subir nivel con su nueva mano (solo sus cartas)."""
+    try:
+        rows = list(
+            db.execute(
+                "SELECT chat_id, cards FROM the_mind_players WHERE game_id = ?",
+                (game_id,),
+            )
+        )
+        exclude = (exclude_chat_id or "").strip()
+        for pchat, cards in rows:
+            cid = str(pchat or "").strip()
+            if exclude and cid == exclude:
+                continue
+            hand = sorted(int(c) for c in list(cards or []))
+            send_telegram_dm(
+                cid,
+                f"🃏 Tus nuevas cartas: {hand}",
+            )
+    except Exception:
+        pass
+
+
 _THE_MIND_MAX_LEVEL = 12
 
 
@@ -721,7 +815,7 @@ def _all_mind_players_in_team(db: Any, game_id: str, tenant_id: str | None) -> t
         if uid not in allowed:
             return (
                 False,
-                f"No se puede iniciar: el jugador user_id={uid} no está en /team para este tenant.",
+                f"No se puede iniciar: {_player_label('', uid, db=db, tenant_id=tid)} no está en /team para este tenant.",
             )
     return True, ""
 
@@ -735,7 +829,8 @@ def _the_mind_invite_hint(db: Any, tenant_id: str | None, game_id: str) -> str:
         for u in users:
             uid = str(u.get("user_id") or "").strip()
             uname = str(u.get("username") or "").strip()
-            team_lines.append(f"- {uid}" + (f" (@{uname})" if uname else ""))
+            label = f"@{uname}" if uname else uid
+            team_lines.append(f"- {label}")
         team_block = "\n".join(team_lines)
     else:
         team_block = "(Nadie en /team: un admin debe usar /team --add <user_id> [nombre].)"
@@ -750,7 +845,7 @@ def _the_mind_invite_hint(db: Any, tenant_id: str | None, game_id: str) -> str:
         "• Avisos del juego (nivel, errores, victoria): el mismo texto a todos los DM de la partida.\n"
         f"• Equipo autorizado ahora:\n{team_block}\n"
         f"• Pasos: cada jugador abre DM con el bot y envía /join {game_id}.\n"
-        f"• Luego el anfitrión: /start_mind {game_id} (mínimo 2 jugadores; ver /game).\n"
+        f"• Luego el anfitrión: /start_mind {game_id} (mínimo 2 jugadores; ver /games).\n"
     )
 
 
@@ -837,6 +932,31 @@ def execute_join_game(
         uname = get_chat_state(db, chat_id, "username") or ""
         rid = str(requester_id or "").strip() or None
         _merge_the_mind_player(db, game_id, cid, uname, user_id=rid)
+        # Avisar por DM al/los admin del tenant cuando alguien se une.
+        try:
+            n_rows = list(
+                db.execute("SELECT COUNT(*) FROM the_mind_players WHERE game_id = ?", (game_id,))
+            )
+            n_players = int(n_rows[0][0]) if n_rows else 0
+            actor = _player_label(uname, (rid or chat_id), db=db, tenant_id=tid)
+            admin_users = [
+                u for u in _list_authorized_users(db, tenant_id=tid)
+                if (u.get("role") or "").strip().lower() == "admin"
+            ]
+            notice = (
+                f"🧠 {actor} se unió a la partida {game_id}. "
+                f"Jugadores: {n_players}. Usa /start_mind {game_id} cuando estén todos."
+            )
+            sent_to: set[str] = set()
+            for u in admin_users:
+                admin_uid = str(u.get("user_id") or "").strip()
+                if not admin_uid or admin_uid in sent_to:
+                    continue
+                send_telegram_dm(admin_uid, notice)
+                sent_to.add(admin_uid)
+        except Exception:
+            # Best-effort: no bloquear el join por problemas de notificación.
+            pass
         return _telegram_safe(
             f"✅ Te has unido a la partida {game_id}. Espera a que el anfitrión inicie con `/start_mind {game_id}`."
         )
@@ -844,8 +964,75 @@ def execute_join_game(
         return _telegram_safe(f"No se pudo unir a la partida: {e}")
 
 
-def execute_list_mind_games(db: Any, chat_id: Any, args: str) -> str:
-    """/game: partidas The Mind en waiting o playing (conteo de jugadores)."""
+def execute_list_mind_games(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    requester_id: Any = None,
+    tenant_id: Any = None,
+) -> str:
+    """/games: listar partidas activas; admin: /games --rm <game_id>|all cancela partidas activas."""
+    raw = (args or "").strip()
+    tid = str(tenant_id or "default").strip() or "default"
+    rid = str(requester_id or "").strip()
+
+    # Admin-only cancel flow
+    if raw.startswith("--rm "):
+        role = _get_authorized_role(db, tenant_id=tid, user_id=rid) if rid else ""
+        if role != "admin":
+            return _telegram_safe("Solo el admin puede cancelar partidas.")
+
+        target = raw[5:].strip().split()[0] if raw[5:].strip() else ""
+        if not target:
+            return _telegram_safe("Uso: /games --rm <game_id> | /games --rm all")
+        try:
+            _ensure_the_mind_schema(db)
+            if target.lower() == "all":
+                rows = list(
+                    db.execute(
+                        """
+                        SELECT game_id
+                        FROM the_mind_games
+                        WHERE lower(COALESCE(status, '')) IN ('waiting', 'playing')
+                        ORDER BY game_id DESC
+                        """
+                    )
+                )
+                game_ids = [str(r[0]) for r in rows if r and r[0]]
+                if not game_ids:
+                    return _telegram_safe("No hay partidas activas que cancelar.")
+                db.execute(
+                    """
+                    UPDATE the_mind_games
+                    SET status = 'cancelled'
+                    WHERE lower(COALESCE(status, '')) IN ('waiting', 'playing')
+                    """
+                )
+                return _telegram_safe(f"🗑️ Partida(s) cancelada(s): [{', '.join(game_ids)}]")
+
+            rows = list(
+                db.execute(
+                    """
+                    SELECT game_id
+                    FROM the_mind_games
+                    WHERE game_id = ? AND lower(COALESCE(status, '')) IN ('waiting', 'playing')
+                    LIMIT 1
+                    """,
+                    (target,),
+                )
+            )
+            if not rows:
+                return _telegram_safe("No hay partidas activas que cancelar.")
+            game_id = str(rows[0][0])
+            db.execute(
+                "UPDATE the_mind_games SET status = 'cancelled' WHERE game_id = ?",
+                (game_id,),
+            )
+            return _telegram_safe(f"🗑️ Partida(s) cancelada(s): [{game_id}]")
+        except Exception as e:
+            return _telegram_safe(f"No se pudo cancelar partidas: {e}")
+
     try:
         _ensure_the_mind_schema(db)
         rows = list(
@@ -867,6 +1054,39 @@ def execute_list_mind_games(db: Any, chat_id: Any, args: str) -> str:
         return _telegram_safe(
             "No hay partidas activas (waiting/playing). Usa /new_mind para crear una."
         )
+    # Durante partida: para un jugador en estado playing devolver estado resumido (sin revelar manos).
+    try:
+        cid = str(chat_id).replace("'", "''")[:256]
+        current = list(
+            db.execute(
+                """
+                SELECT g.game_id, g.current_level, g.lives, g.shurikens, g.cards_played
+                FROM the_mind_games g
+                JOIN the_mind_players p ON p.game_id = g.game_id
+                WHERE g.status = 'playing' AND p.chat_id = ?
+                ORDER BY g.rowid DESC
+                LIMIT 1
+                """,
+                (cid,),
+            )
+        )
+        if current:
+            game_id, lvl, lives, stars, cards_played = current[0]
+            total_remaining_rows = list(
+                db.execute(
+                    "SELECT cards FROM the_mind_players WHERE game_id = ?",
+                    (game_id,),
+                )
+            )
+            remaining = sum(len(list(r[0] or [])) for r in total_remaining_rows)
+            cards_table = list(cards_played or [])
+            return _telegram_safe(
+                f"🧠 Nivel: {int(lvl or 1)} | Vidas: {int(lives or 0)} | Estrellas: {int(stars or 0)}\n"
+                f"Cartas en mesa: {cards_table} | Cartas restantes: {remaining}"
+            )
+    except Exception:
+        pass
+
     lines: list[str] = []
     for r in rows:
         gid, st, lvl, lives, n = r[0], r[1], r[2], r[3], r[4]
@@ -935,6 +1155,10 @@ def execute_start_mind(
     try:
         _ensure_the_mind_schema(db)
         tid = str(tenant_id or "default").strip() or "default"
+        starter_id = str(requester_id or "").strip() or str(chat_id or "").strip()
+        starter_role = _get_authorized_role(db, tenant_id=tid, user_id=starter_id)
+        if starter_role != "admin":
+            return _telegram_safe("Solo el admin puede iniciar la partida.")
         ok_host, err_host = _team_allows_user(db, tid, requester_id)
         if not ok_host:
             return _telegram_safe(err_host)
@@ -1000,7 +1224,7 @@ def execute_start_mind(
             return _telegram_safe(
                 f"Solo hay {count} jugador(es) en la partida {game_id}. "
                 "Se necesitan al menos 2: cada uno debe enviar `/join "
-                f"{game_id}` por DM con el bot. Usa /game para ver el estado. "
+                f"{game_id}` por DM con el bot. Usa /games para ver el estado. "
                 "(Modo 1 jugador: define DUCKCLAW_THE_MIND_ALLOW_SOLO=true en el gateway.)"
             )
 
@@ -1014,10 +1238,30 @@ def execute_start_mind(
             (game_id,),
         )
         deal_res = deal_cards_for_level(db, game_id, 1)
+        # Mensaje proactivo individual tras reparto inicial.
+        try:
+            players = list(
+                db.execute(
+                    "SELECT chat_id, cards FROM the_mind_players WHERE game_id = ?",
+                    (game_id,),
+                )
+            )
+            for pchat, cards in players:
+                hand_count = len(list(cards or []))
+                send_telegram_dm(
+                    str(pchat or ""),
+                    (
+                        f"🧠 Nivel 1 — tienes {hand_count} carta(s). Cuando quieras jugar una, "
+                        "escribe /play <número>. No le digas tu carta a nadie."
+                    ),
+                )
+        except Exception:
+            pass
         broad_res = broadcast_message_to_players(
             db,
             game_id,
-            "¡El Nivel 1 ha comenzado! Concéntrense... 🤫",
+            "🎮 ¡La partida ha comenzado! Recuerden: sin comunicación. "
+            "Jueguen en orden ascendente. Vidas: 3 | Estrellas: 1",
         )
         return _telegram_safe(
             f"🧠 Partida {game_id} iniciada (Nivel 1 en BD).\n"
@@ -1070,7 +1314,13 @@ def execute_deal(db: Any, chat_id: Any, args: str) -> str:
         return _telegram_safe(f"No se pudo repartir: {e}")
 
 
-def execute_play_mind(db: Any, chat_id: Any, args: str) -> str:
+def execute_play_mind(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    tenant_id: Any = None,
+) -> str:
     """/play <numero>: juega una carta en The Mind usando the_mind_games/the_mind_players."""
     num_str = (args or "").strip()
     if not num_str:
@@ -1084,7 +1334,8 @@ def execute_play_mind(db: Any, chat_id: Any, args: str) -> str:
 
     cid = str(chat_id).replace("'", "''")[:256]
     uname = get_chat_state(db, chat_id, "username") or ""
-    uname_display = f"@{uname}" if uname else "Un jugador"
+    tid = str(tenant_id or "default").strip() or "default"
+    uname_display = _player_label(uname, cid, db=db, tenant_id=tid)
 
     try:
         _ensure_the_mind_schema(db)
@@ -1110,6 +1361,15 @@ def execute_play_mind(db: Any, chat_id: Any, args: str) -> str:
             )
         game_id, cards_played_arr, current_level, _st = rows[0]
         cards_played = list(cards_played_arr or [])
+        _insert_mind_move(
+            db,
+            game_id=str(game_id),
+            chat_id=cid,
+            username=uname or "",
+            move_type="play_attempt",
+            card_value=num,
+            level=int(current_level or 1),
+        )
 
         prow = list(
             db.execute(
@@ -1130,19 +1390,25 @@ def execute_play_mind(db: Any, chat_id: Any, args: str) -> str:
             )
 
         lower_exists = False
-        other_rows = list(
+        offender_name = ""
+        offender_card: int | None = None
+        all_rows_for_validation = list(
             db.execute(
-                "SELECT chat_id, cards FROM the_mind_players WHERE game_id = ? AND chat_id <> ?",
-                (game_id, cid),
+                "SELECT chat_id, username, cards FROM the_mind_players WHERE game_id = ?",
+                (game_id,),
             )
         )
-        for _ochat, ocards in other_rows:
-            if ocards:
-                for c in ocards:
-                    if c < num:
+        for pchat, puname, pcards in all_rows_for_validation:
+            if pcards:
+                for c in pcards:
+                    if int(c) < num:
                         lower_exists = True
+                        if offender_card is None or int(c) < offender_card:
+                            offender_card = int(c)
+                            offender_name = _player_label(puname, pchat, db=db, tenant_id=tid)
                         break
-            if lower_exists:
+            if lower_exists and offender_card is not None and offender_card == 1:
+                # No puede existir carta menor que 1; corte rápido.
                 break
 
         if lower_exists:
@@ -1156,33 +1422,145 @@ def execute_play_mind(db: Any, chat_id: Any, args: str) -> str:
 
             all_hands = list(
                 db.execute(
-                    "SELECT chat_id, cards FROM the_mind_players WHERE game_id = ?",
+                    "SELECT chat_id, username, cards FROM the_mind_players WHERE game_id = ?",
                     (game_id,),
                 )
             )
-            for pch, pcards in all_hands:
+            discarded_notes: list[str] = []
+            discarded_count = 0
+            for pch, puname, pcards in all_hands:
                 raw = list(pcards or [])
+                discarded_cards = sorted(int(c) for c in raw if c < num)
                 new_hand = [c for c in raw if c >= num]
+                # En penalización, la carta jugada también sale de la mano del actor.
+                if str(pch or "") == cid:
+                    removed_played = False
+                    actor_hand: list[int] = []
+                    for c in new_hand:
+                        if not removed_played and int(c) == int(num):
+                            removed_played = True
+                            continue
+                        actor_hand.append(int(c))
+                    new_hand = actor_hand
                 db.execute(
                     "UPDATE the_mind_players SET cards = ? WHERE game_id = ? AND chat_id = ?",
                     (new_hand, game_id, pch),
                 )
+                owner = _player_label(puname, pch, db=db, tenant_id=tid)
+                for dc in discarded_cards:
+                    _insert_mind_move(
+                        db,
+                        game_id=str(game_id),
+                        chat_id=str(pch or ""),
+                        username=str(puname or ""),
+                        move_type="discarded",
+                        card_value=int(dc),
+                        level=int(current_level or 1),
+                    )
+                    discarded_notes.append(f"{owner} tenía el {dc} (descartado)")
+                    discarded_count += 1
             db.execute(
                 "UPDATE the_mind_games SET lives = ? WHERE game_id = ?",
                 (new_lives, game_id),
             )
+            _insert_mind_move(
+                db,
+                game_id=str(game_id),
+                chat_id=cid,
+                username=uname or "",
+                move_type="play_error_life_lost",
+                card_value=num,
+                level=int(current_level or 1),
+            )
+            if new_lives <= 0:
+                db.execute("UPDATE the_mind_games SET status = 'lost' WHERE game_id = ?", (game_id,))
+
+            hands_after_penalty = list(
+                db.execute("SELECT cards FROM the_mind_players WHERE game_id = ?", (game_id,))
+            )
+            level_done_after_penalty = all(len(list(h[0] or [])) == 0 for h in hands_after_penalty)
+            lvl_now = int(current_level or 1)
             _mind_tx_commit(db)
             try:
-                broadcast_message_to_players(
-                    db,
-                    game_id,
-                    f"❌ Error de sincronía: {uname_display} jugó {num} con cartas menores en juego. "
-                    f"Pierden 1 vida (restantes: {new_lives}).",
+                _obs = get_obs_logger("duckclaw.fly")
+                log_fly(
+                    _obs,
+                    "/play penalty -> game_id=%s discarded=%s lives=%s",
+                    str(game_id),
+                    discarded_count,
+                    new_lives,
                 )
             except Exception:
                 pass
+            try:
+                _ = discarded_notes
+                broadcast_message_to_players(
+                    db,
+                    game_id,
+                    f"💀 {uname_display} jugó el {num} pero {offender_name or 'unknown'} tenía el {offender_card or '?'} (descartado). "
+                    f"Vidas restantes: {new_lives}",
+                    exclude_chat_id=cid,
+                )
+                if new_lives <= 0:
+                    broadcast_message_to_players(
+                        db,
+                        game_id,
+                        f"💀 Game over. Llegaron al Nivel {int(current_level or 1)}. ¡Buen intento!",
+                        exclude_chat_id=cid,
+                    )
+            except Exception:
+                pass
+            if new_lives <= 0:
+                return _telegram_safe(
+                    f"💀 Game over. Llegaron al Nivel {int(current_level or 1)}. ¡Buen intento!"
+                )
+            if level_done_after_penalty:
+                if lvl_now >= _THE_MIND_MAX_LEVEL:
+                    db.execute(
+                        "UPDATE the_mind_games SET status = 'won' WHERE game_id = ?",
+                        (game_id,),
+                    )
+                    try:
+                        broadcast_message_to_players(
+                            db,
+                            game_id,
+                            f"🏆 ¡Victoria! Han completado los {_THE_MIND_MAX_LEVEL} niveles.",
+                            exclude_chat_id=cid,
+                        )
+                    except Exception:
+                        pass
+                    return _telegram_safe("🏆 ¡Victoria! Han completado todos los niveles.")
+                next_lvl = lvl_now + 1
+                db.execute(
+                    "UPDATE the_mind_games SET cards_played = ARRAY[]::INTEGER[] WHERE game_id = ?",
+                    (game_id,),
+                )
+                try:
+                    broadcast_message_to_players(
+                        db,
+                        game_id,
+                        f"🎉 ¡Nivel {lvl_now} superado! Subiendo al Nivel {next_lvl}...",
+                        exclude_chat_id=cid,
+                    )
+                    deal_cards_for_level(db, game_id, next_lvl, exclude_chat_id=cid)
+                except Exception:
+                    pass
+                try:
+                    sender_rows = list(
+                        db.execute(
+                            "SELECT cards FROM the_mind_players WHERE game_id = ? AND chat_id = ? LIMIT 1",
+                            (game_id, cid),
+                        )
+                    )
+                    sender_hand = sorted(int(c) for c in list((sender_rows[0][0] if sender_rows else []) or []))
+                except Exception:
+                    sender_hand = []
+                return _telegram_safe(
+                    f"🎉 ¡Nivel {lvl_now} superado! Subiendo al Nivel {next_lvl}...\n"
+                    f"🃏 Tus nuevas cartas: {sender_hand}"
+                )
             return _telegram_safe(
-                f"❌ ¡ERROR! {uname_display} jugó el {num}, pero alguien tenía una carta menor. "
+                f"❌ ¡ERROR! {uname_display} jugó el {num}, pero {offender_name or 'unknown'} tenía una carta menor. "
                 f"Pierden 1 vida. Vidas restantes: {new_lives}."
             )
 
@@ -1197,18 +1575,38 @@ def execute_play_mind(db: Any, chat_id: Any, args: str) -> str:
             "UPDATE the_mind_games SET cards_played = ? WHERE game_id = ?",
             (cards_played_sorted, game_id),
         )
+        _insert_mind_move(
+            db,
+            game_id=str(game_id),
+            chat_id=cid,
+            username=uname or "",
+            move_type="play_ok",
+            card_value=num,
+            level=int(current_level or 1),
+        )
 
         lvl_now = int(current_level or 1)
         hands_after = list(
             db.execute("SELECT cards FROM the_mind_players WHERE game_id = ?", (game_id,))
         )
         level_done = all(len(list(h[0] or [])) == 0 for h in hands_after)
+        cards_remaining = sum(len(list(h[0] or [])) for h in hands_after)
 
         _mind_tx_commit(db)
 
         msg = (
             f"✅ {uname_display} jugó el {num}. Cartas jugadas en este nivel: {cards_played_sorted}."
         )
+        try:
+            broadcast_message_to_players(
+                db,
+                game_id,
+                f"✅ {uname_display} jugó el {num}. "
+                f"Mesa: {cards_played_sorted} | Cartas restantes: {cards_remaining}",
+                exclude_chat_id=cid,
+            )
+        except Exception:
+            pass
 
         if level_done:
             if lvl_now >= _THE_MIND_MAX_LEVEL:
@@ -1228,13 +1626,27 @@ def execute_play_mind(db: Any, chat_id: Any, args: str) -> str:
                     "UPDATE the_mind_games SET cards_played = ARRAY[]::INTEGER[] WHERE game_id = ?",
                     (game_id,),
                 )
-                deal_cards_for_level(db, game_id, next_lvl)
                 broadcast_message_to_players(
                     db,
                     game_id,
-                    f"🎉 ¡Nivel {lvl_now} superado! Comienza el Nivel {next_lvl}.",
+                    f"🎉 ¡Nivel {lvl_now} superado! Subiendo al Nivel {next_lvl}...",
+                    exclude_chat_id=cid,
                 )
-                msg += f" 🎉 ¡Nivel {lvl_now} completado! Repartido el Nivel {next_lvl}."
+                deal_cards_for_level(db, game_id, next_lvl, exclude_chat_id=cid)
+                try:
+                    sender_rows = list(
+                        db.execute(
+                            "SELECT cards FROM the_mind_players WHERE game_id = ? AND chat_id = ? LIMIT 1",
+                            (game_id, cid),
+                        )
+                    )
+                    sender_hand = sorted(int(c) for c in list((sender_rows[0][0] if sender_rows else []) or []))
+                except Exception:
+                    sender_hand = []
+                msg += (
+                    f" 🎉 ¡Nivel {lvl_now} completado! Repartido el Nivel {next_lvl}.\n"
+                    f"🃏 Tus nuevas cartas: {sender_hand}"
+                )
             return _telegram_safe(msg)
 
         return _telegram_safe(msg)
@@ -1244,6 +1656,36 @@ def execute_play_mind(db: Any, chat_id: Any, args: str) -> str:
         except Exception:
             pass
         return _telegram_safe(f"No se pudo registrar la jugada: {e}")
+
+
+def execute_cards(db: Any, chat_id: Any, args: str) -> str:
+    """/cards: muestra las cartas activas del jugador en su partida en curso."""
+    _ = args
+    try:
+        _ensure_the_mind_schema(db)
+        cid = str(chat_id).replace("'", "''")[:256]
+        rows = list(
+            db.execute(
+                """
+                SELECT p.cards
+                FROM the_mind_players p
+                JOIN the_mind_games g ON g.game_id = p.game_id
+                WHERE p.chat_id = ? AND g.status = 'playing'
+                ORDER BY g.rowid DESC
+                LIMIT 1
+                """,
+                (cid,),
+            )
+        )
+        if not rows:
+            return _telegram_safe("No estás en ninguna partida en curso.")
+        cards = list(rows[0][0] or [])
+        if not cards:
+            return _telegram_safe("No te quedan cartas en este nivel.")
+        cards_sorted = sorted(int(c) for c in cards)
+        return _telegram_safe(f"🃏 Tus cartas: {', '.join(str(c) for c in cards_sorted)}")
+    except Exception as e:
+        return _telegram_safe(f"No se pudo consultar tus cartas: {e}")
 
 def execute_context_toggle(db: Any, chat_id: Any, on_off: str) -> str:
     """/context on|off: activa o desactiva inyección de memoria a largo plazo."""
@@ -1711,8 +2153,10 @@ def execute_help(db: Any, chat_id: Any) -> str:
         (_telegram_safe("/new_mind"), _telegram_safe("The Mind: crear partida (alias de /new_game the_mind)")),
         (_telegram_safe("/join <game_id>"), _telegram_safe("The Mind: unirse a partida")),
         (_telegram_safe("/start_mind [game_id]"), _telegram_safe("The Mind: iniciar y repartir Nivel 1")),
-        (_telegram_safe("/game"), _telegram_safe("The Mind: listar partidas waiting/playing")),
+        (_telegram_safe("/games"), _telegram_safe("The Mind: listar partidas waiting/playing")),
         (_telegram_safe("/play <n>"), _telegram_safe("The Mind: jugar carta")),
+        (_telegram_safe("/cards"), _telegram_safe("The Mind: ver tus cartas activas (DM)")),
+        (_telegram_safe("/shuriken"), _telegram_safe("The Mind: votar uso de estrella ninja")),
         (_telegram_safe("/setup"), _telegram_safe("Config key=value")),
         (_telegram_safe("/approve"), _telegram_safe("Aprobar última acción")),
         (_telegram_safe("/reject"), _telegram_safe("Rechazar última acción")),
@@ -1775,13 +2219,23 @@ def _dispatch_fly_command(
             db, chat_id, args, requester_id=requester_id, tenant_id=tenant_id
         )
     if name in ("game", "games", "mind_games"):
-        return execute_list_mind_games(db, chat_id, args)
+        return execute_list_mind_games(
+            db,
+            chat_id,
+            args,
+            requester_id=requester_id,
+            tenant_id=tenant_id,
+        )
     if name == "start_game":
         return execute_start_game(db, chat_id, args)
     if name == "deal":
         return execute_deal(db, chat_id, args)
     if name == "play":
-        return execute_play_mind(db, chat_id, args)
+        return execute_play_mind(db, chat_id, args, tenant_id=tenant_id)
+    if name == "cards":
+        return execute_cards(db, chat_id, args)
+    if name == "shuriken":
+        return execute_shuriken(db, chat_id, args, tenant_id=tenant_id)
     if name == "context":
         return execute_context_toggle(db, chat_id, args)
     if name in ("sandbox", "sandox"):
@@ -1807,6 +2261,131 @@ def _dispatch_fly_command(
     if name == "history":
         return execute_history(db, chat_id, args)
     return None
+
+
+def execute_shuriken(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    tenant_id: Any = None,
+) -> str:
+    """/shuriken: voto para usar estrella ninja. Se aplica cuando votan todos los jugadores activos."""
+    _ = args
+    try:
+        _ensure_the_mind_schema(db)
+        tid = str(tenant_id or "default").strip() or "default"
+        cid = str(chat_id).replace("'", "''")[:256]
+        rows = list(
+            db.execute(
+                """
+                SELECT g.game_id, g.current_level, g.shurikens, g.status, p.username
+                FROM the_mind_games g
+                JOIN the_mind_players p ON p.game_id = g.game_id
+                WHERE g.status = 'playing' AND p.chat_id = ?
+                ORDER BY g.rowid DESC
+                LIMIT 1
+                """,
+                (cid,),
+            )
+        )
+        if not rows:
+            return _telegram_safe("No encontré ninguna partida en juego asociada a este chat.")
+        game_id, lvl, stars, status, uname = rows[0]
+        if str(status or "").strip().lower() != "playing":
+            return _telegram_safe("La partida no está en juego.")
+        stars_i = int(stars or 0)
+        if stars_i <= 0:
+            return _telegram_safe("No quedan estrellas disponibles.")
+
+        player_rows = list(
+            db.execute("SELECT chat_id, username, cards FROM the_mind_players WHERE game_id = ?", (game_id,))
+        )
+        if not player_rows:
+            return _telegram_safe("No hay jugadores en esta partida.")
+        active_players = [(str(r[0] or ""), str(r[1] or ""), list(r[2] or [])) for r in player_rows]
+        active_chat_ids = [p[0] for p in active_players if p[0]]
+        if cid not in active_chat_ids:
+            return _telegram_safe("No estás registrado en esta partida.")
+
+        vote_rows = list(
+            db.execute(
+                """
+                SELECT DISTINCT chat_id
+                FROM the_mind_moves
+                WHERE game_id = ? AND move_type = 'shuriken_vote' AND level = ?
+                """,
+                (game_id, int(lvl or 1)),
+            )
+        )
+        votes = {str(v[0] or "") for v in vote_rows if v and v[0]}
+        if cid not in votes:
+            _insert_mind_move(
+                db,
+                game_id=str(game_id),
+                chat_id=cid,
+                username=str(uname or ""),
+                move_type="shuriken_vote",
+                level=int(lvl or 1),
+            )
+            votes.add(cid)
+
+        active_set = {p[0] for p in active_players if p[0]}
+        if votes >= active_set:
+            discarded_parts: list[str] = []
+            for pchat, puname, cards in active_players:
+                if not cards:
+                    continue
+                lowest = min(cards)
+                # Quitar una sola ocurrencia de la menor
+                removed = False
+                final_cards: list[int] = []
+                for c in cards:
+                    if not removed and c == lowest:
+                        removed = True
+                        continue
+                    final_cards.append(c)
+                db.execute(
+                    "UPDATE the_mind_players SET cards = ? WHERE game_id = ? AND chat_id = ?",
+                    (final_cards, game_id, pchat),
+                )
+                discarded_parts.append(
+                    f"{_player_label(puname, pchat, db=db, tenant_id=tid)} descartó el {lowest}"
+                )
+                _insert_mind_move(
+                    db,
+                    game_id=str(game_id),
+                    chat_id=str(pchat),
+                    username=str(puname or ""),
+                    move_type="shuriken_discard",
+                    card_value=int(lowest),
+                    level=int(lvl or 1),
+                )
+            new_stars = max(stars_i - 1, 0)
+            db.execute("UPDATE the_mind_games SET shurikens = ? WHERE game_id = ?", (new_stars, game_id))
+            try:
+                broadcast_message_to_players(
+                    db,
+                    game_id,
+                    f"⭐ Estrella usada. {', '.join(discarded_parts)}. Estrellas restantes: {new_stars}",
+                    exclude_chat_id=cid,
+                )
+            except Exception:
+                pass
+            return _telegram_safe(
+                f"⭐ Estrella usada. {', '.join(discarded_parts)}. Estrellas restantes: {new_stars}"
+            )
+
+        actor = _player_label(uname, cid, db=db, tenant_id=tid)
+        for pchat, _, _ in active_players:
+            if pchat and pchat != cid:
+                send_telegram_dm(
+                    pchat,
+                    f"{actor} quiere usar la estrella. Envía /shuriken para confirmar.",
+                )
+        return _telegram_safe("⭐ Voto registrado. Esperando a los demás...")
+    except Exception as e:
+        return _telegram_safe(f"No se pudo procesar /shuriken: {e}")
 
 
 def handle_command(

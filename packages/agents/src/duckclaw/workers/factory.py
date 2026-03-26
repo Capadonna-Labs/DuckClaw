@@ -143,6 +143,20 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
             return json.dumps({"error": f"Solo se permiten las tablas: {', '.join(spec.allowed_tables)}."})
         return None
 
+    def _qualify_allowed_tables(query: str, schema_name: str) -> str:
+        """
+        Prefix allowed table names with schema when unqualified.
+        Example: FROM the_mind_games -> FROM main.the_mind_games
+        """
+        if not spec.allowed_tables:
+            return query
+        out = query
+        for table in spec.allowed_tables:
+            escaped = re.escape(table)
+            # Replace only unqualified names (not already schema.table)
+            out = re.sub(rf"(?<!\.)\b{escaped}\b", f"{schema_name}.{table}", out, flags=re.IGNORECASE)
+        return out
+
     def _read_sql_worker(query: str) -> str:
         if not query or not query.strip():
             return json.dumps({"error": "Query vacío."})
@@ -158,7 +172,23 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
             # Siempre usamos query() para lecturas
             return db.query(q)
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            err = str(e)
+            # Fallback suave: si falta esquema explícito, probar main.<tabla> y luego private.<tabla>
+            # solo cuando hay allow-list y la consulta parece SQL tabular.
+            if spec.allowed_tables and any(k in upper for k in ("FROM", "JOIN")):
+                try_main = _qualify_allowed_tables(q, "main")
+                if try_main != q:
+                    try:
+                        return db.query(try_main)
+                    except Exception:
+                        pass
+                try_private = _qualify_allowed_tables(q, "private")
+                if try_private != q:
+                    try:
+                        return db.query(try_private)
+                    except Exception:
+                        pass
+            return json.dumps({"error": err})
 
     _read_sql_worker = log_tool_execution_sync(name="read_sql")(_read_sql_worker)
 
@@ -507,10 +537,13 @@ def build_worker_graph(
 
         has_ibkr = "get_ibkr_portfolio" in tools_by_name
         tool_choice_inspect_schema = {"type": "function", "function": {"name": "inspect_schema"}}
+        tool_choice_read_sql = {"type": "function", "function": {"name": "read_sql"}}
         tool_choice_portfolio = {"type": "function", "function": {"name": "get_ibkr_portfolio"}}
 
         llm_force_schema_on = llm.bind_tools(tools, tool_choice=tool_choice_inspect_schema)
         llm_force_schema_off = llm.bind_tools(tools_sandbox_off, tool_choice=tool_choice_inspect_schema)
+        llm_force_read_sql_on = llm.bind_tools(tools, tool_choice=tool_choice_read_sql)
+        llm_force_read_sql_off = llm.bind_tools(tools_sandbox_off, tool_choice=tool_choice_read_sql)
         llm_force_portfolio_on = llm.bind_tools(tools, tool_choice=tool_choice_portfolio) if has_ibkr else None
         llm_force_portfolio_off = (
             llm.bind_tools(tools_sandbox_off, tool_choice=tool_choice_portfolio) if has_ibkr else None
@@ -543,7 +576,36 @@ def build_worker_graph(
             if not text or not text.strip():
                 return False
             t = text.strip().lower()
+            # Si piden contenido/filas de una tabla, NO forzar inspect_schema.
+            if re.search(
+                r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|contenido\s+de\s+la\s+tabla|"
+                r"muestr(a|ame)\s+la\s+tabla|ver\s+datos\s+de\s+la\s+tabla|registros?\s+de\s+la\s+tabla|"
+                r"filas?\s+de\s+la\s+tabla|select\s+\*\s+from)\b",
+                t,
+            ):
+                return False
             return any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas"))
+
+        def _is_table_content_query(text: str) -> bool:
+            if not text or not text.strip():
+                return False
+            t = text.strip().lower()
+            return bool(
+                re.search(
+                    r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|contenido\s+de\s+la\s+tabla|"
+                    r"muestr(a|ame)\s+la\s+tabla|ver\s+datos\s+de\s+la\s+tabla|registros?\s+de\s+la\s+tabla|"
+                    r"filas?\s+de\s+la\s+tabla|select\s+\*\s+from|select\s+.+\s+from)\b",
+                    t,
+                )
+            )
+
+        def _is_latest_game_query(text: str) -> bool:
+            if not text or not text.strip():
+                return False
+            t = text.strip().lower()
+            return bool(
+                re.search(r"\b(ultima|última|mas\s+reciente|más\s+reciente)\s+partida\b", t)
+            ) or ("partida" in t and ("ultima" in t or "última" in t or "reciente" in t))
 
         def agent_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
             _chat_ctx = state.get("chat_id") or state.get("session_id") or "default"
@@ -566,26 +628,35 @@ def build_worker_graph(
                         incoming = (str(m.content) or "").strip()
                         break
             is_schema = _is_schema_query(incoming)
+            is_table_content = _is_table_content_query(incoming)
+            is_latest_game = _is_latest_game_query(incoming)
             is_portfolio = has_ibkr and _is_portfolio_query(incoming)
             # No forzar herramienta si el último mensaje ya es ToolMessage (ya ejecutamos la tool):
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
             last_msg = (state.get("messages") or [])[-1] if state.get("messages") else None
             already_has_tool_result = last_msg is not None and isinstance(last_msg, ToolMessage)
             force_schema = is_schema and not already_has_tool_result
+            force_read_sql = (is_table_content or is_latest_game) and not already_has_tool_result
             force_portfolio = is_portfolio and not already_has_tool_result
 
             sandbox_enabled = _sandbox_enabled_for_state(state)
             llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
             _log.info(
-                "[%s] incoming=%r | is_schema=%s | is_portfolio=%s | forced_tool=%s",
+                "[%s] incoming=%r | is_schema=%s | is_table_content=%s | is_latest_game=%s | is_portfolio=%s | forced_tool=%s",
                 _wl,
                 incoming[:80] + ("..." if len(incoming) > 80 else ""),
                 is_schema,
+                is_table_content,
+                is_latest_game,
                 is_portfolio,
-                "inspect_schema" if force_schema else ("get_ibkr_portfolio" if force_portfolio else "auto"),
+                "inspect_schema"
+                if force_schema
+                else ("read_sql" if force_read_sql else ("get_ibkr_portfolio" if force_portfolio else "auto")),
             )
-            if force_schema:
+            if force_schema and not force_read_sql:
                 resp = (llm_force_schema_on if sandbox_enabled else llm_force_schema_off).invoke(state["messages"])
+            elif force_read_sql:
+                resp = (llm_force_read_sql_on if sandbox_enabled else llm_force_read_sql_off).invoke(state["messages"])
             elif force_portfolio:
                 forced = llm_force_portfolio_on if sandbox_enabled else llm_force_portfolio_off
                 # has_ibkr => forced should not be None

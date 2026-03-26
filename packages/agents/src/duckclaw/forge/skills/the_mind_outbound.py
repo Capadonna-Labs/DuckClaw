@@ -9,13 +9,57 @@ from __future__ import annotations
 import logging
 import os
 import random
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import requests
 from langchain_core.tools import tool
+from duckclaw.utils.logger import get_obs_logger, log_fly
 
 _log = logging.getLogger("duckclaw.the_mind_outbound")
+_obs = get_obs_logger("duckclaw.fly")
+
+
+def _preview_text(text: str, max_len: int = 50) -> str:
+    t = (text or "").replace("\n", " ").strip()
+    return t[:max_len]
+
+
+# Telegram MarkdownV2 reserved chars.
+_TELEGRAM_MD_ESCAPE = (
+    "\\",
+    "_",
+    "*",
+    "[",
+    "]",
+    "(",
+    ")",
+    "~",
+    "`",
+    ">",
+    "#",
+    "+",
+    "-",
+    "=",
+    "|",
+    "{",
+    "}",
+    ".",
+    "!",
+)
+
+
+def _telegram_safe(text: str) -> str:
+    """Escapa texto para nodos outbound configurados con Markdown/MarkdownV2."""
+    if not text:
+        return ""
+    t = str(text).replace("\\", "\\\\")
+    for c in _TELEGRAM_MD_ESCAPE:
+        if c == "\\":
+            continue
+        t = t.replace(c, "\\" + c)
+    return t
 
 
 @dataclass(frozen=True)
@@ -128,12 +172,30 @@ def send_telegram_dm(chat_id: str, text: str) -> TelegramDmOutcome:
         _log.warning("The Mind outbound: chat_id vacío, no se envía DM")
         return TelegramDmOutcome.skipped_no_chat_id()
 
-    payload = {"chat_id": cid, "user_id": cid, "text": text or ""}
+    safe_text = _telegram_safe(text or "")
+    payload = {"chat_id": cid, "user_id": cid, "text": safe_text}
     try:
+        log_fly(
+            _obs,
+            "outbound pre -> chat_id=%s url=%s text=%s",
+            cid,
+            url,
+            _preview_text(safe_text, max_len=50),
+        )
+        t0 = time.perf_counter()
         resp = requests.post(url, json=payload, headers=outbound_request_headers(), timeout=5)
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        snippet = (resp.text or "").strip().replace("\n", " ")
+        log_fly(
+            _obs,
+            "outbound post -> chat_id=%s status=%s elapsed_ms=%s body=%s",
+            cid,
+            resp.status_code,
+            elapsed_ms,
+            snippet[:500],
+        )
         if resp.ok:
             return TelegramDmOutcome.success()
-        snippet = (resp.text or "").strip().replace("\n", " ")
         _log.warning(
             "The Mind outbound: webhook respondió %s para chat_id=%s — %s",
             resp.status_code,
@@ -162,7 +224,13 @@ def _aggregate_dm_line(prefix: str, outcomes: list[TelegramDmOutcome]) -> str:
     return f"{prefix}: {ok} OK, {fail} fallido(s) ({reasons})."
 
 
-def broadcast_message_to_players(db: Any, game_id: str, message: str) -> BroadcastResult:
+def broadcast_message_to_players(
+    db: Any,
+    game_id: str,
+    message: str,
+    *,
+    exclude_chat_id: str | None = None,
+) -> BroadcastResult:
     """
     Avisos generales del juego: el mismo texto a cada DM (chat_id) de la partida.
     (Las cartas van con deal_cards: mensaje distinto por jugador.)
@@ -185,15 +253,23 @@ def broadcast_message_to_players(db: Any, game_id: str, message: str) -> Broadca
         )
 
     outcomes: list[TelegramDmOutcome] = []
+    exclude = (exclude_chat_id or "").strip()
     for (chat_id,) in rows:
-        if chat_id:
-            outcomes.append(send_telegram_dm(str(chat_id), message))
+        cid = str(chat_id or "").strip()
+        if cid and cid != exclude:
+            outcomes.append(send_telegram_dm(cid, message))
 
     line = _aggregate_dm_line("Avisos DM", outcomes)
     return BroadcastResult(line, outcomes)
 
 
-def deal_cards_for_level(db: Any, game_id: str, level: int) -> DealCardsResult:
+def deal_cards_for_level(
+    db: Any,
+    game_id: str,
+    level: int,
+    *,
+    exclude_chat_id: str | None = None,
+) -> DealCardsResult:
     """
     Reparte `level` cartas (1–100) a cada jugador, persiste en the_mind_players,
     actualiza current_level en the_mind_games y envía DM a cada jugador.
@@ -218,22 +294,37 @@ def deal_cards_for_level(db: Any, game_id: str, level: int) -> DealCardsResult:
             [],
         )
 
+    n_players = len(players)
+    total_needed = n_players * lvl
+    if total_needed > 100:
+        return DealCardsResult(
+            f"No se puede repartir nivel {lvl}: {n_players} jugador(es) requieren {total_needed} cartas únicas y el mazo es 1..100.",
+            [],
+        )
+
+    # Cartas únicas globales por nivel: sin repetición entre jugadores ni dentro de una mano.
+    deck = random.sample(range(1, 101), total_needed)
+
     outcomes: list[TelegramDmOutcome] = []
-    for chat_id, username in players:
+    exclude = (exclude_chat_id or "").strip()
+    for idx, (chat_id, username) in enumerate(players):
         if not chat_id:
             continue
-        hand = sorted(random.randint(1, 100) for _ in range(lvl))
+        cid = str(chat_id).strip()
+        start = idx * lvl
+        hand = sorted(deck[start:start + lvl])
         db.execute(
             "UPDATE the_mind_players SET cards = ? WHERE game_id = ? AND chat_id = ?",
-            (hand, game_id, chat_id),
+            (hand, game_id, cid),
         )
-        uname = username or ""
-        text = (
-            f"Tus cartas para el Nivel {lvl} son: {hand}"
-            if not uname
-            else f"{uname}, tus cartas para el Nivel {lvl} son: {hand}"
-        )
-        outcomes.append(send_telegram_dm(str(chat_id), text))
+        if cid != exclude:
+            uname = username or ""
+            text = (
+                f"Tus cartas para el Nivel {lvl} son: {hand}"
+                if not uname
+                else f"{uname}, tus cartas para el Nivel {lvl} son: {hand}"
+            )
+            outcomes.append(send_telegram_dm(cid, text))
 
     db.execute(
         "UPDATE the_mind_games SET current_level = ? WHERE game_id = ?",

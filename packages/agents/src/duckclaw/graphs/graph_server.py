@@ -242,6 +242,12 @@ class InvokeResponse(BaseModel):
     usage_tokens: dict[str, int] | None = None
 
 
+def _chat_log_identity(chat_id: str, username: str | None) -> str:
+    cid = str(chat_id or "").strip() or "unknown"
+    uname = str(username or "").strip()
+    return f"@{uname} ({cid})" if uname else cid
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.get("/", summary="Info del servidor")
@@ -284,8 +290,9 @@ async def invoke(req: InvokeRequest):
 
     t0 = time.monotonic()
     uid = (req.user_id or "").strip() or req.chat_id
+    chat_ident = _chat_log_identity(req.chat_id, req.username)
     try:
-        with structured_log_context(tenant_id=req.tenant_id, chat_id=req.chat_id, worker_id="manager"):
+        with structured_log_context(tenant_id=req.tenant_id, chat_id=chat_ident, worker_id="manager"):
             # El grafo manager se encarga de mapear state → subgrafos; general_graph usará username/chat_type.
             result = await _ainvoke(
                 graph,
@@ -323,7 +330,8 @@ async def stream(req: InvokeRequest):
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
             uid = (req.user_id or "").strip() or req.chat_id
-            with structured_log_context(tenant_id=req.tenant_id, chat_id=req.chat_id, worker_id="manager"):
+            chat_ident = _chat_log_identity(req.chat_id, req.username)
+            with structured_log_context(tenant_id=req.tenant_id, chat_id=chat_ident, worker_id="manager"):
                 invoke_result = await _ainvoke(
                     graph,
                     req.message,

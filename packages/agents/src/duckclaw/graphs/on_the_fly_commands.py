@@ -31,6 +31,7 @@ _PREFIX = "chat_"
 # Caracteres que Telegram Markdown/MarkdownV2 interpretan; escapar para evitar "Can't find end of entity"
 # MarkdownV2 requiere: _ * [ ] ( ) ~ ` > # + - = | { } . !
 _TELEGRAM_MD_ESCAPE = ("\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!")
+_TG_USER_LINK_RE = re.compile(r"\[[^\]]+\]\(tg://user\?id=\d+\)")
 
 
 def _telegram_safe(text: str) -> str:
@@ -38,12 +39,20 @@ def _telegram_safe(text: str) -> str:
     if not text:
         return ""
     t = str(text)
+    preserved: list[str] = []
+    def _stash_link(m: re.Match[str]) -> str:
+        preserved.append(m.group(0))
+        return f"TGLINKTOKEN{len(preserved)-1}"
+    # Preservar menciones tg://user?id=... para perfil real.
+    t = _TG_USER_LINK_RE.sub(_stash_link, t)
     # Escapar backslash primero para evitar doble escape
     t = t.replace("\\", "\\\\")
     for c in _TELEGRAM_MD_ESCAPE:
         if c == "\\":
             continue
         t = t.replace(c, "\\" + c)
+    for i, raw in enumerate(preserved):
+        t = t.replace(f"TGLINKTOKEN{i}", raw)
     return t
 
 
@@ -436,9 +445,9 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             uid = u.get("user_id") or ""
             uname = u.get("username") or ""
             role = (u.get("role") or "user").lower()
-            # Breve y seguro para Telegram
-            label = f"@{uname}" if uname else str(uid)
-            lines.append(_telegram_safe(f"\\- {label} \\- role={role}"))
+            # Usar mención por user_id para abrir perfil real y evitar colisiones de @username.
+            label = _player_label(uname, uid, db=db, tenant_id=tid)
+            lines.append(_telegram_safe(f"\\- {label} ({uid}) \\- role={role}"))
         return _telegram_safe(f"🦆 Usuarios autorizados (tenant '{tid}'):\n") + "\n".join(lines)
 
     if raw.startswith("--rm "):
@@ -731,12 +740,44 @@ def _team_username_by_user_id(db: Any, tenant_id: str | None, user_id: Any) -> s
 
 def _player_label(username: Any, chat_id: Any, *, db: Any | None = None, tenant_id: str | None = None) -> str:
     uname = str(username or "").strip()
+    cid = str(chat_id or "").strip() or "unknown"
     if not uname and db is not None:
         uname = _team_username_by_user_id(db, tenant_id, chat_id)
     if uname:
+        if cid.isdigit():
+            return f"[@{uname}](tg://user?id={cid})"
         return f"@{uname}"
-    cid = str(chat_id or "").strip() or "unknown"
+    if cid.isdigit():
+        return f"[{cid}](tg://user?id={cid})"
     return cid
+
+
+def _player_label_log(username: Any, chat_id: Any, *, db: Any | None = None, tenant_id: str | None = None) -> str:
+    """Formato para logs PM2: @alias (user_id)."""
+    uname = str(username or "").strip()
+    if not uname and db is not None:
+        uname = _team_username_by_user_id(db, tenant_id, chat_id)
+    cid = str(chat_id or "").strip() or "unknown"
+    return f"@{uname} ({cid})" if uname else cid
+
+
+def _chat_log_identity_for_context(
+    chat_id: Any,
+    *,
+    db: Any | None = None,
+    tenant_id: str | None = None,
+) -> str:
+    """Etiqueta para cabecera de logs PM2: @alias (user_id) con fallback a user_id."""
+    cid = str(chat_id if chat_id is not None else "unknown").strip() or "unknown"
+    uname = ""
+    if db is not None:
+        try:
+            uname = str(get_chat_state(db, chat_id, "username") or "").strip()
+        except Exception:
+            uname = ""
+        if not uname:
+            uname = _team_username_by_user_id(db, tenant_id, chat_id)
+    return f"@{uname} ({cid})" if uname else cid
 
 
 def _notify_level_up_with_private_hands(
@@ -751,12 +792,12 @@ def _notify_level_up_with_private_hands(
     try:
         rows = list(
             db.execute(
-                "SELECT chat_id, cards FROM the_mind_players WHERE game_id = ?",
+                "SELECT chat_id, username, cards FROM the_mind_players WHERE game_id = ?",
                 (game_id,),
             )
         )
         exclude = (exclude_chat_id or "").strip()
-        for pchat, cards in rows:
+        for pchat, puname, cards in rows:
             cid = str(pchat or "").strip()
             if exclude and cid == exclude:
                 continue
@@ -764,6 +805,9 @@ def _notify_level_up_with_private_hands(
             send_telegram_dm(
                 cid,
                 f"🃏 Tus nuevas cartas: {hand}",
+                username=str(puname or ""),
+                db=db,
+                tenant_id="default",
             )
     except Exception:
         pass
@@ -845,7 +889,7 @@ def _the_mind_invite_hint(db: Any, tenant_id: str | None, game_id: str) -> str:
         "• Avisos del juego (nivel, errores, victoria): el mismo texto a todos los DM de la partida.\n"
         f"• Equipo autorizado ahora:\n{team_block}\n"
         f"• Pasos: cada jugador abre DM con el bot y envía /join {game_id}.\n"
-        f"• Luego el anfitrión: /start_mind {game_id} (mínimo 2 jugadores; ver /games).\n"
+        f"• Luego el anfitrión: /start_mind {game_id} (mínimo 2 jugadores; ver /game).\n"
     )
 
 
@@ -952,7 +996,13 @@ def execute_join_game(
                 admin_uid = str(u.get("user_id") or "").strip()
                 if not admin_uid or admin_uid in sent_to:
                     continue
-                send_telegram_dm(admin_uid, notice)
+                send_telegram_dm(
+                    admin_uid,
+                    notice,
+                    username=str(u.get("username") or ""),
+                    db=db,
+                    tenant_id=tid,
+                )
                 sent_to.add(admin_uid)
         except Exception:
             # Best-effort: no bloquear el join por problemas de notificación.
@@ -972,10 +1022,50 @@ def execute_list_mind_games(
     requester_id: Any = None,
     tenant_id: Any = None,
 ) -> str:
-    """/games: listar partidas activas; admin: /games --rm <game_id>|all cancela partidas activas."""
+    """/game: listar partidas activas; /game --end cierra tu partida activa; admin: /game --rm <game_id>|all cancela partidas activas."""
     raw = (args or "").strip()
     tid = str(tenant_id or "default").strip() or "default"
     rid = str(requester_id or "").strip()
+
+    # End current player's active game (self-service)
+    if raw == "--end":
+        cid = str(chat_id).replace("'", "''")[:256]
+        try:
+            _ensure_the_mind_schema(db)
+            rows = list(
+                db.execute(
+                    """
+                    SELECT g.game_id
+                    FROM the_mind_games g
+                    JOIN the_mind_players p ON p.game_id = g.game_id
+                    WHERE p.chat_id = ? AND lower(COALESCE(g.status, '')) IN ('waiting', 'playing')
+                    ORDER BY g.rowid DESC
+                    LIMIT 1
+                    """,
+                    (cid,),
+                )
+            )
+            if not rows:
+                return _telegram_safe("No estás en ninguna partida activa.")
+            game_id = str(rows[0][0] or "").strip()
+            if not game_id:
+                return _telegram_safe("No estás en ninguna partida activa.")
+            db.execute(
+                "UPDATE the_mind_games SET status = 'cancelled' WHERE game_id = ?",
+                (game_id,),
+            )
+            try:
+                broadcast_message_to_players(
+                    db,
+                    game_id,
+                    f"🛑 Partida finalizada: {game_id}",
+                    exclude_chat_id=cid,
+                )
+            except Exception:
+                pass
+            return _telegram_safe(f"🛑 Partida finalizada: {game_id}")
+        except Exception as e:
+            return _telegram_safe(f"No se pudo finalizar la partida: {e}")
 
     # Admin-only cancel flow
     if raw.startswith("--rm "):
@@ -985,7 +1075,7 @@ def execute_list_mind_games(
 
         target = raw[5:].strip().split()[0] if raw[5:].strip() else ""
         if not target:
-            return _telegram_safe("Uso: /games --rm <game_id> | /games --rm all")
+            return _telegram_safe("Uso: /game --rm <game_id> | /game --rm all")
         try:
             _ensure_the_mind_schema(db)
             if target.lower() == "all":
@@ -1090,9 +1180,21 @@ def execute_list_mind_games(
     lines: list[str] = []
     for r in rows:
         gid, st, lvl, lives, n = r[0], r[1], r[2], r[3], r[4]
+        players_rows = list(
+            db.execute(
+                "SELECT chat_id, username FROM the_mind_players WHERE game_id = ? ORDER BY chat_id",
+                (gid,),
+            )
+        )
+        players_labels = [
+            f"{_player_label(uname, pchat, db=db, tenant_id=tid)} ({str(pchat or '').strip()})"
+            for pchat, uname in players_rows
+        ]
+        players_text = ", ".join(players_labels) if players_labels else "sin jugadores"
         lines.append(
             f"• {gid} — estado={st or '?'} | jugadores={int(n or 0)} | "
-            f"nivel={int(lvl or 1)} | vidas={int(lives or 0)}"
+            f"nivel={int(lvl or 1)} | vidas={int(lives or 0)} | "
+            f"participantes=[{players_text}]"
         )
     body = "\n".join(lines)
     return _telegram_safe(f"🧠 Partidas activas:\n{body}")
@@ -1224,7 +1326,7 @@ def execute_start_mind(
             return _telegram_safe(
                 f"Solo hay {count} jugador(es) en la partida {game_id}. "
                 "Se necesitan al menos 2: cada uno debe enviar `/join "
-                f"{game_id}` por DM con el bot. Usa /games para ver el estado. "
+                f"{game_id}` por DM con el bot. Usa /game para ver el estado. "
                 "(Modo 1 jugador: define DUCKCLAW_THE_MIND_ALLOW_SOLO=true en el gateway.)"
             )
 
@@ -1237,36 +1339,39 @@ def execute_start_mind(
             "cards_played = ARRAY[]::INTEGER[] WHERE game_id = ?",
             (game_id,),
         )
-        deal_res = deal_cards_for_level(db, game_id, 1)
-        # Mensaje proactivo individual tras reparto inicial.
-        try:
-            players = list(
-                db.execute(
-                    "SELECT chat_id, cards FROM the_mind_players WHERE game_id = ?",
-                    (game_id,),
-                )
-            )
-            for pchat, cards in players:
-                hand_count = len(list(cards or []))
-                send_telegram_dm(
-                    str(pchat or ""),
-                    (
-                        f"🧠 Nivel 1 — tienes {hand_count} carta(s). Cuando quieras jugar una, "
-                        "escribe /play <número>. No le digas tu carta a nadie."
-                    ),
-                )
-        except Exception:
-            pass
+        # Orden requerido de mensajes al iniciar:
+        # 1) anuncio global de comienzo, 2) DM "Nivel 1 ...", 3) DM con cartas.
         broad_res = broadcast_message_to_players(
             db,
             game_id,
             "🎮 ¡La partida ha comenzado! Recuerden: sin comunicación. "
             "Jueguen en orden ascendente. Vidas: 3 | Estrellas: 1",
         )
+        try:
+            players = list(
+                db.execute(
+                    "SELECT chat_id, username FROM the_mind_players WHERE game_id = ?",
+                    (game_id,),
+                )
+            )
+            for pchat, puname in players:
+                send_telegram_dm(
+                    str(pchat or ""),
+                    (
+                        "🧠 Nivel 1 — tienes 1 carta(s). Cuando quieras jugar una, "
+                        "escribe /play <número>. No le digas tu carta a nadie."
+                    ),
+                    username=str(puname or ""),
+                    db=db,
+                    tenant_id=tid,
+                )
+        except Exception:
+            pass
+        deal_res = deal_cards_for_level(db, game_id, 1)
         return _telegram_safe(
             f"🧠 Partida {game_id} iniciada (Nivel 1 en BD).\n"
-            f"• {deal_res.summary_line}\n"
-            f"• {broad_res.summary_line}"
+            f"• {broad_res.summary_line}\n"
+            f"• {deal_res.summary_line}"
         )
     except Exception as e:
         return _telegram_safe(f"No se pudo iniciar The Mind: {e}")
@@ -1391,6 +1496,8 @@ def execute_play_mind(
 
         lower_exists = False
         offender_name = ""
+        offender_chat = ""
+        offender_username = ""
         offender_card: int | None = None
         all_rows_for_validation = list(
             db.execute(
@@ -1405,6 +1512,8 @@ def execute_play_mind(
                         lower_exists = True
                         if offender_card is None or int(c) < offender_card:
                             offender_card = int(c)
+                            offender_chat = str(pchat or "")
+                            offender_username = str(puname or "")
                             offender_name = _player_label(puname, pchat, db=db, tenant_id=tid)
                         break
             if lower_exists and offender_card is not None and offender_card == 1:
@@ -1430,8 +1539,22 @@ def execute_play_mind(
             discarded_count = 0
             for pch, puname, pcards in all_hands:
                 raw = list(pcards or [])
-                discarded_cards = sorted(int(c) for c in raw if c < num)
-                new_hand = [c for c in raw if c >= num]
+                # En penalización, descartar solo la carta en conflicto detectada
+                # (offender_card) y no todas las menores a `num`.
+                discarded_cards: list[int] = []
+                new_hand: list[int] = []
+                removed_conflict = False
+                for c in raw:
+                    ci = int(c)
+                    if (
+                        offender_card is not None
+                        and not removed_conflict
+                        and ci == int(offender_card)
+                    ):
+                        discarded_cards.append(ci)
+                        removed_conflict = True
+                        continue
+                    new_hand.append(ci)
                 # En penalización, la carta jugada también sale de la mano del actor.
                 if str(pch or "") == cid:
                     removed_played = False
@@ -1485,8 +1608,10 @@ def execute_play_mind(
                 _obs = get_obs_logger("duckclaw.fly")
                 log_fly(
                     _obs,
-                    "/play penalty -> game_id=%s discarded=%s lives=%s",
+                    "/play penalty -> game_id=%s actor=%s offender=%s discarded=%s lives=%s",
                     str(game_id),
+                    _player_label_log(uname, cid, db=db, tenant_id=tid),
+                    _player_label_log(offender_username, offender_chat, db=db, tenant_id=tid),
                     discarded_count,
                     new_lives,
                 )
@@ -1512,25 +1637,14 @@ def execute_play_mind(
                 pass
             if new_lives <= 0:
                 return _telegram_safe(
+                    f"💀 {uname_display} jugó el {num} pero {offender_name or 'unknown'} tenía el {offender_card or '?'} (descartado). "
+                    f"Vidas restantes: {new_lives}\n"
                     f"💀 Game over. Llegaron al Nivel {int(current_level or 1)}. ¡Buen intento!"
                 )
             if level_done_after_penalty:
-                if lvl_now >= _THE_MIND_MAX_LEVEL:
-                    db.execute(
-                        "UPDATE the_mind_games SET status = 'won' WHERE game_id = ?",
-                        (game_id,),
-                    )
-                    try:
-                        broadcast_message_to_players(
-                            db,
-                            game_id,
-                            f"🏆 ¡Victoria! Han completado los {_THE_MIND_MAX_LEVEL} niveles.",
-                            exclude_chat_id=cid,
-                        )
-                    except Exception:
-                        pass
-                    return _telegram_safe("🏆 ¡Victoria! Han completado todos los niveles.")
-                next_lvl = lvl_now + 1
+                # Regla operativa: una penalización nunca avanza de nivel.
+                # Si tras el descarte no quedan cartas, se reinicia el mismo nivel.
+                next_lvl = lvl_now
                 db.execute(
                     "UPDATE the_mind_games SET cards_played = ARRAY[]::INTEGER[] WHERE game_id = ?",
                     (game_id,),
@@ -1539,7 +1653,7 @@ def execute_play_mind(
                     broadcast_message_to_players(
                         db,
                         game_id,
-                        f"🎉 ¡Nivel {lvl_now} superado! Subiendo al Nivel {next_lvl}...",
+                        f"⚠️ Penalización en Nivel {lvl_now}. Reiniciando Nivel {next_lvl}...",
                         exclude_chat_id=cid,
                     )
                     deal_cards_for_level(db, game_id, next_lvl, exclude_chat_id=cid)
@@ -1556,8 +1670,10 @@ def execute_play_mind(
                 except Exception:
                     sender_hand = []
                 return _telegram_safe(
-                    f"🎉 ¡Nivel {lvl_now} superado! Subiendo al Nivel {next_lvl}...\n"
-                    f"🃏 Tus nuevas cartas: {sender_hand}"
+                    f"💀 {uname_display} jugó el {num} pero {offender_name or 'unknown'} tenía el {offender_card or '?'} (descartado). "
+                    f"Vidas restantes: {new_lives}\n"
+                    f"⚠️ Penalización en Nivel {lvl_now}. Reiniciando Nivel {next_lvl}...\n"
+                    + f"🃏 Tus nuevas cartas: {sender_hand}"
                 )
             return _telegram_safe(
                 f"❌ ¡ERROR! {uname_display} jugó el {num}, pero {offender_name or 'unknown'} tenía una carta menor. "
@@ -2153,7 +2269,7 @@ def execute_help(db: Any, chat_id: Any) -> str:
         (_telegram_safe("/new_mind"), _telegram_safe("The Mind: crear partida (alias de /new_game the_mind)")),
         (_telegram_safe("/join <game_id>"), _telegram_safe("The Mind: unirse a partida")),
         (_telegram_safe("/start_mind [game_id]"), _telegram_safe("The Mind: iniciar y repartir Nivel 1")),
-        (_telegram_safe("/games"), _telegram_safe("The Mind: listar partidas waiting/playing")),
+        (_telegram_safe("/game"), _telegram_safe("The Mind: listar partidas waiting/playing")),
         (_telegram_safe("/play <n>"), _telegram_safe("The Mind: jugar carta")),
         (_telegram_safe("/cards"), _telegram_safe("The Mind: ver tus cartas activas (DM)")),
         (_telegram_safe("/shuriken"), _telegram_safe("The Mind: votar uso de estrella ninja")),
@@ -2218,7 +2334,7 @@ def _dispatch_fly_command(
         return execute_join_game(
             db, chat_id, args, requester_id=requester_id, tenant_id=tenant_id
         )
-    if name in ("game", "games", "mind_games"):
+    if name == "game":
         return execute_list_mind_games(
             db,
             chat_id,
@@ -2377,11 +2493,14 @@ def execute_shuriken(
             )
 
         actor = _player_label(uname, cid, db=db, tenant_id=tid)
-        for pchat, _, _ in active_players:
+        for pchat, puser, _ in active_players:
             if pchat and pchat != cid:
                 send_telegram_dm(
                     pchat,
                     f"{actor} quiere usar la estrella. Envía /shuriken para confirmar.",
+                    username=str(puser or ""),
+                    db=db,
+                    tenant_id=tid,
                 )
         return _telegram_safe("⭐ Voto registrado. Esperando a los demás...")
     except Exception as e:
@@ -2409,8 +2528,9 @@ def handle_command(
         cid = str(chat_id if chat_id is not None else "unknown").strip() or "unknown"
     except Exception:
         cid = "unknown"
+    chat_ident = _chat_log_identity_for_context(chat_id, db=db, tenant_id=tid)
     _fly_log = get_obs_logger("duckclaw.fly")
-    with structured_log_context(tenant_id=tid, worker_id="gateway", chat_id=cid):
+    with structured_log_context(tenant_id=tid, worker_id="gateway", chat_id=chat_ident):
         out = _dispatch_fly_command(
             db,
             chat_id,

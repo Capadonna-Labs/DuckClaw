@@ -46,6 +46,23 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     if is_db_intent and (worker_id or "").strip().lower() == "personalizable":
         override = "finanz"  # invoke_worker lo usará si finanz está en list_workers
 
+    # Última partida / partida más reciente
+    is_latest_game_intent = bool(
+        re.search(
+            r"\b(ultima|última|mas\s+reciente|más\s+reciente)\s+partida\b",
+            t,
+        )
+    ) or ("partida" in t and ("ultima" in t or "última" in t or "reciente" in t))
+    if is_latest_game_intent:
+        task = (
+            "TAREA: El usuario quiere conocer la última partida de The Mind. "
+            "Ejecuta read_sql con una consulta directa sobre the_mind_games para traer solo 1 registro "
+            "(prioriza ORDER BY game_id DESC LIMIT 1, o por created_at si esa columna existe). "
+            "Si la consulta falla por columna inexistente, corrige automáticamente y reintenta sin preguntar. "
+            "Responde con game_id, status, current_level, lives y shurikens."
+        )
+        return task, override
+
     # Nombre de la db / base de datos
     if re.search(r"\b(nombre\s+de\s+la\s+db|nombre\s+db|cual\s+es\s+el\s+nombre|nombre\s+de\s+la\s+base)\b", t) or (
         "nombre" in t and ("db" in t or "base" in t or "datos" in t)
@@ -55,6 +72,45 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
             "Ejecuta get_db_path y responde de forma proactiva: indica la db usada en texto plano (sin comillas ni negrita). En el cierre invita a /team, /tasks, /help y a crear objetivos con /goals (por defecto están vacíos). Usa 1-2 emojis si encaja."
         )
         return task, override
+    # Contenido de una tabla concreta
+    is_table_content_intent = bool(
+        re.search(
+            r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|contenido\s+de\s+la\s+tabla|"
+            r"muestr(a|ame)\s+la\s+tabla|ver\s+datos\s+de\s+la\s+tabla|registros?\s+de\s+la\s+tabla|"
+            r"filas?\s+de\s+la\s+tabla|select\s+\*\s+from)\b",
+            t,
+        )
+    )
+    if is_table_content_intent:
+        table_name: Optional[str] = None
+        m_from = re.search(r"\bfrom\s+([a-zA-Z_][\w.]*)\b", t)
+        if m_from:
+            table_name = m_from.group(1)
+        if not table_name:
+            m_tabla = re.search(r"\btabla\s+([a-zA-Z_][\w.]*)\b", t)
+            if m_tabla:
+                table_name = m_tabla.group(1)
+        if not table_name:
+            m_registros = re.search(r"\bregistros?\s+de\s+([a-zA-Z_][\w.]*)\b", t)
+            if m_registros:
+                table_name = m_registros.group(1)
+
+        if table_name:
+            task = (
+                "TAREA: El usuario quiere ver el contenido de una tabla específica. "
+                f"Ejecuta read_sql con SELECT * FROM {table_name} LIMIT 20. "
+                "Si falla por nombre/esquema, corrige al esquema válido sin pedir aclaración innecesaria. "
+                "Explica brevemente las columnas visibles y ofrece profundizar con filtros."
+            )
+            return task, override
+
+        task = (
+            "TAREA: El usuario quiere ver el contenido de una tabla específica. "
+            "Ejecuta read_sql con SELECT * FROM <tabla> LIMIT 20 (o una consulta equivalente segura), "
+            "explica brevemente las columnas visibles y ofrece profundizar con filtros."
+        )
+        return task, override
+
     # Tablas / esquema / estructura
     if re.search(
         r"\b(tablas?|tables?|esquema|schema|estructura|listar\s+tablas|disponibles)\b",
@@ -85,7 +141,19 @@ def _llm_plan(incoming: str) -> tuple[str, list[str]]:
         return "Interacción sin contenido", []
 
     lower = text.lower()
-    if "saldo" in lower or "dinero" in lower or "cuenta" in lower:
+    if "partida" in lower and ("ultima" in lower or "última" in lower or "reciente" in lower):
+        title = "Consulta de Última Partida"
+    elif (
+        re.search(
+            r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|contenido\s+de\s+la\s+tabla|"
+            r"muestr(a|ame)\s+la\s+tabla|ver\s+datos\s+de\s+la\s+tabla|registros?\s+de\s+la\s+tabla|"
+            r"filas?\s+de\s+la\s+tabla|select\s+\*\s+from)\b",
+            lower,
+        )
+        is not None
+    ):
+        title = "Consulta de Contenido de Tabla"
+    elif "saldo" in lower or "dinero" in lower or "cuenta" in lower:
         title = "Consulta de Saldo Total"
     elif "tabla" in lower or "tablas" in lower or "schema" in lower or "esquema" in lower:
         title = "Inspección de Esquema de DB"

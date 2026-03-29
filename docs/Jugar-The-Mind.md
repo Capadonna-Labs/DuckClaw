@@ -125,4 +125,112 @@ Tras Nivel 1 con 2 jugadores y jugadas correctas: manos vacías, `cards_played` 
 /play 15                  # en tu DM
 ```
 
+---
+
+## 9. ¿Como Jugarlo?
+
+1. Todos los jugadores reciben cartas numeradas (según el nivel).
+
+2. Objetivo: jugar todas las cartas en orden ascendente sin hablar ni hacer señales.
+
+3. En cualquier momento, un jugador puede poner su carta si cree que es la siguiente más baja.
+
+4. Si alguien se equivoca (por ejemplo, tenía una carta menor), se pierden vidas.
+
+5. El juego avanza por niveles, con más cartas cada vez.
+A veces hay habilidades especiales (como ver cartas o descartar).
+
+---
+
+## 10. Habilidad especial 
+
+- ⭐ Shuriken 
+
+- Para qué sirve: ayudar al grupo cuando está atascado.
+
+- Cualquier jugador puede proponer usarlo escirbiendo el comando 
+`/shuriken`
+
+- si todos los jugadores aceptan (escribiendo el mismo comando) automaticamente se descarta su carta mas baja, como si ya la hubieran jugado.
+
+- Es muy útil cuando se tiene la sospecha que alguien tiene una carta muy baja y nadie se atreve a jugar.
+
+---
+
+## 11. Guardado de las partidas
+
+- Todo se guarda en una base de datos local (llamada DuckDB) que está dentro de tu carpeta personal en el servidor. Esto significa que si el bot se apaga o se reinicia, la partida no se pierde; puedes continuar exactamente donde te quedaste.
+
+- ¿Qué información guarda?
+
+- El bot lleva dos "listas" internas para cada partida:
+
+- La Lista de la Partida: Aquí anota en qué nivel esta(del 1 al 12), cuántas vidas quedan y qué cartas ya se han puesto sobre la mesa.
+
+---
+
+## Diagrama UML
+
+```mermaid
+classDiagram
+    direction TB
+
+    class TheMindCrupier {
+        <<Worker/Agent>>
+        +String worker_id
+        +_ensure_the_mind_schema()
+        +handle_command(command)
+        +broadcast_status(game_id)
+        +send_dm(chat_id, text)
+    }
+
+    class Game {
+        <<DuckDB: the_mind_games>>
+        +String game_id
+        +String tenant_id
+        +Int current_level
+        +Int lives
+        +Int shurikens
+        +String status
+        +List~Int~ cards_played
+        +DateTime created_at
+        +new_mind()
+        +start_game()
+        +next_level()
+        +check_victory()
+    }
+
+    class Player {
+        <<DuckDB: the_mind_players>>
+        +String game_id
+        +String chat_id
+        +String user_id
+        +String username
+        +List~Int~ cards
+        +Boolean is_ready
+        +join(game_id)
+        +play_card(number)
+        +use_shuriken()
+    }
+
+    class OutboundWebhook {
+        <<Service>>
+        +String url
+        +String auth_key
+        +send_payload(json)
+    }
+
+    class TeamConfig {
+        <<Guard>>
+        +List~String~ authorized_users
+        +is_allowed(user_id)
+    }
+
+    TheMindCrupier --> Game : "Administra"
+    TheMindCrupier --> OutboundWebhook : "Envía DMs vía"
+    TheMindCrupier ..> TeamConfig : "Valida permisos"
+    Game "1" *-- "2..*" Player : "Está compuesta por"
+
+
+
 Specs adicionales: `specs/features/Motor de Juego The Mind (Multi-Channel).md`, `Multi-Channel Broadcasting (The Mind Engine).md`.

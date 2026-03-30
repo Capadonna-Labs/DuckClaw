@@ -19,6 +19,8 @@ from typing import Any, Optional
 from langchain_core.runnables import RunnableConfig
 
 from duckclaw.forge.atoms.state import ManagerAgentState
+from duckclaw.graphs.sandbox import extract_latest_sandbox_figure_base64
+from duckclaw.graphs.subagent_run_id import next_subagent_run_number
 from duckclaw.utils.langsmith_trace import get_tracing_config
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_plan, log_sys, set_log_context
 
@@ -49,6 +51,27 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
                 "TAREA: El cliente saluda. Preséntate en 2–3 frases como Leila Store (tienda de ropa): "
                 "tono cálido y directo. Menciona /catalogo para ver productos y /pedido <id> <talla> para pedir. "
                 "No digas que eres un agente de investigación ni listes herramientas genéricas.",
+                None,
+            )
+    # BI Analyst: preguntas meta (qué puedes hacer, quién eres) → el modelo a veces ignora soul.md y copia
+    # el tono genérico «Agente de Investigación Activa»; la tarea explícita lo corrige sin depender del historial.
+    if (worker_id or "").strip().lower() == "bi-analyst":
+        t_plain = (incoming or "").strip().lower()
+        if re.search(
+            r"\b(qué\s+puedes|que\s+puedes|qué\s+haces|que\s+haces|"
+            r"en\s+qué\s+puedes|en\s+que\s+puedes|"
+            r"qué\s+sabes\s+hacer|que\s+sabes\s+hacer|"
+            r"capacidades|qué\s+ofreces|que\s+ofreces|"
+            r"quién\s+eres|quien\s+eres|presentate|preséntate|"
+            r"para\s+qué\s+estás|para\s+que\s+estás)\b",
+            t_plain,
+        ):
+            return (
+                "TAREA: El usuario pregunta qué puedes hacer o pide presentarte. "
+                "Responde en español como **analista de datos / BI** sobre la base DuckDB (esquema analítico): "
+                "consultas SQL de solo lectura, get_schema_info, explain_sql, sandbox para gráficos cuando aplique. "
+                "Sé breve y concreto. **Prohibido:** usar la frase «Agente de Investigación Activa», hablar de "
+                "investigación web genérica o presentarte como asistente de investigación abstracto.",
                 None,
             )
     # Intención DB/tablas/nombre → si el rol es personalizable, usar finanz (especialista) si está disponible
@@ -491,9 +514,13 @@ def build_manager_graph(
         t0 = time.monotonic()
         reply = ""
         messages = None
+        worker_invoke: dict[str, Any] | None = None
         status = "SUCCESS"
+        agent_instance_label = ""
         try:
             global _worker_graph_cache
+            _run_n = next_subagent_run_number(tenant_id, assigned)
+            agent_instance_label = f"{assigned} {_run_n}".strip()
             worker_cache_key = f"{tenant_id}::{assigned}::{vault_db_path or db_path or ''}::{shared_db_path}"
             if worker_cache_key not in _worker_graph_cache:
                 _worker_graph_cache[worker_cache_key] = _build_worker_graph(
@@ -542,9 +569,30 @@ def build_manager_graph(
                 str(chat_id or "unknown"),
                 base=config,
             )
-            result = worker_graph.invoke(worker_state, trace_cfg)
-            reply = str(result.get("reply") or result.get("output") or "Sin respuesta.")
-            messages = result.get("messages")
+            from duckclaw.graphs.chat_heartbeat import (
+                format_delegation_heartbeat_message,
+                schedule_chat_heartbeat_dm,
+            )
+
+            _tasks_for_hb = state.get("tasks")
+            _hb_text = format_delegation_heartbeat_message(
+                state.get("plan_title"),
+                _tasks_for_hb if isinstance(_tasks_for_hb, list) else [],
+                task_summary=task_summary,
+            )
+            if agent_instance_label:
+                _hb_text = f"{agent_instance_label}\n\n{_hb_text}"
+            schedule_chat_heartbeat_dm(
+                str(tenant_id or "default").strip() or "default",
+                str(chat_id or "").strip(),
+                str(user_id or "").strip() or str(chat_id or "").strip(),
+                _hb_text,
+            )
+            worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
+            reply = str(worker_invoke.get("reply") or worker_invoke.get("output") or "Sin respuesta.")
+            if agent_instance_label and reply:
+                reply = f"{agent_instance_label}\n\n{reply}"
+            messages = worker_invoke.get("messages")
             # Log tool use para PM2 (tras manager plan)
             _tool_names = []
             for m in (messages or []):
@@ -562,6 +610,8 @@ def build_manager_graph(
             )
         except Exception as e:
             reply = str(e)[:2048]
+            if agent_instance_label and reply:
+                reply = f"{agent_instance_label}\n\n{reply}"
             status = "FAILED"
         finally:
             set_idle(chat_id)
@@ -579,6 +629,13 @@ def build_manager_graph(
         }  # type: ignore[assignment]
         if messages is not None:
             out["messages"] = messages
+        b64 = ""
+        if isinstance(worker_invoke, dict):
+            b64 = (worker_invoke.get("sandbox_photo_base64") or "").strip()
+        if not b64 and messages is not None:
+            b64 = extract_latest_sandbox_figure_base64(messages) or ""
+        if b64:
+            out["sandbox_photo_base64"] = b64
         return out
 
     graph = StateGraph(ManagerAgentState)

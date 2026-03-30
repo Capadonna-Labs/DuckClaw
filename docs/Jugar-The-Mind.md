@@ -82,6 +82,88 @@ El esquema de tablas se crea con **`_ensure_the_mind_schema`** al crear/unirse/j
 
 ---
 
+## Diagrama UML (Mermaid)
+
+Los bloques siguientes usan [Mermaid](https://mermaid.js.org/): en GitHub, GitLab, VS Code (extensión Markdown) y Cursor se **renderizan como diagramas** (SVG) sin archivo PNG aparte.
+
+### Modelo de datos (tablas DuckDB)
+
+```mermaid
+classDiagram
+    direction TB
+
+    class the_mind_games {
+        <<table>>
+        +game_id VARCHAR PK
+        +status VARCHAR
+        +current_level INTEGER
+        +lives INTEGER
+        +shurikens INTEGER
+        +cards_played INTEGER[]
+    }
+
+    class the_mind_players {
+        <<table>>
+        +game_id VARCHAR PK,FK
+        +chat_id VARCHAR PK
+        +username VARCHAR
+        +user_id VARCHAR
+        +cards INTEGER[]
+        +is_ready BOOLEAN
+    }
+
+    class the_mind_moves {
+        <<table>>
+        +game_id VARCHAR
+        +chat_id VARCHAR
+        +username VARCHAR
+        +move_type VARCHAR
+        +card_value INTEGER
+        +level INTEGER
+        +created_at TIMESTAMP
+    }
+
+    the_mind_games "1" o-- "*" the_mind_players : partida
+    the_mind_games "1" o-- "*" the_mind_moves : historial
+```
+
+### Secuencia: crear partida, unirse, iniciar y jugar carta
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant JA as Jugador A
+    participant JB as Jugador B
+    participant TG as Telegram
+    participant N as n8n
+    participant GW as API Gateway
+    participant DB as DuckDB bóveda
+
+    JA->>TG: /new_mind
+    TG->>N: webhook entrada
+    N->>GW: DM (chat_id, texto)
+    GW->>DB: INSERT the_mind_games + jugador creador
+    GW-->>N: respuesta
+    N-->>TG: sendMessage
+
+    JB->>TG: /join game_id
+    TG->>GW: (vía n8n)
+    GW->>DB: INSERT/UPDATE the_mind_players
+
+    JA->>TG: /start_mind
+    TG->>GW: (vía n8n)
+    GW->>DB: estado playing, reparto nivel 1
+    GW->>N: outbound JSON (chat_id, text) por jugador
+    N->>TG: DM mano a cada chat_id
+
+    JA->>TG: /play n
+    TG->>GW: (vía n8n)
+    GW->>DB: validación atómica, vidas/mesas
+    GW->>N: avisos broadcast a la partida
+```
+
+---
+
 ## 5. Flujo recomendado (2 jugadores)
 
 1. Ambos usuarios deben estar en **`/team`** del tenant (Telegram Guard).

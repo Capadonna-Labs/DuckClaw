@@ -26,35 +26,12 @@ from duckclaw.forge.skills.the_mind_outbound import (
     send_telegram_dm,
 )
 from duckclaw.utils.logger import get_obs_logger, log_fly, structured_log_context
+from duckclaw.utils.telegram_markdown_v2 import (
+    TELEGRAM_MARKDOWN_V2_SPECIAL,
+    escape_telegram_markdown_v2 as _telegram_safe,
+)
 
 _PREFIX = "chat_"
-
-# Caracteres que Telegram Markdown/MarkdownV2 interpretan; escapar para evitar "Can't find end of entity"
-# MarkdownV2 requiere: _ * [ ] ( ) ~ ` > # + - = | { } . !
-_TELEGRAM_MD_ESCAPE = ("\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!")
-_TG_USER_LINK_RE = re.compile(r"\[[^\]]+\]\(tg://user\?id=\d+\)")
-
-
-def _telegram_safe(text: str) -> str:
-    """Escapa caracteres para que el texto sea seguro con parse_mode=Markdown o MarkdownV2 en Telegram."""
-    if not text:
-        return ""
-    t = str(text)
-    preserved: list[str] = []
-    def _stash_link(m: re.Match[str]) -> str:
-        preserved.append(m.group(0))
-        return f"TGLINKTOKEN{len(preserved)-1}"
-    # Preservar menciones tg://user?id=... para perfil real.
-    t = _TG_USER_LINK_RE.sub(_stash_link, t)
-    # Escapar backslash primero para evitar doble escape
-    t = t.replace("\\", "\\\\")
-    for c in _TELEGRAM_MD_ESCAPE:
-        if c == "\\":
-            continue
-        t = t.replace(c, "\\" + c)
-    for i, raw in enumerate(preserved):
-        t = t.replace(f"TGLINKTOKEN{i}", raw)
-    return t
 
 
 def unescape_telegram_markdown_v2_layers(text: str, max_layers: int = 4) -> str:
@@ -70,7 +47,7 @@ def unescape_telegram_markdown_v2_layers(text: str, max_layers: int = 4) -> str:
     """
     if not text:
         return ""
-    esc = frozenset(_TELEGRAM_MD_ESCAPE)
+    esc = frozenset(TELEGRAM_MARKDOWN_V2_SPECIAL)
     t = str(text)
     for _ in range(max(1, int(max_layers))):
         out: list[str] = []
@@ -460,25 +437,44 @@ def execute_team(
     return _telegram_safe(f"✅ Equipo de este chat: {', '.join(valid)}. El manager delegará solo a estos.")
 
 
-def _the_mind_gateway_fixed_db_path() -> str | None:
+def _dedicated_gateway_db_path_for_vault() -> str | None:
     """
-    TheMind-Gateway usa una sola DuckDB (the_mind.duckdb), no el registry multi-bóveda
-    de system.duckdb (que sigue apuntando a finanzdb1 para el mismo user_id).
+    Misma regla que el API Gateway: api_gateways_pm2.json + DUCKCLAW_DB_PATH
+    (evita /vault y fly mostrando finanzdb1 del registry en gateways dedicados).
     """
-    if (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip() != "TheMind-Gateway":
-        return None
-    p = (os.environ.get("DUCKCLAW_DB_PATH") or "").strip()
-    return p or None
+    from duckclaw.pm2_gateway_db import dedicated_gateway_db_path_resolved
+
+    return dedicated_gateway_db_path_resolved()
+
+
+def _dedicated_gateway_vault_label() -> str:
+    proc = (
+        (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
+        or (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
+    )
+    pretty = {
+        "TheMind-Gateway": "The Mind",
+        "Leila-Gateway": "Leila",
+        "BI-Analyst-Gateway": "BI Analyst",
+        "SIATA-Gateway": "SIATA Analyst",
+        "Finanz-Gateway": "Finanz",
+    }
+    if proc in pretty:
+        return pretty[proc]
+    if proc:
+        return proc.replace("-Gateway", "").replace("-", " ").strip() or "este gateway"
+    return "este gateway"
 
 
 def execute_vault(args: str, *, vault_user_id: Any) -> str:
     user_id = (str(vault_user_id or "").strip() or "default")
     raw = (args or "").strip()
-    fixed_db = _the_mind_gateway_fixed_db_path()
+    fixed_db = _dedicated_gateway_db_path_for_vault()
     if fixed_db:
         from pathlib import Path as _P
 
         fp = _P(fixed_db).expanduser().resolve()
+        label = _dedicated_gateway_vault_label()
         if not raw:
             size = 0
             try:
@@ -486,10 +482,8 @@ def execute_vault(args: str, *, vault_user_id: Any) -> str:
             except Exception:
                 pass
             return _telegram_safe(
-                f"🗄 BD de este gateway (The Mind): {fp.name}\n"
-                f"Ruta: {fp}\nTamaño: {size} bytes\n\n"
-                "Aquí no se usa el registry de bóvedas de Finanz (list/use/new/rm). "
-                "Finanz corre en otro proceso PM2 con su propia BD."
+                f"🗄 BD de este gateway ({label}): {fp.name}\n"
+                f"Ruta: {fp}\nTamaño: {size} bytes"
             )
         tokens = raw.split()
         cmd = (tokens[0] or "").strip().lower()
@@ -497,12 +491,12 @@ def execute_vault(args: str, *, vault_user_id: Any) -> str:
             cmd = cmd[2:]
         if cmd in ("list", "new", "use", "rm"):
             return _telegram_safe(
-                "En TheMind-Gateway solo existe la BD del juego (the_mind). "
+                f"En este gateway ({label}) solo aplica la BD anterior. "
                 "Los comandos /vault list|new|use|rm son del registry multi-bóveda en Finanz; "
                 "aquí no aplican. Usa /vault sin argumentos para ver la ruta."
             )
         return _telegram_safe(
-            "Usa /vault sin argumentos para ver la BD de The Mind. "
+            f"Usa /vault sin argumentos para ver la BD de {label}. "
             "Comandos adicionales del registry no aplican en este gateway."
         )
     if not raw:
@@ -2060,6 +2054,53 @@ def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
     return _telegram_safe(f"Uso: /sandbox on|off\nEstado actual: {status}.")
 
 
+def execute_heartbeat(db: Any, chat_id: Any, on_off: str, *, tenant_id: Any = None) -> str:
+    """/heartbeat on|off — DM proactivos vía webhook mientras el agente ejecuta herramientas (Redis + N8N_OUTBOUND)."""
+    from duckclaw.graphs.chat_heartbeat import (
+        heartbeat_redis_configured,
+        is_chat_heartbeat_enabled,
+        set_chat_heartbeat_enabled,
+    )
+
+    tid = str(tenant_id or "default").strip() or "default"
+    cid = str(chat_id if chat_id is not None else "unknown").strip() or "unknown"
+    v = (on_off or "").strip().lower()
+
+    if not heartbeat_redis_configured():
+        return _telegram_safe(
+            "Heartbeat requiere Redis (REDIS_URL o DUCKCLAW_REDIS_URL). Sin eso no se puede guardar el estado."
+        )
+
+    if v in ("on", "1", "true", "sí", "si"):
+        if is_chat_heartbeat_enabled(tid, cid):
+            return _telegram_safe("✅ Heartbeat ya estaba activado.")
+        ok, err = set_chat_heartbeat_enabled(tid, cid, True)
+        if not ok:
+            return _telegram_safe(f"No se pudo activar heartbeat: {err}")
+        _hb_url = (
+            (os.environ.get("DUCKCLAW_HEARTBEAT_WEBHOOK_URL") or "")
+            or (os.environ.get("N8N_OUTBOUND_WEBHOOK_URL") or "")
+        ).strip()
+        if not _hb_url:
+            return _telegram_safe(
+                "Heartbeat activado en Redis, pero falta DUCKCLAW_HEARTBEAT_WEBHOOK_URL o N8N_OUTBOUND_WEBHOOK_URL; "
+                "no se enviarán DMs hasta configurar el webhook de salida."
+            )
+        return _telegram_safe(
+            "✅ Heartbeat activado. Te avisaré por DM mientras uso herramientas."
+        )
+    if v in ("off", "0", "false"):
+        if not is_chat_heartbeat_enabled(tid, cid):
+            return _telegram_safe("Heartbeat ya estaba desactivado.")
+        ok, err = set_chat_heartbeat_enabled(tid, cid, False)
+        if not ok:
+            return _telegram_safe(f"No se pudo desactivar heartbeat: {err}")
+        return _telegram_safe("✅ Heartbeat desactivado.")
+
+    st = "on" if is_chat_heartbeat_enabled(tid, cid) else "off"
+    return _telegram_safe(f"Heartbeat: {st}\nUso: /heartbeat on | /heartbeat off")
+
+
 def execute_audit(db: Any, chat_id: Any) -> str:
     """/audit: evidencia de la última ejecución (SQL, latencia, run_id)."""
     raw = get_chat_state(db, chat_id, "last_audit")
@@ -2313,7 +2354,10 @@ def execute_tasks(db: Any, chat_id: Any) -> str:
             elapsed_s = f" · {int(time.time()) - int(started_at)}s"
         except Exception:
             pass
-    worker_s = f" · {_telegram_safe(worker_id)}" if worker_id else ""
+    # Guión en worker_id (p. ej. SIATA-Analyst) obliga a \- en MarkdownV2; muchos clientes muestran el \ literal.
+    # Mismo criterio que label de gateway: espacio en lugar de guion para etiqueta legible sin escapes.
+    worker_display = (worker_id or "").replace("-", " ").strip()
+    worker_s = f" · {worker_display}" if worker_display else ""
     # Segunda línea: solo el título del plan (task), precedido por un bullet grande
     task_preview = f"• {_telegram_safe(str(task)[:60])}" if task else _telegram_safe("—")
     icon = "▶" if status == "BUSY" else "⏸"
@@ -2651,6 +2695,7 @@ def execute_help(db: Any, chat_id: Any) -> str:
         (_telegram_safe("/context"), _telegram_safe("Toggle contexto largo/corto")),
         (_telegram_safe("/sandbox"), _telegram_safe("Toggle ejecución de código (true|false) para esta sesión")),
         (_telegram_safe("/sandox"), _telegram_safe("(Alias) /sandbox para tolerar errores de escritura.")),
+        (_telegram_safe("/heartbeat"), _telegram_safe("Activa mensajes en tiempo real mientras el agente trabaja")),
         (_telegram_safe("/audit"), _telegram_safe("Última auditoría de ejecución")),
         (_telegram_safe("/health"), _telegram_safe("Estado del servicio")),
         (_telegram_safe("/new_mind"), _telegram_safe("The Mind: crear partida (alias de /new_game the_mind)")),
@@ -2762,6 +2807,8 @@ def _dispatch_fly_command(
         return execute_context_toggle(db, chat_id, args)
     if name in ("sandbox", "sandox"):
         return execute_sandbox_toggle(db, chat_id, args)
+    if name == "heartbeat":
+        return execute_heartbeat(db, chat_id, args, tenant_id=tenant_id)
     if name == "audit":
         return execute_audit(db, chat_id)
     if name == "health":

@@ -100,6 +100,7 @@ def test_resolve_shared_db_path_requires_manifest_env(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     spec = WorkerSpec(
         worker_id="w",
+        logical_worker_id="w",
         name="W",
         schema_name="w",
         llm_required=None,

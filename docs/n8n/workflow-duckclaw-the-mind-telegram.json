@@ -2,7 +2,7 @@
   "name": "DuckClaw The Mind → Gateway (8080)",
   "meta": {
     "templateCredsSetupCompleted": false,
-    "description": "Telegram (mind_crupier_bot o el bot que uses) → POST al TheMind-Gateway. Tras importar: credenciales Telegram + URL base en variable DUCKCLAW_THEMIND_URL o edita el nodo HTTP (puerto 8080)."
+    "description": "Telegram (mind_crupier_bot o el bot que uses) → POST al TheMind-Gateway. Timeout HTTP 10 min (600000 ms). Tras importar: credenciales Telegram + URL base en variable DUCKCLAW_THEMIND_URL o edita el nodo HTTP (puerto 8080)."
   },
   "nodes": [
     {
@@ -24,7 +24,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ message: $json.message?.text || '', chat_id: String($json.message?.chat?.id ?? ''), user_id: String($json.message?.from?.id ?? $json.message?.chat?.id ?? ''), username: ($json.message?.from?.username || $json.message?.from?.first_name || 'Usuario'), chat_type: ($json.message?.chat?.type || 'private'), tenant_id: 'default' }) }}",
         "options": {
-          "timeout": 120000
+          "timeout": 600000
         }
       },
       "id": "http-themind-gateway",

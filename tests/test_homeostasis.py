@@ -218,6 +218,7 @@ def test_loader_ensures_agent_beliefs() -> None:
     db = duckclaw.DuckClaw(":memory:")
     spec = WorkerSpec(
         worker_id="test",
+        logical_worker_id="test",
         name="Test",
         schema_name="test_schema",
         llm_required=None,

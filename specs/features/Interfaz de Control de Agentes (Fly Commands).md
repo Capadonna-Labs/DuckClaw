@@ -16,6 +16,7 @@ Exponer comandos de chat que permitan al usuario **mutar el estado del agente en
 | **Telegram bot** | `packages/agents/src/duckclaw/graphs/telegram_bot.py` | Intercepta `/` antes del grafo; llama `handle_command(db, chat_id, text)` |
 | **API Gateway** | `services/api-gateway/main.py` | Intercepta `/` en `_invoke_chat`; llama `handle_command(db, session_id, message)` |
 | **Persistencia** | Tabla `agent_config` en DuckDB | Claves por chat/sesión: `chat_{id}_worker_id`, `chat_{id}_llm_provider`, etc. |
+| **Heartbeat (observabilidad)** | `packages/agents/src/duckclaw/graphs/chat_heartbeat.py` | Flag en Redis `duckclaw:heartbeat:{tenant_id}:{chat_id}` (TTL 7 días); DMs vía `N8N_OUTBOUND_WEBHOOK_URL` en hilo daemon |
 
 **Flujo:** Mensaje → ¿Empieza por `/`? → `handle_command()` → Si retorna string, enviar y terminar. Si retorna `None`, invocar el grafo.
 
@@ -46,6 +47,10 @@ Borra el historial de conversación del chat/sesión. En Telegram: `telegram_con
 ### D. `/context on | off`
 
 Activa o desactiva la inyección de RAG (memoria a largo plazo) en el prompt. `use_rag=false` reduce el historial a 3 turnos.
+
+### D2. `/heartbeat [on | off]`
+
+Observabilidad en tiempo real para el usuario: si está **on**, el gateway envía DMs breves al `chat_id` por el webhook de salida (mismo contrato que n8n) al delegar al worker, **antes de cada tool** y justo antes de cerrar la respuesta. Requiere **Redis** (`REDIS_URL` / `DUCKCLAW_REDIS_URL`) y **`N8N_OUTBOUND_WEBHOOK_URL`**. El POST outbound corre en hilo **fire-and-forget** (no bloquea el agente). Persistencia: clave canónica `duckclaw:heartbeat:{tenant_id}:{chat_id}` más alias `duckclaw:heartbeat:chat:{chat_id}` (y lectura de `DUCKCLAW_GATEWAY_TENANT_ID` si aplica) para que el flag coincida entre fly command y worker aunque el `tenant_id` del estado del grafo difiera.
 
 ### E. `/audit`
 

@@ -9,6 +9,7 @@ from langchain_core.tools import tool
 
 from duckclaw.graphs.on_the_fly_commands import append_task_audit
 from duckclaw.graphs.graph_server import get_db
+from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
 
 
 @tool
@@ -32,7 +33,7 @@ def send_proactive_message(chat_id: str, message: str) -> str:
     try:
         httpx.post(
             webhook_url,
-            json={"chat_id": str(chat_id), "text": message},
+            json={"chat_id": str(chat_id), "text": escape_telegram_markdown_v2(message)},
             headers=headers,
             timeout=10,
         )

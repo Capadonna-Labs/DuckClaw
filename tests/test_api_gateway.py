@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -153,6 +154,19 @@ def test_clean_agent_response_removes_menus() -> None:
     assert "Tu saldo total es 1.234.567 COP." in cleaned
 
 
+def test_clean_agent_response_keeps_puedo_ayudarte_bi_style() -> None:
+    """No borrar el cuerpo tras 'puedo ayudarte con:' (respuestas analíticas válidas)."""
+    raw = (
+        "Como analista BI, puedo ayudarte con:\n\n"
+        "**Análisis:**\n"
+        "- Ventas por región\n"
+        "- Métricas de latencia"
+    )
+    cleaned = gateway_main.clean_agent_response(raw)
+    assert "Ventas por región" in cleaned
+    assert "Métricas de latencia" in cleaned
+
+
 def test_agent_history_requires_session(client: TestClient) -> None:
     r = client.get("/api/v1/agent/finanz/history?session_id=s1")
     assert r.status_code == 200
@@ -188,3 +202,100 @@ def test_forget_command_via_api_succeeds(client: TestClient) -> None:
     data = r.json()
     assert "response" in data
     assert "✅" in data["response"] or "Historial borrado" in data["response"]
+
+
+def test_effective_tenant_bi_analyst_from_pm2(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_GATEWAY_TENANT_ID", raising=False)
+    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "BI-Analyst-Gateway")
+    assert gateway_main._effective_tenant_id(None) == "BI-Analyst"
+
+
+def test_effective_tenant_bi_analyst_from_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_GATEWAY_TENANT_ID", raising=False)
+    monkeypatch.delenv("DUCKCLAW_PM2_PROCESS_NAME", raising=False)
+    monkeypatch.setenv("DUCKCLAW_DB_PATH", "/data/bi_analyst.duckdb")
+    assert gateway_main._effective_tenant_id(None) == "BI-Analyst"
+
+
+def test_effective_tenant_env_overrides_bi_pm2(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "acme-corp")
+    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "BI-Analyst-Gateway")
+    assert gateway_main._effective_tenant_id(None) == "acme-corp"
+
+
+def test_split_plain_text_for_telegram_reply() -> None:
+    assert gateway_main._split_plain_text_for_telegram_reply("", 80) == [""]
+    raw = "a" * 200
+    # el splitter impone mínimo 64 caracteres por trozo
+    parts = gateway_main._split_plain_text_for_telegram_reply(raw, 80)
+    assert "".join(parts) == raw
+    assert all(len(p) <= 80 for p in parts)
+    with_nl = "l1\n" + "b" * 30 + "\nl3"
+    p2 = gateway_main._split_plain_text_for_telegram_reply(with_nl, 80)
+    assert "".join(p2) == with_nl
+
+
+def test_plain_subchunks_for_telegram_budget_splits_when_escape_grows() -> None:
+    def fake_safe(s: str) -> str:
+        # longitud artificial >> límite Telegram para forzar subdivisión
+        return "x" * (len(s) * 1100)
+
+    tiny = gateway_main._plain_subchunks_for_telegram_budget("abcd", fake_safe)
+    assert len(tiny) > 1
+    assert "".join(tiny) == "abcd"
+
+
+def test_push_chat_reply_via_n8n_outbound_sync_posts_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    posted: list[dict[str, str]] = []
+    monkeypatch.setenv("N8N_OUTBOUND_WEBHOOK_URL", "https://example.test/webhook")
+
+    class _Resp:
+        def read(self) -> bytes:
+            return b"ok"
+
+        def __enter__(self) -> "_Resp":
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+    def fake_urlopen(req: object, timeout: int = 30) -> _Resp:
+        posted.append(json.loads(req.data.decode("utf-8")))  # type: ignore[attr-defined]
+        return _Resp()
+
+    monkeypatch.setattr(gateway_main._url_request, "urlopen", fake_urlopen)
+    gateway_main._push_chat_reply_via_n8n_outbound_sync(
+        chat_id="1726618406",
+        user_id="1726618406",
+        text="hola",
+    )
+    assert len(posted) == 1
+    assert posted[0]["chat_id"] == "1726618406"
+    assert posted[0]["user_id"] == "1726618406"
+    assert posted[0]["text"] == "hola"
+
+
+def test_pm2_json_lists_gateways_with_explicit_db_path() -> None:
+    from duckclaw.pm2_gateway_db import pm2_gateway_names_with_explicit_db_path
+
+    names = pm2_gateway_names_with_explicit_db_path()
+    assert "SIATA-Gateway" in names
+    assert "BI-Analyst-Gateway" in names
+
+
+def test_dedicated_gateway_vault_matches_pm2_db_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Evita que fly/manager abran finanzdb1 cuando el proceso es un gateway con DB propia."""
+    dbf = tmp_path / "dedicated.duckdb"
+    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "SIATA-Gateway")
+    monkeypatch.setenv("DUCKCLAW_DB_PATH", str(dbf))
+    assert gateway_main._dedicated_gateway_vault_db_path() == str(dbf.resolve())
+
+
+def test_dedicated_gateway_vault_unknown_pm2_name_returns_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "Not-In-Pm2-Json-XYZ")
+    monkeypatch.setenv("DUCKCLAW_DB_PATH", str(tmp_path / "x.duckdb"))
+    assert gateway_main._dedicated_gateway_vault_db_path() is None

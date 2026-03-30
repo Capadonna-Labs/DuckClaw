@@ -48,4 +48,5 @@ class ManagerAgentState(TypedDict, total=False):
     available_templates: List[str]
     reply: str
     _audit_done: bool
+    sandbox_photo_base64: Optional[str]
 

@@ -2,7 +2,7 @@
   "name": "DuckClaw Leila → Gateway (8181)",
   "meta": {
     "templateCredsSetupCompleted": false,
-    "description": "Telegram → POST al Leila-Gateway. Tras importar: credenciales Telegram + URL base en variable DUCKCLAW_LEILA_URL o edita el nodo HTTP (puerto 8181)."
+    "description": "Telegram → POST al Leila-Gateway. Timeout HTTP 10 min (600000 ms). Tras importar: credenciales Telegram + URL base en variable DUCKCLAW_LEILA_URL o edita el nodo HTTP (puerto 8181)."
   },
   "nodes": [
     {
@@ -24,7 +24,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ message: $json.message?.text || '', chat_id: String($json.message?.chat?.id ?? ''), user_id: String($json.message?.from?.id ?? $json.message?.chat?.id ?? ''), username: ($json.message?.from?.username || $json.message?.from?.first_name || 'Usuario'), chat_type: ($json.message?.chat?.type || 'private'), tenant_id: 'Leila Store' }) }}",
         "options": {
-          "timeout": 120000
+          "timeout": 600000
         }
       },
       "id": "http-leila-gateway",

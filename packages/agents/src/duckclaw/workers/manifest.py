@@ -61,6 +61,7 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         raise ValueError("manifest.yaml must be a YAML object")
 
     name = (data.get("name") or data.get("id") or worker_id).strip()
+    logical_worker_id = (data.get("id") or worker_id).strip()
     schema_name = (data.get("schema_name") or data.get("schema") or _default_schema(worker_id)).strip()
     llm = (data.get("llm") or {}).copy() if isinstance(data.get("llm"), dict) else {}
     raw_required = llm.get("required")
@@ -110,6 +111,9 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         context_guard_config = data["context_guard"]
     elif data.get("context_guard") is True:
         context_guard_config = {"enabled": True, "max_retries": 2}
+    context_pruning_config: Optional[dict] = None
+    if isinstance(data.get("context_pruning"), dict):
+        context_pruning_config = data["context_pruning"]
     crm_config = None
     if isinstance(data.get("crm"), dict):
         crm_config = data["crm"]
@@ -127,8 +131,30 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         forge_shared_db_path_env = (fc.get("shared_db_path_env") or "").strip() or None
         forge_apply_schema_to_shared = bool(fc.get("apply_main_schema_to_shared"))
 
+    duckdb_extensions: list[str] = []
+    mem = data.get("memory")
+    if isinstance(mem, dict):
+        mem_sql = mem.get("sql")
+        if isinstance(mem_sql, dict):
+            raw_ext = mem_sql.get("extensions")
+            if isinstance(raw_ext, list):
+                duckdb_extensions = [str(x).strip() for x in raw_ext if str(x).strip()]
+            elif isinstance(raw_ext, str):
+                duckdb_extensions = [s.strip() for s in raw_ext.split(",") if s.strip()]
+    top_ext = data.get("duckdb_extensions")
+    if isinstance(top_ext, list) and top_ext:
+        duckdb_extensions = [str(x).strip() for x in top_ext if str(x).strip()]
+    elif isinstance(top_ext, str) and top_ext.strip():
+        duckdb_extensions = [s.strip() for s in top_ext.split(",") if s.strip()]
+
+    sec = data.get("security")
+    network_access = bool(data.get("network_access", False))
+    if isinstance(sec, dict) and sec.get("network_access") is not None:
+        network_access = bool(sec.get("network_access"))
+
     return WorkerSpec(
         worker_id=worker_id,
+        logical_worker_id=logical_worker_id,
         name=name,
         schema_name=schema_name,
         llm_required=llm_required or None,
@@ -149,6 +175,9 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         crm_config=crm_config,
         forge_shared_db_path_env=forge_shared_db_path_env,
         forge_apply_schema_to_shared=forge_apply_schema_to_shared,
+        context_pruning_config=context_pruning_config,
+        duckdb_extensions=duckdb_extensions,
+        network_access=network_access,
     )
 
 
@@ -201,16 +230,20 @@ class WorkerSpec:
     """Validated worker template specification."""
 
     __slots__ = (
-        "worker_id", "name", "schema_name", "llm_required", "temperature",
+        "worker_id", "logical_worker_id", "name", "schema_name", "llm_required", "temperature",
         "topology", "skills_list", "allowed_tables", "read_only", "worker_dir",
         "github_config", "research_config", "tailscale_config", "sft_config",
         "ibkr_config", "inference_config", "homeostasis_config", "context_guard_config", "crm_config",
         "forge_shared_db_path_env", "forge_apply_schema_to_shared",
+        "context_pruning_config",
+        "duckdb_extensions",
+        "network_access",
     )
 
     def __init__(
         self,
         worker_id: str,
+        logical_worker_id: str,
         name: str,
         schema_name: str,
         llm_required: Optional[str],
@@ -231,8 +264,12 @@ class WorkerSpec:
         crm_config: Optional[dict] = None,
         forge_shared_db_path_env: Optional[str] = None,
         forge_apply_schema_to_shared: bool = False,
+        context_pruning_config: Optional[dict] = None,
+        duckdb_extensions: Optional[list] = None,
+        network_access: bool = False,
     ):
         self.worker_id = worker_id
+        self.logical_worker_id = logical_worker_id
         self.name = name
         self.schema_name = schema_name
         self.llm_required = llm_required
@@ -253,3 +290,6 @@ class WorkerSpec:
         self.crm_config = crm_config
         self.forge_shared_db_path_env = forge_shared_db_path_env
         self.forge_apply_schema_to_shared = forge_apply_schema_to_shared
+        self.context_pruning_config = context_pruning_config
+        self.duckdb_extensions = list(duckdb_extensions or [])
+        self.network_access = bool(network_access)

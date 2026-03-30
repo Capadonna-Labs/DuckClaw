@@ -10,7 +10,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import logging
 import os
 import re
 import shutil
@@ -22,6 +24,34 @@ from pathlib import Path
 from typing import Any
 
 from duckclaw.forge.schema import SecurityPolicy, load_security_policy, security_policy_to_docker_kwargs
+
+_log = logging.getLogger(__name__)
+
+# Cabecera inyectada antes del código del usuario (Strix / run_sandbox).
+# Telegram sendPhoto rechaza PNG con transparencia o procesamiento raro (IMAGE_PROCESS_FAILED):
+# fondo blanco opaco + dpi moderado en savefig y rcParams por defecto.
+_SANDBOX_PYTHON_HEADER = """# Available: pandas, numpy, matplotlib, seaborn, scipy
+# Gráficos en /workspace/output/*.png — compatible con Telegram sendPhoto:
+#   plt.savefig('/workspace/output/mi_chart.png', dpi=100, facecolor='white', edgecolor='none', bbox_inches='tight')
+try:
+    import matplotlib as _mpl_dc
+    _mpl_dc.use("Agg")
+except Exception:
+    pass
+try:
+    import matplotlib.pyplot as _plt_dc
+    _plt_dc.rcParams.update(
+        {
+            "figure.facecolor": "white",
+            "savefig.facecolor": "white",
+            "savefig.edgecolor": "none",
+            "figure.dpi": 100,
+            "savefig.dpi": 100,
+        }
+    )
+except Exception:
+    pass
+"""
 
 # Imagen base por defecto; sobreescribible con STRIX_SANDBOX_IMAGE
 _DEFAULT_IMAGE = "duckclaw/sandbox:latest"
@@ -88,9 +118,30 @@ def _ensure_image(client: Any) -> str:
     # Pull fallback
     try:
         client.images.pull(_FALLBACK_IMAGE)
+        _log.warning(
+            "Strix sandbox: imagen %r no disponible; usando %s (sin stack analítico preinstalado). "
+            "Construye: docker build -t duckclaw/sandbox:latest docker/sandbox/",
+            image,
+            _FALLBACK_IMAGE,
+        )
         return _FALLBACK_IMAGE
     except Exception as e:
         raise RuntimeError(f"No se pudo obtener ninguna imagen Docker para el sandbox: {e}") from e
+
+
+def _inject_sandbox_python_header(code: str) -> str:
+    raw = code or ""
+    if "_plt_dc.rcParams" in raw:
+        return raw
+    stripped = raw.lstrip()
+    if stripped:
+        first_line = stripped.split("\n", 1)[0]
+        if "Available:" in first_line and "pandas" in first_line and "_plt_dc" not in raw:
+            nl = stripped.find("\n")
+            raw = stripped[nl + 1 :].lstrip() if nl >= 0 else ""
+    if not (raw or "").strip():
+        return _SANDBOX_PYTHON_HEADER
+    return _SANDBOX_PYTHON_HEADER + "\n" + raw
 
 
 class StrixSandboxManager:
@@ -423,12 +474,14 @@ def run_in_sandbox(
     if data_sql:
         data_inject(db, data_sql, sid)
 
+    lang = (language or "python").strip().lower()
     current_code = code
     result = ExecutionResult(exit_code=1, stdout="", stderr="No ejecutado aún.")
     tags = (langsmith_tags or []) + ["execution_environment:strix_sandbox"]
 
     for attempt in range(1, max_retries + 1):
-        result = manager.execute(sid, current_code, language, policy=policy, secret_env=secret_env)
+        exec_code = _inject_sandbox_python_header(current_code) if lang == "python" else current_code
+        result = manager.execute(sid, exec_code, language, policy=policy, secret_env=secret_env)
         result.attempts = attempt
 
         _langsmith_log(
@@ -473,6 +526,74 @@ def run_in_sandbox(
     return result
 
 
+def _decoded_figure_looks_like_png_or_jpeg(b64: str) -> bool:
+    """Evita usar placeholders compactados u otra basura como si fuera imagen."""
+    if not isinstance(b64, str) or len(b64.strip()) < 80:
+        return False
+    low = b64.lower()
+    if "omitido" in low or "[truncado" in low:
+        return False
+    t = "".join(b64.split())
+    if t.lower().startswith("data:") and "," in t:
+        t = t.split(",", 1)[1].strip()
+    t = t.replace("-", "+").replace("_", "/")
+    t = t.rstrip("=")
+    rem = len(t) % 4
+    if rem:
+        t += "=" * (4 - rem)
+    try:
+        raw = base64.b64decode(t, validate=False)
+    except Exception:
+        return False
+    if len(raw) < 24:
+        return False
+    if len(raw) >= 8 and raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return True
+    if len(raw) >= 2 and raw[:2] == b"\xff\xd8":
+        return True
+    return False
+
+
+def extract_latest_sandbox_figure_base64(messages: list[Any] | None) -> str | None:
+    """
+    Recorre mensajes del worker (p. ej. ToolMessage de run_sandbox) y devuelve el último
+    `figure_base64` válido cuando exit_code == 0. Usado en el manager para enviar el PNG por Telegram.
+    Ignora JSON compactado sin figura real (p. ej. sin clave figure_base64 o datos no imagen).
+    """
+    if not messages:
+        return None
+    try:
+        from langchain_core.messages import ToolMessage
+    except ImportError:
+        return None
+
+    last: str | None = None
+    for m in messages:
+        if not isinstance(m, ToolMessage):
+            continue
+        if getattr(m, "name", None) != "run_sandbox":
+            continue
+        raw = m.content
+        if raw is None:
+            continue
+        s = raw if isinstance(raw, str) else str(raw)
+        s = s.strip()
+        if not s.startswith("{"):
+            continue
+        try:
+            data = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("exit_code") != 0:
+            continue
+        b64 = data.get("figure_base64")
+        if isinstance(b64, str) and _decoded_figure_looks_like_png_or_jpeg(b64):
+            last = b64
+    return last
+
+
 def _langsmith_log(intent: str, code: str, result: ExecutionResult, attempt: int, tags: list[str]) -> None:
     """Trazabilidad forense (sección 7): registra en LangSmith si está configurado."""
     try:
@@ -495,6 +616,65 @@ def _langsmith_log(intent: str, code: str, result: ExecutionResult, attempt: int
         )
     except Exception:
         pass
+
+
+# Import name (como en el traceback) -> nombre del paquete en pip cuando difiere.
+_KNOWN_IMPORT_TO_PIP: dict[str, str] = {
+    "PIL": "Pillow",
+    "sklearn": "scikit-learn",
+    "yaml": "PyYAML",
+    "bs4": "beautifulsoup4",
+    "cv2": "opencv-python-headless",
+    "dateutil": "python-dateutil",
+    "OpenSSL": "pyopenssl",
+    "googleapiclient": "google-api-python-client",
+}
+
+
+def _missing_python_modules_from_traceback(text: str) -> list[str]:
+    """Nombres de módulo citados en ModuleNotFoundError / ImportError (orden de aparición, sin duplicados)."""
+    if not text.strip():
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in re.finditer(r"No module named ['\"]([^'\"]+)['\"]", text):
+        name = (m.group(1) or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    if out:
+        return out
+    for m in re.finditer(r"No module named ([A-Za-z_][\w.]*)", text):
+        name = (m.group(1) or "").strip()
+        if not name or name in {"named"}:
+            continue
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def _import_name_to_pip_suggestion(import_name: str) -> str:
+    """Sugiere el argumento de `pip install` (p. ej. sklearn -> scikit-learn)."""
+    if import_name in _KNOWN_IMPORT_TO_PIP:
+        return _KNOWN_IMPORT_TO_PIP[import_name]
+    root = import_name.split(".", 1)[0]
+    if root in _KNOWN_IMPORT_TO_PIP:
+        return _KNOWN_IMPORT_TO_PIP[root]
+    return root
+
+
+def _pip_install_hints_for_missing_modules(modules: list[str]) -> tuple[list[str], str]:
+    """(lista única de paquetes pip, línea recomendada para Dockerfile)."""
+    seen: set[str] = set()
+    pip_names: list[str] = []
+    for mod in modules:
+        pkg = _import_name_to_pip_suggestion(mod)
+        if pkg not in seen:
+            seen.add(pkg)
+            pip_names.append(pkg)
+    line = "pip install --no-cache-dir " + " ".join(pip_names) if pip_names else ""
+    return pip_names, line
 
 
 def sandbox_tool_factory(db: Any, llm: Any) -> Any:
@@ -525,13 +705,46 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
             original_request=code,
             worker_id=worker_id or "",
         )
-        out = {"exit_code": result.exit_code, "output": result.stdout or result.stderr}
+        out = {
+            "exit_code": result.exit_code,
+            "output": result.stdout or result.stderr,
+            "stdout": result.stdout or "",
+            "figure_base64": None,
+        }
         if result.artifacts:
             out["artifacts"] = result.artifacts
+            for art in result.artifacts:
+                ap = Path(str(art))
+                if ap.suffix.lower() == ".png" and ap.is_file():
+                    try:
+                        out["figure_base64"] = base64.standard_b64encode(ap.read_bytes()).decode("ascii")
+                        break
+                    except OSError:
+                        continue
         if result.timed_out:
             out["warning"] = "Timeout alcanzado"
         if result.attempts > 1:
             out["auto_corrected_attempts"] = result.attempts
+        if result.exit_code != 0:
+            raw_err = (result.stderr or result.stdout or "error desconocido").strip()
+            err_snip = raw_err[:1500]
+            missing_mods = _missing_python_modules_from_traceback(raw_err)
+            if missing_mods:
+                pip_pkgs, pip_line = _pip_install_hints_for_missing_modules(missing_mods)
+                out["missing_pip_packages"] = pip_pkgs
+                out["output"] = (
+                    f"Error en Sandbox: {err_snip}\n\n"
+                    f"Módulos no encontrados en la imagen del sandbox: {', '.join(missing_mods)}.\n"
+                    f"Para habilitarlos, añade en docker/sandbox/Dockerfile (junto al resto de pip): "
+                    f"{pip_line}\n"
+                    "Luego reconstruye la imagen del sandbox (docker build …) y reinicia el gateway.\n"
+                    "También revisa nombres de columnas y datos; no uses librerías externas no listadas en la imagen."
+                )
+            else:
+                out["output"] = (
+                    f"Error en Sandbox: {err_snip}. Por favor, verifica los nombres de las columnas y "
+                    "asegúrate de no usar librerías externas no listadas."
+                )
         return json.dumps(out, ensure_ascii=False)
 
     return StructuredTool.from_function(
@@ -540,6 +753,7 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
         description=(
             "Ejecuta código Python o Bash en un sandbox Docker aislado (sin acceso a red ni al host). "
             "Usa cuando el usuario pida ejecutar scripts, análisis complejos, modelos, gráficos dinámicos o código libre. "
+            "Para PNG con matplotlib: guardar en /workspace/output/ con savefig(dpi=100, facecolor='white', edgecolor='none'). "
             "Parámetros: code (str), language ('python'|'bash'), data_sql (SQL para inyectar datos), session_id (str), worker_id (str opcional para política)."
         ),
     )

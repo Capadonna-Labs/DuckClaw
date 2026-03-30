@@ -387,6 +387,9 @@ async def _tailscale_auth_middleware(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
     if path in ("/", "/health"):
         return await call_next(request)
+    # Telegram Bot API no envía X-Tailscale-Auth-Key; el webhook usa TELEGRAM_WEBHOOK_SECRET.
+    if path == "/api/v1/telegram/webhook":
+        return await call_next(request)
     header_key = request.headers.get("X-Tailscale-Auth-Key", "").strip()
     if header_key != auth_key:
         return JSONResponse(
@@ -1036,11 +1039,13 @@ async def _invoke_chat(
     tenant_id: str,
     *,
     redis_client: Any = None,
+    telegram_multipart_tail_delivery: str | None = None,
 ):
     """
     Orquesta la llamada al grafo LangGraph a partir de un ChatRequest.
 
     - session_id: ya resuelto (body + query + headers); debe ser el mismo en todos los POST del hilo.
+    - telegram_multipart_tail_delivery: ``native`` | ``n8n`` | None (inferido por env) para partes 2..N del mensaje.
     """
     message = (payload.message or "").strip()
     session_id = (session_id or "default").strip() or "default"
@@ -1383,29 +1388,29 @@ async def _invoke_chat(
         _telegram_response_parts_count = len(plain_parts)
         reply_text = _telegram_safe(plain_parts[0])
         tail_plain = "\n\n".join(plain_parts[1:]) if len(plain_parts) > 1 else ""
-        if tail_plain.strip() and (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip():
+        if tail_plain.strip():
             try:
+                from core.telegram_multipart_tail_dispatch_async import dispatch_telegram_multipart_tail_async
 
                 async def _send_telegram_tail() -> None:
-                    await asyncio.get_running_loop().run_in_executor(
-                        None,
-                        partial(
-                            _push_chat_reply_via_n8n_outbound_sync,
-                            chat_id=session_id,
+                    try:
+                        await dispatch_telegram_multipart_tail_async(
+                            tail_plain=tail_plain,
+                            session_id=session_id,
                             user_id=(user_id or "").strip() or session_id,
-                            text=tail_plain,
-                        ),
-                    )
+                            telegram_multipart_tail_delivery=telegram_multipart_tail_delivery,
+                            effective_telegram_bot_token=_effective_telegram_bot_token,
+                            n8n_outbound_push_sync=_push_chat_reply_via_n8n_outbound_sync,
+                        )
+                    except Exception as tail_exc:  # noqa: BLE001
+                        _gateway_log.warning(
+                            "telegram reply tail: envío falló (nativo/n8n): %s",
+                            tail_exc,
+                        )
 
                 asyncio.create_task(_send_telegram_tail())
             except Exception as exc:  # noqa: BLE001
                 _gateway_log.warning("telegram reply tail: no se pudo programar envío: %s", exc)
-        elif tail_plain.strip():
-            _gateway_log.warning(
-                "telegram reply: respuesta en %s partes; falta N8N_OUTBOUND_WEBHOOK_URL — "
-                "solo la 1ª parte la envía n8n (Responder Telegram)",
-                len(plain_parts),
-            )
     except Exception:
         try:
             from duckclaw.graphs.on_the_fly_commands import _telegram_safe
@@ -1516,6 +1521,21 @@ async def enqueue_write(req: WriteRequest):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Error conectando al broker de mensajes: {str(e)}",
         )
+
+
+# ── Telegram inbound webhook (integración nativa) ────────────────────────────
+
+try:
+    from routers.telegram_inbound_webhook import build_telegram_inbound_webhook_router
+
+    app.include_router(
+        build_telegram_inbound_webhook_router(
+            invoke_agent_chat=_invoke_chat,
+            resolve_effective_telegram_bot_token=_effective_telegram_bot_token,
+        )
+    )
+except ImportError:
+    pass
 
 
 # ── Quotes router (microservicio: routers en services/api-gateway) ───────────

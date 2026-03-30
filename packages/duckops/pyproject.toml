@@ -17,6 +17,9 @@ dependencies = [
 [project.scripts]
 duckops = "duckops.cli:app"
 
+[tool.uv.sources]
+duckclaw-shared = { path = "../shared", editable = true }
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["duckops", "duckops.*"]

@@ -20,6 +20,8 @@ dependencies = [
     "duckclaw-core",
     "duckclaw-shared",
     "langchain-openai>=0.3.35",
+    "mcp>=1.0.0; python_full_version >= '3.10'",
+    "duckclaw-telegram-mcp; python_full_version >= '3.10'",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +36,7 @@ duckops = { path = "packages/duckops", editable = true }
 duckclaw-agents = { path = "packages/agents", editable = true }
 duckclaw-core = { path = "packages/core", editable = true }
 duckclaw-shared = { path = "packages/shared", editable = true }
+duckclaw-telegram-mcp = { path = "packages/mcp/telegram", editable = true }
 
 [dependency-groups]
 dev = ["pytest>=7.0.0", "httpx>=0.25.0"]

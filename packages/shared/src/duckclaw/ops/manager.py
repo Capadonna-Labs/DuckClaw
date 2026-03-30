@@ -430,7 +430,7 @@ def _render_gateway_ecosystem_cjs(
         env.setdefault("DUCKCLAW_PM2_PROCESS_NAME", name)
         env_str = json.dumps(env, indent=8, ensure_ascii=False)
         args_cmd = (
-            f"-m uvicorn main:app --host {host} --port {port} --app-dir services/api-gateway"
+            f"services/api-gateway/uvicorn_pm2.py main:app --host {host} --port {port} --app-dir services/api-gateway"
         )
         lines.append("    {")
         lines.append(f"      name: {json.dumps(name)},")

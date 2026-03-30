@@ -906,6 +906,7 @@ def _edit_gateway_service(
             except Exception as e:
                 console.print(f"[red]Error: {e}[/]")
                 console.print("[dim]Ejecuta manualmente: duckops serve --pm2 --gateway[/]")
+            _ensure_default_mcp_telegram_integration(repo_root, console)
             return
         # No regenerar: permitir editar ruta DB, Redis, guardar trazas, etc.
         console.print("[dim]Edita los valores (Enter = mantener actual).[/]")
@@ -934,6 +935,7 @@ def _edit_gateway_service(
         os.environ["DUCKCLAW_CONVERSATION_TRACES_FORMAT"] = traces_fmt
         console.print(f"[green]✓[/] .env actualizado: DUCKCLAW_DB_PATH={db_path}, REDIS_URL=[dim]...[/], trazas={'sí' if save_traces_yes else 'no'}, formato={traces_fmt}")
         if not Confirm.ask("¿Seguir editando este servicio?", default=False):
+            _ensure_default_mcp_telegram_integration(repo_root, console)
             return
 
 
@@ -955,8 +957,8 @@ def _offer_gateway_pm2_if_pm2(console: Console, state: dict[str, Any], repo_root
 
     console.print()
     console.print(Panel(
-        f"El API Gateway (FastAPI, n8n, Telegram vía Gateway) es un proceso PM2 distinto de "
-        f"[bold]{DEPLOY_SERVICE_NAME}[/].\n"
+        "El API Gateway expone FastAPI (agente, Telegram vía webhook, integración n8n opcional) como "
+        "proceso PM2 propio.\n"
         "Ahí defines nombre PM2, puerto, DUCKCLAW_DB_PATH y Redis; varios gateways se fusionan en "
         "config/api_gateways_pm2.json sin borrar otros procesos PM2.",
         title="API Gateway (spec FLUJO_VIDA_DATO)",
@@ -1333,6 +1335,49 @@ def _write_env_file(repo_root: Path, key: str, value: str) -> None:
     if not found:
         lines.append(f"{key}={value}")
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _ensure_mcp_yaml_telegram_enabled(repo_root: Path) -> None:
+    """Activa ``mcp_servers.telegram.enabled`` preservando el resto del YAML."""
+    path = repo_root / "config" / "mcp_servers.yaml"
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    pattern_replace = re.compile(
+        r"(^  telegram:\s*\n)(\s*)enabled:\s*\S+",
+        re.MULTILINE,
+    )
+    new_text, n = pattern_replace.subn(r"\1\2enabled: true", text, count=1)
+    if n == 0:
+        new_text, n2 = re.subn(
+            r"(^  telegram:\s*\n)",
+            r"\1    enabled: true\n",
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if n2:
+            text = new_text
+        else:
+            return
+    else:
+        text = new_text
+    path.write_text(text, encoding="utf-8")
+
+
+def _ensure_default_mcp_telegram_integration(repo_root: Path, console: Console | None = None) -> None:
+    """
+    Habilita por defecto el primer integrador MCP (Telegram egress) tras forjar un agente
+    o configurar el API Gateway (spec: Telegram MCP Integration).
+    """
+    _write_env_file(repo_root, "DUCKCLAW_TELEGRAM_MCP_ENABLED", "1")
+    _ensure_mcp_yaml_telegram_enabled(repo_root)
+    if console:
+        console.print(
+            "[dim]Integración MCP Telegram activada "
+            "([bold]DUCKCLAW_TELEGRAM_MCP_ENABLED=1[/], [bold]config/mcp_servers.yaml[/]). "
+            "Reinicia el API Gateway para aplicar.[/]"
+        )
 
 
 def _ensure_db_file_exists(repo_root: Path, db_path: str, console: Console | None = None) -> bool:
@@ -1978,6 +2023,8 @@ def _run_section(
                 return True, "", nav
             if not run_now:
                 console.print("[dim]Configuración guardada. Ejecuta el bot cuando quieras.[/]")
+                if (state.get("channel") or "telegram").strip().lower() == "telegram":
+                    _ensure_default_mcp_telegram_integration(repo_root, console)
                 return True, "", None
             # Continúa hacia el lanzamiento directo (cae al final de save_launch)
 
@@ -2022,6 +2069,8 @@ def _run_section(
                 _write_env_file(repo_root, "DUCKCLAW_CONVERSATION_TRACES_FORMAT", fmt_traces)
                 _ensure_db_file_exists(repo_root, db_path_save, console)
         state.pop("_used_preferences_skip", None)
+        if (state.get("channel") or "telegram").strip().lower() == "telegram":
+            _ensure_default_mcp_telegram_integration(repo_root, console)
         console.print()
         available_providers = _detect_available_deploy_providers()
         state["available_deploy_providers"] = available_providers
@@ -2049,9 +2098,8 @@ def _run_section(
             console.print(t)
             console.print("[dim]Si despliegas, el bot quedará registrado como servicio y se reiniciará solo.[/]")
             console.print(
-                f"[dim]El proceso del bot es [bold]{DEPLOY_SERVICE_NAME}[/] (Telegram); "
-                "el API Gateway es otro servicio PM2 distinto (p. ej. {GATEWAY_SERVICE_NAME}) "
-                "y se ofrece configurar justo después del despliegue si hay PM2.[/]"
+                "[dim]Con PM2, justo después podrás abrir la configuración del API Gateway "
+                f"(microservicio aparte, p. ej. [bold]{GATEWAY_SERVICE_NAME}[/]).[/]"
             )
             console.print()
             deploy_yes, nav = _confirm_with_nav(console, "¿Desplegar bot como servicio persistente con duckops?", default=False)
@@ -2253,6 +2301,8 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
                     svc_state[k] = saved_for_edit[k]
             svc_state["token"] = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
             _edit_service_settings(console, svc_state, repo_root, DEPLOY_SERVICE_NAME, provider="systemd")
+            if (svc_state.get("channel") or "telegram").strip().lower() == "telegram":
+                _ensure_default_mcp_telegram_integration(repo_root, console)
             return 0
 
     elif shutil.which("pm2") is not None:
@@ -2353,6 +2403,9 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
             svc_state.setdefault("gateway_pm2_name", GATEWAY_SERVICE_NAME)
             svc_state["token"] = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
             _edit_service_settings(console, svc_state, repo_root, found_svc, provider="pm2")
+            if not _is_gateway_service_name(found_svc, svc_state, repo_root):
+                if (svc_state.get("channel") or "telegram").strip().lower() == "telegram":
+                    _ensure_default_mcp_telegram_integration(repo_root, console)
             return 0
 
     # ── PASO 1: Cargar configuración guardada ─────────────────────────────

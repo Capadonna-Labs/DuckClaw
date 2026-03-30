@@ -47,7 +47,10 @@ def _load_dotenv() -> None:
                     elif value.startswith("'") and value.endswith("'"):
                         value = value[1:-1]
                     if key:
-                        os.environ.setdefault(key, value)
+                        if key == "DUCKCLAW_CHAT_PARALLEL_INVOCATIONS":
+                            os.environ[key] = value
+                        else:
+                            os.environ.setdefault(key, value)
             except Exception:
                 pass
             break
@@ -56,6 +59,17 @@ _load_dotenv()
 
 import logging as _logging
 from functools import partial
+
+
+def _parallel_chat_invocations_enabled() -> bool:
+    """Alineado con DUCKCLAW_CHAT_PARALLEL_INVOCATIONS en services/api-gateway/main.py."""
+    return (os.environ.get("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
 
 from duckclaw.utils.langsmith_trace import get_tracing_config
 from duckclaw.utils.logger import (
@@ -430,7 +444,11 @@ async def _ainvoke(
     loop = asyncio.get_event_loop()
 
     trace_cfg = get_tracing_config(tenant_id, "manager", chat_id)
-    if hasattr(graph, "ainvoke"):
+    # ainvoke sigue ejecutando nodos síncronos (p. ej. worker_graph.invoke) en el event loop
+    # y bloquea otras peticiones HTTP. Con paralelismo por chat, mover invoke a un hilo.
+    if _parallel_chat_invocations_enabled():
+        result = await asyncio.to_thread(graph.invoke, state, trace_cfg)
+    elif hasattr(graph, "ainvoke"):
         result = await graph.ainvoke(state, trace_cfg)
     else:
         result = await loop.run_in_executor(None, partial(graph.invoke, state, trace_cfg))

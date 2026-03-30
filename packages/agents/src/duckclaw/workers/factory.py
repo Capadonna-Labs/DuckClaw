@@ -386,25 +386,54 @@ def _sandbox_heartbeat_allowed(spec: WorkerSpec) -> bool:
     v = (os.getenv("DUCKCLAW_SANDBOX_HEARTBEAT", "true").strip().lower())
     if v in ("0", "false", "no", "off"):
         return False
-    return bool((os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip())
+    return bool((os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()) or bool(
+        (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    )
 
 
 def _send_sandbox_heartbeat_telegram(state: dict) -> None:
-    url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
-    if not url:
-        return
-    cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+    from duckclaw.graphs.chat_heartbeat import format_tool_heartbeat, normalize_telegram_chat_id_for_outbound
+
+    cid_raw = str(state.get("chat_id") or state.get("session_id") or "").strip()
+    cid = normalize_telegram_chat_id_for_outbound(cid_raw) or cid_raw
     uid = str(state.get("user_id") or "").strip() or cid
     if not cid:
+        return
+    _hb = (state.get("subagent_instance_label") or "").strip() or None
+    _pt = (state.get("heartbeat_plan_title") or "").strip() or None
+    text = format_tool_heartbeat(
+        _hb,
+        "📊 Estoy procesando los datos y generando tus gráficos. "
+        "Esto puede tomar unos segundos...",
+        plan_title=_pt,
+    )
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    if token:
+        try:
+            from duckclaw.integrations.telegram.telegram_outbound_sync import (
+                send_long_plain_text_markdown_v2_chunks_sync,
+            )
+
+            n = send_long_plain_text_markdown_v2_chunks_sync(
+                bot_token=token,
+                chat_id=cid,
+                plain_text=text,
+                log=_log,
+            )
+            if n > 0:
+                _log.info("sandbox heartbeat: nativo OK chat_id=%r", cid)
+                return
+        except Exception as exc:
+            _log.debug("sandbox heartbeat nativo falló: %s", exc)
+
+    url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
+    if not url:
+        _log.debug("sandbox heartbeat: sin token ni N8N_OUTBOUND_WEBHOOK_URL")
         return
     auth = (os.getenv("N8N_AUTH_KEY") or "").strip()
     headers = {"Content-Type": "application/json"}
     if auth:
         headers["X-DuckClaw-Secret"] = auth
-    text = (
-        "📊 Estoy procesando los datos y generando tus gráficos. "
-        "Esto puede tomar unos segundos..."
-    )
     payload = json.dumps(
         {"chat_id": cid, "user_id": uid, "text": escape_telegram_markdown_v2(text)},
         ensure_ascii=False,
@@ -413,6 +442,7 @@ def _send_sandbox_heartbeat_telegram(state: dict) -> None:
     try:
         with _urllib_request.urlopen(req, timeout=10) as resp:
             _ = resp.read()
+        _log.info("sandbox heartbeat: webhook OK chat_id=%r", cid)
     except URLError as exc:
         _log.debug("sandbox heartbeat webhook failed: %s", exc)
     except Exception as exc:
@@ -1134,7 +1164,11 @@ def build_worker_graph(
             return out
 
     def tools_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
-        from duckclaw.graphs.chat_heartbeat import heartbeat_message_for_tool, schedule_chat_heartbeat_dm
+        from duckclaw.graphs.chat_heartbeat import (
+            format_tool_heartbeat,
+            heartbeat_message_for_tool,
+            schedule_chat_heartbeat_dm,
+        )
 
         _chat_ctx = state.get("chat_id") or state.get("session_id") or "default"
         _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"
@@ -1148,6 +1182,9 @@ def build_worker_graph(
         sandbox_enabled = _sandbox_enabled_for_state(state)
         tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
         sandbox_b64: str | None = state.get("sandbox_photo_base64") if isinstance(state.get("sandbox_photo_base64"), str) else None
+        _hb_head = (state.get("subagent_instance_label") or "").strip() or None
+        _hb_uname = (state.get("username") or "").strip() or None
+        _hb_plan = (state.get("heartbeat_plan_title") or "").strip() or None
         for tc in tool_calls:
             name = (tc.get("name") or "").strip()
             args = tc.get("args") or {}
@@ -1158,7 +1195,19 @@ def build_worker_graph(
                     _htid = (state.get("tenant_id") or "default").strip() or "default"
                     _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
                     _huid = str(state.get("user_id") or "").strip() or _hcid
-                    schedule_chat_heartbeat_dm(_htid, _hcid, _huid, heartbeat_message_for_tool(name))
+                    schedule_chat_heartbeat_dm(
+                        _htid,
+                        _hcid,
+                        _huid,
+                        format_tool_heartbeat(
+                            _hb_head,
+                            heartbeat_message_for_tool(name),
+                            plan_title=_hb_plan,
+                        ),
+                        log_worker_id=_hb_head,
+                        log_username=_hb_uname,
+                        log_plan_title=_hb_plan,
+                    )
                     invoke_args: Any = args
                     if name == "run_sandbox" and isinstance(args, dict):
                         invoke_args = {**args}
@@ -1206,14 +1255,29 @@ def build_worker_graph(
         return out
 
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
-        from duckclaw.graphs.chat_heartbeat import schedule_chat_heartbeat_dm
+        from duckclaw.graphs.chat_heartbeat import format_tool_heartbeat, schedule_chat_heartbeat_dm
         from duckclaw.integrations.llm_providers import _strip_eot
 
         def _notify_final_heartbeat() -> None:
             _tid = (state.get("tenant_id") or "default").strip() or "default"
             _cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
             _uid = str(state.get("user_id") or "").strip() or _cid
-            schedule_chat_heartbeat_dm(_tid, _cid, _uid, "✅ Terminé los pasos con herramientas; te resumo el resultado en el siguiente mensaje.")
+            _head = (state.get("subagent_instance_label") or "").strip() or None
+            _un = (state.get("username") or "").strip() or None
+            _pt = (state.get("heartbeat_plan_title") or "").strip() or None
+            schedule_chat_heartbeat_dm(
+                _tid,
+                _cid,
+                _uid,
+                format_tool_heartbeat(
+                    _head,
+                    "✅ Terminé los pasos con herramientas; te resumo el resultado en el siguiente mensaje.",
+                    plan_title=_pt,
+                ),
+                log_worker_id=_head,
+                log_username=_un,
+                log_plan_title=_pt,
+            )
 
         msgs = state.get("messages") or []
         last = msgs[-1] if msgs else None

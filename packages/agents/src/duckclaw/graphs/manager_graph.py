@@ -20,7 +20,7 @@ from langchain_core.runnables import RunnableConfig
 
 from duckclaw.forge.atoms.state import ManagerAgentState
 from duckclaw.graphs.sandbox import extract_latest_sandbox_figure_base64
-from duckclaw.graphs.subagent_run_id import next_subagent_run_number
+from duckclaw.graphs.subagent_run_id import acquire_subagent_slot, release_subagent_slot
 from duckclaw.utils.langsmith_trace import get_tracing_config
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_plan, log_sys, set_log_context
 
@@ -297,6 +297,65 @@ def _llm_plan_from_model(llm: Any, incoming: str, planner_system_prompt: str) ->
     return title, tasks
 
 
+def _manager_greeting_fast_path_ok(incoming: str) -> bool:
+    """Saludo corto sin comando fly: evita plan LLM y delegación al worker."""
+    raw = (incoming or "").strip()
+    if not raw or raw.startswith("/"):
+        return False
+    from duckclaw.graphs.on_the_fly_commands import _is_simple_greeting
+
+    return _is_simple_greeting(raw)
+
+
+def _manager_capabilities_fast_path_ok(incoming: str) -> bool:
+    """«Qué puedes hacer?» y similares: respuesta fija sin plan ni subagente."""
+    raw = (incoming or "").strip()
+    if not raw or raw.startswith("/"):
+        return False
+    from duckclaw.graphs.on_the_fly_commands import _is_capabilities_smalltalk
+
+    return _is_capabilities_smalltalk(raw)
+
+
+def _greeting_fast_reply_text(worker_id: str | None) -> str:
+    w = (worker_id or "").strip()
+    wl = w.lower()
+    if wl == "bi-analyst":
+        return (
+            "Hola. Soy tu analista de BI (DuckDB): consultas de solo lectura, esquema, métricas y gráficos cuando lo pidas. "
+            "¿Qué quieres revisar?"
+        )
+    if wl == "leilaassistant":
+        return (
+            "Hola. ¿En qué puedo ayudarte? Puedes ver /catalogo o pedir con /pedido."
+        )
+    if w:
+        return f"Hola. Aquí {w}. ¿En qué puedo ayudarte?"
+    return "Hola. ¿En qué puedo ayudarte?"
+
+
+def _capabilities_fast_reply_text(worker_id: str | None) -> str:
+    w = (worker_id or "").strip()
+    wl = w.lower()
+    if wl == "bi-analyst":
+        return (
+            "Puedo trabajar con tu DuckDB en solo lectura: esquema y tablas, consultas SQL, "
+            "métricas, tendencias y gráficos en sandbox. "
+            "Ejemplo de petición: «¿Cuántas filas tiene la tabla sales?» o «Resume ventas por día». "
+            "Dime qué quieres medir o qué tabla explorar."
+        )
+    if wl == "leilaassistant":
+        return (
+            "Puedo ayudarte con el catálogo, pedidos (/pedido) y dudas sobre productos. "
+            "Prueba /catalogo o escribe qué buscas."
+        )
+    if w:
+        return (
+            f"Actúo como asistente ({w}): describe la tarea o el dato que necesitas y la encaminamos."
+        )
+    return "Describe qué necesitas (datos, consulta o objetivo) y te indico los siguientes pasos."
+
+
 def _task_summary_for_activity(incoming: str, planned_task: str) -> str:
     """Resumen corto de la tarea para /tasks (activity), no el planned_task completo."""
     t = (incoming or "").strip().lower()
@@ -385,6 +444,64 @@ def build_manager_graph(
             out["shared_db_path"] = state["shared_db_path"]
         if "username" in state:
             out["username"] = state["username"]
+        return out
+
+    def greeting_shortcut_node(state: ManagerAgentState) -> ManagerAgentState:
+        """Responde saludos o preguntas «qué puedes hacer» sin plan ni invoke_worker."""
+        chat_id = state.get("chat_id") or ""
+        tenant_id = (state.get("tenant_id") or "default").strip() or "default"
+        incoming = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
+        assigned = (state.get("assigned_worker_id") or "").strip() or None
+        _cid = (chat_id or "").strip() or "unknown"
+        set_log_context(
+            tenant_id=tenant_id,
+            worker_id="manager",
+            chat_id=format_chat_log_identity(_cid, state.get("username")),
+        )
+        if _manager_capabilities_fast_path_ok(incoming):
+            log_sys(_obs, "Capacidades: respuesta directa (sin plan ni subagente)")
+            reply = _capabilities_fast_reply_text(assigned)
+            _audit_title = "Capacidades (respuesta directa)"
+        else:
+            log_sys(_obs, "Saludo: respuesta directa (sin plan ni subagente)")
+            reply = _greeting_fast_reply_text(assigned)
+            _audit_title = "Saludo directo"
+        try:
+            append_task_audit(
+                db,
+                chat_id,
+                assigned or "manager",
+                incoming,
+                "SUCCESS",
+                0,
+                plan_title=_audit_title,
+            )
+        except Exception:
+            pass
+        out: ManagerAgentState = {
+            "reply": reply,
+            "_audit_done": True,
+            "assigned_worker_id": assigned,
+            "plan_title": None,
+            "incoming": incoming,
+            "input": incoming,
+        }  # type: ignore[assignment]
+        if "history" in state:
+            out["history"] = state["history"]
+        if "chat_id" in state:
+            out["chat_id"] = state["chat_id"]
+        if "tenant_id" in state:
+            out["tenant_id"] = state["tenant_id"]
+        if "user_id" in state:
+            out["user_id"] = state["user_id"]
+        if "vault_db_path" in state:
+            out["vault_db_path"] = state["vault_db_path"]
+        if "shared_db_path" in state:
+            out["shared_db_path"] = state["shared_db_path"]
+        if "username" in state:
+            out["username"] = state["username"]
+        if "available_templates" in state:
+            out["available_templates"] = state["available_templates"]
         return out
 
     def plan_node(state: ManagerAgentState) -> ManagerAgentState:
@@ -517,10 +634,12 @@ def build_manager_graph(
         worker_invoke: dict[str, Any] | None = None
         status = "SUCCESS"
         agent_instance_label = ""
+        slot_token = ""
+        run_label_n = 1
         try:
             global _worker_graph_cache
-            _run_n = next_subagent_run_number(tenant_id, assigned)
-            agent_instance_label = f"{assigned} {_run_n}".strip()
+            slot_token, run_label_n = acquire_subagent_slot(tenant_id, assigned, str(chat_id or ""))
+            agent_instance_label = f"{assigned} {run_label_n}".strip()
             worker_cache_key = f"{tenant_id}::{assigned}::{vault_db_path or db_path or ''}::{shared_db_path}"
             if worker_cache_key not in _worker_graph_cache:
                 _worker_graph_cache[worker_cache_key] = _build_worker_graph(
@@ -562,6 +681,8 @@ def build_manager_graph(
                 "username": (state.get("username") or "").strip(),
                 "vault_db_path": vault_db_path,
                 "shared_db_path": shared_db_path,
+                "subagent_instance_label": agent_instance_label,
+                "heartbeat_plan_title": (plan_title or "").strip(),
             }
             trace_cfg = get_tracing_config(
                 tenant_id,
@@ -579,19 +700,23 @@ def build_manager_graph(
                 state.get("plan_title"),
                 _tasks_for_hb if isinstance(_tasks_for_hb, list) else [],
                 task_summary=task_summary,
+                subagent_header=agent_instance_label or None,
             )
-            if agent_instance_label:
-                _hb_text = f"{agent_instance_label}\n\n{_hb_text}"
+            _hb_plan_log = (plan_title or "").strip() or None
             schedule_chat_heartbeat_dm(
                 str(tenant_id or "default").strip() or "default",
                 str(chat_id or "").strip(),
                 str(user_id or "").strip() or str(chat_id or "").strip(),
                 _hb_text,
+                log_worker_id=agent_instance_label or None,
+                log_username=(state.get("username") or "").strip() or None,
+                log_plan_title=_hb_plan_log,
             )
             worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
             reply = str(worker_invoke.get("reply") or worker_invoke.get("output") or "Sin respuesta.")
-            if agent_instance_label and reply:
-                reply = f"{agent_instance_label}\n\n{reply}"
+            _label_reply = f"{assigned} {run_label_n}".strip()
+            if _label_reply and reply:
+                reply = f"{_label_reply}\n\n{reply}"
             messages = worker_invoke.get("messages")
             # Log tool use para PM2 (tras manager plan)
             _tool_names = []
@@ -610,10 +735,13 @@ def build_manager_graph(
             )
         except Exception as e:
             reply = str(e)[:2048]
-            if agent_instance_label and reply:
-                reply = f"{agent_instance_label}\n\n{reply}"
+            _label_e = f"{assigned} {run_label_n}".strip()
+            if _label_e and reply:
+                reply = f"{_label_e}\n\n{reply}"
             status = "FAILED"
         finally:
+            if slot_token:
+                release_subagent_slot(tenant_id, assigned, slot_token, str(chat_id or ""))
             set_idle(chat_id)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             append_task_audit(db, chat_id, assigned, incoming, status, elapsed_ms, plan_title=plan_title)
@@ -638,12 +766,26 @@ def build_manager_graph(
             out["sandbox_photo_base64"] = b64
         return out
 
+    def route_after_router(state: ManagerAgentState) -> str:
+        incoming = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
+        if _manager_greeting_fast_path_ok(incoming):
+            return "greeting_shortcut"
+        if _manager_capabilities_fast_path_ok(incoming):
+            return "greeting_shortcut"
+        return "plan"
+
     graph = StateGraph(ManagerAgentState)
     graph.add_node("router", router_node)
+    graph.add_node("greeting_shortcut", greeting_shortcut_node)
     graph.add_node("plan", plan_node)
     graph.add_node("invoke_worker", invoke_worker_node)
     graph.set_entry_point("router")
-    graph.add_edge("router", "plan")
+    graph.add_conditional_edges(
+        "router",
+        route_after_router,
+        {"greeting_shortcut": "greeting_shortcut", "plan": "plan"},
+    )
+    graph.add_edge("greeting_shortcut", END)
     graph.add_edge("plan", "invoke_worker")
     graph.add_edge("invoke_worker", END)
     return graph.compile()

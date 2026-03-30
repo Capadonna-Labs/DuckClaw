@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "duckclaw-telegram-mcp"
+version = "0.1.0"
+description = "MCP stdio server for Telegram Bot API (sendMessage, sendPhoto/sendDocument)"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+    "duckclaw-shared",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+duckclaw-shared = { path = "../../shared", editable = true }

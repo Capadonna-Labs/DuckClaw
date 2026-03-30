@@ -2,7 +2,7 @@
 """
 DuckClaw API Gateway — Microservicio unificado.
 
-Punto de entrada único para n8n, Telegram, Angular y escrituras a DuckDB.
+Punto de entrada único para Telegram (webhook/long polling), clientes HTTP, Angular y escrituras a DuckDB.
 Endpoints: /api/v1/agent/chat, /api/v1/db/write, homeostasis, system health.
 """
 
@@ -61,8 +61,16 @@ for _base in (_repo_root, Path.cwd()):
             _line = _line.strip()
             if _line and not _line.startswith("#") and "=" in _line:
                 _k, _, _v = _line.partition("=")
-                if _k.strip():
-                    os.environ.setdefault(_k.strip(), _v.strip().strip("'\""))
+                _ks = _k.strip()
+                if not _ks:
+                    continue
+                _vs = _v.strip().strip("'\"")
+                # Esta clave controla hilos en graph_server: debe ganar el .env del repo
+                # aunque el proceso traiga un valor vacío heredado del entorno.
+                if _ks == "DUCKCLAW_CHAT_PARALLEL_INVOCATIONS":
+                    os.environ[_ks] = _vs
+                else:
+                    os.environ.setdefault(_ks, _vs)
         break
 
 
@@ -339,14 +347,39 @@ async def lifespan(app: FastAPI):
         ensure_vault_registry()
     except Exception as exc:
         _gateway_log.warning("Multi-Vault: no se pudo inicializar user_vaults: %s", exc)
+
+    app.state.telegram_mcp = None
+    try:
+        from duckclaw.forge.skills.telegram_mcp_bridge import (
+            infer_repo_root,
+            start_telegram_mcp_gateway_session,
+        )
+
+        _mcp_repo = infer_repo_root()
+        _mcp_sess = await start_telegram_mcp_gateway_session(_mcp_repo)
+        if _mcp_sess is not None:
+            app.state.telegram_mcp = _mcp_sess
+            _gateway_log.info("Telegram MCP: sesión stdio activa para egress")
+    except Exception as exc:  # noqa: BLE001
+        _gateway_log.warning("Telegram MCP: no se pudo iniciar (se usa Bot API directa): %s", exc)
+
     yield
+
+    _tg_mcp = getattr(app.state, "telegram_mcp", None)
+    if _tg_mcp is not None:
+        try:
+            await _tg_mcp.aclose()
+        except Exception as exc:  # noqa: BLE001
+            _gateway_log.warning("Telegram MCP: error al cerrar sesión: %s", exc)
+        app.state.telegram_mcp = None
+
     await app.state.redis.aclose()
 
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="API unificada para n8n, Telegram, agentes y escrituras DuckDB.",
+    description="API unificada para Telegram, agentes y escrituras DuckDB.",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -386,6 +419,9 @@ async def _tailscale_auth_middleware(request: Request, call_next):
         return await call_next(request)
     path = request.url.path.rstrip("/") or "/"
     if path in ("/", "/health"):
+        return await call_next(request)
+    # Telegram Bot API no envía X-Tailscale-Auth-Key; el webhook usa TELEGRAM_WEBHOOK_SECRET.
+    if path == "/api/v1/telegram/webhook":
         return await call_next(request)
     header_key = request.headers.get("X-Tailscale-Auth-Key", "").strip()
     if header_key != auth_key:
@@ -428,6 +464,30 @@ async def _chat_lock(chat_id: str):
             except Exception:
                 # No romper si no se puede liberar; expirará por timeout.
                 pass
+
+
+def _chat_parallel_invocations_enabled() -> bool:
+    """
+    Si True, no se serializa por chat_id: varios POST concurrentes (p. ej. Telegram)
+    pueden ejecutar el grafo a la vez; «BI-Analyst N» es el índice entre instancias
+    activas del mismo worker en ese chat (1 si eres el único en curso, 2 si hay dos, …).
+    Riesgo: orden del historial Redis y estado /tasks pueden intercalarse; activar solo si lo necesitas.
+    """
+    return (os.environ.get("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+@asynccontextmanager
+async def _maybe_chat_lock(chat_id: str):
+    if _chat_parallel_invocations_enabled():
+        yield
+        return
+    async with _chat_lock(chat_id):
+        yield
 
 
 # ── Root y health ─────────────────────────────────────────────────────────────
@@ -639,32 +699,57 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
 
 def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
     """
-    Alert opcional al admin via webhook n8n (best-effort).
+    Alert opcional al admin: Bot API nativa si hay token; si no, webhook n8n (best-effort).
     """
     admin_chat_id = (os.getenv("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
-    webhook_url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
-    auth_key = (os.getenv("N8N_AUTH_KEY") or getattr(settings, "N8N_AUTH_KEY", "") or "").strip()
+    plain = (
+        f"🚨 Alerta de Seguridad: El usuario {user_id} ha intentado acceder 3 veces "
+        f"sin autorización al tenant {tenant_id}."
+    )
+    if not admin_chat_id:
+        _gateway_log.warning("Telegram Guard: DUCKCLAW_ADMIN_CHAT_ID vacío; no hay alerta al admin")
+        return
 
-    if not admin_chat_id or not webhook_url:
+    token = _effective_telegram_bot_token()
+    if token:
+        try:
+            from duckclaw.integrations.telegram.telegram_outbound_sync import send_message_markdown_v2_sync
+
+            if send_message_markdown_v2_sync(
+                bot_token=token,
+                chat_id=str(admin_chat_id),
+                text=escape_telegram_markdown_v2(plain),
+                timeout_sec=15.0,
+                log=_gateway_log,
+            ):
+                _gateway_log.info("Telegram Guard: alerta admin enviada vía Bot API nativa")
+                return
+        except Exception as exc:  # noqa: BLE001
+            _gateway_log.warning("Telegram Guard: falló alerta nativa, se intenta webhook: %s", exc)
+
+    if (os.getenv("DUCKCLAW_TELEGRAM_OUTBOUND_VIA") or "").strip().lower() != "n8n":
         _gateway_log.warning(
-            "Telegram Guard: no se pudo enviar alerta (admin_chat_id=%r webhook=%r)",
-            admin_chat_id,
-            bool(webhook_url),
+            "Telegram Guard: alerta admin no usa n8n (DUCKCLAW_TELEGRAM_OUTBOUND_VIA!=n8n)",
         )
         return
 
-    text = f"🚨 Alerta de Seguridad: El usuario {user_id} ha intentado acceder 3 veces sin autorización al tenant {tenant_id}."
+    webhook_url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
+    auth_key = (os.getenv("N8N_AUTH_KEY") or getattr(settings, "N8N_AUTH_KEY", "") or "").strip()
+    if not webhook_url:
+        _gateway_log.warning(
+            "Telegram Guard: no hay token Bot API ni webhook n8n configurado; alerta no enviada",
+        )
+        return
     headers: dict[str, Any] = {"Content-Type": "application/json"}
     if auth_key:
         headers["X-DuckClaw-Secret"] = auth_key
-
-    payload = {"chat_id": str(admin_chat_id), "text": escape_telegram_markdown_v2(text)}
+    payload = {"chat_id": str(admin_chat_id), "text": escape_telegram_markdown_v2(plain)}
     data = json.dumps(payload).encode("utf-8")
     req = _url_request.Request(webhook_url, data=data, headers=headers, method="POST")
-
     try:
         with _url_request.urlopen(req, timeout=10) as resp:
             _ = resp.read()
+        _gateway_log.info("Telegram Guard: alerta admin enviada vía webhook")
     except URLError as exc:
         _gateway_log.warning("Telegram Guard: error enviando alerta webhook: %s", exc)
     except Exception as exc:  # noqa: BLE001
@@ -738,18 +823,14 @@ def _strip_lines_mentioning_workspace_output(text: str) -> str:
     return out if out else text
 
 
-def _push_chat_reply_via_n8n_outbound_sync(*, chat_id: str, user_id: str, text: str) -> None:
-    """
-    Entrega la respuesta del chat al webhook de salida (mismo contrato que The Mind / n8n).
-
-    Usado cuando el cliente HTTP ya cerró (p. ej. timeout de n8n en 300s) pero el agente
-    terminó después: sin esto, el nodo «Responder Telegram» nunca recibe el JSON.
-    """
+def _webhook_outbound_chat_reply_sync(*, chat_id: str, user_id: str, text: str) -> None:
+    """POST al webhook de salida n8n solo si ``DUCKCLAW_TELEGRAM_OUTBOUND_VIA=n8n`` (legado)."""
+    if (os.getenv("DUCKCLAW_TELEGRAM_OUTBOUND_VIA") or "").strip().lower() != "n8n":
+        return
     url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
     if not url:
         _gateway_log.warning(
-            "outbound fallback: cliente desconectado pero N8N_OUTBOUND_WEBHOOK_URL no está definido; "
-            "no se puede reenviar la respuesta a Telegram."
+            "outbound webhook n8n: N8N_OUTBOUND_WEBHOOK_URL no está definido; no se reenvía a Telegram.",
         )
         return
     cid = str(chat_id or "").strip()
@@ -797,6 +878,104 @@ def _push_chat_reply_via_n8n_outbound_sync(*, chat_id: str, user_id: str, text: 
                 len(chunks),
                 exc,
             )
+
+
+def _outbound_deliver_chat_text_sync(
+    *,
+    chat_id: str,
+    user_id: str,
+    text: str,
+    telegram_mcp: Any = None,
+    redis_url: str | None = None,
+    tenant_id: str = "default",
+) -> None:
+    """
+    Entrega texto largo al usuario: MCP (si hay sesión), luego **Bot API nativa**,
+    y solo al final webhook n8n si sigue configurado.
+    """
+    from duckclaw.graphs.chat_heartbeat import normalize_telegram_chat_id_for_outbound
+
+    cid_raw = str(chat_id or "").strip()
+    cid = normalize_telegram_chat_id_for_outbound(cid_raw) or cid_raw
+    uid_raw = str(user_id or "").strip()
+    uid = normalize_telegram_chat_id_for_outbound(uid_raw) or uid_raw or cid
+    raw = (text or "").strip()
+    if not cid or not raw:
+        _gateway_log.warning(
+            "outbound deliver: omitido (chat_id=%s text vacío=%s)",
+            format_chat_id_for_terminal(cid or cid_raw),
+            not bool(raw),
+        )
+        return
+
+    if telegram_mcp is not None:
+        try:
+            from duckclaw.forge.skills.telegram_mcp_bridge import run_async, send_long_plain_via_mcp_chunks
+
+            ok = run_async(
+                send_long_plain_via_mcp_chunks(telegram_mcp.session, chat_id=str(cid), plain_text=raw),
+            )
+            if ok:
+                _gateway_log.info(
+                    "outbound deliver: MCP OK chat_id=%s len_text=%s",
+                    format_chat_id_for_terminal(cid),
+                    len(raw),
+                )
+                return
+            _gateway_log.warning("outbound deliver: MCP no entregó todo; fallback nativo chat_id=%s", cid)
+        except Exception as exc:  # noqa: BLE001
+            _gateway_log.warning("outbound deliver: MCP error %s; fallback nativo", exc)
+            try:
+                from core.telegram_mcp_dlq import push_telegram_mcp_dlq_blocking
+
+                push_telegram_mcp_dlq_blocking(
+                    redis_url,
+                    tenant_id=tenant_id,
+                    chat_id=str(cid),
+                    tool="telegram_send_message",
+                    args={"chat_id": str(cid), "text": "<outbound disconnect fallback>"},
+                    error=str(exc)[:2000],
+                )
+            except Exception:
+                pass
+
+    token = _effective_telegram_bot_token()
+    if token:
+        try:
+            from duckclaw.integrations.telegram.telegram_outbound_sync import (
+                send_long_plain_text_markdown_v2_chunks_sync,
+            )
+
+            _gateway_log.info(
+                "outbound deliver: intento Bot API nativo chat_id=%s len_text=%s",
+                format_chat_id_for_terminal(cid),
+                len(raw),
+            )
+            n = send_long_plain_text_markdown_v2_chunks_sync(
+                bot_token=token,
+                chat_id=cid,
+                plain_text=raw,
+                log=_gateway_log,
+            )
+            if n > 0:
+                _gateway_log.info(
+                    "outbound deliver: Bot API OK chat_id=%s partes=%s",
+                    format_chat_id_for_terminal(cid),
+                    n,
+                )
+                return
+            _gateway_log.warning(
+                "outbound deliver: Bot API no envió partes; fallback webhook si existe (chat_id=%s)",
+                format_chat_id_for_terminal(cid),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _gateway_log.warning(
+                "outbound deliver: error Bot API chat_id=%s: %s; fallback webhook si existe",
+                format_chat_id_for_terminal(cid),
+                exc,
+            )
+
+    _webhook_outbound_chat_reply_sync(chat_id=cid, user_id=uid, text=raw)
 
 
 async def _authorize_or_reject(*, tenant_id: str, user_id: str, is_owner: bool) -> None:
@@ -921,15 +1100,17 @@ async def agent_chat(
             session_source,
         )
     redis_client = getattr(http_request.app.state, "redis", None)
+    _tg_mcp = getattr(http_request.app.state, "telegram_mcp", None)
     result = await _invoke_chat(
         body,
         worker_id or "finanz",
         session_id=session_id,
         tenant_id=tenant_id,
         redis_client=redis_client,
+        telegram_mcp=_tg_mcp,
     )
-    # n8n suele usar timeout ~300s; si el agente tarda más, el cliente aborta y esta respuesta
-    # no llega al flujo. Reenvío best-effort al webhook de Telegram (mismo que alertas / The Mind).
+    # Cliente HTTP puede cerrar antes (timeout ~300s, proxy, etc.): reenvío best-effort
+    # a Telegram por Bot API nativa o webhook n8n.
     _fb = (os.getenv("DUCKCLAW_CHAT_OUTBOUND_ON_CLIENT_DISCONNECT", "true").strip().lower())
     if _fb in ("1", "true", "yes", ""):
         try:
@@ -938,17 +1119,23 @@ async def agent_chat(
                 if resp_text:
                     uid_fb = (body.user_id or "").strip() or session_id
                     _gateway_log.info(
-                        "outbound fallback: cliente desconectado; reenvío a n8n webhook (chat_id=%s, len=%s)",
+                        "outbound fallback: cliente desconectado; entrega async a Telegram "
+                        "(nativo o n8n) chat_id=%s len=%s",
                         format_chat_id_for_terminal(session_id),
                         len(resp_text),
                     )
                     loop = asyncio.get_running_loop()
+                    _mcp_snap = _tg_mcp
+                    _redis_url = str(settings.REDIS_URL)
                     await loop.run_in_executor(
                         None,
-                        lambda: _push_chat_reply_via_n8n_outbound_sync(
+                        lambda: _outbound_deliver_chat_text_sync(
                             chat_id=session_id,
                             user_id=uid_fb,
                             text=resp_text,
+                            telegram_mcp=_mcp_snap,
+                            redis_url=_redis_url,
+                            tenant_id=tenant_id,
                         ),
                     )
         except Exception as exc:  # noqa: BLE001
@@ -977,22 +1164,22 @@ def _strip_markdown_bold(s: str) -> str:
 def clean_agent_response(response: str) -> str:
     """
     Limpia menús residuales del LLM para que la respuesta final sea concisa.
-    Elimina bloques tipo \"¿Cuál es mi tarea?\", \"Puedo ayudarte con:\" y menús de resumen financiero.
+    Quita líneas sueltas (p. ej. \"¿Cuál es mi tarea?\") y bullets de menú finanz sin truncar el resto del texto.
     """
     if not response or not isinstance(response, str):
         return response
     text = str(response)
-    # No usar "Puedo ayudarte con:.*" con DOTALL: el modelo lo escribe en respuestas válidas
-    # (p. ej. BI Analyst) y se borraba todo el cuerpo del mensaje antes de Telegram.
-    patterns = [
-        r"¿Cuál\s+es\s+mi\s+tarea\?.*",
-        r"¿Qué\s+te\s+gustaría\s+hacer\s+ahora\?.*",
-        r"-\s*📊\s*Resumen\s+financiero.*",
-        r"-\s*💰\s*Registrar\s+transacciones.*",
+    # No usar ".*" con DOTALL tras frases cortas: el BI Analyst sigue con párrafos útiles
+    # después de "¿Cuál es mi tarea?" y eso borraba todo el cuerpo (Telegram solo veía el header).
+    line_patterns = [
+        r"(?im)^\s*¿Cuál\s+es\s+mi\s+tarea\?\s*$",
+        r"(?im)^\s*¿Qué\s+te\s+gustaría\s+hacer\s+ahora\?\s*$",
+        r"(?im)^-\s*📊\s*Resumen\s+financiero.*$",
+        r"(?im)^-\s*💰\s*Registrar\s+transacciones.*$",
     ]
-    for pattern in patterns:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.DOTALL)
-    return text.strip()
+    for pattern in line_patterns:
+        text = re.sub(pattern, "", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _beautify_bi_analyst_telegram(text: str) -> str:
@@ -1036,11 +1223,14 @@ async def _invoke_chat(
     tenant_id: str,
     *,
     redis_client: Any = None,
+    telegram_multipart_tail_delivery: str | None = None,
+    telegram_mcp: Any = None,
 ):
     """
     Orquesta la llamada al grafo LangGraph a partir de un ChatRequest.
 
     - session_id: ya resuelto (body + query + headers); debe ser el mismo en todos los POST del hilo.
+    - telegram_multipart_tail_delivery: ``native`` | ``n8n`` | None (inferido por env) para partes 2..N del mensaje.
     """
     message = (payload.message or "").strip()
     session_id = (session_id or "default").strip() or "default"
@@ -1181,8 +1371,8 @@ async def _invoke_chat(
         )
         raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
-    # Concurrencia: procesar un solo mensaje por chat_id a la vez.
-    async with _chat_lock(session_id):
+    # Concurrencia: por defecto un mensaje por chat_id (Redis lock). Opcional: paralelo (ver _maybe_chat_lock).
+    async with _maybe_chat_lock(session_id):
         try:
             graph = _get_or_build_graph()
         except Exception as exc:
@@ -1319,7 +1509,46 @@ async def _invoke_chat(
                 )
             if png_bytes:
                 token = _effective_telegram_bot_token()
-                if token:
+                if telegram_mcp is not None:
+                    try:
+                        from core.telegram_mcp_dlq import push_telegram_mcp_dlq
+                        from duckclaw.forge.skills.telegram_mcp_bridge import send_sandbox_photo_via_mcp
+
+                        out = await send_sandbox_photo_via_mcp(
+                            telegram_mcp.session,
+                            chat_id=str(session_id),
+                            image_bytes=png_bytes,
+                        )
+                        if out.get("ok"):
+                            chart_sent = True
+                            _gateway_log.info("sandbox chart: enviado vía MCP chat_id=%s", session_id)
+                        else:
+                            err = str(out.get("error", out))
+                            _gateway_log.warning("sandbox chart: MCP falló (%s); intento Bot API", err[:500])
+                            await push_telegram_mcp_dlq(
+                                redis_client,
+                                tenant_id=tenant_id,
+                                chat_id=str(session_id),
+                                tool="telegram_send_photo",
+                                args={"chat_id": str(session_id), "photo_base64": "<omitted>"},
+                                error=err[:2000],
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        _gateway_log.warning("sandbox chart: excepción MCP (%s); intento Bot API", exc)
+                        try:
+                            from core.telegram_mcp_dlq import push_telegram_mcp_dlq
+
+                            await push_telegram_mcp_dlq(
+                                redis_client,
+                                tenant_id=tenant_id,
+                                chat_id=str(session_id),
+                                tool="telegram_send_photo",
+                                args={"chat_id": str(session_id)},
+                                error=str(exc)[:2000],
+                            )
+                        except Exception:
+                            pass
+                if not chart_sent and token:
                     loop = asyncio.get_running_loop()
                     chart_sent = bool(
                         await loop.run_in_executor(
@@ -1331,7 +1560,7 @@ async def _invoke_chat(
                             ),
                         )
                     )
-                else:
+                elif not chart_sent and not token:
                     _gateway_log.warning(
                         "sandbox chart: hay PNG del sandbox pero no hay token Bot API (TELEGRAM_BOT_TOKEN "
                         "en el bloque PM2, o TELEGRAM_BOT_TOKEN_BI_ANALYST / TELEGRAM_BOT_TOKEN_LEILA / "
@@ -1383,29 +1612,32 @@ async def _invoke_chat(
         _telegram_response_parts_count = len(plain_parts)
         reply_text = _telegram_safe(plain_parts[0])
         tail_plain = "\n\n".join(plain_parts[1:]) if len(plain_parts) > 1 else ""
-        if tail_plain.strip() and (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip():
+        if tail_plain.strip():
             try:
+                from core.telegram_multipart_tail_dispatch_async import dispatch_telegram_multipart_tail_async
 
                 async def _send_telegram_tail() -> None:
-                    await asyncio.get_running_loop().run_in_executor(
-                        None,
-                        partial(
-                            _push_chat_reply_via_n8n_outbound_sync,
-                            chat_id=session_id,
+                    try:
+                        await dispatch_telegram_multipart_tail_async(
+                            tail_plain=tail_plain,
+                            session_id=session_id,
                             user_id=(user_id or "").strip() or session_id,
-                            text=tail_plain,
-                        ),
-                    )
+                            telegram_multipart_tail_delivery=telegram_multipart_tail_delivery,
+                            effective_telegram_bot_token=_effective_telegram_bot_token,
+                            n8n_outbound_push_sync=_webhook_outbound_chat_reply_sync,
+                            telegram_mcp=telegram_mcp,
+                            redis_client=redis_client,
+                            tenant_id=tenant_id,
+                        )
+                    except Exception as tail_exc:  # noqa: BLE001
+                        _gateway_log.warning(
+                            "telegram reply tail: envío falló (nativo/n8n): %s",
+                            tail_exc,
+                        )
 
                 asyncio.create_task(_send_telegram_tail())
             except Exception as exc:  # noqa: BLE001
                 _gateway_log.warning("telegram reply tail: no se pudo programar envío: %s", exc)
-        elif tail_plain.strip():
-            _gateway_log.warning(
-                "telegram reply: respuesta en %s partes; falta N8N_OUTBOUND_WEBHOOK_URL — "
-                "solo la 1ª parte la envía n8n (Responder Telegram)",
-                len(plain_parts),
-            )
     except Exception:
         try:
             from duckclaw.graphs.on_the_fly_commands import _telegram_safe
@@ -1438,7 +1670,7 @@ async def _invoke_chat(
     }
     if _telegram_response_parts_count > 1:
         out_resp["response_parts"] = _telegram_response_parts_count
-    # Visibilidad en n8n: el nodo Telegram solo envía texto; la imagen la manda el gateway por Bot API.
+    # Texto en JSON; PNG del sandbox lo envía el gateway por Bot API (sendPhoto).
     if (
         not is_system_prompt
         and isinstance(result, dict)
@@ -1516,6 +1748,21 @@ async def enqueue_write(req: WriteRequest):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Error conectando al broker de mensajes: {str(e)}",
         )
+
+
+# ── Telegram inbound webhook (integración nativa) ────────────────────────────
+
+try:
+    from routers.telegram_inbound_webhook import build_telegram_inbound_webhook_router
+
+    app.include_router(
+        build_telegram_inbound_webhook_router(
+            invoke_agent_chat=_invoke_chat,
+            resolve_effective_telegram_bot_token=_effective_telegram_bot_token,
+        )
+    )
+except ImportError:
+    pass
 
 
 # ── Quotes router (microservicio: routers en services/api-gateway) ───────────

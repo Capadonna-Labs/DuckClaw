@@ -384,8 +384,18 @@ def serve(
         if gateway:
             # Microservicio unificado: services/api-gateway/main.py (agente + db/write)
             # cwd=repo_root → --app-dir services/api-gateway resuelve a repo/services/api-gateway
+            # uvicorn_pm2.py evita traceback de KeyboardInterrupt en PM2 error.log al restart
             # args como array para que PM2 pase cada token por separado (evita ModuleNotFoundError)
-            args_list = ["-m", "uvicorn", "main:app", "--host", str(host), "--port", str(port), "--app-dir", "services/api-gateway"]
+            args_list = [
+                "services/api-gateway/uvicorn_pm2.py",
+                "main:app",
+                "--host",
+                str(host),
+                "--port",
+                str(port),
+                "--app-dir",
+                "services/api-gateway",
+            ]
         else:
             args_list = ["-m", "uvicorn", "duckclaw.graphs.graph_server:app", "--host", str(host), "--port", str(port)]
         gateway_cwd = effective_cwd

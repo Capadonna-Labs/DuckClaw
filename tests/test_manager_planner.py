@@ -99,3 +99,37 @@ def test_llm_plan_from_model_truncates_long_title() -> None:
     out = _llm_plan_from_model(_Ok(), "x", "sys")
     assert out is not None
     assert out[0] == "one two three four five"
+
+
+def test_manager_greeting_fast_path_ok() -> None:
+    from duckclaw.graphs.manager_graph import _greeting_fast_reply_text, _manager_greeting_fast_path_ok
+
+    assert _manager_greeting_fast_path_ok("Hola!")
+    assert _manager_greeting_fast_path_ok("buenos días")
+    assert not _manager_greeting_fast_path_ok("/help")
+    assert not _manager_greeting_fast_path_ok("hola necesito ventas")
+    assert "analyst" in _greeting_fast_reply_text("BI-Analyst").lower() or "bi" in _greeting_fast_reply_text(
+        "BI-Analyst"
+    ).lower()
+
+
+def test_manager_capabilities_fast_path_ok() -> None:
+    from duckclaw.graphs.manager_graph import (
+        _capabilities_fast_reply_text,
+        _manager_capabilities_fast_path_ok,
+        _manager_greeting_fast_path_ok,
+    )
+
+    assert _manager_capabilities_fast_path_ok("Que puedes hacer?")
+    assert _manager_capabilities_fast_path_ok("¿En qué puedes ayudarme?")
+    assert _manager_capabilities_fast_path_ok("what can you do")
+    assert not _manager_capabilities_fast_path_ok("hola")
+    assert not _manager_capabilities_fast_path_ok("/help")
+    assert not _manager_capabilities_fast_path_ok("que puedes hacer con la tabla ventas")
+    assert _manager_capabilities_fast_path_ok("Dame un ejemplo de algo que puedas hacer")
+    assert _manager_capabilities_fast_path_ok("Dame un ejemplo de algo que puedes hacer")
+    assert _manager_capabilities_fast_path_ok("Muéstrame un ejemplo")
+    assert not _manager_capabilities_fast_path_ok("dame un ejemplo de ventas por región")
+    assert _manager_greeting_fast_path_ok("hola")
+    assert "duckdb" in _capabilities_fast_reply_text("BI-Analyst").lower()
+    assert "ejemplo" in _capabilities_fast_reply_text("BI-Analyst").lower()

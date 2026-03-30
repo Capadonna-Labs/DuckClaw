@@ -2,6 +2,11 @@
 """Integración Telegram: long polling, webhook (cabecera secreta), cliente Bot API async."""
 
 from duckclaw.integrations.telegram.telegram_bot_api_async_client import TelegramBotApiAsyncClient
+from duckclaw.integrations.telegram.telegram_outbound_sync import (
+    normalize_telegram_chat_id_for_bot_api,
+    send_long_plain_text_markdown_v2_chunks_sync,
+    send_message_markdown_v2_sync,
+)
 from duckclaw.integrations.telegram.telegram_long_polling_bot_base import (
     TelegramBotBase,
     TelegramLongPollingBotBase,
@@ -18,5 +23,8 @@ __all__ = [
     "TelegramBotBase",
     "TelegramLongPollingBotBase",
     "is_valid_telegram_webhook_secret_token",
+    "normalize_telegram_chat_id_for_bot_api",
+    "send_long_plain_text_markdown_v2_chunks_sync",
+    "send_message_markdown_v2_sync",
     "telegram_webhook_secret_expected_from_env",
 ]

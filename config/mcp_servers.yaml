@@ -1,0 +1,9 @@
+# MCP stdio servers for DuckClaw (paths relative to repo root).
+# Telegram: packages/mcp/telegram (duckclaw-telegram-mcp). El gateway arranca el hijo con el mismo
+# Python que uvicorn (use_parent_python: true por defecto en código); evita errores uv "not in workspace" bajo PM2.
+# Forzar ``uv run --package``: use_parent_python: false y command/args, o env DUCKCLAW_TELEGRAM_MCP_SPAWN_WITH_UV=1.
+# TELEGRAM_BOT_TOKEN viene del padre (.env / PM2); no commitear secretos.
+mcp_servers:
+  telegram:
+    enabled: true
+    env: {}

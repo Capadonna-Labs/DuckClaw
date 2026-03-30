@@ -8,6 +8,7 @@ Contrato: POST ``/api/v1/telegram/webhook`` con JSON de Update; validación opci
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -26,6 +27,34 @@ _log = logging.getLogger("duckclaw.gateway.telegram_inbound_webhook")
 
 _TELEGRAM_WEBHOOK_DEDUPE_KEY_PREFIX = "duckclaw:dedupe:telegram:webhook:update"
 _TELEGRAM_WEBHOOK_DEDUPE_TTL_SECONDS = 172800
+
+
+def _telegram_webhook_default_worker_id() -> str:
+    """Worker de entrada al grafo: alinea con PM2 / ecosystem sin duplicar nombres."""
+    for key in ("DUCKCLAW_TELEGRAM_DEFAULT_WORKER", "DUCKCLAW_DEFAULT_WORKER_ID"):
+        v = (os.environ.get(key) or "").strip()
+        if v:
+            return v
+    return "finanz"
+
+
+def _telegram_webhook_default_tenant_id() -> str:
+    """Tenant en el ChatRequest para trazas; _invoke_chat sigue normalizando con _effective_tenant_id."""
+    for key in ("DUCKCLAW_TELEGRAM_DEFAULT_TENANT", "DUCKCLAW_GATEWAY_TENANT_ID"):
+        v = (os.environ.get(key) or "").strip()
+        if v:
+            return v
+    return "default"
+
+
+def _telegram_webhook_parallel_processing_enabled() -> bool:
+    """Alineado con _chat_parallel_invocations_enabled del gateway: respuesta HTTP 200 al instante."""
+    return (os.environ.get("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def build_telegram_inbound_webhook_router(
@@ -107,8 +136,8 @@ def build_telegram_inbound_webhook_router(
         )
         chat_type = str(chat.get("type") or "private")
 
-        worker_id = (os.environ.get("DUCKCLAW_TELEGRAM_DEFAULT_WORKER") or "finanz").strip() or "finanz"
-        tenant_id = (os.environ.get("DUCKCLAW_TELEGRAM_DEFAULT_TENANT") or "default").strip() or "default"
+        worker_id = _telegram_webhook_default_worker_id()
+        tenant_id = _telegram_webhook_default_tenant_id()
 
         payload = ChatRequest(
             message=text,
@@ -120,47 +149,62 @@ def build_telegram_inbound_webhook_router(
         )
 
         session_id = str(chat_id)
+        telegram_mcp = getattr(request.app.state, "telegram_mcp", None)
 
-        try:
-            result = await invoke_agent_chat(
-                payload,
-                worker_id,
-                session_id,
-                tenant_id,
-                redis_client=redis_client,
-                telegram_multipart_tail_delivery="native",
-            )
-        except HTTPException as exc:
-            detail = exc.detail
-            if isinstance(detail, dict):
-                msg_err = str(detail.get("detail") or detail)
-            else:
-                msg_err = str(detail)
-            _log.warning("telegram webhook invoke falló: %s", msg_err)
-            token = (resolve_effective_telegram_bot_token() or "").strip()
-            if token and msg_err:
-                try:
-                    client = TelegramBotApiAsyncClient(token)
-                    await client.send_message(
-                        chat_id=chat_id,
-                        text=msg_err[:3900],
-                        parse_mode=None,
-                    )
-                except Exception as send_exc:  # noqa: BLE001
-                    _log.warning("telegram webhook no pudo enviar error al usuario: %s", send_exc)
+        async def _invoke_and_reply() -> None:
+            try:
+                res = await invoke_agent_chat(
+                    payload,
+                    worker_id,
+                    session_id,
+                    tenant_id,
+                    redis_client=redis_client,
+                    telegram_multipart_tail_delivery="native",
+                    telegram_mcp=telegram_mcp,
+                )
+            except HTTPException as exc:
+                detail = exc.detail
+                if isinstance(detail, dict):
+                    msg_err = str(detail.get("detail") or detail)
+                else:
+                    msg_err = str(detail)
+                _log.warning("telegram webhook invoke falló: %s", msg_err)
+                token_e = (resolve_effective_telegram_bot_token() or "").strip()
+                if token_e and msg_err:
+                    try:
+                        client_e = TelegramBotApiAsyncClient(token_e)
+                        await client_e.send_message(
+                            chat_id=chat_id,
+                            text=msg_err[:3900],
+                            parse_mode=None,
+                        )
+                    except Exception as send_exc:  # noqa: BLE001
+                        _log.warning("telegram webhook no pudo enviar error al usuario: %s", send_exc)
+                return
+
+            reply_local = (res.get("response") or "").strip() if isinstance(res, dict) else ""
+            if not reply_local:
+                return
+
+            token_r = (resolve_effective_telegram_bot_token() or "").strip()
+            if not token_r:
+                _log.warning("telegram webhook: hay respuesta pero falta TELEGRAM_BOT_TOKEN")
+                return
+
+            client_r = TelegramBotApiAsyncClient(token_r)
+            await client_r.send_message(chat_id=chat_id, text=reply_local, parse_mode="MarkdownV2")
+
+        async def _invoke_and_reply_safe() -> None:
+            try:
+                await _invoke_and_reply()
+            except Exception as exc:  # noqa: BLE001
+                _log.exception("telegram webhook: fallo en invocación en segundo plano: %s", exc)
+
+        if _telegram_webhook_parallel_processing_enabled():
+            asyncio.create_task(_invoke_and_reply_safe())
             return {"ok": "true"}
 
-        reply = (result.get("response") or "").strip() if isinstance(result, dict) else ""
-        if not reply:
-            return {"ok": "true"}
-
-        token = (resolve_effective_telegram_bot_token() or "").strip()
-        if not token:
-            _log.warning("telegram webhook: hay respuesta pero falta TELEGRAM_BOT_TOKEN")
-            return {"ok": "true"}
-
-        client = TelegramBotApiAsyncClient(token)
-        await client.send_message(chat_id=chat_id, text=reply, parse_mode="MarkdownV2")
+        await _invoke_and_reply()
         return {"ok": "true"}
 
     return router

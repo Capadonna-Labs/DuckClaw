@@ -68,6 +68,42 @@ def test_format_delegation_heartbeat_message_includes_title_and_tasks() -> None:
     assert "1. Obtener datos" in msg
 
 
+def test_format_delegation_heartbeat_message_subagent_header_in_opener() -> None:
+    from duckclaw.graphs.chat_heartbeat import format_delegation_heartbeat_message
+
+    msg = format_delegation_heartbeat_message(
+        "Saludo",
+        ["Uno"],
+        subagent_header="BI-Analyst 1",
+    )
+    assert msg.startswith("📖 BI-Analyst 1 — Acabo de recibir")
+    assert "Saludo" in msg
+
+
+def test_heartbeat_env_int_treats_empty_or_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    from duckclaw.graphs.chat_heartbeat import _heartbeat_env_int
+
+    monkeypatch.setenv("DUCKCLAW_HEARTBEAT_TEST_INT", "")
+    assert _heartbeat_env_int("DUCKCLAW_HEARTBEAT_TEST_INT", 42) == 42
+    monkeypatch.setenv("DUCKCLAW_HEARTBEAT_TEST_INT", "not-a-number")
+    assert _heartbeat_env_int("DUCKCLAW_HEARTBEAT_TEST_INT", 7) == 7
+
+
+def test_format_tool_heartbeat_prefix() -> None:
+    from duckclaw.graphs.chat_heartbeat import format_tool_heartbeat, heartbeat_message_for_tool
+
+    raw = heartbeat_message_for_tool("read_sql")
+    assert format_tool_heartbeat(None, raw) == raw
+    assert format_tool_heartbeat("", raw) == raw
+    combined = format_tool_heartbeat("BI-Analyst 2", raw)
+    assert combined.startswith("BI-Analyst 2 — ")
+    assert raw in combined
+    with_plan = format_tool_heartbeat("BI-Analyst 1", raw, plan_title="Scatter de ventas")
+    assert with_plan.startswith("BI-Analyst 1 — ")
+    assert "📋 Scatter de ventas" in with_plan
+    assert raw in with_plan
+
+
 def test_heartbeat_message_for_tool_mapping() -> None:
     from duckclaw.graphs.chat_heartbeat import heartbeat_message_for_tool
 
@@ -165,7 +201,7 @@ def test_schedule_chat_heartbeat_runs_post_in_background(
     monkeypatch.setenv("N8N_OUTBOUND_WEBHOOK_URL", "https://example.test/out")
     posted: list[tuple[str, str, str]] = []
 
-    def fake_post(cid: str, uid: str, text: str) -> None:
+    def fake_post(cid: str, uid: str, text: str, **_: object) -> None:
         posted.append((cid, uid, text))
 
     monkeypatch.setattr(

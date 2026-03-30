@@ -139,6 +139,22 @@ def test_chat_request_username_coerces_dict_to_str() -> None:
     assert m.username == "juan_telegram"
 
 
+def test_chat_parallel_invocations_env() -> None:
+    import os
+
+    prev = os.environ.get("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS")
+    try:
+        os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = ""
+        assert gateway_main._chat_parallel_invocations_enabled() is False
+        os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = "true"
+        assert gateway_main._chat_parallel_invocations_enabled() is True
+    finally:
+        if prev is None:
+            os.environ.pop("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS", None)
+        else:
+            os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = prev
+
+
 def test_clean_agent_response_removes_menus() -> None:
     raw = (
         "Tu saldo total es 1.234.567 COP.\n\n"
@@ -165,6 +181,21 @@ def test_clean_agent_response_keeps_puedo_ayudarte_bi_style() -> None:
     cleaned = gateway_main.clean_agent_response(raw)
     assert "Ventas por región" in cleaned
     assert "Métricas de latencia" in cleaned
+
+
+def test_clean_agent_response_keeps_body_after_cual_es_mi_tarea() -> None:
+    """Regresión: DOTALL en '¿Cuál es mi tarea?' borraba todo el texto útil para Telegram."""
+    raw = (
+        "BI-Analyst 1\n\n"
+        "¿Cuál es mi tarea?\n\n"
+        "Como analista senior de BI, puedo ayudarte con:\n"
+        "- Análisis de ventas\n"
+        "- Métricas de rendimiento"
+    )
+    cleaned = gateway_main.clean_agent_response(raw)
+    assert "¿Cuál es mi tarea?" not in cleaned
+    assert "Análisis de ventas" in cleaned
+    assert "Métricas de rendimiento" in cleaned
 
 
 def test_agent_history_requires_session(client: TestClient) -> None:
@@ -245,7 +276,7 @@ def test_plain_subchunks_for_telegram_budget_splits_when_escape_grows() -> None:
     assert "".join(tiny) == "abcd"
 
 
-def test_push_chat_reply_via_n8n_outbound_sync_posts_json(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_webhook_outbound_chat_reply_sync_posts_json(monkeypatch: pytest.MonkeyPatch) -> None:
     posted: list[dict[str, str]] = []
     monkeypatch.setenv("N8N_OUTBOUND_WEBHOOK_URL", "https://example.test/webhook")
 
@@ -264,7 +295,7 @@ def test_push_chat_reply_via_n8n_outbound_sync_posts_json(monkeypatch: pytest.Mo
         return _Resp()
 
     monkeypatch.setattr(gateway_main._url_request, "urlopen", fake_urlopen)
-    gateway_main._push_chat_reply_via_n8n_outbound_sync(
+    gateway_main._webhook_outbound_chat_reply_sync(
         chat_id="1726618406",
         user_id="1726618406",
         text="hola",

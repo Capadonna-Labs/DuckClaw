@@ -1,9 +1,8 @@
 """
-Heartbeat de observabilidad por chat: flag en Redis + DM proactivo vía webhook n8n.
+Heartbeat de observabilidad por chat: flag en Redis + DM proactivo vía **Bot API nativa**
+(``TELEGRAM_BOT_TOKEN``) o webhook ``DUCKCLAW_HEARTBEAT_WEBHOOK_URL`` / ``N8N_OUTBOUND_WEBHOOK_URL``.
 
-URL: ``DUCKCLAW_HEARTBEAT_WEBHOOK_URL`` (solo heartbeat) o, si falta, ``N8N_OUTBOUND_WEBHOOK_URL``.
-
-Fire-and-forget: el POST outbound corre en un hilo daemon; no bloquear el grafo del agente.
+Fire-and-forget: el envío corre en un hilo daemon; no bloquear el grafo del agente.
 """
 
 from __future__ import annotations
@@ -81,6 +80,11 @@ def heartbeat_outbound_webhook_url() -> str:
         (os.getenv("DUCKCLAW_HEARTBEAT_WEBHOOK_URL") or "").strip()
         or (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
     )
+
+
+def heartbeat_outbound_configured() -> bool:
+    """Hay canal de salida si existe token Bot API o URL de webhook."""
+    return bool((os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()) or bool(heartbeat_outbound_webhook_url())
 
 
 def heartbeat_redis_key(tenant_id: str, chat_id: str) -> str:
@@ -161,9 +165,27 @@ def set_chat_heartbeat_enabled(tenant_id: str, chat_id: str, on: bool) -> tuple[
         return False, str(exc)[:500]
 
 
+def _heartbeat_env_int(name: str, default: int) -> int:
+    """
+    ``os.environ.get(k, d)`` no usa el default si la clave existe con valor vacío;
+    eso provocaba ``int('')`` al cargar el módulo.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 _HEARTBEAT_DELEGATION_MAX_CHARS = max(
     800,
-    int(os.environ.get("DUCKCLAW_HEARTBEAT_DELEGATION_MAX_CHARS", "2800")),
+    _heartbeat_env_int("DUCKCLAW_HEARTBEAT_DELEGATION_MAX_CHARS", 2800),
+)
+_HEARTBEAT_PLAN_TITLE_INLINE_MAX = max(
+    24,
+    _heartbeat_env_int("DUCKCLAW_HEARTBEAT_PLAN_TITLE_INLINE_MAX", 90),
 )
 
 
@@ -172,17 +194,27 @@ def format_delegation_heartbeat_message(
     tasks: list | None,
     *,
     task_summary: str = "",
+    subagent_header: str | None = None,
 ) -> str:
     """
     Primer DM de heartbeat al delegar: storytelling corto + plan (tasks del manager).
     Texto plano (válido para Telegram vía n8n sin Markdown).
+
+    ``subagent_header`` (p. ej. ``BI-Analyst 1``) va en la misma línea intro para no
+    duplicar encabezados sueltos en el chat.
     """
     title = (plan_title or "").strip()
     hint = (task_summary or "").strip()
     if not title:
         title = hint[:120] if hint else "Plan en curso"
+    head = (subagent_header or "").strip()
+    opener = (
+        f"📖 {head} — Acabo de recibir la tarea del Manager y arranco así:"
+        if head
+        else "📖 Acabo de recibir la tarea del Manager y arranco así:"
+    )
     lines: list[str] = [
-        "📖 Acabo de recibir la tarea del Manager y arranco así:",
+        opener,
         "",
         f"🎯 Objetivo: {title}",
     ]
@@ -224,15 +256,95 @@ def heartbeat_message_for_tool(name: str) -> str:
     return f"🔄 Paso actual: llamo a la herramienta {n}…"
 
 
-def _post_outbound_sync(chat_id: str, user_id: str, text: str) -> None:
-    url = heartbeat_outbound_webhook_url()
-    if not url:
-        return
+def _shorten_heartbeat_plan_title(title: str) -> str:
+    t = " ".join((title or "").split())
+    if len(t) > _HEARTBEAT_PLAN_TITLE_INLINE_MAX:
+        return t[: _HEARTBEAT_PLAN_TITLE_INLINE_MAX - 1].rstrip() + "…"
+    return t
+
+
+def format_tool_heartbeat(
+    subagent_header: str | None,
+    tool_message: str,
+    *,
+    plan_title: str | None = None,
+) -> str:
+    """
+    Antepone ``BI-Analyst 1`` y opcionalmente el título del plan del manager
+    a los DMs de progreso por herramienta.
+    """
+    head = (subagent_header or "").strip()
+    plan = _shorten_heartbeat_plan_title((plan_title or "").strip())
+    body = (tool_message or "").strip()
+    if not body:
+        return ""
+    segments: list[str] = []
+    if head:
+        segments.append(head)
+    if plan:
+        segments.append(f"📋 {plan}")
+    segments.append(body)
+    return " — ".join(segments)
+
+
+def _post_outbound_sync(
+    chat_id: str,
+    user_id: str,
+    text: str,
+    *,
+    plan_title_log: str | None = None,
+) -> None:
     cid = normalize_telegram_chat_id_for_outbound(chat_id) or str(chat_id or "").strip()
     uid_raw = str(user_id or "").strip()
     uid = normalize_telegram_chat_id_for_outbound(uid_raw) or uid_raw or cid
     raw = (text or "").strip()
     if not cid or not raw:
+        return
+
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    if token:
+        try:
+            from duckclaw.integrations.telegram.telegram_outbound_sync import (
+                send_long_plain_text_markdown_v2_chunks_sync,
+            )
+
+            pl = (plan_title_log or "").strip()
+            if pl:
+                _log.info(
+                    "chat heartbeat: envío nativo chat_id=%r plan=%r partes_plain_len=%s",
+                    cid,
+                    pl[:120],
+                    len(raw),
+                )
+            else:
+                _log.info(
+                    "chat heartbeat: envío nativo chat_id=%r partes_plain_len=%s",
+                    cid,
+                    len(raw),
+                )
+            n = send_long_plain_text_markdown_v2_chunks_sync(
+                bot_token=token,
+                chat_id=cid,
+                plain_text=raw,
+                log=_log,
+            )
+            if n > 0:
+                _log.info("chat heartbeat: nativo OK chat_id=%r partes=%s", cid, n)
+                return
+            _log.warning("chat heartbeat: nativo sin partes OK; fallback webhook chat_id=%r", cid)
+        except Exception as exc:
+            _log.warning("chat heartbeat: error nativo chat_id=%r: %s; fallback webhook", cid, exc)
+
+    if (os.getenv("DUCKCLAW_TELEGRAM_OUTBOUND_VIA") or "").strip().lower() != "n8n":
+        _log.debug("chat heartbeat: sin fallback n8n (DUCKCLAW_TELEGRAM_OUTBOUND_VIA!=n8n) chat_id=%r", cid)
+        return
+
+    url = heartbeat_outbound_webhook_url()
+    if not url:
+        _log.warning(
+            "chat heartbeat: sin TELEGRAM_BOT_TOKEN ni webhook (DUCKCLAW_HEARTBEAT / N8N_OUTBOUND) chat_id=%r",
+            cid,
+        )
         return
     auth = (os.getenv("N8N_AUTH_KEY") or "").strip()
     headers = {"Content-Type": "application/json"}
@@ -244,6 +356,7 @@ def _post_outbound_sync(chat_id: str, user_id: str, text: str) -> None:
     try:
         with urllib_request.urlopen(req, timeout=8) as resp:
             _ = resp.read()
+        _log.info("chat heartbeat: webhook OK chat_id=%r url=%s", cid, url[:80])
     except HTTPError as exc:
         body = ""
         try:
@@ -252,9 +365,7 @@ def _post_outbound_sync(chat_id: str, user_id: str, text: str) -> None:
             pass
         _log.warning(
             "chat heartbeat outbound HTTP %s %s (chat_id=%r). url=%s | "
-            "n8n no crea ejecución en el Webhook si la URL no coincide con un flujo ACTIVO o devuelve 404. "
-            "Revisa DUCKCLAW_HEARTBEAT_WEBHOOK_URL o N8N_OUTBOUND_WEBHOOK_URL (Production URL del nodo Webhook de salida). "
-            "response_body=%r",
+            "Si usas n8n: URL debe coincidir con un flujo ACTIVO. response_body=%r",
             exc.code,
             exc.reason,
             cid,
@@ -267,14 +378,27 @@ def _post_outbound_sync(chat_id: str, user_id: str, text: str) -> None:
         _log.warning("chat heartbeat outbound error (chat_id=%r) url=%s: %s", cid, url, exc)
 
 
-def schedule_chat_heartbeat_dm(tenant_id: str, chat_id: str, user_id: str, text: str) -> None:
+def schedule_chat_heartbeat_dm(
+    tenant_id: str,
+    chat_id: str,
+    user_id: str,
+    text: str,
+    *,
+    log_worker_id: str | None = None,
+    log_username: str | None = None,
+    log_plan_title: str | None = None,
+) -> None:
     """
     Si el heartbeat está activo para el chat, encola un POST al webhook (hilo daemon).
     No espera red; no lanza al llamante.
+
+    ``log_worker_id`` (p. ej. ``BI-Analyst 1``) y ``log_username`` alimentan ``set_log_context``
+    en ese hilo para que las líneas «chat heartbeat» en PM2 identifiquen al subagente.
+    ``log_plan_title`` se añade a la línea de log del envío nativo (título del plan del manager).
     """
     if not is_chat_heartbeat_enabled(tenant_id, chat_id):
         return
-    if not heartbeat_outbound_webhook_url():
+    if not heartbeat_outbound_configured():
         return
     cid_raw = str(chat_id or "").strip()
     cid_eff = normalize_telegram_chat_id_for_outbound(cid_raw) or cid_raw
@@ -283,8 +407,26 @@ def schedule_chat_heartbeat_dm(tenant_id: str, chat_id: str, user_id: str, text:
     msg = (text or "").strip()
     if not cid_eff or not msg:
         return
+    tid_for_log = (tenant_id or "default").strip() or "default"
+    worker_for_log = (log_worker_id or "").strip() or None
+    uname_for_log = (log_username or "").strip() or None
+    plan_for_log = (log_plan_title or "").strip() or None
 
     def _run() -> None:
-        _post_outbound_sync(cid_eff, uid_eff, msg)
+        if worker_for_log:
+            from duckclaw.utils.logger import (
+                format_chat_log_identity,
+                reset_log_context,
+                set_log_context,
+            )
+
+            chat_lbl = format_chat_log_identity(cid_eff, uname_for_log)
+            try:
+                set_log_context(tenant_id=tid_for_log, worker_id=worker_for_log, chat_id=chat_lbl)
+                _post_outbound_sync(cid_eff, uid_eff, msg, plan_title_log=plan_for_log)
+            finally:
+                reset_log_context()
+        else:
+            _post_outbound_sync(cid_eff, uid_eff, msg, plan_title_log=plan_for_log)
 
     threading.Thread(target=_run, name="duckclaw-chat-heartbeat", daemon=True).start()

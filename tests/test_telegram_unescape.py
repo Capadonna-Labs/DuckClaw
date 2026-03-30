@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from duckclaw.graphs.on_the_fly_commands import _telegram_safe, unescape_telegram_markdown_v2_layers
+import time
+
+import pytest
+
+from duckclaw.graphs.on_the_fly_commands import (
+    _telegram_safe,
+    execute_tasks,
+    unescape_telegram_markdown_v2_layers,
+)
 
 
 def test_unescape_one_layer_exclamation() -> None:
@@ -28,3 +36,20 @@ def test_roundtrip_plain() -> None:
     s = "Sin especiales raros"
     assert unescape_telegram_markdown_v2_layers(s) == s
     assert unescape_telegram_markdown_v2_layers(_telegram_safe(s)) == s
+
+
+def test_execute_tasks_shows_worker_without_backslash_before_hyphen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nombre SIATA-Analyst en /tasks: espacio en lugar de guion para no exigir \\- en MarkdownV2."""
+
+    def _fake_get_activity(_chat_id: object) -> dict:
+        return {
+            "status": "BUSY",
+            "task": "Scrapeo radar",
+            "worker_id": "SIATA-Analyst",
+            "started_at": int(time.time()) - 3,
+        }
+
+    monkeypatch.setattr("duckclaw.graphs.activity.get_activity", _fake_get_activity)
+    out = execute_tasks(None, "1726618406")
+    assert "SIATA\\-Analyst" not in out
+    assert "SIATA Analyst" in out or "SIATA" in unescape_telegram_markdown_v2_layers(out)

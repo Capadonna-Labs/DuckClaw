@@ -20,6 +20,7 @@ import time
 import traceback
 import uuid
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional
 from urllib import request as _url_request
@@ -35,6 +36,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import redis.asyncio as redis
 
+from core.sandbox_figure_b64 import decode_sandbox_figure_base64, decode_valid_sandbox_image_bytes
+from core.telegram_media_upload import send_sandbox_chart_to_telegram_sync
+
 from core.chat_history import (
     gateway_chat_history_enabled,
     history_redis_key,
@@ -44,6 +48,7 @@ from core.chat_history import (
     redis_save_chat_history,
 )
 from core.models import ChatRequest
+from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
 from duckclaw.vaults import ensure_registry as ensure_vault_registry
 from duckclaw.vaults import resolve_active_vault, validate_user_db_path
 
@@ -61,22 +66,34 @@ for _base in (_repo_root, Path.cwd()):
         break
 
 
-def _apply_db_path_from_api_gateways_pm2() -> None:
+def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
     """
     Varias apps PM2 comparten el mismo .env; `setdefault` puede dejar DUCKCLAW_DB_PATH
     apuntando a finanzdb para todos. Forzar la ruta del bloque correcto en
     config/api_gateways_pm2.json según DUCKCLAW_PM2_PROCESS_NAME (PM2) o --port (uvicorn).
+
+    También aplica `TELEGRAM_BOT_TOKEN` desde ese mismo bloque `env` si viene definido y no vacío:
+    así BI-Analyst-Gateway puede usar el bot de BI aunque el .env global traiga el token de Finanz.
+    Se ejecuta después de cargar .env, así este valor **sustituye** al de setdefault.
+
+    Returns:
+        (telegram_token_from_json, matched_app_name) — nombre PM2 del bloque elegido (p. ej.
+        ``BI-Analyst-Gateway``), útil si ``DUCKCLAW_PM2_PROCESS_NAME`` no está en el entorno
+        (uvicorn directo por puerto).
     """
     cfg = _repo_root / "config" / "api_gateways_pm2.json"
     if not cfg.is_file():
-        return
+        os.environ.pop("DUCKCLAW_PM2_MATCHED_APP_NAME", None)
+        return False, None
     try:
         raw = json.loads(cfg.read_text(encoding="utf-8"))
         apps = raw.get("apps") if isinstance(raw, dict) else None
         if not isinstance(apps, list):
-            return
+            os.environ.pop("DUCKCLAW_PM2_MATCHED_APP_NAME", None)
+            return False, None
     except Exception:
-        return
+        os.environ.pop("DUCKCLAW_PM2_MATCHED_APP_NAME", None)
+        return False, None
 
     proc_name = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
     chosen: dict | None = None
@@ -103,32 +120,75 @@ def _apply_db_path_from_api_gateways_pm2() -> None:
             if len(matches) == 1:
                 chosen = matches[0]
     if chosen is None:
-        return
+        os.environ.pop("DUCKCLAW_PM2_MATCHED_APP_NAME", None)
+        return False, None
+    matched_name = (chosen.get("name") or "").strip() or None
+    if matched_name:
+        os.environ["DUCKCLAW_PM2_MATCHED_APP_NAME"] = matched_name
+    else:
+        os.environ.pop("DUCKCLAW_PM2_MATCHED_APP_NAME", None)
     env = chosen.get("env") if isinstance(chosen.get("env"), dict) else {}
     dbp = (env.get("DUCKCLAW_DB_PATH") or "").strip()
     if not dbp:
-        return
+        return False, matched_name
     pth = Path(dbp)
     if not pth.is_absolute():
         pth = (_repo_root / pth).resolve()
     else:
         pth = pth.resolve()
     os.environ["DUCKCLAW_DB_PATH"] = str(pth)
+    tok = (env.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    if tok:
+        os.environ["TELEGRAM_BOT_TOKEN"] = tok
+        return True, matched_name
+    return False, matched_name
 
 
-_apply_db_path_from_api_gateways_pm2()
+def _apply_telegram_token_per_gateway_env(*, matched_pm2_app_name: str | None) -> None:
+    """
+    Fallback cuando el bloque PM2 no trae TELEGRAM_BOT_TOKEN: varias gateways comparten
+    .env con un solo TELEGRAM_BOT_TOKEN (p. ej. Finanz) y sendPhoto iría al bot equivocado.
 
-# Gateways PM2 con una sola DuckDB por proceso (p. ej. TheMind, Leila): no mezclar con finanzdb1 del registry.
-_DEDICATED_DB_PM2_NAMES = frozenset({"TheMind-Gateway", "Leila-Gateway"})
+    - BI-Analyst-Gateway → TELEGRAM_BOT_TOKEN_BI_ANALYST
+    - Leila-Gateway → TELEGRAM_BOT_TOKEN_LEILA
+    - SIATA-Gateway → TELEGRAM_BOT_TOKEN_SIATA
+    """
+    proc = (
+        (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
+        or (matched_pm2_app_name or "").strip()
+    )
+    namespaced = {
+        "BI-Analyst-Gateway": "TELEGRAM_BOT_TOKEN_BI_ANALYST",
+        "Leila-Gateway": "TELEGRAM_BOT_TOKEN_LEILA",
+        "SIATA-Gateway": "TELEGRAM_BOT_TOKEN_SIATA",
+    }
+    var = namespaced.get(proc)
+    if not var:
+        return
+    alt = (os.getenv(var) or "").strip()
+    if alt:
+        os.environ["TELEGRAM_BOT_TOKEN"] = alt
+
+
+_telegram_token_from_pm2_json, _matched_pm2_app_name = _apply_db_path_from_api_gateways_pm2()
+if not _telegram_token_from_pm2_json:
+    _apply_telegram_token_per_gateway_env(matched_pm2_app_name=_matched_pm2_app_name)
+
+
+def _effective_telegram_bot_token() -> str:
+    """Token Bot API para este proceso (tras overrides PM2 + per-gateway)."""
+    return (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+
+
+from duckclaw.pm2_gateway_db import dedicated_gateway_db_path_resolved
 
 
 def _dedicated_gateway_vault_db_path() -> str | None:
-    if (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip() not in _DEDICATED_DB_PM2_NAMES:
-        return None
-    gw_db = (os.environ.get("DUCKCLAW_DB_PATH") or "").strip()
-    if not gw_db:
-        return None
-    return str(Path(gw_db).expanduser().resolve())
+    """
+    Si este proceso es un gateway listado en api_gateways_pm2.json con DUCKCLAW_DB_PATH,
+    esa ruta sustituye al vault activo del usuario (fly commands, manager, workers).
+    """
+    return dedicated_gateway_db_path_resolved()
 
 try:
     from core.config import settings
@@ -598,7 +658,7 @@ def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
     if auth_key:
         headers["X-DuckClaw-Secret"] = auth_key
 
-    payload = {"chat_id": str(admin_chat_id), "text": text}
+    payload = {"chat_id": str(admin_chat_id), "text": escape_telegram_markdown_v2(text)}
     data = json.dumps(payload).encode("utf-8")
     req = _url_request.Request(webhook_url, data=data, headers=headers, method="POST")
 
@@ -609,6 +669,134 @@ def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
         _gateway_log.warning("Telegram Guard: error enviando alerta webhook: %s", exc)
     except Exception as exc:  # noqa: BLE001
         _gateway_log.warning("Telegram Guard: error enviando alerta webhook (unknown): %s", exc)
+
+
+# Telegram sendMessage: máx. 4096 caracteres (https://core.telegram.org/bots/api#sendmessage).
+_TELEGRAM_SENDMESSAGE_CHAR_LIMIT = 4096
+# Trozos de texto plano antes de _telegram_safe; conservador para no superar 4096 tras escapar MarkdownV2.
+_DEFAULT_TELEGRAM_REPLY_PLAIN_CHUNK = 2000
+# Webhook outbound: margen para prefijo [i/n] tras escape.
+_OUTBOUND_CHAT_CHUNK = 3600
+
+
+def _telegram_reply_plain_chunk_size() -> int:
+    raw = (os.environ.get("DUCKCLAW_TELEGRAM_REPLY_CHUNK_PLAIN") or "").strip()
+    if raw:
+        try:
+            return max(256, min(int(raw), _TELEGRAM_SENDMESSAGE_CHAR_LIMIT - 200))
+        except ValueError:
+            pass
+    return _DEFAULT_TELEGRAM_REPLY_PLAIN_CHUNK
+
+
+def _split_plain_text_for_telegram_reply(text: str, max_chunk: int) -> list[str]:
+    """Parte texto plano; cada parte se escapa aparte para n8n → Telegram (límite 4096)."""
+    if max_chunk < 64:
+        max_chunk = 64
+    t = text or ""
+    if not t:
+        return [""]
+    out: list[str] = []
+    i = 0
+    n = len(t)
+    while i < n:
+        if n - i <= max_chunk:
+            out.append(t[i:n])
+            break
+        end = i + max_chunk
+        window = t[i:end]
+        nl = window.rfind("\n")
+        if nl > 0:
+            end = i + nl + 1
+        out.append(t[i:end])
+        i = end
+    return out
+
+
+def _plain_subchunks_for_telegram_budget(plain: str, safe_fn: Any) -> list[str]:
+    """Subdivide texto plano hasta que ``safe_fn`` (p. ej. MarkdownV2) no supere el límite de Telegram."""
+    if not plain:
+        return []
+    cap = _TELEGRAM_SENDMESSAGE_CHAR_LIMIT - 32
+    if len(safe_fn(plain)) <= cap:
+        return [plain]
+    if len(plain) <= 1:
+        return [plain]
+    mid = len(plain) // 2
+    return _plain_subchunks_for_telegram_budget(plain[:mid], safe_fn) + _plain_subchunks_for_telegram_budget(
+        plain[mid:], safe_fn
+    )
+
+
+def _strip_lines_mentioning_workspace_output(text: str) -> str:
+    """Quita líneas que citan rutas del sandbox (/workspace/output/...) para no confundir al usuario en Telegram."""
+    if not text or "/workspace/output/" not in text:
+        return text
+    lines = (text or "").splitlines()
+    kept = [ln for ln in lines if "/workspace/output/" not in ln]
+    out = "\n".join(kept).strip()
+    return out if out else text
+
+
+def _push_chat_reply_via_n8n_outbound_sync(*, chat_id: str, user_id: str, text: str) -> None:
+    """
+    Entrega la respuesta del chat al webhook de salida (mismo contrato que The Mind / n8n).
+
+    Usado cuando el cliente HTTP ya cerró (p. ej. timeout de n8n en 300s) pero el agente
+    terminó después: sin esto, el nodo «Responder Telegram» nunca recibe el JSON.
+    """
+    url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
+    if not url:
+        _gateway_log.warning(
+            "outbound fallback: cliente desconectado pero N8N_OUTBOUND_WEBHOOK_URL no está definido; "
+            "no se puede reenviar la respuesta a Telegram."
+        )
+        return
+    cid = str(chat_id or "").strip()
+    uid = str(user_id or "").strip() or cid
+    raw = (text or "").strip()
+    if not cid or not raw:
+        return
+    auth_key = (os.getenv("N8N_AUTH_KEY") or getattr(settings, "N8N_AUTH_KEY", "") or "").strip()
+    headers: dict[str, Any] = {"Content-Type": "application/json"}
+    if auth_key:
+        headers["X-DuckClaw-Secret"] = auth_key
+
+    chunks: list[str] = []
+    i = 0
+    while i < len(raw):
+        chunks.append(raw[i : i + _OUTBOUND_CHAT_CHUNK])
+        i += _OUTBOUND_CHAT_CHUNK
+    if not chunks:
+        chunks = [raw]
+
+    for idx, part in enumerate(chunks):
+        prefix = f"[{idx + 1}/{len(chunks)}]\n" if len(chunks) > 1 else ""
+        payload = {
+            "chat_id": cid,
+            "user_id": uid,
+            "text": escape_telegram_markdown_v2(prefix + part),
+        }
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = _url_request.Request(url, data=data, headers=headers, method="POST")
+        try:
+            with _url_request.urlopen(req, timeout=30) as resp:
+                _ = resp.read()
+        except URLError as exc:
+            _gateway_log.warning(
+                "outbound fallback: error POST parte %s/%s chat_id=%s: %s",
+                idx + 1,
+                len(chunks),
+                cid,
+                exc,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _gateway_log.warning(
+                "outbound fallback: error desconocido parte %s/%s: %s",
+                idx + 1,
+                len(chunks),
+                exc,
+            )
 
 
 async def _authorize_or_reject(*, tenant_id: str, user_id: str, is_owner: bool) -> None:
@@ -668,7 +856,8 @@ def _effective_tenant_id(request_tenant: str | None) -> str:
     (misma clave ``duckclaw:gateway:chat_hist:{tenant}:{session}``).
 
     Si solo llega ``default`` u omisión, aplica DUCKCLAW_GATEWAY_TENANT_ID, heurística PM2
-    Leila-Gateway / leiladb, y por último ``default``.
+    (Leila-Gateway, BI-Analyst-Gateway) / rutas de DuckDB (leiladb, bi_analyst), y por último
+    ``default``.
     """
     rt = (request_tenant or "").strip()
     if rt and rt.lower() != "default":
@@ -677,11 +866,18 @@ def _effective_tenant_id(request_tenant: str | None) -> str:
     override = (os.getenv("DUCKCLAW_GATEWAY_TENANT_ID") or "").strip()
     if override:
         return override
-    if (os.getenv("DUCKCLAW_PM2_PROCESS_NAME") or "").strip() == "Leila-Gateway":
+    pm2 = (os.getenv("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
+    if pm2 == "Leila-Gateway":
         return "Leila Store"
+    if pm2 == "BI-Analyst-Gateway":
+        return "BI-Analyst"
     dbp = (os.getenv("DUCKCLAW_DB_PATH") or "").lower()
     if "leiladb" in dbp:
         return "Leila Store"
+    if "bi_analyst" in dbp:
+        return "BI-Analyst"
+    if "siatadb" in dbp:
+        return "SIATA"
     return rt or "default"
 
 
@@ -725,13 +921,39 @@ async def agent_chat(
             session_source,
         )
     redis_client = getattr(http_request.app.state, "redis", None)
-    return await _invoke_chat(
+    result = await _invoke_chat(
         body,
         worker_id or "finanz",
         session_id=session_id,
         tenant_id=tenant_id,
         redis_client=redis_client,
     )
+    # n8n suele usar timeout ~300s; si el agente tarda más, el cliente aborta y esta respuesta
+    # no llega al flujo. Reenvío best-effort al webhook de Telegram (mismo que alertas / The Mind).
+    _fb = (os.getenv("DUCKCLAW_CHAT_OUTBOUND_ON_CLIENT_DISCONNECT", "true").strip().lower())
+    if _fb in ("1", "true", "yes", ""):
+        try:
+            if await http_request.is_disconnected():
+                resp_text = (result.get("response") or "").strip() if isinstance(result, dict) else ""
+                if resp_text:
+                    uid_fb = (body.user_id or "").strip() or session_id
+                    _gateway_log.info(
+                        "outbound fallback: cliente desconectado; reenvío a n8n webhook (chat_id=%s, len=%s)",
+                        format_chat_id_for_terminal(session_id),
+                        len(resp_text),
+                    )
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(
+                        None,
+                        lambda: _push_chat_reply_via_n8n_outbound_sync(
+                            chat_id=session_id,
+                            user_id=uid_fb,
+                            text=resp_text,
+                        ),
+                    )
+        except Exception as exc:  # noqa: BLE001
+            _gateway_log.warning("outbound fallback: no se pudo comprobar/enviar: %s", exc)
+    return result
 
 
 def _truncate_log(s: str, max_len: int = 200) -> str:
@@ -760,9 +982,10 @@ def clean_agent_response(response: str) -> str:
     if not response or not isinstance(response, str):
         return response
     text = str(response)
+    # No usar "Puedo ayudarte con:.*" con DOTALL: el modelo lo escribe en respuestas válidas
+    # (p. ej. BI Analyst) y se borraba todo el cuerpo del mensaje antes de Telegram.
     patterns = [
         r"¿Cuál\s+es\s+mi\s+tarea\?.*",
-        r"Puedo\s+ayudarte\s+con:.*",
         r"¿Qué\s+te\s+gustaría\s+hacer\s+ahora\?.*",
         r"-\s*📊\s*Resumen\s+financiero.*",
         r"-\s*💰\s*Registrar\s+transacciones.*",
@@ -770,6 +993,40 @@ def clean_agent_response(response: str) -> str:
     for pattern in patterns:
         text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.DOTALL)
     return text.strip()
+
+
+def _beautify_bi_analyst_telegram(text: str) -> str:
+    """Convierte encabezados tipo ## INSIGHT en líneas con emoji (mejor lectura en Telegram)."""
+    if not text or not isinstance(text, str):
+        return text
+    t = text
+    t = re.sub(r"(?im)^#+\s*\*?\*?INSIGHT:?\*?\*?\s*", "📌 INSIGHT — ", t)
+    t = re.sub(r"(?im)^#+\s*\*?\*?CAUSA:?\*?\*?\s*", "\n🔍 CAUSA — ", t)
+    t = re.sub(r"(?im)^#+\s*\*?\*?RECOMENDACIÓN:?\*?\*?\s*", "\n💡 RECOMENDACIÓN — ", t)
+    t = re.sub(r"(?im)^#+\s*\*?\*?RECOMENDACION:?\*?\*?\s*", "\n💡 RECOMENDACIÓN — ", t)
+    t = re.sub(r"(?m)^#+\s+", "", t)
+    return re.sub(r"\n{3,}", "\n\n", t).strip()
+
+
+def _strip_bi_false_chart_delivery_lines(text: str) -> str:
+    """Quita cierres que afirman envío de gráfico (el modelo no puede saber si Telegram recibió la foto)."""
+    if not text or not isinstance(text, str):
+        return text
+    lines = text.splitlines()
+    drop_phrases = (
+        "se ha enviado en el chat",
+        "se envió en el chat",
+        "enviado en el chat",
+        "grafico con el analisis completo",
+        "gráfico con el análisis completo",
+    )
+    kept: list[str] = []
+    for ln in lines:
+        low = ln.lower()
+        if any(p in low for p in drop_phrases) and ("gráfico" in low or "grafico" in low):
+            continue
+        kept.append(ln)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
 
 
 async def _invoke_chat(
@@ -1042,8 +1299,47 @@ async def _invoke_chat(
         from core.leila_output_guard import scrub_leila_contact_surface
 
         reply_text = scrub_leila_contact_surface(reply_text)
+    if (effective_worker_id or worker_id or "").strip() == "BI-Analyst":
+        reply_text = _beautify_bi_analyst_telegram(reply_text or "")
+        reply_text = _strip_bi_false_chart_delivery_lines(reply_text or "")
     # Texto plano para Redis/trazas; _telegram_safe solo en la respuesta al cliente (evita \\ que crece cada turno).
     reply_plain_for_storage = reply_text
+    chart_sent = False
+    if not is_system_prompt and isinstance(result, dict):
+        photo_b64 = (result.get("sandbox_photo_base64") or "").strip()
+        if photo_b64:
+            png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
+            if not png_bytes:
+                raw_try = decode_sandbox_figure_base64(photo_b64)
+                _gateway_log.warning(
+                    "sandbox chart: base64 no produce PNG/JPEG válido (b64_len=%s, decoded_len=%s, mod4=%s)",
+                    len(photo_b64),
+                    len(raw_try),
+                    len("".join(photo_b64.split())) % 4,
+                )
+            if png_bytes:
+                token = _effective_telegram_bot_token()
+                if token:
+                    loop = asyncio.get_running_loop()
+                    chart_sent = bool(
+                        await loop.run_in_executor(
+                            None,
+                            lambda: send_sandbox_chart_to_telegram_sync(
+                                bot_token=token,
+                                chat_id=str(session_id),
+                                image_bytes=png_bytes,
+                            ),
+                        )
+                    )
+                else:
+                    _gateway_log.warning(
+                        "sandbox chart: hay PNG del sandbox pero no hay token Bot API (TELEGRAM_BOT_TOKEN "
+                        "en el bloque PM2, o TELEGRAM_BOT_TOKEN_BI_ANALYST / TELEGRAM_BOT_TOKEN_LEILA / "
+                        "TELEGRAM_BOT_TOKEN_SIATA según gateway); define uno en .env o en "
+                        "config/api_gateways_pm2.json para este proceso."
+                    )
+    if chart_sent:
+        reply_plain_for_storage = _strip_lines_mentioning_workspace_output(reply_plain_for_storage or "")
     try:
         if not result.get("_audit_done"):
             from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
@@ -1071,11 +1367,55 @@ async def _invoke_chat(
             )
     except Exception:
         pass
+    _telegram_response_parts_count = 1
     try:
         from duckclaw.graphs.on_the_fly_commands import _telegram_safe
-        reply_text = _telegram_safe(reply_plain_for_storage)
+
+        coarse = _split_plain_text_for_telegram_reply(
+            reply_plain_for_storage or "",
+            _telegram_reply_plain_chunk_size(),
+        )
+        plain_parts: list[str] = []
+        for piece in coarse:
+            plain_parts.extend(_plain_subchunks_for_telegram_budget(piece, _telegram_safe))
+        if not plain_parts:
+            plain_parts = [""]
+        _telegram_response_parts_count = len(plain_parts)
+        reply_text = _telegram_safe(plain_parts[0])
+        tail_plain = "\n\n".join(plain_parts[1:]) if len(plain_parts) > 1 else ""
+        if tail_plain.strip() and (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip():
+            try:
+
+                async def _send_telegram_tail() -> None:
+                    await asyncio.get_running_loop().run_in_executor(
+                        None,
+                        partial(
+                            _push_chat_reply_via_n8n_outbound_sync,
+                            chat_id=session_id,
+                            user_id=(user_id or "").strip() or session_id,
+                            text=tail_plain,
+                        ),
+                    )
+
+                asyncio.create_task(_send_telegram_tail())
+            except Exception as exc:  # noqa: BLE001
+                _gateway_log.warning("telegram reply tail: no se pudo programar envío: %s", exc)
+        elif tail_plain.strip():
+            _gateway_log.warning(
+                "telegram reply: respuesta en %s partes; falta N8N_OUTBOUND_WEBHOOK_URL — "
+                "solo la 1ª parte la envía n8n (Responder Telegram)",
+                len(plain_parts),
+            )
     except Exception:
-        pass
+        try:
+            from duckclaw.graphs.on_the_fly_commands import _telegram_safe
+
+            reply_text = _telegram_safe(reply_plain_for_storage)
+            cap = _TELEGRAM_SENDMESSAGE_CHAR_LIMIT - 16
+            if len(reply_text) > cap:
+                reply_text = reply_text[:cap] + "…"
+        except Exception:
+            pass
     if (
         not is_system_prompt
         and redis_client is not None
@@ -1090,12 +1430,22 @@ async def _invoke_chat(
                 session_id,
                 history_for_model + [u, a],
             )
-    return {
+    out_resp: dict[str, Any] = {
         "response": reply_text,
         "session_id": session_id,
         "worker_id": effective_worker_id or worker_id,
         "elapsed_ms": elapsed_ms,
     }
+    if _telegram_response_parts_count > 1:
+        out_resp["response_parts"] = _telegram_response_parts_count
+    # Visibilidad en n8n: el nodo Telegram solo envía texto; la imagen la manda el gateway por Bot API.
+    if (
+        not is_system_prompt
+        and isinstance(result, dict)
+        and (result.get("sandbox_photo_base64") or "").strip()
+    ):
+        out_resp["sandbox_chart_delivered"] = chart_sent
+    return out_resp
 
 
 # ── Escrituras DuckDB (encolar en Redis) ──────────────────────────────────────

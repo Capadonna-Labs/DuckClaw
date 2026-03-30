@@ -11,6 +11,7 @@ from duckclaw.workers.manifest import WorkerSpec
 def _spec(worker_dir: Path) -> WorkerSpec:
     return WorkerSpec(
         worker_id="t",
+        logical_worker_id="t",
         name="t",
         schema_name="t",
         llm_required=None,

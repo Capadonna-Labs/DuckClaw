@@ -1,0 +1,29 @@
+# SIATA Analyst — Valle de Aburrá (spec: specs/features/Trabajador Virtual — SIATA Analyst (Geo-Spatial & Weather).md)
+# Runtime: WorkerSpec; cognición en soul/system_prompt/domain_closure; sandbox vía security_policy.yaml.
+# API reference: https://siata.gov.co/COMPLEX/Website/Documentation/API_reference/API_Reference.html
+name: SIATA Analyst
+id: siata_analyst
+schema_name: main
+topology: general
+read_only: true
+allowed_tables: []
+llm:
+  required: true
+  temperature: 0.15
+network_access: true
+memory:
+  sql:
+    required_schemas:
+      - main
+    extensions:
+      - httpfs
+      - json
+execution:
+  policies:
+    timeout_ms: 45000
+# scrape_siata_radar_realtime: read_only; HTTPS listado /data/radar/ en skills/scrape_siata_radar.py
+skills:
+  - scrape_siata_radar_realtime
+context_guard:
+  enabled: true
+  max_retries: 2

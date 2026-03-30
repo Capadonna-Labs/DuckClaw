@@ -1,0 +1,15 @@
+# Strix Sandbox: salida a red para requests hacia SIATA (spec SIATA Analyst).
+# manifest.network_access: true debe mantenerse alineado con network.default: allow.
+network:
+  default: allow
+  allow_list:
+    - "siata.gov.co"
+filesystem:
+  readonly_mounts:
+    - "/tmp/duckclaw_sandbox:/workspace/data:ro"
+  ephemeral_volumes:
+    - "/workspace/output"
+secrets:
+  in_memory_only: true
+  allowed_secrets: []
+max_execution_time_seconds: 90

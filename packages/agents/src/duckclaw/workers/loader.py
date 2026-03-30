@@ -57,6 +57,14 @@ def load_schema_sql(spec: WorkerSpec) -> str:
     return ""
 
 
+def load_seed_sql(spec: WorkerSpec) -> str:
+    """Load seed_data.sql from worker dir (optional demo / BI seed)."""
+    path = spec.worker_dir / "seed_data.sql"
+    if path.is_file():
+        return path.read_text(encoding="utf-8").strip()
+    return ""
+
+
 def _ensure_agent_beliefs(db: Any, schema: str) -> None:
     """Create agent_beliefs table for homeostasis (Active Inference Framework)."""
     s = _safe_ident(schema)
@@ -119,6 +127,11 @@ def run_schema(db: Any, spec: WorkerSpec, seed_beliefs: bool = True, apply_templ
     for stmt in _split_sql(sql):
         if stmt.strip():
             db.execute(stmt)
+    seed = load_seed_sql(spec)
+    if seed:
+        for stmt in _split_sql(seed):
+            if stmt.strip():
+                db.execute(stmt)
 
 
 def _safe_ident(name: str) -> str:

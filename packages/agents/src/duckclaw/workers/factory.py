@@ -11,6 +11,8 @@ import json
 import logging
 import os
 import re
+from urllib.error import URLError
+from urllib import request as _urllib_request
 
 _log = logging.getLogger(__name__)
 from pathlib import Path
@@ -22,6 +24,7 @@ except ImportError:
     RunnableConfig = Any  # type: ignore[misc, assignment]
 
 from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_sync, set_log_context
+from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills, run_schema
 
@@ -37,6 +40,29 @@ _CONCRETE_TASK_KEYWORDS = re.compile(
     r"qu[eé]\s+tablas|estructura|get_db_path|read_sql|admin_sql|consultar|cuenta|saldo|portfolio)\b",
     re.IGNORECASE,
 )
+
+# read_sql sobre read_json_auto sin LIMIT puede devolver megabytes y saturar el contexto del LLM.
+_READ_SQL_MAX_RESPONSE_CHARS = max(8_000, int(os.environ.get("DUCKCLAW_READ_SQL_MAX_RESPONSE_CHARS", "80000")))
+
+# run_sandbox puede volcar cientos de KB; sin context_monitor el ToolMessage iría entero al LLM.
+_RUN_SANDBOX_TOOL_LLM_MAX_CHARS = max(4_000, int(os.environ.get("DUCKCLAW_RUN_SANDBOX_TOOL_LLM_MAX_CHARS", "12000")))
+
+
+def _truncate_read_sql_result_for_llm(raw: str) -> str:
+    if not isinstance(raw, str) or len(raw) <= _READ_SQL_MAX_RESPONSE_CHARS:
+        return raw
+    return json.dumps(
+        {
+            "warning": (
+                "Salida truncada por límite de tamaño del gateway. Para JSON remotos usa LIMIT, "
+                "menos columnas, o run_sandbox para aplanar/resumir el archivo completo."
+            ),
+            "preview": raw[:_READ_SQL_MAX_RESPONSE_CHARS],
+            "total_chars": len(raw),
+            "omitted_chars": len(raw) - _READ_SQL_MAX_RESPONSE_CHARS,
+        },
+        ensure_ascii=False,
+    )
 
 # Tarea explícita del manager (plan): nunca tratar como "sin tarea"
 def _worker_log_label(worker_id: str) -> str:
@@ -191,6 +217,227 @@ def _identity_fields(state: dict) -> dict:
     }
 
 
+def _normalized_context_pruning(spec: WorkerSpec) -> dict:
+    raw = getattr(spec, "context_pruning_config", None)
+    if not isinstance(raw, dict) or not raw.get("enabled"):
+        return {}
+    return {
+        "enabled": True,
+        "max_messages": max(2, int(raw.get("max_messages", 10))),
+        "max_estimated_tokens": max(500, int(raw.get("max_estimated_tokens", 4000))),
+        "keep_last_messages": max(1, int(raw.get("keep_last_messages", 3))),
+        "tool_content_max_chars": max(500, int(raw.get("tool_content_max_chars", 8000))),
+        "sandbox_heartbeat": bool(raw.get("sandbox_heartbeat", True)),
+    }
+
+
+def _compose_bi_system_prompt(base: str, analytical_summary: str) -> str:
+    b = (base or "").strip()
+    s = (analytical_summary or "").strip()
+    if not s:
+        return b
+    return b + "\n\n## Resumen analítico del hilo\n" + s
+
+
+def _estimate_tokens_from_messages(messages: list) -> int:
+    total = 0
+    for m in messages or []:
+        c = getattr(m, "content", None) or ""
+        if isinstance(c, str):
+            total += len(c)
+        elif isinstance(c, list):
+            for part in c:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    total += len(str(part.get("text", "")))
+    return max(0, total // 4)
+
+
+def _compact_run_sandbox_tool_content_for_llm(content: str, max_chars: int) -> str:
+    """
+    El JSON de run_sandbox incluye figure_base64 (cientos de KB). Para el LLM se omite ese campo
+    y se acorta el resto; el PNG real vive en state['sandbox_photo_base64'] (tools_node).
+    """
+    c = content or ""
+    s = c.strip()
+    if not s.startswith("{"):
+        return c if len(c) <= max_chars else c[:max_chars] + "\n…[truncado por tamaño]"
+    try:
+        data = json.loads(s)
+    except json.JSONDecodeError:
+        return c if len(c) <= max_chars else c[:max_chars] + "\n…[truncado por tamaño]"
+    if not isinstance(data, dict):
+        return c[:max_chars] + "\n…[truncado por tamaño]"
+    if data.get("figure_base64"):
+        # Quitar del JSON para el LLM; el PNG real sigue en state['sandbox_photo_base64'] (tools_node).
+        data.pop("figure_base64", None)
+    for key in ("output", "stdout", "stderr"):
+        if key in data and isinstance(data[key], str) and len(data[key]) > 4000:
+            data[key] = data[key][:4000] + "…[truncado]"
+    compact = json.dumps(data, ensure_ascii=False)
+    if len(compact) <= max_chars:
+        return compact
+    return compact[:max_chars] + "\n…[truncado por tamaño]"
+
+
+def _truncate_tool_messages(messages: list, max_chars: int) -> list:
+    from langchain_core.messages import ToolMessage
+
+    out = []
+    for m in messages or []:
+        if isinstance(m, ToolMessage) and max_chars > 0:
+            c = m.content
+            if not isinstance(c, str):
+                out.append(m)
+                continue
+            name = getattr(m, "name", "") or ""
+            if name == "run_sandbox":
+                compacted = _compact_run_sandbox_tool_content_for_llm(c, max_chars)
+                out.append(
+                    ToolMessage(
+                        content=compacted,
+                        tool_call_id=m.tool_call_id,
+                        name=name,
+                    )
+                )
+            elif len(c) > max_chars:
+                out.append(
+                    ToolMessage(
+                        content=c[:max_chars] + "\n…[truncado por tamaño]",
+                        tool_call_id=m.tool_call_id,
+                        name=name,
+                    )
+                )
+            else:
+                out.append(m)
+        else:
+            out.append(m)
+    return out
+
+
+def _serialize_messages_for_summary(messages: list) -> str:
+    lines: list[str] = []
+    for m in messages or []:
+        c = getattr(m, "content", None) or ""
+        if not isinstance(c, str):
+            c = str(c)
+        c = c[:6000]
+        name = type(m).__name__
+        if name == "HumanMessage":
+            lines.append("user: " + c)
+        elif name == "AIMessage":
+            lines.append("assistant: " + c)
+        elif name == "ToolMessage":
+            tn = getattr(m, "name", "") or "tool"
+            lines.append(f"tool_{tn}: " + c[:4000])
+    return "\n".join(lines)
+
+
+def _split_for_pruning(non_system: list, keep_last: int) -> tuple[list, list]:
+    """Divide non-system messages en cabeza (a resumir) y cola estable (preserva ToolMessage tras AI)."""
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    if keep_last < 1:
+        keep_last = 1
+    if len(non_system) <= keep_last:
+        return [], non_system[:]
+    s = len(non_system) - keep_last
+    while s > 0 and isinstance(non_system[s], ToolMessage):
+        s -= 1
+    tail = non_system[s:]
+    if tail and isinstance(tail[-1], AIMessage):
+        last_ai = tail[-1]
+        if getattr(last_ai, "tool_calls", None):
+            e = len(non_system)
+            t_end = s + len(tail)
+            while t_end < e and isinstance(non_system[t_end], ToolMessage):
+                t_end += 1
+            tail = non_system[s:t_end]
+    head = non_system[:s]
+    return head, tail
+
+
+def _llm_fold_conversation_summary(llm: Any, head_msgs: list, prior: str) -> str:
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    blob = _serialize_messages_for_summary(head_msgs)
+    sys = (
+        "Eres un asistente de compresión de contexto para un analista BI. "
+        "Produce un resumen analítico breve en español: consultas y decisiones, hallazgos numéricos, errores. "
+        "Sin saludos. Máximo ~800 palabras."
+    )
+    human = (
+        "Resumen previo del hilo (puede estar vacío):\n"
+        + (prior or "")
+        + "\n\n---\nTranscript a compactar:\n"
+        + blob
+    )
+    try:
+        r = llm.invoke([SystemMessage(content=sys), HumanMessage(content=human)])
+        return (str(getattr(r, "content", None) or "") or "").strip()[:12000]
+    except Exception as exc:
+        _log.warning("context pruning summary LLM failed: %s", exc)
+        return ((prior or "").strip() + "\n[Error al generar resumen; contexto truncado.]").strip()
+
+
+def _sandbox_heartbeat_allowed(spec: WorkerSpec) -> bool:
+    cp = _normalized_context_pruning(spec)
+    if not cp.get("sandbox_heartbeat"):
+        return False
+    v = (os.getenv("DUCKCLAW_SANDBOX_HEARTBEAT", "true").strip().lower())
+    if v in ("0", "false", "no", "off"):
+        return False
+    return bool((os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip())
+
+
+def _send_sandbox_heartbeat_telegram(state: dict) -> None:
+    url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
+    if not url:
+        return
+    cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+    uid = str(state.get("user_id") or "").strip() or cid
+    if not cid:
+        return
+    auth = (os.getenv("N8N_AUTH_KEY") or "").strip()
+    headers = {"Content-Type": "application/json"}
+    if auth:
+        headers["X-DuckClaw-Secret"] = auth
+    text = (
+        "📊 Estoy procesando los datos y generando tus gráficos. "
+        "Esto puede tomar unos segundos..."
+    )
+    payload = json.dumps(
+        {"chat_id": cid, "user_id": uid, "text": escape_telegram_markdown_v2(text)},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    req = _urllib_request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with _urllib_request.urlopen(req, timeout=10) as resp:
+            _ = resp.read()
+    except URLError as exc:
+        _log.debug("sandbox heartbeat webhook failed: %s", exc)
+    except Exception as exc:
+        _log.debug("sandbox heartbeat error: %s", exc)
+
+
+def _ensure_worker_duckdb_extensions(db: Any, spec: WorkerSpec) -> None:
+    """INSTALL/LOAD extensiones declaradas en manifest (p. ej. httpfs + json para APIs remotas)."""
+    exts = getattr(spec, "duckdb_extensions", None) or []
+    if not exts:
+        return
+    for raw in exts:
+        ext = str(raw).strip().lower()
+        if not ext or not re.match(r"^[a-z][a-z0-9_]*$", ext):
+            continue
+        try:
+            db.execute(f"INSTALL {ext};")
+        except Exception:
+            pass
+        try:
+            db.execute(f"LOAD {ext};")
+        except Exception:
+            pass
+
+
 def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
     """Build tool list: template skills + read/admin SQL (with allow-list)."""
     from langchain_core.tools import StructuredTool
@@ -244,12 +491,38 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
         allowed_tables_error = _enforce_allowed_tables(upper)
         if allowed_tables_error:
             return allowed_tables_error
+        _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
+        if _lid == "bi_analyst" and re.search(r"\bSELECT\s+\*", upper) and "LIMIT" not in upper:
+            return json.dumps(
+                {
+                    "error": (
+                        "SELECT * sin LIMIT no está permitido para tablas analíticas. "
+                        "Usa columnas explícitas, agregaciones o añade LIMIT."
+                    )
+                }
+            )
+        if _lid == "siata_analyst" and re.search(r"read_json(_auto)?\s*\(", q, re.IGNORECASE):
+            if "LIMIT" not in upper and not re.search(r"\bCOUNT\s*\(", upper):
+                return json.dumps(
+                    {
+                        "error": (
+                            "Incluye LIMIT (p. ej. LIMIT 30) en consultas con read_json / read_json_auto "
+                            "hacia el SIATA. Sin LIMIT el JSON completo excede el contexto del modelo. "
+                            "COUNT(*) está permitido sin LIMIT."
+                        )
+                    }
+                )
+        ro_only = (
+            "read_sql es solo lectura. Este trabajador no tiene escritura SQL; usa solo SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA."
+            if spec.read_only
+            else "read_sql es solo lectura. Usa admin_sql para escrituras (INSERT/UPDATE/DELETE/CREATE, etc.)."
+        )
         # Bloquear escrituras (read_sql es solo lectura).
         if not upper.startswith(("SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN", "PRAGMA")):
-            return json.dumps({"error": "read_sql es solo lectura. Usa admin_sql para escrituras (INSERT/UPDATE/DELETE/CREATE, etc.)."})
+            return json.dumps({"error": ro_only})
         try:
             # Siempre usamos query() para lecturas
-            return db.query(q)
+            return _truncate_read_sql_result_for_llm(db.query(q))
         except Exception as e:
             err = str(e)
             # Fallback suave: si falta esquema explícito, probar main.<tabla> y luego private.<tabla>
@@ -258,19 +531,19 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
                 try_main = _qualify_allowed_tables(q, "main")
                 if try_main != q:
                     try:
-                        return db.query(try_main)
+                        return _truncate_read_sql_result_for_llm(db.query(try_main))
                     except Exception:
                         pass
                 try_shared = _qualify_allowed_tables(q, "shared")
                 if try_shared != q:
                     try:
-                        return db.query(try_shared)
+                        return _truncate_read_sql_result_for_llm(db.query(try_shared))
                     except Exception:
                         pass
                 try_private = _qualify_allowed_tables(q, "private")
                 if try_private != q:
                     try:
-                        return db.query(try_private)
+                        return _truncate_read_sql_result_for_llm(db.query(try_private))
                     except Exception:
                         pass
             return json.dumps({"error": err})
@@ -313,13 +586,14 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    tools.append(
-        StructuredTool.from_function(
-            _admin_sql_worker,
-            name="admin_sql",
-            description="SQL con permisos admin: lectura + escrituras (INSERT/UPDATE/DELETE/CREATE/ALTER/DROP si el worker no es read_only). Respeta allow-list de tablas del worker si aplica.",
+    if not spec.read_only:
+        tools.append(
+            StructuredTool.from_function(
+                _admin_sql_worker,
+                name="admin_sql",
+                description="SQL con permisos admin: lectura + escrituras (INSERT/UPDATE/DELETE/CREATE/ALTER/DROP si el worker no es read_only). Respeta allow-list de tablas del worker si aplica.",
+            )
         )
-    )
 
     def _inspect_schema_worker() -> str:
         """Lista tablas de todos los esquemas (main, finance_worker, etc.)."""
@@ -435,6 +709,7 @@ def build_worker_graph(
         shared_resolved and getattr(spec, "forge_apply_schema_to_shared", False)
     )
     run_schema(db, spec, apply_template_sql=not skip_primary_sql)
+    _ensure_worker_duckdb_extensions(db, spec)
 
     system_prompt = load_system_prompt(spec)
     tools = _build_worker_tools(db, spec)
@@ -475,6 +750,23 @@ def build_worker_graph(
         llm = build_llm(provider, model, base_url)
     elif llm is None:
         llm = None
+
+    _logical_id_early = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
+    _cp_early = _normalized_context_pruning(spec)
+    llm_summary: Any = None
+    if llm is not None and _cp_early.get("enabled") and _logical_id_early == "bi_analyst":
+        from duckclaw.integrations.llm_providers import build_llm as _build_llm_sum
+
+        sp = (os.getenv("DUCKCLAW_SUMMARY_LLM_PROVIDER") or "").strip() or provider
+        sm = (os.getenv("DUCKCLAW_SUMMARY_LLM_MODEL") or "").strip() or model
+        su = (os.getenv("DUCKCLAW_SUMMARY_LLM_BASE_URL") or "").strip() or base_url
+        try:
+            if (sp or "").lower() != "none_llm":
+                llm_summary = _build_llm_sum(sp, sm, su)
+        except Exception as exc:
+            _log.warning("summary LLM build failed, using primary: %s", exc)
+        if llm_summary is None:
+            llm_summary = llm
 
     if getattr(spec, "research_config", None):
         try:
@@ -553,6 +845,26 @@ def build_worker_graph(
     effective_prompt = (system_prompt or "").strip() + "\n\n" + _task_block
     # Cierre de dominio = última instrucción al modelo (p. ej. LeilaAssistant/domain_closure.md).
     effective_prompt = append_domain_closure_block(effective_prompt, spec)
+    _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
+    if _lid == "bi_analyst":
+        _nm = (getattr(spec, "name", None) or "Analista BI").strip()
+        effective_prompt = (
+            f"Identidad activa (prioritaria sobre mensajes previos del hilo): eres **{_nm}**. "
+            "No digas que eres «Agente de Investigación Activa» ni otro rol de investigación web; "
+            "el historial puede mezclar conversaciones antiguas.\n\n"
+            + effective_prompt
+        )
+
+    _cp = _normalized_context_pruning(spec)
+    use_cm = bool(_cp.get("enabled") and _lid == "bi_analyst")
+    _schema_digest = ""
+    if _lid == "bi_analyst" and _cp.get("enabled"):
+        at = ", ".join(spec.allowed_tables) if spec.allowed_tables else "(ninguna lista explícita)"
+        _schema_digest = (
+            f"\n\n## Contexto de esquema\nEsquema analítico `{spec.schema_name}`; tablas permitidas: {at}. "
+            "Para tipos y DDL exactos, ejecuta `get_schema_info` al inicio del análisis.\n"
+        )
+    _bi_prompt_base: str | None = (effective_prompt + _schema_digest) if (_lid == "bi_analyst" and _cp.get("enabled")) else None
 
     def prepare_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         cfg = config or {}
@@ -570,7 +882,11 @@ def build_worker_graph(
                     break
         if not isinstance(incoming, str):
             incoming = str(incoming or "").strip()
-        prompt = effective_prompt
+        prompt = (
+            _compose_bi_system_prompt(_bi_prompt_base, (state.get("analytical_summary") or "").strip())
+            if _bi_prompt_base is not None
+            else effective_prompt
+        )
         if crm_enabled:
             try:
                 from duckclaw.forge.crm.context_injector import graph_context_injector
@@ -606,7 +922,52 @@ def build_worker_graph(
         messages.append(HumanMessage(content=user_content))
         # LangGraph puede reemplazar/limitar el state entre nodos; preservamos chat_id para
         # que _sandbox_enabled_for_state (y otros flags por sesión) lean el ID correcto.
-        out = {"messages": messages, "incoming": incoming}
+        out = {**state, "messages": messages, "incoming": incoming}
+        if (state.get("analytical_summary") or "").strip():
+            out["analytical_summary"] = (state.get("analytical_summary") or "").strip()
+        out.update(_identity_fields(state))
+        return out
+
+    def context_monitor_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
+        if not _cp.get("enabled") or _lid != "bi_analyst":
+            return state
+        msgs = list(state.get("messages") or [])
+        msgs = _truncate_tool_messages(msgs, _cp["tool_content_max_chars"])
+        est = _estimate_tokens_from_messages(msgs)
+        n = len(msgs)
+        need = n > _cp["max_messages"] or est > _cp["max_estimated_tokens"]
+        if not need:
+            out = {**state, "messages": msgs}
+            out.update(_identity_fields(state))
+            return out
+        if not msgs or not isinstance(msgs[0], SystemMessage):
+            out = {**state, "messages": msgs}
+            out.update(_identity_fields(state))
+            return out
+        rest = msgs[1:]
+        head, tail = _split_for_pruning(rest, _cp["keep_last_messages"])
+        prior = (state.get("analytical_summary") or "").strip()
+        if need and not head:
+            trimmed = list(rest)
+            sys0 = msgs[0]
+            while len(trimmed) > 1 and _estimate_tokens_from_messages([sys0] + trimmed) > _cp["max_estimated_tokens"]:
+                trimmed = trimmed[1:]
+            base = _bi_prompt_base or effective_prompt
+            sys_content = _compose_bi_system_prompt(base, prior)
+            new_msgs = [SystemMessage(content=sys_content)] + trimmed
+            out = {**state, "messages": new_msgs, "analytical_summary": prior}
+            out.update(_identity_fields(state))
+            return out
+        new_summary = prior
+        if head:
+            if llm_summary is not None:
+                new_summary = _llm_fold_conversation_summary(llm_summary, head, prior)
+            else:
+                new_summary = ((prior + "\n") if prior else "").strip() + "[Contexto anterior truncado.]"
+        base = _bi_prompt_base or effective_prompt
+        sys_content = _compose_bi_system_prompt(base, new_summary)
+        new_msgs = [SystemMessage(content=sys_content)] + tail
+        out = {**state, "messages": new_msgs, "analytical_summary": new_summary}
         out.update(_identity_fields(state))
         return out
 
@@ -625,7 +986,10 @@ def build_worker_graph(
 
     if llm is None:
         def agent_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
-            out = {"messages": state["messages"] + [AIMessage(content="Sin LLM configurado. Configura DUCKCLAW_LLM_PROVIDER.")]}
+            out = {
+                **state,
+                "messages": state["messages"] + [AIMessage(content="Sin LLM configurado. Configura DUCKCLAW_LLM_PROVIDER.")],
+            }
             out.update(_identity_fields(state))
             return out
     else:
@@ -765,11 +1129,13 @@ def build_worker_graph(
             tool_calls = getattr(resp, "tool_calls", None) or []
             if tool_calls:
                 _log.info("[%s] LLM tool_calls=%s", _wl, [tc.get("name") for tc in tool_calls])
-            out = {"messages": state["messages"] + [resp]}
+            out = {**state, "messages": state["messages"] + [resp]}
             out.update(_identity_fields(state))
             return out
 
     def tools_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
+        from duckclaw.graphs.chat_heartbeat import heartbeat_message_for_tool, schedule_chat_heartbeat_dm
+
         _chat_ctx = state.get("chat_id") or state.get("session_id") or "default"
         _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"
         _log_chat = format_chat_log_identity(str(_chat_ctx).strip() or "default", state.get("username"))
@@ -781,6 +1147,7 @@ def build_worker_graph(
         new_msgs = list(messages)
         sandbox_enabled = _sandbox_enabled_for_state(state)
         tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
+        sandbox_b64: str | None = state.get("sandbox_photo_base64") if isinstance(state.get("sandbox_photo_base64"), str) else None
         for tc in tool_calls:
             name = (tc.get("name") or "").strip()
             args = tc.get("args") or {}
@@ -788,8 +1155,39 @@ def build_worker_graph(
             tool = tool_lookup.get(name)
             if tool:
                 try:
-                    result = tool.invoke(args)
+                    _htid = (state.get("tenant_id") or "default").strip() or "default"
+                    _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+                    _huid = str(state.get("user_id") or "").strip() or _hcid
+                    schedule_chat_heartbeat_dm(_htid, _hcid, _huid, heartbeat_message_for_tool(name))
+                    invoke_args: Any = args
+                    if name == "run_sandbox" and isinstance(args, dict):
+                        invoke_args = {**args}
+                        if not str(invoke_args.get("worker_id") or "").strip():
+                            invoke_args["worker_id"] = worker_id
+                    if (
+                        name == "run_sandbox"
+                        and _lid == "bi_analyst"
+                        and _sandbox_heartbeat_allowed(spec)
+                    ):
+                        from duckclaw.graphs.chat_heartbeat import is_chat_heartbeat_enabled
+
+                        if not is_chat_heartbeat_enabled(_htid, _hcid):
+                            _send_sandbox_heartbeat_telegram(state)
+                    result = tool.invoke(invoke_args)
                     content = str(result) if result is not None else "OK"
+                    if name == "run_sandbox":
+                        try:
+                            payload = json.loads(content)
+                            if isinstance(payload, dict) and payload.get("exit_code") == 0:
+                                fb = payload.get("figure_base64")
+                                if isinstance(fb, str) and len(fb) > 32:
+                                    sandbox_b64 = fb
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                        if not use_cm:
+                            content = _compact_run_sandbox_tool_content_for_llm(
+                                content, _RUN_SANDBOX_TOOL_LLM_MAX_CHARS
+                            )
                     _log.info("[%s] tool=%s | result_len=%d | preview=%r", _wl, name, len(content), content[:120] + ("..." if len(content) > 120 else ""))
                 except Exception as e:
                     content = f"Error: {e}"
@@ -801,18 +1199,30 @@ def build_worker_graph(
                     content = f"Herramienta desconocida: {name}"
                 _log.warning("[%s] unknown/unavailable tool: %s (sandbox_enabled=%s)", _wl, name, sandbox_enabled)
             new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
-        out = {"messages": new_msgs}
+        out: dict[str, Any] = {**state, "messages": new_msgs}
+        if sandbox_b64:
+            out["sandbox_photo_base64"] = sandbox_b64
         out.update(_identity_fields(state))
         return out
 
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
+        from duckclaw.graphs.chat_heartbeat import schedule_chat_heartbeat_dm
         from duckclaw.integrations.llm_providers import _strip_eot
+
+        def _notify_final_heartbeat() -> None:
+            _tid = (state.get("tenant_id") or "default").strip() or "default"
+            _cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+            _uid = str(state.get("user_id") or "").strip() or _cid
+            schedule_chat_heartbeat_dm(_tid, _cid, _uid, "✅ Terminé los pasos con herramientas; te resumo el resultado en el siguiente mensaje.")
+
         msgs = state.get("messages") or []
         last = msgs[-1] if msgs else None
         reply = getattr(last, "content", None) or str(last) if last else ""
         reply = _strip_eot(reply or "").strip()
         if not msgs:
-            return {"reply": "Sin respuesta generada."}
+            out_empty = {**state, "reply": "Sin respuesta generada."}
+            out_empty.update(_identity_fields(state))
+            return out_empty
         if reply.startswith("{") and '"name"' in reply and ("parameters" in reply or '"args"' in reply):
             try:
                 from duckclaw.utils import format_tool_reply
@@ -824,10 +1234,17 @@ def build_worker_graph(
                 if name and name in tool_lookup:
                     result = tool_lookup[name].invoke(params)
                     text = str(result) if result else "Listo."
-                    return {"reply": format_tool_reply(text), "messages": msgs}
+                    _notify_final_heartbeat()
+                    out_tool = {**state, "reply": format_tool_reply(text), "messages": msgs}
+                    out_tool.update(_identity_fields(state))
+                    return out_tool
             except (json.JSONDecodeError, TypeError, KeyError, Exception):
                 pass
-        out = {"reply": reply or "", "messages": msgs}
+        _notify_final_heartbeat()
+        out = {**state, "reply": reply or "", "messages": msgs}
+        sb = (state.get("sandbox_photo_base64") or "").strip()
+        if sb:
+            out["sandbox_photo_base64"] = sb
         out.update(_identity_fields(state))
         return out
 
@@ -865,6 +1282,8 @@ def build_worker_graph(
 
     graph = StateGraph(dict)
     graph.add_node("prepare", prepare_node)
+    if use_cm:
+        graph.add_node("context_monitor", context_monitor_node)
     graph.add_node("agent", agent_node)
     graph.add_node("tools", tools_node)
     graph.add_node("set_reply", set_reply)
@@ -878,7 +1297,11 @@ def build_worker_graph(
         graph.add_edge("homeostasis", "prepare")
     else:
         graph.set_entry_point("prepare")
-    graph.add_edge("prepare", "agent")
+    if use_cm:
+        graph.add_edge("prepare", "context_monitor")
+        graph.add_edge("context_monitor", "agent")
+    else:
+        graph.add_edge("prepare", "agent")
     if context_guard_enabled:
         graph.add_conditional_edges(
             "agent", should_continue,
@@ -892,7 +1315,10 @@ def build_worker_graph(
         graph.add_edge("handoff_reply", END)
     else:
         graph.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": "set_reply"})
-    graph.add_edge("tools", "agent")
+    if use_cm:
+        graph.add_edge("tools", "context_monitor")
+    else:
+        graph.add_edge("tools", "agent")
     graph.add_edge("set_reply", END)
 
     compiled = graph.compile()

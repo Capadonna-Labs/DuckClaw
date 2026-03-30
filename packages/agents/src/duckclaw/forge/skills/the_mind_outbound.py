@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import os
 import random
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +16,7 @@ from typing import Any
 import requests
 from langchain_core.tools import tool
 from duckclaw.utils.logger import get_obs_logger, log_fly
+from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
 
 _log = logging.getLogger("duckclaw.the_mind_outbound")
 _obs = get_obs_logger("duckclaw.fly")
@@ -27,49 +27,9 @@ def _preview_text(text: str, max_len: int = 50) -> str:
     return t[:max_len]
 
 
-# Telegram MarkdownV2 reserved chars.
-_TELEGRAM_MD_ESCAPE = (
-    "\\",
-    "_",
-    "*",
-    "[",
-    "]",
-    "(",
-    ")",
-    "~",
-    "`",
-    ">",
-    "#",
-    "+",
-    "-",
-    "=",
-    "|",
-    "{",
-    "}",
-    ".",
-    "!",
-)
-_TG_USER_LINK_RE = re.compile(r"\[[^\]]+\]\(tg://user\?id=\d+\)")
-
-
 def _telegram_safe(text: str) -> str:
     """Escapa texto para nodos outbound configurados con Markdown/MarkdownV2."""
-    if not text:
-        return ""
-    t = str(text)
-    preserved: list[str] = []
-    def _stash_link(m: re.Match[str]) -> str:
-        preserved.append(m.group(0))
-        return f"TGLINKTOKEN{len(preserved)-1}"
-    t = _TG_USER_LINK_RE.sub(_stash_link, t)
-    t = t.replace("\\", "\\\\")
-    for c in _TELEGRAM_MD_ESCAPE:
-        if c == "\\":
-            continue
-        t = t.replace(c, "\\" + c)
-    for i, raw in enumerate(preserved):
-        t = t.replace(f"TGLINKTOKEN{i}", raw)
-    return t
+    return escape_telegram_markdown_v2(text)
 
 
 def _team_username_by_user_id(db: Any, tenant_id: str, user_id: str) -> str:

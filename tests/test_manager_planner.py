@@ -5,6 +5,19 @@ from __future__ import annotations
 import pytest
 
 
+def test_plan_task_bi_analyst_meta_capabilities() -> None:
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    task, override = _plan_task("Que puedes hacer?", "BI-Analyst")
+    assert override is None
+    assert "analista de datos" in task.lower()
+    assert "agente de investigación" in task.lower() or "investigación activa" in task.lower()
+
+    # Otro worker: no debe aplicar la rama BI
+    task2, _ = _plan_task("Que puedes hacer?", "finanz")
+    assert task2 == "Que puedes hacer?"
+
+
 def test_truncate_plan_title_words() -> None:
     from duckclaw.graphs.manager_graph import _truncate_plan_title_words
 

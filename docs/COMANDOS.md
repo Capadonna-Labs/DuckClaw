@@ -145,6 +145,33 @@ DUCKCLAW_HEARTBEAT_PLAN_TITLE_INLINE_MAX=90
 
 Si la variable está vacía o no es un entero válido, se usa el valor por defecto del código (no dejes la variable vacía a propósito).
 
+### 2.2 Pool de lectura DuckDB (varias `read_sql` / `inspect_schema` en un turno)
+
+Cuando el modelo devuelve **varias** tool calls de solo lectura en el mismo mensaje, el worker puede ejecutarlas **en paralelo** sobre conexiones DuckDB **efímeras `read_only`** (no comparten la conexión interna de `DuckClaw`). Solo aplica si **todas** las herramientas del turno son `read_sql` y/o `inspect_schema`; si en el mismo turno aparece sandbox, `admin_sql`, etc., se vuelve al modo secuencial.
+
+Variables de entorno (proceso que ejecuta el grafo del worker, p. ej. PM2 del gateway):
+
+```env
+DUCKCLAW_TOOL_READ_POOL_ENABLED=1          # default activo; 0/false/no/off desactiva
+DUCKCLAW_TOOL_READ_POOL_CONCURRENCY=5    # máximo de lecturas efímeras concurrentes
+DUCKCLAW_TOOL_READ_STMT_TIMEOUT_MS=10000 # timeout de sentencia en ms (DuckDB SET statement_timeout)
+DUCKCLAW_TOOL_READ_POOL_RETRIES=3        # reintentos ante lock/IO transitorio
+```
+
+Límite de tamaño de respuesta SQL hacia el LLM (también en el camino efímero):
+
+```env
+DUCKCLAW_READ_SQL_MAX_RESPONSE_CHARS=80000
+```
+
+Por **worker**, en `manifest.yaml`:
+
+```yaml
+tool_read_pool: false   # desactiva el pool para ese template (pese al default global)
+```
+
+Especificación: [specs/features/Concurrent Tool Node (Ephemeral Read-Pool).md](specs/features/Concurrent%20Tool%20Node%20(Ephemeral%20Read-Pool).md).
+
 ---
 
 ## 3. Dependencias Python del monorepo
@@ -244,7 +271,7 @@ uv run python services/db-writer/main.py
 | 3 | `uv sync` |
 | 4 | `uv run duckops init` |
 | 5 | `uv run duckops serve --gateway` |
-| 6 | (Opcional Telegram) `DUCKCLAW_CHAT_PARALLEL_INVOCATIONS=1` + `REDIS_URL` si quieres varias respuestas concurrentes por chat; reiniciar gateway con `--update-env` |
+| 6 | (Opcional Telegram) `DUCKCLAW_CHAT_PARALLEL_INVOCATIONS=1` + `REDIS_URL` para varias respuestas concurrentes por chat; **§2.2** `DUCKCLAW_TOOL_READ_POOL_*` si varias `read_sql` en un solo turno; reiniciar con `--update-env` |
 | 7 | (Opcional) `uv run python services/db-writer/main.py` o PM2 según [Installation.md](docs/Installation.md) |
 
 ---
@@ -259,6 +286,7 @@ pm2 logs BI-Analyst-Gateway                 # Ej.: traza Telegram + subagentes
 pm2 logs DuckClaw-DB-Writer                 # Auditar escrituras
 pm2 flush                                   # Vaciar logs PM2
 pm2 restart BI-Analyst-Gateway --update-env # Nombre según config/api_gateways_pm2.json; tras cambiar DUCKCLAW_*
+# Tras cambiar DUCKCLAW_TOOL_READ_POOL_* o DUCKCLAW_READ_SQL_MAX_RESPONSE_CHARS: mismo restart
 ```
 
 Más comandos: sección **6. Guía Rápida de Operación** en [docs/Installation.md](docs/Installation.md).

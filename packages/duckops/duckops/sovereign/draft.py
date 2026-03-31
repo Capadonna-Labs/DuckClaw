@@ -29,6 +29,12 @@ class SovereignDraft(BaseModel):
     telegram_bot_token_masked: bool = False
     telegram_webhook_secret: str = ""
     telegram_webhook_secret_masked: bool = False
+    #: Base HTTPS que llega a este gateway (túnel/proxy). Sin barra final. Para generar setWebhook al desplegar.
+    telegram_webhook_public_base_url: str = ""
+    #: Si el túnel se registró en PM2 (Quick Tunnel), nombre del proceso; solo informativo.
+    cloudflared_pm2_process_name: str = ""
+    #: El wizard ejecutó `tailscale funnel --bg --yes` hacia el puerto del gateway.
+    tailscale_funnel_bg_via_wizard: bool = False
     duckclaw_tailscale_auth_key: str = ""
     tailscale_key_masked: bool = False
     enable_telegram_mcp: bool = True

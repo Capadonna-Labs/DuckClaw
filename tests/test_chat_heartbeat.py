@@ -102,6 +102,16 @@ def test_format_tool_heartbeat_prefix() -> None:
     assert with_plan.startswith("BI-Analyst 1 — ")
     assert "📋 Scatter de ventas" in with_plan
     assert raw in with_plan
+    with_elapsed = format_tool_heartbeat("W", raw, elapsed_sec=12.345)
+    assert "⏱️ 12.3s" in with_elapsed
+
+
+def test_format_heartbeat_elapsed_minutes() -> None:
+    from duckclaw.graphs.chat_heartbeat import format_heartbeat_elapsed
+
+    assert format_heartbeat_elapsed(None) == ""
+    assert "2.0s" in format_heartbeat_elapsed(2.0)
+    assert format_heartbeat_elapsed(125.0) == "⏱️ 2m 5s"
 
 
 def test_heartbeat_message_for_tool_mapping() -> None:
@@ -109,7 +119,9 @@ def test_heartbeat_message_for_tool_mapping() -> None:
 
     s = heartbeat_message_for_tool("get_schema_info").lower()
     assert "get_schema_info" in s and "columnas" in s
-    assert "sql" in heartbeat_message_for_tool("read_sql").lower()
+    rs = heartbeat_message_for_tool("read_sql")
+    assert "sql" in rs.lower()
+    assert "siata" not in rs.lower()
     assert "sql" in heartbeat_message_for_tool("admin_sql").lower()
     assert "sandbox" in heartbeat_message_for_tool("run_sandbox").lower()
     assert "inspect_schema" in heartbeat_message_for_tool("inspect_schema").lower()

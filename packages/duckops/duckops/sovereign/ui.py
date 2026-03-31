@@ -10,7 +10,21 @@ from prompt_toolkit import PromptSession
 from rich.console import Console
 from rich.panel import Panel
 
-from duckops.sovereign.domain_labels import WizardStep, step_header
+from duckops.sovereign.cloudflared_tunnel import (
+    cloudflared_available,
+    pm2_available,
+    provision_trycloudflare_quick_tunnel,
+)
+from duckops.sovereign.domain_labels import (
+    TAILSCALE_FUNNEL_KB_URL,
+    WizardStep,
+    step_header,
+    tailscale_funnel_wizard_panel_content,
+)
+from duckops.sovereign.tailscale_funnel import (
+    provision_tailscale_funnel_bg,
+    tailscale_cli_available,
+)
 from duckops.sovereign.draft import SovereignDraft
 from duckops.sovereign.keys import (
     NAV_AUTOFILL,
@@ -29,6 +43,14 @@ from duckops.sovereign.validate import (
 )
 
 _CONFIRM_EXIT = 2
+
+
+def _want_yes(val: str) -> bool:
+    return (val or "").strip().lower() not in ("n", "no", "0")
+
+
+def _want_no(val: str) -> bool:
+    return (val or "").strip().lower() in ("n", "no", "0")
 
 
 def _footer() -> str:
@@ -224,67 +246,6 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 step = n
             continue
 
-        if step == WizardStep.CONNECTIVITY:
-            tok, val = _ask_until(
-                session,
-                "TELEGRAM_BOT_TOKEN (password; vacío = no actualizar desde wizard): ",
-                password=True,
-                default="",
-            )
-            if tok == NAV_BACK:
-                p = prev_step(step)
-                if p:
-                    step = p
-                continue
-            if tok == NAV_QUICK_SAVE:
-                console.print(f"[green]{save_draft_json(draft)}[/]")
-                return 0
-            if val:
-                draft.telegram_bot_token = val
-                draft.telegram_bot_token_masked = True
-            tok, val = _ask_until(
-                session,
-                "TELEGRAM_WEBHOOK_SECRET (opcional, password): ",
-                password=True,
-                default="",
-            )
-            if tok == NAV_BACK:
-                continue
-            if tok == NAV_QUICK_SAVE:
-                console.print(f"[green]{save_draft_json(draft)}[/]")
-                return 0
-            if val:
-                draft.telegram_webhook_secret = val
-                draft.telegram_webhook_secret_masked = True
-            tok, val = _ask_until(
-                session,
-                "DUCKCLAW_TAILSCALE_AUTH_KEY (opcional): ",
-                password=True,
-                default="",
-            )
-            if tok == NAV_BACK:
-                continue
-            if tok == NAV_QUICK_SAVE:
-                console.print(f"[green]{save_draft_json(draft)}[/]")
-                return 0
-            if val:
-                draft.duckclaw_tailscale_auth_key = val
-            tok, val = _ask_until(
-                session,
-                "¿Habilitar MCP Telegram? [Y/n]: ",
-                default="y",
-            )
-            if tok == NAV_BACK:
-                continue
-            if tok == NAV_QUICK_SAVE:
-                console.print(f"[green]{save_draft_json(draft)}[/]")
-                return 0
-            draft.enable_telegram_mcp = val.lower() not in ("n", "no", "0")
-            n = next_step(step)
-            if n:
-                step = n
-            continue
-
         if step == WizardStep.ORCHESTRATION:
             host = "127.0.0.1"
             if is_port_in_use(host, draft.gateway_port):
@@ -322,6 +283,10 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
             except ValueError:
                 console.print("[red]Puerto inválido[/]")
                 continue
+            console.print(
+                f"[dim]Siguiente paso: [cyan]tailscale funnel --bg --yes {draft.gateway_port}[/] "
+                f"(o el asistente lo lanzará). Doc: {TAILSCALE_FUNNEL_KB_URL}[/]"
+            )
             tok, val = _ask_until(
                 session,
                 "¿Intentar Redis local gestionado (brew / hint Linux)? [y/N]: ",
@@ -350,6 +315,188 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 step = n
             continue
 
+        if step == WizardStep.CONNECTIVITY:
+            tok, val = _ask_until(
+                session,
+                "TELEGRAM_BOT_TOKEN (password; vacío = no actualizar desde wizard): ",
+                password=True,
+                default="",
+            )
+            if tok == NAV_BACK:
+                p = prev_step(step)
+                if p:
+                    step = p
+                continue
+            if tok == NAV_QUICK_SAVE:
+                console.print(f"[green]{save_draft_json(draft)}[/]")
+                return 0
+            if val:
+                draft.telegram_bot_token = val
+                draft.telegram_bot_token_masked = True
+
+            console.print(
+                Panel(
+                    tailscale_funnel_wizard_panel_content(draft.gateway_port),
+                    title="Tailscale Funnel (webhook HTTPS)",
+                    border_style="cyan",
+                )
+            )
+            tok, val = _ask_until(
+                session,
+                "¿Activar Funnel ahora con [bold]tailscale funnel --bg --yes[/] "
+                f"hacia el puerto [bold]{draft.gateway_port}[/]? (requiere Tailscale logueado y ACL funnel) [Y/n]: ",
+                default="y",
+            )
+            if tok == NAV_BACK:
+                continue
+            if tok == NAV_QUICK_SAVE:
+                console.print(f"[green]{save_draft_json(draft)}[/]")
+                return 0
+            if _want_yes(val):
+                if not tailscale_cli_available():
+                    console.print(
+                        "[yellow]No hay `tailscale` en PATH. Instala la app/CLI o pega la URL HTTPS más abajo.[/]"
+                    )
+                else:
+                    with console.status("[bold cyan]Configurando Tailscale Funnel (--bg)…[/]"):
+                        url_f, err_f = provision_tailscale_funnel_bg(draft.gateway_port)
+                    if url_f:
+                        draft.telegram_webhook_public_base_url = url_f
+                        draft.tailscale_funnel_bg_via_wizard = True
+                        draft.cloudflared_pm2_process_name = ""
+                        console.print(
+                            Panel(
+                                f"[green]Base HTTPS (Funnel)[/]\n{url_f}\n\n"
+                                f"[green]Ruta webhook Telegram[/]\n{url_f}/api/v1/telegram/webhook\n\n"
+                                "[dim]Estado: [bold]tailscale funnel status[/]  ·  Quitar: [bold]tailscale funnel reset[/][/]",
+                                title="Tailscale Funnel",
+                                border_style="green",
+                            )
+                        )
+                    else:
+                        console.print(f"[red]Tailscale Funnel: {err_f}[/]")
+
+            if not (draft.telegram_webhook_public_base_url or "").strip():
+                tok, val = _ask_until(
+                    session,
+                    "¿Usar Cloudflare Quick Tunnel [trycloudflare.com] como alternativa (sin Tailscale)? [y/N]: ",
+                    default="n",
+                )
+                if tok == NAV_BACK:
+                    continue
+                if tok == NAV_QUICK_SAVE:
+                    console.print(f"[green]{save_draft_json(draft)}[/]")
+                    return 0
+                if _want_yes(val):
+                    if not cloudflared_available():
+                        console.print(
+                            "[yellow]No hay `cloudflared` en PATH. Instálalo (p. ej. brew install cloudflared) "
+                            "o indica la URL HTTPS a mano más abajo.[/]"
+                        )
+                    else:
+                        use_pm2_tunnel = True
+                        if pm2_available():
+                            tok_p, val_p = _ask_until(
+                                session,
+                                "¿Registrar cloudflared en PM2? [Y/n]: ",
+                                default="y",
+                            )
+                            if tok_p == NAV_BACK:
+                                continue
+                            if tok_p == NAV_QUICK_SAVE:
+                                console.print(f"[green]{save_draft_json(draft)}[/]")
+                                return 0
+                            use_pm2_tunnel = not _want_no(val_p)
+                        else:
+                            console.print(
+                                "[dim]PM2 no está en PATH; cloudflared en segundo plano.[/]"
+                            )
+                            use_pm2_tunnel = False
+                        with console.status("[bold cyan]Arrancando Quick Tunnel (cloudflared)…[/]"):
+                            url_cf, err_cf, pm2n = provision_trycloudflare_quick_tunnel(
+                                draft.gateway_port,
+                                gateway_pm2_name=draft.gateway_pm2_name,
+                                use_pm2=use_pm2_tunnel,
+                            )
+                        if url_cf:
+                            draft.telegram_webhook_public_base_url = url_cf
+                            draft.cloudflared_pm2_process_name = pm2n or ""
+                            draft.tailscale_funnel_bg_via_wizard = False
+                            extra = (
+                                f"PM2: [cyan]{pm2n}[/]. Considera [dim]pm2 save[/]."
+                                if pm2n
+                                else "cloudflared en segundo plano sin PM2."
+                            )
+                            console.print(
+                                Panel(
+                                    f"[green]Base HTTPS[/]\n{url_cf}\n\n"
+                                    f"[green]Webhook[/]\n{url_cf}/api/v1/telegram/webhook\n\n"
+                                    f"{extra}",
+                                    title="Cloudflare Quick Tunnel",
+                                    border_style="green",
+                                )
+                            )
+                        else:
+                            console.print(f"[red]Quick Tunnel: {err_cf}[/]")
+
+            tok, val = _ask_until(
+                session,
+                "TELEGRAM_WEBHOOK_SECRET (opcional, password; debe coincidir con setWebhook): ",
+                password=True,
+                default="",
+            )
+            if tok == NAV_BACK:
+                continue
+            if tok == NAV_QUICK_SAVE:
+                console.print(f"[green]{save_draft_json(draft)}[/]")
+                return 0
+            if val:
+                draft.telegram_webhook_secret = val
+                draft.telegram_webhook_secret_masked = True
+
+            if not (draft.telegram_webhook_public_base_url or "").strip():
+                tok, val = _ask_until(
+                    session,
+                    "URL HTTPS pública hacia este gateway, sin barra final (si no usaste túnel; vacío = plantilla al final): ",
+                    default="",
+                )
+                if tok == NAV_BACK:
+                    continue
+                if tok == NAV_QUICK_SAVE:
+                    console.print(f"[green]{save_draft_json(draft)}[/]")
+                    return 0
+                if val:
+                    draft.telegram_webhook_public_base_url = val
+
+            tok, val = _ask_until(
+                session,
+                "DUCKCLAW_TAILSCALE_AUTH_KEY (opcional): ",
+                password=True,
+                default="",
+            )
+            if tok == NAV_BACK:
+                continue
+            if tok == NAV_QUICK_SAVE:
+                console.print(f"[green]{save_draft_json(draft)}[/]")
+                return 0
+            if val:
+                draft.duckclaw_tailscale_auth_key = val
+            tok, val = _ask_until(
+                session,
+                "¿Habilitar MCP Telegram? [Y/n]: ",
+                default="y",
+            )
+            if tok == NAV_BACK:
+                continue
+            if tok == NAV_QUICK_SAVE:
+                console.print(f"[green]{save_draft_json(draft)}[/]")
+                return 0
+            draft.enable_telegram_mcp = val.lower() not in ("n", "no", "0")
+            n = next_step(step)
+            if n:
+                step = n
+            continue
+
         if step == WizardStep.REVIEW_DEPLOY:
             masked_tok = "•••• (configurado)" if draft.telegram_bot_token else "(vacío / .env existente)"
             summary = (
@@ -360,6 +507,9 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 f"PM2 name: {draft.gateway_pm2_name}\n"
                 f"Worker: {draft.default_worker_id}\n"
                 f"Telegram token: {masked_tok}\n"
+                f"Webhook HTTPS base: {draft.telegram_webhook_public_base_url or '(plantilla con marcador al final)'}\n"
+                f"Tailscale Funnel (--bg vía wizard): {'sí' if draft.tailscale_funnel_bg_via_wizard else 'no'}\n"
+                f"Cloudflare PM2 (quick tunnel): {draft.cloudflared_pm2_process_name or '(ninguno)'}\n"
                 f"MCP Telegram: {draft.enable_telegram_mcp}\n"
                 f"Orquestación: {draft.orchestration} | Puerto: {draft.gateway_port}\n"
             )

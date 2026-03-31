@@ -21,6 +21,7 @@ from duckclaw.integrations.telegram import (
     TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
     TelegramBotApiAsyncClient,
     is_valid_telegram_webhook_secret_token,
+    telegram_webhook_secret_expected_from_env,
 )
 
 _log = logging.getLogger("duckclaw.gateway.telegram_inbound_webhook")
@@ -74,6 +75,13 @@ def build_telegram_inbound_webhook_router(
     async def telegram_bot_update_webhook(request: Request) -> dict[str, str]:
         header_secret = request.headers.get(TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER)
         if not is_valid_telegram_webhook_secret_token(header_secret):
+            if telegram_webhook_secret_expected_from_env():
+                _log.warning(
+                    "telegram webhook: 403 — TELEGRAM_WEBHOOK_SECRET está definido en el gateway pero "
+                    "la cabecera %s falta o no coincide. Vuelve a llamar setWebhook con el mismo "
+                    "secret_token o vacía TELEGRAM_WEBHOOK_SECRET (solo dev).",
+                    TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
+                )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={

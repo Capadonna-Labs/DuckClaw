@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.error import URLError
 from urllib import request as _urllib_request
 
@@ -25,6 +26,7 @@ except ImportError:
 
 from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_sync, set_log_context
 from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
+from duckclaw.workers import read_pool
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills, run_schema
 
@@ -514,69 +516,7 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
         return out
 
     def _read_sql_worker(query: str) -> str:
-        if not query or not query.strip():
-            return json.dumps({"error": "Query vacío."})
-        q = query.strip()
-        upper = q.upper()
-        allowed_tables_error = _enforce_allowed_tables(upper)
-        if allowed_tables_error:
-            return allowed_tables_error
-        _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
-        if _lid == "bi_analyst" and re.search(r"\bSELECT\s+\*", upper) and "LIMIT" not in upper:
-            return json.dumps(
-                {
-                    "error": (
-                        "SELECT * sin LIMIT no está permitido para tablas analíticas. "
-                        "Usa columnas explícitas, agregaciones o añade LIMIT."
-                    )
-                }
-            )
-        if _lid == "siata_analyst" and re.search(r"read_json(_auto)?\s*\(", q, re.IGNORECASE):
-            if "LIMIT" not in upper and not re.search(r"\bCOUNT\s*\(", upper):
-                return json.dumps(
-                    {
-                        "error": (
-                            "Incluye LIMIT (p. ej. LIMIT 30) en consultas con read_json / read_json_auto "
-                            "hacia el SIATA. Sin LIMIT el JSON completo excede el contexto del modelo. "
-                            "COUNT(*) está permitido sin LIMIT."
-                        )
-                    }
-                )
-        ro_only = (
-            "read_sql es solo lectura. Este trabajador no tiene escritura SQL; usa solo SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA."
-            if spec.read_only
-            else "read_sql es solo lectura. Usa admin_sql para escrituras (INSERT/UPDATE/DELETE/CREATE, etc.)."
-        )
-        # Bloquear escrituras (read_sql es solo lectura).
-        if not upper.startswith(("SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN", "PRAGMA")):
-            return json.dumps({"error": ro_only})
-        try:
-            # Siempre usamos query() para lecturas
-            return _truncate_read_sql_result_for_llm(db.query(q))
-        except Exception as e:
-            err = str(e)
-            # Fallback suave: si falta esquema explícito, probar main.<tabla> y luego private.<tabla>
-            # solo cuando hay allow-list y la consulta parece SQL tabular.
-            if spec.allowed_tables and any(k in upper for k in ("FROM", "JOIN")):
-                try_main = _qualify_allowed_tables(q, "main")
-                if try_main != q:
-                    try:
-                        return _truncate_read_sql_result_for_llm(db.query(try_main))
-                    except Exception:
-                        pass
-                try_shared = _qualify_allowed_tables(q, "shared")
-                if try_shared != q:
-                    try:
-                        return _truncate_read_sql_result_for_llm(db.query(try_shared))
-                    except Exception:
-                        pass
-                try_private = _qualify_allowed_tables(q, "private")
-                if try_private != q:
-                    try:
-                        return _truncate_read_sql_result_for_llm(db.query(try_private))
-                    except Exception:
-                        pass
-            return json.dumps({"error": err})
+        return read_pool.run_worker_read_sql(lambda qq: db.query(qq), spec, query)
 
     _read_sql_worker = log_tool_execution_sync(name="read_sql")(_read_sql_worker)
 
@@ -627,22 +567,7 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
 
     def _inspect_schema_worker() -> str:
         """Lista tablas de todos los esquemas (main, finance_worker, etc.)."""
-        try:
-            r = json.loads(db.query(
-                "SELECT table_schema, table_name FROM information_schema.tables "
-                "WHERE table_schema NOT IN ('information_schema','pg_catalog') ORDER BY table_schema, table_name"
-            ))
-            if not r or not isinstance(r, list):
-                return "No hay tablas en la base de datos."
-            lines = []
-            for row in r:
-                sch = row.get("table_schema", "")
-                tbl = row.get("table_name", "")
-                if sch and tbl:
-                    lines.append(f"- {sch}.{tbl}")
-            return "Tablas disponibles:\n" + "\n".join(lines) if lines else "No hay tablas."
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return read_pool.run_inspect_schema_worker(lambda qq: db.query(qq))
 
     tools.append(
         StructuredTool.from_function(
@@ -1023,22 +948,25 @@ def build_worker_graph(
             out.update(_identity_fields(state))
             return out
     else:
+        from duckclaw.integrations.llm_providers import bind_tools_with_parallel_default as _bind_tools
+
         # Cache de re-ligado por modo (evita re-bind costoso por chat/turno).
-        llm_with_tools_on = llm.bind_tools(tools)
-        llm_with_tools_off = llm.bind_tools(tools_sandbox_off)
+        # parallel_tool_calls=True en APIs OpenAI-compat (incl. MLX): permite varias tool_calls en un turno.
+        llm_with_tools_on = _bind_tools(llm, tools)
+        llm_with_tools_off = _bind_tools(llm, tools_sandbox_off)
 
         has_ibkr = "get_ibkr_portfolio" in tools_by_name
         tool_choice_inspect_schema = {"type": "function", "function": {"name": "inspect_schema"}}
         tool_choice_read_sql = {"type": "function", "function": {"name": "read_sql"}}
         tool_choice_portfolio = {"type": "function", "function": {"name": "get_ibkr_portfolio"}}
 
-        llm_force_schema_on = llm.bind_tools(tools, tool_choice=tool_choice_inspect_schema)
-        llm_force_schema_off = llm.bind_tools(tools_sandbox_off, tool_choice=tool_choice_inspect_schema)
-        llm_force_read_sql_on = llm.bind_tools(tools, tool_choice=tool_choice_read_sql)
-        llm_force_read_sql_off = llm.bind_tools(tools_sandbox_off, tool_choice=tool_choice_read_sql)
-        llm_force_portfolio_on = llm.bind_tools(tools, tool_choice=tool_choice_portfolio) if has_ibkr else None
+        llm_force_schema_on = _bind_tools(llm, tools, tool_choice=tool_choice_inspect_schema)
+        llm_force_schema_off = _bind_tools(llm, tools_sandbox_off, tool_choice=tool_choice_inspect_schema)
+        llm_force_read_sql_on = _bind_tools(llm, tools, tool_choice=tool_choice_read_sql)
+        llm_force_read_sql_off = _bind_tools(llm, tools_sandbox_off, tool_choice=tool_choice_read_sql)
+        llm_force_portfolio_on = _bind_tools(llm, tools, tool_choice=tool_choice_portfolio) if has_ibkr else None
         llm_force_portfolio_off = (
-            llm.bind_tools(tools_sandbox_off, tool_choice=tool_choice_portfolio) if has_ibkr else None
+            _bind_tools(llm, tools_sandbox_off, tool_choice=tool_choice_portfolio) if has_ibkr else None
         )
 
         def _is_portfolio_query(text: str) -> bool:
@@ -1185,69 +1113,147 @@ def build_worker_graph(
         _hb_head = (state.get("subagent_instance_label") or "").strip() or None
         _hb_uname = (state.get("username") or "").strip() or None
         _hb_plan = (state.get("heartbeat_plan_title") or "").strip() or None
-        for tc in tool_calls:
-            name = (tc.get("name") or "").strip()
-            args = tc.get("args") or {}
-            tid = tc.get("id") or ""
-            tool = tool_lookup.get(name)
-            if tool:
-                try:
-                    _htid = (state.get("tenant_id") or "default").strip() or "default"
-                    _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
-                    _huid = str(state.get("user_id") or "").strip() or _hcid
-                    schedule_chat_heartbeat_dm(
-                        _htid,
-                        _hcid,
-                        _huid,
-                        format_tool_heartbeat(
-                            _hb_head,
-                            heartbeat_message_for_tool(name),
-                            plan_title=_hb_plan,
-                        ),
-                        log_worker_id=_hb_head,
-                        log_username=_hb_uname,
-                        log_plan_title=_hb_plan,
-                    )
-                    invoke_args: Any = args
-                    if name == "run_sandbox" and isinstance(args, dict):
-                        invoke_args = {**args}
-                        if not str(invoke_args.get("worker_id") or "").strip():
-                            invoke_args["worker_id"] = worker_id
-                    if (
-                        name == "run_sandbox"
-                        and _lid == "bi_analyst"
-                        and _sandbox_heartbeat_allowed(spec)
-                    ):
-                        from duckclaw.graphs.chat_heartbeat import is_chat_heartbeat_enabled
 
-                        if not is_chat_heartbeat_enabled(_htid, _hcid):
-                            _send_sandbox_heartbeat_telegram(state)
-                    result = tool.invoke(invoke_args)
-                    content = str(result) if result is not None else "OK"
-                    if name == "run_sandbox":
-                        try:
-                            payload = json.loads(content)
-                            if isinstance(payload, dict) and payload.get("exit_code") == 0:
-                                fb = payload.get("figure_base64")
-                                if isinstance(fb, str) and len(fb) > 32:
-                                    sandbox_b64 = fb
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                        if not use_cm:
-                            content = _compact_run_sandbox_tool_content_for_llm(
-                                content, _RUN_SANDBOX_TOOL_LLM_MAX_CHARS
-                            )
-                    _log.info("[%s] tool=%s | result_len=%d | preview=%r", _wl, name, len(content), content[:120] + ("..." if len(content) > 120 else ""))
+        _duck_exts = list(getattr(spec, "duckdb_extensions", None) or [])
+        use_ephemeral_parallel = (
+            read_pool.read_pool_active_for_worker(spec)
+            and read_pool.should_parallelize_ephemeral_tool_calls(tool_calls)
+        )
+
+        def _schedule_tool_heartbeat(tool_name: str) -> None:
+            _htid = (state.get("tenant_id") or "default").strip() or "default"
+            _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+            _huid = str(state.get("user_id") or "").strip() or _hcid
+            schedule_chat_heartbeat_dm(
+                _htid,
+                _hcid,
+                _huid,
+                format_tool_heartbeat(
+                    _hb_head,
+                    heartbeat_message_for_tool(tool_name),
+                    plan_title=_hb_plan,
+                ),
+                log_worker_id=_hb_head,
+                log_username=_hb_uname,
+                log_plan_title=_hb_plan,
+            )
+
+        if use_ephemeral_parallel:
+            _log.info("[%s] tools_node: ephemeral read-pool parallel (%d calls)", _wl, len(tool_calls))
+            n_workers = min(len(tool_calls), read_pool.read_pool_max_concurrency())
+
+            def _parallel_job(idx_tc: tuple[int, dict[str, Any]]) -> tuple[int, str, str, str]:
+                idx, tc = idx_tc
+                name = (tc.get("name") or "").strip()
+                args = tc.get("args") or {}
+                tid = tc.get("id") or ""
+                _schedule_tool_heartbeat(name)
+                try:
+                    if name == "read_sql":
+                        q = str(args.get("query", "")) if isinstance(args, dict) else ""
+                        content = read_pool.run_ephemeral_read_sql(
+                            spec, path, path, shared_resolved, _duck_exts, q
+                        )
+                    elif name == "inspect_schema":
+                        content = read_pool.run_ephemeral_inspect_schema(
+                            path, path, shared_resolved, _duck_exts
+                        )
+                    else:
+                        content = json.dumps({"error": f"Herramienta inesperada en read-pool: {name}"})
                 except Exception as e:
                     content = f"Error: {e}"
-                    _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
-            else:
-                if not sandbox_enabled and name == "run_sandbox":
-                    content = "Sandbox deshabilitado en esta sesión. Actívalo con /sandbox on."
+                    _log.warning("[%s] ephemeral tool=%s failed: %s", _wl, name, e)
+                _log.info(
+                    "[%s] tool=%s | ephemeral | result_len=%d | preview=%r",
+                    _wl,
+                    name,
+                    len(content),
+                    content[:120] + ("..." if len(content) > 120 else ""),
+                )
+                return idx, tid, name, content
+
+            ordered_slots: list[tuple[str, str, str] | None] = [None] * len(tool_calls)
+            with ThreadPoolExecutor(max_workers=max(1, n_workers)) as pool:
+                futs = [pool.submit(_parallel_job, (i, tc)) for i, tc in enumerate(tool_calls)]
+                for fut in as_completed(futs):
+                    idx, tid, name, content = fut.result()
+                    ordered_slots[idx] = (tid, name, content)
+            for i in range(len(tool_calls)):
+                slot = ordered_slots[i]
+                if slot is None:
+                    tc = tool_calls[i]
+                    new_msgs.append(
+                        ToolMessage(
+                            content=json.dumps({"error": "read_pool: resultado faltante"}),
+                            tool_call_id=tc.get("id") or "",
+                            name=(tc.get("name") or "").strip(),
+                        )
+                    )
+                    continue
+                tid, name, content = slot
+                new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
+        else:
+            for tc in tool_calls:
+                name = (tc.get("name") or "").strip()
+                args = tc.get("args") or {}
+                tid = tc.get("id") or ""
+                tool = tool_lookup.get(name)
+                if tool:
+                    try:
+                        _schedule_tool_heartbeat(name)
+                        invoke_args: Any = args
+                        if name == "run_sandbox" and isinstance(args, dict):
+                            invoke_args = {**args}
+                            if not str(invoke_args.get("worker_id") or "").strip():
+                                invoke_args["worker_id"] = worker_id
+                        if (
+                            name == "run_sandbox"
+                            and _lid == "bi_analyst"
+                            and _sandbox_heartbeat_allowed(spec)
+                        ):
+                            from duckclaw.graphs.chat_heartbeat import is_chat_heartbeat_enabled
+
+                            _htid = (state.get("tenant_id") or "default").strip() or "default"
+                            _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+                            if not is_chat_heartbeat_enabled(_htid, _hcid):
+                                _send_sandbox_heartbeat_telegram(state)
+                        result = tool.invoke(invoke_args)
+                        content = str(result) if result is not None else "OK"
+                        if name == "run_sandbox":
+                            try:
+                                payload = json.loads(content)
+                                if isinstance(payload, dict) and payload.get("exit_code") == 0:
+                                    fb = payload.get("figure_base64")
+                                    if isinstance(fb, str) and len(fb) > 32:
+                                        sandbox_b64 = fb
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                            if not use_cm:
+                                content = _compact_run_sandbox_tool_content_for_llm(
+                                    content, _RUN_SANDBOX_TOOL_LLM_MAX_CHARS
+                                )
+                        _log.info(
+                            "[%s] tool=%s | result_len=%d | preview=%r",
+                            _wl,
+                            name,
+                            len(content),
+                            content[:120] + ("..." if len(content) > 120 else ""),
+                        )
+                    except Exception as e:
+                        content = f"Error: {e}"
+                        _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
                 else:
-                    content = f"Herramienta desconocida: {name}"
-                _log.warning("[%s] unknown/unavailable tool: %s (sandbox_enabled=%s)", _wl, name, sandbox_enabled)
-            new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
+                    if not sandbox_enabled and name == "run_sandbox":
+                        content = "Sandbox deshabilitado en esta sesión. Actívalo con /sandbox on."
+                    else:
+                        content = f"Herramienta desconocida: {name}"
+                    _log.warning(
+                        "[%s] unknown/unavailable tool: %s (sandbox_enabled=%s)",
+                        _wl,
+                        name,
+                        sandbox_enabled,
+                    )
+                new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
         out: dict[str, Any] = {**state, "messages": new_msgs}
         if sandbox_b64:
             out["sandbox_photo_base64"] = sandbox_b64

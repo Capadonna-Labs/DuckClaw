@@ -72,7 +72,9 @@ class LangGraphAdapter(BaseAgent):
         llm = self._get_llm()
         if llm is None:
             return "Error: proveedor 'none_llm' no soportado en este adapter. Usa llm_provider=openai, anthropic, mlx o iotcorelabs."
-        llm_with_tools = llm.bind_tools(tools)
+        from duckclaw.integrations.llm_providers import bind_tools_with_parallel_default
+
+        llm_with_tools = bind_tools_with_parallel_default(llm, tools)
         tools_by_name = {t.name: t for t in tools}
 
         def prepare_node(state: dict) -> dict:

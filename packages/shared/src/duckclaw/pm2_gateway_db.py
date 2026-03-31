@@ -62,14 +62,20 @@ def pm2_gateway_names_with_explicit_db_path() -> frozenset[str]:
 
 def dedicated_gateway_db_path_resolved() -> str | None:
     """
-    Ruta absoluta de DUCKCLAW_DB_PATH si este proceso es un gateway listado en
+    Ruta absoluta de DUCKCLAW_DB_PATH si este proceso quedó enlazado a una app en
     api_gateways_pm2.json con DB explícita. None si aplica el registry multi-bóveda.
+
+    Importante: al arranque, ``_apply_db_path_from_api_gateways_pm2`` puede emparejar
+    el bloque correcto por ``--port`` y fijar ``DUCKCLAW_PM2_MATCHED_APP_NAME`` a
+    p. ej. ``BI-Analyst-Gateway`` aunque ``DUCKCLAW_PM2_PROCESS_NAME`` en PM2 lleve
+    otro alias (p. ej. ``BIAnalyst-Gateway``). Hay que aceptar **cualquiera** de los
+    dos si está en el JSON; si solo se mirara el nombre PM2, fly commands y el manager
+    volverían al vault del registry (p. ej. finanzdb1) y chocarían por lock DuckDB.
     """
-    proc = (
-        (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
-        or (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
-    )
-    if proc not in pm2_gateway_names_with_explicit_db_path():
+    names = pm2_gateway_names_with_explicit_db_path()
+    proc = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
+    matched = (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
+    if proc not in names and matched not in names:
         return None
     gw_db = (os.environ.get("DUCKCLAW_DB_PATH") or "").strip()
     if not gw_db:

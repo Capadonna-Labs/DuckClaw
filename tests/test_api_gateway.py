@@ -330,3 +330,14 @@ def test_dedicated_gateway_vault_unknown_pm2_name_returns_none(
     monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "Not-In-Pm2-Json-XYZ")
     monkeypatch.setenv("DUCKCLAW_DB_PATH", str(tmp_path / "x.duckdb"))
     assert gateway_main._dedicated_gateway_vault_db_path() is None
+
+
+def test_dedicated_gateway_vault_uses_matched_app_when_pm2_alias_differs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """PM2 puede llamar el proceso distinto al ``name`` del JSON; el match por puerto fija MATCHED."""
+    dbf = tmp_path / "bi.duckdb"
+    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "BIAnalyst-Gateway")
+    monkeypatch.setenv("DUCKCLAW_PM2_MATCHED_APP_NAME", "BI-Analyst-Gateway")
+    monkeypatch.setenv("DUCKCLAW_DB_PATH", str(dbf))
+    assert gateway_main._dedicated_gateway_vault_db_path() == str(dbf.resolve())

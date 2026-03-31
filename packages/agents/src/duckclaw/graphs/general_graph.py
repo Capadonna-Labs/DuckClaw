@@ -220,8 +220,10 @@ def build_general_graph(
         except Exception:
             pass
 
-    llm_with_tools = llm.bind_tools(tools)
-    llm_with_required_tool = llm.bind_tools(tools, tool_choice="required")
+    from duckclaw.integrations.llm_providers import bind_tools_with_parallel_default
+
+    llm_with_tools = bind_tools_with_parallel_default(llm, tools)
+    llm_with_required_tool = bind_tools_with_parallel_default(llm, tools, tool_choice="required")
     tools_by_name = {t.name: t for t in tools}
 
     def prepare_node(state: dict) -> dict:
@@ -245,7 +247,9 @@ def build_general_graph(
         incoming = state.get("incoming") or ""
         has_sandbox = "run_sandbox" in tools_by_name
         if _needs_sandbox_tool(incoming) and has_sandbox:
-            llm_runner = llm.bind_tools(tools, tool_choice={"type": "function", "function": {"name": "run_sandbox"}})
+            llm_runner = bind_tools_with_parallel_default(
+                llm, tools, tool_choice={"type": "function", "function": {"name": "run_sandbox"}}
+            )
         elif _needs_db_tool(incoming):
             llm_runner = llm_with_required_tool
         else:

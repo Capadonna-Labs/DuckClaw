@@ -28,12 +28,21 @@ El agente NO tiene permitido improvisar respuestas. Debe seguir este protocolo e
 
 1.  **Paso 1: INTROSPECCIÓN:** Llamar a `get_schema_info()` para validar tablas y tipos de datos reales.
 2.  **Paso 2: PLANIFICACIÓN:** Declarar explícitamente qué métricas va a calcular y por qué (ej. "Calcularé el MoM growth para identificar la caída mencionada").
-3.  **Paso 3: EXTRACCIÓN:** Ejecutar SQL analítico usando **CTEs** para consultas con más de 2 joins.
-4.  **Paso 4: VISUALIZACIÓN:** Si el usuario pide gráficos, generar código Python para el Sandbox (Pandas + Matplotlib/Seaborn).
+3.  **Paso 3: EXTRACCIÓN:** Ejecutar SQL analítico usando **CTEs** para consultas con más de 2 joins o cuando varias métricas compartan el mismo contexto (una sola query con varias CTEs).
+4.  **Paso 4: VISUALIZACIÓN:** Si el usuario pide gráficos, generar código Python para el Sandbox; los datos para el gráfico deben leerse desde la DuckDB montada bajo `/workspace/repo_db/...` (solo lectura), nunca desde arrays hardcodeados.
 5.  **Paso 5: SÍNTESIS:** Entregar la respuesta estructurada en tres secciones:
     - **INSIGHT:** ¿Qué pasó? (El dato duro).
     - **CAUSA:** ¿Por qué pasó? (La correlación encontrada).
     - **RECOMENDACIÓN:** ¿Qué hacer? (Acción de negocio).
+
+### 4.1 Concurrencia SQL (`read_sql`)
+- Preferir **una** sentencia con **varias CTEs** cuando se pidan varias agregaciones en el mismo turno y compartan tablas o filtros.
+- Si las consultas son **independientes**, permitido **varias** llamadas a `read_sql` en el mismo turno (paralelismo cuando el runtime lo permita).
+
+### 4.2 Strix / `run_sandbox`: datos solo desde DuckDB montada
+- **Prohibido** incrustar listas, dicts o `DataFrame` manuales con valores de negocio.
+- El sandbox expone `db/` del repo en **`/workspace/repo_db`** (RO). Abrir el `.duckdb` con `duckdb.connect("/workspace/repo_db/<ruta-relativa-bajo-db/>/<archivo>.duckdb", read_only=True)` y usar `pandas.read_sql(...)`.
+- No usar rutas inventadas fuera de ese montaje (p. ej. `/mnt/data/shared/analytics.duckdb`) salvo que existan en la `security_policy` del template.
 
 ## 5. Contratos de Herramientas (Skills)
 

@@ -104,6 +104,21 @@ def _ensure_authorized_users_table(db: Any) -> None:
         pass
 
 
+def _is_gateway_owner_user(user_id: str) -> bool:
+    """Coincide con el bypass del API Gateway (DUCKCLAW_OWNER_ID / DUCKCLAW_ADMIN_CHAT_ID)."""
+    uid = str(user_id or "").strip()
+    if not uid:
+        return False
+    owner = (os.environ.get("DUCKCLAW_OWNER_ID") or os.environ.get("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
+    return bool(owner and uid == owner)
+
+
+def _is_team_admin(db: Any, *, tenant_id: str, requester_id: str) -> bool:
+    if _is_gateway_owner_user(requester_id):
+        return True
+    return _get_authorized_role(db, tenant_id=tenant_id, user_id=requester_id) == "admin"
+
+
 def _get_authorized_role(db: Any, *, tenant_id: str, user_id: str) -> str:
     _ensure_authorized_users_table(db)
     tid = _sql_escape_literal(tenant_id, max_len=128)
@@ -335,7 +350,7 @@ def _sync_tenant_team_if_admin(
     rid = str(requester_id or "").strip()
     if not tid or not rid:
         return
-    if _get_authorized_role(db, tenant_id=tid, user_id=rid) != "admin":
+    if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
         return
     set_tenant_team_templates(db, tid, template_ids)
 
@@ -448,10 +463,8 @@ def _dedicated_gateway_db_path_for_vault() -> str | None:
 
 
 def _dedicated_gateway_vault_label() -> str:
-    proc = (
-        (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
-        or (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
-    )
+    proc = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
+    matched = (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
     pretty = {
         "TheMind-Gateway": "The Mind",
         "Leila-Gateway": "Leila",
@@ -459,11 +472,23 @@ def _dedicated_gateway_vault_label() -> str:
         "SIATA-Gateway": "SIATA Analyst",
         "Finanz-Gateway": "Finanz",
     }
-    if proc in pretty:
-        return pretty[proc]
-    if proc:
-        return proc.replace("-Gateway", "").replace("-", " ").strip() or "este gateway"
+    for key in (proc, matched):
+        if key in pretty:
+            return pretty[key]
+    fallback = proc or matched
+    if fallback:
+        return fallback.replace("-Gateway", "").replace("-", " ").strip() or "este gateway"
     return "este gateway"
+
+
+def _format_vault_size_mb(size_bytes: int | float) -> str:
+    """Tamaño para mensajes /vault (1 MB = 1024² bytes, dos decimales)."""
+    try:
+        b = max(0, int(size_bytes))
+    except (TypeError, ValueError):
+        b = 0
+    mb = b / (1024 * 1024)
+    return f"{mb:.2f} MB"
 
 
 def execute_vault(args: str, *, vault_user_id: Any) -> str:
@@ -481,9 +506,11 @@ def execute_vault(args: str, *, vault_user_id: Any) -> str:
                 size = fp.stat().st_size if fp.exists() else 0
             except Exception:
                 pass
+            gtid = (os.environ.get("DUCKCLAW_GATEWAY_TENANT_ID") or "").strip()
+            extra = f"\nTenant: {gtid}" if gtid else ""
             return _telegram_safe(
                 f"🗄 BD de este gateway ({label}): {fp.name}\n"
-                f"Ruta: {fp}\nTamaño: {size} bytes"
+                f"Ruta: {fp}\nTamaño: {_format_vault_size_mb(size)}{extra}"
             )
         tokens = raw.split()
         cmd = (tokens[0] or "").strip().lower()
@@ -509,7 +536,7 @@ def execute_vault(args: str, *, vault_user_id: Any) -> str:
         except Exception:
             pass
         return _telegram_safe(
-            f"🗄 Bóveda activa: {active_id}\nRuta: {active_path}\nTamaño: {size} bytes\n\n"
+            f"🗄 Bóveda activa: {active_id}\nRuta: {active_path}\nTamaño: {_format_vault_size_mb(size)}\n\n"
             "Comandos: /vault list | /vault --list | /vault new <name> | /vault --new <name> | "
             "/vault use <id> | /vault --use <id> | /vault rm <id> | /vault --rm <id>"
         )
@@ -525,7 +552,10 @@ def execute_vault(args: str, *, vault_user_id: Any) -> str:
         lines = []
         for r in rows:
             mark = "✅" if r.get("is_active") else "•"
-            lines.append(f"{mark} {r.get('vault_id')} ({r.get('vault_name')}) - {r.get('size_bytes', 0)} bytes")
+            sz = int(r.get("size_bytes", 0) or 0)
+            lines.append(
+                f"{mark} {r.get('vault_id')} ({r.get('vault_name')}) - {_format_vault_size_mb(sz)}"
+            )
         return _telegram_safe("🗄 Bóvedas:\n" + "\n".join(lines))
     if cmd == "new":
         name = " ".join(tokens[1:]).strip()
@@ -561,8 +591,8 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
     """
     Telegram Guard spec: /team lista y muta authorized_users por tenant.
     - /team                           -> lista autorizados (para tenant)
-    - /team --add <user_id> [username] (admin-only)
-    - /team --rm <user_id>            (admin-only)
+    - /team --add <user_id> [nombre] [admin] (admin u owner DUCKCLAW_ADMIN_CHAT_ID)
+    - /team --rm <user_id>            (admin u owner)
     """
     tid = str(tenant_id or "default").strip() or "default"
     rid = str(requester_id or "").strip()
@@ -571,7 +601,13 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
     if not raw:
         users = _list_authorized_users(db, tenant_id=tid)
         if not users:
-            return _telegram_safe(f"No hay usuarios autorizados para tenant '{tid}'.")
+            hint = ""
+            if _is_gateway_owner_user(rid):
+                hint = (
+                    " Como eres el owner del gateway (DUCKCLAW_ADMIN_CHAT_ID), puedes ejecutar "
+                    "`/team --add <user_id> [nombre] [admin]` para dar de alta."
+                )
+            return _telegram_safe(f"No hay usuarios autorizados para tenant '{tid}'.{hint}")
         lines = []
         for u in users:
             uid = u.get("user_id") or ""
@@ -585,9 +621,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
     if raw.startswith("--rm "):
         if not rid:
             return _telegram_safe("❌ Acceso denegado.")
-        # role admin-only
-        role = _get_authorized_role(db, tenant_id=tid, user_id=rid)
-        if role != "admin":
+        if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
             return _telegram_safe("❌ Acceso denegado: solo administradores pueden eliminar usuarios.")
         target_uid = raw[5:].strip().split()[0]
         if not target_uid:
@@ -600,25 +634,29 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
     if raw.startswith("--add ") or raw.strip() == "--add":
         if not rid:
             return _telegram_safe("❌ Acceso denegado.")
-        role = _get_authorized_role(db, tenant_id=tid, user_id=rid)
-        if role != "admin":
+        if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
             return _telegram_safe("❌ Acceso denegado: solo administradores pueden agregar usuarios.")
         ids_part = raw[6:].strip() if raw.startswith("--add ") else ""
         tokens = [t for t in ids_part.split() if t.strip()]
         if not tokens:
-            return _telegram_safe("Uso: /team --add <user_id> [username]")
+            return _telegram_safe("Uso: /team --add <user_id> [nombre] [admin]")
+        role_out = "user"
+        if len(tokens) >= 2 and tokens[-1].lower() == "admin":
+            role_out = "admin"
+            tokens = tokens[:-1]
+        if not tokens:
+            return _telegram_safe("Uso: /team --add <user_id> [nombre] [admin]")
         target_uid = tokens[0]
         uname = tokens[1] if len(tokens) > 1 else "Usuario"
-        _upsert_authorized_user(db, tenant_id=tid, user_id=target_uid, username=uname, role="user")
+        _upsert_authorized_user(db, tenant_id=tid, user_id=target_uid, username=uname, role=role_out)
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
         target_label = _player_label(uname, target_uid, db=db, tenant_id=tid)
-        return _telegram_safe(f"✅ Añadido {target_label} (role=user) al tenant '{tid}'.")
+        return _telegram_safe(f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'.")
 
     if raw == "--shared-list" or raw.startswith("--shared-list"):
         if not rid:
             return _telegram_safe("❌ Acceso denegado.")
-        role = _get_authorized_role(db, tenant_id=tid, user_id=rid)
-        if role != "admin":
+        if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
             return _telegram_safe("❌ Acceso denegado: solo administradores pueden listar permisos de bases compartidas.")
         from duckclaw.shared_db_grants import list_shared_grants_for_tenant
 
@@ -642,8 +680,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
     if raw.startswith("--shared-grant "):
         if not rid:
             return _telegram_safe("❌ Acceso denegado.")
-        role = _get_authorized_role(db, tenant_id=tid, user_id=rid)
-        if role != "admin":
+        if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
             return _telegram_safe("❌ Acceso denegado: solo administradores.")
         rest = raw[len("--shared-grant ") :].strip().split(None, 1)
         if len(rest) < 2:
@@ -659,8 +696,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
     if raw.startswith("--shared-revoke "):
         if not rid:
             return _telegram_safe("❌ Acceso denegado.")
-        role = _get_authorized_role(db, tenant_id=tid, user_id=rid)
-        if role != "admin":
+        if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
             return _telegram_safe("❌ Acceso denegado: solo administradores.")
         rest = raw[len("--shared-revoke ") :].strip().split(None, 1)
         if len(rest) < 2:

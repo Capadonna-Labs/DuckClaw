@@ -152,6 +152,13 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
     if isinstance(sec, dict) and sec.get("network_access") is not None:
         network_access = bool(sec.get("network_access"))
 
+    tool_read_pool = True
+    trp = data.get("tool_read_pool")
+    if trp is False or trp == 0:
+        tool_read_pool = False
+    elif isinstance(trp, str):
+        tool_read_pool = trp.strip().lower() not in ("0", "false", "no", "off")
+
     return WorkerSpec(
         worker_id=worker_id,
         logical_worker_id=logical_worker_id,
@@ -178,6 +185,7 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         context_pruning_config=context_pruning_config,
         duckdb_extensions=duckdb_extensions,
         network_access=network_access,
+        tool_read_pool=tool_read_pool,
     )
 
 
@@ -238,6 +246,7 @@ class WorkerSpec:
         "context_pruning_config",
         "duckdb_extensions",
         "network_access",
+        "tool_read_pool",
     )
 
     def __init__(
@@ -267,6 +276,7 @@ class WorkerSpec:
         context_pruning_config: Optional[dict] = None,
         duckdb_extensions: Optional[list] = None,
         network_access: bool = False,
+        tool_read_pool: bool = True,
     ):
         self.worker_id = worker_id
         self.logical_worker_id = logical_worker_id
@@ -293,3 +303,4 @@ class WorkerSpec:
         self.context_pruning_config = context_pruning_config
         self.duckdb_extensions = list(duckdb_extensions or [])
         self.network_access = bool(network_access)
+        self.tool_read_pool = bool(tool_read_pool)

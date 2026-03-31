@@ -29,7 +29,9 @@ def build_retail_graph(
 
     prompt = system_prompt or _DEFAULT_SYSTEM_PROMPT
     tools = build_store_tools(store_db, console=console)
-    llm_with_tools = llm.bind_tools(tools)
+    from duckclaw.integrations.llm_providers import bind_tools_with_parallel_default
+
+    llm_with_tools = bind_tools_with_parallel_default(llm, tools)
     tools_by_name = {t.name: t for t in tools}
 
     def prepare_node(state: dict) -> dict:

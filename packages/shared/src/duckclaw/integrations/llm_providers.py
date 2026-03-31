@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
 import re
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 # EOT tokens comunes en modelos (Slayer, Llama, etc.)
 _EOT_PATTERNS = (
@@ -63,6 +64,25 @@ def _validate_write_sql(sql: str) -> tuple[bool, str]:
     if "SELECT" in s and "INSERT" not in s and "UPDATE" not in s and "DELETE" not in s:
         return False, "Para lectura usa run_read_sql."
     return True, ""
+
+
+def bind_tools_with_parallel_default(llm: Any, tools: Sequence[Any], **kwargs: Any) -> Any:
+    """
+    Llama a ``llm.bind_tools`` con ``parallel_tool_calls=True`` cuando la firma lo admite
+    (p. ej. ``langchain_openai.ChatOpenAI``: API OpenAI y servidores compatibles / MLX).
+    Otros proveedores (Anthropic, Ollama, etc.) se dejan sin ese argumento.
+    """
+    try:
+        sig = inspect.signature(llm.bind_tools)
+    except (TypeError, ValueError):
+        return llm.bind_tools(tools, **kwargs)
+    bind_kwargs = dict(kwargs)
+    if (
+        "parallel_tool_calls" in sig.parameters
+        and "parallel_tool_calls" not in bind_kwargs
+    ):
+        bind_kwargs["parallel_tool_calls"] = True
+    return llm.bind_tools(tools, **bind_kwargs)
 
 
 def build_llm(

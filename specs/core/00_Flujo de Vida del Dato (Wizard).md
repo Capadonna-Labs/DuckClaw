@@ -288,13 +288,20 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 
 ## 6. Wizard y pipeline completo
 
-El wizard (`duckops init` → `scripts/duckclaw_setup_wizard.py`) es el punto de entrada para configurar y desplegar todo el pipeline. Sustituye scripts `.sh` por un CLI en Python: mantenible, cross-platform (macOS, Linux, Windows) y con control de datos sensibles (Habeas Data).
+El wizard es el punto de entrada para configurar y desplegar todo el pipeline. Hay dos implementaciones:
+
+- **Legacy (Rich):** `duckops init` → `scripts/duckclaw_setup_wizard.py` — flujo secuencial con Rich; persistente en pasos intermedios.
+- **Sovereign v2.0:** `duckops sovereign` o `duckops init --sovereign` — máquina de estados, lenguaje soberano en UI, borrador hasta *Review & Deploy*; spec dedicada `specs/features/DuckClaw Sovereign Wizard (v2.0).md`.
+
+Sustituye scripts `.sh` por un CLI en Python: mantenible, cross-platform (macOS, Linux, Windows) y con control de datos sensibles (Habeas Data).
 
 ### 6.1 Comandos duckops
 
 | Comando | Descripción |
 |---------|-------------|
-| `duckops init [tenant_id]` | Ejecuta el wizard interactivo (Rich). Invoca `scripts/duckclaw_setup_wizard.py`. |
+| `duckops init [tenant_id]` | Ejecuta el wizard interactivo legacy (Rich). Invoca `scripts/duckclaw_setup_wizard.py`. |
+| `duckops init --sovereign` | Wizard Sovereign v2.0 (mismo efecto que `duckops sovereign`). |
+| `duckops sovereign` | Wizard Sovereign v2.0 (TUI `prompt_toolkit`, borrador + confirmación). |
 | `duckops serve [--pm2] [--gateway]` | Arranca el API Gateway (`services/api-gateway`) o servidor LangGraph. Con `--gateway` genera `ecosystem.api.config.cjs` y despliega DuckClaw-Gateway en PM2. Carga `.env` para propagar `DUCKCLAW_LLM_PROVIDER`, `REDIS_URL`, etc. |
 | `duckops deploy [--provider]` | Despliega DuckClaw-Brain (bot Telegram) como servicio persistente (PM2, systemd, Windows). |
 | `duckops audit` | Muestra configuración con datos sensibles enmascarados. |
@@ -331,9 +338,10 @@ Al iniciar, el wizard lista los procesos PM2 detectados. Si el usuario elige "Ge
 packages/duckops/
 ├── pyproject.toml
 └── duckops/
-    ├── cli.py              # Punto de entrada Typer (app)
+    ├── cli.py              # duckops sovereign + add_typer init/serve/deploy/audit
+    ├── sovereign/        # Wizard v2.0 (draft, materialize, ui)
     └── commands/
-        ├── init.py         # duckops init → scripts/duckclaw_setup_wizard.py
+        ├── init.py         # duckops init → wizard legacy o --sovereign
         ├── serve.py        # duckops serve (Gateway, LangGraph)
         ├── deploy.py       # duckops deploy (PM2, systemd, Windows)
         └── audit.py        # duckops audit (Habeas Data)

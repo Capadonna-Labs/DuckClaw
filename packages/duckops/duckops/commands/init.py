@@ -29,6 +29,11 @@ def cmd_init(
         "--wizard/--no-wizard",
         help="Ejecutar wizard interactivo (Rich).",
     ),
+    sovereign: bool = typer.Option(
+        False,
+        "--sovereign",
+        help="Wizard v2.0 (prompt_toolkit, borrador hasta Review).",
+    ),
 ) -> None:
     """Inicializa un nuevo tenant con su base de datos y configuración."""
     if ctx.invoked_subcommand is not None:
@@ -41,6 +46,12 @@ def cmd_init(
         raise typer.Exit(1)
 
     typer.secho(f"Forjando agente para {tenant_id}...", fg=typer.colors.CYAN)
+
+    if sovereign:
+        from duckops.sovereign.runner import run_sovereign_wizard
+
+        code = run_sovereign_wizard(repo)
+        raise typer.Exit(code)
 
     if use_wizard:
         env = os.environ.copy()

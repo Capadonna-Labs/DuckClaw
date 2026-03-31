@@ -24,9 +24,9 @@ Se aplicará una capa de "Traducción de Dominio" para que los términos de infr
 1.  **Sovereignty Audit (Check inicial):** El Wizard detecta si corre en macOS (M-series), Linux o Docker.
 2.  **Core Services:** Configuración de Redis y DuckDB (Auto-detecta si ya existen instancias).
 3.  **Identity Setup:** Configuración del `Manager` y el primer `Worker` (Leila, BI, o SIATA).
-4.  **Connectivity:** Configuración de túneles (Tailscale/Cloudflare) y tokens de Telegram.
-5.  **Orchestration Choice:** ¿Cómo quieres correr DuckClaw? (`PM2` para local, `Docker` para aislamiento total).
-6.  **Review & Deploy:** Resumen visual de la configuración y botón de "Ignition".
+4.  **Orchestration:** Puerto del gateway y modo PM2/Docker (antes de Telegram para alinear el túnel al puerto).
+5.  **Connectivity:** Token de Telegram; **Tailscale Funnel** (`--bg --yes`) como vía principal de HTTPS público hacia el gateway; Quick Tunnel Cloudflare opcional; MCP.
+6.  **Review & Deploy:** Resumen visual de la configuración y botón de "Ignition"; tras aplicar `.env` y reiniciar el gateway (PM2 cuando aplique), **registro automático del webhook** con `setWebhook` si hay token y URL HTTPS pública válida.
 
 ## 4. Contratos y Atajos (Hotkeys)
 

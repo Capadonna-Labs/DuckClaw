@@ -244,7 +244,7 @@ def heartbeat_message_for_tool(name: str) -> str:
     n = (name or "").strip()
     mapping = {
         "get_schema_info": "🔎 Paso actual: entender columnas y tipos con get_schema_info…",
-        "read_sql": "📊 Paso actual: traer datos del SIATA con read_sql (solo lectura)…",
+        "read_sql": "📊 Paso actual: consultar la base con read_sql (solo lectura)…",
         "run_sql": "📊 Paso actual: ejecutar SQL con run_sql…",
         "admin_sql": "📊 Paso actual: escritura SQL con admin_sql…",
         "run_sandbox": "⚙️ Paso actual: procesar o graficar en el sandbox (run_sandbox)…",
@@ -254,6 +254,21 @@ def heartbeat_message_for_tool(name: str) -> str:
     if n in mapping:
         return mapping[n]
     return f"🔄 Paso actual: llamo a la herramienta {n}…"
+
+
+def format_heartbeat_elapsed(elapsed_sec: float | None) -> str:
+    """Texto corto para DM de progreso (p. ej. «⏱️ 12.3s»)."""
+    if elapsed_sec is None:
+        return ""
+    try:
+        e = max(0.0, float(elapsed_sec))
+    except (TypeError, ValueError):
+        return ""
+    if e < 60:
+        return f"⏱️ {e:.1f}s"
+    m = int(e // 60)
+    s = int(e % 60)
+    return f"⏱️ {m}m {s}s"
 
 
 def _shorten_heartbeat_plan_title(title: str) -> str:
@@ -268,10 +283,12 @@ def format_tool_heartbeat(
     tool_message: str,
     *,
     plan_title: str | None = None,
+    elapsed_sec: float | None = None,
 ) -> str:
     """
     Antepone ``BI-Analyst 1`` y opcionalmente el título del plan del manager
-    a los DMs de progreso por herramienta.
+    a los DMs de progreso por herramienta. ``elapsed_sec`` = segundos desde el
+    inicio del turno del subagente (``subagent_turn_started_monotonic``).
     """
     head = (subagent_header or "").strip()
     plan = _shorten_heartbeat_plan_title((plan_title or "").strip())
@@ -284,6 +301,9 @@ def format_tool_heartbeat(
     if plan:
         segments.append(f"📋 {plan}")
     segments.append(body)
+    elapsed_txt = format_heartbeat_elapsed(elapsed_sec)
+    if elapsed_txt:
+        segments.append(elapsed_txt)
     return " — ".join(segments)
 
 

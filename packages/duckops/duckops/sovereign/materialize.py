@@ -13,6 +13,7 @@ from duckops.sovereign.docker_compose import write_compose_override
 from duckops.sovereign.draft import SovereignDraft
 from duckops.sovereign.redis_local import try_start_redis_local
 from duckops.sovereign.strix_policy import patch_security_policy
+from duckops.sovereign.telegram_set_webhook import register_telegram_webhook_after_deploy
 
 DEFAULT_SOVEREIGN_VAULT = "db/sovereign_memory.duckdb"
 
@@ -189,6 +190,67 @@ def ensure_duckdb_file(repo_root: Path, relative_or_abs: str) -> bool:
         sys.path[:] = orig
 
 
+def telegram_webhook_post_deploy_message(draft: SovereignDraft) -> str:
+    """
+    Texto post-despliegue: instrucciones manuales y curl de respaldo.
+    Tras reiniciar PM2, ``materialize`` llama a la Bot API (setWebhook) cuando hay token y URL.
+    """
+    port = int(draft.gateway_port)
+    base = (draft.telegram_webhook_public_base_url or "").strip().rstrip("/")
+    path = "/api/v1/telegram/webhook"
+    full_url = f"{base}{path}" if base else f"https://TU_TUNEL_A_PUERTO_{port}{path}"
+    pm2n = (draft.gateway_pm2_name or "").strip() or "este gateway"
+    payload = {
+        "url": full_url,
+        "secret_token": "<TELEGRAM_WEBHOOK_SECRET>",
+        "allowed_updates": ["message", "edited_message"],
+    }
+    curl_body = json.dumps(payload)
+    curl_block = (
+        'curl -sS -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \\\n'
+        '  -H "Content-Type: application/json" \\\n'
+        f"  -d '{curl_body}'"
+    )
+    lines = [
+        "[bold cyan]Telegram — webhook entrante[/]",
+        "",
+        "[green]El wizard intentará registrar setWebhook[/] contra la Bot API cuando hay token y URL HTTPS; "
+        "si falla la red o la API, usa el curl de abajo.",
+        "",
+        f"Cada [bold]bot[/] (token) necesita su propio [bold]setWebhook[/] apuntando al proceso que escucha su puerto.",
+        f"Este wizard configuró [bold]{pm2n}[/] en el puerto [bold]{port}[/] (revisa config/api_gateways_pm2.json si tienes varios).",
+        f"URL completa del webhook: [bold]{full_url}[/]",
+        "",
+        "Si usas [bold]TELEGRAM_WEBHOOK_SECRET[/] en .env, reemplaza el marcador en [bold]secret_token[/] por el mismo valor.",
+        "",
+        "[dim]# Sustituye BOT_TOKEN y el marcador del secret_token[/]",
+        curl_block,
+        "",
+        "[dim]Comprobar:[/] curl -sS \"https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo\"",
+        "",
+        "Revisa [bold]last_error_message[/]: si Telegram no puede conectar al HTTPS del webhook, ahí suele aparecer el motivo.",
+        "Si tienes [bold]TELEGRAM_WEBHOOK_SECRET[/] en .env, [bold]secret_token[/] en setWebhook debe ser idéntico; si no, el gateway responde 403 y en logs verás el aviso correspondiente.",
+        "",
+        "Si [bold]url[/] sale vacía o [bold]pending_update_count[/] crece, Telegram no está llegando al gateway correcto.",
+        "",
+    ]
+    ts_funnel_hint = draft.tailscale_funnel_bg_via_wizard or (
+        base.lower().endswith(".ts.net") if base else False
+    )
+    if ts_funnel_hint:
+        lines.append(
+            "[dim]Funnel/Tailscale: revisa [bold]tailscale funnel status[/]. "
+            "Con [bold]--bg[/] suele sobrevivir reinicios del servicio. "
+            "https://tailscale.com/kb/1223/funnel/[/]"
+        )
+    cfpm = (draft.cloudflared_pm2_process_name or "").strip()
+    if cfpm:
+        lines.append(
+            f"[dim]Cloudflare Quick Tunnel (PM2): [bold]{cfpm}[/]. [bold]pm2 list[/] · [bold]pm2 save[/].[/]"
+        )
+    return "\n".join(lines)
+
+
 def save_wizard_config_json(draft: SovereignDraft) -> None:
     path = _wizard_config_path()
     prev: dict = {}
@@ -209,6 +271,9 @@ def save_wizard_config_json(draft: SovereignDraft) -> None:
             "llm_base_url": draft.llm_base_url,
             "db_path": draft.duckdb_vault_path,
             "gateway_pm2_name": draft.gateway_pm2_name,
+            "telegram_webhook_public_base_url": (draft.telegram_webhook_public_base_url or "").strip(),
+            "cloudflared_pm2_process_name": (draft.cloudflared_pm2_process_name or "").strip(),
+            "tailscale_funnel_bg_via_wizard": draft.tailscale_funnel_bg_via_wizard,
         }
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -286,6 +351,8 @@ def materialize(
 
     patch_api_gateways_pm2_for_draft(repo_root, draft, console_print)
 
+    console_print(telegram_webhook_post_deploy_message(draft))
+
     if draft.orchestration == "docker" and draft.generate_docker_compose:
         try:
             p = write_compose_override(repo_root)
@@ -293,6 +360,7 @@ def materialize(
         except Exception as e:
             console_print(f"docker-compose: {e}")
 
+    exit_code = 0
     if draft.orchestration == "pm2" and deploy_pm2:
         try:
             from duckops.manager import serve  # noqa: PLC0415
@@ -308,7 +376,7 @@ def materialize(
                                 _k.strip(),
                                 _v.strip().strip("'\"").strip(),
                             )
-            return serve(
+            exit_code = serve(
                 host="0.0.0.0",
                 port=int(draft.gateway_port),
                 pm2=True,
@@ -317,10 +385,12 @@ def materialize(
                 cwd=str(repo_root),
             )
         except Exception as e:
-            console_print(f"PM2: {e}. Ejecuta: duckops serve --pm2 --gateway --port {draft.gateway_port}")
-            return 0
+            console_print(
+                f"PM2: {e}. Ejecuta: duckops serve --pm2 --gateway --port {draft.gateway_port}"
+            )
 
-    return 0
+    register_telegram_webhook_after_deploy(repo_root, draft, console_print)
+    return exit_code
 
 
 def save_draft_json(draft: SovereignDraft) -> Path:

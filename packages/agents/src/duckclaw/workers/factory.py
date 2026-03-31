@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.error import URLError
 from urllib import request as _urllib_request
@@ -393,6 +394,13 @@ def _sandbox_heartbeat_allowed(spec: WorkerSpec) -> bool:
     )
 
 
+def _heartbeat_elapsed_sec(state: dict) -> float | None:
+    t0 = state.get("subagent_turn_started_monotonic")
+    if not isinstance(t0, (int, float)):
+        return None
+    return max(0.0, time.monotonic() - float(t0))
+
+
 def _send_sandbox_heartbeat_telegram(state: dict) -> None:
     from duckclaw.graphs.chat_heartbeat import format_tool_heartbeat, normalize_telegram_chat_id_for_outbound
 
@@ -408,6 +416,7 @@ def _send_sandbox_heartbeat_telegram(state: dict) -> None:
         "📊 Estoy procesando los datos y generando tus gráficos. "
         "Esto puede tomar unos segundos...",
         plan_title=_pt,
+        elapsed_sec=_heartbeat_elapsed_sec(state),
     )
     token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
     if token:
@@ -1124,6 +1133,7 @@ def build_worker_graph(
             _htid = (state.get("tenant_id") or "default").strip() or "default"
             _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
             _huid = str(state.get("user_id") or "").strip() or _hcid
+            _elapsed = _heartbeat_elapsed_sec(state)
             schedule_chat_heartbeat_dm(
                 _htid,
                 _hcid,
@@ -1132,6 +1142,7 @@ def build_worker_graph(
                     _hb_head,
                     heartbeat_message_for_tool(tool_name),
                     plan_title=_hb_plan,
+                    elapsed_sec=_elapsed,
                 ),
                 log_worker_id=_hb_head,
                 log_username=_hb_uname,
@@ -1271,6 +1282,7 @@ def build_worker_graph(
             _head = (state.get("subagent_instance_label") or "").strip() or None
             _un = (state.get("username") or "").strip() or None
             _pt = (state.get("heartbeat_plan_title") or "").strip() or None
+            _elapsed = _heartbeat_elapsed_sec(state)
             schedule_chat_heartbeat_dm(
                 _tid,
                 _cid,
@@ -1279,6 +1291,7 @@ def build_worker_graph(
                     _head,
                     "✅ Terminé los pasos con herramientas; te resumo el resultado en el siguiente mensaje.",
                     plan_title=_pt,
+                    elapsed_sec=_elapsed,
                 ),
                 log_worker_id=_head,
                 log_username=_un,

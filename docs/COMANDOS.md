@@ -213,7 +213,7 @@ Inicializa `.env`, rutas de DuckDB, PM2/systemd según el flujo del proyecto:
 uv run duckops init
 ```
 
-**Sovereign Wizard v2.0** (TUI con `prompt_toolkit`, borrador en memoria y escritura solo tras confirmar en *Review*; atajos Ctrl+Z/Esc, Ctrl+S, Ctrl+R, Tab). Spec: [specs/features/DuckClaw Sovereign Wizard (v2.0).md](specs/features/DuckClaw%20Sovereign%20Wizard%20(v2.0).md).
+**Sovereign Wizard v2.0** (TUI con `prompt_toolkit`, borrador en memoria y escritura solo tras confirmar en *Review*; atajos Ctrl+Z/Esc, Ctrl+S, Ctrl+R, Tab). Tras **CONFIRMAR**, imprime instrucciones y un `curl` de **`setWebhook`** (Telegram no registra el webhook solo; cada bot/puerto/gateway necesita su URL HTTPS pública). En el paso Conectividad puedes opcionalmente pegar la base HTTPS del túnel que enruta a ese gateway. Spec: [specs/features/DuckClaw Sovereign Wizard (v2.0).md](specs/features/DuckClaw%20Sovereign%20Wizard%20(v2.0).md).
 
 ```bash
 uv run duckops sovereign

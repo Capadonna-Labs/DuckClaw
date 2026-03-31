@@ -683,6 +683,7 @@ def build_manager_graph(
                 "shared_db_path": shared_db_path,
                 "subagent_instance_label": agent_instance_label,
                 "heartbeat_plan_title": (plan_title or "").strip(),
+                "subagent_turn_started_monotonic": time.monotonic(),
             }
             trace_cfg = get_tracing_config(
                 tenant_id,

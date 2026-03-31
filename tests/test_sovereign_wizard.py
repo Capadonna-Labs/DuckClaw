@@ -13,9 +13,146 @@ from duckops.sovereign.materialize import (
     merge_env_file,
     patch_api_gateways_pm2_for_draft,
     shared_attach_relpath,
+    telegram_webhook_post_deploy_message,
 )
+from duckops.sovereign.domain_labels import tailscale_funnel_wizard_panel_content
 from duckops.sovereign.state_machine import WizardStep, next_step, prev_step
+from duckops.sovereign.tailscale_funnel import public_base_url_from_funnel_status
+from duckops.sovereign.telegram_set_webhook import (
+    build_set_webhook_body,
+    webhook_full_url_for_draft,
+)
 from duckops.sovereign.validate import private_db_dir_writable, suggest_gateway_port
+
+
+def test_tailscale_funnel_panel_mentions_port_and_docs() -> None:
+    text = tailscale_funnel_wizard_panel_content(8000)
+    assert "tailscale funnel --bg --yes 8000" in text
+    assert "tailscale.com/kb/1223/funnel" in text
+
+
+def test_telegram_webhook_post_deploy_message_uses_public_base() -> None:
+    d = SovereignDraft(
+        gateway_port=8000,
+        gateway_pm2_name="Finanz-Gateway",
+        telegram_webhook_public_base_url="https://finanz.example.test",
+    )
+    msg = telegram_webhook_post_deploy_message(d)
+    assert "https://finanz.example.test/api/v1/telegram/webhook" in msg
+    assert "Finanz-Gateway" in msg
+    assert "8000" in msg
+
+
+def test_telegram_webhook_post_deploy_mentions_cloudflared_pm2_name() -> None:
+    d = SovereignDraft(
+        gateway_port=8282,
+        gateway_pm2_name="G",
+        telegram_webhook_public_base_url="https://abc.trycloudflare.com",
+        cloudflared_pm2_process_name="G-cloudflared",
+    )
+    msg = telegram_webhook_post_deploy_message(d)
+    assert "G-cloudflared" in msg
+    assert "pm2 list" in msg.lower()
+
+
+def test_telegram_webhook_post_deploy_funnel_hint_for_ts_net() -> None:
+    d = SovereignDraft(
+        gateway_port=8282,
+        telegram_webhook_public_base_url="https://machine.example.ts.net",
+    )
+    msg = telegram_webhook_post_deploy_message(d)
+    assert "tailscale funnel status" in msg
+
+
+def test_telegram_webhook_post_deploy_funnel_hint_via_wizard_flag() -> None:
+    d = SovereignDraft(gateway_port=8282, tailscale_funnel_bg_via_wizard=True)
+    msg = telegram_webhook_post_deploy_message(d)
+    assert "Funnel/Tailscale" in msg
+
+
+def test_public_base_url_from_funnel_status_requires_proxy_port() -> None:
+    data = {
+        "Web": {
+            "machine.example.ts.net:443": {
+                "Handlers": {"/": {"Proxy": "http://127.0.0.1:8282"}},
+            }
+        },
+        "AllowFunnel": {"machine.example.ts.net:443": True},
+    }
+    assert (
+        public_base_url_from_funnel_status(data, expected_local_port=8282)
+        == "https://machine.example.ts.net"
+    )
+    assert public_base_url_from_funnel_status(data, expected_local_port=9999) is None
+
+
+def test_webhook_full_url_for_draft() -> None:
+    d = SovereignDraft(telegram_webhook_public_base_url="https://node.example.ts.net")
+    assert (
+        webhook_full_url_for_draft(d)
+        == "https://node.example.ts.net/api/v1/telegram/webhook"
+    )
+
+
+def test_webhook_full_url_skips_placeholder() -> None:
+    d = SovereignDraft(
+        telegram_webhook_public_base_url="https://TU_TUNEL_A_PUERTO_8282/api/v1/telegram/webhook"
+    )
+    assert webhook_full_url_for_draft(d) is None
+
+
+def test_build_set_webhook_body_includes_secret_when_set(tmp_path: Path) -> None:
+    d = SovereignDraft(
+        telegram_webhook_public_base_url="https://h.example",
+        telegram_webhook_secret="s3cr3t",
+    )
+    body = build_set_webhook_body(tmp_path, d)
+    assert body is not None
+    assert body["secret_token"] == "s3cr3t"
+    assert body["url"] == "https://h.example/api/v1/telegram/webhook"
+    assert body["allowed_updates"] == ["message", "edited_message"]
+
+
+def test_build_set_webhook_body_omits_secret_when_empty(tmp_path: Path) -> None:
+    d = SovereignDraft(telegram_webhook_public_base_url="https://h.example")
+    body = build_set_webhook_body(tmp_path, d)
+    assert body is not None
+    assert "secret_token" not in body
+
+
+def test_build_set_webhook_body_reads_secret_from_env_when_draft_empty(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(
+        "TELEGRAM_WEBHOOK_SECRET=fromenv\n", encoding="utf-8"
+    )
+    d = SovereignDraft(telegram_webhook_public_base_url="https://h.example")
+    body = build_set_webhook_body(tmp_path, d)
+    assert body is not None
+    assert body["secret_token"] == "fromenv"
+
+
+def test_build_set_webhook_draft_secret_overrides_env(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(
+        "TELEGRAM_WEBHOOK_SECRET=fromenv\n", encoding="utf-8"
+    )
+    d = SovereignDraft(
+        telegram_webhook_public_base_url="https://h.example",
+        telegram_webhook_secret="fromdraft",
+    )
+    body = build_set_webhook_body(tmp_path, d)
+    assert body is not None
+    assert body["secret_token"] == "fromdraft"
+
+
+def test_public_base_url_from_funnel_status_requires_allow() -> None:
+    data = {
+        "Web": {
+            "machine.example.ts.net:443": {
+                "Handlers": {"/": {"Proxy": "http://127.0.0.1:8282"}},
+            }
+        },
+        "AllowFunnel": {},
+    }
+    assert public_base_url_from_funnel_status(data, expected_local_port=8282) is None
 
 
 def test_state_machine_navigation() -> None:

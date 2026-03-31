@@ -8,8 +8,8 @@ STEP_ORDER: tuple[WizardStep, ...] = (
     WizardStep.SOVEREIGNTY_AUDIT,
     WizardStep.CORE_SERVICES,
     WizardStep.IDENTITY_SETUP,
-    WizardStep.CONNECTIVITY,
     WizardStep.ORCHESTRATION,
+    WizardStep.CONNECTIVITY,
     WizardStep.REVIEW_DEPLOY,
 )
 

@@ -19,8 +19,10 @@ def test_load_security_policy_finanz_file_is_valid() -> None:
     worker_dir = repo_root / "packages" / "agents" / "src" / "duckclaw" / "forge" / "templates" / "finanz"
     policy = load_security_policy("finanz", worker_dir=worker_dir)
     assert isinstance(policy, SecurityPolicy)
-    assert policy.network.default == "deny"
-    assert policy.max_execution_time_seconds == 45
+    assert policy.network.default == "allow"
+    assert policy.max_execution_time_seconds == 120
+    hosts = {h.lower() for h in policy.network.allow_list}
+    assert "mql5.com" in hosts or "www.mql5.com" in hosts
 
 
 def test_job_hunter_security_policy_browser_ttl() -> None:
@@ -33,9 +35,9 @@ def test_job_hunter_security_policy_browser_ttl() -> None:
         / "duckclaw"
         / "forge"
         / "templates"
-        / "job_hunter"
+        / "Job-Hunter"
     )
-    policy = load_security_policy("job_hunter", worker_dir=worker_dir)
+    policy = load_security_policy("Job-Hunter", worker_dir=worker_dir)
     assert policy.network.default == "allow"
     assert policy.max_execution_time_seconds == 300
 
@@ -43,9 +45,12 @@ def test_job_hunter_security_policy_browser_ttl() -> None:
 def test_worker_manifest_browser_sandbox_flag() -> None:
     from duckclaw.workers.manifest import load_manifest
 
-    spec = load_manifest("job_hunter")
+    spec = load_manifest("Job-Hunter")
     assert spec.browser_sandbox is True
     assert spec.research_config is not None
+
+    finanz = load_manifest("finanz")
+    assert finanz.browser_sandbox is True
 
 
 def test_security_violation_detection_for_ro_and_network_errors() -> None:

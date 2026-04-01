@@ -8,6 +8,13 @@ homeostasis:
     - key: "tasa_ahorro_objetivo"
       target: 0.20
       threshold: 0.05
+    # Lake Capadonna (0/1 en observed al arrancar el worker; ver specs Capadonna Lake OHLC SSH + IBKR Live.md)
+    - key: "lake_host_configured"
+      target: 1.0
+      threshold: 0.0
+    - key: "lake_status_online"
+      target: 1.0
+      threshold: 0.0
   actions:
     - trigger: "presupuesto_mensual_breach"
       skill: "get_monthly_summary"

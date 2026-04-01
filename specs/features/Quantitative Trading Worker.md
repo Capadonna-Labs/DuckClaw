@@ -6,6 +6,8 @@ Desplegar un Agente Soberano de Trading Cuantitativo capaz de ingerir series tem
 **Contexto**
 El agente operará sobre el esquema `quant_core` en DuckDB. Utilizará un servidor MCP para conectarse a brokers (ej. Interactive Brokers / Alpaca) para extraer datos OHLCV (Open, High, Low, Close, Volume). Todo el cálculo matemático pesado (Pandas, NumPy, TA-Lib) se delega al Strix Sandbox para proteger el Event Loop de LangGraph y el KV Cache del Mac mini. Las órdenes de compra/venta se emiten como `StateDelta` hacia el Singleton Writer.
 
+**Implementación en el monorepo:** La primera entrega integra `quant_core` y las skills (`fetch_market_data`, `propose_trade`, `execute_order`, validación de precios, `/execute_signal`) en el **template Finanz** ([packages/agents/src/duckclaw/forge/templates/finanz](packages/agents/src/duckclaw/forge/templates/finanz)), misma bóveda `.duckdb` que finanzas personales. La ingesta OHLCV usa HTTP (`IBKR_MARKET_DATA_URL`) alineado con el bridge existente de portafolio; MCP puede sustituir o complementar ese endpoint en una fase posterior.
+
 **Esquema de Datos (`quant_core.duckdb`)**
 ```sql
 CREATE SCHEMA quant_core;

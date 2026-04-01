@@ -7,6 +7,11 @@ from typing import Any, Optional
 
 import os
 
+# Claves de skills compuestas en manifest (no usar `name` + estas a la vez en el mismo dict).
+_SKILL_DICT_RESERVED_KEYS = frozenset(
+    {"github", "reddit", "google_trends", "research", "tailscale", "sft", "ibkr", "quant"}
+)
+
 
 def _find_templates_root() -> Path:
     """Project root: packages/agents/templates/workers/."""
@@ -73,9 +78,18 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
     skills_list = data.get("skills") or []
     if isinstance(skills_list, str):
         skills_list = [s.strip() for s in skills_list.split(",") if s.strip()]
-    # skills: strings (nombres) o dicts (ej. {github: {...}}, {research: {...}}, {tailscale: {...}}, {sft: {...}}, {ibkr: {...}})
+    # skills: strings (nombres) o dicts (ej. {github: {...}}, {reddit: {...}}, {research: {...}}, ...)
     skills_names = [s for s in skills_list if isinstance(s, str)]
+    for s in skills_list:
+        if isinstance(s, dict) and not (set(s.keys()) & _SKILL_DICT_RESERVED_KEYS):
+            raw_nm = s.get("name")
+            if isinstance(raw_nm, str):
+                nm = raw_nm.strip()
+                if nm and nm not in skills_names:
+                    skills_names.append(nm)
     github_config = None
+    reddit_config = None
+    google_trends_config = None
     research_config = None
     tailscale_config = None
     sft_config = None
@@ -84,6 +98,10 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         if isinstance(s, dict):
             if "github" in s and github_config is None:
                 github_config = s["github"] if isinstance(s.get("github"), dict) else {}
+            if "reddit" in s and reddit_config is None:
+                reddit_config = s["reddit"] if isinstance(s.get("reddit"), dict) else {}
+            if "google_trends" in s and google_trends_config is None:
+                google_trends_config = s["google_trends"] if isinstance(s.get("google_trends"), dict) else {}
             if "research" in s and research_config is None:
                 research_config = s["research"] if isinstance(s.get("research"), dict) else {}
             if "tailscale" in s and tailscale_config is None:
@@ -94,6 +112,10 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
                 ibkr_config = s["ibkr"] if isinstance(s.get("ibkr"), dict) else {}
     if github_config is None and isinstance(data.get("github"), dict):
         github_config = data["github"]
+    if reddit_config is None and isinstance(data.get("reddit"), dict):
+        reddit_config = data["reddit"]
+    if google_trends_config is None and isinstance(data.get("google_trends"), dict):
+        google_trends_config = data["google_trends"]
     if research_config is None and isinstance(data.get("research"), dict):
         research_config = data["research"]
     if tailscale_config is None and isinstance(data.get("tailscale"), dict):
@@ -102,6 +124,15 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         sft_config = data["sft"]
     if ibkr_config is None and isinstance(data.get("ibkr"), dict):
         ibkr_config = data["ibkr"]
+    quant_config = None
+    for s in skills_list:
+        if isinstance(s, dict) and "quant" in s and quant_config is None:
+            quant_config = s["quant"] if isinstance(s.get("quant"), dict) else {}
+    if quant_config is None and isinstance(data.get("quant"), dict):
+        quant_config = data["quant"]
+    risk_level = str(data.get("risk_level") or "conservative").strip().lower()
+    if risk_level not in ("aggressive", "conservative"):
+        risk_level = "conservative"
     inference_config = None
     if isinstance(data.get("inference"), dict):
         inference_config = data["inference"]
@@ -174,10 +205,14 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         read_only=read_only,
         worker_dir=worker_dir,
         github_config=github_config,
+        reddit_config=reddit_config,
+        google_trends_config=google_trends_config,
         research_config=research_config,
         tailscale_config=tailscale_config,
         sft_config=sft_config,
         ibkr_config=ibkr_config,
+        quant_config=quant_config,
+        risk_level=risk_level,
         inference_config=inference_config,
         homeostasis_config=homeostasis_config,
         context_guard_config=context_guard_config,
@@ -243,8 +278,8 @@ class WorkerSpec:
     __slots__ = (
         "worker_id", "logical_worker_id", "name", "schema_name", "llm_required", "temperature",
         "topology", "skills_list", "allowed_tables", "read_only", "worker_dir",
-        "github_config", "research_config", "tailscale_config", "sft_config",
-        "ibkr_config", "inference_config", "homeostasis_config", "context_guard_config", "crm_config",
+        "github_config", "reddit_config", "google_trends_config", "research_config", "tailscale_config", "sft_config",
+        "ibkr_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config", "crm_config",
         "forge_shared_db_path_env", "forge_apply_schema_to_shared",
         "context_pruning_config",
         "duckdb_extensions",
@@ -267,10 +302,14 @@ class WorkerSpec:
         read_only: bool,
         worker_dir: Path,
         github_config: Optional[dict] = None,
+        reddit_config: Optional[dict] = None,
+        google_trends_config: Optional[dict] = None,
         research_config: Optional[dict] = None,
         tailscale_config: Optional[dict] = None,
         sft_config: Optional[dict] = None,
         ibkr_config: Optional[dict] = None,
+        quant_config: Optional[dict] = None,
+        risk_level: str = "conservative",
         inference_config: Optional[dict] = None,
         homeostasis_config: Optional[dict] = None,
         context_guard_config: Optional[dict] = None,
@@ -295,10 +334,14 @@ class WorkerSpec:
         self.read_only = read_only
         self.worker_dir = worker_dir
         self.github_config = github_config
+        self.reddit_config = reddit_config
+        self.google_trends_config = google_trends_config
         self.research_config = research_config
         self.tailscale_config = tailscale_config
         self.sft_config = sft_config
         self.ibkr_config = ibkr_config
+        self.quant_config = quant_config
+        self.risk_level = risk_level if risk_level in ("aggressive", "conservative") else "conservative"
         self.inference_config = inference_config
         self.homeostasis_config = homeostasis_config
         self.context_guard_config = context_guard_config

@@ -11,12 +11,14 @@ FROM python:3.11-slim
 RUN pip install --no-cache-dir \
         pandas==2.2.3 \
         matplotlib==3.9.4 \
+        mplfinance==0.12.10b0 \
         seaborn==0.13.2 \
         duckdb==1.2.0 \
         scipy==1.14.1 \
         scikit-learn==1.6.1 \
         pyarrow==19.0.1 \
         requests==2.32.3 \
+        vaderSentiment==3.3.2 \
     && rm -rf /root/.cache/pip
 
 # Estructura de directorios del workspace

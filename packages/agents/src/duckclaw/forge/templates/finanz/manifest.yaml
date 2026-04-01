@@ -5,12 +5,26 @@ id: finanz
 schema_name: finance_worker
 topology: general
 read_only: false
+risk_level: conservative
+# IBKR + ingesta OHLCV / quant (spec: Quantitative Trading Worker, integrado en Finanz)
+quant:
+  enabled: true
+  cfd: true  # Cyber-Fluid Dynamics: tool record_fluid_state + tabla quant_core.fluid_state
+  # OHLC histórico vía SSH al lake Capadonna (solo .env; spec: Capadonna Lake OHLC SSH + IBKR Live.md)
+  lake_ssh: {}
+network_access: true
+# Playwright en Strix browser (mql5.com, lectura de código MQL); requiere Docker + imagen STRIX_BROWSER_IMAGE
+browser_sandbox: true
 allowed_tables:
   - transactions
   - categories
   - cuentas
   - deudas
   - presupuestos
+  - quant_core.ohlcv_data
+  - quant_core.trade_signals
+  - quant_core.portfolio_positions
+  - quant_core.fluid_state
 llm:
   required: true
   temperature: 0.2
@@ -23,5 +37,33 @@ skills:
   - get_presupuesto_vs_real
   - categorize_expense
   - ibkr: {}  # Activa get_ibkr_portfolio (credenciales vía IBKR_PORTFOLIO_API_URL e IBKR_PORTFOLIO_API_KEY)
+  # Tavily: noticias, blogs, contexto de mercado en internet (TAVILY_API_KEY + tavily-python en el gateway)
+  - tavily_search
+  - research:
+      tavily_enabled: true
+      audit_langsmith: true
+      search_depth: advanced
+      include_answer: true
+      max_results: 12
+      include_raw_content: false
+  # Reddit MCP (npm mcp-reddit): búsqueda / posts / comentarios; ver REDDIT_* en .env y docs/COMANDOS.md
+  - reddit:
+      read_only: true
+      npm_package: mcp-reddit
+  # Google Trends MCP (PyPI google-trends-mcp / pytrends); uv sync --extra google-trends
+  - google_trends:
+      backend: pytrends
+      tool_allowlist:
+        - interest_over_time
+        - related_queries
   - send_proactive_message
   - get_current_time
+  - name: fetch_lake_ohlcv
+    type: ssh_remote
+    requires_env:
+      - CAPADONNA_SSH_HOST
+      - CAPADONNA_SSH_USER
+      - CAPADONNA_SSH_KEY_PATH
+      - CAPADONNA_REMOTE_OHLC_CMD
+    network_access: tailscale_only
+    fallback: CAPADONNA_OFFLINE_ERROR

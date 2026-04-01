@@ -461,6 +461,42 @@ def _send_sandbox_heartbeat_telegram(state: dict) -> None:
         _log.debug("sandbox heartbeat error: %s", exc)
 
 
+def _sync_finanz_lake_beliefs(db: Any, spec: WorkerSpec) -> None:
+    """Actualiza observed_value de creencias lake_* según env (Capadonna SSH)."""
+    _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
+    if _lid != "finanz":
+        return
+    _qcfg = getattr(spec, "quant_config", None)
+    if not isinstance(_qcfg, dict) or not _qcfg.get("enabled"):
+        return
+    try:
+        from duckclaw.forge.skills.quant_market_bridge import lake_belief_observed_values
+
+        host_v, online_v = lake_belief_observed_values()
+    except Exception:
+        _log.debug("lake_belief_observed_values failed", exc_info=True)
+        return
+    schema = "".join(c if c.isalnum() or c == "_" else "_" for c in (spec.schema_name or "").strip())
+    if not schema:
+        return
+    for key, val in (
+        ("lake_host_configured", host_v),
+        ("lake_status_online", online_v),
+    ):
+        try:
+            db.execute(
+                f"""
+                INSERT INTO {schema}.agent_beliefs (belief_key, target_value, observed_value, threshold)
+                VALUES ('{key}', 1.0, {val}, 0.0)
+                ON CONFLICT (belief_key) DO UPDATE SET
+                    observed_value = excluded.observed_value,
+                    last_updated = CURRENT_TIMESTAMP
+                """
+            )
+        except Exception:
+            _log.debug("sync lake belief %s skipped", key, exc_info=True)
+
+
 def _ensure_worker_duckdb_extensions(db: Any, spec: WorkerSpec) -> None:
     """INSTALL/LOAD extensiones declaradas en manifest (p. ej. httpfs + json para APIs remotas)."""
     exts = getattr(spec, "duckdb_extensions", None) or []
@@ -504,7 +540,8 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
         if "INFORMATION_SCHEMA" in q_upper or "SHOW TABLES" in q_upper or "SHOW " in q_upper:
             return None
         for t in spec.allowed_tables:
-            if t.upper() in q_upper or f"{schema}.{t}".upper() in q_upper:
+            t_str = str(t)
+            if t_str.upper() in q_upper or f"{schema}.{t_str}".upper() in q_upper:
                 return None
         # No allowed table mentioned; check if query likely touches tables.
         if any(k in q_upper for k in ("FROM", "INTO", "UPDATE", "DELETE", "JOIN", "TABLE")):
@@ -520,6 +557,8 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
             return query
         out = query
         for table in spec.allowed_tables:
+            if "." in str(table):
+                continue
             escaped = re.escape(table)
             # Replace only unqualified names (not already schema.table)
             out = re.sub(rf"(?<!\.)\b{escaped}\b", f"{schema_name}.{table}", out, flags=re.IGNORECASE)
@@ -676,6 +715,7 @@ def build_worker_graph(
     )
     run_schema(db, spec, apply_template_sql=not skip_primary_sql)
     _ensure_worker_duckdb_extensions(db, spec)
+    _sync_finanz_lake_beliefs(db, spec)
 
     system_prompt = load_system_prompt(spec)
     tools = _build_worker_tools(db, spec)
@@ -683,6 +723,20 @@ def build_worker_graph(
         try:
             from duckclaw.forge.skills.github_bridge import register_github_skill
             register_github_skill(tools, spec.github_config)
+        except Exception:
+            pass
+    if getattr(spec, "reddit_config", None):
+        try:
+            from duckclaw.forge.skills.reddit_bridge import register_reddit_skill
+
+            register_reddit_skill(tools, spec.reddit_config)
+        except Exception:
+            pass
+    if getattr(spec, "google_trends_config", None) is not None:
+        try:
+            from duckclaw.forge.skills.google_trends_bridge import register_google_trends_skill
+
+            register_google_trends_skill(tools, spec.google_trends_config)
         except Exception:
             pass
     tools_by_name = {t.name: t for t in tools}
@@ -757,6 +811,23 @@ def build_worker_graph(
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             pass
+
+    _qcfg = getattr(spec, "quant_config", None)
+    _lid_q = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
+    if isinstance(_qcfg, dict) and _qcfg.get("enabled") and _lid_q == "finanz":
+        try:
+            from duckclaw.forge.skills.quant_market_bridge import register_quant_market_skill
+            from duckclaw.forge.skills.quant_trade_bridge import register_quant_trade_skills
+
+            register_quant_market_skill(db, tools, spec)
+            register_quant_trade_skills(db, spec, tools)
+            if _qcfg.get("cfd"):
+                from duckclaw.forge.skills.quant_cfd_bridge import register_quant_cfd_skill
+
+                register_quant_cfd_skill(db, spec, tools)
+            tools_by_name = {t.name: t for t in tools}
+        except Exception:
+            _log.debug("quant skills registration skipped", exc_info=True)
 
     if getattr(spec, "sft_config", None):
         try:
@@ -1437,6 +1508,16 @@ def build_worker_graph(
                         _reason,
                     )
                     reply = job_hunter_blocked_reply_message(_reason)
+        except Exception:
+            pass
+        try:
+            from duckclaw.forge.atoms.quant_price_validator import quant_reply_price_audit
+
+            if reply:
+                new_r, qreason = quant_reply_price_audit(db, spec, reply)
+                if qreason:
+                    _log.warning("Finanz quant price audit: %s", qreason)
+                    reply = new_r
         except Exception:
             pass
         out = {**state, "reply": reply or "", "messages": msgs}

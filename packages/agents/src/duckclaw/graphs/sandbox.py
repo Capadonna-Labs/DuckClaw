@@ -31,7 +31,7 @@ _log = logging.getLogger(__name__)
 # Cabecera inyectada antes del código del usuario (Strix / run_sandbox).
 # Telegram sendPhoto rechaza PNG con transparencia o procesamiento raro (IMAGE_PROCESS_FAILED):
 # fondo blanco opaco + dpi moderado en savefig y rcParams por defecto.
-_SANDBOX_PYTHON_HEADER = """# Available: pandas, numpy, matplotlib, seaborn, scipy
+_SANDBOX_PYTHON_HEADER = """# Available: pandas, numpy, matplotlib, mplfinance, seaborn, scipy
 # Gráficos en /workspace/output/*.png — compatible con Telegram sendPhoto:
 #   plt.savefig('/workspace/output/mi_chart.png', dpi=100, facecolor='white', edgecolor='none', bbox_inches='tight')
 try:
@@ -58,6 +58,9 @@ except Exception:
 _DEFAULT_IMAGE = "duckclaw/sandbox:latest"
 # Imagen browser (OSINT JobHunter / Strix Browser Sandbox); STRIX_BROWSER_IMAGE
 _DEFAULT_BROWSER_IMAGE = "duckclaw/browser-env:latest"
+# Límites de texto devuelto al LLM en run_browser_sandbox (evitar reventar contexto; MQL5 puede ser largo).
+_BROWSER_SANDBOX_STDOUT_TAIL = 4000
+_BROWSER_SANDBOX_STDERR_TAIL = 1500
 _FALLBACK_IMAGE = "python:3.11-slim"
 _SANDBOX_MEMORY = "512m"
 _SANDBOX_TIMEOUT = 30          # segundos de timeout por ejecución
@@ -817,8 +820,8 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "status": st if result.exit_code == 0 else "error",
             "jobs_extracted": jobs_n,
             "file": parquet_name,
-            "stdout_tail": (result.stdout or "")[-2000:],
-            "stderr_tail": (result.stderr or "")[-1500:],
+            "stdout_tail": (result.stdout or "")[-_BROWSER_SANDBOX_STDOUT_TAIL:],
+            "stderr_tail": (result.stderr or "")[-_BROWSER_SANDBOX_STDERR_TAIL:],
         }
         if result.artifacts:
             out["artifacts"] = result.artifacts
@@ -841,7 +844,20 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
                 )
             else:
                 out["hint"] = err_snip
-        compact_keys = ("exit_code", "status", "jobs_extracted", "file", "artifacts", "warning", "auto_corrected_attempts", "hint")
+        compact_keys = (
+            "exit_code",
+            "status",
+            "jobs_extracted",
+            "file",
+            "stdout_tail",
+            "stderr_tail",
+            "artifacts",
+            "warning",
+            "auto_corrected_attempts",
+            "hint",
+            "missing_pip_packages",
+        )
+        # compact_keys incluye stdout_tail/stderr_tail para el contrato con el LLM (MQL5, diagnósticos).
         return json.dumps({k: out[k] for k in compact_keys if k in out}, ensure_ascii=False)
 
     return StructuredTool.from_function(
@@ -851,9 +867,18 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "Ejecuta código Python (o bash) en el Strix **browser** sandbox: Chromium vía **Playwright** "
             "(import: playwright.async_api), Xvfb y red según security_policy.yaml del worker. "
             "No uses el paquete Python `browser_use` en código generado (API inestable). "
-            "OSINT JobHunter: **solo** resúmenes en stdout y filas en `/workspace/output/osint_jobs.parquet` "
-            "(no devolver HTML ni JSON masivo al contexto). "
-            "Tras éxito, usa `read_sql` con `read_parquet` en la ruta absoluta del host listada en `artifacts`. "
+            "**Estándar de sigilo (recomendado en scripts generados):** "
+            "chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled']); "
+            "browser.new_context con user_agent realista (no el default de Playwright), viewport ~1920x1080, "
+            "extra_http_headers con Accept-Language (es-ES,en-US,…); si la URL es mql5.com, Referer https://www.mql5.com/ ; "
+            "page.add_init_script para ocultar navigator.webdriver; "
+            "Navegación: en **mql5.com** sigue la plantilla `finanz/snippets/mql5_playwright_stealth.py`: "
+            "wait_until='networkidle', luego wait_for_timeout(5000) para hidratación SPA, y código vía "
+            "`pre, code, .b-code-block, textarea.mql4`. En otros sitios (p. ej. muchos trackers) suele ir mejor "
+            "domcontentloaded + wait_for_selector acotado. "
+            "**Contrato de salida:** imprime JSON o texto útil a stdout; la tool devuelve stdout_tail/stderr_tail para el agente. "
+            "OSINT JobHunter: resúmenes en stdout y/o `/workspace/output/osint_jobs.parquet` (no volcar HTML masivo). "
+            "Tras Parquet, `read_sql` con read_parquet y rutas en `artifacts`. "
             "Parámetros: code, language ('python'|'bash'), data_sql opcional, session_id, worker_id."
         ),
     )

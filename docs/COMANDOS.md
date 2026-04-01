@@ -209,6 +209,40 @@ uv run python scripts/smoke_telegram_mcp_stdio.py TU_CHAT_ID
 
 Deberías ver `tools MCP: [...]` y un JSON con `ok: true` y `message_id` si Telegram aceptó el mensaje. Los logs del proceso hijo van por stderr (`duckclaw.telegram_mcp`).
 
+### Reddit MCP (Finanz / sentimiento social)
+
+El worker **Finanz** puede cargar herramientas Reddit vía **stdio** (`npx --quiet -y mcp-reddit`) cuando el manifest incluye un bloque `reddit:` (ver template [packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml](packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml)).
+
+**Requisitos:** Node.js y `npx` en el `PATH` del proceso del API Gateway (igual que GitHub MCP). Variables en el entorno del gateway (no commitear secretos):
+
+```env
+REDDIT_CLIENT_ID=...
+REDDIT_CLIENT_SECRET=...
+REDDIT_USER_AGENT=app:version (by /u/tu_usuario)
+REDDIT_USERNAME=...
+REDDIT_PASSWORD=...
+```
+
+Crea la app en [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) (tipo script). Spec: [specs/features/Reddit MCP Social Sentiment (QuantClaw).md](specs/features/Reddit%20MCP%20Social%20Sentiment%20(QuantClaw).md).
+
+Tras cambiar `.env`, reinicia el gateway (PM2). Por defecto `read_only: true` solo registra búsqueda y lectura de posts/comentarios.
+
+### Google Trends MCP (Finanz / interés macro)
+
+Instala el paquete del servidor (pytrends, sin API key obligatoria):
+
+```bash
+uv sync --extra google-trends
+```
+
+El proceso hijo usa el ejecutable **`google-trends-mcp`** del mismo entorno que el gateway (o `uvx google-trends-mcp` si no está en el venv). Bloque en manifest: `google_trends:` — ver [packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml](packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml).
+
+Opcionalmente puedes fijar `command` y `args` en YAML para otro lanzador. Limitaciones: acceso no oficial a Google Trends; posibles bloqueos o errores intermitentes. Spec: [specs/features/Google Trends MCP (Macro Interest Finanz).md](specs/features/Google%20Trends%20MCP%20(Macro%20Interest%20Finanz).md).
+
+### Cyber-Fluid Dynamics (Finanz / quant)
+
+Con `quant.cfd: true` en el manifest del template Finanz se registra la herramienta `record_fluid_state` y la tabla `quant_core.fluid_state` (OHLCV + métricas heurísticas y fase SOLID|LIQUID|GAS|PLASMA). Ver spec [specs/features/Cyber-Fluid Dynamics CFD (Finanz).md](specs/features/Cyber-Fluid%20Dynamics%20CFD%20(Finanz).md). Tras aplicar `schema.sql` nuevo, reinicia el gateway si hace falta recrear el grafo.
+
 ---
 
 ## 4. Wizard — aprovisionamiento interactivo
@@ -250,6 +284,43 @@ curl -s http://127.0.0.1:8000/health
 ```
 
 (Si usas `DUCKCLAW_TAILSCALE_AUTH_KEY`, añade la cabecera `X-Tailscale-Auth-Key` en las peticiones, salvo rutas públicas documentadas.)
+
+### 5.1 Finanz + análisis cuantitativo (IBKR / quant_core)
+
+Implementación acoplada al template [finanz](packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml) (spec: [Quantitative Trading Worker](specs/features/Quantitative%20Trading%20Worker.md); lake + SSH: [Capadonna Lake OHLC SSH + IBKR Live](specs/features/Capadonna%20Lake%20OHLC%20SSH%20+%20IBKR%20Live.md)).
+
+| Variable | Uso |
+|----------|-----|
+| `IBKR_PORTFOLIO_API_URL` / `IBKR_PORTFOLIO_API_KEY` | Resumen de portafolio (`get_ibkr_portfolio`), igual que antes. |
+| `IBKR_MARKET_DATA_URL` | GET con `ticker`, `timeframe`, `lookback_days` — JSON con barras OHLCV para `fetch_market_data` (intradía y fallback histórico cuando el timeframe **no** va al lake). Si el API de observabilidad no expone esa ruta (p. ej. HTTP 404), déjala **vacía** en `.env`: los timeframes lake (`1d`, `1w`, `1M`, `moc`, …) siguen funcionando por SSH. |
+| `IBKR_MARKET_DATA_API_KEY` | Opcional; Bearer si el endpoint de barras no reutiliza `IBKR_PORTFOLIO_API_KEY`. |
+| `IBKR_REALTIME_TIMEFRAMES` | CSV de timeframes que van siempre al gateway HTTP (default `1m,5m,15m,30m,1h`). Si un TF coincide con histórico lake, prevalece IBKR. |
+| `CAPADONNA_SSH_HOST` | IP/host Tailscale del VPS con el data lake (histórico). |
+| `CAPADONNA_SSH_USER` | Usuario SSH (default `capadonna`). |
+| `CAPADONNA_SSH_KEY_PATH` | Preferente; ruta local a clave privada (`-i`), p. ej. `~/.ssh/id_ed25519`. Si no se define, se usa `CAPADONNA_SSH_IDENTITY_FILE`. |
+| `CAPADONNA_SSH_IDENTITY_FILE` | Alias histórico; `-i` si `CAPADONNA_SSH_KEY_PATH` está vacío. |
+| `CAPADONNA_SSH_TIMEOUT` | Segundos (default `120`, máx. `600`). |
+| `CAPADONNA_REMOTE_OHLC_CMD` | Plantilla ejecutada **en el VPS por ssh** (usa rutas absolutas del servidor, p. ej. `/home/capadonna/...`, no `~` de tu Mac). Intérprete: venv del proyecto Capadonna-Driller (`…/.venv/bin/python`) con `duckdb` instalado. Script: `scripts/capadonna/export_lake_ohlcv.py`. Opcional `CAPADONNA_LAKE_DATA_ROOT`. |
+| `CAPADONNA_HISTORICAL_TIMEFRAMES` | CSV de timeframes que van al lake por SSH (default en código `1d,1w,1M,moc`). Incluye `moc` para `data/lake/moc/`. **Mes = `1M` mayúscula; minuto = `1m` minúscula** (el bridge no las mezcla). Requiere host + comando remoto. |
+
+Ejemplo de bloque (proceso del gateway; no commitear valores reales):
+
+```bash
+# Capadonna Lake (histórico SSH, típ. Tailscale)
+CAPADONNA_SSH_HOST=100.x.x.x
+CAPADONNA_SSH_USER=capadonna
+CAPADONNA_SSH_KEY_PATH=~/.ssh/id_ed25519
+# En el VPS: /home/capadonna/projects/Capadonna-Driller/.venv/bin/pip install duckdb
+CAPADONNA_REMOTE_OHLC_CMD=/home/capadonna/projects/Capadonna-Driller/.venv/bin/python /home/capadonna/projects/Capadonna-Driller/scripts/export_lake_ohlcv.py {ticker} {timeframe} {lookback_days}
+CAPADONNA_HISTORICAL_TIMEFRAMES=1d,1w,1M,moc
+```
+
+Fly: `/lake` o `/lake status` comprueba env y hace `ssh … true` corto si la config es válida. `/sensors` resume DuckDB, IBKR (portafolio + mercado), Lake, Tavily, Reddit, Google Trends y **browser sandbox** (manifest finanz, Docker, imagen Playwright, red en `security_policy`) en el proceso del gateway.
+| `IBKR_ACCOUNT_MODE` | Debe ser `paper` para permitir `execute_order`. |
+| `IBKR_EXECUTE_ORDER_URL` | POST JSON `{"signal_id","paper":true}` (opcional; sin URL la orden no se envía al broker tras HITL). |
+| `REDIS_URL` / `DUCKCLAW_REDIS_URL` | Recomendado para persistir grants de `/execute_signal` entre procesos; si falta, memoria en proceso (solo mismo worker). |
+
+Telegram (human-in-the-loop): el usuario confirma con `/execute_signal <uuid>` el `signal_id` devuelto por `propose_trade` antes de que el asistente llame `execute_order`.
 
 ---
 

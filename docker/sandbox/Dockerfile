@@ -6,6 +6,9 @@
 
 FROM python:3.11-slim
 
+# Instalar uv como gestor de paquetes.
+RUN pip install --no-cache-dir uv
+
 # Dependencias analíticas requeridas por la spec (pandas, matplotlib, duckdb)
 # + scipy, sklearn para análisis avanzado
 RUN pip install --no-cache-dir \
@@ -20,6 +23,10 @@ RUN pip install --no-cache-dir \
         requests==2.32.3 \
         vaderSentiment==3.3.2 \
     && rm -rf /root/.cache/pip
+
+# Dependencias browser/LLM para automatización en sandbox (según requerimiento).
+RUN uv pip install --system browser-use langchain-openai playwright \
+    && python -m playwright install --with-deps chromium
 
 # Estructura de directorios del workspace
 RUN mkdir -p /workspace/data /workspace/output

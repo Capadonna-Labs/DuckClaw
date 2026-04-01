@@ -13,6 +13,9 @@ quant:
   # OHLC histórico vía SSH al lake Capadonna (solo .env; spec: Capadonna Lake OHLC SSH + IBKR Live.md)
   lake_ssh: {}
 network_access: true
+# Reflector tras errores de tools + inyección "Experiencia de Campo" (spec: Finanz Field Reflection y agent_beliefs.md)
+field_reflection:
+  enabled: true
 # Playwright en Strix browser (mql5.com, lectura de código MQL); requiere Docker + imagen STRIX_BROWSER_IMAGE
 browser_sandbox: true
 allowed_tables:

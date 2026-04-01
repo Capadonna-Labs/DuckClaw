@@ -47,6 +47,12 @@ class ManagerAgentState(TypedDict, total=False):
 
     available_templates: List[str]
     reply: str
+    handoff_context: Optional[dict]
+    active_mission: Optional[dict]
+    mission_context_system_message: Optional[str]
+    last_worker_raw_reply: Optional[str]
+    suppress_subagent_egress: Optional[bool]
+    internal_reply: Optional[str]
     _audit_done: bool
     sandbox_photo_base64: Optional[str]
 

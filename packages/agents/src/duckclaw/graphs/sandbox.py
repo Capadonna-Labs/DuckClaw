@@ -259,8 +259,13 @@ class StrixSandboxManager:
         run_cmd: list[str] = ["tail", "-f", "/dev/null"]
         if image_override:
             env_vars["DISPLAY"] = ":99"
+            env_vars["STRIX_CHROME_PROFILE_DIR"] = "/workspace/chrome_profile"
             # Imagen duckclaw/browser-env: Xvfb + fluxbox + x11vnc + websockify/noVNC (:6080); ver strix-browser-init.sh
             run_cmd = ["bash", "-lc", "/usr/local/bin/strix-browser-init.sh"]
+            # Perfil persistente de navegador (equiv. a -v ${PWD}/db/private/browser_profile:/workspace/chrome_profile)
+            browser_profile_dir = (Path.cwd() / "db" / "private" / "browser_profile").resolve()
+            browser_profile_dir.mkdir(parents=True, exist_ok=True)
+            volumes[str(browser_profile_dir)] = {"bind": "/workspace/chrome_profile", "mode": "rw"}
 
         nm = str(policy_kwargs.get("network_mode", "none"))
         run_kw: dict[str, Any] = {
@@ -333,6 +338,7 @@ class StrixSandboxManager:
         exec_env["PYTHONPATH"] = "/workspace"
         if image_override:
             exec_env["DISPLAY"] = ":99"
+            exec_env["STRIX_CHROME_PROFILE_DIR"] = "/workspace/chrome_profile"
 
         limit = int(timeout_seconds) if timeout_seconds is not None else int(self.timeout)
         limit = max(1, min(limit, 600))
@@ -868,8 +874,10 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "(import: playwright.async_api), Xvfb y red según security_policy.yaml del worker. "
             "No uses el paquete Python `browser_use` en código generado (API inestable). "
             "**Estándar de sigilo (recomendado en scripts generados):** "
-            "chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled']); "
-            "browser.new_context con user_agent realista (no el default de Playwright), viewport ~1920x1080, "
+            "usar contexto persistente para cookies/sesión: "
+            "p.chromium.launch_persistent_context(user_data_dir=os.environ.get('STRIX_CHROME_PROFILE_DIR','/workspace/chrome_profile'), "
+            "headless=True, args=['--disable-blink-features=AutomationControlled'], user_agent=..., viewport=...); "
+            "si no usas contexto persistente, crea browser.new_context con user_agent realista (no el default de Playwright), viewport ~1920x1080, "
             "extra_http_headers con Accept-Language (es-ES,en-US,…); si la URL es mql5.com, Referer https://www.mql5.com/ ; "
             "page.add_init_script para ocultar navigator.webdriver; "
             "Navegación: en **mql5.com** sigue la plantilla `finanz/snippets/mql5_playwright_stealth.py`: "

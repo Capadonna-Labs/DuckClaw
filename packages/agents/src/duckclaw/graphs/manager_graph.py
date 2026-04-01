@@ -114,6 +114,52 @@ def job_hunter_user_requests_job_search(incoming: str) -> bool:
     )
 
 
+def _user_signals_cashflow_stress(incoming: str) -> bool:
+    """Detecta estrés de caja / iliquidez en español coloquial."""
+    t = (incoming or "").strip().lower()
+    if not t:
+        return False
+    stress_terms = (
+        "iliquido",
+        "ilíquido",
+        "sin plata",
+        "sin dinero",
+        "sin liquidez",
+        "no me alcanza",
+        "no me va a alcanzar",
+        "flujo de caja",
+        "deudas",
+        "deuda",
+        "necesito ingresos",
+        "ingreso extra",
+        "ingresos extra",
+        "conseguir trabajo",
+        "buscar trabajo",
+        "buscar empleo",
+        "conseguir empleo",
+    )
+    return any(term in t for term in stress_terms)
+
+
+def _pick_job_hunter_worker(available_templates: list[str]) -> Optional[str]:
+    """Retorna el worker JobHunter presente en el team efectivo."""
+    for wid in available_templates or []:
+        if _is_job_hunter_worker(wid):
+            return wid
+    return None
+
+
+def _worker_matches_id(worker_id: str | None, alias: str | None) -> bool:
+    """Compara ids de worker tolerando guiones/underscores/case."""
+    return _worker_id_alnum_slug(worker_id) == _worker_id_alnum_slug(alias)
+
+
+def _contains_income_injection_request(text: str) -> bool:
+    """Detecta marcador explícito de handoff A2A desde la respuesta de Finanz."""
+    t = (text or "").strip().lower()
+    return "[a2a_request: income_injection]" in t
+
+
 def _prepend_subagent_label_once(reply: str, label: str) -> str:
     """
     Añade el encabezado del subagente solo si el texto aún no lo trae al inicio.
@@ -180,13 +226,13 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     # Job-Hunter: evita run_sandbox con URLs inventadas; discovery = tavily_search.
     if _is_job_hunter_worker(worker_id) and job_hunter_user_requests_job_search(incoming):
         return (
-            "TAREA: El usuario pide búsqueda de empleo y/o enlaces para postular. "
+            "TAREA: Misión A2A INCOME_INJECTION. El usuario pide búsqueda de empleo y/o enlaces para postular. "
             "Sigue el **Flujo cognitivo** del system prompt: (1) **`tavily_search` SIEMPRE primero** — "
             "prohibido anticipar fallo del sandbox o negar la búsqueda antes del resultado `tool` de Tavily; "
             "(2) luego intenta **`run_browser_sandbox`** si aplica; "
             "(3) si el sandbox falla, ve directo al egress con **datos crudos ya obtenidos de Tavily** (no simules otra discovery). "
-            "**Entrega hasta 3 vacantes** con título, descripción breve y **enlace literal** verificado. "
-            "No uses `run_sandbox` solo para listas fijas de portales.",
+            "**Entrega hasta 3 vacantes accionables** con rol, modalidad, rango (si existe), fit y **enlace literal** verificado. "
+            "Prioriza contratación rápida/freelance y no uses `run_sandbox` solo para listas fijas de portales.",
             None,
         )
     # Intención DB/tablas/nombre → si el rol es personalizable, usar finanz (especialista) si está disponible
@@ -664,12 +710,29 @@ def build_manager_graph(
         else:
             plan_title, tasks = _llm_plan(incoming)
 
+        # Prioridad A2A: en crisis de caja + intención laboral, enrutar a JobHunter si está disponible.
+        job_hunter_in_team = _pick_job_hunter_worker(list(available_plan or []))
+        cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
+        if job_hunter_in_team and cashflow_job_intent:
+            assigned = job_hunter_in_team
+
         # Mantener lógica existente de ruteo / planned_task
         planned, override_worker = _plan_task(incoming, assigned)
         planned_final = planned or incoming
 
         # Derivar task_summary a partir del mensaje original / planned_task
         task_summary = _task_summary_for_activity(incoming, planned_final)
+
+        handoff_context: dict[str, Any] | None = None
+        active_mission: dict[str, Any] | None = None
+        if job_hunter_in_team and cashflow_job_intent:
+            active_mission = {
+                "source_worker": "finanz",
+                "target_worker": "job_hunter",
+                "mission": "INCOME_INJECTION",
+                "urgency": "high",
+            }
+            handoff_context = dict(active_mission)
 
         out: ManagerAgentState = {
             "planned_task": planned_final,
@@ -678,6 +741,10 @@ def build_manager_graph(
             "plan_title": plan_title or None,
             "tasks": tasks or [],
         }  # type: ignore[assignment]
+        if handoff_context:
+            out["handoff_context"] = handoff_context
+        if active_mission:
+            out["active_mission"] = active_mission
 
         if override_worker and override_worker in available_plan:
             out["assigned_worker_id"] = override_worker
@@ -704,6 +771,8 @@ def build_manager_graph(
             out["shared_db_path"] = state["shared_db_path"]
         if "username" in state:
             out["username"] = state["username"]
+        if "active_mission" in state and not out.get("active_mission"):
+            out["active_mission"] = state.get("active_mission")
         # Actualizar activity para /tasks usando solo el título del plan cuando esté disponible
         plan_for_task = (plan_title or "").strip()
         if plan_for_task:
@@ -769,6 +838,7 @@ def build_manager_graph(
         agent_instance_label = ""
         slot_token = ""
         run_label_n = 1
+        raw_worker_reply = ""
         try:
             global _worker_graph_cache
             slot_token, run_label_n = acquire_subagent_slot(tenant_id, assigned, str(chat_id or ""))
@@ -818,6 +888,19 @@ def build_manager_graph(
                 "heartbeat_plan_title": (plan_title or "").strip(),
                 "subagent_turn_started_monotonic": time.monotonic(),
             }
+            mission = state.get("active_mission")
+            if (
+                isinstance(mission, dict)
+                and _worker_matches_id(assigned, mission.get("target_worker"))
+            ):
+                worker_state["suppress_subagent_egress"] = True
+            if state.get("handoff_context"):
+                worker_state["handoff_context"] = state.get("handoff_context")
+            mission_context_system_message = (state.get("mission_context_system_message") or "").strip()
+            if mission_context_system_message:
+                from langchain_core.messages import SystemMessage
+
+                worker_state["messages"] = [SystemMessage(content=mission_context_system_message)]
             trace_cfg = get_tracing_config(
                 tenant_id,
                 assigned,
@@ -847,7 +930,13 @@ def build_manager_graph(
                 log_plan_title=_hb_plan_log,
             )
             worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
-            reply = str(worker_invoke.get("reply") or worker_invoke.get("output") or "Sin respuesta.")
+            raw_worker_reply = str(
+                worker_invoke.get("internal_reply")
+                or worker_invoke.get("reply")
+                or worker_invoke.get("output")
+                or "Sin respuesta."
+            )
+            reply = raw_worker_reply
             _label_reply = f"{assigned} {run_label_n}".strip()
             reply = _prepend_subagent_label_once(reply, _label_reply)
             messages = worker_invoke.get("messages")
@@ -896,6 +985,136 @@ def build_manager_graph(
             b64 = extract_latest_sandbox_figure_base64(messages) or ""
         if b64:
             out["sandbox_photo_base64"] = b64
+        if "active_mission" in state:
+            out["active_mission"] = state.get("active_mission")
+        if "handoff_context" in state:
+            out["handoff_context"] = state.get("handoff_context")
+        out["last_worker_raw_reply"] = raw_worker_reply or reply
+        return out
+
+    def route_after_invoke_worker(state: ManagerAgentState) -> str:
+        current_worker = (state.get("assigned_worker_id") or "").strip()
+        if _worker_matches_id(current_worker, "finanz") and _contains_income_injection_request(
+            state.get("last_worker_raw_reply") or state.get("reply") or ""
+        ):
+            return "handoff_to_target"
+        mission = state.get("active_mission")
+        if not isinstance(mission, dict):
+            return "end"
+        target_worker = (mission.get("target_worker") or "").strip()
+        if not target_worker or not current_worker:
+            return "end"
+        if _worker_matches_id(current_worker, target_worker):
+            return "return_to_source"
+        return "end"
+
+    def handoff_to_target_node(state: ManagerAgentState) -> ManagerAgentState:
+        available = state.get("available_templates") or []
+        target_worker = _pick_job_hunter_worker(list(available or [])) or "job_hunter"
+        active_mission = {
+            "source_worker": "finanz",
+            "target_worker": target_worker,
+            "mission": "INCOME_INJECTION",
+            "urgency": "high",
+        }
+        mission_task, _ = _plan_task(
+            "TAREA: Misión A2A INCOME_INJECTION. El usuario pide búsqueda de empleo y/o enlaces para postular.",
+            target_worker,
+        )
+        out: ManagerAgentState = {
+            "assigned_worker_id": target_worker,
+            "planned_task": mission_task,
+            "incoming": mission_task,
+            "input": mission_task,
+            "active_mission": active_mission,
+            "handoff_context": dict(active_mission),
+        }  # type: ignore[assignment]
+        if "history" in state:
+            out["history"] = state["history"]
+        if "chat_id" in state:
+            out["chat_id"] = state["chat_id"]
+        if "tenant_id" in state:
+            out["tenant_id"] = state["tenant_id"]
+        if "user_id" in state:
+            out["user_id"] = state["user_id"]
+        if "vault_db_path" in state:
+            out["vault_db_path"] = state["vault_db_path"]
+        if "shared_db_path" in state:
+            out["shared_db_path"] = state["shared_db_path"]
+        if "username" in state:
+            out["username"] = state["username"]
+        if "available_templates" in state:
+            out["available_templates"] = state["available_templates"]
+        if "plan_title" in state:
+            out["plan_title"] = state["plan_title"]
+        if "tasks" in state:
+            out["tasks"] = state["tasks"]
+        if "task_summary" in state:
+            out["task_summary"] = state["task_summary"]
+        return out
+
+    def return_to_source_node(state: ManagerAgentState) -> ManagerAgentState:
+        mission = state.get("active_mission")
+        if not isinstance(mission, dict):
+            return {"active_mission": None}  # type: ignore[return-value]
+        source_worker = (mission.get("source_worker") or "").strip()
+        if not source_worker:
+            return {"active_mission": None}  # type: ignore[return-value]
+
+        source_in_team = None
+        available = state.get("available_templates") or []
+        for wid in available:
+            if _worker_matches_id(wid, source_worker):
+                source_in_team = wid
+                break
+        next_worker = source_in_team or source_worker
+
+        raw_job_hunter_reply = (state.get("last_worker_raw_reply") or state.get("reply") or "").strip()
+        mission_name = (mission.get("mission") or "INCOME_INJECTION").strip() or "INCOME_INJECTION"
+        mission_system_message = (
+            f"JobHunter ha completado la misión {mission_name}. "
+            f"Aquí están los resultados crudos: {raw_job_hunter_reply}\n\n"
+            "Sintetiza esto en tu reporte financiero final."
+        )
+        synthesis_task = (
+            "TAREA: JobHunter completó la misión INCOME_INJECTION. "
+            "Sintetiza los resultados crudos en un reporte financiero final para el usuario. "
+            "No devuelvas el bloque crudo completo tal cual: prioriza 3 vacantes accionables, "
+            "impacto esperado en flujo de caja y próximos pasos concretos."
+        )
+
+        incoming = (state.get("incoming") or state.get("input") or "").strip()
+        out: ManagerAgentState = {
+            "assigned_worker_id": next_worker,
+            "planned_task": synthesis_task,
+            "incoming": synthesis_task,
+            "input": synthesis_task,
+            "mission_context_system_message": mission_system_message,
+            "active_mission": None,
+            "handoff_context": None,
+        }  # type: ignore[assignment]
+        if "history" in state:
+            out["history"] = state["history"]
+        if "chat_id" in state:
+            out["chat_id"] = state["chat_id"]
+        if "tenant_id" in state:
+            out["tenant_id"] = state["tenant_id"]
+        if "user_id" in state:
+            out["user_id"] = state["user_id"]
+        if "vault_db_path" in state:
+            out["vault_db_path"] = state["vault_db_path"]
+        if "shared_db_path" in state:
+            out["shared_db_path"] = state["shared_db_path"]
+        if "username" in state:
+            out["username"] = state["username"]
+        if "available_templates" in state:
+            out["available_templates"] = state["available_templates"]
+        if "plan_title" in state:
+            out["plan_title"] = state["plan_title"]
+        if "tasks" in state:
+            out["tasks"] = state["tasks"]
+        if "task_summary" in state:
+            out["task_summary"] = state["task_summary"]
         return out
 
     def route_after_router(state: ManagerAgentState) -> str:
@@ -911,6 +1130,8 @@ def build_manager_graph(
     graph.add_node("greeting_shortcut", greeting_shortcut_node)
     graph.add_node("plan", plan_node)
     graph.add_node("invoke_worker", invoke_worker_node)
+    graph.add_node("return_to_source", return_to_source_node)
+    graph.add_node("handoff_to_target", handoff_to_target_node)
     graph.set_entry_point("router")
     graph.add_conditional_edges(
         "router",
@@ -919,5 +1140,11 @@ def build_manager_graph(
     )
     graph.add_edge("greeting_shortcut", END)
     graph.add_edge("plan", "invoke_worker")
-    graph.add_edge("invoke_worker", END)
+    graph.add_conditional_edges(
+        "invoke_worker",
+        route_after_invoke_worker,
+        {"return_to_source": "return_to_source", "handoff_to_target": "handoff_to_target", "end": END},
+    )
+    graph.add_edge("return_to_source", "invoke_worker")
+    graph.add_edge("handoff_to_target", "invoke_worker")
     return graph.compile()

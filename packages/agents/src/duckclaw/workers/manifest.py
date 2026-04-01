@@ -192,6 +192,15 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
 
     browser_sandbox = bool(data.get("browser_sandbox", False))
 
+    field_reflection_config: Optional[dict] = None
+    fr = data.get("field_reflection")
+    if isinstance(fr, dict):
+        field_reflection_config = fr
+    elif fr is True:
+        field_reflection_config = {"enabled": True}
+    elif fr is False:
+        field_reflection_config = {"enabled": False}
+
     return WorkerSpec(
         worker_id=worker_id,
         logical_worker_id=logical_worker_id,
@@ -224,6 +233,7 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         network_access=network_access,
         tool_read_pool=tool_read_pool,
         browser_sandbox=browser_sandbox,
+        field_reflection_config=field_reflection_config,
     )
 
 
@@ -286,6 +296,7 @@ class WorkerSpec:
         "network_access",
         "tool_read_pool",
         "browser_sandbox",
+        "field_reflection_config",
     )
 
     def __init__(
@@ -321,6 +332,7 @@ class WorkerSpec:
         network_access: bool = False,
         tool_read_pool: bool = True,
         browser_sandbox: bool = False,
+        field_reflection_config: Optional[dict] = None,
     ):
         self.worker_id = worker_id
         self.logical_worker_id = logical_worker_id
@@ -353,3 +365,4 @@ class WorkerSpec:
         self.network_access = bool(network_access)
         self.tool_read_pool = bool(tool_read_pool)
         self.browser_sandbox = bool(browser_sandbox)
+        self.field_reflection_config = field_reflection_config

@@ -77,6 +77,24 @@ def _ensure_agent_beliefs(db: Any, schema: str) -> None:
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Field lessons (Finanz Reflector) — nullable / backward compatible
+    for col_sql in (
+        "belief_kind VARCHAR",
+        "context_trigger VARCHAR",
+        "lesson_text VARCHAR",
+        "confidence_score DOUBLE",
+    ):
+        try:
+            db.execute(f"ALTER TABLE {s}.agent_beliefs ADD COLUMN IF NOT EXISTS {col_sql}")
+        except Exception:
+            pass
+    try:
+        db.execute(
+            f"UPDATE {s}.agent_beliefs SET belief_kind = 'numeric' "
+            f"WHERE belief_kind IS NULL"
+        )
+    except Exception:
+        pass
 
 
 def _seed_agent_beliefs(db: Any, spec: WorkerSpec) -> None:
@@ -97,8 +115,10 @@ def _seed_agent_beliefs(db: Any, spec: WorkerSpec) -> None:
             try:
                 db.execute(
                     f"""
-                    INSERT INTO {schema}.agent_beliefs (belief_key, target_value, observed_value, threshold)
-                    VALUES ('{key_safe}', {b.target}, NULL, {b.threshold})
+                    INSERT INTO {schema}.agent_beliefs (
+                        belief_key, target_value, observed_value, threshold, belief_kind
+                    )
+                    VALUES ('{key_safe}', {b.target}, NULL, {b.threshold}, 'numeric')
                     ON CONFLICT (belief_key) DO UPDATE SET
                         target_value = EXCLUDED.target_value,
                         threshold = EXCLUDED.threshold

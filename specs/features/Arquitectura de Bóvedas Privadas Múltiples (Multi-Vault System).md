@@ -5,19 +5,24 @@ Evolucionar el sistema de persistencia para permitir que un único usuario gesti
 
 ## 2. Modelo de Metadatos (System Registry)
 
-Para gestionar la relación Usuario-Bóvedas, la base de datos `system.duckdb` debe incorporar un registro de propiedad:
+Para gestionar la relación Usuario-Bóvedas, la base de datos `system.duckdb` debe incorporar un registro de propiedad. Cada **ámbito (`scope_id`)** representa un tenant/gateway lógico (p. ej. Finanz con tenant `default` vs JobHunter con tenant `Trabajo`), de modo que el mismo `user_id` de Telegram puede tener **distinta bóveda activa** por gateway sin compartir el puntero `is_active`.
 
 ```sql
--- Tabla de registro de bóvedas
+-- Tabla de registro de bóvedas (PK compuesta con scope)
 CREATE TABLE IF NOT EXISTS user_vaults (
     user_id VARCHAR,             -- ID de Telegram / UUID
+    scope_id VARCHAR NOT NULL DEFAULT '',  -- '' = legacy / tenant default; slug del tenant en otros gateways
     vault_id VARCHAR,           -- ID único del archivo (ej. 'finanzas_abc')
     vault_name VARCHAR,         -- Nombre amigable (ej. 'Gastos 2026')
     is_active BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (user_id, vault_id)
+    PRIMARY KEY (user_id, scope_id, vault_id)
 );
 ```
+
+**Resolución de `scope_id`:** `vault_scope_id_for_tenant(tenant_id)` en `duckclaw.vaults`: si el tenant efectivo es vacío o `default`, `scope_id = ''` (comportamiento histórico); en caso contrario, slug sanitizado del tenant (misma regla que rutas `shared/`).
+
+**Bootstrap por ámbito:** con `scope_id != ''` el sistema **no** promueve automáticamente otras bóvedas del disco ni adopta el primer `.duckdb` no-default de la carpeta del usuario (evita que gateways como JobHunter abran `finanzdb1.duckdb` solo por convivir en `db/private/{user}/`). La bóveda inicial puede forzarse con `DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID` (slug); si no está definida, se usa `default`.
 
 ## 3. Topología de Archivos (Hierarchical Storage)
 
@@ -55,7 +60,7 @@ Esta skill permite al usuario (y al agente) manipular su ecosistema de datos.
 
 La resolución de rutas ocurre en `build_worker_graph` (`packages/agents/.../workers/factory.py`):
 
-1.  **Bóveda activa (HTTP/Gateway):** el `vault_db_path` llega desde `resolve_active_vault(user_id)` o equivalente dedicado.
+1.  **Bóveda activa (HTTP/Gateway):** el `vault_db_path` llega desde `resolve_active_vault(user_id, scope_id=vault_scope_id_for_tenant(tenant_efectivo))` o equivalente dedicado (`DUCKCLAW_DB_PATH` en gateways con BD fija).
 2.  **Contexto dual (opcional):** si el `manifest.yaml` declara `forge_context.shared_db_path_env`, se lee esa variable de entorno y se ejecuta un segundo `ATTACH ... AS shared`. La petición puede sobrescribir con `shared_db_path` en el body del chat.
 3.  **Inyección SQL (best-effort):**
     ```sql
@@ -70,10 +75,10 @@ La resolución de rutas ocurre en `build_worker_graph` (`packages/agents/.../wor
 
 Se implementa un nuevo comando de control para la gestión de identidad de datos:
 
-*   **/vault**: Muestra la bóveda activa y el espacio ocupado.
-*   **/vault list**: Lista todas las bóvedas del usuario con sus IDs.
-*   **/vault use `<vault_id>`**: Cambia la base de datos activa para la sesión actual.
-*   **/vault new `<name>`**: Crea una nueva bóveda vacía.
+*   **/vault**: Muestra la bóveda activa y el espacio ocupado **del ámbito del tenant** de la petición (mismo `scope_id` que el gateway).
+*   **/vault list**: Lista bóvedas registradas en ese ámbito (no mezcla punteros con otros tenants del mismo usuario).
+*   **/vault use `<vault_id>`**: Cambia la base de datos activa **solo dentro de ese ámbito**.
+*   **/vault new `<name>`**: Crea una nueva bóveda vacía y la registra en ese ámbito.
 
 ## 7. Impacto en el Singleton DB-Writer
 

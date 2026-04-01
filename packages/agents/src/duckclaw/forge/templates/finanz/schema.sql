@@ -43,5 +43,18 @@ CREATE TABLE IF NOT EXISTS finance_worker.presupuestos (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_presupuestos_cat_ym ON finance_worker.presupuestos (category_id, year, month);
 
+-- OSINT JobHunter: extracciones browser-use → read_parquet → INSERT (spec OSINT JobHunter)
+CREATE TABLE IF NOT EXISTS finance_worker.job_opportunities (
+  title VARCHAR,
+  company VARCHAR,
+  location VARCHAR,
+  salary_range VARCHAR,
+  requirements VARCHAR,
+  apply_url VARCHAR,
+  source_url VARCHAR,
+  scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_job_opportunities_apply_url ON finance_worker.job_opportunities (apply_url);
+
 INSERT INTO finance_worker.categories (id, name) VALUES (1, 'Otros')
 ON CONFLICT (id) DO NOTHING;

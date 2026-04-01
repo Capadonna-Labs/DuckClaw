@@ -18,6 +18,7 @@ from duckclaw.vaults import (
     resolve_active_vault as _vault_resolve_active,
     switch_vault as _vault_switch,
     validate_user_db_path,
+    vault_scope_id_for_tenant,
 )
 
 from duckclaw.forge.skills.the_mind_outbound import (
@@ -125,7 +126,8 @@ def _get_authorized_role(db: Any, *, tenant_id: str, user_id: str) -> str:
     uid = _sql_escape_literal(user_id, max_len=128)
     try:
         raw = db.query(
-            f"SELECT role FROM main.{_AUTHORIZED_USERS_TABLE} WHERE tenant_id='{tid}' AND user_id='{uid}' LIMIT 1"
+            f"SELECT role FROM main.{_AUTHORIZED_USERS_TABLE} "
+            f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}' LIMIT 1"
         )
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
         if rows and isinstance(rows[0], dict):
@@ -140,7 +142,8 @@ def _list_authorized_users(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
     tid = _sql_escape_literal(tenant_id, max_len=128)
     try:
         raw = db.query(
-            f"SELECT user_id, username, role FROM main.{_AUTHORIZED_USERS_TABLE} WHERE tenant_id='{tid}' ORDER BY user_id"
+            f"SELECT user_id, username, role FROM main.{_AUTHORIZED_USERS_TABLE} "
+            f"WHERE lower(tenant_id)=lower('{tid}') ORDER BY user_id"
         )
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
         if isinstance(rows, list):
@@ -182,16 +185,19 @@ def _delete_authorized_user(db: Any, *, tenant_id: str, user_id: str) -> None:
     _ensure_authorized_users_table(db)
     tid = _sql_escape_literal(tenant_id, max_len=128)
     uid = _sql_escape_literal(user_id, max_len=128)
-    db.execute(f"DELETE FROM main.{_AUTHORIZED_USERS_TABLE} WHERE tenant_id='{tid}' AND user_id='{uid}'")
+    db.execute(
+        f"DELETE FROM main.{_AUTHORIZED_USERS_TABLE} "
+        f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}'"
+    )
 
 
 def _invalidate_whitelist_redis_cache(*, tenant_id: str, user_id: str) -> None:
     """
     El Gateway cachea roles en Redis (TTL ~1h). Tras /team --rm o --add, hay que borrar la clave
     o los usuarios revocados siguen pasando _lookup_whitelist_role hasta que expire el TTL.
-    Misma convención que services/api-gateway/main.py: whitelist:{tenant_id}:{user_id}
+    Misma convención que services/api-gateway/main.py: whitelist:{tenant_lower}:{user_id}
     """
-    tid = str(tenant_id or "default").strip() or "default"
+    tid = str(tenant_id or "default").strip().lower() or "default"
     uid = str(user_id or "").strip()
     if not uid:
         return
@@ -491,8 +497,9 @@ def _format_vault_size_mb(size_bytes: int | float) -> str:
     return f"{mb:.2f} MB"
 
 
-def execute_vault(args: str, *, vault_user_id: Any) -> str:
+def execute_vault(args: str, *, vault_user_id: Any, tenant_id: Any = None) -> str:
     user_id = (str(vault_user_id or "").strip() or "default")
+    vault_scope = vault_scope_id_for_tenant(tenant_id)
     raw = (args or "").strip()
     fixed_db = _dedicated_gateway_db_path_for_vault()
     if fixed_db:
@@ -527,7 +534,7 @@ def execute_vault(args: str, *, vault_user_id: Any) -> str:
             "Comandos adicionales del registry no aplican en este gateway."
         )
     if not raw:
-        active_id, active_path = _vault_resolve_active(user_id)
+        active_id, active_path = _vault_resolve_active(user_id, vault_scope)
         size = 0
         try:
             from pathlib import Path as _P
@@ -546,7 +553,7 @@ def execute_vault(args: str, *, vault_user_id: Any) -> str:
     if cmd.startswith("--"):
         cmd = cmd[2:]
     if cmd == "list":
-        rows = _vault_list(user_id)
+        rows = _vault_list(user_id, vault_scope)
         if not rows:
             return _telegram_safe("No hay bóvedas.")
         lines = []
@@ -561,30 +568,44 @@ def execute_vault(args: str, *, vault_user_id: Any) -> str:
         name = " ".join(tokens[1:]).strip()
         if not name:
             return _telegram_safe("Uso: /vault new <name> | /vault --new <name>")
-        created = _vault_create(user_id, name)
+        created = _vault_create(user_id, name, vault_scope)
         return _telegram_safe(f"✅ Bóveda creada: {created.get('vault_id')} ({created.get('vault_name')})")
     if cmd == "use":
         vid = " ".join(tokens[1:]).strip()
         if not vid:
             return _telegram_safe("Uso: /vault use <vault_id> | /vault --use <vault_id>")
-        ok = _vault_switch(user_id, vid)
+        ok = _vault_switch(user_id, vid, vault_scope)
         if not ok:
             return _telegram_safe(f"No existe la bóveda '{vid}'. Usa /vault list.")
-        active_id, _ = _vault_resolve_active(user_id)
+        active_id, _ = _vault_resolve_active(user_id, vault_scope)
         return _telegram_safe(f"✅ Bóveda activa actual: {active_id}")
     if cmd == "rm":
         vid = " ".join(tokens[1:]).strip()
         if not vid:
             return _telegram_safe("Uso: /vault rm <vault_id> | /vault --rm <vault_id>")
-        ok = _vault_remove(user_id, vid)
+        ok = _vault_remove(user_id, vid, vault_scope)
         if not ok:
             return _telegram_safe(f"No existe la bóveda '{vid}'.")
-        active_id, _ = _vault_resolve_active(user_id)
+        active_id, _ = _vault_resolve_active(user_id, vault_scope)
         return _telegram_safe(f"🗑 Bóveda eliminada: {vid}. Activa actual: {active_id}")
     return _telegram_safe(
         "Uso: /vault | /vault list | /vault --list | /vault new <name> | /vault --new <name> | "
         "/vault use <vault_id> | /vault --use <vault_id> | /vault rm <vault_id> | /vault --rm <vault_id>"
     )
+
+
+def _team_whitelist_db(fly_db: Any) -> Any:
+    """
+    En producción (API Gateway), ``authorized_users`` vive en la misma DuckDB que el
+    grafo (``get_db()``), no en la bóveda multi-vault por usuario. En tests o si el
+    grafo no pudo inicializarse, se usa ``fly_db`` (conexión que ya abrió el comando).
+    """
+    try:
+        from duckclaw.graphs.graph_server import get_db as _gw_acl_db  # noqa: PLC0415
+
+        return _gw_acl_db()
+    except Exception:
+        return fly_db
 
 
 def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str) -> str:
@@ -594,12 +615,13 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
     - /team --add <user_id> [nombre] [admin] (admin u owner DUCKCLAW_ADMIN_CHAT_ID)
     - /team --rm <user_id>            (admin u owner)
     """
+    acl = _team_whitelist_db(db)
     tid = str(tenant_id or "default").strip() or "default"
     rid = str(requester_id or "").strip()
 
     raw = (args or "").strip()
     if not raw:
-        users = _list_authorized_users(db, tenant_id=tid)
+        users = _list_authorized_users(acl, tenant_id=tid)
         if not users:
             hint = ""
             if _is_gateway_owner_user(rid):
@@ -614,27 +636,27 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             uname = u.get("username") or ""
             role = (u.get("role") or "user").lower()
             # Usar mención por user_id para abrir perfil real y evitar colisiones de @username.
-            label = _player_label(uname, uid, db=db, tenant_id=tid)
+            label = _player_label(uname, uid, db=acl, tenant_id=tid)
             lines.append(_telegram_safe(f"\\- {label} ({uid}) \\- role={role}"))
         return _telegram_safe(f"🦆 Usuarios autorizados (tenant '{tid}'):\n") + "\n".join(lines)
 
     if raw.startswith("--rm "):
         if not rid:
             return _telegram_safe("❌ Acceso denegado.")
-        if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
+        if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
             return _telegram_safe("❌ Acceso denegado: solo administradores pueden eliminar usuarios.")
         target_uid = raw[5:].strip().split()[0]
         if not target_uid:
             return _telegram_safe("Uso: /team --rm <user_id>")
-        _delete_authorized_user(db, tenant_id=tid, user_id=target_uid)
+        _delete_authorized_user(acl, tenant_id=tid, user_id=target_uid)
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
-        target_label = _player_label("", target_uid, db=db, tenant_id=tid)
+        target_label = _player_label("", target_uid, db=acl, tenant_id=tid)
         return _telegram_safe(f"✅ Eliminado {target_label} del tenant '{tid}'.")
 
     if raw.startswith("--add ") or raw.strip() == "--add":
         if not rid:
             return _telegram_safe("❌ Acceso denegado.")
-        if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
+        if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
             return _telegram_safe("❌ Acceso denegado: solo administradores pueden agregar usuarios.")
         ids_part = raw[6:].strip() if raw.startswith("--add ") else ""
         tokens = [t for t in ids_part.split() if t.strip()]
@@ -648,19 +670,19 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             return _telegram_safe("Uso: /team --add <user_id> [nombre] [admin]")
         target_uid = tokens[0]
         uname = tokens[1] if len(tokens) > 1 else "Usuario"
-        _upsert_authorized_user(db, tenant_id=tid, user_id=target_uid, username=uname, role=role_out)
+        _upsert_authorized_user(acl, tenant_id=tid, user_id=target_uid, username=uname, role=role_out)
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
-        target_label = _player_label(uname, target_uid, db=db, tenant_id=tid)
+        target_label = _player_label(uname, target_uid, db=acl, tenant_id=tid)
         return _telegram_safe(f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'.")
 
     if raw == "--shared-list" or raw.startswith("--shared-list"):
         if not rid:
             return _telegram_safe("❌ Acceso denegado.")
-        if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
+        if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
             return _telegram_safe("❌ Acceso denegado: solo administradores pueden listar permisos de bases compartidas.")
         from duckclaw.shared_db_grants import list_shared_grants_for_tenant
 
-        grants = list_shared_grants_for_tenant(db, tenant_id=tid)
+        grants = list_shared_grants_for_tenant(acl, tenant_id=tid)
         if not grants:
             return _telegram_safe(
                 f"🗂 No hay filas en user_shared_db_access para tenant '{tid}'. "
@@ -680,7 +702,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
     if raw.startswith("--shared-grant "):
         if not rid:
             return _telegram_safe("❌ Acceso denegado.")
-        if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
+        if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
             return _telegram_safe("❌ Acceso denegado: solo administradores.")
         rest = raw[len("--shared-grant ") :].strip().split(None, 1)
         if len(rest) < 2:
@@ -690,13 +712,13 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
 
         if not validate_resource_key(rkey):
             return _telegram_safe("resource_key inválido (usa default, * o slug alfanumérico).")
-        upsert_shared_grant(db, tenant_id=tid, user_id=target_uid, resource_key=rkey)
+        upsert_shared_grant(acl, tenant_id=tid, user_id=target_uid, resource_key=rkey)
         return _telegram_safe(f"✅ Grant shared '{rkey}' → user {target_uid} (tenant '{tid}').")
 
     if raw.startswith("--shared-revoke "):
         if not rid:
             return _telegram_safe("❌ Acceso denegado.")
-        if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
+        if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
             return _telegram_safe("❌ Acceso denegado: solo administradores.")
         rest = raw[len("--shared-revoke ") :].strip().split(None, 1)
         if len(rest) < 2:
@@ -706,7 +728,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
 
         if not validate_resource_key(rkey):
             return _telegram_safe("resource_key inválido.")
-        delete_shared_grant(db, tenant_id=tid, user_id=target_uid, resource_key=rkey)
+        delete_shared_grant(acl, tenant_id=tid, user_id=target_uid, resource_key=rkey)
         return _telegram_safe(f"✅ Revocado shared '{rkey}' para user {target_uid}.")
 
     return _telegram_safe(
@@ -2793,7 +2815,11 @@ def _dispatch_fly_command(
     if name == "team":
         return execute_team_whitelist(db, tenant_id, requester_id, args)
     if name == "vault":
-        return execute_vault(args, vault_user_id=vault_user_id or requester_id or chat_id)
+        return execute_vault(
+            args,
+            vault_user_id=vault_user_id or requester_id or chat_id,
+            tenant_id=tenant_id,
+        )
     if name == "workers":
         return execute_team(
             db, chat_id, args, tenant_id=tenant_id, requester_id=requester_id

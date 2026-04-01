@@ -40,7 +40,7 @@ class SecurityPolicy(BaseModel):
     network: NetworkPolicy = NetworkPolicy()
     filesystem: FileSystemPolicy = FileSystemPolicy()
     secrets: SecretPolicy = SecretPolicy()
-    max_execution_time_seconds: int = Field(default=30, le=120)
+    max_execution_time_seconds: int = Field(default=30, le=600)
 ```
 
 ## 4. Plantilla de Seguridad por Worker (`security_policy.yaml`)

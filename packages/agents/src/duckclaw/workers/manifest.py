@@ -159,6 +159,8 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
     elif isinstance(trp, str):
         tool_read_pool = trp.strip().lower() not in ("0", "false", "no", "off")
 
+    browser_sandbox = bool(data.get("browser_sandbox", False))
+
     return WorkerSpec(
         worker_id=worker_id,
         logical_worker_id=logical_worker_id,
@@ -186,6 +188,7 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         duckdb_extensions=duckdb_extensions,
         network_access=network_access,
         tool_read_pool=tool_read_pool,
+        browser_sandbox=browser_sandbox,
     )
 
 
@@ -247,6 +250,7 @@ class WorkerSpec:
         "duckdb_extensions",
         "network_access",
         "tool_read_pool",
+        "browser_sandbox",
     )
 
     def __init__(
@@ -277,6 +281,7 @@ class WorkerSpec:
         duckdb_extensions: Optional[list] = None,
         network_access: bool = False,
         tool_read_pool: bool = True,
+        browser_sandbox: bool = False,
     ):
         self.worker_id = worker_id
         self.logical_worker_id = logical_worker_id
@@ -304,3 +309,4 @@ class WorkerSpec:
         self.duckdb_extensions = list(duckdb_extensions or [])
         self.network_access = bool(network_access)
         self.tool_read_pool = bool(tool_read_pool)
+        self.browser_sandbox = bool(browser_sandbox)

@@ -58,7 +58,11 @@ Variables típicas en `.env` (el wizard puede escribirlas):
 
 ```env
 REDIS_URL=redis://localhost:6379/0
-TELEGRAM_BOT_TOKEN=...          # salida a Telegram vía Bot API (recomendado; sin n8n)
+TELEGRAM_BOT_TOKEN=...          # compat: token por defecto si no usas el nombre por agente
+TELEGRAM_FINANZ_TOKEN=...       # estándar (id `finanz`); alternativa a TELEGRAM_BOT_TOKEN en gateway Finanz
+TELEGRAM_BI_ANALYST_TOKEN=...   # estándar (id `bi_analyst`); antes TELEGRAM_BOT_TOKEN_BI_ANALYST
+TELEGRAM_SIATA_ANALYST_TOKEN=... # id `siata_analyst`; antes TELEGRAM_BOT_TOKEN_SIATA
+TELEGRAM_LEILAASSISTANT_TOKEN=... # id manifest `LeilaAssistant`; antes TELEGRAM_BOT_TOKEN_LEILA
 # Opcional legado: N8N_OUTBOUND_WEBHOOK_URL + DUCKCLAW_TELEGRAM_OUTBOUND_VIA=n8n
 ```
 
@@ -108,6 +112,8 @@ curl -sS -X POST "https://api.telegram.org/bot<TOKEN>/deleteWebhook"
 `DUCKCLAW_TELEGRAM_DEFAULT_WORKER` → `DUCKCLAW_DEFAULT_WORKER_ID` → `finanz`; tenant en el body interno  
 `DUCKCLAW_TELEGRAM_DEFAULT_TENANT` → `DUCKCLAW_GATEWAY_TENANT_ID` → `default`.  
 `_invoke_chat` sigue aplicando la misma normalización de tenant que `POST /api/v1/agent/chat`.
+
+**Varios bots → misma URL pública (un solo Funnel/puerto):** si registraste el mismo `url` en `setWebhook` para Finanz, BI y SIATA, el gateway procesaba todo como el worker por defecto (`finanz`) y respondía con un solo `TELEGRAM_BOT_TOKEN`. Define `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` (JSON array) en el **proceso que recibe el tráfico**; cada bot debe usar un `secret_token` distinto en `setWebhook`. Cada entrada lleva `secret`, `worker_id` (p. ej. `bi_analyst`, `siata_analyst`), `tenant_id` opcional y `bot_token_env` (nombre de variable con el token de ese bot). Si además tienes `TELEGRAM_WEBHOOK_SECRET`, ese valor sigue sirviendo para el “proceso por defecto” (mismo worker/tenant/token que el PM2). Detalle: [specs/features/Telegram Webhook Multiplex (multi-bot).md](specs/features/Telegram%20Webhook%20Multiplex%20(multi-bot).md).
 
 **Prueba local** del router (Telegram no llama a HTTP sin TLS; sirve para depurar en la máquina):
 
@@ -207,19 +213,14 @@ Deberías ver `tools MCP: [...]` y un JSON con `ok: true` y `message_id` si Tele
 
 ## 4. Wizard — aprovisionamiento interactivo
 
-Inicializa `.env`, rutas de DuckDB, PM2/systemd según el flujo del proyecto:
+**`duckops init`** ejecuta por defecto el **Sovereign Wizard v2.0** (TUI con `prompt_toolkit`, borrador en memoria y escritura solo tras confirmar en *Review*; atajos Ctrl+Z/Esc, Ctrl+S, Ctrl+R, Tab). Tras **CONFIRMAR**, materializa `.env`, rutas DuckDB, PM2 según el borrador y puede registrar `setWebhook`. Opcional: `--repo` / `-C` para la raíz del monorepo. Spec: [specs/features/DuckClaw Sovereign Wizard (v2.0).md](specs/features/DuckClaw%20Sovereign%20Wizard%20(v2.0).md).
 
 ```bash
 uv run duckops init
+uv run duckops init --repo /ruta/al/duckclaw
 ```
 
-**Sovereign Wizard v2.0** (TUI con `prompt_toolkit`, borrador en memoria y escritura solo tras confirmar en *Review*; atajos Ctrl+Z/Esc, Ctrl+S, Ctrl+R, Tab). Tras **CONFIRMAR**, imprime instrucciones y un `curl` de **`setWebhook`** (Telegram no registra el webhook solo; cada bot/puerto/gateway necesita su URL HTTPS pública). En el paso Conectividad puedes opcionalmente pegar la base HTTPS del túnel que enruta a ese gateway. Spec: [specs/features/DuckClaw Sovereign Wizard (v2.0).md](specs/features/DuckClaw%20Sovereign%20Wizard%20(v2.0).md).
-
-```bash
-uv run duckops sovereign
-# equivalente:
-uv run duckops init --sovereign
-```
+Wizard **clásico** (Rich, `scripts/duckclaw_setup_wizard.py`): `uv run duckops init --classic`.
 
 Borrador rápido (sin tocar el `.env` del repo): **Ctrl+S** → `~/.config/duckclaw/wizard_draft.json`.
 

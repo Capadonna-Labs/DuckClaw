@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from duckclaw.graphs.on_the_fly_commands import handle_command
 from duckclaw.workers.manifest import WorkerSpec
 from duckclaw.workers import factory as worker_factory
@@ -11,7 +13,18 @@ from duckclaw.vaults import (
     shared_tenant_dir,
     switch_vault,
     validate_user_db_path,
+    vault_scope_id_for_tenant,
 )
+
+
+@pytest.fixture(autouse=True)
+def _duckclaw_repo_root_is_tmp(tmp_path, monkeypatch):
+    """Evita leer/escribir db/ del monorepo real si DUCKCLAW_REPO_ROOT está definido en el entorno."""
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
+    monkeypatch.delenv("DUCKCLAW_PM2_PROCESS_NAME", raising=False)
+    monkeypatch.delenv("DUCKCLAW_PM2_MATCHED_APP_NAME", raising=False)
+    monkeypatch.delenv("DUCKCLAW_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKDB_PATH", raising=False)
 
 
 class _DummyDB:
@@ -54,6 +67,48 @@ def test_vault_command_flow(tmp_path, monkeypatch):
     target = [r for r in rows if r["vault_id"] != "default"][0]["vault_id"]
     out = handle_command(db, "chat1", f"/vault use {target}", requester_id="u1", tenant_id="default", vault_user_id="u1")
     assert out and "activa actual" in out
+
+
+def test_scoped_resolve_ignores_finanzdb_on_disk(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID", raising=False)
+    user = "1726618406"
+    private_dir = tmp_path / "db" / "private" / user
+    private_dir.mkdir(parents=True, exist_ok=True)
+    (private_dir / "finanzdb1.duckdb").write_bytes(b"x" * 200_000)
+    active_id, active_path = resolve_active_vault(user, scope_id="trabajo")
+    assert active_id == "default"
+    assert active_path.endswith("default.duckdb")
+
+
+def test_scoped_initial_vault_from_env(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID", "job_hunter")
+    user = "1726618406"
+    private_dir = tmp_path / "db" / "private" / user
+    private_dir.mkdir(parents=True, exist_ok=True)
+    (private_dir / "finanzdb1.duckdb").write_bytes(b"x" * 200_000)
+    active_id, active_path = resolve_active_vault(user, scope_id="trabajo")
+    assert active_id == "job_hunter"
+    assert "job_hunter" in active_path
+
+
+def test_vault_scope_id_for_tenant_slug():
+    assert vault_scope_id_for_tenant("default") == ""
+    assert vault_scope_id_for_tenant("") == ""
+    assert vault_scope_id_for_tenant("Trabajo") == "trabajo"
+
+
+def test_vault_command_scoped_tenant(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID", raising=False)
+    db = _DummyDB()
+    private_dir = tmp_path / "db" / "private" / "u1"
+    private_dir.mkdir(parents=True, exist_ok=True)
+    (private_dir / "finanzdb1.duckdb").write_bytes(b"x" * 200_000)
+    out = handle_command(db, "chat1", "/vault", requester_id="u1", tenant_id="Trabajo", vault_user_id="u1")
+    assert out and "default" in out
+    assert "finanzdb1" not in out
 
 
 def test_resolve_promotes_existing_non_default_when_default_active(tmp_path, monkeypatch):

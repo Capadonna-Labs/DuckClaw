@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """DuckClaw setup wizard: interactive install with Rich (legacy).
 
-Para el flujo v2.0 (máquina de estados, borrador hasta Review, atajos): ``duckops sovereign``
-o ``duckops init --sovereign``. Spec: ``specs/features/DuckClaw Sovereign Wizard (v2.0).md``.
+Para el flujo v2.0 (máquina de estados, borrador hasta Review, atajos): ``duckops init``.
+Spec: ``specs/features/DuckClaw Sovereign Wizard (v2.0).md``.
 
 Spec histórica: specs/FLUJO_VIDA_DATO_PIPELINE.md — gestiona DuckClaw-Gateway & DuckClaw-DB-Writer.
 """

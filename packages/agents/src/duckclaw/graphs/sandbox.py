@@ -19,6 +19,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,8 @@ except Exception:
 
 # Imagen base por defecto; sobreescribible con STRIX_SANDBOX_IMAGE
 _DEFAULT_IMAGE = "duckclaw/sandbox:latest"
+# Imagen browser (OSINT JobHunter / Strix Browser Sandbox); STRIX_BROWSER_IMAGE
+_DEFAULT_BROWSER_IMAGE = "duckclaw/browser-env:latest"
 _FALLBACK_IMAGE = "python:3.11-slim"
 _SANDBOX_MEMORY = "512m"
 _SANDBOX_TIMEOUT = 30          # segundos de timeout por ejecución
@@ -107,21 +110,30 @@ def _image_name() -> str:
     return os.environ.get("STRIX_SANDBOX_IMAGE", _DEFAULT_IMAGE)
 
 
-def _ensure_image(client: Any) -> str:
-    """Verifica que la imagen esté disponible; si no, hace pull de fallback."""
-    image = _image_name()
+def _browser_image_name() -> str:
+    return os.environ.get("STRIX_BROWSER_IMAGE", _DEFAULT_BROWSER_IMAGE).strip() or _DEFAULT_BROWSER_IMAGE
+
+
+def _ensure_image(client: Any, image: str | None = None, *, allow_python_fallback: bool = True) -> str:
+    """Verifica que la imagen esté disponible; opcionalmente pull. Sin fallback para imágenes browser explícitas."""
+    want = (image or _image_name()).strip()
     try:
-        client.images.get(image)
-        return image
+        client.images.get(want)
+        return want
     except Exception:
         pass
-    # Pull fallback
+    try:
+        client.images.pull(want)
+        return want
+    except Exception as first_err:
+        if not allow_python_fallback or want != _image_name():
+            raise RuntimeError(f"No se pudo obtener la imagen Docker {want!r}: {first_err}") from first_err
     try:
         client.images.pull(_FALLBACK_IMAGE)
         _log.warning(
             "Strix sandbox: imagen %r no disponible; usando %s (sin stack analítico preinstalado). "
             "Construye: docker build -t duckclaw/sandbox:latest docker/sandbox/",
-            image,
+            want,
             _FALLBACK_IMAGE,
         )
         return _FALLBACK_IMAGE
@@ -164,6 +176,7 @@ class StrixSandboxManager:
         self.timeout = timeout
         self.memory = memory
         self._containers: dict[str, Any] = {}
+        self._session_image: dict[str, str] = {}
 
     def _session_dirs(self, session_id: str) -> tuple[Path, Path]:
         base = _TMP_BASE / session_id
@@ -180,19 +193,31 @@ class StrixSandboxManager:
         out_dir: Path,
         policy: SecurityPolicy | None = None,
         secret_env: dict[str, str] | None = None,
+        image_override: str | None = None,
     ) -> Any:
         import docker  # noqa: PLC0415
 
         container_name = f"strix_sandbox_{session_id}"
         client = _docker_client()
-        image = _ensure_image(client)
+        desired_image = (image_override or self.image).strip()
+        allow_fb = image_override is None
+        resolved_image = _ensure_image(client, desired_image, allow_python_fallback=allow_fb)
 
-        # Reusar si ya está corriendo
+        prev_img = self._session_image.get(session_id)
+        if prev_img and prev_img != resolved_image and session_id in self._containers:
+            try:
+                c_old = self._containers.pop(session_id)
+                c_old.stop(timeout=3)
+                c_old.remove(force=True)
+            except Exception:
+                pass
+
+        # Reusar si ya está corriendo y misma imagen
         if session_id in self._containers:
             try:
                 container = self._containers[session_id]
                 container.reload()
-                if container.status == "running":
+                if container.status == "running" and self._session_image.get(session_id) == resolved_image:
                     return container
             except Exception:
                 pass
@@ -228,28 +253,39 @@ class StrixSandboxManager:
         if secret_env:
             env_vars.update(secret_env)
 
-        container = client.containers.run(
-            image,
-            command=["tail", "-f", "/dev/null"],
-            name=container_name,
-            detach=True,
-            mem_limit=str(policy_kwargs.get("mem_limit", self.memory)),
-            nano_cpus=int(policy_kwargs.get("nano_cpus", int(1e9))),  # 1 CPU
-            network_mode=str(policy_kwargs.get("network_mode", "none")),
-            cap_drop=policy_kwargs.get("cap_drop", ["ALL"]),
-            security_opt=policy_kwargs.get("security_opt", ["no-new-privileges"]),
-            user=str(policy_kwargs.get("user", "1000:1000")),
-            volumes=volumes,
-            # tmpfs solo para rutas no cubiertas por mounts core
-            tmpfs={
+        run_cmd: list[str] = ["tail", "-f", "/dev/null"]
+        if image_override:
+            env_vars["DISPLAY"] = ":99"
+            # Imagen duckclaw/browser-env: Xvfb + fluxbox + x11vnc + websockify/noVNC (:6080); ver strix-browser-init.sh
+            run_cmd = ["bash", "-lc", "/usr/local/bin/strix-browser-init.sh"]
+
+        nm = str(policy_kwargs.get("network_mode", "none"))
+        run_kw: dict[str, Any] = {
+            "command": run_cmd,
+            "name": container_name,
+            "detach": True,
+            "mem_limit": str(policy_kwargs.get("mem_limit", self.memory)),
+            "nano_cpus": int(policy_kwargs.get("nano_cpus", int(1e9))),
+            "network_mode": nm,
+            "cap_drop": policy_kwargs.get("cap_drop", ["ALL"]),
+            "security_opt": policy_kwargs.get("security_opt", ["no-new-privileges"]),
+            "user": str(policy_kwargs.get("user", "1000:1000")),
+            "volumes": volumes,
+            "tmpfs": {
                 k: v
                 for k, v in (policy_kwargs.get("tmpfs") or {}).items()
                 if k not in core_targets
             },
-            working_dir="/workspace",
-            environment=env_vars,
-            remove=False,
-        )
+            "working_dir": "/workspace",
+            "environment": env_vars,
+            "remove": False,
+        }
+        pub = str(os.environ.get("STRIX_BROWSER_PUBLISH_NOVNC", "")).strip().lower()
+        if image_override and pub in ("1", "true", "yes", "on") and nm == "bridge":
+            # Solo dev: http://127.0.0.1:6080/vnc.html — VNC sin password en contenedor aislado
+            run_kw["ports"] = {"6080/tcp": ("127.0.0.1", 6080)}
+        container = client.containers.run(resolved_image, **run_kw)
+        self._session_image[session_id] = resolved_image
         self._containers[session_id] = container
         return container
 
@@ -260,6 +296,8 @@ class StrixSandboxManager:
         language: str = "python",
         policy: SecurityPolicy | None = None,
         secret_env: dict[str, str] | None = None,
+        timeout_seconds: int | None = None,
+        image_override: str | None = None,
     ) -> ExecutionResult:
         """Ejecuta código arbitrario en el sandbox del session_id dado.
 
@@ -274,33 +312,58 @@ class StrixSandboxManager:
                 out_dir,
                 policy=policy,
                 secret_env=secret_env,
+                image_override=image_override,
             )
         except Exception as e:
             return ExecutionResult(exit_code=1, stdout="", stderr=f"Error al levantar sandbox: {e}")
 
         if language == "python":
-            # Escribir código en archivo temporal dentro del contenedor
-            safe_code = code.replace("\\", "\\\\").replace('"', '\\"')
             cmd = ["python3", "-c", code]
         elif language == "bash":
             cmd = ["bash", "-c", code]
         else:
             return ExecutionResult(exit_code=1, stdout="", stderr=f"Lenguaje no soportado: {language}. Usa python o bash.")
 
-        try:
-            exec_result = container.exec_run(
+        # Repetir allowed_secrets en exec: el motor puede no heredar todo el env del contenedor
+        # cuando ExecConfig.Env está presente; así Tavily/OpenAI/etc. ven la misma clave que al create.
+        exec_env = dict(secret_env or {})
+        exec_env["PYTHONPATH"] = "/workspace"
+        if image_override:
+            exec_env["DISPLAY"] = ":99"
+
+        limit = int(timeout_seconds) if timeout_seconds is not None else int(self.timeout)
+        limit = max(1, min(limit, 600))
+
+        def _exec_blocking() -> Any:
+            return container.exec_run(
                 cmd=cmd,
                 workdir="/workspace",
                 demux=True,
-                environment={"PYTHONPATH": "/workspace"},
+                environment=exec_env,
             )
-            timeout_start = time.perf_counter()
-            # demux=True devuelve (stdout_bytes, stderr_bytes)
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                fut = pool.submit(_exec_blocking)
+                try:
+                    exec_result = fut.result(timeout=limit)
+                except FuturesTimeout:
+                    try:
+                        container.stop(timeout=10)
+                    except Exception:
+                        pass
+                    self._containers.pop(session_id, None)
+                    self._session_image.pop(session_id, None)
+                    return ExecutionResult(
+                        exit_code=124,
+                        stdout="",
+                        stderr=f"Sandbox: tiempo de ejecución agotado ({limit}s).",
+                        timed_out=True,
+                    )
             raw_stdout, raw_stderr = exec_result.output or (b"", b"")
             stdout = (raw_stdout or b"").decode("utf-8", errors="replace").strip()
             stderr = (raw_stderr or b"").decode("utf-8", errors="replace").strip()
-            elapsed = time.perf_counter() - timeout_start
-            timed_out = elapsed > self.timeout
+            timed_out = False
         except Exception as e:
             return ExecutionResult(exit_code=1, stdout="", stderr=f"Error de ejecución: {e}")
 
@@ -341,6 +404,7 @@ class StrixSandboxManager:
         except Exception:
             pass
         self._containers.pop(session_id, None)
+        self._session_image.pop(session_id, None)
         # Limpiar directorios temporales
         session_dir = _TMP_BASE / session_id
         shutil.rmtree(session_dir, ignore_errors=True)
@@ -447,6 +511,8 @@ def run_in_sandbox(
     max_retries: int = _MAX_RETRIES_DEFAULT,
     langsmith_tags: list[str] | None = None,
     worker_id: str = "",
+    image_override: str | None = None,
+    inject_python_header: bool = True,
 ) -> ExecutionResult:
     """Bucle de auto-corrección del spec (sección 5).
 
@@ -469,6 +535,7 @@ def run_in_sandbox(
     manager = _get_manager()
     policy = load_security_policy(worker_id or "default")
     secret_env = _load_allowed_secrets(policy)
+    timeout_sec = max(1, min(int(policy.max_execution_time_seconds), 600))
 
     # Protocolo de firewall: inyectar datos si se requiere
     if data_sql:
@@ -478,10 +545,23 @@ def run_in_sandbox(
     current_code = code
     result = ExecutionResult(exit_code=1, stdout="", stderr="No ejecutado aún.")
     tags = (langsmith_tags or []) + ["execution_environment:strix_sandbox"]
+    if image_override:
+        tags = tags + ["execution_environment:strix_browser"]
 
     for attempt in range(1, max_retries + 1):
-        exec_code = _inject_sandbox_python_header(current_code) if lang == "python" else current_code
-        result = manager.execute(sid, exec_code, language, policy=policy, secret_env=secret_env)
+        if lang == "python" and inject_python_header:
+            exec_code = _inject_sandbox_python_header(current_code)
+        else:
+            exec_code = current_code
+        result = manager.execute(
+            sid,
+            exec_code,
+            language,
+            policy=policy,
+            secret_env=secret_env,
+            timeout_seconds=timeout_sec,
+            image_override=image_override,
+        )
         result.attempts = attempt
 
         _langsmith_log(
@@ -675,6 +755,108 @@ def _pip_install_hints_for_missing_modules(modules: list[str]) -> tuple[list[str
             pip_names.append(pkg)
     line = "pip install --no-cache-dir " + " ".join(pip_names) if pip_names else ""
     return pip_names, line
+
+
+def _parquet_row_count(path: str) -> int | None:
+    try:
+        import pyarrow.parquet as pq  # noqa: PLC0415
+
+        meta = pq.read_metadata(path)
+        return int(meta.num_rows)
+    except Exception:
+        return None
+
+
+def _browser_sandbox_summary(stdout: str, artifacts: list[str]) -> tuple[str, int | None, str | None]:
+    """status corto, filas inferidas, nombre de archivo parquet si existe."""
+    jobs: int | None = None
+    file_hint: str | None = None
+    for a in artifacts:
+        if Path(a).suffix.lower() == ".parquet":
+            file_hint = Path(a).name
+            jobs = _parquet_row_count(a)
+            break
+    if jobs is None and stdout:
+        m = re.search(r"(\d+)\s+vacantes", stdout, flags=re.IGNORECASE)
+        if not m:
+            m = re.search(r"Extracci[oó]n completada:\s*(\d+)", stdout, flags=re.IGNORECASE)
+        if m:
+            jobs = int(m.group(1))
+    if jobs is not None and file_hint is None:
+        file_hint = "osint_jobs.parquet"
+    st = "success" if file_hint or (jobs is not None and jobs >= 0) else "completed"
+    return st, jobs, file_hint
+
+
+def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
+    """StructuredTool `run_browser_sandbox` — imagen STRIX_BROWSER_IMAGE, salida Parquet en /workspace/output/."""
+    from langchain_core.tools import StructuredTool  # noqa: PLC0415
+
+    def _run(
+        code: str,
+        language: str = "python",
+        data_sql: str = "",
+        session_id: str = "",
+        worker_id: str = "",
+    ) -> str:
+        result = run_in_sandbox(
+            db=db,
+            llm=llm,
+            code=code,
+            language=language or "python",
+            session_id=session_id or uuid.uuid4().hex[:12],
+            data_sql=data_sql or None,
+            original_request=code,
+            worker_id=worker_id or "",
+            image_override=_browser_image_name(),
+            inject_python_header=False,
+        )
+        st, jobs_n, parquet_name = _browser_sandbox_summary(result.stdout or "", result.artifacts or [])
+        out: dict[str, Any] = {
+            "exit_code": result.exit_code,
+            "status": st if result.exit_code == 0 else "error",
+            "jobs_extracted": jobs_n,
+            "file": parquet_name,
+            "stdout_tail": (result.stdout or "")[-2000:],
+            "stderr_tail": (result.stderr or "")[-1500:],
+        }
+        if result.artifacts:
+            out["artifacts"] = result.artifacts
+        if result.timed_out:
+            out["warning"] = "Timeout alcanzado"
+        if result.attempts > 1:
+            out["auto_corrected_attempts"] = result.attempts
+        if result.exit_code != 0:
+            raw_err = (result.stderr or result.stdout or "error desconocido").strip()
+            err_snip = raw_err[:1500]
+            missing_mods = _missing_python_modules_from_traceback(raw_err)
+            if missing_mods:
+                pip_pkgs, pip_line = _pip_install_hints_for_missing_modules(missing_mods)
+                out["missing_pip_packages"] = pip_pkgs
+                out["hint"] = (
+                    f"{err_snip}\n\nMódulos no encontrados: {', '.join(missing_mods)}.\n"
+                    f"Añade en docker/browser-env/Dockerfile: {pip_line}\n"
+                    "Reconstruye: docker build -t duckclaw/browser-env:latest docker/browser-env/\n"
+                    "Variables: STRIX_BROWSER_IMAGE (opcional)."
+                )
+            else:
+                out["hint"] = err_snip
+        compact_keys = ("exit_code", "status", "jobs_extracted", "file", "artifacts", "warning", "auto_corrected_attempts", "hint")
+        return json.dumps({k: out[k] for k in compact_keys if k in out}, ensure_ascii=False)
+
+    return StructuredTool.from_function(
+        _run,
+        name="run_browser_sandbox",
+        description=(
+            "Ejecuta código Python (o bash) en el Strix **browser** sandbox: Chromium vía **Playwright** "
+            "(import: playwright.async_api), Xvfb y red según security_policy.yaml del worker. "
+            "No uses el paquete Python `browser_use` en código generado (API inestable). "
+            "OSINT JobHunter: **solo** resúmenes en stdout y filas en `/workspace/output/osint_jobs.parquet` "
+            "(no devolver HTML ni JSON masivo al contexto). "
+            "Tras éxito, usa `read_sql` con `read_parquet` en la ruta absoluta del host listada en `artifacts`. "
+            "Parámetros: code, language ('python'|'bash'), data_sql opcional, session_id, worker_id."
+        ),
+    )
 
 
 def sandbox_tool_factory(db: Any, llm: Any) -> Any:

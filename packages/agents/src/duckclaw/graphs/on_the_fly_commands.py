@@ -9,7 +9,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any, Optional, Tuple
 from duckclaw.vaults import (
     create_vault as _vault_create,
@@ -2753,6 +2758,7 @@ def execute_help(db: Any, chat_id: Any) -> str:
         (_telegram_safe("/heartbeat"), _telegram_safe("Activa mensajes en tiempo real mientras el agente trabaja")),
         (_telegram_safe("/audit"), _telegram_safe("Última auditoría de ejecución")),
         (_telegram_safe("/health"), _telegram_safe("Estado del servicio")),
+        (_telegram_safe("/sensors"), _telegram_safe("DuckDB, IBKR, Lake, Tavily, Reddit, Trends, browser sandbox")),
         (_telegram_safe("/new_mind"), _telegram_safe("The Mind: crear partida (alias de /new_game the_mind)")),
         (_telegram_safe("/join <game_id>"), _telegram_safe("The Mind: unirse a partida")),
         (_telegram_safe("/start_mind [game_id]"), _telegram_safe("The Mind: iniciar y repartir Nivel 1")),
@@ -2763,6 +2769,8 @@ def execute_help(db: Any, chat_id: Any) -> str:
         (_telegram_safe("/setup"), _telegram_safe("Config key=value")),
         (_telegram_safe("/approve"), _telegram_safe("Aprobar última acción")),
         (_telegram_safe("/reject"), _telegram_safe("Rechazar última acción")),
+        (_telegram_safe("/execute_signal <uuid>"), _telegram_safe("Finanz quant: confirma ejecución de orden (HITL)")),
+        (_telegram_safe("/lake"), _telegram_safe("Estado del túnel SSH Capadonna (env + prueba rápida)")),
     ]
     if _leila_fly_commands_enabled():
         lines.extend(
@@ -2784,6 +2792,362 @@ def _fly_reply_preview(s: str, max_len: int = 120) -> str:
     return t
 
 
+def _ssh_reach_icon(reach: str) -> str:
+    r = (reach or "").lower()
+    if "alcanzable" in r and "ok" in r:
+        return "✅"
+    if "no probado" in r or "falta config" in r:
+        return "⚠️"
+    return "❌"
+
+
+def _capadonna_lake_status_lines(*, compact: bool) -> list[str]:
+    """Líneas de diagnóstico Lake Capadonna (misma lógica que /lake; compact para /sensors)."""
+    from duckclaw.forge.skills.quant_market_bridge import (
+        capadonna_ssh_config_ok,
+        lake_belief_observed_values,
+        _resolved_identity_file,
+    )
+
+    host = (os.environ.get("CAPADONNA_SSH_HOST") or "").strip()
+    user = (os.environ.get("CAPADONNA_SSH_USER") or "capadonna").strip()
+    cmd_set = bool((os.environ.get("CAPADONNA_REMOTE_OHLC_CMD") or "").strip())
+    idp = _resolved_identity_file()
+    strict = capadonna_ssh_config_ok()
+    host_v, online_v = lake_belief_observed_values()
+    reach = "no probado (falta config)"
+    if strict and host:
+        ssh_args: list[str] = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
+        if idp:
+            ssh_args.extend(["-i", idp])
+        ssh_args.extend([f"{user}@{host}", "true"])
+        try:
+            proc = subprocess.run(ssh_args, capture_output=True, text=True, timeout=20)
+            if proc.returncode == 0:
+                reach = "alcanzable (ssh true OK)"
+            else:
+                err = (proc.stderr or proc.stdout or "").strip()[:200]
+                reach = f"fallo rc={proc.returncode}" + (f" — {err}" if err else "")
+        except FileNotFoundError:
+            reach = "ssh no encontrado en PATH"
+        except subprocess.TimeoutExpired:
+            reach = "timeout 20s"
+        except Exception as e:
+            reach = str(e)[:120]
+    if compact:
+        icfg = "✅" if strict else "⚠️"
+        ireach = _ssh_reach_icon(reach)
+        return [
+            "🌊 Lake Capadonna · SSH / Tailscale",
+            f"   {icfg} Config operativa: {'sí' if strict else 'no'} · CAPADONNA_SSH_HOST: {'sí' if host else 'no'}",
+            f"   📊 Creencias 0/1: lake_host_configured≈{int(host_v)} · lake_status_online≈{int(online_v)}",
+            f"   {ireach} Alcance SSH (rápido): {reach}",
+        ]
+    lines = [
+        "Capadonna Lake (SSH)",
+        f"- CAPADONNA_SSH_HOST: {'sí' if host else 'no'}",
+        f"- CAPADONNA_SSH_USER: {user}",
+        f"- CAPADONNA_REMOTE_OHLC_CMD: {'sí' if cmd_set else 'no'}",
+        f"- Clave SSH (-i): {idp or '(no definida / ssh-agent)'}",
+        f"- Config lista para intentar: {'sí' if strict else 'no'}",
+        f"- Semántica creencias (0/1): lake_host_configured≈{int(host_v)} lake_status_online≈{int(online_v)}",
+        f"- Alcance SSH rápido: {reach}",
+    ]
+    return lines
+
+
+def _probe_ibkr_portfolio(timeout_s: float = 8.0) -> str:
+    api_url = os.environ.get("IBKR_PORTFOLIO_API_URL", "").strip()
+    api_key = os.environ.get("IBKR_PORTFOLIO_API_KEY", "").strip()
+    if not api_url or not api_key:
+        return "Portafolio: no configurado (IBKR_PORTFOLIO_API_URL o IBKR_PORTFOLIO_API_KEY)"
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    req = urllib.request.Request(api_url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            if resp.status != 200:
+                return f"Portafolio: HTTP {resp.status}"
+            return "Portafolio: OK (HTTP 200, JSON)"
+    except urllib.error.HTTPError as e:
+        return f"Portafolio: HTTP {e.code}"[:80]
+    except urllib.error.URLError as e:
+        return f"Portafolio: red — {e.reason!s}"[:100]
+    except Exception as e:
+        return f"Portafolio: {str(e)[:80]}"
+
+
+def _sensor_line_bullet(icon: str, text: str) -> str:
+    """Una línea de detalle bajo un bloque /sensors (icono + texto)."""
+    t = (text or "").strip()
+    return f"   {icon} {t}" if t else f"   {icon}"
+
+
+def _ibkr_detail_icon(line: str) -> str:
+    low = (line or "").lower()
+    if "no configurado" in low:
+        return "⚠️"
+    if "http 404" in low:
+        return "⚠️"
+    if ": ok" in low or " ok " in low:
+        return "✅"
+    if "http 200" in low:
+        return "✅"
+    return "❌"
+
+
+def _probe_ibkr_market_data(timeout_s: float = 8.0) -> str:
+    base = (os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()
+    if not base:
+        return "Mercado OHLC: no configurado (IBKR_MARKET_DATA_URL)"
+    q = urllib.parse.urlencode({"ticker": "SPY", "timeframe": "1d", "lookback_days": "3"})
+    url = f"{base}&{q}" if "?" in base else f"{base}?{q}"
+    req = urllib.request.Request(url, method="GET")
+    token = (
+        os.environ.get("IBKR_PORTFOLIO_API_KEY") or os.environ.get("IBKR_MARKET_DATA_API_KEY") or ""
+    ).strip()
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return "Mercado OHLC: respuesta no JSON"
+        if isinstance(payload, dict):
+            err = payload.get("error") or payload.get("message")
+            if err and isinstance(err, str) and err.strip():
+                return f"Mercado OHLC: API — {err.strip()[:80]}"
+        return "Mercado OHLC: OK (JSON)"
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return (
+                "Mercado OHLC: HTTP 404 — la URL no existe en el API "
+                "(Capadonna :8002 no expone aún OHLC por HTTP). "
+                "Histórico 1d/1w/1M/moc vía lake SSH está bien; "
+                "intradía necesita ese endpoint o quita IBKR_MARKET_DATA_URL del .env."
+            )[:280]
+        return f"Mercado OHLC: HTTP {e.code}"[:80]
+    except urllib.error.URLError as e:
+        return f"Mercado OHLC: red — {e.reason!s}"[:100]
+    except Exception as e:
+        return f"Mercado OHLC: {str(e)[:80]}"
+
+
+def _browser_sandbox_sensor_lines() -> list[str]:
+    """Líneas compactas para /sensors: manifest finanz, Docker, imagen browser, red en policy."""
+    lines: list[str] = [
+        "🌐 Browser sandbox · Playwright (`run_browser_sandbox`)",
+    ]
+    mf_bs: bool | None = None
+    try:
+        from duckclaw.workers.manifest import load_manifest
+
+        mf_bs = bool(load_manifest("finanz").browser_sandbox)
+    except Exception:
+        mf_bs = None
+
+    if mf_bs is None:
+        lines.append(_sensor_line_bullet("⚠️", "No se pudo leer manifest finanz (browser_sandbox)"))
+    elif mf_bs:
+        lines.append(_sensor_line_bullet("✅", "Worker finanz: browser_sandbox=true"))
+    else:
+        lines.append(_sensor_line_bullet("⚠️", "Worker finanz: browser_sandbox=false — tool no registrada"))
+
+    net_mode: str | None = None
+    try:
+        from duckclaw.forge import WORKERS_TEMPLATES_DIR
+        from duckclaw.forge.schema import load_security_policy
+
+        pol = load_security_policy("finanz", worker_dir=WORKERS_TEMPLATES_DIR / "finanz")
+        net_mode = "bridge" if pol.network.default != "deny" else "deny"
+        if net_mode == "deny":
+            lines.append(
+                _sensor_line_bullet(
+                    "⚠️",
+                    "security_policy finanz: red=deny — Playwright no podrá abrir URLs HTTP",
+                )
+            )
+    except Exception:
+        net_mode = None
+
+    try:
+        from duckclaw.graphs.sandbox import _browser_image_name, _docker_available
+    except Exception as exc:
+        lines.append(_sensor_line_bullet("❌", f"Sandbox no importable — {exc!s}"[:120]))
+        return lines
+
+    if not _docker_available():
+        lines.append(_sensor_line_bullet("❌", "Docker no responde — run_browser_sandbox no arrancará"))
+        return lines
+
+    lines.append(_sensor_line_bullet("✅", "Docker ping OK"))
+
+    img = _browser_image_name()
+    env_override = bool((os.environ.get("STRIX_BROWSER_IMAGE") or "").strip())
+    label = f"{img}" + (" · STRIX_BROWSER_IMAGE" if env_override else "")
+
+    try:
+        import docker  # noqa: PLC0415
+
+        client = docker.from_env()
+        client.images.get(img)
+        lines.append(_sensor_line_bullet("✅", f"Imagen local · {label}"[:140]))
+    except Exception:
+        lines.append(
+            _sensor_line_bullet(
+                "⚠️",
+                f"Imagen no encontrada localmente · {label} — build/pull antes del primer uso",
+            )[:200]
+        )
+
+    if net_mode == "bridge":
+        lines.append(_sensor_line_bullet("✅", "Policy red: bridge (HTTP permitido en contenedor browser)"))
+
+    return lines
+
+
+def execute_sensors(db: Any) -> str:
+    """/sensors: resumen DuckDB, IBKR, Lake, Tavily, Reddit, Google Trends, browser sandbox (proceso gateway)."""
+    blocks: list[str] = ["📡 Sensores Finanz", "═══════════════════════", ""]
+
+    try:
+        db.query("SELECT 1")
+        blocks.append("🦆 DuckDB local")
+        blocks.append(_sensor_line_bullet("✅", "Conectado · SELECT 1 OK"))
+    except Exception as e:
+        blocks.append("🦆 DuckDB local")
+        blocks.append(_sensor_line_bullet("❌", f"Error — {str(e)[:100]}"))
+
+    blocks.append("")
+    blocks.append("🏦 IBKR (gateway)")
+    p_line = _probe_ibkr_portfolio()
+    m_line = _probe_ibkr_market_data()
+    blocks.append(_sensor_line_bullet(_ibkr_detail_icon(p_line), p_line))
+    blocks.append(_sensor_line_bullet(_ibkr_detail_icon(m_line), m_line))
+
+    blocks.append("")
+    try:
+        blocks.extend(_capadonna_lake_status_lines(compact=True))
+    except Exception as e:
+        blocks.append("🌊 Lake Capadonna")
+        blocks.append(_sensor_line_bullet("❌", f"Error — {str(e)[:100]}"))
+
+    blocks.append("")
+    try:
+        from duckclaw.forge.skills.research_bridge import _tavily_available
+    except Exception:
+        _tavily_available = lambda: False  # type: ignore[misc, assignment]
+
+    tav_pkg = False
+    try:
+        import tavily  # noqa: F401
+
+        tav_pkg = True
+    except ImportError:
+        pass
+    tav_key = bool((os.environ.get("TAVILY_API_KEY") or "").strip())
+    tav_ready = bool(_tavily_available())
+    blocks.append("🔎 Tavily (research)")
+    if tav_ready and tav_pkg and tav_key:
+        blocks.append(_sensor_line_bullet("✅", "Listo · paquete · TAVILY_API_KEY · bridge"))
+    elif not tav_pkg and not tav_key:
+        blocks.append(_sensor_line_bullet("⚠️", "Sin paquete tavily ni clave"))
+    else:
+        blocks.append(
+            _sensor_line_bullet(
+                "⚠️",
+                f"Parcial · paquete={'sí' if tav_pkg else 'no'} · clave={'sí' if tav_key else 'no'} · bridge={'sí' if tav_ready else 'no'}",
+            )
+        )
+
+    blocks.append("")
+    try:
+        from duckclaw.forge.skills.reddit_bridge import _mcp_available, _reddit_env_ready
+    except Exception:
+        redd_mcp = False
+        redd_env = False
+    else:
+        redd_mcp = _mcp_available()
+        redd_env = _reddit_env_ready()
+    npx_ok = shutil.which("npx") is not None
+    blocks.append("📣 Reddit · mcp-reddit")
+    if redd_mcp and redd_env and npx_ok:
+        blocks.append(_sensor_line_bullet("✅", "Librería MCP · env Reddit · npx en PATH"))
+    else:
+        blocks.append(
+            _sensor_line_bullet(
+                "⚠️",
+                f"mcp_lib={'sí' if redd_mcp else 'no'} · env={'sí' if redd_env else 'no'} · npx={'sí' if npx_ok else 'no'}",
+            )
+        )
+
+    blocks.append("")
+    try:
+        from duckclaw.forge.skills.google_trends_bridge import (
+            _default_stdio_command_and_args,
+            _mcp_available as _gt_mcp_ok,
+        )
+    except Exception:
+        gt_cmd = ""
+        gt_args: list[str] = []
+        gt_mcp = False
+    else:
+        gt_mcp = _gt_mcp_ok()
+        gt_cmd, gt_args = _default_stdio_command_and_args()
+    blocks.append("📈 Google Trends MCP")
+    if not gt_cmd:
+        blocks.append(_sensor_line_bullet("⚠️", "Stdio no resuelto (google-trends-mcp / uvx en PATH)"))
+    else:
+        arg_hint = f" {' '.join(gt_args)}" if gt_args else ""
+        tid = "✅" if gt_mcp else "⚠️"
+        blocks.append(
+            _sensor_line_bullet(
+                tid,
+                f"mcp_lib={'sí' if gt_mcp else 'no'} · stdio: {gt_cmd}{arg_hint}",
+            )
+        )
+
+    blocks.append("")
+    try:
+        blocks.extend(_browser_sandbox_sensor_lines())
+    except Exception as e:
+        blocks.append("🌐 Browser sandbox · Playwright (`run_browser_sandbox`)")
+        blocks.append(_sensor_line_bullet("❌", f"Error — {str(e)[:100]}"))
+
+    return _telegram_safe("\n".join(blocks))
+
+
+def execute_lake_status() -> str:
+    """/lake [status]: variables Capadonna y prueba SSH corta (BatchMode, ConnectTimeout=5)."""
+    try:
+        lines = _capadonna_lake_status_lines(compact=False)
+    except Exception as e:
+        return _telegram_safe(f"Lake: no se pudo cargar el bridge quant: {e}")
+    return _telegram_safe("\n".join(lines))
+
+
+def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
+    """/execute_signal <uuid>: autoriza una llamada a execute_order (HITL) para Finanz quant."""
+    sid = (args or "").strip().lower()
+    if not re.match(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        sid,
+    ):
+        return _telegram_safe("Uso: /execute_signal <signal_id_UUID>")
+    try:
+        from duckclaw.forge.skills.quant_hitl import grant_execute_order
+
+        grant_execute_order(str(chat_id).strip(), sid)
+    except Exception as e:
+        return _telegram_safe(f"No se pudo registrar la confirmación: {e}")
+    return _telegram_safe(
+        f"Confirmación registrada para la señal {sid}. "
+        "Pide al asistente que ejecute la herramienta execute_order con ese signal_id en esta sesión."
+    )
+
+
 def _dispatch_fly_command(
     db: Any,
     chat_id: Any,
@@ -2796,6 +3160,15 @@ def _dispatch_fly_command(
     username: str = "",
 ) -> Optional[str]:
     """Ejecuta un comando fly ya parseado (sin contexto de logging)."""
+    if name == "sensors":
+        return execute_sensors(db)
+    if name == "lake":
+        sub = (args or "").strip().lower()
+        if sub in ("", "status"):
+            return execute_lake_status()
+        return _telegram_safe("Uso: /lake o /lake status")
+    if name == "execute_signal":
+        return execute_quant_execute_signal(chat_id, args)
     if name == "catalogo" and _leila_fly_commands_enabled():
         return execute_leila_catalogo(db, chat_id)
     if name == "pedido" and _leila_fly_commands_enabled():

@@ -58,3 +58,53 @@ CREATE INDEX IF NOT EXISTS idx_job_opportunities_apply_url ON finance_worker.job
 
 INSERT INTO finance_worker.categories (id, name) VALUES (1, 'Otros')
 ON CONFLICT (id) DO NOTHING;
+
+-- Quantitative trading (spec: Quantitative Trading Worker) — misma bóveda Finanz
+CREATE SCHEMA IF NOT EXISTS quant_core;
+
+CREATE TABLE IF NOT EXISTS quant_core.ohlcv_data (
+    ticker VARCHAR,
+    timestamp TIMESTAMP,
+    open DOUBLE,
+    high DOUBLE,
+    low DOUBLE,
+    close DOUBLE,
+    volume DOUBLE,
+    PRIMARY KEY (ticker, timestamp)
+);
+
+CREATE TABLE IF NOT EXISTS quant_core.trade_signals (
+    signal_id UUID PRIMARY KEY,
+    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ticker VARCHAR,
+    strategy_name VARCHAR,
+    action VARCHAR,
+    confidence_score DOUBLE,
+    target_price DOUBLE,
+    stop_loss DOUBLE
+);
+
+CREATE TABLE IF NOT EXISTS quant_core.portfolio_positions (
+    ticker VARCHAR PRIMARY KEY,
+    qty DOUBLE,
+    avg_entry_price DOUBLE,
+    current_price DOUBLE,
+    unrealized_pnl DOUBLE,
+    updated_at TIMESTAMP
+);
+
+-- Cyber-Fluid Dynamics (CFD) — spec: Cyber-Fluid Dynamics CFD (Finanz).md
+CREATE TABLE IF NOT EXISTS quant_core.fluid_state (
+    ticker VARCHAR NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
+    hex_signature VARCHAR NOT NULL,
+    mass DOUBLE,
+    density DOUBLE,
+    temperature DOUBLE,
+    pressure DOUBLE,
+    viscosity DOUBLE,
+    surface_tension DOUBLE,
+    phase VARCHAR NOT NULL,
+    PRIMARY KEY (ticker, timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_fluid_state_ticker ON quant_core.fluid_state (ticker);

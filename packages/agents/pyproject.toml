@@ -18,6 +18,11 @@ dependencies = [
     "mcp>=1.0.0; python_full_version >= '3.10'",
 ]
 
+[project.optional-dependencies]
+google-trends = [
+    "google-trends-mcp>=1.0.2; python_full_version >= '3.10'",
+]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 # duckclaw.graphs (src/duckclaw/graphs), duckclaw.workers, duckclaw.forge (forge/skills en forge)

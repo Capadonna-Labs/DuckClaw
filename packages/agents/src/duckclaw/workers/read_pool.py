@@ -100,7 +100,8 @@ def _enforce_allowed_tables_error(spec: WorkerSpec, q_upper: str) -> Optional[st
     if "INFORMATION_SCHEMA" in q_upper or "SHOW TABLES" in q_upper or "SHOW " in q_upper:
         return None
     for t in allowed:
-        if t.upper() in q_upper or f"{schema}.{t}".upper() in q_upper:
+        ts = str(t)
+        if ts.upper() in q_upper or f"{schema}.{ts}".upper() in q_upper:
             return None
     if any(k in q_upper for k in ("FROM", "INTO", "UPDATE", "DELETE", "JOIN", "TABLE")):
         return json.dumps({"error": f"Solo se permiten las tablas: {', '.join(allowed)}."})
@@ -113,6 +114,8 @@ def _qualify_allowed_tables(query: str, schema_name: str, spec: WorkerSpec) -> s
         return query
     out = query
     for table in allowed:
+        if "." in str(table):
+            continue
         escaped = re.escape(table)
         out = re.sub(rf"(?<!\.)\b{escaped}\b", f"{schema_name}.{table}", out, flags=re.IGNORECASE)
     return out

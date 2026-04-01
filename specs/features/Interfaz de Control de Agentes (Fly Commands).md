@@ -64,6 +64,14 @@ Historial de tareas ejecutadas (auditoría de rendimiento). Sin args: últimas 5
 
 Estado de infraestructura: DuckDB, MLX (si aplica), latencia. Útil para diagnóstico sin acceder al servidor.
 
+### F2. `/lake` | `/lake status`
+
+Diagnóstico del acceso SSH al **Lake Capadonna** (variables `CAPADONNA_*` en el proceso del gateway, resolución de clave `-i`, semántica 0/1 alineada con `finance_worker.agent_beliefs` para `lake_host_configured` / `lake_status_online`, y prueba rápida `ssh -o BatchMode=yes -o ConnectTimeout=5 user@host true` cuando la config es válida). No ingiere OHLCV; para datos reales usar la tool `fetch_lake_ohlcv` o `fetch_market_data`.
+
+### F3. `/sensors`
+
+Resumen en un solo mensaje de sensores y rutas de datos del **proceso del gateway**: DuckDB local (`SELECT 1` sobre la sesión activa), **IBKR** (portafolio vía `GET` a `IBKR_PORTFOLIO_API_URL` con clave; mercado OHLC vía `GET` mínimo a `IBKR_MARKET_DATA_URL` con parámetros de prueba; timeouts cortos), **Lake Capadonna** (misma prueba SSH compacta que `/lake`), **Tavily** (presencia de `tavily-python` y `TAVILY_API_KEY`; sin llamada a la API para no gastar cuota), **Reddit MCP** (librería MCP, env Reddit completo, `npx` en PATH), **Google Trends MCP** (librería MCP y comando stdio resuelto para `google-trends-mcp` / `uvx`), **Browser sandbox** (manifest `finanz` → `browser_sandbox`, Docker ping, imagen `STRIX_BROWSER_IMAGE` / `duckclaw/browser-env:latest` presente localmente, y `security_policy.yaml` finanz: red bridge vs deny para HTTP en Playwright). Tavily, Reddit y Trends reflejan **capacidad y configuración en el proceso**, no un health end-to-end del servicio externo salvo donde se indica (IBKR y SSH lake).
+
 ### G. `/approve` | `/reject`
 
 Autoriza o deniega una operación retenida por SQLValidator o SandboxPipeline (grafo en `interrupt`). HITL para acciones sensibles.

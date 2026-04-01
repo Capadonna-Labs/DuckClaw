@@ -71,32 +71,24 @@ async def connect_github_mcp(
         return []
 
     try:
-        from mcp.client.stdio import stdio_client, StdioServerParameters
-        from mcp import ClientSession
+        from mcp.client.stdio import StdioServerParameters
     except ImportError:
         return []
 
     env = os.environ.copy()
     env["GITHUB_PERSONAL_ACCESS_TOKEN"] = token
 
+    server_params = StdioServerParameters(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-github"],
+        env=env,
+    )
     try:
-        server_params = StdioServerParameters(
-            command="npx",
-            args=["-y", "@modelcontextprotocol/server-github"],
-            env=env,
-        )
-        read_stream, write_stream = await stdio_client(server_params)
+        from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_list_tools
+
+        tools_specs = await mcp_stdio_list_tools(server_params)
     except Exception:
         return []
-
-    try:
-        session = ClientSession(read_stream, write_stream)
-        await session.initialize()
-        tools_result = await session.list_tools()
-    except Exception:
-        return []
-
-    tools_specs = getattr(tools_result, "tools", []) or []
     from langchain_core.tools import StructuredTool
 
     result: list[Any] = []
@@ -106,30 +98,20 @@ async def connect_github_mcp(
         if is_destructive and hitl_destructive:
             tool = _wrap_with_hitl(t, name)
         else:
-            tool = _mcp_tool_to_structured(session, t, name)
+            tool = _mcp_tool_to_structured(server_params, t, name)
         if tool:
             result.append(tool)
 
     return result
 
 
-def _mcp_tool_to_structured(session: Any, tool_spec: Any, name: str) -> Optional[Any]:
+def _mcp_tool_to_structured(server_params: Any, tool_spec: Any, name: str) -> Optional[Any]:
     """Convierte una tool MCP en StructuredTool de LangChain."""
+    from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_call_tool
     from langchain_core.tools import StructuredTool
 
-    async def _call(**kwargs: Any) -> str:
-        try:
-            result = await session.call_tool(name, kwargs)
-            content = getattr(result, "content", None) or []
-            if isinstance(content, list) and content:
-                part = content[0]
-                return getattr(part, "text", str(part))
-            return str(result)
-        except Exception as e:
-            return f"Error MCP: {e}"
-
     def _sync_call(**kwargs: Any) -> str:
-        return _run_async_from_sync(_call(**kwargs))
+        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, dict(kwargs)))
 
     desc = getattr(tool_spec, "description", None) or f"GitHub MCP tool: {name}"
     return StructuredTool.from_function(

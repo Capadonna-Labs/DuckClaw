@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 
@@ -14,7 +16,8 @@ def test_plan_task_job_hunter_uses_tavily_not_run_sandbox_only() -> None:
     )
     assert override is None
     assert "tavily_search" in task.lower()
-    assert "run_sandbox" in task.lower()
+    assert "run_browser_sandbox" in task.lower()
+    assert "income_injection" in task.lower()
     assert "3 vacantes" in task.lower() or "hasta 3" in task.lower()
     # Otro worker: no debe aplicar la rama Job-Hunter
     task2, _ = _plan_task(
@@ -22,6 +25,30 @@ def test_plan_task_job_hunter_uses_tavily_not_run_sandbox_only() -> None:
         "finanz",
     )
     assert task2 == "busca un trabajo de data scientist en Colombia y pásame la url"
+
+
+def test_cashflow_stress_intent_detection() -> None:
+    from duckclaw.graphs.manager_graph import _user_signals_cashflow_stress
+
+    assert _user_signals_cashflow_stress("ando ilíquido y no me alcanza este mes")
+    assert _user_signals_cashflow_stress("necesito ingresos extra para pagar deudas")
+    assert not _user_signals_cashflow_stress("muéstrame el esquema de tablas")
+
+
+def test_pick_job_hunter_worker_from_team() -> None:
+    from duckclaw.graphs.manager_graph import _pick_job_hunter_worker
+
+    assert _pick_job_hunter_worker(["finanz", "Job-Hunter"]) == "Job-Hunter"
+    assert _pick_job_hunter_worker(["finanz", "job_hunter"]) == "job_hunter"
+    assert _pick_job_hunter_worker(["finanz", "bi-analyst"]) is None
+
+
+def test_detect_income_injection_marker() -> None:
+    from duckclaw.graphs.manager_graph import _contains_income_injection_request
+
+    assert _contains_income_injection_request("rechazo por déficit [A2A_REQUEST: INCOME_INJECTION]")
+    assert _contains_income_injection_request("... [a2a_request: income_injection] ...")
+    assert not _contains_income_injection_request("sin marcador de handoff")
 
 
 def test_plan_task_bi_analyst_meta_capabilities() -> None:
@@ -157,3 +184,66 @@ def test_manager_capabilities_fast_path_ok() -> None:
     assert "osint" in jh and "discovery" in jh
     assert "osint" in _capabilities_fast_reply_text("job_hunter").lower()
     assert "osint" in _capabilities_fast_reply_text("Job‐Hunter").lower()  # U+2010 hyphen
+
+
+def test_manager_a2a_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    from duckclaw.graphs.manager_graph import build_manager_graph
+
+    class _FakeDB:
+        pass
+
+    call_log: list[tuple[str, str, bool]] = []
+
+    class _FakeWorkerGraph:
+        def __init__(self, wid: str):
+            self.wid = wid
+
+        def invoke(self, worker_state, _config=None):  # noqa: ANN001
+            task = str(worker_state.get("input") or "")
+            suppressed = bool(worker_state.get("suppress_subagent_egress"))
+            call_log.append((self.wid, task, suppressed))
+            if re.sub(r"[^a-z0-9]", "", self.wid.lower()) == "jobhunter":
+                # Simula sub-rutina intermedia: salida interna para síntesis, sin egress público.
+                if suppressed:
+                    return {"reply": "", "internal_reply": '{"quick_hits":[{"role":"Data Engineer"}]}'}
+                return {"reply": "jobhunter public"}
+            if self.wid.lower() == "finanz":
+                if "JobHunter completó la misión INCOME_INJECTION" in task:
+                    return {"reply": "Reporte final sintetizado por Finanz."}
+                return {"reply": "Operación rechazada por déficit. [A2A_REQUEST: INCOME_INJECTION]"}
+            return {"reply": "ok"}
+
+    def _fake_builder(worker_id, *_args, **_kwargs):  # noqa: ANN001
+        return _FakeWorkerGraph(str(worker_id))
+
+    monkeypatch.setattr("duckclaw.workers.factory.build_worker_graph", _fake_builder)
+    monkeypatch.setattr("duckclaw.workers.factory.list_workers", lambda *_a, **_k: ["finanz", "Job-Hunter"])
+    monkeypatch.setattr(
+        "duckclaw.graphs.on_the_fly_commands.get_effective_team_templates",
+        lambda *_a, **_k: ["finanz", "Job-Hunter"],
+    )
+    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.get_chat_state", lambda *_a, **_k: "off")
+    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.append_task_audit", lambda *_a, **_k: None)
+    monkeypatch.setattr("duckclaw.graphs.activity.set_busy", lambda *_a, **_k: None)
+    monkeypatch.setattr("duckclaw.graphs.activity.set_idle", lambda *_a, **_k: None)
+    monkeypatch.setattr("duckclaw.graphs.chat_heartbeat.schedule_chat_heartbeat_dm", lambda *_a, **_k: None)
+
+    graph = build_manager_graph(_FakeDB(), llm=None)
+    out = graph.invoke(
+        {
+            "incoming": "Quiero invertir 5M COP hoy mismo.",
+            "input": "Quiero invertir 5M COP hoy mismo.",
+            "chat_id": "test-chat",
+            "tenant_id": "default",
+            "user_id": "u1",
+            "available_templates": ["finanz", "Job-Hunter"],
+        }
+    )
+
+    # Flujo esperado: Finanz -> JobHunter (silenciado) -> Finanz síntesis.
+    assert len(call_log) >= 3
+    assert call_log[0][0] == "finanz"
+    assert re.sub(r"[^a-z0-9]", "", call_log[1][0].lower()) == "jobhunter"
+    assert call_log[1][2] is True
+    assert call_log[2][0] == "finanz"
+    assert "Reporte final sintetizado" in str(out.get("reply") or "")

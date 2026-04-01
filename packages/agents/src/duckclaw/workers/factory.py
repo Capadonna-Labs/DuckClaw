@@ -31,6 +31,15 @@ from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
 from duckclaw.workers import read_pool
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills, run_schema
+from duckclaw.workers.field_reflection import (
+    collect_tool_error_digest,
+    finanz_field_reflection_enabled,
+    format_field_experience_block,
+    last_tool_batch_has_error,
+    lesson_belief_key,
+    parse_reflection_json,
+    persist_field_lesson,
+)
 
 _NO_TASK_PATTERN = re.compile(
     r"^(hola|hi|hey|buenos?\s*d[ií]as?|buenas?\s*tardes?|buenas?\s*noches?|"
@@ -486,8 +495,10 @@ def _sync_finanz_lake_beliefs(db: Any, spec: WorkerSpec) -> None:
         try:
             db.execute(
                 f"""
-                INSERT INTO {schema}.agent_beliefs (belief_key, target_value, observed_value, threshold)
-                VALUES ('{key}', 1.0, {val}, 0.0)
+                INSERT INTO {schema}.agent_beliefs (
+                    belief_key, target_value, observed_value, threshold, belief_kind
+                )
+                VALUES ('{key}', 1.0, {val}, 0.0, 'numeric')
                 ON CONFLICT (belief_key) DO UPDATE SET
                     observed_value = excluded.observed_value,
                     last_updated = CURRENT_TIMESTAMP
@@ -897,7 +908,9 @@ def build_worker_graph(
         if (getattr(spec, "worker_id", None) or "").strip() == "LeilaAssistant"
         else _TASK_AWARENESS_PROMPT.strip()
     )
-    effective_prompt = (system_prompt or "").strip() + "\n\n" + _task_block
+    _system_prompt_only = (system_prompt or "").strip()
+    _task_block_resolved = _task_block
+    effective_prompt = _system_prompt_only + "\n\n" + _task_block_resolved
     # Cierre de dominio = última instrucción al modelo (p. ej. LeilaAssistant/domain_closure.md).
     effective_prompt = append_domain_closure_block(effective_prompt, spec)
     _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
@@ -937,11 +950,19 @@ def build_worker_graph(
                     break
         if not isinstance(incoming, str):
             incoming = str(incoming or "").strip()
-        prompt = (
-            _compose_bi_system_prompt(_bi_prompt_base, (state.get("analytical_summary") or "").strip())
-            if _bi_prompt_base is not None
-            else effective_prompt
-        )
+        if _bi_prompt_base is not None:
+            prompt = _compose_bi_system_prompt(_bi_prompt_base, (state.get("analytical_summary") or "").strip())
+        elif _lid == "finanz" and finanz_field_reflection_enabled(spec):
+            fe = format_field_experience_block(incoming, db, spec.schema_name, top_n=5)
+            if fe:
+                prompt = append_domain_closure_block(
+                    _system_prompt_only + "\n\n" + fe + "\n\n" + _task_block_resolved,
+                    spec,
+                )
+            else:
+                prompt = effective_prompt
+        else:
+            prompt = effective_prompt
         if crm_enabled:
             try:
                 from duckclaw.forge.crm.context_injector import graph_context_injector
@@ -1439,6 +1460,51 @@ def build_worker_graph(
         out.update(_identity_fields(state))
         return out
 
+    def reflector_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
+        """Finanz: tras errores de tools, LLM escribe lección en agent_beliefs (sin DELETE)."""
+        from langchain_core.messages import HumanMessage
+
+        if llm is None or not finanz_field_reflection_enabled(spec):
+            out = {**state}
+            out.update(_identity_fields(state))
+            return out
+        digest = collect_tool_error_digest(state.get("messages") or [])
+        if not digest:
+            out = {**state}
+            out.update(_identity_fields(state))
+            return out
+        incoming_r = (state.get("incoming") or "").strip()
+        instr = (
+            "Eres un analista de fallos de herramientas. Dado el error abajo, produce SOLO un JSON válido con:\n"
+            '  "context_trigger": string corto (palabras clave: nombre de tool, código de error, ticker si aplica), '
+            "máximo 500 caracteres\n"
+            '  "lesson_text": lección operativa en español, máximo 4000 caracteres; no inventes datos que no '
+            "aparezcan en el error\n"
+            '  "confidence_score": número entre 0.5 y 3.0 (utilidad esperada de recordar esta lección)\n'
+            "Sin markdown ni texto fuera del objeto JSON.\n\n"
+            f"Contexto del usuario (truncado): {incoming_r[:800]}\n\n"
+            f"Salidas erróneas de herramientas:\n{digest}"
+        )
+        try:
+            resp = llm.invoke([HumanMessage(content=instr)])
+            text = getattr(resp, "content", None) or str(resp)
+            parsed = parse_reflection_json(text)
+            if parsed:
+                bk = lesson_belief_key(parsed["context_trigger"], parsed["lesson_text"])
+                persist_field_lesson(
+                    db,
+                    spec.schema_name,
+                    bk,
+                    parsed["context_trigger"],
+                    parsed["lesson_text"],
+                    parsed["confidence_score"],
+                )
+        except Exception:
+            _log.debug("reflector_node failed", exc_info=True)
+        out = {**state}
+        out.update(_identity_fields(state))
+        return out
+
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.graphs.chat_heartbeat import format_tool_heartbeat, schedule_chat_heartbeat_dm
         from duckclaw.integrations.llm_providers import _strip_eot
@@ -1470,6 +1536,7 @@ def build_worker_graph(
         last = msgs[-1] if msgs else None
         reply = getattr(last, "content", None) or str(last) if last else ""
         reply = _strip_eot(reply or "").strip()
+        suppress_egress = bool(state.get("suppress_subagent_egress"))
         if not msgs:
             out_empty = {**state, "reply": "Sin respuesta generada."}
             out_empty.update(_identity_fields(state))
@@ -1491,7 +1558,8 @@ def build_worker_graph(
                     return out_tool
             except (json.JSONDecodeError, TypeError, KeyError, Exception):
                 pass
-        _notify_final_heartbeat()
+        if not suppress_egress:
+            _notify_final_heartbeat()
         try:
             from duckclaw.forge.atoms.job_hunter_output_validator import (
                 job_hunter_blocked_reply_message,
@@ -1520,7 +1588,10 @@ def build_worker_graph(
                     reply = new_r
         except Exception:
             pass
-        out = {**state, "reply": reply or "", "messages": msgs}
+        if suppress_egress:
+            out = {**state, "reply": "", "internal_reply": (reply or ""), "messages": msgs}
+        else:
+            out = {**state, "reply": reply or "", "internal_reply": (reply or ""), "messages": msgs}
         sb = (state.get("sandbox_photo_base64") or "").strip()
         if sb:
             out["sandbox_photo_base64"] = sb
@@ -1565,6 +1636,8 @@ def build_worker_graph(
         graph.add_node("context_monitor", context_monitor_node)
     graph.add_node("agent", agent_node)
     graph.add_node("tools", tools_node)
+    if finanz_field_reflection_enabled(spec) and llm is not None:
+        graph.add_node("reflector", reflector_node)
     graph.add_node("set_reply", set_reply)
     if context_guard_enabled:
         graph.add_node("fact_check", fact_check_node)
@@ -1594,7 +1667,22 @@ def build_worker_graph(
         graph.add_edge("handoff_reply", END)
     else:
         graph.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": "set_reply"})
-    if use_cm:
+    _tools_dest = "context_monitor" if use_cm else "agent"
+    _fr_graph = finanz_field_reflection_enabled(spec) and llm is not None
+
+    def route_after_tools(state: dict) -> str:
+        if _fr_graph and last_tool_batch_has_error(state.get("messages") or []):
+            return "reflector"
+        return "continue"
+
+    if _fr_graph:
+        graph.add_conditional_edges(
+            "tools",
+            route_after_tools,
+            {"reflector": "reflector", "continue": _tools_dest},
+        )
+        graph.add_edge("reflector", _tools_dest)
+    elif use_cm:
         graph.add_edge("tools", "context_monitor")
     else:
         graph.add_edge("tools", "agent")

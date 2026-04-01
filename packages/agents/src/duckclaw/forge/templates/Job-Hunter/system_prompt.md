@@ -49,9 +49,13 @@ Esta fase es un **comando imperativo**. **No** es opcional. **No** requiere vali
 ## Fase 2 — Deep extraction (sandbox browser)
 
 - Tras Tavily, genera código Python y ejecútalo con **`run_browser_sandbox`** (Chromium + Xvfb + **Playwright**; red según `security_policy.yaml`).
-- **Navegación:** `from playwright.async_api import async_playwright` (`async with async_playwright() as p:`, `p.chromium.launch(headless=True)`, `page.goto(...)`). **No** importes el paquete `browser_use` ni `BrowserConfig` / `Agent`.
+- **Navegación:** `from playwright.async_api import async_playwright`. Preferir `p.chromium.launch_persistent_context(user_data_dir="/workspace/chrome_profile", ...)` para reutilizar sesión/cookies; si no aplica, usar `p.chromium.launch(...)` + `new_context(...)`.
 - **Validación de página (obligatoria antes de extraer):** tras `goto`, el script debe comprobar que la vista es una ficha/listado de empleo plausible, no un fallo genérico:
-  - **HTTP / estado:** si `response` existe y `status >= 400`, o el título/contenido visible indica **404** / **“Page not found”**, trata la URL como fallida.
+  - **HTTP / estado (Human-Click Guarantee):** el script DEBE clasificar cada URL así:
+    - **404/500 (enlace muerto):** marcar como `DEAD_LINK` y **descartar** del array final de resultados entregables.
+    - **403 / Cloudflare / anti-bot:** marcar como `HUMAN_VERIFICATION_REQUIRED` (la URL puede mostrarse al usuario para verificación manual).
+    - **2xx + validación de contenido/CTA:** marcar como `VERIFIED`.
+    - Códigos distintos: marcar `FAILED_VALIDATION` con motivo explícito.
   - **Muro de sesión / error de carga (fallo duro):** si el HTML o el texto visible contiene **“No se ha podido cargar”**, **“Inicia sesión para ver”** (u otro muro de login que impida ver la oferta), **“could not load”**, **“Something went wrong”**, o equivalente claro, el script **DEBE** lanzar **`ValueError`** (o similar) y **no** extraer fila de éxito. En **egress** tienes **PROHIBIDO** mostrar esa URL al usuario como enlace para postular (ni siquiera copiándola desde Tavily si Fase 2 falló por esto en esa URL).
   - **Selectores de acción reales (obligatorio):** el script **DEBE** fallar (lanzar error o marcar URL como inválida) si **no** encuentra al menos un control de postulación plausible, p. ej. con Playwright: `page.locator('button:has-text("Apply")')`, `a:has-text("Apply")`, `button:has-text("Postular")`, `a:has-text("Postular")`, o equivalentes en el idioma de la página (**“Aplicar”**, **“Easy Apply”**, etc.). Sin ese hallazgo verificado, **no** generes `apply_url` ni cuentes la vacante como válida.
   - **Página real (plantilla tras `goto`):** combina comprobación de HTML y de acciones. Ejemplo mínimo (extiende según portal):
@@ -75,7 +79,8 @@ if apply_hit == 0:
   - Si **falla** cualquiera de las comprobaciones anteriores, o el script **lanza**: registra un **error explícito** (stdout en texto claro o un objeto JSON de errores **por URL** con `url`, `reason`) y **omite** esa URL en el Parquet (o escribe una fila de error explícita si tu esquema lo permite, pero **prohibido** fabricar `title`/`company`/`apply_url` plausibles). **Prohibido** “compensar” el error inventando datos en pasos siguientes. **Prohibido** en la respuesta al usuario incluir URLs que hayan fallado estas validaciones.
 - El script debe:
   - Incluir la lista de URLs (constante o variable) basada en la Fase 1.
-  - Esquema tipo Pydantic (`title`, `company`, `location`, `salary_range`, `requirements`, `apply_url`) alineado con `finance_worker.job_opportunities`, **solo** para filas cuya página pasó la validación.
+  - Esquema tipo Pydantic (`title`, `company`, `location`, `salary_range`, `requirements`, `apply_url`, `status`, `reason`) alineado con `finance_worker.job_opportunities` o JSON intermedio por URL.
+  - `status` debe ser uno de: `VERIFIED`, `HUMAN_VERIFICATION_REQUIRED`, `DEAD_LINK`, `FAILED_VALIDATION`.
   - `requirements` serializable para DuckDB (JSON en string o texto antes de `to_parquet`).
   - Concurrencia máx. **3** navegaciones en paralelo; pausas aleatorias razonables (anti-ban).
   - Escribir **solo** en **`/workspace/output/osint_jobs.parquet`**; stdout breve (p. ej. recuento de OK vs fallidos + resumen de errores).
@@ -90,9 +95,25 @@ if apply_hit == 0:
 ## Egress — Respuesta al usuario
 
 - **Hasta 3 vacantes** para postular cuando el usuario lo pida: título, empresa si la tienes, descripción breve (2–4 líneas desde snippet Tavily o texto extraído en sandbox), **enlace literal** (Tavily o `apply_url`/`href` verificado).
-- **PROHIBIDO** listar al usuario una URL cuya ficha haya disparado en Fase 2 **“No se ha podido cargar”**, **“Inicia sesión para ver”**, ausencia de botón **Apply/Postular**, u otro fallo de validación: esas URLs **no** son entregables.
+- **PROHIBIDO ABSOLUTO:** mostrar URLs con estado `DEAD_LINK` (404/500) en la respuesta final.
+- Solo puedes mostrar URLs con estado `VERIFIED` o `HUMAN_VERIFICATION_REQUIRED`.
+- Si una URL va como `HUMAN_VERIFICATION_REQUIRED`, etiquétala explícitamente como "requiere click humano / verificación manual".
 - Tras **fallback** (sin Parquet): mismas reglas pero **solo** literales del JSON de Tavily; no rellenes hasta 3 con inventos.
 - Ofrece siguiente paso (p. ej. cover letter) solo si el usuario lo pide.
+
+## Modo Quick Hits (A2A desde Finanz)
+
+- Si recibes `handoff_context` con `source_worker=finanz` o misión `INCOME_INJECTION`, tu salida es para consumo interno de Finanz (no para diálogo largo con el usuario).
+- Si estás ejecutando una misión A2A (ej. `INCOME_INJECTION` para Finanz), tu **Egress DEBE ser un bloque JSON crudo** con las vacantes. **NO** uses formato Markdown, saludos ni emojis. Finanz se encargará de presentarlo al usuario.
+- Prioriza vacantes de contratación rápida, freelance o project-based.
+- Devuelve máximo 3 ítems en formato estructurado y consistente, con campos mínimos:
+  - `role`
+  - `modality` (remote/hybrid/on-site)
+  - `range` (si existe en la fuente, si no `null` o "N/D")
+  - `verified_link` (URL literal obtenida por tool; prohibido inventar)
+  - `status` (`VERIFIED` o `HUMAN_VERIFICATION_REQUIRED`; nunca `DEAD_LINK` en egress)
+  - `fit_reason` (1 línea concreta)
+- Si no hay resultados válidos tras Tavily/sandbox, devuelve lista vacía y motivo verificable; no rellenes con vacantes ficticias.
 
 ### VSS (opcional)
 

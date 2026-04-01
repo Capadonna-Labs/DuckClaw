@@ -15,6 +15,7 @@ import threading
 from urllib.error import HTTPError, URLError
 from urllib import request as urllib_request
 
+from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
 from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
 
 _log = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ def heartbeat_outbound_webhook_url() -> str:
 
 def heartbeat_outbound_configured() -> bool:
     """Hay canal de salida si existe token Bot API o URL de webhook."""
-    return bool((os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()) or bool(heartbeat_outbound_webhook_url())
+    return bool(effective_telegram_bot_token_outbound()) or bool(heartbeat_outbound_webhook_url())
 
 
 def heartbeat_redis_key(tenant_id: str, chat_id: str) -> str:
@@ -248,6 +249,7 @@ def heartbeat_message_for_tool(name: str) -> str:
         "run_sql": "📊 Paso actual: ejecutar SQL con run_sql…",
         "admin_sql": "📊 Paso actual: escritura SQL con admin_sql…",
         "run_sandbox": "⚙️ Paso actual: procesar o graficar en el sandbox (run_sandbox)…",
+        "run_browser_sandbox": "🌐 Paso actual: navegación aislada en Strix browser (run_browser_sandbox)…",
         "inspect_schema": "🗂️ Paso actual: listar qué hay en la base con inspect_schema…",
         "scrape_siata_radar_realtime": "📡 Paso actual: último producto del radar (scrape_siata_radar_realtime)…",
     }
@@ -321,7 +323,7 @@ def _post_outbound_sync(
     if not cid or not raw:
         return
 
-    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    token = effective_telegram_bot_token_outbound()
     if token:
         try:
             from duckclaw.integrations.telegram.telegram_outbound_sync import (

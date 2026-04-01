@@ -316,6 +316,78 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
             continue
 
         if step == WizardStep.CONNECTIVITY:
+            console.print(
+                Panel(
+                    "[bold]Telegram Guard[/]: solo los user_id que estén en la BD del gateway "
+                    "(tabla [cyan]main.authorized_users[/]) pueden usar el bot.\n\n"
+                    "Te registramos a ti como [green]admin[/] con el ID que indiques y un "
+                    "[bold]nombre[/] para mostrar (como en `/team --add … nombre`). "
+                    "Tu ID numérico: escríbele a [bold]@userinfobot[/] en Telegram o revisa "
+                    "los datos raw de un mensaje tuyo.\n\n"
+                    "Luego podrás añadir más admins (IDs separados por coma).",
+                    title="Quién puede usar el bot",
+                    border_style="cyan",
+                )
+            )
+            while True:
+                tok, val = _ask_until(
+                    session,
+                    "Tu [bold]user_id de Telegram[/] (solo dígitos; quedarás como admin) "
+                    f"[{draft.wizard_creator_telegram_user_id or 'obligatorio'}]: ",
+                    default=draft.wizard_creator_telegram_user_id,
+                )
+                if tok == NAV_BACK:
+                    p = prev_step(step)
+                    if p:
+                        step = p
+                    break
+                if tok == NAV_QUICK_SAVE:
+                    console.print(f"[green]{save_draft_json(draft)}[/]")
+                    return 0
+                cid = (val or "").strip()
+                if not cid.isdigit():
+                    console.print("[red]El ID debe ser numérico (solo dígitos), sin @ ni espacios.[/]")
+                    continue
+                draft.wizard_creator_telegram_user_id = cid
+                break
+            if step != WizardStep.CONNECTIVITY:
+                continue
+
+            tok, val = _ask_until(
+                session,
+                "Tu [bold]nombre[/] como admin (para listados /team; ej. Juan; Enter = último valor o vacío) "
+                f"[{draft.wizard_creator_admin_display_name or 'opcional'}]: ",
+                default=draft.wizard_creator_admin_display_name,
+            )
+            if tok == NAV_BACK:
+                continue
+            if tok == NAV_QUICK_SAVE:
+                console.print(f"[green]{save_draft_json(draft)}[/]")
+                return 0
+            draft.wizard_creator_admin_display_name = (val or "").strip()
+
+            tok, val = _ask_until(
+                session,
+                "¿Más usuarios [bold]admin[/]? (IDs de Telegram separados por coma; vacío = ninguno) "
+                f"[{draft.wizard_extra_admin_telegram_ids}]: ",
+                default=draft.wizard_extra_admin_telegram_ids,
+            )
+            if tok == NAV_BACK:
+                continue
+            if tok == NAV_QUICK_SAVE:
+                console.print(f"[green]{save_draft_json(draft)}[/]")
+                return 0
+            extra = (val or "").strip()
+            if extra:
+                bad = [x.strip() for x in extra.replace(";", ",").split(",") if x.strip() and not x.strip().isdigit()]
+                if bad:
+                    console.print(
+                        "[yellow]Aviso:[/] ignora entradas no numéricas; guardamos solo dígitos válidos."
+                    )
+                draft.wizard_extra_admin_telegram_ids = extra
+            else:
+                draft.wizard_extra_admin_telegram_ids = ""
+
             tok, val = _ask_until(
                 session,
                 "TELEGRAM_BOT_TOKEN (password; vacío = no actualizar desde wizard): ",
@@ -506,6 +578,9 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 f"Tenant: {draft.tenant_id}\n"
                 f"PM2 name: {draft.gateway_pm2_name}\n"
                 f"Worker: {draft.default_worker_id}\n"
+                f"Telegram Guard — admin (tú): {draft.wizard_creator_telegram_user_id or '(falta ID)'} "
+                f"({draft.wizard_creator_admin_display_name or 'sin nombre'})\n"
+                f"Telegram Guard — admins extra: {draft.wizard_extra_admin_telegram_ids or '(ninguno)'}\n"
                 f"Telegram token: {masked_tok}\n"
                 f"Webhook HTTPS base: {draft.telegram_webhook_public_base_url or '(plantilla con marcador al final)'}\n"
                 f"Tailscale Funnel (--bg vía wizard): {'sí' if draft.tailscale_funnel_bg_via_wizard else 'no'}\n"

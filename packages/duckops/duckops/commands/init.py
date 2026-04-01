@@ -1,4 +1,4 @@
-"""Comando init: configuración inicial (env, db, tailscale)."""
+"""Comando init: Sovereign Wizard v2.0 por defecto; wizard clásico con --classic."""
 
 from __future__ import annotations
 
@@ -22,44 +22,52 @@ def cmd_init(
     ctx: typer.Context,
     tenant_id: str = typer.Argument(
         default="default",
-        help="ID del tenant (para futura multi-tenancy).",
+        help="ID del tenant (solo para el wizard clásico; Sovereign usa su propio borrador).",
+    ),
+    repo: Path | None = typer.Option(
+        None,
+        "--repo",
+        "-C",
+        help="Raíz del monorepo DuckClaw (por defecto: cwd o ancestro).",
+    ),
+    classic: bool = typer.Option(
+        False,
+        "--classic",
+        help="Wizard legacy (Rich, scripts/duckclaw_setup_wizard.py) en lugar del Sovereign v2.0.",
     ),
     use_wizard: bool = typer.Option(
         True,
         "--wizard/--no-wizard",
-        help="Ejecutar wizard interactivo (Rich).",
-    ),
-    sovereign: bool = typer.Option(
-        False,
-        "--sovereign",
-        help="Wizard v2.0 (prompt_toolkit, borrador hasta Review).",
+        help="Con --classic: ejecutar wizard interactivo; --no-wizard solo muestra la ruta del script.",
     ),
 ) -> None:
-    """Inicializa un nuevo tenant con su base de datos y configuración."""
+    """Sovereign Wizard v2.0 (TUI, borrador hasta Review). Usa --classic para el wizard anterior."""
     if ctx.invoked_subcommand is not None:
         return
-    repo = _repo_root()
-    wizard_script = repo / "scripts" / "duckclaw_setup_wizard.py"
+
+    repo_path = repo.resolve() if repo is not None else None
+
+    if not classic:
+        from duckops.sovereign.runner import run_sovereign_wizard
+
+        raise typer.Exit(run_sovereign_wizard(repo_path))
+
+    base = repo_path if repo_path is not None else _repo_root()
+    wizard_script = base / "scripts" / "duckclaw_setup_wizard.py"
 
     if not wizard_script.is_file():
         typer.echo(f"[red]No se encontró el wizard: {wizard_script}[/]", err=True)
         raise typer.Exit(1)
 
-    typer.secho(f"Forjando agente para {tenant_id}...", fg=typer.colors.CYAN)
-
-    if sovereign:
-        from duckops.sovereign.runner import run_sovereign_wizard
-
-        code = run_sovereign_wizard(repo)
-        raise typer.Exit(code)
+    typer.secho(f"Forjando agente para {tenant_id} (wizard clásico)...", fg=typer.colors.CYAN)
 
     if use_wizard:
         env = os.environ.copy()
-        env["PYTHONPATH"] = str(repo) + (os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+        env["PYTHONPATH"] = str(base) + (os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
         try:
             result = subprocess.run(
                 [sys.executable, str(wizard_script)],
-                cwd=str(repo),
+                cwd=str(base),
                 env=env,
             )
             if result.returncode != 0:

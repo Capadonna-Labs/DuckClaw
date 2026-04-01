@@ -71,6 +71,12 @@ def bind_tools_with_parallel_default(llm: Any, tools: Sequence[Any], **kwargs: A
     Llama a ``llm.bind_tools`` con ``parallel_tool_calls=True`` cuando la firma lo admite
     (p. ej. ``langchain_openai.ChatOpenAI``: API OpenAI y servidores compatibles / MLX).
     Otros proveedores (Anthropic, Ollama, etc.) se dejan sin ese argumento.
+
+    Para **forzar** una tool concreta (p. ej. ``tavily_search``), LangChain acepta
+    ``tool_choice={"type": "function", "function": {"name": "tavily_search"}}`` en kwargs
+    (formato OpenAI). Las ``StructuredTool`` con ``args_schema`` (Pydantic) generan el
+    JSON Schema que el endpoint espera; si una tool no aparece en la petición, revisar que
+    el paquete esté en el esquema y que el modelo esté en modo tools.
     """
     try:
         sig = inspect.signature(llm.bind_tools)

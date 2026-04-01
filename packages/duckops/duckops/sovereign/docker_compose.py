@@ -6,7 +6,7 @@ from pathlib import Path
 
 from duckops.sovereign.atomic import atomic_write
 
-COMPOSE_OVERRIDE_TEMPLATE = """# Generado por duckops sovereign — Redis local para DuckClaw.
+COMPOSE_OVERRIDE_TEMPLATE = """# Generado por duckops init — Redis local para DuckClaw.
 # Amplía con tu servicio gateway según tu imagen o bind-mount al repo.
 version: "3.8"
 

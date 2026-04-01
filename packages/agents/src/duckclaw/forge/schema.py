@@ -31,7 +31,8 @@ class SecurityPolicy(BaseModel):
     network: NetworkPolicy = Field(default_factory=NetworkPolicy)
     filesystem: FileSystemPolicy = Field(default_factory=FileSystemPolicy)
     secrets: SecretPolicy = Field(default_factory=SecretPolicy)
-    max_execution_time_seconds: int = Field(default=30, le=120)
+    # Perfil browser / OSINT JobHunter puede requerir hasta 300s (spec Strix Browser Sandbox).
+    max_execution_time_seconds: int = Field(default=30, le=600)
 
 
 def _default_zero_trust_policy() -> SecurityPolicy:

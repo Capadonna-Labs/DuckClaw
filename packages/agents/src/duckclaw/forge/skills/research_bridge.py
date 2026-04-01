@@ -9,9 +9,27 @@ Requiere: pip install tavily-python  (o uv sync --extra tavily)
 from __future__ import annotations
 
 import asyncio
+import inspect
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+_log = logging.getLogger(__name__)
+
+
+class TavilySearchInput(BaseModel):
+    """Esquema explícito para APIs OpenAI-compat (DeepSeek, MLX, etc.): mejora tool calling."""
+
+    query: str = Field(
+        ...,
+        description=(
+            "Consulta de búsqueda; usa Google Dorks cuando aplique "
+            "(ej. site:linkedin.com/jobs, site:greenhouse.io, rol, ubicación, remoto)."
+        ),
+    )
 
 _TAVILY_ENV = "TAVILY_API_KEY"
 
@@ -71,7 +89,8 @@ def _format_tavily_results(response: Any) -> str:
 def _tavily_search_tool(config: Optional[dict] = None) -> Optional[Any]:
     """
     Crea un StructuredTool para búsqueda Tavily.
-    config: tavily_enabled, search_depth, include_answer, max_results, topic.
+    config: tavily_enabled, search_depth, include_answer, max_results, topic, include_raw_content.
+    Por defecto include_raw_content=False (menos tokens); max_results por defecto 15 para margen de filtrado.
     """
     if not _tavily_available():
         return None
@@ -88,19 +107,31 @@ def _tavily_search_tool(config: Optional[dict] = None) -> Optional[Any]:
 
     search_depth = cfg.get("search_depth", "advanced")
     include_answer = cfg.get("include_answer", True)
-    max_results = cfg.get("max_results", 10)
+    try:
+        max_results = int(cfg.get("max_results", 15))
+    except (TypeError, ValueError):
+        max_results = 15
     topic = cfg.get("topic", "general")
+    # False = no hinchar contexto con HTML crudo de páginas (contrato skills Job-Hunter).
+    include_raw_content = bool(cfg.get("include_raw_content", False))
 
     def _search(query: str) -> str:
         try:
             client = TavilyClient(api_key=api_key)
-            response = client.search(
-                query=query,
-                search_depth=search_depth,
-                include_answer=include_answer,
-                max_results=max_results,
-                topic=topic,
-            )
+            search_kwargs: dict[str, Any] = {
+                "query": query,
+                "search_depth": search_depth,
+                "include_answer": include_answer,
+                "max_results": max_results,
+                "topic": topic,
+            }
+            try:
+                sig = inspect.signature(client.search)
+                if "include_raw_content" in sig.parameters:
+                    search_kwargs["include_raw_content"] = include_raw_content
+            except (TypeError, ValueError):
+                pass
+            response = client.search(**search_kwargs)
             return _format_tavily_results(response)
         except Exception as e:
             return f"Error Tavily: {e}"
@@ -108,7 +139,12 @@ def _tavily_search_tool(config: Optional[dict] = None) -> Optional[Any]:
     return StructuredTool.from_function(
         _search,
         name="tavily_search",
-        description="Busca en internet con Tavily. Usa para preguntas que requieren información actualizada o no están en la base de datos local. Parámetros: query (consulta de búsqueda).",
+        description=(
+            "Busca en internet con Tavily (hasta varias decenas de candidatos según configuración; "
+            "resultados resumidos sin raw HTML para ahorrar contexto). "
+            "Parámetro: query (consulta; usa Google Dorks si aplica)."
+        ),
+        args_schema=TavilySearchInput,
     )
 
 
@@ -181,8 +217,13 @@ def register_research_skill(
         tavily_tool = _tavily_search_tool(research_config)
         if tavily_tool:
             tools_list.append(tavily_tool)
+        elif research_config.get("tavily_enabled", True):
+            _log.warning(
+                "research: tavily_enabled pero tavily_search no registrada "
+                "(¿tavily-python instalado y TAVILY_API_KEY en el proceso del gateway?)."
+            )
         browser_tool = _browser_navigate_tool(research_config, llm=llm)
         if browser_tool:
             tools_list.append(browser_tool)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.warning("register_research_skill falló: %s", exc)

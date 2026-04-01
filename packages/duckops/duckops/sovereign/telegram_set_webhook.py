@@ -21,14 +21,18 @@ def _effective_telegram_bot_token(repo_root: Path, draft: SovereignDraft) -> str
     env_path = repo_root / ".env"
     if not env_path.is_file():
         return ""
+    kv: dict[str, str] = {}
     for line in env_path.read_text(encoding="utf-8").splitlines():
         s = line.strip()
         if s.startswith("#") or "=" not in s:
             continue
         key, _, val = s.partition("=")
-        if key.strip() == "TELEGRAM_BOT_TOKEN":
-            return val.strip().strip("'\"")
-    return ""
+        ks = key.strip()
+        kv[ks] = val.strip().strip("'\"")
+    from duckclaw.integrations.telegram.telegram_agent_token import resolve_telegram_token_from_flat_env
+
+    wid = (getattr(draft, "default_worker_id", None) or "finanz").strip()
+    return resolve_telegram_token_from_flat_env(kv, wid)
 
 
 def _effective_telegram_webhook_secret(repo_root: Path, draft: SovereignDraft) -> str:
@@ -104,7 +108,8 @@ def register_telegram_webhook_after_deploy(
     body = build_set_webhook_body(repo_root, draft)
     if not token:
         console_print(
-            "[dim]Telegram setWebhook omitido: no hay TELEGRAM_BOT_TOKEN en el borrador ni en .env.[/]"
+            "[dim]Telegram setWebhook omitido: no hay token en el borrador ni "
+            "TELEGRAM_<ID_AGENT>_TOKEN / TELEGRAM_BOT_TOKEN en .env (según default_worker_id del borrador).[/]"
         )
         return
     if not body:

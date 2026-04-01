@@ -29,6 +29,109 @@ _obs = get_obs_logger()
 _worker_graph_cache: dict[str, Any] = {}
 
 
+def _worker_id_alnum_slug(worker_id: str | None) -> str:
+    """Normaliza id de plantilla (guiones Unicode, espacios) para ramas por worker."""
+    return re.sub(r"[^a-z0-9]", "", (worker_id or "").lower())
+
+
+def _is_job_hunter_worker(worker_id: str | None) -> bool:
+    """True si el id de plantilla corresponde a OSINT JobHunter (carpeta Job-Hunter o id job_hunter)."""
+    w = (worker_id or "").strip()
+    if not w:
+        return False
+    if _worker_id_alnum_slug(w) == "jobhunter":
+        return True
+    norm = w.lower()
+    for ch in ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212", "\uff0d"):
+        norm = norm.replace(ch, "-")
+    norm = norm.replace("_", "-").strip("-")
+    return norm == "job-hunter"
+
+
+def job_hunter_user_requests_job_search(incoming: str) -> bool:
+    """
+    True si el texto del usuario (o la TAREA inyectada) implica búsqueda de empleo con acción concreta.
+    Usado por el planner del manager y por el worker (forzar tavily_search en el primer turno).
+    """
+    raw = (incoming or "").strip()
+    if not raw:
+        return False
+    t = raw.lower()
+    if "tavily_search" in t:
+        return True
+    if "tarea:" in t and "tavily" in t:
+        return True
+    # Inyecciones del manager tipo «TAREA: … búsqueda de empleo …» deben disparar Fase 1.
+    if t.startswith("tarea:") and any(
+        k in t
+        for k in (
+            "empleo",
+            "trabajo",
+            "vacante",
+            "búsqueda",
+            "busqueda",
+            "enlace",
+            "enlaces",
+            "url",
+            "postular",
+            "linkedin",
+            "tavily",
+        )
+    ):
+        return True
+    job_terms = (
+        "trabajo",
+        "empleo",
+        "vacante",
+        "oferta",
+        "linkedin",
+        "greenhouse",
+        "lever",
+        "data scientist",
+        "científico de datos",
+        "ciencia de datos",
+    )
+    action_terms = (
+        "busca",
+        "buscar",
+        "encuentra",
+        "dame",
+        "pásame",
+        "pasame",
+        "mandame",
+        "envía",
+        "envia",
+        "url",
+        "enlace",
+        "link",
+        "revisar",
+        "postular",
+        "aplicar",
+        "vacantes",
+    )
+    return any(x in t for x in job_terms) and (
+        any(x in t for x in action_terms) or "http" in t or "www." in t
+    )
+
+
+def _prepend_subagent_label_once(reply: str, label: str) -> str:
+    """
+    Añade el encabezado del subagente solo si el texto aún no lo trae al inicio.
+    Evita respuestas con doble prefijo como:
+    `finanz 1` + `finanz 1`.
+    """
+    clean_reply = (reply or "").strip()
+    clean_label = (label or "").strip()
+    if not clean_label or not clean_reply:
+        return clean_reply
+    # Tolerar un prefijo markdown básico (`**label**`) además del plano.
+    if clean_reply.startswith(clean_label):
+        return clean_reply
+    if clean_reply.startswith(f"**{clean_label}**"):
+        return clean_reply
+    return f"{clean_label}\n\n{clean_reply}"
+
+
 def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     """
     Convierte el mensaje del usuario en una tarea explícita para el subagente.
@@ -74,6 +177,18 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
                 "investigación web genérica o presentarte como asistente de investigación abstracto.",
                 None,
             )
+    # Job-Hunter: evita run_sandbox con URLs inventadas; discovery = tavily_search.
+    if _is_job_hunter_worker(worker_id) and job_hunter_user_requests_job_search(incoming):
+        return (
+            "TAREA: El usuario pide búsqueda de empleo y/o enlaces para postular. "
+            "Sigue el **Flujo cognitivo** del system prompt: (1) **`tavily_search` SIEMPRE primero** — "
+            "prohibido anticipar fallo del sandbox o negar la búsqueda antes del resultado `tool` de Tavily; "
+            "(2) luego intenta **`run_browser_sandbox`** si aplica; "
+            "(3) si el sandbox falla, ve directo al egress con **datos crudos ya obtenidos de Tavily** (no simules otra discovery). "
+            "**Entrega hasta 3 vacantes** con título, descripción breve y **enlace literal** verificado. "
+            "No uses `run_sandbox` solo para listas fijas de portales.",
+            None,
+        )
     # Intención DB/tablas/nombre → si el rol es personalizable, usar finanz (especialista) si está disponible
     is_db_intent = (
         re.search(r"\b(nombre\s+de\s+la\s+db|db|tablas?|tables?|esquema|schema|estructura|disponibles)\b", t)
@@ -320,6 +435,12 @@ def _manager_capabilities_fast_path_ok(incoming: str) -> bool:
 def _greeting_fast_reply_text(worker_id: str | None) -> str:
     w = (worker_id or "").strip()
     wl = w.lower()
+    if _is_job_hunter_worker(w):
+        return (
+            "Hola. Soy **OSINT JobHunter** (búsqueda y extracción de ofertas). "
+            "Di rol, ubicación o remoto y, si quieres, portales (LinkedIn, Lever, etc.). "
+            "Necesitas `/sandbox on` para ejecutar código en el contenedor browser."
+        )
     if wl == "bi-analyst":
         return (
             "Hola. Soy tu analista de BI (DuckDB): consultas de solo lectura, esquema, métricas y gráficos cuando lo pidas. "
@@ -337,6 +458,18 @@ def _greeting_fast_reply_text(worker_id: str | None) -> str:
 def _capabilities_fast_reply_text(worker_id: str | None) -> str:
     w = (worker_id or "").strip()
     wl = w.lower()
+    if _is_job_hunter_worker(w):
+        return (
+            "Soy **OSINT JobHunter** (empleo / OSINT). Puedo:\n"
+            "• **Discovery:** búsqueda amplia con Tavily (consultas tipo Google Dork; URLs limpias, sin HTML en el chat).\n"
+            "• **Extracción:** navegación pesada en sandbox de navegador (Playwright en contenedor) y resultado en Parquet.\n"
+            "• **Ingesta:** cargar ofertas en DuckDB (`finance_worker.job_opportunities`) con SQL.\n"
+            "• **Resumen:** hasta **3 vacantes** con descripción breve y **enlace verificado** para postular (Tavily + opcional Playwright en sandbox).\n\n"
+            "Ejemplos: «Busca data scientist remoto Colombia y LinkedIn», "
+            "«Ofertas de backend en Lever/Greenhouse, Europa». "
+            "Imagen Docker: `docker build -t duckclaw/browser-env:latest docker/browser-env/`. "
+            "`/sandbox on` para ejecutar código en contenedor."
+        )
     if wl == "bi-analyst":
         return (
             "Puedo trabajar con tu DuckDB en solo lectura: esquema y tablas, consultas SQL, "
@@ -716,8 +849,7 @@ def build_manager_graph(
             worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
             reply = str(worker_invoke.get("reply") or worker_invoke.get("output") or "Sin respuesta.")
             _label_reply = f"{assigned} {run_label_n}".strip()
-            if _label_reply and reply:
-                reply = f"{_label_reply}\n\n{reply}"
+            reply = _prepend_subagent_label_once(reply, _label_reply)
             messages = worker_invoke.get("messages")
             # Log tool use para PM2 (tras manager plan)
             _tool_names = []
@@ -737,8 +869,7 @@ def build_manager_graph(
         except Exception as e:
             reply = str(e)[:2048]
             _label_e = f"{assigned} {run_label_n}".strip()
-            if _label_e and reply:
-                reply = f"{_label_e}\n\n{reply}"
+            reply = _prepend_subagent_label_once(reply, _label_e)
             status = "FAILED"
         finally:
             if slot_token:

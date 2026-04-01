@@ -5,6 +5,25 @@ from __future__ import annotations
 import pytest
 
 
+def test_plan_task_job_hunter_uses_tavily_not_run_sandbox_only() -> None:
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    task, override = _plan_task(
+        "busca un trabajo de data scientist en Colombia y pásame la url",
+        "Job-Hunter",
+    )
+    assert override is None
+    assert "tavily_search" in task.lower()
+    assert "run_sandbox" in task.lower()
+    assert "3 vacantes" in task.lower() or "hasta 3" in task.lower()
+    # Otro worker: no debe aplicar la rama Job-Hunter
+    task2, _ = _plan_task(
+        "busca un trabajo de data scientist en Colombia y pásame la url",
+        "finanz",
+    )
+    assert task2 == "busca un trabajo de data scientist en Colombia y pásame la url"
+
+
 def test_plan_task_bi_analyst_meta_capabilities() -> None:
     from duckclaw.graphs.manager_graph import _plan_task
 
@@ -111,6 +130,7 @@ def test_manager_greeting_fast_path_ok() -> None:
     assert "analyst" in _greeting_fast_reply_text("BI-Analyst").lower() or "bi" in _greeting_fast_reply_text(
         "BI-Analyst"
     ).lower()
+    assert "osint" in _greeting_fast_reply_text("Job‐Hunter").lower()
 
 
 def test_manager_capabilities_fast_path_ok() -> None:
@@ -133,3 +153,7 @@ def test_manager_capabilities_fast_path_ok() -> None:
     assert _manager_greeting_fast_path_ok("hola")
     assert "duckdb" in _capabilities_fast_reply_text("BI-Analyst").lower()
     assert "ejemplo" in _capabilities_fast_reply_text("BI-Analyst").lower()
+    jh = _capabilities_fast_reply_text("Job-Hunter").lower()
+    assert "osint" in jh and "discovery" in jh
+    assert "osint" in _capabilities_fast_reply_text("job_hunter").lower()
+    assert "osint" in _capabilities_fast_reply_text("Job‐Hunter").lower()  # U+2010 hyphen

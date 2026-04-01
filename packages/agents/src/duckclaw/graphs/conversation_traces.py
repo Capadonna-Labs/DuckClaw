@@ -31,6 +31,36 @@ _DEFAULT_SYSTEM_FOR_TRACES = (
 _lock = threading.Lock()
 
 
+def _stringify_lc_message_content(content: Any) -> str:
+    """
+    LangChain v2 a veces usa `content` como lista de bloques (OpenAI/Anthropic).
+    Serializar mal (p. ej. slice de lista) corrompe trazas SFT.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content.lstrip("\ufeff")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                t = block.get("text")
+                if isinstance(t, str):
+                    parts.append(t)
+                else:
+                    c = block.get("content")
+                    if isinstance(c, str):
+                        parts.append(c)
+                    elif isinstance(c, list):
+                        parts.append(_stringify_lc_message_content(c))
+            else:
+                parts.append(str(block))
+        return "".join(parts).lstrip("\ufeff")
+    return str(content).lstrip("\ufeff")
+
+
 def get_conversation_traces_dir() -> Path:
     """Directorio raíz del datalake de trazas. Por defecto train/conversation_traces."""
     env = os.environ.get("DUCKCLAW_CONVERSATION_TRACES_DIR", "").strip()
@@ -68,11 +98,15 @@ def _lc_messages_to_chatml(messages: list[Any]) -> list[dict[str, Any]]:
             continue
         role = str(role).lower()
         if role == "system":
-            out.append({"role": "system", "content": (getattr(m, "content", None) or "")[:8192]})
+            out.append(
+                {"role": "system", "content": _stringify_lc_message_content(getattr(m, "content", None))[:8192]}
+            )
         elif role in ("human", "user"):
-            out.append({"role": "user", "content": (getattr(m, "content", None) or "")[:4096]})
+            out.append(
+                {"role": "user", "content": _stringify_lc_message_content(getattr(m, "content", None))[:4096]}
+            )
         elif role == "ai":
-            content = (getattr(m, "content", None) or "").strip()
+            content = _stringify_lc_message_content(getattr(m, "content", None)).strip()
             tool_calls = getattr(m, "tool_calls", None) or []
             if tool_calls:
                 tc_list = []
@@ -91,7 +125,7 @@ def _lc_messages_to_chatml(messages: list[Any]) -> list[dict[str, Any]]:
                 out.append({"role": "assistant", "content": content[:8192]})
         elif role == "tool":
             name = (getattr(m, "name", None) or "")[:128]
-            content = (getattr(m, "content", None) or "")[:8192]
+            content = _stringify_lc_message_content(getattr(m, "content", None))[:8192]
             out.append({"role": "tool", "name": name, "content": content})
     return out
 

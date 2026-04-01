@@ -25,6 +25,7 @@ try:
 except ImportError:
     RunnableConfig = Any  # type: ignore[misc, assignment]
 
+from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
 from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_sync, set_log_context
 from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
 from duckclaw.workers import read_pool
@@ -293,7 +294,7 @@ def _truncate_tool_messages(messages: list, max_chars: int) -> list:
                 out.append(m)
                 continue
             name = getattr(m, "name", "") or ""
-            if name == "run_sandbox":
+            if name in ("run_sandbox", "run_browser_sandbox"):
                 compacted = _compact_run_sandbox_tool_content_for_llm(c, max_chars)
                 out.append(
                     ToolMessage(
@@ -390,7 +391,7 @@ def _sandbox_heartbeat_allowed(spec: WorkerSpec) -> bool:
     if v in ("0", "false", "no", "off"):
         return False
     return bool((os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()) or bool(
-        (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+        effective_telegram_bot_token_outbound()
     )
 
 
@@ -418,7 +419,7 @@ def _send_sandbox_heartbeat_telegram(state: dict) -> None:
         plan_title=_pt,
         elapsed_sec=_heartbeat_elapsed_sec(state),
     )
-    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    token = effective_telegram_bot_token_outbound()
     if token:
         try:
             from duckclaw.integrations.telegram.telegram_outbound_sync import (
@@ -603,11 +604,12 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
 
 def filter_tools_for_sandbox(tools: list[Any], enabled: bool) -> list[Any]:
     """
-    Helper (unit-testable): si sandbox está OFF, elimina la herramienta `run_sandbox`.
+    Helper (unit-testable): si sandbox está OFF, elimina `run_sandbox` y `run_browser_sandbox`.
     """
     if enabled:
         return list(tools)
-    return [t for t in tools if getattr(t, "name", "") != "run_sandbox"]
+    deny = {"run_sandbox", "run_browser_sandbox"}
+    return [t for t in tools if getattr(t, "name", "") not in deny]
 
 
 class WorkerFactory:
@@ -772,16 +774,34 @@ def build_worker_graph(
         except Exception:
             pass
 
-    # Strix Sandbox: solo agregar `run_sandbox` si el worker define policy.
+    # Strix Sandbox: `run_sandbox` si hay security_policy.yaml; `run_browser_sandbox` si browser_sandbox en manifest.
     try:
         security_policy_path = spec.worker_dir / "security_policy.yaml"
-        if security_policy_path.is_file() and llm is not None and "run_sandbox" not in tools_by_name:
-            from duckclaw.graphs.sandbox import sandbox_tool_factory
+        if security_policy_path.is_file() and llm is not None:
+            from duckclaw.graphs.sandbox import browser_sandbox_tool_factory, sandbox_tool_factory
 
-            tools.append(sandbox_tool_factory(db, llm))
-            tools_by_name = {t.name: t for t in tools}
+            if getattr(spec, "browser_sandbox", False) and "run_browser_sandbox" not in tools_by_name:
+                tools.append(browser_sandbox_tool_factory(db, llm))
+                tools_by_name = {t.name: t for t in tools}
+            if "run_sandbox" not in tools_by_name:
+                tools.append(sandbox_tool_factory(db, llm))
+                tools_by_name = {t.name: t for t in tools}
     except Exception:
         pass
+
+    _jh_alnum = re.sub(r"[^a-z0-9]", "", (spec.worker_id or "").lower())
+    _jh_logical = re.sub(r"[^a-z0-9]", "", (getattr(spec, "logical_worker_id", None) or "").lower())
+    if (
+        (_jh_alnum == "jobhunter" or _jh_logical == "jobhunter")
+        and getattr(spec, "research_config", None)
+        and (spec.research_config or {}).get("tavily_enabled", True)
+        and "tavily_search" not in tools_by_name
+    ):
+        _log.warning(
+            "Job-Hunter: manifest con Tavily habilitado pero la tool tavily_search no está en el grafo "
+            "(instala tavily-python en el venv del gateway y define TAVILY_API_KEY en el proceso). "
+            "Sin ello el LLM solo ve run_sandbox y puede simular búsquedas."
+        )
 
     # Aplicar LangSmith config al grafo final (no solo al llm) si está habilitado
     send_to_langsmith = os.environ.get("DUCKCLAW_SEND_TO_LANGSMITH", "false").lower() == "true"
@@ -978,6 +998,18 @@ def build_worker_graph(
             _bind_tools(llm, tools_sandbox_off, tool_choice=tool_choice_portfolio) if has_ibkr else None
         )
 
+        has_tavily = "tavily_search" in tools_by_name
+        tool_choice_tavily = {"type": "function", "function": {"name": "tavily_search"}}
+        llm_force_tavily_on = _bind_tools(llm, tools, tool_choice=tool_choice_tavily) if has_tavily else None
+        llm_force_tavily_off = (
+            _bind_tools(llm, tools_sandbox_off, tool_choice=tool_choice_tavily) if has_tavily else None
+        )
+
+        def _spec_is_job_hunter() -> bool:
+            a = re.sub(r"[^a-z0-9]", "", (spec.worker_id or "").lower())
+            b = re.sub(r"[^a-z0-9]", "", (getattr(spec, "logical_worker_id", None) or "").lower())
+            return a == "jobhunter" or b == "jobhunter"
+
         def _is_portfolio_query(text: str) -> bool:
             if not text or not text.strip():
                 return False
@@ -1065,12 +1097,76 @@ def build_worker_graph(
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
             last_msg = (state.get("messages") or [])[-1] if state.get("messages") else None
             already_has_tool_result = last_msg is not None and isinstance(last_msg, ToolMessage)
+
+            if _spec_is_job_hunter() and not has_tavily and not already_has_tool_result:
+                try:
+                    from duckclaw.graphs.manager_graph import job_hunter_user_requests_job_search as _jh_wants_search
+
+                    if _jh_wants_search(incoming):
+                        _no_tavily = (
+                            "Error técnico: la herramienta **tavily_search** no está disponible en este despliegue "
+                            "(falta `TAVILY_API_KEY` en el proceso del gateway o el paquete **tavily-python**). "
+                            "No está permitido simular la búsqueda con **run_sandbox** ni inventar URLs. "
+                            "Configura Tavily y reinicia el gateway."
+                        )
+                        resp = AIMessage(content=_no_tavily)
+                        out = {**state, "messages": state["messages"] + [resp]}
+                        out.update(_identity_fields(state))
+                        return out
+                except Exception:
+                    pass
+
             force_schema = is_schema and not already_has_tool_result
             force_read_sql = (is_table_content or is_latest_game) and not already_has_tool_result
             force_portfolio = is_portfolio and not already_has_tool_result
 
+            jh_fast_text: str | None = None
+            if _spec_is_job_hunter() and not already_has_tool_result:
+                try:
+                    from duckclaw.graphs.manager_graph import (
+                        _capabilities_fast_reply_text,
+                        _greeting_fast_reply_text,
+                        job_hunter_user_requests_job_search,
+                    )
+                    from duckclaw.graphs.on_the_fly_commands import _is_capabilities_smalltalk, _is_simple_greeting
+
+                    if _is_capabilities_smalltalk(incoming):
+                        jh_fast_text = _capabilities_fast_reply_text(spec.worker_id)
+                    elif _is_simple_greeting(incoming):
+                        jh_fast_text = _greeting_fast_reply_text(spec.worker_id)
+                    force_tavily = bool(
+                        has_tavily
+                        and not jh_fast_text
+                        and not _is_capabilities_smalltalk(incoming)
+                        and not _is_simple_greeting(incoming)
+                        and job_hunter_user_requests_job_search(incoming)
+                    )
+                except Exception:
+                    force_tavily = False
+            else:
+                force_tavily = False
+
+            if jh_fast_text is not None:
+                resp = AIMessage(content=jh_fast_text)
+                out = {**state, "messages": state["messages"] + [resp]}
+                out.update(_identity_fields(state))
+                return out
+
             sandbox_enabled = _sandbox_enabled_for_state(state)
             llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
+            forced_name = (
+                "inspect_schema"
+                if force_schema
+                else (
+                    "read_sql"
+                    if force_read_sql
+                    else (
+                        "get_ibkr_portfolio"
+                        if force_portfolio
+                        else ("tavily_search" if force_tavily else "auto")
+                    )
+                )
+            )
             _log.info(
                 "[%s] incoming=%r | is_schema=%s | is_table_content=%s | is_latest_game=%s | is_portfolio=%s | forced_tool=%s",
                 _wl,
@@ -1079,9 +1175,7 @@ def build_worker_graph(
                 is_table_content,
                 is_latest_game,
                 is_portfolio,
-                "inspect_schema"
-                if force_schema
-                else ("read_sql" if force_read_sql else ("get_ibkr_portfolio" if force_portfolio else "auto")),
+                forced_name,
             )
             if force_schema and not force_read_sql:
                 resp = (llm_force_schema_on if sandbox_enabled else llm_force_schema_off).invoke(state["messages"])
@@ -1091,6 +1185,9 @@ def build_worker_graph(
                 forced = llm_force_portfolio_on if sandbox_enabled else llm_force_portfolio_off
                 # has_ibkr => forced should not be None
                 resp = (forced or llm_with_tools).invoke(state["messages"])
+            elif force_tavily:
+                ft = llm_force_tavily_on if sandbox_enabled else llm_force_tavily_off
+                resp = (ft or llm_with_tools).invoke(state["messages"])
             else:
                 resp = llm_with_tools.invoke(state["messages"])
             tool_calls = getattr(resp, "tool_calls", None) or []
@@ -1213,7 +1310,7 @@ def build_worker_graph(
                     try:
                         _schedule_tool_heartbeat(name)
                         invoke_args: Any = args
-                        if name == "run_sandbox" and isinstance(args, dict):
+                        if name in ("run_sandbox", "run_browser_sandbox") and isinstance(args, dict):
                             invoke_args = {**args}
                             if not str(invoke_args.get("worker_id") or "").strip():
                                 invoke_args["worker_id"] = worker_id
@@ -1230,7 +1327,7 @@ def build_worker_graph(
                                 _send_sandbox_heartbeat_telegram(state)
                         result = tool.invoke(invoke_args)
                         content = str(result) if result is not None else "OK"
-                        if name == "run_sandbox":
+                        if name in ("run_sandbox", "run_browser_sandbox"):
                             try:
                                 payload = json.loads(content)
                                 if isinstance(payload, dict) and payload.get("exit_code") == 0:
@@ -1254,7 +1351,7 @@ def build_worker_graph(
                         content = f"Error: {e}"
                         _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
                 else:
-                    if not sandbox_enabled and name == "run_sandbox":
+                    if not sandbox_enabled and name in ("run_sandbox", "run_browser_sandbox"):
                         content = "Sandbox deshabilitado en esta sesión. Actívalo con /sandbox on."
                     else:
                         content = f"Herramienta desconocida: {name}"
@@ -1324,6 +1421,24 @@ def build_worker_graph(
             except (json.JSONDecodeError, TypeError, KeyError, Exception):
                 pass
         _notify_final_heartbeat()
+        try:
+            from duckclaw.forge.atoms.job_hunter_output_validator import (
+                job_hunter_blocked_reply_message,
+                job_hunter_reply_should_block,
+                spec_is_job_hunter as _jh_spec_check,
+            )
+
+            if reply and _jh_spec_check(spec):
+                blocked, _reason = job_hunter_reply_should_block(reply)
+                if blocked and _reason:
+                    _log.warning(
+                        "Job-Hunter egress blocked (worker_id=%s): %s",
+                        getattr(spec, "worker_id", "?"),
+                        _reason,
+                    )
+                    reply = job_hunter_blocked_reply_message(_reason)
+        except Exception:
+            pass
         out = {**state, "reply": reply or "", "messages": msgs}
         sb = (state.get("sandbox_photo_base64") or "").strip()
         if sb:

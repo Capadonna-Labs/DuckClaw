@@ -10,12 +10,31 @@ El sandbox Strix ejecuta codigo dinamico en contenedores Docker con enfoque Zero
 - montajes de datos en modo solo lectura
 - salida en volumen efimero
 
+## Imagen browser (OSINT JobHunter)
+
+Para **`run_browser_sandbox`** (navegación Chromium + Xvfb + browser-use, red según `security_policy.yaml`):
+
+- Imagen por defecto: `duckclaw/browser-env:latest`.
+- Variable de entorno: `STRIX_BROWSER_IMAGE` (opcional) para otra etiqueta o registry.
+- Build local: `docker build -t duckclaw/browser-env:latest docker/browser-env/`
+- La imagen analítica clásica sigue siendo `duckclaw/sandbox:latest` / `STRIX_SANDBOX_IMAGE` para **`run_sandbox`**.
+
+El tiempo máximo de ejecución por corrida toma `max_execution_time_seconds` del YAML (hasta 600s en esquema Pydantic); el proceso hijo se corta por timeout y el contenedor se reinicia en sesiones browser si aplica.
+
+La imagen incluye **noVNC** (websockify en el puerto **6080** dentro del contenedor). Para depuración en máquina de confianza, puedes publicar el puerto con la variable de entorno del **proceso que crea el sandbox** (gateway / graph):
+
+```env
+STRIX_BROWSER_PUBLISH_NOVNC=1
+```
+
+Luego abre `http://127.0.0.1:6080/vnc.html` en el host. Solo tiene sentido con red tipo `bridge` (p. ej. workers con `network.default: allow` como JobHunter). **No** activar en producción pública: el flujo VNC va sin contraseña pensando en red aislada/ephemeral.
+
 ## Politica por worker
 
 Cada worker puede declarar `security_policy.yaml` junto a su `manifest.yaml`.
 Si falta el archivo, se aplica una politica estricta por defecto (deny-all).
 
-Ejemplo actual: `forge/templates/finanz/security_policy.yaml`.
+Ejemplo actual: `forge/templates/finanz/security_policy.yaml`. Perfil browser/OSINT: `forge/templates/job_hunter/security_policy.yaml`.
 
 ## Secretos
 

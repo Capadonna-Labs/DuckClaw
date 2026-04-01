@@ -11,7 +11,7 @@ def test_load_security_policy_missing_file_defaults_to_deny() -> None:
     assert isinstance(policy, SecurityPolicy)
     assert policy.network.default == "deny"
     assert policy.secrets.allowed_secrets == []
-    assert policy.max_execution_time_seconds <= 120
+    assert policy.max_execution_time_seconds <= 600
 
 
 def test_load_security_policy_finanz_file_is_valid() -> None:
@@ -21,6 +21,31 @@ def test_load_security_policy_finanz_file_is_valid() -> None:
     assert isinstance(policy, SecurityPolicy)
     assert policy.network.default == "deny"
     assert policy.max_execution_time_seconds == 45
+
+
+def test_job_hunter_security_policy_browser_ttl() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    worker_dir = (
+        repo_root
+        / "packages"
+        / "agents"
+        / "src"
+        / "duckclaw"
+        / "forge"
+        / "templates"
+        / "job_hunter"
+    )
+    policy = load_security_policy("job_hunter", worker_dir=worker_dir)
+    assert policy.network.default == "allow"
+    assert policy.max_execution_time_seconds == 300
+
+
+def test_worker_manifest_browser_sandbox_flag() -> None:
+    from duckclaw.workers.manifest import load_manifest
+
+    spec = load_manifest("job_hunter")
+    assert spec.browser_sandbox is True
+    assert spec.research_config is not None
 
 
 def test_security_violation_detection_for_ro_and_network_errors() -> None:

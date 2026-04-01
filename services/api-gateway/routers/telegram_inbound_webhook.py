@@ -20,8 +20,12 @@ from core.models import ChatRequest
 from duckclaw.integrations.telegram import (
     TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
     TelegramBotApiAsyncClient,
-    is_valid_telegram_webhook_secret_token,
-    telegram_webhook_secret_expected_from_env,
+    telegram_bot_token_override,
+)
+from duckclaw.integrations.telegram.telegram_webhook_multiplex import (
+    TelegramWebhookResolvedDispatch,
+    telegram_webhook_header_fingerprint,
+    telegram_webhook_resolve_dispatch,
 )
 
 _log = logging.getLogger("duckclaw.gateway.telegram_inbound_webhook")
@@ -74,14 +78,19 @@ def build_telegram_inbound_webhook_router(
     @router.post("/webhook")
     async def telegram_bot_update_webhook(request: Request) -> dict[str, str]:
         header_secret = request.headers.get(TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER)
-        if not is_valid_telegram_webhook_secret_token(header_secret):
-            if telegram_webhook_secret_expected_from_env():
-                _log.warning(
-                    "telegram webhook: 403 — TELEGRAM_WEBHOOK_SECRET está definido en el gateway pero "
-                    "la cabecera %s falta o no coincide. Vuelve a llamar setWebhook con el mismo "
-                    "secret_token o vacía TELEGRAM_WEBHOOK_SECRET (solo dev).",
-                    TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
-                )
+        default_token = (resolve_effective_telegram_bot_token() or "").strip()
+        resolved = telegram_webhook_resolve_dispatch(
+            header_secret,
+            default_worker_id=_telegram_webhook_default_worker_id(),
+            default_tenant_id=_telegram_webhook_default_tenant_id(),
+            default_bot_token=default_token,
+        )
+        if resolved == "reject":
+            _log.warning(
+                "telegram webhook: 403 — cabecera %s no coincide con TELEGRAM_WEBHOOK_SECRET ni con "
+                "ninguna entrada de DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES.",
+                TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
@@ -91,6 +100,13 @@ def build_telegram_inbound_webhook_router(
                     "detail": "Secreto de webhook de Telegram inválido o ausente.",
                 },
             )
+
+        if isinstance(resolved, TelegramWebhookResolvedDispatch):
+            worker_id = resolved.worker_id
+            tenant_id = resolved.tenant_id
+            reply_token = resolved.bot_token
+        else:
+            _tag, worker_id, tenant_id, reply_token = resolved
 
         try:
             body = await request.json()
@@ -108,7 +124,8 @@ def build_telegram_inbound_webhook_router(
         update_id = body.get("update_id")
         redis_client = getattr(request.app.state, "redis", None)
         if update_id is not None and redis_client is not None:
-            dedupe_key = f"{_TELEGRAM_WEBHOOK_DEDUPE_KEY_PREFIX}:{update_id}"
+            _fp = telegram_webhook_header_fingerprint(header_secret)
+            dedupe_key = f"{_TELEGRAM_WEBHOOK_DEDUPE_KEY_PREFIX}:{_fp}:{update_id}"
             try:
                 first_time = await redis_client.set(
                     dedupe_key,
@@ -144,9 +161,6 @@ def build_telegram_inbound_webhook_router(
         )
         chat_type = str(chat.get("type") or "private")
 
-        worker_id = _telegram_webhook_default_worker_id()
-        tenant_id = _telegram_webhook_default_tenant_id()
-
         payload = ChatRequest(
             message=text,
             chat_id=str(chat_id),
@@ -177,7 +191,7 @@ def build_telegram_inbound_webhook_router(
                 else:
                     msg_err = str(detail)
                 _log.warning("telegram webhook invoke falló: %s", msg_err)
-                token_e = (resolve_effective_telegram_bot_token() or "").strip()
+                token_e = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
                 if token_e and msg_err:
                     try:
                         client_e = TelegramBotApiAsyncClient(token_e)
@@ -194,7 +208,7 @@ def build_telegram_inbound_webhook_router(
             if not reply_local:
                 return
 
-            token_r = (resolve_effective_telegram_bot_token() or "").strip()
+            token_r = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
             if not token_r:
                 _log.warning("telegram webhook: hay respuesta pero falta TELEGRAM_BOT_TOKEN")
                 return
@@ -204,7 +218,8 @@ def build_telegram_inbound_webhook_router(
 
         async def _invoke_and_reply_safe() -> None:
             try:
-                await _invoke_and_reply()
+                with telegram_bot_token_override(reply_token):
+                    await _invoke_and_reply()
             except Exception as exc:  # noqa: BLE001
                 _log.exception("telegram webhook: fallo en invocación en segundo plano: %s", exc)
 
@@ -212,7 +227,8 @@ def build_telegram_inbound_webhook_router(
             asyncio.create_task(_invoke_and_reply_safe())
             return {"ok": "true"}
 
-        await _invoke_and_reply()
+        with telegram_bot_token_override(reply_token):
+            await _invoke_and_reply()
         return {"ok": "true"}
 
     return router

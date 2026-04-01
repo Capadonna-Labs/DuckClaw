@@ -50,7 +50,12 @@ from core.chat_history import (
 from core.models import ChatRequest
 from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
 from duckclaw.vaults import ensure_registry as ensure_vault_registry
-from duckclaw.vaults import resolve_active_vault, validate_user_db_path
+from duckclaw.vaults import resolve_active_vault, validate_user_db_path, vault_scope_id_for_tenant
+from duckclaw.integrations.telegram.telegram_agent_token import (
+    PM2_GATEWAY_APP_TO_WORKER_ID,
+    resolve_telegram_token_for_worker_id,
+    telegram_token_from_pm2_env_dict,
+)
 
 # Cargar .env desde repo root
 _repo_root = Path(__file__).resolve().parent.parent.parent
@@ -68,6 +73,10 @@ for _base in (_repo_root, Path.cwd()):
                 # Esta clave controla hilos en graph_server: debe ganar el .env del repo
                 # aunque el proceso traiga un valor vacío heredado del entorno.
                 if _ks == "DUCKCLAW_CHAT_PARALLEL_INVOCATIONS":
+                    os.environ[_ks] = _vs
+                # Tavily: sin clave la tool no se registra o falla en backend; el .env del repo
+                # debe poder fijarla aunque PM2 herede un valor vacío.
+                elif _ks == "TAVILY_API_KEY" and _vs:
                     os.environ[_ks] = _vs
                 else:
                     os.environ.setdefault(_ks, _vs)
@@ -145,7 +154,13 @@ def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
     else:
         pth = pth.resolve()
     os.environ["DUCKCLAW_DB_PATH"] = str(pth)
-    tok = (env.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    _matched_app = (matched_name or "").strip()
+    _wid = PM2_GATEWAY_APP_TO_WORKER_ID.get(_matched_app, "")
+    tok = (
+        telegram_token_from_pm2_env_dict(env, _wid)
+        if _wid
+        else (str(env.get("TELEGRAM_BOT_TOKEN") or "")).strip()
+    )
     if tok:
         os.environ["TELEGRAM_BOT_TOKEN"] = tok
         return True, matched_name
@@ -154,26 +169,19 @@ def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
 
 def _apply_telegram_token_per_gateway_env(*, matched_pm2_app_name: str | None) -> None:
     """
-    Fallback cuando el bloque PM2 no trae TELEGRAM_BOT_TOKEN: varias gateways comparten
-    .env con un solo TELEGRAM_BOT_TOKEN (p. ej. Finanz) y sendPhoto iría al bot equivocado.
+    Si el bloque PM2 no fijó token: resuelve desde .env con
+    ``TELEGRAM_<ID_AGENT>_TOKEN`` (estándar) o nombres legados.
 
-    - BI-Analyst-Gateway → TELEGRAM_BOT_TOKEN_BI_ANALYST
-    - Leila-Gateway → TELEGRAM_BOT_TOKEN_LEILA
-    - SIATA-Gateway → TELEGRAM_BOT_TOKEN_SIATA
+    Ver: ``duckclaw.integrations.telegram.telegram_agent_token``.
     """
     proc = (
         (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
         or (matched_pm2_app_name or "").strip()
     )
-    namespaced = {
-        "BI-Analyst-Gateway": "TELEGRAM_BOT_TOKEN_BI_ANALYST",
-        "Leila-Gateway": "TELEGRAM_BOT_TOKEN_LEILA",
-        "SIATA-Gateway": "TELEGRAM_BOT_TOKEN_SIATA",
-    }
-    var = namespaced.get(proc)
-    if not var:
+    wid = PM2_GATEWAY_APP_TO_WORKER_ID.get(proc)
+    if not wid:
         return
-    alt = (os.getenv(var) or "").strip()
+    alt = resolve_telegram_token_for_worker_id(wid)
     if alt:
         os.environ["TELEGRAM_BOT_TOKEN"] = alt
 
@@ -184,8 +192,10 @@ if not _telegram_token_from_pm2_json:
 
 
 def _effective_telegram_bot_token() -> str:
-    """Token Bot API para este proceso (tras overrides PM2 + per-gateway)."""
-    return (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    """Token Bot API para este proceso (tras overrides PM2 + per-gateway + ContextVar multiplex)."""
+    from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
+
+    return effective_telegram_bot_token_outbound()
 
 
 from duckclaw.pm2_gateway_db import dedicated_gateway_db_path_resolved
@@ -642,7 +652,7 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
     """
     Telegram Guard whitelist lookup with Redis cache (TTL=1h) + DuckDB source of truth.
     """
-    key = f"whitelist:{tenant_id}:{user_id}"
+    key = f"whitelist:{str(tenant_id or '').strip().lower()}:{user_id}"
     if redis_client is not None:
         try:
             cached = await redis_client.get(key)
@@ -663,7 +673,8 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
 
     try:
         raw = db.query(
-            f"SELECT role FROM main.authorized_users WHERE tenant_id='{tid}' AND user_id='{uid}' LIMIT 1"
+            f"SELECT role FROM main.authorized_users "
+            f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}' LIMIT 1"
         )
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
         if rows and isinstance(rows[0], dict):
@@ -680,7 +691,8 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
         _ensure_authorized_users_table()
         try:
             raw = db.query(
-                f"SELECT role FROM main.authorized_users WHERE tenant_id='{tid}' AND user_id='{uid}' LIMIT 1"
+                f"SELECT role FROM main.authorized_users "
+                f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}' LIMIT 1"
             )
             rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
             if rows and isinstance(rows[0], dict):
@@ -1243,7 +1255,8 @@ async def _invoke_chat(
     if not user_id and chat_type == "private":
         user_id = (session_id or "").strip()
     vault_user_id = user_id or session_id
-    _, vault_db_path = resolve_active_vault(vault_user_id)
+    vault_scope = vault_scope_id_for_tenant(tenant_id)
+    _, vault_db_path = resolve_active_vault(vault_user_id, vault_scope)
     _ded_vault = _dedicated_gateway_vault_db_path()
     if _ded_vault:
         vault_db_path = _ded_vault
@@ -1563,9 +1576,8 @@ async def _invoke_chat(
                 elif not chart_sent and not token:
                     _gateway_log.warning(
                         "sandbox chart: hay PNG del sandbox pero no hay token Bot API (TELEGRAM_BOT_TOKEN "
-                        "en el bloque PM2, o TELEGRAM_BOT_TOKEN_BI_ANALYST / TELEGRAM_BOT_TOKEN_LEILA / "
-                        "TELEGRAM_BOT_TOKEN_SIATA según gateway); define uno en .env o en "
-                        "config/api_gateways_pm2.json para este proceso."
+                        "o TELEGRAM_<ID_AGENT>_TOKEN en el bloque PM2 / .env, p. ej. TELEGRAM_BI_ANALYST_TOKEN); "
+                        "define uno para este proceso."
                     )
     if chart_sent:
         reply_plain_for_storage = _strip_lines_mentioning_workspace_output(reply_plain_for_storage or "")
@@ -1731,7 +1743,8 @@ async def enqueue_write(req: WriteRequest):
         if _ded:
             db_path = _ded
         else:
-            _, db_path = resolve_active_vault(user_id)
+            _t_eff = str(tid or "default").strip() or "default"
+            _, db_path = resolve_active_vault(user_id, vault_scope_id_for_tenant(_t_eff))
     payload = {
         "task_id": task_id,
         "tenant_id": req.tenant_id,

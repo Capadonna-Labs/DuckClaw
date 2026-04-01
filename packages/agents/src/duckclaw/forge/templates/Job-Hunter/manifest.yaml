@@ -1,0 +1,28 @@
+# OSINT JobHunter — Spec: specs/features/OSINT JobHunter (Web-Wide Recruitment Agent).md
+name: OSINT JobHunter
+id: job_hunter
+schema_name: finance_worker
+topology: general
+read_only: false
+browser_sandbox: true
+network_access: true
+allowed_tables:
+  - job_opportunities
+  - transactions
+  - categories
+  - cuentas
+  - deudas
+  - presupuestos
+llm:
+  required: true
+  temperature: 0.25
+skills:
+  # Nombre efectivo de la tool registrada por el bloque research (ver research_bridge).
+  - tavily_search
+  - research:
+      tavily_enabled: true
+      audit_langsmith: true
+      search_depth: advanced
+      include_answer: true
+      max_results: 15
+      include_raw_content: false

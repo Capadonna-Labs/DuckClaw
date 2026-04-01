@@ -62,8 +62,15 @@ def pm2_gateway_names_with_explicit_db_path() -> frozenset[str]:
 
 def dedicated_gateway_db_path_resolved() -> str | None:
     """
-    Ruta absoluta de DUCKCLAW_DB_PATH si este proceso quedó enlazado a una app en
-    api_gateways_pm2.json con DB explícita. None si aplica el registry multi-bóveda.
+    Ruta absoluta de DUCKCLAW_DB_PATH cuando el gateway debe usar una sola DuckDB
+    (no el registry multi-bóveda por usuario).
+
+    - Si el proceso está en ``api_gateways_pm2.json`` con ``DUCKCLAW_DB_PATH`` (nombre
+      PM2 o match por puerto): se usa esa ruta.
+    - Si hay ``DUCKCLAW_PM2_PROCESS_NAME`` pero **no** hay bloque en el JSON (p. ej.
+      wizard creó ``JobHunter-Gateway`` sin editar el JSON): se usa igualmente
+      ``DUCKCLAW_DB_PATH`` del entorno PM2/.env.
+    - Sin nombre PM2 (p. ej. ``uvicorn`` local sin PM2): None → multi-bóveda.
 
     Importante: al arranque, ``_apply_db_path_from_api_gateways_pm2`` puede emparejar
     el bloque correcto por ``--port`` y fijar ``DUCKCLAW_PM2_MATCHED_APP_NAME`` a
@@ -72,12 +79,16 @@ def dedicated_gateway_db_path_resolved() -> str | None:
     dos si está en el JSON; si solo se mirara el nombre PM2, fly commands y el manager
     volverían al vault del registry (p. ej. finanzdb1) y chocarían por lock DuckDB.
     """
-    names = pm2_gateway_names_with_explicit_db_path()
-    proc = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
-    matched = (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
-    if proc not in names and matched not in names:
-        return None
     gw_db = (os.environ.get("DUCKCLAW_DB_PATH") or "").strip()
     if not gw_db:
         return None
-    return str(Path(gw_db).expanduser().resolve())
+    resolved = str(Path(gw_db).expanduser().resolve())
+    names = pm2_gateway_names_with_explicit_db_path()
+    proc = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
+    matched = (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
+    in_json = proc in names or matched in names
+    if in_json:
+        return resolved
+    if proc:
+        return resolved
+    return None

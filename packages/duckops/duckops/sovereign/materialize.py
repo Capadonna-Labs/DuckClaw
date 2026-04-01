@@ -53,50 +53,121 @@ def _resolve_repo_db_path(repo_root: Path, rel_or_abs: str) -> Path:
     return (repo_root / p).resolve()
 
 
+def _parse_repo_dotenv(repo_root: Path) -> dict[str, str]:
+    """Claves del ``.env`` del repo (tras merge del wizard) para reutilizar en un bloque PM2 nuevo."""
+    out: dict[str, str] = {}
+    path = repo_root / ".env"
+    if not path.is_file():
+        return out
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, _, v = s.partition("=")
+            ks = k.strip()
+            if not ks:
+                continue
+            out[ks] = v.strip().strip("'\"").strip()
+    except Exception:
+        pass
+    return out
+
+
 def patch_api_gateways_pm2_for_draft(
     repo_root: Path,
     draft: SovereignDraft,
     console_print,
 ) -> None:
     """
-    Alinea ``env.DUCKCLAW_DB_PATH`` (y opcionalmente ``DUCKCLAW_SHARED_DB_PATH``)
-    del bloque PM2 con nombre ``draft.gateway_pm2_name``.
+    Alinea o crea el bloque ``apps[]`` para ``draft.gateway_pm2_name``.
+
+    - Si ya existe: actualiza ``DUCKCLAW_DB_PATH`` / ``DUCKCLAW_SHARED_DB_PATH``.
+    - Si no existe: **añade** automáticamente un bloque (host, puerto, env copiado del
+      ``.env`` recién fusionado + identidad del borrador) para que ``main.py`` resuelva
+      bien la DuckDB por puerto/nombre PM2 sin editar el JSON a mano.
 
     El gateway cargado con PM2 **sobrescribe** ``DUCKCLAW_DB_PATH`` desde este JSON
     (ver ``api-gateway/main.py``); actualizar solo ``.env`` no bastaba.
     """
-    cfg_path = repo_root / "config" / "api_gateways_pm2.json"
-    if not cfg_path.is_file():
-        return
+    from duckclaw.pm2_gateway_db import clear_pm2_gateway_db_cache  # noqa: PLC0415
+
     app_name = (draft.gateway_pm2_name or "").strip()
     if not app_name:
-        return
-    try:
-        raw = json.loads(cfg_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        console_print(f"No se pudo leer api_gateways_pm2.json: {exc}")
-        return
-    apps = raw.get("apps") if isinstance(raw, dict) else None
-    if not isinstance(apps, list):
-        return
-    idx: int | None = None
-    for i, a in enumerate(apps):
-        if isinstance(a, dict) and (a.get("name") or "").strip() == app_name:
-            idx = i
-            break
-    if idx is None:
-        console_print(
-            f"Aviso: no hay app '{app_name}' en config/api_gateways_pm2.json — "
-            "el proceso PM2 seguirá usando la DUCKCLAW_DB_PATH del JSON actual. "
-            "Crea el bloque o edita el archivo a mano."
-        )
         return
 
     primary_rel = effective_primary_duckdb_relpath(draft)
     primary_abs = _resolve_repo_db_path(repo_root, primary_rel)
     attach_rel = shared_attach_relpath(draft)
 
+    cfg_path = repo_root / "config" / "api_gateways_pm2.json"
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if cfg_path.is_file():
+        try:
+            raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            console_print(f"No se pudo leer api_gateways_pm2.json: {exc}")
+            return
+    else:
+        raw = {"apps": []}
+
+    apps = raw.get("apps") if isinstance(raw, dict) else None
+    if not isinstance(apps, list):
+        apps = []
+        raw["apps"] = apps
+
+    idx: int | None = None
+    for i, a in enumerate(apps):
+        if isinstance(a, dict) and (a.get("name") or "").strip() == app_name:
+            idx = i
+            break
+
+    port = int(draft.gateway_port)
+
+    if idx is None:
+        dot = _parse_repo_dotenv(repo_root)
+        env: dict[str, str] = dict(dot)
+        env["PYTHONPATH"] = str(repo_root.resolve())
+        env["DUCKCLAW_PM2_PROCESS_NAME"] = app_name
+        ru = (draft.redis_url or "").strip() or dot.get("REDIS_URL") or dot.get("DUCKCLAW_REDIS_URL") or ""
+        if ru:
+            env["REDIS_URL"] = ru
+            env["DUCKCLAW_REDIS_URL"] = ru
+        env["DUCKCLAW_DB_PATH"] = str(primary_abs)
+        env["DUCKCLAW_GATEWAY_TENANT_ID"] = (draft.tenant_id or "default").strip() or "default"
+        env["DUCKCLAW_DEFAULT_WORKER_ID"] = (draft.default_worker_id or "finanz").strip()
+        for k, val in (
+            ("DUCKCLAW_LLM_PROVIDER", draft.llm_provider),
+            ("DUCKCLAW_LLM_MODEL", draft.llm_model),
+            ("DUCKCLAW_LLM_BASE_URL", draft.llm_base_url),
+        ):
+            vs = (val or "").strip()
+            if vs:
+                env[k] = vs
+        if attach_rel is not None:
+            env["DUCKCLAW_SHARED_DB_PATH"] = str(_resolve_repo_db_path(repo_root, attach_rel))
+        elif (draft.duckdb_shared_path or "").strip():
+            env.pop("DUCKCLAW_SHARED_DB_PATH", None)
+
+        for a in apps:
+            if isinstance(a, dict) and int(a.get("port") or 0) == port:
+                console_print(
+                    f"[yellow]Aviso:[/] ya hay un gateway en puerto {port} en api_gateways_pm2.json; "
+                    "si el arranque por --port resuelve el bloque equivocado, cambia uno de los puertos."
+                )
+                break
+
+        apps.append({"name": app_name, "host": "0.0.0.0", "port": port, "env": env})
+        console_print(
+            f"[green]Nuevo gateway[/] '{app_name}' añadido a config/api_gateways_pm2.json (puerto {port})."
+        )
+        idx = len(apps) - 1
+
     app = apps[idx]
+    if not isinstance(app, dict):
+        return
+    app.setdefault("host", "0.0.0.0")
     env = app.get("env")
     if not isinstance(env, dict):
         env = {}
@@ -106,10 +177,10 @@ def patch_api_gateways_pm2_for_draft(
     if attach_rel is not None:
         env["DUCKCLAW_SHARED_DB_PATH"] = str(_resolve_repo_db_path(repo_root, attach_rel))
     elif (draft.duckdb_shared_path or "").strip():
-        # «Shared» era solo la principal: quitar clave secundaria del bloque PM2.
         env.pop("DUCKCLAW_SHARED_DB_PATH", None)
 
     atomic_write(cfg_path, json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+    clear_pm2_gateway_db_cache()
     console_print(f"PM2 config: DUCKCLAW_DB_PATH → {primary_abs}")
     if attach_rel is not None:
         console_print(f"PM2 config: DUCKCLAW_SHARED_DB_PATH → {env['DUCKCLAW_SHARED_DB_PATH']}")
@@ -117,6 +188,190 @@ def patch_api_gateways_pm2_for_draft(
 
 def _wizard_config_path() -> Path:
     return Path.home() / ".config" / "duckclaw" / "wizard_config.json"
+
+
+def load_last_duckdb_vault_path_from_wizard_config() -> str:
+    """Ruta de bóveda guardada en la última materialización (wizard_config.json)."""
+    path = _wizard_config_path()
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return (data.get("db_path") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def load_last_wizard_creator_telegram_user_id_from_wizard_config() -> str:
+    """Último user_id del creador guardado en wizard_config.json (materialización previa)."""
+    path = _wizard_config_path()
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return (data.get("wizard_creator_telegram_user_id") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def load_last_wizard_creator_admin_display_name_from_wizard_config() -> str:
+    """Último nombre de admin del creador (username en BD) guardado en wizard_config.json."""
+    path = _wizard_config_path()
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return (data.get("wizard_creator_admin_display_name") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def load_last_wizard_extra_admin_telegram_ids_from_wizard_config() -> str:
+    """Últimos admins extra (CSV) guardados en wizard_config.json."""
+    path = _wizard_config_path()
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return (data.get("wizard_extra_admin_telegram_ids") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def load_last_gateway_tenant_id_from_wizard_config() -> str:
+    """Último ``DUCKCLAW_GATEWAY_TENANT_ID`` guardado en wizard_config.json."""
+    path = _wizard_config_path()
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return (data.get("gateway_tenant_id") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def load_gateway_tenant_hint_from_repo_env(repo_root: Path) -> str:
+    """Lee ``DUCKCLAW_GATEWAY_TENANT_ID`` del ``.env`` del repo si está definido."""
+    envp = repo_root / ".env"
+    if not envp.is_file():
+        return ""
+    try:
+        text = envp.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k, _, v = s.partition("=")
+        if k.strip() != "DUCKCLAW_GATEWAY_TENANT_ID":
+            continue
+        val = v.strip().strip("'\"")
+        return val if val else ""
+    return ""
+
+
+def load_last_gateway_pm2_name_from_wizard_config() -> str:
+    """Último nombre PM2 del gateway guardado en wizard_config.json (clave ``gateway_pm2_name``)."""
+    path = _wizard_config_path()
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return (data.get("gateway_pm2_name") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def load_pm2_gateway_name_hint_from_repo_env(repo_root: Path) -> str:
+    """Lee ``DUCKCLAW_PM2_PROCESS_NAME`` del ``.env`` del repo si está definido."""
+    envp = repo_root / ".env"
+    if not envp.is_file():
+        return ""
+    try:
+        text = envp.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k, _, v = s.partition("=")
+        if k.strip() != "DUCKCLAW_PM2_PROCESS_NAME":
+            continue
+        val = v.strip().strip("'\"")
+        return val if val else ""
+    return ""
+
+
+def load_telegram_creator_hint_from_repo_env(repo_root: Path) -> str:
+    """
+    Si en ``.env`` hay ``DUCKCLAW_ADMIN_CHAT_ID`` o ``DUCKCLAW_OWNER_ID`` numérico,
+    úsalo como sugerencia de admin (mismo criterio que el gateway).
+    """
+    envp = repo_root / ".env"
+    if not envp.is_file():
+        return ""
+    try:
+        text = envp.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    vals: dict[str, str] = {}
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k, _, v = s.partition("=")
+        ks = k.strip()
+        if ks:
+            vals[ks] = v.strip().strip("'\"")
+    for key in ("DUCKCLAW_ADMIN_CHAT_ID", "DUCKCLAW_OWNER_ID"):
+        val = (vals.get(key) or "").strip()
+        if val.isdigit():
+            return val
+    return ""
+
+
+def load_duckdb_vault_hint_from_repo_env(repo_root: Path) -> str:
+    """Si existe .env en el repo con DUCKCLAW_DB_PATH / DUCKDB_PATH, úsalo como sugerencia."""
+    envp = repo_root / ".env"
+    if not envp.is_file():
+        return ""
+    try:
+        text = envp.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k, _, v = s.partition("=")
+        k = k.strip()
+        if k not in ("DUCKCLAW_DB_PATH", "DUCKDB_PATH"):
+            continue
+        v = v.strip().strip("'\"")
+        if not v:
+            continue
+        p = Path(v)
+        if p.is_absolute():
+            try:
+                return str(p.resolve().relative_to(repo_root.resolve()))
+            except ValueError:
+                return v
+        return v
+    return ""
 
 
 def merge_env_file(repo_root: Path, updates: dict[str, str]) -> None:
@@ -168,6 +423,69 @@ def _ensure_mcp_yaml_telegram_enabled(repo_root: Path) -> None:
     else:
         text = new_text
     atomic_write(path, text)
+
+
+def seed_telegram_guard_admins(
+    repo_root: Path,
+    db_path: Path,
+    draft: SovereignDraft,
+    console_print,
+) -> None:
+    """
+    Inserta en ``main.authorized_users`` al creador del wizard y admins extra (role=admin).
+    Requiere ``wizard_creator_telegram_user_id`` numérico.
+    """
+    creator = (draft.wizard_creator_telegram_user_id or "").strip()
+    if not creator or not creator.isdigit():
+        console_print(
+            "[yellow]Telegram Guard:[/] sin ``wizard_creator_telegram_user_id`` válido; "
+            "no se sembraron admins (añade tu ID con ``duckops init`` de nuevo o inserta en DuckDB)."
+        )
+        return
+    tenant = (draft.tenant_id or "default").strip() or "default"
+    ids: list[str] = [creator]
+    raw_extra = (draft.wizard_extra_admin_telegram_ids or "").replace(";", ",")
+    for part in raw_extra.split(","):
+        p = part.strip()
+        if p.isdigit() and p not in ids:
+            ids.append(p)
+    orig = sys.path[:]
+    try:
+        sys.path.insert(0, str(repo_root))
+        from duckclaw import DuckClaw  # noqa: PLC0415
+
+        db = DuckClaw(str(db_path.resolve()))
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS main.authorized_users (
+                tenant_id VARCHAR,
+                user_id VARCHAR,
+                username VARCHAR,
+                role VARCHAR DEFAULT 'user',
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, user_id)
+            );
+            """
+        )
+        creator_uname = (draft.wizard_creator_admin_display_name or "").strip()
+        for uid in ids:
+            db.execute(
+                "DELETE FROM main.authorized_users WHERE tenant_id = ? AND user_id = ?",
+                [tenant, uid],
+            )
+            uname = creator_uname if uid == creator else ""
+            db.execute(
+                "INSERT INTO main.authorized_users (tenant_id, user_id, username, role) VALUES (?, ?, ?, ?)",
+                [tenant, uid, uname, "admin"],
+            )
+        console_print(
+            f"[green]Telegram Guard:[/] {len(ids)} usuario(s) con rol admin "
+            f"(tenant_id={tenant!r}) en {db_path}"
+        )
+    except Exception as exc:
+        console_print(f"[red]Telegram Guard:[/] no se pudo sembrar authorized_users: {exc}")
+    finally:
+        sys.path[:] = orig
 
 
 def ensure_duckdb_file(repo_root: Path, relative_or_abs: str) -> bool:
@@ -271,6 +589,10 @@ def save_wizard_config_json(draft: SovereignDraft) -> None:
             "llm_base_url": draft.llm_base_url,
             "db_path": draft.duckdb_vault_path,
             "gateway_pm2_name": draft.gateway_pm2_name,
+            "gateway_tenant_id": (draft.tenant_id or "default").strip() or "default",
+            "wizard_creator_telegram_user_id": (draft.wizard_creator_telegram_user_id or "").strip(),
+            "wizard_creator_admin_display_name": (draft.wizard_creator_admin_display_name or "").strip(),
+            "wizard_extra_admin_telegram_ids": (draft.wizard_extra_admin_telegram_ids or "").strip(),
             "telegram_webhook_public_base_url": (draft.telegram_webhook_public_base_url or "").strip(),
             "cloudflared_pm2_process_name": (draft.cloudflared_pm2_process_name or "").strip(),
             "tailscale_funnel_bg_via_wizard": draft.tailscale_funnel_bg_via_wizard,
@@ -294,6 +616,7 @@ def materialize(
     primary_rel = effective_primary_duckdb_relpath(draft)
     attach_rel = shared_attach_relpath(draft)
 
+    _dw = (draft.default_worker_id or "").strip().lower()
     updates: dict[str, str] = {
         "REDIS_URL": draft.redis_url.strip(),
         "DUCKCLAW_REDIS_URL": draft.redis_url.strip(),
@@ -306,6 +629,11 @@ def materialize(
         "DUCKCLAW_LLM_BASE_URL": draft.llm_base_url.strip(),
         "DUCKCLAW_PM2_PROCESS_NAME": draft.gateway_pm2_name.strip(),
     }
+    # Gateways no-Finanz con tenant propio: bóveda inicial por slug de worker (p. ej. job_hunter).
+    if _dw and _dw != "finanz":
+        updates["DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID"] = (draft.default_worker_id or "").strip()
+    else:
+        updates["DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID"] = ""
     if attach_rel is not None:
         updates["DUCKCLAW_SHARED_DB_PATH"] = attach_rel
     elif (draft.duckdb_shared_path or "").strip():
@@ -314,6 +642,12 @@ def materialize(
         updates["DUCKCLAW_SHARED_DB_PATH"] = ""
     tok = draft.telegram_bot_token.strip()
     if tok:
+        from duckclaw.integrations.telegram.telegram_agent_token import telegram_agent_token_env_name
+
+        _wid = (draft.default_worker_id or "finanz").strip()
+        _std_key = telegram_agent_token_env_name(_wid)
+        if _std_key:
+            updates[_std_key] = tok
         updates["TELEGRAM_BOT_TOKEN"] = tok
     sec = draft.telegram_webhook_secret.strip()
     if sec:
@@ -346,6 +680,9 @@ def materialize(
             f"Advertencia: no se pudo crear la DuckDB en {primary_rel} "
             "(¿falta duckclaw en PYTHONPATH?)."
         )
+    else:
+        _db_abs = _resolve_repo_db_path(repo_root, primary_rel)
+        seed_telegram_guard_admins(repo_root, _db_abs, draft, console_print)
 
     patch_security_policy(repo_root, draft.default_worker_id)
 

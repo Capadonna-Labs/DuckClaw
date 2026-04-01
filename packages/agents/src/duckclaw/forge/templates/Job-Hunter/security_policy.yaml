@@ -1,0 +1,20 @@
+# Strix browser sandbox — red amplia (ATS + LinkedIn). allow_list documentado; enforce L7 pendiente.
+network:
+  default: allow
+  allow_list:
+    - linkedin.com
+    - www.linkedin.com
+    - greenhouse.io
+    - lever.co
+    - jobs.lever.co
+filesystem:
+  readonly_mounts: []
+  ephemeral_volumes:
+    - "/workspace/output"
+secrets:
+  in_memory_only: true
+  allowed_secrets:
+    - LINKEDIN_LI_AT
+    - OPENAI_API_KEY
+    - TAVILY_API_KEY
+max_execution_time_seconds: 300

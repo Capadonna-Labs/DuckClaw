@@ -92,7 +92,12 @@ def main():
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    schema_sql = (root / "templates" / "workers" / "finanz" / "schema.sql").read_text(encoding="utf-8")
+    schema_path = (
+        root / "packages" / "agents" / "src" / "duckclaw" / "forge" / "templates" / "finanz" / "schema.sql"
+    )
+    if not schema_path.is_file():
+        schema_path = root / "templates" / "workers" / "finanz" / "schema.sql"
+    schema_sql = schema_path.read_text(encoding="utf-8")
     for stmt in split_sql_statements(schema_sql):
         if stmt.strip():
             db.execute(stmt)

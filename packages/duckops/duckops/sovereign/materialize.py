@@ -8,6 +8,11 @@ import re
 import sys
 from pathlib import Path
 
+from duckclaw.dotenv_immutable import (
+    is_repo_dotenv_immutable,
+    merge_proposed_env_file,
+    merged_root_and_proposed_flat_env,
+)
 from duckops.sovereign.atomic import atomic_write
 from duckops.sovereign.docker_compose import write_compose_override
 from duckops.sovereign.draft import SovereignDraft
@@ -74,18 +79,43 @@ def _parse_repo_dotenv(repo_root: Path) -> dict[str, str]:
     return out
 
 
+_PM2_SKIP_ENV_UPDATES_KEYS = frozenset(
+    {
+        "DUCKCLAW_DB_PATH",
+        "DUCKDB_PATH",
+        "DUCKCLAW_SHARED_DB_PATH",
+    }
+)
+
+
+def _apply_materialize_env_updates_to_pm2_env(
+    env: dict[str, str],
+    env_updates: dict[str, str] | None,
+) -> None:
+    """Fusiona claves del materialize (Telegram, Redis, LLM, …) sin pisar rutas DuckDB resueltas."""
+    if not env_updates:
+        return
+    for key, val in env_updates.items():
+        if key in _PM2_SKIP_ENV_UPDATES_KEYS:
+            continue
+        env[key] = val if val is not None else ""
+
+
 def patch_api_gateways_pm2_for_draft(
     repo_root: Path,
     draft: SovereignDraft,
     console_print,
+    *,
+    env_updates: dict[str, str] | None = None,
 ) -> None:
     """
     Alinea o crea el bloque ``apps[]`` para ``draft.gateway_pm2_name``.
 
     - Si ya existe: actualiza ``DUCKCLAW_DB_PATH`` / ``DUCKCLAW_SHARED_DB_PATH``.
-    - Si no existe: **añade** automáticamente un bloque (host, puerto, env copiado del
-      ``.env`` recién fusionado + identidad del borrador) para que ``main.py`` resuelva
-      bien la DuckDB por puerto/nombre PM2 sin editar el JSON a mano.
+    - Si no existe: **añade** automáticamente un bloque (host, puerto, env copiado de
+      ``.env`` + ``config/dotenv_wizard_proposed.env`` + identidad del borrador +
+      ``env_updates`` del materialize) para que ``main.py`` resuelva bien la DuckDB y
+      los tokens Telegram con ``.env`` inmutable.
 
     El gateway cargado con PM2 **sobrescribe** ``DUCKCLAW_DB_PATH`` desde este JSON
     (ver ``api-gateway/main.py``); actualizar solo ``.env`` no bastaba.
@@ -126,7 +156,7 @@ def patch_api_gateways_pm2_for_draft(
     port = int(draft.gateway_port)
 
     if idx is None:
-        dot = _parse_repo_dotenv(repo_root)
+        dot = merged_root_and_proposed_flat_env(repo_root)
         env: dict[str, str] = dict(dot)
         env["PYTHONPATH"] = str(repo_root.resolve())
         env["DUCKCLAW_PM2_PROCESS_NAME"] = app_name
@@ -178,6 +208,8 @@ def patch_api_gateways_pm2_for_draft(
         env["DUCKCLAW_SHARED_DB_PATH"] = str(_resolve_repo_db_path(repo_root, attach_rel))
     elif (draft.duckdb_shared_path or "").strip():
         env.pop("DUCKCLAW_SHARED_DB_PATH", None)
+
+    _apply_materialize_env_updates_to_pm2_env(env, env_updates)
 
     atomic_write(cfg_path, json.dumps(raw, indent=2) + "\n", encoding="utf-8")
     clear_pm2_gateway_db_cache()
@@ -295,6 +327,91 @@ def load_last_gateway_pm2_name_from_wizard_config() -> str:
     return ""
 
 
+def load_last_default_worker_id_from_wizard_config() -> str:
+    """Último worker por defecto guardado en wizard_config.json (clave ``default_worker_id``)."""
+    path = _wizard_config_path()
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return (data.get("default_worker_id") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def load_last_gateway_port_from_wizard_config() -> int | None:
+    """Último puerto del gateway guardado en wizard_config.json (clave ``gateway_port``)."""
+    path = _wizard_config_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
+        raw = data.get("gateway_port")
+        if raw is None:
+            return None
+        p = int(raw)
+        if 1 <= p <= 65535:
+            return p
+    except (TypeError, ValueError, json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def load_gateway_port_hint_from_api_gateways_json(repo_root: Path, gateway_pm2_name: str) -> int | None:
+    """Puerto en ``config/api_gateways_pm2.json`` para la app cuyo ``name`` coincide con ``gateway_pm2_name``."""
+    name = (gateway_pm2_name or "").strip()
+    if not name:
+        return None
+    cfg_path = repo_root / "config" / "api_gateways_pm2.json"
+    if not cfg_path.is_file():
+        return None
+    try:
+        raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+        apps = raw.get("apps") if isinstance(raw, dict) else None
+        if not isinstance(apps, list):
+            return None
+        for a in apps:
+            if not isinstance(a, dict):
+                continue
+            if (a.get("name") or "").strip() != name:
+                continue
+            port = a.get("port")
+            if port is None:
+                return None
+            p = int(port)
+            if 1 <= p <= 65535:
+                return p
+            return None
+    except (TypeError, ValueError, json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def load_default_worker_id_hint_from_repo_env(repo_root: Path) -> str:
+    """Lee ``DUCKCLAW_DEFAULT_WORKER_ID`` del ``.env`` del repo si está definido."""
+    envp = repo_root / ".env"
+    if not envp.is_file():
+        return ""
+    try:
+        text = envp.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k, _, v = s.partition("=")
+        if k.strip() != "DUCKCLAW_DEFAULT_WORKER_ID":
+            continue
+        val = v.strip().strip("'\"")
+        return val if val else ""
+    return ""
+
+
 def load_pm2_gateway_name_hint_from_repo_env(repo_root: Path) -> str:
     """Lee ``DUCKCLAW_PM2_PROCESS_NAME`` del ``.env`` del repo si está definido."""
     envp = repo_root / ".env"
@@ -374,8 +491,20 @@ def load_duckdb_vault_hint_from_repo_env(repo_root: Path) -> str:
     return ""
 
 
-def merge_env_file(repo_root: Path, updates: dict[str, str]) -> None:
-    """Fusiona claves en ``.env`` con backup .bak (vía atomic_write por archivo completo)."""
+def merge_env_file(repo_root: Path, updates: dict[str, str]) -> bool:
+    """
+    Fusiona claves en ``.env`` (vía atomic_write).
+
+    Si el repo está marcado como inmutable (``.env.immutable`` o
+    ``DUCKCLAW_DOTENV_IMMUTABLE``), **no** escribe ``.env``; vuelca la fusión en
+    ``config/dotenv_wizard_proposed.env``.
+
+    Returns:
+        True si se escribió ``.env``; False si solo se escribió la propuesta.
+    """
+    if is_repo_dotenv_immutable(repo_root):
+        merge_proposed_env_file(repo_root, updates)
+        return False
     env_path = repo_root / ".env"
     keys_done: set[str] = set()
     new_lines: list[str] = []
@@ -396,6 +525,7 @@ def merge_env_file(repo_root: Path, updates: dict[str, str]) -> None:
         if key not in keys_done:
             new_lines.append(f"{key}={val}")
     atomic_write(env_path, "\n".join(new_lines) + "\n")
+    return True
 
 
 def _ensure_mcp_yaml_telegram_enabled(repo_root: Path) -> None:
@@ -590,6 +720,8 @@ def save_wizard_config_json(draft: SovereignDraft) -> None:
             "db_path": draft.duckdb_vault_path,
             "gateway_pm2_name": draft.gateway_pm2_name,
             "gateway_tenant_id": (draft.tenant_id or "default").strip() or "default",
+            "default_worker_id": (draft.default_worker_id or "").strip(),
+            "gateway_port": int(draft.gateway_port),
             "wizard_creator_telegram_user_id": (draft.wizard_creator_telegram_user_id or "").strip(),
             "wizard_creator_admin_display_name": (draft.wizard_creator_admin_display_name or "").strip(),
             "wizard_extra_admin_telegram_ids": (draft.wizard_extra_admin_telegram_ids or "").strip(),
@@ -665,7 +797,13 @@ def materialize(
             console_print("(Continuando; puedes arrancar Redis manualmente.)")
 
     try:
-        merge_env_file(repo_root, updates)
+        wrote_env = merge_env_file(repo_root, updates)
+        if not wrote_env:
+            console_print(
+                "[yellow].env inmutable[/]: no se modificó la raíz del repo (sentinel "
+                "`.env.immutable` o `DUCKCLAW_DOTENV_IMMUTABLE`). Valores fusionados en "
+                "[bold]config/dotenv_wizard_proposed.env[/]."
+            )
     except Exception as e:
         console_print(f"Error escribiendo .env: {e}")
         return 1
@@ -686,7 +824,7 @@ def materialize(
 
     patch_security_policy(repo_root, draft.default_worker_id)
 
-    patch_api_gateways_pm2_for_draft(repo_root, draft, console_print)
+    patch_api_gateways_pm2_for_draft(repo_root, draft, console_print, env_updates=updates)
 
     console_print(telegram_webhook_post_deploy_message(draft))
 
@@ -700,7 +838,7 @@ def materialize(
     exit_code = 0
     if draft.orchestration == "pm2" and deploy_pm2:
         try:
-            from duckops.manager import serve  # noqa: PLC0415
+            from duckclaw.ops.manager import serve  # noqa: PLC0415
 
             _env_file = repo_root / ".env"
             if _env_file.is_file():

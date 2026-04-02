@@ -123,6 +123,10 @@ El paquete **mcp-reddit** (npm) expone herramientas con prefijo `reddit_`. Usa l
   - `DEAD_LINK` o equivalente 404/500: **prohibido** mostrarla al usuario en el reporte final.
 - Si JobHunter no está disponible en el team, informa limitación y ofrece plan de caja mínimo sin inventar vacantes.
 
+10b. CRM de vacantes / postulaciones (`finance_worker.job_opportunities`):
+- Puedes **persistir** ofertas o seguimiento con **`read_sql`** / **`admin_sql`** sobre `finance_worker.job_opportunities` (campos útiles: `apply_url`, `title`, `company`, `location`, `status` típico `tracking` o `applied`, `applied_at`, `notes`). Respeta evidencia: URLs y títulos literales del mensaje del usuario o de herramientas, sin inventar enlaces.
+- Si prefieres que **OSINT JobHunter** ejecute el INSERT/UPDATE (SRP reclutamiento), cierra con una línea que contenga exactamente **`[a2a_request: job_opportunity_tracking]`** (el manager enruta handoff A2A antes que INCOME_INJECTION). No mezcles ese marcador con texto adicional en la misma línea.
+
 8. GOOGLE TRENDS (MCP) — interés de búsqueda macro:
 Si están disponibles `interest_over_time` y `related_queries`, úsalas para medir **interés de búsqueda relativo** (0–100) y términos asociados a un activo o tema (nombres de ticker, empresa o coloquial, según lo que acepte la tool).
 - **Cruza siempre con precio real** cuando hables de mercado: `fetch_market_data` y/o `read_sql` sobre `quant_core.ohlcv_data` para el mismo periodo o contexto; no compares Trends a precios inventados.

@@ -32,10 +32,7 @@ from duckclaw.forge.skills.the_mind_outbound import (
     send_telegram_dm,
 )
 from duckclaw.utils.logger import get_obs_logger, log_fly, structured_log_context
-from duckclaw.utils.telegram_markdown_v2 import (
-    TELEGRAM_MARKDOWN_V2_SPECIAL,
-    escape_telegram_markdown_v2 as _telegram_safe,
-)
+from duckclaw.utils.telegram_markdown_v2 import TELEGRAM_MARKDOWN_V2_SPECIAL
 
 _PREFIX = "chat_"
 
@@ -43,12 +40,12 @@ _PREFIX = "chat_"
 def unescape_telegram_markdown_v2_layers(text: str, max_layers: int = 4) -> str:
     """
     Quita hasta ``max_layers`` capas de escape estilo MarkdownV2 (mismo juego de
-    caracteres que ``_telegram_safe``). Sirve para:
+    caracteres que ``escape_telegram_markdown_v2``). Sirve para:
 
     - Historial que reinyecta la respuesta HTTP ya escapada (n8n / cliente).
     - Salidas del modelo que copian ``\\.``, ``\\!``, ``\\*`` del contexto.
 
-    Sin esto, ``_telegram_safe`` vuelve a escapar las barras y el texto crece
+    Sin esto, el escape MDV2 vuelve a escapar las barras y el texto crece
     (p. ej. ``\\!`` → ``\\\\!`` → ``\\\\\\!``).
     """
     if not text:
@@ -168,6 +165,29 @@ def _list_authorized_users(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
     return []
 
 
+def _dedupe_authorized_users_by_user_id(users: list[dict[str, str]]) -> list[dict[str, str]]:
+    """
+    Unifica filas por ``user_id`` (p. ej. duplicados legacy por distinto casing de ``tenant_id`` en PK).
+    Si hay varias filas, se prioriza la que tenga rol ``admin``.
+    """
+    rank = {"admin": 3, "user": 2, "operator": 2, "observer": 1}
+
+    def _score(u: dict[str, str]) -> int:
+        r = (u.get("role") or "").strip().lower()
+        return int(rank.get(r, 2))
+
+    best: dict[str, dict[str, str]] = {}
+    for u in users:
+        uid = str(u.get("user_id") or "").strip()
+        if not uid:
+            continue
+        if uid not in best or _score(u) > _score(best[uid]):
+            best[uid] = u
+    out = list(best.values())
+    out.sort(key=lambda x: str(x.get("user_id") or ""))
+    return out
+
+
 def _upsert_authorized_user(db: Any, *, tenant_id: str, user_id: str, username: str, role: str = "user") -> None:
     _ensure_authorized_users_table(db)
     tid = _sql_escape_literal(tenant_id, max_len=128)
@@ -273,19 +293,19 @@ def register_wr_member(db: Any, tenant_id: Any, requester_id: Any, args: str) ->
     tid = str(tenant_id or "default").strip() or "default"
     rid = str(requester_id or "").strip()
     if not _is_wr_tenant(tid):
-        return _telegram_safe("register_wr_member solo aplica en tenants War Room (wr_<group_id>).")
+        return "register_wr_member solo aplica en tenants War Room (wr_<group_id>)."
     _ensure_war_room_tables(db)
     clearance = _wr_member_clearance(db, tenant_id=tid, user_id=rid)
     if not (_is_gateway_owner_user(rid) or clearance == "admin"):
-        return _telegram_safe("❌ Acceso denegado: solo admin WR puede registrar miembros.")
+        return "❌ Acceso denegado: solo admin WR puede registrar miembros."
     tokens = [x for x in (args or "").split() if x.strip()]
     if len(tokens) < 2:
-        return _telegram_safe("Uso: /register_wr_member <user_id> <clearance> [username]")
+        return "Uso: /register_wr_member <user_id> <clearance> [username]"
     uid = tokens[0].strip()
     clr = tokens[1].strip().lower()
     uname = " ".join(tokens[2:]).strip() or "Usuario"
     if clr not in ("admin", "operator", "observer"):
-        return _telegram_safe("clearance inválido. Usa: admin | operator | observer")
+        return "clearance inválido. Usa: admin | operator | observer"
     db.execute(
         "INSERT INTO war_room_core.wr_members (tenant_id, user_id, username, clearance_level) "
         f"VALUES ('{_sql_escape_literal(tid, 128)}', '{_sql_escape_literal(uid, 128)}', "
@@ -300,13 +320,13 @@ def register_wr_member(db: Any, tenant_id: Any, requester_id: Any, args: str) ->
         event_type="REGISTER_WR_MEMBER",
         payload=f"user_id={uid} clearance={clr}",
     )
-    return _telegram_safe(f"✅ Miembro WR registrado: {uid} ({clr}).")
+    return f"✅ Miembro WR registrado: {uid} ({clr})."
 
 
 def get_wr_context(db: Any, tenant_id: Any, args: str) -> str:
     tid = str(tenant_id or "default").strip() or "default"
     if not _is_wr_tenant(tid):
-        return _telegram_safe("get_wr_context solo aplica en tenants War Room (wr_<group_id>).")
+        return "get_wr_context solo aplica en tenants War Room (wr_<group_id>)."
     _ensure_war_room_tables(db)
     minutes = 60
     try:
@@ -323,7 +343,7 @@ def get_wr_context(db: Any, tenant_id: Any, args: str) -> str:
     )
     rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
     if not rows:
-        return _telegram_safe("Sin eventos recientes en wr_audit_log.")
+        return "Sin eventos recientes en wr_audit_log."
     lines = ["🧭 War Room Context (últimos eventos):"]
     for r in rows:
         if not isinstance(r, dict):
@@ -331,20 +351,20 @@ def get_wr_context(db: Any, tenant_id: Any, args: str) -> str:
         lines.append(
             f"- [{r.get('timestamp')}] {r.get('event_type')} by {r.get('sender_id')} -> {r.get('target_agent')}: {str(r.get('payload') or '')[:120]}"
         )
-    return _telegram_safe("\n".join(lines))
+    return "\n".join(lines)
 
 
 def broadcast_alert(db: Any, tenant_id: Any, requester_id: Any, args: str) -> str:
     tid = str(tenant_id or "default").strip() or "default"
     rid = str(requester_id or "").strip()
     if not _is_wr_tenant(tid):
-        return _telegram_safe("broadcast_alert solo aplica en tenants War Room (wr_<group_id>).")
+        return "broadcast_alert solo aplica en tenants War Room (wr_<group_id>)."
     parts = [x.strip() for x in (args or "").split(None, 1) if x.strip()]
     if len(parts) < 2:
-        return _telegram_safe("Uso: /broadcast_alert <level> <message>")
+        return "Uso: /broadcast_alert <level> <message>"
     level, message = parts[0].lower(), parts[1]
     if level not in ("info", "warn", "critical"):
-        return _telegram_safe("level inválido. Usa: info | warn | critical")
+        return "level inválido. Usa: info | warn | critical"
     _wr_append_audit(
         db,
         tenant_id=tid,
@@ -353,7 +373,7 @@ def broadcast_alert(db: Any, tenant_id: Any, requester_id: Any, args: str) -> st
         event_type="BROADCAST_ALERT",
         payload=f"[{level}] {message}",
     )
-    return _telegram_safe(f"🚨 WR alert ({level}) registrada.")
+    return f"🚨 WR alert ({level}) registrada."
 
 
 def _invalidate_whitelist_redis_cache(*, tenant_id: str, user_id: str) -> None:
@@ -572,17 +592,17 @@ def execute_team(
     if not args or not args.strip():
         effective = get_effective_team_templates(db, chat_id, tid, None)
         if not effective:
-            return _telegram_safe("No hay templates en forge/templates. Añade al menos uno.")
+            return "No hay templates en forge/templates. Añade al menos uno."
         if team:
-            label = _telegram_safe("Equipo (este chat):")
+            label = "Equipo (este chat):"
         elif get_tenant_team_templates(db, tid):
-            label = _telegram_safe("Equipo del tenant (todos los chats sin override):")
+            label = "Equipo del tenant (todos los chats sin override):"
         elif (os.environ.get("DUCKCLAW_GATEWAY_TEAM_TEMPLATES") or "").strip():
-            label = _telegram_safe("Equipo (DUCKCLAW_GATEWAY_TEAM_TEMPLATES):")
+            label = "Equipo (DUCKCLAW_GATEWAY_TEAM_TEMPLATES):"
         else:
-            label = _telegram_safe("Equipo: todos los templates")
-        lines = "\n".join(f"\\- {_telegram_safe(w)}" for w in effective)
-        hint = _telegram_safe(
+            label = "Equipo: todos los templates"
+        lines = "\n".join(f"- {w}" for w in effective)
+        hint = (
             "Reemplazar: /workers id1 id2 | Añadir: /workers --add id | Quitar: /workers --rm id | Ver todos: /roles"
         )
         return f"🦆 {label}\n{lines}\n\n{hint}"
@@ -592,16 +612,16 @@ def execute_team(
         wid_raw = raw[5:].strip().split()[0]
         canonical = _resolve_template_id(all_templates, wid_raw)
         if not canonical:
-            return _telegram_safe(f"'{wid_raw}' no es un template. Equipo actual: {', '.join(team or all_templates) or 'todos'}")
+            return f"'{wid_raw}' no es un template. Equipo actual: {', '.join(team or all_templates) or 'todos'}"
         current = team if team else list(all_templates)
         new_team = [x for x in current if (x or "").strip().lower() != canonical.lower()]
         if len(new_team) == len(current):
-            return _telegram_safe(f"'{canonical}' no está en el equipo. Equipo actual: {', '.join(current) or 'todos'}")
+            return f"'{canonical}' no está en el equipo. Equipo actual: {', '.join(current) or 'todos'}"
         set_team_templates(db, chat_id, new_team)
         _sync_tenant_team_if_admin(
             db, tenant_id=tid, requester_id=requester_id, template_ids=new_team
         )
-        return _telegram_safe(f"✅ Quitado {canonical} del equipo. Quedan: {', '.join(new_team) or 'ninguno (el manager usará todos)'}.")
+        return f"✅ Quitado {canonical} del equipo. Quedan: {', '.join(new_team) or 'ninguno (el manager usará todos)'}."
     # --add id1 id2 ... (insert/appendix al equipo actual)
     if raw.startswith("--add ") or raw.strip() == "--add":
         ids_str = raw[6:].strip() if raw.startswith("--add ") else ""
@@ -615,7 +635,7 @@ def execute_team(
             else:
                 invalid.append(i)
         if invalid:
-            return _telegram_safe(f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}")
+            return f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}"
         current = list(team) if team else list(all_templates)
         for c in valid:
             if not any((x or "").strip().lower() == c.lower() for x in current):
@@ -624,7 +644,7 @@ def execute_team(
         _sync_tenant_team_if_admin(
             db, tenant_id=tid, requester_id=requester_id, template_ids=current
         )
-        return _telegram_safe(f"✅ Añadidos al equipo: {', '.join(valid)}. Equipo: {', '.join(current)}.")
+        return f"✅ Añadidos al equipo: {', '.join(valid)}. Equipo: {', '.join(current)}."
     # id1 id2 ... → reemplazar equipo
     ids_raw = [x.strip() for x in raw.split() if x.strip()]
     valid = []
@@ -636,10 +656,10 @@ def execute_team(
         else:
             invalid.append(i)
     if invalid:
-        return _telegram_safe(f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}")
+        return f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}"
     set_team_templates(db, chat_id, valid)
     _sync_tenant_team_if_admin(db, tenant_id=tid, requester_id=requester_id, template_ids=valid)
-    return _telegram_safe(f"✅ Equipo de este chat: {', '.join(valid)}. El manager delegará solo a estos.")
+    return f"✅ Equipo de este chat: {', '.join(valid)}. El manager delegará solo a estos."
 
 
 def _dedicated_gateway_db_path_for_vault() -> str | None:
@@ -699,7 +719,7 @@ def execute_vault(args: str, *, vault_user_id: Any, tenant_id: Any = None) -> st
                 pass
             gtid = (os.environ.get("DUCKCLAW_GATEWAY_TENANT_ID") or "").strip()
             extra = f"\nTenant: {gtid}" if gtid else ""
-            return _telegram_safe(
+            return (
                 f"🗄 BD de este gateway ({label}): {fp.name}\n"
                 f"Ruta: {fp}\nTamaño: {_format_vault_size_mb(size)}{extra}"
             )
@@ -708,12 +728,12 @@ def execute_vault(args: str, *, vault_user_id: Any, tenant_id: Any = None) -> st
         if cmd.startswith("--"):
             cmd = cmd[2:]
         if cmd in ("list", "new", "use", "rm"):
-            return _telegram_safe(
+            return (
                 f"En este gateway ({label}) solo aplica la BD anterior. "
                 "Los comandos /vault list|new|use|rm son del registry multi-bóveda en Finanz; "
                 "aquí no aplican. Usa /vault sin argumentos para ver la ruta."
             )
-        return _telegram_safe(
+        return (
             f"Usa /vault sin argumentos para ver la BD de {label}. "
             "Comandos adicionales del registry no aplican en este gateway."
         )
@@ -726,10 +746,11 @@ def execute_vault(args: str, *, vault_user_id: Any, tenant_id: Any = None) -> st
             size = p.stat().st_size if p.exists() else 0
         except Exception:
             pass
-        return _telegram_safe(
+        return (
             f"🗄 Bóveda activa: {active_id}\nRuta: {active_path}\nTamaño: {_format_vault_size_mb(size)}\n\n"
             "Comandos: /vault list | /vault --list | /vault new <name> | /vault --new <name> | "
             "/vault use <id> | /vault --use <id> | /vault rm <id> | /vault --rm <id>"
+        
         )
     tokens = raw.split()
     cmd = (tokens[0] or "").strip().lower()
@@ -739,7 +760,7 @@ def execute_vault(args: str, *, vault_user_id: Any, tenant_id: Any = None) -> st
     if cmd == "list":
         rows = _vault_list(user_id, vault_scope)
         if not rows:
-            return _telegram_safe("No hay bóvedas.")
+            return "No hay bóvedas."
         lines = []
         for r in rows:
             mark = "✅" if r.get("is_active") else "•"
@@ -747,37 +768,38 @@ def execute_vault(args: str, *, vault_user_id: Any, tenant_id: Any = None) -> st
             lines.append(
                 f"{mark} {r.get('vault_id')} ({r.get('vault_name')}) - {_format_vault_size_mb(sz)}"
             )
-        return _telegram_safe("🗄 Bóvedas:\n" + "\n".join(lines))
+        return "🗄 Bóvedas:\n" + "\n".join(lines)
     if cmd == "new":
         name = " ".join(tokens[1:]).strip()
         if not name:
-            return _telegram_safe("Uso: /vault new <name> | /vault --new <name>")
+            return "Uso: /vault new <name> | /vault --new <name>"
         created = _vault_create(user_id, name, vault_scope)
-        return _telegram_safe(f"✅ Bóveda creada: {created.get('vault_id')} ({created.get('vault_name')})")
+        return f"✅ Bóveda creada: {created.get('vault_id')} ({created.get('vault_name')})"
     if cmd == "use":
         vid = " ".join(tokens[1:]).strip()
         if not vid:
-            return _telegram_safe("Uso: /vault use <vault_id> | /vault --use <vault_id>")
+            return "Uso: /vault use <vault_id> | /vault --use <vault_id>"
         ok = _vault_switch(user_id, vid, vault_scope)
         if not ok:
-            return _telegram_safe(f"No existe la bóveda '{vid}'. Usa /vault list.")
+            return f"No existe la bóveda '{vid}'. Usa /vault list."
         active_id, _ = _vault_resolve_active(user_id, vault_scope)
-        return _telegram_safe(f"✅ Bóveda activa actual: {active_id}")
+        return f"✅ Bóveda activa actual: {active_id}"
     if cmd == "rm":
         vid = " ".join(tokens[1:]).strip()
         if not vid:
-            return _telegram_safe("Uso: /vault rm <vault_id> | /vault --rm <vault_id>")
+            return "Uso: /vault rm <vault_id> | /vault --rm <vault_id>"
         ok = _vault_remove(user_id, vid, vault_scope)
         if not ok:
-            return _telegram_safe(f"No existe la bóveda '{vid}'.")
+            return f"No existe la bóveda '{vid}'."
         active_id, _ = _vault_resolve_active(user_id, vault_scope)
-        return _telegram_safe(f"🗑 Bóveda eliminada: {vid}. Activa actual: {active_id}")
-    return _telegram_safe(
+        return f"🗑 Bóveda eliminada: {vid}. Activa actual: {active_id}"
+    return (
         "Uso: /vault | /vault list | /vault --list | /vault new <name> | /vault --new <name> | "
         "/vault use <vault_id> | /vault --use <vault_id> | /vault rm <vault_id> | /vault --rm <vault_id>"
+    
+
+
     )
-
-
 def _team_whitelist_db(fly_db: Any) -> Any:
     """
     En producción (API Gateway), ``authorized_users`` vive en la misma DuckDB que el
@@ -815,24 +837,29 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             )
             rows = json.loads(rows_raw) if isinstance(rows_raw, str) else (rows_raw or [])
             if not rows:
-                return _telegram_safe(f"No hay miembros WR para tenant '{tid}'.")
-            lines = []
+                return f"No hay miembros WR para tenant '{tid}'."
+            lines_wr: list[str] = []
+            seen_wr: set[str] = set()
             for r in rows:
                 if not isinstance(r, dict):
                     continue
                 uid = str(r.get("user_id") or "").strip()
+                if not uid or uid in seen_wr:
+                    continue
+                seen_wr.add(uid)
                 uname = str(r.get("username") or "").strip()
                 clr = str(r.get("clearance_level") or "").strip().lower() or "observer"
                 label = _player_label(uname, uid, db=acl, tenant_id=tid)
-                lines.append(_telegram_safe(f"\\- {label} ({uid}) \\- clearance={clr}"))
-            return _telegram_safe(f"🛡 Miembros War Room (tenant '{tid}'):\n") + "\n".join(lines)
+                lines_wr.append(f"- {label} ({uid}) · clearance: {clr}")
+            body_wr = "\n".join(lines_wr)
+            return f"🛡 Miembros War Room (tenant '{tid}'):\n{body_wr}"
 
         if raw.startswith("--rm "):
             if not (_is_gateway_owner_user(rid) or requester_clearance == "admin"):
-                return _telegram_safe("❌ Acceso denegado: solo admin WR puede eliminar miembros.")
+                return "❌ Acceso denegado: solo admin WR puede eliminar miembros."
             tokens = [t for t in raw[5:].strip().split() if t.strip()]
             if not tokens:
-                return _telegram_safe("Uso WR: /team --rm <user_id>")
+                return "Uso WR: /team --rm <user_id>"
             target_uid = tokens[0]
             acl.execute(
                 "DELETE FROM war_room_core.wr_members "
@@ -849,15 +876,15 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
                 payload=f"user_id={target_uid}",
             )
             target_label = _player_label("", target_uid, db=acl, tenant_id=tid)
-            return _telegram_safe(f"✅ Miembro WR eliminado: {target_label}.")
+            return f"✅ Miembro WR eliminado: {target_label}."
 
         if raw.startswith("--add ") or raw.strip() == "--add":
             if not (_is_gateway_owner_user(rid) or requester_clearance == "admin"):
-                return _telegram_safe("❌ Acceso denegado: solo admin WR puede agregar miembros.")
+                return "❌ Acceso denegado: solo admin WR puede agregar miembros."
             ids_part = raw[6:].strip() if raw.startswith("--add ") else ""
             tokens = [t for t in ids_part.split() if t.strip()]
             if not tokens:
-                return _telegram_safe("Uso WR: /team --add <user_id> [username] [admin|operator|observer]")
+                return "Uso WR: /team --add <user_id> [username] [admin|operator|observer]"
             target_uid = tokens[0]
             clearance = "observer"
             if len(tokens) >= 2 and tokens[-1].lower() in ("admin", "operator", "observer"):
@@ -881,14 +908,14 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
                 payload=f"user_id={target_uid} clearance={clearance}",
             )
             target_label = _player_label(username, target_uid, db=acl, tenant_id=tid)
-            return _telegram_safe(f"✅ Miembro WR registrado: {target_label} ({clearance}).")
+            return f"✅ Miembro WR registrado: {target_label} ({clearance})."
 
-        return _telegram_safe(
+        return (
             "Uso WR: /team | /team --add <user_id> [username] [admin|operator|observer] | /team --rm <user_id>"
         )
 
     if not raw:
-        users = _list_authorized_users(acl, tenant_id=tid)
+        users = _dedupe_authorized_users_by_user_id(_list_authorized_users(acl, tenant_id=tid))
         if not users:
             hint = ""
             if _is_gateway_owner_user(rid):
@@ -896,109 +923,108 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
                     " Como eres el owner del gateway (DUCKCLAW_ADMIN_CHAT_ID), puedes ejecutar "
                     "`/team --add <user_id> [nombre] [admin]` para dar de alta."
                 )
-            return _telegram_safe(f"No hay usuarios autorizados para tenant '{tid}'.{hint}")
-        lines = []
+            return f"No hay usuarios autorizados para tenant '{tid}'.{hint}"
+        body_lines: list[str] = []
         for u in users:
-            uid = u.get("user_id") or ""
-            uname = u.get("username") or ""
-            role = (u.get("role") or "user").lower()
-            # Usar mención por user_id para abrir perfil real y evitar colisiones de @username.
+            uid = str(u.get("user_id") or "").strip()
+            uname = str(u.get("username") or "").strip()
+            role = (u.get("role") or "user").strip().lower() or "user"
             label = _player_label(uname, uid, db=acl, tenant_id=tid)
-            lines.append(_telegram_safe(f"\\- {label} ({uid}) \\- role={role}"))
-        return _telegram_safe(f"🦆 Usuarios autorizados (tenant '{tid}'):\n") + "\n".join(lines)
+            body_lines.append(f"- {label} ({uid}) · rol: {role}")
+        return f"🦆 Usuarios autorizados (tenant '{tid}'):\n" + "\n".join(body_lines)
 
     if raw.startswith("--rm "):
         if not rid:
-            return _telegram_safe("❌ Acceso denegado.")
+            return "❌ Acceso denegado."
         if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
-            return _telegram_safe("❌ Acceso denegado: solo administradores pueden eliminar usuarios.")
+            return "❌ Acceso denegado: solo administradores pueden eliminar usuarios."
         target_uid = raw[5:].strip().split()[0]
         if not target_uid:
-            return _telegram_safe("Uso: /team --rm <user_id>")
+            return "Uso: /team --rm <user_id>"
         _delete_authorized_user(acl, tenant_id=tid, user_id=target_uid)
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
         target_label = _player_label("", target_uid, db=acl, tenant_id=tid)
-        return _telegram_safe(f"✅ Eliminado {target_label} del tenant '{tid}'.")
+        return f"✅ Eliminado {target_label} del tenant '{tid}'."
 
     if raw.startswith("--add ") or raw.strip() == "--add":
         if not rid:
-            return _telegram_safe("❌ Acceso denegado.")
+            return "❌ Acceso denegado."
         if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
-            return _telegram_safe("❌ Acceso denegado: solo administradores pueden agregar usuarios.")
+            return "❌ Acceso denegado: solo administradores pueden agregar usuarios."
         ids_part = raw[6:].strip() if raw.startswith("--add ") else ""
         tokens = [t for t in ids_part.split() if t.strip()]
         if not tokens:
-            return _telegram_safe("Uso: /team --add <user_id> [nombre] [admin]")
+            return "Uso: /team --add <user_id> [nombre] [admin]"
         role_out = "user"
         if len(tokens) >= 2 and tokens[-1].lower() == "admin":
             role_out = "admin"
             tokens = tokens[:-1]
         if not tokens:
-            return _telegram_safe("Uso: /team --add <user_id> [nombre] [admin]")
+            return "Uso: /team --add <user_id> [nombre] [admin]"
         target_uid = tokens[0]
         uname = tokens[1] if len(tokens) > 1 else "Usuario"
         _upsert_authorized_user(acl, tenant_id=tid, user_id=target_uid, username=uname, role=role_out)
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
         target_label = _player_label(uname, target_uid, db=acl, tenant_id=tid)
-        return _telegram_safe(f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'.")
+        return f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'."
 
     if raw == "--shared-list" or raw.startswith("--shared-list"):
         if not rid:
-            return _telegram_safe("❌ Acceso denegado.")
+            return "❌ Acceso denegado."
         if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
-            return _telegram_safe("❌ Acceso denegado: solo administradores pueden listar permisos de bases compartidas.")
+            return "❌ Acceso denegado: solo administradores pueden listar permisos de bases compartidas."
         from duckclaw.shared_db_grants import list_shared_grants_for_tenant
 
         grants = list_shared_grants_for_tenant(acl, tenant_id=tid)
         if not grants:
-            return _telegram_safe(
+            return (
                 f"🗂 No hay filas en user_shared_db_access para tenant '{tid}'. "
                 "Sin filas, cualquier usuario whitelist puede usar rutas shared válidas (compat). "
                 "Admin: /team --shared-grant <user_id> <resource_key> (ej. default o *)."
             )
-        lines = []
+        grant_lines: list[str] = []
         for g in grants:
-            lines.append(
-                _telegram_safe(
-                    f"\\- user={g.get('user_id')} key={g.get('resource_key')} at={g.get('created_at')}"
-                )
+            grant_lines.append(
+                f"- user={g.get('user_id')} key={g.get('resource_key')} at={g.get('created_at')}"
             )
-        body = "\n".join(lines)
-        return _telegram_safe(f"🗂 Bases compartidas permitidas (tenant '{tid}'):\n\n{body}")
+        return f"🗂 Bases compartidas permitidas (tenant '{tid}'):\n\n" + "\n".join(grant_lines)
 
     if raw.startswith("--shared-grant "):
         if not rid:
-            return _telegram_safe("❌ Acceso denegado.")
+            return "❌ Acceso denegado."
         if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
-            return _telegram_safe("❌ Acceso denegado: solo administradores.")
+            return "❌ Acceso denegado: solo administradores."
         rest = raw[len("--shared-grant ") :].strip().split(None, 1)
         if len(rest) < 2:
-            return _telegram_safe("Uso: /team --shared-grant <user_id> <resource_key>\nresource_key: default, * (todas), o slug (env DUCKCLAW_SHARED_RESOURCE_<SLUG>).")
+            return (
+                "Uso: /team --shared-grant <user_id> <resource_key>\n"
+                "resource_key: default, * (todas), o slug (env DUCKCLAW_SHARED_RESOURCE_<SLUG>)."
+            )
         target_uid, rkey = rest[0], rest[1].strip()
         from duckclaw.shared_db_grants import upsert_shared_grant, validate_resource_key
 
         if not validate_resource_key(rkey):
-            return _telegram_safe("resource_key inválido (usa default, * o slug alfanumérico).")
+            return "resource_key inválido (usa default, * o slug alfanumérico)."
         upsert_shared_grant(acl, tenant_id=tid, user_id=target_uid, resource_key=rkey)
-        return _telegram_safe(f"✅ Grant shared '{rkey}' → user {target_uid} (tenant '{tid}').")
+        return f"✅ Grant shared '{rkey}' → user {target_uid} (tenant '{tid}')."
 
     if raw.startswith("--shared-revoke "):
         if not rid:
-            return _telegram_safe("❌ Acceso denegado.")
+            return "❌ Acceso denegado."
         if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
-            return _telegram_safe("❌ Acceso denegado: solo administradores.")
+            return "❌ Acceso denegado: solo administradores."
         rest = raw[len("--shared-revoke ") :].strip().split(None, 1)
         if len(rest) < 2:
-            return _telegram_safe("Uso: /team --shared-revoke <user_id> <resource_key>")
+            return "Uso: /team --shared-revoke <user_id> <resource_key>"
         target_uid, rkey = rest[0], rest[1].strip()
         from duckclaw.shared_db_grants import delete_shared_grant, validate_resource_key
 
         if not validate_resource_key(rkey):
-            return _telegram_safe("resource_key inválido.")
+            return "resource_key inválido."
         delete_shared_grant(acl, tenant_id=tid, user_id=target_uid, resource_key=rkey)
-        return _telegram_safe(f"✅ Revocado shared '{rkey}' para user {target_uid}.")
+        return f"✅ Revocado shared '{rkey}' para user {target_uid}."
 
-    return _telegram_safe(
+    return (
         "Uso: /team | /team --add ... | /team --rm ... | /team --shared-list | "
         "/team --shared-grant <user_id> <resource_key> | /team --shared-revoke <user_id> <resource_key>"
     )
@@ -1009,11 +1035,12 @@ def execute_roles(db: Any, chat_id: Any) -> str:
     from duckclaw.workers.factory import list_workers
     all_templates = list_workers()
     if not all_templates:
-        return _telegram_safe("No hay templates en forge/templates. Añade al menos uno.")
-    lines = "\n".join(f"\\- {_telegram_safe(w)}" for w in all_templates)
+        return "No hay templates en forge/templates. Añade al menos uno."
+    lines = "\n".join(f"- {w}" for w in all_templates)
     return (
-        f"🦆 {_telegram_safe('Trabajadores virtuales (templates) disponibles:')}\n\n{lines}\n\n"
-        f"{_telegram_safe('El manager solo delegará a los que estén en tu equipo. Para añadirlos: /workers id1 id2 ...')}"
+        "🦆 Trabajadores virtuales (templates) disponibles:\n\n"
+        f"{lines}\n\n"
+        "El manager solo delegará a los que estén en tu equipo. Para añadirlos: /workers id1 id2 ..."
     )
 
 
@@ -1029,29 +1056,32 @@ def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
     if not wid_raw:
         current = get_chat_state(db, chat_id, "worker_id") or _DEFAULT_WORKER
         if current == "manager":
-            current_display = _telegram_safe("Manager (delega a trabajadores en templates)")
+            current_display = "Manager (delega a trabajadores en templates)"
         else:
             try:
                 from duckclaw.workers.manifest import load_manifest
                 spec = load_manifest(current)
-                current_display = _telegram_safe(f"{spec.name} ({current})")
+                current_display = f"{spec.name} ({current})"
             except Exception:
-                current_display = _telegram_safe(current)
-        avail_str = "\n".join(f"\\- {_telegram_safe(w)}" for w in available) if available else "ninguna"
-        return f"🦆 {_telegram_safe('Rol:')} {current_display}\n\n{_telegram_safe('Disponibles:')} {_telegram_safe('manager (por defecto)')}\n{avail_str}\n{_telegram_safe('/role <id>')}"
+                current_display = current
+        avail_str = "\n".join(f"- {w}" for w in available) if available else "ninguna"
+        return (
+            f"🦆 Rol: {current_display}\n\n"
+            f"Disponibles: manager (por defecto)\n{avail_str}\n/role <id>"
+        )
     if wid_raw.lower() == "manager":
         set_chat_state(db, chat_id, "worker_id", "manager")
-        return _telegram_safe("✅ Manager. Delega a los trabajadores en templates.")
+        return "✅ Manager. Delega a los trabajadores en templates."
     canonical = _resolve_template_id(available, wid_raw)
     if not canonical:
-        avail_str = "\n".join(f"\\- {_telegram_safe(w)}" for w in available) if available else "ninguna"
-        return _telegram_safe(f"Rol '{wid_raw}' no existe.") + f"\n{_telegram_safe('Disponibles:')}\n{avail_str}"
+        avail_str = "\n".join(f"- {w}" for w in available) if available else "ninguna"
+        return f"Rol '{wid_raw}' no existe.\nDisponibles:\n{avail_str}"
     try:
         from duckclaw.workers.manifest import load_manifest
         spec = load_manifest(canonical)
         set_chat_state(db, chat_id, "worker_id", canonical)
-        skills = ", ".join(_telegram_safe(s) for s in (spec.skills_list or [])) or "read_sql, admin_sql"
-        return _telegram_safe(f"✅ {spec.name} ({canonical}). Herramientas: {skills}")
+        skills = ", ".join(spec.skills_list or []) or "read_sql, admin_sql"
+        return f"✅ {spec.name} ({canonical}). Herramientas: {skills}"
     except Exception as e:
         return f"Error al cargar rol: {e}."
 
@@ -1062,20 +1092,19 @@ def execute_skills_list(db: Any, chat_id: Any, args: str) -> str:
     available = list_workers()
     wid_raw = (args or "").strip()
     if not wid_raw:
-        return _telegram_safe("Uso: /skills <worker_id>. Ver templates: /roles")
+        return "Uso: /skills <worker_id>. Ver templates: /roles"
     if wid_raw.startswith("--"):
-        return _telegram_safe("Indica un worker_id (ej. finanz, research_worker). Ver templates: /roles")
+        return "Indica un worker_id (ej. finanz, research_worker). Ver templates: /roles"
     canonical = _resolve_template_id(available, wid_raw)
     if not canonical:
-        return _telegram_safe(f"Template '{wid_raw}' no encontrado. Disponibles (usa /roles): {', '.join(available)}")
+        return f"Template '{wid_raw}' no encontrado. Disponibles (usa /roles): {', '.join(available)}"
     try:
         from duckclaw.workers.manifest import load_manifest
         spec = load_manifest(canonical)
-        skills_safe = [_telegram_safe(s) for s in (spec.skills_list or [])]
-        lines = [f"\\- {s}" for s in skills_safe]
-        lines.append(f"\\- {_telegram_safe('read_sql')} (solo lectura)")
-        lines.append(f"\\- {_telegram_safe('admin_sql')} (lectura + escrituras)")
-        return _telegram_safe(f"🔧 {spec.name} ({canonical})\n") + "\n".join(lines)
+        skill_lines = [f"- {s}" for s in (spec.skills_list or [])]
+        skill_lines.append("- read_sql (solo lectura)")
+        skill_lines.append("- admin_sql (lectura + escrituras)")
+        return f"🔧 {spec.name} ({canonical})\n" + "\n".join(skill_lines)
     except Exception as e:
         return f"Error: {e}."
 
@@ -1104,7 +1133,7 @@ def execute_forget(db: Any, chat_id: Any) -> str:
             pass
         except Exception:
             pass
-    return _telegram_safe("✅ Historial borrado.")
+    return "✅ Historial borrado."
 
 
 def _ensure_the_mind_schema(db: Any) -> None:
@@ -1398,7 +1427,7 @@ def _the_mind_invite_hint(db: Any, tenant_id: str | None, game_id: str) -> str:
     else:
         team_block = "(Nadie en /team: un admin debe usar /team --add <user_id> [nombre].)"
 
-    return _telegram_safe(
+    return (
         "\n\n---\n"
         "Cómo invitar e iniciar:\n"
         "• Solo pueden unirse quienes estén en /team (tenant actual).\n"
@@ -1409,9 +1438,10 @@ def _the_mind_invite_hint(db: Any, tenant_id: str | None, game_id: str) -> str:
         f"• Equipo autorizado ahora:\n{team_block}\n"
         f"• Pasos: cada jugador abre DM con el bot y envía /join {game_id}.\n"
         f"• Luego el anfitrión: /start_mind {game_id} (mínimo 2 jugadores; ver /game).\n"
+    
+
+
     )
-
-
 def _new_game_id() -> str:
     """Genera un identificador de partida único (game_id)."""
     # timestamp en segundos + sufijo aleatorio corto
@@ -1435,13 +1465,13 @@ def execute_new_game(
     """/new_game the_mind: crea una nueva partida de The Mind y devuelve el game_id."""
     game_type = (args or "").strip().lower()
     if game_type not in ("the_mind", "themind", "themindcrupier"):
-        return _telegram_safe("Uso: /new_game the_mind")
+        return "Uso: /new_game the_mind"
     try:
         _ensure_the_mind_schema(db)
         tid = str(tenant_id or "default").strip() or "default"
         ok, err = _team_allows_user(db, tid, requester_id)
         if not ok:
-            return _telegram_safe(err)
+            return err
         game_id = _new_game_id()
         db.execute(
             "INSERT INTO the_mind_games (game_id, status, current_level, lives, shurikens, cards_played) "
@@ -1452,13 +1482,13 @@ def execute_new_game(
         uname = get_chat_state(db, chat_id, "username") or ""
         rid = str(requester_id or "").strip() or None
         _merge_the_mind_player(db, game_id, cid, uname, user_id=rid)
-        base = _telegram_safe(
+        base = (
             f"🧠 The Mind: partida creada con id {game_id}. "
             f"Cada jugador debe enviar `/join {game_id}` desde el chat privado (DM) con el bot para quedar registrado y recibir cartas."
         )
         return base + _the_mind_invite_hint(db, tid, game_id)
     except Exception as e:
-        return _telegram_safe(f"No se pudo crear la partida de The Mind: {e}")
+        return f"No se pudo crear la partida de The Mind: {e}"
 
 
 def execute_join_game(
@@ -1472,24 +1502,25 @@ def execute_join_game(
     """/join <game_id>: añade al jugador (este chat) a la partida indicada."""
     game_id = (args or "").strip()
     if not game_id:
-        return _telegram_safe("Uso: /join <game_id>. Ejemplo: /join game_1234")
+        return "Uso: /join <game_id>. Ejemplo: /join game_1234"
     try:
         _ensure_the_mind_schema(db)
         tid = str(tenant_id or "default").strip() or "default"
         ok, err = _team_allows_user(db, tid, requester_id)
         if not ok:
-            return _telegram_safe(err)
+            return err
         rows = list(
             db.execute(
                 "SELECT game_id, status FROM the_mind_games WHERE game_id = ?", (game_id,)
             )
         )
         if not rows:
-            return _telegram_safe(f"No existe ninguna partida con id {game_id}.")
+            return f"No existe ninguna partida con id {game_id}."
         status = str(rows[0][1] or "").strip().lower()
         if status not in ("waiting", "playing"):
-            return _telegram_safe(
+            return (
                 f"La partida {game_id} no acepta más jugadores (estado actual: {status or 'desconocido'})."
+            
             )
         cid = str(chat_id).replace("'", "''")[:256]
         uname = get_chat_state(db, chat_id, "username") or ""
@@ -1526,11 +1557,12 @@ def execute_join_game(
         except Exception:
             # Best-effort: no bloquear el join por problemas de notificación.
             pass
-        return _telegram_safe(
+        return (
             f"✅ Te has unido a la partida {game_id}. Espera a que el anfitrión inicie con `/start_mind {game_id}`."
+        
         )
     except Exception as e:
-        return _telegram_safe(f"No se pudo unir a la partida: {e}")
+        return f"No se pudo unir a la partida: {e}"
 
 
 def execute_list_mind_games(
@@ -1565,10 +1597,10 @@ def execute_list_mind_games(
                 )
             )
             if not rows:
-                return _telegram_safe("No estás en ninguna partida activa.")
+                return "No estás en ninguna partida activa."
             game_id = str(rows[0][0] or "").strip()
             if not game_id:
-                return _telegram_safe("No estás en ninguna partida activa.")
+                return "No estás en ninguna partida activa."
             db.execute(
                 "UPDATE the_mind_games SET status = 'cancelled' WHERE game_id = ?",
                 (game_id,),
@@ -1582,19 +1614,19 @@ def execute_list_mind_games(
                 )
             except Exception:
                 pass
-            return _telegram_safe(f"🛑 Partida finalizada: {game_id}")
+            return f"🛑 Partida finalizada: {game_id}"
         except Exception as e:
-            return _telegram_safe(f"No se pudo finalizar la partida: {e}")
+            return f"No se pudo finalizar la partida: {e}"
 
     # Admin-only cancel flow
     if raw.startswith("--rm "):
         role = _get_authorized_role(db, tenant_id=tid, user_id=rid) if rid else ""
         if role != "admin":
-            return _telegram_safe("Solo el admin puede cancelar partidas.")
+            return "Solo el admin puede cancelar partidas."
 
         target = raw[5:].strip().split()[0] if raw[5:].strip() else ""
         if not target:
-            return _telegram_safe("Uso: /game --rm <game_id> | /game --rm all")
+            return "Uso: /game --rm <game_id> | /game --rm all"
         try:
             _ensure_the_mind_schema(db)
             if target.lower() == "all":
@@ -1610,7 +1642,7 @@ def execute_list_mind_games(
                 )
                 game_ids = [str(r[0]) for r in rows if r and r[0]]
                 if not game_ids:
-                    return _telegram_safe("No hay partidas activas que cancelar.")
+                    return "No hay partidas activas que cancelar."
                 db.execute(
                     """
                     UPDATE the_mind_games
@@ -1618,7 +1650,7 @@ def execute_list_mind_games(
                     WHERE lower(COALESCE(status, '')) IN ('waiting', 'playing')
                     """
                 )
-                return _telegram_safe(f"🗑️ Partida(s) cancelada(s): [{', '.join(game_ids)}]")
+                return f"🗑️ Partida(s) cancelada(s): [{', '.join(game_ids)}]"
 
             rows = list(
                 db.execute(
@@ -1632,15 +1664,15 @@ def execute_list_mind_games(
                 )
             )
             if not rows:
-                return _telegram_safe("No hay partidas activas que cancelar.")
+                return "No hay partidas activas que cancelar."
             game_id = str(rows[0][0])
             db.execute(
                 "UPDATE the_mind_games SET status = 'cancelled' WHERE game_id = ?",
                 (game_id,),
             )
-            return _telegram_safe(f"🗑️ Partida(s) cancelada(s): [{game_id}]")
+            return f"🗑️ Partida(s) cancelada(s): [{game_id}]"
         except Exception as e:
-            return _telegram_safe(f"No se pudo cancelar partidas: {e}")
+            return f"No se pudo cancelar partidas: {e}"
     try:
         _ensure_the_mind_schema(db)
         rows = list(
@@ -1657,10 +1689,11 @@ def execute_list_mind_games(
             )
         )
     except Exception as e:
-        return _telegram_safe(f"No se pudo listar partidas: {e}")
+        return f"No se pudo listar partidas: {e}"
     if not rows:
-        return _telegram_safe(
+        return (
             "No hay partidas activas (waiting/playing). Usa /new_mind para crear una."
+        
         )
     # Durante partida: para un jugador en estado playing devolver estado resumido (sin revelar manos).
     try:
@@ -1688,9 +1721,10 @@ def execute_list_mind_games(
             )
             remaining = sum(len(list(r[0] or [])) for r in total_remaining_rows)
             cards_table = list(cards_played or [])
-            return _telegram_safe(
+            return (
                 f"🧠 Nivel: {int(lvl or 1)} | Vidas: {int(lives or 0)} | Estrellas: {int(stars or 0)}\n"
                 f"Cartas en mesa: {cards_table} | Cartas restantes: {remaining}"
+            
             )
     except Exception:
         pass
@@ -1717,7 +1751,7 @@ def execute_list_mind_games(
             f"participantes={players_text}"
         )
     body = "\n".join(lines)
-    return _telegram_safe(f"🧠 Partidas activas:\n{body}")
+    return f"🧠 Partidas activas:\n{body}"
 
 
 def execute_start_game(db: Any, chat_id: Any, args: str) -> str:
@@ -1732,8 +1766,9 @@ def execute_start_game(db: Any, chat_id: Any, args: str) -> str:
                 )
             )
             if not rows:
-                return _telegram_safe(
+                return (
                     "No encontré ninguna partida en estado 'waiting'. Usa `/new_mind` o `/new_game the_mind`."
+                
                 )
             game_id = str(rows[0][0])
         rows = list(
@@ -1742,24 +1777,26 @@ def execute_start_game(db: Any, chat_id: Any, args: str) -> str:
             )
         )
         if not rows:
-            return _telegram_safe(f"No existe ninguna partida con id {game_id}.")
+            return f"No existe ninguna partida con id {game_id}."
         status = str(rows[0][0] or "").strip().lower()
         if status == "playing":
-            return _telegram_safe(f"La partida {game_id} ya está en juego.")
+            return f"La partida {game_id} ya está en juego."
         if status not in ("waiting",):
-            return _telegram_safe(
+            return (
                 f"No se puede iniciar la partida {game_id} desde el estado {status or 'desconocido'}."
+            
             )
         db.execute(
             "UPDATE the_mind_games SET status = 'playing', current_level = COALESCE(current_level, 1) "
             "WHERE game_id = ?",
             (game_id,),
         )
-        return _telegram_safe(
+        return (
             f"🧠 The Mind: partida {game_id} en estado playing. Reparte cartas con `/start_mind {game_id}` o `/deal`."
+        
         )
     except Exception as e:
-        return _telegram_safe(f"No se pudo iniciar la partida: {e}")
+        return f"No se pudo iniciar la partida: {e}"
 
 
 def execute_start_mind(
@@ -1780,10 +1817,10 @@ def execute_start_mind(
         starter_id = str(requester_id or "").strip() or str(chat_id or "").strip()
         starter_role = _get_authorized_role(db, tenant_id=tid, user_id=starter_id)
         if starter_role != "admin":
-            return _telegram_safe("Solo el admin puede iniciar la partida.")
+            return "Solo el admin puede iniciar la partida."
         ok_host, err_host = _team_allows_user(db, tid, requester_id)
         if not ok_host:
-            return _telegram_safe(err_host)
+            return err_host
         game_id = (args or "").strip()
         cid = str(chat_id).replace("'", "''")[:256]
 
@@ -1809,8 +1846,9 @@ def execute_start_mind(
                     )
                 )
             if not rows:
-                return _telegram_safe(
+                return (
                     "No encontré ninguna partida en espera. Usa `/new_mind` o `/new_game the_mind`."
+                
                 )
             game_id = str(rows[0][0])
 
@@ -1820,14 +1858,15 @@ def execute_start_mind(
             )
         )
         if not rows:
-            return _telegram_safe(f"No existe ninguna partida con id {game_id}.")
+            return f"No existe ninguna partida con id {game_id}."
         status = str(rows[0][0] or "").strip().lower()
         if status != "waiting":
-            return _telegram_safe(
+            return (
                 f"La partida {game_id} no está en espera (estado: {status or 'desconocido'}). "
                 "Solo se puede `/start_mind` desde 'waiting'."
-            )
+            
 
+            )
         n_players = list(
             db.execute(
                 "SELECT COUNT(*) FROM the_mind_players WHERE game_id = ?", (game_id,)
@@ -1835,7 +1874,7 @@ def execute_start_mind(
         )
         count = int(n_players[0][0]) if n_players else 0
         if count < 1:
-            return _telegram_safe("No hay jugadores en esta partida.")
+            return "No hay jugadores en esta partida."
 
         allow_solo = (os.environ.get("DUCKCLAW_THE_MIND_ALLOW_SOLO") or "").strip().lower() in (
             "1",
@@ -1843,16 +1882,17 @@ def execute_start_mind(
             "yes",
         )
         if count < 2 and not allow_solo:
-            return _telegram_safe(
+            return (
                 f"Solo hay {count} jugador(es) en la partida {game_id}. "
                 "Se necesitan al menos 2: cada uno debe enviar `/join "
                 f"{game_id}` por DM con el bot. Usa /game para ver el estado. "
                 "(Modo 1 jugador: define DUCKCLAW_THE_MIND_ALLOW_SOLO=true en el gateway.)"
-            )
+            
 
+            )
         ok_roster, err_roster = _all_mind_players_in_team(db, game_id, tid)
         if not ok_roster:
-            return _telegram_safe(err_roster)
+            return err_roster
 
         db.execute(
             "UPDATE the_mind_games SET status = 'playing', current_level = 1, "
@@ -1888,13 +1928,14 @@ def execute_start_mind(
         except Exception:
             pass
         deal_res = deal_cards_for_level(db, game_id, 1)
-        return _telegram_safe(
+        return (
             f"🧠 Partida {game_id} iniciada (Nivel 1 en BD).\n"
             f"• {broad_res.summary_line}\n"
             f"• {deal_res.summary_line}"
+        
         )
     except Exception as e:
-        return _telegram_safe(f"No se pudo iniciar The Mind: {e}")
+        return f"No se pudo iniciar The Mind: {e}"
 
 
 def execute_deal(db: Any, chat_id: Any, args: str) -> str:
@@ -1918,8 +1959,9 @@ def execute_deal(db: Any, chat_id: Any, args: str) -> str:
                 )
             )
             if not rows:
-                return _telegram_safe(
+                return (
                     "No hay partida en juego para este chat. Usa `/join` y `/start_mind` primero."
+                
                 )
             game_id = str(rows[0][0])
             lvl = int(rows[0][1] or 1)
@@ -1931,12 +1973,12 @@ def execute_deal(db: Any, chat_id: Any, args: str) -> str:
                 )
             )
             if not lr:
-                return _telegram_safe(f"No hay partida en juego con id {game_id}.")
+                return f"No hay partida en juego con id {game_id}."
             lvl = int(lr[0][0] or 1)
         deal_res = deal_cards_for_level(db, game_id, lvl)
-        return _telegram_safe(f"🃏 {deal_res.summary_line}")
+        return f"🃏 {deal_res.summary_line}"
     except Exception as e:
-        return _telegram_safe(f"No se pudo repartir: {e}")
+        return f"No se pudo repartir: {e}"
 
 
 def execute_play_mind(
@@ -1949,13 +1991,13 @@ def execute_play_mind(
     """/play <numero>: juega una carta en The Mind usando the_mind_games/the_mind_players."""
     num_str = (args or "").strip()
     if not num_str:
-        return _telegram_safe("Uso: /play <numero>. Ejemplo: /play 15")
+        return "Uso: /play <numero>. Ejemplo: /play 15"
     try:
         num = int(num_str)
     except Exception:
-        return _telegram_safe("La carta debe ser un número entero. Ejemplo: /play 15")
+        return "La carta debe ser un número entero. Ejemplo: /play 15"
     if num <= 0 or num > 100:
-        return _telegram_safe("La carta debe estar entre 1 y 100.")
+        return "La carta debe estar entre 1 y 100."
 
     cid = str(chat_id).replace("'", "''")[:256]
     uname = get_chat_state(db, chat_id, "username") or ""
@@ -1980,9 +2022,10 @@ def execute_play_mind(
         )
         if not rows:
             _mind_tx_rollback(db)
-            return _telegram_safe(
+            return (
                 "No encontré ninguna partida en juego asociada a este chat. "
                 "Usa `/join` y `/start_mind`."
+            
             )
         game_id, cards_played_arr, current_level, _st = rows[0]
         cards_played = list(cards_played_arr or [])
@@ -2004,16 +2047,18 @@ def execute_play_mind(
         )
         if not prow:
             _mind_tx_rollback(db)
-            return _telegram_safe(
+            return (
                 "No encontré tu mano en esta partida. Espera a que se repartan cartas con `/start_mind`."
+            
             )
         hand = list(prow[0][0] or [])
         if num not in hand:
             _mind_tx_rollback(db)
-            return _telegram_safe(
+            return (
                 f"No tienes la carta {num} en tu mano actual. Verifica tus cartas privadas."
-            )
+            
 
+            )
         lower_exists = False
         offender_name = ""
         offender_chat = ""
@@ -2156,10 +2201,11 @@ def execute_play_mind(
             except Exception:
                 pass
             if new_lives <= 0:
-                return _telegram_safe(
+                return (
                     f"💀 {uname_display} jugó el {num} pero {offender_name or 'unknown'} tenía el {offender_card or '?'} (descartado). "
                     f"Vidas restantes: {new_lives}\n"
                     f"💀 Game over. Llegaron al Nivel {int(current_level or 1)}. ¡Buen intento!"
+                
                 )
             if level_done_after_penalty:
                 # Regla operativa: una penalización nunca avanza de nivel.
@@ -2189,17 +2235,19 @@ def execute_play_mind(
                     sender_hand = sorted(int(c) for c in list((sender_rows[0][0] if sender_rows else []) or []))
                 except Exception:
                     sender_hand = []
-                return _telegram_safe(
+                return (
                     f"💀 {uname_display} jugó el {num} pero {offender_name or 'unknown'} tenía el {offender_card or '?'} (descartado). "
                     f"Vidas restantes: {new_lives}\n"
                     f"⚠️ Penalización en Nivel {lvl_now}. Reiniciando Nivel {next_lvl}...\n"
                     + f"🃏 Tus nuevas cartas: {sender_hand}"
+                
                 )
-            return _telegram_safe(
+            return (
                 f"❌ ¡ERROR! {uname_display} jugó el {num}, pero {offender_name or 'unknown'} tenía una carta menor. "
                 f"Pierden 1 vida. Vidas restantes: {new_lives}."
-            )
+            
 
+            )
         hand.remove(num)
         db.execute(
             "UPDATE the_mind_players SET cards = ? WHERE game_id = ? AND chat_id = ?",
@@ -2283,15 +2331,15 @@ def execute_play_mind(
                     f" 🎉 ¡Nivel {lvl_now} completado! Repartido el Nivel {next_lvl}.\n"
                     f"🃏 Tus nuevas cartas: {sender_hand}"
                 )
-            return _telegram_safe(msg)
+            return msg
 
-        return _telegram_safe(msg)
+        return msg
     except Exception as e:
         try:
             _mind_tx_rollback(db)
         except Exception:
             pass
-        return _telegram_safe(f"No se pudo registrar la jugada: {e}")
+        return f"No se pudo registrar la jugada: {e}"
 
 
 def execute_cards(db: Any, chat_id: Any, args: str) -> str:
@@ -2314,26 +2362,26 @@ def execute_cards(db: Any, chat_id: Any, args: str) -> str:
             )
         )
         if not rows:
-            return _telegram_safe("No estás en ninguna partida en curso.")
+            return "No estás en ninguna partida en curso."
         cards = list(rows[0][0] or [])
         if not cards:
-            return _telegram_safe("No te quedan cartas en este nivel.")
+            return "No te quedan cartas en este nivel."
         cards_sorted = sorted(int(c) for c in cards)
-        return _telegram_safe(f"🃏 Tus cartas: {', '.join(str(c) for c in cards_sorted)}")
+        return f"🃏 Tus cartas: {', '.join(str(c) for c in cards_sorted)}"
     except Exception as e:
-        return _telegram_safe(f"No se pudo consultar tus cartas: {e}")
+        return f"No se pudo consultar tus cartas: {e}"
 
 def execute_context_toggle(db: Any, chat_id: Any, on_off: str) -> str:
     """/context on|off: activa o desactiva inyección de memoria a largo plazo."""
     v = (on_off or "").strip().lower()
     if v in ("on", "1", "true", "sí", "si"):
         set_chat_state(db, chat_id, "use_rag", "true")
-        return _telegram_safe("✅ Contexto largo activado (más mensajes en historial).")
+        return "✅ Contexto largo activado (más mensajes en historial)."
     if v in ("off", "0", "false"):
         set_chat_state(db, chat_id, "use_rag", "false")
-        return _telegram_safe("✅ Contexto largo desactivado (solo historial reciente).")
+        return "✅ Contexto largo desactivado (solo historial reciente)."
     current = get_chat_state(db, chat_id, "use_rag")
-    return _telegram_safe(f"Uso: /context on | /context off\nEstado actual: {'on' if current != 'false' else 'off'}.")
+    return f"Uso: /context on | /context off\nEstado actual: {'on' if current != 'false' else 'off'}."
 
 
 def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
@@ -2360,7 +2408,7 @@ def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
             chat_id,
             "true",
         )
-        return _telegram_safe("Entendido. He habilitado mis capacidades de ejecución de código para esta sesión.")
+        return "Entendido. He habilitado mis capacidades de ejecución de código para esta sesión."
     if parsed is False:
         set_chat_state(db, chat_id, "sandbox_enabled", "false")
         db_path = getattr(db, "_path", None) or getattr(db, "path", None) or "(unknown_db_path)"
@@ -2371,12 +2419,12 @@ def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
             chat_id,
             "false",
         )
-        return _telegram_safe("Entendido. He desactivado mis capacidades de ejecución de código para esta sesión.")
+        return "Entendido. He desactivado mis capacidades de ejecución de código para esta sesión."
 
     # Sin args válidos: mostrar estado actual.
     current = _parse(get_chat_state(db, chat_id, "sandbox_enabled"))
     status = "habilitado" if current is True else "desactivado"  # default OFF
-    return _telegram_safe(f"Uso: /sandbox on|off\nEstado actual: {status}.")
+    return f"Uso: /sandbox on|off\nEstado actual: {status}."
 
 
 def execute_heartbeat(db: Any, chat_id: Any, on_off: str, *, tenant_id: Any = None) -> str:
@@ -2393,52 +2441,56 @@ def execute_heartbeat(db: Any, chat_id: Any, on_off: str, *, tenant_id: Any = No
     v = (on_off or "").strip().lower()
 
     if not heartbeat_redis_configured():
-        return _telegram_safe(
+        return (
             "Heartbeat requiere Redis (REDIS_URL o DUCKCLAW_REDIS_URL). Sin eso no se puede guardar el estado."
-        )
+        
 
+        )
     if v in ("on", "1", "true", "sí", "si"):
         if is_chat_heartbeat_enabled(tid, cid):
-            return _telegram_safe("✅ Heartbeat ya estaba activado.")
+            return "✅ Heartbeat ya estaba activado."
         ok, err = set_chat_heartbeat_enabled(tid, cid, True)
         if not ok:
-            return _telegram_safe(f"No se pudo activar heartbeat: {err}")
+            return f"No se pudo activar heartbeat: {err}"
         if not heartbeat_outbound_configured():
-            return _telegram_safe(
+            return (
                 "Heartbeat activado en Redis, pero falta TELEGRAM_BOT_TOKEN (recomendado) o un webhook "
                 "(DUCKCLAW_HEARTBEAT_WEBHOOK_URL / N8N_OUTBOUND_WEBHOOK_URL); no se enviarán DMs."
+            
             )
-        return _telegram_safe(
+        return (
             "✅ Heartbeat activado. Te avisaré por DM mientras uso herramientas."
+        
         )
     if v in ("off", "0", "false"):
         if not is_chat_heartbeat_enabled(tid, cid):
-            return _telegram_safe("Heartbeat ya estaba desactivado.")
+            return "Heartbeat ya estaba desactivado."
         ok, err = set_chat_heartbeat_enabled(tid, cid, False)
         if not ok:
-            return _telegram_safe(f"No se pudo desactivar heartbeat: {err}")
-        return _telegram_safe("✅ Heartbeat desactivado.")
+            return f"No se pudo desactivar heartbeat: {err}"
+        return "✅ Heartbeat desactivado."
 
     st = "on" if is_chat_heartbeat_enabled(tid, cid) else "off"
-    return _telegram_safe(f"Heartbeat: {st}\nUso: /heartbeat on | /heartbeat off")
+    return f"Heartbeat: {st}\nUso: /heartbeat on | /heartbeat off"
 
 
 def execute_audit(db: Any, chat_id: Any) -> str:
     """/audit: evidencia de la última ejecución (SQL, latencia, run_id)."""
     raw = get_chat_state(db, chat_id, "last_audit")
     if not raw:
-        return _telegram_safe("No hay evidencia de última ejecución. Envía un mensaje y vuelve a usar /audit.")
+        return "No hay evidencia de última ejecución. Envía un mensaje y vuelve a usar /audit."
     try:
         data = json.loads(raw)
         sql = data.get("sql") or "(no registrado)"
         latency_ms = data.get("latency_ms") or "—"
         tokens = data.get("tokens") or "—"
         run_id = data.get("run_id") or "—"
-        return _telegram_safe(
+        return (
             f"📋 Última ejecución\nSQL: {str(sql)[:300]}\nLatencia: {latency_ms} ms\nTokens: {tokens}\nLangSmith run_id: {run_id}"
+        
         )
     except Exception:
-        return _telegram_safe("Datos de auditoría no válidos.")
+        return "Datos de auditoría no válidos."
 
 
 def execute_health(db: Any) -> str:
@@ -2466,12 +2518,12 @@ def execute_health(db: Any) -> str:
                 lines.append(f"✅ Inferencia ({url[:40]}...): {elapsed} ms")
         except Exception as e:
             lines.append(f"⚠️ Inferencia: {e}")
-    return _telegram_safe("\n".join(lines) or "Sin comprobaciones.")
+    return "\n".join(lines) or "Sin comprobaciones."
 
 
 def execute_approve_reject(db: Any, chat_id: Any, approved: bool) -> str:
     """/approve o /reject: HITL (grafo en interrupt). Sin interrupt implementado: mensaje informativo."""
-    return _telegram_safe("No hay operación pendiente de aprobación. (El grafo no está en estado interrupt en esta versión.)")
+    return "No hay operación pendiente de aprobación. (El grafo no está en estado interrupt en esta versión.)"
 
 
 def _normalize_belief_key(key: str) -> str:
@@ -2579,7 +2631,7 @@ def execute_goals(db: Any, chat_id: Any, args: str) -> str:
 
     if do_reset:
         set_manager_goals(db, chat_id, [])
-        return _telegram_safe("✅ Objetivos reiniciados. Crea con /goals <objetivo en lenguaje natural o clave>.")
+        return "✅ Objetivos reiniciados. Crea con /goals <objetivo en lenguaje natural o clave>."
 
     # Añadir: /goals <clave o lenguaje natural>
     if raw and not raw.startswith("--"):
@@ -2624,12 +2676,12 @@ def execute_goals(db: Any, chat_id: Any, args: str) -> str:
             goals = [g for g in goals if (g.get("belief_key") or "").strip() != new_goal["belief_key"]]
         goals.append(new_goal)
         set_manager_goals(db, chat_id, goals)
-        title_display = _telegram_safe(new_goal.get("title") or new_goal["belief_key"])
-        return _telegram_safe(f"✅ Objetivo añadido: {title_display}")
+        title_display = new_goal.get("title") or new_goal["belief_key"]
+        return f"✅ Objetivo añadido: {title_display}"
 
     # Listar (por defecto vacío)
     if not goals:
-        return _telegram_safe("🎯 Manager\nNo hay goals. Crea con /goals <objetivo>, ej. /goals disminuir gasto en recreación.")
+        return "🎯 Manager\nNo hay goals. Crea con /goals <objetivo>, ej. /goals disminuir gasto en recreación."
 
     lines = ["🎯 Manager"]
     try:
@@ -2646,18 +2698,18 @@ def execute_goals(db: Any, chat_id: Any, args: str) -> str:
                 observed = float(g.get("observed_value")) if g.get("observed_value") is not None else None
             except (TypeError, ValueError):
                 observed = None
-            title = _telegram_safe(_goal_title(g, key))
+            title = _goal_title(g, key)
             if observed is not None and target is not None and thresh is not None and (target != 0 or thresh != 0):
                 res = compute_surprise(observed, target, thresh)
                 st = "⚠️" if res.is_anomaly else "✓"
-                lines.append(f"\\- {title}: target={target} (obs: {observed}) {st}")
+                lines.append(f"- {title}: target={target} (obs: {observed}) {st}")
             elif target is not None and thresh is not None:
-                lines.append(f"\\- {title}: target={target}, thresh={thresh} (sin dato)")
+                lines.append(f"- {title}: target={target}, thresh={thresh} (sin dato)")
             else:
-                lines.append(f"\\- {title}")
+                lines.append(f"- {title}")
     except Exception as e:
-        return _telegram_safe(f"Error: {e}.")
-    return _telegram_safe("\n".join(lines) + "\n\n/goals --reset")
+        return f"Error: {e}."
+    return "\n".join(lines) + "\n\n/goals --reset"
 
 
 def execute_tasks(db: Any, chat_id: Any) -> str:
@@ -2665,7 +2717,7 @@ def execute_tasks(db: Any, chat_id: Any) -> str:
     from duckclaw.graphs.activity import get_activity
     data = get_activity(chat_id)
     if data is None:
-        return _telegram_safe("⏸ IDLE (Redis no configurado).")
+        return "⏸ IDLE (Redis no configurado)."
     status = data.get("status", "IDLE")
     task = data.get("task", "")
     worker_id = data.get("worker_id", "") or ""
@@ -2681,9 +2733,9 @@ def execute_tasks(db: Any, chat_id: Any) -> str:
     worker_display = (worker_id or "").replace("-", " ").strip()
     worker_s = f" · {worker_display}" if worker_display else ""
     # Segunda línea: solo el título del plan (task), precedido por un bullet grande
-    task_preview = f"• {_telegram_safe(str(task)[:60])}" if task else _telegram_safe("—")
+    task_preview = f"• {str(task)[:60]}" if task else "—"
     icon = "▶" if status == "BUSY" else "⏸"
-    return _telegram_safe(f"{icon} {status}{elapsed_s}{worker_s}\n") + task_preview
+    return f"{icon} {status}{elapsed_s}{worker_s}\n" + task_preview
 
 
 def _get_global_config(db: Any, key: str) -> str:
@@ -2761,7 +2813,7 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
         provider = p or env_p or "—"
         model = m or env_m or "—"
         base_url = (u or env_u or "—")[:50] + "…" if (u or env_u) and len((u or env_u) or "") > 50 else (u or env_u or "—")
-        return _telegram_safe(f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model model=Slayer-8B")
+        return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model model=Slayer-8B"
     for part in args.split("|"):
         part = part.strip()
         if "=" in part:
@@ -2769,7 +2821,7 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
             k, v = k.strip().lower(), v.strip()
             if k == "provider":
                 if v and v.lower() not in _PROVIDERS:
-                    return _telegram_safe(f"Provider desconocido: {v}. Válidos: {', '.join(_PROVIDERS)}")
+                    return f"Provider desconocido: {v}. Válidos: {', '.join(_PROVIDERS)}"
                 set_chat_state(db, chat_id, "llm_provider", v)
                 # Al cambiar provider, resetear model al default para evitar "Model Not Exist"
                 # (ej. Slayer-8B-v1.1 no existe en DeepSeak)
@@ -2779,7 +2831,7 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
                 set_chat_state(db, chat_id, "llm_model", v)
             elif k == "base_url":
                 set_chat_state(db, chat_id, "llm_base_url", v)
-    return _telegram_safe("✅ Modelo actualizado. Los próximos mensajes usarán esta config.")
+    return "✅ Modelo actualizado. Los próximos mensajes usarán esta config."
 
 
 def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
@@ -2788,9 +2840,9 @@ def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
     all_templates = list_workers()
     raw = (args or "").strip()
     if not raw:
-        return _telegram_safe("Uso: /prompt <worker_id> [--change <texto>]. Ver templates: /roles")
+        return "Uso: /prompt <worker_id> [--change <texto>]. Ver templates: /roles"
     if raw.startswith("--"):
-        return _telegram_safe("Indica un worker_id (ej. finanz, research_worker). Ver templates: /roles")
+        return "Indica un worker_id (ej. finanz, research_worker). Ver templates: /roles"
     change_marker = " --change "
     idx = raw.lower().find(change_marker)
     if idx >= 0:
@@ -2800,18 +2852,18 @@ def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
         worker_id = raw.split()[0].strip().lower() if raw.split() else ""
         new_prompt = ""
     if not worker_id:
-        return _telegram_safe("Uso: /prompt <worker_id> [--change <texto>]. Ver templates: /roles")
+        return "Uso: /prompt <worker_id> [--change <texto>]. Ver templates: /roles"
     if worker_id not in all_templates:
-        return _telegram_safe(f"Template '{worker_id}' no encontrado. Disponibles (usa /roles): {', '.join(all_templates)}")
+        return f"Template '{worker_id}' no encontrado. Disponibles (usa /roles): {', '.join(all_templates)}"
     if new_prompt:
         _set_global_config(db, f"system_prompt_{worker_id}", new_prompt)
         preview = new_prompt[:200] + "..." if len(new_prompt) > 200 else new_prompt
-        return _telegram_safe(f"✅ System prompt de {worker_id} actualizado.\nVista previa: {preview}")
+        return f"✅ System prompt de {worker_id} actualizado.\nVista previa: {preview}"
     current = get_effective_system_prompt(db, worker_id)
     if not current:
-        return _telegram_safe(f"System prompt de {worker_id}: (vacío o por defecto del template).\nPara cambiar: /prompt {worker_id} --change <texto>")
+        return f"System prompt de {worker_id}: (vacío o por defecto del template).\nPara cambiar: /prompt {worker_id} --change <texto>"
     preview = current[:400] + "..." if len(current) > 400 else current
-    return _telegram_safe(f"System prompt de {worker_id}:\n{preview}\n\nPara cambiar: /prompt {worker_id} --change <texto>")
+    return f"System prompt de {worker_id}:\n{preview}\n\nPara cambiar: /prompt {worker_id} --change <texto>"
 
 
 def _leila_fly_commands_enabled() -> bool:
@@ -2895,9 +2947,9 @@ def execute_leila_catalogo(db: Any, chat_id: Any) -> str:
         )
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
     except Exception as e:
-        return _telegram_safe(f"No pude leer el catálogo: {e}")
+        return f"No pude leer el catálogo: {e}"
     if not rows:
-        return _telegram_safe("Catálogo vacío por ahora. Vuelve pronto.")
+        return "Catálogo vacío por ahora. Vuelve pronto."
     lines: list[str] = []
     for r in rows:
         if not isinstance(r, dict):
@@ -2919,11 +2971,12 @@ def execute_leila_catalogo(db: Any, chat_id: Any) -> str:
             extra += f"\n  foto: {foto[:80]}"
         lines.append(f"• {nom}\n  id: {tid} — precio: {precio}\n  Tallas: {ts}{extra}")
     body = "\n\n".join(lines)
-    return _telegram_safe(
+    return (
         f"Leila Store — Catálogo\n\n{body}\n\nPedido: /pedido id_producto talla"
+    
+
+
     )
-
-
 def execute_leila_pedido(
     db: Any,
     chat_id: Any,
@@ -2936,7 +2989,7 @@ def execute_leila_pedido(
     """/pedido <producto_id> <talla> [nota] — inserta en leila_orders (shared.main si hay catálogo compartido)."""
     parts = (args or "").strip().split(None, 2)
     if len(parts) < 2:
-        return _telegram_safe("Uso: /pedido id_producto talla [nota opcional]")
+        return "Uso: /pedido id_producto talla [nota opcional]"
     product_id = parts[0].strip()
     talla = parts[1].strip()
     nota = (parts[2].strip() if len(parts) > 2 else "") or ""
@@ -2955,17 +3008,17 @@ def execute_leila_pedido(
         chk = db.query(f"SELECT nombre, activo FROM {prod_rel} WHERE id = '{pid_sql}' LIMIT 1")
         rows = json.loads(chk) if isinstance(chk, str) else (chk or [])
         if not rows or not isinstance(rows[0], dict):
-            return _telegram_safe(f"No encontré el producto {product_id}. Usa /catalogo para ver ids.")
+            return f"No encontré el producto {product_id}. Usa /catalogo para ver ids."
         act = rows[0].get("activo")
         if act is False:
-            return _telegram_safe("Ese producto no está disponible.")
+            return "Ese producto no está disponible."
         nombre = str(rows[0].get("nombre") or product_id)
         db.execute(
             f"INSERT INTO {ord_rel} (chat_id, producto_id, talla, nota) "
             f"VALUES ('{cid_sql}', '{pid_sql}', '{talla_sql}', '{nota_sql}')"
         )
     except Exception as e:
-        return _telegram_safe(f"No pude registrar el pedido: {e}")
+        return f"No pude registrar el pedido: {e}"
 
     user_label = (username or "").strip() or (str(requester_id).strip() if requester_id is not None else cid)
     admin_txt = f"Nuevo pedido: {nombre} talla {talla} de {user_label}"
@@ -2984,66 +3037,68 @@ def execute_leila_pedido(
             tenant_id=tid,
         )
 
-    return _telegram_safe(
+    return (
         f"Pedido recibido: {nombre}, talla {talla}. Te contactamos pronto."
+    
+
+
     )
-
-
 def execute_leila_ayuda() -> str:
     """/ayuda — comprar en Leila Store (solo gateway Leila)."""
-    return _telegram_safe(
+    return (
         "Leila Store — cómo comprar\n\n"
         "• /catalogo — ver productos, tallas y precios\n"
         "• /pedido id talla — registrar tu pedido (opcional: una nota al final)\n"
         "• Pregunta por tallas o combinar piezas; si algo es especial, dilo y lo vemos con Leila.\n\n"
         "Comandos generales del bot: /help"
+    
+
+
     )
-
-
 def execute_help(db: Any, chat_id: Any) -> str:
     """/help: lista los fly commands disponibles."""
     lines = [
-        (_telegram_safe("/team"), _telegram_safe("Whitelist + grants bases compartidas (--shared-*)")),
-        (_telegram_safe("/vault"), _telegram_safe("Bóvedas privadas: ver/listar/crear/cambiar/eliminar")),
-        (_telegram_safe("/workers"), _telegram_safe("Equipo (templates): ver o definir workers para este chat")),
-        (_telegram_safe("/roles"), _telegram_safe("Ver todos los trabajadores virtuales (templates)")),
-        (_telegram_safe("/tasks"), _telegram_safe("Estado actual: BUSY/IDLE, subagente, tarea")),
-        (_telegram_safe("/history"), _telegram_safe("Historial de tareas (quién hizo qué)")),
-        (_telegram_safe("/goals"), _telegram_safe("Objetivos de homeostasis")),
-        (_telegram_safe("/prompt <worker_id>"), _telegram_safe("Ver prompt; --change <texto> para cambiar")),
-        (_telegram_safe("/model"), _telegram_safe("Ver o cambiar LLM (provider/model)")),
-        (_telegram_safe("/skills <worker_id>"), _telegram_safe("Herramientas del template")),
-        (_telegram_safe("/forget"), _telegram_safe("Borrar historial de la conversación")),
-        (_telegram_safe("/context"), _telegram_safe("Toggle contexto largo/corto")),
-        (_telegram_safe("/sandbox"), _telegram_safe("Toggle ejecución de código (true|false) para esta sesión")),
-        (_telegram_safe("/sandox"), _telegram_safe("(Alias) /sandbox para tolerar errores de escritura.")),
-        (_telegram_safe("/heartbeat"), _telegram_safe("Activa mensajes en tiempo real mientras el agente trabaja")),
-        (_telegram_safe("/audit"), _telegram_safe("Última auditoría de ejecución")),
-        (_telegram_safe("/health"), _telegram_safe("Estado del servicio")),
-        (_telegram_safe("/sensors"), _telegram_safe("DuckDB, IBKR, Lake, Tavily, Reddit, Trends, browser sandbox")),
-        (_telegram_safe("/new_mind"), _telegram_safe("The Mind: crear partida (alias de /new_game the_mind)")),
-        (_telegram_safe("/join <game_id>"), _telegram_safe("The Mind: unirse a partida")),
-        (_telegram_safe("/start_mind [game_id]"), _telegram_safe("The Mind: iniciar y repartir Nivel 1")),
-        (_telegram_safe("/game"), _telegram_safe("The Mind: listar partidas waiting/playing")),
-        (_telegram_safe("/play <n>"), _telegram_safe("The Mind: jugar carta")),
-        (_telegram_safe("/cards"), _telegram_safe("The Mind: ver tus cartas activas (DM)")),
-        (_telegram_safe("/shuriken"), _telegram_safe("The Mind: votar uso de estrella ninja")),
-        (_telegram_safe("/setup"), _telegram_safe("Config key=value")),
-        (_telegram_safe("/approve"), _telegram_safe("Aprobar última acción")),
-        (_telegram_safe("/reject"), _telegram_safe("Rechazar última acción")),
-        (_telegram_safe("/execute_signal <uuid>"), _telegram_safe("Finanz quant: confirma ejecución de orden (HITL)")),
-        (_telegram_safe("/lake"), _telegram_safe("Estado del túnel SSH Capadonna (env + prueba rápida)")),
+        ("/team", "Whitelist + grants bases compartidas (--shared-*)"),
+        ("/vault", "Bóvedas privadas: ver/listar/crear/cambiar/eliminar"),
+        ("/workers", "Equipo (templates): ver o definir workers para este chat"),
+        ("/roles", "Ver todos los trabajadores virtuales (templates)"),
+        ("/tasks", "Estado actual: BUSY/IDLE, subagente, tarea"),
+        ("/history", "Historial de tareas (quién hizo qué)"),
+        ("/goals", "Objetivos de homeostasis"),
+        ("/prompt <worker_id>", "Ver prompt; --change <texto> para cambiar"),
+        ("/model", "Ver o cambiar LLM (provider/model)"),
+        ("/skills <worker_id>", "Herramientas del template"),
+        ("/forget", "Borrar historial de la conversación"),
+        ("/context", "Toggle contexto largo/corto"),
+        ("/sandbox", "Toggle ejecución de código (true|false) para esta sesión"),
+        ("/sandox", "(Alias) /sandbox para tolerar errores de escritura."),
+        ("/heartbeat", "Activa mensajes en tiempo real mientras el agente trabaja"),
+        ("/audit", "Última auditoría de ejecución"),
+        ("/health", "Estado del servicio"),
+        ("/sensors", "DuckDB, IBKR, Lake, Tavily, Reddit, Trends, browser sandbox"),
+        ("/new_mind", "The Mind: crear partida (alias de /new_game the_mind)"),
+        ("/join <game_id>", "The Mind: unirse a partida"),
+        ("/start_mind [game_id]", "The Mind: iniciar y repartir Nivel 1"),
+        ("/game", "The Mind: listar partidas waiting/playing"),
+        ("/play <n>", "The Mind: jugar carta"),
+        ("/cards", "The Mind: ver tus cartas activas (DM)"),
+        ("/shuriken", "The Mind: votar uso de estrella ninja"),
+        ("/setup", "Config key=value"),
+        ("/approve", "Aprobar última acción"),
+        ("/reject", "Rechazar última acción"),
+        ("/execute_signal <uuid>", "Finanz quant: confirma ejecución de orden (HITL)"),
+        ("/lake", "Estado del túnel SSH Capadonna (env + prueba rápida)"),
     ]
     if _leila_fly_commands_enabled():
         lines.extend(
             [
-                (_telegram_safe("/catalogo"), _telegram_safe("Leila: ver catálogo de productos")),
-                (_telegram_safe("/pedido id talla"), _telegram_safe("Leila: registrar pedido")),
-                (_telegram_safe("/ayuda"), _telegram_safe("Leila: cómo comprar")),
+                ("/catalogo", "Leila: ver catálogo de productos"),
+                ("/pedido id talla", "Leila: registrar pedido"),
+                ("/ayuda", "Leila: cómo comprar"),
             ]
         )
-    block = "\n".join(f"{cmd} \\- {desc}" for cmd, desc in lines)
-    return f"🦆 {_telegram_safe('Fly commands:')}\n\n{block}"
+    block = "\n".join(f"- {cmd} — {desc}" for cmd, desc in lines)
+    return f"🦆 Fly commands:\n\n{block}"
 
 
 def _fly_reply_preview(s: str, max_len: int = 120) -> str:
@@ -3378,7 +3433,7 @@ def execute_sensors(db: Any) -> str:
         blocks.append("🌐 Browser sandbox · Playwright (`run_browser_sandbox`)")
         blocks.append(_sensor_line_bullet("❌", f"Error — {str(e)[:100]}"))
 
-    return _telegram_safe("\n".join(blocks))
+    return "\n".join(blocks)
 
 
 def execute_lake_status() -> str:
@@ -3386,8 +3441,8 @@ def execute_lake_status() -> str:
     try:
         lines = _capadonna_lake_status_lines(compact=False)
     except Exception as e:
-        return _telegram_safe(f"Lake: no se pudo cargar el bridge quant: {e}")
-    return _telegram_safe("\n".join(lines))
+        return f"Lake: no se pudo cargar el bridge quant: {e}"
+    return "\n".join(lines)
 
 
 def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
@@ -3397,7 +3452,7 @@ def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
         sid,
     ):
-        return _telegram_safe("Uso: /execute_signal <signal_id_UUID>")
+        return "Uso: /execute_signal <signal_id_UUID>"
     try:
         from duckclaw.graphs.graph_server import get_db as _get_db
 
@@ -3407,7 +3462,7 @@ def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
         if _is_wr_tenant(tid):
             clearance = _wr_member_clearance(_db, tenant_id=tid, user_id=rid)
             if not (_is_gateway_owner_user(rid) or clearance == "admin"):
-                return _telegram_safe("❌ Acceso denegado: /execute_signal en War Room requiere clearance admin.")
+                return "❌ Acceso denegado: /execute_signal en War Room requiere clearance admin."
     except Exception:
         pass
     try:
@@ -3415,13 +3470,14 @@ def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
 
         grant_execute_order(str(chat_id).strip(), sid)
     except Exception as e:
-        return _telegram_safe(f"No se pudo registrar la confirmación: {e}")
-    return _telegram_safe(
+        return f"No se pudo registrar la confirmación: {e}"
+    return (
         f"Confirmación registrada para la señal {sid}. "
         "Pide al asistente que ejecute la herramienta execute_order con ese signal_id en esta sesión."
+    
+
+
     )
-
-
 def _dispatch_fly_command(
     db: Any,
     chat_id: Any,
@@ -3440,7 +3496,7 @@ def _dispatch_fly_command(
         sub = (args or "").strip().lower()
         if sub in ("", "status"):
             return execute_lake_status()
-        return _telegram_safe("Uso: /lake o /lake status")
+        return "Uso: /lake o /lake status"
     if name == "execute_signal":
         return execute_quant_execute_signal(chat_id, args)
     if name == "register_wr_member":
@@ -3460,8 +3516,9 @@ def _dispatch_fly_command(
     if name == "help":
         return execute_help(db, chat_id)
     if name == "role":
-        return _telegram_safe(
+        return (
             "El comando /role ya no existe. Usa /workers para ver o definir el equipo, /help para ver todos los comandos."
+        
         )
     if name == "roles":
         return execute_roles(db, chat_id)
@@ -3571,23 +3628,23 @@ def execute_shuriken(
             )
         )
         if not rows:
-            return _telegram_safe("No encontré ninguna partida en juego asociada a este chat.")
+            return "No encontré ninguna partida en juego asociada a este chat."
         game_id, lvl, stars, status, uname = rows[0]
         if str(status or "").strip().lower() != "playing":
-            return _telegram_safe("La partida no está en juego.")
+            return "La partida no está en juego."
         stars_i = int(stars or 0)
         if stars_i <= 0:
-            return _telegram_safe("No quedan estrellas disponibles.")
+            return "No quedan estrellas disponibles."
 
         player_rows = list(
             db.execute("SELECT chat_id, username, cards FROM the_mind_players WHERE game_id = ?", (game_id,))
         )
         if not player_rows:
-            return _telegram_safe("No hay jugadores en esta partida.")
+            return "No hay jugadores en esta partida."
         active_players = [(str(r[0] or ""), str(r[1] or ""), list(r[2] or [])) for r in player_rows]
         active_chat_ids = [p[0] for p in active_players if p[0]]
         if cid not in active_chat_ids:
-            return _telegram_safe("No estás registrado en esta partida.")
+            return "No estás registrado en esta partida."
 
         vote_rows = list(
             db.execute(
@@ -3653,10 +3710,11 @@ def execute_shuriken(
                 )
             except Exception:
                 pass
-            return _telegram_safe(
+            return (
                 f"⭐ Estrella usada. {', '.join(discarded_parts)}. Estrellas restantes: {new_stars}"
-            )
+            
 
+            )
         actor = _player_label(uname, cid, db=db, tenant_id=tid)
         for pchat, puser, _ in active_players:
             if pchat and pchat != cid:
@@ -3667,9 +3725,9 @@ def execute_shuriken(
                     db=db,
                     tenant_id=tid,
                 )
-        return _telegram_safe("⭐ Voto registrado. Esperando a los demás...")
+        return "⭐ Voto registrado. Esperando a los demás..."
     except Exception as e:
-        return _telegram_safe(f"No se pudo procesar /shuriken: {e}")
+        return f"No se pudo procesar /shuriken: {e}"
 
 
 def handle_command(
@@ -3725,10 +3783,11 @@ def _execute_setup(db: Any, chat_id: Any, args: str) -> str:
         m = get_chat_state(db, chat_id, "llm_model") or _get_global_config(db, "llm_model")
         wid = get_chat_state(db, chat_id, "worker_id")
         prompt = _get_global_config(db, "system_prompt") or ""
-        return _telegram_safe(
+        return (
             f"Config actual:\n- llm_provider: {p or '—'}\n- llm_model: {m or '—'}\n"
             f"- worker_id: {wid or '—'}\n- system_prompt: {prompt[:80]}...\n\n"
             "Para cambiar: /setup llm_provider=deepseek | /setup system_prompt=..."
+        
         )
     for part in args.split("|"):
         part = part.strip()
@@ -3737,7 +3796,7 @@ def _execute_setup(db: Any, chat_id: Any, args: str) -> str:
             k, v = k.strip().lower(), v.strip()
             if k in ("llm_provider", "provider"):
                 if v and v.lower() not in _PROVIDERS:
-                    return _telegram_safe(f"Provider desconocido: {v}. Válidos: {', '.join(_PROVIDERS)}")
+                    return f"Provider desconocido: {v}. Válidos: {', '.join(_PROVIDERS)}"
                 set_chat_state(db, chat_id, "llm_provider", v)
                 default_model = _DEFAULT_MODEL_BY_PROVIDER.get(v.lower(), "")
                 set_chat_state(db, chat_id, "llm_model", default_model)
@@ -3747,7 +3806,7 @@ def _execute_setup(db: Any, chat_id: Any, args: str) -> str:
                 set_chat_state(db, chat_id, "llm_base_url", v)
             elif k in ("system_prompt", "prompt"):
                 _set_global_config(db, "system_prompt", v)
-    return _telegram_safe("✅ Config actualizado.")
+    return "✅ Config actualizado."
 
 
 def get_history_limit_for_chat(db: Any, chat_id: Any, default: int = 10) -> int:
@@ -3929,10 +3988,10 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
         )
         rows = json.loads(r) if isinstance(r, str) else (r or [])
     except Exception as e:
-        return _telegram_safe(f"Error al cargar historial: {e}.")
+        return f"Error al cargar historial: {e}."
 
     if not rows:
-        return _telegram_safe("📋 Sin tareas registradas.")
+        return "📋 Sin tareas registradas."
 
     # Filtrar: tareas complejas con título de plan + como máximo 1 saludo simple
     complex_rows = []
@@ -3950,7 +4009,7 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
         filtered.append(one_greeting)
 
     if not filtered:
-        return _telegram_safe("📋 Sin tareas complejas.")
+        return "📋 Sin tareas complejas."
 
     # Evitar duplicados: si hay varias filas con mismo worker/status/duración y
     # solo algunas tienen plan_title explícito, preferir las que sí lo tienen.
@@ -3987,7 +4046,7 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
         deduped.append(row)
 
     if not deduped:
-        return _telegram_safe("📋 Sin tareas complejas.")
+        return "📋 Sin tareas complejas."
 
     lines = [f"📋 Últimas {len(deduped)}"]
     for i, row in enumerate(deduped, 1):
@@ -4011,8 +4070,8 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
             dur_ms = 0
         dur_s = f"{dur_ms / 1000:.1f}s"
         # Formato: número. [subagente] Título del plan · ⏱️ duración
-        worker_part = f"[{_telegram_safe(wid)}] " if wid else ""
-        title_part = _telegram_safe(plan_title) if plan_title else ""
+        worker_part = f"[{wid}] " if wid else ""
+        title_part = plan_title if plan_title else ""
         lines.append(f"{i}. {worker_part}{title_part} · ⏱️ {dur_s}")
 
     success_rows = [r for r in filtered if isinstance(r, dict) and (r.get("status") or "").upper() == "SUCCESS"]
@@ -4036,4 +4095,4 @@ def execute_history(db: Any, chat_id: Any, args: str) -> str:
         failed_24h = 0
     lines.append(f"— avg {avg_ms/1000:.1f}s · fallidas 24h: {failed_24h}")
 
-    return _telegram_safe("\n".join(lines))
+    return "\n".join(lines)

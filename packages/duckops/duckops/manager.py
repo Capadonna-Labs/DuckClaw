@@ -346,6 +346,19 @@ def serve(
             print("PM2 no está instalado. Instala con: npm install -g pm2")
             return 1
 
+        if gateway:
+            from duckclaw.ops.manager import serve as ops_serve
+
+            return ops_serve(
+                host=host,
+                port=port,
+                reload=False,
+                pm2=True,
+                name=name,
+                cwd=cwd,
+                gateway=True,
+            )
+
         # Load .env from repo root so LLM vars are available for PM2 config
         _env_file = Path(effective_cwd) / ".env"
         if _env_file.is_file():

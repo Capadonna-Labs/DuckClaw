@@ -105,8 +105,10 @@ def tailscale_funnel_wizard_panel_content(gateway_port: int) -> str:
             "Usa como base del webhook de Telegram (sin barra final) esa URL; el [bold]setWebhook[/] completo será:",
             "  [dim]…/api/v1/telegram/webhook[/] al final.",
             "",
-            "[bold]Varios gateways[/] (p. ej. puertos distintos): un [cyan]tailscale funnel[/] por puerto "
-            "o configuración equivalente según la doc; cada bot de Telegram debe apuntar al host:puerto correcto.",
+            "[bold]Varios gateways[/] (Finanz :8000, JobHunter :8283, etc.): el modo recomendado es que "
+            "cada bot tenga una URL HTTPS que termine en el puerto de [italic]ese[/] PM2. Opciones: varios "
+            "túneles/hostnames (p. ej. Cloudflare) hacia cada puerto; varios funnels si el tailnet lo permite; "
+            "o [bold]Tailscale Serve[/] / reverse proxy con reglas por ruta o host y un solo funnel al frontal.",
             "",
             "[dim]Estado: tailscale funnel status  ·  Reiniciar mapeos: tailscale funnel reset[/]",
         ]

@@ -322,6 +322,11 @@ Al iniciar, el wizard lista los procesos PM2 detectados. Si el usuario elige "Ge
 - **Normalización:** Cualquier ruta se normaliza a `db/<nombre>.duckdb` respecto a la raíz del repo.
 - **Compatibilidad:** Al escribir `DUCKCLAW_DB_PATH`, el wizard escribe también `DUCKDB_PATH` para que `services/db-writer` use la misma ruta.
 - **Creación automática:** Al confirmar o guardar, se crea el archivo `.duckdb` en `db/` si no existe.
+- **Varios API Gateways (PM2):** La fuente de verdad por proceso es el bloque `env` de `config/api_gateways_pm2.json`: cada app PM2 tiene su propio `DUCKCLAW_DB_PATH` (y, si aplica, `DUCKCLAW_SHARED_DB_PATH` y `DUCKDB_PATH`). Al ejecutar `duckops serve --pm2 --gateway` o el deploy PM2 del wizard soberano, las variables del `.env` compartido se fusionan en ese bloque pero **no sustituyen** esas rutas de bóveda si ya estaban definidas en el JSON (evita que al añadir otro gateway la ruta de Finanz pase a ser la del último valor genérico del `.env`). Para cambiar la bóveda de un gateway existente de forma explícita: volver a materializar el borrador soberano para ese nombre, editar `config/api_gateways_pm2.json`, o `duckops serve --pm2 --gateway --gateway-db-path <ruta>`.
+
+**Logs `[tenant:worker N]` (subagent_slot_rank)**
+
+En PM2/Gateway, entradas como `[Finanzas:finanz 2]` o `[Finanzas:Job-Hunter 1]` usan un sufijo numérico que viene del rank en un ZSET de Redis (`duckclaw:subagent_active:...`), no de un “Worker 1” productivo vs “Worker 2” ocioso. El número solo refleja **cuántas ejecuciones de ese mismo `worker_id` en ese chat** estaban registradas como activas al adquirir el slot. Comparar `Job-Hunter 1` con `finanz 2` no indica carga entre roles (claves Redis distintas). Detalle y diagnóstico: `packages/agents/src/duckclaw/graphs/subagent_run_id.py`.
 
 **Flujo completo (wizard → pipeline operativo)**
 

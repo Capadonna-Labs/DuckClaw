@@ -1,5 +1,11 @@
 # Telegram Webhook Multiplex (multi-bot)
 
+## Modo recomendado (fuera de este documento)
+
+Cuando cada bot tiene **su propio** proceso gateway y **su propia** URL HTTPS que termina en el puerto PM2 correcto, **no** hace falta multiplex ni `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`. Ver [Telegram Webhook One Gateway One Port.md](Telegram%20Webhook%20One%20Gateway%20One%20Port.md) y [docs/COMANDOS.md](../../docs/COMANDOS.md) § 2.0.
+
+Este documento describe el **Modo B**: varios bots compartiendo **una** URL pública y **un** proceso receptor.
+
 ## Problema
 
 Una sola URL HTTPS (p. ej. Tailscale Funnel) no puede ejecutar varios procesos Puerto-distintos a la vez. Si **todos** los bots registran el mismo `setWebhook` URL contra **un** gateway, ese gateway debe enrutar cada `Update` al worker y al `TELEGRAM_BOT_TOKEN` correcto.

@@ -448,7 +448,7 @@ async def _tailscale_auth_middleware(request: Request, call_next):
     if path in ("/", "/health"):
         return await call_next(request)
     # Telegram Bot API no envía X-Tailscale-Auth-Key; el webhook usa TELEGRAM_WEBHOOK_SECRET.
-    if path == "/api/v1/telegram/webhook":
+    if path == "/api/v1/telegram/webhook" or path.startswith("/api/v1/telegram/webhook/"):
         return await call_next(request)
     header_key = request.headers.get("X-Tailscale-Auth-Key", "").strip()
     if header_key != auth_key:
@@ -1029,10 +1029,21 @@ def _outbound_deliver_chat_text_sync(
     _webhook_outbound_chat_reply_sync(chat_id=cid, user_id=uid, text=raw)
 
 
-async def _authorize_or_reject(*, tenant_id: str, user_id: str, is_owner: bool) -> None:
+async def _authorize_or_reject(
+    *,
+    tenant_id: str,
+    user_id: str,
+    is_owner: bool,
+    telegram_guard_acl_db_path: str | None = None,
+) -> None:
     """
     Raises HTTPException(403) for unauthorized access.
     Also increments unauthorized attempts and triggers admin alert after 3 attempts.
+
+    telegram_guard_acl_db_path:
+        Si el webhook forzó una bóveda distinta (p. ej. ruta legado ``/webhook/finanz`` con
+        ``DUCKCLAW_FINANZ_DB_PATH``), la whitelist ``main.authorized_users`` se lee de esa DuckDB.
+        Con un gateway aislado por bot, suele ser ``None`` y se usa ``DUCKCLAW_DB_PATH`` del proceso.
     """
     # Check 1 (Bypass): owner bypass no DB/Redis access.
     if is_owner:
@@ -1040,9 +1051,13 @@ async def _authorize_or_reject(*, tenant_id: str, user_id: str, is_owner: bool) 
         return
 
     redis_client = getattr(app.state, "redis", None)
-    from core.gateway_acl_db import get_gateway_acl_duckdb, get_war_room_acl_duckdb
+    from core.gateway_acl_db import ReadOnlyGatewayAclDb, get_gateway_acl_duckdb, get_war_room_acl_duckdb
 
-    db = get_gateway_acl_duckdb()[0]
+    _guard_acl = (telegram_guard_acl_db_path or "").strip()
+    if _guard_acl:
+        db: Any = ReadOnlyGatewayAclDb(str(Path(_guard_acl).expanduser().resolve()))
+    else:
+        db = get_gateway_acl_duckdb()[0]
     if is_war_room_tenant(tenant_id):
         wr_db = get_war_room_acl_duckdb()
         # Bootstrap WR: mientras no haya miembros registrados, no bloquear al primer operador.
@@ -1291,6 +1306,7 @@ async def _invoke_chat(
     redis_client: Any = None,
     telegram_multipart_tail_delivery: str | None = None,
     telegram_mcp: Any = None,
+    telegram_forced_vault_db_path: str | None = None,
 ):
     """
     Orquesta la llamada al grafo LangGraph a partir de un ChatRequest.
@@ -1311,9 +1327,15 @@ async def _invoke_chat(
     vault_user_id = user_id or session_id
     vault_scope = vault_scope_id_for_tenant(tenant_id)
     _, vault_db_path = resolve_active_vault(vault_user_id, vault_scope)
-    _ded_vault = _dedicated_gateway_vault_db_path()
-    if _ded_vault:
-        vault_db_path = _ded_vault
+    _forced_v = (telegram_forced_vault_db_path or "").strip()
+    _telegram_acl_for_guard: str | None = None
+    if _forced_v:
+        vault_db_path = str(Path(_forced_v).expanduser().resolve())
+        _telegram_acl_for_guard = vault_db_path
+    else:
+        _ded_vault = _dedicated_gateway_vault_db_path()
+        if _ded_vault:
+            vault_db_path = _ded_vault
     history = payload.history or []
     is_system_prompt = bool(payload.is_system_prompt or False)
     shared_db_path = (payload.shared_db_path or "").strip() or None
@@ -1346,13 +1368,18 @@ async def _invoke_chat(
             tenant_id=tenant_id,
             user_id=user_id,
             is_owner=is_owner,
+            telegram_guard_acl_db_path=_telegram_acl_for_guard,
         )
 
     if not is_system_prompt and not is_owner:
-        from core.gateway_acl_db import get_gateway_acl_duckdb
+        from core.gateway_acl_db import ReadOnlyGatewayAclDb, get_gateway_acl_duckdb
         from duckclaw.shared_db_grants import path_is_under_shared_tree, user_may_access_shared_path
 
-        acl_db = get_gateway_acl_duckdb()[0]
+        acl_db = (
+            ReadOnlyGatewayAclDb(_telegram_acl_for_guard)
+            if _telegram_acl_for_guard
+            else get_gateway_acl_duckdb()[0]
+        )
         _candidates = {s for s in ((shared_db_path or "").strip(), (os.getenv("DUCKCLAW_SHARED_DB_PATH") or "").strip()) if s}
         for candidate in _candidates:
             if not path_is_under_shared_tree(candidate):

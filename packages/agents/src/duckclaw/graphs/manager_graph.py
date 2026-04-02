@@ -4,6 +4,9 @@ Manager graph: orquestador que asigna cada mensaje a un subagente (worker) y reg
 State: incoming, history, chat_id, reply, assigned_worker_id, planned_task, messages (opcional).
 Flujo: router -> plan (formula tarea clara para el worker) -> invoke_worker (set_busy, invoca worker, set_idle, append_task_audit).
 Spec: Plan manager orquestador de subagentes.
+
+Las etiquetas de log ``{worker} {n}`` tras delegación son **subagent_slot_rank** (Redis), no IDs de réplica PM2;
+ver ``duckclaw.graphs.subagent_run_id``.
 """
 
 from __future__ import annotations
@@ -160,7 +163,14 @@ def _contains_income_injection_request(text: str) -> bool:
     return "[a2a_request: income_injection]" in t
 
 
+def _contains_job_opportunity_tracking_request(text: str) -> bool:
+    """Handoff A2A: Finanz pide que JobHunter persista vacante/postulación en job_opportunities."""
+    t = (text or "").strip().lower()
+    return "[a2a_request: job_opportunity_tracking]" in t
+
+
 # Líneas tipo «finanz 2», «Job-Hunter 1» al inicio del cuerpo (eco de heartbeats / historial).
+# El número es subagent_slot_rank (Redis), no réplica PM2 — ver subagent_run_id.
 _SUBAGENT_INSTANCE_HEADER_LINE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\s+\d+\s*$")
 
 
@@ -243,6 +253,19 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
                 "investigación web genérica o presentarte como asistente de investigación abstracto.",
                 None,
             )
+    # Job-Hunter: persistencia-only (A2A desde Finanz). Antes que INCOME_INJECTION para no forzar Tavily.
+    if _is_job_hunter_worker(worker_id) and "job_opportunity_tracking" in (incoming or "").strip().lower():
+        ctx = (incoming or "").strip()
+        return (
+            "TAREA: Misión A2A JOB_OPPORTUNITY_TRACKING. Registra en finance_worker.job_opportunities la vacante o "
+            "postulación del contexto siguiente. **No** uses tavily_search ni run_browser_sandbox salvo que no exista "
+            "ninguna URL ni dato mínimo de oferta en el contexto. Usa read_sql/admin_sql: INSERT con apply_url (literal del "
+            "mensaje si existe), title, company, location según el texto; status='applied' si el usuario indica que ya postuló, "
+            "si no 'tracking'; notes con detalle breve; applied_at=CURRENT_TIMESTAMP cuando aplique a aplicación ya hecha. "
+            "Si INSERT falla por URL duplicada (índice único), lee la fila y haz UPDATE de status/notes/applied_at.\n\n"
+            f"--- Contexto ---\n{ctx[:6000]}",
+            None,
+        )
     # Job-Hunter: evita run_sandbox con URLs inventadas; discovery = tavily_search.
     if _is_job_hunter_worker(worker_id) and job_hunter_user_requests_job_search(incoming):
         return (
@@ -1034,9 +1057,12 @@ def build_manager_graph(
 
     def route_after_invoke_worker(state: ManagerAgentState) -> str:
         current_worker = (state.get("assigned_worker_id") or "").strip()
-        if _worker_matches_id(current_worker, "finanz") and _contains_income_injection_request(
-            state.get("last_worker_raw_reply") or state.get("reply") or ""
+        raw_reply = state.get("last_worker_raw_reply") or state.get("reply") or ""
+        if _worker_matches_id(current_worker, "finanz") and _contains_job_opportunity_tracking_request(
+            raw_reply
         ):
+            return "handoff_job_track"
+        if _worker_matches_id(current_worker, "finanz") and _contains_income_injection_request(raw_reply):
             return "handoff_to_target"
         mission = state.get("active_mission")
         if not isinstance(mission, dict):
@@ -1093,6 +1119,51 @@ def build_manager_graph(
             out["task_summary"] = state["task_summary"]
         return out
 
+    def handoff_job_track_node(state: ManagerAgentState) -> ManagerAgentState:
+        """A2A: Finanz solicitó persistencia de vacante vía JobHunter (tabla job_opportunities)."""
+        available = state.get("available_templates") or []
+        target_worker = _pick_job_hunter_worker(list(available or [])) or "job_hunter"
+        user_ctx = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
+        synthetic = f"TAREA: Misión A2A JOB_OPPORTUNITY_TRACKING.\n{user_ctx}"
+        mission_task, _ = _plan_task(synthetic, target_worker)
+        active_mission = {
+            "source_worker": "finanz",
+            "target_worker": target_worker,
+            "mission": "JOB_OPPORTUNITY_TRACKING",
+            "urgency": "medium",
+        }
+        out: ManagerAgentState = {
+            "assigned_worker_id": target_worker,
+            "planned_task": mission_task,
+            "incoming": mission_task,
+            "input": mission_task,
+            "active_mission": active_mission,
+            "handoff_context": dict(active_mission),
+        }  # type: ignore[assignment]
+        if "history" in state:
+            out["history"] = state["history"]
+        if "chat_id" in state:
+            out["chat_id"] = state["chat_id"]
+        if "tenant_id" in state:
+            out["tenant_id"] = state["tenant_id"]
+        if "user_id" in state:
+            out["user_id"] = state["user_id"]
+        if "vault_db_path" in state:
+            out["vault_db_path"] = state["vault_db_path"]
+        if "shared_db_path" in state:
+            out["shared_db_path"] = state["shared_db_path"]
+        if "username" in state:
+            out["username"] = state["username"]
+        if "available_templates" in state:
+            out["available_templates"] = state["available_templates"]
+        if "plan_title" in state:
+            out["plan_title"] = state["plan_title"]
+        if "tasks" in state:
+            out["tasks"] = state["tasks"]
+        if "task_summary" in state:
+            out["task_summary"] = state["task_summary"]
+        return out
+
     def return_to_source_node(state: ManagerAgentState) -> ManagerAgentState:
         mission = state.get("active_mission")
         if not isinstance(mission, dict):
@@ -1111,19 +1182,30 @@ def build_manager_graph(
 
         raw_job_hunter_reply = (state.get("last_worker_raw_reply") or state.get("reply") or "").strip()
         mission_name = (mission.get("mission") or "INCOME_INJECTION").strip() or "INCOME_INJECTION"
-        mission_system_message = (
-            f"JobHunter ha completado la misión {mission_name}. "
-            f"Aquí están los resultados crudos: {raw_job_hunter_reply}\n\n"
-            "Sintetiza esto en tu reporte financiero final."
-        )
-        synthesis_task = (
-            "TAREA: JobHunter completó la misión INCOME_INJECTION. "
-            "Sintetiza los resultados crudos en un reporte financiero final para el usuario. "
-            "No devuelvas el bloque crudo completo tal cual: prioriza 3 vacantes accionables, "
-            "impacto esperado en flujo de caja y próximos pasos concretos."
-        )
+        if mission_name.upper() == "JOB_OPPORTUNITY_TRACKING":
+            mission_system_message = (
+                f"JobHunter completó la misión {mission_name}. "
+                f"Resultado (persistencia / SQL): {raw_job_hunter_reply}\n\n"
+                "Confirma al usuario el registro de la vacante o postulación de forma breve."
+            )
+            synthesis_task = (
+                "TAREA: JobHunter persistió datos en finance_worker.job_opportunities. "
+                "Responde en 2–5 frases en español: confirmación, estado (tracking/applied) y siguiente paso concreto. "
+                "No pegues bloques SQL crudos."
+            )
+        else:
+            mission_system_message = (
+                f"JobHunter ha completado la misión {mission_name}. "
+                f"Aquí están los resultados crudos: {raw_job_hunter_reply}\n\n"
+                "Sintetiza esto en tu reporte financiero final."
+            )
+            synthesis_task = (
+                "TAREA: JobHunter completó la misión INCOME_INJECTION. "
+                "Sintetiza los resultados crudos en un reporte financiero final para el usuario. "
+                "No devuelvas el bloque crudo completo tal cual: prioriza 3 vacantes accionables, "
+                "impacto esperado en flujo de caja y próximos pasos concretos."
+            )
 
-        incoming = (state.get("incoming") or state.get("input") or "").strip()
         out: ManagerAgentState = {
             "assigned_worker_id": next_worker,
             "planned_task": synthesis_task,
@@ -1172,6 +1254,7 @@ def build_manager_graph(
     graph.add_node("invoke_worker", invoke_worker_node)
     graph.add_node("return_to_source", return_to_source_node)
     graph.add_node("handoff_to_target", handoff_to_target_node)
+    graph.add_node("handoff_job_track", handoff_job_track_node)
     graph.set_entry_point("router")
     graph.add_conditional_edges(
         "router",
@@ -1183,8 +1266,14 @@ def build_manager_graph(
     graph.add_conditional_edges(
         "invoke_worker",
         route_after_invoke_worker,
-        {"return_to_source": "return_to_source", "handoff_to_target": "handoff_to_target", "end": END},
+        {
+            "return_to_source": "return_to_source",
+            "handoff_to_target": "handoff_to_target",
+            "handoff_job_track": "handoff_job_track",
+            "end": END,
+        },
     )
     graph.add_edge("return_to_source", "invoke_worker")
     graph.add_edge("handoff_to_target", "invoke_worker")
+    graph.add_edge("handoff_job_track", "invoke_worker")
     return graph.compile()

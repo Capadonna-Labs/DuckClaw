@@ -56,6 +56,15 @@ def test_llm_markdown_link_http() -> None:
     assert "[" not in html
 
 
+def test_llm_markdown_link_tg_user_mention() -> None:
+    raw = "- [Juan](tg://user?id=1726618406) (1726618406) · rol: admin"
+    html = llm_markdown_to_telegram_html(raw)
+    assert '<a href="tg://user?id=1726618406">' in html
+    assert "Juan" in html
+    assert "[" not in html
+    assert "\\" not in html
+
+
 def test_plain_subchunks_keeps_order() -> None:
     parts = plain_subchunks_for_telegram_html("ab" * 5000)
     assert len(parts) >= 2

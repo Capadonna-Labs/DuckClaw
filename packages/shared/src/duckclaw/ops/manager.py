@@ -9,6 +9,29 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+from duckclaw.dotenv_immutable import merged_root_and_proposed_flat_env
+
+
+def _overlay_merged_repo_telegram_env_into_process(repo_root: str) -> None:
+    """
+    Tras cargar sólo la raíz ``.env`` con ``setdefault``, aplica la misma fusión que el
+    gateway / setWebhook: ``.env`` + ``config/dotenv_wizard_proposed.env`` (gana el
+    propuesto) para claves ``TELEGRAM_*`` y ``DUCKCLAW_TELEGRAM_*``.
+
+    Así ``duckops serve --pm2 --gateway`` no pisa tokens recién materializados en
+    ``api_gateways_pm2.json`` con valores antiguos de un ``.env`` inmutable.
+    """
+    flat = merged_root_and_proposed_flat_env(repo_root)
+    for key, val in flat.items():
+        ks = str(key).strip()
+        if not ks:
+            continue
+        vs = (str(val).strip() if val is not None else "").strip()
+        if not vs:
+            continue
+        if ks.startswith("TELEGRAM_") or ks.startswith("DUCKCLAW_TELEGRAM_"):
+            os.environ[ks] = vs
+
 
 def _resolve_python() -> str:
     """Current interpreter absolute path (respects venv/uv)."""
@@ -286,6 +309,32 @@ def _env_dict_for_json(env: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+# Rutas de bóveda persistidas por bloque en api_gateways_pm2.json; no deben sustituirse
+# silenciosamente por DUCKCLAW_DB_PATH del .env compartido al redeployar otro gateway.
+_GATEWAY_MERGE_PERSIST_DB_KEYS = frozenset(
+    ("DUCKCLAW_DB_PATH", "DUCKCLAW_SHARED_DB_PATH", "DUCKDB_PATH")
+)
+
+
+def _merge_persisted_gateway_env(
+    old_env: dict[str, Any],
+    incoming: dict[str, str],
+    forced: dict[str, str],
+) -> dict[str, str]:
+    old = _env_dict_for_json(old_env) if old_env else {}
+    merged: dict[str, str] = dict(old)
+    for k, v in incoming.items():
+        if not v:
+            continue
+        if k in _GATEWAY_MERGE_PERSIST_DB_KEYS and (old.get(k) or "").strip():
+            continue
+        merged[k] = v
+    for k, v in forced.items():
+        if v:
+            merged[k] = v
+    return merged
+
+
 def _upsert_gateway_app(
     apps: list[dict[str, Any]],
     *,
@@ -293,18 +342,20 @@ def _upsert_gateway_app(
     host: str,
     port: int,
     env_vars: dict[str, Any],
+    forced_env: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    payload = {
-        "name": name,
-        "host": host,
-        "port": port,
-        "env": _env_dict_for_json(env_vars),
-    }
+    forced = {str(k): str(v) for k, v in (forced_env or {}).items() if v}
+    incoming = _env_dict_for_json(env_vars)
     for i, a in enumerate(apps):
         if isinstance(a, dict) and (a.get("name") or "").strip() == name:
-            apps[i] = payload
+            old_raw = a.get("env") if isinstance(a.get("env"), dict) else {}
+            merged_env = _merge_persisted_gateway_env(old_raw, incoming, forced)
+            apps[i] = {"name": name, "host": host, "port": port, "env": merged_env}
             return apps
-    apps.append(payload)
+    base = dict(incoming)
+    for k, v in forced.items():
+        base[k] = v
+    apps.append({"name": name, "host": host, "port": port, "env": base})
     return apps
 
 
@@ -506,6 +557,8 @@ def serve(
                     if _k.strip():
                         os.environ.setdefault(_k.strip(), _v.strip().strip("'\"").strip())
 
+        _overlay_merged_repo_telegram_env_into_process(effective_cwd)
+
         python_path = _resolve_python()
         config_path = Path(effective_cwd) / "config" / "ecosystem.api.config.cjs"
         graph_api_config_path = Path(effective_cwd) / "config" / "ecosystem.graph_api.config.cjs"
@@ -525,15 +578,27 @@ def serve(
             val = os.environ.get(key, "")
             if val:
                 env_vars[key] = val
+        # Tokens / rutas webhook Telegram: deben refrescarse desde .env en cada deploy;
+        # si no, el merge conserva TELEGRAM_FINANZ_TOKEN u otros en JSON y el legado
+        # POST …/webhook/finanz responde con el bot equivocado (mismo chat_id en DM).
+        for key in os.environ:
+            if key.startswith("TELEGRAM_") or key.startswith("DUCKCLAW_TELEGRAM_"):
+                val = (os.environ.get(key) or "").strip()
+                if val:
+                    env_vars[key] = val
         if gateway and not env_vars.get("REDIS_URL") and env_vars.get("DUCKCLAW_REDIS_URL"):
             env_vars["REDIS_URL"] = env_vars["DUCKCLAW_REDIS_URL"]
 
         gwp = (gateway_db_path or "").strip()
+        forced_env: dict[str, str] = {}
         if gwp:
             _dbf = Path(gwp)
             if not _dbf.is_absolute():
                 _dbf = Path(effective_cwd) / _dbf
-            env_vars["DUCKCLAW_DB_PATH"] = str(_dbf.resolve())
+            _resolved = str(_dbf.resolve())
+            env_vars["DUCKCLAW_DB_PATH"] = _resolved
+            forced_env["DUCKCLAW_DB_PATH"] = _resolved
+            forced_env["DUCKDB_PATH"] = _resolved
 
         if gateway:
             env_vars["DUCKCLAW_PM2_PROCESS_NAME"] = effective_name
@@ -557,6 +622,7 @@ def serve(
                 host=host,
                 port=gw_port,
                 env_vars=dict(env_vars),
+                forced_env=forced_env or None,
             )
             save_gateway_cluster_config(effective_cwd, apps)
 
@@ -567,7 +633,12 @@ def serve(
                     flush=True,
                 )
 
-            _db_path = env_vars.get("DUCKCLAW_DB_PATH", "").strip()
+            _db_path = ""
+            for _gw_app in apps:
+                if isinstance(_gw_app, dict) and (_gw_app.get("name") or "").strip() == effective_name:
+                    _ge = _gw_app.get("env") if isinstance(_gw_app.get("env"), dict) else {}
+                    _db_path = (_ge.get("DUCKCLAW_DB_PATH") or "").strip()
+                    break
             if _db_path:
                 _db_file = Path(_db_path)
                 if not _db_file.is_absolute():

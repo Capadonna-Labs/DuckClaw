@@ -102,7 +102,7 @@ def _inline_line_to_telegram_html(line: str) -> str:
 
     def link_repl(m: re.Match[str]) -> str:
         lab, url = m.group(1), (m.group(2) or "").strip()
-        if url.startswith(("http://", "https://")):
+        if url.startswith(("http://", "https://")) or url.startswith("tg://user?id="):
             tokens.append(f'<a href="{_esc_href_attr(url)}">{escape_telegram_html(lab)}</a>')
             return f"{_MARK}{len(tokens) - 1}{_MARK}"
         return m.group(0)

@@ -24,6 +24,7 @@ allowed_tables:
   - cuentas
   - deudas
   - presupuestos
+  - job_opportunities
   - quant_core.ohlcv_data
   - quant_core.trade_signals
   - quant_core.portfolio_positions

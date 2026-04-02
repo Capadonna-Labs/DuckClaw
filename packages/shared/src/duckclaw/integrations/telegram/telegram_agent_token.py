@@ -25,6 +25,7 @@ PM2_GATEWAY_APP_TO_WORKER_ID: dict[str, str] = {
     "BI-Analyst-Gateway": "bi_analyst",
     "Leila-Gateway": "LeilaAssistant",
     "SIATA-Gateway": "siata_analyst",
+    "JobHunter-Gateway": "Job-Hunter",
 }
 
 
@@ -96,24 +97,30 @@ def telegram_token_from_pm2_env_dict(env: dict[str, object], worker_id: str) -> 
     """
     Token definido en el bloque ``env`` de un proceso PM2.
 
-    Orden: ``TELEGRAM_BOT_TOKEN`` (compat) → ``TELEGRAM_<ID>_TOKEN`` → envs legados.
+    Orden: ``TELEGRAM_<ID>_TOKEN`` y legados del worker → fallback ``TELEGRAM_BOT_TOKEN``
+    (para Finanz, ``TELEGRAM_FINANZ_TOKEN`` puede omitirse y usa el genérico como en
+    ``resolve_telegram_token_for_worker_id``).
+
+    El token específico del worker va **antes** que ``TELEGRAM_BOT_TOKEN`` para que
+    gateways como JobHunter-Gateway no hereden el bot de Finanz cuando el merge PM2
+    copia el genérico al bloque ``env``.
     """
     if not isinstance(env, dict):
         return ""
     flat = {str(k): str(v).strip() if v is not None else "" for k, v in env.items()}
-    t = flat.get("TELEGRAM_BOT_TOKEN", "").strip()
-    if t:
-        return t
     wid = canonical_manifest_worker_id(worker_id)
-    if not wid:
-        return ""
-    std = telegram_agent_token_env_name(wid)
-    if std:
-        t = flat.get(std, "").strip()
-        if t:
-            return t
-    for leg in _LEGACY_ENV_BY_WORKER.get(wid, ()):
-        t = flat.get(leg, "").strip()
-        if t:
-            return t
-    return ""
+    if wid:
+        std = telegram_agent_token_env_name(wid)
+        if std:
+            t = flat.get(std, "").strip()
+            if t:
+                return t
+        for leg in _LEGACY_ENV_BY_WORKER.get(wid, ()):
+            t = flat.get(leg, "").strip()
+            if t:
+                return t
+        if wid.lower() == "finanz":
+            t = flat.get("TELEGRAM_BOT_TOKEN", "").strip()
+            if t:
+                return t
+    return flat.get("TELEGRAM_BOT_TOKEN", "").strip()

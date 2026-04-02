@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -75,6 +76,26 @@ def test_detect_income_injection_marker() -> None:
     assert _contains_income_injection_request("rechazo por déficit [A2A_REQUEST: INCOME_INJECTION]")
     assert _contains_income_injection_request("... [a2a_request: income_injection] ...")
     assert not _contains_income_injection_request("sin marcador de handoff")
+
+
+def test_detect_job_opportunity_tracking_marker() -> None:
+    from duckclaw.graphs.manager_graph import _contains_job_opportunity_tracking_request
+
+    assert _contains_job_opportunity_tracking_request("registro [a2a_request: job_opportunity_tracking]")
+    assert not _contains_job_opportunity_tracking_request("solo income [a2a_request: income_injection]")
+
+
+def test_plan_task_job_hunter_job_tracking_skips_tavily_mission() -> None:
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    task, override = _plan_task(
+        "TAREA: Misión A2A JOB_OPPORTUNITY_TRACKING.\nhttps://ejemplo.com/oferta",
+        "Job-Hunter",
+    )
+    assert override is None
+    assert "JOB_OPPORTUNITY_TRACKING" in task
+    assert "uses tavily_search ni run_browser_sandbox salvo" in task.lower()
+    assert "admin_sql" in task.lower() or "read_sql" in task.lower()
 
 
 def test_plan_task_bi_analyst_meta_capabilities() -> None:
@@ -215,6 +236,8 @@ def test_manager_capabilities_fast_path_ok() -> None:
 def test_manager_a2a_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pytest.MonkeyPatch) -> None:
     from duckclaw.graphs.manager_graph import build_manager_graph
 
+    monkeypatch.delenv("DUCKCLAW_DEFAULT_WORKER_ID", raising=False)
+
     class _FakeDB:
         pass
 
@@ -254,6 +277,9 @@ def test_manager_a2a_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pyt
     monkeypatch.setattr("duckclaw.graphs.activity.set_idle", lambda *_a, **_k: None)
     monkeypatch.setattr("duckclaw.graphs.chat_heartbeat.schedule_chat_heartbeat_dm", lambda *_a, **_k: None)
 
+    import duckclaw.graphs.manager_graph as _mgr_mod
+
+    _mgr_mod._worker_graph_cache.clear()
     graph = build_manager_graph(_FakeDB(), llm=None)
     out = graph.invoke(
         {
@@ -273,3 +299,88 @@ def test_manager_a2a_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pyt
     assert call_log[1][2] is True
     assert call_log[2][0] == "finanz"
     assert "Reporte final sintetizado" in str(out.get("reply") or "")
+
+
+def test_manager_job_track_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A2A JOB_OPPORTUNITY_TRACKING: Finanz emite marcador → JobHunter persiste → Finanz confirma."""
+    from duckclaw.graphs.manager_graph import build_manager_graph
+
+    monkeypatch.delenv("DUCKCLAW_DEFAULT_WORKER_ID", raising=False)
+
+    class _FakeDB:
+        pass
+
+    call_log: list[tuple[str, str, bool]] = []
+
+    class _FakeWorkerGraph:
+        def __init__(self, wid: str):
+            self.wid = wid
+
+        def invoke(self, worker_state, _config=None):  # noqa: ANN001
+            task = str(worker_state.get("input") or "")
+            suppressed = bool(worker_state.get("suppress_subagent_egress"))
+            call_log.append((self.wid, task, suppressed))
+            if re.sub(r"[^a-z0-9]", "", self.wid.lower()) == "jobhunter":
+                if suppressed:
+                    return {"reply": "", "internal_reply": '{"rows":1}'}
+                assert "JOB_OPPORTUNITY_TRACKING" in task
+                return {"reply": "INSERT job_opportunities OK"}
+            if self.wid.lower() == "finanz":
+                if "JobHunter persistió datos" in task or "job_opportunities" in task.lower():
+                    return {"reply": "Vacante registrada en CRM."}
+                return {"reply": "Delegando registro. [a2a_request: job_opportunity_tracking]"}
+            return {"reply": "ok"}
+
+    def _fake_builder(worker_id, *_args, **_kwargs):  # noqa: ANN001
+        return _FakeWorkerGraph(str(worker_id))
+
+    monkeypatch.setattr("duckclaw.workers.factory.build_worker_graph", _fake_builder)
+    monkeypatch.setattr("duckclaw.workers.factory.list_workers", lambda *_a, **_k: ["finanz", "Job-Hunter"])
+    monkeypatch.setattr(
+        "duckclaw.graphs.on_the_fly_commands.get_effective_team_templates",
+        lambda *_a, **_k: ["finanz", "Job-Hunter"],
+    )
+    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.get_chat_state", lambda *_a, **_k: "off")
+    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.append_task_audit", lambda *_a, **_k: None)
+    monkeypatch.setattr("duckclaw.graphs.activity.set_busy", lambda *_a, **_k: None)
+    monkeypatch.setattr("duckclaw.graphs.activity.set_idle", lambda *_a, **_k: None)
+    monkeypatch.setattr("duckclaw.graphs.chat_heartbeat.schedule_chat_heartbeat_dm", lambda *_a, **_k: None)
+
+    import duckclaw.graphs.manager_graph as _mgr_mod
+
+    _mgr_mod._worker_graph_cache.clear()
+    graph = build_manager_graph(_FakeDB(), llm=None)
+    # Evitar palabras URL tipo «oferta» + http que dispararían plan → JobHunter antes que Finanz.
+    out = graph.invoke(
+        {
+            "incoming": "Registra mi postulación https://ejemplo.com/job/abc",
+            "input": "Registra mi postulación https://ejemplo.com/job/abc",
+            "chat_id": "test-chat-jt",
+            "tenant_id": "default",
+            "user_id": "u1",
+            "available_templates": ["finanz", "Job-Hunter"],
+        }
+    )
+
+    assert len(call_log) >= 3
+    assert call_log[0][0] == "finanz"
+    assert re.sub(r"[^a-z0-9]", "", call_log[1][0].lower()) == "jobhunter"
+    assert "JOB_OPPORTUNITY_TRACKING" in call_log[1][1]
+    assert call_log[2][0] == "finanz"
+    assert "Vacante registrada" in str(out.get("reply") or "")
+
+
+def test_finanz_manifest_includes_job_opportunities_allowlist() -> None:
+    raw = (
+        Path(__file__).resolve().parents[1]
+        / "packages"
+        / "agents"
+        / "src"
+        / "duckclaw"
+        / "forge"
+        / "templates"
+        / "finanz"
+        / "manifest.yaml"
+    ).read_text(encoding="utf-8")
+    assert "job_opportunities" in raw
+    assert "allowed_tables:" in raw

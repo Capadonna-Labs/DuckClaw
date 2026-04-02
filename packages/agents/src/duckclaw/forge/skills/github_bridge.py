@@ -12,6 +12,8 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
+from duckclaw.forge.skills.mcp_tool_args_schema import mcp_input_schema_to_args_model
+
 _DESTRUCTIVE_TOOLS = frozenset({
     "github_delete_branch",
     "github_merge_pr",
@@ -110,20 +112,36 @@ def _mcp_tool_to_structured(server_params: Any, tool_spec: Any, name: str) -> Op
     from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_call_tool
     from langchain_core.tools import StructuredTool
 
+    raw_schema = getattr(tool_spec, "inputSchema", None) or getattr(tool_spec, "input_schema", None)
+    args_model = mcp_input_schema_to_args_model(
+        raw_schema if isinstance(raw_schema, dict) else None,
+        f"{name}_github",
+    )
+
     def _sync_call(**kwargs: Any) -> str:
-        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, dict(kwargs)))
+        validated = args_model(**kwargs)
+        payload = validated.model_dump(exclude_none=True)
+        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, payload))
 
     desc = getattr(tool_spec, "description", None) or f"GitHub MCP tool: {name}"
     return StructuredTool.from_function(
         _sync_call,
         name=name,
         description=desc,
+        args_schema=args_model,
+        infer_schema=False,
     )
 
 
 def _wrap_with_hitl(tool_spec: Any, name: str) -> Optional[Any]:
     """Envuelve una tool destructiva con guard HITL (requiere /approve)."""
     from langchain_core.tools import StructuredTool
+
+    raw_schema = getattr(tool_spec, "inputSchema", None) or getattr(tool_spec, "input_schema", None)
+    args_model = mcp_input_schema_to_args_model(
+        raw_schema if isinstance(raw_schema, dict) else None,
+        f"{name}_github_hitl",
+    )
 
     def _call_hitl(**kwargs: Any) -> str:
         return (
@@ -136,6 +154,8 @@ def _wrap_with_hitl(tool_spec: Any, name: str) -> Optional[Any]:
         _call_hitl,
         name=name,
         description=desc,
+        args_schema=args_model,
+        infer_schema=False,
     )
 
 

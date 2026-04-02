@@ -14,6 +14,8 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
+from duckclaw.forge.skills.mcp_tool_args_schema import mcp_input_schema_to_args_model
+
 _log = logging.getLogger(__name__)
 
 _REDDIT_ENV_KEYS = (
@@ -24,7 +26,8 @@ _REDDIT_ENV_KEYS = (
     "REDDIT_PASSWORD",
 )
 
-# Herramientas de solo lectura permitidas cuando read_only=true (mcp-reddit).
+# Herramientas de solo lectura cuando read_only=true.
+# mcp-reddit 1.0.x usaba nombres cortos; 1.1.x+ usa prefijo `reddit_` (list_tools devuelve p.ej. reddit_get_post).
 _READ_ONLY_TOOL_NAMES = frozenset({
     "search_reddit",
     "get_subreddit_posts",
@@ -34,15 +37,35 @@ _READ_ONLY_TOOL_NAMES = frozenset({
     "get_user_info",
     "get_user_posts",
     "get_user_comments",
+    "reddit_search_reddit",
+    "reddit_search_subreddits",
+    "reddit_get_subreddit_posts",
+    "reddit_get_subreddit_info",
+    "reddit_get_subreddit_rules",
+    "reddit_get_post",
+    "reddit_get_post_comments",
+    "reddit_get_user_info",
+    "reddit_get_user_posts",
+    "reddit_get_user_comments",
+    "reddit_get_user_overview",
+    "reddit_get_front_page_posts",
+    "reddit_get_popular_subreddits",
+    "reddit_get_new_subreddits",
 })
 
-# Mutadoras conocidas en mcp-reddit: HITL si read_only=false y hitl_destructive.
+# Mutadoras: HITL si read_only=false y hitl_destructive.
 _MUTATING_TOOL_NAMES = frozenset({
     "submit_post",
     "submit_comment",
     "edit_post_or_comment",
     "delete_post_or_comment",
     "upload_image",
+    "reddit_submit_post",
+    "reddit_submit_comment",
+    "reddit_edit_post_or_comment",
+    "reddit_delete_post_or_comment",
+    "reddit_upload_image",
+    "reddit_vote",
 })
 
 
@@ -137,19 +160,35 @@ def _mcp_tool_to_structured(server_params: Any, tool_spec: Any, name: str) -> Op
     from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_call_tool
     from langchain_core.tools import StructuredTool
 
+    raw_schema = getattr(tool_spec, "inputSchema", None) or getattr(tool_spec, "input_schema", None)
+    args_model = mcp_input_schema_to_args_model(
+        raw_schema if isinstance(raw_schema, dict) else None,
+        f"{name}_reddit",
+    )
+
     def _sync_call(**kwargs: Any) -> str:
-        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, dict(kwargs)))
+        validated = args_model(**kwargs)
+        payload = validated.model_dump(exclude_none=True)
+        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, payload))
 
     desc = getattr(tool_spec, "description", None) or f"Reddit MCP: {name}"
     return StructuredTool.from_function(
         _sync_call,
         name=name,
         description=desc,
+        args_schema=args_model,
+        infer_schema=False,
     )
 
 
 def _wrap_with_hitl(tool_spec: Any, name: str) -> Optional[Any]:
     from langchain_core.tools import StructuredTool
+
+    raw_schema = getattr(tool_spec, "inputSchema", None) or getattr(tool_spec, "input_schema", None)
+    args_model = mcp_input_schema_to_args_model(
+        raw_schema if isinstance(raw_schema, dict) else None,
+        f"{name}_reddit_hitl",
+    )
 
     def _call_hitl(**kwargs: Any) -> str:
         return (
@@ -162,6 +201,8 @@ def _wrap_with_hitl(tool_spec: Any, name: str) -> Optional[Any]:
         _call_hitl,
         name=name,
         description=desc,
+        args_schema=args_model,
+        infer_schema=False,
     )
 
 
@@ -182,5 +223,12 @@ def register_reddit_skill(
             )
         )
         tools_list.extend(rd_tools)
+        if rd_tools:
+            names = [getattr(t, "name", "") or "" for t in rd_tools]
+            _log.info(
+                "reddit MCP: registered %d tools: %s",
+                len(rd_tools),
+                ", ".join(sorted(n for n in names if n)),
+            )
     except Exception:
-        _log.debug("register_reddit_skill omitido", exc_info=True)
+        _log.warning("register_reddit_skill falló", exc_info=True)

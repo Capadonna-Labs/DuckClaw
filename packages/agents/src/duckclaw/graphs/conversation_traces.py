@@ -12,10 +12,27 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+# Mismo criterio que manager_graph: el modelo a veces repite encabezados de subagente
+# (eco de DMs de heartbeat) en contenido assistant; limpiar al serializar trazas SFT.
+_ASSISTANT_TRACE_SUBAGENT_HDR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\s+\d+\s*$")
+
+
+def _strip_leading_subagent_headers_for_trace(text: str) -> str:
+    t = (text or "").strip()
+    while t:
+        lines = t.splitlines()
+        if not lines:
+            break
+        if not _ASSISTANT_TRACE_SUBAGENT_HDR.match(lines[0].strip()):
+            break
+        t = "\n".join(lines[1:]).strip()
+    return t
 
 # packages/agents/train/conversation_traces/ (mismo criterio que forge.sft.collector: parents[3] = agents)
 _TRAIN_DIR = Path(__file__).resolve().parents[3] / "train"
@@ -106,7 +123,9 @@ def _lc_messages_to_chatml(messages: list[Any]) -> list[dict[str, Any]]:
                 {"role": "user", "content": _stringify_lc_message_content(getattr(m, "content", None))[:4096]}
             )
         elif role == "ai":
-            content = _stringify_lc_message_content(getattr(m, "content", None)).strip()
+            content = _strip_leading_subagent_headers_for_trace(
+                _stringify_lc_message_content(getattr(m, "content", None))
+            ).strip()
             tool_calls = getattr(m, "tool_calls", None) or []
             if tool_calls:
                 tc_list = []

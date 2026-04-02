@@ -483,3 +483,78 @@ def register_quant_market_skill(db: Any, tools: list[Any], spec: Any) -> None:
             ),
         )
     )
+
+    def _verify_visual_claim(
+        symbol: str = "",
+        claimed_value: Optional[float] = None,
+        claim: str = "",
+    ) -> str:
+        narrative = (claim or "").strip()
+        sym = (symbol or "").strip().upper()
+        if narrative and not sym:
+            return json.dumps(
+                {
+                    "status": "not_applicable",
+                    "message": (
+                        "Sin ticker+cifra de cotización en la imagen: use tavily_search u otras "
+                        "fuentes para hechos de noticias; esta tool solo cruza versus quant_core.ohlcv_data."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        if not sym:
+            return json.dumps(
+                {"error": "symbol requerido (o use claim=... solo para marcar que no hay precio de ticker)"},
+                ensure_ascii=False,
+            )
+        if claimed_value is None:
+            return json.dumps({"error": "claimed_value requerido cuando symbol está presente"}, ensure_ascii=False)
+        try:
+            claimed = float(claimed_value)
+        except (TypeError, ValueError):
+            return json.dumps({"error": "claimed_value inválido"}, ensure_ascii=False)
+        try:
+            raw = db.query(
+                f"SELECT close, timestamp FROM quant_core.ohlcv_data WHERE UPPER(ticker)='{sym}' "
+                "ORDER BY timestamp DESC LIMIT 1"
+            )
+            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            if not rows:
+                return json.dumps(
+                    {
+                        "status": "no_evidence",
+                        "symbol": sym,
+                        "claimed_value": claimed,
+                        "message": "No hay evidencia en quant_core.ohlcv_data para validar el claim visual.",
+                    },
+                    ensure_ascii=False,
+                )
+            row = rows[0] if isinstance(rows[0], dict) else {}
+            actual = float(row.get("close"))
+            drift = abs(actual - claimed) / actual if actual else 1.0
+            return json.dumps(
+                {
+                    "status": "verified" if drift <= 0.01 else "mismatch",
+                    "symbol": sym,
+                    "claimed_value": claimed,
+                    "actual_value": actual,
+                    "timestamp": row.get("timestamp"),
+                    "relative_drift": drift,
+                },
+                ensure_ascii=False,
+            )
+        except Exception as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+    tools.append(
+        StructuredTool.from_function(
+            _verify_visual_claim,
+            name="verify_visual_claim",
+            description=(
+                "Valida precio/ticker de un gráfico o tabla OHLCV: symbol + claimed_value vs último close en "
+                "quant_core.ohlcv_data (verified/mismatch/no_evidence). Para titulares de noticias sin precio "
+                "de bolsa en la imagen, use claim con el texto visto (devuelve not_applicable) y confirme con "
+                "tavily_search."
+            ),
+        )
+    )

@@ -198,6 +198,15 @@ def test_clean_agent_response_keeps_body_after_cual_es_mi_tarea() -> None:
     assert "Métricas de rendimiento" in cleaned
 
 
+def test_clean_agent_response_strips_pre_tags() -> None:
+    raw = "<pre>line1\nline2</pre>\n\nTexto visible"
+    cleaned = gateway_main.clean_agent_response(raw)
+    assert "<pre>" not in cleaned.lower()
+    assert "</pre>" not in cleaned.lower()
+    assert "line1" in cleaned
+    assert "Texto visible" in cleaned
+
+
 def test_agent_history_requires_session(client: TestClient) -> None:
     r = client.get("/api/v1/agent/finanz/history?session_id=s1")
     assert r.status_code == 200
@@ -278,6 +287,7 @@ def test_plain_subchunks_for_telegram_budget_splits_when_escape_grows() -> None:
 
 def test_webhook_outbound_chat_reply_sync_posts_json(monkeypatch: pytest.MonkeyPatch) -> None:
     posted: list[dict[str, str]] = []
+    monkeypatch.setenv("DUCKCLAW_TELEGRAM_OUTBOUND_VIA", "n8n")
     monkeypatch.setenv("N8N_OUTBOUND_WEBHOOK_URL", "https://example.test/webhook")
 
     class _Resp:
@@ -304,6 +314,7 @@ def test_webhook_outbound_chat_reply_sync_posts_json(monkeypatch: pytest.MonkeyP
     assert posted[0]["chat_id"] == "1726618406"
     assert posted[0]["user_id"] == "1726618406"
     assert posted[0]["text"] == "hola"
+    assert posted[0].get("parse_mode") == "HTML"
 
 
 def test_pm2_json_lists_gateways_with_explicit_db_path() -> None:

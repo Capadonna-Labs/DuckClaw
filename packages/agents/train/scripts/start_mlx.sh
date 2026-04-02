@@ -1,13 +1,17 @@
 #!/bin/bash
 set -e
-# Cargar .env del repo para MLX_MODEL_PATH y MLX_PYTHON (PM2 no carga .env al arrancar)
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ -f "${ROOT_DIR}/.env" ]; then
-  set -a
-  # shellcheck source=/dev/null
-  source "${ROOT_DIR}/.env"
-  set +a
-fi
+# Cargar .env: raíz del monorepo primero (canonical), luego packages/agents/train/.env si existe.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+for envfile in "${REPO_ROOT}/.env" "${ROOT_DIR}/.env"; do
+  if [ -f "${envfile}" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${envfile}"
+    set +a
+  fi
+done
 # Rutas: desde .env o valores por defecto
 PYTHON_PATH="${MLX_PYTHON:-/Users/juanjosearevalocamargo/Desktop/mlx_env/bin/python}"
 MODEL_PATH="${MLX_MODEL_PATH:-/Users/juanjosearevalocamargo/Desktop/models/Slayer-8B-V1}"

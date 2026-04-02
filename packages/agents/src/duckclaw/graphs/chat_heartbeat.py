@@ -16,7 +16,7 @@ from urllib.error import HTTPError, URLError
 from urllib import request as urllib_request
 
 from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
-from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
+from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 
 _log = logging.getLogger(__name__)
 
@@ -372,8 +372,11 @@ def _post_outbound_sync(
     headers = {"Content-Type": "application/json"}
     if auth:
         headers["X-DuckClaw-Secret"] = auth
-    safe = escape_telegram_markdown_v2(raw)
-    payload = json.dumps({"chat_id": cid, "user_id": uid, "text": safe}, ensure_ascii=False).encode("utf-8")
+    safe = llm_markdown_to_telegram_html(raw)
+    payload = json.dumps(
+        {"chat_id": cid, "user_id": uid, "text": safe, "parse_mode": "HTML"},
+        ensure_ascii=False,
+    ).encode("utf-8")
     req = urllib_request.Request(url, data=payload, headers=headers, method="POST")
     try:
         with urllib_request.urlopen(req, timeout=8) as resp:

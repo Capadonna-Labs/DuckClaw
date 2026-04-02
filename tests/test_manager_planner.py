@@ -35,6 +35,32 @@ def test_cashflow_stress_intent_detection() -> None:
     assert not _user_signals_cashflow_stress("muéstrame el esquema de tablas")
 
 
+def test_strip_leading_subagent_instance_headers() -> None:
+    from duckclaw.graphs.manager_graph import (
+        _prepend_subagent_label_once,
+        _strip_leading_subagent_instance_headers,
+    )
+
+    raw = "finanz 2\n\nfinanz 4\n\nfinanz 1\n\nHola cuerpo"
+    assert _strip_leading_subagent_instance_headers(raw) == "Hola cuerpo"
+    single = _prepend_subagent_label_once(raw, "finanz 3")
+    assert single.startswith("finanz 3\n\n")
+    assert "finanz 2" not in single
+    assert "Hola cuerpo" in single
+
+
+def test_lc_messages_to_chatml_strips_repeated_subagent_headers() -> None:
+    from langchain_core.messages import AIMessage
+
+    from duckclaw.graphs.conversation_traces import _lc_messages_to_chatml
+
+    m = AIMessage(content="finanz 2\n\nfinanz 4\n\nHola cuerpo")
+    out = _lc_messages_to_chatml([m])
+    assert len(out) == 1
+    assert out[0]["role"] == "assistant"
+    assert out[0]["content"] == "Hola cuerpo"
+
+
 def test_pick_job_hunter_worker_from_team() -> None:
     from duckclaw.graphs.manager_graph import _pick_job_hunter_worker
 

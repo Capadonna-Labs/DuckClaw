@@ -280,7 +280,7 @@ async def call_telegram_send_message_via_mcp(
     *,
     chat_id: str,
     text: str,
-    parse_mode: str = "MarkdownV2",
+    parse_mode: str = "HTML",
 ) -> dict[str, Any]:
     result = await session.call_tool(
         "telegram_send_message",
@@ -296,17 +296,13 @@ async def send_long_plain_via_mcp_chunks(
     plain_text: str,
     max_plain_chunk: int = 3600,
 ) -> bool:
-    """Trocea texto plano y envía MarkdownV2 vía MCP. True si todos los trozos ok."""
+    """Trocea texto y envía HTML vía MCP (markdown del modelo → HTML Telegram). True si todos los trozos ok."""
+    from duckclaw.utils.telegram_markdown_v2 import plain_subchunks_for_telegram_html
+
     raw = (plain_text or "").strip()
     if not raw:
         return True
-    n = len(raw)
-    cap = max(256, min(max_plain_chunk, 3900))
-    chunks: list[str] = []
-    i = 0
-    while i < n:
-        chunks.append(raw[i : i + cap])
-        i += cap
+    chunks = plain_subchunks_for_telegram_html(raw)
     if not chunks:
         chunks = [raw]
     total = len(chunks)
@@ -317,7 +313,7 @@ async def send_long_plain_via_mcp_chunks(
             session,
             chat_id=chat_id,
             text=payload_text,
-            parse_mode="MarkdownV2",
+            parse_mode="HTML",
         )
         if not out.get("ok"):
             _log.warning(

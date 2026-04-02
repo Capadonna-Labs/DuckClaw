@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from duckclaw.integrations.telegram.telegram_outbound_sync import normalize_telegram_chat_id_for_bot_api
-from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
+from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2, llm_markdown_to_telegram_html
 
 from duckclaw_telegram_mcp.rate_limit import pace_before_request, retry_after_sec_from_telegram_body
 
@@ -97,14 +97,14 @@ def send_message_api(
     *,
     chat_id: str,
     text: str,
-    parse_mode: str = "MarkdownV2",
+    parse_mode: str = "HTML",
 ) -> dict[str, Any]:
     token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
     if not token:
         return {"ok": False, "error": "TELEGRAM_BOT_TOKEN no definido"}
     cid = normalize_telegram_chat_id_for_bot_api(chat_id) or chat_id.strip()
     if parse_mode not in ("MarkdownV2", "HTML", ""):
-        parse_mode = "MarkdownV2"
+        parse_mode = "HTML"
 
     body_text = text
     payload: dict[str, Any] = {
@@ -115,7 +115,7 @@ def send_message_api(
         payload["text"] = escape_telegram_markdown_v2(body_text)
         payload["parse_mode"] = "MarkdownV2"
     elif parse_mode == "HTML":
-        payload["text"] = body_text
+        payload["text"] = llm_markdown_to_telegram_html(body_text)
         payload["parse_mode"] = "HTML"
     else:
         payload["text"] = body_text

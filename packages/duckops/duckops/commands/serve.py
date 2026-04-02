@@ -32,6 +32,12 @@ def cmd_serve(
         "--delete-pm2-name",
         help="Con --pm2: elimina este proceso PM2 antes de arrancar (p. ej. al renombrar el Gateway).",
     ),
+    gateway_db_path: str = typer.Option(
+        None,
+        "--gateway-db-path",
+        help="Con --pm2 --gateway: fija DUCKCLAW_DB_PATH (y DUCKDB_PATH) para este proceso; "
+        "sustituye la ruta persistida en api_gateways_pm2.json para ese nombre PM2.",
+    ),
     reload: bool = typer.Option(False, "--reload", help="Recargar al cambiar código (solo sin --pm2)."),
 ) -> None:
     """Arranca el API Gateway o el servidor LangGraph."""
@@ -55,6 +61,7 @@ def cmd_serve(
         cwd=str(repo),
         gateway=gateway,
         delete_pm2_name=(delete_pm2_name.strip() if delete_pm2_name else None),
+        gateway_db_path=(gateway_db_path.strip() if gateway_db_path else None),
     )
     if code != 0:
         raise typer.Exit(code)

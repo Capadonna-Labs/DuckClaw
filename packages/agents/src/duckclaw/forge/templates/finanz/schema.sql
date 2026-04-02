@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS finance_worker.presupuestos (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_presupuestos_cat_ym ON finance_worker.presupuestos (category_id, year, month);
 
--- OSINT JobHunter: extracciones browser-use → read_parquet → INSERT (spec OSINT JobHunter)
+-- OSINT JobHunter + seguimiento de postulaciones (spec OSINT JobHunter, A2A JOB_OPPORTUNITY_TRACKING)
 CREATE TABLE IF NOT EXISTS finance_worker.job_opportunities (
   title VARCHAR,
   company VARCHAR,
@@ -52,9 +52,20 @@ CREATE TABLE IF NOT EXISTS finance_worker.job_opportunities (
   requirements VARCHAR,
   apply_url VARCHAR,
   source_url VARCHAR,
-  scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  status VARCHAR,
+  applied_at TIMESTAMP,
+  notes VARCHAR
 );
 CREATE INDEX IF NOT EXISTS idx_job_opportunities_apply_url ON finance_worker.job_opportunities (apply_url);
+
+-- Migración desde tablas creadas antes de status/applied_at/notes (CREATE IF NOT EXISTS no altera columnas)
+ALTER TABLE finance_worker.job_opportunities ADD COLUMN IF NOT EXISTS status VARCHAR;
+ALTER TABLE finance_worker.job_opportunities ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP;
+ALTER TABLE finance_worker.job_opportunities ADD COLUMN IF NOT EXISTS notes VARCHAR;
+
+-- Idempotencia por URL (si falla: hay apply_url duplicados; deduplicar y volver a aplicar schema)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_opportunities_apply_url_unique ON finance_worker.job_opportunities (apply_url);
 
 INSERT INTO finance_worker.categories (id, name) VALUES (1, 'Otros')
 ON CONFLICT (id) DO NOTHING;

@@ -227,7 +227,7 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 draft.gateway_pm2_name = val
             console.print(
                 "Worker por defecto (carpeta en forge/templates): "
-                "BI-Analyst | LeilaAssistant | SIATA-Analyst | finanz | TheMindCrupier"
+                "BI-Analyst | Job-Hunter | LeilaAssistant | SIATA-Analyst | finanz | TheMindCrupier"
             )
             tok, val = _ask_until(
                 session,

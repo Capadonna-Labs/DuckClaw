@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ from duckops.sovereign.domain_labels import tailscale_funnel_wizard_panel_conten
 from duckops.sovereign.state_machine import WizardStep, next_step, prev_step
 from duckops.sovereign.tailscale_funnel import public_base_url_from_funnel_status
 from duckops.sovereign.telegram_set_webhook import (
+    _effective_telegram_bot_token,
+    _effective_telegram_webhook_secret,
     build_set_webhook_body,
     webhook_full_url_for_draft,
 )
@@ -181,6 +184,17 @@ def test_merge_env_file_creates_and_merges(tmp_path: Path) -> None:
     assert "B=2" in t2
 
 
+def test_merge_env_file_respects_immutable_sentinel(tmp_path: Path) -> None:
+    (tmp_path / ".env.immutable").write_text("", encoding="utf-8")
+    (tmp_path / ".env").write_text("EXISTING=1\n", encoding="utf-8")
+    assert merge_env_file(tmp_path, {"X": "y"}) is False
+    assert "EXISTING=1" in (tmp_path / ".env").read_text(encoding="utf-8")
+    prop = tmp_path / "config" / "dotenv_wizard_proposed.env"
+    assert prop.is_file()
+    body = prop.read_text(encoding="utf-8")
+    assert "X=y" in body
+
+
 def test_suggest_gateway_port_free(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import duckops.sovereign.validate as v
 
@@ -271,6 +285,89 @@ def test_patch_pm2_preserves_shared_when_draft_has_no_secondary(tmp_path: Path) 
     assert env["DUCKCLAW_DB_PATH"] == str((root / "db/new_vault.duckdb").resolve())
 
 
+def test_patch_api_gateways_pm2_merges_telegram_env_updates(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    (root / "config").mkdir(parents=True)
+    cfg = {
+        "apps": [
+            {
+                "name": "JobHunter-Gateway",
+                "env": {
+                    "DUCKCLAW_DB_PATH": "/old.duckdb",
+                    "TELEGRAM_JOB_HUNTER_TOKEN": "stale_token",
+                },
+            }
+        ]
+    }
+    (root / "config" / "api_gateways_pm2.json").write_text(
+        json.dumps(cfg, indent=2), encoding="utf-8"
+    )
+    draft = SovereignDraft(
+        gateway_pm2_name="JobHunter-Gateway",
+        duckdb_shared_path="db/private/jh.duckdb",
+        default_worker_id="Job-Hunter",
+    )
+    patch_api_gateways_pm2_for_draft(
+        root,
+        draft,
+        lambda _m: None,
+        env_updates={"TELEGRAM_JOB_HUNTER_TOKEN": "fresh_token", "DUCKCLAW_TELEGRAM_MCP_ENABLED": "1"},
+    )
+    out = json.loads((root / "config" / "api_gateways_pm2.json").read_text(encoding="utf-8"))
+    env = out["apps"][0]["env"]
+    assert env["TELEGRAM_JOB_HUNTER_TOKEN"] == "fresh_token"
+    assert env["DUCKCLAW_TELEGRAM_MCP_ENABLED"] == "1"
+    assert env["DUCKCLAW_DB_PATH"] == str((root / "db/private/jh.duckdb").resolve())
+
+
+def test_patch_api_gateways_pm2_new_app_includes_proposed_telegram(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "dotenv_wizard_proposed.env").write_text(
+        "TELEGRAM_JOB_HUNTER_TOKEN=token_from_proposed\n",
+        encoding="utf-8",
+    )
+    (root / "config" / "api_gateways_pm2.json").write_text(
+        json.dumps({"apps": []}, indent=2), encoding="utf-8"
+    )
+    draft = SovereignDraft(
+        gateway_pm2_name="JobHunter-Gateway",
+        gateway_port=8484,
+        duckdb_shared_path="db/private/jh.duckdb",
+        default_worker_id="Job-Hunter",
+        redis_url="redis://localhost:6379/1",
+    )
+    patch_api_gateways_pm2_for_draft(
+        root,
+        draft,
+        lambda _m: None,
+        env_updates={"DUCKCLAW_DEFAULT_WORKER_ID": "Job-Hunter"},
+    )
+    out = json.loads((root / "config" / "api_gateways_pm2.json").read_text(encoding="utf-8"))
+    assert len(out["apps"]) == 1
+    env = out["apps"][0]["env"]
+    assert env["TELEGRAM_JOB_HUNTER_TOKEN"] == "token_from_proposed"
+    assert env["DUCKCLAW_DEFAULT_WORKER_ID"] == "Job-Hunter"
+
+
+def test_effective_telegram_reads_proposed_when_root_env_empty(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    (root / "config").mkdir(parents=True)
+    (root / ".env").write_text("# minimal\n", encoding="utf-8")
+    (root / "config" / "dotenv_wizard_proposed.env").write_text(
+        "TELEGRAM_JOB_HUNTER_TOKEN=secret_from_proposed\n"
+        "TELEGRAM_WEBHOOK_SECRET=whsec_proposed\n",
+        encoding="utf-8",
+    )
+    d = SovereignDraft(
+        telegram_bot_token="",
+        telegram_webhook_secret="",
+        default_worker_id="Job-Hunter",
+    )
+    assert _effective_telegram_bot_token(root, d) == "secret_from_proposed"
+    assert _effective_telegram_webhook_secret(root, d) == "whsec_proposed"
+
+
 def test_draft_json_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from duckops.sovereign import materialize as m
 
@@ -280,3 +377,55 @@ def test_draft_json_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     d = SovereignDraft(redis_url="redis://x:9/0", tenant_id="t1")
     m.save_wizard_config_json(d)
     assert (cfg / "wizard_config.json").is_file()
+
+
+def test_wizard_config_default_worker_id_roundtrip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from duckops.sovereign import materialize as m
+
+    cfg = tmp_path / "duckclaw"
+    cfg.mkdir()
+    monkeypatch.setattr(m, "_wizard_config_path", lambda: cfg / "wizard_config.json")
+    d = SovereignDraft(default_worker_id="Job-Hunter")
+    m.save_wizard_config_json(d)
+    data = json.loads((cfg / "wizard_config.json").read_text(encoding="utf-8"))
+    assert data.get("default_worker_id") == "Job-Hunter"
+    assert m.load_last_default_worker_id_from_wizard_config() == "Job-Hunter"
+
+
+def test_wizard_config_gateway_port_roundtrip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from duckops.sovereign import materialize as m
+
+    cfg = tmp_path / "duckclaw"
+    cfg.mkdir()
+    monkeypatch.setattr(m, "_wizard_config_path", lambda: cfg / "wizard_config.json")
+    d = SovereignDraft(gateway_port=8484)
+    m.save_wizard_config_json(d)
+    data = json.loads((cfg / "wizard_config.json").read_text(encoding="utf-8"))
+    assert data.get("gateway_port") == 8484
+    assert m.load_last_gateway_port_from_wizard_config() == 8484
+
+
+def test_gateway_port_hint_from_api_gateways_json(tmp_path: Path) -> None:
+    from duckops.sovereign import materialize as m
+
+    root = tmp_path / "repo"
+    (root / "config").mkdir(parents=True)
+    cfg = {"apps": [{"name": "JobHunter-Gateway", "port": 8484, "env": {}}]}
+    (root / "config" / "api_gateways_pm2.json").write_text(
+        json.dumps(cfg, indent=2), encoding="utf-8"
+    )
+    assert m.load_gateway_port_hint_from_api_gateways_json(root, "JobHunter-Gateway") == 8484
+    assert m.load_gateway_port_hint_from_api_gateways_json(root, "Missing-Gateway") is None
+
+
+def test_default_worker_id_hint_from_repo_env(tmp_path: Path) -> None:
+    from duckops.sovereign import materialize as m
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".env").write_text("DUCKCLAW_DEFAULT_WORKER_ID=finanz\n", encoding="utf-8")
+    assert m.load_default_worker_id_hint_from_repo_env(root) == "finanz"

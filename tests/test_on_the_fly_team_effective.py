@@ -60,6 +60,20 @@ def test_get_effective_env_fallback(monkeypatch, db) -> None:
     assert eff == [target]
 
 
+def test_execute_team_list_is_plain_for_telegram_html(db, monkeypatch) -> None:
+    """Salida sin escape MarkdownV2 (el gateway usa parse_mode HTML)."""
+    all_w = list_workers()
+    if not all_w:
+        pytest.skip("need worker templates")
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_TEAM_TEMPLATES", "")
+    set_team_templates(db, "c1", [all_w[0]])
+    out = execute_team(db, "c1", "", tenant_id="default", requester_id="1")
+    assert out is not None
+    assert "\\" not in out
+    assert "- " in out
+    assert "Equipo (este chat):" in out
+
+
 def test_execute_team_admin_syncs_tenant(db) -> None:
     all_w = list_workers()
     if not all_w:

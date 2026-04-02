@@ -2,13 +2,29 @@
 Identificación de subagentes (manager → worker).
 
 - **Slot activo** (``acquire_subagent_slot``): sorted set en Redis con tokens en curso;
-  el rank (1..n) es la etiqueta de UI: número de instancia entre ejecuciones **simultáneas**
-  del mismo worker. Si solo hay una activa → 1; al liberar slots, las que siguen
-  ocupan el rango según los que queden en curso (otra vez 1 si eres el único).
+  el rank (1..n) es la etiqueta de UI/log: **subagent_slot_rank** entre ejecuciones
+  **simultáneas** del mismo worker en el mismo ámbito. **No** es un índice de réplica PM2
+  ni «Finanz 1 vs Finanz 2» como workers distintos: ``finanz 2`` solo indica que, al
+  hacer ``ZADD``, este token quedó en segunda posición en el ZSET (p. ej. otra ejecución
+  ``finanz`` del mismo chat aún no registró ``release``, o un token huérfano tras un fallo
+  antes del ``finally``).
+
+  **Comparar números entre workers no es significativo:** ``Job-Hunter 1`` y ``finanz 2``
+  usan claves Redis distintas (el ``worker_id`` forma parte de la clave); cada uno cuenta
+  solo sus propias ejecuciones concurrentes.
+
+  Si solo hay una ejecución activa para ese worker/chat → rank 1.
 
   Con ``chat_id`` no vacío, el conjunto activo es por ``(tenant, worker, chat)``:
   dos usuarios distintos no comparten números. Sin ``chat_id`` (tests / legacy)
   el ámbito es solo ``(tenant, worker)``.
+
+**Diagnóstico operativo (huérfanos / concurrencia):**
+
+- Clave Redis (chat normalizado): ``duckclaw:subagent_active:{tenant}:{worker}:{chat}``
+  (sin chat: ``duckclaw:subagent_active:{tenant}:{worker}``).
+- ``ZCARD`` > 1 con una sola petición HTTP en curso sugiere tokens sin ``release`` o varias
+  solicitudes solapadas al mismo worker/chat.
 
 Redis:
 - ``duckclaw:subagent_active:{tenant}:{worker}`` — ZSET (sin chat)

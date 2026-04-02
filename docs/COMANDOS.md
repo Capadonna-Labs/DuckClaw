@@ -82,9 +82,24 @@ Puedes recibir mensajes del bot **sin n8n**: Telegram hace `POST` al API Gateway
 | Un bot, un webhook | Antes de apuntar Telegram a DuckClaw, **desactiva** el *Telegram Trigger* de n8n (u otro servicio) para ese bot; si no, los mensajes seguirán yendo al webhook anterior. |
 | Redis | Opcional pero recomendado: deduplica por `update_id` (evita doble procesamiento en reintentos de Telegram). |
 
-Expose el puerto del proceso correcto detrás de HTTPS (Cloudflare Tunnel, Tailscale Funnel, reverse proxy, etc.). Ejemplo BI Analyst: gateway en `8282` según [config/api_gateways_pm2.json](config/api_gateways_pm2.json).
+### 2.0 Un gateway PM2, un webhook HTTPS (recomendado)
 
-**Registrar el webhook** (sustituye `TOKEN`, URL y secreto; el secreto debe coincidir con `TELEGRAM_WEBHOOK_SECRET`):
+Cada proceso gateway es el mismo código pero con **env y puerto distintos** ([`config/api_gateways_pm2.json`](config/api_gateways_pm2.json): p. ej. Finanz-Gateway `8000`, JobHunter-Gateway `8283`, BI-Analyst-Gateway `8282`). Telegram solo llama la URL que configures en `setWebhook`; si un único `tailscale funnel --yes <puerto>` apunta solo al JobHunter, **todos** los bots que compartan esa URL entrarán por ese proceso (mal para logs y para ACL). El modelo recomendado:
+
+1. Cada bot tiene una URL HTTPS cuya **terminación** llega al **puerto de ese** PM2 (verifica con `pm2 describe <nombre>` / JSON de puertos).
+2. Usa siempre el path estándar `…/api/v1/telegram/webhook` y el `secret_token` del **mismo** proceso.
+
+**Ingress:** elige cómo mapear Internet → `127.0.0.1:<puerto>` (al menos una línea por gateway o un proxy que enrute):
+
+| Enfoque | Cuándo usarlo |
+|--------|----------------|
+| **Túnel / hostname por servicio** | P. ej. Cloudflare Tunnel: dos `public_hostnames` → `http://127.0.0.1:8000` y `http://127.0.0.1:8283`. Cada bot `setWebhook` apunta al hostname que toca. |
+| **Tailscale Funnel** | Un comando `tailscale funnel --bg --yes <puerto>` expone **un** puerto por máquina en la URL `ts.net` habitual; para varios gateways, varios funnels si tu tailnet lo permite, o **Tailscale Serve** con reglas por ruta/host según la [KB Funnel](https://tailscale.com/kb/1223/funnel/). |
+| **Reverse proxy local (Caddy/nginx)** | Un frontal TLS en `443` que enruta por host o path a `8000` / `828x`; un solo funnel al `443` del proxy. |
+
+Especificación: [specs/features/Telegram Webhook One Gateway One Port.md](specs/features/Telegram%20Webhook%20One%20Gateway%20One%20Port.md).
+
+**Registrar el webhook** (sustituye `TOKEN`, URL pública que llega **a ese** puerto y `TELEGRAM_WEBHOOK_SECRET` del env de **ese** proceso):
 
 ```bash
 curl -sS -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
@@ -95,6 +110,11 @@ curl -sS -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
     "allowed_updates": ["message", "edited_message"]
   }'
 ```
+
+Ejemplo alineado al JSON de gateways (ajusta el host al túnel/proxy real):
+
+- Bot Finanz (`TELEGRAM_FINANZ_TOKEN`): `url` debe terminar en el proceso que escucha el puerto **8000** (p. ej. `https://finanz.tu-tunnel.example/api/v1/telegram/webhook`).
+- Bot Job Hunter (`TELEGRAM_JOB_HUNTER_TOKEN` / `TELEGRAM_BOT_TOKEN` en ese PM2): `url` debe terminar en el puerto del **JobHunter-Gateway** (p. ej. **8283** en el repo, o el que tengas en PM2).
 
 Comprobar estado:
 
@@ -113,7 +133,7 @@ curl -sS -X POST "https://api.telegram.org/bot<TOKEN>/deleteWebhook"
 `DUCKCLAW_TELEGRAM_DEFAULT_TENANT` → `DUCKCLAW_GATEWAY_TENANT_ID` → `default`.  
 `_invoke_chat` sigue aplicando la misma normalización de tenant que `POST /api/v1/agent/chat`.
 
-**Varios bots → misma URL pública (un solo Funnel/puerto):** si registraste el mismo `url` en `setWebhook` para Finanz, BI y SIATA, el gateway procesaba todo como el worker por defecto (`finanz`) y respondía con un solo `TELEGRAM_BOT_TOKEN`. Define `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` (JSON array) en el **proceso que recibe el tráfico**; cada bot debe usar un `secret_token` distinto en `setWebhook`. Cada entrada lleva `secret`, `worker_id` (p. ej. `bi_analyst`, `siata_analyst`), `tenant_id` opcional y `bot_token_env` (nombre de variable con el token de ese bot). Si además tienes `TELEGRAM_WEBHOOK_SECRET`, ese valor sigue sirviendo para el “proceso por defecto” (mismo worker/tenant/token que el PM2). Detalle: [specs/features/Telegram Webhook Multiplex (multi-bot).md](specs/features/Telegram%20Webhook%20Multiplex%20(multi-bot).md).
+**Modo B — Varios bots → misma URL pública (un solo Funnel/puerto):** si registraste el mismo `url` en `setWebhook` para Finanz, BI y SIATA, el gateway procesaba todo como el worker por defecto (`finanz`) y respondía con un solo `TELEGRAM_BOT_TOKEN`. Define `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` (JSON array) en el **proceso que recibe el tráfico**; cada bot debe usar un `secret_token` distinto en `setWebhook`. Cada entrada lleva `secret`, `worker_id` (p. ej. `bi_analyst`, `siata_analyst`), `tenant_id` opcional y `bot_token_env` (nombre de variable con el token de ese bot). Si además tienes `TELEGRAM_WEBHOOK_SECRET`, ese valor sigue sirviendo para el “proceso por defecto” (mismo worker/tenant/token que el PM2). Detalle: [specs/features/Telegram Webhook Multiplex (multi-bot).md](specs/features/Telegram%20Webhook%20Multiplex%20(multi-bot).md). Rutas opcionales `POST …/webhook/finanz` y `…/webhook/trabajo` son **legado** para ese modo (un solo ingress); preferir Modo recomendado arriba cuando puedas.
 
 **Prueba local** del router (Telegram no llama a HTTP sin TLS; sirve para depurar en la máquina):
 

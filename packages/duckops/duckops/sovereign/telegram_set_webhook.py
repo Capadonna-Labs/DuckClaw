@@ -8,6 +8,8 @@ from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from duckclaw.dotenv_immutable import merged_root_and_proposed_flat_env
+
 from duckops.sovereign.draft import SovereignDraft
 
 _WEBHOOK_PATH = "/api/v1/telegram/webhook"
@@ -18,17 +20,7 @@ def _effective_telegram_bot_token(repo_root: Path, draft: SovereignDraft) -> str
     t = (draft.telegram_bot_token or "").strip()
     if t:
         return t
-    env_path = repo_root / ".env"
-    if not env_path.is_file():
-        return ""
-    kv: dict[str, str] = {}
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        s = line.strip()
-        if s.startswith("#") or "=" not in s:
-            continue
-        key, _, val = s.partition("=")
-        ks = key.strip()
-        kv[ks] = val.strip().strip("'\"")
+    kv = merged_root_and_proposed_flat_env(repo_root)
     from duckclaw.integrations.telegram.telegram_agent_token import resolve_telegram_token_from_flat_env
 
     wid = (getattr(draft, "default_worker_id", None) or "finanz").strip()
@@ -36,21 +28,12 @@ def _effective_telegram_bot_token(repo_root: Path, draft: SovereignDraft) -> str
 
 
 def _effective_telegram_webhook_secret(repo_root: Path, draft: SovereignDraft) -> str:
-    """Mismo valor que verá el gateway: borrador si existe, si no la clave ya fusionada en .env."""
+    """Mismo valor que verá el gateway: borrador, o fusión .env + proposed (inmutable)."""
     s = (draft.telegram_webhook_secret or "").strip()
     if s:
         return s
-    env_path = repo_root / ".env"
-    if not env_path.is_file():
-        return ""
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        raw = line.strip()
-        if raw.startswith("#") or "=" not in raw:
-            continue
-        key, _, val = raw.partition("=")
-        if key.strip() == "TELEGRAM_WEBHOOK_SECRET":
-            return val.strip().strip("'\"")
-    return ""
+    kv = merged_root_and_proposed_flat_env(repo_root)
+    return (kv.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
 
 
 def webhook_full_url_for_draft(draft: SovereignDraft) -> str | None:
@@ -109,7 +92,8 @@ def register_telegram_webhook_after_deploy(
     if not token:
         console_print(
             "[dim]Telegram setWebhook omitido: no hay token en el borrador ni "
-            "TELEGRAM_<ID_AGENT>_TOKEN / TELEGRAM_BOT_TOKEN en .env (según default_worker_id del borrador).[/]"
+            "TELEGRAM_<ID_AGENT>_TOKEN / TELEGRAM_BOT_TOKEN en .env ni "
+            "config/dotenv_wizard_proposed.env (según default_worker_id del borrador).[/]"
         )
         return
     if not body:

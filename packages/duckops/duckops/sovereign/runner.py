@@ -14,7 +14,11 @@ from duckops.sovereign.materialize import (
     load_gateway_tenant_hint_from_repo_env,
     load_last_duckdb_vault_path_from_wizard_config,
     load_last_gateway_pm2_name_from_wizard_config,
+    load_last_gateway_port_from_wizard_config,
     load_last_gateway_tenant_id_from_wizard_config,
+    load_last_default_worker_id_from_wizard_config,
+    load_gateway_port_hint_from_api_gateways_json,
+    load_default_worker_id_hint_from_repo_env,
     load_last_wizard_creator_admin_display_name_from_wizard_config,
     load_last_wizard_creator_telegram_user_id_from_wizard_config,
     load_last_wizard_extra_admin_telegram_ids_from_wizard_config,
@@ -84,6 +88,20 @@ def run_sovereign_wizard(repo_root: Path | None = None) -> int:
             pm2_name_hint = load_pm2_gateway_name_hint_from_repo_env(rr)
             if pm2_name_hint:
                 draft.gateway_pm2_name = pm2_name_hint
+        last_worker = load_last_default_worker_id_from_wizard_config()
+        if last_worker:
+            draft.default_worker_id = last_worker
+        else:
+            worker_hint = load_default_worker_id_hint_from_repo_env(rr)
+            if worker_hint:
+                draft.default_worker_id = worker_hint
+        last_port = load_last_gateway_port_from_wizard_config()
+        if last_port is not None:
+            draft.gateway_port = last_port
+        else:
+            port_hint = load_gateway_port_hint_from_api_gateways_json(rr, draft.gateway_pm2_name)
+            if port_hint is not None:
+                draft.gateway_port = port_hint
     code = run_wizard_loop(rr, console, draft)
     if code == 2:
 

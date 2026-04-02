@@ -2,8 +2,11 @@
 """
 Webhook entrante de Telegram (Bot API Update) → mismo pipeline que /api/v1/agent/.../chat.
 
-Contrato: POST ``/api/v1/telegram/webhook`` con JSON de Update; validación opcional vía
-``TELEGRAM_WEBHOOK_SECRET`` y cabecera ``X-Telegram-Bot-Api-Secret-Token``.
+Contrato principal (recomendado): POST ``/api/v1/telegram/webhook`` con JSON de Update; un proceso
+PM2 por bot con su propia URL HTTPS al puerto correcto (ver specs ``Telegram Webhook One Gateway One Port``).
+
+Rutas ``/webhook/finanz`` y ``/webhook/trabajo``: legado para un solo ingress compartido; validación vía
+``TELEGRAM_WEBHOOK_SECRET_*`` y cabecera ``X-Telegram-Bot-Api-Secret-Token``.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 from typing import Any, Awaitable, Callable
 
@@ -370,6 +374,44 @@ def _extract_visual_payload_with_reply(msg: dict[str, Any]) -> tuple[dict[str, s
     return pv, True
 
 
+KNOWN_TELEGRAM_PATH_WEBHOOK_ROUTES = frozenset(
+    {"finanz", "finanzas", "trabajo", "jobhunter", "job-hunter"}
+)
+
+
+def _telegram_path_route_family(route_key: str | None) -> str | None:
+    if not (route_key or "").strip():
+        return None
+    rk = str(route_key).strip().lower()
+    if rk in ("finanz", "finanzas"):
+        return "finanz"
+    if rk in ("trabajo", "jobhunter", "job-hunter"):
+        return "trabajo"
+    return None
+
+
+def _webhook_secret_ok_finanz_path(header_secret: str | None) -> bool:
+    fin = (os.environ.get("TELEGRAM_WEBHOOK_SECRET_FINANZ") or "").strip()
+    leg = (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    hdr = (header_secret or "").strip()
+    if fin:
+        return bool(hdr) and secrets.compare_digest(hdr, fin)
+    if leg:
+        return bool(hdr) and secrets.compare_digest(hdr, leg)
+    return True
+
+
+def _webhook_secret_ok_trabajo_path(header_secret: str | None) -> bool:
+    job = (os.environ.get("TELEGRAM_WEBHOOK_SECRET_TRABAJO") or "").strip()
+    leg = (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    hdr = (header_secret or "").strip()
+    if job:
+        return bool(hdr) and secrets.compare_digest(hdr, job)
+    if leg:
+        return bool(hdr) and secrets.compare_digest(hdr, leg)
+    return True
+
+
 def build_telegram_inbound_webhook_router(
     *,
     invoke_agent_chat: Callable[..., Awaitable[Any]],
@@ -379,42 +421,145 @@ def build_telegram_inbound_webhook_router(
     Factory para no importar ``main`` desde este módulo (evita ciclos).
 
     - invoke_agent_chat: típicamente ``_invoke_chat`` del gateway.
+
+    Rutas adicionales ``…/webhook/finanz`` y ``…/webhook/trabajo`` (legado): mismo host cuando un solo
+    funnel recibe todos los bots; ``secret_token`` por bot
+    (``TELEGRAM_WEBHOOK_SECRET_FINANZ`` / ``TELEGRAM_WEBHOOK_SECRET_TRABAJO`` o ``TELEGRAM_WEBHOOK_SECRET``).
+    Modo recomendado: un webhook estándar ``…/webhook`` por gateway y URL pública que termine en el puerto
+    PM2 de ese proceso (sin depender de estas rutas).
     """
 
     router = APIRouter(prefix="/api/v1/telegram", tags=["telegram-inbound-webhook"])
 
-    @router.post("/webhook")
-    async def telegram_bot_update_webhook(request: Request) -> dict[str, str]:
+    async def _telegram_webhook_core(
+        request: Request,
+        path_route_raw: str | None,
+    ) -> dict[str, str]:
         header_secret = request.headers.get(TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER)
         default_token = (resolve_effective_telegram_bot_token() or "").strip()
-        resolved = telegram_webhook_resolve_dispatch(
-            header_secret,
-            default_worker_id=_telegram_webhook_default_worker_id(),
-            default_tenant_id=_telegram_webhook_default_tenant_id(),
-            default_bot_token=default_token,
-        )
-        if resolved == "reject":
-            _log.warning(
-                "telegram webhook: 403 — cabecera %s no coincide con TELEGRAM_WEBHOOK_SECRET ni con "
-                "ninguna entrada de DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES.",
-                TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "type": "about:blank",
-                    "title": "Forbidden",
-                    "status": 403,
-                    "detail": "Secreto de webhook de Telegram inválido o ausente.",
-                },
-            )
 
-        if isinstance(resolved, TelegramWebhookResolvedDispatch):
-            worker_id = resolved.worker_id
-            tenant_id = resolved.tenant_id
-            reply_token = resolved.bot_token
+        path_family = _telegram_path_route_family(path_route_raw)
+        worker_id: str
+        tenant_id: str
+        reply_token: str
+
+        if path_family == "finanz":
+            if not _webhook_secret_ok_finanz_path(header_secret):
+                _log.warning(
+                    "telegram webhook: 403 — path finanz: cabecera %s inválida.",
+                    TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "type": "about:blank",
+                        "title": "Forbidden",
+                        "status": 403,
+                        "detail": "Secreto de webhook de Telegram inválido o ausente (ruta finanz).",
+                    },
+                )
+            worker_id = (os.environ.get("DUCKCLAW_TELEGRAM_FINANZ_ENTRY_WORKER") or "finanz").strip()
+            tenant_id = (os.environ.get("DUCKCLAW_FINANZ_TENANT_ID") or "Finanzas").strip()
+            # Multiplex: TELEGRAM_FINANZ_TOKEN explícito. Gateway dedicado Finanz suele tener solo
+            # TELEGRAM_BOT_TOKEN; sin fallback las respuestas usan un token viejo en PM2 JSON y el
+            # mensaje aparece en el chat del otro bot (mismo user_id en DM).
+            reply_token = (os.environ.get("TELEGRAM_FINANZ_TOKEN") or "").strip()
+            if not reply_token:
+                reply_token = default_token
+            if not reply_token:
+                _log.error(
+                    "telegram webhook path finanz: falta TELEGRAM_FINANZ_TOKEN y token efectivo del proceso"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "type": "about:blank",
+                        "title": "Server Error",
+                        "status": 500,
+                        "detail": "Sin token de bot: configure TELEGRAM_FINANZ_TOKEN o TELEGRAM_BOT_TOKEN.",
+                    },
+                )
+        elif path_family == "trabajo":
+            if not _webhook_secret_ok_trabajo_path(header_secret):
+                _log.warning(
+                    "telegram webhook: 403 — path trabajo: cabecera %s inválida.",
+                    TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "type": "about:blank",
+                        "title": "Forbidden",
+                        "status": 403,
+                        "detail": "Secreto de webhook de Telegram inválido o ausente (ruta trabajo).",
+                    },
+                )
+            worker_id = (os.environ.get("DUCKCLAW_DEFAULT_WORKER_ID") or "Job-Hunter").strip()
+            tenant_id = (os.environ.get("DUCKCLAW_GATEWAY_TENANT_ID") or "trabajo").strip()
+            reply_token = (
+                os.environ.get("TELEGRAM_JOB_HUNTER_TOKEN")
+                or os.environ.get("TELEGRAM_BOT_TOKEN")
+                or ""
+            ).strip()
+            if not reply_token:
+                _log.error("telegram webhook path trabajo: falta TELEGRAM_JOB_HUNTER_TOKEN")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "type": "about:blank",
+                        "title": "Server Error",
+                        "status": 500,
+                        "detail": "TELEGRAM_JOB_HUNTER_TOKEN no configurado.",
+                    },
+                )
         else:
-            _tag, worker_id, tenant_id, reply_token = resolved
+            resolved = telegram_webhook_resolve_dispatch(
+                header_secret,
+                default_worker_id=_telegram_webhook_default_worker_id(),
+                default_tenant_id=_telegram_webhook_default_tenant_id(),
+                default_bot_token=default_token,
+            )
+            if resolved == "reject":
+                _log.warning(
+                    "telegram webhook: 403 — cabecera %s no coincide con TELEGRAM_WEBHOOK_SECRET ni con "
+                    "ninguna entrada de DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES.",
+                    TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "type": "about:blank",
+                        "title": "Forbidden",
+                        "status": 403,
+                        "detail": "Secreto de webhook de Telegram inválido o ausente.",
+                    },
+                )
+
+            if isinstance(resolved, TelegramWebhookResolvedDispatch):
+                worker_id = resolved.worker_id
+                tenant_id = resolved.tenant_id
+                reply_token = resolved.bot_token
+            else:
+                _tag, worker_id, tenant_id, reply_token = resolved
+
+        telegram_forced_vault_db_path: str | None = None
+        if path_family == "finanz":
+            # Bóveda y Telegram Guard deben leer la misma DuckDB que el tenant Finanzas.
+            # Si solo existe gateway JobHunter pero el webhook de Finanz apunta aquí
+            # (mismo funnel / puerto), suele faltar DUCKCLAW_FINANZ_DB_PATH; en ese caso
+            # DUCKCLAW_WAR_ROOM_ACL_DB_PATH apunta típicamente a finanzdb (equipo/admin).
+            _v = (os.environ.get("DUCKCLAW_FINANZ_DB_PATH") or "").strip()
+            if not _v:
+                _v = (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip()
+            telegram_forced_vault_db_path = _v or None
+
+        _log.info(
+            "telegram_webhook_dispatch secret_fp=%s worker_id=%s tenant_id=%s path_route=%s",
+            telegram_webhook_header_fingerprint(header_secret),
+            worker_id,
+            tenant_id,
+            (path_route_raw or "").strip() or "(default)",
+        )
 
         try:
             body = await request.json()
@@ -810,6 +955,7 @@ def build_telegram_inbound_webhook_router(
                     redis_client=redis_client,
                     telegram_multipart_tail_delivery="native",
                     telegram_mcp=telegram_mcp,
+                    telegram_forced_vault_db_path=telegram_forced_vault_db_path,
                 )
             except HTTPException as exc:
                 detail = exc.detail
@@ -875,5 +1021,24 @@ def build_telegram_inbound_webhook_router(
         with telegram_bot_token_override(reply_token):
             await _invoke_and_reply()
         return {"ok": "true"}
+
+    @router.post("/webhook")
+    async def telegram_bot_update_webhook(request: Request) -> dict[str, str]:
+        return await _telegram_webhook_core(request, None)
+
+    @router.post("/webhook/{route_key}")
+    async def telegram_bot_update_webhook_pathed(request: Request, route_key: str) -> dict[str, str]:
+        rk = (route_key or "").strip().lower()
+        if rk not in KNOWN_TELEGRAM_PATH_WEBHOOK_ROUTES:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "type": "about:blank",
+                    "title": "Not Found",
+                    "status": 404,
+                    "detail": "Webhook path desconocido.",
+                },
+            )
+        return await _telegram_webhook_core(request, rk)
 
     return router

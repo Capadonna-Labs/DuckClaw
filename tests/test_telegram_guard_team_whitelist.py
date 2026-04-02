@@ -52,6 +52,24 @@ def test_team_whitelist_list_requires_any_authorized_role(db) -> None:
     assert "123" in reply
 
 
+def test_team_list_deduplicates_same_user_multiple_tenant_rows(db) -> None:
+    """Dos filas con mismo user_id y tenant_id solo por casing distinto en PK → una línea en /team."""
+    d = db
+    d.execute(
+        "INSERT INTO main.authorized_users (tenant_id, user_id, username, role) "
+        "VALUES ('Trabajo', '9', 'Juan', 'admin')"
+    )
+    d.execute(
+        "INSERT INTO main.authorized_users (tenant_id, user_id, username, role) "
+        "VALUES ('trabajo', '9', 'Juan', 'user')"
+    )
+    reply = handle_command(d, "chat_1", "/team", requester_id="9", tenant_id="Trabajo")
+    assert reply is not None
+    bullet_lines = [ln for ln in reply.splitlines() if ln.strip().startswith("- ")]
+    assert len(bullet_lines) == 1
+    assert "admin" in bullet_lines[0]
+
+
 def test_team_whitelist_add_is_admin_only(db) -> None:
     d = db
     # requester '2' es user (no admin)

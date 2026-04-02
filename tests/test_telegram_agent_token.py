@@ -34,3 +34,17 @@ def test_resolve_finanz_fallback_bot_token(monkeypatch: pytest.MonkeyPatch) -> N
 def test_resolve_flat_env_bi_analyst_alias() -> None:
     kv = {"TELEGRAM_BI_ANALYST_TOKEN": "x"}
     assert m.resolve_telegram_token_from_flat_env(kv, "BI-Analyst") == "x"
+
+
+def test_pm2_env_dict_prefers_worker_token_over_generic_bot_token() -> None:
+    """Evita que JobHunter-Gateway use TELEGRAM_BOT_TOKEN de Finanz del bloque PM2 fusionado."""
+    env = {
+        "TELEGRAM_BOT_TOKEN": "finanz-bot-token",
+        "TELEGRAM_JOB_HUNTER_TOKEN": "job-hunter-bot-token",
+    }
+    assert m.telegram_token_from_pm2_env_dict(env, "Job-Hunter") == "job-hunter-bot-token"
+
+
+def test_pm2_env_dict_finanz_still_falls_back_to_generic_bot_token() -> None:
+    env = {"TELEGRAM_BOT_TOKEN": "only-finanz"}
+    assert m.telegram_token_from_pm2_env_dict(env, "finanz") == "only-finanz"

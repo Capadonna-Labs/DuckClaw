@@ -30,6 +30,7 @@ Makefile
 .env
 .env.*
 !.env.example
+!.env.immutable
 db/
 *.duckdb
 *.duckdb.wal
@@ -43,6 +44,8 @@ strix_runs/
 # Gateway env (LANGCHAIN_API_KEY, DEEPSEEK_API_KEY, rutas locales) — no subir
 *.bak
 config/api_gateways_pm2.json
+# Propuesta de fusión cuando .env está bloqueado (puede contener tokens)
+config/dotenv_wizard_proposed.env
 ecosystem.config.cjs
 ecosystem.config.js
 ecosystem.*.config.cjs

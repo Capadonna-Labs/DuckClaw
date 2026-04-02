@@ -13,7 +13,11 @@ from typing import Any
 
 from pathlib import Path
 
-from duckclaw.gateway_db import get_gateway_db_path, get_war_room_acl_db_path
+from duckclaw.gateway_db import (
+    GatewayDbEphemeralReadonly,
+    get_gateway_db_path,
+    get_war_room_acl_db_path,
+)
 
 _log = logging.getLogger("duckclaw.gateway.acl_db")
 
@@ -27,6 +31,7 @@ class ReadOnlyGatewayAclDb:
 
     def __init__(self, path: str) -> None:
         self._path = path
+        self._read_only = True
 
     def query(self, sql: str, params: tuple | list | None = None) -> str:
         import duckdb
@@ -51,13 +56,14 @@ class ReadOnlyGatewayAclDb:
 def get_gateway_acl_duckdb() -> tuple[Any, bool]:
     """Retorna ``(db, es_facade_readonly)``.
 
-    Intenta ``graph_server.get_db()`` (proceso con lock de escritor). Si falla, abre solo lectura
-    sobre ``get_gateway_db_path()``.
+    ``graph_server.get_db()`` es siempre una facade RO efímera (sin handle persistente al .duckdb).
     """
     try:
         from duckclaw.graphs.graph_server import get_db
 
         db = get_db()
+        if isinstance(db, (ReadOnlyGatewayAclDb, GatewayDbEphemeralReadonly)):
+            return db, True
         try:
             db.execute("SELECT 1")
         except Exception as exc:
@@ -73,23 +79,7 @@ def get_war_room_acl_duckdb() -> Any:
     """
     Conexión lógica para ``war_room_core`` (miembros / conteos).
 
-    Si el grafo ya abrió la misma ruta que ``get_war_room_acl_db_path()``, reutiliza ese ``DuckClaw``.
-    Si no (p. ej. JobHunter con jobhunterdb1 y ACL en finanzdb1), devuelve solo lectura sobre la ruta canónica.
+    El gateway no mantiene un DuckClaw persistente al archivo; siempre lectura efímera sobre la ruta canónica.
     """
     wr_path = str(Path(get_war_room_acl_db_path()).expanduser().resolve())
-    graph_path_resolved = ""
-    db_concrete: Any | None = None
-    try:
-        from duckclaw.graphs import graph_server as _gs
-
-        if _gs._graph_state.get("db") is not None and _gs._graph_init_error is None:
-            gp = (_gs._graph_state.get("db_path") or "").strip()
-            if gp:
-                graph_path_resolved = str(Path(gp).expanduser().resolve())
-            db_concrete = _gs._graph_state.get("db")
-    except Exception:
-        pass
-
-    if db_concrete is not None and graph_path_resolved and graph_path_resolved == wr_path:
-        return db_concrete
     return ReadOnlyGatewayAclDb(wr_path)

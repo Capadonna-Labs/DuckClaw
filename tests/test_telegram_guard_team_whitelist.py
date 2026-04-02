@@ -9,6 +9,14 @@ from duckclaw import DuckClaw
 from duckclaw.graphs.on_the_fly_commands import handle_command
 
 
+@pytest.fixture(autouse=True)
+def _graph_get_db_points_at_fixture_db(monkeypatch: pytest.MonkeyPatch, db: DuckClaw) -> None:
+    """execute_team_whitelist usa graph_server.get_db(); en tests la ACL vive en el tmp del fixture."""
+    from duckclaw.graphs import graph_server
+
+    monkeypatch.setattr(graph_server, "get_db", lambda: db)
+
+
 @pytest.fixture
 def db(tmp_path: Path) -> DuckClaw:
     path = str(tmp_path / "gateway_guard_test.duckdb")

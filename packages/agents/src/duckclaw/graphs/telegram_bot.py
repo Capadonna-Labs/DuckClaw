@@ -224,7 +224,7 @@ def _get_store_db(config: dict) -> Any:
     if not resolved.exists():
         return None
     from duckclaw import DuckClaw
-    return DuckClaw(str(resolved))
+    return DuckClaw(str(resolved), read_only=True)
 
 
 def _build_graph_via_forge(

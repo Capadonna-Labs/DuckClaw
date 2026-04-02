@@ -18,11 +18,20 @@ import os
 import re
 import secrets
 import time
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException, Request, status
 
 from core.config import settings
+from core.context_injection_delta import (
+    build_context_injection_delta,
+    context_injection_queue_key,
+    push_context_injection_delta_redis,
+)
+from core.context_injection_rbac import user_may_context_inject
+from core.context_injection_vault import resolve_telegram_user_vault_db_path
+from core.context_stored_snapshot import fetch_semantic_memory_snapshot
 from core.models import ChatRequest
 from core.vlm_ingest import (
     process_visual_album_batch,
@@ -30,7 +39,6 @@ from core.vlm_ingest import (
     push_vlm_state_delta_redis,
 )
 from core.war_rooms import (
-    ensure_war_room_schema,
     hit_rate_limit,
     is_war_room_tenant,
     normalize_telegram_bot_username,
@@ -60,6 +68,157 @@ _WORKER_ALIAS_CACHE_TTL_SECONDS = 60
 _worker_alias_cache: set[str] = set()
 _worker_alias_cache_ts: float = 0.0
 _VISUAL_ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
+
+_CONTEXT_ADD_RE = re.compile(
+    r"^/context(?:@[^\s]+)?\s+--add(?:\s+(.*))?$",
+    re.DOTALL | re.IGNORECASE,
+)
+_CONTEXT_SUMMARY_RE = re.compile(
+    r"^/context(?:@[^\s]+)?\s+--(?:summary|summarize|peek|db)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _parse_context_add_command(text: str) -> tuple[bool, str]:
+    """(False, '') si no es el comando; (True, body) si es /context --add (body puede estar vacío)."""
+    m = _CONTEXT_ADD_RE.match((text or "").strip())
+    if not m:
+        return False, ""
+    return True, (m.group(1) or "").strip()
+
+
+def _parse_context_summary_command(text: str) -> bool:
+    """``/context --summary`` | ``--summarize`` | ``--peek`` | ``--db``: leer memoria semántica y resumir (sin escribir)."""
+    return bool(_CONTEXT_SUMMARY_RE.match((text or "").strip()))
+
+
+def _summarize_new_context_directive(injected_text: str) -> str:
+    t = (injected_text or "").strip()
+    return (
+        f"[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]\n{t}\n\n"
+        "Sintetiza este nuevo contexto ingresado a memoria VSS. Formato: bullet points técnicos "
+        "alineados con el dominio del worker activo."
+    )
+
+
+def _summarize_stored_context_directive(snapshot: str) -> str:
+    t = (snapshot or "").strip()
+    return (
+        f"[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]\n{t}\n\n"
+        "Este bloque se obtuvo leyendo ``main.semantic_memory`` en DuckDB (contexto ya persistido). "
+        "Sintetiza en bullet points técnicos alineados al dominio del worker activo. "
+        "No digas que acabas de guardar o encolar nada; es solo lectura de lo almacenado."
+    )
+
+
+def schedule_telegram_context_summary_background(
+    *,
+    directive_msg: str,
+    telegram_header_html: str,
+    log_label: str,
+    invoke_agent_chat: Callable[..., Awaitable[Any]],
+    resolve_effective_telegram_bot_token: Callable[[], str],
+    worker_id: str,
+    chat_id: int | str,
+    tenant_id: str,
+    vault_uid: str,
+    username: str,
+    chat_type: str,
+    redis_client: Any,
+    telegram_mcp_state: Any,
+    telegram_forced_vault_db_path: str | None,
+    reply_token: str | None,
+) -> None:
+    """Invoca el grafo con directiva de resumen y envía la respuesta por Bot API (segundo plano)."""
+    bg_payload = ChatRequest(
+        message=directive_msg,
+        chat_id=str(chat_id),
+        user_id=vault_uid,
+        username=username,
+        chat_type=chat_type,
+        tenant_id=tenant_id,
+        is_system_prompt=True,
+        skip_session_lock=True,
+    )
+
+    async def _bg_summarize_task() -> None:
+        try:
+            tok = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
+            if not tok:
+                _log.warning("%s: sin token de bot, no se puede enviar resumen chat_id=%s", log_label, chat_id)
+                return
+            with telegram_bot_token_override(tok):
+                try:
+                    res = await invoke_agent_chat(
+                        bg_payload,
+                        worker_id,
+                        str(chat_id),
+                        tenant_id,
+                        redis_client=redis_client,
+                        telegram_multipart_tail_delivery="native",
+                        telegram_mcp=telegram_mcp_state,
+                        telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                    )
+                except HTTPException as exc:
+                    detail = exc.detail
+                    if isinstance(detail, dict):
+                        msg_err = str(detail.get("detail") or detail)
+                    else:
+                        msg_err = str(detail)
+                    _log.warning("%s invoke falló: %s", log_label, msg_err)
+                    if msg_err:
+                        try:
+                            client_e = TelegramBotApiAsyncClient(tok)
+                            await client_e.send_message(
+                                chat_id=chat_id,
+                                text=msg_err[:3900],
+                                parse_mode=None,
+                            )
+                        except Exception as send_exc:  # noqa: BLE001
+                            _log.warning("%s no pudo enviar error al usuario: %s", log_label, send_exc)
+                    return
+
+            reply_local = (res.get("response") or "").strip() if isinstance(res, dict) else ""
+            if not reply_local:
+                _log.warning(
+                    "%s: respuesta vacía tenant_id=%s chat_id=%s worker_id=%s",
+                    log_label,
+                    tenant_id,
+                    chat_id,
+                    worker_id,
+                )
+                try:
+                    client_e = TelegramBotApiAsyncClient(tok)
+                    await client_e.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            "No se generó texto de resumen. Revisa /tasks o los logs del gateway."
+                        ),
+                        parse_mode=None,
+                    )
+                except Exception as send_exc:  # noqa: BLE001
+                    _log.warning("%s no pudo enviar aviso de vacío: %s", log_label, send_exc)
+                return
+
+            client_r = TelegramBotApiAsyncClient(tok)
+            body_slice = reply_local[:3500]
+            body_html = llm_markdown_to_telegram_html(body_slice)
+            combined = telegram_header_html + body_html
+            cap = 4096 - 16
+            if len(combined) > cap:
+                combined = combined[: max(0, cap - 1)] + "…"
+            sent = await client_r.send_message(chat_id=chat_id, text=combined, parse_mode="HTML")
+            if not sent.get("ok"):
+                plain_hdr = re.sub(r"<[^>]+>", "", telegram_header_html)
+                await client_r.send_message(
+                    chat_id=chat_id,
+                    text=(plain_hdr + reply_local)[:3900],
+                    parse_mode=None,
+                )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("%s background invoke failed: %s", log_label, exc)
+
+    asyncio.create_task(_bg_summarize_task())
 
 
 def _telegram_entities_for_message(msg: dict[str, Any]) -> list[dict[str, Any]]:
@@ -678,7 +837,6 @@ def build_telegram_inbound_webhook_router(
             from core.gateway_acl_db import get_war_room_acl_duckdb
 
             db = get_war_room_acl_duckdb()
-            ensure_war_room_schema(db)
             sender_is_owner = bool(
                 str(user_id or "").strip()
                 and str(user_id).strip()
@@ -932,6 +1090,200 @@ def build_telegram_inbound_webhook_router(
                             event_type="VLM_INGEST_FAILED",
                             payload=str(exc)[:500],
                         )
+
+        is_ctx_add, ctx_body = _parse_context_add_command(text)
+        if is_ctx_add:
+            token_ctx = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
+
+            async def _send_ctx_reply(html: str) -> None:
+                if not token_ctx:
+                    _log.warning("context_injection: sin token de bot para responder")
+                    return
+                try:
+                    c = TelegramBotApiAsyncClient(token_ctx)
+                    await c.send_message(chat_id=chat_id, text=html, parse_mode="HTML")
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning("context_injection send_message failed: %s", exc)
+
+            if not ctx_body:
+                await _send_ctx_reply(
+                    llm_markdown_to_telegram_html(
+                        "Uso: `/context --add` requiere texto después de `--add`."
+                    )
+                )
+                return {"ok": "true"}
+
+            vault_uid = str(user_id or "").strip() or str(chat_id)
+            if not user_may_context_inject(
+                tenant_id=tenant_id,
+                user_id=vault_uid,
+                telegram_guard_acl_db_path=telegram_forced_vault_db_path,
+            ):
+                await _send_ctx_reply(
+                    llm_markdown_to_telegram_html(
+                        "No autorizado: solo administradores pueden usar `/context --add`."
+                    )
+                )
+                return {"ok": "true"}
+
+            try:
+                target_db = resolve_telegram_user_vault_db_path(
+                    tenant_id=tenant_id,
+                    vault_user_id=vault_uid,
+                    telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                )
+                delta = build_context_injection_delta(
+                    tenant_id=tenant_id,
+                    raw_text=ctx_body,
+                    user_id=vault_uid,
+                    target_db_path=target_db,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.exception("context_injection prepare failed: %s", exc)
+                await _send_ctx_reply(
+                    llm_markdown_to_telegram_html("No se pudo preparar la inyección de contexto.")
+                )
+                return {"ok": "true"}
+
+            if redis_client is None:
+                _log.error("context_injection: Redis no disponible; no se puede encolar CONTEXT_INJECTION")
+                await _send_ctx_reply(
+                    llm_markdown_to_telegram_html(
+                        "Error interno: Redis no está configurado; el contexto no se pudo encolar para persistir."
+                    )
+                )
+                return {"ok": "true"}
+
+            try:
+                await push_context_injection_delta_redis(redis_client, delta)
+                _log.info(
+                    "context_injection LPUSH ok queue=%s tenant=%s user=%s db=%s",
+                    context_injection_queue_key(),
+                    tenant_id,
+                    vault_uid,
+                    target_db,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.exception("context_injection LPUSH falló: %s", exc)
+                await _send_ctx_reply(
+                    llm_markdown_to_telegram_html(
+                        "No se pudo encolar el contexto en Redis; revisa logs del gateway y que DuckClaw-DB-Writer esté activo."
+                    )
+                )
+                return {"ok": "true"}
+
+            telegram_mcp_state = getattr(request.app.state, "telegram_mcp", None)
+            schedule_telegram_context_summary_background(
+                directive_msg=_summarize_new_context_directive(ctx_body),
+                telegram_header_html="<b>Resumen del contexto inyectado</b>\n\n",
+                log_label="SUMMARIZE_NEW_CONTEXT",
+                invoke_agent_chat=invoke_agent_chat,
+                resolve_effective_telegram_bot_token=resolve_effective_telegram_bot_token,
+                worker_id=worker_id,
+                chat_id=chat_id,
+                tenant_id=tenant_id,
+                vault_uid=vault_uid,
+                username=username,
+                chat_type=chat_type,
+                redis_client=redis_client,
+                telegram_mcp_state=telegram_mcp_state,
+                telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                reply_token=reply_token,
+            )
+
+            await _send_ctx_reply(
+                llm_markdown_to_telegram_html(
+                    "Contexto encolado para memoria semántica. Resumen en segundo plano."
+                )
+            )
+            return {"ok": "true"}
+
+        if _parse_context_summary_command(text):
+            token_sum = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
+
+            async def _send_ctx_summary_reply(html: str) -> None:
+                if not token_sum:
+                    _log.warning("context_summary: sin token de bot para responder")
+                    return
+                try:
+                    c = TelegramBotApiAsyncClient(token_sum)
+                    await c.send_message(chat_id=chat_id, text=html, parse_mode="HTML")
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning("context_summary send_message failed: %s", exc)
+
+            vault_uid_sum = str(user_id or "").strip() or str(chat_id)
+            if not user_may_context_inject(
+                tenant_id=tenant_id,
+                user_id=vault_uid_sum,
+                telegram_guard_acl_db_path=telegram_forced_vault_db_path,
+            ):
+                await _send_ctx_summary_reply(
+                    llm_markdown_to_telegram_html(
+                        "No autorizado: solo administradores pueden usar `/context --summary`."
+                    )
+                )
+                return {"ok": "true"}
+
+            try:
+                target_db_sum = resolve_telegram_user_vault_db_path(
+                    tenant_id=tenant_id,
+                    vault_user_id=vault_uid_sum,
+                    telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.exception("context_summary resolve vault failed: %s", exc)
+                await _send_ctx_summary_reply(
+                    llm_markdown_to_telegram_html("No se pudo resolver la bóveda DuckDB para leer contexto.")
+                )
+                return {"ok": "true"}
+
+            snapshot = fetch_semantic_memory_snapshot(target_db_sum)
+            if not (snapshot or "").strip():
+                pending_ctx = 0
+                qkey = context_injection_queue_key()
+                if redis_client is not None:
+                    try:
+                        pending_ctx = int(await redis_client.llen(qkey))
+                    except Exception:  # noqa: BLE001
+                        pending_ctx = 0
+                if pending_ctx > 0:
+                    empty_msg = (
+                        f"No hay filas aún en `main.semantic_memory`, pero hay **{pending_ctx}** inyección(es) "
+                        f"en cola Redis (`{qkey}`). El **db-writer** debe estar en ejecución para persistir; "
+                        "si solo corre el gateway, los `/context --add` quedan encolados."
+                    )
+                else:
+                    empty_msg = (
+                        "No hay filas en `main.semantic_memory` en esta bóveda (o la tabla aún no existe). "
+                        "Inyecta contexto con `/context --add …` primero."
+                    )
+                await _send_ctx_summary_reply(llm_markdown_to_telegram_html(empty_msg))
+                return {"ok": "true"}
+
+            telegram_mcp_sum = getattr(request.app.state, "telegram_mcp", None)
+            schedule_telegram_context_summary_background(
+                directive_msg=_summarize_stored_context_directive(snapshot),
+                telegram_header_html="<b>Resumen del contexto (base de datos)</b>\n\n",
+                log_label="SUMMARIZE_STORED_CONTEXT",
+                invoke_agent_chat=invoke_agent_chat,
+                resolve_effective_telegram_bot_token=resolve_effective_telegram_bot_token,
+                worker_id=worker_id,
+                chat_id=chat_id,
+                tenant_id=tenant_id,
+                vault_uid=vault_uid_sum,
+                username=username,
+                chat_type=chat_type,
+                redis_client=redis_client,
+                telegram_mcp_state=telegram_mcp_sum,
+                telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                reply_token=reply_token,
+            )
+            await _send_ctx_summary_reply(
+                llm_markdown_to_telegram_html(
+                    "Leyendo `main.semantic_memory` desde DuckDB (solo lectura). Resumen en segundo plano."
+                )
+            )
+            return {"ok": "true"}
 
         payload = ChatRequest(
             message=text,

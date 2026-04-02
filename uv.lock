@@ -575,6 +575,7 @@ dependencies = [
     { name = "langgraph", version = "1.1.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "mcp", marker = "python_full_version >= '3.10'" },
     { name = "pyyaml" },
+    { name = "redis" },
     { name = "requests" },
     { name = "tavily-python" },
 ]
@@ -588,6 +589,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=0.2.0" },
     { name = "mcp", marker = "python_full_version >= '3.10'", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0.1" },
+    { name = "redis", specifier = ">=5.0.0" },
     { name = "requests", specifier = ">=2.28.0" },
     { name = "tavily-python", specifier = ">=0.5.0" },
 ]
@@ -597,6 +599,12 @@ provides-extras = ["google-trends"]
 name = "duckclaw-core"
 version = "0.1.0"
 source = { editable = "packages/core" }
+dependencies = [
+    { name = "duckdb" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "duckdb", specifier = ">=0.10.0" }]
 
 [[package]]
 name = "duckclaw-shared"
@@ -608,6 +616,7 @@ dependencies = [
     { name = "langchain-core", version = "1.2.19", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "langchain-openai", version = "0.3.35", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "langchain-openai", version = "1.1.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "redis" },
     { name = "requests" },
 ]
 
@@ -617,6 +626,7 @@ requires-dist = [
     { name = "langchain-core", specifier = ">=0.3.0" },
     { name = "langchain-openai", specifier = ">=0.3.35" },
     { name = "python-telegram-bot", marker = "extra == 'telegram'", specifier = ">=21.0" },
+    { name = "redis", specifier = ">=5.0.0" },
     { name = "requests", specifier = ">=2.28.0" },
 ]
 provides-extras = ["telegram"]

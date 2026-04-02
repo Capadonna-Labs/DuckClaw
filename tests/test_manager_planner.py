@@ -98,6 +98,35 @@ def test_plan_task_job_hunter_job_tracking_skips_tavily_mission() -> None:
     assert "admin_sql" in task.lower() or "read_sql" in task.lower()
 
 
+def test_plan_task_summarize_directives_passthrough_despite_db_keywords_in_body() -> None:
+    """El cuerpo inyectado puede decir 'estructura', 'schema', 'DuckDB', etc.; no debe convertirse en TAREA de tablas."""
+    from duckclaw.graphs.manager_graph import _llm_plan, _plan_task
+
+    stored = (
+        "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]\n"
+        "- Cookbooks con estructura jerárquica y Postgres endpoint sobre DuckDB.\n"
+        "- Ver tablas en information_schema si hace falta.\n\n"
+        "Este bloque se obtuvo leyendo main.semantic_memory. Sintetiza."
+    )
+    task, override = _plan_task(stored, "Job-Hunter")
+    assert override is None
+    assert task == stored
+    assert "TAREA: El usuario quiere ver las tablas" not in task
+
+    title, tasks = _llm_plan(stored)
+    assert title == "Síntesis de contexto almacenado"
+    assert any("no listar tablas" in t.lower() for t in tasks)
+
+    new_ctx = (
+        "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]\n"
+        "- Pipeline con esquema de datos y listar tablas en el dashboard.\n\n"
+        "Sintetiza."
+    )
+    task2, _ = _plan_task(new_ctx, "Job-Hunter")
+    assert task2 == new_ctx
+    assert "SHOW TABLES" not in task2
+
+
 def test_plan_task_bi_analyst_meta_capabilities() -> None:
     from duckclaw.graphs.manager_graph import _plan_task
 

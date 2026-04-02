@@ -7,7 +7,9 @@ name = "duckclaw-core"
 version = "0.1.0"
 description = "Native C++ bridge for DuckDB"
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+    "duckdb>=0.10.0",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

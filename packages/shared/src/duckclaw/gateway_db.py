@@ -7,11 +7,44 @@ la misma DuckDB que usa el Gateway. Resuelve desde DUCKCLAW_DB_PATH o DUCKDB_PAT
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
 
-_gateway_db_singleton: Any = None
+
+class GatewayDbEphemeralReadonly:
+    """
+    Acceso RO al archivo del gateway sin mantener ``duckdb.connect`` abierto entre llamadas.
+    Compatible con código que usa ``.query``, ``._path`` y ``._read_only`` (p. ej. append_task_audit → cola).
+    """
+
+    __slots__ = ("_path", "_read_only")
+
+    def __init__(self, path: str) -> None:
+        self._path = (path or "").strip() or get_gateway_db_path()
+        self._read_only = True
+
+    def query(self, sql: str, params: tuple | list | None = None) -> str:
+        import duckdb
+
+        con = duckdb.connect(self._path, read_only=True)
+        try:
+            if params is not None:
+                result = con.execute(sql, params)
+            else:
+                result = con.execute(sql)
+            rows = result.fetchall()
+            names = [d[0] for d in result.description]
+            out = [dict(zip(names, ("" if v is None else str(v) for v in row))) for row in rows]
+            return json.dumps(out, ensure_ascii=False)
+        finally:
+            con.close()
+
+    def execute(self, _sql: str, _params: Any = None) -> Any:
+        return None
+
+
 
 
 def get_gateway_db_path() -> str:
@@ -42,16 +75,10 @@ def get_war_room_acl_db_path() -> str:
 
 def get_gateway_db() -> Any:
     """
-    Instancia DuckClaw apuntando a la misma ruta que el API Gateway (legacy / herramientas sin db inyectada).
+    Facade RO efímera a la misma ruta que el API Gateway (sin conexión persistente al archivo).
 
     Preferir pasar la conexión de la bóveda activa cuando el contexto sea multi-vault.
     """
-    global _gateway_db_singleton
-    if _gateway_db_singleton is not None:
-        return _gateway_db_singleton
-    from duckclaw import DuckClaw
-
     path = get_gateway_db_path()
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    _gateway_db_singleton = DuckClaw(path)
-    return _gateway_db_singleton
+    return GatewayDbEphemeralReadonly(path)

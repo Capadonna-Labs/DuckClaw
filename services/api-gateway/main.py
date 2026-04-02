@@ -39,7 +39,6 @@ import redis.asyncio as redis
 from core.sandbox_figure_b64 import decode_sandbox_figure_base64, decode_valid_sandbox_image_bytes
 from core.telegram_media_upload import send_sandbox_chart_to_telegram_sync
 from core.war_rooms import (
-    ensure_war_room_schema,
     is_war_room_tenant,
     wr_lookup_member_clearance,
     wr_members_count,
@@ -55,7 +54,6 @@ from core.chat_history import (
 )
 from core.models import ChatRequest
 from duckclaw.utils.telegram_markdown_v2 import escape_telegram_html, llm_markdown_to_telegram_html, plain_subchunks_for_telegram_html
-from duckclaw.vaults import ensure_registry as ensure_vault_registry
 from duckclaw.vaults import resolve_active_vault, validate_user_db_path, vault_scope_id_for_tenant
 from duckclaw.integrations.telegram.telegram_agent_token import (
     PM2_GATEWAY_APP_TO_WORKER_ID,
@@ -250,17 +248,6 @@ _gateway_log.info(
     (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip() or "(unset)",
 )
 
-_AUTHORIZED_USERS_TABLE_DDL = """
-CREATE TABLE IF NOT EXISTS main.authorized_users (
-    tenant_id VARCHAR,
-    user_id VARCHAR,
-    username VARCHAR,
-    role VARCHAR DEFAULT 'user',
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (tenant_id, user_id)
-);
-"""
-
 def _normalize_local_artifacts_to_db() -> None:
     """Mueve artefactos locales conocidos a `db/` si aparecen en la raíz."""
     try:
@@ -336,45 +323,7 @@ async def lifespan(app: FastAPI):
         await app.state.redis.config_set("dbfilename", "dump.rdb")
     except Exception:
         pass
-    # Prepara el esquema de Telegram Guard (idempotente).
-    try:
-        from core.gateway_acl_db import get_gateway_acl_duckdb, get_war_room_acl_duckdb
-
-        db, _acl_readonly = get_gateway_acl_duckdb()
-        if _acl_readonly:
-            _gateway_log.info(
-                "Gateway ACL: DuckDB en solo lectura para esquemas de seguridad (whitelist / war rooms)"
-            )
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS main.authorized_users (
-                tenant_id VARCHAR,
-                user_id VARCHAR,
-                username VARCHAR,
-                role VARCHAR DEFAULT 'user',
-                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (tenant_id, user_id)
-            );
-            """
-        )
-        from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
-
-        ensure_user_shared_db_access_table(db)
-        ensure_war_room_schema(get_war_room_acl_duckdb())
-    except Exception as exc:
-        _gateway_log.warning("Telegram Guard: no se pudo inicializar authorized_users: %s", exc)
-    try:
-        from duckclaw.graphs.graph_server import get_db
-        from duckclaw.forge import ensure_leila_mvp_schema
-
-        ensure_leila_mvp_schema(get_db())
-    except Exception as exc:
-        _gateway_log.warning("Leila MVP: no se pudo inicializar leila_products/leila_orders: %s", exc)
-    try:
-        ensure_vault_registry()
-    except Exception as exc:
-        _gateway_log.warning("Multi-Vault: no se pudo inicializar user_vaults: %s", exc)
-
+    # DDL en runtime desactivado: ejecutar scripts/bootstrap_dbs.py y ensure_registry antes de PM2.
     app.state.telegram_mcp = None
     try:
         from duckclaw.forge.skills.telegram_mcp_bridge import (
@@ -514,6 +463,16 @@ async def _maybe_chat_lock(chat_id: str):
         yield
         return
     async with _chat_lock(chat_id):
+        yield
+
+
+@asynccontextmanager
+async def _maybe_chat_lock_for_request(chat_id: str, skip_session_lock: bool):
+    """Evita lock de sesión para tareas internas (p. ej. SUMMARIZE_NEW_CONTEXT)."""
+    if skip_session_lock:
+        yield
+        return
+    async with _maybe_chat_lock(chat_id):
         yield
 
 
@@ -1063,7 +1022,6 @@ async def _authorize_or_reject(
         # Bootstrap WR: mientras no haya miembros registrados, no bloquear al primer operador.
         # El zero-trust estricto se activa automáticamente cuando wr_members > 0.
         try:
-            ensure_war_room_schema(wr_db)
             if wr_members_count(wr_db, tenant_id) <= 0:
                 _langsmith_auth_log(auth_status="authorized", user_id=user_id, tenant_id=tenant_id)
                 return
@@ -1411,7 +1369,7 @@ async def _invoke_chat(
 
             vpath = (vault_db_path or "").strip()
             Path(vpath).parent.mkdir(parents=True, exist_ok=True)
-            fly_db = DuckClaw(vpath)
+            fly_db = DuckClaw(vpath, read_only=True)
             from duckclaw.graphs.graph_server import get_db as _fly_acl_db
 
             prepare_leila_fly_duckdb(
@@ -1455,7 +1413,7 @@ async def _invoke_chat(
             _gateway_log.error("fly command failed chat=%s: %s", format_chat_id_for_terminal(session_id), exc)
 
     try:
-        from duckclaw.graphs.graph_server import _get_or_build_graph, _ainvoke
+        from duckclaw.graphs.graph_server import ainvoke_manager_ephemeral
     except Exception as exc:
         _gateway_log.error(
             "graph init failed chat=%s: %s\n%s",
@@ -1466,9 +1424,12 @@ async def _invoke_chat(
         raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
     # Concurrencia: por defecto un mensaje por chat_id (Redis lock). Opcional: paralelo (ver _maybe_chat_lock).
-    async with _maybe_chat_lock(session_id):
+    _skip_lock = bool(getattr(payload, "skip_session_lock", None) or False)
+    async with _maybe_chat_lock_for_request(session_id, _skip_lock):
         try:
-            graph = _get_or_build_graph()
+            from duckclaw.graphs.graph_server import _ensure_llm_config
+
+            _ensure_llm_config()
         except Exception as exc:
             _gateway_log.error(
                 "graph init failed chat=%s: %s\n%s",
@@ -1485,8 +1446,7 @@ async def _invoke_chat(
             pass
         t0 = time.monotonic()
         try:
-            result = await _ainvoke(
-                graph,
+            result = await ainvoke_manager_ephemeral(
                 message,
                 history_for_model,
                 session_id,

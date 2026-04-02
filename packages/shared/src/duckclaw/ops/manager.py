@@ -12,14 +12,26 @@ from typing import Any, Optional
 from duckclaw.dotenv_immutable import merged_root_and_proposed_flat_env
 
 
+_WIZARD_PROPOSED_OVERLAY_EXTRA_KEYS = frozenset(
+    {
+        "REDIS_URL",
+        "DUCKCLAW_REDIS_URL",
+        "DUCKCLAW_WRITE_QUEUE_URL",
+        "DUCKCLAW_CONTEXT_STATE_DELTA_QUEUE",
+        "CONTEXT_INJECTION_QUEUE_NAME",
+    }
+)
+
+
 def _overlay_merged_repo_telegram_env_into_process(repo_root: str) -> None:
     """
     Tras cargar sólo la raíz ``.env`` con ``setdefault``, aplica la misma fusión que el
     gateway / setWebhook: ``.env`` + ``config/dotenv_wizard_proposed.env`` (gana el
-    propuesto) para claves ``TELEGRAM_*`` y ``DUCKCLAW_TELEGRAM_*``.
+    propuesto) para:
 
-    Así ``duckops serve --pm2 --gateway`` no pisa tokens recién materializados en
-    ``api_gateways_pm2.json`` con valores antiguos de un ``.env`` inmutable.
+    - ``TELEGRAM_*`` y ``DUCKCLAW_TELEGRAM_*``
+    - Redis y colas de escritura/contexto (p. ej. ``REDIS_URL``), para que el Sovereign
+      Wizard con ``.env`` inmutable deje operativo ``duckops serve --pm2 --gateway``.
     """
     flat = merged_root_and_proposed_flat_env(repo_root)
     for key, val in flat.items():
@@ -29,13 +41,35 @@ def _overlay_merged_repo_telegram_env_into_process(repo_root: str) -> None:
         vs = (str(val).strip() if val is not None else "").strip()
         if not vs:
             continue
-        if ks.startswith("TELEGRAM_") or ks.startswith("DUCKCLAW_TELEGRAM_"):
+        tele = ks.startswith("TELEGRAM_") or ks.startswith("DUCKCLAW_TELEGRAM_")
+        infra = ks in _WIZARD_PROPOSED_OVERLAY_EXTRA_KEYS
+        if tele or infra:
             os.environ[ks] = vs
 
 
 def _resolve_python() -> str:
     """Current interpreter absolute path (respects venv/uv)."""
     return os.path.abspath(sys.executable)
+
+
+def resolve_repo_pm2_python(repo_root: str | Path) -> str:
+    """
+    Intérprete para procesos PM2 ligados al monorepo (p. ej. db-writer).
+
+    ``uv run duckops …`` puede resolver ``sys.executable`` al Python del sistema
+    sin dependencias del proyecto. Si existe ``<repo>/.venv/bin/python(3)``,
+    úsese para que PM2 cargue ``duckdb`` y el resto del venv.
+    """
+    root = Path(repo_root).resolve()
+    bindir = root / ".venv" / "bin"
+    for name in ("python3", "python"):
+        cand = bindir / name
+        try:
+            if cand.is_file() and os.access(cand, os.X_OK):
+                return str(cand.resolve())
+        except OSError:
+            continue
+    return str(Path(sys.executable).resolve())
 
 
 def _resolve_command(command: str, cwd: Optional[str] = None) -> str:

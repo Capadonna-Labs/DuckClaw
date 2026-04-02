@@ -1052,7 +1052,9 @@ def _edit_db_writer_service(console: Console, state: dict[str, Any], repo_root: 
     _write_env_file(repo_root, "REDIS_URL", new_redis)
     if not Confirm.ask("¿Generar/actualizar ecosystem.db-writer.config.cjs?", default=True):
         return
-    venv_python = os.path.abspath(sys.executable)
+    from duckclaw.ops.manager import resolve_repo_pm2_python  # noqa: PLC0415
+
+    venv_python = resolve_repo_pm2_python(repo_root)
     db_writer_dir = repo_root / "services" / "db-writer"
     abs_db = str((repo_root / new_db).resolve()) if not Path(new_db).is_absolute() else new_db
     config_content = f"""/**
@@ -1091,8 +1093,14 @@ module.exports = {{
     console.print(action_table)
     action = Prompt.ask("Acción", choices=["1", "2", "3", "s"], default="s").strip().lower()
     if action == "1":
-        subprocess.run(["pm2", "restart", DB_WRITER_SERVICE_NAME, "--update-env"], timeout=10)
-        console.print("[green]✓[/] Reiniciado.")
+        subprocess.run(
+            ["pm2", "delete", DB_WRITER_SERVICE_NAME],
+            timeout=15,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(["pm2", "start", str(config_path)], timeout=20)
+        console.print("[green]✓[/] Recreado desde ecosystem (delete+start; PM2 no actualiza ``script`` con restart).")
     elif action == "2":
         subprocess.run(["pm2", "start", str(config_path)], timeout=15)
         console.print("[green]✓[/] Iniciado.")
@@ -1137,7 +1145,9 @@ def _edit_service_settings(
     if service_name == DB_WRITER_SERVICE_NAME and provider == "pm2":
         _edit_db_writer_service(console, state, repo_root)
         return
-    venv_python = str(repo_root / ".venv" / "bin" / "python3")
+    from duckclaw.ops.manager import resolve_repo_pm2_python  # noqa: PLC0415
+
+    venv_python = resolve_repo_pm2_python(repo_root)
     
     if provider == "pm2":
         status = _pm2_app_status(service_name)

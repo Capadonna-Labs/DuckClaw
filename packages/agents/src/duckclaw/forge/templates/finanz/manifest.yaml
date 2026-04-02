@@ -40,6 +40,7 @@ skills:
   - get_monthly_summary
   - get_presupuesto_vs_real
   - categorize_expense
+  - search_semantic_context
   - ibkr: {}  # Activa get_ibkr_portfolio (credenciales vía IBKR_PORTFOLIO_API_URL e IBKR_PORTFOLIO_API_KEY)
   # Tavily: noticias, blogs, contexto de mercado en internet (TAVILY_API_KEY + tavily-python en el gateway)
   - tavily_search

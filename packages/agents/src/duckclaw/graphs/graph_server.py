@@ -23,6 +23,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from pathlib import Path
@@ -134,75 +135,32 @@ async def _tailscale_auth_middleware(request: Request, call_next):
 app.middleware("http")(_tailscale_auth_middleware)
 
 # ── Estado global del grafo ────────────────────────────────────────────────────
+# No se guarda conexión DuckDB al archivo del gateway entre peticiones (evita lock con db-writer).
+# Se cachea LLM + rutas; el grafo manager se compila por turno con un DuckClaw RO efímero.
+# Para LangGraph Studio: grafo aparte contra :memory: (sin lock de archivo).
 
 _graph_state: dict[str, Any] = {}
 _graph_init_error: Optional[Exception] = None
 
 
-def _get_or_build_graph() -> Any:
-    """Build/cache the compiled LangGraph via AgentAssembler. Safe to call from sync context."""
-    if _graph_state.get("graph") is not None:
-        return _graph_state["graph"]
+def _ensure_llm_config() -> None:
+    """Carga y cachea LLM y metadatos. No abre el .duckdb del gateway."""
+    if _graph_state.get("llm") is not None:
+        return
 
-    from duckclaw import DuckClaw
     from duckclaw.integrations.llm_providers import build_llm
-    from duckclaw.forge import AgentAssembler, MANAGER_ROUTER_YAML
-
     from duckclaw.gateway_db import get_gateway_db_path
-    db_path = get_gateway_db_path()
 
-    import os as _os
-    _os.makedirs(str(Path(db_path).parent), exist_ok=True)
+    db_path = get_gateway_db_path()
+    os.makedirs(str(Path(db_path).parent), exist_ok=True)
 
     provider = os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx").strip().lower()
-    model    = os.environ.get("DUCKCLAW_LLM_MODEL", "").strip()
+    model = os.environ.get("DUCKCLAW_LLM_MODEL", "").strip()
     base_url = os.environ.get("DUCKCLAW_LLM_BASE_URL", "http://127.0.0.1:8080/v1").strip()
-    system_prompt = os.environ.get("DUCKCLAW_SYSTEM_PROMPT", "Eres un asistente útil con acceso a una base de datos.").strip()
-
-    db  = DuckClaw(db_path)
-
-    # Telegram Guard (Telegram Guard / Whitelist): asegurar esquema persistente.
-    # Hacemos esto aquí para que funcione incluso cuando el pre-init de FastAPI
-    # o lifespan no llegue (y para usar la misma conexión DuckDB).
-    try:
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS main.authorized_users (
-                tenant_id VARCHAR,
-                user_id VARCHAR,
-                username VARCHAR,
-                role VARCHAR DEFAULT 'user',
-                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (tenant_id, user_id)
-            )
-            """
-        )
-        from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
-
-        ensure_user_shared_db_access_table(db)
-    except Exception as exc:
-        # No romper el server: si falla por lock/permiso, el guard bloqueará todo,
-        # y el problema se verá en logs/observabilidad.
-        print(f"[telegram_guard] Could not ensure authorized_users table: {exc}", flush=True)
-    try:
-        from duckclaw.forge import ensure_leila_mvp_schema
-
-        leila_shared = (os.environ.get("DUCKCLAW_SHARED_DB_PATH") or "").strip()
-        if leila_shared:
-            ldb = DuckClaw(leila_shared)
-            try:
-                ensure_leila_mvp_schema(ldb)
-            finally:
-                _lcon = getattr(ldb, "_con", None)
-                if _lcon is not None:
-                    try:
-                        _lcon.close()
-                    except Exception:
-                        pass
-        else:
-            ensure_leila_mvp_schema(db)
-    except Exception as exc:
-        print(f"[leila_mvp] Could not ensure leila_products/leila_orders: {exc}", flush=True)
+    system_prompt = os.environ.get(
+        "DUCKCLAW_SYSTEM_PROMPT",
+        "Eres un asistente útil con acceso a una base de datos.",
+    ).strip()
 
     llm = build_llm(provider, model, base_url)
     if llm is None:
@@ -211,8 +169,39 @@ def _get_or_build_graph() -> Any:
             "Configura DUCKCLAW_LLM_PROVIDER y DUCKCLAW_LLM_BASE_URL en .env."
         )
 
-    # Grafo manager: orquestador que asigna tareas a subagentes (workers); state incluye chat_id
-    graph = AgentAssembler.from_yaml(MANAGER_ROUTER_YAML).build(
+    _graph_state["llm"] = llm
+    _graph_state["provider"] = provider
+    _graph_state["model"] = model
+    _graph_state["base_url"] = base_url
+    _graph_state["db_path"] = db_path
+    _graph_state["system_prompt"] = system_prompt
+
+
+def _build_manager_graph_for_db(db: Any) -> Any:
+    """Compila el grafo manager con la conexión ``db`` del turno (o :memory: para Studio)."""
+    from duckclaw.forge import AgentAssembler, MANAGER_ROUTER_YAML
+
+    _ensure_llm_config()
+    llm = _graph_state["llm"]
+    provider = _graph_state["provider"]
+    model = _graph_state["model"]
+    base_url = _graph_state["base_url"]
+    db_path = _graph_state["db_path"]
+    system_prompt = _graph_state["system_prompt"]
+
+    # :memory: exige read_only=False en DuckDB; no advertir por ello.
+    _dp = (getattr(db, "_path", None) or "").strip()
+    if (
+        db is not None
+        and _dp
+        and _dp != ":memory:"
+        and not getattr(db, "_read_only", False)
+    ):
+        _logging.getLogger(__name__).warning(
+            "graph_server: DuckClaw no está en read_only; revisar core y DUCKCLAW_DB_PATH"
+        )
+
+    return AgentAssembler.from_yaml(MANAGER_ROUTER_YAML).build(
         db=db,
         llm=llm,
         system_prompt=system_prompt,
@@ -222,24 +211,92 @@ def _get_or_build_graph() -> Any:
         db_path=db_path,
     )
 
-    _graph_state["graph"]    = graph
-    _graph_state["db"]       = db
-    _graph_state["provider"] = provider
-    _graph_state["model"]    = model
-    _graph_state["base_url"] = base_url
-    _graph_state["db_path"]  = db_path
-    return graph
+
+def _ensure_studio_graph() -> Any:
+    """Grafo compilado contra :memory: para langgraph dev / GET /graph (sin lock al vault)."""
+    if _graph_state.get("studio_graph") is not None:
+        return _graph_state["studio_graph"]
+
+    from duckclaw import DuckClaw
+
+    # DuckDB: «Cannot launch in-memory database in read-only mode»
+    mem = DuckClaw(":memory:", read_only=False)
+    _graph_state["studio_db"] = mem
+    _graph_state["studio_graph"] = _build_manager_graph_for_db(mem)
+    return _graph_state["studio_graph"]
+
+
+def _is_duckdb_lock_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "lock" in msg or "conflicting" in msg
+
+
+def _open_duckclaw_readonly_with_retry(db_path: str) -> Any:
+    """
+    Abre DuckClaw RO al archivo; reintenta si el db-writer u otro proceso tiene el lock RW.
+    Alineado con el backoff de ``context_injection_handler._connect_duckdb_writable``.
+    """
+    from duckclaw import DuckClaw
+
+    raw_attempts = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS") or "24").strip()
+    try:
+        attempts = max(1, min(int(raw_attempts), 80))
+    except ValueError:
+        attempts = 24
+    raw_sleep = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_BASE_SLEEP_S") or "0.15").strip()
+    try:
+        base_sleep_s = float(raw_sleep)
+    except ValueError:
+        base_sleep_s = 0.15
+    base_sleep_s = max(0.05, base_sleep_s)
+
+    log = _logging.getLogger(__name__)
+    last: BaseException | None = None
+    for i in range(attempts):
+        try:
+            return DuckClaw(db_path, read_only=True)
+        except Exception as exc:
+            last = exc
+            if _is_duckdb_lock_error(exc):
+                delay = base_sleep_s * min(i + 1, 12)
+                log.warning(
+                    "graph_server: DuckDB RO lock intento %s/%s, reintento en %.2fs: %s",
+                    i + 1,
+                    attempts,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+                continue
+            raise
+    assert last is not None
+    raise last
+
+
+def _invoke_ephemeral_gateway_graph() -> tuple[Any, Any]:
+    """
+    Abre DuckClaw RO al archivo del gateway, compila el manager y devuelve (graph, db).
+    El caller debe ``db.close()`` y llamar ``clear_worker_graph_cache()`` en ``finally``.
+    """
+    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+
+    _ensure_llm_config()
+    db_path = str(_graph_state["db_path"])
+    os.makedirs(str(Path(db_path).parent), exist_ok=True)
+    clear_worker_graph_cache()
+    db = _open_duckclaw_readonly_with_retry(db_path)
+    graph = _build_manager_graph_for_db(db)
+    return graph, db
 
 
 # ── Pre-inicialización en tiempo de importación ────────────────────────────────
-# langgraph dev importa este módulo antes de arrancar el event loop (contexto sync).
-# Inicializando aquí, get_graph() devuelve el grafo cacheado sin hacer ningún I/O,
-# evitando el BlockingError de blockbuster al ser llamado desde contexto async.
+# langgraph dev importa este módulo antes del event loop: solo LLM (+ grafo :memory: opcional).
 
 def _pre_init() -> None:
     global _graph_init_error
     try:
-        _get_or_build_graph()
+        _ensure_llm_config()
+        _ensure_studio_graph()
     except Exception as exc:
         _graph_init_error = exc
         print(f"[graph_server] Pre-init warning: {exc}", flush=True)
@@ -306,10 +363,13 @@ async def invoke(req: InvokeRequest):
     Las trazas se envían automáticamente a LangSmith si LANGCHAIN_TRACING_V2=true.
     """
     try:
-        graph = _get_or_build_graph()
+        _ensure_llm_config()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
+    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+
+    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph)
     # Enriquecer el estado con identidad (username/chat_type) para general_graph.
     history = req.history or []
     state = {
@@ -336,6 +396,12 @@ async def invoke(req: InvokeRequest):
             )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error en el grafo: {exc}")
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+        clear_worker_graph_cache()
 
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     return InvokeResponse(
@@ -355,9 +421,13 @@ async def stream(req: InvokeRequest):
     El evento final es: data: [DONE]\\n\\n
     """
     try:
-        graph = _get_or_build_graph()
+        _ensure_llm_config()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
+
+    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+
+    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
@@ -380,6 +450,12 @@ async def stream(req: InvokeRequest):
             yield "data: [DONE]\n\n"
         except Exception as exc:
             yield f"data: [ERROR] {exc}\n\n"
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
+            clear_worker_graph_cache()
 
     return StreamingResponse(
         event_generator(),
@@ -392,7 +468,7 @@ async def stream(req: InvokeRequest):
 async def graph_info():
     """Retorna la estructura del grafo en formato JSON (compatible con LangSmith Studio)."""
     try:
-        graph = _get_or_build_graph()
+        graph = _ensure_studio_graph()
         # LangGraph compiled graphs exponen get_graph()
         if hasattr(graph, "get_graph"):
             g = graph.get_graph()
@@ -476,22 +552,74 @@ async def _async_sleep(seconds: float) -> None:
 def get_graph() -> Any:
     """
     Entry point para langgraph dev / LangSmith Studio.
-    El grafo ya está pre-inicializado en tiempo de importación — no hace I/O.
+    Usa DuckDB :memory: para no mantener lock sobre el archivo del gateway.
     """
-    if _graph_state.get("graph") is None:
+    if _graph_init_error is not None and _graph_state.get("llm") is None:
+        raise _graph_init_error
+    try:
+        return _ensure_studio_graph()
+    except Exception as exc:
         if _graph_init_error is not None:
-            raise _graph_init_error
-        _get_or_build_graph()
-    return _graph_state["graph"]
+            raise _graph_init_error from exc
+        raise
 
 
 def get_db() -> Any:
-    """Devuelve la instancia DuckClaw del grafo (para fly commands en el Gateway)."""
-    if _graph_state.get("db") is None:
-        if _graph_init_error is not None:
-            raise _graph_init_error
-        _get_or_build_graph()
-    return _graph_state.get("db")
+    """
+    Acceso RO efímero al DuckDB del gateway (sin handle persistente).
+    Para comandos fly, ACL y auditoría desde el API Gateway.
+    """
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+
+    p = get_gateway_db_path()
+    os.makedirs(str(Path(p).parent), exist_ok=True)
+    return GatewayDbEphemeralReadonly(p)
+
+
+def _get_or_build_graph() -> Any:
+    """Compatibilidad: mismo grafo que LangGraph Studio (:memory:), no el del archivo del gateway."""
+    return _ensure_studio_graph()
+
+
+async def ainvoke_manager_ephemeral(
+    message: str,
+    history: list,
+    chat_id: str,
+    *,
+    tenant_id: str = "default",
+    user_id: str | None = None,
+    username: str | None = None,
+    vault_db_path: str | None = None,
+    shared_db_path: str | None = None,
+    is_system_prompt: bool | None = False,
+) -> dict:
+    """
+    Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
+    Uso recomendado desde services/api-gateway en lugar de retener un grafo global.
+    """
+    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+
+    _ensure_llm_config()
+    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph)
+    try:
+        return await _ainvoke(
+            graph,
+            message,
+            history,
+            chat_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            username=username,
+            vault_db_path=vault_db_path,
+            shared_db_path=shared_db_path,
+            is_system_prompt=is_system_prompt,
+        )
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+        clear_worker_graph_cache()
 
 
 # ── __main__ ───────────────────────────────────────────────────────────────────

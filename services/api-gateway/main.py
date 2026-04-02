@@ -38,6 +38,12 @@ import redis.asyncio as redis
 
 from core.sandbox_figure_b64 import decode_sandbox_figure_base64, decode_valid_sandbox_image_bytes
 from core.telegram_media_upload import send_sandbox_chart_to_telegram_sync
+from core.war_rooms import (
+    ensure_war_room_schema,
+    is_war_room_tenant,
+    wr_lookup_member_clearance,
+    wr_members_count,
+)
 
 from core.chat_history import (
     gateway_chat_history_enabled,
@@ -48,7 +54,7 @@ from core.chat_history import (
     redis_save_chat_history,
 )
 from core.models import ChatRequest
-from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
+from duckclaw.utils.telegram_markdown_v2 import escape_telegram_html, llm_markdown_to_telegram_html, plain_subchunks_for_telegram_html
 from duckclaw.vaults import ensure_registry as ensure_vault_registry
 from duckclaw.vaults import resolve_active_vault, validate_user_db_path, vault_scope_id_for_tenant
 from duckclaw.integrations.telegram.telegram_agent_token import (
@@ -235,6 +241,14 @@ _log_level = getattr(logging, _log_level_name, logging.INFO)
 configure_structured_logging(level=_log_level)
 _gateway_log = logging.getLogger("duckclaw.gateway")
 _obs_log = get_obs_logger()
+_gateway_log.info(
+    "Gateway startup: DUCKCLAW_DB_PATH=%s DUCKCLAW_PM2_MATCHED_APP_NAME=%s "
+    "DUCKCLAW_WAR_ROOM_ACL_DB_PATH=%s | diagnóstico WR: pm2 logs … --lines 300 "
+    "y grep telegram_inbound_early war_room_gate DROP_NO_MENTION rate_limited",
+    (os.environ.get("DUCKCLAW_DB_PATH") or "").strip() or "(unset)",
+    (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip() or "(unset)",
+    (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip() or "(unset)",
+)
 
 _AUTHORIZED_USERS_TABLE_DDL = """
 CREATE TABLE IF NOT EXISTS main.authorized_users (
@@ -324,11 +338,13 @@ async def lifespan(app: FastAPI):
         pass
     # Prepara el esquema de Telegram Guard (idempotente).
     try:
-        # Importante: reutilizar la misma conexión DuckDB que mantiene graph_server
-        # para evitar conflictos de lock.
-        from duckclaw.graphs.graph_server import get_db
+        from core.gateway_acl_db import get_gateway_acl_duckdb, get_war_room_acl_duckdb
 
-        db = get_db()
+        db, _acl_readonly = get_gateway_acl_duckdb()
+        if _acl_readonly:
+            _gateway_log.info(
+                "Gateway ACL: DuckDB en solo lectura para esquemas de seguridad (whitelist / war rooms)"
+            )
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS main.authorized_users (
@@ -344,6 +360,7 @@ async def lifespan(app: FastAPI):
         from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
 
         ensure_user_shared_db_access_table(db)
+        ensure_war_room_schema(get_war_room_acl_duckdb())
     except Exception as exc:
         _gateway_log.warning("Telegram Guard: no se pudo inicializar authorized_users: %s", exc)
     try:
@@ -665,6 +682,8 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
     uid = _escape_sql_literal(user_id, max_len=128)
     def _ensure_authorized_users_table() -> None:
         # Best-effort: usa el mismo `db` en el que estamos para evitar lock.
+        if getattr(db, "_war_room_acl_readonly", False):
+            return
         try:
             db.execute(_AUTHORIZED_USERS_TABLE_DDL)
         except Exception:
@@ -709,6 +728,28 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
     return None
 
 
+async def _lookup_wr_clearance(redis_client: Any, db: Any, tenant_id: str, user_id: str) -> Optional[str]:
+    key = f"wr_clearance:{str(tenant_id or '').strip().lower()}:{user_id}"
+    if redis_client is not None:
+        try:
+            cached = await redis_client.get(key)
+            if cached:
+                return str(cached).strip() or None
+        except Exception:
+            pass
+    clearance = ""
+    try:
+        clearance = wr_lookup_member_clearance(db, tenant_id, user_id)
+    except Exception:
+        clearance = ""
+    if clearance and redis_client is not None:
+        try:
+            await redis_client.set(key, clearance, ex=300)
+        except Exception:
+            pass
+    return clearance or None
+
+
 def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
     """
     Alert opcional al admin: Bot API nativa si hay token; si no, webhook n8n (best-effort).
@@ -725,12 +766,13 @@ def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
     token = _effective_telegram_bot_token()
     if token:
         try:
-            from duckclaw.integrations.telegram.telegram_outbound_sync import send_message_markdown_v2_sync
+            from duckclaw.integrations.telegram.telegram_outbound_sync import send_bot_message_sync
 
-            if send_message_markdown_v2_sync(
+            if send_bot_message_sync(
                 bot_token=token,
                 chat_id=str(admin_chat_id),
-                text=escape_telegram_markdown_v2(plain),
+                text=escape_telegram_html(plain),
+                parse_mode="HTML",
                 timeout_sec=15.0,
                 log=_gateway_log,
             ):
@@ -755,7 +797,11 @@ def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
     headers: dict[str, Any] = {"Content-Type": "application/json"}
     if auth_key:
         headers["X-DuckClaw-Secret"] = auth_key
-    payload = {"chat_id": str(admin_chat_id), "text": escape_telegram_markdown_v2(plain)}
+    payload = {
+        "chat_id": str(admin_chat_id),
+        "text": escape_telegram_html(plain),
+        "parse_mode": "HTML",
+    }
     data = json.dumps(payload).encode("utf-8")
     req = _url_request.Request(webhook_url, data=data, headers=headers, method="POST")
     try:
@@ -770,12 +816,8 @@ def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
 
 # Telegram sendMessage: máx. 4096 caracteres (https://core.telegram.org/bots/api#sendmessage).
 _TELEGRAM_SENDMESSAGE_CHAR_LIMIT = 4096
-# Trozos de texto plano antes de _telegram_safe; conservador para no superar 4096 tras escapar MarkdownV2.
+# Trozos de texto plano; margen conservador para no superar 4096 tras escapar HTML.
 _DEFAULT_TELEGRAM_REPLY_PLAIN_CHUNK = 2000
-# Webhook outbound: margen para prefijo [i/n] tras escape.
-_OUTBOUND_CHAT_CHUNK = 3600
-
-
 def _telegram_reply_plain_chunk_size() -> int:
     raw = (os.environ.get("DUCKCLAW_TELEGRAM_REPLY_CHUNK_PLAIN") or "").strip()
     if raw:
@@ -811,7 +853,7 @@ def _split_plain_text_for_telegram_reply(text: str, max_chunk: int) -> list[str]
 
 
 def _plain_subchunks_for_telegram_budget(plain: str, safe_fn: Any) -> list[str]:
-    """Subdivide texto plano hasta que ``safe_fn`` (p. ej. MarkdownV2) no supere el límite de Telegram."""
+    """Subdivide texto plano hasta que ``safe_fn`` (p. ej. escape HTML) no supere el límite de Telegram."""
     if not plain:
         return []
     cap = _TELEGRAM_SENDMESSAGE_CHAR_LIMIT - 32
@@ -855,11 +897,7 @@ def _webhook_outbound_chat_reply_sync(*, chat_id: str, user_id: str, text: str) 
     if auth_key:
         headers["X-DuckClaw-Secret"] = auth_key
 
-    chunks: list[str] = []
-    i = 0
-    while i < len(raw):
-        chunks.append(raw[i : i + _OUTBOUND_CHAT_CHUNK])
-        i += _OUTBOUND_CHAT_CHUNK
+    chunks = plain_subchunks_for_telegram_html(raw)
     if not chunks:
         chunks = [raw]
 
@@ -868,7 +906,8 @@ def _webhook_outbound_chat_reply_sync(*, chat_id: str, user_id: str, text: str) 
         payload = {
             "chat_id": cid,
             "user_id": uid,
-            "text": escape_telegram_markdown_v2(prefix + part),
+            "text": llm_markdown_to_telegram_html(prefix + part),
+            "parse_mode": "HTML",
         }
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = _url_request.Request(url, data=data, headers=headers, method="POST")
@@ -1001,10 +1040,23 @@ async def _authorize_or_reject(*, tenant_id: str, user_id: str, is_owner: bool) 
         return
 
     redis_client = getattr(app.state, "redis", None)
-    from duckclaw.graphs.graph_server import get_db
+    from core.gateway_acl_db import get_gateway_acl_duckdb, get_war_room_acl_duckdb
 
-    db = get_db()
-    role = await _lookup_whitelist_role(redis_client, db, tenant_id, user_id)
+    db = get_gateway_acl_duckdb()[0]
+    if is_war_room_tenant(tenant_id):
+        wr_db = get_war_room_acl_duckdb()
+        # Bootstrap WR: mientras no haya miembros registrados, no bloquear al primer operador.
+        # El zero-trust estricto se activa automáticamente cuando wr_members > 0.
+        try:
+            ensure_war_room_schema(wr_db)
+            if wr_members_count(wr_db, tenant_id) <= 0:
+                _langsmith_auth_log(auth_status="authorized", user_id=user_id, tenant_id=tenant_id)
+                return
+        except Exception:
+            pass
+        role = await _lookup_wr_clearance(redis_client, wr_db, tenant_id, user_id)
+    else:
+        role = await _lookup_whitelist_role(redis_client, db, tenant_id, user_id)
     if role:
         _langsmith_auth_log(auth_status="authorized", user_id=user_id, tenant_id=tenant_id)
         return
@@ -1181,6 +1233,8 @@ def clean_agent_response(response: str) -> str:
     if not response or not isinstance(response, str):
         return response
     text = str(response)
+    text = re.sub(r"(?is)<\s*pre\b[^>]*>", "", text)
+    text = re.sub(r"(?is)<\s*/\s*pre\s*>", "", text)
     # No usar ".*" con DOTALL tras frases cortas: el BI Analyst sigue con párrafos útiles
     # después de "¿Cuál es mi tarea?" y eso borraba todo el cuerpo (Telegram solo veía el header).
     line_patterns = [
@@ -1295,10 +1349,10 @@ async def _invoke_chat(
         )
 
     if not is_system_prompt and not is_owner:
-        from duckclaw.graphs.graph_server import get_db
+        from core.gateway_acl_db import get_gateway_acl_duckdb
         from duckclaw.shared_db_grants import path_is_under_shared_tree, user_may_access_shared_path
 
-        acl_db = get_db()
+        acl_db = get_gateway_acl_duckdb()[0]
         _candidates = {s for s in ((shared_db_path or "").strip(), (os.getenv("DUCKCLAW_SHARED_DB_PATH") or "").strip()) if s}
         for candidate in _candidates:
             if not path_is_under_shared_tree(candidate):
@@ -1610,19 +1664,17 @@ async def _invoke_chat(
         pass
     _telegram_response_parts_count = 1
     try:
-        from duckclaw.graphs.on_the_fly_commands import _telegram_safe
-
         coarse = _split_plain_text_for_telegram_reply(
             reply_plain_for_storage or "",
             _telegram_reply_plain_chunk_size(),
         )
         plain_parts: list[str] = []
         for piece in coarse:
-            plain_parts.extend(_plain_subchunks_for_telegram_budget(piece, _telegram_safe))
+            plain_parts.extend(_plain_subchunks_for_telegram_budget(piece, llm_markdown_to_telegram_html))
         if not plain_parts:
             plain_parts = [""]
         _telegram_response_parts_count = len(plain_parts)
-        reply_text = _telegram_safe(plain_parts[0])
+        reply_text = llm_markdown_to_telegram_html(plain_parts[0])
         tail_plain = "\n\n".join(plain_parts[1:]) if len(plain_parts) > 1 else ""
         if tail_plain.strip():
             try:
@@ -1652,9 +1704,7 @@ async def _invoke_chat(
                 _gateway_log.warning("telegram reply tail: no se pudo programar envío: %s", exc)
     except Exception:
         try:
-            from duckclaw.graphs.on_the_fly_commands import _telegram_safe
-
-            reply_text = _telegram_safe(reply_plain_for_storage)
+            reply_text = llm_markdown_to_telegram_html(reply_plain_for_storage or "")
             cap = _TELEGRAM_SENDMESSAGE_CHAR_LIMIT - 16
             if len(reply_text) > cap:
                 reply_text = reply_text[:cap] + "…"
@@ -1665,6 +1715,17 @@ async def _invoke_chat(
         and redis_client is not None
         and gateway_chat_history_enabled()
     ):
+        if is_war_room_tenant(tenant_id):
+            from core.gateway_acl_db import get_war_room_acl_duckdb
+
+            wr_role = await _lookup_wr_clearance(redis_client, get_war_room_acl_duckdb(), tenant_id, user_id)
+            if not wr_role:
+                return {
+                    "response": "Clearance Revoked.",
+                    "session_id": session_id,
+                    "worker_id": effective_worker_id or worker_id,
+                    "elapsed_ms": elapsed_ms,
+                }
         u = normalize_history_item({"role": "user", "content": message})
         a = normalize_history_item({"role": "assistant", "content": reply_plain_for_storage})
         if u and a:
@@ -1725,11 +1786,11 @@ async def enqueue_write(req: WriteRequest):
             detail="db_path inválido para el usuario.",
         )
     if db_path:
+        from core.gateway_acl_db import get_gateway_acl_duckdb
         from duckclaw.shared_db_grants import path_is_under_shared_tree, user_may_access_shared_path
-        from duckclaw.graphs.graph_server import get_db
 
         if path_is_under_shared_tree(db_path) and not user_may_access_shared_path(
-            get_db(),
+            get_gateway_acl_duckdb()[0],
             tenant_id=str(tid or "default").strip() or "default",
             user_id=user_id,
             shared_db_path=db_path,

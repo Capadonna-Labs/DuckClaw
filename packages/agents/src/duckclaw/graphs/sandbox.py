@@ -376,7 +376,7 @@ class StrixSandboxManager:
         except Exception as e:
             return ExecutionResult(exit_code=1, stdout="", stderr=f"Error de ejecución: {e}")
 
-        artifacts = self._collect_artifacts(out_dir)
+        artifacts = self._collect_artifacts(out_dir, session_id=session_id)
 
         return ExecutionResult(
             exit_code=exec_result.exit_code or 0,
@@ -386,10 +386,12 @@ class StrixSandboxManager:
             artifacts=artifacts,
         )
 
-    def _collect_artifacts(self, out_dir: Path) -> list[str]:
+    def _collect_artifacts(self, out_dir: Path, *, session_id: str = "") -> list[str]:
         """Mueve artefactos del directorio de salida a la carpeta de plots del proyecto."""
         artifacts = []
-        plots_dir = Path("output") / "sandbox"
+        sid = str(session_id or "").strip()
+        wr_bucket = sid if sid.startswith("wr_") else ""
+        plots_dir = Path("output") / "sandbox" / (wr_bucket or "default")
         plots_dir.mkdir(parents=True, exist_ok=True)
         for f in out_dir.iterdir():
             if f.is_file():

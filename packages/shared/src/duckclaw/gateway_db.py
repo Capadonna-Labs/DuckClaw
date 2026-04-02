@@ -26,6 +26,20 @@ def get_gateway_db_path() -> str:
     return os.environ.get("DUCKDB_PATH", "db/duckclaw.duckdb").strip() or "db/duckclaw.duckdb"
 
 
+def get_war_room_acl_db_path() -> str:
+    """
+    DuckDB donde vive ``war_room_core.wr_members`` para zero-trust en War Rooms.
+
+    Si ``DUCKCLAW_WAR_ROOM_ACL_DB_PATH`` está definida (p. ej. finanzdb1 mientras el
+    grafo del gateway usa jobhunterdb1), las comprobaciones WR leen esa ruta en solo
+    lectura. Si no, coincide con ``get_gateway_db_path()``.
+    """
+    p = (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip()
+    if p:
+        return p
+    return get_gateway_db_path()
+
+
 def get_gateway_db() -> Any:
     """
     Instancia DuckClaw apuntando a la misma ruta que el API Gateway (legacy / herramientas sin db inyectada).

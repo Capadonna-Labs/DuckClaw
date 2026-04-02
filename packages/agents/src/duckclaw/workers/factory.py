@@ -27,7 +27,7 @@ except ImportError:
 
 from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
 from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_sync, set_log_context
-from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
+from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 from duckclaw.workers import read_pool
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills, run_schema
@@ -456,7 +456,12 @@ def _send_sandbox_heartbeat_telegram(state: dict) -> None:
     if auth:
         headers["X-DuckClaw-Secret"] = auth
     payload = json.dumps(
-        {"chat_id": cid, "user_id": uid, "text": escape_telegram_markdown_v2(text)},
+        {
+            "chat_id": cid,
+            "user_id": uid,
+                "text": llm_markdown_to_telegram_html(text),
+            "parse_mode": "HTML",
+        },
         ensure_ascii=False,
     ).encode("utf-8")
     req = _urllib_request.Request(url, data=payload, headers=headers, method="POST")
@@ -1097,6 +1102,124 @@ def build_worker_graph(
             _bind_tools(llm, tools_sandbox_off, tool_choice=tool_choice_tavily) if has_tavily else None
         )
 
+        _reddit_tool_names = sorted(k for k in tools_by_name if (k or "").startswith("reddit_"))
+        has_reddit_tools = bool(_reddit_tool_names)
+
+        def _reddit_tool_choice_dict(tool_nm: str) -> dict[str, Any]:
+            return {"type": "function", "function": {"name": tool_nm}}
+
+        llm_force_reddit_post_on = (
+            _bind_tools(llm, tools, tool_choice=_reddit_tool_choice_dict("reddit_get_post"))
+            if "reddit_get_post" in tools_by_name
+            else None
+        )
+        llm_force_reddit_post_off = (
+            _bind_tools(llm, tools_sandbox_off, tool_choice=_reddit_tool_choice_dict("reddit_get_post"))
+            if "reddit_get_post" in tools_by_name_sandbox_off
+            else None
+        )
+        llm_force_reddit_search_on = (
+            _bind_tools(llm, tools, tool_choice=_reddit_tool_choice_dict("reddit_search_reddit"))
+            if "reddit_search_reddit" in tools_by_name
+            else None
+        )
+        llm_force_reddit_search_off = (
+            _bind_tools(llm, tools_sandbox_off, tool_choice=_reddit_tool_choice_dict("reddit_search_reddit"))
+            if "reddit_search_reddit" in tools_by_name_sandbox_off
+            else None
+        )
+        _reddit_fallback_nm = None
+        if has_reddit_tools and not llm_force_reddit_post_on and not llm_force_reddit_search_on:
+            _reddit_fallback_nm = _reddit_tool_names[0]
+        llm_force_reddit_fallback_on = (
+            _bind_tools(llm, tools, tool_choice=_reddit_tool_choice_dict(_reddit_fallback_nm))
+            if _reddit_fallback_nm and _reddit_fallback_nm in tools_by_name
+            else None
+        )
+        llm_force_reddit_fallback_off = (
+            _bind_tools(llm, tools_sandbox_off, tool_choice=_reddit_tool_choice_dict(_reddit_fallback_nm))
+            if _reddit_fallback_nm and _reddit_fallback_nm in tools_by_name_sandbox_off
+            else None
+        )
+
+        def _incoming_has_reddit_url(text: str) -> bool:
+            if not text or not str(text).strip():
+                return False
+            return bool(re.search(r"(?:reddit\.com|redd\.it)/", str(text), re.IGNORECASE))
+
+        def _incoming_looks_like_reddit_post_url(text: str) -> bool:
+            if not text or not str(text).strip():
+                return False
+            return bool(
+                re.search(
+                    r"(?:https?://)?(?:www\.)?reddit\.com/r/[\w_]+/comments/[\w]+",
+                    str(text),
+                    re.IGNORECASE,
+                )
+            )
+
+        def _first_reddit_url_in_text(text: str) -> Optional[str]:
+            if not text or not str(text).strip():
+                return None
+            m = re.search(r"https?://(?:www\.)?reddit\.com/[^\s)>\]\"']+", str(text), re.IGNORECASE)
+            if m:
+                u = m.group(0)
+                while u and u[-1] in ".,);":
+                    u = u[:-1]
+                return u or None
+            m2 = re.search(r"https?://redd\.it/[a-zA-Z0-9]+", str(text), re.IGNORECASE)
+            return m2.group(0) if m2 else None
+
+        def _incoming_has_reddit_share_path(text: str) -> bool:
+            return bool(re.search(r"reddit\.com/r/[\w_]+/s/[a-zA-Z0-9]+", str(text or ""), re.IGNORECASE))
+
+        def _reddit_share_slug_from_incoming(text: str) -> Optional[str]:
+            m = re.search(r"/r/[\w_]+/s/([a-zA-Z0-9]+)", str(text or ""), re.IGNORECASE)
+            return m.group(1) if m else None
+
+        def _count_tool_messages_named(messages: list[Any], tool_name: str) -> int:
+            n = 0
+            for m in messages or []:
+                if isinstance(m, ToolMessage) and (getattr(m, "name", None) or "") == tool_name:
+                    n += 1
+            return n
+
+        def _tc_args_as_dict(tc: Any) -> dict[str, Any]:
+            if isinstance(tc, dict):
+                args = tc.get("args")
+                if isinstance(args, dict):
+                    return dict(args)
+                raw = tc.get("arguments")
+                if isinstance(raw, str) and raw.strip():
+                    try:
+                        parsed = json.loads(raw)
+                        if isinstance(parsed, dict):
+                            return dict(parsed)
+                    except Exception:
+                        pass
+            return {}
+
+        def _patch_ai_reddit_search_query(resp: Any, query_url: str) -> Any:
+            tcs = list(getattr(resp, "tool_calls", None) or [])
+            if not query_url or not tcs:
+                return resp
+            patched: list[Any] = []
+            changed = False
+            for tc in tcs:
+                name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+                if name != "reddit_search_reddit" or not isinstance(tc, dict):
+                    patched.append(tc)
+                    continue
+                args = _tc_args_as_dict(tc)
+                args["query"] = query_url
+                new_tc = {**tc, "args": args}
+                new_tc.pop("arguments", None)
+                patched.append(new_tc)
+                changed = True
+            if not changed:
+                return resp
+            return resp.model_copy(update={"tool_calls": patched})
+
         def _spec_is_job_hunter() -> bool:
             a = re.sub(r"[^a-z0-9]", "", (spec.worker_id or "").lower())
             b = re.sub(r"[^a-z0-9]", "", (getattr(spec, "logical_worker_id", None) or "").lower())
@@ -1238,6 +1361,24 @@ def build_worker_graph(
             else:
                 force_tavily = False
 
+            share_slug = _reddit_share_slug_from_incoming(incoming)
+            reddit_search_tool_count = _count_tool_messages_named(state.get("messages") or [], "reddit_search_reddit")
+            need_share_followup = bool(
+                share_slug
+                and already_has_tool_result
+                and isinstance(last_msg, ToolMessage)
+                and (last_msg.name or "") == "reddit_search_reddit"
+                and share_slug not in str(last_msg.content or "")
+                and reddit_search_tool_count < 2
+            )
+            force_reddit = bool(
+                _lid == "finanz"
+                and has_reddit_tools
+                and _incoming_has_reddit_url(incoming)
+                and not (force_schema or force_read_sql or force_portfolio or force_tavily)
+                and (not already_has_tool_result or need_share_followup)
+            )
+
             if jh_fast_text is not None:
                 resp = AIMessage(content=jh_fast_text)
                 out = {**state, "messages": state["messages"] + [resp]}
@@ -1255,7 +1396,7 @@ def build_worker_graph(
                     else (
                         "get_ibkr_portfolio"
                         if force_portfolio
-                        else ("tavily_search" if force_tavily else "auto")
+                        else ("tavily_search" if force_tavily else ("reddit" if force_reddit else "auto"))
                     )
                 )
             )
@@ -1280,6 +1421,18 @@ def build_worker_graph(
             elif force_tavily:
                 ft = llm_force_tavily_on if sandbox_enabled else llm_force_tavily_off
                 resp = (ft or llm_with_tools).invoke(state["messages"])
+            elif force_reddit:
+                fr = None
+                if _incoming_looks_like_reddit_post_url(incoming):
+                    fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
+                if fr is None:
+                    fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
+                if fr is None:
+                    fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
+                resp = (fr or llm_with_tools).invoke(state["messages"])
+                ruq = _first_reddit_url_in_text(incoming)
+                if ruq and _incoming_has_reddit_share_path(incoming):
+                    resp = _patch_ai_reddit_search_query(resp, ruq)
             else:
                 resp = llm_with_tools.invoke(state["messages"])
             tool_calls = getattr(resp, "tool_calls", None) or []
@@ -1580,8 +1733,19 @@ def build_worker_graph(
             pass
         try:
             from duckclaw.forge.atoms.quant_price_validator import quant_reply_price_audit
+            from duckclaw.forge.atoms.quant_price_validator import enforce_visual_evidence_rule
 
             if reply:
+                new_v, vreason = enforce_visual_evidence_rule(
+                    incoming=(state.get("incoming") or ""),
+                    messages=msgs,
+                    reply=reply,
+                    db=db,
+                    spec=spec,
+                )
+                if vreason:
+                    _log.warning("Finanz visual evidence audit: %s", vreason)
+                    reply = new_v
                 new_r, qreason = quant_reply_price_audit(db, spec, reply)
                 if qreason:
                     _log.warning("Finanz quant price audit: %s", qreason)

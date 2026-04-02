@@ -17,6 +17,8 @@ No existe `src/reddit` en el repositorio oficial [modelcontextprotocol/servers](
 | Comentarios de un post | `get_post_comments` |
 | Perfil / historial usuario | `get_user_info`, `get_user_posts`, `get_user_comments` |
 
+**Paquete npm `mcp-reddit` ≥1.1:** las mismas herramientas se listan con prefijo `reddit_` (p. ej. `reddit_get_post`, `reddit_search_reddit`). El bridge en `reddit_bridge.py` admite **ambos** esquemas de nombres.
+
 Herramientas **mutadoras** del paquete (posts, comentarios, borrado, subida de imagen): por defecto **no** se registran si el manifest tiene `reddit.read_only: true`. Con `read_only: false` se exponen pero quedan envueltas en **HITL** (mensaje que pide `/approve`), igual que GitHub destructivo.
 
 **Variables de entorno (proceso del API Gateway)**  

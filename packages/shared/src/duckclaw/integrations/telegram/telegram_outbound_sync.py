@@ -10,7 +10,11 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
+from duckclaw.utils.telegram_markdown_v2 import (
+    escape_telegram_markdown_v2,
+    llm_markdown_to_telegram_html,
+    plain_subchunks_for_telegram_html,
+)
 
 _log = logging.getLogger("duckclaw.telegram_outbound_sync")
 
@@ -33,16 +37,20 @@ def normalize_telegram_chat_id_for_bot_api(chat_id: str | None) -> str:
     return s
 
 
-def send_message_markdown_v2_sync(
+def send_bot_message_sync(
     *,
     bot_token: str,
     chat_id: str,
     text: str,
+    parse_mode: str | None,
     timeout_sec: float = 60.0,
     log: logging.Logger | None = None,
     emit_success_log: bool = True,
 ) -> bool:
-    """Un sendMessage con parse_mode MarkdownV2. Devuelve True si ``ok`` en la respuesta JSON."""
+    """
+    sendMessage con el cuerpo tal cual (ya escapado por el llamante si aplica).
+    ``parse_mode`` None = texto plano sin entidades.
+    """
     lg = log or _log
     token = (bot_token or "").strip()
     cid = normalize_telegram_chat_id_for_bot_api(chat_id) or (chat_id or "").strip()
@@ -59,9 +67,10 @@ def send_message_markdown_v2_sync(
     payload: dict[str, Any] = {
         "chat_id": cid,
         "text": body,
-        "parse_mode": "MarkdownV2",
         "disable_web_page_preview": True,
     }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     try:
@@ -95,9 +104,10 @@ def send_message_markdown_v2_sync(
     if ok:
         if emit_success_log:
             lg.info(
-                "telegram native sendMessage OK chat_id=%s text_len=%s",
+                "telegram native sendMessage OK chat_id=%s text_len=%s parse_mode=%s",
                 cid,
                 len(body),
+                parse_mode or "none",
             )
     else:
         lg.warning(
@@ -106,6 +116,27 @@ def send_message_markdown_v2_sync(
             raw[:800],
         )
     return ok
+
+
+def send_message_markdown_v2_sync(
+    *,
+    bot_token: str,
+    chat_id: str,
+    text: str,
+    timeout_sec: float = 60.0,
+    log: logging.Logger | None = None,
+    emit_success_log: bool = True,
+) -> bool:
+    """sendMessage MarkdownV2 (texto ya escapado para esa modalidad)."""
+    return send_bot_message_sync(
+        bot_token=bot_token,
+        chat_id=chat_id,
+        text=text,
+        parse_mode="MarkdownV2",
+        timeout_sec=timeout_sec,
+        log=log,
+        emit_success_log=emit_success_log,
+    )
 
 
 def send_long_plain_text_markdown_v2_chunks_sync(
@@ -118,7 +149,7 @@ def send_long_plain_text_markdown_v2_chunks_sync(
     log: logging.Logger | None = None,
 ) -> int:
     """
-    Trocea texto plano, escapa MarkdownV2 y envía uno o varios sendMessage.
+    Trocea texto plano, escapa como HTML (sin barras de MarkdownV2) y envía uno o varios sendMessage.
     Returns: número de partes enviadas con éxito.
     """
     lg = log or _log
@@ -130,32 +161,27 @@ def send_long_plain_text_markdown_v2_chunks_sync(
     if not token or not cid:
         lg.warning("telegram native chunks omitidos: token=%s chat_id=%s", bool(token), cid or chat_id)
         return 0
-    cap = max(256, min(max_plain_chunk, 3900))
-    chunks: list[str] = []
-    i = 0
-    n = len(raw)
-    while i < n:
-        chunks.append(raw[i : i + cap])
-        i += cap
+    chunks = plain_subchunks_for_telegram_html(raw)
     if not chunks:
         chunks = [raw]
     total = len(chunks)
     sent = 0
     for idx, part in enumerate(chunks):
         prefix = f"[{idx + 1}/{total}]\n" if total > 1 else ""
-        escaped = escape_telegram_markdown_v2(prefix + part)
+        safe = llm_markdown_to_telegram_html(prefix + part)
         lg.info(
-            "telegram native chunk %s/%s chat_id=%s plain_len=%s escaped_len=%s",
+            "telegram native chunk %s/%s chat_id=%s plain_len=%s html_len=%s",
             idx + 1,
             total,
             cid,
             len(part),
-            len(escaped),
+            len(safe),
         )
-        if send_message_markdown_v2_sync(
+        if send_bot_message_sync(
             bot_token=token,
             chat_id=cid,
-            text=escaped,
+            text=safe,
+            parse_mode="HTML",
             timeout_sec=timeout_sec,
             log=lg,
             emit_success_log=False,

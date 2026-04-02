@@ -28,10 +28,10 @@ def build_mcp_app():
     mcp = FastMCP("duckclaw-telegram")
 
     @mcp.tool()
-    def telegram_send_message(chat_id: str, text: str, parse_mode: str = "MarkdownV2") -> str:
-        """Envía un mensaje de texto a un chat de Telegram."""
+    def telegram_send_message(chat_id: str, text: str, parse_mode: str = "HTML") -> str:
+        """Envía un mensaje de texto. Por defecto HTML (menos caracteres escapados que MarkdownV2)."""
         if parse_mode not in ("MarkdownV2", "HTML", ""):
-            parse_mode = "MarkdownV2"
+            parse_mode = "HTML"
         r = send_message_api(chat_id=chat_id, text=text, parse_mode=parse_mode)
         return json.dumps(r, ensure_ascii=False)
 

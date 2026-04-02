@@ -160,13 +160,33 @@ def _contains_income_injection_request(text: str) -> bool:
     return "[a2a_request: income_injection]" in t
 
 
+# Líneas tipo «finanz 2», «Job-Hunter 1» al inicio del cuerpo (eco de heartbeats / historial).
+_SUBAGENT_INSTANCE_HEADER_LINE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\s+\d+\s*$")
+
+
+def _strip_leading_subagent_instance_headers(text: str) -> str:
+    """
+    Elimina una o más líneas iniciales ``<worker_id> <n>`` que el modelo repite tras ver
+    DMs de delegación o turnos anteriores. Deja intacto el resto del mensaje.
+    """
+    t = (text or "").strip()
+    while t:
+        lines = t.splitlines()
+        if not lines:
+            break
+        if not _SUBAGENT_INSTANCE_HEADER_LINE.match(lines[0].strip()):
+            break
+        t = "\n".join(lines[1:]).strip()
+    return t
+
+
 def _prepend_subagent_label_once(reply: str, label: str) -> str:
     """
     Añade el encabezado del subagente solo si el texto aún no lo trae al inicio.
     Evita respuestas con doble prefijo como:
     `finanz 1` + `finanz 1`.
     """
-    clean_reply = (reply or "").strip()
+    clean_reply = _strip_leading_subagent_instance_headers(reply or "")
     clean_label = (label or "").strip()
     if not clean_label or not clean_reply:
         return clean_reply
@@ -894,6 +914,26 @@ def build_manager_graph(
                 and _worker_matches_id(assigned, mission.get("target_worker"))
             ):
                 worker_state["suppress_subagent_egress"] = True
+                try:
+                    from duckclaw.graphs.chat_heartbeat import schedule_chat_heartbeat_dm
+
+                    target_name = str(mission.get("target_worker") or assigned or "subagente")
+                    source_name = str(mission.get("source_worker") or "manager")
+                    handoff_msg = (
+                        f"A2A handoff visible: @{target_name}, solicitado por @{source_name} "
+                        "para misión en curso."
+                    )
+                    schedule_chat_heartbeat_dm(
+                        str(tenant_id or "default").strip() or "default",
+                        str(chat_id or "").strip(),
+                        str(user_id or "").strip() or str(chat_id or "").strip(),
+                        handoff_msg,
+                        log_worker_id=agent_instance_label or None,
+                        log_username=(state.get("username") or "").strip() or None,
+                        log_plan_title="A2A handoff",
+                    )
+                except Exception:
+                    pass
             if state.get("handoff_context"):
                 worker_state["handoff_context"] = state.get("handoff_context")
             mission_context_system_message = (state.get("mission_context_system_message") or "").strip()

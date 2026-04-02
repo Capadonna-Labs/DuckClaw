@@ -7,11 +7,16 @@ from __future__ import annotations
 import json
 import re
 from typing import Any, Optional, Tuple
+from langchain_core.messages import ToolMessage
 
 _TICKER_PAT = re.compile(r"\b([A-Z]{1,5})\b")
 # Cotización probable: decimal con al menos 2 dígitos fraccionarios o con símbolo $
 _PRICE_PAT = re.compile(r"(?:\$\s*)?(\d{1,6}\.\d{2,6})\b")
 _MAX_DRIFT = 0.001  # 0.1 %
+_VLM_MARKER = "VLM_CONTEXT"
+_EVIDENCE_TOOLS = {"fetch_market_data", "fetch_lake_ohlcv", "read_sql"}
+
+_NUMERIC_VERIFY_STATUSES = frozenset({"verified", "mismatch", "no_evidence"})
 
 
 def spec_is_finanz_quant(spec: Any) -> bool:
@@ -102,3 +107,63 @@ def quant_reply_price_audit(db: Any, spec: Any, reply: str) -> Tuple[str, Option
                 err,
             )
     return reply, None
+
+
+def _tool_message_satisfies_visual_evidence(m: ToolMessage) -> bool:
+    nm = str(getattr(m, "name", "") or "").strip()
+    content = str(getattr(m, "content", "") or "")
+    low = content.lower()
+    if nm in _EVIDENCE_TOOLS and "error" not in low:
+        return True
+    if nm == "verify_visual_claim":
+        if "error" in low:
+            return False
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict) and data.get("status") in _NUMERIC_VERIFY_STATUSES:
+                return True
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return False
+
+
+def enforce_visual_evidence_rule(
+    *,
+    incoming: str,
+    messages: list[Any],
+    reply: str,
+    db: Any = None,
+    spec: Any = None,
+) -> Tuple[str, Optional[str]]:
+    """
+    Si hay contexto visual inyectado, exige evidencia tool-call en el mismo turno antes de citar cifras
+    que parezcan cotizaciones. Para capturas de noticias (sin ticker en quant_core.ohlcv_data en el texto),
+    no bloquea: evita falsos positivos con montos tipo “1,75 billones”.
+    """
+    inc = (incoming or "").strip()
+    text = (reply or "").strip()
+    if not inc or _VLM_MARKER not in inc:
+        return reply, None
+    if not _PRICE_PAT.search(text):
+        return reply, None
+
+    if (
+        db is not None
+        and spec is not None
+        and spec_is_finanz_quant(spec)
+    ):
+        known = _known_tickers(db)
+        if not known:
+            return reply, None
+        mentioned = {m.group(1) for m in _TICKER_PAT.finditer(text) if m.group(1) in known}
+        if not mentioned:
+            return reply, None
+
+    for m in messages or []:
+        if isinstance(m, ToolMessage) and _tool_message_satisfies_visual_evidence(m):
+            return reply, None
+    return (
+        "❌ Regla de Evidencia Única: detecté contexto visual y cifras de mercado sin tool call válido en este turno. "
+        "Ejecuta fetch_market_data/fetch_lake_ohlcv o read_sql primero y luego recalculo.",
+        "missing_tool_evidence_for_vlm_claim",
+    )

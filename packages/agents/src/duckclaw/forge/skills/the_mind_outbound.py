@@ -16,7 +16,7 @@ from typing import Any
 import requests
 from langchain_core.tools import tool
 from duckclaw.utils.logger import get_obs_logger, log_fly
-from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2
+from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 
 _log = logging.getLogger("duckclaw.the_mind_outbound")
 _obs = get_obs_logger("duckclaw.fly")
@@ -28,8 +28,8 @@ def _preview_text(text: str, max_len: int = 50) -> str:
 
 
 def _telegram_safe(text: str) -> str:
-    """Escapa texto para nodos outbound configurados con Markdown/MarkdownV2."""
-    return escape_telegram_markdown_v2(text)
+    """Escapa texto para nodos outbound con parse_mode HTML (Telegram Bot API)."""
+    return llm_markdown_to_telegram_html(text)
 
 
 def _team_username_by_user_id(db: Any, tenant_id: str, user_id: str) -> str:
@@ -187,7 +187,7 @@ def send_telegram_dm(
         return TelegramDmOutcome.skipped_no_chat_id()
 
     safe_text = _telegram_safe(text or "")
-    payload = {"chat_id": cid, "user_id": cid, "text": safe_text}
+    payload = {"chat_id": cid, "user_id": cid, "text": safe_text, "parse_mode": "HTML"}
     try:
         log_fly(
             _obs,

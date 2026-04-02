@@ -196,6 +196,166 @@ def _delete_authorized_user(db: Any, *, tenant_id: str, user_id: str) -> None:
     )
 
 
+def _is_wr_tenant(tenant_id: str | None) -> bool:
+    return str(tenant_id or "").strip().lower().startswith("wr_")
+
+
+def _ensure_war_room_tables(db: Any) -> None:
+    try:
+        db.execute("CREATE SCHEMA IF NOT EXISTS war_room_core;")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS war_room_core.wr_members (
+                tenant_id VARCHAR,
+                user_id VARCHAR,
+                username VARCHAR,
+                clearance_level VARCHAR,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, user_id)
+            );
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS war_room_core.wr_audit_log (
+                event_id VARCHAR PRIMARY KEY,
+                tenant_id VARCHAR,
+                sender_id VARCHAR,
+                target_agent VARCHAR,
+                event_type VARCHAR,
+                payload TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
+    except Exception:
+        pass
+
+
+def _wr_member_clearance(db: Any, *, tenant_id: str, user_id: str) -> str:
+    _ensure_war_room_tables(db)
+    tid = _sql_escape_literal(tenant_id, max_len=128)
+    uid = _sql_escape_literal(user_id, max_len=128)
+    try:
+        raw = db.query(
+            "SELECT clearance_level FROM war_room_core.wr_members "
+            f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if rows and isinstance(rows[0], dict):
+            return str(rows[0].get("clearance_level") or "").strip().lower()
+    except Exception:
+        pass
+    return ""
+
+
+def _wr_append_audit(
+    db: Any,
+    *,
+    tenant_id: str,
+    sender_id: str,
+    target_agent: str,
+    event_type: str,
+    payload: str,
+) -> None:
+    import uuid
+
+    _ensure_war_room_tables(db)
+    db.execute(
+        "INSERT INTO war_room_core.wr_audit_log (event_id, tenant_id, sender_id, target_agent, event_type, payload) "
+        f"VALUES ('{uuid.uuid4()}', '{_sql_escape_literal(tenant_id, 128)}', "
+        f"'{_sql_escape_literal(sender_id, 128)}', '{_sql_escape_literal(target_agent, 64)}', "
+        f"'{_sql_escape_literal(event_type, 64)}', '{_sql_escape_literal(payload, 8000)}')"
+    )
+
+
+def register_wr_member(db: Any, tenant_id: Any, requester_id: Any, args: str) -> str:
+    tid = str(tenant_id or "default").strip() or "default"
+    rid = str(requester_id or "").strip()
+    if not _is_wr_tenant(tid):
+        return _telegram_safe("register_wr_member solo aplica en tenants War Room (wr_<group_id>).")
+    _ensure_war_room_tables(db)
+    clearance = _wr_member_clearance(db, tenant_id=tid, user_id=rid)
+    if not (_is_gateway_owner_user(rid) or clearance == "admin"):
+        return _telegram_safe("❌ Acceso denegado: solo admin WR puede registrar miembros.")
+    tokens = [x for x in (args or "").split() if x.strip()]
+    if len(tokens) < 2:
+        return _telegram_safe("Uso: /register_wr_member <user_id> <clearance> [username]")
+    uid = tokens[0].strip()
+    clr = tokens[1].strip().lower()
+    uname = " ".join(tokens[2:]).strip() or "Usuario"
+    if clr not in ("admin", "operator", "observer"):
+        return _telegram_safe("clearance inválido. Usa: admin | operator | observer")
+    db.execute(
+        "INSERT INTO war_room_core.wr_members (tenant_id, user_id, username, clearance_level) "
+        f"VALUES ('{_sql_escape_literal(tid, 128)}', '{_sql_escape_literal(uid, 128)}', "
+        f"'{_sql_escape_literal(uname, 128)}', '{_sql_escape_literal(clr, 32)}') "
+        "ON CONFLICT (tenant_id, user_id) DO UPDATE SET username=EXCLUDED.username, clearance_level=EXCLUDED.clearance_level, added_at=now()"
+    )
+    _wr_append_audit(
+        db,
+        tenant_id=tid,
+        sender_id=rid,
+        target_agent="manager",
+        event_type="REGISTER_WR_MEMBER",
+        payload=f"user_id={uid} clearance={clr}",
+    )
+    return _telegram_safe(f"✅ Miembro WR registrado: {uid} ({clr}).")
+
+
+def get_wr_context(db: Any, tenant_id: Any, args: str) -> str:
+    tid = str(tenant_id or "default").strip() or "default"
+    if not _is_wr_tenant(tid):
+        return _telegram_safe("get_wr_context solo aplica en tenants War Room (wr_<group_id>).")
+    _ensure_war_room_tables(db)
+    minutes = 60
+    try:
+        if (args or "").strip():
+            minutes = max(1, min(1440, int((args or "").strip())))
+    except ValueError:
+        minutes = 60
+    raw = db.query(
+        "SELECT sender_id, target_agent, event_type, payload, timestamp "
+        "FROM war_room_core.wr_audit_log "
+        f"WHERE lower(tenant_id)=lower('{_sql_escape_literal(tid, 128)}') "
+        f"AND timestamp >= now() - INTERVAL '{minutes} minutes' "
+        "ORDER BY timestamp DESC LIMIT 10"
+    )
+    rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    if not rows:
+        return _telegram_safe("Sin eventos recientes en wr_audit_log.")
+    lines = ["🧭 War Room Context (últimos eventos):"]
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        lines.append(
+            f"- [{r.get('timestamp')}] {r.get('event_type')} by {r.get('sender_id')} -> {r.get('target_agent')}: {str(r.get('payload') or '')[:120]}"
+        )
+    return _telegram_safe("\n".join(lines))
+
+
+def broadcast_alert(db: Any, tenant_id: Any, requester_id: Any, args: str) -> str:
+    tid = str(tenant_id or "default").strip() or "default"
+    rid = str(requester_id or "").strip()
+    if not _is_wr_tenant(tid):
+        return _telegram_safe("broadcast_alert solo aplica en tenants War Room (wr_<group_id>).")
+    parts = [x.strip() for x in (args or "").split(None, 1) if x.strip()]
+    if len(parts) < 2:
+        return _telegram_safe("Uso: /broadcast_alert <level> <message>")
+    level, message = parts[0].lower(), parts[1]
+    if level not in ("info", "warn", "critical"):
+        return _telegram_safe("level inválido. Usa: info | warn | critical")
+    _wr_append_audit(
+        db,
+        tenant_id=tid,
+        sender_id=rid or "system",
+        target_agent="group",
+        event_type="BROADCAST_ALERT",
+        payload=f"[{level}] {message}",
+    )
+    return _telegram_safe(f"🚨 WR alert ({level}) registrada.")
+
+
 def _invalidate_whitelist_redis_cache(*, tenant_id: str, user_id: str) -> None:
     """
     El Gateway cachea roles en Redis (TTL ~1h). Tras /team --rm o --add, hay que borrar la clave
@@ -210,6 +370,25 @@ def _invalidate_whitelist_redis_cache(*, tenant_id: str, user_id: str) -> None:
     if not url:
         return
     key = f"whitelist:{tid}:{uid}"
+    try:
+        import redis as redis_sync  # noqa: PLC0415
+
+        client = redis_sync.Redis.from_url(url, decode_responses=True)
+        client.delete(key)
+    except Exception:
+        pass
+
+
+def _invalidate_wr_clearance_redis_cache(*, tenant_id: str, user_id: str) -> None:
+    """Invalidar cache de clearance WR (services/api-gateway/main.py::_lookup_wr_clearance)."""
+    tid = str(tenant_id or "default").strip().lower() or "default"
+    uid = str(user_id or "").strip()
+    if not uid:
+        return
+    url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
+    if not url:
+        return
+    key = f"wr_clearance:{tid}:{uid}"
     try:
         import redis as redis_sync  # noqa: PLC0415
 
@@ -625,6 +804,89 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
     rid = str(requester_id or "").strip()
 
     raw = (args or "").strip()
+    if _is_wr_tenant(tid):
+        _ensure_war_room_tables(acl)
+        requester_clearance = _wr_member_clearance(acl, tenant_id=tid, user_id=rid)
+
+        if not raw:
+            rows_raw = acl.query(
+                "SELECT user_id, username, clearance_level FROM war_room_core.wr_members "
+                f"WHERE lower(tenant_id)=lower('{_sql_escape_literal(tid, 128)}') ORDER BY user_id"
+            )
+            rows = json.loads(rows_raw) if isinstance(rows_raw, str) else (rows_raw or [])
+            if not rows:
+                return _telegram_safe(f"No hay miembros WR para tenant '{tid}'.")
+            lines = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                uid = str(r.get("user_id") or "").strip()
+                uname = str(r.get("username") or "").strip()
+                clr = str(r.get("clearance_level") or "").strip().lower() or "observer"
+                label = _player_label(uname, uid, db=acl, tenant_id=tid)
+                lines.append(_telegram_safe(f"\\- {label} ({uid}) \\- clearance={clr}"))
+            return _telegram_safe(f"🛡 Miembros War Room (tenant '{tid}'):\n") + "\n".join(lines)
+
+        if raw.startswith("--rm "):
+            if not (_is_gateway_owner_user(rid) or requester_clearance == "admin"):
+                return _telegram_safe("❌ Acceso denegado: solo admin WR puede eliminar miembros.")
+            tokens = [t for t in raw[5:].strip().split() if t.strip()]
+            if not tokens:
+                return _telegram_safe("Uso WR: /team --rm <user_id>")
+            target_uid = tokens[0]
+            acl.execute(
+                "DELETE FROM war_room_core.wr_members "
+                f"WHERE lower(tenant_id)=lower('{_sql_escape_literal(tid, 128)}') "
+                f"AND user_id='{_sql_escape_literal(target_uid, 128)}'"
+            )
+            _invalidate_wr_clearance_redis_cache(tenant_id=tid, user_id=target_uid)
+            _wr_append_audit(
+                acl,
+                tenant_id=tid,
+                sender_id=rid or "system",
+                target_agent="manager",
+                event_type="REMOVE_WR_MEMBER",
+                payload=f"user_id={target_uid}",
+            )
+            target_label = _player_label("", target_uid, db=acl, tenant_id=tid)
+            return _telegram_safe(f"✅ Miembro WR eliminado: {target_label}.")
+
+        if raw.startswith("--add ") or raw.strip() == "--add":
+            if not (_is_gateway_owner_user(rid) or requester_clearance == "admin"):
+                return _telegram_safe("❌ Acceso denegado: solo admin WR puede agregar miembros.")
+            ids_part = raw[6:].strip() if raw.startswith("--add ") else ""
+            tokens = [t for t in ids_part.split() if t.strip()]
+            if not tokens:
+                return _telegram_safe("Uso WR: /team --add <user_id> [username] [admin|operator|observer]")
+            target_uid = tokens[0]
+            clearance = "observer"
+            if len(tokens) >= 2 and tokens[-1].lower() in ("admin", "operator", "observer"):
+                clearance = tokens[-1].lower()
+                tokens = tokens[:-1]
+            username = " ".join(tokens[1:]).strip() if len(tokens) > 1 else "Usuario"
+            acl.execute(
+                "INSERT INTO war_room_core.wr_members (tenant_id, user_id, username, clearance_level) "
+                f"VALUES ('{_sql_escape_literal(tid, 128)}', '{_sql_escape_literal(target_uid, 128)}', "
+                f"'{_sql_escape_literal(username or 'Usuario', 128)}', '{_sql_escape_literal(clearance, 32)}') "
+                "ON CONFLICT (tenant_id, user_id) DO UPDATE SET "
+                "username=EXCLUDED.username, clearance_level=EXCLUDED.clearance_level, added_at=now()"
+            )
+            _invalidate_wr_clearance_redis_cache(tenant_id=tid, user_id=target_uid)
+            _wr_append_audit(
+                acl,
+                tenant_id=tid,
+                sender_id=rid or "system",
+                target_agent="manager",
+                event_type="REGISTER_WR_MEMBER",
+                payload=f"user_id={target_uid} clearance={clearance}",
+            )
+            target_label = _player_label(username, target_uid, db=acl, tenant_id=tid)
+            return _telegram_safe(f"✅ Miembro WR registrado: {target_label} ({clearance}).")
+
+        return _telegram_safe(
+            "Uso WR: /team | /team --add <user_id> [username] [admin|operator|observer] | /team --rm <user_id>"
+        )
+
     if not raw:
         users = _list_authorized_users(acl, tenant_id=tid)
         if not users:
@@ -3137,6 +3399,18 @@ def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
     ):
         return _telegram_safe("Uso: /execute_signal <signal_id_UUID>")
     try:
+        from duckclaw.graphs.graph_server import get_db as _get_db
+
+        _db = _get_db()
+        tid = str(get_chat_state(_db, chat_id, "tenant_id") or "default").strip() or "default"
+        rid = str(get_chat_state(_db, chat_id, "last_requester_id") or "").strip()
+        if _is_wr_tenant(tid):
+            clearance = _wr_member_clearance(_db, tenant_id=tid, user_id=rid)
+            if not (_is_gateway_owner_user(rid) or clearance == "admin"):
+                return _telegram_safe("❌ Acceso denegado: /execute_signal en War Room requiere clearance admin.")
+    except Exception:
+        pass
+    try:
         from duckclaw.forge.skills.quant_hitl import grant_execute_order
 
         grant_execute_order(str(chat_id).strip(), sid)
@@ -3169,6 +3443,12 @@ def _dispatch_fly_command(
         return _telegram_safe("Uso: /lake o /lake status")
     if name == "execute_signal":
         return execute_quant_execute_signal(chat_id, args)
+    if name == "register_wr_member":
+        return register_wr_member(db, tenant_id, requester_id, args)
+    if name == "get_wr_context":
+        return get_wr_context(db, tenant_id, args)
+    if name == "broadcast_alert":
+        return broadcast_alert(db, tenant_id, requester_id, args)
     if name == "catalogo" and _leila_fly_commands_enabled():
         return execute_leila_catalogo(db, chat_id)
     if name == "pedido" and _leila_fly_commands_enabled():
@@ -3417,6 +3697,12 @@ def handle_command(
     chat_ident = _chat_log_identity_for_context(chat_id, db=db, tenant_id=tid)
     _fly_log = get_obs_logger("duckclaw.fly")
     with structured_log_context(tenant_id=tid, worker_id="gateway", chat_id=chat_ident):
+        try:
+            set_chat_state(db, chat_id, "tenant_id", tid)
+            if requester_id is not None:
+                set_chat_state(db, chat_id, "last_requester_id", str(requester_id).strip())
+        except Exception:
+            pass
         out = _dispatch_fly_command(
             db,
             chat_id,

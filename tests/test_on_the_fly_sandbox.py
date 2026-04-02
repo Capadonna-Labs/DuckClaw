@@ -98,7 +98,7 @@ def test_worker_sandbox_binding_respects_chat_id(tmp_path) -> None:
     set_chat_state(db, chat_on, "sandbox_enabled", "true")
     set_chat_state(db, chat_off, "sandbox_enabled", "false")
 
-    worker_graph = build_worker_graph("finanz", db_path, _StubLLM())
+    worker_graph = build_worker_graph("finanz", db_path, _StubLLM(), reuse_db=db)
 
     res_on = worker_graph.invoke(
         {"incoming": "Ejecuta el código: print(2+2)", "history": [], "chat_id": chat_on}
@@ -169,7 +169,7 @@ def test_worker_sandbox_tool_call_uses_chat_id(tmp_path, monkeypatch) -> None:
     set_chat_state(db, chat_on, "sandbox_enabled", "true")
     set_chat_state(db, chat_off, "sandbox_enabled", "false")
 
-    worker_graph = build_worker_graph("finanz", db_path, _StubLLM())
+    worker_graph = build_worker_graph("finanz", db_path, _StubLLM(), reuse_db=db)
 
     res_on = worker_graph.invoke(
         {"incoming": "Ejecuta el código: print(2+2)", "history": [], "chat_id": chat_on}

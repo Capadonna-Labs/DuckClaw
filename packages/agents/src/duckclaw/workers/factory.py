@@ -20,6 +20,8 @@ _log = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any, Optional
 
+from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
+
 try:
     from langchain_core.runnables import RunnableConfig
 except ImportError:
@@ -30,7 +32,7 @@ from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_s
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 from duckclaw.workers import read_pool
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
-from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills, run_schema
+from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills
 from duckclaw.workers.field_reflection import (
     collect_tool_error_digest,
     finanz_field_reflection_enabled,
@@ -132,6 +134,18 @@ def _escape_attach_path(path: str) -> str:
     return str(path).replace("'", "''")
 
 
+def _same_duckdb_file(a: str, b: str) -> bool:
+    """True si dos rutas apuntan al mismo archivo .duckdb (canonicalizadas)."""
+    sa = (a or "").strip()
+    sb = (b or "").strip()
+    if not sa or not sb:
+        return False
+    try:
+        return Path(sa).expanduser().resolve() == Path(sb).expanduser().resolve()
+    except Exception:
+        return os.path.abspath(sa) == os.path.abspath(sb)
+
+
 def _resolve_shared_db_path(spec: WorkerSpec, override: Optional[str]) -> Optional[str]:
     """
     Segundo archivo .duckdb (catálogo compartido). Solo si el manifest declara
@@ -147,17 +161,26 @@ def _resolve_shared_db_path(spec: WorkerSpec, override: Optional[str]) -> Option
     return (os.environ.get(env_key) or "").strip() or None
 
 
-def _apply_forge_attaches(db: Any, private_path: str, shared_path: Optional[str]) -> None:
+def _apply_forge_attaches(
+    db: Any,
+    private_path: str,
+    shared_path: Optional[str],
+    *,
+    read_only_attaches: bool = False,
+    skip_private_attach: bool = False,
+) -> None:
     """ATTACH bóveda privada y opcionalmente una segunda base como catálogo compartido."""
-    esc_p = _escape_attach_path(private_path)
-    try:
+    ro = " (READ_ONLY)" if read_only_attaches else ""
+    if not skip_private_attach:
+        esc_p = _escape_attach_path(private_path)
         try:
-            db.execute("DETACH private")
-        except Exception:
-            pass
-        db.execute(f"ATTACH '{esc_p}' AS private")
-    except Exception as exc:
-        _log.debug("forge ATTACH private skipped: %s", exc)
+            try:
+                db.execute("DETACH private")
+            except Exception:
+                pass
+            db.execute(f"ATTACH '{esc_p}' AS private{ro}")
+        except Exception as exc:
+            _log.debug("forge ATTACH private skipped: %s", exc)
     sp = (shared_path or "").strip()
     try:
         try:
@@ -177,7 +200,7 @@ def _apply_forge_attaches(db: Any, private_path: str, shared_path: Optional[str]
     Path(sp).parent.mkdir(parents=True, exist_ok=True)
     esc_s = _escape_attach_path(sp)
     try:
-        db.execute(f"ATTACH '{esc_s}' AS shared")
+        db.execute(f"ATTACH '{esc_s}' AS shared{ro}")
     except Exception as exc:
         _log.warning("forge ATTACH shared failed (%s): %s", sp, exc)
 
@@ -198,6 +221,15 @@ def _bootstrap_shared_main_schema(db: Any, spec: WorkerSpec) -> None:
                 db.execute(stmt)
             except Exception as exc:
                 _log.debug("forge shared schema stmt skipped: %s", exc)
+
+
+def _infer_user_id_for_writer(db_path: str) -> str:
+    parts = Path(db_path).expanduser().resolve().parts
+    if "private" in parts:
+        i = parts.index("private")
+        if i + 1 < len(parts):
+            return str(parts[i + 1])
+    return "default"
 
 
 def _get_db_path(worker_id: str, instance_name: Optional[str], base_path: Optional[str]) -> str:
@@ -615,9 +647,27 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
             if upper.startswith(("SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN", "PRAGMA")):
                 return db.query(q)
 
-            # Para escrituras, usar execute()
-            db.execute(q)
-            return json.dumps({"status": "ok"})
+            # Escrituras: cola singleton + confirmación breve en Redis
+            db_path_str = str(getattr(db, "_path", "") or "").strip()
+            if not db_path_str:
+                return json.dumps({"error": "Sin ruta de base de datos para encolar escritura."})
+            try:
+                resolved = str(Path(db_path_str).expanduser().resolve())
+                uid = _infer_user_id_for_writer(resolved)
+                task_id = enqueue_duckdb_write_sync(
+                    db_path=resolved,
+                    query=q,
+                    user_id=uid,
+                    tenant_id="default",
+                )
+                st = poll_task_status_sync(task_id, timeout_sec=3.0)
+            except Exception as e:
+                return json.dumps({"error": str(e)})
+            if st is not None and st.status == "success":
+                return json.dumps({"status": "success"})
+            if st is not None and st.status == "failed":
+                return json.dumps({"status": "failed", "detail": st.detail or "writer failed"})
+            return json.dumps({"status": "enqueued_pending_confirmation"})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -712,26 +762,45 @@ def build_worker_graph(
     llm_model: Optional[str] = None,
     llm_base_url: Optional[str] = None,
     shared_db_path: Optional[str] = None,
+    reuse_db: Any | None = None,
 ) -> Any:
     """
     Build a compiled LangGraph for a worker. Used by AgentAssembler._build_worker
     and by WorkerFactory.create() (shim).
+
+    Si ``reuse_db`` apunta al mismo archivo que ``path`` y el worker **no** necesita
+    catálogo ``shared`` (``shared_resolved`` vacío), reutiliza esa conexión y omite ATTACH
+    del privado para no duplicar handles (en producción el manager usa RO; en tests puede
+    ser RW). Si hace falta ``shared``, se abre otra conexión para no pisar el estado
+    ATTACH entre workers distintos en caché.
     """
     spec = load_manifest(worker_id, templates_root)
     path = _get_db_path(worker_id, instance_name, db_path)
     shared_resolved = _resolve_shared_db_path(spec, shared_db_path)
 
     from duckclaw import DuckClaw
-    db = DuckClaw(path)
-    _apply_forge_attaches(db, path, shared_resolved)
-    if shared_resolved:
-        _bootstrap_shared_main_schema(db, spec)
-    skip_primary_sql = bool(
-        shared_resolved and getattr(spec, "forge_apply_schema_to_shared", False)
+
+    reuse_path = ""
+    if reuse_db is not None:
+        reuse_path = str(getattr(reuse_db, "_path", "") or "").strip()
+    skip_private = bool(
+        reuse_db is not None
+        and reuse_path
+        and _same_duckdb_file(reuse_path, path)
+        and not (shared_resolved or "").strip()
     )
-    run_schema(db, spec, apply_template_sql=not skip_primary_sql)
-    _ensure_worker_duckdb_extensions(db, spec)
-    _sync_finanz_lake_beliefs(db, spec)
+    if skip_private:
+        db = reuse_db
+        _log.debug("build_worker_graph: reuse DuckClaw (same file, no shared, skip private ATTACH) path=%s", path)
+    else:
+        db = DuckClaw(path, read_only=True)
+    _apply_forge_attaches(
+        db,
+        path,
+        shared_resolved,
+        read_only_attaches=True,
+        skip_private_attach=skip_private,
+    )
 
     system_prompt = load_system_prompt(spec)
     tools = _build_worker_tools(db, spec)
@@ -1308,6 +1377,16 @@ def build_worker_graph(
             is_table_content = _is_table_content_query(incoming)
             is_latest_game = _is_latest_game_query(incoming)
             is_portfolio = has_ibkr and _is_portfolio_query(incoming)
+            # Resumen post /context --add: el texto crudo ya va en el mensaje; no forzar inspect_schema
+            # (p. ej. "esquemas criptográficos" dispara is_schema por subcadena "esquema") ni otras tools.
+            if (
+                "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in (incoming or "")
+                or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
+            ):
+                is_schema = False
+                is_table_content = False
+                is_latest_game = False
+                is_portfolio = False
             # No forzar herramienta si el último mensaje ya es ToolMessage (ya ejecutamos la tool):
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
             last_msg = (state.get("messages") or [])[-1] if state.get("messages") else None

@@ -472,11 +472,22 @@ def remove_vault(user_id: Any, vault_id: str, scope_id: Any = "") -> bool:
 
 def validate_user_db_path(user_id: Any, db_path: str, tenant_id: Any | None = None) -> bool:
     """
-    Acepta rutas .duckdb bajo:
-    - db/private/{user_id}/
-    - db/shared/{user_id}/  (compat: misma carpeta que el slug del usuario)
-    - db/shared/{tenant_id}/ cuando se pasa tenant_id (bóvedas compartidas por tenant)
+    Acepta rutas .duckdb bajo el árbol ``db/`` del repo, con comprobación por usuario
+    cuando la ruta está bajo private/ o shared/ (no en la raíz de db/).
+
+    Archivos en la raíz de ``db/`` (p. ej. ``duckclaw.duckdb``, ACL del gateway) son válidos
+    para el consumidor singleton (mensajes ya filtrados en el Gateway).
     """
+    path = Path(db_path).expanduser().resolve()
+    if path.suffix.lower() != ".duckdb":
+        return False
+    db_r = db_root().resolve()
+    try:
+        rel = path.relative_to(db_r)
+    except ValueError:
+        return False
+    if len(rel.parts) == 1:
+        return True
     uid = _safe_user_id(user_id)
     private_root = user_vault_dir(uid).resolve()
     roots: list[Path] = [
@@ -487,9 +498,6 @@ def validate_user_db_path(user_id: Any, db_path: str, tenant_id: Any | None = No
         tid = _safe_user_id(tenant_id)
         if tid:
             roots.append((db_root() / "shared" / tid).resolve())
-    path = Path(db_path).resolve()
-    if path.suffix.lower() != ".duckdb":
-        return False
     for root in roots:
         try:
             path.relative_to(root)

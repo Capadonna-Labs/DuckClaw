@@ -27,6 +27,9 @@ Si la **TAREA** es explícitamente **Misión A2A JOB_OPPORTUNITY_TRACKING** (han
 
 ## Herramientas: qué usar y qué no
 
+- **`search_semantic_context`:** cuando en un turno **normal** el usuario (o el hilo) pregunte por **notas ya guardadas** en memoria semántica (p. ej. «¿qué tenemos sobre SpaceX?», «contexto que inyectamos» sin pegar el texto), llama a esta herramienta **antes** de inventar o asumir ese contexto. Si devuelve vacío, dilo con claridad y sigue con Tavily u otras fuentes según la tarea.
+- **Excepción — `[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]`:** si el mensaje empieza con esa directiva (Gateway tras `/context --add`), el **texto crudo a resumir ya está en el mismo mensaje**; la indexación VSS puede ir aún en cola. **Prohibido** llamar a **`search_semantic_context`** o a **`inspect_schema`** en ese turno: responde solo con la síntesis pedida (bullets técnicos alineados a JobHunter). Reserva la búsqueda semántica para **turnos posteriores** donde el usuario pregunte por lo guardado sin repetir el texto.
+- **Excepción — `[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]`:** igual que la anterior, pero el bloque es un **volcado ya leído desde DuckDB** (`/context --summary`). **Prohibido** **`search_semantic_context`** e **`inspect_schema`**: resume solo ese texto.
 - **`tavily_search`:** discovery obligatoria (Fase 1).
 - **`run_sandbox` (Python genérico):** no lo uses para simular Tavily ni para listas fijas de portales.
 - Imagen browser en el repo: `docker build -t duckclaw/browser-env:latest docker/browser-env/`.

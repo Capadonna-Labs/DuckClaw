@@ -37,6 +37,11 @@ from duckclaw.utils.telegram_markdown_v2 import TELEGRAM_MARKDOWN_V2_SPECIAL
 _PREFIX = "chat_"
 
 
+def _skip_runtime_ddl(db: Any) -> bool:
+    """Si True, no ejecutar CREATE/ALTER en runtime (asumir scripts/bootstrap_dbs.py)."""
+    return bool(getattr(db, "_read_only", False))
+
+
 def unescape_telegram_markdown_v2_layers(text: str, max_layers: int = 4) -> str:
     """
     Quita hasta ``max_layers`` capas de escape estilo MarkdownV2 (mismo juego de
@@ -419,6 +424,8 @@ def _invalidate_wr_clearance_redis_cache(*, tenant_id: str, user_id: str) -> Non
 
 
 def _ensure_agent_config(db: Any) -> None:
+    if _skip_runtime_ddl(db):
+        return
     db.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {_AGENT_CONFIG_TABLE} (
@@ -1138,6 +1145,8 @@ def execute_forget(db: Any, chat_id: Any) -> str:
 
 def _ensure_the_mind_schema(db: Any) -> None:
     """DDL único para The Mind + migraciones ligeras."""
+    if _skip_runtime_ddl(db):
+        return
     db.execute(
         "CREATE TABLE IF NOT EXISTS the_mind_games ("
         "game_id VARCHAR PRIMARY KEY, "
@@ -2381,7 +2390,10 @@ def execute_context_toggle(db: Any, chat_id: Any, on_off: str) -> str:
         set_chat_state(db, chat_id, "use_rag", "false")
         return "✅ Contexto largo desactivado (solo historial reciente)."
     current = get_chat_state(db, chat_id, "use_rag")
-    return f"Uso: /context on | /context off\nEstado actual: {'on' if current != 'false' else 'off'}."
+    return (
+        "Uso: `/context on` | `/context off` | `/context --add <texto>` | `/context --summary` (`--summarize`)\n"
+        f"Estado actual (historial largo): {'on' if current != 'false' else 'off'}."
+    )
 
 
 def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
@@ -3069,7 +3081,7 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ("/model", "Ver o cambiar LLM (provider/model)"),
         ("/skills <worker_id>", "Herramientas del template"),
         ("/forget", "Borrar historial de la conversación"),
-        ("/context", "Toggle contexto largo/corto"),
+        ("/context", "on|off (historial); en Telegram: --add / --summary (memoria semántica)"),
         ("/sandbox", "Toggle ejecución de código (true|false) para esta sesión"),
         ("/sandox", "(Alias) /sandbox para tolerar errores de escritura."),
         ("/heartbeat", "Activa mensajes en tiempo real mientras el agente trabaja"),
@@ -3833,6 +3845,8 @@ _TASK_AUDIT_TABLE = "task_audit_log"
 
 def _ensure_task_audit_log(db: Any) -> None:
     """Crea task_audit_log y aplica migraciones suaves (plan_title)."""
+    if _skip_runtime_ddl(db):
+        return
     db.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {_TASK_AUDIT_TABLE} (
@@ -3859,6 +3873,18 @@ def _ensure_task_audit_log(db: Any) -> None:
         pass
 
 
+def _infer_user_id_for_audit_queue(db_path: str) -> str:
+    """Alineado con validate_user_db_path: slug bajo db/private/{user}/."""
+    from pathlib import Path
+
+    parts = Path(db_path).expanduser().resolve().parts
+    if "private" in parts:
+        i = parts.index("private")
+        if i + 1 < len(parts):
+            return str(parts[i + 1])
+    return "default"
+
+
 def append_task_audit(
     db: Any,
     tenant_id: Any,
@@ -3870,6 +3896,7 @@ def append_task_audit(
 ) -> None:
     """Append a task to task_audit_log for /history. plan_title es el identificador semántico para auditoría y /history."""
     import uuid
+
     _ensure_task_audit_log(db)
     task_id = f"TASK-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
     tenant_s = str(tenant_id).replace("'", "''")[:128]
@@ -3879,12 +3906,33 @@ def append_task_audit(
     status_allowed = ("SUCCESS", "FAILED", "PROACTIVE_MESSAGE_SENT", "SECURITY_VIOLATION_ATTEMPT")
     status_s = "SUCCESS" if status_s not in status_allowed else status_s
     plan_title_s = (plan_title or "")[:256].replace("'", "''") if plan_title else ""
-    db.execute(
+    sql = (
         f"""
         INSERT INTO {_TASK_AUDIT_TABLE} (task_id, tenant_id, worker_id, query_prefix, status, duration_ms, plan_title)
         VALUES ('{task_id}', '{tenant_s}', '{worker_s}', '{prefix_s}', '{status_s}', {int(duration_ms)}, '{plan_title_s}')
         """
     )
+    if _skip_runtime_ddl(db):
+        try:
+            from pathlib import Path
+
+            from duckclaw.db_write_queue import enqueue_duckdb_write_sync
+
+            raw_path = str(getattr(db, "_path", "") or "").strip()
+            if not raw_path:
+                return
+            resolved = str(Path(raw_path).expanduser().resolve())
+            uid = _infer_user_id_for_audit_queue(resolved)
+            enqueue_duckdb_write_sync(
+                db_path=resolved,
+                query=sql.strip(),
+                user_id=uid,
+                tenant_id=str(tenant_id or "default").strip() or "default",
+            )
+        except Exception:
+            pass
+        return
+    db.execute(sql)
 
 
 def _is_simple_greeting(prefix: str) -> bool:

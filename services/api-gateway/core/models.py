@@ -47,6 +47,10 @@ class ChatRequest(BaseModel):
         False,
         description="Marca mensajes internos del sistema (ej. [SYSTEM_EVENT] del Heartbeat).",
     )
+    skip_session_lock: bool | None = Field(
+        False,
+        description="Solo uso interno: no tomar el Redis lock por chat_id (p. ej. CONTEXT_INJECTION en background).",
+    )
 
     @field_validator("chat_id", mode="before")
     @classmethod

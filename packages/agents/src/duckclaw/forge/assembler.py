@@ -241,4 +241,5 @@ class AgentAssembler:
             llm_model=overrides.get("llm_model"),
             llm_base_url=overrides.get("llm_base_url"),
             shared_db_path=shared_db_path,
+            reuse_db=db,
         )

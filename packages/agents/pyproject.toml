@@ -9,6 +9,7 @@ description = "LangGraph agents and workers for DuckClaw"
 requires-python = ">=3.9"
 dependencies = [
     "langgraph>=0.2.0",
+    "redis>=5.0.0",
     "duckclaw-core",
     "duckclaw-shared",
     "docker",

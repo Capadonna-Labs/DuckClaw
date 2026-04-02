@@ -32,6 +32,15 @@ _obs = get_obs_logger()
 _worker_graph_cache: dict[str, Any] = {}
 
 
+def clear_worker_graph_cache() -> None:
+    """
+    Los grafos de worker cierran sobre un DuckClaw concreto; tras cerrar la conexión del manager
+    hay que vaciar la caché para no reutilizar handles muertos en la siguiente petición.
+    """
+    global _worker_graph_cache
+    _worker_graph_cache.clear()
+
+
 def _worker_id_alnum_slug(worker_id: str | None) -> str:
     """Normaliza id de plantilla (guiones Unicode, espacios) para ramas por worker."""
     return re.sub(r"[^a-z0-9]", "", (worker_id or "").lower())
@@ -217,6 +226,12 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     text = (incoming or "").strip()
     if not text:
         return incoming or "", None
+    # Gateway (Telegram /context): el cuerpo puede mencionar DuckDB, "estructura", "schema", tablas, etc.
+    # Sin este bypass, _plan_task sustituye el mensaje por TAREA: listar tablas y el worker pierde la directiva.
+    if text.startswith("[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]") or text.startswith(
+        "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]"
+    ):
+        return text, None
     t = text.lower()
     override: Optional[str] = None
     # MVP Leila: saludos cortos → respuesta de tienda (evita tono “agente de investigación”).
@@ -380,6 +395,23 @@ def _llm_plan(incoming: str) -> tuple[str, list[str]]:
     text = (incoming or "").strip()
     if not text:
         return "Interacción sin contenido", []
+
+    if text.startswith("[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]"):
+        return (
+            "Síntesis de contexto (recién inyectado)",
+            [
+                "Resumir solo el bloque del usuario en bullets técnicos alineados al worker.",
+                "No ejecutar inspect_schema ni read_sql salvo que el usuario lo pida explícitamente aparte.",
+            ],
+        )
+    if text.startswith("[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]"):
+        return (
+            "Síntesis de contexto almacenado",
+            [
+                "Resumir solo el volcado de main.semantic_memory en bullets técnicos.",
+                "No listar tablas ni inspeccionar esquema: el texto ya está en el mensaje.",
+            ],
+        )
 
     lower = text.lower()
     if "partida" in lower and ("ultima" in lower or "última" in lower or "reciente" in lower):
@@ -898,6 +930,7 @@ def build_manager_graph(
                     llm_base_url=llm_base_url or "",
                     instance_name=tenant_id,  # Aislar por tenant (Forge/WorkerFactory)
                     shared_db_path=shared_db_path or None,
+                    reuse_db=db,
                 )
             worker_graph = _worker_graph_cache[worker_cache_key]
             set_log_context(

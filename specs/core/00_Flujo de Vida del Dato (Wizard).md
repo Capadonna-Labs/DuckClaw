@@ -72,6 +72,10 @@ Documento detallado del ciclo de vida de los datos: API Gateway, DB Writer, cola
 
 **Arranque:** `duckops serve --pm2 --gateway` o `uvicorn main:app --app-dir services/api-gateway`
 
+**Política solo lectura (runtime):** El API Gateway y el grafo (`graph_server`) abren DuckDB con `read_only=True`. El único proceso que debe abrir conexiones de escritura a bóvedas en producción es `services/db-writer/main.py` (más scripts de mantenimiento). Antes de arrancar PM2, ejecutar `python scripts/bootstrap_dbs.py` para DDL idempotente (`authorized_users`, war rooms, Leila, plantillas de workers, extensiones). El registry multi-bóveda (`ensure_registry` / `system.duckdb`) lo inicializa ese mismo script vía `ensure_registry()`.
+
+**Confirmación de escrituras:** Tras ejecutar SQL desde la cola `duckdb_write_queue`, el DB Writer publica `task_status:<task_id>` en Redis (TTL ~60s) para que `admin_sql` pueda hacer polling breve (~3s).
+
 ---
 
 ### 2.2 Dependencias del agente (usadas por el microservicio)

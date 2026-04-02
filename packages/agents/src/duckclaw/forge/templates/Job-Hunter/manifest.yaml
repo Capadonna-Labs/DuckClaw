@@ -17,6 +17,7 @@ llm:
   required: true
   temperature: 0.25
 skills:
+  - search_semantic_context
   # Nombre efectivo de la tool registrada por el bloque research (ver research_bridge).
   - tavily_search
   - research:

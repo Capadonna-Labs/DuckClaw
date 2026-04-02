@@ -12,57 +12,47 @@ os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_repo_root))
 
 import duckdb
 import redis.asyncio as redis
+from context_injection_handler import handle_context_injection_message
 from core.config import settings
+from duckclaw.db_write_queue import (
+    TASK_STATUS_TTL_SEC,
+    DbWriteTaskStatus,
+    task_status_redis_key,
+)
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.vaults import validate_user_db_path
 
 # Configuración de logging robusto
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("db-writer")
 
-async def process_queue():
-    """Bucle principal que consume la cola de Redis y escribe en DuckDB."""
-    
-    # 1. Conexión a Redis
-    redis_client = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
-    
-    # 2. Conexión a DuckDB (Modo READ_WRITE)
+
+async def _publish_task_status(
+    redis_client: redis.Redis,
+    task_id: str,
+    status: DbWriteTaskStatus,
+) -> None:
     try:
-        conn = duckdb.connect(settings.DUCKDB_PATH, read_only=False)
-        logger.info(f"Conectado a DuckDB en: {settings.DUCKDB_PATH}")
-    except Exception as e:
-        logger.critical(f"Error fatal conectando a DuckDB: {e}")
-        return
+        await redis_client.setex(
+            task_status_redis_key(task_id),
+            TASK_STATUS_TTL_SEC,
+            status.model_dump_json(),
+        )
+    except Exception as exc:
+        logger.warning("[%s] No se pudo publicar task_status: %s", task_id, exc)
 
-    logger.info(f"Escuchando la cola de Redis: {settings.QUEUE_NAME}...")
 
-    try:
-        while True:
-            # 3. Lectura Bloqueante (BRPOP)
-            result = await redis_client.brpop(settings.QUEUE_NAME, timeout=0)
-            
-            if result:
-                _, message = result
-                await execute_write(conn, message)
-                
-    except asyncio.CancelledError:
-        logger.info("Señal de apagado recibida. Cerrando conexiones...")
-    finally:
-        # 4. Limpieza (Graceful Shutdown)
-        conn.close()
-        await redis_client.aclose()
-        logger.info("DB Writer apagado correctamente.")
-
-async def execute_write(conn: duckdb.DuckDBPyConnection, message: str):
-    """Ejecuta la consulta SQL de forma segura."""
+async def execute_write(redis_client: redis.Redis, message: str) -> None:
+    """Ejecuta la consulta SQL de forma segura y confirma en Redis."""
+    task_id = "unknown"
     try:
         payload = json.loads(message)
-        task_id = payload.get("task_id", "unknown")
+        task_id = str(payload.get("task_id") or "unknown")
         query = payload.get("query")
-        params = payload.get("params",[]) # <-- Línea completada
+        params = payload.get("params", [])
         target_db_path = str(payload.get("db_path") or settings.DUCKDB_PATH)
         user_id = str(payload.get("user_id") or "default")
         tenant_raw = payload.get("tenant_id")
@@ -71,10 +61,20 @@ async def execute_write(conn: duckdb.DuckDBPyConnection, message: str):
             tenant_id = None
 
         if not query:
-            logger.warning(f"[{task_id}] Payload inválido: No hay query SQL.")
+            logger.warning("[%s] Payload inválido: No hay query SQL.", task_id)
+            await _publish_task_status(
+                redis_client,
+                task_id,
+                DbWriteTaskStatus(status="failed", detail="No hay query SQL"),
+            )
             return
         if not validate_user_db_path(user_id, target_db_path, tenant_id=tenant_id):
-            logger.warning(f"[{task_id}] Rechazado: db_path fuera del directorio permitido del usuario.")
+            logger.warning("[%s] Rechazado: db_path fuera del directorio permitido del usuario.", task_id)
+            await _publish_task_status(
+                redis_client,
+                task_id,
+                DbWriteTaskStatus(status="failed", detail="db_path inválido para el usuario"),
+            )
             return
 
         try:
@@ -84,7 +84,7 @@ async def execute_write(conn: duckdb.DuckDBPyConnection, message: str):
                 from duckclaw import DuckClaw
 
                 acl_path = get_gateway_db_path()
-                acl_con = DuckClaw(acl_path)
+                acl_con = DuckClaw(acl_path, read_only=True)
                 try:
                     ok_grant = user_may_access_shared_path(
                         acl_con,
@@ -101,13 +101,19 @@ async def execute_write(conn: duckdb.DuckDBPyConnection, message: str):
                             pass
                 if not ok_grant:
                     logger.warning(
-                        f"[{task_id}] Rechazado: sin grant de base compartida (user={user_id})."
+                        "[%s] Rechazado: sin grant de base compartida (user=%s).",
+                        task_id,
+                        user_id,
+                    )
+                    await _publish_task_status(
+                        redis_client,
+                        task_id,
+                        DbWriteTaskStatus(status="failed", detail="sin grant de base compartida"),
                     )
                     return
         except Exception as exc:
             logger.warning("[%s] ACL shared check skipped/failed: %s", task_id, exc)
 
-        # Ejecutar contra la ruta objetivo (path-aware por bóveda).
         def _exec() -> None:
             conn_local = duckdb.connect(target_db_path, read_only=False)
             try:
@@ -116,16 +122,75 @@ async def execute_write(conn: duckdb.DuckDBPyConnection, message: str):
                 conn_local.close()
 
         await asyncio.to_thread(_exec)
-        
-        logger.info(f"[{task_id}] Escritura exitosa en {target_db_path}: {query[:60]}...")
+
+        logger.info("[%s] Escritura exitosa en %s: %s...", task_id, target_db_path, query[:60])
+        await _publish_task_status(redis_client, task_id, DbWriteTaskStatus(status="success"))
 
     except json.JSONDecodeError:
         logger.error("Error decodificando el mensaje de Redis. Formato JSON inválido.")
     except duckdb.Error as e:
-        logger.error(f"[{task_id}] Error de DuckDB ejecutando la query: {e}")
-        # TODO futuro: Enviar el payload fallido a una Dead Letter Queue (DLQ) en Redis
+        logger.error("[%s] Error de DuckDB ejecutando la query: %s", task_id, e)
+        await _publish_task_status(
+            redis_client,
+            task_id,
+            DbWriteTaskStatus(status="failed", detail=str(e)),
+        )
     except Exception as e:
-        logger.error(f"[{task_id}] Error inesperado: {e}")
+        logger.error("[%s] Error inesperado: %s", task_id, e)
+        await _publish_task_status(
+            redis_client,
+            task_id,
+            DbWriteTaskStatus(status="failed", detail=str(e)),
+        )
+
+
+async def _sql_queue_loop(redis_client: redis.Redis) -> None:
+    logger.info("Escuchando cola SQL: %s", settings.QUEUE_NAME)
+    while True:
+        result = await redis_client.brpop(settings.QUEUE_NAME, timeout=0)
+        if result:
+            _, message = result
+            await execute_write(redis_client, message)
+
+
+async def _context_injection_loop(redis_client: redis.Redis) -> None:
+    # Debe coincidir con `context_injection_queue_key()` del API Gateway
+    # (env DUCKCLAW_CONTEXT_STATE_DELTA_QUEUE o default duckclaw:state_delta:context).
+    q = str(settings.CONTEXT_INJECTION_QUEUE_NAME).strip()
+    logger.info("Escuchando cola CONTEXT_INJECTION (delta_type=CONTEXT_INJECTION): %s", q)
+    while True:
+        result = await redis_client.brpop(q, timeout=0)
+        if result:
+            _, message = result
+            try:
+                preview = json.loads(message)
+                if str(preview.get("delta_type") or "") != "CONTEXT_INJECTION":
+                    logger.warning(
+                        "Mensaje en cola CONTEXT_INJECTION con delta_type inesperado: %s",
+                        preview.get("delta_type"),
+                    )
+            except json.JSONDecodeError:
+                logger.warning("CONTEXT_INJECTION payload no es JSON válido (primeros 120 chars): %s", message[:120])
+            try:
+                await handle_context_injection_message(redis_client, message)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("CONTEXT_INJECTION handler no capturó excepción: %s", exc)
+
+
+async def process_queue():
+    """Consume cola SQL y cola CONTEXT_INJECTION en paralelo."""
+    redis_client = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
+    try:
+        await asyncio.gather(
+            _sql_queue_loop(redis_client),
+            _context_injection_loop(redis_client),
+        )
+    except asyncio.CancelledError:
+        logger.info("Señal de apagado recibida. Cerrando conexiones...")
+    finally:
+        await redis_client.aclose()
+        logger.info("DB Writer apagado correctamente.")
+
 
 if __name__ == "__main__":
     logger.info("Iniciando DuckClaw DB Writer...")

@@ -41,7 +41,7 @@ async def download_quote(
         # Resolver respecto al repo root (parent de services/)
         _root = Path(__file__).resolve().parent.parent.parent
         db_path = str(_root / db_path)
-    db = DuckClaw(db_path)
+    db = DuckClaw(db_path, read_only=True)
     # Escapar comillas para SQL (DuckClaw.query solo acepta sql string)
     qid_esc = (quote_id or "").replace("'", "''")[:128]
     tok_esc = (token or "").replace("'", "''")[:256]

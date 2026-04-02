@@ -5,6 +5,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Tuple
 
 
@@ -25,6 +26,8 @@ def war_room_tenant_for_chat(chat_type: str | None, chat_id: Any, fallback_tenan
 
 def ensure_war_room_schema(db: Any) -> None:
     if getattr(db, "_war_room_acl_readonly", False):
+        return
+    if getattr(db, "_read_only", False):
         return
     db.execute("CREATE SCHEMA IF NOT EXISTS war_room_core;")
     db.execute(
@@ -56,6 +59,17 @@ def ensure_war_room_schema(db: Any) -> None:
 
 def _sql_lit(value: Any, max_len: int = 4096) -> str:
     return str(value if value is not None else "").replace("'", "''")[:max_len]
+
+
+def _war_room_writes_via_queue(db: Any) -> bool:
+    if getattr(db, "_read_only", False):
+        return True
+    try:
+        from core.gateway_acl_db import ReadOnlyGatewayAclDb
+
+        return isinstance(db, ReadOnlyGatewayAclDb)
+    except Exception:
+        return False
 
 
 def wr_lookup_member_clearance(db: Any, tenant_id: str, user_id: str) -> str:
@@ -103,17 +117,30 @@ def wr_upsert_member(
     username: str,
     clearance_level: str,
 ) -> None:
-    ensure_war_room_schema(db)
     clr = str(clearance_level or "").strip().lower()
     if clr not in _WR_ALLOWED_CLEARANCE:
         clr = "observer"
-    db.execute(
+    sql = (
         "INSERT INTO war_room_core.wr_members (tenant_id, user_id, username, clearance_level) "
         f"VALUES ('{_sql_lit(tenant_id, 256)}', '{_sql_lit(user_id, 256)}', "
         f"'{_sql_lit(username or 'Usuario', 128)}', '{_sql_lit(clr, 32)}') "
         "ON CONFLICT (tenant_id, user_id) DO UPDATE SET "
         "username=EXCLUDED.username, clearance_level=EXCLUDED.clearance_level, added_at=now()"
     )
+    if _war_room_writes_via_queue(db):
+        from duckclaw.db_write_queue import enqueue_duckdb_write_sync
+        from duckclaw.gateway_db import get_war_room_acl_db_path
+
+        db_path = str(Path(get_war_room_acl_db_path()).expanduser().resolve())
+        enqueue_duckdb_write_sync(
+            db_path=db_path,
+            query=sql,
+            user_id=str(user_id or "default"),
+            tenant_id=str(tenant_id or "default"),
+        )
+        return
+    ensure_war_room_schema(db)
+    db.execute(sql)
 
 
 def wr_append_audit(
@@ -125,12 +152,25 @@ def wr_append_audit(
     event_type: str,
     payload: str,
 ) -> None:
-    ensure_war_room_schema(db)
-    db.execute(
+    sql = (
         "INSERT INTO war_room_core.wr_audit_log (event_id, tenant_id, sender_id, target_agent, event_type, payload) "
         f"VALUES ('{uuid.uuid4()}', '{_sql_lit(tenant_id, 256)}', '{_sql_lit(sender_id, 256)}', "
         f"'{_sql_lit(target_agent or '', 128)}', '{_sql_lit(event_type, 64)}', '{_sql_lit(payload, 8000)}')"
     )
+    if _war_room_writes_via_queue(db):
+        from duckclaw.db_write_queue import enqueue_duckdb_write_sync
+        from duckclaw.gateway_db import get_war_room_acl_db_path
+
+        db_path = str(Path(get_war_room_acl_db_path()).expanduser().resolve())
+        enqueue_duckdb_write_sync(
+            db_path=db_path,
+            query=sql,
+            user_id=str(sender_id or "default"),
+            tenant_id=str(tenant_id or "default"),
+        )
+        return
+    ensure_war_room_schema(db)
+    db.execute(sql)
 
 
 def _utf16_slice(text: str, offset: int, length: int) -> str:

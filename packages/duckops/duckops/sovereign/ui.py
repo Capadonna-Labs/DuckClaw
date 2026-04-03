@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import platform
 import subprocess
+import unicodedata
 from pathlib import Path
 from typing import Callable
 
@@ -28,7 +29,7 @@ from duckops.sovereign.tailscale_funnel import (
     provision_tailscale_funnel_bg,
     tailscale_cli_available,
 )
-from duckops.sovereign.draft import SovereignDraft
+from duckops.sovereign.draft import SovereignDraft, WizardProfile
 from duckops.sovereign.keys import (
     NAV_AUTOFILL,
     NAV_BACK,
@@ -37,16 +38,42 @@ from duckops.sovereign.keys import (
     build_key_bindings,
 )
 from duckops.sovereign.materialize import load_draft_json, save_draft_json
-from duckops.sovereign.state_machine import STEP_ORDER, next_step, prev_step
+from duckops.sovereign.state_machine import (
+    next_step_in,
+    prev_step_in,
+    step_order_for_profile,
+)
 from duckops.sovereign.validate import (
     is_port_in_use,
     private_db_dir_writable,
     redis_ping_url,
     suggest_gateway_port,
 )
-from duckops.sovereign.wizard_theme import PANEL_BORDER, PANEL_BORDER_SUCCESS, panel_title
+from duckops.sovereign.wizard_theme import (
+    PANEL_BORDER,
+    PANEL_BORDER_SUCCESS,
+    dim_technical,
+    panel_title,
+    print_dim_rule,
+    section_label,
+)
 
 _CONFIRM_EXIT = 2
+
+
+def _parse_wizard_profile_choice(val: str) -> WizardProfile | None:
+    """Acepta rápida/manual (con o sin tilde), 1/2 y alias express/full."""
+    s = (val or "").strip().lower()
+    if not s:
+        return None
+    folded = "".join(
+        c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)
+    )
+    if s == "1" or folded in ("rapida", "rapido", "express"):
+        return "express"
+    if s == "2" or folded in ("manual", "full", "completo", "completa"):
+        return "full"
+    return None
 
 
 def _want_yes(val: str) -> bool:
@@ -188,30 +215,22 @@ def _show_wizard_concepts_primer(session: PromptSession, console: Console, draft
     Pantalla inicial de conceptos. Devuelve 0 para continuar al paso 1, 1 si el usuario guardó borrador y sale.
     """
     body = (
-        "[bold bright_white]En un minuto[/]\n"
-        "Son [bold]unos 6 pasos[/] con preguntas cortas. No hace falta ser informático: "
-        "casi siempre basta [bold]Enter[/] con lo que ya aparece escrito.\n"
+        f"{section_label('Qué va a pasar')}"
+        "Te hará unas pocas preguntas en orden. La mayoría tienen ya una respuesta sugerida: "
+        "suele bastar pulsar Enter. No necesitas saber programar.\n"
         "\n"
-        "[bold bright_white]Qué significan algunas palabras[/]\n"
-        "\n"
-        "[bold]Nombre para esta instalación[/]\n"
-        "Una etiqueta tuya (ej. «Mi negocio» o «casa»). Así los datos de esta copia de DuckClaw no se mezclan "
-        "con otros usos. [dim]No es tu usuario de Telegram ni una contraseña.[/]\n"
-        "\n"
-        "[bold]Archivo de memoria[/]\n"
-        "Un solo archivo en tu disco donde se guarda lo importante (conversaciones, datos del asistente).\n"
-        "\n"
-        "[bold]Redis[/]\n"
-        "Cola de mensajes entre programas internos. En un equipo normal suele valer el valor que te proponemos.\n"
-        "\n"
-        "[bold]Servidor (gateway) y PM2[/]\n"
-        "El gateway es quien recibe mensajes desde fuera (p. ej. Telegram). "
-        "PM2 es la herramienta que mantiene ese servidor encendido en segundo plano.\n"
-        "\n"
-        "[bold]Manager y worker[/]\n"
-        "El manager te atiende primero; el worker es el perfil especializado (finanzas, empleo, etc.).\n"
-        "\n"
-        "[dim]Enter para empezar · Ctrl+S guardar borrador y salir · Ctrl+C cancelar[/]"
+        f"{section_label('Palabras que verás más adelante')}"
+        "- Nombre para esta instalación: cómo quieres llamar a esta copia de DuckClaw "
+        "en tu ordenador (por ejemplo el nombre de tu negocio). No es tu usuario de Telegram.\n\n"
+        "- Archivo de memoria: donde DuckClaw guarda conversaciones y datos en tu disco "
+        "(un solo archivo; el asistente te sugerirá una ruta).\n\n"
+        "- Cola de mensajes (Redis): ayuda a que los programas de DuckClaw se hablen entre sí. "
+        "En casa casi siempre vale el valor que te proponemos.\n\n"
+        "- Servidor en segundo plano: el programa que se queda escuchando cuando llegan mensajes "
+        "(por ejemplo desde Telegram). Una herramienta llamada PM2 ayuda a que siga encendido aunque cierres la ventana.\n\n"
+        "- Quién te atiende primero: un coordinador y luego un perfil más concreto "
+        "(finanzas, ofertas de trabajo, etc.); elegirás el perfil en un paso.\n\n"
+        "[dim]Enter = empezar  |  Ctrl+S = guardar borrador y salir  |  Ctrl+C = cancelar[/]"
     )
     console.print()
     console.print(
@@ -224,7 +243,7 @@ def _show_wizard_concepts_primer(session: PromptSession, console: Console, draft
     )
     console.print()
     while True:
-        tok, _ = _ask_until(session, "[dim]Pulsa Enter para comenzar el asistente paso a paso.[/] ", default="")
+        tok, _ = _ask_until(session, "Pulsa Enter para empezar las preguntas. ", default="")
         if tok == NAV_BACK:
             console.print(
                 "[dim]Aún no hay paso anterior. Pulsa Enter para comenzar o Ctrl+C para salir.[/]"
@@ -250,6 +269,7 @@ def _ask(
     default: str = "",
     password: bool = False,
 ) -> tuple[str | None, str]:
+    # prompt_toolkit no interpreta marcado Rich; el texto debe ser plano.
     raw = session.prompt(message, default=default, is_password=password)
     if raw == NAV_BACK:
         return NAV_BACK, ""
@@ -277,13 +297,61 @@ def _ask_until(
             return tok, val
 
 
+def _show_wizard_profile_choice(
+    session: PromptSession, console: Console, draft: SovereignDraft
+) -> int:
+    """
+    Elige configuración rápida (express) vs manual (full).
+    Devuelve 0 para continuar, 1 si guardó borrador y sale (igual que el primer).
+    """
+    default_word = "rápida" if draft.wizard_profile == "express" else "manual"
+    body = (
+        f"{section_label('Tipo de configuración')}"
+        "[bold]Rápida[/] — Recomendada para empezar. Dejamos los valores habituales del proyecto "
+        "(cola de mensajes, archivo de memoria, PM2, puerto). Solo preguntamos lo imprescindible para "
+        "Telegram y el enlace público (admin, token, HTTPS, etc.) y la confirmación final.\n\n"
+        "[bold]Manual[/] — Revisas cada bloque: memoria y rutas, nombre de la instalación, "
+        "cómo arrancar servicios (PM2 o Docker), puerto y Redis, y después Telegram.\n\n"
+        "[dim]Escribe la palabra «rápida» o «manual» y Enter (también valen 1 / 2). "
+        "Tab usa la sugerida entre corchetes · Ctrl+S guardar borrador · Ctrl+C cancelar[/]"
+    )
+    console.print()
+    console.print(
+        Panel(
+            body,
+            title=panel_title("Tipo de configuración"),
+            title_align="left",
+            border_style=PANEL_BORDER,
+        )
+    )
+    console.print()
+    while True:
+        tok, val = _ask_until(
+            session,
+            "Tipo de configuración (rápida / manual): ",
+            default=default_word,
+        )
+        if tok == NAV_BACK:
+            console.print("[yellow]Escribe rápida o manual para seguir. (Aún no hay paso anterior.)[/]")
+            continue
+        if tok == NAV_QUICK_SAVE:
+            p = save_draft_json(draft)
+            console.print(f"[green]Borrador en {p}[/]. Saliendo.")
+            return 1
+        parsed = _parse_wizard_profile_choice(val)
+        if parsed is not None:
+            draft.wizard_profile = parsed
+            break
+        console.print("[yellow]Escribe «rápida» o «manual» (o 1 / 2) y pulsa Enter.[/]")
+    console.print()
+    return 0
+
+
 def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) -> int:
-    total = len(STEP_ORDER)
-    step = STEP_ORDER[0]
     if load_draft_json():
         console.print(
-            "[dim]Hay un borrador en ~/.config/duckclaw/wizard_draft.json "
-            "(usa Ctrl+S para sobrescribirlo).[/]"
+            "[yellow]Tienes un borrador guardado[/] (se puede sobrescribir con Ctrl+S al guardar).\n"
+            "[dim]Archivo: ~/.config/duckclaw/wizard_draft.json[/]"
         )
 
     def redis_test() -> None:
@@ -299,9 +367,15 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
     session = _make_session(redis_test)
     if _show_wizard_concepts_primer(session, console, draft) != 0:
         return 0
+    if _show_wizard_profile_choice(session, console, draft) != 0:
+        return 0
+
+    order = step_order_for_profile(draft.wizard_profile)
+    total = len(order)
+    step = order[0]
 
     while True:
-        idx = STEP_ORDER.index(step) + 1
+        idx = order.index(step) + 1
 
         if step == WizardStep.SOVEREIGNTY_AUDIT:
             draft.detected_os = platform.system()
@@ -326,7 +400,7 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 p = save_draft_json(draft)
                 console.print(f"[green]Borrador en {p}[/]. Saliendo.")
                 return 0
-            n = next_step(step)
+            n = next_step_in(order, step)
             if n:
                 step = n
             continue
@@ -337,16 +411,23 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
         elif step == WizardStep.IDENTITY_SETUP:
             hdr = step_header_compact(WizardStep.IDENTITY_SETUP, index_1_based=idx, total=total)
             footer = _footer_identity_setup()
+        elif step == WizardStep.ORCHESTRATION:
+            hdr = step_header_compact(WizardStep.ORCHESTRATION, index_1_based=idx, total=total)
+            footer = _footer_core_services()
+        elif step == WizardStep.CONNECTIVITY:
+            hdr = step_header_compact(WizardStep.CONNECTIVITY, index_1_based=idx, total=total)
+            footer = _footer_core_services()
         else:
             hdr = step_header(step, index_1_based=idx, total=total)
             footer = _footer()
-        console.print(
-            Panel(
-                hdr + "\n\n" + footer,
-                border_style=PANEL_BORDER,
+        if step != WizardStep.REVIEW_DEPLOY:
+            console.print(
+                Panel(
+                    hdr + "\n\n" + footer,
+                    border_style=PANEL_BORDER,
+                )
             )
-        )
-        console.print()
+            console.print()
 
         if step == WizardStep.CORE_SERVICES:
             if not private_db_dir_writable(repo_root):
@@ -364,7 +445,7 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 default=draft.redis_url,
             )
             if tok == NAV_BACK:
-                p = prev_step(step)
+                p = prev_step_in(order, step)
                 if p:
                     step = p
                 continue
@@ -406,7 +487,7 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 console.print(f"[green]{save_draft_json(draft)}[/]")
                 return 0
             draft.duckdb_shared_path = val
-            n = next_step(step)
+            n = next_step_in(order, step)
             if n:
                 step = n
             continue
@@ -415,14 +496,14 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
             tok, val = _ask_until(
                 session,
                 (
-                    "1/3 — [bold]Nombre para esta instalación[/]: una etiqueta tuya (ej. «Mi negocio») para separar "
+                    "1/3 — Nombre para esta instalación: una etiqueta tuya (ej. «Mi negocio») para separar "
                     "estos datos de otros proyectos. No es Telegram. Enter para el valor sugerido.\n"
                     f"Nombre [{draft.tenant_id}]: "
                 ),
                 default=draft.tenant_id,
             )
             if tok == NAV_BACK:
-                p = prev_step(step)
+                p = prev_step_in(order, step)
                 if p:
                     step = p
                 continue
@@ -467,7 +548,7 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 return 0
             if val:
                 draft.default_worker_id = val
-            n = next_step(step)
+            n = next_step_in(order, step)
             if n:
                 step = n
             continue
@@ -480,11 +561,16 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 draft.gateway_port = alt
             tok, val = _ask_until(
                 session,
-                "Orquestación [pm2 / docker] (default pm2): ",
+                (
+                    "1/4 — ¿Cómo quieres ejecutar los servicios en este equipo?\n"
+                    "Escribe pm2 (recomendado: procesos en segundo plano en esta máquina) "
+                    "o docker (contenedores).\n"
+                    f"Modo [{draft.orchestration}]: "
+                ),
                 default=draft.orchestration,
             )
             if tok == NAV_BACK:
-                p = prev_step(step)
+                p = prev_step_in(order, step)
                 if p:
                     step = p
                 continue
@@ -493,9 +579,13 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 return 0
             if val in ("docker", "pm2"):
                 draft.orchestration = val  # type: ignore[assignment]
+            console.print()
             tok, val = _ask_until(
                 session,
-                f"Puerto gateway [{draft.gateway_port}]: ",
+                (
+                    "2/4 — Puerto del servidor web (número). Telegram y los túneles usarán este puerto.\n"
+                    f"Puerto [{draft.gateway_port}]: "
+                ),
                 default=str(draft.gateway_port),
             )
             if tok == NAV_BACK:
@@ -510,12 +600,17 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 console.print("[red]Puerto inválido[/]")
                 continue
             console.print(
-                f"[dim]Siguiente paso: [cyan]tailscale funnel --bg --yes {draft.gateway_port}[/] "
-                f"(o el asistente lo lanzará). Doc: {TAILSCALE_FUNNEL_KB_URL}[/]"
+                f"[dim]Paso siguiente: enlace público HTTPS hacia este puerto. "
+                f"Comando avanzado (Tailscale): tailscale funnel --bg --yes {draft.gateway_port} · "
+                f"{TAILSCALE_FUNNEL_KB_URL}[/]"
             )
+            console.print()
             tok, val = _ask_until(
                 session,
-                "¿Intentar Redis local gestionado (brew / hint Linux)? [y/N]: ",
+                (
+                    "3/4 — ¿Intentar instalar o activar Redis en esta máquina con ayuda del asistente "
+                    "(Homebrew en Mac, pistas en Linux)? [y/N]: "
+                ),
                 default="n",
             )
             if tok == NAV_BACK:
@@ -525,9 +620,13 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 return 0
             draft.redis_local_managed = val.lower() in ("y", "yes", "s", "sí", "si", "1")
             if draft.orchestration == "docker":
+                console.print()
                 tok, val = _ask_until(
                     session,
-                    "¿Generar docker-compose.override.yml con Redis? [Y/n]: ",
+                    (
+                        "4/4 — ¿Crear un archivo extra de Docker Compose que incluya Redis? [Y/n] "
+                        "(archivo: docker-compose.override.yml)"
+                    ),
                     default="y",
                 )
                 if tok == NAV_BACK:
@@ -536,34 +635,54 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                     console.print(f"[green]{save_draft_json(draft)}[/]")
                     return 0
                 draft.generate_docker_compose = val.lower() not in ("n", "no", "0")
-            n = next_step(step)
+            n = next_step_in(order, step)
             if n:
                 step = n
             continue
 
         if step == WizardStep.CONNECTIVITY:
+            if draft.wizard_profile == "express":
+                host = "127.0.0.1"
+                if is_port_in_use(host, draft.gateway_port):
+                    alt = suggest_gateway_port(host, draft.gateway_port)
+                    console.print(
+                        f"[yellow]El puerto {draft.gateway_port} está ocupado; "
+                        f"usaremos el sugerido {alt} para el servidor web.[/]"
+                    )
+                    draft.gateway_port = alt
+            _tg_intro = (
+                f"{section_label('Quién puede usar el bot')}"
+                "Solo las personas que tú autorices podrán hablar con este bot. "
+                "Te registramos como [green]administrador principal[/] con tu número de usuario de Telegram "
+                "y un nombre para reconocerte en listas internas.\n\n"
+                "Para ver tu número: escribe a [bold]@userinfobot[/] en Telegram o revisa los detalles "
+                "de cualquier mensaje tuyo en Telegram (aparece como número largo, solo dígitos).\n\n"
+                "Más adelante podrás indicar otros administradores (también por número).\n\n"
+                + dim_technical(
+                    "Técnico: lista de usuarios autorizados en la base de datos del servidor "
+                    "(tabla main.authorized_users)"
+                )
+            )
             console.print(
                 Panel(
-                    "[bold]Telegram Guard[/]: solo los user_id que estén en la BD del gateway "
-                    "(tabla [cyan]main.authorized_users[/]) pueden usar el bot.\n\n"
-                    "Te registramos a ti como [green]admin[/] con el ID que indiques y un "
-                    "[bold]nombre[/] para mostrar (como en `/team --add … nombre`). "
-                    "Tu ID numérico: escríbele a [bold]@userinfobot[/] en Telegram o revisa "
-                    "los datos raw de un mensaje tuyo.\n\n"
-                    "Luego podrás añadir más admins (IDs separados por coma).",
-                    title=panel_title("Quién puede usar el bot"),
+                    _tg_intro,
+                    title=panel_title("Telegram"),
                     border_style=PANEL_BORDER,
                 )
             )
+            print_dim_rule(console)
             while True:
                 tok, val = _ask_until(
                     session,
-                    "Tu [bold]user_id de Telegram[/] (solo dígitos; quedarás como admin) "
-                    f"[{draft.wizard_creator_telegram_user_id or 'obligatorio'}]: ",
+                    (
+                        "Tu número de usuario de Telegram (solo dígitos, sin @). "
+                        "Quedarás como administrador principal.\n"
+                        f"Número [{draft.wizard_creator_telegram_user_id or 'obligatorio'}]: "
+                    ),
                     default=draft.wizard_creator_telegram_user_id,
                 )
                 if tok == NAV_BACK:
-                    p = prev_step(step)
+                    p = prev_step_in(order, step)
                     if p:
                         step = p
                     break
@@ -579,10 +698,13 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
             if step != WizardStep.CONNECTIVITY:
                 continue
 
+            console.print()
             tok, val = _ask_until(
                 session,
-                "Tu [bold]nombre[/] como admin (para listados /team; ej. Juan; Enter = último valor o vacío) "
-                f"[{draft.wizard_creator_admin_display_name or 'opcional'}]: ",
+                (
+                    "Tu nombre para mostrar en listas del bot (ej. Juan). Enter para dejar vacío o el valor entre corchetes.\n"
+                    f"Nombre [{draft.wizard_creator_admin_display_name or 'opcional'}]: "
+                ),
                 default=draft.wizard_creator_admin_display_name,
             )
             if tok == NAV_BACK:
@@ -592,10 +714,14 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 return 0
             draft.wizard_creator_admin_display_name = (val or "").strip()
 
+            console.print()
             tok, val = _ask_until(
                 session,
-                "¿Más usuarios [bold]admin[/]? (IDs de Telegram separados por coma; vacío = ninguno) "
-                f"[{draft.wizard_extra_admin_telegram_ids}]: ",
+                (
+                    "¿Otros administradores del bot? Escribe números de Telegram separados por coma; "
+                    "vacío + Enter = ninguno.\n"
+                    f"Números extra [{draft.wizard_extra_admin_telegram_ids}]: "
+                ),
                 default=draft.wizard_extra_admin_telegram_ids,
             )
             if tok == NAV_BACK:
@@ -614,14 +740,20 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
             else:
                 draft.wizard_extra_admin_telegram_ids = ""
 
+            console.print()
+            console.print(dim_technical("Variable de entorno: TELEGRAM_BOT_TOKEN"))
             tok, val = _ask_until(
                 session,
-                "TELEGRAM_BOT_TOKEN (password; vacío = no actualizar desde wizard): ",
+                (
+                    "Token del bot de Telegram (el que te dio BotFather). "
+                    "Si ya lo tienes en un archivo .env, deja vacío y pulsa Enter para no cambiarlo aquí.\n"
+                    "Token: "
+                ),
                 password=True,
                 default="",
             )
             if tok == NAV_BACK:
-                p = prev_step(step)
+                p = prev_step_in(order, step)
                 if p:
                     step = p
                 continue
@@ -632,17 +764,21 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 draft.telegram_bot_token = val
                 draft.telegram_bot_token_masked = True
 
+            print_dim_rule(console)
             console.print(
                 Panel(
                     tailscale_funnel_wizard_panel_content(draft.gateway_port),
-                    title=panel_title("Tailscale Funnel (webhook HTTPS)"),
+                    title=panel_title("Enlace público (Tailscale Funnel)"),
                     border_style=PANEL_BORDER,
                 )
             )
             tok, val = _ask_until(
                 session,
-                "¿Activar Funnel ahora con [bold]tailscale funnel --bg --yes[/] "
-                f"hacia el puerto [bold]{draft.gateway_port}[/]? (requiere Tailscale logueado y ACL funnel) [Y/n]: ",
+                (
+                    f"¿Quieres que el asistente intente abrir ahora un enlace HTTPS público con Tailscale "
+                    f"hacia el puerto {draft.gateway_port}? "
+                    "Hace falta Tailscale instalado, sesión iniciada y permiso de funnel en tu red. [Y/n]: "
+                ),
                 default="y",
             )
             if tok == NAV_BACK:
@@ -737,9 +873,19 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                         else:
                             console.print(f"[red]Quick Tunnel: {err_cf}[/]")
 
+            console.print()
+            console.print(
+                dim_technical(
+                    "Variable: TELEGRAM_WEBHOOK_SECRET · Debe coincidir con la configuración del webhook en Telegram"
+                )
+            )
             tok, val = _ask_until(
                 session,
-                "TELEGRAM_WEBHOOK_SECRET (opcional, password; debe coincidir con setWebhook): ",
+                (
+                    "Frase secreta del webhook (opcional). Si la configuras, debe ser la misma "
+                    "que pongas al registrar el webhook en Telegram.\n"
+                    "Secreto (opcional): "
+                ),
                 password=True,
                 default="",
             )
@@ -755,7 +901,11 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
             if not (draft.telegram_webhook_public_base_url or "").strip():
                 tok, val = _ask_until(
                     session,
-                    "URL HTTPS pública hacia este gateway, sin barra final (si no usaste túnel; vacío = plantilla al final): ",
+                    (
+                        "Dirección HTTPS pública que apunte a tu servidor (sin barra al final). "
+                        "Úsala si no activaste un túnel arriba; vacío = se completará más tarde con una plantilla.\n"
+                        "URL HTTPS: "
+                    ),
                     default="",
                 )
                 if tok == NAV_BACK:
@@ -766,9 +916,14 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 if val:
                     draft.telegram_webhook_public_base_url = val
 
+            console.print()
+            console.print(dim_technical("Variable: DUCKCLAW_TAILSCALE_AUTH_KEY"))
             tok, val = _ask_until(
                 session,
-                "DUCKCLAW_TAILSCALE_AUTH_KEY (opcional): ",
+                (
+                    "Clave de acceso a la red Tailscale (opcional). Solo si tu instalación la necesita.\n"
+                    "Clave (opcional): "
+                ),
                 password=True,
                 default="",
             )
@@ -779,9 +934,14 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 return 0
             if val:
                 draft.duckclaw_tailscale_auth_key = val
+            console.print(dim_technical("Opción técnica: integración MCP (herramientas para desarrolladores)"))
             tok, val = _ask_until(
                 session,
-                "¿Habilitar MCP Telegram? [Y/n]: ",
+                (
+                    "¿Activar herramientas extra para desarrolladores vinculadas a Telegram? "
+                    "La mayoría puede dejar Sí o Enter.\n"
+                    "[Y/n]: "
+                ),
                 default="y",
             )
             if tok == NAV_BACK:
@@ -790,44 +950,77 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 console.print(f"[green]{save_draft_json(draft)}[/]")
                 return 0
             draft.enable_telegram_mcp = val.lower() not in ("n", "no", "0")
-            n = next_step(step)
+            n = next_step_in(order, step)
             if n:
                 step = n
             continue
 
         if step == WizardStep.REVIEW_DEPLOY:
-            masked_tok = "•••• (configurado)" if draft.telegram_bot_token else "(vacío / .env existente)"
-            summary = (
-                f"Redis: {draft.redis_url}\n"
-                f"DuckDB vault: {draft.duckdb_vault_path}\n"
-                f"Shared: {draft.duckdb_shared_path or '(ninguna)'}\n"
-                f"Tenant: {draft.tenant_id}\n"
-                f"PM2 name: {draft.gateway_pm2_name}\n"
-                f"Worker: {draft.default_worker_id}\n"
-                f"Telegram Guard — admin (tú): {draft.wizard_creator_telegram_user_id or '(falta ID)'} "
-                f"({draft.wizard_creator_admin_display_name or 'sin nombre'})\n"
-                f"Telegram Guard — admins extra: {draft.wizard_extra_admin_telegram_ids or '(ninguno)'}\n"
-                f"Telegram token: {masked_tok}\n"
-                f"Webhook HTTPS base: {draft.telegram_webhook_public_base_url or '(plantilla con marcador al final)'}\n"
-                f"Tailscale Funnel (--bg vía wizard): {'sí' if draft.tailscale_funnel_bg_via_wizard else 'no'}\n"
-                f"Cloudflare PM2 (quick tunnel): {draft.cloudflared_pm2_process_name or '(ninguno)'}\n"
-                f"MCP Telegram: {draft.enable_telegram_mcp}\n"
-                f"Orquestación: {draft.orchestration} | Puerto: {draft.gateway_port}\n"
+            masked_tok = "•••• (configurado)" if draft.telegram_bot_token else "(sin cambiar aquí / ya en .env)"
+            extra_path = draft.duckdb_shared_path.strip() or "(ninguna)"
+            orch_sp = "Docker" if draft.orchestration == "docker" else "PM2 en esta máquina"
+            funnel_sí = "sí" if draft.tailscale_funnel_bg_via_wizard else "no"
+            cf_pm2 = draft.cloudflared_pm2_process_name.strip() or "(ninguno)"
+            mcp_sí = "sí" if draft.enable_telegram_mcp else "no"
+            url_pub = (draft.telegram_webhook_public_base_url or "").strip() or "(se definirá después / plantilla)"
+            profile_es = (
+                "Rápida (valores por defecto; solo canal y secretos en detalle)"
+                if draft.wizard_profile == "express"
+                else "Manual (revisaste memoria, identidad y orquestación paso a paso)"
             )
+            summary = (
+                f"{section_label('Tipo de configuración')}"
+                f"{profile_es}\n"
+                "\n"
+                f"{section_label('Datos y mensajes')}"
+                f"Redis (cola): {draft.redis_url}\n"
+                f"Archivo de memoria principal: {draft.duckdb_vault_path}\n"
+                f"Archivo de memoria extra: {extra_path}\n"
+                "\n"
+                f"{section_label('Tu instalación')}"
+                f"Nombre para esta instalación: {draft.tenant_id}\n"
+                f"Nombre del servicio en segundo plano: {draft.gateway_pm2_name}\n"
+                f"Asistente especializado por defecto: {draft.default_worker_id}\n"
+                "\n"
+                f"{section_label('Telegram')}"
+                f"Tu número (admin principal): {draft.wizard_creator_telegram_user_id or '(falta)'} "
+                f"— nombre: {draft.wizard_creator_admin_display_name or '(sin nombre)'}\n"
+                f"Otros administradores: {draft.wizard_extra_admin_telegram_ids or '(ninguno)'}\n"
+                f"Token del bot: {masked_tok}\n"
+                f"Dirección HTTPS pública: {url_pub}\n"
+                f"Enlace abierto con Tailscale Funnel desde el asistente: {funnel_sí}\n"
+                f"Túnel Cloudflare (proceso en PM2 si aplica): {cf_pm2}\n"
+                f"Integración MCP con Telegram: {mcp_sí}\n"
+                "\n"
+                f"{section_label('Arranque')}"
+                f"Modo: {orch_sp} · Puerto del servidor web: {draft.gateway_port}\n"
+            )
+            confirm_help = (
+                "\n"
+                f"{section_label('Cómo confirmar')}"
+                "Si todo te parece bien y quieres guardar los cambios en esta carpeta del proyecto, "
+                "escribe exactamente la palabra CONFIRMAR (las ocho letras, todo en mayúsculas) "
+                "en la línea que verás justo debajo de este cuadro, y pulsa Enter.\n\n"
+                "Si no quieres guardar nada todavía, escribe cualquier otra cosa en esa línea; "
+                "también puedes pulsar Esc o Ctrl+Z para volver atrás y corregir un paso.\n\n"
+                f"{dim_technical('Al confirmar se actualizan .env y los archivos de arranque del repositorio')}"
+            )
+            review_full = hdr + "\n\n" + footer + "\n\n" + summary + confirm_help
             console.print(
                 Panel(
-                    summary,
-                    title=panel_title("Revisión — confirmar"),
+                    review_full,
+                    title=panel_title("Última comprobación"),
                     border_style=PANEL_BORDER,
                 )
             )
+            console.print()
             tok, val = _ask_until(
                 session,
-                "Escribe CONFIRMAR para escribir .env y artefactos (otro texto cancela): ",
+                "Tu respuesta (CONFIRMAR u otra cosa): ",
                 default="",
             )
             if tok == NAV_BACK:
-                p = prev_step(step)
+                p = prev_step_in(order, step)
                 if p:
                     step = p
                 continue
@@ -835,7 +1028,7 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 console.print(f"[green]{save_draft_json(draft)}[/]")
                 return 0
             if val.strip().upper() != "CONFIRMAR":
-                console.print("[yellow]Cancelado — no se escribió nada en el repo.[/]")
+                console.print("[yellow]Cancelado: no se ha modificado la configuración en el proyecto.[/]")
                 return 0
             return _CONFIRM_EXIT
 

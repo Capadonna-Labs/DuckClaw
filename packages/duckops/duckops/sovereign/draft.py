@@ -7,8 +7,14 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+WizardProfile = Literal["express", "full"]
+
+
 class SovereignDraft(BaseModel):
     """Valores recogidos en la sesión; se materializan en disco al confirmar Review."""
+
+    #: express = pocos pasos (valores por defecto + Telegram/secretos); full = wizard completo.
+    wizard_profile: WizardProfile = "express"
 
     # Audit
     detected_os: str = ""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import platform
+import subprocess
 from pathlib import Path
 from typing import Callable
 
@@ -16,6 +17,7 @@ from duckops.sovereign.cloudflared_tunnel import (
     provision_trycloudflare_quick_tunnel,
 )
 from duckops.sovereign.domain_labels import (
+    STEP_UI,
     TAILSCALE_FUNNEL_KB_URL,
     WizardStep,
     step_header,
@@ -58,6 +60,106 @@ def _footer() -> str:
         "Atajos: Ctrl+Z/Esc (atrás) | Ctrl+S (guardar borrador y salir) | "
         "Ctrl+R (probar Redis en pasos Core/Orchestration) | Tab (autofill default)\n"
         "Ctrl+C (abortar)"
+    )
+
+
+def _footer_step_intro() -> str:
+    """Atajos del paso 1: una sola línea."""
+    return (
+        "[dim]Enter continuar · Ctrl+S guardar borrador · Ctrl+C cancelar · "
+        "Esc/Ctrl+Z atrás en pasos siguientes[/]"
+    )
+
+
+def _friendly_os_name(system: str) -> str:
+    s = (system or "").strip()
+    if s == "Darwin":
+        return "Mac"
+    if s == "Windows":
+        return "Windows"
+    if s == "Linux":
+        return "Linux"
+    return s or "este equipo"
+
+
+def _processor_display(os_name: str, machine: str) -> str:
+    """
+    Nombre legible del CPU (p. ej. «Apple M4» vía sysctl en macOS).
+    En Linux/Windows usa heurísticas; si falla, devuelve arquitectura o «no identificado».
+    """
+    os_n = (os_name or "").strip()
+    mach = (machine or "").strip()
+
+    if os_n == "Darwin":
+        try:
+            out = subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                timeout=4,
+            )
+            if out.returncode == 0:
+                brand = (out.stdout or "").strip()
+                if brand:
+                    return brand
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if mach == "arm64":
+            return "Apple Silicon (modelo no identificado)"
+        if mach == "x86_64":
+            return "Intel u otro (64 bits)"
+        return mach or "no identificado"
+
+    if os_n == "Linux":
+        try:
+            txt = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="ignore")
+            model = ""
+            hardware = ""
+            for line in txt.splitlines():
+                low = line.lower()
+                if low.startswith("model name"):
+                    _, _, rest = line.partition(":")
+                    model = (rest or "").strip()
+                elif low.startswith("hardware"):
+                    _, _, rest = line.partition(":")
+                    hardware = (rest or "").strip()
+            if model:
+                return model
+            if hardware:
+                return hardware
+        except OSError:
+            pass
+        proc = (platform.processor() or "").strip()
+        if proc:
+            return proc
+        return mach or "no identificado"
+
+    if os_n == "Windows":
+        proc = (platform.processor() or "").strip()
+        if proc:
+            return proc
+        return mach or "no identificado"
+
+    proc = (platform.processor() or "").strip()
+    if proc:
+        return proc
+    return mach or "no identificado"
+
+
+def _sovereignty_card_content(draft: SovereignDraft, *, index_1_based: int, total: int) -> str:
+    """Una sola tarjeta: reconocimiento, SO, CPU, ayuda breve y atajos."""
+    os_friendly = _friendly_os_name(draft.detected_os)
+    cpu = _processor_display(draft.detected_os, platform.machine())
+    copy = STEP_UI[WizardStep.SOVEREIGNTY_AUDIT]
+    intro = (copy.description or "Reconociendo tu sistema operativo.").strip()
+    return (
+        f"[dim]DuckClaw · paso {index_1_based} de {total}[/]\n\n"
+        f"{intro}\n\n"
+        f"Tipo de sistema operativo: [bold]{os_friendly}[/]\n"
+        f"Procesador: [bold]{cpu}[/]\n\n"
+        "[dim]¿Es correcto? Enter para seguir. Si no coincide, puedes seguir igual (solo sugerencias) "
+        "o Ctrl+C para salir.[/]\n"
+        f"{_footer_step_intro()}"
     )
 
 
@@ -122,18 +224,22 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
 
     while True:
         idx = STEP_ORDER.index(step) + 1
-        hdr = step_header(step, index_1_based=idx, total=total)
-        console.print(Panel(hdr + "\n\n" + _footer(), border_style="green"))
 
         if step == WizardStep.SOVEREIGNTY_AUDIT:
             draft.detected_os = platform.system()
             draft.is_apple_silicon = platform.machine() == "arm64" and draft.detected_os == "Darwin"
             console.print(
-                f"Sistema: [bold]{draft.detected_os}[/] | "
-                f"machine={platform.machine()} | "
-                f"Apple Silicon: {draft.is_apple_silicon}"
+                Panel(
+                    _sovereignty_card_content(draft, index_1_based=idx, total=total),
+                    title="Tu equipo",
+                    border_style="green",
+                )
             )
-            tok, _ = _ask_until(session, "Enter continuar → siguiente paso (Esc atrás) ", default="")
+            tok, _ = _ask_until(
+                session,
+                "¿Seguimos al siguiente paso? Pulsa Enter. ",
+                default="",
+            )
             if tok == NAV_BACK:
                 console.print("[yellow]Ya estás en el primer paso.[/]")
                 continue
@@ -145,6 +251,10 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
             if n:
                 step = n
             continue
+
+        hdr = step_header(step, index_1_based=idx, total=total)
+        footer = _footer()
+        console.print(Panel(hdr + "\n\n" + footer, border_style="green"))
 
         if step == WizardStep.CORE_SERVICES:
             if not private_db_dir_writable(repo_root):

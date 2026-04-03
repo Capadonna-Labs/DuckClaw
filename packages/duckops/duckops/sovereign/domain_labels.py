@@ -26,9 +26,9 @@ class StepCopy:
 
 STEP_UI: dict[WizardStep, StepCopy] = {
     WizardStep.SOVEREIGNTY_AUDIT: StepCopy(
-        title_sovereign="Soberanía del entorno",
-        subtitle_technical="Sovereignty Audit",
-        description="Detectamos tu sistema (macOS, Linux, Docker) para adaptar rutas y servicios.",
+        title_sovereign="Tu equipo",
+        subtitle_technical="Sistema operativo",
+        description="Reconociendo tu sistema operativo...",
     ),
     WizardStep.CORE_SERVICES: StepCopy(
         title_sovereign="Canal de comunicación y bóveda de memoria",

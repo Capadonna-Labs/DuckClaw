@@ -40,20 +40,6 @@ docker stop redis
 docker rm redis
 ```
 
-### Opción B — Redis instalado en el sistema
-
-Si ya tienes `redis-server` en el PATH:
-
-```bash
-redis-server
-```
-
-(En otra terminal) verificación:
-
-```bash
-redis-cli ping
-```
-
 Variables típicas en `.env` (el wizard puede escribirlas):
 
 ```env

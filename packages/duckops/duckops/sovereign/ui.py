@@ -212,12 +212,36 @@ def _sovereignty_card_content(draft: SovereignDraft, *, index_1_based: int, tota
 
 def _show_wizard_concepts_primer(session: PromptSession, console: Console, draft: SovereignDraft) -> int:
     """
-    Pantalla inicial de conceptos. Devuelve 0 para continuar al paso 1, 1 si el usuario guardó borrador y sale.
+    Pantalla inicial de bienvenida y conceptos. Devuelve 0 para continuar, 1 si guardó borrador y sale.
     """
     body = (
-        f"{section_label('Qué va a pasar')}"
-        "Te hará unas pocas preguntas en orden. La mayoría tienen ya una respuesta sugerida: "
-        "suele bastar pulsar Enter. No necesitas saber programar.\n"
+        f"{section_label('Bienvenida')}"
+        "Hola. Este asistente te va a acompañar para dejar DuckClaw instalado y configurado en "
+        "este equipo, con tus datos y tus reglas.\n"
+        "\n"
+        f"{section_label('Qué es DuckClaw')}"
+        "DuckClaw es tu sistema agéntico: varios programas que actúan como un equipo de "
+        "asistentes de inteligencia artificial. Pueden hablar contigo por un canal como Telegram, "
+        "recordar contexto, usar herramientas y pasarte a perfiles más concretos cuando haga falta. "
+        "Está pensado para integrarse en tu vida o tu trabajo sin que pierdas el control: la memoria "
+        "y la configuración viven donde tú elijas, en tu máquina o tu infraestructura.\n"
+        "\n"
+        f"{section_label('Qué puede hacer por ti')}"
+        "- Ofrecerte un bot que mantiene coherencia entre conversaciones gracias a una memoria local.\n"
+        "- Orquestar un coordinador y trabajadores especializados (finanzas, análisis, ofertas, etc.; "
+        "elegirás el perfil que prefieras en la configuración).\n"
+        "- Mantener servicios en segundo plano de forma estable, para que no dependas de ventanas abiertas.\n"
+        "\n"
+        f"{section_label('Qué va a crear en tu proyecto')}"
+        "Si al final confirmas, el asistente escribirá en esta carpeta del proyecto archivos de "
+        "configuración (por ejemplo .env), apuntará a un archivo de memoria (base de datos DuckDB), "
+        "y dejará preparado el arranque del servidor y la conexión con Telegram u otros enlaces que configures. "
+        "Antes de tocar nada verás un resumen: nada se aplica a ciegas.\n"
+        "\n"
+        f"{section_label('Cómo lo haremos juntos')}"
+        "Te haré preguntas en orden; la mayoría traen ya una respuesta sugerida (suele bastar Enter). "
+        "Podrás elegir configuración rápida o repasar cada bloque. No necesitas saber programar. "
+        "Ctrl+S guarda borrador y sale; Ctrl+C cancela.\n"
         "\n"
         f"{section_label('Palabras que verás más adelante')}"
         "- Nombre para esta instalación: cómo quieres llamar a esta copia de DuckClaw "
@@ -230,20 +254,20 @@ def _show_wizard_concepts_primer(session: PromptSession, console: Console, draft
         "(por ejemplo desde Telegram). Una herramienta llamada PM2 ayuda a que siga encendido aunque cierres la ventana.\n\n"
         "- Quién te atiende primero: un coordinador y luego un perfil más concreto "
         "(finanzas, ofertas de trabajo, etc.); elegirás el perfil en un paso.\n\n"
-        "[dim]Enter = empezar  |  Ctrl+S = guardar borrador y salir  |  Ctrl+C = cancelar[/]"
+        "[dim]Enter = continuar  |  Ctrl+S = guardar borrador y salir  |  Ctrl+C = cancelar[/]"
     )
     console.print()
     console.print(
         Panel(
             body,
-            title=panel_title("Antes de empezar"),
+            title=panel_title("Bienvenida a DuckClaw"),
             title_align="left",
             border_style=PANEL_BORDER,
         )
     )
     console.print()
     while True:
-        tok, _ = _ask_until(session, "Pulsa Enter para empezar las preguntas. ", default="")
+        tok, _ = _ask_until(session, "Pulsa Enter para continuar. ", default="")
         if tok == NAV_BACK:
             console.print(
                 "[dim]Aún no hay paso anterior. Pulsa Enter para comenzar o Ctrl+C para salir.[/]"

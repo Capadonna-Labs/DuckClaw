@@ -9,6 +9,8 @@ El Wizard dejará de ser un `input()` secuencial. Se implementará como una **M�
 *   **Persistencia Temporal:** Los cambios se mantienen en un diccionario `draft_config` y solo se escriben a disco (`.env`, `manifest.yaml`, `docker-compose.yml`) al confirmar en la pantalla final de "Review".
 
 ## 2. UI/UX y Abstracción de Lenguaje (Human-Centric)
+La primera pantalla del wizard (`_show_wizard_concepts_primer`) debe **dar la bienvenida** en lenguaje llano: qué es DuckClaw como sistema agéntico, qué puede hacer el usuario, qué artefactos se crearán al confirmar y cómo se desarrollará el flujo (preguntas guiadas, borrador, resumen antes de aplicar). Después convive un **glosario** de términos que aparecerán más adelante.
+
 Se aplicará una capa de "Traducción de Dominio" para que los términos de infraestructura no oscurezcan el propósito del sistema.
 
 | Término Técnico | Lenguaje Wizard (Soberano) | Descripción en UI |

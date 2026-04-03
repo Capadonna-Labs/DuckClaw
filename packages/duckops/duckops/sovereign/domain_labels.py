@@ -34,14 +34,22 @@ STEP_UI: dict[WizardStep, StepCopy] = {
         title_sovereign="Datos y cola de mensajes",
         subtitle_technical="Redis y DuckDB",
         description=(
-            "Te pediremos tres valores: dirección de Redis (mensajes en cola), archivo de tu base principal "
-            "y, si la necesitas, una segunda base. En un equipo normal suele bastar pulsar Enter en los dos primeros."
+            "Tres preguntas cortas: dónde está el servicio de mensajes (Redis), dónde guardar el archivo de "
+            "memoria de DuckClaw en tu disco y, solo en casos avanzados, una ruta extra. "
+            "En la mayoría de equipos basta pulsar Enter en las dos primeras."
         ),
     ),
     WizardStep.IDENTITY_SETUP: StepCopy(
-        title_sovereign="Identidad del orquestador",
-        subtitle_technical="Manager + Worker",
-        description="Tenant, nombre PM2 del gateway y plantilla del primer worker.",
+        title_sovereign="Tu proyecto y asistente por defecto",
+        subtitle_technical="Nombre, servidor y perfil",
+        description=(
+            "[bold]Nombre para esta instalación[/] — cómo quieres llamar a esta copia de DuckClaw en tus datos "
+            "(ej. «Mi tienda», «casa»). Solo organiza archivos y permisos; no es Telegram.\n\n"
+            "[bold]Gateway[/] — el programa-servidor que recibe mensajes y habla con los agentes.\n\n"
+            "[bold]PM2[/] — herramienta que mantiene ese servidor encendido en segundo plano.\n\n"
+            "[bold]Manager[/] te atiende primero; [bold]worker[/] es el asistente especializado (finanzas, empleo…); "
+            "más abajo eliges cuál usar por defecto."
+        ),
     ),
     WizardStep.ORCHESTRATION: StepCopy(
         title_sovereign="Orquestación",
@@ -115,19 +123,26 @@ def tailscale_funnel_wizard_panel_content(gateway_port: int) -> str:
 
 
 def step_header_compact(step: WizardStep, *, index_1_based: int, total: int) -> str:
-    """Encabezado corto (pasos 2+ cuando se quiere menos ruido que ``step_header``)."""
+    """Encabezado corto: número de paso destacado, título y aire entre bloques."""
     copy = STEP_UI[step]
     return (
-        f"[dim]DuckClaw · paso {index_1_based} de {total}[/]\n"
-        f"[bold]{copy.title_sovereign}[/] · [dim]{copy.subtitle_technical}[/]\n"
+        f"[bold bright_white]Paso {index_1_based} de {total}[/] [dim]· DuckClaw[/]\n"
+        "\n"
+        f"[bold]{copy.title_sovereign}[/]\n"
+        f"[dim]{copy.subtitle_technical}[/]\n"
+        "\n"
         f"{copy.description}"
     )
 
 
 def step_header(step: WizardStep, *, index_1_based: int, total: int) -> str:
+    """Encabezado largo (pasos 4–6): misma jerarquía visual, sin banda de guiones."""
     copy = STEP_UI[step]
     return (
-        f"── DuckClaw Sovereign Wizard v2.0 ──────────────────────────────────────────\n"
-        f"[ Paso {index_1_based} de {total}: {copy.title_sovereign} ({copy.subtitle_technical}) ]\n"
+        f"[dim]DuckClaw · asistente de configuración[/]\n"
+        f"[bold bright_white]Paso {index_1_based} de {total}[/]\n"
+        "\n"
+        f"[bold]{copy.title_sovereign}[/] · [dim]{copy.subtitle_technical}[/]\n"
+        "\n"
         f"{copy.description}"
     )

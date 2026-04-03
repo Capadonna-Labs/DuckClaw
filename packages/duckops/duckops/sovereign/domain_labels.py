@@ -31,12 +31,11 @@ STEP_UI: dict[WizardStep, StepCopy] = {
         description="Reconociendo tu sistema operativo...",
     ),
     WizardStep.CORE_SERVICES: StepCopy(
-        title_sovereign="Canal de comunicación y bóveda de memoria",
-        subtitle_technical="Redis + DuckDB",
+        title_sovereign="Datos y cola de mensajes",
+        subtitle_technical="Redis y DuckDB",
         description=(
-            "Redis como canal; DuckDB principal en «Bóveda» (DUCKCLAW_DB_PATH del gateway PM2). "
-            "El campo opcional «compartida» es una segunda base (p. ej. Leila); si dejas la bóveda "
-            "por defecto y solo tienes un .duckdb analítico (BI), puedes indicarlo ahí y se usará como principal."
+            "Te pediremos tres valores: dirección de Redis (mensajes en cola), archivo de tu base principal "
+            "y, si la necesitas, una segunda base. En un equipo normal suele bastar pulsar Enter en los dos primeros."
         ),
     ),
     WizardStep.IDENTITY_SETUP: StepCopy(
@@ -112,6 +111,16 @@ def tailscale_funnel_wizard_panel_content(gateway_port: int) -> str:
             "",
             "[dim]Estado: tailscale funnel status  ·  Reiniciar mapeos: tailscale funnel reset[/]",
         ]
+    )
+
+
+def step_header_compact(step: WizardStep, *, index_1_based: int, total: int) -> str:
+    """Encabezado corto (pasos 2+ cuando se quiere menos ruido que ``step_header``)."""
+    copy = STEP_UI[step]
+    return (
+        f"[dim]DuckClaw · paso {index_1_based} de {total}[/]\n"
+        f"[bold]{copy.title_sovereign}[/] · [dim]{copy.subtitle_technical}[/]\n"
+        f"{copy.description}"
     )
 
 

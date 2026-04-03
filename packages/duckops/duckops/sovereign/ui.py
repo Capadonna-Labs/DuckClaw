@@ -21,6 +21,7 @@ from duckops.sovereign.domain_labels import (
     TAILSCALE_FUNNEL_KB_URL,
     WizardStep,
     step_header,
+    step_header_compact,
     tailscale_funnel_wizard_panel_content,
 )
 from duckops.sovereign.tailscale_funnel import (
@@ -68,6 +69,14 @@ def _footer_step_intro() -> str:
     return (
         "[dim]Enter continuar · Ctrl+S guardar borrador · Ctrl+C cancelar · "
         "Esc/Ctrl+Z atrás en pasos siguientes[/]"
+    )
+
+
+def _footer_core_services() -> str:
+    """Paso 2: incluye prueba de Redis (Ctrl+R)."""
+    return (
+        "[dim]Tab valor sugerido · Ctrl+R probar conexión Redis · Esc/Ctrl+Z atrás · "
+        "Ctrl+S guardar borrador · Ctrl+C cancelar[/]"
     )
 
 
@@ -252,18 +261,26 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 step = n
             continue
 
-        hdr = step_header(step, index_1_based=idx, total=total)
-        footer = _footer()
+        if step == WizardStep.CORE_SERVICES:
+            hdr = step_header_compact(WizardStep.CORE_SERVICES, index_1_based=idx, total=total)
+            footer = _footer_core_services()
+        else:
+            hdr = step_header(step, index_1_based=idx, total=total)
+            footer = _footer()
         console.print(Panel(hdr + "\n\n" + footer, border_style="green"))
 
         if step == WizardStep.CORE_SERVICES:
             if not private_db_dir_writable(repo_root):
                 console.print(
-                    "[red]Sin permiso de escritura en db/private. Corrige antes de continuar.[/]"
+                    "[red]No hay permiso de escritura en la carpeta db/private. "
+                    "Ajusta permisos antes de seguir.[/]"
                 )
             tok, val = _ask_until(
                 session,
-                f"Redis URL [Canal de comunicación] [{draft.redis_url}]: ",
+                (
+                    "1/3 — Dirección de Redis (mensajes en cola). Enter para aceptar el valor entre corchetes.\n"
+                    f"Redis [{draft.redis_url}]: "
+                ),
                 default=draft.redis_url,
             )
             if tok == NAV_BACK:
@@ -278,7 +295,11 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                 draft.redis_url = val
             tok, val = _ask_until(
                 session,
-                f"DuckDB vault path [Bóveda] [{draft.duckdb_vault_path}]: ",
+                (
+                    "2/3 — Archivo de la base principal (donde guarda datos el sistema). "
+                    "Enter para el valor mostrado.\n"
+                    f"Ruta .duckdb [{draft.duckdb_vault_path}]: "
+                ),
                 default=draft.duckdb_vault_path,
             )
             if tok == NAV_BACK:
@@ -291,8 +312,9 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
             tok, val = _ask_until(
                 session,
                 (
-                    "DuckDB segunda / compartida (opcional; Enter vacío = omitir) "
-                    f"[{draft.duckdb_shared_path}]: "
+                    "3/3 — Segunda base de datos (opcional). Vacío = no usar. "
+                    "Solo si necesitas otra .duckdb aparte de la principal.\n"
+                    f"Ruta opcional [{draft.duckdb_shared_path}]: "
                 ),
                 default=draft.duckdb_shared_path,
             )

@@ -7,6 +7,8 @@ El verde se reserva para confirmaciones puntuales (p. ej. borrador guardado, Red
 
 from __future__ import annotations
 
+from rich.console import Console
+
 # Pasos y guía: información / navegación
 PANEL_BORDER = "cyan"
 
@@ -25,3 +27,20 @@ def panel_title(text: str) -> str:
 
 # Cabecera de paso «Paso N de M»
 STEP_NUMBER_STYLE = "bold bright_white"
+
+
+def section_label(text: str) -> str:
+    """Subtítulo visual dentro de un bloque de texto (panel o guía inicial)."""
+    return f"[bold cyan]{text}[/]\n"
+
+
+def dim_technical(*fragments: str) -> str:
+    """Línea técnica opcional (variables, tablas) solo en gris."""
+    return "[dim]" + " · ".join(fragments) + "[/]"
+
+
+def print_dim_rule(console: Console) -> None:
+    """Separador horizontal suave entre bloques en consola."""
+    from rich.rule import Rule
+
+    console.print(Rule(style="dim"))

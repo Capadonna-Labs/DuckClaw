@@ -52,72 +52,51 @@ STEP_UI: dict[WizardStep, StepCopy] = {
         ),
     ),
     WizardStep.ORCHESTRATION: StepCopy(
-        title_sovereign="Orquestación",
-        subtitle_technical="PM2 vs Docker",
+        title_sovereign="Cómo arranca el servidor",
+        subtitle_technical="PM2, Docker y puerto",
         description=(
-            "Puerto del API Gateway y Redis local. El puerto se fija aquí antes de Telegram para poder "
-            "usar Tailscale Funnel (--bg) o, en su defecto, otro túnel hacia 127.0.0.1:puerto."
+            "Indica si los programas correrán en esta máquina con PM2 (lo habitual) o con Docker, "
+            "qué puerto usará el servidor web y, si quieres, ayuda para Redis local. "
+            "El puerto importa para el siguiente paso (enlace público hacia Telegram)."
         ),
     ),
     WizardStep.CONNECTIVITY: StepCopy(
-        title_sovereign="Puente de integración y acceso",
-        subtitle_technical="Telegram / Tailscale Funnel / MCP",
+        title_sovereign="Telegram y enlace seguro",
+        subtitle_technical="Bot, túnel HTTPS y opciones",
         description=(
-            "Token de Telegram; URL HTTPS pública vía Tailscale Funnel (recomendado) hacia el puerto ya definido; "
-            "secreto de webhook; Cloudflare Quick Tunnel solo como alternativa; clave Tailscale opcional."
+            "Registramos quién puede usar el bot, el token del bot y una dirección HTTPS pública "
+            "(Tailscale Funnel u otra) para que Telegram llegue a tu servidor. "
+            "Lo opcional va al final (clave de red, integración avanzada)."
         ),
     ),
     WizardStep.REVIEW_DEPLOY: StepCopy(
-        title_sovereign="Revisión e ignición",
-        subtitle_technical="Review & Deploy",
+        title_sovereign="Última comprobación",
+        subtitle_technical="Revisa y confirma",
         description=(
-            "Resumen; al confirmar se escriben .env y artefactos. "
-            "Quick Save (Ctrl+S) guarda borrador sin desplegar."
+            "Aquí ves todo lo que elegiste. Léelo con calma antes de continuar. "
+            "Más abajo te diremos cómo confirmar para guardar los cambios en la carpeta del proyecto. "
+            "Si solo quieres un borrador sin aplicar, usa Ctrl+S."
         ),
     ),
 }
 
 
 TAILSCALE_FUNNEL_KB_URL = "https://tailscale.com/kb/1223/funnel/"
-TAILSCALE_FUNNEL_CLI_URL = "https://tailscale.com/docs/reference/tailscale-cli/funnel"
 
 
 def tailscale_funnel_wizard_panel_content(gateway_port: int) -> str:
-    """
-    Instrucciones para exponer este gateway vía Tailscale Funnel (webhook Telegram HTTPS).
-    Resumen alineado con la documentación oficial (MagicDNS, HTTPS, nodeAttrs funnel).
-    """
+    """Texto breve para el paso Telegram; el detalle técnico queda en dim y en la KB."""
     p = int(gateway_port)
     return "\n".join(
         [
-            "[bold]Qué es[/]: Funnel enruta tráfico de Internet a un servicio TCP en esta máquina "
-            "(tu API Gateway). Telegram puede hacer [bold]POST[/] a esa URL HTTPS.",
+            "Tailscale Funnel abre una dirección [bold]https://…[/] en Internet hacia el servidor "
+            f"que ya escucha en tu equipo en el puerto [bold]{p}[/]. Así Telegram puede enviar mensajes al bot.",
             "",
-            "[bold]Requisitos en el tailnet[/] (consola admin Tailscale):",
-            "  • MagicDNS activo",
-            "  • Certificados HTTPS del tailnet configurados",
-            "  • Política ACL con atributo de nodo [bold]funnel[/] para quien ejecute el comando "
-            "(p. ej. «Add Funnel to policy» en Access controls)",
+            "Necesitas la app Tailscale instalada, sesión iniciada y permisos de «funnel» en tu red "
+            "(en la consola de administración de Tailscale).",
             "",
-            f"[bold]Documentación[/]: {TAILSCALE_FUNNEL_KB_URL}",
-            f"[bold]Referencia CLI[/]: {TAILSCALE_FUNNEL_CLI_URL}",
-            "",
-            f"Con el gateway escuchando en [bold]127.0.0.1:{p}[/] (PM2 / uvicorn), en esta máquina:",
-            f"  [cyan]tailscale funnel --bg --yes {p}[/]",
-            "  ([bold]--bg[/] mantiene el mapeo en segundo plano; tras reinicio del nodo suele reanudarse.)",
-            "",
-            "La CLI mostrará una URL pública del tipo "
-            "[bold]https://NOMBRE-MÁQUINA.<tu-tailnet>.ts.net[/] "
-            f"proxando a [bold]http://127.0.0.1:{p}[/].",
-            "Usa como base del webhook de Telegram (sin barra final) esa URL; el [bold]setWebhook[/] completo será:",
-            "  [dim]…/api/v1/telegram/webhook[/] al final.",
-            "",
-            "[bold]Varios gateways[/] (Finanz :8000, JobHunter :8283, etc.): el modo recomendado es que "
-            "cada bot tenga una URL HTTPS que termine en el puerto de [italic]ese[/] PM2. Opciones: varios "
-            "túneles/hostnames (p. ej. Cloudflare) hacia cada puerto; varios funnels si el tailnet lo permite; "
-            "o [bold]Tailscale Serve[/] / reverse proxy con reglas por ruta o host y un solo funnel al frontal.",
-            "",
-            "[dim]Estado: tailscale funnel status  ·  Reiniciar mapeos: tailscale funnel reset[/]",
+            f"[dim]Guía: {TAILSCALE_FUNNEL_KB_URL} · Comando que puede ejecutar el asistente: "
+            f"tailscale funnel --bg --yes {p} · Ruta del webhook: …/api/v1/telegram/webhook[/]",
         ]
     )
 

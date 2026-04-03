@@ -42,7 +42,7 @@ Al finalizar el Wizard, el sistema queda orquestado con los siguientes procesos 
 | Servicio PM2 | Rol Arquitectónico | Comando Subyacente |
 | :--- | :--- | :--- |
 | **`DuckClaw-Gateway`** | API Unificada (FastAPI). Recibe tráfico de n8n/Angular, encola escrituras y sirve SSE. | `uvicorn main:app --app-dir services/api-gateway` |
-| **`DuckClaw-DB-Writer`** | Consumidor Singleton. Lee de Redis y escribe en DuckDB garantizando ACID. | `python services/db-writer/main.py` |
+| **`DuckClaw-DB-Writer`** | Consumidor Singleton. Lee de Redis y escribe en DuckDB (cola SQL + **`CONTEXT_INJECTION`** para `/context --add` → `main.semantic_memory`). | `python services/db-writer/main.py` |
 | **`DuckClaw-MLX_Inference`**| (Solo Mac) Servidor MLX local compatible con OpenAI API. | `bash mlx/start_mlx.sh` |
 
 ## 5. Protocolo de Seguridad (Manejo de Secretos)
@@ -51,7 +51,7 @@ Al finalizar el Wizard, el sistema queda orquestado con los siguientes procesos 
 
 ## 6. Guía Rápida de Operación (Cheat Sheet)
 
-Estos son los comandos del día a día:
+Estos son los comandos del día a día. La referencia amplia (Redis, webhook Telegram, pool `read_sql`, **context injection**, variables) está en **[docs/COMANDOS.md](COMANDOS.md)**.
 
 ```bash
 # 1. Instalación desde cero o reconfiguración interactiva
@@ -63,6 +63,25 @@ uv run duckops serve --gateway
 # 3. Ver el estado de los servicios en background
 pm2 status
 
-# 4. Ver logs en tiempo real del DB-Writer (para auditar escrituras)
+# 4. Ver logs del DB-Writer (SQL + CONTEXT_INJECTION / semantic_memory)
 pm2 logs DuckClaw-DB-Writer
+
+# 5. Ejemplo: gateway con Telegram (nombre según config PM2, p. ej. JobHunter-Gateway)
+pm2 logs JobHunter-Gateway
+
+# 6. Tras cambiar DUCKCLAW_* en PM2
+pm2 restart <NombreDelGateway> --update-env
 ```
+
+### Telegram: memoria semántica (`/context`)
+
+Solo **admin** (misma regla que el Telegram Guard: `main.authorized_users`, War Room, u owner vía `DUCKCLAW_OWNER_ID` / `DUCKCLAW_ADMIN_CHAT_ID`).
+
+| Comando | Rol |
+| :--- | :--- |
+| `/context --add <texto>` | Encola persistencia en `main.semantic_memory` (Redis → **DuckClaw-DB-Writer**). Acuse inmediato; resumen en segundo plano. |
+| `/context --summary` | Aliases: `--summarize`, `--peek`, `--db`. Solo lectura del volcado reciente; resumen en segundo plano. |
+
+Requisitos: **Redis** y **DuckClaw-DB-Writer** activos para que `--add` llegue a DuckDB. Cola por defecto `duckclaw:state_delta:context` (sobrescribible con `DUCKCLAW_CONTEXT_STATE_DELTA_QUEUE`).
+
+Especificación: [specs/features/Context Injection (Telegram).md](../specs/features/Context%20Injection%20(Telegram).md).

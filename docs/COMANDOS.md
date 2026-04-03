@@ -63,6 +63,7 @@ TELEGRAM_FINANZ_TOKEN=...       # estándar (id `finanz`); alternativa a TELEGRA
 TELEGRAM_BI_ANALYST_TOKEN=...   # estándar (id `bi_analyst`); antes TELEGRAM_BOT_TOKEN_BI_ANALYST
 TELEGRAM_SIATA_ANALYST_TOKEN=... # id `siata_analyst`; antes TELEGRAM_BOT_TOKEN_SIATA
 TELEGRAM_LEILAASSISTANT_TOKEN=... # id manifest `LeilaAssistant`; antes TELEGRAM_BOT_TOKEN_LEILA
+TELEGRAM_JOB_HUNTER_TOKEN=...   # id `Job-Hunter` / JobHunter-Gateway (según config PM2)
 # Opcional legado: N8N_OUTBOUND_WEBHOOK_URL + DUCKCLAW_TELEGRAM_OUTBOUND_VIA=n8n
 ```
 
@@ -198,6 +199,21 @@ tool_read_pool: false   # desactiva el pool para ese template (pese al default g
 
 Especificación: [specs/features/Concurrent Tool Node (Ephemeral Read-Pool).md](specs/features/Concurrent%20Tool%20Node%20(Ephemeral%20Read-Pool).md).
 
+### 2.3 Context injection (Telegram `/context`)
+
+Comandos del **webhook nativo** para memoria semántica en la bóveda DuckDB del usuario (`main.semantic_memory`). Detalle: [specs/features/Context Injection (Telegram).md](specs/features/Context%20Injection%20(Telegram).md).
+
+| Comando | Efecto |
+|---------|--------|
+| `/context --add <texto>` | Solo **admin** (mismo RBAC que Telegram Guard: `main.authorized_users`, War Room, o owner). Encola un `STATE_DELTA` en Redis → **DuckClaw-DB-Writer** inserta chunks en `main.semantic_memory`. Respuesta inmediata de acuse; el **resumen** se genera en segundo plano con `[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]` (no bloquea el webhook). Sufijo de bot: `/context@MiBot --add …`. |
+| `/context --summary` | Alias: `--summarize`, `--peek`, `--db`. **Solo lectura** de filas recientes en `main.semantic_memory` (sin `LPUSH`). Acuse + resumen en segundo plano con `[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]`. Si no hay datos, mensaje fijo **sin** LLM. |
+
+**Requisitos para `--add`:** `REDIS_URL` y proceso **DuckClaw-DB-Writer** activo (cola por defecto `duckclaw:state_delta:context`). Sin writer, el acuse puede mostrarse pero la persistencia queda pendiente en Redis.
+
+**Variable de cola:** `DUCKCLAW_CONTEXT_STATE_DELTA_QUEUE` (sobrescribe el nombre de la lista Redis anterior).
+
+**Locks DuckDB (gateway RO vs writer RW):** Tras un `--add`, el gateway puede abrir la bóveda en solo lectura con reintentos. Opcional: `DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS` (default `24`) y `DUCKCLAW_GATEWAY_RO_LOCK_BASE_SLEEP_S` (default `0.15`).
+
 ---
 
 ## 3. Dependencias Python del monorepo
@@ -322,6 +338,9 @@ Implementación acoplada al template [finanz](packages/agents/src/duckclaw/forge
 | `CAPADONNA_SSH_TIMEOUT` | Segundos (default `120`, máx. `600`). |
 | `CAPADONNA_REMOTE_OHLC_CMD` | Plantilla ejecutada **en el VPS por ssh** (usa rutas absolutas del servidor, p. ej. `/home/capadonna/...`, no `~` de tu Mac). Intérprete: venv del proyecto Capadonna-Driller (`…/.venv/bin/python`) con `duckdb` instalado. Script: `scripts/capadonna/export_lake_ohlcv.py`. Opcional `CAPADONNA_LAKE_DATA_ROOT`. |
 | `CAPADONNA_HISTORICAL_TIMEFRAMES` | CSV de timeframes que van al lake por SSH (default en código `1d,1w,1M,moc`). Incluye `moc` para `data/lake/moc/`. **Mes = `1M` mayúscula; minuto = `1m` minúscula** (el bridge no las mezcla). Requiere host + comando remoto. |
+| `IBKR_ACCOUNT_MODE` | Debe ser `paper` para permitir `execute_order`. |
+| `IBKR_EXECUTE_ORDER_URL` | POST JSON `{"signal_id","paper":true}` (opcional; sin URL la orden no se envía al broker tras HITL). |
+| `REDIS_URL` / `DUCKCLAW_REDIS_URL` | Recomendado para persistir grants de `/execute_signal` entre procesos; si falta, memoria en proceso (solo mismo worker). |
 
 Ejemplo de bloque (proceso del gateway; no commitear valores reales):
 
@@ -336,9 +355,6 @@ CAPADONNA_HISTORICAL_TIMEFRAMES=1d,1w,1M,moc
 ```
 
 Fly: `/lake` o `/lake status` comprueba env y hace `ssh … true` corto si la config es válida. `/sensors` resume DuckDB, IBKR (portafolio + mercado), Lake, Tavily, Reddit, Google Trends y **browser sandbox** (manifest finanz, Docker, imagen Playwright, red en `security_policy`) en el proceso del gateway.
-| `IBKR_ACCOUNT_MODE` | Debe ser `paper` para permitir `execute_order`. |
-| `IBKR_EXECUTE_ORDER_URL` | POST JSON `{"signal_id","paper":true}` (opcional; sin URL la orden no se envía al broker tras HITL). |
-| `REDIS_URL` / `DUCKCLAW_REDIS_URL` | Recomendado para persistir grants de `/execute_signal` entre procesos; si falta, memoria en proceso (solo mismo worker). |
 
 Telegram (human-in-the-loop): el usuario confirma con `/execute_signal <uuid>` el `signal_id` devuelto por `propose_trade` antes de que el asistente llame `execute_order`.
 
@@ -346,7 +362,7 @@ Telegram (human-in-the-loop): el usuario confirma con `/execute_signal <uuid>` e
 
 ## 6. DB Writer (si usas escrituras encoladas)
 
-El wizard puede registrarlo en PM2. Arranque manual orientativo:
+El wizard puede registrarlo en PM2. Además de la cola SQL (`duckdb_write_queue`), escucha **CONTEXT_INJECTION** (`duckclaw:state_delta:context` por defecto) para persistir `/context --add` en `main.semantic_memory`. Arranque manual orientativo:
 
 ```bash
 uv run python services/db-writer/main.py
@@ -364,7 +380,7 @@ uv run python services/db-writer/main.py
 | 4 | `uv run duckops init` |
 | 5 | `uv run duckops serve --gateway` |
 | 6 | (Opcional Telegram) `DUCKCLAW_CHAT_PARALLEL_INVOCATIONS=1` + `REDIS_URL` para varias respuestas concurrentes por chat; **§2.2** `DUCKCLAW_TOOL_READ_POOL_*` si varias `read_sql` en un solo turno; reiniciar con `--update-env` |
-| 7 | (Opcional) `uv run python services/db-writer/main.py` o PM2 según [Installation.md](docs/Installation.md) |
+| 7 | (Opcional) `uv run python services/db-writer/main.py` o PM2 según [Installation.md](docs/Installation.md) — **necesario** para `/context --add` (§2.3) |
 
 ---
 
@@ -375,10 +391,12 @@ uv run duckops init                         # Reconfigurar / instalar
 uv run duckops serve --gateway              # Solo gateway en dev
 pm2 status                                  # Si usas PM2 tras el wizard
 pm2 logs BI-Analyst-Gateway                 # Ej.: traza Telegram + subagentes
-pm2 logs DuckClaw-DB-Writer                 # Auditar escrituras
+pm2 logs JobHunter-Gateway                  # Job-Hunter + resúmenes /context
+pm2 logs DuckClaw-DB-Writer                 # Escrituras + CONTEXT_INJECTION
 pm2 flush                                   # Vaciar logs PM2
 pm2 restart BI-Analyst-Gateway --update-env # Nombre según config/api_gateways_pm2.json; tras cambiar DUCKCLAW_*
 # Tras cambiar DUCKCLAW_TOOL_READ_POOL_* o DUCKCLAW_READ_SQL_MAX_RESPONSE_CHARS: mismo restart
+# Telegram (admin): /context --add …  |  /context --summary  — ver §2.3
 ```
 
 Más comandos: sección **6. Guía Rápida de Operación** en [docs/Installation.md](docs/Installation.md).

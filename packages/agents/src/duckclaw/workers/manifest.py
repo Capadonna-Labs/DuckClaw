@@ -201,6 +201,20 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
     elif fr is False:
         field_reflection_config = {"enabled": False}
 
+    agent_node_heuristic_first_tool: bool | None = None
+    _anc = data.get("agent_node")
+    if isinstance(_anc, dict) and "heuristic_first_tool" in _anc:
+        agent_node_heuristic_first_tool = bool(_anc.get("heuristic_first_tool"))
+
+    # Telegram / egress: síntesis LLM para evitar JSON crudo (default on; spec: worker-telegram-natural-language-egress.md)
+    _enl = data.get("egress_natural_language_synthesis")
+    if _enl is None:
+        egress_natural_language_synthesis = True
+    elif isinstance(_enl, str):
+        egress_natural_language_synthesis = _enl.strip().lower() not in ("0", "false", "no", "off")
+    else:
+        egress_natural_language_synthesis = bool(_enl)
+
     return WorkerSpec(
         worker_id=worker_id,
         logical_worker_id=logical_worker_id,
@@ -234,6 +248,8 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         tool_read_pool=tool_read_pool,
         browser_sandbox=browser_sandbox,
         field_reflection_config=field_reflection_config,
+        agent_node_heuristic_first_tool=agent_node_heuristic_first_tool,
+        egress_natural_language_synthesis=egress_natural_language_synthesis,
     )
 
 
@@ -297,6 +313,8 @@ class WorkerSpec:
         "tool_read_pool",
         "browser_sandbox",
         "field_reflection_config",
+        "agent_node_heuristic_first_tool",
+        "egress_natural_language_synthesis",
     )
 
     def __init__(
@@ -333,6 +351,8 @@ class WorkerSpec:
         tool_read_pool: bool = True,
         browser_sandbox: bool = False,
         field_reflection_config: Optional[dict] = None,
+        agent_node_heuristic_first_tool: bool | None = None,
+        egress_natural_language_synthesis: bool = True,
     ):
         self.worker_id = worker_id
         self.logical_worker_id = logical_worker_id
@@ -366,3 +386,5 @@ class WorkerSpec:
         self.tool_read_pool = bool(tool_read_pool)
         self.browser_sandbox = bool(browser_sandbox)
         self.field_reflection_config = field_reflection_config
+        self.agent_node_heuristic_first_tool = agent_node_heuristic_first_tool
+        self.egress_natural_language_synthesis = bool(egress_natural_language_synthesis)

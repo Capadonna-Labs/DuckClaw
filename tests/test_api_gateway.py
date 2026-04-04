@@ -25,6 +25,18 @@ app = gateway_main.app
 _AUTH_HEADERS = {"X-Tailscale-Auth-Key": "test-key-for-tests"}
 
 
+def _clear_multiplex_db_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for k in (
+        "DUCKCLAW_DB_PATH",
+        "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
+        "DUCKCLAW_FINANZ_DB_PATH",
+        "DUCKCLAW_JOB_HUNTER_DB_PATH",
+        "DUCKCLAW_SIATA_DB_PATH",
+        "DUCKDB_PATH",
+    ):
+        monkeypatch.delenv(k, raising=False)
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app, headers=_AUTH_HEADERS)
@@ -251,9 +263,10 @@ def test_effective_tenant_bi_analyst_from_pm2(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_effective_tenant_bi_analyst_from_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_multiplex_db_env(monkeypatch)
     monkeypatch.delenv("DUCKCLAW_GATEWAY_TENANT_ID", raising=False)
     monkeypatch.delenv("DUCKCLAW_PM2_PROCESS_NAME", raising=False)
-    monkeypatch.setenv("DUCKCLAW_DB_PATH", "/data/bi_analyst.duckdb")
+    monkeypatch.setenv("DUCKDB_PATH", "/data/bi_analyst.duckdb")
     assert gateway_main._effective_tenant_id(None) == "BI-Analyst"
 
 
@@ -317,9 +330,22 @@ def test_webhook_outbound_chat_reply_sync_posts_json(monkeypatch: pytest.MonkeyP
     assert posted[0].get("parse_mode") == "HTML"
 
 
-def test_pm2_json_lists_gateways_with_explicit_db_path() -> None:
-    from duckclaw.pm2_gateway_db import pm2_gateway_names_with_explicit_db_path
+def test_pm2_json_lists_gateways_with_explicit_db_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from duckclaw.pm2_gateway_db import clear_pm2_gateway_db_cache, pm2_gateway_names_with_explicit_db_path
 
+    root = tmp_path / "repo"
+    (root / "config").mkdir(parents=True)
+    cfg = {
+        "apps": [
+            {"name": "SIATA-Gateway", "env": {"DUCKCLAW_SIATA_DB_PATH": "/x/s.duckdb"}},
+            {"name": "BI-Analyst-Gateway", "env": {"DUCKDB_PATH": "/x/bi.duckdb"}},
+        ]
+    }
+    (root / "config" / "api_gateways_pm2.json").write_text(json.dumps(cfg), encoding="utf-8")
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(root))
+    clear_pm2_gateway_db_cache()
     names = pm2_gateway_names_with_explicit_db_path()
     assert "SIATA-Gateway" in names
     assert "BI-Analyst-Gateway" in names
@@ -329,17 +355,51 @@ def test_dedicated_gateway_vault_matches_pm2_db_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Evita que fly/manager abran finanzdb1 cuando el proceso es un gateway con DB propia."""
+    from duckclaw.pm2_gateway_db import clear_pm2_gateway_db_cache
+
     dbf = tmp_path / "dedicated.duckdb"
+    dbf.touch()
+    root = tmp_path / "repo"
+    (root / "config").mkdir(parents=True)
+    cfg = {
+        "apps": [
+            {
+                "name": "SIATA-Gateway",
+                "port": 9001,
+                "env": {"DUCKDB_PATH": str(dbf)},
+            }
+        ]
+    }
+    (root / "config" / "api_gateways_pm2.json").write_text(json.dumps(cfg), encoding="utf-8")
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(root))
+    clear_pm2_gateway_db_cache()
+    _clear_multiplex_db_env(monkeypatch)
     monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "SIATA-Gateway")
-    monkeypatch.setenv("DUCKCLAW_DB_PATH", str(dbf))
+    monkeypatch.setenv("DUCKDB_PATH", str(dbf))
     assert gateway_main._dedicated_gateway_vault_db_path() == str(dbf.resolve())
 
 
 def test_dedicated_gateway_vault_unknown_pm2_name_returns_none(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    from duckclaw.pm2_gateway_db import clear_pm2_gateway_db_cache
+
+    root = tmp_path / "repo"
+    (root / "config").mkdir(parents=True)
+    cfg = {
+        "apps": [
+            {
+                "name": "Other-Gateway",
+                "env": {"DUCKDB_PATH": str(tmp_path / "other.duckdb")},
+            }
+        ]
+    }
+    (root / "config" / "api_gateways_pm2.json").write_text(json.dumps(cfg), encoding="utf-8")
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(root))
+    clear_pm2_gateway_db_cache()
+    _clear_multiplex_db_env(monkeypatch)
     monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "Not-In-Pm2-Json-XYZ")
-    monkeypatch.setenv("DUCKCLAW_DB_PATH", str(tmp_path / "x.duckdb"))
+    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "x.duckdb"))
     assert gateway_main._dedicated_gateway_vault_db_path() is None
 
 
@@ -347,8 +407,26 @@ def test_dedicated_gateway_vault_uses_matched_app_when_pm2_alias_differs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """PM2 puede llamar el proceso distinto al ``name`` del JSON; el match por puerto fija MATCHED."""
+    from duckclaw.pm2_gateway_db import clear_pm2_gateway_db_cache
+
     dbf = tmp_path / "bi.duckdb"
+    dbf.touch()
+    root = tmp_path / "repo"
+    (root / "config").mkdir(parents=True)
+    cfg = {
+        "apps": [
+            {
+                "name": "BI-Analyst-Gateway",
+                "port": 8282,
+                "env": {"DUCKDB_PATH": str(dbf)},
+            }
+        ]
+    }
+    (root / "config" / "api_gateways_pm2.json").write_text(json.dumps(cfg), encoding="utf-8")
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(root))
+    clear_pm2_gateway_db_cache()
+    _clear_multiplex_db_env(monkeypatch)
     monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "BIAnalyst-Gateway")
     monkeypatch.setenv("DUCKCLAW_PM2_MATCHED_APP_NAME", "BI-Analyst-Gateway")
-    monkeypatch.setenv("DUCKCLAW_DB_PATH", str(dbf))
+    monkeypatch.setenv("DUCKDB_PATH", str(dbf))
     assert gateway_main._dedicated_gateway_vault_db_path() == str(dbf.resolve())

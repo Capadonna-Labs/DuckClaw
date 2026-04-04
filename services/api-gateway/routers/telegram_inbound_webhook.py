@@ -5,6 +5,10 @@ Webhook entrante de Telegram (Bot API Update) → mismo pipeline que /api/v1/age
 Contrato principal (recomendado): POST ``/api/v1/telegram/webhook`` con JSON de Update; un proceso
 PM2 por bot con su propia URL HTTPS al puerto correcto (ver specs ``Telegram Webhook One Gateway One Port``).
 
+**Multiplex por path:** si ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` está en formato compacto
+(``bot:token:/api/v1/telegram/...`` separado por comas), se registran ``POST`` dinámicos por ruta
+y se fijan worker, tenant, token de respuesta y bóveda (ver ``core/telegram_compact_webhook_routes``).
+
 Rutas ``/webhook/finanz`` y ``/webhook/trabajo``: legado para un solo ingress compartido; validación vía
 ``TELEGRAM_WEBHOOK_SECRET_*`` y cabecera ``X-Telegram-Bot-Api-Secret-Token``.
 """
@@ -38,6 +42,7 @@ from core.vlm_ingest import (
     process_visual_payload,
     push_vlm_state_delta_redis,
 )
+from duckclaw.gateway_db import resolve_env_duckdb_path
 from core.war_rooms import (
     hit_rate_limit,
     is_war_room_tenant,
@@ -58,6 +63,12 @@ from duckclaw.integrations.telegram.telegram_webhook_multiplex import (
     TelegramWebhookResolvedDispatch,
     telegram_webhook_header_fingerprint,
     telegram_webhook_resolve_dispatch,
+)
+
+from core.telegram_compact_webhook_routes import (
+    TelegramPathWebhookBinding,
+    fastapi_relative_path,
+    load_path_webhook_bindings_from_env,
 )
 
 _log = logging.getLogger("duckclaw.gateway.telegram_inbound_webhook")
@@ -158,6 +169,7 @@ def schedule_telegram_context_summary_background(
                         telegram_multipart_tail_delivery="native",
                         telegram_mcp=telegram_mcp_state,
                         telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                        outbound_telegram_bot_token=(reply_token or "").strip() or None,
                     )
                 except HTTPException as exc:
                     detail = exc.detail
@@ -179,6 +191,25 @@ def schedule_telegram_context_summary_background(
                     return
 
             reply_local = (res.get("response") or "").strip() if isinstance(res, dict) else ""
+            try:
+                from duckclaw.forge.atoms.user_reply_nl_synthesis import (
+                    telegram_stored_context_summary_body_when_model_trivial,
+                )
+
+                _fb = telegram_stored_context_summary_body_when_model_trivial(
+                    directive_msg,
+                    reply_local,
+                    html_header_will_duplicate_title=bool((telegram_header_html or "").strip()),
+                )
+                if _fb is not None:
+                    reply_local = _fb
+                    _log.info(
+                        "%s: cuerpo sustituido por fallback determinístico "
+                        "(respuesta del invoke aún trivial; red de seguridad)",
+                        log_label,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                _log.debug("%s: fallback determinístico omitido: %s", log_label, exc)
             if not reply_local:
                 _log.warning(
                     "%s: respuesta vacía tenant_id=%s chat_id=%s worker_id=%s",
@@ -238,6 +269,15 @@ def _telegram_webhook_default_worker_id() -> str:
         v = (os.environ.get(key) or "").strip()
         if v:
             return v
+    proc = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
+    if proc:
+        from duckclaw.integrations.telegram.telegram_agent_token import (
+            PM2_GATEWAY_APP_TO_WORKER_ID,
+        )
+
+        mapped = PM2_GATEWAY_APP_TO_WORKER_ID.get(proc)
+        if mapped:
+            return mapped
     return "finanz"
 
 
@@ -590,6 +630,18 @@ def build_telegram_inbound_webhook_router(
 
     router = APIRouter(prefix="/api/v1/telegram", tags=["telegram-inbound-webhook"])
 
+    _compact_path_bindings: list[TelegramPathWebhookBinding] = []
+    _raw_compact_routes = (os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()
+    if _raw_compact_routes and not _raw_compact_routes.startswith("[") and ":/api/" in _raw_compact_routes:
+        try:
+            _compact_path_bindings = load_path_webhook_bindings_from_env()
+        except ValueError as exc:
+            _log.error(
+                "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES (compacto) inválido; arranca el gateway tras corregir .env: %s",
+                exc,
+            )
+            raise RuntimeError(f"DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES compacto inválido: {exc}") from exc
+
     async def _telegram_webhook_core(
         request: Request,
         path_route_raw: str | None,
@@ -601,8 +653,24 @@ def build_telegram_inbound_webhook_router(
         worker_id: str
         tenant_id: str
         reply_token: str
+        multiplex_forced_vault: str | None = None
 
-        if path_family == "finanz":
+        path_mux: TelegramPathWebhookBinding | None = getattr(
+            request.state, "duckclaw_telegram_path_binding", None
+        )
+        if path_mux is not None:
+            worker_id = path_mux.worker_id
+            tenant_id = path_mux.tenant_id
+            reply_token = path_mux.bot_token
+            multiplex_forced_vault = path_mux.forced_vault_db_path
+            _log.info(
+                "telegram path multiplex: request bot_name=%s worker_id=%s tenant_id=%s path=%s",
+                path_mux.bot_name,
+                worker_id,
+                tenant_id,
+                path_mux.webhook_path,
+            )
+        elif path_family == "finanz":
             if not _webhook_secret_ok_finanz_path(header_secret):
                 _log.warning(
                     "telegram webhook: 403 — path finanz: cabecera %s inválida.",
@@ -698,19 +766,17 @@ def build_telegram_inbound_webhook_router(
                 worker_id = resolved.worker_id
                 tenant_id = resolved.tenant_id
                 reply_token = resolved.bot_token
+                multiplex_forced_vault = resolved.forced_vault_db_path
             else:
                 _tag, worker_id, tenant_id, reply_token = resolved
 
+        # Misma regla que SIATA/jobhunter: multiplex primero; legado finanz solo con DUCKCLAW_FINANZ_DB_PATH.
         telegram_forced_vault_db_path: str | None = None
-        if path_family == "finanz":
-            # Bóveda y Telegram Guard deben leer la misma DuckDB que el tenant Finanzas.
-            # Si solo existe gateway JobHunter pero el webhook de Finanz apunta aquí
-            # (mismo funnel / puerto), suele faltar DUCKCLAW_FINANZ_DB_PATH; en ese caso
-            # DUCKCLAW_WAR_ROOM_ACL_DB_PATH apunta típicamente a finanzdb (equipo/admin).
+        if multiplex_forced_vault:
+            telegram_forced_vault_db_path = multiplex_forced_vault
+        elif path_family == "finanz":
             _v = (os.environ.get("DUCKCLAW_FINANZ_DB_PATH") or "").strip()
-            if not _v:
-                _v = (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip()
-            telegram_forced_vault_db_path = _v or None
+            telegram_forced_vault_db_path = resolve_env_duckdb_path(_v) if _v else None
 
         _log.info(
             "telegram_webhook_dispatch secret_fp=%s worker_id=%s tenant_id=%s path_route=%s",
@@ -1308,6 +1374,7 @@ def build_telegram_inbound_webhook_router(
                     telegram_multipart_tail_delivery="native",
                     telegram_mcp=telegram_mcp,
                     telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                    outbound_telegram_bot_token=(reply_token or "").strip() or None,
                 )
             except HTTPException as exc:
                 detail = exc.detail
@@ -1374,9 +1441,30 @@ def build_telegram_inbound_webhook_router(
             await _invoke_and_reply()
         return {"ok": "true"}
 
-    @router.post("/webhook")
-    async def telegram_bot_update_webhook(request: Request) -> dict[str, str]:
-        return await _telegram_webhook_core(request, None)
+    if _compact_path_bindings:
+
+        @router.post("/webhook")
+        async def telegram_bot_update_webhook(request: Request) -> dict[str, str]:
+            try:
+                _body = await request.json()
+                _upd = _body.get("update_id")
+            except Exception:
+                _upd = None
+            _log.error(
+                "telegram path multiplex: POST a /api/v1/telegram/webhook ignorado (no se enruta a Finanz). "
+                "Los bots siguen usando la URL genérica en Telegram. Registra webhook por path: "
+                "`python scripts/register_webhooks.py` con DUCKCLAW_PUBLIC_URL. "
+                "Rutas configuradas: %s. update_id=%s",
+                ", ".join(b.webhook_path for b in _compact_path_bindings),
+                _upd,
+            )
+            return {"ok": "true"}
+
+    else:
+
+        @router.post("/webhook")
+        async def telegram_bot_update_webhook(request: Request) -> dict[str, str]:
+            return await _telegram_webhook_core(request, None)
 
     @router.post("/webhook/{route_key}")
     async def telegram_bot_update_webhook_pathed(request: Request, route_key: str) -> dict[str, str]:
@@ -1392,5 +1480,30 @@ def build_telegram_inbound_webhook_router(
                 },
             )
         return await _telegram_webhook_core(request, rk)
+
+    for _pb in _compact_path_bindings:
+        _rel = fastapi_relative_path(_pb.webhook_path)
+
+        def _make_path_handler(binding: TelegramPathWebhookBinding) -> Callable[..., Awaitable[dict[str, str]]]:
+            async def _path_webhook(request: Request) -> dict[str, str]:
+                request.state.duckclaw_telegram_bot_name = binding.bot_name
+                request.state.duckclaw_telegram_path_binding = binding
+                return await _telegram_webhook_core(request, None)
+
+            return _path_webhook
+
+        router.add_api_route(
+            _rel,
+            _make_path_handler(_pb),
+            methods=["POST"],
+            name=f"telegram_compact_{_pb.bot_name}",
+        )
+        _log.info(
+            "telegram path multiplex: ruta %s registrada para el bot %s (worker_id=%s, tenant_id=%s)",
+            _pb.webhook_path,
+            _pb.bot_name,
+            _pb.worker_id,
+            _pb.tenant_id,
+        )
 
     return router

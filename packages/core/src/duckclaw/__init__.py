@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import pkgutil
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 __path__ = pkgutil.extend_path(__path__, __name__)
 
@@ -24,12 +24,24 @@ class DuckClaw:
 
     __slots__ = ("_path", "_read_only", "_native", "_con")
 
-    def __init__(self, db_path: str, *, read_only: bool = False) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        *,
+        read_only: bool = False,
+        engine: Literal["auto", "python"] = "auto",
+    ) -> None:
         self._path = (db_path or ":memory:").strip() or ":memory:"
         self._read_only = bool(read_only)
         self._native: Any = None
         self._con: Any = None
-        if _NativeDuckClaw is not None and not self._read_only:
+        use_native = (
+            engine == "auto"
+            and _NativeDuckClaw is not None
+            and not self._read_only
+            and self._path != ":memory:"
+        )
+        if use_native:
             self._native = _NativeDuckClaw(self._path)
         else:
             self._con = _duckdb.connect(self._path, read_only=self._read_only)
@@ -61,12 +73,22 @@ class DuckClaw:
 
     def close(self) -> None:
         """Cierra el handle DuckDB para liberar el archivo (conexiones efímeras)."""
+        if self._native is not None:
+            try:
+                self._native.execute("CHECKPOINT")
+            except Exception:
+                pass
+            self._native = None
         if self._con is not None:
+            if not self._read_only:
+                try:
+                    self._con.execute("CHECKPOINT")
+                except Exception:
+                    pass
             try:
                 self._con.close()
             finally:
                 self._con = None
-        self._native = None
 
 
 __all__ = ["DuckClaw"]

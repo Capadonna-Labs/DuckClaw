@@ -55,4 +55,6 @@ class ManagerAgentState(TypedDict, total=False):
     internal_reply: Optional[str]
     _audit_done: bool
     sandbox_photo_base64: Optional[str]
+    # Token Bot API del webhook que originó el turno (multiplex); heartbeats en hilos no heredan ContextVar.
+    outbound_telegram_bot_token: Optional[str]
 

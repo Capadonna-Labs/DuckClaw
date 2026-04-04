@@ -7,7 +7,9 @@ Spec: specs/interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md
 from __future__ import annotations
 
 import json
+import logging
 import os
+from pathlib import Path
 import re
 import shutil
 import subprocess
@@ -15,7 +17,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 from duckclaw.vaults import (
     create_vault as _vault_create,
     list_vaults as _vault_list,
@@ -165,8 +167,10 @@ def _list_authorized_users(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
                         }
                     )
             return out
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger("duckclaw.team_whitelist").warning(
+            "authorized_users list query failed tenant_id=%r: %s", tenant_id, exc
+        )
     return []
 
 
@@ -671,12 +675,40 @@ def execute_team(
 
 def _dedicated_gateway_db_path_for_vault() -> str | None:
     """
-    Misma regla que el API Gateway: api_gateways_pm2.json + DUCKCLAW_DB_PATH
+    Misma regla que el API Gateway: api_gateways_pm2.json + claves multiplex / DUCKDB_PATH
     (evita /vault y fly mostrando finanzdb1 del registry en gateways dedicados).
     """
     from duckclaw.pm2_gateway_db import dedicated_gateway_db_path_resolved
 
     return dedicated_gateway_db_path_resolved()
+
+
+def _session_duckdb_path_for_fly(db: Any) -> str | None:
+    """Ruta del ``DuckClaw``/sesión que abrió el gateway para el turno (multiplex por bot)."""
+    p = getattr(db, "_path", None)
+    if p is None:
+        return None
+    s = str(p).strip()
+    if not s or s == ":memory:":
+        return None
+    try:
+        from pathlib import Path as _P
+
+        return str(_P(s).expanduser().resolve())
+    except Exception:
+        return None
+
+
+def _fly_vault_label_for_tenant(tenant_id: Any) -> str:
+    tid = str(tenant_id or "").strip()
+    if not tid or tid.lower() == "default":
+        return _dedicated_gateway_vault_label()
+    pretty = {
+        "Finanzas": "Finanz",
+        "SIATA": "SIATA Analyst",
+        "Trabajo": "Job Hunter",
+    }
+    return pretty.get(tid, tid)
 
 
 def _dedicated_gateway_vault_label() -> str:
@@ -708,23 +740,38 @@ def _format_vault_size_mb(size_bytes: int | float) -> str:
     return f"{mb:.2f} MB"
 
 
-def execute_vault(args: str, *, vault_user_id: Any, tenant_id: Any = None) -> str:
+def execute_vault(
+    args: str,
+    *,
+    vault_user_id: Any,
+    tenant_id: Any = None,
+    db: Any | None = None,
+) -> str:
     user_id = (str(vault_user_id or "").strip() or "default")
     vault_scope = vault_scope_id_for_tenant(tenant_id)
     raw = (args or "").strip()
-    fixed_db = _dedicated_gateway_db_path_for_vault()
+    session_db_path = _session_duckdb_path_for_fly(db) if db is not None else None
+    fixed_db = session_db_path or _dedicated_gateway_db_path_for_vault()
     if fixed_db:
         from pathlib import Path as _P
 
         fp = _P(fixed_db).expanduser().resolve()
-        label = _dedicated_gateway_vault_label()
+        label = (
+            _fly_vault_label_for_tenant(tenant_id)
+            if session_db_path
+            else _dedicated_gateway_vault_label()
+        )
         if not raw:
             size = 0
             try:
                 size = fp.stat().st_size if fp.exists() else 0
             except Exception:
                 pass
-            gtid = (os.environ.get("DUCKCLAW_GATEWAY_TENANT_ID") or "").strip()
+            tid_req = str(tenant_id or "").strip()
+            if tid_req and tid_req.lower() != "default":
+                gtid = tid_req
+            else:
+                gtid = (os.environ.get("DUCKCLAW_GATEWAY_TENANT_ID") or "").strip()
             extra = f"\nTenant: {gtid}" if gtid else ""
             return (
                 f"🗄 BD de este gateway ({label}): {fp.name}\n"
@@ -807,18 +854,130 @@ def execute_vault(args: str, *, vault_user_id: Any, tenant_id: Any = None) -> st
 
 
     )
+def _team_whitelist_audit_enabled() -> bool:
+    v = (os.environ.get("DUCKCLAW_TEAM_WHITELIST_DEBUG") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _audit_team_whitelist_rw(message: str, **data: Any) -> None:
+    if not _team_whitelist_audit_enabled():
+        return
+    logging.getLogger("duckclaw.team_whitelist").info("%s %s", message, data)
+
+
+def _paths_same_duckdb_file(a: str, b: str) -> bool:
+    if not (a or "").strip() or not (b or "").strip():
+        return False
+    pa = Path(str(a).strip()).expanduser().resolve()
+    pb = Path(str(b).strip()).expanduser().resolve()
+    if str(pa) == str(pb):
+        return True
+    try:
+        return bool(pa.samefile(pb))
+    except OSError:
+        return False
+
+
+def _try_duckdb_checkpoint_rw(db: Any) -> None:
+    if getattr(db, "_read_only", True):
+        return
+    try:
+        db.execute("CHECKPOINT")
+    except Exception:
+        pass
+
+
 def _team_whitelist_db(fly_db: Any) -> Any:
     """
-    En producción (API Gateway), ``authorized_users`` vive en la misma DuckDB que el
-    grafo (``get_db()``), no en la bóveda multi-vault por usuario. En tests o si el
-    grafo no pudo inicializarse, se usa ``fly_db`` (conexión que ya abrió el comando).
+    Whitelist ``main.authorized_users`` se lee de la misma DuckDB que el hub
+    (``get_gateway_db_path()``), vía ``get_db()`` (conexión RO efímera).
+
+    Excepción: en el API Gateway el bloque fly ya abrió ``fly_db`` en RW sobre ese
+    archivo; abrir un segundo ``duckdb.connect(..., read_only=True)`` en paralelo
+    puede lanzar ``ConnectionException``. En ese caso reutilizamos ``fly_db``.
     """
     try:
+        from duckclaw.gateway_db import get_gateway_db_path  # noqa: PLC0415
         from duckclaw.graphs.graph_server import get_db as _gw_acl_db  # noqa: PLC0415
 
+        gw = str(Path(get_gateway_db_path()).resolve())
+        fp = ""
+        try:
+            fpraw = getattr(fly_db, "_path", "") or ""
+            if fpraw and str(fpraw).strip() not in ("", ":memory:"):
+                fp = str(Path(str(fpraw)).expanduser().resolve())
+        except Exception:
+            fp = ""
+        same = _paths_same_duckdb_file(fp, gw) if fp else False
+        fly_rw = getattr(fly_db, "_read_only", True) is False
+        if same and fly_rw and hasattr(fly_db, "query"):
+            return fly_db
         return _gw_acl_db()
     except Exception:
         return fly_db
+
+
+def _authorized_users_rw_connection(fly_db: Any) -> tuple[Any, Callable[[], None]]:
+    """
+    ``graph_server.get_db()`` es RO efímero: ``execute`` no persiste. Las mutaciones
+    de whitelist deben usar DuckClaw RW sobre ``get_gateway_db_path()`` o reutilizar
+    ``fly_db`` si ya apunta al mismo archivo en modo RW (p. ej. bot Finanz).
+    """
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+
+    acl_ro = _team_whitelist_db(fly_db)
+    if not isinstance(acl_ro, GatewayDbEphemeralReadonly):
+        _audit_team_whitelist_rw(
+            "rw_connection",
+            branch="direct_acl_not_ephemeral",
+            acl_type=type(acl_ro).__name__,
+        )
+
+        def _noop() -> None:
+            return None
+
+        return acl_ro, _noop
+
+    gw = str(Path(get_gateway_db_path()).resolve())
+    fly_resolved = ""
+    try:
+        fp = getattr(fly_db, "_path", "") or ""
+        if fp and str(fp).strip() not in ("", ":memory:"):
+            fly_resolved = str(Path(str(fp)).expanduser().resolve())
+    except Exception:
+        fly_resolved = ""
+
+    reuse_fly = _paths_same_duckdb_file(fly_resolved, gw) and getattr(fly_db, "_read_only", True) is False
+
+    _audit_team_whitelist_rw(
+        "rw_connection",
+        branch="gateway_ephemeral_acl",
+        reuse_fly=reuse_fly,
+        gw_tail=gw[-64:] if gw else "",
+        fly_tail=fly_resolved[-64:] if fly_resolved else "",
+        fly_read_only=getattr(fly_db, "_read_only", None),
+    )
+
+    if reuse_fly:
+
+        def _noop_fly() -> None:
+            return None
+
+        return fly_db, _noop_fly
+
+    # Mismo motor que GatewayDbEphemeralReadonly (duckdb Python). Si usamos C++ nativo en RW,
+    # /team --add puede persistir pero /team (lectura RO Python) no ve las filas.
+    _audit_team_whitelist_rw("rw_connection", branch="duckclaw_gw_python_engine", gw_tail=gw[-64:] if gw else "")
+    rw = DuckClaw(gw, read_only=False, engine="python")
+
+    def _close_rw() -> None:
+        try:
+            rw.close()
+        except Exception:
+            pass
+
+    return rw, _close_rw
 
 
 def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str) -> str:
@@ -927,7 +1086,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             hint = ""
             if _is_gateway_owner_user(rid):
                 hint = (
-                    " Como eres el owner del gateway (DUCKCLAW_ADMIN_CHAT_ID), puedes ejecutar "
+                    " Como eres el owner del gateway (DUCKCLAW_OWNER_ID o DUCKCLAW_ADMIN_CHAT_ID), puedes ejecutar "
                     "`/team --add <user_id> [nombre] [admin]` para dar de alta."
                 )
             return f"No hay usuarios autorizados para tenant '{tid}'.{hint}"
@@ -948,7 +1107,12 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         target_uid = raw[5:].strip().split()[0]
         if not target_uid:
             return "Uso: /team --rm <user_id>"
-        _delete_authorized_user(acl, tenant_id=tid, user_id=target_uid)
+        mut_db, mut_close = _authorized_users_rw_connection(db)
+        try:
+            _delete_authorized_user(mut_db, tenant_id=tid, user_id=target_uid)
+            _try_duckdb_checkpoint_rw(mut_db)
+        finally:
+            mut_close()
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
         target_label = _player_label("", target_uid, db=acl, tenant_id=tid)
         return f"✅ Eliminado {target_label} del tenant '{tid}'."
@@ -970,7 +1134,12 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             return "Uso: /team --add <user_id> [nombre] [admin]"
         target_uid = tokens[0]
         uname = tokens[1] if len(tokens) > 1 else "Usuario"
-        _upsert_authorized_user(acl, tenant_id=tid, user_id=target_uid, username=uname, role=role_out)
+        mut_db, mut_close = _authorized_users_rw_connection(db)
+        try:
+            _upsert_authorized_user(mut_db, tenant_id=tid, user_id=target_uid, username=uname, role=role_out)
+            _try_duckdb_checkpoint_rw(mut_db)
+        finally:
+            mut_close()
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
         target_label = _player_label(uname, target_uid, db=acl, tenant_id=tid)
         return f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'."
@@ -2595,11 +2764,9 @@ def _natural_language_goal_to_params(db: Any, chat_id: Any, text: str) -> Option
         return None
     try:
         from langchain_core.messages import HumanMessage
-        provider = get_chat_state(db, chat_id, "llm_provider") or _get_global_config(db, "llm_provider") or os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx")
-        model = get_chat_state(db, chat_id, "llm_model") or _get_global_config(db, "llm_model") or os.environ.get("DUCKCLAW_LLM_MODEL", "")
-        base_url = get_chat_state(db, chat_id, "llm_base_url") or _get_global_config(db, "llm_base_url") or os.environ.get("DUCKCLAW_LLM_BASE_URL", "http://127.0.0.1:8080")
+        provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id)
         from duckclaw.integrations.llm_providers import build_llm
-        llm = build_llm(provider, model, base_url)
+        llm = build_llm(provider, model, base_url, prefer_env_provider=False)
         if llm is None:
             return None
         prompt = (
@@ -2812,19 +2979,74 @@ _DEFAULT_MODEL_BY_PROVIDER = {
     "ollama": "llama3.2",
 }
 
+# Base URL por defecto al cambiar provider (evita mezclar host global PM2 con otro proveedor).
+_DEFAULT_BASE_URL_BY_PROVIDER = {
+    "deepseek": "https://api.deepseek.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "openai": "",
+    "anthropic": "",
+    "mlx": "",
+    "ollama": "http://127.0.0.1:11434",
+}
+
+
+def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str, str]:
+    """provider/model/base_url efectivos (chat > global agent_config > env), con MLX forzado a host local."""
+    from duckclaw.integrations.llm_providers import (
+        _ensure_duckclaw_llm_env_from_legacy_llm_vars,
+        mlx_openai_compatible_base_url,
+    )
+
+    _ensure_duckclaw_llm_env_from_legacy_llm_vars()
+    p = (
+        get_chat_state(db, chat_id, "llm_provider")
+        or _get_global_config(db, "llm_provider")
+        or os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx")
+    ).strip().lower()
+    m = (
+        get_chat_state(db, chat_id, "llm_model")
+        or _get_global_config(db, "llm_model")
+        or os.environ.get("DUCKCLAW_LLM_MODEL", "")
+    ).strip()
+    u = (
+        get_chat_state(db, chat_id, "llm_base_url")
+        or _get_global_config(db, "llm_base_url")
+        or os.environ.get("DUCKCLAW_LLM_BASE_URL", "")
+    ).strip()
+    if p == "mlx":
+        ul = u.lower()
+        if (not u) or "groq.com" in ul or "deepseek.com" in ul:
+            u = mlx_openai_compatible_base_url()
+        if not m:
+            m = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
+    return (p, m, u)
+
+
+def chat_has_llm_chat_state_override(db: Any, chat_id: Any) -> bool:
+    cid = str(chat_id or "").strip()
+    if not cid:
+        return False
+    for key in ("llm_provider", "llm_model", "llm_base_url"):
+        if (get_chat_state(db, cid, key) or "").strip():
+            return True
+    return False
+
+
+def resolve_llm_triplet_for_chat_invocation(db: Any, chat_id: Any) -> tuple[str, str, str] | None:
+    """Si el chat tiene llm_* en agent_config, devuelve tripleta para build_llm; si no, None (usar cache env del gateway)."""
+    if not chat_has_llm_chat_state_override(db, chat_id):
+        return None
+    return _effective_llm_triplet_for_chat_ui(db, chat_id)
+
 
 def execute_model(db: Any, chat_id: Any, args: str) -> str:
     """/model [provider=mlx] [model=...] [base_url=...]: cambia proveedor/modelo LLM en caliente. Sin args muestra el actual."""
     if not args or not args.strip():
-        p = get_chat_state(db, chat_id, "llm_provider") or _get_global_config(db, "llm_provider")
-        m = get_chat_state(db, chat_id, "llm_model") or _get_global_config(db, "llm_model")
-        u = get_chat_state(db, chat_id, "llm_base_url") or _get_global_config(db, "llm_base_url")
-        env_p = os.environ.get("DUCKCLAW_LLM_PROVIDER", "").strip()
-        env_m = os.environ.get("DUCKCLAW_LLM_MODEL", "").strip()
-        env_u = os.environ.get("DUCKCLAW_LLM_BASE_URL", "").strip()
-        provider = p or env_p or "—"
-        model = m or env_m or "—"
-        base_url = (u or env_u or "—")[:50] + "…" if (u or env_u) and len((u or env_u) or "") > 50 else (u or env_u or "—")
+        provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id)
+        provider = provider or "—"
+        model = model or "—"
+        u_show = base_url or "—"
+        base_url = u_show[:50] + "…" if len(u_show) > 50 else u_show
         return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model model=Slayer-8B"
     for part in args.split("|"):
         part = part.strip()
@@ -2837,8 +3059,20 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
                 set_chat_state(db, chat_id, "llm_provider", v)
                 # Al cambiar provider, resetear model al default para evitar "Model Not Exist"
                 # (ej. Slayer-8B-v1.1 no existe en DeepSeak)
-                default_model = _DEFAULT_MODEL_BY_PROVIDER.get(v.lower(), "")
-                set_chat_state(db, chat_id, "llm_model", default_model)
+                if v.lower() == "mlx":
+                    from duckclaw.integrations.llm_providers import mlx_openai_compatible_base_url
+
+                    set_chat_state(db, chat_id, "llm_base_url", mlx_openai_compatible_base_url())
+                    mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
+                    set_chat_state(db, chat_id, "llm_model", mid)
+                else:
+                    default_model = _DEFAULT_MODEL_BY_PROVIDER.get(v.lower(), "")
+                    set_chat_state(db, chat_id, "llm_model", default_model)
+                    default_url = _DEFAULT_BASE_URL_BY_PROVIDER.get(v.lower(), "")
+                    if default_url:
+                        set_chat_state(db, chat_id, "llm_base_url", default_url)
+                    else:
+                        set_chat_state(db, chat_id, "llm_base_url", "")
             elif k == "model":
                 set_chat_state(db, chat_id, "llm_model", v)
             elif k == "base_url":
@@ -3541,6 +3775,7 @@ def _dispatch_fly_command(
             args,
             vault_user_id=vault_user_id or requester_id or chat_id,
             tenant_id=tenant_id,
+            db=db,
         )
     if name == "workers":
         return execute_team(
@@ -3810,8 +4045,20 @@ def _execute_setup(db: Any, chat_id: Any, args: str) -> str:
                 if v and v.lower() not in _PROVIDERS:
                     return f"Provider desconocido: {v}. Válidos: {', '.join(_PROVIDERS)}"
                 set_chat_state(db, chat_id, "llm_provider", v)
-                default_model = _DEFAULT_MODEL_BY_PROVIDER.get(v.lower(), "")
-                set_chat_state(db, chat_id, "llm_model", default_model)
+                if v.lower() == "mlx":
+                    from duckclaw.integrations.llm_providers import mlx_openai_compatible_base_url
+
+                    set_chat_state(db, chat_id, "llm_base_url", mlx_openai_compatible_base_url())
+                    mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
+                    set_chat_state(db, chat_id, "llm_model", mid)
+                else:
+                    default_model = _DEFAULT_MODEL_BY_PROVIDER.get(v.lower(), "")
+                    set_chat_state(db, chat_id, "llm_model", default_model)
+                    default_url = _DEFAULT_BASE_URL_BY_PROVIDER.get(v.lower(), "")
+                    if default_url:
+                        set_chat_state(db, chat_id, "llm_base_url", default_url)
+                    else:
+                        set_chat_state(db, chat_id, "llm_base_url", "")
             elif k in ("llm_model", "model"):
                 set_chat_state(db, chat_id, "llm_model", v)
             elif k in ("llm_base_url", "base_url"):

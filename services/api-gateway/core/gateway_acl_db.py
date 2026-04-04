@@ -25,7 +25,7 @@ _log = logging.getLogger("duckclaw.gateway.acl_db")
 class ReadOnlyGatewayAclDb:
     """Subconjunto de la API DuckClaw: ``query`` con conexiones temporarias; ``execute`` sin efecto."""
 
-    __slots__ = ("_path",)
+    __slots__ = ("_path", "_read_only")
 
     _war_room_acl_readonly: bool = True
 

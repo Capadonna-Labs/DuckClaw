@@ -24,6 +24,10 @@ def _duckclaw_repo_root_is_tmp(tmp_path, monkeypatch):
     monkeypatch.delenv("DUCKCLAW_PM2_PROCESS_NAME", raising=False)
     monkeypatch.delenv("DUCKCLAW_PM2_MATCHED_APP_NAME", raising=False)
     monkeypatch.delenv("DUCKCLAW_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKCLAW_FINANZ_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKCLAW_JOB_HUNTER_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKCLAW_SIATA_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKCLAW_WAR_ROOM_ACL_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKDB_PATH", raising=False)
 
 
@@ -97,6 +101,47 @@ def test_vault_scope_id_for_tenant_slug():
     assert vault_scope_id_for_tenant("default") == ""
     assert vault_scope_id_for_tenant("") == ""
     assert vault_scope_id_for_tenant("Trabajo") == "trabajo"
+
+
+def test_read_only_skips_agent_config_ddl_rw_persists_chat_state(tmp_path) -> None:
+    """Gateway fly path debe usar DuckClaw RW: en RO no hay CREATE y SELECT a agent_config falla."""
+    from duckclaw import DuckClaw
+    from duckclaw.graphs.on_the_fly_commands import _ensure_agent_config, get_chat_state, set_chat_state
+
+    p = tmp_path / "vault.duckdb"
+    _bootstrap = DuckClaw(str(p), read_only=False)
+    _bootstrap.execute("SELECT 1")
+    _bootstrap.close()
+
+    ro = DuckClaw(str(p), read_only=True)
+    _ensure_agent_config(ro)
+    assert get_chat_state(ro, "chat1", "team_templates") == ""
+    ro.close()
+
+    rw = DuckClaw(str(p), read_only=False)
+    _ensure_agent_config(rw)
+    set_chat_state(rw, "chat1", "team_templates", '["Job-Hunter"]')
+    assert get_chat_state(rw, "chat1", "team_templates") == '["Job-Hunter"]'
+    rw.close()
+
+
+def test_vault_fly_uses_session_duckdb_path_over_dedicated_env(tmp_path, monkeypatch):
+    """Multiplex: el gateway abre DuckClaw(bóveda del bot); /vault debe mostrar ese archivo, no la FINANZ por defecto."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
+    fin = tmp_path / "finanzdb1.duckdb"
+    fin.write_bytes(b"x" * 100)
+    siata = tmp_path / "siatadb1.duckdb"
+    siata.write_bytes(b"y" * 100)
+    monkeypatch.setenv("DUCKCLAW_FINANZ_DB_PATH", str(fin))
+    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "DuckClaw-Gateway")
+
+    db = _DummyDB()
+    db._path = str(siata.resolve())
+    out = handle_command(db, "c1", "/vault", tenant_id="SIATA", vault_user_id="u1", requester_id="u1")
+    assert out and "siatadb1.duckdb" in out
+    assert "finanzdb1.duckdb" not in out
+    assert "Tenant: SIATA" in out
 
 
 def test_vault_command_scoped_tenant(tmp_path, monkeypatch):

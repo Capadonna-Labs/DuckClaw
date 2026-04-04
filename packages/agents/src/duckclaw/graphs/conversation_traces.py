@@ -18,6 +18,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from duckclaw.integrations.llm_providers import sanitize_worker_reply_text
+
 # Mismo criterio que manager_graph: el modelo a veces repite encabezados de subagente
 # (eco de DMs de heartbeat) en contenido assistant; limpiar al serializar trazas SFT.
 _ASSISTANT_TRACE_SUBAGENT_HDR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\s+\d+\s*$")
@@ -123,9 +125,11 @@ def _lc_messages_to_chatml(messages: list[Any]) -> list[dict[str, Any]]:
                 {"role": "user", "content": _stringify_lc_message_content(getattr(m, "content", None))[:4096]}
             )
         elif role == "ai":
-            content = _strip_leading_subagent_headers_for_trace(
-                _stringify_lc_message_content(getattr(m, "content", None))
-            ).strip()
+            content = sanitize_worker_reply_text(
+                _strip_leading_subagent_headers_for_trace(
+                    _stringify_lc_message_content(getattr(m, "content", None))
+                ).strip()
+            )
             tool_calls = getattr(m, "tool_calls", None) or []
             if tool_calls:
                 tc_list = []
@@ -147,6 +151,29 @@ def _lc_messages_to_chatml(messages: list[Any]) -> list[dict[str, Any]]:
             content = _stringify_lc_message_content(getattr(m, "content", None))[:8192]
             out.append({"role": "tool", "name": name, "content": content})
     return out
+
+
+def align_trace_messages_with_assistant_egress(
+    messages: list[dict[str, Any]], assistant_content: str
+) -> None:
+    """
+    Si el último mensaje assistant es solo JSON de invocación de tool (p. ej. MLX sin tool_calls)
+    y ya tenemos el texto real enviado al usuario, sustituye ese content para que el JSONL SFT
+    coincida con el egress (no solo la intención de tool).
+    """
+    ac = (assistant_content or "").strip()
+    if not ac or not messages:
+        return
+    from duckclaw.integrations.llm_providers import coerce_json_tool_invoke
+
+    last_m = messages[-1]
+    if (last_m.get("role") or "").lower() != "assistant":
+        return
+    if last_m.get("tool_calls"):
+        return
+    raw_c = (last_m.get("content") or "").strip()
+    if coerce_json_tool_invoke(raw_c):
+        messages[-1] = {**last_m, "content": ac[:8192]}
 
 
 def append_conversation_trace(
@@ -176,7 +203,7 @@ def append_conversation_trace(
     ts_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", ts)
     sys_content = (system_prompt or "").strip()[:8192]
     user_content = (user_message or "")[:4096]
-    assistant_content = (assistant_reply or "")[:8192]
+    assistant_content = sanitize_worker_reply_text(assistant_reply or "")[:8192]
     wid = (worker_id or "").strip()[:64] if worker_id else None
     fmt = _get_trace_format()
 
@@ -210,6 +237,7 @@ def append_conversation_trace(
                     first_content = (messages[0].get("content") or "").strip()
                     if not first_content:
                         messages[0] = {"role": "system", "content": _DEFAULT_SYSTEM_FOR_TRACES.strip()[:8192]}
+            align_trace_messages_with_assistant_egress(messages, assistant_content)
         else:
             sys_final = (system_prompt or sys_content or _DEFAULT_SYSTEM_FOR_TRACES).strip()[:8192]
             messages = [

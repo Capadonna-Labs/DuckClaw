@@ -34,7 +34,7 @@ STEP_UI: dict[WizardStep, StepCopy] = {
         title_sovereign="Canal de comunicación y bóveda de memoria",
         subtitle_technical="Redis + DuckDB",
         description=(
-            "Redis como canal; DuckDB principal en «Bóveda» (DUCKCLAW_DB_PATH del gateway PM2). "
+            "Redis como canal; DuckDB principal en «Bóveda» (rutas multiplex / DUCKDB_PATH del gateway PM2). "
             "El campo opcional «compartida» es una segunda base (p. ej. Leila); si dejas la bóveda "
             "por defecto y solo tienes un .duckdb analítico (BI), puedes indicarlo ahí y se usará como principal."
         ),

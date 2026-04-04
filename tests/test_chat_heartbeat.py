@@ -213,7 +213,14 @@ def test_schedule_chat_heartbeat_runs_post_in_background(
     monkeypatch.setenv("N8N_OUTBOUND_WEBHOOK_URL", "https://example.test/out")
     posted: list[tuple[str, str, str]] = []
 
-    def fake_post(cid: str, uid: str, text: str, **_: object) -> None:
+    def fake_post(
+        cid: str,
+        uid: str,
+        text: str,
+        *,
+        plan_title_log: str | None = None,
+        outbound_bot_token: str | None = None,
+    ) -> None:
         posted.append((cid, uid, text))
 
     monkeypatch.setattr(
@@ -231,6 +238,24 @@ def test_schedule_chat_heartbeat_runs_post_in_background(
     while time.monotonic() < deadline and not posted:
         time.sleep(0.01)
     assert posted == [("42", "42", "ping")]
+
+
+def test_post_outbound_sync_prefers_explicit_bot_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "env_default_token")
+    captured: dict[str, str] = {}
+
+    def fake_send(*, bot_token: str, **_kw: object) -> int:
+        captured["bot_token"] = bot_token
+        return 1
+
+    monkeypatch.setattr(
+        "duckclaw.integrations.telegram.telegram_outbound_sync.send_long_plain_text_markdown_v2_chunks_sync",
+        fake_send,
+    )
+    from duckclaw.graphs.chat_heartbeat import _post_outbound_sync
+
+    _post_outbound_sync("99", "99", "hello", outbound_bot_token="explicit_jh_token")
+    assert captured.get("bot_token") == "explicit_jh_token"
 
 
 def test_handle_command_heartbeat_on_requires_redis(

@@ -3,7 +3,7 @@ Entry point for a hired worker process (PM2).
 
 Usage:
   python -m duckclaw.workers.run_worker finanz --instance FinanzBot
-  (env: DUCKCLAW_WORKER_ID, DUCKCLAW_WORKER_INSTANCE, DUCKCLAW_DB_PATH, etc.)
+  (env: DUCKCLAW_WORKER_ID, DUCKCLAW_WORKER_INSTANCE, DUCKDB_PATH / multiplex, etc.)
 
 Starts a minimal HTTP server that invokes the worker graph on POST /invoke.
 LangSmith: tag with worker_role and instance from env.
@@ -56,13 +56,15 @@ def main():
         sys.exit(1)
 
     from duckclaw.forge import AgentAssembler, WORKERS_TEMPLATES_DIR
+    from duckclaw.gateway_db import get_gateway_db_path
     from duckclaw.utils.langsmith_trace import get_tracing_config
 
     yaml_path = WORKERS_TEMPLATES_DIR / WORKER_ID / "manifest.yaml"
+    _db = (get_gateway_db_path() or "").strip() or None
     graph = AgentAssembler.from_yaml(yaml_path).build(
         db=None,
         llm=None,
-        db_path=os.environ.get("DUCKCLAW_DB_PATH"),
+        db_path=_db,
         instance_name=INSTANCE or None,
     )
 

@@ -145,18 +145,39 @@ _graph_init_error: Optional[Exception] = None
 
 def _ensure_llm_config() -> None:
     """Carga y cachea LLM y metadatos. No abre el .duckdb del gateway."""
-    if _graph_state.get("llm") is not None:
-        return
-
-    from duckclaw.integrations.llm_providers import build_llm
+    from duckclaw.integrations.llm_providers import (
+        _ensure_duckclaw_llm_env_from_legacy_llm_vars,
+        build_llm,
+    )
     from duckclaw.gateway_db import get_gateway_db_path
 
-    db_path = get_gateway_db_path()
-    os.makedirs(str(Path(db_path).parent), exist_ok=True)
+    # Misma fusión LLM_* → DUCKCLAW_* que build_llm (evita leer solo DUCKCLAW_* obsoleto).
+    _ensure_duckclaw_llm_env_from_legacy_llm_vars()
 
     provider = os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx").strip().lower()
     model = os.environ.get("DUCKCLAW_LLM_MODEL", "").strip()
     base_url = os.environ.get("DUCKCLAW_LLM_BASE_URL", "http://127.0.0.1:8080/v1").strip()
+    fingerprint = (provider, model, base_url)
+
+    if _graph_state.get("llm") is not None and _graph_state.get("_llm_env_fingerprint") == fingerprint:
+        return
+
+    # Proveedor/modelo/base cambiaron: el grafo Studio y el LLM global deben reconstruirse.
+    if _graph_state.get("llm") is not None:
+        try:
+            _sd = _graph_state.get("studio_db")
+            if _sd is not None and hasattr(_sd, "close"):
+                _sd.close()
+        except Exception:
+            pass
+        _graph_state.pop("studio_graph", None)
+        _graph_state.pop("studio_db", None)
+        _graph_state.pop("_llm_env_fingerprint", None)
+        _graph_state.pop("llm", None)
+
+    db_path = get_gateway_db_path()
+    os.makedirs(str(Path(db_path).parent), exist_ok=True)
+
     system_prompt = os.environ.get(
         "DUCKCLAW_SYSTEM_PROMPT",
         "Eres un asistente útil con acceso a una base de datos.",
@@ -170,6 +191,7 @@ def _ensure_llm_config() -> None:
         )
 
     _graph_state["llm"] = llm
+    _graph_state["_llm_env_fingerprint"] = fingerprint
     _graph_state["provider"] = provider
     _graph_state["model"] = model
     _graph_state["base_url"] = base_url
@@ -177,15 +199,22 @@ def _ensure_llm_config() -> None:
     _graph_state["system_prompt"] = system_prompt
 
 
-def _build_manager_graph_for_db(db: Any) -> Any:
+def _build_manager_graph_for_db(
+    db: Any,
+    *,
+    llm_override: Any | None = None,
+    llm_provider_override: str | None = None,
+    llm_model_override: str | None = None,
+    llm_base_url_override: str | None = None,
+) -> Any:
     """Compila el grafo manager con la conexión ``db`` del turno (o :memory: para Studio)."""
     from duckclaw.forge import AgentAssembler, MANAGER_ROUTER_YAML
 
     _ensure_llm_config()
-    llm = _graph_state["llm"]
-    provider = _graph_state["provider"]
-    model = _graph_state["model"]
-    base_url = _graph_state["base_url"]
+    llm = _graph_state["llm"] if llm_override is None else llm_override
+    provider = _graph_state["provider"] if llm_provider_override is None else llm_provider_override
+    model = _graph_state["model"] if llm_model_override is None else llm_model_override
+    base_url = _graph_state["base_url"] if llm_base_url_override is None else llm_base_url_override
     db_path = _graph_state["db_path"]
     system_prompt = _graph_state["system_prompt"]
 
@@ -198,7 +227,7 @@ def _build_manager_graph_for_db(db: Any) -> Any:
         and not getattr(db, "_read_only", False)
     ):
         _logging.getLogger(__name__).warning(
-            "graph_server: DuckClaw no está en read_only; revisar core y DUCKCLAW_DB_PATH"
+            "graph_server: DuckClaw no está en read_only; revisar core y ruta gateway (multiplex)"
         )
 
     return AgentAssembler.from_yaml(MANAGER_ROUTER_YAML).build(
@@ -273,19 +302,54 @@ def _open_duckclaw_readonly_with_retry(db_path: str) -> Any:
     raise last
 
 
-def _invoke_ephemeral_gateway_graph() -> tuple[Any, Any]:
+def _invoke_ephemeral_gateway_graph(
+    chat_id: str | None = None,
+    vault_db_path: str | None = None,
+) -> tuple[Any, Any]:
     """
     Abre DuckClaw RO al archivo del gateway, compila el manager y devuelve (graph, db).
     El caller debe ``db.close()`` y llamar ``clear_worker_graph_cache()`` en ``finally``.
+
+    Si ``chat_id`` tiene llm_* en agent_config (p. ej. /model), el LLM del grafo sigue esa
+    tripleta en lugar del cache global basado solo en env. Con ``vault_db_path``, la tripleta
+    se resuelve primero en el vault del tenant (Telegram multiplex) y solo si no hay override
+    se usa el hub.
     """
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+    from duckclaw.integrations.llm_providers import build_llm
 
     _ensure_llm_config()
     db_path = str(_graph_state["db_path"])
     os.makedirs(str(Path(db_path).parent), exist_ok=True)
     clear_worker_graph_cache()
     db = _open_duckclaw_readonly_with_retry(db_path)
-    graph = _build_manager_graph_for_db(db)
+    ovr: dict[str, Any] = {}
+    try:
+        from duckclaw.gateway_db import GatewayDbEphemeralReadonly
+        from duckclaw.graphs.on_the_fly_commands import resolve_llm_triplet_for_chat_invocation
+
+        trip = None
+        v_p = (vault_db_path or "").strip()
+        if v_p and v_p != ":memory:":
+            try:
+                trip = resolve_llm_triplet_for_chat_invocation(GatewayDbEphemeralReadonly(v_p), chat_id)
+            except Exception:
+                trip = None
+        if trip is None:
+            trip = resolve_llm_triplet_for_chat_invocation(db, chat_id)
+        if trip is not None:
+            tp, tm, tu = trip
+            built = build_llm(tp, tm, tu, prefer_env_provider=False)
+            if built is not None:
+                ovr = {
+                    "llm_override": built,
+                    "llm_provider_override": tp,
+                    "llm_model_override": tm,
+                    "llm_base_url_override": tu,
+                }
+    except Exception:
+        pass
+    graph = _build_manager_graph_for_db(db, **ovr)
     return graph, db
 
 
@@ -340,11 +404,13 @@ class InvokeResponse(BaseModel):
 
 @app.get("/", summary="Info del servidor")
 async def root():
+    from duckclaw.gateway_db import get_gateway_db_path
+
     return {
         "service":    "DuckClaw LangGraph API",
         "version":    "0.1.0",
         "model":      _resolve_display_model(),
-        "db_path":    os.environ.get("DUCKCLAW_DB_PATH", "(default)"),
+        "db_path":    get_gateway_db_path() or "(default)",
         "tracing":    os.environ.get("LANGCHAIN_TRACING_V2", "false"),
         "project":    os.environ.get("LANGCHAIN_PROJECT", ""),
         "endpoints":  ["/invoke", "/stream", "/health", "/docs"],
@@ -369,7 +435,7 @@ async def invoke(req: InvokeRequest):
 
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
 
-    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph)
+    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
     # Enriquecer el estado con identidad (username/chat_type) para general_graph.
     history = req.history or []
     state = {
@@ -427,7 +493,7 @@ async def stream(req: InvokeRequest):
 
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
 
-    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph)
+    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
@@ -495,6 +561,7 @@ async def _ainvoke(
     vault_db_path: str | None = None,
     shared_db_path: str | None = None,
     is_system_prompt: bool | None = False,
+    outbound_telegram_bot_token: str | None = None,
 ) -> dict:
     """
     Invoca el grafo y retorna {"reply": str, "messages": list | None}.
@@ -504,7 +571,8 @@ async def _ainvoke(
 
     # `input` primero: LangSmith suele usar esta clave para la columna **Input** en la tabla Runs
     # (convención LangChain). `incoming` sigue siendo la fuente de verdad en el grafo.
-    state = {
+    _tok = (outbound_telegram_bot_token or "").strip() or None
+    state: dict[str, Any] = {
         "input": message,
         "incoming": message,
         "history": history or [],
@@ -515,6 +583,8 @@ async def _ainvoke(
         "vault_db_path": (vault_db_path or "").strip() or "",
         "shared_db_path": (shared_db_path or "").strip() or "",
     }
+    if _tok:
+        state["outbound_telegram_bot_token"] = _tok
     if is_system_prompt:
         state["is_system_prompt"] = True
     loop = asyncio.get_event_loop()
@@ -592,6 +662,7 @@ async def ainvoke_manager_ephemeral(
     vault_db_path: str | None = None,
     shared_db_path: str | None = None,
     is_system_prompt: bool | None = False,
+    outbound_telegram_bot_token: str | None = None,
 ) -> dict:
     """
     Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
@@ -600,7 +671,7 @@ async def ainvoke_manager_ephemeral(
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
 
     _ensure_llm_config()
-    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph)
+    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, chat_id, vault_db_path)
     try:
         return await _ainvoke(
             graph,
@@ -613,6 +684,7 @@ async def ainvoke_manager_ephemeral(
             vault_db_path=vault_db_path,
             shared_db_path=shared_db_path,
             is_system_prompt=is_system_prompt,
+            outbound_telegram_bot_token=outbound_telegram_bot_token,
         )
     finally:
         try:

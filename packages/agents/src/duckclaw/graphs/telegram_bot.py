@@ -9,7 +9,7 @@ Uso:
   pip install 'duckclaw[agents]'
   python -m duckclaw.graphs.telegram_bot
 
-Requiere: TELEGRAM_BOT_TOKEN y opcionalmente DUCKCLAW_DB_PATH.
+Requiere: TELEGRAM_BOT_TOKEN y opcionalmente rutas multiplex / DUCKDB_PATH (vía ``get_gateway_db_path``).
 Lee variables desde .env en el directorio actual o en la raíz del proyecto.
 """
 
@@ -62,10 +62,10 @@ def _log(msg: str) -> None:
 def _normalize_reply(reply: str) -> str:
     """Strip EOT tokens; hide raw tool-call JSON and error JSON so they never reach Telegram or logs."""
     import json
-    from duckclaw.integrations.llm_providers import _strip_eot
+    from duckclaw.integrations.llm_providers import sanitize_worker_reply_text
     from duckclaw.utils import friendly_query_error
 
-    s = _strip_eot(str(reply or "")).strip()
+    s = sanitize_worker_reply_text(str(reply or ""))
     # If graph returned raw tool-call JSON (e.g. Slayer-8B text output), don't send to user
     if s.startswith("{") and '"name"' in s and ("parameters" in s or '"args"' in s):
         return "El asistente está procesando. Si no ves resultado, intenta de nuevo."
@@ -105,7 +105,9 @@ def _persist_conversation(db: Any, chat_id: Any, role: str, content: str) -> Non
 
 
 def _get_db_path() -> str:
-    path = os.environ.get("DUCKCLAW_DB_PATH", "").strip()
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    path = (get_gateway_db_path() or "").strip()
     if path:
         return str(Path(path).resolve())
     return str(Path.cwd() / "duckclaw_agents.duckdb")

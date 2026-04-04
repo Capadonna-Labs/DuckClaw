@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 _log = logging.getLogger("duckclaw.gateway.context_stored_snapshot")
 
 DEFAULT_MAX_ROWS = 80
-DEFAULT_MAX_CHARS = 14_000
+# Volcado para /context --summary: prompts muy largos + system prompt amplían KV en MLX y pueden disparar OOM.
+DEFAULT_MAX_CHARS = 10_000
 
 
 def _semantic_rows_to_text(rows: list[tuple[Any, Any, Any]], cap: int) -> str:
@@ -95,7 +97,12 @@ def fetch_semantic_memory_snapshot(
     if not path.is_file():
         return ""
     lim = max(1, min(int(max_rows), 500))
-    cap = max(1024, int(max_chars))
+    raw_env = (os.environ.get("DUCKCLAW_SEMANTIC_SUMMARY_MAX_CHARS") or "").strip()
+    # Solo sustituir el default del gateway; llamadas con max_chars explícito (tests) no la pisan.
+    if raw_env.isdigit() and int(max_chars) == DEFAULT_MAX_CHARS:
+        cap = max(1024, min(int(raw_env), 200_000))
+    else:
+        cap = max(1024, int(max_chars))
 
     reuse_matched_but_empty = False
     if reuse_readonly_connection is not None:

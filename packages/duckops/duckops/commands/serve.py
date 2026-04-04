@@ -35,7 +35,7 @@ def cmd_serve(
     gateway_db_path: str = typer.Option(
         None,
         "--gateway-db-path",
-        help="Con --pm2 --gateway: fija DUCKCLAW_DB_PATH (y DUCKDB_PATH) para este proceso; "
+        help="Con --pm2 --gateway: fija DUCKCLAW_FINANZ_DB_PATH y DUCKDB_PATH para este proceso; "
         "sustituye la ruta persistida en api_gateways_pm2.json para ese nombre PM2.",
     ),
     reload: bool = typer.Option(False, "--reload", help="Recargar al cambiar código (solo sin --pm2)."),

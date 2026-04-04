@@ -11,6 +11,7 @@ from pathlib import Path
 from duckclaw.dotenv_immutable import (
     is_repo_dotenv_immutable,
     merge_proposed_env_file,
+    merged_root_and_proposed_flat_env,
 )
 from duckops.sovereign.atomic import atomic_write
 from duckops.sovereign.docker_compose import write_compose_override
@@ -28,7 +29,7 @@ def effective_primary_duckdb_relpath(draft: SovereignDraft) -> str:
 
     Si la bóveda sigue en el valor por defecto soberano y el usuario solo rellenó
     «DuckDB shared», esa ruta pasa a ser la principal (BI-Analyst no usa ATTACH
-    compartido; necesita DUCKCLAW_DB_PATH).
+    compartido; necesita la ruta hub en ``DUCKCLAW_*_DB_PATH`` / ``DUCKDB_PATH``).
     """
     vault = (draft.duckdb_vault_path or "").strip() or DEFAULT_SOVEREIGN_VAULT
     shared = (draft.duckdb_shared_path or "").strip()
@@ -57,42 +58,60 @@ def _resolve_repo_db_path(repo_root: Path, rel_or_abs: str) -> Path:
     return (repo_root / p).resolve()
 
 
+def _pm2_env_set_multiplex_db_paths(
+    env: dict[str, str],
+    repo_root: Path,
+    dot: dict[str, str],
+    primary_abs: Path,
+    primary_rel: str,
+) -> None:
+    """Sin DUCKCLAW_DB_PATH: rutas por worker + DUCKDB_PATH para db-writer."""
+    env.pop("DUCKCLAW_DB_PATH", None)
+    for k in (
+        "DUCKCLAW_FINANZ_DB_PATH",
+        "DUCKCLAW_JOB_HUNTER_DB_PATH",
+        "DUCKCLAW_SIATA_DB_PATH",
+        "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
+    ):
+        v = (dot.get(k) or "").strip()
+        if v:
+            env[k] = str(_resolve_repo_db_path(repo_root, v))
+    low = primary_rel.lower()
+    if "job" in low and "hunter" in low:
+        env["DUCKCLAW_JOB_HUNTER_DB_PATH"] = str(primary_abs)
+    elif "siata" in low:
+        env["DUCKCLAW_SIATA_DB_PATH"] = str(primary_abs)
+    elif "finanz" in low:
+        env["DUCKCLAW_FINANZ_DB_PATH"] = str(primary_abs)
+    env["DUCKDB_PATH"] = str(primary_abs)
+
+
 def _parse_repo_dotenv(repo_root: Path) -> dict[str, str]:
-    """Claves del ``.env`` del repo (tras merge del wizard) para reutilizar en un bloque PM2 nuevo."""
-    out: dict[str, str] = {}
-    path = repo_root / ".env"
-    if not path.is_file():
-        return out
+    """``.env`` raíz + ``config/dotenv_wizard_proposed.env`` (overlay), para bloques PM2 nuevos."""
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            s = line.strip()
-            if not s or s.startswith("#") or "=" not in s:
-                continue
-            k, _, v = s.partition("=")
-            ks = k.strip()
-            if not ks:
-                continue
-            out[ks] = v.strip().strip("'\"").strip()
+        return merged_root_and_proposed_flat_env(repo_root)
     except Exception:
-        pass
-    return out
+        return {}
 
 
 def patch_api_gateways_pm2_for_draft(
     repo_root: Path,
     draft: SovereignDraft,
     console_print,
+    env_updates: dict[str, str] | None = None,
 ) -> None:
     """
     Alinea o crea el bloque ``apps[]`` para ``draft.gateway_pm2_name``.
 
-    - Si ya existe: actualiza ``DUCKCLAW_DB_PATH`` / ``DUCKCLAW_SHARED_DB_PATH``.
+    - Si ya existe: actualiza ``DUCKCLAW_*_DB_PATH`` / ``DUCKDB_PATH`` / ``DUCKCLAW_SHARED_DB_PATH``.
     - Si no existe: **añade** automáticamente un bloque (host, puerto, env copiado del
       ``.env`` recién fusionado + identidad del borrador) para que ``main.py`` resuelva
       bien la DuckDB por puerto/nombre PM2 sin editar el JSON a mano.
 
-    El gateway cargado con PM2 **sobrescribe** ``DUCKCLAW_DB_PATH`` desde este JSON
+    El gateway cargado con PM2 **vuelca** las rutas multiplex desde este JSON
     (ver ``api-gateway/main.py``); actualizar solo ``.env`` no bastaba.
+
+    ``env_updates``: claves extra a fusionar en el bloque ``env`` (p. ej. tokens Telegram tras deploy).
     """
     from duckclaw.pm2_gateway_db import clear_pm2_gateway_db_cache  # noqa: PLC0415
 
@@ -138,7 +157,7 @@ def patch_api_gateways_pm2_for_draft(
         if ru:
             env["REDIS_URL"] = ru
             env["DUCKCLAW_REDIS_URL"] = ru
-        env["DUCKCLAW_DB_PATH"] = str(primary_abs)
+        _pm2_env_set_multiplex_db_paths(env, repo_root, env, primary_abs, primary_rel)
         env["DUCKCLAW_GATEWAY_TENANT_ID"] = (draft.tenant_id or "default").strip() or "default"
         env["DUCKCLAW_DEFAULT_WORKER_ID"] = (draft.default_worker_id or "finanz").strip()
         for k, val in (
@@ -177,15 +196,21 @@ def patch_api_gateways_pm2_for_draft(
         env = {}
         app["env"] = env
 
-    env["DUCKCLAW_DB_PATH"] = str(primary_abs)
+    _pm2_env_set_multiplex_db_paths(env, repo_root, _parse_repo_dotenv(repo_root), primary_abs, primary_rel)
     if attach_rel is not None:
         env["DUCKCLAW_SHARED_DB_PATH"] = str(_resolve_repo_db_path(repo_root, attach_rel))
     elif (draft.duckdb_shared_path or "").strip():
         env.pop("DUCKCLAW_SHARED_DB_PATH", None)
 
+    if env_updates:
+        for k, v in env_updates.items():
+            vs = str(v).strip()
+            if vs:
+                env[str(k)] = vs
+
     atomic_write(cfg_path, json.dumps(raw, indent=2) + "\n", encoding="utf-8")
     clear_pm2_gateway_db_cache()
-    console_print(f"PM2 config: DUCKCLAW_DB_PATH → {primary_abs}")
+    console_print(f"PM2 config: multiplex DuckDB hub → {primary_abs}")
     if attach_rel is not None:
         console_print(f"PM2 config: DUCKCLAW_SHARED_DB_PATH → {env['DUCKCLAW_SHARED_DB_PATH']}")
 
@@ -299,6 +324,47 @@ def load_last_gateway_pm2_name_from_wizard_config() -> str:
     return ""
 
 
+def load_last_gateway_port_from_wizard_config() -> int | None:
+    """Último puerto del gateway guardado en wizard_config.json (clave ``gateway_port``)."""
+    path = _wizard_config_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("gateway_port") is not None:
+            return int(data["gateway_port"])
+    except (TypeError, ValueError, OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def load_gateway_port_hint_from_api_gateways_json(repo_root: Path, gateway_name: str) -> int | None:
+    """Puerto del bloque ``apps[]`` cuyo ``name`` coincide con ``gateway_name``."""
+    want = (gateway_name or "").strip()
+    if not want:
+        return None
+    cfg_path = Path(repo_root) / "config" / "api_gateways_pm2.json"
+    if not cfg_path.is_file():
+        return None
+    try:
+        raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+        apps = raw.get("apps") if isinstance(raw, dict) else None
+        if not isinstance(apps, list):
+            return None
+        for a in apps:
+            if not isinstance(a, dict):
+                continue
+            if (a.get("name") or "").strip() == want:
+                try:
+                    p = int(a.get("port") or 0)
+                except (TypeError, ValueError):
+                    return None
+                return p if p > 0 else None
+    except (OSError, json.JSONDecodeError):
+        return None
+    return None
+
+
 def load_last_default_worker_id_from_wizard_config() -> str:
     """Último worker por defecto guardado en wizard_config.json (clave ``default_worker_id``)."""
     path = _wizard_config_path()
@@ -383,8 +449,36 @@ def load_telegram_creator_hint_from_repo_env(repo_root: Path) -> str:
     return ""
 
 
+# Orden alineado con gateway_db (sin DUCKCLAW_DB_PATH).
+_ENV_PRIMARY_DUCKDB_KEYS: tuple[str, ...] = (
+    "DUCKDB_PATH",
+    "DUCKCLAW_FINANZ_DB_PATH",
+    "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
+    "DUCKCLAW_JOB_HUNTER_DB_PATH",
+    "DUCKCLAW_SIATA_DB_PATH",
+)
+
+
+def _env_duck_path_as_repo_relative(raw: str, repo_root: Path) -> str:
+    v = (raw or "").strip().strip("'\"")
+    if not v:
+        return ""
+    p = Path(v)
+    if p.is_absolute():
+        try:
+            return str(p.resolve().relative_to(repo_root.resolve()))
+        except ValueError:
+            return v
+    return v
+
+
 def load_duckdb_vault_hint_from_repo_env(repo_root: Path) -> str:
-    """Si existe .env en el repo con DUCKCLAW_DB_PATH / DUCKDB_PATH, úsalo como sugerencia."""
+    """
+    Primera ruta DuckDB no vacía en ``.env`` (hub o por-agente).
+
+    No hace falta preguntarla en el wizard si ya defines ``DUCKCLAW_FINANZ_DB_PATH``,
+    ``DUCKCLAW_JOB_HUNTER_DB_PATH``, etc.
+    """
     envp = repo_root / ".env"
     if not envp.is_file():
         return ""
@@ -392,24 +486,19 @@ def load_duckdb_vault_hint_from_repo_env(repo_root: Path) -> str:
         text = envp.read_text(encoding="utf-8")
     except OSError:
         return ""
-    for raw in text.splitlines():
-        s = raw.strip()
+    vals: dict[str, str] = {}
+    for line in text.splitlines():
+        s = line.strip()
         if not s or s.startswith("#") or "=" not in s:
             continue
         k, _, v = s.partition("=")
-        k = k.strip()
-        if k not in ("DUCKCLAW_DB_PATH", "DUCKDB_PATH"):
-            continue
-        v = v.strip().strip("'\"")
-        if not v:
-            continue
-        p = Path(v)
-        if p.is_absolute():
-            try:
-                return str(p.resolve().relative_to(repo_root.resolve()))
-            except ValueError:
-                return v
-        return v
+        ks = k.strip()
+        if ks:
+            vals[ks] = v.strip().strip("'\"")
+    for key in _ENV_PRIMARY_DUCKDB_KEYS:
+        hint = _env_duck_path_as_repo_relative(vals.get(key) or "", repo_root)
+        if hint:
+            return hint
     return ""
 
 
@@ -641,6 +730,7 @@ def save_wizard_config_json(draft: SovereignDraft) -> None:
             "llm_base_url": draft.llm_base_url,
             "db_path": draft.duckdb_vault_path,
             "gateway_pm2_name": draft.gateway_pm2_name,
+            "gateway_port": int(draft.gateway_port),
             "gateway_tenant_id": (draft.tenant_id or "default").strip() or "default",
             "default_worker_id": (draft.default_worker_id or "").strip(),
             "wizard_creator_telegram_user_id": (draft.wizard_creator_telegram_user_id or "").strip(),
@@ -670,10 +760,10 @@ def materialize(
     attach_rel = shared_attach_relpath(draft)
 
     _dw = (draft.default_worker_id or "").strip().lower()
+    _low = primary_rel.lower()
     updates: dict[str, str] = {
         "REDIS_URL": draft.redis_url.strip(),
         "DUCKCLAW_REDIS_URL": draft.redis_url.strip(),
-        "DUCKCLAW_DB_PATH": primary_rel,
         "DUCKDB_PATH": primary_rel,
         "DUCKCLAW_GATEWAY_TENANT_ID": draft.tenant_id.strip(),
         "DUCKCLAW_DEFAULT_WORKER_ID": draft.default_worker_id.strip(),
@@ -682,6 +772,12 @@ def materialize(
         "DUCKCLAW_LLM_BASE_URL": draft.llm_base_url.strip(),
         "DUCKCLAW_PM2_PROCESS_NAME": draft.gateway_pm2_name.strip(),
     }
+    if "job" in _low and "hunter" in _low:
+        updates["DUCKCLAW_JOB_HUNTER_DB_PATH"] = primary_rel
+    elif "siata" in _low:
+        updates["DUCKCLAW_SIATA_DB_PATH"] = primary_rel
+    elif "finanz" in _low:
+        updates["DUCKCLAW_FINANZ_DB_PATH"] = primary_rel
     # Gateways no-Finanz con tenant propio: bóveda inicial por slug de worker (p. ej. job_hunter).
     if _dw and _dw != "finanz":
         updates["DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID"] = (draft.default_worker_id or "").strip()

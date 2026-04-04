@@ -2,10 +2,10 @@
 """
 Inserta o actualiza un usuario como admin en main.authorized_users (Telegram Guard / /team).
 
-Usa la misma ruta DuckDB que el API Gateway (DUCKCLAW_DB_PATH).
+Usa la misma ruta DuckDB que el API Gateway (multiplex / ``get_gateway_db_path``).
 
-Ejemplo (ajusta la ruta a tu PM2 / TheMind-Gateway):
-  export DUCKCLAW_DB_PATH="/Users/.../duckclaw/db/private/1726618406/the_mind.duckdb"
+Ejemplo (ajusta la variable a tu PM2 / TheMind-Gateway):
+  export DUCKCLAW_FINANZ_DB_PATH="/Users/.../duckclaw/db/private/1726618406/the_mind.duckdb"
   uv run python scripts/bootstrap_team_admin.py 1726618406 --username Juan
 
 Si DuckDB devuelve lock (PM2 tiene abierta la misma .duckdb): ``pm2 stop TheMind-Gateway``,
@@ -49,7 +49,7 @@ def main() -> int:
     parser.add_argument(
         "--db",
         default="",
-        help="Ruta explícita a .duckdb (si no, usa DUCKCLAW_DB_PATH / get_gateway_db_path)",
+        help="Ruta explícita a .duckdb (si no, usa variables multiplex / get_gateway_db_path)",
     )
     args = parser.parse_args()
 
@@ -62,7 +62,7 @@ def main() -> int:
         os.path.join(repo, "packages", "shared", "src"),
     ]
 
-    db_path = (args.db or os.environ.get("DUCKCLAW_DB_PATH") or "").strip()
+    db_path = (args.db or "").strip()
     if not db_path:
         from duckclaw.gateway_db import get_gateway_db_path
 

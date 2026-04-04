@@ -84,8 +84,8 @@ Integración Angular: EventSource a SSE de chat y subagentes; polling a `/homeos
 
 ## 4. Despliegue y persistencia (PM2 / Docker)
 
-- **Local/Híbrido**: PM2 para `DuckClaw-Brain` (bot), `DuckClaw-Gateway` (API para n8n/Telegram) y `DuckClaw-Inference` (MLX). Config generado por `duckops serve --pm2 --gateway` → `ecosystem.api.config.cjs`.
-- **DuckClaw-Gateway**: Usa `services/api-gateway/main.py` (microservicio unificado: agente, db/write, homeostasis). Requiere variables de entorno para el LLM (`DUCKCLAW_LLM_PROVIDER`, `DEEPSEEK_API_KEY` o `OPENAI_API_KEY`, etc.) y para la BD (`DUCKCLAW_DB_PATH`, normalizada a `db/<nombre>.duckdb` por el wizard). El manager carga `.env` de la raíz al generar el config para propagarlas a PM2.
+- **Local/Híbrido**: PM2 para `DuckClaw-Brain` (bot), `DuckClaw-Gateway` (API para n8n/Telegram) y `MLX-Inference` (MLX). Config generado por `duckops serve --pm2 --gateway` → `ecosystem.api.config.cjs`.
+- **DuckClaw-Gateway**: Usa `services/api-gateway/main.py` (microservicio unificado: agente, db/write, homeostasis). Requiere variables de entorno para el LLM (`DUCKCLAW_LLM_PROVIDER`, `DUCKCLAW_LLM_MODEL`, `DUCKCLAW_LLM_BASE_URL`; claves según proveedor: `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, **`GROQ_API_KEY`** si `DUCKCLAW_LLM_PROVIDER=groq` con base `https://api.groq.com/openai/v1`, etc.) y para la BD (`DUCKCLAW_DB_PATH`, normalizada a `db/<nombre>.duckdb` por el wizard). Si el `.env` solo define `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL`, `build_llm` en `duckclaw.integrations.llm_providers` las refleja en `DUCKCLAW_LLM_*` cuando estas están vacías. El manager carga `.env` de la raíz al generar el config para propagarlas a PM2.
 - **Contenerización**: Docker multi-etapa (`docker/base/`, `docker/api/`) para aislamiento y K8s.
 
 ---

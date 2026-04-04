@@ -121,7 +121,7 @@ DEPLOY_PROVIDERS = ("auto", "pm2", "systemd", "windows", "cron")
 DEPLOY_SERVICE_NAME = "DuckClaw-Brain"
 GATEWAY_SERVICE_NAME = "DuckClaw-Gateway"  # spec FLUJO_VIDA_DATO: services/api-gateway
 DB_WRITER_SERVICE_NAME = "DuckClaw-DB-Writer"  # spec FLUJO_VIDA_DATO: services/db-writer
-INFERENCE_SERVICE_NAME = "DuckClaw-Inference"
+INFERENCE_SERVICE_NAME = "MLX-Inference"
 # Orden: IoTCoreLabs, OpenAI, Anthropic, DeepSeek, MLX (principales); luego Ollama y none_llm
 LLM_PROVIDERS = ("iotcorelabs", "openai", "anthropic", "deepseek", "huggingface", "mlx", "ollama", "none_llm")
 TELEGRAM_TOKEN_PATTERN = re.compile(r"^\d+:[A-Za-z0-9_-]{20,}$")
@@ -403,7 +403,7 @@ def _is_deploy_service_running(name: str) -> tuple[bool, str]:
 
 
 def _ensure_pm2_inference_service(script_path: Path, cwd: Path) -> str:
-    """Arranca DuckClaw-Inference (start_mlx.sh) con PM2 si no está ya en marcha. Devuelve mensaje para el usuario."""
+    """Arranca MLX-Inference (start_mlx.sh) con PM2 si no está ya en marcha. Devuelve mensaje para el usuario."""
     if not shutil.which("pm2"):
         return "pm2 no encontrado; no se pudo crear el servicio de inferencia."
     exists, _ = _is_deploy_service_running(INFERENCE_SERVICE_NAME)

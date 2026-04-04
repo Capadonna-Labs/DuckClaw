@@ -36,7 +36,9 @@ def clear_pm2_gateway_db_cache() -> None:
 
 
 def pm2_gateway_names_with_explicit_db_path() -> frozenset[str]:
-    """Nombres `apps[].name` que declaran `env.DUCKCLAW_DB_PATH` no vacío."""
+    """Nombres `apps[].name` con ruta DuckDB explícita (``DUCKCLAW_*_DB_PATH`` o ``DUCKDB_PATH``)."""
+    from duckclaw.gateway_db import raw_gateway_db_path_from_mapping
+
     global _NAMES_CACHE
     if _NAMES_CACHE is not None:
         return _NAMES_CACHE
@@ -51,8 +53,7 @@ def pm2_gateway_names_with_explicit_db_path() -> frozenset[str]:
                     continue
                 n = (a.get("name") or "").strip()
                 env = a.get("env") if isinstance(a.get("env"), dict) else {}
-                dbp = (env.get("DUCKCLAW_DB_PATH") or "").strip()
-                if n and dbp:
+                if n and raw_gateway_db_path_from_mapping(env):
                     names.add(n)
     except Exception:
         pass
@@ -62,33 +63,24 @@ def pm2_gateway_names_with_explicit_db_path() -> frozenset[str]:
 
 def dedicated_gateway_db_path_resolved() -> str | None:
     """
-    Ruta absoluta de DUCKCLAW_DB_PATH cuando el gateway debe usar una sola DuckDB
-    (no el registry multi-bóveda por usuario).
+    Ruta absoluta del DuckDB dedicado del proceso gateway (misma que ``get_gateway_db_path()``).
 
-    - Si el proceso está en ``api_gateways_pm2.json`` con ``DUCKCLAW_DB_PATH`` (nombre
-      PM2 o match por puerto): se usa esa ruta.
-    - Si hay ``DUCKCLAW_PM2_PROCESS_NAME`` pero **no** hay bloque en el JSON (p. ej.
-      wizard creó ``JobHunter-Gateway`` sin editar el JSON): se usa igualmente
-      ``DUCKCLAW_DB_PATH`` del entorno PM2/.env.
-    - Sin nombre PM2 (p. ej. ``uvicorn`` local sin PM2): None → multi-bóveda.
+    - Si el proceso está en ``api_gateways_pm2.json`` con rutas ``DUCKCLAW_*_DB_PATH``
+      (nombre PM2 o match por puerto): el arranque ya volcó esas claves al entorno.
+    - Sin bloque PM2 (``uvicorn`` local): None → multi-bóveda por usuario.
 
-    Importante: al arranque, ``_apply_db_path_from_api_gateways_pm2`` puede emparejar
-    el bloque correcto por ``--port`` y fijar ``DUCKCLAW_PM2_MATCHED_APP_NAME`` a
-    p. ej. ``BI-Analyst-Gateway`` aunque ``DUCKCLAW_PM2_PROCESS_NAME`` en PM2 lleve
-    otro alias (p. ej. ``BIAnalyst-Gateway``). Hay que aceptar **cualquiera** de los
-    dos si está en el JSON; si solo se mirara el nombre PM2, fly commands y el manager
-    volverían al vault del registry (p. ej. finanzdb1) y chocarían por lock DuckDB.
+    ``_apply_db_path_from_api_gateways_pm2`` puede fijar ``DUCKCLAW_PM2_MATCHED_APP_NAME``
+    por ``--port`` aunque el nombre PM2 real difiera; se acepta **cualquiera** de los
+    dos si está en el JSON.
     """
-    gw_db = (os.environ.get("DUCKCLAW_DB_PATH") or "").strip()
-    if not gw_db:
-        return None
-    resolved = str(Path(gw_db).expanduser().resolve())
+    from duckclaw.gateway_db import get_gateway_db_path
+
     names = pm2_gateway_names_with_explicit_db_path()
     proc = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
     matched = (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
-    in_json = proc in names or matched in names
-    if in_json:
-        return resolved
-    if proc:
-        return resolved
-    return None
+    if not (proc in names or matched in names):
+        return None
+    resolved = get_gateway_db_path()
+    if not (resolved or "").strip():
+        return None
+    return resolved

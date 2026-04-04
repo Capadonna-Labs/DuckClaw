@@ -98,6 +98,28 @@ def test_plan_task_job_hunter_job_tracking_skips_tavily_mission() -> None:
     assert "admin_sql" in task.lower() or "read_sql" in task.lower()
 
 
+def test_plan_task_job_hunter_application_tracking_read_sql_no_tavily() -> None:
+    from duckclaw.graphs.manager_graph import _plan_task, job_hunter_user_requests_job_search
+
+    q = "dame el seguimiento de las vacantes a las que he aplicado"
+    assert not job_hunter_user_requests_job_search(q)
+    task, override = _plan_task(q, "Job-Hunter")
+    assert override is None
+    assert "job_opportunities" in task.lower()
+    assert "read_sql" in task.lower()
+    assert "prohibido" in task.lower() and "tavily_search" in task.lower()
+
+
+def test_job_hunter_synthesis_task_does_not_trigger_tavily_intent() -> None:
+    from duckclaw.graphs.manager_graph import job_hunter_user_requests_job_search
+
+    syn = (
+        "TAREA: JobHunter completó la misión INCOME_INJECTION. Sintetiza los resultados crudos "
+        "prioriza 3 vacantes accionables"
+    )
+    assert not job_hunter_user_requests_job_search(syn)
+
+
 def test_plan_task_summarize_directives_passthrough_despite_db_keywords_in_body() -> None:
     """El cuerpo inyectado puede decir 'estructura', 'schema', 'DuckDB', etc.; no debe convertirse en TAREA de tablas."""
     from duckclaw.graphs.manager_graph import _llm_plan, _plan_task
@@ -125,6 +147,19 @@ def test_plan_task_summarize_directives_passthrough_despite_db_keywords_in_body(
     task2, _ = _plan_task(new_ctx, "Job-Hunter")
     assert task2 == new_ctx
     assert "SHOW TABLES" not in task2
+
+
+def test_plan_task_summarize_stored_with_bom_still_passthrough() -> None:
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    body = (
+        "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]\n--- registro 1 ---\nx\n"
+        "Este bloque se obtuvo leyendo main.semantic_memory."
+    )
+    task, override = _plan_task("\ufeff" + body, "Job-Hunter")
+    assert override is None
+    assert task == body
+    assert "TAREA: El usuario quiere ver las tablas" not in task
 
 
 def test_plan_task_bi_analyst_meta_capabilities() -> None:
@@ -413,3 +448,115 @@ def test_finanz_manifest_includes_job_opportunities_allowlist() -> None:
     ).read_text(encoding="utf-8")
     assert "job_opportunities" in raw
     assert "allowed_tables:" in raw
+
+
+def test_worker_tool_names_from_messages_embedded_json_in_content() -> None:
+    """MLX sin tool_calls: el nombre de tool se infiere del JSON en content del último AIMessage."""
+    from langchain_core.messages import AIMessage
+
+    from duckclaw.graphs.manager_graph import _worker_tool_names_from_messages
+
+    ai = AIMessage(
+        content='{"name": "read_sql", "parameters": {"query": "SELECT 1"}}',
+    )
+    assert _worker_tool_names_from_messages([ai]) == ["read_sql"]
+
+
+def test_worker_tool_names_from_messages_dict_assistant_embedded_json() -> None:
+    """Estado serializado como dict ChatML (último assistant con JSON de tool)."""
+    from duckclaw.graphs.manager_graph import _worker_tool_names_from_messages
+
+    msgs = [{"role": "assistant", "content": '{"name": "read_sql", "parameters": {"query": "SELECT 1"}}'}]
+    assert _worker_tool_names_from_messages(msgs) == ["read_sql"]
+
+
+def test_worker_tool_names_from_messages_tuple_same_as_list() -> None:
+    """LangGraph puede devolver messages como tupla; el manager debe inferir tools igual que con lista."""
+    from langchain_core.messages import AIMessage
+
+    from duckclaw.graphs.manager_graph import _worker_tool_names_from_messages
+
+    ai = AIMessage(
+        content='{"name": "read_sql", "parameters": {"query": "SELECT 1"}}',
+    )
+    assert _worker_tool_names_from_messages((ai,)) == ["read_sql"]
+
+
+def test_worker_tool_names_from_messages_embedded_earlier_ai_same_turn() -> None:
+    """Mismo turno: varios AIMessage; el JSON de tool puede ir en uno anterior al último assistant."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from duckclaw.graphs.manager_graph import _worker_tool_names_from_messages
+
+    ai_tool = AIMessage(
+        content='{"name": "read_sql", "parameters": {"query": "SELECT 1"}}',
+    )
+    ai_text = AIMessage(content="Aquí tienes el resultado.")
+    msgs = [HumanMessage(content="Dame cuentas"), ai_tool, ai_text]
+    assert _worker_tool_names_from_messages(msgs) == ["read_sql"]
+
+
+def test_worker_tool_names_additional_kwargs_tool_calls() -> None:
+    """MLX / OpenAI-compat a veces dejan tool_calls solo en additional_kwargs."""
+    from langchain_core.messages import HumanMessage
+
+    from duckclaw.graphs.manager_graph import _worker_tool_names_from_messages
+
+    class _AI:
+        type = "ai"
+        tool_calls: list = []
+        content = ""
+        additional_kwargs = {
+            "tool_calls": [{"type": "function", "function": {"name": "read_sql", "arguments": "{}"}}]
+        }
+
+    msgs = [HumanMessage(content="q"), _AI()]
+    assert _worker_tool_names_from_messages(msgs) == ["read_sql"]
+
+
+def test_worker_tool_names_read_sql_regex_fallback() -> None:
+    """JSON roto en content: aún detectamos read_sql para logs del manager."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from duckclaw.graphs.manager_graph import _worker_tool_names_from_messages
+
+    ai = AIMessage(
+        content='x {"name": "read_sql", "parameters": {"query": "SELECT 1" no cierra',
+    )
+    msgs = [HumanMessage(content="x"), ai]
+    assert "read_sql" in _worker_tool_names_from_messages(msgs)
+
+
+def test_worker_tool_names_from_messages_embedded_json_after_prefix() -> None:
+    """MLX a veces antepone texto antes del objeto JSON de la tool."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from duckclaw.graphs.manager_graph import _worker_tool_names_from_messages
+
+    ai = AIMessage(
+        content='Consulto la base.\n{"name": "read_sql", "parameters": {"query": "SELECT 1"}}',
+    )
+    msgs = [HumanMessage(content="q"), ai]
+    assert _worker_tool_names_from_messages(msgs) == ["read_sql"]
+
+
+def test_worker_tool_names_from_messages_dict_and_object_tool_calls() -> None:
+    from types import SimpleNamespace
+
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    from duckclaw.graphs.manager_graph import _worker_tool_names_from_messages
+
+    class _FakeMsg:
+        __slots__ = ("tool_calls",)
+
+        def __init__(self, tool_calls: list) -> None:
+            self.tool_calls = tool_calls
+
+    ai_lc = AIMessage(content="", tool_calls=[{"name": "read_sql", "id": "1", "args": {}}])
+    fake_obj_tc = _FakeMsg(tool_calls=[SimpleNamespace(name="tavily_search")])
+    tm = ToolMessage(content="ok", tool_call_id="1", name="read_sql")
+    names = _worker_tool_names_from_messages([ai_lc, fake_obj_tc, tm])
+    # AIMessage normaliza tool_calls a objetos; dedupe mantiene un solo read_sql.
+    assert "read_sql" in names and "tavily_search" in names
+    assert names.index("read_sql") < names.index("tavily_search")

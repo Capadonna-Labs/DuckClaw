@@ -16,7 +16,10 @@ class SovereignDraft(BaseModel):
 
     # Core
     redis_url: str = Field(default="redis://localhost:6379/0", description="Canal de comunicación")
-    duckdb_vault_path: str = Field(default="db/sovereign_memory.duckdb", description="Bóveda de memoria")
+    duckdb_vault_path: str = Field(
+        default="db/sovereign_memory.duckdb",
+        description="Hub DuckDB (multiplex / DUCKDB_PATH); el wizard lo infiere del .env si hay rutas por agente",
+    )
     duckdb_shared_path: str = Field(default="", description="BD compartida opcional (ej. BI)")
 
     # Identity

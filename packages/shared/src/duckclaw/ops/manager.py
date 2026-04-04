@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from duckclaw.dotenv_immutable import merged_root_and_proposed_flat_env
+from duckclaw.gateway_db import raw_gateway_db_path_from_mapping
 
 
 _WIZARD_PROPOSED_OVERLAY_EXTRA_KEYS = frozenset(
@@ -344,9 +345,17 @@ def _env_dict_for_json(env: dict[str, Any]) -> dict[str, str]:
 
 
 # Rutas de bóveda persistidas por bloque en api_gateways_pm2.json; no deben sustituirse
-# silenciosamente por DUCKCLAW_DB_PATH del .env compartido al redeployar otro gateway.
+# silenciosamente por valores genéricos del .env compartido al redeployar otro gateway.
 _GATEWAY_MERGE_PERSIST_DB_KEYS = frozenset(
-    ("DUCKCLAW_DB_PATH", "DUCKCLAW_SHARED_DB_PATH", "DUCKDB_PATH")
+    (
+        "DUCKCLAW_DB_PATH",
+        "DUCKCLAW_FINANZ_DB_PATH",
+        "DUCKCLAW_JOB_HUNTER_DB_PATH",
+        "DUCKCLAW_SIATA_DB_PATH",
+        "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
+        "DUCKCLAW_SHARED_DB_PATH",
+        "DUCKDB_PATH",
+    )
 )
 
 
@@ -412,7 +421,7 @@ def _compute_gateway_cluster_maps(
         env = a.get("env") or {}
         if not isinstance(env, dict):
             env = {}
-        dbp = (env.get("DUCKCLAW_DB_PATH") or "").strip()
+        dbp = (raw_gateway_db_path_from_mapping(env) or (env.get("DUCKCLAW_DB_PATH") or "").strip()).strip()
         if dbp:
             try:
                 dp = Path(dbp)
@@ -566,8 +575,8 @@ def serve(
     gateway=True: services/api-gateway/main.py (uvicorn --app-dir services/api-gateway).
     Default name: DuckClaw-Gateway con gateway=True, DuckClaw-API si no.
     delete_pm2_name: opcional; elimina ese proceso PM2 antes de arrancar (sustitución explícita).
-    gateway_db_path: si se indica, fija DUCKCLAW_DB_PATH solo para este proceso en el ecosystem
-    (varios gateways pueden usar BDs distintas sin pisar el .env global).
+    gateway_db_path: si se indica, fija ``DUCKCLAW_FINANZ_DB_PATH`` y ``DUCKDB_PATH`` para este
+    proceso en el ecosystem (varios gateways pueden usar BDs distintas sin pisar el .env global).
     Con gateway+pm2 se fusionan varios gateways en config/api_gateways_pm2.json y ecosystem.api.config.cjs.
     """
     effective_name = name if name is not None else ("DuckClaw-Gateway" if gateway else "DuckClaw-API")
@@ -602,7 +611,9 @@ def serve(
         for key in (
             "LANGCHAIN_TRACING_V2", "LANGCHAIN_API_KEY", "LANGCHAIN_PROJECT",
             "DUCKCLAW_LLM_PROVIDER", "DUCKCLAW_LLM_MODEL", "DUCKCLAW_LLM_BASE_URL",
-            "DUCKCLAW_DB_PATH", "MLX_MODEL_ID", "MLX_MODEL_PATH",
+            "DUCKCLAW_FINANZ_DB_PATH", "DUCKCLAW_JOB_HUNTER_DB_PATH", "DUCKCLAW_SIATA_DB_PATH",
+            "DUCKCLAW_WAR_ROOM_ACL_DB_PATH", "DUCKDB_PATH",
+            "MLX_MODEL_ID", "MLX_MODEL_PATH",
             "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
             "DUCKCLAW_REDIS_URL", "DUCKCLAW_WRITE_QUEUE_URL",
             "REDIS_URL", "DUCKCLAW_TAILSCALE_AUTH_KEY",
@@ -630,8 +641,9 @@ def serve(
             if not _dbf.is_absolute():
                 _dbf = Path(effective_cwd) / _dbf
             _resolved = str(_dbf.resolve())
-            env_vars["DUCKCLAW_DB_PATH"] = _resolved
-            forced_env["DUCKCLAW_DB_PATH"] = _resolved
+            env_vars["DUCKCLAW_FINANZ_DB_PATH"] = _resolved
+            env_vars["DUCKDB_PATH"] = _resolved
+            forced_env["DUCKCLAW_FINANZ_DB_PATH"] = _resolved
             forced_env["DUCKDB_PATH"] = _resolved
 
         if gateway:
@@ -671,7 +683,10 @@ def serve(
             for _gw_app in apps:
                 if isinstance(_gw_app, dict) and (_gw_app.get("name") or "").strip() == effective_name:
                     _ge = _gw_app.get("env") if isinstance(_gw_app.get("env"), dict) else {}
-                    _db_path = (_ge.get("DUCKCLAW_DB_PATH") or "").strip()
+                    _db_path = (
+                        raw_gateway_db_path_from_mapping(_ge)
+                        or (_ge.get("DUCKCLAW_DB_PATH") or "").strip()
+                    ).strip()
                     break
             if _db_path:
                 _db_file = Path(_db_path)
@@ -740,7 +755,10 @@ module.exports = {{
                 flush=True,
             )
 
-        _db_path = env_vars.get("DUCKCLAW_DB_PATH", "").strip()
+        _db_path = (
+            raw_gateway_db_path_from_mapping(env_vars)
+            or (env_vars.get("DUCKCLAW_DB_PATH") or "").strip()
+        ).strip()
         if _db_path:
             _db_file = Path(_db_path)
             if not _db_file.is_absolute():
@@ -816,7 +834,7 @@ def hire(
     env_lines = [
         f"DUCKCLAW_WORKER_ID={worker_id}",
         f"DUCKCLAW_WORKER_INSTANCE={instance}",
-        f"DUCKCLAW_DB_PATH={db_path}",
+        f"DUCKDB_PATH={db_path}",
         "PYTHONPATH=" + effective_cwd,
         f"LANGCHAIN_TAGS=worker_role:{worker_id},instance:{instance}",
     ]
@@ -849,7 +867,7 @@ module.exports = {{
       env: {{
         DUCKCLAW_WORKER_ID: "{worker_id}",
         DUCKCLAW_WORKER_INSTANCE: "{instance}",
-        DUCKCLAW_DB_PATH: "{db_path}",
+        DUCKDB_PATH: "{db_path}",
         PYTHONPATH: "{effective_cwd}",
         WORKER_PORT: "{port}",
       }},

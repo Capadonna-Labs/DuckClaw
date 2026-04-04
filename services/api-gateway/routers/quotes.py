@@ -16,12 +16,10 @@ router = APIRouter(prefix="/api/v1/quotes", tags=["quotes"])
 
 
 def _gateway_db_path() -> str:
-    """Ruta de la BD del Gateway (misma que usa el agente). Resuelve desde repo root."""
-    path = os.environ.get("DUCKCLAW_DB_PATH", "").strip()
-    if path:
-        return path
-    # Default relativo al repo (cuando cwd es repo root)
-    return os.environ.get("DUCKDB_PATH", "db/duckclaw.duckdb").strip() or "db/duckclaw.duckdb"
+    """Ruta de la BD del Gateway (misma que usa el agente). Multiplex + DUCKDB_PATH."""
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    return get_gateway_db_path()
 
 
 @router.get("/download/{quote_id}")

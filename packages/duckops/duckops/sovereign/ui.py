@@ -33,7 +33,11 @@ from duckops.sovereign.keys import (
     NAV_SERVICE_TEST,
     build_key_bindings,
 )
-from duckops.sovereign.materialize import load_draft_json, save_draft_json
+from duckops.sovereign.materialize import (
+    load_draft_json,
+    load_duckdb_vault_hint_from_repo_env,
+    save_draft_json,
+)
 from duckops.sovereign.state_machine import STEP_ORDER, next_step, prev_step
 from duckops.sovereign.validate import (
     is_port_in_use,
@@ -431,7 +435,17 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
                     )
                 else:
                     with console.status("[bold cyan]Configurando Tailscale Funnel (--bg)…[/]"):
-                        url_f, err_f = provision_tailscale_funnel_bg(draft.gateway_port)
+                        url_f, err_f, warn_f = provision_tailscale_funnel_bg(
+                            draft.gateway_port
+                        )
+                    if warn_f:
+                        console.print(
+                            Panel(
+                                warn_f,
+                                title="Aviso: Funnel cambia el puerto de destino",
+                                border_style="yellow",
+                            )
+                        )
                     if url_f:
                         draft.telegram_webhook_public_base_url = url_f
                         draft.tailscale_funnel_bg_via_wizard = True
@@ -573,7 +587,7 @@ def run_wizard_loop(repo_root: Path, console: Console, draft: SovereignDraft) ->
             masked_tok = "•••• (configurado)" if draft.telegram_bot_token else "(vacío / .env existente)"
             summary = (
                 f"Redis: {draft.redis_url}\n"
-                f"DuckDB vault: {draft.duckdb_vault_path}\n"
+                f"DuckDB hub (materialización / PM2): {draft.duckdb_vault_path}\n"
                 f"Shared: {draft.duckdb_shared_path or '(ninguna)'}\n"
                 f"Tenant: {draft.tenant_id}\n"
                 f"PM2 name: {draft.gateway_pm2_name}\n"

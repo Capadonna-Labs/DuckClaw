@@ -315,6 +315,7 @@ def _post_outbound_sync(
     text: str,
     *,
     plan_title_log: str | None = None,
+    outbound_bot_token: str | None = None,
 ) -> None:
     cid = normalize_telegram_chat_id_for_outbound(chat_id) or str(chat_id or "").strip()
     uid_raw = str(user_id or "").strip()
@@ -323,7 +324,7 @@ def _post_outbound_sync(
     if not cid or not raw:
         return
 
-    token = effective_telegram_bot_token_outbound()
+    token = (outbound_bot_token or "").strip() or effective_telegram_bot_token_outbound()
     if token:
         try:
             from duckclaw.integrations.telegram.telegram_outbound_sync import (
@@ -412,6 +413,7 @@ def schedule_chat_heartbeat_dm(
     log_worker_id: str | None = None,
     log_username: str | None = None,
     log_plan_title: str | None = None,
+    outbound_bot_token: str | None = None,
 ) -> None:
     """
     Si el heartbeat está activo para el chat, encola un POST al webhook (hilo daemon).
@@ -420,6 +422,7 @@ def schedule_chat_heartbeat_dm(
     ``log_worker_id`` (p. ej. ``BI-Analyst 1``) y ``log_username`` alimentan ``set_log_context``
     en ese hilo para que las líneas «chat heartbeat» en PM2 identifiquen al subagente.
     ``log_plan_title`` se añade a la línea de log del envío nativo (título del plan del manager).
+    ``outbound_bot_token``: token explícito (p. ej. webhook multiplex); los hilos no heredan ContextVar.
     """
     if not is_chat_heartbeat_enabled(tenant_id, chat_id):
         return
@@ -436,6 +439,7 @@ def schedule_chat_heartbeat_dm(
     worker_for_log = (log_worker_id or "").strip() or None
     uname_for_log = (log_username or "").strip() or None
     plan_for_log = (log_plan_title or "").strip() or None
+    token_for_thread = (outbound_bot_token or "").strip() or None
 
     def _run() -> None:
         if worker_for_log:
@@ -448,10 +452,22 @@ def schedule_chat_heartbeat_dm(
             chat_lbl = format_chat_log_identity(cid_eff, uname_for_log)
             try:
                 set_log_context(tenant_id=tid_for_log, worker_id=worker_for_log, chat_id=chat_lbl)
-                _post_outbound_sync(cid_eff, uid_eff, msg, plan_title_log=plan_for_log)
+                _post_outbound_sync(
+                    cid_eff,
+                    uid_eff,
+                    msg,
+                    plan_title_log=plan_for_log,
+                    outbound_bot_token=token_for_thread,
+                )
             finally:
                 reset_log_context()
         else:
-            _post_outbound_sync(cid_eff, uid_eff, msg, plan_title_log=plan_for_log)
+            _post_outbound_sync(
+                cid_eff,
+                uid_eff,
+                msg,
+                plan_title_log=plan_for_log,
+                outbound_bot_token=token_for_thread,
+            )
 
     threading.Thread(target=_run, name="duckclaw-chat-heartbeat", daemon=True).start()

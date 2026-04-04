@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -65,6 +66,38 @@ def test_multiplex_route_picks_worker_and_token_env(monkeypatch: pytest.MonkeyPa
     assert out.worker_id == "bi_analyst"
     assert out.tenant_id == "T1"
     assert out.bot_token == "token-bi"
+    assert out.forced_vault_db_path is None
+
+
+def test_multiplex_vault_db_env_resolves_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = str(tmp_path / "repo")
+    db_fin = str(tmp_path / "repo" / "db" / "fin.duckdb")
+    Path(db_fin).parent.mkdir(parents=True, exist_ok=True)
+    routes = [
+        {
+            "secret": "hdr-fin",
+            "worker_id": "finanz",
+            "tenant_id": "Finanzas",
+            "bot_token_env": "TELEGRAM_FINANZ_TOKEN",
+            "vault_db_env": "DUCKCLAW_FINANZ_DB_PATH",
+        }
+    ]
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", repo)
+    monkeypatch.setenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES", json.dumps(routes))
+    monkeypatch.setenv("TELEGRAM_FINANZ_TOKEN", "tok-f")
+    monkeypatch.setenv("DUCKCLAW_FINANZ_DB_PATH", "db/fin.duckdb")
+    m._cached_bindings = None
+    m._cached_bindings_error = None
+    out = m.telegram_webhook_resolve_dispatch(
+        "hdr-fin",
+        default_worker_id="siata_analyst",
+        default_tenant_id="SIATA",
+        default_bot_token="tok-s",
+    )
+    assert isinstance(out, m.TelegramWebhookResolvedDispatch)
+    assert out.forced_vault_db_path == db_fin
 
 
 def test_multiplex_legacy_still_default_process(monkeypatch: pytest.MonkeyPatch) -> None:

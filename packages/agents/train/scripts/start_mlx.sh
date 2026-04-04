@@ -27,8 +27,8 @@ fi
 
 MLX_PORT="${MLX_PORT:-8080}"
 if command -v lsof >/dev/null 2>&1 && lsof -i :"${MLX_PORT}" -t >/dev/null 2>&1; then
-  echo "Puerto ${MLX_PORT} ya está en uso. Ejecuta: pm2 stop DuckClaw-Inference; lsof -ti :${MLX_PORT} | xargs kill -9; sleep 2; pm2 start DuckClaw-Inference"
-  echo "Quedando en espera para evitar reinicios en bucle (Ctrl+C o pm2 stop DuckClaw-Inference)."
+  echo "Puerto ${MLX_PORT} ya está en uso. Ejecuta: pm2 stop MLX-Inference; lsof -ti :${MLX_PORT} | xargs kill -9; sleep 2; pm2 start MLX-Inference"
+  echo "Quedando en espera para evitar reinicios en bucle (Ctrl+C o pm2 stop MLX-Inference)."
   while true; do sleep 3600; done
 fi
 

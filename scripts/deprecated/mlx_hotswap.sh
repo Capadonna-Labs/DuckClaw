@@ -1,5 +1,5 @@
 #!/bin/bash
-# Hot-Swap: fusiona adapters LoRA en el modelo base y recarga DuckClaw-Inference.
+# Hot-Swap: fusiona adapters LoRA en el modelo base y recarga MLX-Inference.
 # Spec: specs/Migracion_de_Pipeline_de_Entrenamiento_(GRPO_a_SFT_con_MLX).md
 #
 # Uso: ./scripts/mlx_hotswap.sh
@@ -43,5 +43,5 @@ if ! "$PYTHON" scripts/eval_model.py --model "$FUSED_PATH" --no-db; then
   exit 1
 fi
 
-echo "Modelo validado. Recargando DuckClaw-Inference..."
-pm2 reload DuckClaw-Inference 2>/dev/null || echo "PM2 no disponible o DuckClaw-Inference no está en marcha. Reinicia manualmente."
+echo "Modelo validado. Recargando MLX-Inference..."
+pm2 reload MLX-Inference 2>/dev/null || echo "PM2 no disponible o MLX-Inference no está en marcha. Reinicia manualmente."

@@ -22,7 +22,7 @@ import uuid
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from urllib import request as _url_request
 from urllib.error import URLError
 
@@ -60,6 +60,12 @@ from duckclaw.integrations.telegram.telegram_agent_token import (
     resolve_telegram_token_for_worker_id,
     telegram_token_from_pm2_env_dict,
 )
+from duckclaw.gateway_db import (
+    GATEWAY_DB_ENV_KEYS,
+    get_gateway_db_path,
+    raw_gateway_db_path_from_mapping,
+    resolve_env_duckdb_path,
+)
 
 # Cargar .env desde repo root
 _repo_root = Path(__file__).resolve().parent.parent.parent
@@ -89,9 +95,9 @@ for _base in (_repo_root, Path.cwd()):
 
 def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
     """
-    Varias apps PM2 comparten el mismo .env; `setdefault` puede dejar DUCKCLAW_DB_PATH
-    apuntando a finanzdb para todos. Forzar la ruta del bloque correcto en
-    config/api_gateways_pm2.json según DUCKCLAW_PM2_PROCESS_NAME (PM2) o --port (uvicorn).
+    Varias apps PM2 comparten el mismo .env. Volcar al proceso las claves ``DUCKCLAW_*_DB_PATH``
+    y ``DUCKDB_PATH`` del bloque ``config/api_gateways_pm2.json`` según
+    ``DUCKCLAW_PM2_PROCESS_NAME`` o ``--port`` (uvicorn).
 
     También aplica `TELEGRAM_BOT_TOKEN` desde ese mismo bloque `env` si viene definido y no vacío:
     así BI-Analyst-Gateway puede usar el bot de BI aunque el .env global traiga el token de Finanz.
@@ -149,15 +155,21 @@ def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
     else:
         os.environ.pop("DUCKCLAW_PM2_MATCHED_APP_NAME", None)
     env = chosen.get("env") if isinstance(chosen.get("env"), dict) else {}
-    dbp = (env.get("DUCKCLAW_DB_PATH") or "").strip()
-    if not dbp:
-        return False, matched_name
-    pth = Path(dbp)
-    if not pth.is_absolute():
-        pth = (_repo_root / pth).resolve()
-    else:
-        pth = pth.resolve()
-    os.environ["DUCKCLAW_DB_PATH"] = str(pth)
+    for key in GATEWAY_DB_ENV_KEYS:
+        raw_v = str(env.get(key) or "").strip()
+        if raw_v:
+            os.environ[key] = resolve_env_duckdb_path(raw_v)
+    legacy = str(env.get("DUCKCLAW_DB_PATH") or "").strip()
+    if legacy and not any(str(env.get(k) or "").strip() for k in (
+        "DUCKCLAW_FINANZ_DB_PATH",
+        "DUCKCLAW_JOB_HUNTER_DB_PATH",
+        "DUCKCLAW_SIATA_DB_PATH",
+    )):
+        os.environ.setdefault("DUCKCLAW_FINANZ_DB_PATH", resolve_env_duckdb_path(legacy))
+    if not any(os.environ.get(k) for k in GATEWAY_DB_ENV_KEYS):
+        dbp = raw_gateway_db_path_from_mapping(env)
+        if dbp:
+            os.environ["DUCKCLAW_FINANZ_DB_PATH"] = resolve_env_duckdb_path(dbp)
     _matched_app = (matched_name or "").strip()
     _wid = PM2_GATEWAY_APP_TO_WORKER_ID.get(_matched_app, "")
     tok = (
@@ -207,8 +219,8 @@ from duckclaw.pm2_gateway_db import dedicated_gateway_db_path_resolved
 
 def _dedicated_gateway_vault_db_path() -> str | None:
     """
-    Si este proceso es un gateway listado en api_gateways_pm2.json con DUCKCLAW_DB_PATH,
-    esa ruta sustituye al vault activo del usuario (fly commands, manager, workers).
+    Si este proceso es un gateway listado en api_gateways_pm2.json con rutas multiplex,
+    esa DuckDB sustituye al vault activo del usuario (fly commands, manager, workers).
     """
     return dedicated_gateway_db_path_resolved()
 
@@ -240,10 +252,10 @@ configure_structured_logging(level=_log_level)
 _gateway_log = logging.getLogger("duckclaw.gateway")
 _obs_log = get_obs_logger()
 _gateway_log.info(
-    "Gateway startup: DUCKCLAW_DB_PATH=%s DUCKCLAW_PM2_MATCHED_APP_NAME=%s "
+    "Gateway startup: gateway_db_path=%s DUCKCLAW_PM2_MATCHED_APP_NAME=%s "
     "DUCKCLAW_WAR_ROOM_ACL_DB_PATH=%s | diagnóstico WR: pm2 logs … --lines 300 "
     "y grep telegram_inbound_early war_room_gate DROP_NO_MENTION rate_limited",
-    (os.environ.get("DUCKCLAW_DB_PATH") or "").strip() or "(unset)",
+    get_gateway_db_path() or "(unset)",
     (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip() or "(unset)",
     (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip() or "(unset)",
 )
@@ -396,8 +408,8 @@ async def _tailscale_auth_middleware(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
     if path in ("/", "/health"):
         return await call_next(request)
-    # Telegram Bot API no envía X-Tailscale-Auth-Key; el webhook usa TELEGRAM_WEBHOOK_SECRET.
-    if path == "/api/v1/telegram/webhook" or path.startswith("/api/v1/telegram/webhook/"):
+    # Telegram Bot API no envía X-Tailscale-Auth-Key; webhook estándar y rutas path-multiplex.
+    if path.startswith("/api/v1/telegram/"):
         return await call_next(request)
     header_key = request.headers.get("X-Tailscale-Auth-Key", "").strip()
     if header_key != auth_key:
@@ -1002,7 +1014,7 @@ async def _authorize_or_reject(
     telegram_guard_acl_db_path:
         Si el webhook forzó una bóveda distinta (p. ej. ruta legado ``/webhook/finanz`` con
         ``DUCKCLAW_FINANZ_DB_PATH``), la whitelist ``main.authorized_users`` se lee de esa DuckDB.
-        Con un gateway aislado por bot, suele ser ``None`` y se usa ``DUCKCLAW_DB_PATH`` del proceso.
+        Con un gateway aislado por bot, suele ser ``None`` y se usa la bóveda del proceso (multiplex / ``get_gateway_db_path``).
     """
     # Check 1 (Bypass): owner bypass no DB/Redis access.
     if is_owner:
@@ -1087,7 +1099,8 @@ def _effective_tenant_id(request_tenant: str | None) -> str:
         return "Leila Store"
     if pm2 == "BI-Analyst-Gateway":
         return "BI-Analyst"
-    dbp = (os.getenv("DUCKCLAW_DB_PATH") or "").lower()
+    dbp_src = get_gateway_db_path()
+    dbp = str(dbp_src or "").lower()
     if "leiladb" in dbp:
         return "Leila Store"
     if "bi_analyst" in dbp:
@@ -1265,6 +1278,7 @@ async def _invoke_chat(
     telegram_multipart_tail_delivery: str | None = None,
     telegram_mcp: Any = None,
     telegram_forced_vault_db_path: str | None = None,
+    outbound_telegram_bot_token: str | None = None,
 ):
     """
     Orquesta la llamada al grafo LangGraph a partir de un ChatRequest.
@@ -1288,7 +1302,7 @@ async def _invoke_chat(
     _forced_v = (telegram_forced_vault_db_path or "").strip()
     _telegram_acl_for_guard: str | None = None
     if _forced_v:
-        vault_db_path = str(Path(_forced_v).expanduser().resolve())
+        vault_db_path = resolve_env_duckdb_path(_forced_v)
         _telegram_acl_for_guard = vault_db_path
     else:
         _ded_vault = _dedicated_gateway_vault_db_path()
@@ -1362,24 +1376,76 @@ async def _invoke_chat(
             "worker_id": worker_id,
             "elapsed_ms": 0,
         }
-    if msg_stripped.startswith("/"):
-        try:
-            from duckclaw import DuckClaw
-            from duckclaw.graphs.on_the_fly_commands import handle_command, prepare_leila_fly_duckdb
+    try:
+        from duckclaw.graphs.graph_server import ainvoke_manager_ephemeral
+    except Exception as exc:
+        _gateway_log.error(
+            "graph init failed chat=%s: %s\n%s",
+            format_chat_id_for_terminal(session_id),
+            exc,
+            traceback.format_exc(),
+        )
+        raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
-            vpath = (vault_db_path or "").strip()
-            Path(vpath).parent.mkdir(parents=True, exist_ok=True)
-            fly_db = DuckClaw(vpath, read_only=True)
-            from duckclaw.graphs.graph_server import get_db as _fly_acl_db
-
-            prepare_leila_fly_duckdb(
-                fly_db,
-                vpath,
-                user_id=vault_user_id,
-                tenant_id=tenant_id,
-                acl_db=_fly_acl_db(),
-            )
+    # Concurrencia: por defecto un mensaje por chat_id (Redis lock). Opcional: paralelo (ver _maybe_chat_lock).
+    # Fly (/team, /vault, /workers): si la bóveda es el mismo archivo que get_gateway_db_path(), usar motor
+    # Python (mismo que GatewayDbEphemeralReadonly); si no, DuckClaw nativo en RW. Evita que /team --add
+    # escriba vía C++ y /team lea vía duckdb Python sin ver las filas.
+    _skip_lock = bool(getattr(payload, "skip_session_lock", None) or False)
+    async with _maybe_chat_lock_for_request(session_id, _skip_lock):
+        if msg_stripped.startswith("/"):
+            cmd_reply: str | None = None
+            fly_db = None
             try:
+                from duckclaw import DuckClaw
+                from duckclaw.graphs.on_the_fly_commands import handle_command, prepare_leila_fly_duckdb
+
+                vpath = (vault_db_path or "").strip()
+                Path(vpath).parent.mkdir(parents=True, exist_ok=True)
+                _fly_engine: Literal["auto", "python"] = "auto"
+                if vpath and vpath != ":memory:":
+                    try:
+                        if Path(vpath).resolve() == Path(get_gateway_db_path()).resolve():
+                            _fly_engine = "python"
+                    except OSError:
+                        pass
+                if (os.environ.get("DUCKCLAW_TEAM_WHITELIST_DEBUG") or "").strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                ):
+                    try:
+                        _gw_abs = str(Path(get_gateway_db_path()).resolve())
+                        _v_abs = (
+                            str(Path(vpath).resolve())
+                            if vpath and vpath != ":memory:"
+                            else (vpath or "")
+                        )
+                        _same = bool(
+                            _v_abs
+                            and _gw_abs
+                            and Path(_v_abs).resolve() == Path(_gw_abs).resolve()
+                        )
+                        _gateway_log.info(
+                            "fly_team_audit vault_resolved=%r gateway_resolved=%r same_file=%s fly_engine=%s",
+                            _v_abs[-96:] if len(_v_abs) > 96 else _v_abs,
+                            _gw_abs[-96:] if len(_gw_abs) > 96 else _gw_abs,
+                            _same,
+                            _fly_engine,
+                        )
+                    except OSError as _audit_exc:
+                        _gateway_log.info("fly_team_audit path_compare_error=%s", _audit_exc)
+                fly_db = DuckClaw(vpath, read_only=False, engine=_fly_engine)
+                from duckclaw.graphs.graph_server import get_db as _fly_acl_db
+
+                prepare_leila_fly_duckdb(
+                    fly_db,
+                    vpath,
+                    user_id=vault_user_id,
+                    tenant_id=tenant_id,
+                    acl_db=_fly_acl_db(),
+                )
                 cmd_reply = handle_command(
                     fly_db,
                     session_id,
@@ -1389,11 +1455,12 @@ async def _invoke_chat(
                     vault_user_id=vault_user_id,
                     username=username,
                 )
+            except Exception as exc:
+                _gateway_log.error("fly command failed chat=%s: %s", format_chat_id_for_terminal(session_id), exc)
             finally:
-                _con = getattr(fly_db, "_con", None)
-                if _con is not None:
+                if fly_db is not None:
                     try:
-                        _con.close()
+                        fly_db.close()
                     except Exception:
                         pass
             if cmd_reply is not None:
@@ -1409,23 +1476,7 @@ async def _invoke_chat(
                     "worker_id": worker_id,
                     "elapsed_ms": 0,
                 }
-        except Exception as exc:
-            _gateway_log.error("fly command failed chat=%s: %s", format_chat_id_for_terminal(session_id), exc)
 
-    try:
-        from duckclaw.graphs.graph_server import ainvoke_manager_ephemeral
-    except Exception as exc:
-        _gateway_log.error(
-            "graph init failed chat=%s: %s\n%s",
-            format_chat_id_for_terminal(session_id),
-            exc,
-            traceback.format_exc(),
-        )
-        raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
-
-    # Concurrencia: por defecto un mensaje por chat_id (Redis lock). Opcional: paralelo (ver _maybe_chat_lock).
-    _skip_lock = bool(getattr(payload, "skip_session_lock", None) or False)
-    async with _maybe_chat_lock_for_request(session_id, _skip_lock):
         try:
             from duckclaw.graphs.graph_server import _ensure_llm_config
 
@@ -1456,6 +1507,7 @@ async def _invoke_chat(
                 vault_db_path=vault_db_path,
                 shared_db_path=shared_db_path,
                 is_system_prompt=is_system_prompt,
+                outbound_telegram_bot_token=(outbound_telegram_bot_token or "").strip() or None,
             )
         except Exception as exc:
             try:

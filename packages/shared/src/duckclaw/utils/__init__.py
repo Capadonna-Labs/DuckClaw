@@ -5,6 +5,7 @@ from duckclaw.utils.langsmith_trace import (
     get_tracing_config,
     run_name_for_langsmith,
 )
+from duckclaw.utils.tool_reply import format_tool_reply
 from duckclaw.utils.logger import (
     configure_structured_logging,
     extract_usage_from_messages,
@@ -24,6 +25,7 @@ from duckclaw.utils.logger import (
 )
 
 __all__ = [
+    "format_tool_reply",
     "configure_structured_logging",
     "extract_usage_from_messages",
     "format_chat_id_for_terminal",

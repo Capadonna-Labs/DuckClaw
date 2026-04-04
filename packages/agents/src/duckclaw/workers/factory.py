@@ -30,6 +30,7 @@ except ImportError:
 from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
 from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_sync, set_log_context
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
+from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.workers import read_pool
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills
@@ -79,6 +80,7 @@ def _truncate_read_sql_result_for_llm(raw: str) -> str:
         ensure_ascii=False,
     )
 
+
 # Tarea explícita del manager (plan): nunca tratar como "sin tarea"
 def _worker_log_label(worker_id: str) -> str:
     """Etiqueta corta solo para texto de log (no sustituye el id real del estado)."""
@@ -87,6 +89,15 @@ def _worker_log_label(worker_id: str) -> str:
     if low == "themindcrupier":
         return "crupier"
     return w or "worker"
+
+
+def _worker_use_heuristic_first_tool(spec: WorkerSpec) -> bool:
+    """Manifest ``agent_node.heuristic_first_tool`` tiene prioridad sobre ``DUCKCLAW_WORKER_HEURISTIC_FIRST_TOOL``."""
+    o = getattr(spec, "agent_node_heuristic_first_tool", None)
+    if isinstance(o, bool):
+        return o
+    raw = (os.getenv("DUCKCLAW_WORKER_HEURISTIC_FIRST_TOOL") or "true").strip().lower()
+    return raw in ("1", "true", "yes", "on")
 
 
 _PLANNED_TASK_PREFIX = (
@@ -234,7 +245,7 @@ def _infer_user_id_for_writer(db_path: str) -> str:
 
 def _get_db_path(worker_id: str, instance_name: Optional[str], base_path: Optional[str]) -> str:
     """Resolve DuckDB path for this worker instance."""
-    base = (base_path or os.environ.get("DUCKCLAW_DB_PATH") or "").strip()
+    base = (base_path or os.environ.get("DUCKDB_PATH") or get_gateway_db_path() or "").strip()
     if not base:
         base = str(Path.cwd() / "db" / "workers.duckdb")
     p = Path(base)
@@ -295,6 +306,128 @@ def _estimate_tokens_from_messages(messages: list) -> int:
                 if isinstance(part, dict) and part.get("type") == "text":
                     total += len(str(part.get("text", "")))
     return max(0, total // 4)
+
+
+def _groq_max_estimated_input_tokens() -> int:
+    """
+    Tope estimado (chars/4) para el contenido serializado de mensajes hacia Groq.
+    El TPM de 12k de Groq cuenta además esquemas de tools; este tope solo recorta historial/tool output.
+    """
+    raw = (os.environ.get("DUCKCLAW_GROQ_MAX_INPUT_TOKENS") or "").strip()
+    if raw:
+        try:
+            return max(1500, min(int(raw), 11500))
+        except ValueError:
+            pass
+    return 9500
+
+
+def _groq_tool_message_max_chars() -> int:
+    raw = (os.environ.get("DUCKCLAW_GROQ_TOOL_MESSAGE_MAX_CHARS") or "").strip()
+    if raw:
+        try:
+            return max(400, min(int(raw), 100_000))
+        except ValueError:
+            pass
+    return 6000
+
+
+def _trim_messages_to_estimated_cap(
+    messages: list[Any],
+    *,
+    cap: int,
+    tool_cap: int,
+    note_brand: str,
+) -> list[Any]:
+    """Recorta historial + tool output para no exceder ``cap`` tokens estimados (chars/4)."""
+    from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+
+    msgs = _truncate_tool_messages(list(messages), tool_cap)
+
+    while len(msgs) > 2 and _estimate_tokens_from_messages(msgs) > cap:
+        if isinstance(msgs[0], SystemMessage):
+            if len(msgs) < 3:
+                break
+            victim = msgs.pop(1)
+            if isinstance(victim, AIMessage) and getattr(victim, "tool_calls", None):
+                while len(msgs) > 1 and isinstance(msgs[1], ToolMessage):
+                    msgs.pop(1)
+        else:
+            msgs.pop(0)
+
+    if msgs and isinstance(msgs[0], SystemMessage) and _estimate_tokens_from_messages(msgs) > cap:
+        sys0 = msgs[0]
+        c_raw = getattr(sys0, "content", "") or ""
+        c = c_raw if isinstance(c_raw, str) else str(c_raw)
+        if c:
+            over_tok = _estimate_tokens_from_messages(msgs) - cap
+            cut = min(len(c), over_tok * 4 + 400)
+            tail = c[:-cut] if cut < len(c) else c[: max(3000, len(c) // 2)]
+            note = (
+                f"\n\n[{note_brand}: system prompt truncado por límite de contexto; "
+                "prioriza reglas críticas y herramientas.]"
+            )
+            msgs = [SystemMessage(content=tail + note)] + list(msgs[1:])
+
+    return msgs
+
+
+def _apply_groq_message_budget(messages: list[Any], *, provider: str) -> list[Any]:
+    """Recorta mensajes LangChain antes de invoke cuando el proveedor es Groq (evita 413 TPM)."""
+    if (provider or "").strip().lower() != "groq" or not messages:
+        return messages
+    return _trim_messages_to_estimated_cap(
+        messages,
+        cap=_groq_max_estimated_input_tokens(),
+        tool_cap=_groq_tool_message_max_chars(),
+        note_brand="GROQ",
+    )
+
+
+def _mlx_max_estimated_input_tokens() -> int:
+    """
+    Tope estimado para MLX local (Metal VRAM). Prompts muy largos pueden tumbar mlx_lm con OOM;
+    ver logs [METAL] Insufficient Memory.
+    """
+    raw = (os.environ.get("DUCKCLAW_MLX_MAX_INPUT_TOKENS") or "").strip()
+    if raw:
+        try:
+            return max(2000, min(int(raw), 12000))
+        except ValueError:
+            pass
+    return 7000
+
+
+def _mlx_tool_message_max_chars() -> int:
+    raw = (os.environ.get("DUCKCLAW_MLX_TOOL_MESSAGE_MAX_CHARS") or "").strip()
+    if raw:
+        try:
+            return max(400, min(int(raw), 80_000))
+        except ValueError:
+            pass
+    return 5000
+
+
+def _apply_mlx_message_budget(messages: list[Any], *, provider: str) -> list[Any]:
+    if (provider or "").strip().lower() not in ("mlx", "iotcorelabs") or not messages:
+        return messages
+    return _trim_messages_to_estimated_cap(
+        messages,
+        cap=_mlx_max_estimated_input_tokens(),
+        tool_cap=_mlx_tool_message_max_chars(),
+        note_brand="MLX",
+    )
+
+
+def _apply_provider_input_budget(messages: list[Any], *, provider: str) -> list[Any]:
+    """Recorte de contexto por proveedor (Groq TPM / MLX VRAM)."""
+    pl = (provider or "").strip().lower()
+    m = messages
+    if pl == "groq":
+        m = _apply_groq_message_budget(m, provider=provider)
+    elif pl in ("mlx", "iotcorelabs"):
+        m = _apply_mlx_message_budget(m, provider=provider)
+    return m
 
 
 def _compact_run_sandbox_tool_content_for_llm(content: str, max_chars: int) -> str:
@@ -1070,6 +1203,7 @@ def build_worker_graph(
         else:
             user_content = incoming
         messages.append(HumanMessage(content=user_content))
+        messages = _apply_provider_input_budget(messages, provider=provider)
         # LangGraph puede reemplazar/limitar el state entre nodos; preservamos chat_id para
         # que _sandbox_enabled_for_state (y otros flags por sesión) lean el ID correcto.
         out = {**state, "messages": messages, "incoming": incoming}
@@ -1143,7 +1277,10 @@ def build_worker_graph(
             out.update(_identity_fields(state))
             return out
     else:
-        from duckclaw.integrations.llm_providers import bind_tools_with_parallel_default as _bind_tools
+        from duckclaw.integrations.llm_providers import (
+            bind_tools_with_parallel_default as _bind_tools,
+            coerce_json_tool_invoke,
+        )
 
         # Cache de re-ligado por modo (evita re-bind costoso por chat/turno).
         # parallel_tool_calls=True en APIs OpenAI-compat (incl. MLX): permite varias tool_calls en un turno.
@@ -1151,6 +1288,7 @@ def build_worker_graph(
         llm_with_tools_off = _bind_tools(llm, tools_sandbox_off)
 
         has_ibkr = "get_ibkr_portfolio" in tools_by_name
+        has_read_sql = "read_sql" in tools_by_name
         tool_choice_inspect_schema = {"type": "function", "function": {"name": "inspect_schema"}}
         tool_choice_read_sql = {"type": "function", "function": {"name": "read_sql"}}
         tool_choice_portfolio = {"type": "function", "function": {"name": "get_ibkr_portfolio"}}
@@ -1294,6 +1432,21 @@ def build_worker_graph(
             b = re.sub(r"[^a-z0-9]", "", (getattr(spec, "logical_worker_id", None) or "").lower())
             return a == "jobhunter" or b == "jobhunter"
 
+        def _is_finanz_local_accounts_query(text: str) -> bool:
+            """Cuentas/saldos en DuckDB local (finance_worker); no mezclar con IBKR ni portfolio de bolsa."""
+            if not text or not text.strip():
+                return False
+            t = text.strip().lower()
+            if any(k in t for k in ("ibkr", "interactive brokers", "bolsa", "acciones", "portfolio", "portafolio")):
+                return False
+            return bool(
+                re.search(
+                    r"\b(resumen\s+(de\s+)?(mis\s+)?cuentas|saldos?\s+(de\s+)?(mis\s+)?cuentas|"
+                    r"mis\s+cuentas\s+bancarias|cuentas\s+bancarias|estado\s+actual\s+de\s+mis\s+cuentas)\b",
+                    t,
+                )
+            )
+
         def _is_portfolio_query(text: str) -> bool:
             if not text or not text.strip():
                 return False
@@ -1310,9 +1463,24 @@ def build_worker_graph(
             # "Portfolio total" / "cuánto tengo en total" -> no forzar solo IBKR; el agente debe usar get_ibkr_portfolio + read_sql (cuentas en .duckdb)
             if any(k in t for k in ("portfolio total", "en total", "resumen de todo", "cuánto tengo en total", "cuanto tengo en total")):
                 return False
+            # Cuentas locales en .duckdb (resumen de mis cuentas, etc.) — nunca forzar IBKR por subcadena "mis cuentas"
+            if _is_finanz_local_accounts_query(text):
+                return False
             # "acciones" como palabra completa (no subcadena de "transacciones")
             # "ibkr", "en ibkr" -> consultas explícitas al broker
-            kw = ("portfolio", "portafolio", "cuanto dinero", "cuánto dinero", "saldo ibkr", "dinero en bolsa", "resumen de mi portfolio", "estado de mis cuentas", "estado de cuenta", "mis cuentas", "en ibkr", "ibkr", "interactive brokers")
+            # No incluir "mis cuentas" / "estado de mis cuentas" (ambiguo con cuentas bancarias locales).
+            kw = (
+                "portfolio",
+                "portafolio",
+                "cuanto dinero",
+                "cuánto dinero",
+                "saldo ibkr",
+                "dinero en bolsa",
+                "resumen de mi portfolio",
+                "en ibkr",
+                "ibkr",
+                "interactive brokers",
+            )
             if any(k in t for k in kw):
                 return True
             return bool(re.search(r"\bacciones\b", t))
@@ -1321,6 +1489,12 @@ def build_worker_graph(
             if not text or not text.strip():
                 return False
             t = text.strip().lower()
+            # TAREA explícita: leer filas en job_opportunities → read_sql, no inspect_schema.
+            if "read_sql" in t and "job_opportunities" in t:
+                return False
+            # "tabla o lista" = formato de presentación, no pedido de esquema DuckDB.
+            if re.search(r"\btabla\s+o\s+lista\b", t):
+                return False
             # Si piden contenido/filas de una tabla, NO forzar inspect_schema.
             if re.search(
                 r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|contenido\s+de\s+la\s+tabla|"
@@ -1335,6 +1509,8 @@ def build_worker_graph(
             if not text or not text.strip():
                 return False
             t = text.strip().lower()
+            if "read_sql" in t and "job_opportunities" in t:
+                return True
             return bool(
                 re.search(
                     r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|contenido\s+de\s+la\s+tabla|"
@@ -1373,20 +1549,30 @@ def build_worker_graph(
                     if isinstance(m, HumanMessage) and getattr(m, "content", None):
                         incoming = (str(m.content) or "").strip()
                         break
+            telegram_context_summarize_directive = (
+                "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in (incoming or "")
+                or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
+            )
             is_schema = _is_schema_query(incoming)
             is_table_content = _is_table_content_query(incoming)
             is_latest_game = _is_latest_game_query(incoming)
             is_portfolio = has_ibkr and _is_portfolio_query(incoming)
-            # Resumen post /context --add: el texto crudo ya va en el mensaje; no forzar inspect_schema
-            # (p. ej. "esquemas criptográficos" dispara is_schema por subcadena "esquema") ni otras tools.
-            if (
-                "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in (incoming or "")
-                or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
-            ):
+            force_finanz_cuentas = (
+                (_lid or "").strip().lower() == "finanz"
+                and has_read_sql
+                and _is_finanz_local_accounts_query(incoming)
+                and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
+            )
+            # Resumen post /context --add | --summary: el volcado ya va en el mensaje; no forzar inspect_schema
+            # (p. ej. "esquemas criptográficos" dispara is_schema por subcadena "esquema"), read_sql, Reddit, etc.
+            # SUMMARIZE_STORED_CONTEXT suele incluir URLs (reddit.com/...): sin esto, force_reddit roba el turno
+            # y el modelo nunca sintetiza el snapshot de main.semantic_memory.
+            if telegram_context_summarize_directive:
                 is_schema = False
                 is_table_content = False
                 is_latest_game = False
                 is_portfolio = False
+                force_finanz_cuentas = False
             # No forzar herramienta si el último mensaje ya es ToolMessage (ya ejecutamos la tool):
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
             last_msg = (state.get("messages") or [])[-1] if state.get("messages") else None
@@ -1411,7 +1597,9 @@ def build_worker_graph(
                     pass
 
             force_schema = is_schema and not already_has_tool_result
-            force_read_sql = (is_table_content or is_latest_game) and not already_has_tool_result
+            force_read_sql = (
+                is_table_content or is_latest_game or force_finanz_cuentas
+            ) and not already_has_tool_result
             force_portfolio = is_portfolio and not already_has_tool_result
 
             jh_fast_text: str | None = None
@@ -1454,9 +1642,17 @@ def build_worker_graph(
                 _lid == "finanz"
                 and has_reddit_tools
                 and _incoming_has_reddit_url(incoming)
+                and not telegram_context_summarize_directive
                 and not (force_schema or force_read_sql or force_portfolio or force_tavily)
                 and (not already_has_tool_result or need_share_followup)
             )
+
+            if not _worker_use_heuristic_first_tool(spec):
+                force_schema = False
+                force_read_sql = False
+                force_portfolio = False
+                force_tavily = False
+                force_reddit = False
 
             if jh_fast_text is not None:
                 resp = AIMessage(content=jh_fast_text)
@@ -1489,34 +1685,64 @@ def build_worker_graph(
                 is_portfolio,
                 forced_name,
             )
-            if force_schema and not force_read_sql:
-                resp = (llm_force_schema_on if sandbox_enabled else llm_force_schema_off).invoke(state["messages"])
-            elif force_read_sql:
-                resp = (llm_force_read_sql_on if sandbox_enabled else llm_force_read_sql_off).invoke(state["messages"])
-            elif force_portfolio:
-                forced = llm_force_portfolio_on if sandbox_enabled else llm_force_portfolio_off
-                # has_ibkr => forced should not be None
-                resp = (forced or llm_with_tools).invoke(state["messages"])
-            elif force_tavily:
-                ft = llm_force_tavily_on if sandbox_enabled else llm_force_tavily_off
-                resp = (ft or llm_with_tools).invoke(state["messages"])
-            elif force_reddit:
-                fr = None
-                if _incoming_looks_like_reddit_post_url(incoming):
-                    fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
-                if fr is None:
-                    fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
-                if fr is None:
-                    fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
-                resp = (fr or llm_with_tools).invoke(state["messages"])
-                ruq = _first_reddit_url_in_text(incoming)
-                if ruq and _incoming_has_reddit_share_path(incoming):
-                    resp = _patch_ai_reddit_search_query(resp, ruq)
-            else:
-                resp = llm_with_tools.invoke(state["messages"])
+            _msg_list = list(state["messages"])
+            if not _worker_use_heuristic_first_tool(spec):
+                _msg_list = [
+                    SystemMessage(
+                        content=(
+                            "Elige la herramienta adecuada al plan o tarea en el mensaje del usuario y a los datos "
+                            "disponibles; si necesitas una herramienta que no está en la lista, dilo en texto sin "
+                            "inventar resultados."
+                        )
+                    )
+                ] + _msg_list
+            _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
+            try:
+                if force_schema and not force_read_sql:
+                    resp = (llm_force_schema_on if sandbox_enabled else llm_force_schema_off).invoke(_groq_msgs)
+                elif force_read_sql:
+                    resp = (llm_force_read_sql_on if sandbox_enabled else llm_force_read_sql_off).invoke(_groq_msgs)
+                elif force_portfolio:
+                    forced = llm_force_portfolio_on if sandbox_enabled else llm_force_portfolio_off
+                    # has_ibkr => forced should not be None
+                    resp = (forced or llm_with_tools).invoke(_groq_msgs)
+                elif force_tavily:
+                    ft = llm_force_tavily_on if sandbox_enabled else llm_force_tavily_off
+                    resp = (ft or llm_with_tools).invoke(_groq_msgs)
+                elif force_reddit:
+                    fr = None
+                    if _incoming_looks_like_reddit_post_url(incoming):
+                        fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
+                    if fr is None:
+                        fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
+                    if fr is None:
+                        fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
+                    resp = (fr or llm_with_tools).invoke(_groq_msgs)
+                    ruq = _first_reddit_url_in_text(incoming)
+                    if ruq and _incoming_has_reddit_share_path(incoming):
+                        resp = _patch_ai_reddit_search_query(resp, ruq)
+                else:
+                    resp = llm_with_tools.invoke(_groq_msgs)
+            except Exception as exc:
+                _log.warning("[%s] LLM invoke failed in agent_node: %s", _wl, exc, exc_info=True)
+                resp = AIMessage(
+                    content=(
+                        "No pude completar la inferencia: el motor local (p. ej. MLX) no respondió o se reinició, "
+                        "a veces por **falta de memoria GPU**. Revisa `pm2 logs MLX-Inference`.\n\n"
+                        "Si el fallo fue tras `/context --summary`, prueba bajar el volcado con la variable "
+                        "`DUCKCLAW_SEMANTIC_SUMMARY_MAX_CHARS` (p. ej. 6000) o desactiva la segunda pasada de síntesis "
+                        "con `DUCKCLAW_DISABLE_NL_REPLY_SYNTHESIS=1`."
+                    )
+                )
             tool_calls = getattr(resp, "tool_calls", None) or []
             if tool_calls:
-                _log.info("[%s] LLM tool_calls=%s", _wl, [tc.get("name") for tc in tool_calls])
+                _tc_names: list[Any] = []
+                for tc in tool_calls:
+                    if isinstance(tc, dict):
+                        _tc_names.append(tc.get("name"))
+                    else:
+                        _tc_names.append(getattr(tc, "name", None))
+                _log.info("[%s] LLM tool_calls=%s", _wl, _tc_names)
             out = {**state, "messages": state["messages"] + [resp]}
             out.update(_identity_fields(state))
             return out
@@ -1543,6 +1769,7 @@ def build_worker_graph(
         _hb_head = (state.get("subagent_instance_label") or "").strip() or None
         _hb_uname = (state.get("username") or "").strip() or None
         _hb_plan = (state.get("heartbeat_plan_title") or "").strip() or None
+        _hb_tok = (state.get("outbound_telegram_bot_token") or "").strip() or None
 
         _duck_exts = list(getattr(spec, "duckdb_extensions", None) or [])
         use_ephemeral_parallel = (
@@ -1568,6 +1795,7 @@ def build_worker_graph(
                 log_worker_id=_hb_head,
                 log_username=_hb_uname,
                 log_plan_title=_hb_plan,
+                outbound_bot_token=_hb_tok,
             )
 
         if use_ephemeral_parallel:
@@ -1738,8 +1966,17 @@ def build_worker_graph(
         return out
 
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
+        from duckclaw.forge.atoms.user_reply_nl_synthesis import (
+            incoming_has_context_summarize_directive,
+            maybe_synthesize_reply,
+            rescind_trivial_context_summary_reply,
+            state_evidence_for_context_summary_rescind,
+        )
         from duckclaw.graphs.chat_heartbeat import format_tool_heartbeat, schedule_chat_heartbeat_dm
-        from duckclaw.integrations.llm_providers import _strip_eot
+        from duckclaw.integrations.llm_providers import (
+            lc_message_content_to_text,
+            sanitize_worker_reply_text,
+        )
 
         def _notify_final_heartbeat() -> None:
             _tid = (state.get("tenant_id") or "default").strip() or "default"
@@ -1749,6 +1986,7 @@ def build_worker_graph(
             _un = (state.get("username") or "").strip() or None
             _pt = (state.get("heartbeat_plan_title") or "").strip() or None
             _elapsed = _heartbeat_elapsed_sec(state)
+            _tok_f = (state.get("outbound_telegram_bot_token") or "").strip() or None
             schedule_chat_heartbeat_dm(
                 _tid,
                 _cid,
@@ -1762,34 +2000,80 @@ def build_worker_graph(
                 log_worker_id=_head,
                 log_username=_un,
                 log_plan_title=_pt,
+                outbound_bot_token=_tok_f,
             )
 
         msgs = state.get("messages") or []
         last = msgs[-1] if msgs else None
-        reply = getattr(last, "content", None) or str(last) if last else ""
-        reply = _strip_eot(reply or "").strip()
+        reply = lc_message_content_to_text(last) if last else ""
+        reply = sanitize_worker_reply_text(reply)
         suppress_egress = bool(state.get("suppress_subagent_egress"))
+
+        def _nl_user_ask() -> str:
+            inc = state.get("incoming") or state.get("input") or ""
+            return (inc.strip() if isinstance(inc, str) else str(inc or "")).strip()
+
+        def _apply_nl_synthesis(candidate: str) -> str:
+            return maybe_synthesize_reply(llm, spec=spec, user_ask=_nl_user_ask(), reply_candidate=candidate)
+
         if not msgs:
             out_empty = {**state, "reply": "Sin respuesta generada."}
             out_empty.update(_identity_fields(state))
             return out_empty
-        if reply.startswith("{") and '"name"' in reply and ("parameters" in reply or '"args"' in reply):
+        coerced = coerce_json_tool_invoke(reply)
+        if coerced:
+            from duckclaw.utils import format_tool_reply
+
+            name, params = coerced
+            sandbox_enabled = _sandbox_enabled_for_state(state)
+            tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
+            if name not in tool_lookup:
+                _log.warning(
+                    "[%s] assistant JSON tool not in registry: %s (sandbox_tools=%s)",
+                    getattr(spec, "worker_id", "?"),
+                    name,
+                    sandbox_enabled,
+                )
+                err = json.dumps(
+                    {"error": f"Herramienta no disponible en este modo: {name}"},
+                    ensure_ascii=False,
+                )
+                _eb = _apply_nl_synthesis(format_tool_reply(err))
+                out_bad = {**state, "reply": _eb, "messages": msgs}
+                out_bad.update(_identity_fields(state))
+                return out_bad
             try:
-                from duckclaw.utils import format_tool_reply
-                data = json.loads(reply)
-                name = data.get("name") or data.get("tool")
-                params = data.get("parameters") or data.get("args") or {}
-                sandbox_enabled = _sandbox_enabled_for_state(state)
-                tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
-                if name and name in tool_lookup:
-                    result = tool_lookup[name].invoke(params)
-                    text = str(result) if result else "Listo."
-                    _notify_final_heartbeat()
-                    out_tool = {**state, "reply": format_tool_reply(text), "messages": msgs}
-                    out_tool.update(_identity_fields(state))
-                    return out_tool
-            except (json.JSONDecodeError, TypeError, KeyError, Exception):
-                pass
+                result = tool_lookup[name].invoke(params)
+                text = str(result) if result else "Listo."
+                _notify_final_heartbeat()
+                _formatted = _apply_nl_synthesis(format_tool_reply(text))
+                out_tool = {**state, "reply": _formatted, "internal_reply": _formatted, "messages": msgs}
+                out_tool.update(_identity_fields(state))
+                return out_tool
+            except Exception as e:
+                _log.warning(
+                    "[%s] JSON tool invoke failed tool=%s: %s",
+                    getattr(spec, "worker_id", "?"),
+                    name,
+                    e,
+                    exc_info=True,
+                )
+                err = json.dumps(
+                    {
+                        "error": str(e),
+                        "hint": "Si el error menciona lock de DuckDB, cierra otras conexiones (CLI, IDE) a ese .duckdb.",
+                    },
+                    ensure_ascii=False,
+                )
+                _ee = _apply_nl_synthesis(format_tool_reply(err))
+                out_err = {**state, "reply": _ee, "messages": msgs}
+                out_err.update(_identity_fields(state))
+                return out_err
+        reply = _apply_nl_synthesis(reply or "")
+        _rescind_incoming = state_evidence_for_context_summary_rescind(state)
+        reply = rescind_trivial_context_summary_reply(
+            llm, spec, incoming=_rescind_incoming, reply_candidate=reply or ""
+        )
         if not suppress_egress:
             _notify_final_heartbeat()
         try:
@@ -1814,7 +2098,8 @@ def build_worker_graph(
             from duckclaw.forge.atoms.quant_price_validator import quant_reply_price_audit
             from duckclaw.forge.atoms.quant_price_validator import enforce_visual_evidence_rule
 
-            if reply:
+            # Turnos /context (SUMMARIZE_*): sin auditorías cuánticas/VLM que puedan sustituir el resumen.
+            if reply and not incoming_has_context_summarize_directive(_rescind_incoming):
                 new_v, vreason = enforce_visual_evidence_rule(
                     incoming=(state.get("incoming") or ""),
                     messages=msgs,

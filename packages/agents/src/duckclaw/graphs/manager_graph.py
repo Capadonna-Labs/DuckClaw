@@ -32,6 +32,174 @@ _obs = get_obs_logger()
 _worker_graph_cache: dict[str, Any] = {}
 
 
+def _tool_name_from_embedded_json_content(text: str) -> str | None:
+    """Si el modelo emitió tool como JSON en el texto (p. ej. MLX sin tool_calls), extrae el nombre."""
+    from duckclaw.integrations.llm_providers import coerce_json_tool_invoke
+
+    raw = (text or "").strip()
+    got = coerce_json_tool_invoke(raw)
+    if got:
+        return got[0]
+    # Texto antes del objeto JSON (p. ej. "Voy a consultar:\n{\"name\": ...")
+    i = raw.find("{")
+    if i > 0:
+        got = coerce_json_tool_invoke(raw[i:])
+        if got:
+            return got[0]
+    return None
+
+
+def _messages_turn_for_tool_audit(messages: list[Any]) -> list[Any]:
+    """
+    Mensajes del turno actual respecto al último HumanMessage (tarea del usuario en el worker).
+    Evita mezclar tool_calls de turnos viejos del historial y alinea con prepare_node (último Human = tarea).
+    """
+    try:
+        from langchain_core.messages import HumanMessage
+    except ImportError:
+        HumanMessage = ()  # type: ignore[assignment, misc]
+    last_u = -1
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if isinstance(m, dict):
+            r = str(m.get("role") or m.get("type") or "").lower()
+            if r in ("human", "user"):
+                last_u = i
+                break
+        elif HumanMessage and isinstance(m, HumanMessage):
+            last_u = i
+            break
+    if last_u < 0:
+        return messages
+    return messages[last_u + 1 :]
+
+
+def _is_ai_like_message(m: Any) -> bool:
+    """True si el mensaje es un turno assistant (LangChain o dict ChatML)."""
+    if m is None:
+        return False
+    if isinstance(m, dict):
+        r = str(m.get("role") or m.get("type") or "").lower()
+        return r in ("ai", "assistant", "model")
+    t = getattr(m, "type", None)
+    if isinstance(t, str) and t.lower() in ("ai", "assistant"):
+        return True
+    try:
+        from langchain_core.messages import AIMessage
+
+        return isinstance(m, AIMessage)
+    except ImportError:
+        return False
+
+
+def _message_body_text_for_embedded_tool(m: Any) -> str:
+    """Texto de ``content`` para parsear JSON de tool embebido (dict o BaseMessage)."""
+    if isinstance(m, dict):
+        from duckclaw.graphs.conversation_traces import _stringify_lc_message_content
+
+        return _stringify_lc_message_content(m.get("content"))
+    from duckclaw.integrations.llm_providers import lc_message_content_to_text
+
+    return lc_message_content_to_text(m)
+
+
+def _worker_tool_names_from_messages(messages: list[Any] | None) -> list[str]:
+    """
+    Nombres de herramientas usadas en el turno del worker (AIMessage.tool_calls + ToolMessage.name).
+    LangChain puede devolver tool_calls como dict o como objetos (p. ej. ToolCall); antes solo se leían dicts
+    y los logs del manager mostraban «ninguna» aunque hubiera read_sql/tavily.
+    Además: MLX a veces deja la invocación solo en ``content`` JSON sin ``tool_calls``; si no hubo tool_calls/tool
+    en el barrido hacia adelante, se busca hacia atrás el último ToolMessage o AIMessage con JSON embebido
+    (p. ej. LangGraph devuelve ``messages`` como tupla o el último turno no es assistant).
+    """
+    if not messages:
+        return []
+    turn = _messages_turn_for_tool_audit(messages)
+    if not turn:
+        return []
+    try:
+        from langchain_core.messages import ToolMessage
+    except ImportError:
+        ToolMessage = ()  # type: ignore[assignment, misc]
+
+    names: list[str] = []
+    for m in turn:
+        if isinstance(m, dict):
+            for tc in m.get("tool_calls") or []:
+                if isinstance(tc, dict):
+                    fn = (tc.get("function") or {}) if isinstance(tc.get("function"), dict) else {}
+                    nm = fn.get("name") or tc.get("name")
+                else:
+                    nm = getattr(tc, "name", None)
+                if nm:
+                    names.append(str(nm))
+            rdict = str(m.get("role") or m.get("type") or "").lower()
+            if rdict == "tool":
+                tn = m.get("name")
+                if tn:
+                    names.append(str(tn))
+            continue
+        for tc in getattr(m, "tool_calls", None) or []:
+            nm = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
+            if nm:
+                names.append(str(nm))
+        addl = getattr(m, "additional_kwargs", None) or {}
+        if isinstance(addl, dict):
+            for tc in addl.get("tool_calls") or []:
+                if isinstance(tc, dict):
+                    fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+                    nm = fn.get("name") if isinstance(fn, dict) else tc.get("name")
+                else:
+                    nm = getattr(tc, "name", None)
+                if nm:
+                    names.append(str(nm))
+        if ToolMessage and isinstance(m, ToolMessage):
+            tn = getattr(m, "name", None)
+            if tn:
+                names.append(str(tn))
+    names = list(dict.fromkeys(names))
+    if not names and turn:
+        for m in reversed(turn):
+            if isinstance(m, dict):
+                rdict = str(m.get("role") or m.get("type") or "").lower()
+                if rdict == "tool" and m.get("name"):
+                    names.append(str(m["name"]))
+                    break
+                if _is_ai_like_message(m):
+                    embedded = _tool_name_from_embedded_json_content(
+                        _message_body_text_for_embedded_tool(m).strip()
+                    )
+                    if embedded:
+                        names.append(embedded)
+                        break
+                continue
+            if ToolMessage and isinstance(m, ToolMessage):
+                tn = getattr(m, "name", None)
+                if tn:
+                    names.append(str(tn))
+                    break
+                continue
+            if _is_ai_like_message(m):
+                embedded = _tool_name_from_embedded_json_content(
+                    _message_body_text_for_embedded_tool(m).strip()
+                )
+                if embedded:
+                    names.append(embedded)
+                    break
+    names = list(dict.fromkeys(names))
+    if not names and turn:
+        for m in turn:
+            if not _is_ai_like_message(m):
+                continue
+            blob = _message_body_text_for_embedded_tool(m)
+            if re.search(r'["\']name["\']\s*:\s*["\']read_sql["\']', blob) and re.search(
+                r'["\']query["\']\s*:', blob, re.IGNORECASE
+            ):
+                names.append("read_sql")
+                break
+    return list(dict.fromkeys(names))
+
+
 def clear_worker_graph_cache() -> None:
     """
     Los grafos de worker cierran sobre un DuckClaw concreto; tras cerrar la conexión del manager
@@ -39,6 +207,20 @@ def clear_worker_graph_cache() -> None:
     """
     global _worker_graph_cache
     _worker_graph_cache.clear()
+
+
+def _agent_config_db_for_vault(hub_db: Any, vault_db_path: str | None) -> Any:
+    """
+    Lee claves por chat (team_templates, sandbox_enabled, llm_*) desde el vault del tenant
+    cuando existe; si no, desde el hub ``hub_db``. Evita mezclar equipo Finanz/Job-Hunter del
+    hub multiplex con bots SIATA u otros que comparten chat_id pero usan otro .duckdb.
+    """
+    vp = (vault_db_path or "").strip()
+    if vp and vp != ":memory:":
+        from duckclaw.gateway_db import GatewayDbEphemeralReadonly
+
+        return GatewayDbEphemeralReadonly(vp)
+    return hub_db
 
 
 def _worker_id_alnum_slug(worker_id: str | None) -> str:
@@ -69,6 +251,24 @@ def job_hunter_user_requests_job_search(incoming: str) -> bool:
     if not raw:
         return False
     t = raw.lower()
+    if _job_hunter_user_requests_application_tracking(raw):
+        return False
+    # Tareas internas de síntesis / retorno A2A: no forzar Tavily.
+    if any(
+        x in t
+        for x in (
+            "jobhunter completó",
+            "jobhunter completo",
+            "completó la misión",
+            "completo la mision",
+            "sintetiza los resultados",
+            "persistió datos en finance_worker",
+            "persistio datos en finance_worker",
+            "misión a2a job_opportunity_tracking",
+            "mision a2a job_opportunity_tracking",
+        )
+    ):
+        return False
     if "tavily_search" in t:
         return True
     if "tarea:" in t and "tavily" in t:
@@ -161,6 +361,47 @@ def _pick_job_hunter_worker(available_templates: list[str]) -> Optional[str]:
     return None
 
 
+def _finanz_worker_in_templates(available_templates: list[str]) -> bool:
+    """True si el equipo incluye al worker finanz (A2A Manager → Finanz → JobHunter → Finanz)."""
+    for wid in available_templates or []:
+        if _worker_matches_id(wid, "finanz"):
+            return True
+    return False
+
+
+def _job_hunter_user_requests_application_tracking(incoming: str) -> bool:
+    """
+    Seguimiento de postulaciones ya guardadas (DuckDB), sin discovery Tavily.
+    Ej.: «dame el seguimiento de las vacantes a las que he aplicado».
+    """
+    raw = (incoming or "").strip()
+    if not raw:
+        return False
+    tl = raw.lower()
+    if tl.startswith("tarea:"):
+        return False
+    tracking_kw = (
+        "seguimiento",
+        "postulaciones",
+        "postulación",
+        "postulacion",
+        "aplicaciones enviadas",
+        "apliqué",
+        "aplique",
+        "he aplicado",
+        "a las que he aplicado",
+        "donde apliqué",
+        "donde aplique",
+        "estado de mis postul",
+        "mis postul",
+        "mis aplicaciones",
+    )
+    if not any(k in tl for k in tracking_kw):
+        return False
+    job_kw = ("vacante", "vacantes", "empleo", "trabajo", "postul", "aplic", "oferta", "ofertas")
+    return any(k in tl for k in job_kw)
+
+
 def _worker_matches_id(worker_id: str | None, alias: str | None) -> bool:
     """Compara ids de worker tolerando guiones/underscores/case."""
     return _worker_id_alnum_slug(worker_id) == _worker_id_alnum_slug(alias)
@@ -176,6 +417,22 @@ def _contains_job_opportunity_tracking_request(text: str) -> bool:
     """Handoff A2A: Finanz pide que JobHunter persista vacante/postulación en job_opportunities."""
     t = (text or "").strip().lower()
     return "[a2a_request: job_opportunity_tracking]" in t
+
+
+def route_finanz_reply_a2a_branch(state: dict) -> str | None:
+    """
+    ``handoff_job_track`` / ``handoff_to_target`` solo si Finanz está en el equipo efectivo.
+    Una sola fuente de verdad para el router tras ``invoke_worker`` (y tests).
+    """
+    if not _finanz_worker_in_templates(list(state.get("available_templates") or [])):
+        return None
+    current_worker = (state.get("assigned_worker_id") or "").strip()
+    raw_reply = state.get("last_worker_raw_reply") or state.get("reply") or ""
+    if _worker_matches_id(current_worker, "finanz") and _contains_job_opportunity_tracking_request(raw_reply):
+        return "handoff_job_track"
+    if _worker_matches_id(current_worker, "finanz") and _contains_income_injection_request(raw_reply):
+        return "handoff_to_target"
+    return None
 
 
 # Líneas tipo «finanz 2», «Job-Hunter 1» al inicio del cuerpo (eco de heartbeats / historial).
@@ -223,7 +480,8 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     Retorna (planned_task, override_worker_id).
     override_worker_id: si la intención es DB/tablas y el rol actual es personalizable, delegar a finanz si existe.
     """
-    text = (incoming or "").strip()
+    # BOM u otros prefijos rompen startswith; el cuerpo largo no debe caer en heurísticas de tablas/Tavily.
+    text = (incoming or "").strip().lstrip("\ufeff")
     if not text:
         return incoming or "", None
     # Gateway (Telegram /context): el cuerpo puede mencionar DuckDB, "estructura", "schema", tablas, etc.
@@ -232,6 +490,9 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
         "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]"
     ):
         return text, None
+    if "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in text or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in text:
+        # Directiva no al inicio (p. ej. prefijo invisible): devolver el texto completo tal cual llegó al manager.
+        return (incoming or "").strip(), None
     t = text.lower()
     override: Optional[str] = None
     # MVP Leila: saludos cortos → respuesta de tienda (evita tono “agente de investigación”).
@@ -279,6 +540,16 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
             "si no 'tracking'; notes con detalle breve; applied_at=CURRENT_TIMESTAMP cuando aplique a aplicación ya hecha. "
             "Si INSERT falla por URL duplicada (índice único), lee la fila y haz UPDATE de status/notes/applied_at.\n\n"
             f"--- Contexto ---\n{ctx[:6000]}",
+            None,
+        )
+    # Job-Hunter: seguimiento de postulaciones en DuckDB (sin Tavily ni round-trip a Finanz).
+    if _is_job_hunter_worker(worker_id) and _job_hunter_user_requests_application_tracking(incoming or ""):
+        return (
+            "TAREA: El usuario pide seguimiento de vacantes/postulaciones **ya registradas** en la base local. "
+            "Ejecuta read_sql sobre finance_worker.job_opportunities (p. ej. ORDER BY COALESCE(applied_at, updated_at) DESC LIMIT 30) "
+            "y responde en español de forma **completa pero concisa**: tabla o lista con title, company, status, apply_url, fechas; "
+            "si no hay filas, dilo y ofrece registrar con la URL de la oferta. "
+            "**Prohibido** tavily_search y run_browser_sandbox en este turno (no es búsqueda de ofertas nuevas).",
             None,
         )
     # Job-Hunter: evita run_sandbox con URLs inventadas; discovery = tavily_search.
@@ -670,7 +941,9 @@ def build_manager_graph(
         """Equipo efectivo: chat > tenant > env > todos. El manager delega según el plan. Preserva incoming/history/chat_id."""
         chat_id = state.get("chat_id") or ""
         tenant_id = state.get("tenant_id") or "default"
-        available = list(get_effective_team_templates(db, chat_id, tenant_id, troot))
+        vault_path = (state.get("vault_db_path") or "").strip()
+        state_db = _agent_config_db_for_vault(db, vault_path or None)
+        available = list(get_effective_team_templates(state_db, chat_id, tenant_id, troot))
         preferred = (os.environ.get("DUCKCLAW_DEFAULT_WORKER_ID") or "").strip()
         assigned = available[0] if available else None
         if preferred and available:
@@ -698,6 +971,9 @@ def build_manager_graph(
             out["shared_db_path"] = state["shared_db_path"]
         if "username" in state:
             out["username"] = state["username"]
+        _ot = (state.get("outbound_telegram_bot_token") or "").strip()
+        if _ot:
+            out["outbound_telegram_bot_token"] = _ot
         return out
 
     def greeting_shortcut_node(state: ManagerAgentState) -> ManagerAgentState:
@@ -756,6 +1032,9 @@ def build_manager_graph(
             out["username"] = state["username"]
         if "available_templates" in state:
             out["available_templates"] = state["available_templates"]
+        _ot_g = (state.get("outbound_telegram_bot_token") or "").strip()
+        if _ot_g:
+            out["outbound_telegram_bot_token"] = _ot_g
         return out
 
     def plan_node(state: ManagerAgentState) -> ManagerAgentState:
@@ -800,7 +1079,9 @@ def build_manager_graph(
 
         handoff_context: dict[str, Any] | None = None
         active_mission: dict[str, Any] | None = None
-        if job_hunter_in_team and cashflow_job_intent:
+        # A2A con retorno a Finanz solo si Finanz está en el equipo; si no, Job-Hunter cierra el turno solo (evita handoff fantasma).
+        finanz_in_team = _finanz_worker_in_templates(list(available_plan or []))
+        if job_hunter_in_team and cashflow_job_intent and finanz_in_team:
             active_mission = {
                 "source_worker": "finanz",
                 "target_worker": "job_hunter",
@@ -846,6 +1127,9 @@ def build_manager_graph(
             out["shared_db_path"] = state["shared_db_path"]
         if "username" in state:
             out["username"] = state["username"]
+        _ot_p = (state.get("outbound_telegram_bot_token") or "").strip()
+        if _ot_p:
+            out["outbound_telegram_bot_token"] = _ot_p
         if "active_mission" in state and not out.get("active_mission"):
             out["active_mission"] = state.get("active_mission")
         # Actualizar activity para /tasks usando solo el título del plan cuando esté disponible
@@ -939,7 +1223,8 @@ def build_manager_graph(
                 chat_id=format_chat_log_identity(chat_id or "unknown", state.get("username")),
             )
             log_sys(_obs, "Delegación: manager -> %s", assigned)
-            raw_sb = get_chat_state(db, chat_id, "sandbox_enabled")
+            _cfg_db = _agent_config_db_for_vault(db, vault_db_path or None)
+            raw_sb = get_chat_state(_cfg_db, chat_id, "sandbox_enabled")
             sb_on = (raw_sb or "").strip().lower() in ("true", "1", "on", "sí", "si")
             db_display = vault_db_path or db_path or "(unknown)"
             log_sys(
@@ -950,6 +1235,7 @@ def build_manager_graph(
             )
             # Pasar la tarea planificada al worker para que use herramientas y no responda genérico
             # Incluimos chat_id para que el worker pueda leer sandbox_enabled por sesión.
+            _out_hb_tok = (state.get("outbound_telegram_bot_token") or "").strip() or None
             worker_state = {
                 "input": planned_task,
                 "incoming": planned_task,
@@ -964,6 +1250,8 @@ def build_manager_graph(
                 "heartbeat_plan_title": (plan_title or "").strip(),
                 "subagent_turn_started_monotonic": time.monotonic(),
             }
+            if _out_hb_tok:
+                worker_state["outbound_telegram_bot_token"] = _out_hb_tok
             mission = state.get("active_mission")
             if (
                 isinstance(mission, dict)
@@ -987,6 +1275,7 @@ def build_manager_graph(
                         log_worker_id=agent_instance_label or None,
                         log_username=(state.get("username") or "").strip() or None,
                         log_plan_title="A2A handoff",
+                        outbound_bot_token=_out_hb_tok,
                     )
                 except Exception:
                     pass
@@ -1024,6 +1313,7 @@ def build_manager_graph(
                 log_worker_id=agent_instance_label or None,
                 log_username=(state.get("username") or "").strip() or None,
                 log_plan_title=_hb_plan_log,
+                outbound_bot_token=_out_hb_tok,
             )
             worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
             raw_worker_reply = str(
@@ -1036,23 +1326,36 @@ def build_manager_graph(
             _label_reply = f"{assigned} {run_label_n}".strip()
             reply = _prepend_subagent_label_once(reply, _label_reply)
             messages = worker_invoke.get("messages")
+            if isinstance(messages, tuple):
+                messages = list(messages)
             # Log tool use para PM2 (tras manager plan)
-            _tool_names = []
-            for m in (messages or []):
-                for tc in (getattr(m, "tool_calls", None) or []):
-                    if isinstance(tc, dict) and tc.get("name"):
-                        _tool_names.append(tc["name"])
-                n = getattr(m, "name", None)
-                if n:
-                    _tool_names.append(n)
-            _tools_list = list(dict.fromkeys(_tool_names))
+            _tools_list = _worker_tool_names_from_messages(messages if isinstance(messages, list) else None)
             _log.info(
                 "manager tool_use: delegó a worker=%s | tools usadas=%s",
                 assigned,
                 _tools_list if _tools_list else "ninguna",
             )
         except Exception as e:
-            reply = str(e)[:2048]
+            msg = str(e)[:2048]
+            low = msg.lower()
+            if any(
+                x in low
+                for x in (
+                    "connection error",
+                    "connection refused",
+                    "remote protocol",
+                    "failed to establish",
+                    "errno 61",
+                    "econnrefused",
+                )
+            ):
+                msg = (
+                    "El backend de inferencia (p. ej. MLX en :8080) no está disponible o se reinició; "
+                    "suele ir ligado a OOM en Metal. Revisa `pm2 logs MLX-Inference` y, si usas resúmenes largos "
+                    "de contexto, reduce `DUCKCLAW_SEMANTIC_SUMMARY_MAX_CHARS`.\n\n"
+                    f"Detalle: {str(e)[:400]}"
+                )
+            reply = msg
             _label_e = f"{assigned} {run_label_n}".strip()
             reply = _prepend_subagent_label_once(reply, _label_e)
             status = "FAILED"
@@ -1104,6 +1407,10 @@ def build_manager_graph(
         if not target_worker or not current_worker:
             return "end"
         if _worker_matches_id(current_worker, target_worker):
+            source_w = (mission.get("source_worker") or "").strip()
+            available = state.get("available_templates") or []
+            if source_w and not any(_worker_matches_id(wid, source_w) for wid in available):
+                return "end"
             return "return_to_source"
         return "end"
 
@@ -1150,6 +1457,9 @@ def build_manager_graph(
             out["tasks"] = state["tasks"]
         if "task_summary" in state:
             out["task_summary"] = state["task_summary"]
+        _tok_ht = (state.get("outbound_telegram_bot_token") or "").strip()
+        if _tok_ht:
+            out["outbound_telegram_bot_token"] = _tok_ht
         return out
 
     def handoff_job_track_node(state: ManagerAgentState) -> ManagerAgentState:
@@ -1195,6 +1505,9 @@ def build_manager_graph(
             out["tasks"] = state["tasks"]
         if "task_summary" in state:
             out["task_summary"] = state["task_summary"]
+        _tok_hj = (state.get("outbound_telegram_bot_token") or "").strip()
+        if _tok_hj:
+            out["outbound_telegram_bot_token"] = _tok_hj
         return out
 
     def return_to_source_node(state: ManagerAgentState) -> ManagerAgentState:
@@ -1270,6 +1583,9 @@ def build_manager_graph(
             out["tasks"] = state["tasks"]
         if "task_summary" in state:
             out["task_summary"] = state["task_summary"]
+        _tok_rs = (state.get("outbound_telegram_bot_token") or "").strip()
+        if _tok_rs:
+            out["outbound_telegram_bot_token"] = _tok_rs
         return out
 
     def route_after_router(state: ManagerAgentState) -> str:

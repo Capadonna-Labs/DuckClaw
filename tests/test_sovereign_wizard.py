@@ -234,7 +234,7 @@ def test_patch_api_gateways_pm2_json_updates_db_path(tmp_path: Path) -> None:
             {
                 "name": "BI-Analyst-Gateway",
                 "port": 8282,
-                "env": {"DUCKCLAW_DB_PATH": "/old/abs.duckdb"},
+                "env": {"DUCKDB_PATH": "/old/abs.duckdb"},
             }
         ]
     }
@@ -248,8 +248,8 @@ def test_patch_api_gateways_pm2_json_updates_db_path(tmp_path: Path) -> None:
     msgs: list[str] = []
     patch_api_gateways_pm2_for_draft(root, draft, msgs.append)
     out = json.loads((root / "config" / "api_gateways_pm2.json").read_text(encoding="utf-8"))
-    dbp = out["apps"][0]["env"]["DUCKCLAW_DB_PATH"]
-    assert str(root / "db/private/x/bi_analyst.duckdb") == dbp
+    dbp = out["apps"][0]["env"]["DUCKDB_PATH"]
+    assert str((root / "db/private/x/bi_analyst.duckdb").resolve()) == dbp
     assert "DUCKCLAW_SHARED_DB_PATH" not in out["apps"][0]["env"]
 
 
@@ -264,7 +264,7 @@ def test_patch_pm2_preserves_shared_when_draft_has_no_secondary(tmp_path: Path) 
             {
                 "name": "Leila-Gateway",
                 "env": {
-                    "DUCKCLAW_DB_PATH": "/_prior.duckdb",
+                    "DUCKDB_PATH": "/_prior.duckdb",
                     "DUCKCLAW_SHARED_DB_PATH": shared_path,
                 },
             }
@@ -282,7 +282,7 @@ def test_patch_pm2_preserves_shared_when_draft_has_no_secondary(tmp_path: Path) 
     out = json.loads((root / "config" / "api_gateways_pm2.json").read_text(encoding="utf-8"))
     env = out["apps"][0]["env"]
     assert env["DUCKCLAW_SHARED_DB_PATH"] == shared_path
-    assert env["DUCKCLAW_DB_PATH"] == str((root / "db/new_vault.duckdb").resolve())
+    assert env["DUCKDB_PATH"] == str((root / "db/new_vault.duckdb").resolve())
 
 
 def test_patch_api_gateways_pm2_merges_telegram_env_updates(tmp_path: Path) -> None:
@@ -293,7 +293,7 @@ def test_patch_api_gateways_pm2_merges_telegram_env_updates(tmp_path: Path) -> N
             {
                 "name": "JobHunter-Gateway",
                 "env": {
-                    "DUCKCLAW_DB_PATH": "/old.duckdb",
+                    "DUCKDB_PATH": "/old.duckdb",
                     "TELEGRAM_JOB_HUNTER_TOKEN": "stale_token",
                 },
             }
@@ -317,7 +317,7 @@ def test_patch_api_gateways_pm2_merges_telegram_env_updates(tmp_path: Path) -> N
     env = out["apps"][0]["env"]
     assert env["TELEGRAM_JOB_HUNTER_TOKEN"] == "fresh_token"
     assert env["DUCKCLAW_TELEGRAM_MCP_ENABLED"] == "1"
-    assert env["DUCKCLAW_DB_PATH"] == str((root / "db/private/jh.duckdb").resolve())
+    assert env["DUCKDB_PATH"] == str((root / "db/private/jh.duckdb").resolve())
 
 
 def test_patch_api_gateways_pm2_new_app_includes_proposed_telegram(tmp_path: Path) -> None:

@@ -76,12 +76,14 @@ def build_retail_graph(
     def set_reply_node(state: dict) -> dict:
         import json
 
-        from duckclaw.integrations.llm_providers import _strip_eot
+        from duckclaw.integrations.llm_providers import (
+            lc_message_content_to_text,
+            sanitize_worker_reply_text,
+        )
 
         messages = state.get("messages") or []
         last = messages[-1]
-        reply = getattr(last, "content", None) or str(last)
-        reply = _strip_eot(reply).strip()
+        reply = sanitize_worker_reply_text(lc_message_content_to_text(last))
         # Model returned tool call as text (e.g. Slayer-8B)
         if reply.startswith("{") and '"name"' in reply and ("parameters" in reply or '"args"' in reply):
             try:

@@ -42,7 +42,7 @@ for svc in Finanz-Inference DuckClaw-Brain; do
   fi
 done
 
-# Si el bot está en PM2 y el proveedor es MLX, asegurar que DuckClaw-Inference (servidor MLX) esté en marcha
+# Si el bot está en PM2 y el proveedor es MLX, asegurar que MLX-Inference (servidor MLX) esté en marcha
 WIZARD_CFG="${HOME}/.config/duckclaw/wizard_config.json"
 START_MLX=""
 [ -f "${REPO_ROOT}/core/mlx/start_mlx.sh" ] && START_MLX="${REPO_ROOT}/core/mlx/start_mlx.sh"
@@ -50,13 +50,13 @@ START_MLX=""
 
 if [ -n "${PM2_SERVICE}" ]; then
   if [ -f "${WIZARD_CFG}" ] && grep -qE '"llm_provider"[[:space:]]*:[[:space:]]*"mlx"' "${WIZARD_CFG}" 2>/dev/null; then
-    if [ -n "${START_MLX}" ] && ! pm2 describe DuckClaw-Inference >/dev/null 2>&1; then
+    if [ -n "${START_MLX}" ] && ! pm2 describe MLX-Inference >/dev/null 2>&1; then
       echo ""
-      echo "Arrancando servidor de inferencia MLX (DuckClaw-Inference)..."
-      if pm2 start bash --name DuckClaw-Inference --cwd "${REPO_ROOT}" -- "${START_MLX}"; then
-        echo "DuckClaw-Inference en marcha. El bot podrá conectar al LLM local."
+      echo "Arrancando servidor de inferencia MLX (MLX-Inference)..."
+      if pm2 start bash --name MLX-Inference --cwd "${REPO_ROOT}" -- "${START_MLX}"; then
+        echo "MLX-Inference en marcha. El bot podrá conectar al LLM local."
       else
-        echo "Aviso: no se pudo arrancar DuckClaw-Inference."
+        echo "Aviso: no se pudo arrancar MLX-Inference."
       fi
     fi
   fi

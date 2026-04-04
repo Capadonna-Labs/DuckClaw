@@ -22,6 +22,7 @@ Variable opcional: `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` — JSON lista de objetos:
 - `worker_id` (string, obligatorio): id del grafo (p. ej. `finanz`, `bi_analyst`, `siata_analyst`).
 - `tenant_id` (string, opcional): por defecto `default`.
 - `bot_token_env` (string, obligatorio): nombre de variable con el token Bot API para **respuestas** de ese bot (convención estándar: `TELEGRAM_<ID_MANIFEST_EN_MAYÚSCULAS>_TOKEN`, p. ej. `TELEGRAM_BI_ANALYST_TOKEN`; los nombres `TELEGRAM_BOT_TOKEN_*` siguen funcionando como legado).
+- `vault_db_env` (string, opcional): nombre de variable cuyo valor es la ruta DuckDB de la **bóveda** de ese bot (p. ej. `DUCKCLAW_FINANZ_DB_PATH`). Si falta, el proceso multiplex usa el `DUCKCLAW_DB_PATH` del PM2 (típicamente incorrecto para otro worker). Obligatorio cuando cada bot tiene su propio `.duckdb`.
 
 Reglas de autorización:
 
@@ -29,3 +30,15 @@ Reglas de autorización:
 2. Si hay rutas: se acepta la petición si la cabecera coincide con **alguna** ruta (compare_digest) **o** con `TELEGRAM_WEBHOOK_SECRET` legacy (modo “default” del proceso: worker/tenant/token del propio gateway).
 
 Cada bot debe usar un `secret_token` distinto en `setWebhook`. La deduplicación Redis de updates incluye un fingerprint del secreto para evitar colisiones de `update_id` entre bots.
+
+## Modo B2 — Mismo túnel, rutas HTTP distintas (compacto)
+
+Alternativa sin cabeceras por bot: `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` como lista separada por comas de entradas
+
+`bot_name:bot_token:/api/v1/telegram/<slug>`
+
+(el token puede contener `:`; el path se detecta con `rfind(":/api/")`). El API Gateway registra un `POST` por path e inyecta `request.state.duckclaw_telegram_path_binding` (worker, tenant, token, bóveda).
+
+Perfiles `bot_name` admitidos hoy: `finanz`, `siata`, `jobhunter` (mapeo a `worker_id` y variables de bóveda en `core/telegram_compact_webhook_routes.py`).
+
+Registro: `python scripts/register_webhooks.py` lee `DUCKCLAW_PUBLIC_URL` + la variable compacta y llama `setWebhook` por bot. Si la variable empieza por `[`, se interpreta como Modo B JSON y no se registran rutas compactas.

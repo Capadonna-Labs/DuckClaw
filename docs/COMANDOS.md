@@ -81,7 +81,7 @@ Cada proceso gateway es el mismo código pero con **env y puerto distintos** ([`
 | Enfoque | Cuándo usarlo |
 |--------|----------------|
 | **Túnel / hostname por servicio** | P. ej. Cloudflare Tunnel: dos `public_hostnames` → `http://127.0.0.1:8000` y `http://127.0.0.1:8283`. Cada bot `setWebhook` apunta al hostname que toca. |
-| **Tailscale Funnel** | Un comando `tailscale funnel --bg --yes <puerto>` expone **un** puerto por máquina en la URL `ts.net` habitual; para varios gateways, varios funnels si tu tailnet lo permite, o **Tailscale Serve** con reglas por ruta/host según la [KB Funnel](https://tailscale.com/kb/1223/funnel/). |
+| **Tailscale Funnel** | Un comando `tailscale funnel --bg --yes <puerto>` expone **un** puerto por máquina en la URL `ts.net` habitual; **volver a ejecutarlo con otro puerto reemplaza el destino** de esa misma URL pública. Por eso, si el Sovereign Wizard activa Funnel primero para Finanz (`8000`) y luego para SIATA (`8888`), **todos** los bots cuyo `setWebhook` siga apuntando a `https://nodo….ts.net/...` recibirán updates en **8888** — no es que PM2 o `.env` sobrescriban tokens, es el túnel. Para varios gateways: varios hostnames/túneles, proxy con virtual hosts, **Tailscale Serve** con reglas por ruta/host ([KB Funnel](https://tailscale.com/kb/1223/funnel/)), o multiplexación (§2.0 Modo B). El wizard muestra un aviso amarillo si detecta cambio de puerto. |
 | **Reverse proxy local (Caddy/nginx)** | Un frontal TLS en `443` que enruta por host o path a `8000` / `828x`; un solo funnel al `443` del proxy. |
 
 Especificación: [specs/features/Telegram Webhook One Gateway One Port.md](specs/features/Telegram%20Webhook%20One%20Gateway%20One%20Port.md).
@@ -120,7 +120,26 @@ curl -sS -X POST "https://api.telegram.org/bot<TOKEN>/deleteWebhook"
 `DUCKCLAW_TELEGRAM_DEFAULT_TENANT` → `DUCKCLAW_GATEWAY_TENANT_ID` → `default`.  
 `_invoke_chat` sigue aplicando la misma normalización de tenant que `POST /api/v1/agent/chat`.
 
-**Modo B — Varios bots → misma URL pública (un solo Funnel/puerto):** si registraste el mismo `url` en `setWebhook` para Finanz, BI y SIATA, el gateway procesaba todo como el worker por defecto (`finanz`) y respondía con un solo `TELEGRAM_BOT_TOKEN`. Define `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` (JSON array) en el **proceso que recibe el tráfico**; cada bot debe usar un `secret_token` distinto en `setWebhook`. Cada entrada lleva `secret`, `worker_id` (p. ej. `bi_analyst`, `siata_analyst`), `tenant_id` opcional y `bot_token_env` (nombre de variable con el token de ese bot). Si además tienes `TELEGRAM_WEBHOOK_SECRET`, ese valor sigue sirviendo para el “proceso por defecto” (mismo worker/tenant/token que el PM2). Detalle: [specs/features/Telegram Webhook Multiplex (multi-bot).md](specs/features/Telegram%20Webhook%20Multiplex%20(multi-bot).md). Rutas opcionales `POST …/webhook/finanz` y `…/webhook/trabajo` son **legado** para ese modo (un solo ingress); preferir Modo recomendado arriba cuando puedas.
+**Modo B — Varios bots → misma URL pública (un solo Funnel/puerto):** cuando Tailscale Funnel (u otro túnel) solo puede llegar a **un** puerto local, deja ese puerto como **único** receptor de Telegram (p. ej. tu funnel a `127.0.0.1:8888` → proceso **SIATA-Gateway**). Los otros gateways PM2 pueden seguir levantados para HTTP interno, pero **no** recibirán el webhook a menos que montes otro túnel.
+
+1. En el bloque `env` del proceso que recibe el funnel, define **todos** los tokens y rutas DuckDB que necesiten los bots (p. ej. `TELEGRAM_FINANZ_TOKEN`, `DUCKCLAW_FINANZ_DB_PATH`, `TELEGRAM_JOB_HUNTER_TOKEN`, `DUCKCLAW_JOB_HUNTER_DB_PATH`; el propio proceso ya tiene `TELEGRAM_SIATA_TOKEN` y `DUCKCLAW_DB_PATH` para SIATA).
+2. Variable `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`: JSON **array**; cada elemento tiene `secret` (mismo string que `secret_token` en `setWebhook` de **ese** bot), `worker_id`, `tenant_id` (opcional), `bot_token_env`, y **`vault_db_env`** (opcional pero recomendado): nombre de variable cuyo valor es la DuckDB de ese bot — sin eso, el grafo usaría el `DUCKCLAW_DB_PATH` del PM2 equivocado.
+
+Ejemplo (genera tres secretos distintos, p. ej. `openssl rand -hex 32`, y úsalos en `setWebhook` y en `secret`):
+
+```json
+[
+  {"secret":"SEC_FINANZ","worker_id":"finanz","tenant_id":"Finanzas","bot_token_env":"TELEGRAM_FINANZ_TOKEN","vault_db_env":"DUCKCLAW_FINANZ_DB_PATH"},
+  {"secret":"SEC_SIATA","worker_id":"siata_analyst","tenant_id":"SIATA","bot_token_env":"TELEGRAM_SIATA_TOKEN","vault_db_env":"DUCKCLAW_DB_PATH"},
+  {"secret":"SEC_TRABAJO","worker_id":"Job-Hunter","tenant_id":"Trabajo","bot_token_env":"TELEGRAM_JOB_HUNTER_TOKEN","vault_db_env":"DUCKCLAW_JOB_HUNTER_DB_PATH"}
+]
+```
+
+En PM2, `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` debe ser **una sola línea** JSON escapada o definida en `ecosystem` como string. Cada bot: misma `url` (`https://tu-nodo.ts.net/api/v1/telegram/webhook`), **`secret_token` distinto** por bot.
+
+Si además tienes `TELEGRAM_WEBHOOK_SECRET`, solo los updates cuya cabecera coincida con ese valor usarán el “default” del proceso (worker/tenant/token del PM2); el resto debe coincidir con una entrada de `ROUTES`. Especificación: [specs/features/Telegram Webhook Multiplex (multi-bot).md](specs/features/Telegram%20Webhook%20Multiplex%20(multi-bot).md). Rutas `POST …/webhook/finanz` y `…/webhook/trabajo` son **legado**; con un solo funnel suele bastar Modo B + `vault_db_env`.
+
+**Modo compacto (path por bot, misma base `DUCKCLAW_PUBLIC_URL`):** si `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` **no** empieza por `[` y contiene `:/api/`, se interpreta como lista separada por comas `bot_name:bot_token:webhook_path`. El gateway crea `POST` bajo `/api/v1/telegram/...` (p. ej. `/finanz`). Perfiles admitidos: `finanz`, `siata`, `jobhunter`. Define las mismas variables de DuckDB que en modo multi-puerto (`DUCKCLAW_FINANZ_DB_PATH`, `DUCKCLAW_JOB_HUNTER_DB_PATH`, `DUCKCLAW_SIATA_DB_PATH` o `DUCKCLAW_DB_PATH`). **Obligatorio:** tras definir la variable, ejecuta `python scripts/register_webhooks.py` (con `DUCKCLAW_PUBLIC_URL` y tokens en la cadena). Si los bots siguen con `setWebhook` en `…/api/v1/telegram/webhook`, todos los updates caen en esa ruta y el gateway **no** puede saber qué bot es: en ese modo, el gateway ignora el POST genérico y solo procesa los paths dedicados (`…/finanz`, `…/siata`, …). Opcional: `TELEGRAM_WEBHOOK_SECRET` como `secret_token` común en el script.
 
 **Prueba local** del router (Telegram no llama a HTTP sin TLS; sirve para depurar en la máquina):
 
@@ -348,11 +367,41 @@ Telegram (human-in-the-loop): el usuario confirma con `/execute_signal <uuid>` e
 
 ## 6. DB Writer (si usas escrituras encoladas)
 
-El wizard puede registrarlo en PM2. Además de la cola SQL (`duckdb_write_queue`), escucha **CONTEXT_INJECTION** (`duckclaw:state_delta:context` por defecto) para persistir `/context --add` en `main.semantic_memory`. Arranque manual orientativo:
+El wizard soberano puede generar `ecosystem.db-writer.config.cjs` en la **raíz del repo**. Además de la cola SQL (`duckdb_write_queue`), el proceso escucha **CONTEXT_INJECTION** (`duckclaw:state_delta:context` por defecto) para persistir `/context --add` en `main.semantic_memory`.
+
+**PM2** (recomendado en servidor; nombre del proceso: `DuckClaw-DB-Writer`):
+
+```bash
+# Desde la raíz del monorepo
+pm2 start ecosystem.db-writer.config.cjs
+# Si el archivo define más de una app y solo quieres el writer:
+pm2 start ecosystem.db-writer.config.cjs --only DuckClaw-DB-Writer
+pm2 save   # opcional: persistir la lista de procesos PM2
+
+# Tras cambiar REDIS_URL, DUCKDB_PATH o rutas multiplex en ese ecosystem:
+pm2 restart DuckClaw-DB-Writer --update-env
+pm2 logs DuckClaw-DB-Writer
+```
+
+El bloque `env` del ecosystem debe llevar la misma **`REDIS_URL`** (o `DUCKCLAW_REDIS_URL`) que el gateway y un **`DUCKDB_PATH`** coherente con la bóveda donde quieres aplicar las escrituras encoladas (alineado con multiplex / hub del gateway).
+
+**Manual** (desarrollo u one-off):
 
 ```bash
 uv run python services/db-writer/main.py
 ```
+
+### Depuración Telegram `/team` (whitelist)
+
+Si `/team --add` responde bien pero `/team` lista vacío: define `DUCKCLAW_TEAM_WHITELIST_DEBUG=1`, reinicia el gateway (PM2) y busca en logs `fly_team_audit` y mensajes del logger `duckclaw.team_whitelist` (comparan bóveda fly vs hub y la rama `reuse_fly`).
+
+Consulta directa en la `.duckdb` del hub:
+
+```bash
+uv run python scripts/check_authorized_users.py --db db/private/TU_USER/finanzdb1.duckdb --tenant Finanzas
+```
+
+Sin `--db` usa `get_gateway_db_path()` según el `.env` / multiplex actual.
 
 ---
 
@@ -366,7 +415,7 @@ uv run python services/db-writer/main.py
 | 4 | `uv run duckops init` |
 | 5 | `uv run duckops serve --gateway` |
 | 6 | (Opcional Telegram) `DUCKCLAW_CHAT_PARALLEL_INVOCATIONS=1` + `REDIS_URL` para varias respuestas concurrentes por chat; **§2.2** `DUCKCLAW_TOOL_READ_POOL_*` si varias `read_sql` en un solo turno; reiniciar con `--update-env` |
-| 7 | (Opcional) `uv run python services/db-writer/main.py` o PM2 según [Installation.md](docs/Installation.md) — **necesario** para `/context --add` (§2.3) |
+| 7 | (Opcional) DB Writer: **§6** (`pm2 start ecosystem.db-writer.config.cjs` o `uv run python services/db-writer/main.py`) — **necesario** para `/context --add` (§2.3) |
 
 ---
 

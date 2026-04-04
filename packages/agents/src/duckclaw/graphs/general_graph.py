@@ -308,12 +308,14 @@ def build_general_graph(
     def set_reply(state: dict) -> dict:
         import json
 
-        from duckclaw.integrations.llm_providers import _strip_eot
+        from duckclaw.integrations.llm_providers import (
+            lc_message_content_to_text,
+            sanitize_worker_reply_text,
+        )
 
         msgs = state["messages"]
         last = msgs[-1]
-        reply = getattr(last, "content", None) or str(last)
-        reply = _strip_eot(reply or "").strip()
+        reply = sanitize_worker_reply_text(lc_message_content_to_text(last))
         # Model returned tool call as text (e.g. Slayer-8B without native tool_calls)
         if reply.startswith("{") and '"name"' in reply and ("parameters" in reply or '"args"' in reply):
             try:

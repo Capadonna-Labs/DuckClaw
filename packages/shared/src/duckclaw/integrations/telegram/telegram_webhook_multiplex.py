@@ -9,6 +9,7 @@ import logging
 import os
 import secrets
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from duckclaw.integrations.telegram.telegram_webhook_secret_header import (
@@ -20,12 +21,30 @@ _log = logging.getLogger(__name__)
 _ENV_ROUTES = "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES"
 
 
+def _resolve_vault_db_path_for_multiplex(raw: str) -> str | None:
+    """Ruta DuckDB absoluta para forzar la bóveda por bot (multiplex en un solo proceso)."""
+    pth = (raw or "").strip()
+    if not pth:
+        return None
+    path = Path(pth)
+    if not path.is_absolute():
+        root = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
+        if root:
+            path = (Path(root) / path).resolve()
+        else:
+            path = (Path.cwd() / path).resolve()
+    else:
+        path = path.resolve()
+    return str(path)
+
+
 @dataclass(frozen=True)
 class TelegramWebhookRouteBinding:
     secret: str
     worker_id: str
     tenant_id: str
     bot_token_env: str
+    vault_db_env: str
 
 
 @dataclass(frozen=True)
@@ -33,6 +52,7 @@ class TelegramWebhookResolvedDispatch:
     worker_id: str
     tenant_id: str
     bot_token: str
+    forced_vault_db_path: str | None = None
 
 
 def _parse_route_bindings(raw: str) -> list[TelegramWebhookRouteBinding]:
@@ -47,6 +67,7 @@ def _parse_route_bindings(raw: str) -> list[TelegramWebhookRouteBinding]:
         secret = str(d.get("secret") or "").strip()
         worker_id = str(d.get("worker_id") or "").strip()
         bot_token_env = str(d.get("bot_token_env") or "").strip()
+        vault_db_env = str(d.get("vault_db_env") or "").strip()
         tenant_id = str(d.get("tenant_id") or "default").strip() or "default"
         if not secret or not worker_id or not bot_token_env:
             raise ValueError(f"ruta[{i}]: secret, worker_id y bot_token_env son obligatorios")
@@ -56,6 +77,7 @@ def _parse_route_bindings(raw: str) -> list[TelegramWebhookRouteBinding]:
                 worker_id=worker_id,
                 tenant_id=tenant_id,
                 bot_token_env=bot_token_env,
+                vault_db_env=vault_db_env,
             )
         )
     return out
@@ -76,6 +98,11 @@ def telegram_webhook_route_bindings() -> tuple[list[TelegramWebhookRouteBinding]
 
     raw = (os.environ.get(_ENV_ROUTES) or "").strip()
     if not raw:
+        _cached_bindings = []
+        _cached_bindings_error = None
+        return _cached_bindings, _cached_bindings_error
+    if not raw.startswith("["):
+        # Modo compacto por path (DUCKCLAW): ver ``telegram_compact_webhook_routes`` en api-gateway.
         _cached_bindings = []
         _cached_bindings_error = None
         return _cached_bindings, _cached_bindings_error
@@ -152,10 +179,16 @@ def telegram_webhook_resolve_dispatch(
                         b.worker_id,
                     )
                     return "reject"
+                fv: str | None = None
+                if b.vault_db_env:
+                    fv = _resolve_vault_db_path_for_multiplex(
+                        os.environ.get(b.vault_db_env) or ""
+                    )
                 return TelegramWebhookResolvedDispatch(
                     worker_id=b.worker_id,
                     tenant_id=b.tenant_id,
                     bot_token=tok,
+                    forced_vault_db_path=fv,
                 )
         if legacy and secrets.compare_digest(hdr, legacy):
             return (

@@ -2,7 +2,8 @@
 Ruta y acceso a la BD del API Gateway (microservicio services/api-gateway).
 
 Usado por duckclaw.graphs.graph_server, forge, workers y scripts cuando necesitan
-la misma DuckDB que usa el Gateway. Resuelve desde DUCKCLAW_DB_PATH o DUCKDB_PATH.
+la misma DuckDB que usa el Gateway. Resuelve desde ``DUCKCLAW_*_DB_PATH`` (multiplex)
+y ``DUCKDB_PATH``; no usa ``DUCKCLAW_DB_PATH`` (eliminada).
 """
 
 from __future__ import annotations
@@ -10,7 +11,16 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
+
+# Multiplex: solo rutas por worker (+ ACL WR opcional). Orden = prioridad del hub efectivo.
+GATEWAY_DB_ENV_KEYS: tuple[str, ...] = (
+    "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
+    "DUCKCLAW_FINANZ_DB_PATH",
+    "DUCKCLAW_JOB_HUNTER_DB_PATH",
+    "DUCKCLAW_SIATA_DB_PATH",
+    "DUCKDB_PATH",
+)
 
 
 class GatewayDbEphemeralReadonly:
@@ -47,16 +57,52 @@ class GatewayDbEphemeralReadonly:
 
 
 
+def resolve_env_duckdb_path(raw: str) -> str:
+    """
+    Absolutiza una ruta de archivo DuckDB.
+
+    Las rutas relativas (p. ej. ``DUCKCLAW_FINANZ_DB_PATH=db/private/.../x.duckdb``) se
+    resuelven contra ``DUCKCLAW_REPO_ROOT``, no contra el cwd del proceso (PM2 puede
+    arrancar fuera del repo y abrir otra copia del archivo).
+    """
+    p = Path((raw or "").strip()).expanduser()
+    if not str(p):
+        return ""
+    if p.is_absolute():
+        return str(p.resolve())
+    rr = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
+    base = Path(rr).resolve() if rr else Path.cwd()
+    return str((base / p).resolve())
+
+
+def raw_gateway_db_path_from_environ() -> str:
+    """Primera variable de entorno no vacía en ``GATEWAY_DB_ENV_KEYS``; fallback ``db/duckclaw.duckdb``."""
+    for key in GATEWAY_DB_ENV_KEYS:
+        v = (os.environ.get(key) or "").strip()
+        if v:
+            return v
+    return "db/duckclaw.duckdb"
+
+
+def raw_gateway_db_path_from_mapping(mapping: Mapping[str, Any]) -> str:
+    """Igual que ``raw_gateway_db_path_from_environ`` pero leyendo un dict (p. ej. ``apps[].env`` del PM2 JSON)."""
+    for key in GATEWAY_DB_ENV_KEYS:
+        v = (str(mapping.get(key) or "")).strip()
+        if v:
+            return v
+    return ""
+
+
 def get_gateway_db_path() -> str:
     """
-    Ruta del archivo DuckDB que usa el API Gateway (services/api-gateway).
-    Resuelve DUCKCLAW_DB_PATH, luego DUCKDB_PATH; por defecto db/duckclaw.duckdb.
-    No resuelve a ruta absoluta; el caller puede hacer Path(path).resolve() si necesita.
+    Ruta absoluta del DuckDB del gateway (hub ACL / whitelist).
+
+    Primera variable no vacía entre ``DUCKCLAW_WAR_ROOM_ACL_DB_PATH``,
+    ``DUCKCLAW_FINANZ_DB_PATH``, ``DUCKCLAW_JOB_HUNTER_DB_PATH``,
+    ``DUCKCLAW_SIATA_DB_PATH``, luego ``DUCKDB_PATH``; resuelta con
+    ``resolve_env_duckdb_path``.
     """
-    path = os.environ.get("DUCKCLAW_DB_PATH", "").strip()
-    if path:
-        return path
-    return os.environ.get("DUCKDB_PATH", "db/duckclaw.duckdb").strip() or "db/duckclaw.duckdb"
+    return resolve_env_duckdb_path(raw_gateway_db_path_from_environ())
 
 
 def get_war_room_acl_db_path() -> str:
@@ -69,7 +115,7 @@ def get_war_room_acl_db_path() -> str:
     """
     p = (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip()
     if p:
-        return p
+        return resolve_env_duckdb_path(p)
     return get_gateway_db_path()
 
 
@@ -80,5 +126,6 @@ def get_gateway_db() -> Any:
     Preferir pasar la conexión de la bóveda activa cuando el contexto sea multi-vault.
     """
     path = get_gateway_db_path()
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    if path:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
     return GatewayDbEphemeralReadonly(path)

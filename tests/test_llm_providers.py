@@ -4,10 +4,37 @@ import duckclaw
 from duckclaw.integrations.llm_providers import (
     build_agent_graph,
     build_duckclaw_tools,
+    coerce_json_tool_invoke,
+    lc_message_content_to_text,
+    sanitize_worker_reply_text,
     _validate_read_sql,
     _validate_write_sql,
     _safe_table_name,
 )
+
+
+def test_sanitize_worker_reply_strips_error_code_preface_and_eot() -> None:
+    raw = "Error code: 200 - {'error': None}\n\n**Hola** cuenta\n\n<|eot_id|>"
+    out = sanitize_worker_reply_text(raw)
+    assert "Error code:" not in out
+    assert "<|eot_id|>" not in out
+    assert "Hola" in out
+
+
+def test_coerce_json_tool_invoke_parameters_and_arguments_string() -> None:
+    raw = '{"name": "read_sql", "parameters": {"query": "SELECT 1"}}'
+    got = coerce_json_tool_invoke(raw)
+    assert got == ("read_sql", {"query": "SELECT 1"})
+    raw2 = r'{"name": "read_sql", "arguments": "{\"query\": \"SELECT 2\"}"}'
+    got2 = coerce_json_tool_invoke(raw2)
+    assert got2 == ("read_sql", {"query": "SELECT 2"})
+
+
+def test_lc_message_content_to_text_list_blocks() -> None:
+    class _Msg:
+        content = [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
+
+    assert lc_message_content_to_text(_Msg()) == "ab"
 
 
 def test_safe_table_name() -> None:

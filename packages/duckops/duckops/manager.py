@@ -381,7 +381,9 @@ def serve(
         for key in (
             "LANGCHAIN_TRACING_V2", "LANGCHAIN_API_KEY", "LANGCHAIN_PROJECT",
             "DUCKCLAW_LLM_PROVIDER", "DUCKCLAW_LLM_MODEL", "DUCKCLAW_LLM_BASE_URL",
-            "DUCKCLAW_DB_PATH", "MLX_MODEL_ID", "MLX_MODEL_PATH",
+            "DUCKCLAW_FINANZ_DB_PATH", "DUCKCLAW_JOB_HUNTER_DB_PATH", "DUCKCLAW_SIATA_DB_PATH",
+            "DUCKCLAW_WAR_ROOM_ACL_DB_PATH", "DUCKDB_PATH",
+            "MLX_MODEL_ID", "MLX_MODEL_PATH",
             "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
             "DUCKCLAW_REDIS_URL", "DUCKCLAW_WRITE_QUEUE_URL",
             "REDIS_URL", "DUCKCLAW_TAILSCALE_AUTH_KEY",
@@ -439,8 +441,13 @@ module.exports = {{
         config_path.write_text(config_content, encoding="utf-8")
         print(f"✅  config/ecosystem.api.config.cjs generado: {config_path}", flush=True)
 
-        # Crear la BD en db/ si DUCKCLAW_DB_PATH está definida y el archivo no existe
-        _db_path = env_vars.get("DUCKCLAW_DB_PATH", "").strip()
+        # Crear la BD en db/ si hay ruta multiplex / DUCKDB_PATH y el archivo no existe
+        from duckclaw.gateway_db import raw_gateway_db_path_from_mapping
+
+        _db_path = (
+            raw_gateway_db_path_from_mapping(env_vars)
+            or (env_vars.get("DUCKCLAW_DB_PATH") or "").strip()
+        ).strip()
         if _db_path:
             _db_file = Path(_db_path)
             if not _db_file.is_absolute():
@@ -534,7 +541,7 @@ def hire(
     env_lines = [
         f"DUCKCLAW_WORKER_ID={worker_id}",
         f"DUCKCLAW_WORKER_INSTANCE={instance}",
-        f"DUCKCLAW_DB_PATH={db_path}",
+        f"DUCKDB_PATH={db_path}",
         "PYTHONPATH=" + effective_cwd,
         f"LANGCHAIN_TAGS=worker_role:{worker_id},instance:{instance}",
     ]
@@ -569,7 +576,7 @@ module.exports = {{
       env: {{
         DUCKCLAW_WORKER_ID: "{worker_id}",
         DUCKCLAW_WORKER_INSTANCE: "{instance}",
-        DUCKCLAW_DB_PATH: "{db_path}",
+        DUCKDB_PATH: "{db_path}",
         PYTHONPATH: "{effective_cwd}",
         WORKER_PORT: "{port}",
       }},

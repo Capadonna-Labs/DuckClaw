@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from duckclaw.integrations.llm_providers import sanitize_worker_reply_text
+from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
 
 # Mismo criterio que manager_graph: el modelo a veces repite encabezados de subagente
 # (eco de DMs de heartbeat) en contenido assistant; limpiar al serializar trazas SFT.
@@ -148,8 +149,10 @@ def _lc_messages_to_chatml(messages: list[Any]) -> list[dict[str, Any]]:
                 out.append({"role": "assistant", "content": content[:8192]})
         elif role == "tool":
             name = (getattr(m, "name", None) or "")[:128]
-            content = _stringify_lc_message_content(getattr(m, "content", None))[:8192]
-            out.append({"role": "tool", "name": name, "content": content})
+            content = _stringify_lc_message_content(getattr(m, "content", None))
+            if name.startswith("reddit_"):
+                content = format_reddit_mcp_reply_if_applicable(content)
+            out.append({"role": "tool", "name": name, "content": content[:8192]})
     return out
 
 

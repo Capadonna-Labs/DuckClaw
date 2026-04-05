@@ -57,6 +57,46 @@ SUMMARIZE_STORED_CONTEXT_MARK = "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]"
 
 _MAX_EVIDENCE_CHARS = 12000
 _MAX_SYNTH_TOKENS = 768
+# 2.ª pasada tras SUMMARIZE_*: el turno principal ya llenó KV en MLX; evidencia más corta evita OOM Metal.
+_DEFAULT_CONTEXT_SUMMARY_SYNTH_EVIDENCE = 4500
+_DEFAULT_CONTEXT_SUMMARY_SYNTH_MAX_TOKENS = 512
+
+
+def _parse_bounded_int_env(name: str, default: int, *, lo: int, hi: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if raw.isdigit():
+        return max(lo, min(hi, int(raw)))
+    return default
+
+
+def context_summary_synthesis_evidence_char_limit() -> int:
+    """Tope de caracteres de ``<evidence>`` solo en la síntesis NL de ``rescind_*`` (SUMMARIZE_*)."""
+    return _parse_bounded_int_env(
+        "DUCKCLAW_CONTEXT_SUMMARY_SYNTH_MAX_CHARS",
+        _DEFAULT_CONTEXT_SUMMARY_SYNTH_EVIDENCE,
+        lo=1200,
+        hi=_MAX_EVIDENCE_CHARS,
+    )
+
+
+def context_summary_synthesis_max_output_tokens() -> int:
+    return _parse_bounded_int_env(
+        "DUCKCLAW_CONTEXT_SUMMARY_SYNTH_MAX_TOKENS",
+        _DEFAULT_CONTEXT_SUMMARY_SYNTH_MAX_TOKENS,
+        lo=128,
+        hi=2048,
+    )
+
+
+def _is_transient_inference_connection_error(exc: BaseException) -> bool:
+    """Errores habituales cuando MLX reinicia o el puerto local no acepta aún."""
+    if isinstance(exc, (ConnectionError, TimeoutError, BrokenPipeError)):
+        return True
+    name = type(exc).__name__
+    if name in ("APIConnectionError", "ConnectError", "ReadTimeout", "WriteTimeout", "RemoteProtocolError"):
+        return True
+    low = str(exc).lower()
+    return "connection refused" in low or "connection reset" in low or "eof occurred" in low
 
 _FOOTER_HINTS = (
     "este bloque se obtuvo",
@@ -310,6 +350,8 @@ def rescind_trivial_context_summary_reply(
         ),
         raw_evidence=inc,
         worker_id=wid,
+        max_evidence_chars=context_summary_synthesis_evidence_char_limit(),
+        max_tokens=context_summary_synthesis_max_output_tokens(),
     )
     syn_st = (syn or "").strip()
     if context_summary_synthesis_acceptable(syn_st):
@@ -319,24 +361,145 @@ def rescind_trivial_context_summary_reply(
     return reply_candidate
 
 
+_TOOL_BLOCK_HEADER = re.compile(r"^###\s+([a-zA-Z0-9_.-]+)\s*$", re.MULTILINE)
+
+
+def _combined_tool_blocks_contain_json(s: str) -> bool:
+    """
+    True si hay bloques ``### nombre_tool`` seguidos de cuerpo JSON (p. ej. salida unida en
+    ``set_reply`` cuando MLX emite tools embebidas y se ejecutan varias en un turno).
+    """
+    if "### " not in s:
+        return False
+    for m in _TOOL_BLOCK_HEADER.finditer(s):
+        rest = s[m.end() :]
+        nxt = re.search(r"^\s*###\s+", rest, re.MULTILINE)
+        chunk = rest if not nxt else rest[: nxt.start()]
+        t = chunk.lstrip()
+        if t.startswith("[") or t.startswith("{"):
+            return True
+    return False
+
+
+_TOOL_BLOCK_SNAKE_NAME = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
+
+
+def _combined_tool_blocks_snake_prose(s: str) -> bool:
+    """
+    True si hay ``### snake_case_tool`` seguido de texto (p. ej. ``get_ibkr_portfolio`` + «Estado:…»).
+    Sin esto, ``reply_needs_nl_synthesis`` no dispara la 2.ª pasada y el usuario ve el encabezado crudo.
+    """
+    if "### " not in s:
+        return False
+    for m in _TOOL_BLOCK_HEADER.finditer(s):
+        name = (m.group(1) or "").strip()
+        if not _TOOL_BLOCK_SNAKE_NAME.match(name):
+            continue
+        rest = s[m.end() :]
+        nxt = re.search(r"^\s*###\s+", rest, re.MULTILINE)
+        chunk = (rest if not nxt else rest[: nxt.start()]).strip()
+        if chunk:
+            return True
+    return False
+
+
+def _body_looks_like_reddit_mcp_listing_json(s: str) -> bool:
+    """
+    Listados MCP (subreddit + posts) a menudo van con prefijo ``finanz N`` y no pasan el
+    ``startswith('{')`` de la heurística JSON pura; si además el JSON está truncado,
+    ``json.loads`` falla y el usuario ve el volcado crudo en Telegram.
+    """
+    if '"posts"' not in s or '"subreddit"' not in s:
+        return False
+    return bool(re.search(r'"subreddit"\s*:', s) and re.search(r'"posts"\s*:', s))
+
+
+def _body_looks_like_reddit_compact_listing_markdown(s: str) -> bool:
+    """
+    Tras ``format_reddit_mcp_reply_if_applicable`` el modelo a veces devuelve solo el Markdown
+    compacto (cabecera ``## r/… (Top N posts)`` + viñetas con ``[Enlace](…)``). Eso ya no es JSON
+    ni bloque ``### tool_*``, así que sin esta rama ``reply_needs_nl_synthesis`` queda en False y
+    el usuario ve el payload en lugar de un resumen + siguientes pasos.
+    """
+    t = (s or "").strip()
+    if "[Enlace](" not in t:
+        return False
+    if not re.search(r"^##\s+r/[\w.+-]+\s+\(Top\s+\d+\s+posts\)", t, re.MULTILINE | re.IGNORECASE):
+        return False
+    return "Score:" in t or "*Extracto:*" in t
+
+
+def _reddit_compact_subreddit_from_header(s: str) -> str:
+    m = re.search(r"^##\s+r/([\w.+-]+)\s+\(Top\s+\d+\s+posts\)", (s or "").strip(), re.MULTILINE | re.IGNORECASE)
+    return (m.group(1) or "reddit").strip() if m else "reddit"
+
+
+def _deterministic_reddit_compact_listing_summary(s: str) -> str:
+    """
+    Resumen sin LLM a partir del listado compacto (títulos + scores). Cubre el caso
+    ``DUCKCLAW_DISABLE_NL_REPLY_SYNTHESIS=1`` o fallo/echo del modelo en la segunda pasada.
+    """
+    if not _body_looks_like_reddit_compact_listing_markdown(s):
+        return ""
+    sub = _reddit_compact_subreddit_from_header(s)
+    titles: list[str] = []
+    for raw_ln in (s or "").splitlines():
+        ln = raw_ln.strip()
+        if not ln.startswith("- "):
+            continue
+        if " (Score:" not in ln:
+            continue
+        body = ln[2:].strip()
+        idx = body.find(" (Score:")
+        if idx <= 0:
+            continue
+        title = body[:idx].strip()
+        title = re.sub(r"^\*+", "", title)
+        title = re.sub(r"\*+$", "", title).strip()
+        if len(title) < 6:
+            continue
+        if len(title) > 160:
+            title = title[:159] + "…"
+        titles.append(title)
+        if len(titles) >= 6:
+            break
+    if not titles:
+        return ""
+    joined = "; ".join(titles[:5])
+    if len(titles) > 5:
+        joined += "; …"
+    return (
+        f"En **r/{sub}** los hilos más visibles en el listado hablan de: {joined}.\n\n"
+        "**Siguientes pasos**\n"
+        "- Abre el **Enlace** de un hilo si quieres el contexto completo en Reddit.\n"
+        "- Si buscas un solo post, pega su URL directa y pide «resume solo este»."
+    )
+
+
 def reply_needs_nl_synthesis(text: str) -> bool:
-    """True si el texto es JSON objeto/array parseable (salida típica de tools o MLX)."""
+    """True si el texto es JSON puro o bloques ``### tool`` + JSON o prosa de tool (MLX / egress)."""
     s = (text or "").strip()
     if len(s) < 2:
         return False
-    if not (s.startswith("{") or s.startswith("[")):
-        return False
-    try:
-        json.loads(s)
-    except json.JSONDecodeError:
-        return False
-    return True
+    if _body_looks_like_reddit_compact_listing_markdown(s):
+        return True
+    if _body_looks_like_reddit_mcp_listing_json(s):
+        return True
+    if s.startswith("{") or s.startswith("["):
+        try:
+            json.loads(s)
+            return True
+        except json.JSONDecodeError:
+            pass
+    if _combined_tool_blocks_contain_json(s):
+        return True
+    return _combined_tool_blocks_snake_prose(s)
 
 
-def _truncate_evidence(s: str) -> str:
-    if len(s) <= _MAX_EVIDENCE_CHARS:
+def _truncate_evidence(s: str, max_chars: int) -> str:
+    if len(s) <= max_chars:
         return s
-    return s[:_MAX_EVIDENCE_CHARS] + "\n\n…[evidencia truncada para la síntesis]"
+    return s[:max_chars] + "\n\n…[evidencia truncada para la síntesis]"
 
 
 def synthesize_user_visible_reply(
@@ -345,23 +508,42 @@ def synthesize_user_visible_reply(
     user_ask: str,
     raw_evidence: str,
     worker_id: str,
+    max_evidence_chars: int | None = None,
+    max_tokens: int | None = None,
 ) -> str:
     """Invoca el LLM sin tools; devuelve texto para el usuario o cadena vacía si falla."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    sys = SystemMessage(
-        content=(
-            "Eres un asistente que redacta la respuesta FINAL al usuario en español, para Telegram.\n"
-            "Reglas obligatorias:\n"
-            "- No pegues JSON, arrays, SQL ni bloques de código como cuerpo principal; parafrasea en prosa clara.\n"
-            "- Usa Markdown ligero: **negritas**, listas con viñetas cuando ayuden.\n"
-            "- Sé breve y directo; amplía solo si la evidencia lo exige.\n"
-            "- Toda cifra o nombre de dato debe salir solo de la evidencia entre <evidence> y </evidence>; no inventes.\n"
-            "- Termina con un apartado **Siguientes pasos** con 1–2 sugerencias concretas y útiles (sin inventar datos).\n"
-            "- Si la evidencia es un error técnico, explícalo en lenguaje simple sin volver a pegar el JSON crudo entero."
+    ev_limit = max_evidence_chars if max_evidence_chars is not None else _MAX_EVIDENCE_CHARS
+    mt = max_tokens if max_tokens is not None else _MAX_SYNTH_TOKENS
+
+    _reddit_listing_rules = ""
+    if _body_looks_like_reddit_compact_listing_markdown(raw_evidence or ""):
+        _reddit_listing_rules = (
+            "\n- La evidencia es un listado compacto de Reddit (cabecera ## r/…): NO repitas todas las viñetas ni los "
+            "enlaces uno por uno. Resume en 2–5 frases los temas dominantes y menciona como máximo 1–2 hilos si son "
+            "centrales; luego **Siguientes pasos**."
         )
+    _base_rules = (
+        "Eres un asistente que redacta la respuesta FINAL al usuario en español, para Telegram.\n"
+        "Reglas obligatorias:\n"
+        "- No pegues JSON, arrays, SQL ni bloques de código como cuerpo principal; parafrasea en prosa clara.\n"
+        "- Usa Markdown ligero: **negritas**, listas con viñetas cuando ayuden.\n"
+        "- Sé breve y directo; amplía solo si la evidencia lo exige.\n"
+        "- Toda cifra o nombre de dato debe salir solo de la evidencia entre <evidence> y </evidence>; no inventes.\n"
+        "- Termina con un apartado **Siguientes pasos** con 1–2 sugerencias concretas y útiles (sin inventar datos).\n"
+        "- Si la evidencia es un error técnico, explícalo en lenguaje simple sin volver a pegar el JSON crudo entero."
+        f"{_reddit_listing_rules}"
     )
-    ev = _truncate_evidence(raw_evidence or "")
+    _finanz_extra = (
+        "\n- Worker Finanz: si la evidencia incluye varias cuentas locales con `balance` y `currency` (p. ej. JSON de "
+        "`read_sql` sobre cuentas), incluye **líneas de subtotal por cada moneda** presente, sumando solo balances de "
+        "la evidencia. Si también hay bloque IBKR, conserva totales del broker en su divisa; **no** unifiques COP y USD "
+        "en un solo total sin tipo de cambio en la evidencia."
+    )
+    _sys_text = _base_rules + (_finanz_extra if (worker_id or "").strip().lower() == "finanz" else "")
+    sys = SystemMessage(content=_sys_text)
+    ev = _truncate_evidence(raw_evidence or "", ev_limit)
     human = HumanMessage(
         content=(
             f"Worker: `{worker_id}`\n"
@@ -370,14 +552,25 @@ def synthesize_user_visible_reply(
             "Redacta solo la respuesta al usuario."
         )
     )
-    try:
+
+    def _invoke() -> Any:
         try:
-            resp = llm.invoke([sys, human], max_tokens=_MAX_SYNTH_TOKENS)
+            return llm.invoke([sys, human], max_tokens=mt)
         except TypeError:
-            resp = llm.invoke([sys, human])
-    except Exception:
-        _LOG.warning("nl_reply_synthesis: invoke failed", exc_info=True)
-        return ""
+            return llm.invoke([sys, human])
+
+    try:
+        resp = _invoke()
+    except Exception as exc:
+        if _is_transient_inference_connection_error(exc):
+            try:
+                resp = _invoke()
+            except Exception:
+                _LOG.warning("nl_reply_synthesis: invoke failed after transient retry", exc_info=True)
+                return ""
+        else:
+            _LOG.warning("nl_reply_synthesis: invoke failed", exc_info=True)
+            return ""
     out = getattr(resp, "content", None)
     if out is None:
         out = str(resp)
@@ -402,13 +595,24 @@ def maybe_synthesize_reply(
     """
     Si aplica política + heurística, sustituye ``reply_candidate`` por síntesis LLM.
     ``spec`` debe tener ``egress_natural_language_synthesis`` y ``worker_id``.
+
+    Listado compacto Reddit: aunque ``DUCKCLAW_DISABLE_NL_REPLY_SYNTHESIS`` esté activo o el LLM
+    devuelva vacío/echo del listado, se aplica un resumen **determinístico** (sin segundo modelo).
     """
+    rc_compact = _body_looks_like_reddit_compact_listing_markdown(reply_candidate)
+
+    def _reddit_det_or(candidate: str) -> str:
+        if not _body_looks_like_reddit_compact_listing_markdown(candidate):
+            return candidate
+        det = _deterministic_reddit_compact_listing_summary(candidate)
+        return det if det else candidate
+
     if llm is None:
-        return reply_candidate
+        return _reddit_det_or(reply_candidate)
     if nl_reply_synthesis_globally_disabled():
-        return reply_candidate
+        return _reddit_det_or(reply_candidate)
     if not bool(getattr(spec, "egress_natural_language_synthesis", True)):
-        return reply_candidate
+        return _reddit_det_or(reply_candidate)
     if not reply_needs_nl_synthesis(reply_candidate):
         return reply_candidate
     wid = str(getattr(spec, "worker_id", "") or "").strip() or "worker"
@@ -418,4 +622,9 @@ def maybe_synthesize_reply(
         raw_evidence=reply_candidate,
         worker_id=wid,
     )
-    return synthesized if synthesized else reply_candidate
+    syn_st = (synthesized or "").strip()
+    if rc_compact and (not syn_st or _body_looks_like_reddit_compact_listing_markdown(syn_st)):
+        det = _deterministic_reddit_compact_listing_summary(reply_candidate)
+        if det:
+            return det
+    return syn_st if syn_st else reply_candidate

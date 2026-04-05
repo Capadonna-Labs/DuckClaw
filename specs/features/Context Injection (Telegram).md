@@ -61,7 +61,8 @@ Permitir que un **admin** inyecte texto largo en **memoria semántica** (`main.s
 - El Gateway lee `main.semantic_memory` con DuckDB **read-only** en la ruta de bóveda (misma resolución que el delta de inyección), orden descendente por `created_at`, con límite de filas y de caracteres totales en el prompt (por defecto acotado para no saturar MLX; override: `DUCKCLAW_SEMANTIC_SUMMARY_MAX_CHARS`).
 - Tras el `invoke`, si el texto devuelto sigue trivial, el router puede aplicar el mismo fallback determinístico de viñetas que el átomo `user_reply_nl_synthesis` (alineado con el worker); la ruta principal de **resumen en NL** es la segunda pasada LLM en el worker cuando hay modelo y egress NL activos.
 - El worker trata el mensaje como en `SUMMARIZE_NEW_CONTEXT`: **sin** `search_semantic_context` en ese turno (el contenido ya va en el prompt).
-- El volcado puede incluir **URLs** (p. ej. Reddit en notas guardadas). El ensamblado del worker (`factory.py` / `agent_node`) **no** debe aplicar heurísticas de primera herramienta (p. ej. forzar Reddit) en turnos con `[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]` o `SUMMARIZE_STORED_CONTEXT`; solo síntesis en texto según el plan.
+- `[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]`: el volcado puede incluir URLs en el texto guardado; el worker **no** debe forzar Reddit en ese turno (sintetizar el snapshot DuckDB).
+- `[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]`: si el cuerpo es **principalmente** una URL de Reddit (p. ej. `/r/.../s/...`), `factory.py` / `agent_node` **sí** puede forzar una herramienta Reddit en el primer turno para obtener título/cuerpo antes de sintetizar; sigue **prohibido** `search_semantic_context` en ese turno.
 
 ## Excepción de arquitectura (embeddings en Writer)
 

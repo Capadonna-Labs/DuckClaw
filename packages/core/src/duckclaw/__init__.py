@@ -90,5 +90,27 @@ class DuckClaw:
             finally:
                 self._con = None
 
+    def suspend_readonly_file_handle(self) -> None:
+        """
+        Cierra la conexión Python en modo solo lectura para liberar el lock del archivo.
+        Otro proceso (p. ej. db-writer) puede abrir el mismo .duckdb en escritura mientras
+        esta instancia no tiene handle abierto. No-op para :memory:, motor nativo RW o read_only=False.
+        """
+        if self._native is not None or self._path == ":memory:" or not self._read_only:
+            return
+        if self._con is not None:
+            try:
+                self._con.close()
+            except Exception:
+                pass
+            self._con = None
+
+    def resume_readonly_file_handle(self) -> None:
+        """Reabre la conexión RO tras ``suspend_readonly_file_handle``."""
+        if self._native is not None or self._path == ":memory:" or not self._read_only:
+            return
+        if self._con is None:
+            self._con = _duckdb.connect(self._path, read_only=True)
+
 
 __all__ = ["DuckClaw"]

@@ -869,6 +869,19 @@ def _capabilities_fast_reply_text(worker_id: str | None) -> str:
             "Ejemplo de petición: «¿Cuántas filas tiene la tabla sales?» o «Resume ventas por día». "
             "Dime qué quieres medir o qué tabla explorar."
         )
+    if wl == "finanz":
+        return (
+            "Soy **Finanz** (finanzas personales + broker). Puedo:\n"
+            "• **Cuentas en DuckDB:** saldos por cuenta (Bancolombia, Nequi, efectivo…), "
+            "resumen con **totales por moneda**, gastos, presupuestos y deudas.\n"
+            "• **IBKR:** consultar saldo y portafolio en vivo con la API del gateway cuando lo pidas "
+            "(o en resúmenes amplios junto a tus cuentas locales).\n"
+            "• **Datos y cambios:** consultas `read_sql`, registro con las tools de finanzas, "
+            "y actualizaciones de saldo vía `admin_sql` (cola db-writer).\n"
+            "• **Mercado / cuant:** OHLCV, CFD y contexto web cuando el manifest lo tenga activo.\n\n"
+            "Ejemplos: «Dame un resumen de mis cuentas», «¿Cuánto tengo en Nequi?», "
+            "«Consulta el saldo de IBKR», «gastos del mes»."
+        )
     if wl == "leilaassistant":
         return (
             "Puedo ayudarte con el catálogo, pedidos (/pedido) y dudas sobre productos. "
@@ -1198,11 +1211,35 @@ def build_manager_graph(
         slot_token = ""
         run_label_n = 1
         raw_worker_reply = ""
+        worker_graph = None
+        worker_cache_key = ""
+        _suspend_for_rw_worker = False
         try:
             global _worker_graph_cache
             slot_token, run_label_n = acquire_subagent_slot(tenant_id, assigned, str(chat_id or ""))
             agent_instance_label = f"{assigned} {run_label_n}".strip()
             worker_cache_key = f"{tenant_id}::{assigned}::{vault_db_path or db_path or ''}::{shared_db_path}"
+            from duckclaw.workers.factory import _same_duckdb_file
+            from duckclaw.workers.manifest import load_manifest
+
+            spec_inv = load_manifest(assigned, troot)
+            vault_eff = (vault_db_path or db_path or "").strip()
+            mgr_path = str(getattr(db, "_path", "") or "").strip()
+            # DuckDB: no RO+RW simultáneo al mismo archivo. Suspender el RO del manager antes
+            # de abrir el worker RW; leer sandbox/chat_state antes (sin worker RW abierto).
+            _suspend_for_rw_worker = bool(
+                getattr(db, "_read_only", False)
+                and not spec_inv.read_only
+                and vault_eff
+                and mgr_path
+                and _same_duckdb_file(mgr_path, vault_eff)
+            )
+            _cfg_db = _agent_config_db_for_vault(db, vault_db_path or None)
+            raw_sb = get_chat_state(_cfg_db, chat_id, "sandbox_enabled")
+            sb_on = (raw_sb or "").strip().lower() in ("true", "1", "on", "sí", "si")
+            db_display = vault_db_path or db_path or "(unknown)"
+            if _suspend_for_rw_worker:
+                db.suspend_readonly_file_handle()
             if worker_cache_key not in _worker_graph_cache:
                 _worker_graph_cache[worker_cache_key] = _build_worker_graph(
                     assigned,
@@ -1223,10 +1260,6 @@ def build_manager_graph(
                 chat_id=format_chat_log_identity(chat_id or "unknown", state.get("username")),
             )
             log_sys(_obs, "Delegación: manager -> %s", assigned)
-            _cfg_db = _agent_config_db_for_vault(db, vault_db_path or None)
-            raw_sb = get_chat_state(_cfg_db, chat_id, "sandbox_enabled")
-            sb_on = (raw_sb or "").strip().lower() in ("true", "1", "on", "sí", "si")
-            db_display = vault_db_path or db_path or "(unknown)"
             log_sys(
                 _obs,
                 "Sandbox: %s | DB: %s",
@@ -1338,15 +1371,22 @@ def build_manager_graph(
         except Exception as e:
             msg = str(e)[:2048]
             low = msg.lower()
-            if any(
-                x in low
-                for x in (
-                    "connection error",
-                    "connection refused",
-                    "remote protocol",
-                    "failed to establish",
-                    "errno 61",
-                    "econnrefused",
+            # DuckDB usa "Connection Error" al mezclar RO/RW en el mismo archivo; no confundir con MLX caído.
+            _duckdb_config_clash = (
+                "same database file" in low and "different configuration" in low
+            ) or ("duckdb" in low and "read_only" in low)
+            if (
+                not _duckdb_config_clash
+                and any(
+                    x in low
+                    for x in (
+                        "connection error",
+                        "connection refused",
+                        "remote protocol",
+                        "failed to establish",
+                        "errno 61",
+                        "econnrefused",
+                    )
                 )
             ):
                 msg = (
@@ -1360,6 +1400,18 @@ def build_manager_graph(
             reply = _prepend_subagent_label_once(reply, _label_e)
             status = "FAILED"
         finally:
+            _wdb = getattr(worker_graph, "_worker_db", None) if worker_graph is not None else None
+            if _suspend_for_rw_worker and _wdb is not None and _wdb is not db:
+                try:
+                    _wdb.close()
+                except Exception:
+                    pass
+                _worker_graph_cache.pop(worker_cache_key, None)
+            if _suspend_for_rw_worker:
+                try:
+                    db.resume_readonly_file_handle()
+                except Exception:
+                    pass
             if slot_token:
                 release_subagent_slot(tenant_id, assigned, slot_token, str(chat_id or ""))
             set_idle(chat_id)

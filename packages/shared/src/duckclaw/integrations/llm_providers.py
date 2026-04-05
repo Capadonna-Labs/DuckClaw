@@ -69,11 +69,18 @@ def _mlx_base_url_is_incompatible(url: str) -> bool:
 _EOT_PATTERNS = (
     "<|end_of_text|>",
     "<|eot_id|>",
+    "&lt;|eot_id|&gt;",  # a veces copiado/escapado en HTML o clientes
     "<|end|>",
     "</s>",
     "<s>",
     "[INST]",
     "[/INST]",
+)
+
+# Sufijo EOT pegado al último carácter (p. ej. "...COP.<|eot_id|>") sin espacio
+_EOT_TAIL = re.compile(
+    r"(?:<\|eot_id\|>|<\|end_of_text\|>|<\|end\|>|</s>)\s*\Z",
+    re.IGNORECASE,
 )
 
 
@@ -84,11 +91,27 @@ def _strip_eot(text: str) -> str:
     s = str(text)
     for pat in _EOT_PATTERNS:
         s = s.replace(pat, "")
+    s = _EOT_TAIL.sub("", s)
     return s
 
 
 # Prefijos que algunos modelos locales (p. ej. MLX/Slayer) repiten al imitar trazas HTTP/OpenAI.
 _LEADING_ERROR_CODE_LINE = re.compile(r"^\s*Error\s+code:\s*\d+.*$", re.IGNORECASE)
+# Líneas tipo ``### read_sql`` / ``### get_ibkr_portfolio`` (marcadores internos de salida de tools).
+_TOOL_SECTION_HEADER_LINE = re.compile(r"^###\s+([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\s*$")
+
+
+def _strip_tool_section_header_lines(text: str) -> str:
+    """Quita líneas que solo nombran una tool en snake_case (no títulos Markdown humanos con espacios)."""
+    if "### " not in text:
+        return text
+    lines = (text or "").split("\n")
+    out: list[str] = []
+    for ln in lines:
+        if _TOOL_SECTION_HEADER_LINE.match(ln.strip()):
+            continue
+        out.append(ln)
+    return "\n".join(out)
 
 
 def _strip_leading_error_code_line(text: str) -> str:
@@ -102,10 +125,22 @@ def _strip_leading_error_code_line(text: str) -> str:
     return raw
 
 
-def sanitize_worker_reply_text(text: str) -> str:
-    """Limpia respuestas assistant para Telegram/trazas: basura HTTP simulada + EOT."""
+def strip_internal_tool_markdown_headers(text: str) -> str:
+    """Quita líneas ``### snake_case_tool`` (salida intermedia); usar tras síntesis o en egress final."""
+    return _strip_tool_section_header_lines(text or "")
+
+
+def sanitize_worker_reply_phase1(text: str) -> str:
+    """EOT + línea ``Error code:``; no quita ``### tool`` (necesario antes de ``reply_needs_nl_synthesis``)."""
     s = _strip_leading_error_code_line(text or "")
     return _strip_eot(s).strip()
+
+
+def sanitize_worker_reply_text(text: str) -> str:
+    """Limpia respuestas assistant para Telegram/trazas: basura HTTP + EOT + encabezados ``### tool``."""
+    s = sanitize_worker_reply_phase1(text or "")
+    s = _strip_tool_section_header_lines(s)
+    return s.strip()
 
 
 def strip_markdown_json_fence(text: str) -> str:
@@ -160,6 +195,48 @@ def coerce_json_tool_invoke(reply: str) -> tuple[str, dict[str, Any]] | None:
         elif isinstance(arg, dict):
             params = arg
     return (name, params)
+
+
+def extract_embedded_json_tool_invokes(text: str) -> list[tuple[str, dict[str, Any]]]:
+    """
+    Una o más invocaciones tool serializadas en texto (p. ej. MLX sin ``tool_calls``).
+
+    Incluye el caso ``{"name": "a", ...}; {"name": "b", ...}`` donde ``json.loads``
+    sobre el string completo falla.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    single = coerce_json_tool_invoke(raw)
+    if single:
+        return [single]
+    out: list[tuple[str, dict[str, Any]]] = []
+    n = len(raw)
+    i = 0
+    while i < n:
+        j = raw.find("{", i)
+        if j < 0:
+            break
+        depth = 0
+        k = j
+        while k < n:
+            ch = raw[k]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    got = coerce_json_tool_invoke(raw[j : k + 1])
+                    if got:
+                        out.append(got)
+                    i = k + 1
+                    while i < n and raw[i] in " \t\n\r;":
+                        i += 1
+                    break
+            k += 1
+        else:
+            break
+    return out
 
 
 def lc_message_content_to_text(message: Any) -> str:

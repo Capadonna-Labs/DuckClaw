@@ -1218,7 +1218,10 @@ def build_manager_graph(
             global _worker_graph_cache
             slot_token, run_label_n = acquire_subagent_slot(tenant_id, assigned, str(chat_id or ""))
             agent_instance_label = f"{assigned} {run_label_n}".strip()
-            worker_cache_key = f"{tenant_id}::{assigned}::{vault_db_path or db_path or ''}::{shared_db_path}"
+            worker_cache_key = (
+                f"{tenant_id}::{assigned}::{vault_db_path or db_path or ''}::{shared_db_path}"
+                f"::{(llm_provider or '').strip()}::{(llm_model or '').strip()}::{(llm_base_url or '').strip()}"
+            )
             from duckclaw.workers.factory import _same_duckdb_file
             from duckclaw.workers.manifest import load_manifest
 

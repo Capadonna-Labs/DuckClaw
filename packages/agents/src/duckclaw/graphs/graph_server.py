@@ -302,6 +302,15 @@ def _open_duckclaw_readonly_with_retry(db_path: str) -> Any:
     raise last
 
 
+def _paths_same_canonical(a: str, b: str) -> bool:
+    if not (a or "").strip() or not (b or "").strip():
+        return False
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return (a or "").strip() == (b or "").strip()
+
+
 def _invoke_ephemeral_gateway_graph(
     chat_id: str | None = None,
     vault_db_path: str | None = None,
@@ -324,22 +333,47 @@ def _invoke_ephemeral_gateway_graph(
     clear_worker_graph_cache()
     db = _open_duckclaw_readonly_with_retry(db_path)
     ovr: dict[str, Any] = {}
+    _log = _logging.getLogger(__name__)
+    trip: tuple[str, str, str] | None = None
+    trip_source = "env_defaults"
+    v_p = (vault_db_path or "").strip()
     try:
         from duckclaw.gateway_db import GatewayDbEphemeralReadonly
         from duckclaw.graphs.on_the_fly_commands import resolve_llm_triplet_for_chat_invocation
 
-        trip = None
-        v_p = (vault_db_path or "").strip()
-        if v_p and v_p != ":memory:":
+        same_file = bool(v_p and v_p != ":memory:" and _paths_same_canonical(v_p, db_path))
+        if same_file:
+            trip = resolve_llm_triplet_for_chat_invocation(db, chat_id)
+            trip_source = "same_file_as_hub" if trip else "same_file_no_chat_override"
+        elif v_p and v_p != ":memory:":
             try:
                 trip = resolve_llm_triplet_for_chat_invocation(GatewayDbEphemeralReadonly(v_p), chat_id)
-            except Exception:
+                trip_source = "vault_separate" if trip else "vault_separate_no_override"
+            except Exception as exc:
+                _log.warning(
+                    "graph_server: resolve_llm_triplet vault read failed chat_id=%s vault_suffix=%s err=%s",
+                    chat_id,
+                    v_p[-96:] if len(v_p) > 96 else v_p,
+                    exc,
+                )
                 trip = None
-        if trip is None:
+                trip_source = "vault_read_error"
+        if trip is None and not same_file:
             trip = resolve_llm_triplet_for_chat_invocation(db, chat_id)
+            if trip is not None:
+                trip_source = "hub_only"
         if trip is not None:
             tp, tm, tu = trip
-            built = build_llm(tp, tm, tu, prefer_env_provider=False)
+            try:
+                built = build_llm(tp, tm, tu, prefer_env_provider=False)
+            except Exception as exc:
+                _log.warning(
+                    "graph_server: build_llm(chat triplet) failed provider=%s err=%s",
+                    tp,
+                    exc,
+                    exc_info=True,
+                )
+                built = None
             if built is not None:
                 ovr = {
                     "llm_override": built,
@@ -347,8 +381,63 @@ def _invoke_ephemeral_gateway_graph(
                     "llm_model_override": tm,
                     "llm_base_url_override": tu,
                 }
-    except Exception:
-        pass
+            else:
+                _log.warning(
+                    "graph_server: build_llm returned None for chat triplet provider=%s model=%s",
+                    tp,
+                    (tm or "")[:80],
+                )
+        _env_llm_provider = str(_graph_state.get("provider") or "")
+        _invoke_provider = _env_llm_provider
+        if ovr.get("llm_provider_override"):
+            _invoke_provider = str(ovr.get("llm_provider_override") or "")
+        elif trip:
+            _invoke_provider = str(trip[0] or "")
+        _log.info(
+            "graph_server: llm_invoke_override chat_id=%s trip_source=%s has_trip=%s ovr=%s global_provider=%s env_llm_provider=%s",
+            chat_id,
+            trip_source,
+            trip is not None,
+            bool(ovr),
+            _invoke_provider,
+            _env_llm_provider,
+        )
+        # #region agent log
+        try:
+            import json
+            import time as _time
+
+            _dbg_path = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+            with open(_dbg_path, "a", encoding="utf-8") as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "adf9d8",
+                            "hypothesisId": "H1-trip",
+                            "location": "graph_server.py:_invoke_ephemeral_gateway_graph",
+                            "message": "llm override resolution",
+                            "data": {
+                                "chat_id": str(chat_id),
+                                "trip_source": trip_source,
+                                "trip_provider": trip[0] if trip else None,
+                                "ovr_applied": bool(ovr),
+                                "invoke_provider": _invoke_provider,
+                                "env_llm_provider": _env_llm_provider,
+                                "vault_same_file_as_hub": bool(
+                                    v_p and v_p != ":memory:" and _paths_same_canonical(v_p, db_path)
+                                ),
+                            },
+                            "timestamp": int(_time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
+    except Exception as exc:
+        _log.warning("graph_server: LLM override resolution failed: %s", exc, exc_info=True)
     graph = _build_manager_graph_for_db(db, **ovr)
     return graph, db
 

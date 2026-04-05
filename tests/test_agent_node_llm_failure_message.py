@@ -19,7 +19,8 @@ def test_mlx_provider_keeps_mlx_hint() -> None:
     assert "MLX-Inference" in msg
 
 
-def test_non_local_provider_generic_no_mlx_blame() -> None:
+def test_deepseek_failure_mentions_deepseek_not_mlx() -> None:
     msg = _agent_node_llm_failure_user_message(ValueError("bad payload"), provider="deepseek")
+    assert "DeepSeek" in msg
     assert "MLX-Inference" not in msg
     assert "bad payload" in msg

@@ -35,6 +35,164 @@ def mlx_openai_compatible_base_url() -> str:
     return f"http://127.0.0.1:{port}/v1"
 
 
+def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
+    """
+    Deduce proveedor desde ``ChatOpenAI`` (base URL) cuando la etiqueta ``llm_provider`` del grafo
+    no coincide (p. ej. caché de worker o cadena vacía que cayó en ``DUCKCLAW_LLM_PROVIDER=mlx``).
+    """
+    if llm is None:
+        return ""
+    bound = getattr(llm, "bound", None)
+    if bound is not None and bound is not llm:
+        inner = infer_provider_from_openai_compatible_llm(bound)
+        if inner:
+            return inner
+    bases: list[str] = []
+    for attr in ("openai_api_base", "base_url"):
+        v = getattr(llm, attr, None)
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            bases.append(s.lower())
+    for attr in ("client", "async_client", "root_client", "root_async_client"):
+        c = getattr(llm, attr, None)
+        if c is None:
+            continue
+        bu = getattr(c, "base_url", None)
+        if bu is not None:
+            bases.append(str(bu).strip().lower())
+    u = " ".join(bases)
+    if u:
+        if "deepseek" in u:
+            return "deepseek"
+        if "groq.com" in u:
+            return "groq"
+        if "anthropic" in u:
+            return "anthropic"
+        if "api.openai.com" in u and "azure" not in u:
+            return "openai"
+        if "127.0.0.1" in u or "localhost" in u:
+            return "mlx"
+    # Sin URL aún (cliente lazy) o host no reconocido: pistas por nombre de modelo (p. ej. deepseek-chat).
+    mn = ""
+    for attr in ("model_name", "model", "model_id"):
+        v = getattr(llm, attr, None)
+        if v is None:
+            continue
+        ms = str(v).strip()
+        if ms:
+            mn = ms.lower()
+            break
+    if "deepseek" in mn:
+        # #region agent log
+        try:
+            import json
+            import time as _time
+
+            _dbg_path = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+            with open(_dbg_path, "a", encoding="utf-8") as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "adf9d8",
+                            "hypothesisId": "H_MODEL_FB",
+                            "location": "llm_providers.py:infer_provider_from_openai_compatible_llm",
+                            "message": "provider from model_name (url empty or unmatched)",
+                            "data": {"has_url_bases": bool(u)},
+                            "timestamp": int(_time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
+        return "deepseek"
+    return ""
+
+
+_REMOTE_USER_FACING_LLM = frozenset({"deepseek", "groq", "openai", "anthropic"})
+_LOCAL_INFERENCE_FAIL_LABELS = frozenset({"mlx", "iotcorelabs"})
+
+
+def failure_provider_label_for_llm_invoke(llm: Any, reconciled_provider: str) -> str:
+    """
+    Etiqueta para mensajes de fallo al usuario: combina inferencia por URL/modelo con la tripleta
+    reconciliada del grafo. Si la heurística devuelve ``mlx``/``iotcorelabs`` (p. ej. ``localhost``)
+    pero el turno se compiló con proveedor remoto vía ``/model``, gana el remoto para no culpar al
+    motor local por error.
+    """
+    rec = (reconciled_provider or "").strip().lower()
+    inf = (infer_provider_from_openai_compatible_llm(llm) or "").strip().lower()
+    if not inf:
+        out = rec
+    elif inf in _LOCAL_INFERENCE_FAIL_LABELS and rec in _REMOTE_USER_FACING_LLM:
+        out = rec
+    else:
+        out = inf
+    # PM2/.env a veces dejan DUCKCLAW_* en mlx y LLM_* en deepseek; si la etiqueta sigue siendo local,
+    # tomar el primer proveedor remoto explícito en env (no sustituye MLX real si ambos dicen mlx).
+    out_before_env = out
+    if out in _LOCAL_INFERENCE_FAIL_LABELS:
+        for _ek in ("DUCKCLAW_LLM_PROVIDER", "LLM_PROVIDER"):
+            _ev = (os.environ.get(_ek) or "").strip().lower()
+            if _ev in _REMOTE_USER_FACING_LLM:
+                out = _ev
+                break
+    # #region agent log
+    try:
+        import json
+        import time as _time
+
+        _dbg_path = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+        with open(_dbg_path, "a", encoding="utf-8") as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "adf9d8",
+                        "hypothesisId": "H_FAIL_LBL",
+                        "location": "llm_providers.py:failure_provider_label_for_llm_invoke",
+                        "message": "failure label merge",
+                        "data": {
+                            "rec": rec,
+                            "inf": inf,
+                            "out_before_env": out_before_env,
+                            "out": out,
+                        },
+                        "timestamp": int(_time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+    return out
+
+
+def reconcile_worker_provider_label(
+    llm: Any,
+    provider: str,
+    llm_provider_arg: Optional[str],
+) -> str:
+    """
+    Etiqueta efectiva para recortes de contexto y mensajes de fallo del agente.
+    Si el manifest pasó ``mlx`` pero el cliente apunta a api.deepseek.com, corrige a ``deepseek``.
+    """
+    decl = (llm_provider_arg or "").strip().lower()
+    inferred = infer_provider_from_openai_compatible_llm(llm)
+    if decl and decl not in ("none_llm", "none"):
+        if decl in ("mlx", "iotcorelabs") and inferred and inferred not in ("mlx", "iotcorelabs"):
+            return inferred
+        return decl
+    if inferred:
+        return inferred
+    return (provider or "").strip().lower() or "none_llm"
+
+
 def mlx_openai_compatible_model_name(requested: str) -> str:
     """
     Nombre de modelo para ``ChatOpenAI`` → ``mlx_lm.server``.

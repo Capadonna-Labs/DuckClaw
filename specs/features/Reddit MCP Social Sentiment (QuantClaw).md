@@ -19,6 +19,14 @@ No existe `src/reddit` en el repositorio oficial [modelcontextprotocol/servers](
 
 **Paquete npm `mcp-reddit` ≥1.1:** las mismas herramientas se listan con prefijo `reddit_` (p. ej. `reddit_get_post`, `reddit_search_reddit`). El bridge en `reddit_bridge.py` admite **ambos** esquemas de nombres.
 
+**Enlaces de compartir `/r/<sub>/s/<slug>`:** el slug **no** es el `post_id` de la API de Reddit; `reddit_get_post` suele devolver 404. En `factory.py` / `agent_node`, Finanz fuerza **`reddit_search_reddit`** con la URL completa y reescribe llamadas `reddit_get_post` a búsqueda cuando el turno incluye ese patrón.
+
+**Contexto LLM (`tools_node` en `factory.py`):** las herramientas cuyo nombre comienza por `reddit_` pasan su salida por [`duckclaw.utils.formatters`](packages/shared/src/duckclaw/utils/formatters.py) (`format_reddit_mcp_reply_if_applicable`) **antes** de añadir el `ToolMessage` al historial, para evitar JSON masivo en contexto/KV cache (Markdown compacto: cabecera `## r/… (Top N posts)`, score, enlace, extracto truncado).
+
+**Redundancia anti-regresión:** justo antes de cada `llm.invoke` en `agent_node`, `sanitize_reddit_tool_messages_for_llm` vuelve a compactar cualquier `ToolMessage` `reddit_*` en la lista enviada al modelo. En `context_monitor` / `_truncate_tool_messages` (BI), el contenido `reddit_*` se compacta antes de truncar por tamaño. Las trazas SFT (`conversation_traces._lc_messages_to_chatml`) aplican el mismo formateador al serializar mensajes `tool` con nombre `reddit_*`.
+
+**Egress Telegram:** si el asistente aún devuelve JSON crudo de listado (`subreddit` + `posts`), `set_reply` y el API Gateway aplican el mismo formateador antes de la síntesis NL / envío. La fachada [`reddit_listing_to_nl.py`](packages/agents/src/duckclaw/forge/atoms/reddit_listing_to_nl.py) reexporta las funciones desde shared por compatibilidad.
+
 Herramientas **mutadoras** del paquete (posts, comentarios, borrado, subida de imagen): por defecto **no** se registran si el manifest tiene `reddit.read_only: true`. Con `read_only: false` se exponen pero quedan envueltas en **HITL** (mensaje que pide `/approve`), igual que GitHub destructivo.
 
 **Variables de entorno (proceso del API Gateway)**  

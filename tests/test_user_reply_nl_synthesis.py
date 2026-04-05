@@ -15,6 +15,41 @@ def test_reply_needs_nl_synthesis() -> None:
     assert mod.reply_needs_nl_synthesis("{broken") is False
 
 
+def test_reply_needs_nl_synthesis_reddit_mcp_prefixed_or_truncated() -> None:
+    """Prefijo worker + JSON listado MCP no empieza por '{'; JSON truncado no pasa json.loads."""
+    blob_ok = 'finanz 2\n\n{\n  "subreddit": "worldnews",\n  "sort": "hot",\n  "posts": []\n}'
+    assert mod.reply_needs_nl_synthesis(blob_ok) is True
+    broken = 'finanz 2\n\n{"subreddit":"worldnews","posts":[{"title":"x"'
+    assert mod.reply_needs_nl_synthesis(broken) is True
+
+
+def test_reply_needs_nl_synthesis_reddit_compact_markdown_listing() -> None:
+    """Listado Markdown post-formatter (no JSON) debe disparar síntesis NL."""
+    md = """finanz 2
+
+## r/worldnews (Top 8 posts)
+
+- **Hilo Ucrania** (Score: 100) - [Enlace](https://reddit.com/r/worldnews/comments/x/y/)
+"""
+    assert mod.reply_needs_nl_synthesis(md) is True
+    assert mod.reply_needs_nl_synthesis("## r/x (Top 1 posts)\n- a [Enlace](u)") is False  # sin Score ni Extracto
+
+
+def test_reply_needs_nl_synthesis_combined_tool_blocks() -> None:
+    combined = "### read_sql\n[\n  {\"id\": \"1\", \"name\": \"Nequi\"}\n]\n\n### get_ibkr_portfolio\n{\"cash\": 1.0}"
+    assert mod.reply_needs_nl_synthesis(combined) is True
+
+
+def test_reply_needs_nl_synthesis_plain_hash_headers_no_json() -> None:
+    # Sin guiones bajos en el encabezado → no parece id de tool DuckClaw.
+    assert mod.reply_needs_nl_synthesis("### hola\nmundo") is False
+
+
+def test_reply_needs_nl_synthesis_snake_tool_prose_block() -> None:
+    ibkr = "finanz 2\n\n### get_ibkr_portfolio\nEstado: IBKR Gateway conectado.\nValor total: $1"
+    assert mod.reply_needs_nl_synthesis(ibkr) is True
+
+
 def test_maybe_synthesize_reply_skips_when_spec_off() -> None:
     llm = MagicMock()
     spec = MagicMock()
@@ -38,6 +73,20 @@ def test_maybe_synthesize_reply_invokes_llm() -> None:
     llm.invoke.assert_called_once()
 
 
+def test_synthesize_user_visible_reply_finanz_adds_subtotal_rules_to_system() -> None:
+    from langchain_core.messages import AIMessage, SystemMessage
+
+    llm = MagicMock()
+    llm.invoke.return_value = AIMessage(content="Listo.")
+    mod.synthesize_user_visible_reply(
+        llm, user_ask="resumen cuentas", raw_evidence="[]", worker_id="finanz"
+    )
+    msgs = llm.invoke.call_args[0][0]
+    assert isinstance(msgs[0], SystemMessage)
+    assert "subtotal" in (msgs[0].content or "").lower()
+    assert "ibkr" in (msgs[0].content or "").lower()
+
+
 def test_load_manifest_default_egress_nl_true() -> None:
     """finanz manifest debe asumir síntesis activa sin clave explícita."""
     spec = load_manifest("finanz")
@@ -52,6 +101,25 @@ def test_maybe_synthesize_skips_when_env_global_off(monkeypatch) -> None:
     spec.worker_id = "x"
     raw = '{"a": 1}'
     assert mod.maybe_synthesize_reply(llm, spec=spec, user_ask="q", reply_candidate=raw) == raw
+    llm.invoke.assert_not_called()
+
+
+def test_maybe_synthesize_reddit_compact_when_env_global_off_uses_deterministic(monkeypatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_DISABLE_NL_REPLY_SYNTHESIS", "1")
+    llm = MagicMock()
+    spec = MagicMock()
+    spec.egress_natural_language_synthesis = True
+    spec.worker_id = "finanz"
+    md = """## r/worldnews (Top 2 posts)
+
+- **Hilo A** (Score: 10) - [Enlace](https://reddit.com/a)
+- **Hilo B** (Score: 9) - [Enlace](https://reddit.com/b)
+"""
+    out = mod.maybe_synthesize_reply(llm, spec=spec, user_ask="Lee reddit", reply_candidate=md)
+    assert "r/worldnews" in out
+    assert "Siguientes pasos" in out
+    assert "Hilo A" in out and "Hilo B" in out
+    assert "[Enlace](" not in out
     llm.invoke.assert_not_called()
 
 

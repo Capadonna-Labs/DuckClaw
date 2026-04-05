@@ -128,6 +128,114 @@ def _is_no_task(incoming: str) -> bool:
     return bool(_NO_TASK_PATTERN.match(text))
 
 
+def _is_finanz_local_account_write_query(text: str) -> bool:
+    """
+    True si el usuario pide mutar saldo/cuenta en la DuckDB local (finance_worker).
+    Usado para forzar la primera tool `admin_sql` (cola → db-writer), no IBKR.
+    """
+    if not text or not text.strip():
+        return False
+    t = text.strip().lower()
+    if any(
+        k in t
+        for k in (
+            "ibkr",
+            "interactive brokers",
+            "bolsa",
+            "acciones",
+            "portfolio",
+            "portafolio",
+            "[system_directive:",
+        )
+    ):
+        return False
+    if not re.search(
+        r"\b(actualiza|actualizar|cambia|cambiar|modifica|modificar|ajusta|ajustar|"
+        r"pone|poner|ponga|pon\b|establece|establecer|fija|fijar|deja|dejar|corrige|corregir|"
+        r"setea|setear)\b",
+        t,
+    ):
+        return False
+    if "saldo" in t or "balance" in t:
+        return True
+    if "cuenta" in t and any(
+        k in t
+        for k in (
+            "bancolombia",
+            "nequi",
+            "davivienda",
+            "efectivo",
+            "global 66",
+            "global66",
+            "scotiabank",
+            "finance_worker",
+            "cop",
+            "pesos",
+            "cero",
+        )
+    ):
+        return True
+    if re.search(r"\b(cero|0)\b", t) and ("cop" in t or "peso" in t) and any(
+        k in t for k in ("bancolombia", "nequi", "davivienda", "cuenta", "efectivo")
+    ):
+        return True
+    return False
+
+
+def _is_finanz_local_accounts_query(text: str) -> bool:
+    """Cuentas/saldos en DuckDB local (finance_worker); no mezclar con IBKR ni portfolio de bolsa."""
+    if not text or not text.strip():
+        return False
+    t = text.strip().lower()
+    if any(k in t for k in ("ibkr", "interactive brokers", "bolsa", "acciones", "portfolio", "portafolio")):
+        return False
+    return bool(
+        re.search(
+            r"\b(resumen\s+(de\s+)?(mis\s+)?cuentas|saldos?\s+(de\s+)?(mis\s+)?cuentas|"
+            r"mis\s+cuentas\s+bancarias|cuentas\s+bancarias|estado\s+actual\s+de\s+mis\s+cuentas)\b",
+            t,
+        )
+    )
+
+
+def _finanz_should_force_ibkr_after_local_cuentas_read(
+    messages: list[Any] | None,
+    *,
+    logical_worker_id: str,
+    has_ibkr: bool,
+) -> bool:
+    """
+    Tras un ToolMessage de read_sql, forzar get_ibkr_portfolio si el último HumanMessage
+    fue un resumen general de cuentas locales y aún no hubo get_ibkr_portfolio en ese turno.
+    """
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    if not has_ibkr or (logical_worker_id or "").strip().lower() != "finanz":
+        return False
+    msgs = messages or []
+    if not msgs:
+        return False
+    last = msgs[-1]
+    if not isinstance(last, ToolMessage) or (last.name or "") != "read_sql":
+        return False
+    last_human_idx: int | None = None
+    for i in range(len(msgs) - 1, -1, -1):
+        if isinstance(msgs[i], HumanMessage):
+            last_human_idx = i
+            break
+    if last_human_idx is None:
+        return False
+    human_text = str(getattr(msgs[last_human_idx], "content", "") or "")
+    if "[SYSTEM_DIRECTIVE:" in human_text:
+        return False
+    if not _is_finanz_local_accounts_query(human_text):
+        return False
+    for m in msgs[last_human_idx + 1 :]:
+        if isinstance(m, ToolMessage) and (m.name or "") == "get_ibkr_portfolio":
+            return False
+    return True
+
+
 _TASK_AWARENESS_PROMPT = """
 Además:
 - Si no recibes una tarea concreta (mensaje vacío o solo saludos), pregunta: "¿Cuál es mi tarea?" y ofrece ejemplos de lo que puedes hacer según tu rol.
@@ -177,11 +285,22 @@ def _apply_forge_attaches(
     private_path: str,
     shared_path: Optional[str],
     *,
-    read_only_attaches: bool = False,
+    read_only_attaches: bool | None = None,
+    private_attach_read_only: bool = False,
+    shared_attach_read_only: bool = True,
     skip_private_attach: bool = False,
 ) -> None:
-    """ATTACH bóveda privada y opcionalmente una segunda base como catálogo compartido."""
-    ro = " (READ_ONLY)" if read_only_attaches else ""
+    """ATTACH bóveda privada y opcionalmente una segunda base como catálogo compartido.
+
+    Por defecto el alias ``shared`` va en READ_ONLY. El alias ``private`` puede ir en RW
+    cuando el worker tiene ``manifest.read_only: false`` (p. ej. Finanz + ``quant_core``).
+    Si se pasa ``read_only_attaches`` (legado), se aplica el mismo modo a ambos ATTACH.
+    """
+    if read_only_attaches is not None:
+        private_attach_read_only = bool(read_only_attaches)
+        shared_attach_read_only = bool(read_only_attaches)
+    ro_p = " (READ_ONLY)" if private_attach_read_only else ""
+    ro_s = " (READ_ONLY)" if shared_attach_read_only else ""
     if not skip_private_attach:
         esc_p = _escape_attach_path(private_path)
         try:
@@ -189,7 +308,7 @@ def _apply_forge_attaches(
                 db.execute("DETACH private")
             except Exception:
                 pass
-            db.execute(f"ATTACH '{esc_p}' AS private{ro}")
+            db.execute(f"ATTACH '{esc_p}' AS private{ro_p}")
         except Exception as exc:
             _log.debug("forge ATTACH private skipped: %s", exc)
     sp = (shared_path or "").strip()
@@ -211,7 +330,7 @@ def _apply_forge_attaches(
     Path(sp).parent.mkdir(parents=True, exist_ok=True)
     esc_s = _escape_attach_path(sp)
     try:
-        db.execute(f"ATTACH '{esc_s}' AS shared{ro}")
+        db.execute(f"ATTACH '{esc_s}' AS shared{ro_s}")
     except Exception as exc:
         _log.warning("forge ATTACH shared failed (%s): %s", sp, exc)
 
@@ -311,7 +430,8 @@ def _estimate_tokens_from_messages(messages: list) -> int:
 def _groq_max_estimated_input_tokens() -> int:
     """
     Tope estimado (chars/4) para el contenido serializado de mensajes hacia Groq.
-    El TPM de 12k de Groq cuenta además esquemas de tools; este tope solo recorta historial/tool output.
+    El límite efectivo del tier free/on_demand (~12k TPM por petición) incluye esquemas de tools;
+    este tope debe quedar por debajo para no disparar 413.
     """
     raw = (os.environ.get("DUCKCLAW_GROQ_MAX_INPUT_TOKENS") or "").strip()
     if raw:
@@ -319,7 +439,7 @@ def _groq_max_estimated_input_tokens() -> int:
             return max(1500, min(int(raw), 11500))
         except ValueError:
             pass
-    return 9500
+    return 5000
 
 
 def _groq_tool_message_max_chars() -> int:
@@ -329,7 +449,7 @@ def _groq_tool_message_max_chars() -> int:
             return max(400, min(int(raw), 100_000))
         except ValueError:
             pass
-    return 6000
+    return 3500
 
 
 def _trim_messages_to_estimated_cap(
@@ -430,6 +550,113 @@ def _apply_provider_input_budget(messages: list[Any], *, provider: str) -> list[
     return m
 
 
+def _groq_tools_without_reddit_for_bind(tools: list[Any]) -> list[Any]:
+    """
+    Groq tier on_demand (~12k TPM por petición) cuenta mensajes + **definiciones de tools**.
+    El MCP de Reddit registra muchas herramientas; en rutas genéricas (p. ej. presupuestos) no hacen falta
+    y empujan el request por encima del límite. Las rutas forzadas Reddit siguen ligando el set completo.
+    """
+    return [t for t in (tools or []) if not str(getattr(t, "name", None) or "").startswith("reddit_")]
+
+
+def _extract_first_reddit_url(text: str) -> Optional[str]:
+    if not text or not str(text).strip():
+        return None
+    m = re.search(r"https?://(?:www\.)?reddit\.com/[^\s)>\]\"']+", str(text), re.IGNORECASE)
+    if m:
+        u = m.group(0)
+        while u and u[-1] in ".,);":
+            u = u[:-1]
+        return u or None
+    m2 = re.search(r"https?://redd\.it/[a-zA-Z0-9]+", str(text), re.IGNORECASE)
+    return m2.group(0) if m2 else None
+
+
+def _finanz_followup_reddit_read_intent(text: str) -> bool:
+    t = (text or "").lower()
+    if "reddit" not in t and "redd.it" not in t:
+        return False
+    return any(
+        k in t
+        for k in (
+            "leer",
+            "lee",
+            "read",
+            "post",
+            "hilo",
+            "thread",
+            "enlace",
+            "link",
+            "url",
+            "muestra",
+            "mostrar",
+            "ver ",
+            "contenido",
+            "abrir",
+        )
+    )
+
+
+def _most_recent_reddit_url_in_human_messages(messages: list[Any]) -> Optional[str]:
+    from langchain_core.messages import HumanMessage
+
+    from duckclaw.integrations.llm_providers import lc_message_content_to_text
+
+    for m in reversed(messages or []):
+        if not isinstance(m, HumanMessage):
+            continue
+        txt = lc_message_content_to_text(m)
+        u = _extract_first_reddit_url(txt)
+        if u:
+            return u
+    return None
+
+
+def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -> str:
+    """Mensaje Telegram cuando falla invoke del LLM en agent_node (sin culpar a MLX si el proveedor es Groq)."""
+    pl = (provider or "").strip().lower()
+    raw = str(exc)
+    low = raw.lower()
+    mlx_hint = (
+        "No pude completar la inferencia: el motor local (p. ej. MLX) no respondió o se reinició, "
+        "a veces por **falta de memoria GPU**. Revisa `pm2 logs MLX-Inference`.\n\n"
+        "Si el fallo fue tras `/context --summary`, prueba bajar el volcado con la variable "
+        "`DUCKCLAW_SEMANTIC_SUMMARY_MAX_CHARS` (p. ej. 6000) o desactiva la segunda pasada de síntesis "
+        "con `DUCKCLAW_DISABLE_NL_REPLY_SYNTHESIS=1`."
+    )
+    groq_tokens_hint = (
+        "No pude completar la inferencia con **Groq**: el envío supera el límite de tokens de tu plan "
+        "(p. ej. ~12k TPM en tier on_demand). El gateway ya omite herramientas **reddit_*** en rutas "
+        "genéricas con Groq para ahorrar esquema; si sigue fallando, prueba:\n"
+        "- `DUCKCLAW_GROQ_MAX_INPUT_TOKENS` más bajo y/o `DUCKCLAW_GROQ_TOOL_MESSAGE_MAX_CHARS` más bajo\n"
+        "- Acortar el historial del chat o subir tier en console.groq.com\n"
+        "- `DUCKCLAW_DISABLE_NL_REPLY_SYNTHESIS=1` si ocurre tras muchas herramientas."
+    )
+    is_groq_size_or_tpm = (
+        "413" in raw
+        or "rate_limit_exceeded" in low
+        or "tokens per minute" in low
+        or "request too large" in low
+        or "too large for model" in low
+    )
+    if pl == "groq" and is_groq_size_or_tpm:
+        return groq_tokens_hint
+    if pl == "groq":
+        return (
+            "No pude completar la inferencia con **Groq**. Revisa API key y cuotas. "
+            "Detalle: "
+            + raw[:380]
+            + ("…" if len(raw) > 380 else "")
+        )
+    if pl in ("mlx", "iotcorelabs"):
+        return mlx_hint
+    return (
+        "No pude completar la inferencia con el proveedor LLM configurado. Detalle: "
+        + raw[:380]
+        + ("…" if len(raw) > 380 else "")
+    )
+
+
 def _compact_run_sandbox_tool_content_for_llm(content: str, max_chars: int) -> str:
     """
     El JSON de run_sandbox incluye figure_base64 (cientos de KB). Para el LLM se omite ese campo
@@ -459,6 +686,7 @@ def _compact_run_sandbox_tool_content_for_llm(content: str, max_chars: int) -> s
 
 def _truncate_tool_messages(messages: list, max_chars: int) -> list:
     from langchain_core.messages import ToolMessage
+    from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
 
     out = []
     for m in messages or []:
@@ -468,6 +696,9 @@ def _truncate_tool_messages(messages: list, max_chars: int) -> list:
                 out.append(m)
                 continue
             name = getattr(m, "name", "") or ""
+            orig_c = c
+            if name.startswith("reddit_"):
+                c = format_reddit_mcp_reply_if_applicable(c)
             if name in ("run_sandbox", "run_browser_sandbox"):
                 compacted = _compact_run_sandbox_tool_content_for_llm(c, max_chars)
                 out.append(
@@ -481,6 +712,14 @@ def _truncate_tool_messages(messages: list, max_chars: int) -> list:
                 out.append(
                     ToolMessage(
                         content=c[:max_chars] + "\n…[truncado por tamaño]",
+                        tool_call_id=m.tool_call_id,
+                        name=name,
+                    )
+                )
+            elif c != orig_c:
+                out.append(
+                    ToolMessage(
+                        content=c,
                         tool_call_id=m.tool_call_id,
                         name=name,
                     )
@@ -784,7 +1023,18 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
             db_path_str = str(getattr(db, "_path", "") or "").strip()
             if not db_path_str:
                 return json.dumps({"error": "Sin ruta de base de datos para encolar escritura."})
+            released_ro = False
+            st = None
             try:
+                # DuckDB: un handle abierto en el proceso del gateway (aunque sea RO) puede
+                # impedir que db-writer tome lock de escritura en el mismo archivo (evidencia: PID gateway en el error).
+                ro = bool(getattr(db, "_read_only", False))
+                if ro and db_path_str != ":memory:":
+                    susp = getattr(db, "suspend_readonly_file_handle", None)
+                    resu = getattr(db, "resume_readonly_file_handle", None)
+                    if callable(susp) and callable(resu):
+                        susp()
+                        released_ro = True
                 resolved = str(Path(db_path_str).expanduser().resolve())
                 uid = _infer_user_id_for_writer(resolved)
                 task_id = enqueue_duckdb_write_sync(
@@ -793,9 +1043,18 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
                     user_id=uid,
                     tenant_id="default",
                 )
-                st = poll_task_status_sync(task_id, timeout_sec=3.0)
+                _poll = 15.0 if released_ro else 3.0
+                st = poll_task_status_sync(task_id, timeout_sec=_poll)
             except Exception as e:
                 return json.dumps({"error": str(e)})
+            finally:
+                if released_ro:
+                    try:
+                        resu = getattr(db, "resume_readonly_file_handle", None)
+                        if callable(resu):
+                            resu()
+                    except Exception:
+                        pass
             if st is not None and st.status == "success":
                 return json.dumps({"status": "success"})
             if st is not None and st.status == "failed":
@@ -901,11 +1160,13 @@ def build_worker_graph(
     Build a compiled LangGraph for a worker. Used by AgentAssembler._build_worker
     and by WorkerFactory.create() (shim).
 
-    Si ``reuse_db`` apunta al mismo archivo que ``path`` y el worker **no** necesita
-    catálogo ``shared`` (``shared_resolved`` vacío), reutiliza esa conexión y omite ATTACH
-    del privado para no duplicar handles (en producción el manager usa RO; en tests puede
-    ser RW). Si hace falta ``shared``, se abre otra conexión para no pisar el estado
-    ATTACH entre workers distintos en caché.
+    Si ``reuse_db`` apunta al mismo archivo que ``path``, **no** está en solo lectura,
+    y el worker **no** necesita catálogo ``shared`` (``shared_resolved`` vacío), reutiliza
+    esa conexión y omite ATTACH del privado para no duplicar handles. Si ``reuse_db`` es RO
+    (manager/gateway típico) **no** reutilizar: abrir ``DuckClaw(path, read_only=spec.read_only)``
+    para que workers con ``read_only: false`` puedan INSERT en quant_core.*.
+    Si hace falta ``shared``, se abre otra conexión para no pisar el estado ATTACH entre
+    workers distintos en caché.
     """
     spec = load_manifest(worker_id, templates_root)
     path = _get_db_path(worker_id, instance_name, db_path)
@@ -916,22 +1177,26 @@ def build_worker_graph(
     reuse_path = ""
     if reuse_db is not None:
         reuse_path = str(getattr(reuse_db, "_path", "") or "").strip()
+    reuse_read_only = bool(getattr(reuse_db, "_read_only", False)) if reuse_db is not None else False
     skip_private = bool(
         reuse_db is not None
         and reuse_path
         and _same_duckdb_file(reuse_path, path)
         and not (shared_resolved or "").strip()
+        and not reuse_read_only
     )
     if skip_private:
         db = reuse_db
         _log.debug("build_worker_graph: reuse DuckClaw (same file, no shared, skip private ATTACH) path=%s", path)
     else:
-        db = DuckClaw(path, read_only=True)
+        # Manifest ``read_only: false`` (p. ej. Finanz): conexión RW para INSERT en quant_core.* / señales.
+        db = DuckClaw(path, read_only=bool(spec.read_only))
     _apply_forge_attaches(
         db,
         path,
         shared_resolved,
-        read_only_attaches=True,
+        private_attach_read_only=bool(spec.read_only),
+        shared_attach_read_only=True,
         skip_private_attach=skip_private,
     )
 
@@ -1268,6 +1533,17 @@ def build_worker_graph(
     tools_sandbox_off = filter_tools_for_sandbox(tools, enabled=False)
     tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}
 
+    _groq_bind = (provider or "").strip().lower() == "groq"
+    _tools_for_llm_bind = _groq_tools_without_reddit_for_bind(tools) if _groq_bind else tools
+    _tools_sandbox_off_bind = (
+        _groq_tools_without_reddit_for_bind(tools_sandbox_off) if _groq_bind else tools_sandbox_off
+    )
+    if _groq_bind:
+        _log.info(
+            "Groq: bind genérico sin reddit_* (%d tools; forzados Reddit/otros usan set acorde).",
+            len(_tools_for_llm_bind),
+        )
+
     if llm is None:
         def agent_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
             out = {
@@ -1279,34 +1555,51 @@ def build_worker_graph(
     else:
         from duckclaw.integrations.llm_providers import (
             bind_tools_with_parallel_default as _bind_tools,
-            coerce_json_tool_invoke,
+            extract_embedded_json_tool_invokes,
         )
 
         # Cache de re-ligado por modo (evita re-bind costoso por chat/turno).
         # parallel_tool_calls=True en APIs OpenAI-compat (incl. MLX): permite varias tool_calls en un turno.
-        llm_with_tools_on = _bind_tools(llm, tools)
-        llm_with_tools_off = _bind_tools(llm, tools_sandbox_off)
+        # Groq (~12k TPM): rutas genéricas sin reddit_* (ver _tools_for_llm_bind); Reddit forzado usa `tools` completo.
+        llm_with_tools_on = _bind_tools(llm, _tools_for_llm_bind)
+        llm_with_tools_off = _bind_tools(llm, _tools_sandbox_off_bind)
 
         has_ibkr = "get_ibkr_portfolio" in tools_by_name
         has_read_sql = "read_sql" in tools_by_name
+        has_admin_sql = "admin_sql" in tools_by_name
         tool_choice_inspect_schema = {"type": "function", "function": {"name": "inspect_schema"}}
         tool_choice_read_sql = {"type": "function", "function": {"name": "read_sql"}}
+        tool_choice_admin_sql = {"type": "function", "function": {"name": "admin_sql"}}
         tool_choice_portfolio = {"type": "function", "function": {"name": "get_ibkr_portfolio"}}
 
-        llm_force_schema_on = _bind_tools(llm, tools, tool_choice=tool_choice_inspect_schema)
-        llm_force_schema_off = _bind_tools(llm, tools_sandbox_off, tool_choice=tool_choice_inspect_schema)
-        llm_force_read_sql_on = _bind_tools(llm, tools, tool_choice=tool_choice_read_sql)
-        llm_force_read_sql_off = _bind_tools(llm, tools_sandbox_off, tool_choice=tool_choice_read_sql)
-        llm_force_portfolio_on = _bind_tools(llm, tools, tool_choice=tool_choice_portfolio) if has_ibkr else None
+        llm_force_schema_on = _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_inspect_schema)
+        llm_force_schema_off = _bind_tools(
+            llm, _tools_sandbox_off_bind, tool_choice=tool_choice_inspect_schema
+        )
+        llm_force_read_sql_on = _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_read_sql)
+        llm_force_read_sql_off = _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_read_sql)
+        llm_force_admin_sql_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_admin_sql) if has_admin_sql else None
+        )
+        llm_force_admin_sql_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_admin_sql)
+            if has_admin_sql
+            else None
+        )
+        llm_force_portfolio_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_portfolio) if has_ibkr else None
+        )
         llm_force_portfolio_off = (
-            _bind_tools(llm, tools_sandbox_off, tool_choice=tool_choice_portfolio) if has_ibkr else None
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_portfolio) if has_ibkr else None
         )
 
         has_tavily = "tavily_search" in tools_by_name
         tool_choice_tavily = {"type": "function", "function": {"name": "tavily_search"}}
-        llm_force_tavily_on = _bind_tools(llm, tools, tool_choice=tool_choice_tavily) if has_tavily else None
+        llm_force_tavily_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_tavily) if has_tavily else None
+        )
         llm_force_tavily_off = (
-            _bind_tools(llm, tools_sandbox_off, tool_choice=tool_choice_tavily) if has_tavily else None
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_tavily) if has_tavily else None
         )
 
         _reddit_tool_names = sorted(k for k in tools_by_name if (k or "").startswith("reddit_"))
@@ -1366,16 +1659,7 @@ def build_worker_graph(
             )
 
         def _first_reddit_url_in_text(text: str) -> Optional[str]:
-            if not text or not str(text).strip():
-                return None
-            m = re.search(r"https?://(?:www\.)?reddit\.com/[^\s)>\]\"']+", str(text), re.IGNORECASE)
-            if m:
-                u = m.group(0)
-                while u and u[-1] in ".,);":
-                    u = u[:-1]
-                return u or None
-            m2 = re.search(r"https?://redd\.it/[a-zA-Z0-9]+", str(text), re.IGNORECASE)
-            return m2.group(0) if m2 else None
+            return _extract_first_reddit_url(text)
 
         def _incoming_has_reddit_share_path(text: str) -> bool:
             return bool(re.search(r"reddit\.com/r/[\w_]+/s/[a-zA-Z0-9]+", str(text or ""), re.IGNORECASE))
@@ -1406,23 +1690,36 @@ def build_worker_graph(
                         pass
             return {}
 
-        def _patch_ai_reddit_search_query(resp: Any, query_url: str) -> Any:
+        def _patch_ai_reddit_share_tool_calls(resp: Any, share_url: str) -> Any:
+            """
+            Enlaces /r/<sub>/s/<slug> no son post_id de la API de Reddit: reddit_get_post devuelve 404.
+            Sustituye get_post por reddit_search_reddit(query=url) y fija query en búsquedas.
+            """
+            if not share_url or not _incoming_has_reddit_share_path(share_url):
+                return resp
             tcs = list(getattr(resp, "tool_calls", None) or [])
-            if not query_url or not tcs:
+            if not tcs:
                 return resp
             patched: list[Any] = []
             changed = False
             for tc in tcs:
                 name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
-                if name != "reddit_search_reddit" or not isinstance(tc, dict):
-                    patched.append(tc)
+                tid = (tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)) or ""
+                if name == "reddit_get_post":
+                    patched.append(
+                        {"name": "reddit_search_reddit", "args": {"query": share_url}, "id": tid}
+                    )
+                    changed = True
                     continue
-                args = _tc_args_as_dict(tc)
-                args["query"] = query_url
-                new_tc = {**tc, "args": args}
-                new_tc.pop("arguments", None)
-                patched.append(new_tc)
-                changed = True
+                if name == "reddit_search_reddit" and isinstance(tc, dict):
+                    args = _tc_args_as_dict(tc)
+                    args["query"] = share_url
+                    new_tc = {**tc, "args": args}
+                    new_tc.pop("arguments", None)
+                    patched.append(new_tc)
+                    changed = True
+                    continue
+                patched.append(tc)
             if not changed:
                 return resp
             return resp.model_copy(update={"tool_calls": patched})
@@ -1431,21 +1728,6 @@ def build_worker_graph(
             a = re.sub(r"[^a-z0-9]", "", (spec.worker_id or "").lower())
             b = re.sub(r"[^a-z0-9]", "", (getattr(spec, "logical_worker_id", None) or "").lower())
             return a == "jobhunter" or b == "jobhunter"
-
-        def _is_finanz_local_accounts_query(text: str) -> bool:
-            """Cuentas/saldos en DuckDB local (finance_worker); no mezclar con IBKR ni portfolio de bolsa."""
-            if not text or not text.strip():
-                return False
-            t = text.strip().lower()
-            if any(k in t for k in ("ibkr", "interactive brokers", "bolsa", "acciones", "portfolio", "portafolio")):
-                return False
-            return bool(
-                re.search(
-                    r"\b(resumen\s+(de\s+)?(mis\s+)?cuentas|saldos?\s+(de\s+)?(mis\s+)?cuentas|"
-                    r"mis\s+cuentas\s+bancarias|cuentas\s+bancarias|estado\s+actual\s+de\s+mis\s+cuentas)\b",
-                    t,
-                )
-            )
 
         def _is_portfolio_query(text: str) -> bool:
             if not text or not text.strip():
@@ -1553,6 +1835,7 @@ def build_worker_graph(
                 "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in (incoming or "")
                 or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
             )
+            summarize_stored_directive = "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
             is_schema = _is_schema_query(incoming)
             is_table_content = _is_table_content_query(incoming)
             is_latest_game = _is_latest_game_query(incoming)
@@ -1561,6 +1844,12 @@ def build_worker_graph(
                 (_lid or "").strip().lower() == "finanz"
                 and has_read_sql
                 and _is_finanz_local_accounts_query(incoming)
+                and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
+            )
+            force_finanz_admin_sql = (
+                (_lid or "").strip().lower() == "finanz"
+                and has_admin_sql
+                and _is_finanz_local_account_write_query(incoming)
                 and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
             )
             # Resumen post /context --add | --summary: el volcado ya va en el mensaje; no forzar inspect_schema
@@ -1573,6 +1862,7 @@ def build_worker_graph(
                 is_latest_game = False
                 is_portfolio = False
                 force_finanz_cuentas = False
+                force_finanz_admin_sql = False
             # No forzar herramienta si el último mensaje ya es ToolMessage (ya ejecutamos la tool):
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
             last_msg = (state.get("messages") or [])[-1] if state.get("messages") else None
@@ -1597,10 +1887,20 @@ def build_worker_graph(
                     pass
 
             force_schema = is_schema and not already_has_tool_result
+            force_admin_sql = force_finanz_admin_sql and not already_has_tool_result
             force_read_sql = (
                 is_table_content or is_latest_game or force_finanz_cuentas
             ) and not already_has_tool_result
-            force_portfolio = is_portfolio and not already_has_tool_result
+            force_portfolio_first = is_portfolio and not already_has_tool_result
+            force_portfolio_after_local_cuentas = (
+                not telegram_context_summarize_directive
+                and _finanz_should_force_ibkr_after_local_cuentas_read(
+                    state.get("messages"),
+                    logical_worker_id=str(_lid or ""),
+                    has_ibkr=bool(has_ibkr),
+                )
+            )
+            force_portfolio = force_portfolio_first or force_portfolio_after_local_cuentas
 
             jh_fast_text: str | None = None
             if _spec_is_job_hunter() and not already_has_tool_result:
@@ -1628,7 +1928,16 @@ def build_worker_graph(
             else:
                 force_tavily = False
 
-            share_slug = _reddit_share_slug_from_incoming(incoming)
+            _reddit_anchor_u: Optional[str] = None
+            if _incoming_has_reddit_url(incoming):
+                _reddit_anchor_u = _first_reddit_url_in_text(incoming)
+            elif (_lid or "").strip().lower() == "finanz" and _finanz_followup_reddit_read_intent(incoming):
+                _reddit_anchor_u = _most_recent_reddit_url_in_human_messages(state.get("messages") or [])
+            incoming_for_reddit = incoming
+            if _reddit_anchor_u and (_reddit_anchor_u not in (incoming or "")):
+                incoming_for_reddit = f"{incoming}\n{_reddit_anchor_u}"
+
+            share_slug = _reddit_share_slug_from_incoming(incoming_for_reddit)
             reddit_search_tool_count = _count_tool_messages_named(state.get("messages") or [], "reddit_search_reddit")
             need_share_followup = bool(
                 share_slug
@@ -1638,17 +1947,20 @@ def build_worker_graph(
                 and share_slug not in str(last_msg.content or "")
                 and reddit_search_tool_count < 2
             )
+            # SUMMARIZE_NEW_CONTEXT con solo URL de Reddit debe poder forzar Reddit (fetch); STORED con URLs en
+            # el volcado no debe robar el turno (sintetizar snapshot DuckDB).
             force_reddit = bool(
                 _lid == "finanz"
                 and has_reddit_tools
-                and _incoming_has_reddit_url(incoming)
-                and not telegram_context_summarize_directive
-                and not (force_schema or force_read_sql or force_portfolio or force_tavily)
+                and _reddit_anchor_u is not None
+                and not summarize_stored_directive
+                and not (force_schema or force_admin_sql or force_read_sql or force_portfolio or force_tavily)
                 and (not already_has_tool_result or need_share_followup)
             )
 
             if not _worker_use_heuristic_first_tool(spec):
                 force_schema = False
+                force_admin_sql = False
                 force_read_sql = False
                 force_portfolio = False
                 force_tavily = False
@@ -1663,29 +1975,37 @@ def build_worker_graph(
             sandbox_enabled = _sandbox_enabled_for_state(state)
             llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
             forced_name = (
-                "inspect_schema"
-                if force_schema
+                "admin_sql"
+                if force_admin_sql
                 else (
-                    "read_sql"
-                    if force_read_sql
+                    "inspect_schema"
+                    if force_schema
                     else (
-                        "get_ibkr_portfolio"
-                        if force_portfolio
-                        else ("tavily_search" if force_tavily else ("reddit" if force_reddit else "auto"))
+                        "read_sql"
+                        if force_read_sql
+                        else (
+                            "get_ibkr_portfolio"
+                            if force_portfolio
+                            else ("tavily_search" if force_tavily else ("reddit" if force_reddit else "auto"))
+                        )
                     )
                 )
             )
             _log.info(
-                "[%s] incoming=%r | is_schema=%s | is_table_content=%s | is_latest_game=%s | is_portfolio=%s | forced_tool=%s",
+                "[%s] incoming=%r | is_schema=%s | is_table_content=%s | is_latest_game=%s | "
+                "is_portfolio=%s | ibkr_after_cuentas=%s | forced_tool=%s",
                 _wl,
                 incoming[:80] + ("..." if len(incoming) > 80 else ""),
                 is_schema,
                 is_table_content,
                 is_latest_game,
                 is_portfolio,
+                force_portfolio_after_local_cuentas,
                 forced_name,
             )
-            _msg_list = list(state["messages"])
+            from duckclaw.utils.formatters import sanitize_reddit_tool_messages_for_llm
+
+            _msg_list = sanitize_reddit_tool_messages_for_llm(list(state["messages"]))
             if not _worker_use_heuristic_first_tool(spec):
                 _msg_list = [
                     SystemMessage(
@@ -1698,7 +2018,10 @@ def build_worker_graph(
                 ] + _msg_list
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             try:
-                if force_schema and not force_read_sql:
+                if force_admin_sql:
+                    fa = llm_force_admin_sql_on if sandbox_enabled else llm_force_admin_sql_off
+                    resp = (fa or llm_with_tools).invoke(_groq_msgs)
+                elif force_schema and not force_read_sql:
                     resp = (llm_force_schema_on if sandbox_enabled else llm_force_schema_off).invoke(_groq_msgs)
                 elif force_read_sql:
                     resp = (llm_force_read_sql_on if sandbox_enabled else llm_force_read_sql_off).invoke(_groq_msgs)
@@ -1711,29 +2034,29 @@ def build_worker_graph(
                     resp = (ft or llm_with_tools).invoke(_groq_msgs)
                 elif force_reddit:
                     fr = None
-                    if _incoming_looks_like_reddit_post_url(incoming):
+                    # Share /r/x/s/slug → siempre búsqueda; nunca get_post (el slug no es post_id).
+                    if _incoming_has_reddit_share_path(incoming_for_reddit):
+                        fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
+                    elif _incoming_looks_like_reddit_post_url(incoming_for_reddit):
                         fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
                     if fr is None:
                         fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
                     if fr is None:
                         fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
                     resp = (fr or llm_with_tools).invoke(_groq_msgs)
-                    ruq = _first_reddit_url_in_text(incoming)
-                    if ruq and _incoming_has_reddit_share_path(incoming):
-                        resp = _patch_ai_reddit_search_query(resp, ruq)
                 else:
                     resp = llm_with_tools.invoke(_groq_msgs)
+                if (
+                    (_lid or "").strip().lower() == "finanz"
+                    and resp is not None
+                    and getattr(resp, "tool_calls", None)
+                ):
+                    _ru_share = _first_reddit_url_in_text(incoming_for_reddit)
+                    if _ru_share and _incoming_has_reddit_share_path(_ru_share):
+                        resp = _patch_ai_reddit_share_tool_calls(resp, _ru_share)
             except Exception as exc:
                 _log.warning("[%s] LLM invoke failed in agent_node: %s", _wl, exc, exc_info=True)
-                resp = AIMessage(
-                    content=(
-                        "No pude completar la inferencia: el motor local (p. ej. MLX) no respondió o se reinició, "
-                        "a veces por **falta de memoria GPU**. Revisa `pm2 logs MLX-Inference`.\n\n"
-                        "Si el fallo fue tras `/context --summary`, prueba bajar el volcado con la variable "
-                        "`DUCKCLAW_SEMANTIC_SUMMARY_MAX_CHARS` (p. ej. 6000) o desactiva la segunda pasada de síntesis "
-                        "con `DUCKCLAW_DISABLE_NL_REPLY_SYNTHESIS=1`."
-                    )
-                )
+                resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=provider))
             tool_calls = getattr(resp, "tool_calls", None) or []
             if tool_calls:
                 _tc_names: list[Any] = []
@@ -1753,6 +2076,7 @@ def build_worker_graph(
             heartbeat_message_for_tool,
             schedule_chat_heartbeat_dm,
         )
+        from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
 
         _chat_ctx = state.get("chat_id") or state.get("session_id") or "default"
         _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"
@@ -1892,6 +2216,8 @@ def build_worker_graph(
                                 content = _compact_run_sandbox_tool_content_for_llm(
                                     content, _RUN_SANDBOX_TOOL_LLM_MAX_CHARS
                                 )
+                        if name.startswith("reddit_"):
+                            content = format_reddit_mcp_reply_if_applicable(content)
                         _log.info(
                             "[%s] tool=%s | result_len=%d | preview=%r",
                             _wl,
@@ -1966,6 +2292,7 @@ def build_worker_graph(
         return out
 
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
+        from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
         from duckclaw.forge.atoms.user_reply_nl_synthesis import (
             incoming_has_context_summarize_directive,
             maybe_synthesize_reply,
@@ -1975,6 +2302,7 @@ def build_worker_graph(
         from duckclaw.graphs.chat_heartbeat import format_tool_heartbeat, schedule_chat_heartbeat_dm
         from duckclaw.integrations.llm_providers import (
             lc_message_content_to_text,
+            sanitize_worker_reply_phase1,
             sanitize_worker_reply_text,
         )
 
@@ -2006,7 +2334,8 @@ def build_worker_graph(
         msgs = state.get("messages") or []
         last = msgs[-1] if msgs else None
         reply = lc_message_content_to_text(last) if last else ""
-        reply = sanitize_worker_reply_text(reply)
+        reply = sanitize_worker_reply_phase1(reply)
+        reply = format_reddit_mcp_reply_if_applicable(reply)
         suppress_egress = bool(state.get("suppress_subagent_egress"))
 
         def _nl_user_ask() -> str:
@@ -2020,41 +2349,48 @@ def build_worker_graph(
             out_empty = {**state, "reply": "Sin respuesta generada."}
             out_empty.update(_identity_fields(state))
             return out_empty
-        coerced = coerce_json_tool_invoke(reply)
-        if coerced:
+        _embedded_invokes = extract_embedded_json_tool_invokes(reply)
+        if _embedded_invokes:
             from duckclaw.utils import format_tool_reply
 
-            name, params = coerced
+            # read_sql (cuentas locales) antes que broker, alineado con el system prompt Finanz.
+            _embed_order = {"read_sql": 0, "get_ibkr_portfolio": 1}
+            _embedded_invokes = sorted(
+                _embedded_invokes, key=lambda t: (_embed_order.get(t[0], 99), t[0])
+            )
             sandbox_enabled = _sandbox_enabled_for_state(state)
             tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
-            if name not in tool_lookup:
-                _log.warning(
-                    "[%s] assistant JSON tool not in registry: %s (sandbox_tools=%s)",
-                    getattr(spec, "worker_id", "?"),
-                    name,
-                    sandbox_enabled,
-                )
-                err = json.dumps(
-                    {"error": f"Herramienta no disponible en este modo: {name}"},
-                    ensure_ascii=False,
-                )
-                _eb = _apply_nl_synthesis(format_tool_reply(err))
-                out_bad = {**state, "reply": _eb, "messages": msgs}
-                out_bad.update(_identity_fields(state))
-                return out_bad
+            for name, _params in _embedded_invokes:
+                if name not in tool_lookup:
+                    _log.warning(
+                        "[%s] assistant JSON tool not in registry: %s (sandbox_tools=%s)",
+                        getattr(spec, "worker_id", "?"),
+                        name,
+                        sandbox_enabled,
+                    )
+                    err = json.dumps(
+                        {"error": f"Herramienta no disponible en este modo: {name}"},
+                        ensure_ascii=False,
+                    )
+                    _eb = sanitize_worker_reply_text(_apply_nl_synthesis(format_tool_reply(err)))
+                    out_bad = {**state, "reply": _eb, "messages": msgs}
+                    out_bad.update(_identity_fields(state))
+                    return out_bad
             try:
-                result = tool_lookup[name].invoke(params)
-                text = str(result) if result else "Listo."
+                _parts: list[str] = []
+                for name, params in _embedded_invokes:
+                    result = tool_lookup[name].invoke(params)
+                    _parts.append(f"### {name}\n{format_tool_reply(result)}")
+                _combined = "\n\n".join(_parts)
                 _notify_final_heartbeat()
-                _formatted = _apply_nl_synthesis(format_tool_reply(text))
+                _formatted = sanitize_worker_reply_text(_apply_nl_synthesis(_combined))
                 out_tool = {**state, "reply": _formatted, "internal_reply": _formatted, "messages": msgs}
                 out_tool.update(_identity_fields(state))
                 return out_tool
             except Exception as e:
                 _log.warning(
-                    "[%s] JSON tool invoke failed tool=%s: %s",
+                    "[%s] JSON tool invoke failed (embedded multi/single): %s",
                     getattr(spec, "worker_id", "?"),
-                    name,
                     e,
                     exc_info=True,
                 )
@@ -2065,7 +2401,7 @@ def build_worker_graph(
                     },
                     ensure_ascii=False,
                 )
-                _ee = _apply_nl_synthesis(format_tool_reply(err))
+                _ee = sanitize_worker_reply_text(_apply_nl_synthesis(format_tool_reply(err)))
                 out_err = {**state, "reply": _ee, "messages": msgs}
                 out_err.update(_identity_fields(state))
                 return out_err
@@ -2074,6 +2410,7 @@ def build_worker_graph(
         reply = rescind_trivial_context_summary_reply(
             llm, spec, incoming=_rescind_incoming, reply_candidate=reply or ""
         )
+        reply = format_reddit_mcp_reply_if_applicable(reply or "")
         if not suppress_egress:
             _notify_final_heartbeat()
         try:
@@ -2116,6 +2453,7 @@ def build_worker_graph(
                     reply = new_r
         except Exception:
             pass
+        reply = sanitize_worker_reply_text(reply or "")
         if suppress_egress:
             out = {**state, "reply": "", "internal_reply": (reply or ""), "messages": msgs}
         else:

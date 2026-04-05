@@ -5,7 +5,9 @@ from duckclaw.integrations.llm_providers import (
     build_agent_graph,
     build_duckclaw_tools,
     coerce_json_tool_invoke,
+    extract_embedded_json_tool_invokes,
     lc_message_content_to_text,
+    sanitize_worker_reply_phase1,
     sanitize_worker_reply_text,
     _validate_read_sql,
     _validate_write_sql,
@@ -21,6 +23,34 @@ def test_sanitize_worker_reply_strips_error_code_preface_and_eot() -> None:
     assert "Hola" in out
 
 
+def test_sanitize_worker_reply_strips_eot_glued_to_last_word() -> None:
+    raw = "El saldo ha sido actualizado a 0 COP.<|eot_id|>"
+    out = sanitize_worker_reply_text(raw)
+    assert "<|eot_id|>" not in out
+    assert out.endswith("0 COP.")
+
+
+def test_sanitize_worker_reply_strips_html_escaped_eot() -> None:
+    raw = "Listo.&lt;|eot_id|&gt;"
+    out = sanitize_worker_reply_text(raw)
+    assert "eot_id" not in out.lower()
+    assert out.rstrip(".").endswith("Listo")
+
+
+def test_sanitize_worker_reply_strips_tool_section_headers() -> None:
+    raw = "finanz 2\n\n### get_ibkr_portfolio\nEstado: conectado."
+    out = sanitize_worker_reply_text(raw)
+    assert "get_ibkr_portfolio" not in out
+    assert "Estado: conectado" in out
+
+
+def test_sanitize_worker_reply_phase1_keeps_tool_headers() -> None:
+    raw = "### get_ibkr_portfolio\nEstado: ok"
+    out = sanitize_worker_reply_phase1(raw)
+    assert "get_ibkr_portfolio" in out
+    assert "Estado: ok" in out
+
+
 def test_coerce_json_tool_invoke_parameters_and_arguments_string() -> None:
     raw = '{"name": "read_sql", "parameters": {"query": "SELECT 1"}}'
     got = coerce_json_tool_invoke(raw)
@@ -28,6 +58,23 @@ def test_coerce_json_tool_invoke_parameters_and_arguments_string() -> None:
     raw2 = r'{"name": "read_sql", "arguments": "{\"query\": \"SELECT 2\"}"}'
     got2 = coerce_json_tool_invoke(raw2)
     assert got2 == ("read_sql", {"query": "SELECT 2"})
+
+
+def test_extract_embedded_json_tool_invokes_semicolon_separated_pair() -> None:
+    raw = (
+        '{"name": "get_ibkr_portfolio", "parameters": {}}; '
+        '{"name": "read_sql", "parameters": {"query": "SELECT * FROM finance_worker.cuentas"}}'
+    )
+    got = extract_embedded_json_tool_invokes(raw)
+    assert got == [
+        ("get_ibkr_portfolio", {}),
+        ("read_sql", {"query": "SELECT * FROM finance_worker.cuentas"}),
+    ]
+
+
+def test_extract_embedded_json_tool_invokes_single_same_as_coerce() -> None:
+    raw = '{"name": "read_sql", "parameters": {"query": "SELECT 1"}}'
+    assert extract_embedded_json_tool_invokes(raw) == [("read_sql", {"query": "SELECT 1"})]
 
 
 def test_lc_message_content_to_text_list_blocks() -> None:

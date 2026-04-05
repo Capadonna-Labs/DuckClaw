@@ -295,6 +295,9 @@ def test_manager_capabilities_fast_path_ok() -> None:
     assert "osint" in jh and "discovery" in jh
     assert "osint" in _capabilities_fast_reply_text("job_hunter").lower()
     assert "osint" in _capabilities_fast_reply_text("Job‐Hunter").lower()  # U+2010 hyphen
+    fz = _capabilities_fast_reply_text("finanz").lower()
+    assert "ibkr" in fz and "duckdb" in fz
+    assert "resumen" in fz or "cuenta" in fz
 
 
 def test_manager_a2a_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pytest.MonkeyPatch) -> None:

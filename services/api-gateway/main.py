@@ -1554,11 +1554,25 @@ async def _invoke_chat(
         except Exception:
             pass
     reply_text = result.get("reply", "") if isinstance(result, dict) else (result or "")
+    # Tokens EOT del modelo (p. ej. Slayer/MLX: <|eot_id|>) no deben llegar a Telegram ni a logs.
+    try:
+        from duckclaw.integrations.llm_providers import sanitize_worker_reply_text
+
+        reply_text = sanitize_worker_reply_text(reply_text or "")
+    except Exception:
+        pass
     # Evitar doble escape Telegram: historial/n8n a veces reinyecta texto ya escapado y el modelo lo copia.
     try:
         from duckclaw.graphs.on_the_fly_commands import unescape_telegram_markdown_v2_layers
 
         reply_text = unescape_telegram_markdown_v2_layers(reply_text or "")
+    except Exception:
+        pass
+    # Reddit MCP: último filtro antes de Telegram/logs (delegación manager, caché de grafos, rutas sin set_reply).
+    try:
+        from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
+
+        reply_text = format_reddit_mcp_reply_if_applicable(reply_text or "")
     except Exception:
         pass
     # Grafo manager devuelve assigned_worker_id; refinar contexto de log para [RES]
@@ -1774,8 +1788,12 @@ async def _invoke_chat(
                 session_id,
                 history_for_model + [u, a],
             )
+    # ``response`` debe ser Markdown/texto plano: el webhook de Telegram y
+    # ``_outbound_deliver_chat_text_sync`` aplican ``llm_markdown_to_telegram_html`` una sola vez.
+    # Si aquí devolviéramos ``reply_text`` (ya HTML), la segunda pasada escapa ``<a>`` → el usuario ve
+    # literales ``<a href="...">`` en el cliente.
     out_resp: dict[str, Any] = {
-        "response": reply_text,
+        "response": reply_plain_for_storage or "",
         "session_id": session_id,
         "worker_id": effective_worker_id or worker_id,
         "elapsed_ms": elapsed_ms,

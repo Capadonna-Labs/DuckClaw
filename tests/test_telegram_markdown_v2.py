@@ -56,6 +56,15 @@ def test_llm_markdown_link_http() -> None:
     assert "[" not in html
 
 
+def test_llm_markdown_double_conversion_escapes_html_entities() -> None:
+    """Evitar segunda pasada sobre salida ya HTML (p. ej. gateway + webhook Telegram)."""
+    md = "- **T** (Score: 1) - [Enlace](https://reddit.com/x)"
+    once = llm_markdown_to_telegram_html(md)
+    twice = llm_markdown_to_telegram_html(once)
+    assert '<a href="https://reddit.com/x">' in once
+    assert "&lt;a href=" in twice
+
+
 def test_llm_markdown_link_tg_user_mention() -> None:
     raw = "- [Juan](tg://user?id=1726618406) (1726618406) · rol: admin"
     html = llm_markdown_to_telegram_html(raw)

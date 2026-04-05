@@ -5,6 +5,11 @@ from duckclaw.utils.langsmith_trace import (
     get_tracing_config,
     run_name_for_langsmith,
 )
+from duckclaw.utils.formatters import (
+    format_reddit_mcp_json_to_nl,
+    format_reddit_mcp_reply_if_applicable,
+    sanitize_reddit_tool_messages_for_llm,
+)
 from duckclaw.utils.tool_reply import format_tool_reply
 from duckclaw.utils.logger import (
     configure_structured_logging,
@@ -25,6 +30,9 @@ from duckclaw.utils.logger import (
 )
 
 __all__ = [
+    "format_reddit_mcp_json_to_nl",
+    "format_reddit_mcp_reply_if_applicable",
+    "sanitize_reddit_tool_messages_for_llm",
     "format_tool_reply",
     "configure_structured_logging",
     "extract_usage_from_messages",

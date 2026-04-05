@@ -648,6 +648,19 @@ def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -
             + raw[:380]
             + ("…" if len(raw) > 380 else "")
         )
+    if pl == "deepseek":
+        return (
+            "No pude completar la inferencia con **DeepSeek**. Revisa `DEEPSEEK_API_KEY`, red y cuotas; "
+            "el fallo no es el servidor MLX local.\n\n"
+            f"Detalle: {raw[:380]}"
+            + ("…" if len(raw) > 380 else "")
+        )
+    if pl == "openai":
+        return (
+            "No pude completar la inferencia con **OpenAI** (API compatible). Revisa `OPENAI_API_KEY` y red.\n\n"
+            f"Detalle: {raw[:380]}"
+            + ("…" if len(raw) > 380 else "")
+        )
     if pl in ("mlx", "iotcorelabs"):
         return mlx_hint
     return (
@@ -1253,6 +1266,11 @@ def build_worker_graph(
         llm = build_llm(provider, model, base_url)
     elif llm is None:
         llm = None
+
+    if llm is not None:
+        from duckclaw.integrations.llm_providers import reconcile_worker_provider_label
+
+        provider = reconcile_worker_provider_label(llm, provider, llm_provider)
 
     _logical_id_early = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
     _cp_early = _normalized_context_pruning(spec)
@@ -2017,35 +2035,50 @@ def build_worker_graph(
                     )
                 ] + _msg_list
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
+            _invoked_llm: Any = llm_with_tools
+            if force_admin_sql:
+                _fa = llm_force_admin_sql_on if sandbox_enabled else llm_force_admin_sql_off
+                _invoked_llm = _fa or llm_with_tools
+            elif force_schema and not force_read_sql:
+                _invoked_llm = (
+                    llm_force_schema_on if sandbox_enabled else llm_force_schema_off
+                )
+            elif force_read_sql:
+                _invoked_llm = (
+                    llm_force_read_sql_on if sandbox_enabled else llm_force_read_sql_off
+                )
+            elif force_portfolio:
+                _forced_pf = llm_force_portfolio_on if sandbox_enabled else llm_force_portfolio_off
+                _invoked_llm = _forced_pf or llm_with_tools
+            elif force_tavily:
+                _ft = llm_force_tavily_on if sandbox_enabled else llm_force_tavily_off
+                _invoked_llm = _ft or llm_with_tools
+            elif force_reddit:
+                _fr = None
+                if _incoming_has_reddit_share_path(incoming_for_reddit):
+                    _fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
+                elif _incoming_looks_like_reddit_post_url(incoming_for_reddit):
+                    _fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
+                if _fr is None:
+                    _fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
+                if _fr is None:
+                    _fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
+                _invoked_llm = _fr or llm_with_tools
             try:
                 if force_admin_sql:
-                    fa = llm_force_admin_sql_on if sandbox_enabled else llm_force_admin_sql_off
-                    resp = (fa or llm_with_tools).invoke(_groq_msgs)
+                    resp = _invoked_llm.invoke(_groq_msgs)
                 elif force_schema and not force_read_sql:
-                    resp = (llm_force_schema_on if sandbox_enabled else llm_force_schema_off).invoke(_groq_msgs)
+                    resp = _invoked_llm.invoke(_groq_msgs)
                 elif force_read_sql:
-                    resp = (llm_force_read_sql_on if sandbox_enabled else llm_force_read_sql_off).invoke(_groq_msgs)
+                    resp = _invoked_llm.invoke(_groq_msgs)
                 elif force_portfolio:
-                    forced = llm_force_portfolio_on if sandbox_enabled else llm_force_portfolio_off
-                    # has_ibkr => forced should not be None
-                    resp = (forced or llm_with_tools).invoke(_groq_msgs)
+                    resp = _invoked_llm.invoke(_groq_msgs)
                 elif force_tavily:
-                    ft = llm_force_tavily_on if sandbox_enabled else llm_force_tavily_off
-                    resp = (ft or llm_with_tools).invoke(_groq_msgs)
+                    resp = _invoked_llm.invoke(_groq_msgs)
                 elif force_reddit:
-                    fr = None
-                    # Share /r/x/s/slug → siempre búsqueda; nunca get_post (el slug no es post_id).
-                    if _incoming_has_reddit_share_path(incoming_for_reddit):
-                        fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
-                    elif _incoming_looks_like_reddit_post_url(incoming_for_reddit):
-                        fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
-                    if fr is None:
-                        fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
-                    if fr is None:
-                        fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
-                    resp = (fr or llm_with_tools).invoke(_groq_msgs)
+                    resp = _invoked_llm.invoke(_groq_msgs)
                 else:
-                    resp = llm_with_tools.invoke(_groq_msgs)
+                    resp = _invoked_llm.invoke(_groq_msgs)
                 if (
                     (_lid or "").strip().lower() == "finanz"
                     and resp is not None
@@ -2056,7 +2089,10 @@ def build_worker_graph(
                         resp = _patch_ai_reddit_share_tool_calls(resp, _ru_share)
             except Exception as exc:
                 _log.warning("[%s] LLM invoke failed in agent_node: %s", _wl, exc, exc_info=True)
-                resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=provider))
+                from duckclaw.integrations.llm_providers import failure_provider_label_for_llm_invoke
+
+                _pl_fail = failure_provider_label_for_llm_invoke(_invoked_llm, provider)
+                resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=_pl_fail))
             tool_calls = getattr(resp, "tool_calls", None) or []
             if tool_calls:
                 _tc_names: list[Any] = []

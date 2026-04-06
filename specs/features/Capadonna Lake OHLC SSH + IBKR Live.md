@@ -17,10 +17,13 @@ Ingerir **OHLC histórico** (y series de precio desde **`moc/`** con `timeframe=
 | `CAPADONNA_OFFLINE` | Sin túnel / config incompleta (`CAPADONNA_SSH_HOST` vacío, falta comando remoto, o ruta de clave declarada e inexistente). `message` suele ser `Túnel Lake cerrado`. |
 | `SSH_FAILED` | `ssh` falló (rc, timeout, stdout vacío, JSON inválido, binario `ssh` ausente). `message` con detalle breve. |
 
+**Solo `ticker` VIX (`VIX` / `^VIX`):** errores adicionales desde `yfinance`: `YFINANCE_IMPORT_ERROR`, `YFINANCE_FETCH_FAILED`, `YFINANCE_EMPTY`, `YFINANCE_PARSE_FAILED` (`message` con detalle).
+
 ## Enrutado por timeframe
 
 | Origen | Condición |
 |--------|-----------|
+| **VIX (yfinance)** | `ticker` normalizado **`VIX`** (acepta `VIX` o `^VIX`). **Siempre** antes que lake/HTTP: descarga vía `yfinance` (`Ticker("^VIX")`), upsert en `quant_core.ohlcv_data` con `ticker='VIX'` y `source=yfinance` en el JSON de éxito. No exige `IBKR_MARKET_DATA_URL` ni lake. Requiere el paquete `yfinance` en el proceso del gateway. |
 | **Lake (SSH)** | `timeframe` ∈ `CAPADONNA_HISTORICAL_TIMEFRAMES` (default `1d,1w,1M,moc`), lake SSH configurado (`CAPADONNA_SSH_HOST` + `CAPADONNA_REMOTE_OHLC_CMD`), y el mismo `timeframe` **no** aparece en `IBKR_REALTIME_TIMEFRAMES` (live gana si hay solapamiento). Claves **`1M`** (mes) y **`1m`** (minuto) se distinguen en el bridge. |
 | **IBKR (HTTP)** | Cualquier otro caso: intradía en vivo, histórico sin lake, o solapamiento resuelto a favor de IBKR. |
 
@@ -38,6 +41,69 @@ Ingerir **OHLC histórico** (y series de precio desde **`moc/`** con `timeframe=
 | `IBKR_REALTIME_TIMEFRAMES` | Lista CSV (default `1m,5m,15m,30m,1h`). Si un timeframe está aquí y también en histórico, **prevalece IBKR**. |
 | `IBKR_MARKET_DATA_URL` | GET con `ticker`, `timeframe`, `lookback_days` — rama tiempo real u omólogo histórico si no hay lake. |
 | `IBKR_PORTFOLIO_API_KEY` / `IBKR_MARKET_DATA_API_KEY` | Bearer opcional para el endpoint de barras. |
+
+## Contrato HTTP GET `/api/market/ohlcv` (VPS Capadonna :8002 ↔ DuckClaw)
+
+Microservicio alineado con `quant_market_bridge._http_fetch_json`. Implementación de referencia en el monorepo: [services/ibkr-ohlcv-api/main.py](../../services/ibkr-ohlcv-api/main.py) (carga el lake local vía `export_lake_ohlcv.py`; sustituible por barras IBKR en vivo en el mismo path si el VPS lo expone).
+
+**Request**
+
+- `GET /api/market/ohlcv?ticker=USO&timeframe=1h&lookback_days=7`
+- Cabecera opcional: `Authorization: Bearer <token>` (misma clave que portafolio si se reutiliza).
+- Query: `ticker`, `timeframe`, `lookback_days` (entero 1…4000).
+
+**Respuesta 200 (éxito)**
+
+```json
+{
+  "status": "success",
+  "ticker": "USO",
+  "timeframe": "1h",
+  "data": [
+    {"timestamp": "2026-04-01T09:30:00Z", "open": 81.5, "high": 82.1, "low": 81.2, "close": 81.95, "volume": 1500000}
+  ]
+}
+```
+
+Cada vela admite los alias que ya parsea `_normalize_row` (`timestamp` / `time` / `date` / `ts`, OHLC, `volume`).
+
+**Errores 4xx / 5xx**
+
+Cuerpo JSON preferente:
+
+```json
+{"status": "error", "message": "Market data farm connection is OK but missing subscription for USO"}
+```
+
+DuckClaw incorpora `message` (o `error`) en el texto devuelto a la tool cuando el código HTTP indica fallo.
+
+**Gateway (Mac mini) — `.env`**
+
+- `IBKR_MARKET_DATA_URL=http://<tailscale>:8002/api/market/ohlcv` (sin query).
+- `IBKR_MARKET_DATA_API_KEY` opcional; si falta se usa `IBKR_PORTFOLIO_API_KEY` como Bearer.
+- `IBKR_REALTIME_TIMEFRAMES` — CSV de TF que **no** usan solo lake (default en código `1m,5m,15m,30m,1h`). Añadir `1d` aquí si el lake SSH está caído y se desea forzar HTTP para diario.
+
+**Servidor (referencia `ibkr-ohlcv-api`)**
+
+- `OHLCV_LAKE_PYTHON` — Python del venv con `duckdb` en el VPS.
+- `OHLCV_LAKE_SCRIPT` — ruta absoluta a `export_lake_ohlcv.py`.
+- `OHLCV_API_KEY` opcional; si no hay, puede usarse `IBKR_PORTFOLIO_API_KEY` para exigir Bearer.
+- Arranque: `cd services/ibkr-ohlcv-api && uv run uvicorn main:app --host 0.0.0.0 --port 8002` (o `python main.py`).
+
+## Fallback IB Gateway (`/api/market/ohlcv` en el VPS)
+
+Cuando el **lake local** (`export_lake_ohlcv.py`) falla (stderr/rc), devuelve JSON vacío o **no hay barras** para el `ticker`/`timeframe`, el router [`ohlcv_market_routes.py`](../../services/ibkr-ohlcv-api/ohlcv_market_routes.py) puede intentar **barras históricas vía IB** con el mismo contrato `data[]` hacia DuckClaw.
+
+| Variable (VPS) | Rol |
+|----------------|-----|
+| `OHLCV_IB_FALLBACK` | Si es `0`, no se llama al fallback IB. Por defecto (vacío) se intenta si el script existe. |
+| `OHLCV_IB_PYTHON` / `OHLCV_IB_SCRIPT` | Rutas absolutas al intérprete y a `ibkr_historical_bars.py` (opcional; por defecto: mismo Python que el lake + `scripts/capadonna/ibkr_historical_bars.py` en `Capadonna-Driller`). |
+| `OHLCV_IB_EXPORT_TIMEOUT` | Segundos para el subproceso IB (default `90`). |
+| `IB_HOST` / `IB_PORT` / `IB_CLIENT_ID` | Conexión a TWS/Gateway en **localhost del VPS** (misma convención que `IB_ENV` paper/live → 4002/4001). |
+
+Script de referencia en el monorepo: [`scripts/capadonna/ibkr_historical_bars.py`](../../scripts/capadonna/ibkr_historical_bars.py) — requiere Python 3.10+ y `pip install ib_async` en el venv del proyecto. Contrato stdout: `{"bars":[...]}` con `timestamp`, OHLC, `volume` (como `export_lake_ohlcv`).
+
+**Límites:** pacing y permisos de mercado de IB; contratos `Stock(ticker,'SMART','USD')` pueden requerir ajuste (exchange) para algunos símbolos. El **snapshot de cuenta** (`get_account_snapshot`) no sustituye este histórico para símbolos arbitrarios.
 
 ## Contrato JSON remoto (stdout)
 

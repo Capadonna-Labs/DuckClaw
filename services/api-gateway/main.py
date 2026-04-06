@@ -1716,6 +1716,8 @@ async def _invoke_chat(
     except Exception:
         pass
     _telegram_response_parts_count = 1
+    telegram_reply_head_plain: str | None = None
+    telegram_multipart_tail_plain_for_client: str | None = None
     try:
         coarse = _split_plain_text_for_telegram_reply(
             reply_plain_for_storage or "",
@@ -1727,34 +1729,13 @@ async def _invoke_chat(
         if not plain_parts:
             plain_parts = [""]
         _telegram_response_parts_count = len(plain_parts)
-        reply_text = llm_markdown_to_telegram_html(plain_parts[0])
         tail_plain = "\n\n".join(plain_parts[1:]) if len(plain_parts) > 1 else ""
         if tail_plain.strip():
-            try:
-                from core.telegram_multipart_tail_dispatch_async import dispatch_telegram_multipart_tail_async
-
-                async def _send_telegram_tail() -> None:
-                    try:
-                        await dispatch_telegram_multipart_tail_async(
-                            tail_plain=tail_plain,
-                            session_id=session_id,
-                            user_id=(user_id or "").strip() or session_id,
-                            telegram_multipart_tail_delivery=telegram_multipart_tail_delivery,
-                            effective_telegram_bot_token=_effective_telegram_bot_token,
-                            n8n_outbound_push_sync=_webhook_outbound_chat_reply_sync,
-                            telegram_mcp=telegram_mcp,
-                            redis_client=redis_client,
-                            tenant_id=tenant_id,
-                        )
-                    except Exception as tail_exc:  # noqa: BLE001
-                        _gateway_log.warning(
-                            "telegram reply tail: envío falló (nativo/n8n): %s",
-                            tail_exc,
-                        )
-
-                asyncio.create_task(_send_telegram_tail())
-            except Exception as exc:  # noqa: BLE001
-                _gateway_log.warning("telegram reply tail: no se pudo programar envío: %s", exc)
+            # Cola 2..N: el webhook (o el cliente) debe enviar la cabeza primero y luego hacer await
+            # del tail. Un asyncio.create_task aquí compite con sendMessage de la cabeza y Telegram
+            # muestra los bubbles en orden invertido.
+            telegram_reply_head_plain = plain_parts[0]
+            telegram_multipart_tail_plain_for_client = tail_plain
     except Exception:
         try:
             reply_text = llm_markdown_to_telegram_html(reply_plain_for_storage or "")
@@ -1800,6 +1781,9 @@ async def _invoke_chat(
     }
     if _telegram_response_parts_count > 1:
         out_resp["response_parts"] = _telegram_response_parts_count
+    if telegram_reply_head_plain is not None and (telegram_multipart_tail_plain_for_client or "").strip():
+        out_resp["telegram_reply_head_plain"] = telegram_reply_head_plain
+        out_resp["telegram_multipart_tail_plain"] = telegram_multipart_tail_plain_for_client
     # Texto en JSON; PNG del sandbox lo envía el gateway por Bot API (sendPhoto).
     if (
         not is_system_prompt

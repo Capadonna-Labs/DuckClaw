@@ -20,12 +20,70 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple
 
 from duckclaw.utils.logger import log_tool_execution_sync
 
 _log = logging.getLogger(__name__)
+
+# #region agent log
+def _agent_debug_ndjson(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    """NDJSON debug ingest (session adf9d8); no secrets/PII. Activa con DUCKCLAW_DEBUG_QUANT_MARKET=1."""
+    if (os.environ.get("DUCKCLAW_DEBUG_QUANT_MARKET") or "").strip() != "1":
+        return
+    import time
+
+    _path = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+    try:
+        with open(_path, "a", encoding="utf-8") as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "adf9d8",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+
+# #endregion
+
+# #region agent log
+def _finanz_debug_ndjson(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    """Debug session adf9d8: siempre escribe (sin secrets). Quitar tras verificación post-fix."""
+    import time
+
+    _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+    try:
+        with open(_p, "a", encoding="utf-8") as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "adf9d8",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+
+# #endregion
 
 _TF_SAFE = re.compile(r"^[0-9A-Za-z]+$")
 
@@ -262,7 +320,35 @@ def _fetch_lake_ohlcv_impl(
     timeframe: str = "1d",
     lookback_days: int = 90,
 ) -> str:
-    if not capadonna_ssh_config_ok():
+    tkr_preview = (ticker or "").strip().upper()[:16]
+    tf_prev = (timeframe or "").strip()[:16]
+    _ssh_ok = capadonna_ssh_config_ok()
+    # #region agent log
+    _finanz_debug_ndjson(
+        "H2",
+        "quant_market_bridge._fetch_lake_ohlcv_impl:entry",
+        "fetch_lake_ohlcv invoked",
+        {
+            "ticker": tkr_preview,
+            "timeframe": tf_prev,
+            "capadonna_ssh_strict_ok": _ssh_ok,
+        },
+    )
+    # #endregion
+    # #region agent log
+    _agent_debug_ndjson(
+        "H3",
+        "quant_market_bridge._fetch_lake_ohlcv_impl:entry",
+        "fetch_lake_ohlcv",
+        {
+            "ticker": tkr_preview,
+            "timeframe": tf_prev,
+            "capadonna_ssh_strict_ok": _ssh_ok,
+            "has_ssh_host": bool((os.environ.get("CAPADONNA_SSH_HOST") or "").strip()),
+        },
+    )
+    # #endregion
+    if not _ssh_ok:
         return _capadonna_offline_json("Túnel Lake cerrado")
     tkr = (ticker or "").strip().upper()
     if not tkr or len(tkr) > 12:
@@ -324,12 +410,135 @@ def _http_fetch_json(tkr: str, tf: str, lookback_days: int) -> Tuple[Optional[An
             return json.loads(body), None
     except urllib.error.HTTPError as e:
         _log.warning("[quant_market] HTTP %s", e.code)
-        return None, json.dumps({"error": f"HTTP {e.code}: mercado no disponible."}, ensure_ascii=False)
+        detail = f"HTTP {e.code}: mercado no disponible."
+        try:
+            raw = e.read().decode("utf-8", errors="replace")
+            body = json.loads(raw)
+            if isinstance(body, dict):
+                msg = body.get("message") or body.get("error")
+                if msg is not None and str(msg).strip():
+                    detail = f"HTTP {e.code}: {str(msg).strip()}"
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+            pass
+        return None, json.dumps({"error": detail}, ensure_ascii=False)
     except urllib.error.URLError as e:
         _log.warning("[quant_market] URLError: %s", e.reason)
         return None, json.dumps({"error": f"Conexión fallida: {e.reason!s}"}, ensure_ascii=False)
     except json.JSONDecodeError as e:
         return None, json.dumps({"error": f"Respuesta no JSON: {e}"}, ensure_ascii=False)
+
+
+def _vix_ticker_store(ticker_upper: str) -> Optional[str]:
+    """Normaliza VIX / ^VIX al ticker guardado en quant_core (`VIX`)."""
+    s = (ticker_upper or "").strip().upper()
+    if s.startswith("^"):
+        s = s[1:]
+    return "VIX" if s == "VIX" else None
+
+
+def _yfinance_interval_for_tf(tf_norm: str) -> str:
+    """Intervalos soportados por yfinance.history (subset alineado con Finanz)."""
+    return {
+        "1m": "1m",
+        "2m": "2m",
+        "5m": "5m",
+        "15m": "15m",
+        "30m": "30m",
+        "60m": "60m",
+        "1h": "1h",
+        "1d": "1d",
+        "1w": "1wk",
+        "1M": "1mo",
+    }.get(tf_norm, "1d")
+
+
+def _fetch_vix_yfinance_payload(
+    *,
+    ticker_store: str,
+    tf: str,
+    lookback_days: int,
+) -> Tuple[Optional[list[dict[str, Any]]], Optional[str]]:
+    """
+    OHLCV para el índice VIX usando Yahoo (^VIX). Ejecuta en el gateway (no sandbox).
+    """
+    try:
+        import yfinance as yf  # type: ignore[import-untyped]
+    except ImportError:
+        return None, json.dumps(
+            {
+                "error": "YFINANCE_IMPORT_ERROR",
+                "message": "Instala yfinance en el venv del gateway (dependencia duckclaw-agents).",
+            },
+            ensure_ascii=False,
+        )
+    tf_norm = _normalize_timeframe_route_key(tf)
+    interval = _yfinance_interval_for_tf(tf_norm)
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=lookback_days)
+    try:
+        tk_yf = yf.Ticker("^VIX")
+        hist = tk_yf.history(
+            start=start.strftime("%Y-%m-%d"),
+            end=(end + timedelta(days=1)).strftime("%Y-%m-%d"),
+            interval=interval,
+            auto_adjust=False,
+            prepost=False,
+        )
+    except Exception as e:
+        _log.warning("[quant_market] yfinance VIX: %s", e)
+        return None, json.dumps(
+            {"error": "YFINANCE_FETCH_FAILED", "message": str(e)[:500]},
+            ensure_ascii=False,
+        )
+    if hist is None or hist.empty:
+        return None, json.dumps(
+            {
+                "error": "YFINANCE_EMPTY",
+                "ticker": ticker_store,
+                "timeframe": tf,
+                "message": "yfinance devolvió 0 velas para ^VIX (intervalo/ventana).",
+            },
+            ensure_ascii=False,
+        )
+    bars: list[dict[str, Any]] = []
+    for ts_idx, row in hist.iterrows():
+        try:
+            ts_dt = ts_idx.to_pydatetime() if hasattr(ts_idx, "to_pydatetime") else ts_idx
+            if getattr(ts_dt, "tzinfo", None) is not None:
+                ts_dt = ts_dt.astimezone(timezone.utc).replace(tzinfo=None)
+            o = float(row["Open"])
+            h = float(row["High"])
+            l = float(row["Low"])
+            c = float(row["Close"])
+            v_raw = row.get("Volume")
+            v = 0.0
+            if v_raw is not None:
+                try:
+                    vf = float(v_raw)
+                    if vf == vf:
+                        v = vf
+                except (TypeError, ValueError):
+                    pass
+            bars.append(
+                {
+                    "ticker": ticker_store,
+                    "timestamp": ts_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "open": o,
+                    "high": h,
+                    "low": l,
+                    "close": c,
+                    "volume": v,
+                }
+            )
+        except (KeyError, TypeError, ValueError) as ex:
+            _log.debug("[quant_market] yfinance VIX row skip: %s", ex)
+            continue
+    if not bars:
+        return None, json.dumps(
+            {"error": "YFINANCE_PARSE_FAILED", "message": "No se pudieron normalizar velas de ^VIX."},
+            ensure_ascii=False,
+        )
+    return bars, None
 
 
 def _upsert_bars(db: Any, data: Any, tkr: str, tf: str, lookback_days: int, source: str) -> str:
@@ -416,22 +625,117 @@ def _fetch_market_data_impl(
         return json.dumps({"error": "timeframe inválido (solo alfanumérico, máx. 16)."}, ensure_ascii=False)
 
     tf_norm = _normalize_timeframe_route_key(tf)
+    vix_store = _vix_ticker_store(tkr)
+    if vix_store:
+        bars, yerr = _fetch_vix_yfinance_payload(
+            ticker_store=vix_store, tf=tf, lookback_days=lookback_days
+        )
+        if yerr:
+            return yerr
+        return _upsert_bars(db, bars, vix_store, tf, lookback_days, "yfinance")
+
     use_lake = _use_lake_ssh(tf_norm)
+
+    # #region agent log
+    _finanz_debug_ndjson(
+        "H1",
+        "quant_market_bridge._fetch_market_data_impl:route",
+        "fetch_market_data route inputs",
+        {
+            "ticker": tkr[:12],
+            "timeframe": tf[:16],
+            "tf_norm": tf_norm,
+            "use_lake_ssh": use_lake,
+            "ibkr_url_non_empty": bool((os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()),
+            "lake_ssh_configured": _lake_ssh_configured(),
+            "capadonna_ssh_strict_ok": capadonna_ssh_config_ok(),
+        },
+    )
+    # #endregion
+
+    # #region agent log
+    _ibkr_url_set = bool((os.environ.get("IBKR_MARKET_DATA_URL") or "").strip())
+    _agent_debug_ndjson(
+        "H1",
+        "quant_market_bridge._fetch_market_data_impl:route",
+        "fetch_market_data routing",
+        {
+            "ticker": tkr[:16],
+            "timeframe": tf[:16],
+            "tf_norm": tf_norm,
+            "use_lake_ssh": use_lake,
+            "ibkr_url_non_empty": _ibkr_url_set,
+            "lake_ssh_configured": _lake_ssh_configured(),
+            "capadonna_ssh_strict_ok": capadonna_ssh_config_ok(),
+        },
+    )
+    # #endregion
 
     if use_lake:
         payload, err = _run_lake_ssh_json(tkr, tf, lookback_days)
         if err:
+            # #region agent log
+            _agent_debug_ndjson(
+                "H2",
+                "quant_market_bridge._fetch_market_data_impl:lake_err",
+                "lake branch error",
+                {"snippet": (err or "")[:240]},
+            )
+            # #endregion
+            # #region agent log
+            try:
+                _ej = json.loads(err) if err else {}
+                _finanz_debug_ndjson(
+                    "H3",
+                    "quant_market_bridge._fetch_market_data_impl:lake_return",
+                    "lake branch returning error string",
+                    {"error": str(_ej.get("error", ""))[:80]},
+                )
+            except Exception:
+                _finanz_debug_ndjson(
+                    "H3",
+                    "quant_market_bridge._fetch_market_data_impl:lake_return",
+                    "lake branch returning non-json err",
+                    {"snippet": (err or "")[:120]},
+                )
+            # #endregion
             return err
-        return _upsert_bars(db, payload, tkr, tf, lookback_days, "lake_ssh")
+        _out = _upsert_bars(db, payload, tkr, tf, lookback_days, "lake_ssh")
+        # #region agent log
+        _agent_debug_ndjson(
+            "H2",
+            "quant_market_bridge._fetch_market_data_impl:lake_ok",
+            "lake branch upsert",
+            {"snippet": (_out or "")[:240]},
+        )
+        # #endregion
+        return _out
 
     base = (os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()
     if not base:
+        # #region agent log
+        _agent_debug_ndjson(
+            "H5",
+            "quant_market_bridge._fetch_market_data_impl:http_unconfigured",
+            "IBKR_MARKET_HTTP_UNCONFIGURED",
+            {"tf_norm": tf_norm},
+        )
+        # #endregion
+        # #region agent log
+        _finanz_debug_ndjson(
+            "H1",
+            "quant_market_bridge._fetch_market_data_impl:http_unconfigured",
+            "returning IBKR_MARKET_HTTP_UNCONFIGURED",
+            {"tf_norm": tf_norm, "use_lake_ssh": use_lake},
+        )
+        # #endregion
         return json.dumps(
             {
                 "error": "IBKR_MARKET_HTTP_UNCONFIGURED",
                 "message": (
                     "Este timeframe no está enrutado al lake (revisa CAPADONNA_HISTORICAL_TIMEFRAMES vs "
-                    "IBKR_REALTIME_TIMEFRAMES) e IBKR_MARKET_DATA_URL está vacío. "
+                    "IBKR_REALTIME_TIMEFRAMES) e IBKR_MARKET_DATA_URL está vacío en el proceso del gateway. "
+                    "Añade IBKR_MARKET_DATA_URL al env de PM2 (p. ej. ecosystem.api.config.cjs) además de .env. "
                     "Para solo lake: usa 1d/1w/1M/moc o añade el TF al histórico y quítalo de realtime; "
                     "o define IBKR_MARKET_DATA_URL para intradía por HTTP."
                 ),
@@ -440,10 +744,183 @@ def _fetch_market_data_impl(
         )
     payload, err = _http_fetch_json(tkr, tf, lookback_days)
     if err:
+        # #region agent log
+        _agent_debug_ndjson(
+            "H4",
+            "quant_market_bridge._fetch_market_data_impl:http_err",
+            "http fetch error",
+            {"snippet": (err or "")[:240]},
+        )
+        # #endregion
+        # #region agent log
+        try:
+            _he = json.loads(err) if err else {}
+            _finanz_debug_ndjson(
+                "H4",
+                "quant_market_bridge._fetch_market_data_impl:http_err_return",
+                "http branch error",
+                {"error": str(_he.get("error", ""))[:120]},
+            )
+        except Exception:
+            _finanz_debug_ndjson(
+                "H4",
+                "quant_market_bridge._fetch_market_data_impl:http_err_return",
+                "http branch error raw",
+                {"snippet": (err or "")[:160]},
+            )
+        # #endregion
         return err
     if payload is None:
+        # #region agent log
+        _agent_debug_ndjson(
+            "H4",
+            "quant_market_bridge._fetch_market_data_impl:http_empty",
+            "no payload",
+            {},
+        )
+        # #endregion
         return json.dumps({"error": "Sin respuesta del gateway IBKR."}, ensure_ascii=False)
-    return _upsert_bars(db, payload, tkr, tf, lookback_days, "ibkr_http")
+    _http_out = _upsert_bars(db, payload, tkr, tf, lookback_days, "ibkr_http")
+    # #region agent log
+    _finanz_debug_ndjson(
+        "H5",
+        "quant_market_bridge._fetch_market_data_impl:http_ok",
+        "http upsert done",
+        {"snippet": (_http_out or "")[:200]},
+    )
+    # #endregion
+    # #region agent log
+    _agent_debug_ndjson(
+        "H4",
+        "quant_market_bridge._fetch_market_data_impl:http_ok",
+        "http upsert",
+        {"snippet": (_http_out or "")[:240]},
+    )
+    # #endregion
+    return _http_out
+
+
+def _finanz_reply_already_documents_successful_ingest(reply: str) -> bool:
+    """
+    No sustituir el borrador si ya resume ingesta OK + verificación aunque mencione
+    CAPADONNA_OFFLINE como matiz (runtime: nota al pie tras ibkr_http exitoso).
+    """
+    r = (reply or "").strip()
+    if not r:
+        return False
+    low = r.lower()
+    if "fetch_market_data" not in low:
+        return False
+    if "ingesta" in low and "exitosa" in low:
+        return True
+    if "`ok`" in r and "fetch_market" in low:
+        return True
+    if "quant_core.ohlcv_data" in low and "filas" in low and "✅" in r:
+        return True
+    return False
+
+
+def finanz_reconcile_reply_with_fetch_market_tool(messages: Any, reply: str) -> str:
+    """
+    El asistente a veces ignora un ToolMessage exitoso de ``fetch_market_data`` (p. ej. tras un
+    historial largo de fallos) y narra ``CAPADONNA_OFFLINE`` o lake SSH. Eso contradice el JSON
+    real de la tool (``status`` ok). Corregimos el texto de egreso antes de síntesis/validadores.
+    """
+    r = (reply or "").strip()
+    if not r or not messages:
+        return reply or ""
+    low = r.lower()
+    false_offline = (
+        "capadonna_offline" in low
+        or "lake capadonna fuera" in low
+        or "gateway ssh al vps" in low
+    )
+    if not false_offline:
+        return reply or ""
+    if _finanz_reply_already_documents_successful_ingest(r):
+        # #region agent log
+        _finanz_debug_ndjson(
+            "H6b",
+            "quant_market_bridge.finanz_reconcile_reply_with_fetch_market_tool",
+            "skip override: reply already has successful ingest + verify",
+            {},
+        )
+        # #endregion
+        return reply or ""
+
+    last_ok: dict[str, Any] | None = None
+    seq = list(messages)[-120:] if len(messages) > 120 else list(messages)
+    for m in reversed(seq):
+        name: str | None = None
+        content: Any = None
+        if isinstance(m, dict):
+            rrole = str(m.get("role") or m.get("type") or "").lower()
+            if rrole not in ("tool", "toolmessage"):
+                continue
+            name = m.get("name") if isinstance(m.get("name"), str) else None
+            content = m.get("content")
+        else:
+            cls = type(m).__name__
+            if cls != "ToolMessage" and getattr(m, "type", None) != "tool":
+                continue
+            name = getattr(m, "name", None)
+            content = getattr(m, "content", None)
+
+        if name != "fetch_market_data":
+            continue
+        if isinstance(content, list):
+            try:
+                from duckclaw.integrations.llm_providers import lc_message_content_to_text
+
+                body = lc_message_content_to_text(m)
+            except Exception:
+                body = str(content)
+        elif isinstance(content, str):
+            body = content
+        else:
+            body = str(content or "")
+        try:
+            data = json.loads(body.strip())
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            continue
+        if not isinstance(data, dict) or data.get("status") != "ok":
+            continue
+        try:
+            rows = int(data.get("rows_upserted") or 0)
+        except (TypeError, ValueError):
+            rows = 0
+        if rows < 0:
+            continue
+        last_ok = data
+        break
+
+    if not last_ok:
+        return reply or ""
+
+    tkr = str(last_ok.get("ticker") or "?")
+    tf = str(last_ok.get("timeframe") or "?")
+    rows = int(last_ok.get("rows_upserted") or 0)
+    src = str(last_ok.get("source") or "")
+    lb = last_ok.get("lookback_days")
+    lookback = str(lb) if lb is not None else "?"
+    # #region agent log
+    _finanz_debug_ndjson(
+        "H6",
+        "quant_market_bridge.finanz_reconcile_reply_with_fetch_market_tool",
+        "overrode reply: model claimed lake/offline but fetch_market_data JSON was ok",
+        {"ticker": tkr[:12], "timeframe": tf[:16], "rows_upserted": rows, "source": src[:24]},
+    )
+    # #endregion
+    return (
+        f"## Ingesta OHLCV\n\n"
+        f"`fetch_market_data` **correcto** para **{tkr}** (`timeframe={tf}`, lookback_days={lookback}, "
+        f"fuente `{src}`): **{rows}** fila(s) upsert en `quant_core.ohlcv_data`.\n\n"
+        f"_Nota interna: el borrador citaba error de lake/SSH; el JSON de la herramienta indica éxito._\n\n"
+        f"**Siguientes pasos**\n"
+        f"- Si el usuario pidió conteo o último cierre, ejecuta `read_sql` sobre `quant_core.ohlcv_data` "
+        f"para **{tkr}** en esta ventana.\n"
+        f"- `CAPADONNA_OFFLINE` aplica sobre todo a `fetch_lake_ohlcv`, no a esta ingesta HTTP/lake exitosa."
+    )
 
 
 def register_quant_market_skill(db: Any, tools: list[Any], spec: Any) -> None:

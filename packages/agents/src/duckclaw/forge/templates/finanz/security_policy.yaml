@@ -1,10 +1,15 @@
-# Strix: run_sandbox y run_browser_sandbox comparten policy. default: allow → Docker bridge (necesario para Playwright → mql5.com).
-# allow_list documenta intención; filtrado L7 en runtime no aplicado aún (igual que Job-Hunter).
+# Strix: run_sandbox y run_browser_sandbox comparten policy.
+# default: allow → Docker bridge (necesario para Playwright → mql5.com y para yfinance → Yahoo Finance vía HTTPS).
+# allow_list documenta dependencias de red esperadas; el motor Docker no filtra por dominio (bridge = salida amplia).
 network:
   default: allow
   allow_list:
     - mql5.com
     - www.mql5.com
+    # yfinance (run_sandbox): Yahoo OHLC — referencia operativa si algún día se añade filtrado L7
+    - finance.yahoo.com
+    - query1.finance.yahoo.com
+    - query2.finance.yahoo.com
 filesystem:
   readonly_mounts:
     - "/Users/juanjosearevalocamargo/Desktop/duckclaw/db:/workspace/repo_db:ro"

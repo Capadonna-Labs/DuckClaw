@@ -198,6 +198,34 @@ def _is_finanz_local_accounts_query(text: str) -> bool:
     )
 
 
+def _finanz_user_requests_ohlcv_ingest(text: str) -> bool:
+    """
+    True si el usuario pide traer/descargar velas OHLCV (evita que el LLM invente tool calls).
+    Requiere palabra clave de mercado + símbolo tipo ticker (1–5 letras mayúsculas).
+    """
+    if not text or not text.strip():
+        return False
+    raw = text.strip()
+    low = raw.lower()
+    if "quant_core.ohlcv" in low and any(
+        k in low for k in ("trae", "descarga", "importa", "ingesta", "actualiza", "bajar", "pull")
+    ):
+        return True
+    if not any(
+        k in low
+        for k in (
+            "vela",
+            "ohlcv",
+            "candle",
+            "fetch_market",
+            "fetch market",
+            "ingesta",
+        )
+    ):
+        return False
+    return bool(re.search(r"\b[A-Z]{1,5}\b", raw))
+
+
 def _finanz_should_force_ibkr_after_local_cuentas_read(
     messages: list[Any] | None,
     *,
@@ -1620,6 +1648,19 @@ def build_worker_graph(
             _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_tavily) if has_tavily else None
         )
 
+        has_fetch_market = "fetch_market_data" in tools_by_name
+        tool_choice_fetch_market = {"type": "function", "function": {"name": "fetch_market_data"}}
+        llm_force_fetch_market_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_fetch_market)
+            if has_fetch_market
+            else None
+        )
+        llm_force_fetch_market_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_fetch_market)
+            if has_fetch_market
+            else None
+        )
+
         _reddit_tool_names = sorted(k for k in tools_by_name if (k or "").startswith("reddit_"))
         has_reddit_tools = bool(_reddit_tool_names)
 
@@ -1984,6 +2025,42 @@ def build_worker_graph(
                 force_tavily = False
                 force_reddit = False
 
+            force_fetch_market_data = bool(
+                (_lid or "").strip().lower() == "finanz"
+                and has_fetch_market
+                and _finanz_user_requests_ohlcv_ingest(incoming)
+                and not telegram_context_summarize_directive
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_tavily
+                    or force_reddit
+                )
+                and not already_has_tool_result
+            )
+            if not _worker_use_heuristic_first_tool(spec):
+                force_fetch_market_data = False
+
+            if (_lid or "").strip().lower() == "finanz" and has_fetch_market:
+                try:
+                    from duckclaw.forge.skills.quant_market_bridge import _finanz_debug_ndjson
+
+                    _finanz_debug_ndjson(
+                        "H7",
+                        "workers/factory.py:agent_node",
+                        "ohlcv ingest force gate",
+                        {
+                            "ingest_intent": _finanz_user_requests_ohlcv_ingest(incoming),
+                            "already_tool_result": already_has_tool_result,
+                            "force_fetch_market_data": force_fetch_market_data,
+                            "incoming_tail": (incoming[-80:] if incoming else "")[:80],
+                        },
+                    )
+                except Exception:
+                    pass
+
             if jh_fast_text is not None:
                 resp = AIMessage(content=jh_fast_text)
                 out = {**state, "messages": state["messages"] + [resp]}
@@ -2004,7 +2081,15 @@ def build_worker_graph(
                         else (
                             "get_ibkr_portfolio"
                             if force_portfolio
-                            else ("tavily_search" if force_tavily else ("reddit" if force_reddit else "auto"))
+                            else (
+                                "tavily_search"
+                                if force_tavily
+                                else (
+                                    "reddit"
+                                    if force_reddit
+                                    else ("fetch_market_data" if force_fetch_market_data else "auto")
+                                )
+                            )
                         )
                     )
                 )
@@ -2064,6 +2149,9 @@ def build_worker_graph(
                 if _fr is None:
                     _fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
                 _invoked_llm = _fr or llm_with_tools
+            elif force_fetch_market_data:
+                _ffmd = llm_force_fetch_market_on if sandbox_enabled else llm_force_fetch_market_off
+                _invoked_llm = _ffmd or llm_with_tools
             try:
                 if force_admin_sql:
                     resp = _invoked_llm.invoke(_groq_msgs)
@@ -2076,6 +2164,8 @@ def build_worker_graph(
                 elif force_tavily:
                     resp = _invoked_llm.invoke(_groq_msgs)
                 elif force_reddit:
+                    resp = _invoked_llm.invoke(_groq_msgs)
+                elif force_fetch_market_data:
                     resp = _invoked_llm.invoke(_groq_msgs)
                 else:
                     resp = _invoked_llm.invoke(_groq_msgs)
@@ -2371,6 +2461,12 @@ def build_worker_graph(
         last = msgs[-1] if msgs else None
         reply = lc_message_content_to_text(last) if last else ""
         reply = sanitize_worker_reply_phase1(reply)
+        if (getattr(spec, "worker_id", "") or "").strip().lower() == "finanz":
+            from duckclaw.forge.skills.quant_market_bridge import (
+                finanz_reconcile_reply_with_fetch_market_tool,
+            )
+
+            reply = finanz_reconcile_reply_with_fetch_market_tool(msgs, reply)
         reply = format_reddit_mcp_reply_if_applicable(reply)
         suppress_egress = bool(state.get("suppress_subagent_egress"))
 
@@ -2483,7 +2579,7 @@ def build_worker_graph(
                 if vreason:
                     _log.warning("Finanz visual evidence audit: %s", vreason)
                     reply = new_v
-                new_r, qreason = quant_reply_price_audit(db, spec, reply)
+                new_r, qreason = quant_reply_price_audit(db, spec, reply, messages=msgs)
                 if qreason:
                     _log.warning("Finanz quant price audit: %s", qreason)
                     reply = new_r

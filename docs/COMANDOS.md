@@ -333,9 +333,9 @@ Implementación acoplada al template [finanz](packages/agents/src/duckclaw/forge
 | Variable | Uso |
 |----------|-----|
 | `IBKR_PORTFOLIO_API_URL` / `IBKR_PORTFOLIO_API_KEY` | Resumen de portafolio (`get_ibkr_portfolio`), igual que antes. |
-| `IBKR_MARKET_DATA_URL` | GET con `ticker`, `timeframe`, `lookback_days` — JSON con barras OHLCV para `fetch_market_data` (intradía y fallback histórico cuando el timeframe **no** va al lake). Si el API de observabilidad no expone esa ruta (p. ej. HTTP 404), déjala **vacía** en `.env`: los timeframes lake (`1d`, `1w`, `1M`, `moc`, …) siguen funcionando por SSH. |
-| `IBKR_MARKET_DATA_API_KEY` | Opcional; Bearer si el endpoint de barras no reutiliza `IBKR_PORTFOLIO_API_KEY`. |
-| `IBKR_REALTIME_TIMEFRAMES` | CSV de timeframes que van siempre al gateway HTTP (default `1m,5m,15m,30m,1h`). Si un TF coincide con histórico lake, prevalece IBKR. |
+| `IBKR_MARKET_DATA_URL` | **Solo la URL base** del endpoint (sin query), p. ej. `http://100.x.x.x:8002/api/market/ohlcv`. El cliente añade `?ticker=&timeframe=&lookback_days=`. En el VPS, el mismo path puede usar **lake** (`export_lake_ohlcv.py`) y, si no hay barras, **fallback IB** (`scripts/capadonna/ibkr_historical_bars.py`, `ib_async` + `OHLCV_IB_*`; ver spec). Contrato: [Capadonna Lake + IBKR Live](../specs/features/Capadonna%20Lake%20OHLC%20SSH%20+%20IBKR%20Live.md). Referencia: [services/ibkr-ohlcv-api](../services/ibkr-ohlcv-api/main.py). Si no existe esa ruta (404), déjala **vacía**: el lake histórico sigue por SSH. |
+| `IBKR_MARKET_DATA_API_KEY` | Opcional; Bearer para OHLCV. Si no se define, `fetch_market_data` usa `IBKR_PORTFOLIO_API_KEY`. |
+| `IBKR_REALTIME_TIMEFRAMES` | CSV de timeframes que van al gateway HTTP cuando **no** están solo en rama lake (default `1m,5m,15m,30m,1h`). Si un TF está en histórico lake **y** aquí, prevalece IBKR. Añade `1d` si el lake SSH falla y quieres diario por HTTP. |
 | `CAPADONNA_SSH_HOST` | IP/host Tailscale del VPS con el data lake (histórico). |
 | `CAPADONNA_SSH_USER` | Usuario SSH (default `capadonna`). |
 | `CAPADONNA_SSH_KEY_PATH` | Preferente; ruta local a clave privada (`-i`), p. ej. `~/.ssh/id_ed25519`. Si no se define, se usa `CAPADONNA_SSH_IDENTITY_FILE`. |

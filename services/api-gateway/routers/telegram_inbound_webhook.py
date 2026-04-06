@@ -191,6 +191,7 @@ def schedule_telegram_context_summary_background(
                     return
 
             reply_local = (res.get("response") or "").strip() if isinstance(res, dict) else ""
+            used_fb = False
             try:
                 from duckclaw.forge.atoms.user_reply_nl_synthesis import (
                     telegram_stored_context_summary_body_when_model_trivial,
@@ -203,6 +204,7 @@ def schedule_telegram_context_summary_background(
                 )
                 if _fb is not None:
                     reply_local = _fb
+                    used_fb = True
                     _log.info(
                         "%s: cuerpo sustituido por fallback determinístico "
                         "(respuesta del invoke aún trivial; red de seguridad)",
@@ -231,8 +233,14 @@ def schedule_telegram_context_summary_background(
                     _log.warning("%s no pudo enviar aviso de vacío: %s", log_label, send_exc)
                 return
 
+            head_plain = ""
+            tail_plain_ctx = ""
+            if isinstance(res, dict) and not used_fb:
+                head_plain = (res.get("telegram_reply_head_plain") or "").strip()
+                tail_plain_ctx = (res.get("telegram_multipart_tail_plain") or "").strip()
+            body_slice = head_plain if (tail_plain_ctx and head_plain) else reply_local[:3500]
+
             client_r = TelegramBotApiAsyncClient(tok)
-            body_slice = reply_local[:3500]
             body_html = llm_markdown_to_telegram_html(body_slice)
             combined = telegram_header_html + body_html
             cap = 4096 - 16
@@ -243,8 +251,22 @@ def schedule_telegram_context_summary_background(
                 plain_hdr = re.sub(r"<[^>]+>", "", telegram_header_html)
                 await client_r.send_message(
                     chat_id=chat_id,
-                    text=(plain_hdr + reply_local)[:3900],
+                    text=(plain_hdr + body_slice)[:3900],
                     parse_mode=None,
+                )
+            if tail_plain_ctx:
+                from core.telegram_multipart_tail_dispatch_async import dispatch_telegram_multipart_tail_async
+
+                await dispatch_telegram_multipart_tail_async(
+                    tail_plain=tail_plain_ctx,
+                    session_id=str(chat_id),
+                    user_id=str(vault_uid or "").strip() or str(chat_id),
+                    telegram_multipart_tail_delivery="native",
+                    effective_telegram_bot_token=resolve_effective_telegram_bot_token,
+                    n8n_outbound_push_sync=_telegram_multipart_tail_sync_stub,
+                    telegram_mcp=telegram_mcp_state,
+                    redis_client=redis_client,
+                    tenant_id=tenant_id,
                 )
         except Exception as exc:  # noqa: BLE001
             _log.warning("%s background invoke failed: %s", log_label, exc)
@@ -598,6 +620,11 @@ def _webhook_secret_ok_finanz_path(header_secret: str | None) -> bool:
     if leg:
         return bool(hdr) and secrets.compare_digest(hdr, leg)
     return True
+
+
+def _telegram_multipart_tail_sync_stub(*, chat_id: str, user_id: str, text: str) -> None:
+    """Firma requerida por ``dispatch_telegram_multipart_tail_async``; salida solo nativa/MCP."""
+    del chat_id, user_id, text
 
 
 def _webhook_secret_ok_trabajo_path(header_secret: str | None) -> bool:
@@ -1414,16 +1441,35 @@ def build_telegram_inbound_webhook_router(
                 return
 
             client_r = TelegramBotApiAsyncClient(token_r)
-            reply_plain = reply_local[:3500]
+            tail_plain = (res.get("telegram_multipart_tail_plain") or "").strip() if isinstance(res, dict) else ""
+            head_plain = (res.get("telegram_reply_head_plain") or "").strip() if isinstance(res, dict) else ""
+            reply_plain = head_plain if (tail_plain and head_plain) else reply_local[:3500]
             reply_html = llm_markdown_to_telegram_html(reply_plain)
+            cap_msg = 4096 - 16
+            if len(reply_html) > cap_msg:
+                reply_html = reply_html[: max(0, cap_msg - 1)] + "…"
             sent = await client_r.send_message(
                 chat_id=chat_id, text=reply_html, parse_mode="HTML"
             )
             if not sent.get("ok"):
                 await client_r.send_message(
                     chat_id=chat_id,
-                    text=reply_local[:3900],
+                    text=reply_plain[:3900],
                     parse_mode=None,
+                )
+            if tail_plain:
+                from core.telegram_multipart_tail_dispatch_async import dispatch_telegram_multipart_tail_async
+
+                await dispatch_telegram_multipart_tail_async(
+                    tail_plain=tail_plain,
+                    session_id=str(chat_id),
+                    user_id=(str(user_id or "").strip() or str(chat_id)),
+                    telegram_multipart_tail_delivery="native",
+                    effective_telegram_bot_token=resolve_effective_telegram_bot_token,
+                    n8n_outbound_push_sync=_telegram_multipart_tail_sync_stub,
+                    telegram_mcp=telegram_mcp,
+                    redis_client=redis_client,
+                    tenant_id=tenant_id,
                 )
 
         async def _invoke_and_reply_safe() -> None:

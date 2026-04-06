@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir uv
 
 # Dependencias analíticas requeridas por la spec (pandas, matplotlib, duckdb)
 # + scipy, sklearn para análisis avanzado
+# + yfinance (VIX/series Yahoo dentro del contenedor; requiere red si se descarga en vivo)
 RUN pip install --no-cache-dir \
         pandas==2.2.3 \
         matplotlib==3.9.4 \
@@ -22,6 +23,7 @@ RUN pip install --no-cache-dir \
         pyarrow==19.0.1 \
         requests==2.32.3 \
         vaderSentiment==3.3.2 \
+        yfinance==0.2.66 \
     && rm -rf /root/.cache/pip
 
 # Dependencias browser/LLM para automatización en sandbox (según requerimiento).

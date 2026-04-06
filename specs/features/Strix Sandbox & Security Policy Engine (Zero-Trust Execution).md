@@ -8,6 +8,7 @@ Implementar un entorno de ejecución efímero y aislado (Sandbox) basado en cont
 Dado que el host es una Mac Mini M4, se utilizará el motor de contenedores de OrbStack configurado para ejecución sin privilegios.
 
 *   **Imagen Base:** `python:3.12-slim` (o una imagen personalizada `duckclaw-strix-base` pre-empaquetada con `polars`, `pyarrow` y `requests`).
+*   **Imagen `docker/sandbox` (referencia):** además de pandas, matplotlib, mplfinance, seaborn, duckdb, scipy, scikit-learn, pyarrow, requests, vaderSentiment, incluye **`yfinance`** para scripts que descarguen datos Yahoo (^VIX, etc.). Si la política de red del worker es `deny`, las llamadas de red de `yfinance` fallarán en runtime; el import y el código offline siguen siendo válidos.
 *   **Restricciones de Daemon:**
     *   Ejecución forzada con `--user 1000:1000`.
     *   Drop de todas las capabilities del kernel: `--cap-drop=ALL`.

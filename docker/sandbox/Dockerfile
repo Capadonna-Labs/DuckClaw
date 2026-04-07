@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir \
         scipy==1.14.1 \
         scikit-learn==1.6.1 \
         pyarrow==19.0.1 \
+        openpyxl==3.1.5 \
         requests==2.32.3 \
         vaderSentiment==3.3.2 \
         yfinance==0.2.66 \

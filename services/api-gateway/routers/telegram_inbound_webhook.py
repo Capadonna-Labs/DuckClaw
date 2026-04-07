@@ -22,7 +22,6 @@ import os
 import re
 import secrets
 import time
-from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -39,9 +38,12 @@ from core.context_injection_vault import resolve_telegram_user_vault_db_path
 from core.context_stored_snapshot import fetch_semantic_memory_snapshot
 from core.models import ChatRequest
 from core.vlm_ingest import (
+    extract_pdf_plain_text_from_bytes,
     process_visual_album_batch,
     process_visual_payload,
     push_vlm_state_delta_redis,
+    telegram_document_download_limit_bytes,
+    telegram_download_file_bytes,
 )
 from duckclaw.gateway_db import resolve_env_duckdb_path
 from core.war_rooms import (
@@ -104,19 +106,26 @@ def _telegram_message_has_vlm_block(s: str) -> bool:
     return "[VLM_CONTEXT" in t and "Contexto visual adjunto:" in t
 
 
+def _telegram_message_has_gateway_document_enrichment(s: str) -> bool:
+    """PDF texto extraído en gateway o META de adjunto no parseado (sin VLM imagen)."""
+    t = (s or "").strip()
+    return "[CONTENIDO_TEXTO_EXTRAIDO_PDF]" in t or "[META: ATTACHED_DOCUMENT_NOT_PARSED" in t
+
+
 def _resolve_context_add_body(*, raw_caption: str, current_text: str) -> tuple[bool, str]:
     """
     /context --add debe detectarse con el caption/texto crudo de Telegram.
 
     Tras VLM el mensaje enriquecido ya no empieza por ``/context``; sin esto,
     ``/context --add`` + foto no encola memoria ni manda SUMMARIZE_NEW_CONTEXT.
-    Si hay bloque VLM, el cuerpo a inyectar y resumir es el texto enriquecido completo.
+    Si hay bloque VLM o enriquecimiento PDF/META del gateway, el cuerpo a inyectar
+    y resumir es el ``current_text`` completo.
     """
     is_add, body = _parse_context_add_command(raw_caption)
     if not is_add:
         return False, ""
     cur = (current_text or "").strip()
-    if _telegram_message_has_vlm_block(cur):
+    if _telegram_message_has_vlm_block(cur) or _telegram_message_has_gateway_document_enrichment(cur):
         return True, cur
     return True, (body or "").strip()
 
@@ -505,6 +514,46 @@ async def _ingest_telegram_visual_enrich_text(
             (mime_type or "unknown")[:128],
             private_dm,
         )
+        cap_ok = bool((text or "").strip())
+        # PDF/otros no-imagen con caption o comando → seguir el pipeline (sin VLM), no cortar el webhook.
+        if cap_ok:
+            _log.info(
+                "telegram_inbound tag=VLM_MIME_PASSTHROUGH_CAPTION chat_id=%s mime=%s caption_len=%s",
+                chat_id,
+                (mime_type or "unknown")[:128],
+                len(text or ""),
+            )
+            out_text = text
+            fid = (visual.get("file_id") or "").strip()
+            if mime_type == "application/pdf" and fid and token_v:
+                try:
+                    pdf_raw = await telegram_download_file_bytes(
+                        token_v,
+                        fid,
+                        max_bytes=telegram_document_download_limit_bytes(),
+                    )
+                    extracted = extract_pdf_plain_text_from_bytes(pdf_raw)
+                    if extracted.strip():
+                        out_text = (
+                            f"{text}\n\n"
+                            "[CONTENIDO_TEXTO_EXTRAIDO_PDF]\n"
+                            f"{extracted.strip()}\n"
+                        )
+                        _log.info(
+                            "telegram_inbound tag=PDF_TEXT_EXTRACTED chat_id=%s chars=%s",
+                            chat_id,
+                            len(extracted.strip()),
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning("telegram_inbound pdf extract: %s", exc)
+            if out_text is text:
+                meta = (
+                    f"[META: ATTACHED_DOCUMENT_NOT_PARSED mime={(mime_type or 'unknown')[:80]}] "
+                    "El adjunto no aportó texto utilizable en el gateway (no es imagen VLM; PDF vacío/escaneado "
+                    "u otro formato sin extractor). Prohibido inventar contenido del archivo; sintetiza solo el caption.\n\n"
+                )
+                out_text = meta + text
+            return out_text, False
         return text, True
 
     mgid = (visual.get("media_group_id") or "").strip()
@@ -1105,6 +1154,7 @@ def build_telegram_inbound_webhook_router(
                         user_id,
                     )
                 mime_type = (visual.get("mime_type") or "").strip().lower()
+                skip_vlm = False
                 if mime_type and mime_type not in _VISUAL_ALLOWED_MIME:
                     wr_append_audit(
                         db,
@@ -1114,10 +1164,19 @@ def build_telegram_inbound_webhook_router(
                         event_type="VLM_MIME_REJECTED",
                         payload=(mime_type or "unknown")[:128],
                     )
-                    return {"ok": "true"}
+                    cap_ok_wr = bool((text or "").strip())
+                    if not cap_ok_wr:
+                        return {"ok": "true"}
+                    skip_vlm = True
+                    _log.info(
+                        "war_room_filter tag=VLM_MIME_PASSTHROUGH_CAPTION tenant_id=%s mime=%s caption_len=%s",
+                        tenant_id,
+                        (mime_type or "unknown")[:128],
+                        len(text or ""),
+                    )
                 token_v = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
                 mgid = (visual.get("media_group_id") or "").strip()
-                if token_v:
+                if token_v and not skip_vlm:
                     try:
                         _log.info(
                             "war_room inbound tag=VLM_PAYLOAD_RECEIVED tenant_id=%s user_id=%s "

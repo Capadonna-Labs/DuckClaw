@@ -1304,8 +1304,10 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
         name="run_sandbox",
         description=(
             "Ejecuta código Python o Bash en un sandbox Docker aislado (sin acceso a red ni al host). "
-            "Usa cuando el usuario pida ejecutar scripts, análisis complejos, modelos, gráficos dinámicos o código libre. "
+            "Usa cuando el usuario pida ejecutar scripts, análisis complejos, modelos, gráficos dinámicos, "
+            "exportar .xlsx/.csv/.txt/.md o código libre. "
             "Para PNG con matplotlib: guardar en /workspace/output/ con savefig(dpi=100, facecolor='white', edgecolor='none'). "
+            "Para Excel/CSV u otros documentos: escribir bajo /workspace/output/ (p. ej. to_excel); con exit_code 0 el gateway puede adjuntarlos por Telegram. "
             "Parámetros: code (str), language ('python'|'bash'), data_sql (SQL para inyectar datos), session_id (str), worker_id (str opcional para política)."
         ),
     )

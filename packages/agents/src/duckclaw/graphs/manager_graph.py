@@ -504,6 +504,9 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
         if "/context" in tctx and "--add" in tctx:
             return (incoming or "").strip(), None
     t = text.lower()
+    # "Estructura de datos" (curso/materia) contiene la palabra «estructura» pero no es intención de esquema DuckDB.
+    # Sin esto, _plan_task sustituye todo el mensaje por TAREA listar tablas (p. ej. usuario va a clase de ED).
+    t_db_heuristic = re.sub(r"\bestructura\s+de\s+datos\b", " ", t)
     override: Optional[str] = None
     # MVP Leila: saludos cortos → respuesta de tienda (evita tono “agente de investigación”).
     if (worker_id or "").strip() == "LeilaAssistant":
@@ -576,9 +579,12 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
         )
     # Intención DB/tablas/nombre → si el rol es personalizable, usar finanz (especialista) si está disponible
     is_db_intent = (
-        re.search(r"\b(nombre\s+de\s+la\s+db|db|tablas?|tables?|esquema|schema|estructura|disponibles)\b", t)
-        or "tablas" in t
-        or ("nombre" in t and ("db" in t or "base" in t or "datos" in t))
+        re.search(
+            r"\b(nombre\s+de\s+la\s+db|db|tablas?|tables?|esquema|schema|estructura|disponibles)\b",
+            t_db_heuristic,
+        )
+        or "tablas" in t_db_heuristic
+        or ("nombre" in t_db_heuristic and ("db" in t_db_heuristic or "base" in t_db_heuristic or "datos" in t_db_heuristic))
     )
     if is_db_intent and (worker_id or "").strip().lower() == "personalizable":
         override = "finanz"  # invoke_worker lo usará si finanz está en list_workers
@@ -651,8 +657,8 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     # Tablas / esquema / estructura
     if re.search(
         r"\b(tablas?|tables?|esquema|schema|estructura|listar\s+tablas|disponibles)\b",
-        t,
-    ) or "tablas" in t or "qué tablas" in t or "que tablas" in t:
+        t_db_heuristic,
+    ) or "tablas" in t_db_heuristic or "qué tablas" in t_db_heuristic or "que tablas" in t_db_heuristic:
         task = (
             "TAREA: El usuario quiere ver las tablas de la base de datos. "
             "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /team, /tasks, /help y a crear objetivos con /goals."

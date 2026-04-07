@@ -220,7 +220,64 @@ def _secure_wipe_remove(tmp_path: str) -> None:
         pass
 
 
-async def _telegram_download_file_bytes(bot_token: str, file_id: str) -> bytes:
+def telegram_document_download_limit_bytes() -> int:
+    """Límite para documentos (p. ej. PDF) descargados fuera del pipeline VLM de imágenes."""
+    raw = (os.environ.get("DUCKCLAW_TELEGRAM_MAX_DOCUMENT_BYTES") or "20971520").strip()
+    try:
+        return max(1_048_576, int(raw))
+    except ValueError:
+        return 20_971_520
+
+
+def _max_pdf_context_extract_chars() -> int:
+    raw = (os.environ.get("DUCKCLAW_PDF_CONTEXT_MAX_CHARS") or "100000").strip()
+    try:
+        return max(2_000, min(500_000, int(raw)))
+    except ValueError:
+        return 100_000
+
+
+def extract_pdf_plain_text_from_bytes(pdf_bytes: bytes, *, max_chars: int | None = None) -> str:
+    """
+    Extrae texto plano de un PDF (p. ej. adjunto Telegram + /context --add).
+    PDF escaneado u omitido sin pypdf → cadena vacía.
+    """
+    if not pdf_bytes:
+        return ""
+    cap = max_chars if max_chars is not None else _max_pdf_context_extract_chars()
+    try:
+        from io import BytesIO
+
+        from pypdf import PdfReader
+    except ImportError:
+        _log.warning("pypdf no instalado; omitiendo extracción de texto PDF en gateway")
+        return ""
+    try:
+        reader = PdfReader(BytesIO(pdf_bytes))
+        chunks: list[str] = []
+        total = 0
+        for page in reader.pages:
+            t = (page.extract_text() or "").strip()
+            if not t:
+                continue
+            chunks.append(t)
+            total += len(t) + 1
+            if total >= cap:
+                break
+        out = "\n".join(chunks).strip()
+        return out[:cap]
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("extract_pdf_plain_text_from_bytes: %s", exc)
+        return ""
+
+
+async def telegram_download_file_bytes(
+    bot_token: str, file_id: str, *, max_bytes: int | None = None
+) -> bytes:
+    """
+    Descarga bytes desde Telegram Bot API (getFile + file URL).
+    Por defecto aplica el límite de imagen VLM; pasa max_bytes explícito para documentos.
+    """
     api = f"https://api.telegram.org/bot{bot_token}"
     async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
         r = await client.get(f"{api}/getFile", params={"file_id": file_id})
@@ -233,11 +290,12 @@ async def _telegram_download_file_bytes(bot_token: str, file_id: str) -> bytes:
             raise RuntimeError("Telegram file_path vacío")
         rf = await client.get(f"https://api.telegram.org/file/bot{bot_token}/{file_path}")
         rf.raise_for_status()
-        data = bytes(rf.content or b"")
-    limit = _max_image_bytes()
-    if len(data) > limit:
-        raise RuntimeError(f"imagen demasiado grande ({len(data)} > {limit})")
-    return data
+        raw = bytes(rf.content or b"")
+    limit = _max_image_bytes() if max_bytes is None else int(max_bytes)
+    if len(raw) > limit:
+        kind = "archivo" if max_bytes is not None else "imagen"
+        raise RuntimeError(f"{kind} demasiado grande ({len(raw)} > {limit})")
+    return raw
 
 
 async def _call_openai_vision(
@@ -445,7 +503,7 @@ async def process_visual_payload(
     if not (file_id or "").strip():
         raise ValueError("file_id vacío")
 
-    image_bytes = await _telegram_download_file_bytes(bot_token, file_id)
+    image_bytes = await telegram_download_file_bytes(bot_token, file_id)
     if not image_bytes:
         raise RuntimeError("imagen vacía")
     image_hash = hashlib.sha256(image_bytes).hexdigest()
@@ -580,7 +638,7 @@ async def process_visual_album_batch(
                 raise ValueError(f"MIME no permitido: {mt}")
             if not (file_id or "").strip():
                 raise ValueError("file_id vacío")
-            image_bytes = await _telegram_download_file_bytes(bot_token, file_id)
+            image_bytes = await telegram_download_file_bytes(bot_token, file_id)
             if not image_bytes:
                 raise RuntimeError("imagen vacía")
             per_hashes.append(hashlib.sha256(image_bytes).hexdigest())

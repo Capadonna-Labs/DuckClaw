@@ -1060,16 +1060,26 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
             if upper.startswith(("SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN", "PRAGMA")):
                 return db.query(q)
 
-            # Escrituras: cola singleton + confirmación breve en Redis
+            # Escrituras: cola singleton (workers RO) o ejecución en proceso (workers RW).
             db_path_str = str(getattr(db, "_path", "") or "").strip()
             if not db_path_str:
                 return json.dumps({"error": "Sin ruta de base de datos para encolar escritura."})
+            ro = bool(getattr(db, "_read_only", False))
+            # Worker RW: este proceso ya mantiene ``duckdb.connect(..., read_only=False)`` al archivo.
+            # Encolar un segundo RW en db-writer falla con lock en el mismo PID (gateway); ver logs db-writer.
+            # Alineado con ``insert_transaction``: mutar en el handle actual.
+            if not ro and db_path_str != ":memory:":
+                try:
+                    db.execute(q)
+                    return json.dumps({"status": "success"})
+                except Exception as e:
+                    return json.dumps({"error": str(e)})
+
             released_ro = False
             st = None
             try:
-                # DuckDB: un handle abierto en el proceso del gateway (aunque sea RO) puede
-                # impedir que db-writer tome lock de escritura en el mismo archivo (evidencia: PID gateway en el error).
-                ro = bool(getattr(db, "_read_only", False))
+                # DuckDB: un handle RO en el gateway puede impedir que db-writer tome lock RW;
+                # suspender antes de encolar.
                 if ro and db_path_str != ":memory:":
                     susp = getattr(db, "suspend_readonly_file_handle", None)
                     resu = getattr(db, "resume_readonly_file_handle", None)

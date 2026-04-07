@@ -27,36 +27,6 @@ from duckclaw.utils.logger import log_tool_execution_sync
 
 _log = logging.getLogger(__name__)
 
-# #region agent log
-def _agent_debug_ndjson(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    """NDJSON debug ingest (session adf9d8); no secrets/PII. Activa con DUCKCLAW_DEBUG_QUANT_MARKET=1."""
-    if (os.environ.get("DUCKCLAW_DEBUG_QUANT_MARKET") or "").strip() != "1":
-        return
-    import time
-
-    _path = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-    try:
-        with open(_path, "a", encoding="utf-8") as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "adf9d8",
-                        "hypothesisId": hypothesis_id,
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-
-
-# #endregion
-
 _TF_SAFE = re.compile(r"^[0-9A-Za-z]+$")
 
 _DEFAULT_HISTORICAL_TF = "1d,1w,1M,moc"
@@ -292,22 +262,7 @@ def _fetch_lake_ohlcv_impl(
     timeframe: str = "1d",
     lookback_days: int = 90,
 ) -> str:
-    tkr_preview = (ticker or "").strip().upper()[:16]
-    tf_prev = (timeframe or "").strip()[:16]
     _ssh_ok = capadonna_ssh_config_ok()
-    # #region agent log
-    _agent_debug_ndjson(
-        "H3",
-        "quant_market_bridge._fetch_lake_ohlcv_impl:entry",
-        "fetch_lake_ohlcv",
-        {
-            "ticker": tkr_preview,
-            "timeframe": tf_prev,
-            "capadonna_ssh_strict_ok": _ssh_ok,
-            "has_ssh_host": bool((os.environ.get("CAPADONNA_SSH_HOST") or "").strip()),
-        },
-    )
-    # #endregion
     if not _ssh_ok:
         return _capadonna_offline_json("Túnel Lake cerrado")
     tkr = (ticker or "").strip().upper()
@@ -596,57 +551,14 @@ def _fetch_market_data_impl(
 
     use_lake = _use_lake_ssh(tf_norm)
 
-    # #region agent log
-    _ibkr_url_set = bool((os.environ.get("IBKR_MARKET_DATA_URL") or "").strip())
-    _agent_debug_ndjson(
-        "H1",
-        "quant_market_bridge._fetch_market_data_impl:route",
-        "fetch_market_data routing",
-        {
-            "ticker": tkr[:16],
-            "timeframe": tf[:16],
-            "tf_norm": tf_norm,
-            "use_lake_ssh": use_lake,
-            "ibkr_url_non_empty": _ibkr_url_set,
-            "lake_ssh_configured": _lake_ssh_configured(),
-            "capadonna_ssh_strict_ok": capadonna_ssh_config_ok(),
-        },
-    )
-    # #endregion
-
     if use_lake:
         payload, err = _run_lake_ssh_json(tkr, tf, lookback_days)
         if err:
-            # #region agent log
-            _agent_debug_ndjson(
-                "H2",
-                "quant_market_bridge._fetch_market_data_impl:lake_err",
-                "lake branch error",
-                {"snippet": (err or "")[:240]},
-            )
-            # #endregion
             return err
-        _out = _upsert_bars(db, payload, tkr, tf, lookback_days, "lake_ssh")
-        # #region agent log
-        _agent_debug_ndjson(
-            "H2",
-            "quant_market_bridge._fetch_market_data_impl:lake_ok",
-            "lake branch upsert",
-            {"snippet": (_out or "")[:240]},
-        )
-        # #endregion
-        return _out
+        return _upsert_bars(db, payload, tkr, tf, lookback_days, "lake_ssh")
 
     base = (os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()
     if not base:
-        # #region agent log
-        _agent_debug_ndjson(
-            "H5",
-            "quant_market_bridge._fetch_market_data_impl:http_unconfigured",
-            "IBKR_MARKET_HTTP_UNCONFIGURED",
-            {"tf_norm": tf_norm},
-        )
-        # #endregion
         return json.dumps(
             {
                 "error": "IBKR_MARKET_HTTP_UNCONFIGURED",
@@ -662,35 +574,10 @@ def _fetch_market_data_impl(
         )
     payload, err = _http_fetch_json(tkr, tf, lookback_days)
     if err:
-        # #region agent log
-        _agent_debug_ndjson(
-            "H4",
-            "quant_market_bridge._fetch_market_data_impl:http_err",
-            "http fetch error",
-            {"snippet": (err or "")[:240]},
-        )
-        # #endregion
         return err
     if payload is None:
-        # #region agent log
-        _agent_debug_ndjson(
-            "H4",
-            "quant_market_bridge._fetch_market_data_impl:http_empty",
-            "no payload",
-            {},
-        )
-        # #endregion
         return json.dumps({"error": "Sin respuesta del gateway IBKR."}, ensure_ascii=False)
-    _http_out = _upsert_bars(db, payload, tkr, tf, lookback_days, "ibkr_http")
-    # #region agent log
-    _agent_debug_ndjson(
-        "H4",
-        "quant_market_bridge._fetch_market_data_impl:http_ok",
-        "http upsert",
-        {"snippet": (_http_out or "")[:240]},
-    )
-    # #endregion
-    return _http_out
+    return _upsert_bars(db, payload, tkr, tf, lookback_days, "ibkr_http")
 
 
 def _finanz_reply_already_documents_successful_ingest(reply: str) -> bool:

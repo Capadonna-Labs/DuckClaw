@@ -24,6 +24,14 @@ execution:
 # scrape_siata_radar_realtime: read_only; HTTPS listado /data/radar/ en skills/scrape_siata_radar.py
 skills:
   - scrape_siata_radar_realtime
+  - tavily_search
+  - research:
+      tavily_enabled: true
+      audit_langsmith: true
+      search_depth: advanced
+      include_answer: true
+      max_results: 10
+      include_raw_content: false
 context_guard:
   enabled: true
   max_retries: 2

@@ -1613,10 +1613,12 @@ def build_worker_graph(
         has_ibkr = "get_ibkr_portfolio" in tools_by_name
         has_read_sql = "read_sql" in tools_by_name
         has_admin_sql = "admin_sql" in tools_by_name
+        has_run_sandbox = "run_sandbox" in tools_by_name
         tool_choice_inspect_schema = {"type": "function", "function": {"name": "inspect_schema"}}
         tool_choice_read_sql = {"type": "function", "function": {"name": "read_sql"}}
         tool_choice_admin_sql = {"type": "function", "function": {"name": "admin_sql"}}
         tool_choice_portfolio = {"type": "function", "function": {"name": "get_ibkr_portfolio"}}
+        tool_choice_run_sandbox = {"type": "function", "function": {"name": "run_sandbox"}}
 
         llm_force_schema_on = _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_inspect_schema)
         llm_force_schema_off = _bind_tools(
@@ -1637,6 +1639,16 @@ def build_worker_graph(
         )
         llm_force_portfolio_off = (
             _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_portfolio) if has_ibkr else None
+        )
+        llm_force_run_sandbox_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_run_sandbox)
+            if has_run_sandbox
+            else None
+        )
+        llm_force_run_sandbox_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_run_sandbox)
+            if "run_sandbox" in tools_by_name_sandbox_off
+            else None
         )
 
         has_tavily = "tavily_search" in tools_by_name
@@ -2042,6 +2054,74 @@ def build_worker_graph(
             )
             if not _worker_use_heuristic_first_tool(spec):
                 force_fetch_market_data = False
+            _incoming_l = (incoming or "").lower()
+            _is_graph_request = any(
+                k in _incoming_l
+                for k in (
+                    "gráfica",
+                    "grafica",
+                    "gráfico",
+                    "grafico",
+                    "diagrama",
+                    "plot",
+                    "streamplot",
+                    "subplot",
+                    "matplotlib",
+                    "seaborn",
+                    "plotly",
+                )
+            )
+            _is_plot_docs_request = any(
+                k in _incoming_l
+                for k in (
+                    "matplotlib.org",
+                    "seaborn.pydata.org",
+                    "plotly.com/python",
+                    "docs matplotlib",
+                    "doc matplotlib",
+                    "docs seaborn",
+                    "doc seaborn",
+                    "docs plotly",
+                    "doc plotly",
+                )
+            )
+            force_plot_docs = bool(
+                has_tavily
+                and (_lid or "").strip().lower() == "siata_analyst"
+                and _is_plot_docs_request
+                and not telegram_context_summarize_directive
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_reddit
+                    or force_fetch_market_data
+                )
+                and not already_has_tool_result
+            )
+            force_run_sandbox = bool(
+                (_lid or "").strip().lower() == "siata_analyst"
+                and has_run_sandbox
+                and _is_graph_request
+                and not telegram_context_summarize_directive
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_tavily
+                    or force_plot_docs
+                    or force_reddit
+                    or force_fetch_market_data
+                )
+                and not already_has_tool_result
+            )
+            if not _worker_use_heuristic_first_tool(spec):
+                force_plot_docs = False
+                force_run_sandbox = False
+            if force_plot_docs:
+                force_tavily = True
 
             if (_lid or "").strip().lower() == "finanz" and has_fetch_market:
                 try:
@@ -2087,7 +2167,11 @@ def build_worker_graph(
                                 else (
                                     "reddit"
                                     if force_reddit
-                                    else ("fetch_market_data" if force_fetch_market_data else "auto")
+                                    else (
+                                        "fetch_market_data"
+                                        if force_fetch_market_data
+                                        else ("run_sandbox" if force_run_sandbox else "auto")
+                                    )
                                 )
                             )
                         )
@@ -2152,6 +2236,9 @@ def build_worker_graph(
             elif force_fetch_market_data:
                 _ffmd = llm_force_fetch_market_on if sandbox_enabled else llm_force_fetch_market_off
                 _invoked_llm = _ffmd or llm_with_tools
+            elif force_run_sandbox:
+                _frs = llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
+                _invoked_llm = _frs or llm_with_tools
             try:
                 if force_admin_sql:
                     resp = _invoked_llm.invoke(_groq_msgs)
@@ -2166,6 +2253,8 @@ def build_worker_graph(
                 elif force_reddit:
                     resp = _invoked_llm.invoke(_groq_msgs)
                 elif force_fetch_market_data:
+                    resp = _invoked_llm.invoke(_groq_msgs)
+                elif force_run_sandbox:
                     resp = _invoked_llm.invoke(_groq_msgs)
                 else:
                     resp = _invoked_llm.invoke(_groq_msgs)

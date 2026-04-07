@@ -50,8 +50,14 @@ async def dispatch_telegram_multipart_tail_async(
     raw = (tail_plain or "").strip()
     if not raw:
         return
+    mode = resolve_telegram_multipart_tail_delivery_mode(telegram_multipart_tail_delivery)
+    if mode == "n8n" and not (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip():
+        mode = "native"
+        _log.warning("multipart tail: modo n8n pero N8N_OUTBOUND_WEBHOOK_URL vacío; usando nativo")
 
-    if telegram_mcp is not None:
+    # En modo native respetamos el bot/token de la ruta actual; evitar MCP aquí
+    # previene mezclar colas de tail entre bots (ej. SIATA -> Finanz).
+    if telegram_mcp is not None and mode != "native":
         try:
             from duckclaw.forge.skills.telegram_mcp_bridge import send_long_plain_via_mcp_chunks
 
@@ -90,10 +96,6 @@ async def dispatch_telegram_multipart_tail_async(
             except Exception:
                 pass
 
-    mode = resolve_telegram_multipart_tail_delivery_mode(telegram_multipart_tail_delivery)
-    if mode == "n8n" and not (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip():
-        mode = "native"
-        _log.warning("multipart tail: modo n8n pero N8N_OUTBOUND_WEBHOOK_URL vacío; usando nativo")
     if mode == "native":
         token = (effective_telegram_bot_token() or "").strip()
         if not token:

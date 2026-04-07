@@ -4163,19 +4163,37 @@ def append_task_audit(
         try:
             from pathlib import Path
 
-            from duckclaw.db_write_queue import enqueue_duckdb_write_sync
+            from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
 
             raw_path = str(getattr(db, "_path", "") or "").strip()
-            if not raw_path:
+            if not raw_path or raw_path == ":memory:":
                 return
             resolved = str(Path(raw_path).expanduser().resolve())
             uid = _infer_user_id_for_audit_queue(resolved)
-            enqueue_duckdb_write_sync(
-                db_path=resolved,
-                query=sql.strip(),
-                user_id=uid,
-                tenant_id=str(tenant_id or "default").strip() or "default",
-            )
+            # El manager RO mantiene ``duckdb.connect`` al vault: db-writer no puede tomar RW
+            # hasta suspender el handle (mismo patrón que ``admin_sql`` para workers RO).
+            released_ro = False
+            try:
+                susp = getattr(db, "suspend_readonly_file_handle", None)
+                resu = getattr(db, "resume_readonly_file_handle", None)
+                if callable(susp) and callable(resu):
+                    susp()
+                    released_ro = True
+                write_tid = enqueue_duckdb_write_sync(
+                    db_path=resolved,
+                    query=sql.strip(),
+                    user_id=uid,
+                    tenant_id=str(tenant_id or "default").strip() or "default",
+                )
+                poll_task_status_sync(write_tid, timeout_sec=15.0)
+            finally:
+                if released_ro:
+                    try:
+                        resu2 = getattr(db, "resume_readonly_file_handle", None)
+                        if callable(resu2):
+                            resu2()
+                    except Exception:
+                        pass
         except Exception:
             pass
         return

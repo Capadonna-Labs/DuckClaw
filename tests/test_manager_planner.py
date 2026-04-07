@@ -177,6 +177,21 @@ def test_plan_task_context_add_vlm_passthrough_not_get_db_path() -> None:
     assert "get_db_path" not in task.lower()
 
 
+def test_plan_task_estructura_de_datos_not_db_schema_intent() -> None:
+    """«Estructura de datos» (materia) no debe reemplazar el mensaje por TAREA listar tablas."""
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    incoming = (
+        "Nada que me llega la transferencia. Voy a clase de estructura de datos y postulo vacantes. "
+        "Crea transacciones de ajuste con categoría ajuste."
+    )
+    task, override = _plan_task(incoming, "finanz")
+    assert override is None
+    assert task == incoming
+    assert "SHOW TABLES" not in task
+    assert "TAREA: El usuario quiere ver las tablas" not in task
+
+
 def test_plan_task_bi_analyst_meta_capabilities() -> None:
     from duckclaw.graphs.manager_graph import _plan_task
 

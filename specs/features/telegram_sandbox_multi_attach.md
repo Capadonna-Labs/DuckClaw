@@ -17,6 +17,11 @@
 - El API Gateway lee cada ruta del disco, valida que esté bajo la raíz permitida (`DUCKCLAW_SANDBOX_ARTIFACT_ROOT` si está definida, si no `output/sandbox` relativo al cwd), tamaño máximo ~48 MiB por archivo, y envía con **`sendDocument`** (nombre de archivo = basename del artefacto).
 - Límites: **`DUCKCLAW_SANDBOX_TELEGRAM_MAX_DOCS`** (por defecto **20**, tope **50**). Pensado para gateway y sandbox **en el mismo host**; si el gateway no ve el filesystem de `output/sandbox/`, no habrá adjuntos.
 
+## Comportamiento del agente (obligatorio)
+
+- Telegram **solo** adjunta documentos si el turno incluye un **`run_sandbox` exitoso** (`exit_code == 0`) que deje el fichero en **`/workspace/output/`** (mapeado a `output/sandbox/` en el host). Sin esa tool en el mismo turno, **no existen rutas** y el usuario verá solo texto.
+- **Prohibido** afirmar que hay un `.xlsx` / `.csv` / `.md` / `.txt` “generado”, listar hojas, tamaños o rutas fingidas, o describir un libro Excel completo **sin** `tool_calls` reales a `run_sandbox` que escriban el archivo. En ese caso el modelo debe ejecutar código en sandbox primero (p. ej. `openpyxl`, `pandas.ExcelWriter`) y solo entonces resumir lo que el artefacto contiene.
+
 ## Texto largo (webhook)
 
 - Las ramas del webhook que antes usaban `reply_local[:3500]` cuando faltaban `telegram_reply_head_plain` / `telegram_multipart_tail_plain` ahora reutilizan la misma lógica de troceo que `_invoke_chat` (`core/telegram_chunking.py`), de modo que la respuesta completa puede entregarse en varios `sendMessage` coordinados con la cola multipart existente.

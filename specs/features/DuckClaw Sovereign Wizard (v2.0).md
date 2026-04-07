@@ -9,6 +9,8 @@ El Wizard dejará de ser un `input()` secuencial. Se implementará como una **M�
 *   **Persistencia Temporal:** Los cambios se mantienen en un diccionario `draft_config` y solo se escriben a disco (`.env`, `manifest.yaml`, `docker-compose.yml`) al confirmar en la pantalla final de "Review".
 
 ## 2. UI/UX y Abstracción de Lenguaje (Human-Centric)
+La primera pantalla del wizard (`_show_wizard_concepts_primer`) debe **dar la bienvenida** en lenguaje llano: qué es DuckClaw como sistema agéntico, qué puede hacer el usuario, qué artefactos se crearán al confirmar y cómo se desarrollará el flujo (preguntas guiadas, borrador, resumen antes de aplicar). Después convive un **glosario** de términos que aparecerán más adelante.
+
 Se aplicará una capa de "Traducción de Dominio" para que los términos de infraestructura no oscurezcan el propósito del sistema.
 
 | Término Técnico | Lenguaje Wizard (Soberano) | Descripción en UI |
@@ -21,12 +23,23 @@ Se aplicará una capa de "Traducción de Dominio" para que los términos de infr
 
 ## 3. Flujo Cognitivo del Wizard
 
+Tras la guía «Antes de empezar», el usuario **elige el modo** (equivalente a una selección única en TUI):
+
+| Modo | Orden de pasos | Uso |
+| :--- | :--- | :--- |
+| **Rápido (`express`)** | Sovereignty → Connectivity → Review | Valores por defecto del borrador (Redis local, rutas de memoria, tenant, PM2, puerto, etc.). Solo se recorre lo imprescindible para **canal (Telegram), tokens, HTTPS / túneles** y confirmación. El puerto del gateway sigue comprobándose (colisión → sugerencia automática) antes de Telegram. |
+| **Completo (`full`)** | Los 6 pasos actuales | Misma experiencia que un configurador largo «todo abierto» (similar en espíritu a helpers tipo OpenClaw): Core Services, identidad, orquestación y luego conectividad. |
+
+Secuencia **completa** (perfil `full`):
+
 1.  **Sovereignty Audit (Check inicial):** El Wizard detecta si corre en macOS (M-series), Linux o Docker.
 2.  **Core Services:** Configuración de Redis y DuckDB (Auto-detecta si ya existen instancias).
 3.  **Identity Setup:** Configuración del `Manager` y el primer `Worker` (Leila, BI, o SIATA).
 4.  **Orchestration:** Puerto del gateway y modo PM2/Docker (antes de Telegram para alinear el túnel al puerto).
 5.  **Connectivity:** Token de Telegram; **Tailscale Funnel** (`--bg --yes`) como vía principal de HTTPS público hacia el gateway; Quick Tunnel Cloudflare opcional; MCP.
 6.  **Review & Deploy:** Resumen visual de la configuración y botón de "Ignition"; tras aplicar `.env` y reiniciar el gateway (PM2 cuando aplique), **registro automático del webhook** con `setWebhook` si hay token y URL HTTPS pública válida.
+
+El campo `wizard_profile` vive en el borrador (`SovereignDraft`) y en `wizard_draft.json` si el usuario guarda con Ctrl+S.
 
 ## 4. Contratos y Atajos (Hotkeys)
 

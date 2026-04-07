@@ -16,8 +16,16 @@ from duckops.sovereign.materialize import (
     shared_attach_relpath,
     telegram_webhook_post_deploy_message,
 )
-from duckops.sovereign.domain_labels import tailscale_funnel_wizard_panel_content
-from duckops.sovereign.state_machine import WizardStep, next_step, prev_step
+from duckops.sovereign.domain_labels import WizardStep, tailscale_funnel_wizard_panel_content
+from duckops.sovereign.state_machine import (
+    EXPRESS_STEP_ORDER,
+    FULL_STEP_ORDER,
+    next_step,
+    next_step_in,
+    prev_step,
+    prev_step_in,
+    step_order_for_profile,
+)
 from duckops.sovereign.tailscale_funnel import public_base_url_from_funnel_status
 from duckops.sovereign.telegram_set_webhook import (
     _effective_telegram_bot_token,
@@ -163,6 +171,15 @@ def test_state_machine_navigation() -> None:
     assert prev_step(WizardStep.CORE_SERVICES) == WizardStep.SOVEREIGNTY_AUDIT
     assert prev_step(WizardStep.SOVEREIGNTY_AUDIT) is None
     assert next_step(WizardStep.REVIEW_DEPLOY) is None
+
+
+def test_express_order_skips_core_identity_orchestration() -> None:
+    assert step_order_for_profile("express") == EXPRESS_STEP_ORDER
+    assert step_order_for_profile("full") == FULL_STEP_ORDER
+    assert next_step_in(EXPRESS_STEP_ORDER, WizardStep.SOVEREIGNTY_AUDIT) == WizardStep.CONNECTIVITY
+    assert prev_step_in(EXPRESS_STEP_ORDER, WizardStep.CONNECTIVITY) == WizardStep.SOVEREIGNTY_AUDIT
+    assert next_step_in(EXPRESS_STEP_ORDER, WizardStep.CONNECTIVITY) == WizardStep.REVIEW_DEPLOY
+    assert next_step_in(EXPRESS_STEP_ORDER, WizardStep.REVIEW_DEPLOY) is None
 
 
 def test_atomic_write_backup_and_restore(tmp_path: Path) -> None:

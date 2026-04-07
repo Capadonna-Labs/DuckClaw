@@ -1628,47 +1628,10 @@ async def _invoke_chat(
                     len("".join(photo_b64.split())) % 4,
                 )
             if png_bytes:
-                token = _effective_telegram_bot_token()
-                if telegram_mcp is not None:
-                    try:
-                        from core.telegram_mcp_dlq import push_telegram_mcp_dlq
-                        from duckclaw.forge.skills.telegram_mcp_bridge import send_sandbox_photo_via_mcp
-
-                        out = await send_sandbox_photo_via_mcp(
-                            telegram_mcp.session,
-                            chat_id=str(session_id),
-                            image_bytes=png_bytes,
-                        )
-                        if out.get("ok"):
-                            chart_sent = True
-                            _gateway_log.info("sandbox chart: enviado vía MCP chat_id=%s", session_id)
-                        else:
-                            err = str(out.get("error", out))
-                            _gateway_log.warning("sandbox chart: MCP falló (%s); intento Bot API", err[:500])
-                            await push_telegram_mcp_dlq(
-                                redis_client,
-                                tenant_id=tenant_id,
-                                chat_id=str(session_id),
-                                tool="telegram_send_photo",
-                                args={"chat_id": str(session_id), "photo_base64": "<omitted>"},
-                                error=err[:2000],
-                            )
-                    except Exception as exc:  # noqa: BLE001
-                        _gateway_log.warning("sandbox chart: excepción MCP (%s); intento Bot API", exc)
-                        try:
-                            from core.telegram_mcp_dlq import push_telegram_mcp_dlq
-
-                            await push_telegram_mcp_dlq(
-                                redis_client,
-                                tenant_id=tenant_id,
-                                chat_id=str(session_id),
-                                tool="telegram_send_photo",
-                                args={"chat_id": str(session_id)},
-                                error=str(exc)[:2000],
-                            )
-                        except Exception:
-                            pass
-                if not chart_sent and token:
+                token = (outbound_telegram_bot_token or "").strip() or _effective_telegram_bot_token()
+                # Evitar cruce de bot al enviar imágenes: para charts del sandbox usar
+                # Bot API del token efectivo de la ruta actual (no MCP global).
+                if token:
                     loop = asyncio.get_running_loop()
                     chart_sent = bool(
                         await loop.run_in_executor(
@@ -1680,11 +1643,10 @@ async def _invoke_chat(
                             ),
                         )
                     )
-                elif not chart_sent and not token:
+                if not chart_sent and not token:
                     _gateway_log.warning(
-                        "sandbox chart: hay PNG del sandbox pero no hay token Bot API (TELEGRAM_BOT_TOKEN "
-                        "o TELEGRAM_<ID_AGENT>_TOKEN en el bloque PM2 / .env, p. ej. TELEGRAM_BI_ANALYST_TOKEN); "
-                        "define uno para este proceso."
+                        "sandbox chart: hay PNG del sandbox pero no hay token de salida para este request "
+                        "(outbound_telegram_bot_token ni token efectivo del contexto)."
                     )
     if chart_sent:
         reply_plain_for_storage = _strip_lines_mentioning_workspace_output(reply_plain_for_storage or "")

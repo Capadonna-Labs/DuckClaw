@@ -850,6 +850,7 @@ def _greeting_fast_reply_text(worker_id: str | None) -> str:
 def _capabilities_fast_reply_text(worker_id: str | None) -> str:
     w = (worker_id or "").strip()
     wl = w.lower()
+    wl_norm = wl.replace("_", "-")
     if _is_job_hunter_worker(w):
         return (
             "Soy **OSINT JobHunter** (empleo / OSINT). Puedo:\n"
@@ -886,6 +887,18 @@ def _capabilities_fast_reply_text(worker_id: str | None) -> str:
         return (
             "Puedo ayudarte con el catálogo, pedidos (/pedido) y dudas sobre productos. "
             "Prueba /catalogo o escribe qué buscas."
+        )
+    if wl_norm == "siata-analyst":
+        return (
+            "Soy **SIATA-Analyst** y trabajo con datos ambientales oficiales para Medellín y el Valle de Aburrá. "
+            "Puedo ayudarte con:\n"
+            "• **Calidad del aire:** PM2.5 (y PM10 cuando esté disponible).\n"
+            "• **Lluvia y pluviómetros:** lectura y tendencias recientes.\n"
+            "• **Niveles de quebradas:** estado reportado y cambios observables.\n"
+            "• **Radar SIATA:** último producto publicado (archivo, hora local/UTC y enlace).\n"
+            "• **Análisis técnico:** consultas con `read_sql` y apoyo en `run_sandbox` cuando se necesite procesar más detalle.\n\n"
+            "Ejemplos: «¿Cuál es el último dato del radar?», "
+            "«¿Cómo está el PM2.5 hoy?», «¿Qué muestran las quebradas ahora?»."
         )
     if w:
         return (

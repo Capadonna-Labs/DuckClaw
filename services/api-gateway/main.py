@@ -36,8 +36,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import redis.asyncio as redis
 
-from core.sandbox_figure_b64 import decode_sandbox_figure_base64, decode_valid_sandbox_image_bytes
-from core.telegram_media_upload import send_sandbox_chart_to_telegram_sync
+from core.telegram_chunking import (
+    TELEGRAM_SENDMESSAGE_CHAR_LIMIT,
+    gateway_multipart_plain_head_tail,
+    plain_subchunks_for_telegram_budget,
+    split_plain_text_for_telegram_reply,
+    telegram_reply_plain_chunk_size,
+)
+from core.telegram_media_upload import (
+    send_sandbox_charts_to_telegram_sync,
+    send_sandbox_documents_to_telegram_sync,
+)
 from core.war_rooms import (
     is_war_room_tenant,
     wr_lookup_member_clearance,
@@ -785,59 +794,6 @@ def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
         _gateway_log.warning("Telegram Guard: error enviando alerta webhook: %s", exc)
     except Exception as exc:  # noqa: BLE001
         _gateway_log.warning("Telegram Guard: error enviando alerta webhook (unknown): %s", exc)
-
-
-# Telegram sendMessage: máx. 4096 caracteres (https://core.telegram.org/bots/api#sendmessage).
-_TELEGRAM_SENDMESSAGE_CHAR_LIMIT = 4096
-# Trozos de texto plano; margen conservador para no superar 4096 tras escapar HTML.
-_DEFAULT_TELEGRAM_REPLY_PLAIN_CHUNK = 2000
-def _telegram_reply_plain_chunk_size() -> int:
-    raw = (os.environ.get("DUCKCLAW_TELEGRAM_REPLY_CHUNK_PLAIN") or "").strip()
-    if raw:
-        try:
-            return max(256, min(int(raw), _TELEGRAM_SENDMESSAGE_CHAR_LIMIT - 200))
-        except ValueError:
-            pass
-    return _DEFAULT_TELEGRAM_REPLY_PLAIN_CHUNK
-
-
-def _split_plain_text_for_telegram_reply(text: str, max_chunk: int) -> list[str]:
-    """Parte texto plano; cada parte se escapa aparte para n8n → Telegram (límite 4096)."""
-    if max_chunk < 64:
-        max_chunk = 64
-    t = text or ""
-    if not t:
-        return [""]
-    out: list[str] = []
-    i = 0
-    n = len(t)
-    while i < n:
-        if n - i <= max_chunk:
-            out.append(t[i:n])
-            break
-        end = i + max_chunk
-        window = t[i:end]
-        nl = window.rfind("\n")
-        if nl > 0:
-            end = i + nl + 1
-        out.append(t[i:end])
-        i = end
-    return out
-
-
-def _plain_subchunks_for_telegram_budget(plain: str, safe_fn: Any) -> list[str]:
-    """Subdivide texto plano hasta que ``safe_fn`` (p. ej. escape HTML) no supere el límite de Telegram."""
-    if not plain:
-        return []
-    cap = _TELEGRAM_SENDMESSAGE_CHAR_LIMIT - 32
-    if len(safe_fn(plain)) <= cap:
-        return [plain]
-    if len(plain) <= 1:
-        return [plain]
-    mid = len(plain) // 2
-    return _plain_subchunks_for_telegram_budget(plain[:mid], safe_fn) + _plain_subchunks_for_telegram_budget(
-        plain[mid:], safe_fn
-    )
 
 
 def _strip_lines_mentioning_workspace_output(text: str) -> str:
@@ -1616,41 +1572,61 @@ async def _invoke_chat(
         reply_text = _strip_bi_false_chart_delivery_lines(reply_text or "")
     # Texto plano para Redis/trazas; _telegram_safe solo en la respuesta al cliente (evita \\ que crece cada turno).
     reply_plain_for_storage = reply_text
-    chart_sent = False
+    sandbox_photos_b64: list[str] = []
+    sandbox_document_paths: list[str] = []
     if not is_system_prompt and isinstance(result, dict):
-        photo_b64 = (result.get("sandbox_photo_base64") or "").strip()
-        if photo_b64:
-            png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
-            if not png_bytes:
-                raw_try = decode_sandbox_figure_base64(photo_b64)
-                _gateway_log.warning(
-                    "sandbox chart: base64 no produce PNG/JPEG válido (b64_len=%s, decoded_len=%s, mod4=%s)",
-                    len(photo_b64),
-                    len(raw_try),
-                    len("".join(photo_b64.split())) % 4,
+        raw_list = result.get("sandbox_photos_base64")
+        if isinstance(raw_list, list):
+            sandbox_photos_b64 = [str(x).strip() for x in raw_list if isinstance(x, str) and str(x).strip()]
+        if not sandbox_photos_b64:
+            one = (result.get("sandbox_photo_base64") or "").strip()
+            if one:
+                sandbox_photos_b64 = [one]
+        raw_docs = result.get("sandbox_document_paths")
+        if isinstance(raw_docs, list):
+            sandbox_document_paths = [
+                str(x).strip() for x in raw_docs if isinstance(x, str) and str(x).strip()
+            ]
+    chart_sent = 0
+    docs_sent = 0
+    if not is_system_prompt and isinstance(result, dict) and sandbox_photos_b64:
+        token = (outbound_telegram_bot_token or "").strip() or _effective_telegram_bot_token()
+        if token:
+            loop = asyncio.get_running_loop()
+            chart_sent = int(
+                await loop.run_in_executor(
+                    None,
+                    lambda imgs=sandbox_photos_b64: send_sandbox_charts_to_telegram_sync(
+                        bot_token=token,
+                        chat_id=str(session_id),
+                        images_b64=imgs,
+                    ),
                 )
-            if png_bytes:
-                token = (outbound_telegram_bot_token or "").strip() or _effective_telegram_bot_token()
-                # Evitar cruce de bot al enviar imágenes: para charts del sandbox usar
-                # Bot API del token efectivo de la ruta actual (no MCP global).
-                if token:
-                    loop = asyncio.get_running_loop()
-                    chart_sent = bool(
-                        await loop.run_in_executor(
-                            None,
-                            lambda: send_sandbox_chart_to_telegram_sync(
-                                bot_token=token,
-                                chat_id=str(session_id),
-                                image_bytes=png_bytes,
-                            ),
-                        )
-                    )
-                if not chart_sent and not token:
-                    _gateway_log.warning(
-                        "sandbox chart: hay PNG del sandbox pero no hay token de salida para este request "
-                        "(outbound_telegram_bot_token ni token efectivo del contexto)."
-                    )
-    if chart_sent:
+            )
+        elif sandbox_photos_b64:
+            _gateway_log.warning(
+                "sandbox chart: hay PNG del sandbox pero no hay token de salida para este request "
+                "(outbound_telegram_bot_token ni token efectivo del contexto)."
+            )
+    if not is_system_prompt and isinstance(result, dict) and sandbox_document_paths:
+        token_doc = (outbound_telegram_bot_token or "").strip() or _effective_telegram_bot_token()
+        if token_doc:
+            loop_d = asyncio.get_running_loop()
+            docs_sent = int(
+                await loop_d.run_in_executor(
+                    None,
+                    lambda paths=sandbox_document_paths: send_sandbox_documents_to_telegram_sync(
+                        bot_token=token_doc,
+                        chat_id=str(session_id),
+                        paths=paths,
+                    ),
+                )
+            )
+        else:
+            _gateway_log.warning(
+                "sandbox document: hay rutas del sandbox pero no hay token de salida para este request."
+            )
+    if chart_sent > 0 or docs_sent > 0:
         reply_plain_for_storage = _strip_lines_mentioning_workspace_output(reply_plain_for_storage or "")
     try:
         if not result.get("_audit_done"):
@@ -1683,13 +1659,13 @@ async def _invoke_chat(
     telegram_reply_head_plain: str | None = None
     telegram_multipart_tail_plain_for_client: str | None = None
     try:
-        coarse = _split_plain_text_for_telegram_reply(
+        coarse = split_plain_text_for_telegram_reply(
             reply_plain_for_storage or "",
-            _telegram_reply_plain_chunk_size(),
+            telegram_reply_plain_chunk_size(),
         )
         plain_parts: list[str] = []
         for piece in coarse:
-            plain_parts.extend(_plain_subchunks_for_telegram_budget(piece, llm_markdown_to_telegram_html))
+            plain_parts.extend(plain_subchunks_for_telegram_budget(piece, llm_markdown_to_telegram_html))
         if not plain_parts:
             plain_parts = [""]
         _telegram_response_parts_count = len(plain_parts)
@@ -1703,7 +1679,7 @@ async def _invoke_chat(
     except Exception:
         try:
             reply_text = llm_markdown_to_telegram_html(reply_plain_for_storage or "")
-            cap = _TELEGRAM_SENDMESSAGE_CHAR_LIMIT - 16
+            cap = TELEGRAM_SENDMESSAGE_CHAR_LIMIT - 16
             if len(reply_text) > cap:
                 reply_text = reply_text[:cap] + "…"
         except Exception:
@@ -1748,13 +1724,11 @@ async def _invoke_chat(
     if telegram_reply_head_plain is not None and (telegram_multipart_tail_plain_for_client or "").strip():
         out_resp["telegram_reply_head_plain"] = telegram_reply_head_plain
         out_resp["telegram_multipart_tail_plain"] = telegram_multipart_tail_plain_for_client
-    # Texto en JSON; PNG del sandbox lo envía el gateway por Bot API (sendPhoto).
-    if (
-        not is_system_prompt
-        and isinstance(result, dict)
-        and (result.get("sandbox_photo_base64") or "").strip()
-    ):
-        out_resp["sandbox_chart_delivered"] = chart_sent
+    # Texto en JSON; PNG del sandbox lo envía el gateway por Bot API (sendPhoto); documentos vía sendDocument.
+    if not is_system_prompt and isinstance(result, dict) and sandbox_photos_b64:
+        out_resp["sandbox_chart_delivered"] = chart_sent > 0
+    if not is_system_prompt and isinstance(result, dict) and sandbox_document_paths:
+        out_resp["sandbox_documents_sent"] = docs_sent
     return out_resp
 
 

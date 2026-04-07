@@ -700,8 +700,9 @@ def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -
 
 def _compact_run_sandbox_tool_content_for_llm(content: str, max_chars: int) -> str:
     """
-    El JSON de run_sandbox incluye figure_base64 (cientos de KB). Para el LLM se omite ese campo
-    y se acorta el resto; el PNG real vive en state['sandbox_photo_base64'] (tools_node).
+    El JSON de run_sandbox incluye figure_base64 / figures_base64 (grandes) y sandbox_document_paths
+    (rutas largas del host). Para el LLM se omiten/sustituyen; las imágenes viven en
+    state['sandbox_photo_base64'] y state['sandbox_photos_base64']; las rutas en state['sandbox_document_paths'].
     """
     c = content or ""
     s = c.strip()
@@ -714,8 +715,20 @@ def _compact_run_sandbox_tool_content_for_llm(content: str, max_chars: int) -> s
     if not isinstance(data, dict):
         return c[:max_chars] + "\n…[truncado por tamaño]"
     if data.get("figure_base64"):
-        # Quitar del JSON para el LLM; el PNG real sigue en state['sandbox_photo_base64'] (tools_node).
         data.pop("figure_base64", None)
+    if data.get("figures_base64"):
+        data.pop("figures_base64", None)
+    doc_paths = data.get("sandbox_document_paths")
+    if isinstance(doc_paths, list) and doc_paths:
+        data.pop("sandbox_document_paths", None)
+        from pathlib import Path as _Path
+
+        names = []
+        for x in doc_paths:
+            if isinstance(x, str) and str(x).strip():
+                names.append(_Path(str(x).strip()).name)
+        if names:
+            data["sandbox_document_names"] = names
     for key in ("output", "stdout", "stderr"):
         if key in data and isinstance(data[key], str) and len(data[key]) > 4000:
             data[key] = data[key][:4000] + "…[truncado]"
@@ -2297,7 +2310,19 @@ def build_worker_graph(
         new_msgs = list(messages)
         sandbox_enabled = _sandbox_enabled_for_state(state)
         tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
-        sandbox_b64: str | None = state.get("sandbox_photo_base64") if isinstance(state.get("sandbox_photo_base64"), str) else None
+        sandbox_b64: str | None = (
+            state.get("sandbox_photo_base64") if isinstance(state.get("sandbox_photo_base64"), str) else None
+        )
+        sandbox_photos_b64: list[str] = []
+        _prev_pl = state.get("sandbox_photos_base64")
+        if isinstance(_prev_pl, list):
+            sandbox_photos_b64 = [str(x).strip() for x in _prev_pl if isinstance(x, str) and str(x).strip()]
+        sandbox_document_paths: list[str] = []
+        _prev_docs = state.get("sandbox_document_paths")
+        if isinstance(_prev_docs, list):
+            sandbox_document_paths = [
+                str(x).strip() for x in _prev_docs if isinstance(x, str) and str(x).strip()
+            ]
         _hb_head = (state.get("subagent_instance_label") or "").strip() or None
         _hb_uname = (state.get("username") or "").strip() or None
         _hb_plan = (state.get("heartbeat_plan_title") or "").strip() or None
@@ -2415,9 +2440,24 @@ def build_worker_graph(
                             try:
                                 payload = json.loads(content)
                                 if isinstance(payload, dict) and payload.get("exit_code") == 0:
+                                    figs = payload.get("figures_base64")
+                                    if isinstance(figs, list):
+                                        sandbox_photos_b64 = [
+                                            str(x) for x in figs if isinstance(x, str) and len(str(x).strip()) > 32
+                                        ]
                                     fb = payload.get("figure_base64")
-                                    if isinstance(fb, str) and len(fb) > 32:
+                                    if sandbox_photos_b64:
+                                        sandbox_b64 = sandbox_photos_b64[0]
+                                    elif isinstance(fb, str) and len(fb) > 32:
                                         sandbox_b64 = fb
+                                        sandbox_photos_b64 = [fb]
+                                    sdp = payload.get("sandbox_document_paths")
+                                    if isinstance(sdp, list):
+                                        sandbox_document_paths = [
+                                            str(x).strip()
+                                            for x in sdp
+                                            if isinstance(x, str) and str(x).strip()
+                                        ]
                             except (json.JSONDecodeError, TypeError):
                                 pass
                             if not use_cm:
@@ -2449,8 +2489,12 @@ def build_worker_graph(
                     )
                 new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
         out: dict[str, Any] = {**state, "messages": new_msgs}
+        if sandbox_photos_b64:
+            out["sandbox_photos_base64"] = sandbox_photos_b64
         if sandbox_b64:
             out["sandbox_photo_base64"] = sandbox_b64
+        if sandbox_document_paths:
+            out["sandbox_document_paths"] = sandbox_document_paths
         out.update(_identity_fields(state))
         return out
 
@@ -2675,6 +2719,12 @@ def build_worker_graph(
         sb = (state.get("sandbox_photo_base64") or "").strip()
         if sb:
             out["sandbox_photo_base64"] = sb
+        sb_pl = state.get("sandbox_photos_base64")
+        if isinstance(sb_pl, list) and sb_pl:
+            out["sandbox_photos_base64"] = [str(x) for x in sb_pl if isinstance(x, str) and str(x).strip()]
+        sb_docs = state.get("sandbox_document_paths")
+        if isinstance(sb_docs, list) and sb_docs:
+            out["sandbox_document_paths"] = [str(x).strip() for x in sb_docs if isinstance(x, str) and str(x).strip()]
         out.update(_identity_fields(state))
         return out
 

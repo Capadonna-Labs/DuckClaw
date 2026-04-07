@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -23,6 +24,8 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from duckclaw.forge.schema import SecurityPolicy, load_security_policy, security_policy_to_docker_kwargs
 
@@ -65,6 +68,8 @@ _FALLBACK_IMAGE = "python:3.11-slim"
 _SANDBOX_MEMORY = "512m"
 _SANDBOX_TIMEOUT = 30          # segundos de timeout por ejecución
 _MAX_RETRIES_DEFAULT = 3
+# Adjuntos Telegram (sendDocument): extensiones admitidas para rutas en host.
+_SANDBOX_TELEGRAM_DOCUMENT_SUFFIXES = frozenset({".txt", ".md", ".csv", ".xlsx"})
 
 # Directorio base de sesiones en el host
 _TMP_BASE = Path(tempfile.gettempdir()) / "duckclaw_sandbox"
@@ -645,6 +650,114 @@ def _decoded_figure_looks_like_png_or_jpeg(b64: str) -> bool:
     return False
 
 
+def _collect_sandbox_telegram_document_paths(artifacts: list[str] | None) -> list[str]:
+    """Rutas absolutas de artefactos .txt/.md/.csv/.xlsx existentes; orden por nombre."""
+    if not artifacts:
+        return []
+    doc_paths: list[Path] = []
+    for art in artifacts:
+        ap = Path(str(art))
+        if ap.suffix.lower() in _SANDBOX_TELEGRAM_DOCUMENT_SUFFIXES and ap.is_file():
+            doc_paths.append(ap)
+    doc_paths.sort(key=lambda p: p.name)
+    return [str(p.resolve()) for p in doc_paths]
+
+
+def extract_latest_sandbox_document_paths(messages: list[Any] | None) -> list[str]:
+    """
+    Última lista de rutas de documentos entregables del último ``run_sandbox`` con exit_code 0.
+    Prefiere ``sandbox_document_paths`` en el JSON; si falta, filtra ``artifacts``.
+    """
+    if not messages:
+        return []
+    try:
+        from langchain_core.messages import ToolMessage
+    except ImportError:
+        return []
+
+    last_list: list[str] = []
+    for m in messages:
+        if not isinstance(m, ToolMessage):
+            continue
+        if getattr(m, "name", None) != "run_sandbox":
+            continue
+        raw = m.content
+        if raw is None:
+            continue
+        s = raw if isinstance(raw, str) else str(raw)
+        s = s.strip()
+        if not s.startswith("{"):
+            continue
+        try:
+            data = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("exit_code") != 0:
+            continue
+        paths = data.get("sandbox_document_paths")
+        if isinstance(paths, list):
+            acc = [str(x).strip() for x in paths if isinstance(x, str) and str(x).strip()]
+            if acc:
+                last_list = acc
+                continue
+        arts = data.get("artifacts")
+        if isinstance(arts, list):
+            coll = _collect_sandbox_telegram_document_paths([str(x) for x in arts if isinstance(x, str)])
+            if coll:
+                last_list = coll
+    return last_list
+
+
+def extract_latest_sandbox_figures_base64(messages: list[Any] | None) -> list[str]:
+    """
+    Como extract_latest_sandbox_figure_base64, pero devuelve todas las figuras válidas del último
+    ``run_sandbox`` exitoso (clave ``figures_base64``), o una lista de un elemento si solo hay ``figure_base64``.
+    """
+    if not messages:
+        return []
+    try:
+        from langchain_core.messages import ToolMessage
+    except ImportError:
+        return []
+
+    last_list: list[str] = []
+    for m in messages:
+        if not isinstance(m, ToolMessage):
+            continue
+        if getattr(m, "name", None) != "run_sandbox":
+            continue
+        raw = m.content
+        if raw is None:
+            continue
+        s = raw if isinstance(raw, str) else str(raw)
+        s = s.strip()
+        if not s.startswith("{"):
+            continue
+        try:
+            data = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("exit_code") != 0:
+            continue
+        figs = data.get("figures_base64")
+        if isinstance(figs, list):
+            acc: list[str] = []
+            for b64 in figs:
+                if isinstance(b64, str) and _decoded_figure_looks_like_png_or_jpeg(b64):
+                    acc.append(b64)
+            if acc:
+                last_list = acc
+                continue
+        b64 = data.get("figure_base64")
+        if isinstance(b64, str) and _decoded_figure_looks_like_png_or_jpeg(b64):
+            last_list = [b64]
+    return last_list
+
+
 def extract_latest_sandbox_figure_base64(messages: list[Any] | None) -> str | None:
     """
     Recorre mensajes del worker (p. ej. ToolMessage de run_sandbox) y devuelve el último
@@ -799,6 +912,216 @@ def _browser_sandbox_summary(stdout: str, artifacts: list[str]) -> tuple[str, in
     return st, jobs, file_hint
 
 
+class MercenaryResultObject(BaseModel):
+    """Contrato mínimo de /workspace/output/result.json (spec: Caged_Beast_Mercenary)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    directive_digest: str
+
+
+def _mercenary_exchange_root() -> Path:
+    return Path("/tmp/duckclaw_exchange")
+
+
+def _mercenary_image_name() -> str:
+    return (os.environ.get("STRIX_MERCENARY_IMAGE") or "").strip() or _image_name()
+
+
+def _manager_template_dir() -> Path:
+    return Path(__file__).resolve().parent.parent / "forge" / "templates" / "Manager"
+
+
+def _mercenary_security_policy() -> SecurityPolicy:
+    md = _manager_template_dir()
+    if md.is_dir():
+        return load_security_policy("Manager", worker_dir=md)
+    return load_security_policy("Manager")
+
+
+def _mercenary_container_name(task_id: str) -> str:
+    raw = (task_id or uuid.uuid4().hex)[:24]
+    slug = re.sub(r"[^a-zA-Z0-9_.-]", "_", raw)
+    if not slug:
+        slug = "task"
+    if not re.match(r"^[A-Za-z]", slug):
+        slug = f"m_{slug}"
+    return f"duckclaw_mercenary_{slug}"[:120]
+
+
+def _mercenary_entrypoint_command() -> list[str]:
+    code = (
+        "import os,json,base64,hashlib,time;"
+        "from pathlib import Path;"
+        "raw=os.environ.get('MERCENARY_DIRECTIVE_B64') or '';"
+        "d=base64.urlsafe_b64decode(raw.encode('ascii')).decode('utf-8','replace');"
+        "h=hashlib.sha256(d.encode('utf-8')).hexdigest()[:16];"
+        "out={'status':'stub_completed','directive_digest':h,'started_at':time.time(),'finished_at':time.time()};"
+        "Path('/workspace/output/result.json').write_text(json.dumps(out),encoding='utf-8')"
+    )
+    return ["python3", "-c", code]
+
+
+def _mercenary_run_blocking(directive: str, limit: int, tid: str) -> dict[str, Any]:
+    import docker  # noqa: PLC0415
+    import docker.errors  # noqa: PLC0415
+
+    exchange = _mercenary_exchange_root() / tid
+    policy = _mercenary_security_policy()
+    b64 = base64.urlsafe_b64encode(directive.strip().encode("utf-8")).decode("ascii")
+
+    client = _docker_client()
+    cname = _mercenary_container_name(tid)
+    try:
+        old = client.containers.get(cname)
+        old.remove(force=True)
+    except docker.errors.NotFound:
+        pass
+    except Exception:
+        pass
+
+    exchange.mkdir(parents=True, exist_ok=True)
+    policy_kw = security_policy_to_docker_kwargs(policy)
+    tmpfs = {
+        k: v
+        for k, v in (policy_kw.get("tmpfs") or {}).items()
+        if str(k).rstrip("/") not in {"/workspace/output", "/workspace"}
+    }
+    volumes = {str(exchange.resolve()): {"bind": "/workspace/output", "mode": "rw"}}
+    env = {"PYTHONUNBUFFERED": "1", "MERCENARY_DIRECTIVE_B64": b64}
+    img = _ensure_image(client, _mercenary_image_name(), allow_python_fallback=True)
+    run_kw: dict[str, Any] = {
+        "command": _mercenary_entrypoint_command(),
+        "name": cname,
+        "detach": True,
+        "mem_limit": str(policy_kw.get("mem_limit", "512m")),
+        "nano_cpus": int(policy_kw.get("nano_cpus", int(1e9))),
+        "network_mode": str(policy_kw.get("network_mode", "none")),
+        "cap_drop": policy_kw.get("cap_drop", ["ALL"]),
+        "security_opt": policy_kw.get("security_opt", ["no-new-privileges"]),
+        "user": str(policy_kw.get("user", "1000:1000")),
+        "volumes": volumes,
+        "tmpfs": tmpfs,
+        "working_dir": "/workspace",
+        "environment": env,
+        "remove": False,
+    }
+
+    container: Any = None
+    exit_code = 1
+    _log.info("mercenary: create/start name=%s image=%s timeout=%ss", cname, img, limit)
+    try:
+        container = client.containers.run(img, **run_kw)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(container.wait)
+            try:
+                wait_out = fut.result(timeout=limit)
+                exit_code = int((wait_out or {}).get("StatusCode", 1))
+            except FuturesTimeout:
+                _log.warning("mercenary: timeout after %ss task_id=%s", limit, tid[:12])
+                try:
+                    container.kill()
+                except Exception:
+                    pass
+                return {
+                    "ok": False,
+                    "error_code": "MERCENARY_TIMEOUT",
+                    "message": f"Tiempo agotado ({limit}s)",
+                }
+    except Exception as exc:
+        _log.exception("mercenary: docker run/wait failed: %s", exc)
+        return {
+            "ok": False,
+            "error_code": "MERCENARY_CONTAINER_ERROR",
+            "message": str(exc)[:2000],
+        }
+    finally:
+        if container is not None:
+            try:
+                container.remove(force=True)
+            except Exception:
+                pass
+
+    result_path = exchange / "result.json"
+    if not result_path.is_file():
+        shutil.rmtree(exchange, ignore_errors=True)
+        return {
+            "ok": False,
+            "error_code": "MERCENARY_RESULT_MISSING",
+            "message": "result.json no encontrado tras la ejecución",
+        }
+    try:
+        data = json.loads(result_path.read_text(encoding="utf-8", errors="replace"))
+    except json.JSONDecodeError as exc:
+        shutil.rmtree(exchange, ignore_errors=True)
+        return {
+            "ok": False,
+            "error_code": "MERCENARY_JSON_INVALID",
+            "message": f"JSON inválido: {exc}",
+        }
+    if not isinstance(data, dict):
+        shutil.rmtree(exchange, ignore_errors=True)
+        return {
+            "ok": False,
+            "error_code": "MERCENARY_JSON_INVALID",
+            "message": "result.json debe ser un objeto JSON",
+        }
+    try:
+        MercenaryResultObject.model_validate(data)
+    except ValidationError as exc:
+        shutil.rmtree(exchange, ignore_errors=True)
+        return {
+            "ok": False,
+            "error_code": "MERCENARY_JSON_INVALID",
+            "message": str(exc)[:1500],
+        }
+    if exit_code != 0:
+        shutil.rmtree(exchange, ignore_errors=True)
+        return {
+            "ok": False,
+            "error_code": "MERCENARY_CONTAINER_ERROR",
+            "message": f"Contenedor salió con código {exit_code}",
+            "result": data,
+        }
+    shutil.rmtree(exchange, ignore_errors=True)
+    _log.info("mercenary: completed task_id=%s", tid[:12])
+    return {"ok": True, "result": data, "exit_code": exit_code}
+
+
+async def run_mercenary_ephemeral_async(
+    directive: str,
+    timeout_s: int,
+    *,
+    task_id: str | None = None,
+) -> dict[str, Any]:
+    if not (directive or "").strip():
+        return {"ok": False, "error_code": "MERCENARY_INVALID_INPUT", "message": "directive vacío"}
+    limit = max(1, min(int(timeout_s), 600))
+    if not _docker_available():
+        return {
+            "ok": False,
+            "error_code": "MERCENARY_DOCKER_UNAVAILABLE",
+            "message": "Docker no disponible o daemon inaccesible",
+        }
+    tid = ((task_id or "").strip() or uuid.uuid4().hex)[:32]
+    return await asyncio.to_thread(_mercenary_run_blocking, directive.strip(), limit, tid)
+
+
+def run_mercenary_ephemeral(directive: str, timeout_s: int = 300, *, task_id: str | None = None) -> dict[str, Any]:
+    """Ejecuta el mercenario desde código síncrono (p. ej. nodo LangGraph)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(run_mercenary_ephemeral_async(directive, timeout_s, task_id=task_id))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        fut = pool.submit(
+            asyncio.run,
+            run_mercenary_ephemeral_async(directive, timeout_s, task_id=task_id),
+        )
+        return fut.result()
+
+
 def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
     """StructuredTool `run_browser_sandbox` — imagen STRIX_BROWSER_IMAGE, salida Parquet en /workspace/output/."""
     from langchain_core.tools import StructuredTool  # noqa: PLC0415
@@ -927,17 +1250,29 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "output": result.stdout or result.stderr,
             "stdout": result.stdout or "",
             "figure_base64": None,
+            "figures_base64": [],
         }
         if result.artifacts:
             out["artifacts"] = result.artifacts
+            png_paths: list[Path] = []
             for art in result.artifacts:
                 ap = Path(str(art))
                 if ap.suffix.lower() == ".png" and ap.is_file():
-                    try:
-                        out["figure_base64"] = base64.standard_b64encode(ap.read_bytes()).decode("ascii")
-                        break
-                    except OSError:
-                        continue
+                    png_paths.append(ap)
+            png_paths.sort(key=lambda p: p.name)
+            encoded: list[str] = []
+            for ap in png_paths:
+                try:
+                    encoded.append(base64.standard_b64encode(ap.read_bytes()).decode("ascii"))
+                except OSError:
+                    continue
+            if encoded:
+                out["figures_base64"] = encoded
+                out["figure_base64"] = encoded[0]
+            if result.exit_code == 0:
+                docs = _collect_sandbox_telegram_document_paths(result.artifacts)
+                if docs:
+                    out["sandbox_document_paths"] = docs
         if result.timed_out:
             out["warning"] = "Timeout alcanzado"
         if result.attempts > 1:

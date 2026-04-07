@@ -661,7 +661,14 @@ async def _ainvoke(
     if usage:
         out["usage_tokens"] = usage
     # Manager → subagente: propagar para logs/auditoría en el API Gateway (evita [finanz] cuando el worker real es otro).
-    for _k in ("assigned_worker_id", "plan_title", "_audit_done", "sandbox_photo_base64"):
+    for _k in (
+        "assigned_worker_id",
+        "plan_title",
+        "_audit_done",
+        "sandbox_photo_base64",
+        "sandbox_photos_base64",
+        "sandbox_document_paths",
+    ):
         if _k in result:
             out[_k] = result[_k]
     return out

@@ -16,13 +16,18 @@ import logging
 import os
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
 from langchain_core.runnables import RunnableConfig
 
 from duckclaw.forge.atoms.state import ManagerAgentState
-from duckclaw.graphs.sandbox import extract_latest_sandbox_figure_base64
+from duckclaw.graphs.sandbox import (
+    extract_latest_sandbox_document_paths,
+    extract_latest_sandbox_figure_base64,
+    extract_latest_sandbox_figures_base64,
+)
 from duckclaw.graphs.subagent_run_id import acquire_subagent_slot, release_subagent_slot
 from duckclaw.utils.langsmith_trace import get_tracing_config
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_plan, log_sys, set_log_context
@@ -746,7 +751,7 @@ def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
     return None
 
 
-def _coerce_planner_payload(data: Any) -> tuple[str, list[str]]:
+def _coerce_planner_payload(data: Any) -> tuple[str, list[str], dict[str, Any] | None]:
     """Valida el dict del LLM; lanza ValueError si no cumple el contrato."""
     if not isinstance(data, dict):
         raise ValueError("planner payload is not an object")
@@ -760,12 +765,33 @@ def _coerce_planner_payload(data: Any) -> tuple[str, list[str]]:
         tasks_list = [str(x).strip() for x in tasks_raw if str(x).strip()]
     else:
         raise ValueError("tasks must be a list")
-    return str(title).strip(), tasks_list
+
+    merc_raw = data.get("mercenary", None)
+    merc_obj: dict[str, Any] | None = None
+    if merc_raw is None or merc_raw is False:
+        merc_obj = None
+    elif isinstance(merc_raw, dict):
+        directive = str(merc_raw.get("directive") or "").strip()
+        if not directive:
+            raise ValueError("mercenary.directive is required when mercenary is an object")
+        t_raw = merc_raw.get("timeout", 300)
+        try:
+            tmo = int(t_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("mercenary.timeout must be an integer") from exc
+        tmo = max(1, min(tmo, 600))
+        merc_obj = {"directive": directive, "timeout": tmo}
+    else:
+        raise ValueError("mercenary must be null, omitted, or an object")
+
+    return str(title).strip(), tasks_list, merc_obj
 
 
-def _llm_plan_from_model(llm: Any, incoming: str, planner_system_prompt: str) -> Optional[tuple[str, list[str]]]:
+def _llm_plan_from_model(
+    llm: Any, incoming: str, planner_system_prompt: str
+) -> Optional[tuple[str, list[str], dict[str, Any] | None]]:
     """
-    Invoca el LLM del Manager para obtener {"plan_title", "tasks"}.
+    Invoca el LLM del Manager para obtener {"plan_title", "tasks", "mercenary"?}.
     Devuelve None si falla el invoke, el parse o el contrato (el caller usa heurística).
     """
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -773,8 +799,9 @@ def _llm_plan_from_model(llm: Any, incoming: str, planner_system_prompt: str) ->
     append = (os.environ.get("DUCKCLAW_MANAGER_PLANNER_SYSTEM_APPEND") or "").strip()
     system_chunks = [planner_system_prompt.strip(), append]
     system_chunks.append(
-        'Responde únicamente con JSON válido (sin markdown): '
-        '{"plan_title": "string", "tasks": ["string", ...]}'
+        "Responde únicamente con JSON válido (sin markdown). Forma:\n"
+        '{"plan_title": "string", "tasks": ["string", ...], "mercenary": null | '
+        '{"directive": "string", "timeout": entero_1_a_600} }'
     )
     system = "\n\n".join(c for c in system_chunks if c)
     human = f"Mensaje del usuario:\n{(incoming or '').strip()}"
@@ -796,7 +823,7 @@ def _llm_plan_from_model(llm: Any, incoming: str, planner_system_prompt: str) ->
         _log.debug("manager planner: no JSON object in model output")
         return None
     try:
-        title, tasks = _coerce_planner_payload(data)
+        title, tasks, mercenary_spec = _coerce_planner_payload(data)
     except ValueError as exc:
         _log.debug("manager planner: invalid payload: %s", exc)
         return None
@@ -806,7 +833,7 @@ def _llm_plan_from_model(llm: Any, incoming: str, planner_system_prompt: str) ->
     if not tasks:
         clip = (incoming or "").strip()[:200]
         tasks = [f"Resolver la solicitud del usuario: {clip}" if clip else "Resolver solicitud del usuario"]
-    return title, tasks
+    return title, tasks, mercenary_spec
 
 
 def _manager_greeting_fast_path_ok(incoming: str) -> bool:
@@ -1086,14 +1113,17 @@ def build_manager_graph(
             _log.warning("manager plan: incoming vacío en state (keys=%s)", list(state.keys()))
 
         _psp = (planner_system_prompt or "").strip()
+        mercenary_spec: dict[str, Any] | None = None
         if llm is not None and _psp:
             _parsed = _llm_plan_from_model(llm, incoming, _psp)
             if _parsed:
-                plan_title, tasks = _parsed
+                plan_title, tasks, mercenary_spec = _parsed
             else:
                 plan_title, tasks = _llm_plan(incoming)
+                mercenary_spec = None
         else:
             plan_title, tasks = _llm_plan(incoming)
+            mercenary_spec = None
 
         # Prioridad A2A: en crisis de caja + intención laboral, enrutar a JobHunter si está disponible.
         job_hunter_in_team = _pick_job_hunter_worker(list(available_plan or []))
@@ -1128,6 +1158,8 @@ def build_manager_graph(
             "plan_title": plan_title or None,
             "tasks": tasks or [],
         }  # type: ignore[assignment]
+        if mercenary_spec:
+            out["mercenary_spec"] = mercenary_spec
         if handoff_context:
             out["handoff_context"] = handoff_context
         if active_mission:
@@ -1450,19 +1482,133 @@ def build_manager_graph(
         }  # type: ignore[assignment]
         if messages is not None:
             out["messages"] = messages
-        b64 = ""
+        photos: list[str] = []
         if isinstance(worker_invoke, dict):
-            b64 = (worker_invoke.get("sandbox_photo_base64") or "").strip()
-        if not b64 and messages is not None:
-            b64 = extract_latest_sandbox_figure_base64(messages) or ""
-        if b64:
-            out["sandbox_photo_base64"] = b64
+            raw_pl = worker_invoke.get("sandbox_photos_base64")
+            if isinstance(raw_pl, list):
+                photos = [str(x).strip() for x in raw_pl if isinstance(x, str) and str(x).strip()]
+        if not photos and messages is not None:
+            photos = extract_latest_sandbox_figures_base64(messages)
+        if not photos:
+            b64 = ""
+            if isinstance(worker_invoke, dict):
+                b64 = (worker_invoke.get("sandbox_photo_base64") or "").strip()
+            if not b64 and messages is not None:
+                b64 = extract_latest_sandbox_figure_base64(messages) or ""
+            if b64:
+                photos = [b64]
+        if len(photos) == 1:
+            out["sandbox_photo_base64"] = photos[0]
+        elif len(photos) > 1:
+            out["sandbox_photos_base64"] = photos
+            out["sandbox_photo_base64"] = photos[0]
+        doc_paths: list[str] = []
+        if isinstance(worker_invoke, dict):
+            raw_docs = worker_invoke.get("sandbox_document_paths")
+            if isinstance(raw_docs, list):
+                doc_paths = [str(x).strip() for x in raw_docs if isinstance(x, str) and str(x).strip()]
+        if not doc_paths and messages is not None:
+            doc_paths = extract_latest_sandbox_document_paths(messages)
+        if doc_paths:
+            out["sandbox_document_paths"] = doc_paths
         if "active_mission" in state:
             out["active_mission"] = state.get("active_mission")
         if "handoff_context" in state:
             out["handoff_context"] = state.get("handoff_context")
         out["last_worker_raw_reply"] = raw_worker_reply or reply
         return out
+
+    def mercenary_node(state: ManagerAgentState) -> ManagerAgentState:
+        """Ejecución efímera Caged Beast: Docker aislado → result.json → respuesta (sin invoke_worker)."""
+        from duckclaw.graphs.activity import set_idle
+        from duckclaw.graphs.on_the_fly_commands import append_task_audit
+        from duckclaw.graphs.sandbox import run_mercenary_ephemeral
+
+        chat_id = state.get("chat_id") or ""
+        incoming = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
+        plan_title = (state.get("plan_title") or "").strip() or None
+        spec = state.get("mercenary_spec")
+        assigned = (state.get("assigned_worker_id") or "").strip() or None
+
+        if not isinstance(spec, dict) or not str(spec.get("directive") or "").strip():
+            set_idle(chat_id)
+            return {
+                "reply": "No se pudo ejecutar el mercenario: especificación inválida.",
+                "_audit_done": True,
+                "assigned_worker_id": assigned,
+            }  # type: ignore[return-value]
+
+        directive = str(spec.get("directive") or "").strip()
+        timeout_m = max(1, min(int(spec.get("timeout") or 300), 600))
+        task_id = uuid.uuid4().hex[:20]
+        t0 = time.monotonic()
+        result = run_mercenary_ephemeral(directive, timeout_m, task_id=task_id)
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        ok = bool(result.get("ok"))
+        status = "SUCCESS" if ok else "FAILED"
+        try:
+            append_task_audit(
+                db,
+                chat_id,
+                "manager",
+                incoming[:2000] if incoming else "(mercenary)",
+                status,
+                elapsed_ms,
+                plan_title=plan_title or "Mercenario (sandbox)",
+            )
+        except Exception:
+            pass
+        set_idle(chat_id)
+
+        if ok:
+            payload = result.get("result") or {}
+            body = json.dumps(payload, ensure_ascii=False, indent=2)
+            if len(body) > 7500:
+                body = body[:7500] + "\n…"
+            reply = "**Mercenario (sandbox)** — ejecución aislada completada.\n\n```json\n" + body + "\n```"
+        else:
+            code = result.get("error_code") or "MERCENARY_ERROR"
+            msg = (result.get("message") or "").strip()
+            reply = f"**Mercenario:** error `{code}`\n\n{msg}"
+
+        _log.info(
+            "manager mercenary: ok=%s code=%s",
+            ok,
+            result.get("error_code") if not ok else "ok",
+        )
+
+        out: ManagerAgentState = {
+            "reply": reply,
+            "_audit_done": True,
+            "assigned_worker_id": assigned,
+            "plan_title": plan_title,
+        }  # type: ignore[assignment]
+        if "history" in state:
+            out["history"] = state["history"]
+        if "chat_id" in state:
+            out["chat_id"] = state["chat_id"]
+        if "tenant_id" in state:
+            out["tenant_id"] = state["tenant_id"]
+        if "user_id" in state:
+            out["user_id"] = state["user_id"]
+        if "vault_db_path" in state:
+            out["vault_db_path"] = state["vault_db_path"]
+        if "shared_db_path" in state:
+            out["shared_db_path"] = state["shared_db_path"]
+        if "username" in state:
+            out["username"] = state["username"]
+        if "available_templates" in state:
+            out["available_templates"] = state["available_templates"]
+        _ot_m = (state.get("outbound_telegram_bot_token") or "").strip()
+        if _ot_m:
+            out["outbound_telegram_bot_token"] = _ot_m
+        return out
+
+    def route_after_plan(state: ManagerAgentState) -> str:
+        mspec = state.get("mercenary_spec")
+        if isinstance(mspec, dict) and str(mspec.get("directive") or "").strip():
+            return "mercenary"
+        return "invoke_worker"
 
     def route_after_invoke_worker(state: ManagerAgentState) -> str:
         current_worker = (state.get("assigned_worker_id") or "").strip()
@@ -1673,6 +1819,7 @@ def build_manager_graph(
     graph.add_node("router", router_node)
     graph.add_node("greeting_shortcut", greeting_shortcut_node)
     graph.add_node("plan", plan_node)
+    graph.add_node("mercenary", mercenary_node)
     graph.add_node("invoke_worker", invoke_worker_node)
     graph.add_node("return_to_source", return_to_source_node)
     graph.add_node("handoff_to_target", handoff_to_target_node)
@@ -1684,7 +1831,12 @@ def build_manager_graph(
         {"greeting_shortcut": "greeting_shortcut", "plan": "plan"},
     )
     graph.add_edge("greeting_shortcut", END)
-    graph.add_edge("plan", "invoke_worker")
+    graph.add_conditional_edges(
+        "plan",
+        route_after_plan,
+        {"mercenary": "mercenary", "invoke_worker": "invoke_worker"},
+    )
+    graph.add_edge("mercenary", END)
     graph.add_conditional_edges(
         "invoke_worker",
         route_after_invoke_worker,

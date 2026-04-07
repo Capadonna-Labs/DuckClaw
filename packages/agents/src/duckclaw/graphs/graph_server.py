@@ -402,40 +402,6 @@ def _invoke_ephemeral_gateway_graph(
             _invoke_provider,
             _env_llm_provider,
         )
-        # #region agent log
-        try:
-            import json
-            import time as _time
-
-            _dbg_path = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-            with open(_dbg_path, "a", encoding="utf-8") as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "adf9d8",
-                            "hypothesisId": "H1-trip",
-                            "location": "graph_server.py:_invoke_ephemeral_gateway_graph",
-                            "message": "llm override resolution",
-                            "data": {
-                                "chat_id": str(chat_id),
-                                "trip_source": trip_source,
-                                "trip_provider": trip[0] if trip else None,
-                                "ovr_applied": bool(ovr),
-                                "invoke_provider": _invoke_provider,
-                                "env_llm_provider": _env_llm_provider,
-                                "vault_same_file_as_hub": bool(
-                                    v_p and v_p != ":memory:" and _paths_same_canonical(v_p, db_path)
-                                ),
-                            },
-                            "timestamp": int(_time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
     except Exception as exc:
         _log.warning("graph_server: LLM override resolution failed: %s", exc, exc_info=True)
     graph = _build_manager_graph_for_db(db, **ovr)

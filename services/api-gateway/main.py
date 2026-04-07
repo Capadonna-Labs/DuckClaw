@@ -250,6 +250,8 @@ _log_level_name = (os.environ.get("DUCKCLAW_LOG_LEVEL") or "INFO").strip().upper
 _log_level = getattr(logging, _log_level_name, logging.INFO)
 configure_structured_logging(level=_log_level)
 _gateway_log = logging.getLogger("duckclaw.gateway")
+
+
 _obs_log = get_obs_logger()
 _gateway_log.info(
     "Gateway startup: gateway_db_path=%s DUCKCLAW_PM2_MATCHED_APP_NAME=%s "

@@ -102,6 +102,28 @@ def test_parse_context_add_command() -> None:
     assert _parse_context_summary_command("/context --add x") is False
 
 
+def test_resolve_context_add_body_with_vlm_enrichment() -> None:
+    """Caption /context --add no coincide con el texto post-VLM; el cuerpo debe ser el bloque completo."""
+    sys.path.insert(0, str(_REPO / "services" / "api-gateway"))
+    from routers.telegram_inbound_webhook import _resolve_context_add_body  # noqa: PLC0415
+
+    enriched = (
+        "Usuario dice: /context --add\n"
+        "Contexto visual adjunto: Cuadrícula de tickers\n"
+        "[VLM_CONTEXT image_hash=abc confidence=0.9]"
+    )
+    ok, body = _resolve_context_add_body(raw_caption="/context --add", current_text=enriched)
+    assert ok and body == enriched
+
+    ok2, body2 = _resolve_context_add_body(raw_caption="/context --add cartera", current_text=enriched)
+    assert ok2 and body2 == enriched
+
+    ok3, body3 = _resolve_context_add_body(raw_caption="/context --add solo", current_text="solo")
+    assert ok3 and body3 == "solo"
+
+    assert _resolve_context_add_body(raw_caption="/hola", current_text=enriched) == (False, "")
+
+
 def test_fetch_semantic_memory_snapshot_empty_and_rows(tmp_path: Path) -> None:
     sys.path.insert(0, str(_REPO / "services" / "api-gateway"))
     from core.context_stored_snapshot import fetch_semantic_memory_snapshot  # noqa: PLC0415

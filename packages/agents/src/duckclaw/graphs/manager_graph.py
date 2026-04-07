@@ -493,6 +493,11 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     if "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in text or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in text:
         # Directiva no al inicio (p. ej. prefijo invisible): devolver el texto completo tal cual llegó al manager.
         return (incoming or "").strip(), None
+    # /context --add + foto: VLM antepone «Usuario dice:…»; evitar heurísticas db/tablas (p. ej. nombre+datos).
+    if "[VLM_CONTEXT" in text and "Contexto visual adjunto:" in text:
+        tctx = text.lower()
+        if "/context" in tctx and "--add" in tctx:
+            return (incoming or "").strip(), None
     t = text.lower()
     override: Optional[str] = None
     # MVP Leila: saludos cortos → respuesta de tienda (evita tono “agente de investigación”).

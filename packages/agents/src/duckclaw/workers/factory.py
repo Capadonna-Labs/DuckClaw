@@ -2085,9 +2085,10 @@ def build_worker_graph(
                     "doc plotly",
                 )
             )
+            _plot_capable_worker = (_lid or "").strip().lower() in ("siata_analyst", "finanz")
             force_plot_docs = bool(
                 has_tavily
-                and (_lid or "").strip().lower() == "siata_analyst"
+                and _plot_capable_worker
                 and _is_plot_docs_request
                 and not telegram_context_summarize_directive
                 and not (
@@ -2101,7 +2102,7 @@ def build_worker_graph(
                 and not already_has_tool_result
             )
             force_run_sandbox = bool(
-                (_lid or "").strip().lower() == "siata_analyst"
+                _plot_capable_worker
                 and has_run_sandbox
                 and _is_graph_request
                 and not telegram_context_summarize_directive
@@ -2122,24 +2123,6 @@ def build_worker_graph(
                 force_run_sandbox = False
             if force_plot_docs:
                 force_tavily = True
-
-            if (_lid or "").strip().lower() == "finanz" and has_fetch_market:
-                try:
-                    from duckclaw.forge.skills.quant_market_bridge import _finanz_debug_ndjson
-
-                    _finanz_debug_ndjson(
-                        "H7",
-                        "workers/factory.py:agent_node",
-                        "ohlcv ingest force gate",
-                        {
-                            "ingest_intent": _finanz_user_requests_ohlcv_ingest(incoming),
-                            "already_tool_result": already_has_tool_result,
-                            "force_fetch_market_data": force_fetch_market_data,
-                            "incoming_tail": (incoming[-80:] if incoming else "")[:80],
-                        },
-                    )
-                except Exception:
-                    pass
 
             if jh_fast_text is not None:
                 resp = AIMessage(content=jh_fast_text)

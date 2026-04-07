@@ -213,18 +213,36 @@ def test_extract_json_object() -> None:
 def test_coerce_planner_payload() -> None:
     from duckclaw.graphs.manager_graph import _coerce_planner_payload
 
-    t, tasks = _coerce_planner_payload({"plan_title": "Título", "tasks": ["u1", "u2"]})
+    t, tasks, merc = _coerce_planner_payload({"plan_title": "Título", "tasks": ["u1", "u2"]})
     assert t == "Título"
     assert tasks == ["u1", "u2"]
-    t2, tasks2 = _coerce_planner_payload({"plan_title": "  x  ", "tasks": None})
+    assert merc is None
+    t2, tasks2, merc2 = _coerce_planner_payload({"plan_title": "  x  ", "tasks": None})
     assert t2 == "x"
     assert tasks2 == []
+    assert merc2 is None
+    _, _, m3 = _coerce_planner_payload(
+        {
+            "plan_title": "M",
+            "tasks": ["a"],
+            "mercenary": {"directive": "probe", "timeout": 60},
+        }
+    )
+    assert m3 == {"directive": "probe", "timeout": 60}
+    _, _, m4 = _coerce_planner_payload(
+        {"plan_title": "M", "tasks": ["a"], "mercenary": {"directive": "x", "timeout": 900}}
+    )
+    assert m4 == {"directive": "x", "timeout": 600}
     with pytest.raises(ValueError):
         _coerce_planner_payload([])
     with pytest.raises(ValueError):
         _coerce_planner_payload({"plan_title": "", "tasks": []})
     with pytest.raises(ValueError):
         _coerce_planner_payload({"plan_title": "ok", "tasks": "nope"})
+    with pytest.raises(ValueError):
+        _coerce_planner_payload({"plan_title": "ok", "tasks": [], "mercenary": {}})
+    with pytest.raises(ValueError):
+        _coerce_planner_payload({"plan_title": "ok", "tasks": [], "mercenary": "bad"})
 
 
 def test_llm_plan_from_model_returns_none_on_bad_invoke() -> None:
@@ -249,10 +267,11 @@ def test_llm_plan_from_model_parses_response() -> None:
 
     out = _llm_plan_from_model(_Ok(), "¿Qué tienes?", "Instrucciones.")
     assert out is not None
-    title, tasks = out
+    title, tasks, merc = out
     assert title == "Consulta catálogo ropa"
     assert len(title.split()) <= 5
     assert tasks == ["Listar productos", "Responder precios"]
+    assert merc is None
 
 
 def test_llm_plan_from_model_truncates_long_title() -> None:
@@ -271,6 +290,28 @@ def test_llm_plan_from_model_truncates_long_title() -> None:
     out = _llm_plan_from_model(_Ok(), "x", "sys")
     assert out is not None
     assert out[0] == "one two three four five"
+    assert out[2] is None
+
+
+def test_llm_plan_from_model_parses_mercenary_block() -> None:
+    from duckclaw.graphs.manager_graph import _llm_plan_from_model
+
+    class _Ok:
+        def invoke(self, _messages):  # noqa: ANN001
+            class R:
+                content = (
+                    '{"plan_title":"Aislamiento","tasks":["run"],'
+                    '"mercenary":{"directive":"haz X","timeout":120}}'
+                )
+
+            return R()
+
+    out = _llm_plan_from_model(_Ok(), "u", "sys")
+    assert out is not None
+    title, tasks, merc = out
+    assert title == "Aislamiento"
+    assert tasks == ["run"]
+    assert merc == {"directive": "haz X", "timeout": 120}
 
 
 def test_manager_greeting_fast_path_ok() -> None:

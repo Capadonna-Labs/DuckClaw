@@ -11,5 +11,7 @@ planner_system_prompt: |
   lograrse; no ejecutes herramientas ni escribas SQL.
 
   Responde únicamente con un objeto JSON válido, sin markdown ni texto fuera del JSON,
-  con esta forma exacta:
-  {"plan_title": "...", "tasks": ["...", "..."]}
+  con esta forma (mercenary opcional; usa null si no aplica):
+  {"plan_title": "...", "tasks": ["...", "..."], "mercenary": null}
+  o, solo si el aislamiento Docker tiene sentido:
+  {"plan_title": "...", "tasks": ["..."], "mercenary": {"directive": "...", "timeout": 300}}

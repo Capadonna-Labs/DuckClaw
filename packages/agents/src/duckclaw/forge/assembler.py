@@ -13,6 +13,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+_FORGE_TEMPLATES = Path(__file__).resolve().parent / "templates"
+
 try:
     import yaml
 except ImportError:
@@ -197,6 +199,11 @@ class AgentAssembler:
         if _psp is None:
             _psp = self.spec.get("planner_system_prompt") or ""
         planner_system_prompt = str(_psp).strip() if _psp else ""
+        _mgr_sp = _FORGE_TEMPLATES / "Manager" / "system_prompt.md"
+        if _mgr_sp.is_file():
+            planner_system_prompt = (
+                planner_system_prompt + "\n\n" + _mgr_sp.read_text(encoding="utf-8")
+            ).strip()
         return build_manager_graph(
             db,
             llm,

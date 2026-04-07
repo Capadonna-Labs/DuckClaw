@@ -20,6 +20,8 @@ API_GATEWAY_DIR = REPO_ROOT / "services" / "api-gateway"
 if str(API_GATEWAY_DIR) not in sys.path:
     sys.path.insert(0, str(API_GATEWAY_DIR))
 import main as gateway_main
+from core import telegram_chunking as _tg_chunk
+
 app = gateway_main.app
 
 _AUTH_HEADERS = {"X-Tailscale-Auth-Key": "test-key-for-tests"}
@@ -277,14 +279,14 @@ def test_effective_tenant_env_overrides_bi_pm2(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_split_plain_text_for_telegram_reply() -> None:
-    assert gateway_main._split_plain_text_for_telegram_reply("", 80) == [""]
+    assert _tg_chunk.split_plain_text_for_telegram_reply("", 80) == [""]
     raw = "a" * 200
     # el splitter impone mínimo 64 caracteres por trozo
-    parts = gateway_main._split_plain_text_for_telegram_reply(raw, 80)
+    parts = _tg_chunk.split_plain_text_for_telegram_reply(raw, 80)
     assert "".join(parts) == raw
     assert all(len(p) <= 80 for p in parts)
     with_nl = "l1\n" + "b" * 30 + "\nl3"
-    p2 = gateway_main._split_plain_text_for_telegram_reply(with_nl, 80)
+    p2 = _tg_chunk.split_plain_text_for_telegram_reply(with_nl, 80)
     assert "".join(p2) == with_nl
 
 
@@ -293,9 +295,27 @@ def test_plain_subchunks_for_telegram_budget_splits_when_escape_grows() -> None:
         # longitud artificial >> límite Telegram para forzar subdivisión
         return "x" * (len(s) * 1100)
 
-    tiny = gateway_main._plain_subchunks_for_telegram_budget("abcd", fake_safe)
+    tiny = _tg_chunk.plain_subchunks_for_telegram_budget("abcd", fake_safe)
     assert len(tiny) > 1
     assert "".join(tiny) == "abcd"
+
+
+def test_gateway_multipart_plain_head_tail_matches_short_reply() -> None:
+    h, t = _tg_chunk.gateway_multipart_plain_head_tail("hello", lambda s: s)
+    assert h is None and t is None
+
+
+def test_gateway_multipart_plain_head_tail_splits_when_html_budget_grows() -> None:
+    """Misma lógica que main: plain_subchunks puede partir aunque el texto plano no sea enorme."""
+
+    def fake_safe(s: str) -> str:
+        return "H" * (len(s) * 1200)
+
+    body = "chunk-" * 400
+    h, t = _tg_chunk.gateway_multipart_plain_head_tail(body, fake_safe)
+    assert h is not None and t is not None
+    assert body.startswith(h)
+    assert len(h) < len(body)
 
 
 def test_webhook_outbound_chat_reply_sync_posts_json(monkeypatch: pytest.MonkeyPatch) -> None:

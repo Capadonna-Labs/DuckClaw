@@ -28,6 +28,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException, Request, status
 
 from core.config import settings
+from core.telegram_chunking import gateway_multipart_plain_head_tail
 from core.context_injection_delta import (
     build_context_injection_delta,
     context_injection_queue_key,
@@ -260,7 +261,16 @@ def schedule_telegram_context_summary_background(
             if isinstance(res, dict) and not used_fb:
                 head_plain = (res.get("telegram_reply_head_plain") or "").strip()
                 tail_plain_ctx = (res.get("telegram_multipart_tail_plain") or "").strip()
-            body_slice = head_plain if (tail_plain_ctx and head_plain) else reply_local[:3500]
+            if tail_plain_ctx and head_plain:
+                body_slice = head_plain
+            else:
+                mh, mt = gateway_multipart_plain_head_tail(reply_local, llm_markdown_to_telegram_html)
+                if mh is not None and (mt or "").strip():
+                    head_plain = mh
+                    tail_plain_ctx = mt
+                    body_slice = head_plain
+                else:
+                    body_slice = reply_local
 
             client_r = TelegramBotApiAsyncClient(tok)
             body_html = llm_markdown_to_telegram_html(body_slice)
@@ -1469,7 +1479,16 @@ def build_telegram_inbound_webhook_router(
             client_r = TelegramBotApiAsyncClient(token_r)
             tail_plain = (res.get("telegram_multipart_tail_plain") or "").strip() if isinstance(res, dict) else ""
             head_plain = (res.get("telegram_reply_head_plain") or "").strip() if isinstance(res, dict) else ""
-            reply_plain = head_plain if (tail_plain and head_plain) else reply_local[:3500]
+            if tail_plain and head_plain:
+                reply_plain = head_plain
+            else:
+                mh, mt = gateway_multipart_plain_head_tail(reply_local, llm_markdown_to_telegram_html)
+                if mh is not None and (mt or "").strip():
+                    head_plain = mh
+                    tail_plain = mt
+                    reply_plain = head_plain
+                else:
+                    reply_plain = reply_local
             reply_html = llm_markdown_to_telegram_html(reply_plain)
             cap_msg = 4096 - 16
             if len(reply_html) > cap_msg:

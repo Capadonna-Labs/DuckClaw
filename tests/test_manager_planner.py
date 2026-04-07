@@ -162,6 +162,21 @@ def test_plan_task_summarize_stored_with_bom_still_passthrough() -> None:
     assert "TAREA: El usuario quiere ver las tablas" not in task
 
 
+def test_plan_task_context_add_vlm_passthrough_not_get_db_path() -> None:
+    """/context --add + VLM: el cuerpo menciona símbolos/datos; no debe disparar TAREA get_db_path."""
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    incoming = (
+        "Usuario dice: /context --add\n"
+        "Contexto visual adjunto: SPY, VIX; datos de precios y nombres de activos.\n"
+        "[VLM_CONTEXT image_hash=ab confidence=0.74]"
+    )
+    task, override = _plan_task(incoming, "finanz")
+    assert override is None
+    assert task == incoming
+    assert "get_db_path" not in task.lower()
+
+
 def test_plan_task_bi_analyst_meta_capabilities() -> None:
     from duckclaw.graphs.manager_graph import _plan_task
 

@@ -85,30 +85,6 @@ def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
             mn = ms.lower()
             break
     if "deepseek" in mn:
-        # #region agent log
-        try:
-            import json
-            import time as _time
-
-            _dbg_path = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-            with open(_dbg_path, "a", encoding="utf-8") as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "adf9d8",
-                            "hypothesisId": "H_MODEL_FB",
-                            "location": "llm_providers.py:infer_provider_from_openai_compatible_llm",
-                            "message": "provider from model_name (url empty or unmatched)",
-                            "data": {"has_url_bases": bool(u)},
-                            "timestamp": int(_time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         return "deepseek"
     return ""
 
@@ -141,35 +117,6 @@ def failure_provider_label_for_llm_invoke(llm: Any, reconciled_provider: str) ->
             if _ev in _REMOTE_USER_FACING_LLM:
                 out = _ev
                 break
-    # #region agent log
-    try:
-        import json
-        import time as _time
-
-        _dbg_path = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-        with open(_dbg_path, "a", encoding="utf-8") as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "adf9d8",
-                        "hypothesisId": "H_FAIL_LBL",
-                        "location": "llm_providers.py:failure_provider_label_for_llm_invoke",
-                        "message": "failure label merge",
-                        "data": {
-                            "rec": rec,
-                            "inf": inf,
-                            "out_before_env": out_before_env,
-                            "out": out,
-                        },
-                        "timestamp": int(_time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     return out
 
 

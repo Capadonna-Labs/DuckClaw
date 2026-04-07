@@ -57,34 +57,6 @@ def _agent_debug_ndjson(hypothesis_id: str, location: str, message: str, data: d
 
 # #endregion
 
-# #region agent log
-def _finanz_debug_ndjson(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    """Debug session adf9d8: siempre escribe (sin secrets). Quitar tras verificación post-fix."""
-    import time
-
-    _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-    try:
-        with open(_p, "a", encoding="utf-8") as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "adf9d8",
-                        "hypothesisId": hypothesis_id,
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-
-
-# #endregion
-
 _TF_SAFE = re.compile(r"^[0-9A-Za-z]+$")
 
 _DEFAULT_HISTORICAL_TF = "1d,1w,1M,moc"
@@ -323,18 +295,6 @@ def _fetch_lake_ohlcv_impl(
     tkr_preview = (ticker or "").strip().upper()[:16]
     tf_prev = (timeframe or "").strip()[:16]
     _ssh_ok = capadonna_ssh_config_ok()
-    # #region agent log
-    _finanz_debug_ndjson(
-        "H2",
-        "quant_market_bridge._fetch_lake_ohlcv_impl:entry",
-        "fetch_lake_ohlcv invoked",
-        {
-            "ticker": tkr_preview,
-            "timeframe": tf_prev,
-            "capadonna_ssh_strict_ok": _ssh_ok,
-        },
-    )
-    # #endregion
     # #region agent log
     _agent_debug_ndjson(
         "H3",
@@ -637,23 +597,6 @@ def _fetch_market_data_impl(
     use_lake = _use_lake_ssh(tf_norm)
 
     # #region agent log
-    _finanz_debug_ndjson(
-        "H1",
-        "quant_market_bridge._fetch_market_data_impl:route",
-        "fetch_market_data route inputs",
-        {
-            "ticker": tkr[:12],
-            "timeframe": tf[:16],
-            "tf_norm": tf_norm,
-            "use_lake_ssh": use_lake,
-            "ibkr_url_non_empty": bool((os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()),
-            "lake_ssh_configured": _lake_ssh_configured(),
-            "capadonna_ssh_strict_ok": capadonna_ssh_config_ok(),
-        },
-    )
-    # #endregion
-
-    # #region agent log
     _ibkr_url_set = bool((os.environ.get("IBKR_MARKET_DATA_URL") or "").strip())
     _agent_debug_ndjson(
         "H1",
@@ -682,23 +625,6 @@ def _fetch_market_data_impl(
                 {"snippet": (err or "")[:240]},
             )
             # #endregion
-            # #region agent log
-            try:
-                _ej = json.loads(err) if err else {}
-                _finanz_debug_ndjson(
-                    "H3",
-                    "quant_market_bridge._fetch_market_data_impl:lake_return",
-                    "lake branch returning error string",
-                    {"error": str(_ej.get("error", ""))[:80]},
-                )
-            except Exception:
-                _finanz_debug_ndjson(
-                    "H3",
-                    "quant_market_bridge._fetch_market_data_impl:lake_return",
-                    "lake branch returning non-json err",
-                    {"snippet": (err or "")[:120]},
-                )
-            # #endregion
             return err
         _out = _upsert_bars(db, payload, tkr, tf, lookback_days, "lake_ssh")
         # #region agent log
@@ -719,14 +645,6 @@ def _fetch_market_data_impl(
             "quant_market_bridge._fetch_market_data_impl:http_unconfigured",
             "IBKR_MARKET_HTTP_UNCONFIGURED",
             {"tf_norm": tf_norm},
-        )
-        # #endregion
-        # #region agent log
-        _finanz_debug_ndjson(
-            "H1",
-            "quant_market_bridge._fetch_market_data_impl:http_unconfigured",
-            "returning IBKR_MARKET_HTTP_UNCONFIGURED",
-            {"tf_norm": tf_norm, "use_lake_ssh": use_lake},
         )
         # #endregion
         return json.dumps(
@@ -752,23 +670,6 @@ def _fetch_market_data_impl(
             {"snippet": (err or "")[:240]},
         )
         # #endregion
-        # #region agent log
-        try:
-            _he = json.loads(err) if err else {}
-            _finanz_debug_ndjson(
-                "H4",
-                "quant_market_bridge._fetch_market_data_impl:http_err_return",
-                "http branch error",
-                {"error": str(_he.get("error", ""))[:120]},
-            )
-        except Exception:
-            _finanz_debug_ndjson(
-                "H4",
-                "quant_market_bridge._fetch_market_data_impl:http_err_return",
-                "http branch error raw",
-                {"snippet": (err or "")[:160]},
-            )
-        # #endregion
         return err
     if payload is None:
         # #region agent log
@@ -781,14 +682,6 @@ def _fetch_market_data_impl(
         # #endregion
         return json.dumps({"error": "Sin respuesta del gateway IBKR."}, ensure_ascii=False)
     _http_out = _upsert_bars(db, payload, tkr, tf, lookback_days, "ibkr_http")
-    # #region agent log
-    _finanz_debug_ndjson(
-        "H5",
-        "quant_market_bridge._fetch_market_data_impl:http_ok",
-        "http upsert done",
-        {"snippet": (_http_out or "")[:200]},
-    )
-    # #endregion
     # #region agent log
     _agent_debug_ndjson(
         "H4",
@@ -838,14 +731,6 @@ def finanz_reconcile_reply_with_fetch_market_tool(messages: Any, reply: str) -> 
     if not false_offline:
         return reply or ""
     if _finanz_reply_already_documents_successful_ingest(r):
-        # #region agent log
-        _finanz_debug_ndjson(
-            "H6b",
-            "quant_market_bridge.finanz_reconcile_reply_with_fetch_market_tool",
-            "skip override: reply already has successful ingest + verify",
-            {},
-        )
-        # #endregion
         return reply or ""
 
     last_ok: dict[str, Any] | None = None
@@ -903,14 +788,6 @@ def finanz_reconcile_reply_with_fetch_market_tool(messages: Any, reply: str) -> 
     src = str(last_ok.get("source") or "")
     lb = last_ok.get("lookback_days")
     lookback = str(lb) if lb is not None else "?"
-    # #region agent log
-    _finanz_debug_ndjson(
-        "H6",
-        "quant_market_bridge.finanz_reconcile_reply_with_fetch_market_tool",
-        "overrode reply: model claimed lake/offline but fetch_market_data JSON was ok",
-        {"ticker": tkr[:12], "timeframe": tf[:16], "rows_upserted": rows, "source": src[:24]},
-    )
-    # #endregion
     return (
         f"## Ingesta OHLCV\n\n"
         f"`fetch_market_data` **correcto** para **{tkr}** (`timeframe={tf}`, lookback_days={lookback}, "

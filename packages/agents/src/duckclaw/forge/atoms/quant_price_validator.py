@@ -19,8 +19,6 @@ _MAX_DRIFT = 0.001  # 0.1 %
 _MIN_QUOTE_VS_MIN_ANCHOR_FRAC = 0.01
 _VLM_MARKER = "VLM_CONTEXT"
 _EVIDENCE_TOOLS = {"fetch_market_data", "fetch_lake_ohlcv", "read_sql"}
-_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-_DEBUG_SESSION_ID = "adf9d8"
 
 _NUMERIC_VERIFY_STATUSES = frozenset({"verified", "mismatch", "no_evidence"})
 
@@ -300,88 +298,14 @@ def quant_reply_price_audit(
     evidence = _ohlc_numbers_from_messages_for_ticker(list(messages or []), sym)
     anchors: set[float] = {close} | evidence
 
-    # #region agent log
-    try:
-        import time as _time
-
-        _pl0 = {
-            "sessionId": _DEBUG_SESSION_ID,
-            "hypothesisId": "D1",
-            "location": "quant_price_validator.quant_reply_price_audit",
-            "message": "anchors: db close + tool OHLC evidence",
-            "data": {
-                "sym": sym,
-                "close": close,
-                "evidence_n": len(evidence),
-                "sample_evidence": sorted(evidence)[:12],
-            },
-            "timestamp": int(_time.time() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as _df:
-            _df.write(json.dumps(_pl0, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
     quote_candidates: list[float] = []
     for m in _PRICE_PAT.finditer(text):
         p = float(m.group(1))
         if _price_in_non_market_context(text, m.start(), m.end()):
-            # #region agent log
-            try:
-                import time as _time
-
-                _pl = {
-                    "sessionId": _DEBUG_SESSION_ID,
-                    "hypothesisId": "B1",
-                    "location": "quant_price_validator.quant_reply_price_audit",
-                    "message": "skip price: non-market context window",
-                    "data": {"sym": sym, "price": p},
-                    "timestamp": int(_time.time() * 1000),
-                }
-                with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as _df:
-                    _df.write(json.dumps(_pl, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # #endregion
             continue
         if _price_in_vix_or_index_context(text, m.start(), m.end()):
-            # #region agent log
-            try:
-                import time as _time
-
-                _pl_v = {
-                    "sessionId": _DEBUG_SESSION_ID,
-                    "hypothesisId": "E1",
-                    "location": "quant_price_validator.quant_reply_price_audit",
-                    "message": "skip price: VIX/index context window",
-                    "data": {"sym": sym, "price": p},
-                    "timestamp": int(_time.time() * 1000),
-                }
-                with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as _df:
-                    _df.write(json.dumps(_pl_v, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # #endregion
             continue
         if _below_plausible_share_quote_vs_anchors(p, anchors):
-            # #region agent log
-            try:
-                import time as _time
-
-                _pl2 = {
-                    "sessionId": _DEBUG_SESSION_ID,
-                    "hypothesisId": "C1",
-                    "location": "quant_price_validator.quant_reply_price_audit",
-                    "message": "skip price: below plausible share quote vs min anchor",
-                    "data": {"sym": sym, "price": p},
-                    "timestamp": int(_time.time() * 1000),
-                }
-                with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as _df:
-                    _df.write(json.dumps(_pl2, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # #endregion
             continue
         quote_candidates.append(p)
 

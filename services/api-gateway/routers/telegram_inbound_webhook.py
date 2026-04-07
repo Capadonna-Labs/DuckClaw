@@ -98,6 +98,28 @@ def _parse_context_add_command(text: str) -> tuple[bool, str]:
     return True, (m.group(1) or "").strip()
 
 
+def _telegram_message_has_vlm_block(s: str) -> bool:
+    t = (s or "").strip()
+    return "[VLM_CONTEXT" in t and "Contexto visual adjunto:" in t
+
+
+def _resolve_context_add_body(*, raw_caption: str, current_text: str) -> tuple[bool, str]:
+    """
+    /context --add debe detectarse con el caption/texto crudo de Telegram.
+
+    Tras VLM el mensaje enriquecido ya no empieza por ``/context``; sin esto,
+    ``/context --add`` + foto no encola memoria ni manda SUMMARIZE_NEW_CONTEXT.
+    Si hay bloque VLM, el cuerpo a inyectar y resumir es el texto enriquecido completo.
+    """
+    is_add, body = _parse_context_add_command(raw_caption)
+    if not is_add:
+        return False, ""
+    cur = (current_text or "").strip()
+    if _telegram_message_has_vlm_block(cur):
+        return True, cur
+    return True, (body or "").strip()
+
+
 def _parse_context_summary_command(text: str) -> bool:
     """``/context --summary`` | ``--summarize`` | ``--peek`` | ``--db``: leer memoria semántica y resumir (sin escribir)."""
     return bool(_CONTEXT_SUMMARY_RE.match((text or "").strip()))
@@ -879,6 +901,7 @@ def build_telegram_inbound_webhook_router(
             return {"ok": "true"}
 
         text = (msg.get("text") or msg.get("caption") or "").strip()
+        telegram_raw_caption = text
         tg_entities = _telegram_entities_for_message(msg)
         visual, visual_from_parent_reply = _extract_visual_payload_with_reply(msg)
         has_visual = bool(visual.get("file_id"))
@@ -1184,7 +1207,10 @@ def build_telegram_inbound_webhook_router(
                             payload=str(exc)[:500],
                         )
 
-        is_ctx_add, ctx_body = _parse_context_add_command(text)
+        is_ctx_add, ctx_body = _resolve_context_add_body(
+            raw_caption=telegram_raw_caption,
+            current_text=text,
+        )
         if is_ctx_add:
             token_ctx = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
 

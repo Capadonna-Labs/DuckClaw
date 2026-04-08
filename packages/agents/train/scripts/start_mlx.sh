@@ -25,6 +25,41 @@ if [ ! -d "$MODEL_PATH" ] && [ ! -f "$MODEL_PATH" ]; then
   exit 1
 fi
 
+# Checkpoints con model_type gemma4 requieren mlx-lm reciente (mlx_lm.models.gemma4).
+# Si ves: ValueError: Model type gemma4 not supported → pip install -U mlx-lm en este venv.
+if [ -d "$MODEL_PATH" ] && [ -f "${MODEL_PATH}/config.json" ]; then
+  _GEMMA4=$(
+    MODEL_PATH="$MODEL_PATH" "$PYTHON_PATH" -c "
+import json, os
+from pathlib import Path
+p = Path(os.environ['MODEL_PATH']) / 'config.json'
+d = json.loads(p.read_text(encoding='utf-8'))
+print(d.get('model_type', '') or '')
+" 2>/dev/null || true
+  )
+  if [ "$_GEMMA4" = "gemma4" ]; then
+    if ! MODEL_PATH="$MODEL_PATH" "$PYTHON_PATH" -c "import mlx_lm.models.gemma4" 2>/dev/null; then
+      echo "Error: El modelo en ${MODEL_PATH} es Gemma 4 (model_type=gemma4), pero este intérprete no puede cargar mlx_lm.models.gemma4."
+      _pyver=$("$PYTHON_PATH" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "?")
+      echo "Intérprete: $PYTHON_PATH (Python ${_pyver})"
+      echo ""
+      echo "Causa frecuente: mlx-lm reciente exige mlx>=0.30.4 en macOS; para Python 3.9 PyPI solo ofrece mlx hasta ~0.29.x, así que"
+      echo "  pip install -U mlx-lm  NO sube de versión y Gemma 4 no llega nunca."
+      echo ""
+      echo "Qué hacer (elige una):"
+      echo "  A) Si usas este monorepo DuckClaw: en .env pon MLX_PYTHON=<raíz-del-repo>/.venv/bin/python"
+      echo "     (ese venv suele ser Python 3.10+ con mlx-lm reciente). Luego: pip install -U mlx-lm dentro de ese venv."
+      echo "  B) Otro Python 3.10+: ruta real a python3.11 (whereis / brew --prefix), p. ej.:"
+      echo "     /opt/homebrew/bin/python3.11 -m venv \$HOME/mlx_env311 && \$HOME/mlx_env311/bin/pip install -U pip mlx-lm"
+      echo "     y MLX_PYTHON=\$HOME/mlx_env311/bin/python"
+      echo "No uses rutas inventadas ni el carácter … en la shell; copia la ruta absoluta que exista (test: test -x \"\$ruta\")."
+      echo "Actualizar mlx-lm en el intérprete activo:  \"$PYTHON_PATH\" -m pip install -U mlx-lm"
+      echo "O desde main si hace falta: https://github.com/ml-explore/mlx-lm"
+      exit 1
+    fi
+  fi
+fi
+
 MLX_PORT="${MLX_PORT:-8080}"
 if command -v lsof >/dev/null 2>&1 && lsof -i :"${MLX_PORT}" -t >/dev/null 2>&1; then
   echo "Puerto ${MLX_PORT} ya está en uso. Ejecuta: pm2 stop MLX-Inference; lsof -ti :${MLX_PORT} | xargs kill -9; sleep 2; pm2 start MLX-Inference"

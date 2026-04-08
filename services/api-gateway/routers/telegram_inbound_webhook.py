@@ -38,6 +38,7 @@ from core.context_injection_vault import resolve_telegram_user_vault_db_path
 from core.context_stored_snapshot import fetch_semantic_memory_snapshot
 from core.models import ChatRequest
 from core.vlm_ingest import (
+    VLMBackendUnavailableError,
     extract_pdf_plain_text_from_bytes,
     process_visual_album_batch,
     process_visual_payload,
@@ -635,6 +636,13 @@ async def _ingest_telegram_visual_enrich_text(
             )
             return enriched, False
     except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, VLMBackendUnavailableError):
+            try:
+                c = TelegramBotApiAsyncClient(token_v)
+                await c.send_message(chat_id=chat_id, text=str(exc))
+            except Exception as send_exc:  # noqa: BLE001
+                _log.warning("VLM unavailable send_message failed: %s", send_exc)
+            return text, True
         _log.warning("VLM ingest falló (private_dm=%s): %s", private_dm, exc)
     return text, False
 
@@ -1266,6 +1274,13 @@ def build_telegram_inbound_webhook_router(
                                 str(out.get("image_hash") or "")[:12],
                             )
                     except Exception as exc:  # noqa: BLE001
+                        if isinstance(exc, VLMBackendUnavailableError):
+                            try:
+                                client_vlm = TelegramBotApiAsyncClient(token_v)
+                                await client_vlm.send_message(chat_id=chat_id, text=str(exc))
+                            except Exception as send_exc:  # noqa: BLE001
+                                _log.warning("war_room VLM unavailable send failed: %s", send_exc)
+                            return {"ok": "true"}
                         _log.warning("VLM ingest falló: %s", exc)
                         wr_append_audit(
                             db,

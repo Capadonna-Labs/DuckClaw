@@ -3047,7 +3047,7 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
         model = model or "—"
         u_show = base_url or "—"
         base_url = u_show[:50] + "…" if len(u_show) > 50 else u_show
-        return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model model=Slayer-8B"
+        return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model model=Slayer-8B | /model provider=mlx | model=gemma4"
     for part in args.split("|"):
         part = part.strip()
         if "=" in part:
@@ -3713,13 +3713,41 @@ def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
         pass
     try:
         from duckclaw.forge.skills.quant_hitl import grant_execute_order
+        from duckclaw.forge.skills.quant_state_delta import push_quant_state_delta_sync
 
         grant_execute_order(str(chat_id).strip(), sid)
+        try:
+            from duckclaw.graphs.graph_server import get_db as _get_db_for_delta
+
+            _dbd = _get_db_for_delta()
+            _db_path = str(getattr(_dbd, "_path", "") or "")
+        except Exception:
+            _db_path = ""
+        _tenant = "default"
+        _requester = ""
+        try:
+            from duckclaw.graphs.graph_server import get_db as _get_db_meta
+
+            _dbm = _get_db_meta()
+            _tenant = str(get_chat_state(_dbm, chat_id, "tenant_id") or "default").strip() or "default"
+            _requester = str(get_chat_state(_dbm, chat_id, "last_requester_id") or "").strip()
+        except Exception:
+            pass
+        if _db_path:
+            push_quant_state_delta_sync(
+                {
+                    "tenant_id": _tenant,
+                    "delta_type": "TRADE_SIGNAL_APPROVED",
+                    "user_id": _requester or str(chat_id),
+                    "target_db_path": _db_path,
+                    "mutation": {"signal_id": sid},
+                }
+            )
     except Exception as e:
         return f"No se pudo registrar la confirmación: {e}"
     return (
         f"Confirmación registrada para la señal {sid}. "
-        "Pide al asistente que ejecute la herramienta execute_order con ese signal_id en esta sesión."
+        "Pide al asistente que ejecute `execute_approved_signal` (o `execute_order` legado) con ese signal_id en esta sesión."
     
 
 

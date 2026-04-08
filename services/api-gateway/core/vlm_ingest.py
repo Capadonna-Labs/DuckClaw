@@ -60,6 +60,12 @@ _VLM_SYSTEM_PROMPT = (
 _mlx_vlm_model_proc: tuple[Any, Any] | None = None
 
 
+class VLMBackendUnavailableError(RuntimeError):
+    def __init__(self, provider: str):
+        self.provider = provider
+        super().__init__(f"error 503: {provider} no disponible")
+
+
 def _suffix_for_mime(mime: str) -> str:
     m = (mime or "image/jpeg").strip().lower()
     if m == "image/png":
@@ -584,8 +590,10 @@ async def process_visual_payload(
                 last_exc = exc
                 if kind == "mlx":
                     _log.warning("VLM vía MLX falló (base_url=%s): %s", mlx_base, exc)
+                    last_exc = VLMBackendUnavailableError("mlx vlm")
                 elif kind == "gemini":
                     _log.warning("VLM vía Gemini falló: %s", exc)
+                    last_exc = VLMBackendUnavailableError("gemini")
                 else:
                     _log.warning("VLM vía OpenAI cloud falló: %s", exc)
                 continue
@@ -715,8 +723,10 @@ async def process_visual_album_batch(
                 last_exc = exc
                 if kind == "mlx":
                     _log.warning("VLM (álbum) vía MLX falló (base_url=%s): %s", mlx_base, exc)
+                    last_exc = VLMBackendUnavailableError("mlx vlm")
                 elif kind == "gemini":
                     _log.warning("VLM (álbum) vía Gemini falló: %s", exc)
+                    last_exc = VLMBackendUnavailableError("gemini")
                 else:
                     _log.warning("VLM (álbum) vía OpenAI cloud falló: %s", exc)
                 continue

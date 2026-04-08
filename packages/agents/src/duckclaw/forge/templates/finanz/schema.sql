@@ -67,6 +67,30 @@ ALTER TABLE finance_worker.job_opportunities ADD COLUMN IF NOT EXISTS notes VARC
 -- Idempotencia por URL (si falla: hay apply_url duplicados; deduplicar y volver a aplicar schema)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_job_opportunities_apply_url_unique ON finance_worker.job_opportunities (apply_url);
 
+-- Quant Trader ledger (spec: Quant Trader.md) mutado por StateDelta + Singleton Writer
+CREATE TABLE IF NOT EXISTS finance_worker.trading_mandates (
+  mandate_id UUID PRIMARY KEY,
+  source_worker VARCHAR,
+  asset_class VARCHAR,
+  direction VARCHAR, -- LONG | SHORT | NEUTRAL
+  max_weight_pct DECIMAL(5,2),
+  status VARCHAR, -- PENDING | ANALYZING | FULFILLED | REJECTED
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS finance_worker.trade_signals (
+  signal_id UUID PRIMARY KEY,
+  mandate_id UUID REFERENCES finance_worker.trading_mandates(mandate_id),
+  ticker VARCHAR,
+  signal_type VARCHAR, -- ENTRY | EXIT
+  proposed_weight DECIMAL(5,2),
+  sandbox_backtest_cid VARCHAR,
+  human_approved BOOLEAN DEFAULT FALSE,
+  status VARCHAR, -- AWAITING_HITL | EXECUTED | DISCARDED
+  rationale VARCHAR,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 INSERT INTO finance_worker.categories (id, name) VALUES (1, 'Otros')
 ON CONFLICT (id) DO NOTHING;
 

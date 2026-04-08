@@ -140,6 +140,13 @@ def reconcile_worker_provider_label(
     return (provider or "").strip().lower() or "none_llm"
 
 
+# Repo HF por defecto para `/model model=gemma4` cuando `MLX_GEMMA4_MODEL_PATH` está vacío.
+# Debe coincidir con `MLX_MODEL_PATH` del proceso `mlx_lm.server` al servir ese checkpoint.
+MLX_GEMMA4_DEFAULT_REPO_ID = "mlx-community/gemma-4-e4b-it-4bit"
+
+_MLX_GEMMA4_ALIASES = frozenset({"gemma4", "gemma-4"})
+
+
 def mlx_openai_compatible_model_name(requested: str) -> str:
     """
     Nombre de modelo para ``ChatOpenAI`` → ``mlx_lm.server``.
@@ -148,6 +155,9 @@ def mlx_openai_compatible_model_name(requested: str) -> str:
     ni ruta en disco; LangChain puede intentar resolverlos en HuggingFace y MLX devuelve 404.
     En ese caso se usa ``MLX_MODEL_ID`` / ``MLX_MODEL_PATH``. Rutas (``/``, ``./``),
     rutas con subcarpetas (``/``) y pares tipo ``org/model`` se respetan.
+
+    ``gemma4`` / ``gemma-4`` se resuelven con ``MLX_GEMMA4_MODEL_PATH`` o
+    ``MLX_GEMMA4_DEFAULT_REPO_ID`` (antes del fallback genérico a ``MLX_MODEL_PATH``).
     """
     r = (requested or "").strip()
     if not r:
@@ -159,6 +169,9 @@ def mlx_openai_compatible_model_name(requested: str) -> str:
         return r
     if "/" in r:
         return r
+    if r.lower() in _MLX_GEMMA4_ALIASES:
+        g4 = (os.environ.get("MLX_GEMMA4_MODEL_PATH") or "").strip()
+        return g4 or MLX_GEMMA4_DEFAULT_REPO_ID
     mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
     return mid or r
 

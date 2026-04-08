@@ -1312,9 +1312,52 @@ def build_worker_graph(
         model = (llm_model or os.environ.get("DUCKCLAW_LLM_MODEL") or "").strip()
         base_url = (llm_base_url or os.environ.get("DUCKCLAW_LLM_BASE_URL") or "").strip()
 
+    # Si el turno debe usar MLX/IoT local (triplet o env fusionado) pero el objeto LLM heredado apunta
+    # a un host remoto (p. ej. Groq vía _graph_state), reconstruir desde provider/model/base_url; si no,
+    # el worker invoca Groq con model=/ruta/local y aparece el error HF «Repo id must be…».
+    if llm is not None and provider in ("mlx", "iotcorelabs"):
+        from duckclaw.integrations.llm_providers import infer_provider_from_openai_compatible_llm
+
+        _inf_host = (infer_provider_from_openai_compatible_llm(llm) or "").strip().lower()
+        if _inf_host and _inf_host not in ("mlx", "iotcorelabs"):
+            _log.warning(
+                "build_worker_graph: cliente LLM inferido=%s no coincide con triplet local declarado; "
+                "reconstruyendo desde provider=%s model=%s…",
+                _inf_host,
+                provider,
+                (model or "")[:48],
+            )
+            # region agent log
+            try:
+                _payload = {
+                    "sessionId": "c964f7",
+                    "hypothesisId": "H1",
+                    "location": "workers/factory.py:build_worker_graph",
+                    "message": "mlx declared but remote LLM client; rebuilding from triplet",
+                    "data": {
+                        "worker_id": worker_id,
+                        "inferred_client": _inf_host,
+                        "merged_provider": provider,
+                    },
+                    "timestamp": int(time.time() * 1000),
+                }
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+            # endregion
+            llm = None
+
     if llm is None and provider != "none_llm":
         from duckclaw.integrations.llm_providers import build_llm
-        llm = build_llm(provider, model, base_url)
+
+        # Ya fusionamos llm_provider/model/base_url con env arriba; prefer_env_provider=False
+        # evita que build_llm vuelva a imponer DUCKCLAW_LLM_* y anule /model (mlx en chat vs groq en PM2).
+        llm = build_llm(provider, model, base_url, prefer_env_provider=False)
     elif llm is None:
         llm = None
 
@@ -1380,6 +1423,14 @@ def build_worker_graph(
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             _log.debug("quant skills registration skipped", exc_info=True)
+    if isinstance(_qcfg, dict) and _qcfg.get("enabled") and _lid_q in ("quant_trader", "quanttrader"):
+        try:
+            from duckclaw.forge.skills.quant_trader_bridge import register_quant_trader_skills
+
+            register_quant_trader_skills(db, llm, tools)
+            tools_by_name = {t.name: t for t in tools}
+        except Exception:
+            _log.debug("quant trader skills registration skipped", exc_info=True)
 
     if getattr(spec, "sft_config", None):
         try:
@@ -2434,6 +2485,20 @@ def build_worker_graph(
                             _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
                             if not is_chat_heartbeat_enabled(_htid, _hcid):
                                 _send_sandbox_heartbeat_telegram(state)
+                        try:
+                            from duckclaw.forge.skills.quant_tool_context import (
+                                set_quant_tool_chat_id,
+                                set_quant_tool_db_path,
+                                set_quant_tool_tenant_id,
+                                set_quant_tool_user_id,
+                            )
+
+                            set_quant_tool_chat_id(str(state.get("chat_id") or state.get("session_id") or ""))
+                            set_quant_tool_tenant_id(str(state.get("tenant_id") or "default"))
+                            set_quant_tool_user_id(str(state.get("user_id") or state.get("chat_id") or "default"))
+                            set_quant_tool_db_path(str(getattr(db, "_path", "") or ""))
+                        except Exception:
+                            pass
                         result = tool.invoke(invoke_args)
                         content = str(result) if result is not None else "OK"
                         if name in ("run_sandbox", "run_browser_sandbox"):
@@ -2589,10 +2654,12 @@ def build_worker_graph(
         reply = sanitize_worker_reply_phase1(reply)
         if (getattr(spec, "worker_id", "") or "").strip().lower() == "finanz":
             from duckclaw.forge.skills.quant_market_bridge import (
+                finanz_reconcile_cuentas_placeholder_reply,
                 finanz_reconcile_reply_with_fetch_market_tool,
             )
 
             reply = finanz_reconcile_reply_with_fetch_market_tool(msgs, reply)
+            reply = finanz_reconcile_cuentas_placeholder_reply(msgs, reply)
         reply = format_reddit_mcp_reply_if_applicable(reply)
         suppress_egress = bool(state.get("suppress_subagent_egress"))
 
@@ -2712,6 +2779,22 @@ def build_worker_graph(
         except Exception:
             pass
         reply = sanitize_worker_reply_text(reply or "")
+        if not (reply or "").strip():
+            tool_content = ""
+            for _m in reversed(msgs):
+                if getattr(_m, "type", "") == "tool":
+                    tool_content = str(getattr(_m, "content", "") or "").strip()
+                    if tool_content:
+                        break
+            if tool_content:
+                try:
+                    from duckclaw.utils import format_tool_reply
+
+                    reply = sanitize_worker_reply_text(format_tool_reply(tool_content))
+                except Exception:
+                    reply = tool_content
+            if not (reply or "").strip():
+                reply = "No encontré resultados para responder en este turno."
         if suppress_egress:
             out = {**state, "reply": "", "internal_reply": (reply or ""), "messages": msgs}
         else:

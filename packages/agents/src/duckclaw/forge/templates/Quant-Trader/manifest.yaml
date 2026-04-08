@@ -1,0 +1,24 @@
+name: QuantTraderWorker
+id: quant_trader
+schema_name: finance_worker
+topology: general
+read_only: true
+risk_level: conservative
+quant:
+  enabled: true
+network_access: false
+browser_sandbox: false
+allowed_tables:
+  - finance_worker.trading_mandates
+  - finance_worker.trade_signals
+  - finance_worker.cuentas
+  - quant_core.ohlcv_data
+llm:
+  required: true
+  temperature: 0.1
+skills:
+  - read_sql
+  - fetch_market_data
+  - execute_sandbox_script
+  - propose_trade_signal
+  - execute_approved_signal

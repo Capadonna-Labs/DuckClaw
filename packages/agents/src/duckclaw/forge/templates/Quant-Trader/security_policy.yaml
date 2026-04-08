@@ -1,0 +1,13 @@
+network:
+  default: deny
+  allow_list: []
+filesystem:
+  readonly_mounts:
+    - "/Users/juanjosearevalocamargo/Desktop/duckclaw/db:/workspace/repo_db:ro"
+    - "/tmp/duckclaw_sandbox:/workspace/data:ro"
+  ephemeral_volumes:
+    - "/workspace/output"
+secrets:
+  in_memory_only: true
+  allowed_secrets: []
+max_execution_time_seconds: 30

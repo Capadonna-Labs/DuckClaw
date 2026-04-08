@@ -17,6 +17,7 @@ import os
 import re
 import time
 import uuid
+import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
@@ -35,6 +36,27 @@ from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_
 _log = logging.getLogger(__name__)
 _obs = get_obs_logger()
 _worker_graph_cache: dict[str, Any] = {}
+_telegram_bot_username_cache: dict[str, str] = {}
+
+
+def _debug_emit(location: str, message: str, data: dict[str, Any], run_id: str, hypothesis_id: str) -> None:
+    # #region agent log
+    try:
+        payload = {
+            "sessionId": "9accbe",
+            "id": f"log_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}",
+            "timestamp": int(time.time() * 1000),
+            "location": location,
+            "message": message,
+            "data": data,
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+        }
+        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-9accbe.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
 
 
 def _tool_name_from_embedded_json_content(text: str) -> str | None:
@@ -366,6 +388,33 @@ def _pick_job_hunter_worker(available_templates: list[str]) -> Optional[str]:
     return None
 
 
+def _pick_quant_trader_worker(available_templates: list[str]) -> Optional[str]:
+    """Retorna el worker Quant Trader presente en el team efectivo."""
+    for wid in available_templates or []:
+        if _worker_id_alnum_slug(wid) in ("quanttrader", "quanttraderworker", "quant"):
+            return wid
+    return None
+
+
+def _user_requests_quant_execution(incoming: str) -> bool:
+    if (os.environ.get("DUCKCLAW_QUANT_TRADER_ENABLED") or "1").strip().lower() in ("0", "false", "no", "off"):
+        return False
+    t = (incoming or "").strip().lower()
+    if not t:
+        return False
+    cues = (
+        "quant trader",
+        "trading cuant",
+        "backtest",
+        "z-score",
+        "mean reversion",
+        "reversion a la media",
+        "señal de trading",
+        "senal de trading",
+    )
+    return any(c in t for c in cues)
+
+
 def _finanz_worker_in_templates(available_templates: list[str]) -> bool:
     """True si el equipo incluye al worker finanz (A2A Manager → Finanz → JobHunter → Finanz)."""
     for wid in available_templates or []:
@@ -407,15 +456,157 @@ def _job_hunter_user_requests_application_tracking(incoming: str) -> bool:
     return any(k in tl for k in job_kw)
 
 
+def _job_hunter_user_requests_application_save(incoming: str) -> bool:
+    """
+    Detecta intención de registrar/guardar una vacante ya aplicada para seguimiento.
+    Incluye variantes naturales y comando `/job --add <url>`.
+    """
+    raw = (incoming or "").strip()
+    if not raw:
+        return False
+    tl = raw.lower()
+    if "tarea: misión a2a income_injection" in tl:
+        return False
+    has_url = ("http://" in tl) or ("https://" in tl) or ("www." in tl)
+    save_terms = (
+        "guarda la oferta",
+        "guardar la oferta",
+        "guárdala en la db",
+        "guardala en la db",
+        "registra la oferta",
+        "registra en la bd",
+        "registrar en la bd",
+        "darle seguimiento",
+        "/job add",
+        "/job --add",
+    )
+    apply_terms = (
+        "acabo de aplicar",
+        "ya apliqué",
+        "ya aplique",
+        "postulé",
+        "postule",
+    )
+    return has_url and (any(t in tl for t in save_terms) or any(t in tl for t in apply_terms))
+
+
 def _worker_matches_id(worker_id: str | None, alias: str | None) -> bool:
     """Compara ids de worker tolerando guiones/underscores/case."""
     return _worker_id_alnum_slug(worker_id) == _worker_id_alnum_slug(alias)
+
+
+def _derive_worker_vault_db_path(vault_db_path: str, worker_id: str | None) -> str:
+    """
+    Deriva el vault db del worker destino cuando comparten chat pero no vault.
+    Ej.: .../finanzdb1.duckdb -> .../jobhunterdb1.duckdb
+    """
+    raw = (vault_db_path or "").strip()
+    wid = (worker_id or "").strip()
+    if not raw or not wid:
+        return raw
+    try:
+        p = Path(raw)
+        filename = p.name
+        if "db1.duckdb" not in filename.lower():
+            return raw
+        worker_slug = _worker_id_alnum_slug(wid)
+        if not worker_slug:
+            return raw
+        target = f"{worker_slug}db1.duckdb"
+        if filename == target:
+            return raw
+        return str(p.with_name(target))
+    except Exception:
+        return raw
+
+
+def _compact_bot_name_for_worker(worker_id: str | None) -> str | None:
+    slug = _worker_id_alnum_slug(worker_id)
+    mapping = {
+        "finanz": "finanz",
+        "jobhunter": "jobhunter",
+        "siataanalyst": "siata",
+    }
+    return mapping.get(slug)
+
+
+def _bot_token_from_compact_routes_for_bot_name(bot_name: str | None) -> str:
+    """
+    Extrae token desde DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES (formato compacto):
+    bot_name:bot_token:/api/v1/telegram/<slug>,...
+    """
+    name = (bot_name or "").strip().lower()
+    raw = (os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()
+    if not name or not raw or raw.startswith("["):
+        return ""
+    for entry in [x.strip() for x in raw.split(",") if x.strip()]:
+        idx = entry.rfind(":/api/")
+        if idx < 0:
+            continue
+        prefix = entry[:idx]
+        first = prefix.find(":")
+        if first <= 0:
+            continue
+        bn = prefix[:first].strip().lower()
+        tok = prefix[first + 1 :].strip()
+        if bn == name and tok:
+            return tok
+    return ""
+
+
+def _telegram_bot_username_from_token(token: str) -> str:
+    """
+    Resuelve username real del bot por getMe y cachea en memoria del proceso.
+    Retorna sin arroba, o vacío si no se pudo resolver.
+    """
+    tok = (token or "").strip()
+    if not tok:
+        return ""
+    cached = _telegram_bot_username_cache.get(tok)
+    if cached:
+        return cached
+    try:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{tok}/getMe",
+            method="GET",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
+            payload = json.loads(resp.read().decode("utf-8", "replace"))
+        if isinstance(payload, dict) and bool(payload.get("ok")):
+            result = payload.get("result") or {}
+            username = str(result.get("username") or "").strip()
+            if username:
+                _telegram_bot_username_cache[tok] = username
+                return username
+    except Exception:
+        pass
+    return ""
+
+
+def _telegram_bot_mention_for_worker(worker_id: str | None, fallback_handle: str | None = None) -> str:
+    """
+    Devuelve @username real del bot asociado al worker cuando sea posible.
+    Fallback a @<worker_id> si no se puede resolver.
+    """
+    bot_name = _compact_bot_name_for_worker(worker_id)
+    token = _bot_token_from_compact_routes_for_bot_name(bot_name)
+    username = _telegram_bot_username_from_token(token)
+    if username:
+        return f"@{username}"
+    fb = (fallback_handle or worker_id or "worker").strip().lstrip("@")
+    return f"@{fb}" if fb else "@worker"
 
 
 def _contains_income_injection_request(text: str) -> bool:
     """Detecta marcador explícito de handoff A2A desde la respuesta de Finanz."""
     t = (text or "").strip().lower()
     return "[a2a_request: income_injection]" in t
+
+
+def _contains_quant_trader_request(text: str) -> bool:
+    t = (text or "").strip().lower()
+    return "[a2a_request: quant_trader]" in t
 
 
 def _contains_job_opportunity_tracking_request(text: str) -> bool:
@@ -433,6 +624,8 @@ def route_finanz_reply_a2a_branch(state: dict) -> str | None:
         return None
     current_worker = (state.get("assigned_worker_id") or "").strip()
     raw_reply = state.get("last_worker_raw_reply") or state.get("reply") or ""
+    if _worker_matches_id(current_worker, "finanz") and _contains_quant_trader_request(raw_reply):
+        return "handoff_quant_trader"
     if _worker_matches_id(current_worker, "finanz") and _contains_job_opportunity_tracking_request(raw_reply):
         return "handoff_job_track"
     if _worker_matches_id(current_worker, "finanz") and _contains_income_injection_request(raw_reply):
@@ -555,14 +748,56 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
             f"--- Contexto ---\n{ctx[:6000]}",
             None,
         )
+    # Job-Hunter: registrar postulación con URL (incluye `/job --add ...`).
+    if _is_job_hunter_worker(worker_id) and _job_hunter_user_requests_application_save(incoming or ""):
+        ctx = (incoming or "").strip()
+        _debug_emit(
+            "graphs/manager_graph.py:job_tracking_save_plan",
+            "manager planned job tracking save",
+            {"worker_id": worker_id, "incoming_preview": ctx[:220]},
+            worker_id or "manager",
+            "H6",
+        )
+        return (
+            "TAREA: Misión A2A JOB_OPPORTUNITY_TRACKING. Registra en finance_worker.job_opportunities la vacante o "
+            "postulación indicada por el usuario. Usa admin_sql/read_sql para UPSERT por apply_url; "
+            "si el usuario dice que ya aplicó, status='applied' y applied_at=CURRENT_TIMESTAMP. "
+            "Responde confirmación breve del registro, sin iniciar búsqueda Tavily.\n\n"
+            f"--- Contexto ---\n{ctx[:6000]}",
+            None,
+        )
     # Job-Hunter: seguimiento de postulaciones en DuckDB (sin Tavily ni round-trip a Finanz).
     if _is_job_hunter_worker(worker_id) and _job_hunter_user_requests_application_tracking(incoming or ""):
+        _debug_emit(
+            "graphs/manager_graph.py:job_tracking_plan",
+            "manager planned job tracking read",
+            {"worker_id": worker_id, "incoming_preview": (incoming or "")[:220]},
+            worker_id or "manager",
+            "H1",
+        )
         return (
             "TAREA: El usuario pide seguimiento de vacantes/postulaciones **ya registradas** en la base local. "
             "Ejecuta read_sql sobre finance_worker.job_opportunities (p. ej. ORDER BY COALESCE(applied_at, updated_at) DESC LIMIT 30) "
             "y responde en español de forma **completa pero concisa**: tabla o lista con title, company, status, apply_url, fechas; "
             "si no hay filas, dilo y ofrece registrar con la URL de la oferta. "
             "**Prohibido** tavily_search y run_browser_sandbox en este turno (no es búsqueda de ofertas nuevas).",
+            None,
+        )
+    # Si el usuario pide seguimiento de vacantes fuera de Job-Hunter, bloquear ejecución en Finanz
+    # y pedir explícitamente agregar el worker al equipo del chat.
+    if _job_hunter_user_requests_application_tracking(incoming or "") and not _is_job_hunter_worker(worker_id):
+        _debug_emit(
+            "graphs/manager_graph.py:job_tracking_not_jobhunter",
+            "job tracking intent detected outside Job-Hunter worker",
+            {"worker_id": worker_id, "incoming_preview": (incoming or "")[:220]},
+            worker_id or "manager",
+            "H9",
+        )
+        return (
+            "TAREA: El usuario pidió seguimiento de vacantes/postulaciones, pero el equipo actual del chat no incluye "
+            "Job-Hunter. NO uses read_sql/admin_sql ni otras tools en este turno. Responde breve y accionable: "
+            "indica que para continuar debe agregar el worker con `/workers --add Job-Hunter` (o `/workers Job-Hunter finanz` "
+            "si quiere reemplazar), y luego repetir la solicitud.",
             None,
         )
     # Job-Hunter: evita run_sandbox con URLs inventadas; discovery = tavily_search.
@@ -1009,12 +1244,28 @@ def build_manager_graph(
         state_db = _agent_config_db_for_vault(db, vault_path or None)
         available = list(get_effective_team_templates(state_db, chat_id, tenant_id, troot))
         preferred = (os.environ.get("DUCKCLAW_DEFAULT_WORKER_ID") or "").strip()
+        incoming_assigned = (state.get("assigned_worker_id") or "").strip() or None
         assigned = available[0] if available else None
         if preferred and available:
             for wid in available:
                 if (wid or "").strip().lower() == preferred.lower():
                     assigned = (wid or "").strip()
                     break
+        # region agent log
+        _debug_emit(
+            "graphs/manager_graph.py:router_worker_pick",
+            "router selected initial worker",
+            {
+                "incoming_assigned": incoming_assigned,
+                "selected_assigned": assigned,
+                "available_templates": available[:8],
+                "tenant_id": str(tenant_id or ""),
+                "chat_id": str(chat_id or ""),
+            },
+            str(chat_id or "manager"),
+            "H7",
+        )
+        # endregion
         out = {"assigned_worker_id": assigned, "available_templates": available}
         # Preservar estado para nodos siguientes (por si el grafo hace merge sustituyendo)
         if "incoming" in state:
@@ -1115,6 +1366,20 @@ def build_manager_graph(
         available_plan = state.get("available_templates") or list_workers(troot)
         default_worker = available_plan[0] if available_plan else None
         assigned = (state.get("assigned_worker_id") or default_worker or "").strip() or default_worker
+        # region agent log
+        _debug_emit(
+            "graphs/manager_graph.py:plan_worker_before_task",
+            "plan_node worker before _plan_task",
+            {
+                "state_assigned_worker_id": state.get("assigned_worker_id"),
+                "assigned_for_plan": assigned,
+                "available_templates": list(available_plan or [])[:8],
+                "incoming_preview": incoming[:220],
+            },
+            str(state.get("chat_id") or "manager"),
+            "H8",
+        )
+        # endregion
         if not incoming:
             _log.warning("manager plan: incoming vacío en state (keys=%s)", list(state.keys()))
 
@@ -1136,6 +1401,28 @@ def build_manager_graph(
         cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
         if job_hunter_in_team and cashflow_job_intent:
             assigned = job_hunter_in_team
+        # Seguimiento de postulaciones: si Job-Hunter está en el equipo, evitar caer en el guardrail
+        # "agrega Job-Hunter" de _plan_task(worker_id=finanz) y enrutar directo al worker correcto.
+        tracking_intent = _job_hunter_user_requests_application_tracking(incoming)
+        if job_hunter_in_team and tracking_intent:
+            assigned = job_hunter_in_team
+        quant_trader_in_team = _pick_quant_trader_worker(list(available_plan or []))
+        if quant_trader_in_team and _user_requests_quant_execution(incoming):
+            assigned = quant_trader_in_team
+        # region agent log
+        _debug_emit(
+            "graphs/manager_graph.py:plan_jobhunter_tracking_route",
+            "plan routing decision for job tracking intent",
+            {
+                "tracking_intent": tracking_intent,
+                "job_hunter_in_team": job_hunter_in_team,
+                "assigned_before_plan_task": assigned,
+                "available_templates": list(available_plan or [])[:8],
+            },
+            str(state.get("chat_id") or "manager"),
+            "H12",
+        )
+        # endregion
 
         # Mantener lógica existente de ruteo / planned_task
         planned, override_worker = _plan_task(incoming, assigned)
@@ -1154,6 +1441,16 @@ def build_manager_graph(
                 "target_worker": "job_hunter",
                 "mission": "INCOME_INJECTION",
                 "urgency": "high",
+            }
+            handoff_context = dict(active_mission)
+        # Seguimiento de postulaciones en chat de Finanz + Job-Hunter: marcar misión explícita
+        # para habilitar prefijo A2A en heartbeat y selección de DB por worker.
+        if job_hunter_in_team and tracking_intent and finanz_in_team:
+            active_mission = {
+                "source_worker": "finanz",
+                "target_worker": "job_hunter",
+                "mission": "JOB_OPPORTUNITY_TRACKING",
+                "urgency": "medium",
             }
             handoff_context = dict(active_mission)
 
@@ -1274,15 +1571,33 @@ def build_manager_graph(
             global _worker_graph_cache
             slot_token, run_label_n = acquire_subagent_slot(tenant_id, assigned, str(chat_id or ""))
             agent_instance_label = f"{assigned} {run_label_n}".strip()
+            mission = state.get("active_mission")
+            worker_vault_db_path = vault_db_path
+            if _is_job_hunter_worker(assigned) and isinstance(mission, dict):
+                mission_name = (mission.get("mission") or "").strip().upper()
+                if mission_name in {"JOB_OPPORTUNITY_TRACKING", "INCOME_INJECTION"}:
+                    worker_vault_db_path = _derive_worker_vault_db_path(vault_db_path, assigned)
+            _debug_emit(
+                "graphs/manager_graph.py:invoke_worker_db_path",
+                "resolved worker vault db path",
+                {
+                    "assigned_worker": assigned,
+                    "incoming_vault_db_path": vault_db_path,
+                    "worker_vault_db_path": worker_vault_db_path,
+                    "active_mission": (mission or {}).get("mission") if isinstance(mission, dict) else None,
+                },
+                str(chat_id or "manager"),
+                "H13",
+            )
             worker_cache_key = (
-                f"{tenant_id}::{assigned}::{vault_db_path or db_path or ''}::{shared_db_path}"
+                f"{tenant_id}::{assigned}::{worker_vault_db_path or db_path or ''}::{shared_db_path}"
                 f"::{(llm_provider or '').strip()}::{(llm_model or '').strip()}::{(llm_base_url or '').strip()}"
             )
             from duckclaw.workers.factory import _same_duckdb_file
             from duckclaw.workers.manifest import load_manifest
 
             spec_inv = load_manifest(assigned, troot)
-            vault_eff = (vault_db_path or db_path or "").strip()
+            vault_eff = (worker_vault_db_path or db_path or "").strip()
             mgr_path = str(getattr(db, "_path", "") or "").strip()
             # DuckDB: no RO+RW simultáneo al mismo archivo. Suspender el RO del manager antes
             # de abrir el worker RW; leer sandbox/chat_state antes (sin worker RW abierto).
@@ -1296,13 +1611,13 @@ def build_manager_graph(
             _cfg_db = _agent_config_db_for_vault(db, vault_db_path or None)
             raw_sb = get_chat_state(_cfg_db, chat_id, "sandbox_enabled")
             sb_on = (raw_sb or "").strip().lower() in ("true", "1", "on", "sí", "si")
-            db_display = vault_db_path or db_path or "(unknown)"
+            db_display = worker_vault_db_path or db_path or "(unknown)"
             if _suspend_for_rw_worker:
                 db.suspend_readonly_file_handle()
             if worker_cache_key not in _worker_graph_cache:
                 _worker_graph_cache[worker_cache_key] = _build_worker_graph(
                     assigned,
-                    vault_db_path or db_path,
+                    worker_vault_db_path or db_path,
                     llm,
                     templates_root=troot,  # None => forge/templates
                     llm_provider=llm_provider or "",
@@ -1336,7 +1651,7 @@ def build_manager_graph(
                 "tenant_id": tenant_id,
                 "user_id": user_id,
                 "username": (state.get("username") or "").strip(),
-                "vault_db_path": vault_db_path,
+                "vault_db_path": worker_vault_db_path,
                 "shared_db_path": shared_db_path,
                 "subagent_instance_label": agent_instance_label,
                 "heartbeat_plan_title": (plan_title or "").strip(),
@@ -1344,7 +1659,6 @@ def build_manager_graph(
             }
             if _out_hb_tok:
                 worker_state["outbound_telegram_bot_token"] = _out_hb_tok
-            mission = state.get("active_mission")
             if (
                 isinstance(mission, dict)
                 and _worker_matches_id(assigned, mission.get("target_worker"))
@@ -1355,8 +1669,22 @@ def build_manager_graph(
 
                     target_name = str(mission.get("target_worker") or assigned or "subagente")
                     source_name = str(mission.get("source_worker") or "manager")
+                    target_mention = _telegram_bot_mention_for_worker(target_name)
+                    source_mention = _telegram_bot_mention_for_worker(source_name, fallback_handle="manager")
+                    _debug_emit(
+                        "graphs/manager_graph.py:a2a_handoff_bot_mentions",
+                        "resolved bot mentions for A2A handoff heartbeat",
+                        {
+                            "target_worker": target_name,
+                            "source_worker": source_name,
+                            "target_mention": target_mention,
+                            "source_mention": source_mention,
+                        },
+                        str(chat_id or "manager"),
+                        "H16",
+                    )
                     handoff_msg = (
-                        f"A2A handoff visible: @{target_name}, solicitado por @{source_name} "
+                        f"A2A handoff visible: {target_mention}, solicitado por {source_mention} "
                         "para misión en curso."
                     )
                     schedule_chat_heartbeat_dm(
@@ -1395,6 +1723,26 @@ def build_manager_graph(
                 _tasks_for_hb if isinstance(_tasks_for_hb, list) else [],
                 task_summary=task_summary,
                 subagent_header=agent_instance_label or None,
+            )
+            _hb_contract_prefixed = False
+            _mission_name = ""
+            if isinstance(mission, dict):
+                _mission_name = str((mission.get("mission") or "")).strip().upper()
+            if _is_job_hunter_worker(assigned) and _mission_name in {"JOB_OPPORTUNITY_TRACKING", "INCOME_INJECTION"}:
+                _hb_text = f"[A2A Contract:{agent_instance_label}]\n{_hb_text}".strip()
+                _hb_contract_prefixed = True
+            _debug_emit(
+                "graphs/manager_graph.py:invoke_worker_heartbeat_contract",
+                "heartbeat A2A contract prefix decision",
+                {
+                    "assigned_worker": assigned,
+                    "agent_instance_label": agent_instance_label,
+                    "mission_name": _mission_name or None,
+                    "contract_prefixed": _hb_contract_prefixed,
+                    "heartbeat_preview": _hb_text[:180],
+                },
+                str(chat_id or "manager"),
+                "H15",
             )
             _hb_plan_log = (plan_title or "").strip() or None
             schedule_chat_heartbeat_dm(
@@ -1619,11 +1967,48 @@ def build_manager_graph(
     def route_after_invoke_worker(state: ManagerAgentState) -> str:
         current_worker = (state.get("assigned_worker_id") or "").strip()
         raw_reply = state.get("last_worker_raw_reply") or state.get("reply") or ""
+        available = state.get("available_templates") or []
+        job_hunter_in_team = _pick_job_hunter_worker(list(available or []))
+        quant_trader_in_team = _pick_quant_trader_worker(list(available or []))
+        if _worker_matches_id(current_worker, "finanz") and _contains_quant_trader_request(raw_reply):
+            if not quant_trader_in_team:
+                return "end"
+            return "handoff_quant_trader"
         if _worker_matches_id(current_worker, "finanz") and _contains_job_opportunity_tracking_request(
             raw_reply
         ):
+            # region agent log
+            _debug_emit(
+                "graphs/manager_graph.py:route_after_invoke_a2a_job_track",
+                "route_after_invoke_worker detected A2A job tracking request",
+                {
+                    "current_worker": current_worker,
+                    "job_hunter_in_team": job_hunter_in_team,
+                    "available_templates": list(available or [])[:8],
+                },
+                str(state.get("chat_id") or "manager"),
+                "H10",
+            )
+            # endregion
+            if not job_hunter_in_team:
+                return "end"
             return "handoff_job_track"
         if _worker_matches_id(current_worker, "finanz") and _contains_income_injection_request(raw_reply):
+            # region agent log
+            _debug_emit(
+                "graphs/manager_graph.py:route_after_invoke_a2a_income",
+                "route_after_invoke_worker detected A2A income request",
+                {
+                    "current_worker": current_worker,
+                    "job_hunter_in_team": job_hunter_in_team,
+                    "available_templates": list(available or [])[:8],
+                },
+                str(state.get("chat_id") or "manager"),
+                "H11",
+            )
+            # endregion
+            if not job_hunter_in_team:
+                return "end"
             return "handoff_to_target"
         mission = state.get("active_mission")
         if not isinstance(mission, dict):
@@ -1632,16 +2017,87 @@ def build_manager_graph(
         if not target_worker or not current_worker:
             return "end"
         if _worker_matches_id(current_worker, target_worker):
+            mission_name = str(mission.get("mission") or "").strip().upper()
+            if mission_name == "JOB_OPPORTUNITY_TRACKING":
+                # region agent log
+                _debug_emit(
+                    "graphs/manager_graph.py:route_after_invoke_end_job_tracking",
+                    "ending after Job-Hunter job tracking to preserve worker-native reply",
+                    {
+                        "current_worker": current_worker,
+                        "target_worker": target_worker,
+                        "mission_name": mission_name,
+                    },
+                    str(state.get("chat_id") or "manager"),
+                    "H17",
+                )
+                # endregion
+                return "end"
             source_w = (mission.get("source_worker") or "").strip()
-            available = state.get("available_templates") or []
             if source_w and not any(_worker_matches_id(wid, source_w) for wid in available):
                 return "end"
             return "return_to_source"
         return "end"
 
+    def handoff_quant_trader_node(state: ManagerAgentState) -> ManagerAgentState:
+        available = state.get("available_templates") or []
+        target_worker = _pick_quant_trader_worker(list(available or []))
+        if not target_worker:
+            return dict(state)
+        user_ctx = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
+        mission_task = (
+            "TAREA: Misión A2A QUANT_TRADER. Ejecuta pipeline cuantitativo: "
+            "fetch_market_data -> execute_sandbox_script -> propose_trade_signal. "
+            "Si hay señal, pausa en AWAITING_HITL y pide /execute_signal <signal_id>.\n\n"
+            f"--- Contexto ---\n{user_ctx[:6000]}"
+        )
+        out: ManagerAgentState = {
+            "assigned_worker_id": target_worker,
+            "planned_task": mission_task,
+            "incoming": mission_task,
+            "input": mission_task,
+        }  # type: ignore[assignment]
+        if "history" in state:
+            out["history"] = state["history"]
+        if "chat_id" in state:
+            out["chat_id"] = state["chat_id"]
+        if "tenant_id" in state:
+            out["tenant_id"] = state["tenant_id"]
+        if "user_id" in state:
+            out["user_id"] = state["user_id"]
+        if "vault_db_path" in state:
+            out["vault_db_path"] = state["vault_db_path"]
+        if "shared_db_path" in state:
+            out["shared_db_path"] = state["shared_db_path"]
+        if "username" in state:
+            out["username"] = state["username"]
+        if "available_templates" in state:
+            out["available_templates"] = state["available_templates"]
+        if "plan_title" in state:
+            out["plan_title"] = state["plan_title"]
+        if "tasks" in state:
+            out["tasks"] = state["tasks"]
+        if "task_summary" in state:
+            out["task_summary"] = state["task_summary"]
+        _tok_hq = (state.get("outbound_telegram_bot_token") or "").strip()
+        if _tok_hq:
+            out["outbound_telegram_bot_token"] = _tok_hq
+        return out
+
     def handoff_to_target_node(state: ManagerAgentState) -> ManagerAgentState:
         available = state.get("available_templates") or []
-        target_worker = _pick_job_hunter_worker(list(available or [])) or "job_hunter"
+        target_worker = _pick_job_hunter_worker(list(available or []))
+        if not target_worker:
+            # region agent log
+            _debug_emit(
+                "graphs/manager_graph.py:handoff_to_target_skipped",
+                "handoff_to_target skipped: Job-Hunter not in team",
+                {"available_templates": list(available or [])[:8]},
+                str(state.get("chat_id") or "manager"),
+                "H11",
+            )
+            # endregion
+            return dict(state)
         active_mission = {
             "source_worker": "finanz",
             "target_worker": target_worker,
@@ -1690,8 +2146,30 @@ def build_manager_graph(
     def handoff_job_track_node(state: ManagerAgentState) -> ManagerAgentState:
         """A2A: Finanz solicitó persistencia de vacante vía JobHunter (tabla job_opportunities)."""
         available = state.get("available_templates") or []
-        target_worker = _pick_job_hunter_worker(list(available or [])) or "job_hunter"
+        target_worker = _pick_job_hunter_worker(list(available or []))
+        if not target_worker:
+            # region agent log
+            _debug_emit(
+                "graphs/manager_graph.py:handoff_job_track_skipped",
+                "handoff_job_track skipped: Job-Hunter not in team",
+                {"available_templates": list(available or [])[:8]},
+                str(state.get("chat_id") or "manager"),
+                "H10",
+            )
+            # endregion
+            return dict(state)
         user_ctx = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
+        _debug_emit(
+            "graphs/manager_graph.py:handoff_job_track",
+            "manager handoff job tracking",
+            {
+                "target_worker": target_worker,
+                "incoming_preview": user_ctx[:220],
+                "available_templates": list(available or []),
+            },
+            str(state.get("chat_id") or "manager"),
+            "H1",
+        )
         synthetic = f"TAREA: Misión A2A JOB_OPPORTUNITY_TRACKING.\n{user_ctx}"
         mission_task, _ = _plan_task(synthetic, target_worker)
         active_mission = {
@@ -1830,6 +2308,7 @@ def build_manager_graph(
     graph.add_node("return_to_source", return_to_source_node)
     graph.add_node("handoff_to_target", handoff_to_target_node)
     graph.add_node("handoff_job_track", handoff_job_track_node)
+    graph.add_node("handoff_quant_trader", handoff_quant_trader_node)
     graph.set_entry_point("router")
     graph.add_conditional_edges(
         "router",
@@ -1850,10 +2329,12 @@ def build_manager_graph(
             "return_to_source": "return_to_source",
             "handoff_to_target": "handoff_to_target",
             "handoff_job_track": "handoff_job_track",
+            "handoff_quant_trader": "handoff_quant_trader",
             "end": END,
         },
     )
     graph.add_edge("return_to_source", "invoke_worker")
     graph.add_edge("handoff_to_target", "invoke_worker")
     graph.add_edge("handoff_job_track", "invoke_worker")
+    graph.add_edge("handoff_quant_trader", "invoke_worker")
     return graph.compile()

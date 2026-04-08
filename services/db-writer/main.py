@@ -13,6 +13,7 @@ os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_repo_root))
 import duckdb
 import redis.asyncio as redis
 from context_injection_handler import handle_context_injection_message
+from quant_state_delta_handler import handle_quant_state_delta_message
 from core.config import settings
 from duckclaw.db_write_queue import (
     TASK_STATUS_TTL_SEC,
@@ -177,6 +178,37 @@ async def _context_injection_loop(redis_client: redis.Redis) -> None:
                 logger.exception("CONTEXT_INJECTION handler no capturó excepción: %s", exc)
 
 
+async def _quant_state_delta_loop(redis_client: redis.Redis) -> None:
+    q = str(settings.QUANT_STATE_DELTA_QUEUE_NAME).strip()
+    logger.info("Escuchando cola QUANT_STATE_DELTA: %s", q)
+    while True:
+        result = await redis_client.brpop(q, timeout=0)
+        if result:
+            _, message = result
+            try:
+                preview = json.loads(message)
+                if str(preview.get("delta_type") or "") not in (
+                    "MANDATE_UPSERT",
+                    "TRADE_SIGNAL_PROPOSED",
+                    "TRADE_SIGNAL_APPROVED",
+                    "TRADE_SIGNAL_EXECUTED",
+                    "TRADE_SIGNAL_DISCARDED",
+                ):
+                    logger.warning(
+                        "Mensaje en cola QUANT_STATE_DELTA con delta_type inesperado: %s",
+                        preview.get("delta_type"),
+                    )
+            except json.JSONDecodeError:
+                logger.warning(
+                    "QUANT_STATE_DELTA payload no es JSON válido (primeros 120 chars): %s",
+                    message[:120],
+                )
+            try:
+                await handle_quant_state_delta_message(redis_client, message)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("QUANT_STATE_DELTA handler no capturó excepción: %s", exc)
+
+
 async def process_queue():
     """Consume cola SQL y cola CONTEXT_INJECTION en paralelo."""
     redis_client = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
@@ -184,6 +216,7 @@ async def process_queue():
         await asyncio.gather(
             _sql_queue_loop(redis_client),
             _context_injection_loop(redis_client),
+            _quant_state_delta_loop(redis_client),
         )
     except asyncio.CancelledError:
         logger.info("Señal de apagado recibida. Cerrando conexiones...")

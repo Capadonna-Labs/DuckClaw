@@ -23,7 +23,13 @@ def test_finanz_write_query_resumen_cuentas_not_write() -> None:
     assert not _is_finanz_local_account_write_query("Dame un resumen de mis cuentas bancarias")
 
 
-def test_finanz_write_query_registro_gasto_not_matched() -> None:
-    assert not _is_finanz_local_account_write_query(
+def test_finanz_write_query_registro_gasto() -> None:
+    assert _is_finanz_local_account_write_query(
         "Registra un gasto de 50000 en restaurante con tarjeta Bancolombia"
+    )
+
+
+def test_finanz_write_query_resta_presupuesto_efectivo() -> None:
+    assert _is_finanz_local_account_write_query(
+        "Registra un gasto de 6k en weed. Resta los 6k del presupuesto de recreación y de la cuenta de efectivo"
     )

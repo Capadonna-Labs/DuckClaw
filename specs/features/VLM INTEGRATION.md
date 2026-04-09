@@ -50,6 +50,8 @@ El usuario envía capturas de pantalla de mercados (ej. Google Finance, VIX) o f
 | `GOOGLE_API_KEY` | Clave de Google AI si no se fijan las anteriores. |
 | `DUCKCLAW_VLM_GEMINI_MODEL` | Modelo `generateContent` (default: `gemini-2.5-flash`). |
 | `DUCKCLAW_VLM_GEMINI_HTTP_TIMEOUT` | Timeout HTTP en segundos (default acotado ~90s). |
+| `DUCKCLAW_VLM_MLX_VLM_MODEL` | Pesos para `mlx_vlm` local. Default recomendado: `mlx-community/gemma-4-e4b-it-4bit` (o `MLX_GEMMA4_MODEL_PATH` si está definido). |
+| `DUCKCLAW_VLM_MLX_VLM_PROCESSOR_REPO` | Repo HF del processor/tokenizer para `mlx_vlm` (opcional; si no se define, usa heurística por modelo). |
 
 **Orden HTTP:** por defecto `mlx` → `gemini` (si hay clave) → `openai` (si hay clave). Con `DUCKCLAW_VLM_PRIMARY=openai` y `OPENAI_API_KEY`: `openai` → `mlx` → `gemini` (si hay clave).
 5. **Inyección de Contexto:** El texto resultante del VLM se concatena con el `caption` original del usuario y se envía al *Manager Graph* como un mensaje de texto estándar.

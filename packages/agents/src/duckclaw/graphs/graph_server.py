@@ -381,6 +381,44 @@ def _invoke_ephemeral_gateway_graph(
                     "llm_model_override": tm,
                     "llm_base_url_override": tu,
                 }
+                # region agent log
+                try:
+                    import importlib.util
+                    import json as _json_dbg
+
+                    _lpath = ""
+                    try:
+                        _spec_lp = importlib.util.find_spec("duckclaw.integrations.llm_providers")
+                        if _spec_lp and _spec_lp.origin:
+                            _lpath = str(_spec_lp.origin)
+                    except Exception:
+                        pass
+                    _bm = getattr(built, "model_name", None) or getattr(built, "model", "") or ""
+                    _bb = getattr(built, "openai_api_base", None) or getattr(built, "base_url", None) or ""
+                    _payload = {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H-A",
+                        "location": "graph_server.py:_invoke_ephemeral_gateway_graph",
+                        "message": "build_llm_chat_triplet_ok",
+                        "data": {
+                            "trip_provider": tp,
+                            "trip_model": (tm or "")[:120],
+                            "trip_base": (tu or "")[:160],
+                            "built_model": str(_bm)[:120],
+                            "built_base": str(_bb)[:160],
+                            "llm_providers_path": _lpath[-220:],
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(_json_dbg.dumps(_payload, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+                # endregion
             else:
                 _log.warning(
                     "graph_server: build_llm returned None for chat triplet provider=%s model=%s",

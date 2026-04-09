@@ -6,6 +6,8 @@ import hashlib
 import json
 import logging
 import os
+import re
+import sys
 import tempfile
 from typing import Any
 
@@ -58,6 +60,7 @@ _VLM_SYSTEM_PROMPT = (
 )
 
 _mlx_vlm_model_proc: tuple[Any, Any] | None = None
+_VLM_MLX_GEMMA4_DEFAULT_REPO_ID = "mlx-community/gemma-4-e4b-it-4bit"
 
 
 class VLMBackendUnavailableError(RuntimeError):
@@ -106,13 +109,29 @@ def _mlx_http_timeout_s() -> float:
 
 
 def _mlx_vlm_model_id() -> str:
-    # Qwen2-VL snapshots en mlx-community a veces no traen image_processor_type compatible
-    # con transformers instalado; LLaVA v1.6 Mistral 4bit es estable en mlx_vlm.
+    # Default soberano: Gemma 4 (alias consistente con /model gemma4).
+    # Se puede sobrescribir con DUCKCLAW_VLM_MLX_VLM_MODEL / MLX_VLM_MODEL.
     return (
         os.environ.get("DUCKCLAW_VLM_MLX_VLM_MODEL")
         or os.environ.get("MLX_VLM_MODEL")
-        or "mlx-community/llava-v1.6-mistral-7b-4bit"
+        or os.environ.get("MLX_GEMMA4_MODEL_PATH")
+        or _VLM_MLX_GEMMA4_DEFAULT_REPO_ID
     ).strip()
+
+
+def _mlx_vlm_target_is_gemma4() -> bool:
+    mid = (_mlx_vlm_model_id() or "").strip().lower()
+    return "gemma4" in mid or "gemma-4" in mid
+
+
+def _strict_mlx_gemma4_required() -> bool:
+    """
+    Si el target VLM es Gemma4, evita fallback silencioso a Gemini/OpenAI cuando MLX no lo soporta.
+    Se puede desactivar explícitamente con DUCKCLAW_VLM_STRICT_MLX_GEMMA4=0.
+    """
+    raw = (os.environ.get("DUCKCLAW_VLM_STRICT_MLX_GEMMA4") or "1").strip().lower()
+    strict = raw in ("1", "true", "yes", "on")
+    return strict and _mlx_vlm_target_is_gemma4()
 
 
 def _mlx_vlm_processor_repo(weights_id: str) -> str:
@@ -131,6 +150,10 @@ def _mlx_vlm_processor_repo(weights_id: str) -> str:
         if "2b" in w:
             return "Qwen/Qwen2-VL-2B-Instruct"
         return "Qwen/Qwen2-VL-7B-Instruct"
+    if "gemma-4" in w or "gemma4" in w:
+        # Gemma4 alias: por defecto usa el mismo repo de pesos (o MLX_GEMMA4_MODEL_PATH),
+        # salvo override explícito por env.
+        return weights_id.strip()
     return weights_id.strip()
 
 
@@ -195,7 +218,94 @@ async def _try_mlx_vlm_caption_paths(paths: list[str], prompt: str) -> str:
         max_tokens = max(64, min(4096, int(raw_max)))
     except ValueError:
         max_tokens = 512
-    return await asyncio.to_thread(_mlx_vlm_caption_paths_sync, paths, prompt, max_tokens=max_tokens)
+    try:
+        return await asyncio.to_thread(_mlx_vlm_caption_paths_sync, paths, prompt, max_tokens=max_tokens)
+    except Exception as exc:
+        if _mlx_vlm_target_is_gemma4():
+            return await _mlx_vlm_caption_paths_cli(paths, prompt, max_tokens=max_tokens)
+        raise
+
+
+def _mlx_vlm_python_candidates() -> list[str]:
+    vals = [
+        (os.environ.get("MLX_PYTHON") or "").strip(),
+        (os.environ.get("DUCKCLAW_VLM_MLX_PYTHON") or "").strip(),
+        (sys.executable or "").strip(),
+        "python3",
+    ]
+    out: list[str] = []
+    for v in vals:
+        if v and v not in out:
+            out.append(v)
+    return out
+
+
+def _mlx_vlm_python_bin() -> str:
+    cands = _mlx_vlm_python_candidates()
+    return cands[0] if cands else "python3"
+
+
+def _extract_mlx_generate_text(stdout: str) -> str:
+    text = (stdout or "").strip()
+    if not text:
+        return ""
+    m = re.search(r"<\|turn\>model\s*(.*?)\n=+", text, flags=re.S)
+    if m and (m.group(1) or "").strip():
+        return m.group(1).strip()
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    # Evita métricas finales de CLI y devuelve el bloque más informativo.
+    cleaned = [ln for ln in lines if not ln.startswith(("Prompt:", "Generation:", "Peak memory:"))]
+    return "\n".join(cleaned).strip()
+
+
+async def _mlx_vlm_generate_one_cli(path: str, prompt: str, *, max_tokens: int) -> str:
+    last_err = ""
+    for py_bin in _mlx_vlm_python_candidates():
+        cmd = [
+            py_bin,
+            "-m",
+            "mlx_vlm",
+            "generate",
+            "--model",
+            _mlx_vlm_model_id(),
+            "--max-tokens",
+            str(max_tokens),
+            "--prompt",
+            prompt,
+            "--image",
+            path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out_b, err_b = await proc.communicate()
+        out = out_b.decode("utf-8", errors="replace")
+        err = err_b.decode("utf-8", errors="replace")
+        if proc.returncode == 0:
+            parsed = _extract_mlx_generate_text(out)
+            if parsed:
+                return parsed
+            last_err = "mlx_vlm CLI devolvió salida vacía"
+            continue
+        last_err = f"mlx_vlm CLI rc={proc.returncode}: {(err or out).strip()[:500]}"
+        if "No module named mlx_vlm" not in (err + out):
+            break
+    raise RuntimeError(last_err or "mlx_vlm CLI error desconocido")
+
+
+async def _mlx_vlm_caption_paths_cli(paths: list[str], prompt: str, *, max_tokens: int) -> str:
+    if not paths:
+        raise ValueError("paths vacío")
+    parts: list[str] = []
+    for idx, p in enumerate(paths[:3], start=1):
+        txt = await _mlx_vlm_generate_one_cli(p, prompt, max_tokens=max_tokens)
+        if len(paths) > 1:
+            parts.append(f"[img {idx}] {txt}")
+        else:
+            parts.append(txt)
+    return "\n".join(parts).strip()
 
 
 def _tmp_dir() -> str:
@@ -532,6 +642,7 @@ async def process_visual_payload(
         ).strip()
         fb_model = (os.environ.get("DUCKCLAW_VLM_FALLBACK_MODEL") or "gpt-4o-mini").strip()
         prompt_use = (caption or "").strip() or _VLM_SYSTEM_PROMPT
+        strict_g4 = _strict_mlx_gemma4_required()
         if _try_mlx_vlm_local_before_http():
             try:
                 summary_l = await _try_mlx_vlm_caption_paths([tmp_path], prompt_use)
@@ -544,13 +655,18 @@ async def process_visual_payload(
                     }
             except Exception as exc:  # noqa: BLE001
                 _log.warning("VLM mlx_vlm local-first falló, se intentará HTTP: %s", exc)
+                if strict_g4:
+                    raise VLMBackendUnavailableError(
+                        "mlx_vlm gemma4 no soportado en esta instalación (sin fallback por modo estricto)"
+                    ) from exc
         mlx_to = _mlx_http_timeout_s()
         cloud_to = _openai_cloud_http_timeout_s()
         gemini_to = _gemini_http_timeout_s()
         summary = ""
         confidence = 0.85
         last_exc: BaseException | None = None
-        for kind in _vlm_backend_order():
+        backend_order = ["mlx"] if strict_g4 else _vlm_backend_order()
+        for kind in backend_order:
             try:
                 if kind == "mlx":
                     summary = await _call_openai_vision(
@@ -591,6 +707,8 @@ async def process_visual_payload(
                 if kind == "mlx":
                     _log.warning("VLM vía MLX falló (base_url=%s): %s", mlx_base, exc)
                     last_exc = VLMBackendUnavailableError("mlx vlm")
+                    if strict_g4:
+                        raise last_exc
                 elif kind == "gemini":
                     _log.warning("VLM vía Gemini falló: %s", exc)
                     last_exc = VLMBackendUnavailableError("gemini")
@@ -667,6 +785,7 @@ async def process_visual_album_batch(
         ).strip()
         fb_model = (os.environ.get("DUCKCLAW_VLM_FALLBACK_MODEL") or "gpt-4o-mini").strip()
         caption_use = (caption or "").strip() or "Analiza estas imágenes relacionadas."
+        strict_g4 = _strict_mlx_gemma4_required()
         if _try_mlx_vlm_local_before_http() and tmp_paths:
             try:
                 summary_l = await _try_mlx_vlm_caption_paths(tmp_paths, caption_use)
@@ -680,13 +799,18 @@ async def process_visual_album_batch(
                     }
             except Exception as exc:  # noqa: BLE001
                 _log.warning("VLM mlx_vlm local-first (álbum) falló, se intentará HTTP: %s", exc)
+                if strict_g4:
+                    raise VLMBackendUnavailableError(
+                        "mlx_vlm gemma4 no soportado en esta instalación (sin fallback por modo estricto)"
+                    ) from exc
         mlx_multi_to = max(_mlx_http_timeout_s(), 45.0)
         cloud_multi_to = max(_openai_cloud_http_timeout_s(), 90.0)
         gemini_multi_to = max(_gemini_http_timeout_s(), 90.0)
         summary = ""
         confidence = 0.85
         last_exc: BaseException | None = None
-        for kind in _vlm_backend_order():
+        backend_order = ["mlx"] if strict_g4 else _vlm_backend_order()
+        for kind in backend_order:
             try:
                 if kind == "mlx":
                     summary = await _call_openai_vision_multi(
@@ -724,6 +848,8 @@ async def process_visual_album_batch(
                 if kind == "mlx":
                     _log.warning("VLM (álbum) vía MLX falló (base_url=%s): %s", mlx_base, exc)
                     last_exc = VLMBackendUnavailableError("mlx vlm")
+                    if strict_g4:
+                        raise last_exc
                 elif kind == "gemini":
                     _log.warning("VLM (álbum) vía Gemini falló: %s", exc)
                     last_exc = VLMBackendUnavailableError("gemini")

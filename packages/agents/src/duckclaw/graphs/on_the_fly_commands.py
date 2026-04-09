@@ -2995,6 +2995,7 @@ def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str,
     from duckclaw.integrations.llm_providers import (
         _ensure_duckclaw_llm_env_from_legacy_llm_vars,
         mlx_openai_compatible_base_url,
+        normalize_deepseek_base_url,
     )
 
     _ensure_duckclaw_llm_env_from_legacy_llm_vars()
@@ -3019,6 +3020,8 @@ def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str,
             u = mlx_openai_compatible_base_url()
         if not m:
             m = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
+    elif p == "deepseek":
+        u = normalize_deepseek_base_url(u)
     return (p, m, u)
 
 

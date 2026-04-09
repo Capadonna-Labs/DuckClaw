@@ -26,13 +26,45 @@ def _ensure_duckclaw_llm_env_from_legacy_llm_vars() -> None:
     if not (os.environ.get("DUCKCLAW_LLM_BASE_URL") or "").strip():
         leg = (os.environ.get("LLM_BASE_URL") or "").strip()
         if leg:
-            os.environ["DUCKCLAW_LLM_BASE_URL"] = leg
+            p = (
+                (os.environ.get("DUCKCLAW_LLM_PROVIDER") or os.environ.get("LLM_PROVIDER") or "")
+                .strip()
+                .lower()
+            )
+            ll = leg.lower()
+            # .env a veces deja LLM_PROVIDER=deepseek con LLM_BASE_URL=127.0.0.1:8080 (MLX); copiar eso
+            # hace que deepseek-chat golpee el servidor local → 400 "Model Not Exist".
+            if p == "deepseek" and ("127.0.0.1" in ll or "localhost" in ll):
+                os.environ["DUCKCLAW_LLM_BASE_URL"] = normalize_deepseek_base_url("")
+            else:
+                os.environ["DUCKCLAW_LLM_BASE_URL"] = leg
 
 
 def mlx_openai_compatible_base_url() -> str:
     """Base OpenAI-compatible para ``mlx_lm.server`` (``MLX_PORT``, default 8080)."""
     port = (os.environ.get("MLX_PORT") or "8080").strip() or "8080"
     return f"http://127.0.0.1:{port}/v1"
+
+
+def normalize_deepseek_base_url(url: Optional[str]) -> str:
+    """
+    PM2/.env suele dejar ``DUCKCLAW_LLM_BASE_URL`` en Groq u OpenAI; si el proveedor activo es DeepSeek
+    pero la tripleta hereda ese host, las peticiones van a Groq con ``model=deepseek-chat`` → 400 Model Not Exist.
+    """
+    default = "https://api.deepseek.com/v1"
+    u = (url or "").strip()
+    if not u:
+        return default
+    ul = u.lower()
+    if "deepseek.com" in ul:
+        return u.rstrip("/")
+    if "127.0.0.1" in ul or "localhost" in ul:
+        return u.rstrip("/")
+    if "groq.com" in ul or "anthropic.com" in ul:
+        return default
+    if "api.openai.com" in ul and "azure" not in ul:
+        return default
+    return u.rstrip("/")
 
 
 def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
@@ -447,7 +479,10 @@ def bind_tools_with_parallel_default(llm: Any, tools: Sequence[Any], **kwargs: A
         "parallel_tool_calls" in sig.parameters
         and "parallel_tool_calls" not in bind_kwargs
     ):
-        bind_kwargs["parallel_tool_calls"] = True
+        # DeepSeek: parallel tool calls + esquemas grandes (p. ej. MCP Reddit) ha devuelto 400
+        # "Model Not Exist" en runtime pese a modelo/base correctos; desactivar paralelismo aquí.
+        _inf_parallel = (infer_provider_from_openai_compatible_llm(llm) or "").strip().lower()
+        bind_kwargs["parallel_tool_calls"] = _inf_parallel != "deepseek"
     return llm.bind_tools(tools, **bind_kwargs)
 
 
@@ -488,6 +523,13 @@ def build_llm(
         m = m_arg or m_env
         url = url_arg or url_env
 
+    # Env PM2 suele fijar DUCKCLAW_LLM_PROVIDER=groq; el chat puede guardar solo model=deepseek-chat →
+    # tripleta efectiva groq + deepseek-chat y 400 "Model Not Exist" en el host Groq.
+    _ml = (m or "").strip().lower()
+    if p == "groq" and (_ml.startswith("deepseek-") or _ml == "deepseek"):
+        p = "deepseek"
+        url = normalize_deepseek_base_url(url)
+
     if p in ("none_llm", "none", ""):
         return None
 
@@ -515,10 +557,16 @@ def build_llm(
     if p == "deepseek":
         try:
             from langchain_openai import ChatOpenAI
+            # /model model=deepseek guarda el mismo string que el provider; la API solo acepta ids reales (p. ej. deepseek-chat).
+            _raw_ds = (m or "").strip()
+            if not _raw_ds or _raw_ds.lower() == "deepseek":
+                _ds_model = "deepseek-chat"
+            else:
+                _ds_model = _raw_ds
             return ChatOpenAI(
-                model=m or "deepseek-chat",
+                model=_ds_model,
                 temperature=0,
-                base_url=url or "https://api.deepseek.com/v1",
+                base_url=normalize_deepseek_base_url(url),
                 api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
             )
         except Exception:

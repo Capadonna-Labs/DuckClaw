@@ -149,6 +149,13 @@ def _is_finanz_local_account_write_query(text: str) -> bool:
         )
     ):
         return False
+    # Gasto / presupuesto / efectivo local (DuckDB): no requiere verbos tipo "actualizar".
+    if re.search(r"\b(registra|registrar)\b", t) and "gasto" in t:
+        return True
+    if re.search(r"\b(resta|restar|restás|reste|disminuye|disminuir|rebaja|rebajar)\b", t) and (
+        "presupuesto" in t or "efectivo" in t or "categor" in t
+    ):
+        return True
     if not re.search(
         r"\b(actualiza|actualizar|cambia|cambiar|modifica|modificar|ajusta|ajustar|"
         r"pone|poner|ponga|pon\b|establece|establecer|fija|fijar|deja|dejar|corrige|corregir|"
@@ -180,6 +187,245 @@ def _is_finanz_local_account_write_query(text: str) -> bool:
     ):
         return True
     return False
+
+
+def _finanz_local_mutation_anchor_message(incoming: str) -> str:
+    """
+    Directiva reinyectada en cada paso del agente cuando hay intención de mutación local,
+    para evitar que el modelo sustituya montos/descripciones/cuenta por ejemplos del historial o del pre-entrenamiento.
+    """
+    raw = (incoming or "").strip()
+    if not raw:
+        return ""
+    body = raw[:900]
+    return (
+        "[FINANZ_LOCAL_MUTATION_ANCHOR] La tarea activa debe cumplirse con los datos del usuario de abajo; "
+        "cada INSERT/UPDATE debe ser coherente con ese texto.\n"
+        "- Monto: usa solo el importe que indique el usuario (p. ej. «6k» → 6000 en COP si no dice otra moneda). "
+        "Prohibido usar otros montos de memoria o ejemplos (p. ej. 50000, 20000).\n"
+        "- Descripción: refleja el concepto que dio el usuario (p. ej. «weed»), no inventes otro gasto («internet», «servicios») "
+        "si no aparece en su mensaje.\n"
+        "- Si nombra **efectivo** / «cuenta de efectivo», el ajuste de saldo es sobre la fila de `finance_worker.cuentas` "
+        "cuyo `name` coincide con Efectivo (`ILIKE '%Efectivo%'`), no Bancolombia u otro banco salvo que el usuario lo haya dicho.\n"
+        "- «Presupuesto de recreación» / recreación: categoría **Recreacion** (obtén `category_id` con **una** llamada a "
+        "`list_categories` o con `read_sql`/`admin_sql`); no Internet/Spotify u otra si el usuario no la mencionó.\n"
+        "- **No repitas** `list_categories` si ya recibiste la lista o el id en este hilo; el siguiente paso es "
+        "`insert_transaction` y luego los `UPDATE` de cuenta/presupuesto.\n"
+        "- Presupuesto mensual: año y mes **actuales** (EXTRACT(YEAR|MONTH FROM CURRENT_DATE)) salvo que el usuario fije otra fecha explícitamente.\n"
+        "Texto del usuario:\n"
+        f"{body}"
+    )
+
+
+def _insert_system_after_leading_systems(messages: list[Any], system_extra: Any) -> list[Any]:
+    """Inserta un SystemMessage tras el bloque inicial de SystemMessage(s), antes de Human/AI/Tool (contrato tool-use)."""
+    from langchain_core.messages import SystemMessage
+
+    if system_extra is None:
+        return list(messages)
+    if not messages:
+        return [system_extra]
+    i = 0
+    while i < len(messages) and isinstance(messages[i], SystemMessage):
+        i += 1
+    return list(messages[:i]) + [system_extra] + list(messages[i:])
+
+
+def _finanz_parse_local_expense_intent(text: str) -> Optional[dict[str, Any]]:
+    """
+    Extrae monto COP (p. ej. 6k → 6000) y pistas de descripción / recreación desde el mensaje del usuario.
+    Solo para overrides determinísticos cuando el LLM repite plantillas (50k internet).
+    """
+    if not text or not str(text).strip():
+        return None
+    raw = str(text).strip()
+    tl = raw.lower()
+    if not _is_finanz_local_account_write_query(raw):
+        return None
+    amount_cop: Optional[int] = None
+    mk = re.search(r"\b(\d+)\s*k\b", tl, re.IGNORECASE)
+    if mk:
+        amount_cop = int(mk.group(1)) * 1000
+    if amount_cop is None:
+        mc = re.search(r"\b(\d[\d\.,]*)\s*(?:cop|pesos?)\b", tl, re.IGNORECASE)
+        if mc:
+            raw_num = mc.group(1).replace(".", "").replace(",", "")
+            if raw_num.isdigit():
+                amount_cop = int(raw_num)
+    if amount_cop is None:
+        mdn = re.search(r"\bgast[oa]\s+de\s+(\d[\d\.,]*)\b", tl, re.IGNORECASE)
+        if mdn:
+            raw_num = mdn.group(1).replace(".", "").replace(",", "")
+            if raw_num.isdigit():
+                amount_cop = int(raw_num)
+    if amount_cop is None:
+        return None
+    desc: Optional[str] = None
+    md = re.search(
+        r"\ben\s+([a-záéíóúñ0-9][a-záéíóúñ0-9\s]{1,80}?)(?:[.,;]|$)",
+        tl,
+        re.IGNORECASE,
+    )
+    if md:
+        desc = re.sub(r"\s+", " ", md.group(1)).strip()
+        for cut in (" y de la ", " y del ", " y ", " del presupuesto", " de la cuenta", " del saldo"):
+            if cut in desc:
+                desc = desc.split(cut, 1)[0].strip()
+        desc = desc[:120]
+    recreation = ("recreación" in raw.lower()) or ("recreacion" in tl) or ("recreaci" in tl)
+    return {
+        "amount_cop": amount_cop,
+        "description": desc,
+        "recreation_budget": recreation,
+    }
+
+
+def _finanz_resolve_recreation_category_id(db: Any, schema: str) -> Optional[int]:
+    """Id numérico de la categoría cuyo nombre contiene 'recreac' (p. ej. Recreacion)."""
+    try:
+        q = (
+            f"SELECT id FROM {schema}.categories WHERE lower(name) ILIKE '%recreac%' "
+            "ORDER BY id LIMIT 1"
+        )
+        r = db.query(q)
+        rows = json.loads(r) if isinstance(r, str) else (r or [])
+        if rows and isinstance(rows[0], dict) and rows[0].get("id") is not None:
+            return int(rows[0]["id"])
+    except Exception:
+        return None
+    return None
+
+
+def _finanz_patch_admin_sql_for_user_expense(
+    sql: str,
+    *,
+    amount: int,
+    recreation_category_id: Optional[int],
+    recreation_budget: bool,
+) -> str:
+    """Corrige montos/categoría/fecha típicos alucinados en UPDATE locales."""
+    s = sql or ""
+    if not s.strip():
+        return s
+    low = s.lower()
+    # Montos: sustituir 50000 (plantilla frecuente) por el monto del usuario
+    if amount and "50000" in s:
+        s = re.sub(r"\b50000\b", str(int(amount)), s)
+    if recreation_budget and "presupuestos" in low:
+        # Si el UPDATE no encuentra fila del mes, ON CONFLICT garantiza aplicar el descuento igual.
+        if "update finance_worker.presupuestos" in low:
+            # region agent log
+            try:
+                _payload = {
+                    "sessionId": "c964f7",
+                    "hypothesisId": "H-BUDGET-UPSERT",
+                    "location": "factory.py:_finanz_patch_admin_sql_for_user_expense",
+                    "message": "rewrite_update_presupuesto_to_upsert",
+                    "data": {"amount_cop": int(amount), "recreation_category_id": recreation_category_id},
+                    "timestamp": int(time.time() * 1000),
+                }
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+            # endregion
+            _cat_expr = (
+                str(int(recreation_category_id))
+                if recreation_category_id is not None
+                else "(SELECT id FROM finance_worker.categories WHERE lower(name) ILIKE '%recreac%' ORDER BY id LIMIT 1)"
+            )
+            return (
+                "INSERT INTO finance_worker.presupuestos (category_id, amount, year, month)\n"
+                f"VALUES ({_cat_expr}, {-int(amount)}, "
+                "CAST(strftime('%Y', CURRENT_DATE) AS INTEGER), CAST(strftime('%m', CURRENT_DATE) AS INTEGER))\n"
+                "ON CONFLICT(category_id, year, month)\n"
+                f"DO UPDATE SET amount = finance_worker.presupuestos.amount - {int(amount)}"
+            )
+        if recreation_category_id is not None:
+            s = re.sub(
+                r"category_id\s*=\s*8\b",
+                f"category_id = {int(recreation_category_id)}",
+                s,
+                flags=re.IGNORECASE,
+            )
+        s = re.sub(
+            r"year\s*=\s*\d+\s+AND\s+month\s*=\s*\d+",
+            "year = CAST(strftime('%Y', CURRENT_DATE) AS INTEGER) "
+            "AND month = CAST(strftime('%m', CURRENT_DATE) AS INTEGER)",
+            s,
+            flags=re.IGNORECASE,
+        )
+    return s
+
+
+def _finanz_override_local_expense_tool_args(
+    *,
+    tool_name: str,
+    args: dict[str, Any],
+    incoming: str,
+    db: Any,
+    schema: str,
+) -> dict[str, Any]:
+    """Aplica montos/descripción/categoría del mensaje del usuario a insert_transaction / admin_sql."""
+    parsed = _finanz_parse_local_expense_intent(incoming)
+    if not parsed:
+        return args
+    amt = int(parsed["amount_cop"])
+    neg = -abs(amt)
+    rec_id = _finanz_resolve_recreation_category_id(db, schema) if parsed.get("recreation_budget") else None
+    out = dict(args)
+    # region agent log
+    _did = False
+    # endregion
+    if tool_name == "insert_transaction":
+        out["amount"] = float(neg)
+        if parsed.get("description"):
+            out["description"] = str(parsed["description"])[:500]
+        if rec_id is not None:
+            out["category_id"] = int(rec_id)
+        _did = True
+    elif tool_name == "admin_sql":
+        q = str(out.get("query") or "")
+        if q.strip():
+            new_q = _finanz_patch_admin_sql_for_user_expense(
+                q,
+                amount=amt,
+                recreation_category_id=rec_id,
+                recreation_budget=bool(parsed.get("recreation_budget")),
+            )
+            if new_q != q:
+                out["query"] = new_q
+                _did = True
+    # region agent log
+    if _did:
+        try:
+            _payload = {
+                "sessionId": "c964f7",
+                "hypothesisId": "H-FINANZ-COP-OVERRIDE",
+                "location": "factory.py:_finanz_override_local_expense_tool_args",
+                "message": "applied_user_intent_override",
+                "data": {
+                    "tool": tool_name,
+                    "amount_cop": amt,
+                    "recreation_category_id": rec_id,
+                    "description": (parsed.get("description") or "")[:80],
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+    # endregion
+    return out
 
 
 def _is_finanz_local_accounts_query(text: str) -> bool:
@@ -567,12 +813,46 @@ def _apply_mlx_message_budget(messages: list[Any], *, provider: str) -> list[Any
     )
 
 
+def _deepseek_max_estimated_input_tokens() -> int:
+    """Tope estimado (chars/4) hacia DeepSeek; evita payloads enormes + tools (MCP Reddit)."""
+    raw = (os.environ.get("DUCKCLAW_DEEPSEEK_MAX_INPUT_TOKENS") or "").strip()
+    if raw:
+        try:
+            return max(4000, min(int(raw), 120_000))
+        except ValueError:
+            pass
+    return 10000
+
+
+def _deepseek_tool_message_max_chars() -> int:
+    raw = (os.environ.get("DUCKCLAW_DEEPSEEK_TOOL_MESSAGE_MAX_CHARS") or "").strip()
+    if raw:
+        try:
+            return max(400, min(int(raw), 200_000))
+        except ValueError:
+            pass
+    return 8000
+
+
+def _apply_deepseek_message_budget(messages: list[Any], *, provider: str) -> list[Any]:
+    if (provider or "").strip().lower() != "deepseek" or not messages:
+        return messages
+    return _trim_messages_to_estimated_cap(
+        messages,
+        cap=_deepseek_max_estimated_input_tokens(),
+        tool_cap=_deepseek_tool_message_max_chars(),
+        note_brand="DEEPSEEK",
+    )
+
+
 def _apply_provider_input_budget(messages: list[Any], *, provider: str) -> list[Any]:
-    """Recorte de contexto por proveedor (Groq TPM / MLX VRAM)."""
+    """Recorte de contexto por proveedor (Groq TPM / MLX VRAM / DeepSeek payloads)."""
     pl = (provider or "").strip().lower()
     m = messages
     if pl == "groq":
         m = _apply_groq_message_budget(m, provider=provider)
+    elif pl == "deepseek":
+        m = _apply_deepseek_message_budget(m, provider=provider)
     elif pl in ("mlx", "iotcorelabs"):
         m = _apply_mlx_message_budget(m, provider=provider)
     return m
@@ -1653,14 +1933,17 @@ def build_worker_graph(
     tools_sandbox_off = filter_tools_for_sandbox(tools, enabled=False)
     tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}
 
-    _groq_bind = (provider or "").strip().lower() == "groq"
-    _tools_for_llm_bind = _groq_tools_without_reddit_for_bind(tools) if _groq_bind else tools
+    # Groq (TPM) y DeepSeek (runtime: petición masiva con MCP Reddit → 400 spurious "Model Not Exist"):
+    # en rutas genéricas se omite reddit_*; rutas forzadas Reddit siguen con `tools` completos.
+    _slim_reddit_for_bind = (provider or "").strip().lower() in ("groq", "deepseek")
+    _tools_for_llm_bind = _groq_tools_without_reddit_for_bind(tools) if _slim_reddit_for_bind else tools
     _tools_sandbox_off_bind = (
-        _groq_tools_without_reddit_for_bind(tools_sandbox_off) if _groq_bind else tools_sandbox_off
+        _groq_tools_without_reddit_for_bind(tools_sandbox_off) if _slim_reddit_for_bind else tools_sandbox_off
     )
-    if _groq_bind:
+    if _slim_reddit_for_bind:
         _log.info(
-            "Groq: bind genérico sin reddit_* (%d tools; forzados Reddit/otros usan set acorde).",
+            "%s: bind genérico sin reddit_* (%d tools; forzados Reddit/otros usan set acorde).",
+            (provider or "").strip().lower() or "llm",
             len(_tools_for_llm_bind),
         )
 
@@ -1680,9 +1963,23 @@ def build_worker_graph(
 
         # Cache de re-ligado por modo (evita re-bind costoso por chat/turno).
         # parallel_tool_calls=True en APIs OpenAI-compat (incl. MLX): permite varias tool_calls en un turno.
-        # Groq (~12k TPM): rutas genéricas sin reddit_* (ver _tools_for_llm_bind); Reddit forzado usa `tools` completo.
+        # Groq (~12k TPM) y DeepSeek: rutas genéricas sin reddit_* (ver _slim_reddit_for_bind); Reddit forzado usa `tools` completo.
         llm_with_tools_on = _bind_tools(llm, _tools_for_llm_bind)
         llm_with_tools_off = _bind_tools(llm, _tools_sandbox_off_bind)
+        # Finanz: mutaciones locales (gasto/presupuesto) — bind sin IBKR ni ingesta mercado (evita bucle read_sql↔get_ibkr_portfolio y llamadas espurias a fetch_market_data/CFD).
+        _FINANZ_LOCAL_MUT_EXCLUDE = frozenset({"get_ibkr_portfolio", "fetch_market_data", "fetch_lake_ohlcv"})
+        _finanz_local_mut_bind_on = [
+            t for t in _tools_for_llm_bind if getattr(t, "name", None) not in _FINANZ_LOCAL_MUT_EXCLUDE
+        ]
+        _finanz_local_mut_bind_off = [
+            t for t in _tools_sandbox_off_bind if getattr(t, "name", None) not in _FINANZ_LOCAL_MUT_EXCLUDE
+        ]
+        if (_lid or "").strip().lower() == "finanz":
+            llm_with_tools_on_nibkr = _bind_tools(llm, _finanz_local_mut_bind_on)
+            llm_with_tools_off_nibkr = _bind_tools(llm, _finanz_local_mut_bind_off)
+        else:
+            llm_with_tools_on_nibkr = None
+            llm_with_tools_off_nibkr = None
 
         has_ibkr = "get_ibkr_portfolio" in tools_by_name
         has_read_sql = "read_sql" in tools_by_name
@@ -2205,7 +2502,42 @@ def build_worker_graph(
                 return out
 
             sandbox_enabled = _sandbox_enabled_for_state(state)
-            llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
+            _finanz_hide_ibkr_bind = bool(
+                (_lid or "").strip().lower() == "finanz"
+                and llm_with_tools_on_nibkr is not None
+                and not telegram_context_summarize_directive
+                and _is_finanz_local_account_write_query(incoming)
+                and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
+                and not is_portfolio
+            )
+            llm_with_tools = (
+                (llm_with_tools_on_nibkr if sandbox_enabled else llm_with_tools_off_nibkr)
+                if _finanz_hide_ibkr_bind
+                else (llm_with_tools_on if sandbox_enabled else llm_with_tools_off)
+            )
+            # region agent log
+            try:
+                if str(_lid or "").strip().lower() == "finanz":
+                    _payload = {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H-LOOP",
+                        "location": "factory.py:agent_node:hide_ibkr_bind",
+                        "message": "finanz_local_mut_bind_choice",
+                        "data": {
+                            "hide_ibkr_bind": _finanz_hide_ibkr_bind,
+                            "incoming_snip": (incoming or "")[:120],
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+            # endregion
             forced_name = (
                 "admin_sql"
                 if force_admin_sql
@@ -2260,6 +2592,45 @@ def build_worker_graph(
                         )
                     )
                 ] + _msg_list
+            if (
+                (str(_lid or "").strip().lower() == "finanz")
+                and not telegram_context_summarize_directive
+                and _is_finanz_local_account_write_query(incoming)
+            ):
+                _anchor_txt = _finanz_local_mutation_anchor_message(incoming)
+                if _anchor_txt:
+                    _before_n = len(_msg_list)
+                    _msg_list = _insert_system_after_leading_systems(
+                        _msg_list, SystemMessage(content=_anchor_txt)
+                    )
+                    # region agent log
+                    try:
+                        _tail_types = [
+                            type(_msg_list[i]).__name__
+                            for i in range(max(0, len(_msg_list) - 4), len(_msg_list))
+                        ]
+                        _payload = {
+                            "sessionId": "c964f7",
+                            "hypothesisId": "H-ANCHOR",
+                            "location": "factory.py:agent_node:local_mutation_anchor",
+                            "message": "finanz_anchor_after_leading_systems",
+                            "data": {
+                                "incoming_snip": (incoming or "")[:160],
+                                "msg_count_before": _before_n,
+                                "msg_count_after": len(_msg_list),
+                                "tail_message_types": _tail_types,
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }
+                        with open(
+                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                            "a",
+                            encoding="utf-8",
+                        ) as _df:
+                            _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+                    except Exception:
+                        pass
+                    # endregion
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             _invoked_llm: Any = llm_with_tools
             if force_admin_sql:
@@ -2296,6 +2667,55 @@ def build_worker_graph(
             elif force_run_sandbox:
                 _frs = llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
                 _invoked_llm = _frs or llm_with_tools
+            # region agent log
+            try:
+                if (str(_lid or "").strip().lower() == "finanz"):
+                    from duckclaw.integrations.llm_providers import infer_provider_from_openai_compatible_llm as _inf_dbg
+
+                    def _unwrap_openai_compat(co: Any) -> tuple[str, str]:
+                        z: Any = co
+                        for _ in range(12):
+                            if z is None:
+                                return "", ""
+                            mo = str(getattr(z, "model_name", None) or getattr(z, "model", "") or "")[:120]
+                            ba = getattr(z, "openai_api_base", None) or getattr(z, "base_url", None)
+                            if ba is None:
+                                cl = getattr(z, "client", None) or getattr(z, "root_client", None)
+                                ba = getattr(cl, "base_url", None) if cl else None
+                            if mo.strip() or (ba is not None and str(ba).strip()):
+                                return mo.strip(), str(ba).strip()[:200]
+                            z = getattr(z, "bound", None)
+                        return "", ""
+
+                    _m0, _b0 = _unwrap_openai_compat(llm)
+                    _m1, _b1 = _unwrap_openai_compat(_invoked_llm)
+                    _payload = {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H-B",
+                        "location": "factory.py:agent_node:pre_invoke",
+                        "message": "finanz_llm_unwrap",
+                        "data": {
+                            "merged_provider": str(provider or ""),
+                            "merged_model": str(model or "")[:120],
+                            "merged_base": str(base_url or "")[:160],
+                            "infer_llm": str(_inf_dbg(llm) or ""),
+                            "infer_invoked": str(_inf_dbg(_invoked_llm) or ""),
+                            "unwrap_llm_model": _m0,
+                            "unwrap_llm_base": _b0,
+                            "unwrap_inv_model": _m1,
+                            "unwrap_inv_base": _b1,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+            # endregion
             try:
                 if force_admin_sql:
                     resp = _invoked_llm.invoke(_groq_msgs)
@@ -2338,6 +2758,43 @@ def build_worker_graph(
                     else:
                         _tc_names.append(getattr(tc, "name", None))
                 _log.info("[%s] LLM tool_calls=%s", _wl, _tc_names)
+            # region agent log
+            try:
+                if (str(_lid or "").strip().lower() == "finanz") and resp is not None:
+                    _ak_dbg = getattr(resp, "additional_kwargs", None) or {}
+                    _ak_tc_dbg = _ak_dbg.get("tool_calls") if isinstance(_ak_dbg, dict) else None
+                    _rm_dbg = getattr(resp, "response_metadata", None) or {}
+                    _fn_dbg = _rm_dbg.get("finish_reason") if isinstance(_rm_dbg, dict) else None
+                    _prev_txt = str(getattr(resp, "content", "") or "")[:400].replace("\n", " ")
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "hypothesisId": "H1-H5",
+                                    "location": "factory.py:agent_node",
+                                    "message": "finanz_after_llm_invoke",
+                                    "data": {
+                                        "provider": str(provider or ""),
+                                        "tool_calls_len": len(tool_calls),
+                                        "tool_call_names": _tc_names if tool_calls else [],
+                                        "additional_kwargs_has_tool_calls": bool(_ak_tc_dbg),
+                                        "finish_reason": _fn_dbg,
+                                        "content_preview": _prev_txt,
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+            except Exception:
+                pass
+            # endregion
             out = {**state, "messages": state["messages"] + [resp]}
             out.update(_identity_fields(state))
             return out
@@ -2470,10 +2927,21 @@ def build_worker_graph(
                     try:
                         _schedule_tool_heartbeat(name)
                         invoke_args: Any = args
-                        if name in ("run_sandbox", "run_browser_sandbox") and isinstance(args, dict):
+                        if isinstance(args, dict):
                             invoke_args = {**args}
+                        if name in ("run_sandbox", "run_browser_sandbox") and isinstance(invoke_args, dict):
                             if not str(invoke_args.get("worker_id") or "").strip():
                                 invoke_args["worker_id"] = worker_id
+                        if isinstance(invoke_args, dict) and (str(_lid or "").strip().lower() == "finanz"):
+                            _inc_ov = (state.get("incoming") or "").strip()
+                            _sch_ov = (getattr(spec, "schema_name", None) or "finance_worker").strip()
+                            invoke_args = _finanz_override_local_expense_tool_args(
+                                tool_name=name,
+                                args=invoke_args,
+                                incoming=_inc_ov,
+                                db=db,
+                                schema=_sch_ov,
+                            )
                         if (
                             name == "run_sandbox"
                             and _lid == "bi_analyst"
@@ -2813,7 +3281,40 @@ def build_worker_graph(
 
     def should_continue(state: dict) -> str:
         last = state["messages"][-1]
-        return "tools" if getattr(last, "tool_calls", None) else "end"
+        _ptc = getattr(last, "tool_calls", None)
+        _ak_sc = getattr(last, "additional_kwargs", None) or {}
+        _ak_tc_sc = _ak_sc.get("tool_calls") if isinstance(_ak_sc, dict) else None
+        _branch = "tools" if _ptc else "end"
+        # region agent log
+        try:
+            if (str(_lid or "").strip().lower() == "finanz"):
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "hypothesisId": "H2",
+                                "location": "factory.py:should_continue",
+                                "message": "route_after_agent",
+                                "data": {
+                                    "branch": _branch,
+                                    "parsed_tool_calls_truthy": bool(_ptc),
+                                    "additional_kwargs_tool_calls_truthy": bool(_ak_tc_sc),
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+        except Exception:
+            pass
+        # endregion
+        return _branch
 
     # Context-Guard (FactChecker + SelfCorrection) para workers con catalog_retriever
     context_guard_config = getattr(spec, "context_guard_config", None) or {}

@@ -172,8 +172,12 @@ def schedule_telegram_context_summary_background(
     telegram_mcp_state: Any,
     telegram_forced_vault_db_path: str | None,
     reply_token: str | None,
+    redis_session_id: str,
 ) -> None:
     """Invoca el grafo con directiva de resumen y envía la respuesta por Bot API (segundo plano)."""
+    # Mismo session_id que el webhook multiplex (p. ej. quanttrader:1726618406) y lock Redis activo:
+    # si skip_session_lock=True y session_id=chat_id puro, el resumen en background abre DuckDB RO
+    # mientras el usuario manda /team: fly abre RW al mismo .duckdb → «different configuration».
     bg_payload = ChatRequest(
         message=directive_msg,
         chat_id=str(chat_id),
@@ -182,7 +186,7 @@ def schedule_telegram_context_summary_background(
         chat_type=chat_type,
         tenant_id=tenant_id,
         is_system_prompt=True,
-        skip_session_lock=True,
+        skip_session_lock=False,
     )
 
     async def _bg_summarize_task() -> None:
@@ -196,7 +200,7 @@ def schedule_telegram_context_summary_background(
                     res = await invoke_agent_chat(
                         bg_payload,
                         worker_id,
-                        str(chat_id),
+                        redis_session_id,
                         tenant_id,
                         redis_client=redis_client,
                         telegram_multipart_tail_delivery="native",
@@ -301,7 +305,7 @@ def schedule_telegram_context_summary_background(
 
                 await dispatch_telegram_multipart_tail_async(
                     tail_plain=tail_plain_ctx,
-                    session_id=str(chat_id),
+                    session_id=redis_session_id,
                     user_id=str(vault_uid or "").strip() or str(chat_id),
                     telegram_multipart_tail_delivery="native",
                     effective_telegram_bot_token=resolve_effective_telegram_bot_token,
@@ -748,57 +752,9 @@ def build_telegram_inbound_webhook_router(
 
     _compact_path_bindings: list[TelegramPathWebhookBinding] = []
     _raw_compact_routes = (os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()
-    # #region agent log
-    try:
-        _payload = {
-            "sessionId": "c964f7",
-            "runId": "pre-fix",
-            "hypothesisId": "H-ENV-SOURCE",
-            "location": "telegram_inbound_webhook.py:build_router",
-            "message": "compact_routes_env_snapshot",
-            "data": {
-                "has_routes": bool(_raw_compact_routes),
-                "contains_quanttrader": "quanttrader:" in _raw_compact_routes.lower(),
-                "routes_preview": _raw_compact_routes[:240],
-            },
-            "timestamp": int(__import__("time").time() * 1000),
-        }
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
     if _raw_compact_routes and not _raw_compact_routes.startswith("[") and ":/api/" in _raw_compact_routes:
         try:
             _compact_path_bindings = load_path_webhook_bindings_from_env()
-            # #region agent log
-            try:
-                _payload = {
-                    "sessionId": "c964f7",
-                    "runId": "pre-fix",
-                    "hypothesisId": "H-PARSE-BINDINGS",
-                    "location": "telegram_inbound_webhook.py:build_router",
-                    "message": "compact_bindings_loaded",
-                    "data": {
-                        "count": len(_compact_path_bindings),
-                        "bot_names": [b.bot_name for b in _compact_path_bindings],
-                        "paths": [b.webhook_path for b in _compact_path_bindings],
-                    },
-                    "timestamp": int(__import__("time").time() * 1000),
-                }
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # #endregion
         except ValueError as exc:
             _log.error(
                 "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES (compacto) inválido; arranca el gateway tras corregir .env: %s",
@@ -1424,6 +1380,7 @@ def build_telegram_inbound_webhook_router(
                 return {"ok": "true"}
 
             telegram_mcp_state = getattr(request.app.state, "telegram_mcp", None)
+            _redis_sess_ctx = f"{path_mux.bot_name}:{chat_id}" if path_mux is not None else str(chat_id)
             schedule_telegram_context_summary_background(
                 directive_msg=_summarize_new_context_directive(ctx_body),
                 telegram_header_html="<b>Resumen del contexto inyectado</b>\n\n",
@@ -1440,6 +1397,7 @@ def build_telegram_inbound_webhook_router(
                 telegram_mcp_state=telegram_mcp_state,
                 telegram_forced_vault_db_path=telegram_forced_vault_db_path,
                 reply_token=reply_token,
+                redis_session_id=_redis_sess_ctx,
             )
 
             await _send_ctx_reply(
@@ -1512,6 +1470,7 @@ def build_telegram_inbound_webhook_router(
                 return {"ok": "true"}
 
             telegram_mcp_sum = getattr(request.app.state, "telegram_mcp", None)
+            _redis_sess_sum = f"{path_mux.bot_name}:{chat_id}" if path_mux is not None else str(chat_id)
             schedule_telegram_context_summary_background(
                 directive_msg=_summarize_stored_context_directive(snapshot),
                 telegram_header_html="<b>Resumen del contexto (base de datos)</b>\n\n",
@@ -1528,6 +1487,7 @@ def build_telegram_inbound_webhook_router(
                 telegram_mcp_state=telegram_mcp_sum,
                 telegram_forced_vault_db_path=telegram_forced_vault_db_path,
                 reply_token=reply_token,
+                redis_session_id=_redis_sess_sum,
             )
             await _send_ctx_summary_reply(
                 llm_markdown_to_telegram_html(
@@ -1552,38 +1512,6 @@ def build_telegram_inbound_webhook_router(
         else:
             session_id = str(chat_id)
         telegram_mcp = getattr(request.app.state, "telegram_mcp", None)
-        # #region agent log
-        try:
-            _bot_name_dbg = getattr(request.state, "duckclaw_telegram_bot_name", "") or ""
-            _path_dbg = ""
-            _pb_dbg = getattr(request.state, "duckclaw_telegram_path_binding", None)
-            if _pb_dbg is not None:
-                _path_dbg = str(getattr(_pb_dbg, "webhook_path", "") or "")
-            _payload = {
-                "sessionId": "c964f7",
-                "runId": "pre-fix",
-                "hypothesisId": "H-SESSION-COLLISION",
-                "location": "telegram_inbound_webhook.py:_telegram_webhook_core",
-                "message": "pre_invoke_worker_and_session",
-                "data": {
-                    "bot_name": _bot_name_dbg,
-                    "path": _path_dbg,
-                    "worker_id": worker_id,
-                    "tenant_id": tenant_id,
-                    "chat_id": str(chat_id),
-                    "session_id": session_id,
-                },
-                "timestamp": int(__import__("time").time() * 1000),
-            }
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-        # #endregion
 
         async def _invoke_and_reply() -> None:
             try:
@@ -1733,31 +1661,6 @@ def build_telegram_inbound_webhook_router(
 
     for _pb in _compact_path_bindings:
         _rel = fastapi_relative_path(_pb.webhook_path)
-        # #region agent log
-        try:
-            _payload = {
-                "sessionId": "c964f7",
-                "runId": "pre-fix",
-                "hypothesisId": "H-ROUTE-REGISTER",
-                "location": "telegram_inbound_webhook.py:register_compact_path",
-                "message": "registering_compact_path",
-                "data": {
-                    "bot_name": _pb.bot_name,
-                    "worker_id": _pb.worker_id,
-                    "webhook_path": _pb.webhook_path,
-                    "relative_path": _rel,
-                },
-                "timestamp": int(__import__("time").time() * 1000),
-            }
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-        # #endregion
 
         def _make_path_handler(binding: TelegramPathWebhookBinding) -> Callable[..., Awaitable[dict[str, str]]]:
             async def _path_webhook(request: Request) -> dict[str, str]:

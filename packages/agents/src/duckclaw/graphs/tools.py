@@ -53,31 +53,6 @@ def read_sql(db: Any, query: str) -> str:
         return json.dumps({"error": "Query vacío."})
     q = query.strip()
     q_no_comment = _strip_leading_sql_comments(q)
-    # region agent log
-    if q_no_comment != q:
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "hypothesisId": "H-SQL-COMMENT",
-                            "location": "graphs/tools.py:read_sql",
-                            "message": "stripped_leading_sql_comments",
-                            "data": {"original_prefix": q[:60]},
-                            "timestamp": int(__import__("time").time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-    # endregion
     if _BLOCKED.search(q_no_comment):
         blocked = re.search(r"\b(ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", q, re.IGNORECASE)
         cmd = blocked.group(0).upper() if blocked else "comando"
@@ -107,31 +82,6 @@ def admin_sql(db: Any, query: str) -> str:
         return json.dumps({"error": "Query vacío."})
     q = query.strip()
     q_no_comment = _strip_leading_sql_comments(q)
-    # region agent log
-    if q_no_comment != q:
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "hypothesisId": "H-SQL-COMMENT",
-                            "location": "graphs/tools.py:admin_sql",
-                            "message": "stripped_leading_sql_comments",
-                            "data": {"original_prefix": q[:60]},
-                            "timestamp": int(__import__("time").time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-    # endregion
     if _BLOCKED.search(q_no_comment):
         blocked = re.search(r"\b(ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", q, re.IGNORECASE)
         cmd = blocked.group(0).upper() if blocked else "comando"

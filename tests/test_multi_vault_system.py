@@ -27,6 +27,7 @@ def _duckclaw_repo_root_is_tmp(tmp_path, monkeypatch):
     monkeypatch.delenv("DUCKCLAW_FINANZ_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKCLAW_JOB_HUNTER_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKCLAW_SIATA_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_TRADER_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKCLAW_WAR_ROOM_ACL_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKDB_PATH", raising=False)
 
@@ -142,6 +143,20 @@ def test_vault_fly_uses_session_duckdb_path_over_dedicated_env(tmp_path, monkeyp
     assert out and "siatadb1.duckdb" in out
     assert "finanzdb1.duckdb" not in out
     assert "Tenant: SIATA" in out
+
+
+def test_vault_fly_quant_trader_label_from_path(tmp_path, monkeypatch):
+    """/vault con sesión en quant_traderdb1 muestra etiqueta Quant Trader aunque tenant sea Finanzas."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
+    q = tmp_path / "quant_traderdb1.duckdb"
+    q.write_bytes(b"x" * 100)
+    db = _DummyDB()
+    db._path = str(q.resolve())
+    out = handle_command(db, "c1", "/vault", tenant_id="Finanzas", vault_user_id="u1", requester_id="u1")
+    assert out and "quant_traderdb1.duckdb" in out
+    assert "Quant Trader" in out
+    assert "gateway (Finanz)" not in out
 
 
 def test_vault_command_scoped_tenant(tmp_path, monkeypatch):

@@ -40,23 +40,7 @@ _telegram_bot_username_cache: dict[str, str] = {}
 
 
 def _debug_emit(location: str, message: str, data: dict[str, Any], run_id: str, hypothesis_id: str) -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "9accbe",
-            "id": f"log_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}",
-            "timestamp": int(time.time() * 1000),
-            "location": location,
-            "message": message,
-            "data": data,
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-        }
-        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-9accbe.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
+    return
 
 
 def _tool_name_from_embedded_json_content(text: str) -> str | None:
@@ -253,6 +237,41 @@ def _agent_config_db_for_vault(hub_db: Any, vault_db_path: str | None) -> Any:
 def _worker_id_alnum_slug(worker_id: str | None) -> str:
     """Normaliza id de plantilla (guiones Unicode, espacios) para ramas por worker."""
     return re.sub(r"[^a-z0-9]", "", (worker_id or "").lower())
+
+
+def _resolve_gateway_worker_to_template_dir(
+    template_ids: list[str],
+    incoming_worker_id: str | None,
+    templates_root: Path | None,
+) -> str | None:
+    """
+    Mapea worker_id inyectado por el gateway (manifest ``id``, p. ej. quant_trader)
+    al nombre de carpeta bajo forge/templates (p. ej. Quant-Trader).
+    """
+    raw = (incoming_worker_id or "").strip()
+    if not raw or not template_ids:
+        return None
+    from duckclaw.graphs.on_the_fly_commands import _resolve_template_id
+
+    pin = _resolve_template_id(template_ids, raw)
+    if pin:
+        return pin
+    inc_slug = _worker_id_alnum_slug(raw)
+    if not inc_slug:
+        return None
+    for tid in template_ids:
+        if _worker_id_alnum_slug(tid) == inc_slug:
+            return (tid or "").strip()
+    from duckclaw.workers.manifest import load_manifest
+
+    for tid in template_ids:
+        try:
+            spec = load_manifest(tid, templates_root)
+            if _worker_id_alnum_slug(spec.logical_worker_id) == inc_slug:
+                return (tid or "").strip()
+        except Exception:
+            continue
+    return None
 
 
 def _is_job_hunter_worker(worker_id: str | None) -> bool:
@@ -1106,6 +1125,11 @@ def _greeting_fast_reply_text(worker_id: str | None) -> str:
             "Di rol, ubicación o remoto y, si quieres, portales (LinkedIn, Lever, etc.). "
             "Necesitas `/sandbox on` para ejecutar código en el contenedor browser."
         )
+    if _worker_id_alnum_slug(w) in ("quanttrader", "quanttraderworker", "quant"):
+        return (
+            "Hola. Soy **Quant Trader** (mercado y ejecución cuantitativa). "
+            "¿En qué puedo ayudarte?"
+        )
     if wl == "bi-analyst":
         return (
             "Hola. Soy tu analista de BI (DuckDB): consultas de solo lectura, esquema, métricas y gráficos cuando lo pidas. "
@@ -1124,6 +1148,14 @@ def _capabilities_fast_reply_text(worker_id: str | None) -> str:
     w = (worker_id or "").strip()
     wl = w.lower()
     wl_norm = wl.replace("_", "-")
+    if _worker_id_alnum_slug(w) in ("quanttrader", "quanttraderworker", "quant"):
+        return (
+            "Soy **Quant Trader** (mercado / cuant). Puedo:\n"
+            "• Análisis de mercado, OHLCV y datos del lake cuando estén disponibles.\n"
+            "• Señales, backtest y flujos del manifest `quant_trader` (tools permitidas).\n"
+            "• Contexto operativo sin mezclar cuentas personales salvo que lo pidas explícitamente.\n\n"
+            "Ejemplos: «estado del VIX», «OHLCV de SPY 1d», «resume la estrategia actual»."
+        )
     if _is_job_hunter_worker(w):
         return (
             "Soy **OSINT JobHunter** (empleo / OSINT). Puedo:\n"
@@ -1251,21 +1283,16 @@ def build_manager_graph(
                 if (wid or "").strip().lower() == preferred.lower():
                     assigned = (wid or "").strip()
                     break
-        # region agent log
-        _debug_emit(
-            "graphs/manager_graph.py:router_worker_pick",
-            "router selected initial worker",
-            {
-                "incoming_assigned": incoming_assigned,
-                "selected_assigned": assigned,
-                "available_templates": available[:8],
-                "tenant_id": str(tenant_id or ""),
-                "chat_id": str(chat_id or ""),
-            },
-            str(chat_id or "manager"),
-            "H7",
-        )
-        # endregion
+        # Gateway / Telegram multiplex: el proceso ya fijó assigned_worker_id (p. ej. quant_trader).
+        # Sin esto, router_node sobrescribe con available[0] (típico finanz) y el saludo rápido suena a otro bot.
+        if incoming_assigned:
+            all_tpl = list_workers(troot)
+            pinned = _resolve_gateway_worker_to_template_dir(all_tpl, incoming_assigned, troot)
+            if pinned:
+                assigned = pinned
+                av_lower = {(a or "").strip().lower() for a in available}
+                if pinned.lower() not in av_lower:
+                    available = [pinned] + list(available)
         out = {"assigned_worker_id": assigned, "available_templates": available}
         # Preservar estado para nodos siguientes (por si el grafo hace merge sustituyendo)
         if "incoming" in state:
@@ -1366,20 +1393,6 @@ def build_manager_graph(
         available_plan = state.get("available_templates") or list_workers(troot)
         default_worker = available_plan[0] if available_plan else None
         assigned = (state.get("assigned_worker_id") or default_worker or "").strip() or default_worker
-        # region agent log
-        _debug_emit(
-            "graphs/manager_graph.py:plan_worker_before_task",
-            "plan_node worker before _plan_task",
-            {
-                "state_assigned_worker_id": state.get("assigned_worker_id"),
-                "assigned_for_plan": assigned,
-                "available_templates": list(available_plan or [])[:8],
-                "incoming_preview": incoming[:220],
-            },
-            str(state.get("chat_id") or "manager"),
-            "H8",
-        )
-        # endregion
         if not incoming:
             _log.warning("manager plan: incoming vacío en state (keys=%s)", list(state.keys()))
 
@@ -1409,20 +1422,6 @@ def build_manager_graph(
         quant_trader_in_team = _pick_quant_trader_worker(list(available_plan or []))
         if quant_trader_in_team and _user_requests_quant_execution(incoming):
             assigned = quant_trader_in_team
-        # region agent log
-        _debug_emit(
-            "graphs/manager_graph.py:plan_jobhunter_tracking_route",
-            "plan routing decision for job tracking intent",
-            {
-                "tracking_intent": tracking_intent,
-                "job_hunter_in_team": job_hunter_in_team,
-                "assigned_before_plan_task": assigned,
-                "available_templates": list(available_plan or [])[:8],
-            },
-            str(state.get("chat_id") or "manager"),
-            "H12",
-        )
-        # endregion
 
         # Mantener lógica existente de ruteo / planned_task
         planned, override_worker = _plan_task(incoming, assigned)
@@ -1977,36 +1976,10 @@ def build_manager_graph(
         if _worker_matches_id(current_worker, "finanz") and _contains_job_opportunity_tracking_request(
             raw_reply
         ):
-            # region agent log
-            _debug_emit(
-                "graphs/manager_graph.py:route_after_invoke_a2a_job_track",
-                "route_after_invoke_worker detected A2A job tracking request",
-                {
-                    "current_worker": current_worker,
-                    "job_hunter_in_team": job_hunter_in_team,
-                    "available_templates": list(available or [])[:8],
-                },
-                str(state.get("chat_id") or "manager"),
-                "H10",
-            )
-            # endregion
             if not job_hunter_in_team:
                 return "end"
             return "handoff_job_track"
         if _worker_matches_id(current_worker, "finanz") and _contains_income_injection_request(raw_reply):
-            # region agent log
-            _debug_emit(
-                "graphs/manager_graph.py:route_after_invoke_a2a_income",
-                "route_after_invoke_worker detected A2A income request",
-                {
-                    "current_worker": current_worker,
-                    "job_hunter_in_team": job_hunter_in_team,
-                    "available_templates": list(available or [])[:8],
-                },
-                str(state.get("chat_id") or "manager"),
-                "H11",
-            )
-            # endregion
             if not job_hunter_in_team:
                 return "end"
             return "handoff_to_target"
@@ -2019,19 +1992,6 @@ def build_manager_graph(
         if _worker_matches_id(current_worker, target_worker):
             mission_name = str(mission.get("mission") or "").strip().upper()
             if mission_name == "JOB_OPPORTUNITY_TRACKING":
-                # region agent log
-                _debug_emit(
-                    "graphs/manager_graph.py:route_after_invoke_end_job_tracking",
-                    "ending after Job-Hunter job tracking to preserve worker-native reply",
-                    {
-                        "current_worker": current_worker,
-                        "target_worker": target_worker,
-                        "mission_name": mission_name,
-                    },
-                    str(state.get("chat_id") or "manager"),
-                    "H17",
-                )
-                # endregion
                 return "end"
             source_w = (mission.get("source_worker") or "").strip()
             if source_w and not any(_worker_matches_id(wid, source_w) for wid in available):
@@ -2088,15 +2048,6 @@ def build_manager_graph(
         available = state.get("available_templates") or []
         target_worker = _pick_job_hunter_worker(list(available or []))
         if not target_worker:
-            # region agent log
-            _debug_emit(
-                "graphs/manager_graph.py:handoff_to_target_skipped",
-                "handoff_to_target skipped: Job-Hunter not in team",
-                {"available_templates": list(available or [])[:8]},
-                str(state.get("chat_id") or "manager"),
-                "H11",
-            )
-            # endregion
             return dict(state)
         active_mission = {
             "source_worker": "finanz",
@@ -2148,15 +2099,6 @@ def build_manager_graph(
         available = state.get("available_templates") or []
         target_worker = _pick_job_hunter_worker(list(available or []))
         if not target_worker:
-            # region agent log
-            _debug_emit(
-                "graphs/manager_graph.py:handoff_job_track_skipped",
-                "handoff_job_track skipped: Job-Hunter not in team",
-                {"available_templates": list(available or [])[:8]},
-                str(state.get("chat_id") or "manager"),
-                "H10",
-            )
-            # endregion
             return dict(state)
         user_ctx = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
         _debug_emit(

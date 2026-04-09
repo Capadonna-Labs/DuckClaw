@@ -64,7 +64,7 @@ ALTER TABLE finance_worker.job_opportunities ADD COLUMN IF NOT EXISTS status VAR
 ALTER TABLE finance_worker.job_opportunities ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP;
 ALTER TABLE finance_worker.job_opportunities ADD COLUMN IF NOT EXISTS notes VARCHAR;
 
--- Idempotencia por URL (si falla: hay apply_url duplicados; deduplicar y volver a aplicar schema)
+-- Idempotencia por URL (si falla: hay apply_url duplicados — deduplicar y volver a aplicar schema)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_job_opportunities_apply_url_unique ON finance_worker.job_opportunities (apply_url);
 
 -- Quant Trader ledger (spec: Quant Trader.md) mutado por StateDelta + Singleton Writer

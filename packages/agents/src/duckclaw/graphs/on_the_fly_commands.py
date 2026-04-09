@@ -711,6 +711,14 @@ def _fly_vault_label_for_tenant(tenant_id: Any) -> str:
     return pretty.get(tid, tid)
 
 
+def _fly_vault_label_for_session_path(session_resolved_path: str, tenant_id: Any) -> str:
+    """Etiqueta /vault cuando el archivo ya está fijado (multiplex): no mezclar Quant con Finanz por tenant."""
+    low = (session_resolved_path or "").lower().replace("\\", "/")
+    if "quant_trader" in low:
+        return "Quant Trader"
+    return _fly_vault_label_for_tenant(tenant_id)
+
+
 def _dedicated_gateway_vault_label() -> str:
     proc = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
     matched = (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
@@ -757,7 +765,7 @@ def execute_vault(
 
         fp = _P(fixed_db).expanduser().resolve()
         label = (
-            _fly_vault_label_for_tenant(tenant_id)
+            _fly_vault_label_for_session_path(str(fp), tenant_id)
             if session_db_path
             else _dedicated_gateway_vault_label()
         )

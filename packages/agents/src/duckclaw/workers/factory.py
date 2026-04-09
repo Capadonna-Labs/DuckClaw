@@ -314,25 +314,6 @@ def _finanz_patch_admin_sql_for_user_expense(
     if recreation_budget and "presupuestos" in low:
         # Si el UPDATE no encuentra fila del mes, ON CONFLICT garantiza aplicar el descuento igual.
         if "update finance_worker.presupuestos" in low:
-            # region agent log
-            try:
-                _payload = {
-                    "sessionId": "c964f7",
-                    "hypothesisId": "H-BUDGET-UPSERT",
-                    "location": "factory.py:_finanz_patch_admin_sql_for_user_expense",
-                    "message": "rewrite_update_presupuesto_to_upsert",
-                    "data": {"amount_cop": int(amount), "recreation_category_id": recreation_category_id},
-                    "timestamp": int(time.time() * 1000),
-                }
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # endregion
             _cat_expr = (
                 str(int(recreation_category_id))
                 if recreation_category_id is not None
@@ -378,9 +359,7 @@ def _finanz_override_local_expense_tool_args(
     neg = -abs(amt)
     rec_id = _finanz_resolve_recreation_category_id(db, schema) if parsed.get("recreation_budget") else None
     out = dict(args)
-    # region agent log
     _did = False
-    # endregion
     if tool_name == "insert_transaction":
         out["amount"] = float(neg)
         if parsed.get("description"):
@@ -400,31 +379,6 @@ def _finanz_override_local_expense_tool_args(
             if new_q != q:
                 out["query"] = new_q
                 _did = True
-    # region agent log
-    if _did:
-        try:
-            _payload = {
-                "sessionId": "c964f7",
-                "hypothesisId": "H-FINANZ-COP-OVERRIDE",
-                "location": "factory.py:_finanz_override_local_expense_tool_args",
-                "message": "applied_user_intent_override",
-                "data": {
-                    "tool": tool_name,
-                    "amount_cop": amt,
-                    "recreation_category_id": rec_id,
-                    "description": (parsed.get("description") or "")[:80],
-                },
-                "timestamp": int(time.time() * 1000),
-            }
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-    # endregion
     return out
 
 
@@ -1607,29 +1561,6 @@ def build_worker_graph(
                 provider,
                 (model or "")[:48],
             )
-            # region agent log
-            try:
-                _payload = {
-                    "sessionId": "c964f7",
-                    "hypothesisId": "H1",
-                    "location": "workers/factory.py:build_worker_graph",
-                    "message": "mlx declared but remote LLM client; rebuilding from triplet",
-                    "data": {
-                        "worker_id": worker_id,
-                        "inferred_client": _inf_host,
-                        "merged_provider": provider,
-                    },
-                    "timestamp": int(time.time() * 1000),
-                }
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # endregion
             llm = None
 
     if llm is None and provider != "none_llm":
@@ -2515,29 +2446,6 @@ def build_worker_graph(
                 if _finanz_hide_ibkr_bind
                 else (llm_with_tools_on if sandbox_enabled else llm_with_tools_off)
             )
-            # region agent log
-            try:
-                if str(_lid or "").strip().lower() == "finanz":
-                    _payload = {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H-LOOP",
-                        "location": "factory.py:agent_node:hide_ibkr_bind",
-                        "message": "finanz_local_mut_bind_choice",
-                        "data": {
-                            "hide_ibkr_bind": _finanz_hide_ibkr_bind,
-                            "incoming_snip": (incoming or "")[:120],
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # endregion
             forced_name = (
                 "admin_sql"
                 if force_admin_sql
@@ -2603,34 +2511,6 @@ def build_worker_graph(
                     _msg_list = _insert_system_after_leading_systems(
                         _msg_list, SystemMessage(content=_anchor_txt)
                     )
-                    # region agent log
-                    try:
-                        _tail_types = [
-                            type(_msg_list[i]).__name__
-                            for i in range(max(0, len(_msg_list) - 4), len(_msg_list))
-                        ]
-                        _payload = {
-                            "sessionId": "c964f7",
-                            "hypothesisId": "H-ANCHOR",
-                            "location": "factory.py:agent_node:local_mutation_anchor",
-                            "message": "finanz_anchor_after_leading_systems",
-                            "data": {
-                                "incoming_snip": (incoming or "")[:160],
-                                "msg_count_before": _before_n,
-                                "msg_count_after": len(_msg_list),
-                                "tail_message_types": _tail_types,
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                        with open(
-                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                            "a",
-                            encoding="utf-8",
-                        ) as _df:
-                            _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-                    except Exception:
-                        pass
-                    # endregion
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             _invoked_llm: Any = llm_with_tools
             if force_admin_sql:
@@ -2667,55 +2547,6 @@ def build_worker_graph(
             elif force_run_sandbox:
                 _frs = llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
                 _invoked_llm = _frs or llm_with_tools
-            # region agent log
-            try:
-                if (str(_lid or "").strip().lower() == "finanz"):
-                    from duckclaw.integrations.llm_providers import infer_provider_from_openai_compatible_llm as _inf_dbg
-
-                    def _unwrap_openai_compat(co: Any) -> tuple[str, str]:
-                        z: Any = co
-                        for _ in range(12):
-                            if z is None:
-                                return "", ""
-                            mo = str(getattr(z, "model_name", None) or getattr(z, "model", "") or "")[:120]
-                            ba = getattr(z, "openai_api_base", None) or getattr(z, "base_url", None)
-                            if ba is None:
-                                cl = getattr(z, "client", None) or getattr(z, "root_client", None)
-                                ba = getattr(cl, "base_url", None) if cl else None
-                            if mo.strip() or (ba is not None and str(ba).strip()):
-                                return mo.strip(), str(ba).strip()[:200]
-                            z = getattr(z, "bound", None)
-                        return "", ""
-
-                    _m0, _b0 = _unwrap_openai_compat(llm)
-                    _m1, _b1 = _unwrap_openai_compat(_invoked_llm)
-                    _payload = {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H-B",
-                        "location": "factory.py:agent_node:pre_invoke",
-                        "message": "finanz_llm_unwrap",
-                        "data": {
-                            "merged_provider": str(provider or ""),
-                            "merged_model": str(model or "")[:120],
-                            "merged_base": str(base_url or "")[:160],
-                            "infer_llm": str(_inf_dbg(llm) or ""),
-                            "infer_invoked": str(_inf_dbg(_invoked_llm) or ""),
-                            "unwrap_llm_model": _m0,
-                            "unwrap_llm_base": _b0,
-                            "unwrap_inv_model": _m1,
-                            "unwrap_inv_base": _b1,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # endregion
             try:
                 if force_admin_sql:
                     resp = _invoked_llm.invoke(_groq_msgs)
@@ -2758,43 +2589,6 @@ def build_worker_graph(
                     else:
                         _tc_names.append(getattr(tc, "name", None))
                 _log.info("[%s] LLM tool_calls=%s", _wl, _tc_names)
-            # region agent log
-            try:
-                if (str(_lid or "").strip().lower() == "finanz") and resp is not None:
-                    _ak_dbg = getattr(resp, "additional_kwargs", None) or {}
-                    _ak_tc_dbg = _ak_dbg.get("tool_calls") if isinstance(_ak_dbg, dict) else None
-                    _rm_dbg = getattr(resp, "response_metadata", None) or {}
-                    _fn_dbg = _rm_dbg.get("finish_reason") if isinstance(_rm_dbg, dict) else None
-                    _prev_txt = str(getattr(resp, "content", "") or "")[:400].replace("\n", " ")
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "hypothesisId": "H1-H5",
-                                    "location": "factory.py:agent_node",
-                                    "message": "finanz_after_llm_invoke",
-                                    "data": {
-                                        "provider": str(provider or ""),
-                                        "tool_calls_len": len(tool_calls),
-                                        "tool_call_names": _tc_names if tool_calls else [],
-                                        "additional_kwargs_has_tool_calls": bool(_ak_tc_dbg),
-                                        "finish_reason": _fn_dbg,
-                                        "content_preview": _prev_txt,
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-            except Exception:
-                pass
-            # endregion
             out = {**state, "messages": state["messages"] + [resp]}
             out.update(_identity_fields(state))
             return out
@@ -3285,35 +3079,6 @@ def build_worker_graph(
         _ak_sc = getattr(last, "additional_kwargs", None) or {}
         _ak_tc_sc = _ak_sc.get("tool_calls") if isinstance(_ak_sc, dict) else None
         _branch = "tools" if _ptc else "end"
-        # region agent log
-        try:
-            if (str(_lid or "").strip().lower() == "finanz"):
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "hypothesisId": "H2",
-                                "location": "factory.py:should_continue",
-                                "message": "route_after_agent",
-                                "data": {
-                                    "branch": _branch,
-                                    "parsed_tool_calls_truthy": bool(_ptc),
-                                    "additional_kwargs_tool_calls_truthy": bool(_ak_tc_sc),
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-        except Exception:
-            pass
-        # endregion
         return _branch
 
     # Context-Guard (FactChecker + SelfCorrection) para workers con catalog_retriever

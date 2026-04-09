@@ -46,7 +46,12 @@ _BOT_PROFILES: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "finanz": ("finanz", "Finanzas", ("DUCKCLAW_FINANZ_DB_PATH",)),
     "siata": ("siata_analyst", "SIATA", ("DUCKCLAW_SIATA_DB_PATH",)),
     "jobhunter": ("Job-Hunter", "Trabajo", ("DUCKCLAW_JOB_HUNTER_DB_PATH",)),
-    "quanttrader": ("quant_trader", "Finanzas", ("DUCKCLAW_FINANZ_DB_PATH",)),
+    # Bóveda propia: DUCKCLAW_QUANT_TRADER_DB_PATH; fallback a finanz si no está definida.
+    "quanttrader": (
+        "quant_trader",
+        "Finanzas",
+        ("DUCKCLAW_QUANT_TRADER_DB_PATH", "DUCKCLAW_FINANZ_DB_PATH"),
+    ),
 }
 
 

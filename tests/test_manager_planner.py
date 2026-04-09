@@ -340,6 +340,27 @@ def test_manager_greeting_fast_path_ok() -> None:
         "BI-Analyst"
     ).lower()
     assert "osint" in _greeting_fast_reply_text("Job‐Hunter").lower()
+    qt_greet = _greeting_fast_reply_text("Quant-Trader").lower()
+    assert "quant" in qt_greet and "trader" in qt_greet
+
+
+def test_resolve_gateway_worker_quant_trader_id_to_template_dir() -> None:
+    """Gateway compact profile usa manifest id ``quant_trader``; la carpeta es ``Quant-Trader``."""
+    from duckclaw.graphs.manager_graph import _resolve_gateway_worker_to_template_dir
+    from duckclaw.workers.factory import list_workers
+
+    all_tpl = list_workers(None)
+    assert _resolve_gateway_worker_to_template_dir(all_tpl, "quant_trader", None) == "Quant-Trader"
+
+
+def test_get_worker_dir_accepts_forge_templates_flat_layout() -> None:
+    """bootstrap_dbs pasa forge/templates como root; debe resolver Quant-Trader sin templates/workers/."""
+    from duckclaw.forge import WORKERS_TEMPLATES_DIR
+    from duckclaw.workers.manifest import get_worker_dir
+
+    d = get_worker_dir("Quant-Trader", WORKERS_TEMPLATES_DIR)
+    assert d.name == "Quant-Trader"
+    assert (d / "manifest.yaml").is_file()
 
 
 def test_manager_capabilities_fast_path_ok() -> None:
@@ -369,6 +390,8 @@ def test_manager_capabilities_fast_path_ok() -> None:
     fz = _capabilities_fast_reply_text("finanz").lower()
     assert "ibkr" in fz and "duckdb" in fz
     assert "resumen" in fz or "cuenta" in fz
+    qt_cap = _capabilities_fast_reply_text("Quant-Trader").lower()
+    assert "quant" in qt_cap and ("mercado" in qt_cap or "ohlcv" in qt_cap)
 
 
 def test_manager_a2a_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pytest.MonkeyPatch) -> None:

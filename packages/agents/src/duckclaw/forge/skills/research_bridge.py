@@ -9,9 +9,11 @@ Requiere: pip install tavily-python  (o uv sync --extra tavily)
 from __future__ import annotations
 
 import asyncio
+import html
 import inspect
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
@@ -67,10 +69,31 @@ def _browser_use_available() -> bool:
         return False
 
 
+_SCRIPT_STYLE_RE = re.compile(r"<\s*(script|style)\b[^>]*>.*?<\s*/\s*\1\s*>", flags=re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"<[^>]+>")
+_WHITESPACE_RE = re.compile(r"[ \t]+")
+_MULTI_NL_RE = re.compile(r"\n{3,}")
+
+
+def _sanitize_tavily_text(value: Any) -> str:
+    """Limpia HTML/scripts y normaliza espacios para inyección segura de contexto."""
+    text = str(value or "")
+    if not text:
+        return ""
+    text = html.unescape(text)
+    text = _SCRIPT_STYLE_RE.sub(" ", text)
+    text = _TAG_RE.sub(" ", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = "\n".join(_WHITESPACE_RE.sub(" ", ln).strip() for ln in text.split("\n"))
+    text = _MULTI_NL_RE.sub("\n\n", text)
+    return text.strip()
+
+
 def _format_tavily_results(response: Any) -> str:
     """Convierte la respuesta de Tavily a Markdown legible."""
     parts: list[str] = []
     answer = getattr(response, "answer", None) or (response.get("answer") if isinstance(response, dict) else None)
+    answer = _sanitize_tavily_text(answer)
     if answer:
         parts.append(f"## Respuesta\n{answer}\n")
     results = getattr(response, "results", None) or (response.get("results", []) if isinstance(response, dict) else [])
@@ -80,6 +103,8 @@ def _format_tavily_results(response: Any) -> str:
             title = getattr(r, "title", None) or (r.get("title") if isinstance(r, dict) else "Sin título")
             url = getattr(r, "url", None) or (r.get("url") if isinstance(r, dict) else "")
             content = getattr(r, "content", None) or (r.get("content") if isinstance(r, dict) else "")
+            title = _sanitize_tavily_text(title) or "Sin título"
+            content = _sanitize_tavily_text(content)
             parts.append(f"{i}. **{title}**\n   - URL: {url}\n")
             if content:
                 parts.append(f"   - {content[:500]}{'...' if len(str(content)) > 500 else ''}\n")

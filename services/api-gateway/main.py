@@ -71,6 +71,7 @@ from duckclaw.integrations.telegram.telegram_agent_token import (
 )
 from duckclaw.gateway_db import (
     GATEWAY_DB_ENV_KEYS,
+    ensure_usable_duckdb_file,
     get_gateway_db_path,
     raw_gateway_db_path_from_mapping,
     resolve_env_duckdb_path,
@@ -96,6 +97,11 @@ for _base in (_repo_root, Path.cwd()):
                 # Tavily: sin clave la tool no se registra o falla en backend; el .env del repo
                 # debe poder fijarla aunque PM2 herede un valor vacío.
                 elif _ks == "TAVILY_API_KEY" and _vs:
+                    os.environ[_ks] = _vs
+                # Multiplex por path: la cadena compacta suele mantenerse en .env y
+                # `register_webhooks.py` la lee desde ahí; PM2 a menudo conserva un valor
+                # antiguo en el dump del proceso. Si .env trae rutas, deben ganar.
+                elif _ks == "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES" and _vs:
                     os.environ[_ks] = _vs
                 else:
                     os.environ.setdefault(_ks, _vs)
@@ -1266,6 +1272,7 @@ async def _invoke_chat(
         _ded_vault = _dedicated_gateway_vault_db_path()
         if _ded_vault:
             vault_db_path = _ded_vault
+    ensure_usable_duckdb_file((vault_db_path or "").strip())
     history = payload.history or []
     is_system_prompt = bool(payload.is_system_prompt or False)
     shared_db_path = (payload.shared_db_path or "").strip() or None
@@ -1455,30 +1462,6 @@ async def _invoke_chat(
             pass
         t0 = time.monotonic()
         try:
-            # #region agent log
-            try:
-                _payload = {
-                    "sessionId": "c964f7",
-                    "runId": "post-fix",
-                    "hypothesisId": "H-INITIAL-WORKER-PLUMB",
-                    "location": "main.py:_invoke_chat",
-                    "message": "before_ainvoke_manager_ephemeral",
-                    "data": {
-                        "worker_id_arg": worker_id,
-                        "session_id": session_id,
-                        "tenant_id": tenant_id,
-                    },
-                    "timestamp": int(__import__("time").time() * 1000),
-                }
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # #endregion
             result = await ainvoke_manager_ephemeral(
                 message,
                 history_for_model,

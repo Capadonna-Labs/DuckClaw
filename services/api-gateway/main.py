@@ -1455,6 +1455,30 @@ async def _invoke_chat(
             pass
         t0 = time.monotonic()
         try:
+            # #region agent log
+            try:
+                _payload = {
+                    "sessionId": "c964f7",
+                    "runId": "post-fix",
+                    "hypothesisId": "H-INITIAL-WORKER-PLUMB",
+                    "location": "main.py:_invoke_chat",
+                    "message": "before_ainvoke_manager_ephemeral",
+                    "data": {
+                        "worker_id_arg": worker_id,
+                        "session_id": session_id,
+                        "tenant_id": tenant_id,
+                    },
+                    "timestamp": int(__import__("time").time() * 1000),
+                }
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+            # #endregion
             result = await ainvoke_manager_ephemeral(
                 message,
                 history_for_model,
@@ -1466,6 +1490,7 @@ async def _invoke_chat(
                 shared_db_path=shared_db_path,
                 is_system_prompt=is_system_prompt,
                 outbound_telegram_bot_token=(outbound_telegram_bot_token or "").strip() or None,
+                assigned_worker_id=worker_id,
             )
         except Exception as exc:
             try:

@@ -24,6 +24,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from pathlib import Path
@@ -655,6 +656,7 @@ async def _ainvoke(
     shared_db_path: str | None = None,
     is_system_prompt: bool | None = False,
     outbound_telegram_bot_token: str | None = None,
+    assigned_worker_id: str | None = None,
 ) -> dict:
     """
     Invoca el grafo y retorna {"reply": str, "messages": list | None}.
@@ -676,6 +678,32 @@ async def _ainvoke(
         "vault_db_path": (vault_db_path or "").strip() or "",
         "shared_db_path": (shared_db_path or "").strip() or "",
     }
+    if (assigned_worker_id or "").strip():
+        state["assigned_worker_id"] = (assigned_worker_id or "").strip()
+    # #region agent log
+    try:
+        _payload = {
+            "sessionId": "c964f7",
+            "runId": "post-fix",
+            "hypothesisId": "H-INITIAL-WORKER-PLUMB",
+            "location": "graph_server.py:_ainvoke",
+            "message": "initial_state_worker_seed",
+            "data": {
+                "chat_id": chat_id,
+                "assigned_worker_id": state.get("assigned_worker_id"),
+                "tenant_id": tenant_id,
+            },
+            "timestamp": int(__import__("time").time() * 1000),
+        }
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
     if _tok:
         state["outbound_telegram_bot_token"] = _tok
     if is_system_prompt:
@@ -763,6 +791,7 @@ async def ainvoke_manager_ephemeral(
     shared_db_path: str | None = None,
     is_system_prompt: bool | None = False,
     outbound_telegram_bot_token: str | None = None,
+    assigned_worker_id: str | None = None,
 ) -> dict:
     """
     Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
@@ -785,6 +814,7 @@ async def ainvoke_manager_ephemeral(
             shared_db_path=shared_db_path,
             is_system_prompt=is_system_prompt,
             outbound_telegram_bot_token=outbound_telegram_bot_token,
+            assigned_worker_id=assigned_worker_id,
         )
     finally:
         try:

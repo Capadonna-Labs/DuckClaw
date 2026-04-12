@@ -19,8 +19,11 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable, Optional, Tuple
 from duckclaw.vaults import (
+    create_vault as _vault_create,
     list_vaults as _vault_list,
+    remove_vault as _vault_remove,
     resolve_active_vault as _vault_resolve_active,
+    switch_vault as _vault_switch,
     validate_user_db_path,
     vault_scope_id_for_tenant,
 )
@@ -708,14 +711,6 @@ def _fly_vault_label_for_tenant(tenant_id: Any) -> str:
     return pretty.get(tid, tid)
 
 
-def _fly_vault_label_for_session_path(session_resolved_path: str, tenant_id: Any) -> str:
-    """Etiqueta /vault cuando el archivo ya está fijado (multiplex): no mezclar Quant con Finanz por tenant."""
-    low = (session_resolved_path or "").lower().replace("\\", "/")
-    if "quant_trader" in low:
-        return "Quant Trader"
-    return _fly_vault_label_for_tenant(tenant_id)
-
-
 def _dedicated_gateway_vault_label() -> str:
     proc = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
     matched = (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
@@ -762,7 +757,7 @@ def execute_vault(
 
         fp = _P(fixed_db).expanduser().resolve()
         label = (
-            _fly_vault_label_for_session_path(str(fp), tenant_id)
+            _fly_vault_label_for_tenant(tenant_id)
             if session_db_path
             else _dedicated_gateway_vault_label()
         )
@@ -829,20 +824,29 @@ def execute_vault(
             )
         return "🗄 Bóvedas:\n" + "\n".join(lines)
     if cmd == "new":
-        return (
-            "⚠️ Mutación bloqueada en Gateway: `/vault new` debe pasar por DuckClaw-DB-Writer. "
-            "Este proceso ya no abre DuckDB en escritura."
-        )
+        name = " ".join(tokens[1:]).strip()
+        if not name:
+            return "Uso: /vault new <name> | /vault --new <name>"
+        created = _vault_create(user_id, name, vault_scope)
+        return f"✅ Bóveda creada: {created.get('vault_id')} ({created.get('vault_name')})"
     if cmd == "use":
-        return (
-            "⚠️ Mutación bloqueada en Gateway: `/vault use` debe pasar por DuckClaw-DB-Writer. "
-            "Este proceso ya no abre DuckDB en escritura."
-        )
+        vid = " ".join(tokens[1:]).strip()
+        if not vid:
+            return "Uso: /vault use <vault_id> | /vault --use <vault_id>"
+        ok = _vault_switch(user_id, vid, vault_scope)
+        if not ok:
+            return f"No existe la bóveda '{vid}'. Usa /vault list."
+        active_id, _ = _vault_resolve_active(user_id, vault_scope)
+        return f"✅ Bóveda activa actual: {active_id}"
     if cmd == "rm":
-        return (
-            "⚠️ Mutación bloqueada en Gateway: `/vault rm` debe pasar por DuckClaw-DB-Writer. "
-            "Este proceso ya no abre DuckDB en escritura."
-        )
+        vid = " ".join(tokens[1:]).strip()
+        if not vid:
+            return "Uso: /vault rm <vault_id> | /vault --rm <vault_id>"
+        ok = _vault_remove(user_id, vid, vault_scope)
+        if not ok:
+            return f"No existe la bóveda '{vid}'."
+        active_id, _ = _vault_resolve_active(user_id, vault_scope)
+        return f"🗑 Bóveda eliminada: {vid}. Activa actual: {active_id}"
     return (
         "Uso: /vault | /vault list | /vault --list | /vault new <name> | /vault --new <name> | "
         "/vault use <vault_id> | /vault --use <vault_id> | /vault rm <vault_id> | /vault --rm <vault_id>"
@@ -888,8 +892,9 @@ def _team_whitelist_db(fly_db: Any) -> Any:
     Whitelist ``main.authorized_users`` se lee de la misma DuckDB que el hub
     (``get_gateway_db_path()``), vía ``get_db()`` (conexión RO efímera).
 
-    Si el bloque fly ya abrió ``fly_db`` sobre ese mismo archivo, reutilizamos esa
-    instancia para evitar handles duplicados al mismo `.duckdb`.
+    Excepción: en el API Gateway el bloque fly ya abrió ``fly_db`` en RW sobre ese
+    archivo; abrir un segundo ``duckdb.connect(..., read_only=True)`` en paralelo
+    puede lanzar ``ConnectionException``. En ese caso reutilizamos ``fly_db``.
     """
     try:
         from duckclaw.gateway_db import get_gateway_db_path  # noqa: PLC0415
@@ -914,15 +919,65 @@ def _team_whitelist_db(fly_db: Any) -> Any:
 
 def _authorized_users_rw_connection(fly_db: Any) -> tuple[Any, Callable[[], None]]:
     """
-    Compat legado para rutas históricas de mutación directa.
-
-    El Gateway ya no debe abrir la DB en RW: el patrón Singleton Writer reserva la
-    escritura al servicio db-writer. Este helper se conserva para minimizar diffs,
-    pero las mutaciones deben quedar bloqueadas o reenrutadas fuera del Gateway.
+    ``graph_server.get_db()`` es RO efímero: ``execute`` no persiste. Las mutaciones
+    de whitelist deben usar DuckClaw RW sobre ``get_gateway_db_path()`` o reutilizar
+    ``fly_db`` si ya apunta al mismo archivo en modo RW (p. ej. bot Finanz).
     """
-    raise RuntimeError(
-        "DuckClaw Gateway no puede abrir authorized_users en RW; reenruta la mutación a DuckClaw-DB-Writer."
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+
+    acl_ro = _team_whitelist_db(fly_db)
+    if not isinstance(acl_ro, GatewayDbEphemeralReadonly):
+        _audit_team_whitelist_rw(
+            "rw_connection",
+            branch="direct_acl_not_ephemeral",
+            acl_type=type(acl_ro).__name__,
+        )
+
+        def _noop() -> None:
+            return None
+
+        return acl_ro, _noop
+
+    gw = str(Path(get_gateway_db_path()).resolve())
+    fly_resolved = ""
+    try:
+        fp = getattr(fly_db, "_path", "") or ""
+        if fp and str(fp).strip() not in ("", ":memory:"):
+            fly_resolved = str(Path(str(fp)).expanduser().resolve())
+    except Exception:
+        fly_resolved = ""
+
+    reuse_fly = _paths_same_duckdb_file(fly_resolved, gw) and getattr(fly_db, "_read_only", True) is False
+
+    _audit_team_whitelist_rw(
+        "rw_connection",
+        branch="gateway_ephemeral_acl",
+        reuse_fly=reuse_fly,
+        gw_tail=gw[-64:] if gw else "",
+        fly_tail=fly_resolved[-64:] if fly_resolved else "",
+        fly_read_only=getattr(fly_db, "_read_only", None),
     )
+
+    if reuse_fly:
+
+        def _noop_fly() -> None:
+            return None
+
+        return fly_db, _noop_fly
+
+    # Mismo motor que GatewayDbEphemeralReadonly (duckdb Python). Si usamos C++ nativo en RW,
+    # /team --add puede persistir pero /team (lectura RO Python) no ve las filas.
+    _audit_team_whitelist_rw("rw_connection", branch="duckclaw_gw_python_engine", gw_tail=gw[-64:] if gw else "")
+    rw = DuckClaw(gw, read_only=False, engine="python")
+
+    def _close_rw() -> None:
+        try:
+            rw.close()
+        except Exception:
+            pass
+
+    return rw, _close_rw
 
 
 def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str) -> str:
@@ -971,10 +1026,23 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             tokens = [t for t in raw[5:].strip().split() if t.strip()]
             if not tokens:
                 return "Uso WR: /team --rm <user_id>"
-            return (
-                "⚠️ Mutación bloqueada en Gateway: `/team --rm` debe pasar por DuckClaw-DB-Writer. "
-                "Este proceso ya no abre DuckDB en escritura."
+            target_uid = tokens[0]
+            acl.execute(
+                "DELETE FROM war_room_core.wr_members "
+                f"WHERE lower(tenant_id)=lower('{_sql_escape_literal(tid, 128)}') "
+                f"AND user_id='{_sql_escape_literal(target_uid, 128)}'"
             )
+            _invalidate_wr_clearance_redis_cache(tenant_id=tid, user_id=target_uid)
+            _wr_append_audit(
+                acl,
+                tenant_id=tid,
+                sender_id=rid or "system",
+                target_agent="manager",
+                event_type="REMOVE_WR_MEMBER",
+                payload=f"user_id={target_uid}",
+            )
+            target_label = _player_label("", target_uid, db=acl, tenant_id=tid)
+            return f"✅ Miembro WR eliminado: {target_label}."
 
         if raw.startswith("--add ") or raw.strip() == "--add":
             if not (_is_gateway_owner_user(rid) or requester_clearance == "admin"):
@@ -983,10 +1051,30 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             tokens = [t for t in ids_part.split() if t.strip()]
             if not tokens:
                 return "Uso WR: /team --add <user_id> [username] [admin|operator|observer]"
-            return (
-                "⚠️ Mutación bloqueada en Gateway: `/team --add` debe pasar por DuckClaw-DB-Writer. "
-                "Este proceso ya no abre DuckDB en escritura."
+            target_uid = tokens[0]
+            clearance = "observer"
+            if len(tokens) >= 2 and tokens[-1].lower() in ("admin", "operator", "observer"):
+                clearance = tokens[-1].lower()
+                tokens = tokens[:-1]
+            username = " ".join(tokens[1:]).strip() if len(tokens) > 1 else "Usuario"
+            acl.execute(
+                "INSERT INTO war_room_core.wr_members (tenant_id, user_id, username, clearance_level) "
+                f"VALUES ('{_sql_escape_literal(tid, 128)}', '{_sql_escape_literal(target_uid, 128)}', "
+                f"'{_sql_escape_literal(username or 'Usuario', 128)}', '{_sql_escape_literal(clearance, 32)}') "
+                "ON CONFLICT (tenant_id, user_id) DO UPDATE SET "
+                "username=EXCLUDED.username, clearance_level=EXCLUDED.clearance_level, added_at=now()"
             )
+            _invalidate_wr_clearance_redis_cache(tenant_id=tid, user_id=target_uid)
+            _wr_append_audit(
+                acl,
+                tenant_id=tid,
+                sender_id=rid or "system",
+                target_agent="manager",
+                event_type="REGISTER_WR_MEMBER",
+                payload=f"user_id={target_uid} clearance={clearance}",
+            )
+            target_label = _player_label(username, target_uid, db=acl, tenant_id=tid)
+            return f"✅ Miembro WR registrado: {target_label} ({clearance})."
 
         return (
             "Uso WR: /team | /team --add <user_id> [username] [admin|operator|observer] | /team --rm <user_id>"
@@ -1019,10 +1107,15 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         target_uid = raw[5:].strip().split()[0]
         if not target_uid:
             return "Uso: /team --rm <user_id>"
-        return (
-            "⚠️ Mutación bloqueada en Gateway: `/team --rm` debe pasar por DuckClaw-DB-Writer. "
-            "Este proceso ya no abre DuckDB en escritura."
-        )
+        mut_db, mut_close = _authorized_users_rw_connection(db)
+        try:
+            _delete_authorized_user(mut_db, tenant_id=tid, user_id=target_uid)
+            _try_duckdb_checkpoint_rw(mut_db)
+        finally:
+            mut_close()
+        _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
+        target_label = _player_label("", target_uid, db=acl, tenant_id=tid)
+        return f"✅ Eliminado {target_label} del tenant '{tid}'."
 
     if raw.startswith("--add ") or raw.strip() == "--add":
         if not rid:
@@ -1040,10 +1133,16 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         if not tokens:
             return "Uso: /team --add <user_id> [nombre] [admin]"
         target_uid = tokens[0]
-        return (
-            "⚠️ Mutación bloqueada en Gateway: `/team --add` debe pasar por DuckClaw-DB-Writer. "
-            "Este proceso ya no abre DuckDB en escritura."
-        )
+        uname = tokens[1] if len(tokens) > 1 else "Usuario"
+        mut_db, mut_close = _authorized_users_rw_connection(db)
+        try:
+            _upsert_authorized_user(mut_db, tenant_id=tid, user_id=target_uid, username=uname, role=role_out)
+            _try_duckdb_checkpoint_rw(mut_db)
+        finally:
+            mut_close()
+        _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
+        target_label = _player_label(uname, target_uid, db=acl, tenant_id=tid)
+        return f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'."
 
     if raw == "--shared-list" or raw.startswith("--shared-list"):
         if not rid:
@@ -2896,7 +2995,6 @@ def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str,
     from duckclaw.integrations.llm_providers import (
         _ensure_duckclaw_llm_env_from_legacy_llm_vars,
         mlx_openai_compatible_base_url,
-        normalize_deepseek_base_url,
     )
 
     _ensure_duckclaw_llm_env_from_legacy_llm_vars()
@@ -2921,8 +3019,6 @@ def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str,
             u = mlx_openai_compatible_base_url()
         if not m:
             m = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
-    elif p == "deepseek":
-        u = normalize_deepseek_base_url(u)
     return (p, m, u)
 
 
@@ -2951,7 +3047,7 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
         model = model or "—"
         u_show = base_url or "—"
         base_url = u_show[:50] + "…" if len(u_show) > 50 else u_show
-        return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model model=Slayer-8B | /model provider=mlx | model=gemma4"
+        return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model model=Slayer-8B"
     for part in args.split("|"):
         part = part.strip()
         if "=" in part:
@@ -3617,41 +3713,13 @@ def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
         pass
     try:
         from duckclaw.forge.skills.quant_hitl import grant_execute_order
-        from duckclaw.forge.skills.quant_state_delta import push_quant_state_delta_sync
 
         grant_execute_order(str(chat_id).strip(), sid)
-        try:
-            from duckclaw.graphs.graph_server import get_db as _get_db_for_delta
-
-            _dbd = _get_db_for_delta()
-            _db_path = str(getattr(_dbd, "_path", "") or "")
-        except Exception:
-            _db_path = ""
-        _tenant = "default"
-        _requester = ""
-        try:
-            from duckclaw.graphs.graph_server import get_db as _get_db_meta
-
-            _dbm = _get_db_meta()
-            _tenant = str(get_chat_state(_dbm, chat_id, "tenant_id") or "default").strip() or "default"
-            _requester = str(get_chat_state(_dbm, chat_id, "last_requester_id") or "").strip()
-        except Exception:
-            pass
-        if _db_path:
-            push_quant_state_delta_sync(
-                {
-                    "tenant_id": _tenant,
-                    "delta_type": "TRADE_SIGNAL_APPROVED",
-                    "user_id": _requester or str(chat_id),
-                    "target_db_path": _db_path,
-                    "mutation": {"signal_id": sid},
-                }
-            )
     except Exception as e:
         return f"No se pudo registrar la confirmación: {e}"
     return (
         f"Confirmación registrada para la señal {sid}. "
-        "Pide al asistente que ejecute `execute_approved_signal` (o `execute_order` legado) con ese signal_id en esta sesión."
+        "Pide al asistente que ejecute la herramienta execute_order con ese signal_id en esta sesión."
     
 
 

@@ -120,6 +120,19 @@ def test_job_hunter_synthesis_task_does_not_trigger_tavily_intent() -> None:
     assert not job_hunter_user_requests_job_search(syn)
 
 
+def test_summarize_stored_context_does_not_trigger_job_hunter_or_cashflow_handoff() -> None:
+    """URLs + «oferta» en noticias disparaban job_terms+http antes; /context no es búsqueda laboral."""
+    from duckclaw.graphs.manager_graph import _user_signals_cashflow_stress, job_hunter_user_requests_job_search
+
+    msg = (
+        "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]\n"
+        "https://www.elcomercio.com/actualidad/negocios/ecuador-descarta-compra-energia\n"
+        "oferta de compra; deudas del sector eléctrico"
+    )
+    assert not job_hunter_user_requests_job_search(msg)
+    assert not _user_signals_cashflow_stress(msg)
+
+
 def test_plan_task_summarize_directives_passthrough_despite_db_keywords_in_body() -> None:
     """El cuerpo inyectado puede decir 'estructura', 'schema', 'DuckDB', etc.; no debe convertirse en TAREA de tablas."""
     from duckclaw.graphs.manager_graph import _llm_plan, _plan_task
@@ -175,21 +188,6 @@ def test_plan_task_context_add_vlm_passthrough_not_get_db_path() -> None:
     assert override is None
     assert task == incoming
     assert "get_db_path" not in task.lower()
-
-
-def test_plan_task_estructura_de_datos_not_db_schema_intent() -> None:
-    """«Estructura de datos» (materia) no debe reemplazar el mensaje por TAREA listar tablas."""
-    from duckclaw.graphs.manager_graph import _plan_task
-
-    incoming = (
-        "Nada que me llega la transferencia. Voy a clase de estructura de datos y postulo vacantes. "
-        "Crea transacciones de ajuste con categoría ajuste."
-    )
-    task, override = _plan_task(incoming, "finanz")
-    assert override is None
-    assert task == incoming
-    assert "SHOW TABLES" not in task
-    assert "TAREA: El usuario quiere ver las tablas" not in task
 
 
 def test_plan_task_bi_analyst_meta_capabilities() -> None:
@@ -340,27 +338,6 @@ def test_manager_greeting_fast_path_ok() -> None:
         "BI-Analyst"
     ).lower()
     assert "osint" in _greeting_fast_reply_text("Job‐Hunter").lower()
-    qt_greet = _greeting_fast_reply_text("Quant-Trader").lower()
-    assert "quant" in qt_greet and "trader" in qt_greet
-
-
-def test_resolve_gateway_worker_quant_trader_id_to_template_dir() -> None:
-    """Gateway compact profile usa manifest id ``quant_trader``; la carpeta es ``Quant-Trader``."""
-    from duckclaw.graphs.manager_graph import _resolve_gateway_worker_to_template_dir
-    from duckclaw.workers.factory import list_workers
-
-    all_tpl = list_workers(None)
-    assert _resolve_gateway_worker_to_template_dir(all_tpl, "quant_trader", None) == "Quant-Trader"
-
-
-def test_get_worker_dir_accepts_forge_templates_flat_layout() -> None:
-    """bootstrap_dbs pasa forge/templates como root; debe resolver Quant-Trader sin templates/workers/."""
-    from duckclaw.forge import WORKERS_TEMPLATES_DIR
-    from duckclaw.workers.manifest import get_worker_dir
-
-    d = get_worker_dir("Quant-Trader", WORKERS_TEMPLATES_DIR)
-    assert d.name == "Quant-Trader"
-    assert (d / "manifest.yaml").is_file()
 
 
 def test_manager_capabilities_fast_path_ok() -> None:
@@ -390,8 +367,6 @@ def test_manager_capabilities_fast_path_ok() -> None:
     fz = _capabilities_fast_reply_text("finanz").lower()
     assert "ibkr" in fz and "duckdb" in fz
     assert "resumen" in fz or "cuenta" in fz
-    qt_cap = _capabilities_fast_reply_text("Quant-Trader").lower()
-    assert "quant" in qt_cap and ("mercado" in qt_cap or "ohlcv" in qt_cap)
 
 
 def test_manager_a2a_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pytest.MonkeyPatch) -> None:

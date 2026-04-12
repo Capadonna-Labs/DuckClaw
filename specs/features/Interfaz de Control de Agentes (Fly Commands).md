@@ -84,8 +84,6 @@ Sin args: muestra el system prompt actual (del worker o modificado). Con args: a
 
 Sin args: muestra provider, model y base_url actuales. Con args: actualiza en caliente. Ej: `/model provider=deepseek` o `/model provider=mlx | model=Slayer-8B`.
 
-- **Alias Gemma 4 (MLX):** `model=gemma4` o `model=gemma-4` resuelven a `MLX_GEMMA4_MODEL_PATH` si está definida; si no, a `mlx-community/gemma-4-e4b-it-4bit`. El proceso `mlx_lm.server` (PM2 `MLX-Inference`) debe usar el **mismo** repo o ruta en `MLX_MODEL_PATH` al servir ese checkpoint; tras cambiar pesos, reiniciar MLX-Inference.
-
 ### J. `/setup [key=value | key=value]`
 
 Formato compatible con Telegram. Sin args: muestra config (llm_provider, llm_model, worker_id, system_prompt). Con args: actualiza. Ej: `/setup llm_provider=deepseek | system_prompt=Eres un experto...`

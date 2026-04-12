@@ -45,18 +45,6 @@ def _truncate_read_sql_result_for_llm(raw: str) -> str:
     )
 
 
-def _strip_leading_sql_comments(query: str) -> str:
-    """Elimina comentarios SQL de cabecera para validar tipo de sentencia."""
-    q = str(query or "")
-    while True:
-        q2 = re.sub(r"^\s*(?:--[^\n]*\n)+", "", q, flags=re.MULTILINE)
-        q2 = re.sub(r"^\s*/\*.*?\*/\s*", "", q2, flags=re.DOTALL)
-        if q2 == q:
-            break
-        q = q2
-    return q.lstrip()
-
-
 def _escape_attach_path(path: str) -> str:
     return str(path).replace("'", "''")
 
@@ -138,8 +126,7 @@ def validate_worker_read_sql(spec: WorkerSpec, query: str) -> Optional[str]:
     if not query or not query.strip():
         return json.dumps({"error": "Query vacío."})
     q = query.strip()
-    q_no_comment = _strip_leading_sql_comments(q)
-    upper = q_no_comment.upper()
+    upper = q.upper()
     err = _enforce_allowed_tables_error(spec, upper)
     if err:
         return err
@@ -153,7 +140,7 @@ def validate_worker_read_sql(spec: WorkerSpec, query: str) -> Optional[str]:
                 )
             }
         )
-    if _lid == "siata_analyst" and re.search(r"read_json(_auto)?\s*\(", q_no_comment, re.IGNORECASE):
+    if _lid == "siata_analyst" and re.search(r"read_json(_auto)?\s*\(", q, re.IGNORECASE):
         if "LIMIT" not in upper and not re.search(r"\bCOUNT\s*\(", upper):
             return json.dumps(
                 {

@@ -33,14 +33,7 @@ def _find_templates_root() -> Path:
 def get_worker_dir(worker_id: str, templates_root: Optional[Path] = None) -> Path:
     """Return worker dir: forge/templates/<worker_id>/ or templates_root/templates/workers/<worker_id>/."""
     if templates_root is not None:
-        wid = worker_id.strip()
-        nested = templates_root / "templates" / "workers" / wid
-        if nested.is_dir():
-            return nested
-        flat = templates_root / wid
-        if flat.is_dir():
-            return flat
-        path = nested
+        path = templates_root / "templates" / "workers" / worker_id.strip()
     else:
         try:
             from duckclaw.forge import WORKERS_TEMPLATES_DIR

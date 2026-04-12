@@ -21,6 +21,13 @@ def test_mlx_gemma4_alias_default_repo_when_env_unset(monkeypatch) -> None:
     assert mlx_openai_compatible_model_name("Gemma-4") == MLX_GEMMA4_DEFAULT_REPO_ID
 
 
+def test_mlx_gemma4_alias_follows_mlx_model_path_when_gemma(monkeypatch) -> None:
+    """Evita desalinear gateway (alias gemma4) y servidor MLX precargado con la misma ruta."""
+    monkeypatch.delenv("MLX_GEMMA4_MODEL_PATH", raising=False)
+    monkeypatch.setenv("MLX_MODEL_PATH", "/Users/me/Desktop/models/gemma4-e4b")
+    assert mlx_openai_compatible_model_name("gemma4") == "/Users/me/Desktop/models/gemma4-e4b"
+
+
 def test_mlx_short_name_non_gemma_still_uses_mlx_model_path(monkeypatch) -> None:
     monkeypatch.delenv("MLX_GEMMA4_MODEL_PATH", raising=False)
     monkeypatch.setenv("MLX_MODEL_PATH", "/data/models/Slayer-8B-V1")

@@ -139,13 +139,7 @@ En PM2, `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` debe ser **una sola línea** JSON esc
 
 Si además tienes `TELEGRAM_WEBHOOK_SECRET`, solo los updates cuya cabecera coincida con ese valor usarán el “default” del proceso (worker/tenant/token del PM2); el resto debe coincidir con una entrada de `ROUTES`. Especificación: [specs/features/Telegram Webhook Multiplex (multi-bot).md](specs/features/Telegram%20Webhook%20Multiplex%20(multi-bot).md). Rutas `POST …/webhook/finanz` y `…/webhook/trabajo` son **legado**; con un solo funnel suele bastar Modo B + `vault_db_env`.
 
-**Modo compacto (path por bot, misma base `DUCKCLAW_PUBLIC_URL`):** si `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` **no** empieza por `[` y contiene `:/api/`, se interpreta como lista separada por comas `bot_name:bot_token:webhook_path`. El gateway crea `POST` bajo `/api/v1/telegram/...` (p. ej. `/finanz`). Perfiles admitidos: `finanz`, `siata`, `jobhunter`, `quanttrader` (este último usa `worker_id` `quant_trader`, tenant `Finanzas` y la misma bóveda que `finanz` vía `DUCKCLAW_FINANZ_DB_PATH` si no hay otra variable). Define las mismas variables de DuckDB que en modo multi-puerto (`DUCKCLAW_FINANZ_DB_PATH`, `DUCKCLAW_JOB_HUNTER_DB_PATH`, `DUCKCLAW_SIATA_DB_PATH` o `DUCKCLAW_DB_PATH`). **Obligatorio:** tras definir la variable, ejecuta `python scripts/register_webhooks.py` (con `DUCKCLAW_PUBLIC_URL` y tokens en la cadena). Si los bots siguen con `setWebhook` en `…/api/v1/telegram/webhook`, todos los updates caen en esa ruta y el gateway **no** puede saber qué bot es: en ese modo, el gateway ignora el POST genérico y solo procesa los paths dedicados (`…/finanz`, `…/siata`, …). Opcional: `TELEGRAM_WEBHOOK_SECRET` como `secret_token` común en el script.
-
-Comando (raíz del repo):
-
-```bash
-python scripts/register_webhooks.py
-```
+**Modo compacto (path por bot, misma base `DUCKCLAW_PUBLIC_URL`):** si `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` **no** empieza por `[` y contiene `:/api/`, se interpreta como lista separada por comas `bot_name:bot_token:webhook_path`. El gateway crea `POST` bajo `/api/v1/telegram/...` (p. ej. `/finanz`). Perfiles admitidos: `finanz`, `siata`, `jobhunter`. Define las mismas variables de DuckDB que en modo multi-puerto (`DUCKCLAW_FINANZ_DB_PATH`, `DUCKCLAW_JOB_HUNTER_DB_PATH`, `DUCKCLAW_SIATA_DB_PATH` o `DUCKCLAW_DB_PATH`). **Obligatorio:** tras definir la variable, ejecuta `python scripts/register_webhooks.py` (con `DUCKCLAW_PUBLIC_URL` y tokens en la cadena). Si los bots siguen con `setWebhook` en `…/api/v1/telegram/webhook`, todos los updates caen en esa ruta y el gateway **no** puede saber qué bot es: en ese modo, el gateway ignora el POST genérico y solo procesa los paths dedicados (`…/finanz`, `…/siata`, …). Opcional: `TELEGRAM_WEBHOOK_SECRET` como `secret_token` común en el script.
 
 **Prueba local** del router (Telegram no llama a HTTP sin TLS; sirve para depurar en la máquina):
 
@@ -238,22 +232,6 @@ Con extra Telegram (bot por long polling), si lo necesitas:
 ```bash
 uv sync --extra telegram
 ```
-
-Tooling de documentación (MkDocs + Material + mkdocstrings):
-
-```bash
-uv pip install -e '.[docs]'
-mkdocs serve
-mkdocs build --strict
-```
-
-Alternativa (si no usas extras del `pyproject.toml`):
-
-```bash
-uv pip install mkdocs-material 'mkdocstrings[python]'
-```
-
-Nota zsh: `mkdocstrings[python]` debe ir entre comillas (o con `\[` `\]`) para evitar el error `no matches found`.
 
 El **API Gateway** (Python 3.10+) arranca un cliente MCP hijo si activas el flag (PM2 o `.env`):
 

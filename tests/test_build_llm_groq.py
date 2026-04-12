@@ -81,51 +81,6 @@ def test_build_llm_mlx_keeps_hf_repo_id(monkeypatch: pytest.MonkeyPatch) -> None
     assert getattr(llm, "model_name", None) == "mlx-community/Llama-3.2-1B-Instruct"
 
 
-def test_build_llm_deepseek_normalizes_bare_deepseek_to_chat(monkeypatch: pytest.MonkeyPatch) -> None:
-    """/model model=deepseek es ambiguo (provider vs id); la API rechaza el id literal 'deepseek'."""
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk_test_dummy")
-    monkeypatch.delenv("DUCKCLAW_LLM_PROVIDER", raising=False)
-    monkeypatch.delenv("DUCKCLAW_LLM_MODEL", raising=False)
-    monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    monkeypatch.delenv("LLM_MODEL", raising=False)
-    llm = build_llm("deepseek", "deepseek", "", prefer_env_provider=False)
-    assert llm is not None
-    assert getattr(llm, "model_name", None) == "deepseek-chat"
-
-
-def test_build_llm_coerces_groq_provider_when_model_is_deepseek_chat(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Evita groq + model=deepseek-chat cuando el merge deja provider=env groq y modelo del chat."""
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk_test_dummy")
-    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_dummy")
-    monkeypatch.setenv("DUCKCLAW_LLM_PROVIDER", "groq")
-    monkeypatch.delenv("DUCKCLAW_LLM_MODEL", raising=False)
-    llm = build_llm("groq", "deepseek-chat", "https://api.groq.com/openai/v1", prefer_env_provider=True)
-    assert llm is not None
-    assert getattr(llm, "model_name", None) == "deepseek-chat"
-    assert getattr(llm, "openai_api_base", None) == "https://api.deepseek.com/v1"
-
-
-def test_build_llm_deepseek_ignores_groq_base_url_from_env_style_triplet(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Si la tripleta hereda DUCKCLAW_LLM_BASE_URL=Groq, no enviar deepseek-chat al host Groq (400 Model Not Exist)."""
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk_test_dummy")
-    monkeypatch.delenv("DUCKCLAW_LLM_PROVIDER", raising=False)
-    monkeypatch.delenv("DUCKCLAW_LLM_MODEL", raising=False)
-    monkeypatch.delenv("DUCKCLAW_LLM_BASE_URL", raising=False)
-    llm = build_llm(
-        "deepseek",
-        "deepseek-chat",
-        "https://api.groq.com/openai/v1",
-        prefer_env_provider=False,
-    )
-    assert llm is not None
-    assert getattr(llm, "model_name", None) == "deepseek-chat"
-    assert getattr(llm, "openai_api_base", None) == "https://api.deepseek.com/v1"
-
-
 def test_build_llm_mlx_keeps_absolute_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MLX_MODEL_PATH", "/other")
     monkeypatch.delenv("DUCKCLAW_LLM_PROVIDER", raising=False)

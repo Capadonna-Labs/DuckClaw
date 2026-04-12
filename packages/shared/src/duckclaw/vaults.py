@@ -205,85 +205,6 @@ def _sync_registry_with_files(
         )
 
 
-def _try_read_active_vault_readonly(user_id: Any, scope_id: Any = "") -> tuple[str, Path] | None:
-    """
-    Camino rápido RO para el Gateway: devuelve la bóveda activa si el registry ya existe.
-    Si falta bootstrap o migración, el caller puede caer al camino RW legado.
-    """
-    uid = _safe_user_id(user_id)
-    sid = _normalize_scope_id(scope_id)
-    sys_path = system_db_path()
-    if not sys_path.exists():
-        return None
-    try:
-        sysdb = duckdb.connect(str(sys_path), read_only=True)
-    except Exception:
-        return None
-    try:
-        if not _user_vaults_table_exists(sysdb) or not _user_vaults_has_scope_id(sysdb):
-            return None
-        row = sysdb.execute(
-            """
-            SELECT vault_id FROM main.user_vaults
-            WHERE user_id = ? AND scope_id = ? AND is_active = TRUE
-            LIMIT 1
-            """,
-            [uid, sid],
-        ).fetchone()
-        if not row:
-            return None
-        vault_id = str(row[0] or "default").strip() or "default"
-        return vault_id, vault_file_path(uid, vault_id)
-    finally:
-        sysdb.close()
-
-
-def _try_list_vaults_readonly(user_id: Any, scope_id: Any = "") -> list[dict[str, Any]] | None:
-    """
-    Lee el registry en RO cuando ya está inicializado. Evita abrir system.duckdb en RW
-    durante requests comunes del Gateway.
-    """
-    uid = _safe_user_id(user_id)
-    sid = _normalize_scope_id(scope_id)
-    sys_path = system_db_path()
-    if not sys_path.exists():
-        return None
-    try:
-        sysdb = duckdb.connect(str(sys_path), read_only=True)
-    except Exception:
-        return None
-    try:
-        if not _user_vaults_table_exists(sysdb) or not _user_vaults_has_scope_id(sysdb):
-            return None
-        rows = sysdb.execute(
-            """
-            SELECT vault_id, vault_name, is_active, created_at
-            FROM main.user_vaults
-            WHERE user_id = ? AND scope_id = ?
-            ORDER BY created_at, vault_id
-            """,
-            [uid, sid],
-        ).fetchall()
-    finally:
-        sysdb.close()
-
-    out: list[dict[str, Any]] = []
-    for vault_id, vault_name, is_active, created_at in rows:
-        path = vault_file_path(uid, str(vault_id))
-        size = path.stat().st_size if path.exists() else 0
-        out.append(
-            {
-                "vault_id": str(vault_id),
-                "vault_name": str(vault_name or vault_id or ""),
-                "is_active": bool(is_active),
-                "created_at": str(created_at or ""),
-                "db_path": str(path.resolve()),
-                "size_bytes": int(size),
-            }
-        )
-    return out
-
-
 def _bootstrap_default_if_missing(user_id: Any, scope_id: Any = "") -> tuple[str, Path]:
     uid = _safe_user_id(user_id)
     sid = _normalize_scope_id(scope_id)
@@ -396,10 +317,6 @@ def _bootstrap_default_if_missing(user_id: Any, scope_id: Any = "") -> tuple[str
 
 def resolve_active_vault(user_id: Any, scope_id: Any = "") -> tuple[str, str]:
     sid = _normalize_scope_id(scope_id)
-    ro_hit = _try_read_active_vault_readonly(user_id, sid)
-    if ro_hit is not None:
-        vault_id, path = ro_hit
-        return vault_id, str(path.resolve())
     vault_id, path = _bootstrap_default_if_missing(user_id, sid)
     return vault_id, str(path.resolve())
 
@@ -407,9 +324,6 @@ def resolve_active_vault(user_id: Any, scope_id: Any = "") -> tuple[str, str]:
 def list_vaults(user_id: Any, scope_id: Any = "") -> list[dict[str, Any]]:
     uid = _safe_user_id(user_id)
     sid = _normalize_scope_id(scope_id)
-    ro_rows = _try_list_vaults_readonly(uid, sid)
-    if ro_rows:
-        return ro_rows
     ensure_registry()
     sysdb = duckdb.connect(str(system_db_path()), read_only=False)
     try:

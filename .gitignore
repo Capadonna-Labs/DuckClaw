@@ -56,13 +56,12 @@ ecosystem.*.config.cjs
 
 # Agent training conversation traces
 packages/agents/train/conversation_traces/
-# Sanitized SFT mirror for Gemma 4 (local build)
-packages/agents/train/gemma4/
 
 .cusorignore
 .cursorrules
 
 /db/
+packages/agents/train/conversation_traces/
 dump.rdb
 # Local generated output
 output/

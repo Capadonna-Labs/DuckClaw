@@ -15,11 +15,12 @@ from typing import Any, Mapping
 
 # Multiplex: solo rutas por worker (+ ACL WR opcional). Orden = prioridad del hub efectivo.
 GATEWAY_DB_ENV_KEYS: tuple[str, ...] = (
+    "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
     "DUCKCLAW_FINANZ_DB_PATH",
     "DUCKCLAW_JOB_HUNTER_DB_PATH",
-    "DUCKCLAW_SIATA_DB_PATH"
+    "DUCKCLAW_SIATA_DB_PATH",
+    "DUCKDB_PATH",
 )
-# "DUCKCLAW_WAR_ROOM_ACL_DB_PATH", "DUCKDB_PATH"
 
 
 class GatewayDbEphemeralReadonly:
@@ -54,33 +55,6 @@ class GatewayDbEphemeralReadonly:
         return None
 
 
-
-
-def ensure_usable_duckdb_file(path: str) -> None:
-    """
-    Garantiza que la ruta pueda abrirse con DuckDB.
-
-    Un archivo ``*.duckdb`` de **0 bytes** (p. ej. creado con ``touch``) no es una base
-    válida: DuckDB responde «not a valid DuckDB database file». En ese caso se elimina
-    el placeholder para que ``duckclaw.DuckClaw`` o ``duckdb.connect`` creen una BD real
-    al abrir en escritura.
-    """
-    p = (path or "").strip()
-    if not p or p == ":memory:":
-        return
-    fp = Path(p).expanduser()
-    try:
-        fp = fp.resolve()
-    except OSError:
-        fp = Path(p).expanduser()
-    try:
-        fp.parent.mkdir(parents=True, exist_ok=True)
-        if not fp.is_file():
-            return
-        if fp.stat().st_size == 0:
-            fp.unlink()
-    except OSError:
-        return
 
 
 def resolve_env_duckdb_path(raw: str) -> str:

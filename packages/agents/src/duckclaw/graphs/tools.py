@@ -22,18 +22,6 @@ _ALTER_BLOCKED = re.compile(r"^\s*ALTER\s", re.IGNORECASE)
 _MEMORY_TABLE = "agent_memory"
 
 
-def _strip_leading_sql_comments(query: str) -> str:
-    """Elimina comentarios iniciales (-- ... y /* ... */) antes de clasificar read-only."""
-    q = str(query or "")
-    while True:
-        q2 = re.sub(r"^\s*(?:--[^\n]*\n)+", "", q, flags=re.MULTILINE)
-        q2 = re.sub(r"^\s*/\*.*?\*/\s*", "", q2, flags=re.DOTALL)
-        if q2 == q:
-            break
-        q = q2
-    return q.lstrip()
-
-
 def _ensure_memory_table(db: Any) -> None:
     db.execute(
         f"""
@@ -52,12 +40,11 @@ def read_sql(db: Any, query: str) -> str:
     if not query or not query.strip():
         return json.dumps({"error": "Query vacío."})
     q = query.strip()
-    q_no_comment = _strip_leading_sql_comments(q)
-    if _BLOCKED.search(q_no_comment):
+    if _BLOCKED.search(q):
         blocked = re.search(r"\b(ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", q, re.IGNORECASE)
         cmd = blocked.group(0).upper() if blocked else "comando"
         return json.dumps({"error": f"{cmd} no está permitido por política de seguridad."})
-    if not _READ_ONLY.search(q_no_comment):
+    if not _READ_ONLY.search(q):
         return json.dumps({"error": "read_sql es solo lectura. Usa admin_sql para escrituras (INSERT/UPDATE/DELETE/CREATE, etc.)."})
     try:
         raw = db.query(q)
@@ -81,13 +68,12 @@ def admin_sql(db: Any, query: str) -> str:
     if not query or not query.strip():
         return json.dumps({"error": "Query vacío."})
     q = query.strip()
-    q_no_comment = _strip_leading_sql_comments(q)
-    if _BLOCKED.search(q_no_comment):
+    if _BLOCKED.search(q):
         blocked = re.search(r"\b(ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", q, re.IGNORECASE)
         cmd = blocked.group(0).upper() if blocked else "comando"
         return json.dumps({"error": f"{cmd} no está permitido por política de seguridad."})
     try:
-        if _READ_ONLY.search(q_no_comment):
+        if _READ_ONLY.search(q):
             raw = db.query(q)
             return raw
 

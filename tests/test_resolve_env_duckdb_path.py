@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from duckclaw.gateway_db import ensure_usable_duckdb_file, get_gateway_db_path, resolve_env_duckdb_path
+from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
 
 
 def test_relative_path_joins_duckclaw_repo_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -36,14 +36,6 @@ def test_get_gateway_db_falls_back_to_finanz_when_no_duckclaw_db_path(
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo))
     monkeypatch.setenv("DUCKCLAW_FINANZ_DB_PATH", "db/f.duckdb")
     assert Path(get_gateway_db_path()) == f.resolve()
-
-
-def test_ensure_usable_duckdb_file_removes_zero_byte_placeholder(tmp_path: Path) -> None:
-    p = tmp_path / "stub.duckdb"
-    p.write_bytes(b"")
-    assert p.stat().st_size == 0
-    ensure_usable_duckdb_file(str(p))
-    assert not p.exists()
 
 
 def test_absolute_path_unchanged_modulo_resolve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

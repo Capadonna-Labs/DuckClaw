@@ -64,3 +64,14 @@ def test_clear_worker_graph_cache_idempotent() -> None:
 
     clear_worker_graph_cache()
     clear_worker_graph_cache()
+
+
+def test_graph_server_treats_duckdb_config_mismatch_as_retriable_lock() -> None:
+    """Misma causa que contención RO+RW en un PID: debe reintentar _open_duckclaw_readonly_with_retry."""
+    from duckclaw.graphs import graph_server as gs
+
+    err = Exception(
+        "Connection Error: Can't open a connection to same database file "
+        "with a different configuration than existing connections"
+    )
+    assert gs._is_duckdb_lock_error(err) is True

@@ -24,17 +24,42 @@ _SANDBOX_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 
-
+"""
 def _needs_db_tool(incoming: str) -> bool:
     text = (incoming or "").strip()
     if not text:
         return False
     return bool(_DB_INTENT_RE.search(text)) or "?" in text
-
-
 def _needs_sandbox_tool(incoming: str) -> bool:
     return bool(_SANDBOX_INTENT_RE.search(incoming or ""))
+"""
+def _needs_db_tool(incoming: str) -> bool:
+    text = (incoming or "").strip().lower()
+    if not text or "[system_directive" in text:
+        return False
 
+    db_signal = bool(_DB_INTENT_RE.search(text))
+
+    # SOLO preguntas que impliquen datos
+    data_question = any(k in text for k in [
+        "cuántos", "cuantas", "total", "promedio",
+        "lista", "muestra", "dame", "consulta"
+    ])
+
+    return db_signal or data_question
+
+def _needs_sandbox_tool(incoming: str) -> bool:
+    text = (incoming or "").strip()
+    # FIX: No forzar sandbox en directivas
+    if "[SYSTEM_DIRECTIVE:" in text:
+        return False
+    return bool(_SANDBOX_INTENT_RE.search(text))
+
+def _is_url_context_addition(incoming: str) -> bool:
+    """Detecta si es una inyección de contexto con una URL."""
+    text = (incoming or "").strip()
+    # Verifica si es la directiva de nuevo contexto y contiene un link
+    return "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in text and ("http://" in text or "https://" in text)
 
 _DEFAULT_SYSTEM_PROMPT = (
     "Eres un asistente útil con acceso a una base de datos DuckDB y a un sandbox de ejecución Python/Bash. "
@@ -242,7 +267,7 @@ def build_general_graph(
         incoming = _format_incoming_with_identity(state)
         messages.append(HumanMessage(content=incoming))
         return {"messages": messages}
-
+    """
     def agent_node(state: dict) -> dict:
         incoming = state.get("incoming") or ""
         has_sandbox = "run_sandbox" in tools_by_name
@@ -259,7 +284,52 @@ def build_general_graph(
         except Exception:
             resp = llm_with_tools.invoke(state["messages"])
         return {"messages": state["messages"] + [resp]}
+    """
+    def agent_node(state: dict) -> dict:
+        incoming = state.get("incoming") or ""
+        
+        # --- ENRUTAMIENTO DE ARSENAL (TOOL BINDING DINÁMICO) ---
+        if "[SYSTEM_DIRECTIVE: SUMMARIZE" in incoming:
+            # 1. Modo Restringido: Solo permitimos herramientas de lectura/búsqueda
+            allowed_tool_names = {"tavily_search", "run_browser_sandbox", "read_sql"}
+            safe_tools =[t for t in tools if t.name in allowed_tool_names]
+            
+            # 2. Si hay una URL, lo obligamos a usar SOLO la herramienta de navegación
+            if "http" in incoming:
+                target_tool = "tavily_search" if "tavily_search" in tools_by_name else "run_browser_sandbox"
+                if target_tool in tools_by_name:
+                    _log.info(f"Router: Directiva de URL detectada. Forzando uso exclusivo de {target_tool}.")
+                    llm_runner = llm.bind_tools(safe_tools, tool_choice=target_tool)
+                else:
+                    llm_runner = llm.bind_tools(safe_tools)
+            else:
+                # Es un resumen de memoria interna (sin URL)
+                llm_runner = llm.bind_tools(safe_tools)
+                
+            try:
+                resp = llm_runner.invoke(state["messages"])
+            except Exception:
+                resp = llm.bind_tools(safe_tools).invoke(state["messages"])
+            return {"messages": state["messages"] + [resp]}
+        # -------------------------------------------------------
 
+        # Lógica normal para interacciones estándar del usuario
+        has_sandbox = "run_sandbox" in tools_by_name
+        if _needs_sandbox_tool(incoming) and has_sandbox:
+            llm_runner = bind_tools_with_parallel_default(
+                llm, tools, tool_choice={"type": "function", "function": {"name": "run_sandbox"}}
+            )
+        elif _needs_db_tool(incoming):
+            llm_runner = llm_with_required_tool
+        else:
+            llm_runner = llm_with_tools
+
+        try:
+            resp = llm_runner.invoke(state["messages"])
+        except Exception:
+            resp = llm_with_tools.invoke(state["messages"])
+        return {"messages": state["messages"] + [resp]}
+    
     def tools_node(state: dict) -> dict:
         messages = state["messages"]
         last = messages[-1]

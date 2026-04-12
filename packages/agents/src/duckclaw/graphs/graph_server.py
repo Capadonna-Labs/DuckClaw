@@ -260,12 +260,12 @@ def _is_duckdb_lock_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
     return "lock" in msg or "conflicting" in msg
 
-
+"""
 def _open_duckclaw_readonly_with_retry(db_path: str) -> Any:
-    """
+
     Abre DuckClaw RO al archivo; reintenta si el db-writer u otro proceso tiene el lock RW.
     Alineado con el backoff de ``context_injection_handler._connect_duckdb_writable``.
-    """
+    
     from duckclaw import DuckClaw
 
     raw_attempts = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS") or "24").strip()
@@ -301,7 +301,42 @@ def _open_duckclaw_readonly_with_retry(db_path: str) -> Any:
             raise
     assert last is not None
     raise last
+"""
+def _open_duckclaw_readonly_with_retry(db_path: str) -> Any:
+    """
+    Abre DuckClaw RO y reintenta únicamente ante locks transitorios del archivo.
 
+    El Gateway no debe degradar a RW: el patrón Singleton Writer reserva la
+    escritura al servicio db-writer.
+    """
+    from duckclaw import DuckClaw
+
+    log = _logging.getLogger(__name__)
+
+    raw_attempts = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS") or "24").strip()
+    attempts = max(1, min(int(raw_attempts), 80))
+    base_sleep_s = 0.15
+
+    last: BaseException | None = None
+    for i in range(attempts):
+        try:
+            return DuckClaw(db_path, read_only=True)
+        except Exception as exc:
+            last = exc
+            if _is_duckdb_lock_error(exc):
+                delay = base_sleep_s * min(i + 1, 12)
+                log.warning(
+                    "graph_server: DuckDB RO lock intento %s/%s, reintento en %.2fs: %s",
+                    i + 1,
+                    attempts,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+                continue
+            raise
+    assert last is not None
+    raise last
 
 def _paths_same_canonical(a: str, b: str) -> bool:
     if not (a or "").strip() or not (b or "").strip():
@@ -310,13 +345,12 @@ def _paths_same_canonical(a: str, b: str) -> bool:
         return Path(a).resolve() == Path(b).resolve()
     except OSError:
         return (a or "").strip() == (b or "").strip()
-
-
+"""
 def _invoke_ephemeral_gateway_graph(
     chat_id: str | None = None,
     vault_db_path: str | None = None,
 ) -> tuple[Any, Any]:
-    """
+    
     Abre DuckClaw RO al archivo del gateway, compila el manager y devuelve (graph, db).
     El caller debe ``db.close()`` y llamar ``clear_worker_graph_cache()`` en ``finally``.
 
@@ -324,7 +358,7 @@ def _invoke_ephemeral_gateway_graph(
     tripleta en lugar del cache global basado solo en env. Con ``vault_db_path``, la tripleta
     se resuelve primero en el vault del tenant (Telegram multiplex) y solo si no hay override
     se usa el hub.
-    """
+    
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
     from duckclaw.integrations.llm_providers import build_llm
 
@@ -407,7 +441,110 @@ def _invoke_ephemeral_gateway_graph(
         _log.warning("graph_server: LLM override resolution failed: %s", exc, exc_info=True)
     graph = _build_manager_graph_for_db(db, **ovr)
     return graph, db
+"""
+def _invoke_ephemeral_gateway_graph(
+    chat_id: str | None = None,
+    vault_db_path: str | None = None,
+    message: str | None = None,
+    assigned_worker_id: str | None = None,
+) -> tuple[Any, Any]:
+    """
+    Abre DuckClaw RO al archivo del gateway, compila el manager (o el worker directo) y devuelve (graph, db).
+    """
+    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+    from duckclaw.integrations.llm_providers import build_llm
 
+    _ensure_llm_config()
+    v_p = (vault_db_path or "").strip()
+    if v_p == ":memory:":
+        from duckclaw import DuckClaw
+
+        clear_worker_graph_cache()
+        mem = DuckClaw(":memory:", read_only=False)
+        graph = _build_manager_graph_for_db(mem)
+        return graph, mem
+
+    db_path = str(_graph_state["db_path"])
+    os.makedirs(str(Path(db_path).parent), exist_ok=True)
+    clear_worker_graph_cache()
+    db = _open_duckclaw_readonly_with_retry(db_path)
+    ovr: dict[str, Any] = {}
+    _log = _logging.getLogger(__name__)
+    trip: tuple[str, str, str] | None = None
+    trip_source = "env_defaults"
+    try:
+        from duckclaw.gateway_db import GatewayDbEphemeralReadonly
+        from duckclaw.graphs.on_the_fly_commands import resolve_llm_triplet_for_chat_invocation
+
+        same_file = bool(v_p and v_p != ":memory:" and _paths_same_canonical(v_p, db_path))
+        if same_file:
+            trip = resolve_llm_triplet_for_chat_invocation(db, chat_id)
+            trip_source = "same_file_as_hub" if trip else "same_file_no_chat_override"
+        elif v_p and v_p != ":memory:":
+            try:
+                trip = resolve_llm_triplet_for_chat_invocation(GatewayDbEphemeralReadonly(v_p), chat_id)
+                trip_source = "vault_separate" if trip else "vault_separate_no_override"
+            except Exception as exc:
+                _log.warning("graph_server: resolve_llm_triplet vault read failed chat_id=%s err=%s", chat_id, exc)
+                trip = None
+                trip_source = "vault_read_error"
+        if trip is None and not same_file:
+            trip = resolve_llm_triplet_for_chat_invocation(db, chat_id)
+            if trip is not None:
+                trip_source = "hub_only"
+        if trip is not None:
+            tp, tm, tu = trip
+            try:
+                built = build_llm(tp, tm, tu, prefer_env_provider=False)
+            except Exception as exc:
+                _log.warning("graph_server: build_llm failed provider=%s err=%s", tp, exc)
+                built = None
+            if built is not None:
+                ovr = {
+                    "llm_override": built,
+                    "llm_provider_override": tp,
+                    "llm_model_override": tm,
+                    "llm_base_url_override": tu,
+                }
+        _env_llm_provider = str(_graph_state.get("provider") or "")
+        _invoke_provider = str(ovr.get("llm_provider_override") or trip[0] if trip else _env_llm_provider)
+        _log.info(
+            "graph_server: llm_invoke_override chat_id=%s trip_source=%s has_trip=%s ovr=%s global_provider=%s",
+            chat_id, trip_source, trip is not None, bool(ovr), _invoke_provider
+        )
+    except Exception as exc:
+        _log.warning("graph_server: LLM override resolution failed: %s", exc)
+
+    # --- FIX: Bypass Manager para Directivas de Sistema ---
+    bypass_manager = message and "[SYSTEM_DIRECTIVE" in message and assigned_worker_id
+    if bypass_manager:
+        from duckclaw.forge import WORKERS_TEMPLATES_DIR
+        from duckclaw.workers.factory import build_worker_graph
+        
+        yaml_path = WORKERS_TEMPLATES_DIR / assigned_worker_id / "manifest.yaml"
+        if yaml_path.exists():
+            _log.info("graph_server: Bypass Manager activado. Enrutando directiva a %s", assigned_worker_id)
+            llm = ovr.get("llm_override", _graph_state["llm"])
+            
+            # Cerramos la conexión que acabamos de abrir para dejar el archivo libre para el Worker
+            if db:
+                try: db.close()
+                except: pass
+            
+            graph = build_worker_graph(
+                assigned_worker_id,
+                db_path=_graph_state["db_path"],
+                llm=llm,
+                templates_root=WORKERS_TEMPLATES_DIR
+            )
+            
+            # Devolvemos la DB del worker para que el finally del server la cierre
+            worker_db = getattr(graph, "db", None)
+            return graph, worker_db
+    # ------------------------------------------------------
+
+    graph = _build_manager_graph_for_db(db, **ovr)
+    return graph, db
 
 # ── Pre-inicialización en tiempo de importación ────────────────────────────────
 # langgraph dev importa este módulo antes del event loop: solo LLM (+ grafo :memory: opcional).
@@ -467,7 +604,7 @@ async def root():
         "version":    "0.1.0",
         "model":      _resolve_display_model(),
         "db_path":    get_gateway_db_path() or "(default)",
-        "tracing":    os.environ.get("LANGCHAIN_TRACING_V2", "false"),
+        "tracing":    os.environ.get("LANGCHAIN_TRACING_V2", "true"),
         "project":    os.environ.get("LANGCHAIN_PROJECT", ""),
         "endpoints":  ["/invoke", "/stream", "/health", "/docs"],
     }
@@ -491,7 +628,8 @@ async def invoke(req: InvokeRequest):
 
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
 
-    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
+    # graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
+    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id, None, req.message, None)
     # Enriquecer el estado con identidad (username/chat_type) para general_graph.
     history = req.history or []
     state = {
@@ -549,8 +687,9 @@ async def stream(req: InvokeRequest):
 
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
 
-    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
-
+    # graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
+    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id, None, req.message, None)
+    
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
             uid = (req.user_id or "").strip() or req.chat_id
@@ -716,7 +855,7 @@ def _get_or_build_graph() -> Any:
     """Compatibilidad: mismo grafo que LangGraph Studio (:memory:), no el del archivo del gateway."""
     return _ensure_studio_graph()
 
-
+"""
 async def ainvoke_manager_ephemeral(
     message: str,
     history: list,
@@ -731,10 +870,10 @@ async def ainvoke_manager_ephemeral(
     outbound_telegram_bot_token: str | None = None,
     assigned_worker_id: str | None = None,
 ) -> dict:
-    """
+    
     Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
     Uso recomendado desde services/api-gateway en lugar de retener un grafo global.
-    """
+    
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
 
     _ensure_llm_config()
@@ -760,9 +899,59 @@ async def ainvoke_manager_ephemeral(
         except Exception:
             pass
         clear_worker_graph_cache()
+"""
+async def ainvoke_manager_ephemeral(
+    message: str,
+    history: list,
+    chat_id: str,
+    *,
+    tenant_id: str = "default",
+    user_id: str | None = None,
+    username: str | None = None,
+    vault_db_path: str | None = None,
+    shared_db_path: str | None = None,
+    is_system_prompt: bool | None = False,
+    outbound_telegram_bot_token: str | None = None,
+    assigned_worker_id: str | None = None,
+) -> dict:
+    """
+    Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
+    Uso recomendado desde services/api-gateway en lugar de retener un grafo global.
+    """
+    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
 
-
-# ── __main__ ───────────────────────────────────────────────────────────────────
+    _ensure_llm_config()
+    
+    # Llamada actualizada con los 4 argumentos para el Bypass
+    graph, db = await asyncio.to_thread(
+        _invoke_ephemeral_gateway_graph, 
+        chat_id, 
+        vault_db_path,
+        message,
+        assigned_worker_id
+    )
+    
+    try:
+        return await _ainvoke(
+            graph,
+            message,
+            history,
+            chat_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            username=username,
+            vault_db_path=vault_db_path,
+            shared_db_path=shared_db_path,
+            is_system_prompt=is_system_prompt,
+            outbound_telegram_bot_token=outbound_telegram_bot_token,
+            assigned_worker_id=assigned_worker_id,
+        )
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+        clear_worker_graph_cache()
 
 def _run_server(host: str = "0.0.0.0", port: int = 8123, reload: bool = False) -> None:
     import uvicorn

@@ -197,6 +197,9 @@ def schedule_telegram_context_summary_background(
                 return
             with telegram_bot_token_override(tok):
                 try:
+                    # El resumen post `/context` ya trae el contenido en el mensaje:
+                    # usar `:memory:` evita abrir la bóveda real en RO mientras
+                    # DuckClaw-DB-Writer intenta persistir CONTEXT_INJECTION en RW.
                     res = await invoke_agent_chat(
                         bg_payload,
                         worker_id,
@@ -205,7 +208,7 @@ def schedule_telegram_context_summary_background(
                         redis_client=redis_client,
                         telegram_multipart_tail_delivery="native",
                         telegram_mcp=telegram_mcp_state,
-                        telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                        telegram_forced_vault_db_path=":memory:",
                         outbound_telegram_bot_token=(reply_token or "").strip() or None,
                     )
                 except HTTPException as exc:

@@ -19,6 +19,14 @@ llm:
 skills:
   - read_sql
   - fetch_market_data
+  - tavily_search
+  - research:
+      tavily_enabled: true
+      audit_langsmith: true
+      search_depth: advanced
+      include_answer: true
+      max_results: 8
+      include_raw_content: false
   - execute_sandbox_script
   - propose_trade_signal
   - execute_approved_signal

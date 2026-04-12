@@ -2020,6 +2020,13 @@ def build_worker_graph(
                 return False
             return bool(re.search(r"(?:reddit\.com|redd\.it)/", str(text), re.IGNORECASE))
 
+        def _incoming_has_generic_web_url(text: str) -> bool:
+            if not text or not str(text).strip():
+                return False
+            if _incoming_has_reddit_url(text):
+                return False
+            return bool(re.search(r"https?://[^\s)>\]\"']+", str(text), re.IGNORECASE))
+
         def _incoming_looks_like_reddit_post_url(text: str) -> bool:
             if not text or not str(text).strip():
                 return False
@@ -2300,6 +2307,15 @@ def build_worker_graph(
                     force_tavily = False
             else:
                 force_tavily = False
+
+            force_tavily_context_url = bool(
+                (_lid or "").strip().lower() == "finanz"
+                and has_tavily
+                and "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in (incoming or "")
+                and _incoming_has_generic_web_url(incoming)
+                and not already_has_tool_result
+            )
+            force_tavily = bool(force_tavily or force_tavily_context_url)
 
             _reddit_anchor_u: Optional[str] = None
             if _incoming_has_reddit_url(incoming):

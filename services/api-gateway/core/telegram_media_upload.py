@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import uuid
-from pathlib import Path
 from urllib import request as url_request
 from urllib.error import HTTPError, URLError
 
@@ -24,8 +22,6 @@ CHART_UPLOAD_FILENAME_BIN = "chart.bin"
 
 # No intentar sendPhoto con basura decodificada (evita IMAGE_PROCESS_FAILED y .bin).
 _MIN_IMAGE_BYTES_FOR_TELEGRAM = 32
-# Margen bajo el límite ~50 MiB de Telegram para sendDocument.
-_MAX_SANDBOX_DOCUMENT_BYTES = 48 * 1024 * 1024
 
 
 def _telegram_api_detail_for_log(detail: str) -> str:
@@ -126,16 +122,9 @@ def _post_telegram_multipart(
     return False, raw[:2000]
 
 
-def send_sandbox_chart_to_telegram_sync(
-    *,
-    bot_token: str,
-    chat_id: str,
-    image_bytes: bytes,
-    upload_filename: str | None = None,
-) -> bool:
+def send_sandbox_chart_to_telegram_sync(*, bot_token: str, chat_id: str, image_bytes: bytes) -> bool:
     """
     Intenta sendPhoto; si falla (p. ej. 400 por tamaño/dimensiones), reintenta sendDocument.
-    ``upload_filename``: nombre en multipart (p. ej. chart_2.png); por defecto chart.png / chart.jpg.
     """
     cid = str(chat_id or "").strip()
     if not cid or not image_bytes:
@@ -147,8 +136,6 @@ def send_sandbox_chart_to_telegram_sync(
         )
         return False
     ctype, filename = _sniff_image_meta(image_bytes)
-    if upload_filename and upload_filename.strip():
-        filename = upload_filename.strip()
 
     ok, detail = _post_telegram_multipart(
         bot_token=bot_token,
@@ -196,158 +183,3 @@ def send_sandbox_chart_to_telegram_sync(
         detail_doc[:1200],
     )
     return False
-
-
-def _sandbox_telegram_artifact_root() -> Path:
-    raw = (os.environ.get("DUCKCLAW_SANDBOX_ARTIFACT_ROOT") or "").strip()
-    if raw:
-        return Path(raw).expanduser().resolve()
-    return (Path.cwd() / "output" / "sandbox").resolve()
-
-
-def _is_allowed_sandbox_document_path(path: Path, allowed_root: Path) -> bool:
-    try:
-        resolved = path.expanduser().resolve()
-        root = allowed_root.resolve()
-        resolved.relative_to(root)
-        return True
-    except (ValueError, OSError):
-        return False
-
-
-def _content_type_for_sandbox_document(suffix: str) -> str:
-    s = (suffix or "").lower()
-    if s == ".md":
-        return "text/markdown; charset=utf-8"
-    if s == ".txt":
-        return "text/plain; charset=utf-8"
-    if s == ".csv":
-        return "text/csv; charset=utf-8"
-    if s == ".xlsx":
-        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    return "application/octet-stream"
-
-
-def _max_sandbox_docs_per_telegram_delivery() -> int:
-    raw = (os.environ.get("DUCKCLAW_SANDBOX_TELEGRAM_MAX_DOCS") or "20").strip()
-    try:
-        return max(1, min(int(raw), 50))
-    except ValueError:
-        return 20
-
-
-def send_sandbox_documents_to_telegram_sync(
-    *,
-    bot_token: str,
-    chat_id: str,
-    paths: list[str],
-    max_docs: int | None = None,
-    max_bytes: int | None = None,
-) -> int:
-    """
-    Envía cada ruta existente y permitida como sendDocument (basename como nombre de fichero).
-    Retorna cuántos envíos tuvieron éxito.
-    """
-    cid = str(chat_id or "").strip()
-    tok = (bot_token or "").strip()
-    if not cid or not paths or not tok:
-        return 0
-    cap = max_docs if max_docs is not None else _max_sandbox_docs_per_telegram_delivery()
-    limit = max_bytes if max_bytes is not None else _MAX_SANDBOX_DOCUMENT_BYTES
-    root = _sandbox_telegram_artifact_root()
-    sent = 0
-    for raw_path in paths[:cap]:
-        p = Path(str(raw_path).strip())
-        if not p.name:
-            continue
-        if not _is_allowed_sandbox_document_path(p, root):
-            _log.warning(
-                "sandbox document: ruta fuera de la raíz permitida (omitida): %s root=%s",
-                p,
-                root,
-            )
-            continue
-        if not p.is_file():
-            _log.warning("sandbox document: omitido (no fichero o no existe): %s", p)
-            continue
-        try:
-            sz = p.stat().st_size
-        except OSError:
-            continue
-        if sz > limit:
-            _log.warning("sandbox document: omitido (len=%s > max=%s): %s", sz, limit, p)
-            continue
-        try:
-            body = p.read_bytes()
-        except OSError as exc:
-            _log.warning("sandbox document: lectura fallida %s: %s", p, exc)
-            continue
-        fname = p.name
-        ctype = _content_type_for_sandbox_document(p.suffix)
-        ok, detail = _post_telegram_multipart(
-            bot_token=tok,
-            api_method="sendDocument",
-            chat_id=cid,
-            file_field="document",
-            filename=fname,
-            file_bytes=body,
-            content_type=ctype,
-        )
-        if ok:
-            _log.info("sandbox document: sendDocument OK chat_id=%s file=%s", cid, fname)
-            sent += 1
-        else:
-            _log.warning(
-                "sandbox document: sendDocument falló chat_id=%s file=%s %s",
-                cid,
-                fname,
-                _telegram_api_detail_for_log(detail),
-            )
-    return sent
-
-
-def _max_sandbox_charts_per_telegram_delivery() -> int:
-    raw = (os.environ.get("DUCKCLAW_SANDBOX_TELEGRAM_MAX_CHARTS") or "20").strip()
-    try:
-        return max(1, min(int(raw), 50))
-    except ValueError:
-        return 20
-
-
-def send_sandbox_charts_to_telegram_sync(
-    *,
-    bot_token: str,
-    chat_id: str,
-    images_b64: list[str],
-    max_charts: int | None = None,
-) -> int:
-    """
-    Envía cada imagen válida con sendPhoto (o sendDocument como fallback), en orden.
-    Retorna cuántas entregas tuvieron éxito.
-    """
-    from core.sandbox_figure_b64 import decode_valid_sandbox_image_bytes
-
-    cap = max_charts if max_charts is not None else _max_sandbox_charts_per_telegram_delivery()
-    sent = 0
-    for idx, photo_b64 in enumerate(images_b64[:cap]):
-        b64s = (photo_b64 or "").strip()
-        if not b64s:
-            continue
-        png_bytes = decode_valid_sandbox_image_bytes(b64s)
-        if not is_telegram_ready_image_bytes(png_bytes):
-            _log.warning(
-                "sandbox chart [%s]: base64 no produce PNG/JPEG válido (omitido)",
-                idx + 1,
-            )
-            continue
-        ctype_sniff, default_name = _sniff_image_meta(png_bytes)
-        ext = ".png" if ctype_sniff == "image/png" else ".jpg" if ctype_sniff == "image/jpeg" else ".bin"
-        upload_name = f"chart_{idx + 1}{ext}" if ext != ".bin" else f"chart_{idx + 1}_{default_name}"
-        if send_sandbox_chart_to_telegram_sync(
-            bot_token=bot_token,
-            chat_id=chat_id,
-            image_bytes=png_bytes,
-            upload_filename=upload_name,
-        ):
-            sent += 1
-    return sent

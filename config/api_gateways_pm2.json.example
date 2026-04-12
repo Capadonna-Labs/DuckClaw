@@ -12,7 +12,7 @@
         "LANGCHAIN_PROJECT": "Finanz",
         "DUCKCLAW_LLM_PROVIDER": "deepseek",
         "DUCKCLAW_LLM_MODEL": "deepseek-chat",
-        "DUCKCLAW_LLM_BASE_URL": "https://api.deepseek.com/v1",
+        "DUCKCLAW_LLM_BASE_URL": "https://api.deepseek.com/",
         "DUCKCLAW_DB_PATH": "/path/to/db.duckdb",
         "DEEPSEEK_API_KEY": "<DEEPSEEK_API_KEY>",
         "DUCKCLAW_REDIS_URL": "redis://localhost:6379/0",

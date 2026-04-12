@@ -6,8 +6,6 @@ import hashlib
 import json
 import logging
 import os
-import re
-import sys
 import tempfile
 from typing import Any
 
@@ -60,13 +58,6 @@ _VLM_SYSTEM_PROMPT = (
 )
 
 _mlx_vlm_model_proc: tuple[Any, Any] | None = None
-_VLM_MLX_GEMMA4_DEFAULT_REPO_ID = "mlx-community/gemma-4-e4b-it-4bit"
-
-
-class VLMBackendUnavailableError(RuntimeError):
-    def __init__(self, provider: str):
-        self.provider = provider
-        super().__init__(f"error 503: {provider} no disponible")
 
 
 def _suffix_for_mime(mime: str) -> str:
@@ -78,16 +69,27 @@ def _suffix_for_mime(mime: str) -> str:
     return ".jpg"
 
 
+def _env_flag_disables_truthy(raw: str | None) -> bool:
+    return (raw or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _mlx_vlm_local_enabled() -> bool:
-    return (os.environ.get("DUCKCLAW_VLM_DISABLE_LOCAL_MLX_VLM") or "").strip().lower() not in (
-        "1",
-        "true",
-        "yes",
-    )
+    """Local mlx_vlm desactivado con cualquiera de los alias (p. ej. ``VLM_MLX_DISABLE_LOCAL=1``)."""
+    if _env_flag_disables_truthy(os.environ.get("DUCKCLAW_VLM_DISABLE_LOCAL_MLX_VLM")):
+        return False
+    if _env_flag_disables_truthy(os.environ.get("VLM_MLX_DISABLE_LOCAL")):
+        return False
+    if _env_flag_disables_truthy(os.environ.get("DUCKCLAW_VLM_MLX_DISABLE_LOCAL")):
+        return False
+    return True
+
+
+_mlx_vlm_missing_logged = False
 
 
 def _try_mlx_vlm_local_before_http() -> bool:
     """Evita colgarse en mlx_lm HTTP (texto) con payloads visuales: local primero si mlx_vlm está instalado."""
+    global _mlx_vlm_missing_logged
     if not _mlx_vlm_local_enabled():
         return False
     if (os.environ.get("DUCKCLAW_VLM_HTTP_BEFORE_LOCAL") or "").strip().lower() in ("1", "true", "yes"):
@@ -95,43 +97,191 @@ def _try_mlx_vlm_local_before_http() -> bool:
     try:
         import importlib.util
 
-        return importlib.util.find_spec("mlx_vlm") is not None
+        if importlib.util.find_spec("mlx_vlm") is None:
+            if not _mlx_vlm_missing_logged:
+                _mlx_vlm_missing_logged = True
+                _log.info(
+                    "VLM: mlx_vlm no importable en este proceso; se usará MLX HTTP. "
+                    "Para Gemma multimodal en local, instala mlx-vlm en el venv del gateway."
+                )
+            return False
+        return True
     except Exception:
         return False
 
 
 def _mlx_http_timeout_s() -> float:
-    raw = (os.environ.get("DUCKCLAW_VLM_MLX_HTTP_TIMEOUT") or "20").strip()
+    # Visión en MLX local suele superar 20s (carga KV / primer token); ReadTimeout si es corto.
+    raw = (os.environ.get("DUCKCLAW_VLM_MLX_HTTP_TIMEOUT") or "60").strip()
     try:
         return max(5.0, min(120.0, float(raw)))
     except ValueError:
-        return 20.0
+        return 60.0
+
+
+def _is_loopback_openai_base(base_url: str) -> bool:
+    u = (base_url or "").strip().lower()
+    if not u:
+        return False
+    return "127.0.0.1" in u or "localhost" in u or u.startswith("http://[::1]")
+
+
+_MLX_LOOPBACK_CONNECT_ATTEMPTS = 3
+_MLX_LOOPBACK_RECONNECT_BASE_S = 0.35
+
+
+async def _post_openai_chat_completions_resilient(
+    *,
+    client: httpx.AsyncClient,
+    endpoint: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    base_url: str,
+) -> httpx.Response:
+    """
+    Reintenta solo ``httpx.ConnectError`` hacia bases loopback (p. ej. Uvicorn + reload
+    de MLX-Inference: ventanas sin listener en :8080).
+    """
+    for attempt in range(_MLX_LOOPBACK_CONNECT_ATTEMPTS):
+        try:
+            return await client.post(endpoint, json=payload, headers=headers)
+        except httpx.ConnectError:
+            if not _is_loopback_openai_base(base_url) or attempt >= _MLX_LOOPBACK_CONNECT_ATTEMPTS - 1:
+                raise
+            # region agent log
+            try:
+                _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+                with open(_p, "a", encoding="utf-8") as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "adf9d8",
+                                "hypothesisId": "H6",
+                                "location": "vlm_ingest.py:_post_openai_chat_completions_resilient",
+                                "message": "mlx_connect_retry",
+                                "data": {
+                                    "attempt": attempt + 1,
+                                    "max": _MLX_LOOPBACK_CONNECT_ATTEMPTS,
+                                },
+                                "timestamp": int(__import__("time").time() * 1000),
+                            }
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
+            await asyncio.sleep(_MLX_LOOPBACK_RECONNECT_BASE_S * (2**attempt))
+
+
+def _httpx_trust_env_for_openai_base(base_url: str) -> bool:
+    """
+    httpx usa trust_env=True por defecto; HTTP_PROXY/ALL_PROXY pueden desviar **localhost**
+    y provocar ConnectError aunque MLX-Inference escuche en :8080.
+    Para bases loopback, desactivar confianza en env de proxy.
+    """
+    u = (base_url or "").strip().lower()
+    if not u:
+        return True
+    if "127.0.0.1" in u or "localhost" in u or u.startswith("http://[::1]"):
+        return False
+    return True
+
+
+def _mlx_http_base_url() -> str:
+    """
+    Servidor OpenAI-compatible para VLM (``/v1/chat/completions``).
+    Prioridad: ``DUCKCLAW_VLM_MLX_BASE_URL`` → ``VLM_MLX_BASE_URL`` →
+    ``http://127.0.0.1:{VLM_MLX_PORT|MLX_PORT|8081}/v1``.
+    """
+    for key in ("DUCKCLAW_VLM_MLX_BASE_URL", "VLM_MLX_BASE_URL"):
+        v = (os.environ.get(key) or "").strip().rstrip("/")
+        if v:
+            return v
+    raw_port = (os.environ.get("VLM_MLX_PORT") or os.environ.get("MLX_PORT") or "8081").strip()
+    try:
+        port = max(1, min(65535, int(raw_port)))
+    except ValueError:
+        port = 8081
+    return f"http://127.0.0.1:{port}/v1"
+
+
+def _mlx_http_vision_model() -> str:
+    """
+    Modelo para peticiones VLM al servidor OpenAI-compat (mlx_vlm HTTP).
+
+    No usar ``MLX_MODEL_ID`` directamente: en PM2 suele apuntar al LLM de texto (p. ej. Slayer/Llama),
+    lo que fuerza un swap a un checkpoint incompatible con ``mlx_vlm`` (error ``mlx_vlm.models.llama``).
+    Misma resolución que VLM local: ``DUCKCLAW_VLM_MLX_MODEL`` / ``MLX_VISION_MODEL`` → ``_mlx_vlm_model_id()``.
+    """
+    for key in ("DUCKCLAW_VLM_MLX_MODEL", "MLX_VISION_MODEL"):
+        v = (os.environ.get(key) or "").strip()
+        if v:
+            return v
+    return _mlx_vlm_model_id()
+
+
+def vlm_exception_for_log(exc: BaseException) -> str:
+    """Log de errores HTTP sin query string (evita filtrar ``key=`` de Gemini u otros)."""
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+        try:
+            u = exc.request.url
+            return (
+                f"HTTPStatusError {exc.response.status_code} "
+                f"host={u.host} path={u.path}"
+            )
+        except Exception:
+            pass
+    if isinstance(exc, httpx.RequestError):
+        try:
+            req = getattr(exc, "request", None)
+            if req is not None:
+                u = req.url
+                detail = (str(exc) or "").strip() or "(sin mensaje del cliente HTTP)"
+                return f"{type(exc).__name__} host={u.host} path={u.path} {detail}"
+        except Exception:
+            pass
+    msg = (str(exc) or "").strip()
+    if msg:
+        return msg[:800]
+    return f"{type(exc).__name__}(sin mensaje textual)"
+
+
+class VlmIngestAllFailed(Exception):
+    """Ningún backend VLM produjo resumen; ``gemini_503`` si Gemini respondió 503 en la cadena."""
+
+    def __init__(self, cause: BaseException, *, gemini_503: bool = False) -> None:
+        self.cause = cause
+        self.gemini_503 = bool(gemini_503)
+        super().__init__(str(cause))
 
 
 def _mlx_vlm_model_id() -> str:
-    # Default soberano: Gemma 4 (alias consistente con /model gemma4).
-    # Se puede sobrescribir con DUCKCLAW_VLM_MLX_VLM_MODEL / MLX_VLM_MODEL.
-    return (
-        os.environ.get("DUCKCLAW_VLM_MLX_VLM_MODEL")
-        or os.environ.get("MLX_VLM_MODEL")
-        or os.environ.get("MLX_GEMMA4_MODEL_PATH")
-        or _VLM_MLX_GEMMA4_DEFAULT_REPO_ID
-    ).strip()
-
-
-def _mlx_vlm_target_is_gemma4() -> bool:
-    mid = (_mlx_vlm_model_id() or "").strip().lower()
-    return "gemma4" in mid or "gemma-4" in mid
-
-
-def _strict_mlx_gemma4_required() -> bool:
     """
-    Si el target VLM es Gemma4, evita fallback silencioso a Gemini/OpenAI cuando MLX no lo soporta.
-    Se puede desactivar explícitamente con DUCKCLAW_VLM_STRICT_MLX_GEMMA4=0.
+    VLM local (mlx_vlm) y el LLM de texto (mlx_lm) usan **identificadores distintos** salvo
+    que se alineen por env. Prioridad: overrides explícitos → misma resolución que texto Gemma 4
+    (``MLX_GEMMA4_MODEL_PATH``, ``MLX_MODEL_*`` si contiene ``gemma``) →
+    ``MLX_GEMMA4_DEFAULT_REPO_ID`` (``mlx-community/gemma-4-e4b-it-4bit``).
+
+    Para forzar otro checkpoint (p. ej. LLaVA Mistral si mlx_vlm lo requiere en tu entorno):
+    ``DUCKCLAW_VLM_MLX_VLM_MODEL`` o ``MLX_VLM_MODEL``.
     """
-    raw = (os.environ.get("DUCKCLAW_VLM_STRICT_MLX_GEMMA4") or "1").strip().lower()
-    strict = raw in ("1", "true", "yes", "on")
-    return strict and _mlx_vlm_target_is_gemma4()
+    for key in ("DUCKCLAW_VLM_MLX_VLM_MODEL", "MLX_VLM_MODEL"):
+        v = (os.environ.get(key) or "").strip()
+        if v:
+            return v
+    g4 = (os.environ.get("MLX_GEMMA4_MODEL_PATH") or "").strip()
+    if g4:
+        return g4
+    mlx = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
+    if mlx and "gemma" in mlx.lower():
+        return mlx
+    try:
+        from duckclaw.integrations.llm_providers import MLX_GEMMA4_DEFAULT_REPO_ID
+
+        return MLX_GEMMA4_DEFAULT_REPO_ID
+    except ImportError:
+        return "mlx-community/gemma-4-e4b-it-4bit"
 
 
 def _mlx_vlm_processor_repo(weights_id: str) -> str:
@@ -150,10 +300,6 @@ def _mlx_vlm_processor_repo(weights_id: str) -> str:
         if "2b" in w:
             return "Qwen/Qwen2-VL-2B-Instruct"
         return "Qwen/Qwen2-VL-7B-Instruct"
-    if "gemma-4" in w or "gemma4" in w:
-        # Gemma4 alias: por defecto usa el mismo repo de pesos (o MLX_GEMMA4_MODEL_PATH),
-        # salvo override explícito por env.
-        return weights_id.strip()
     return weights_id.strip()
 
 
@@ -182,11 +328,19 @@ def _get_mlx_vlm_loaded() -> tuple[Any, Any]:
         proc_repo,
     )
     model_path = get_model_path(mid)
+    # load_tokenizer() hace model_path / "tokenizer.json"; debe ser pathlib.Path, no str
+    # (evita TypeError: unsupported operand type(s) for /: 'str' and 'str').
+    proc_id = (proc_repo or "").strip()
+    mid_s = (mid or "").strip()
+    if proc_id == mid_s:
+        processor_path = model_path
+    else:
+        processor_path = get_model_path(proc_id)
     model = load_model(model_path, lazy=False)
     eos_token_id = getattr(model.config, "eos_token_id", None)
     image_processor = load_image_processor(model_path)
     processor = load_processor(
-        proc_repo, True, eos_token_ids=eos_token_id, trust_remote_code=True
+        processor_path, True, eos_token_ids=eos_token_id, trust_remote_code=True
     )
     if image_processor is not None:
         processor.image_processor = image_processor
@@ -218,94 +372,7 @@ async def _try_mlx_vlm_caption_paths(paths: list[str], prompt: str) -> str:
         max_tokens = max(64, min(4096, int(raw_max)))
     except ValueError:
         max_tokens = 512
-    try:
-        return await asyncio.to_thread(_mlx_vlm_caption_paths_sync, paths, prompt, max_tokens=max_tokens)
-    except Exception as exc:
-        if _mlx_vlm_target_is_gemma4():
-            return await _mlx_vlm_caption_paths_cli(paths, prompt, max_tokens=max_tokens)
-        raise
-
-
-def _mlx_vlm_python_candidates() -> list[str]:
-    vals = [
-        (os.environ.get("MLX_PYTHON") or "").strip(),
-        (os.environ.get("DUCKCLAW_VLM_MLX_PYTHON") or "").strip(),
-        (sys.executable or "").strip(),
-        "python3",
-    ]
-    out: list[str] = []
-    for v in vals:
-        if v and v not in out:
-            out.append(v)
-    return out
-
-
-def _mlx_vlm_python_bin() -> str:
-    cands = _mlx_vlm_python_candidates()
-    return cands[0] if cands else "python3"
-
-
-def _extract_mlx_generate_text(stdout: str) -> str:
-    text = (stdout or "").strip()
-    if not text:
-        return ""
-    m = re.search(r"<\|turn\>model\s*(.*?)\n=+", text, flags=re.S)
-    if m and (m.group(1) or "").strip():
-        return m.group(1).strip()
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    # Evita métricas finales de CLI y devuelve el bloque más informativo.
-    cleaned = [ln for ln in lines if not ln.startswith(("Prompt:", "Generation:", "Peak memory:"))]
-    return "\n".join(cleaned).strip()
-
-
-async def _mlx_vlm_generate_one_cli(path: str, prompt: str, *, max_tokens: int) -> str:
-    last_err = ""
-    for py_bin in _mlx_vlm_python_candidates():
-        cmd = [
-            py_bin,
-            "-m",
-            "mlx_vlm",
-            "generate",
-            "--model",
-            _mlx_vlm_model_id(),
-            "--max-tokens",
-            str(max_tokens),
-            "--prompt",
-            prompt,
-            "--image",
-            path,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out_b, err_b = await proc.communicate()
-        out = out_b.decode("utf-8", errors="replace")
-        err = err_b.decode("utf-8", errors="replace")
-        if proc.returncode == 0:
-            parsed = _extract_mlx_generate_text(out)
-            if parsed:
-                return parsed
-            last_err = "mlx_vlm CLI devolvió salida vacía"
-            continue
-        last_err = f"mlx_vlm CLI rc={proc.returncode}: {(err or out).strip()[:500]}"
-        if "No module named mlx_vlm" not in (err + out):
-            break
-    raise RuntimeError(last_err or "mlx_vlm CLI error desconocido")
-
-
-async def _mlx_vlm_caption_paths_cli(paths: list[str], prompt: str, *, max_tokens: int) -> str:
-    if not paths:
-        raise ValueError("paths vacío")
-    parts: list[str] = []
-    for idx, p in enumerate(paths[:3], start=1):
-        txt = await _mlx_vlm_generate_one_cli(p, prompt, max_tokens=max_tokens)
-        if len(paths) > 1:
-            parts.append(f"[img {idx}] {txt}")
-        else:
-            parts.append(txt)
-    return "\n".join(parts).strip()
+    return await asyncio.to_thread(_mlx_vlm_caption_paths_sync, paths, prompt, max_tokens=max_tokens)
 
 
 def _tmp_dir() -> str:
@@ -336,64 +403,7 @@ def _secure_wipe_remove(tmp_path: str) -> None:
         pass
 
 
-def telegram_document_download_limit_bytes() -> int:
-    """Límite para documentos (p. ej. PDF) descargados fuera del pipeline VLM de imágenes."""
-    raw = (os.environ.get("DUCKCLAW_TELEGRAM_MAX_DOCUMENT_BYTES") or "20971520").strip()
-    try:
-        return max(1_048_576, int(raw))
-    except ValueError:
-        return 20_971_520
-
-
-def _max_pdf_context_extract_chars() -> int:
-    raw = (os.environ.get("DUCKCLAW_PDF_CONTEXT_MAX_CHARS") or "100000").strip()
-    try:
-        return max(2_000, min(500_000, int(raw)))
-    except ValueError:
-        return 100_000
-
-
-def extract_pdf_plain_text_from_bytes(pdf_bytes: bytes, *, max_chars: int | None = None) -> str:
-    """
-    Extrae texto plano de un PDF (p. ej. adjunto Telegram + /context --add).
-    PDF escaneado u omitido sin pypdf → cadena vacía.
-    """
-    if not pdf_bytes:
-        return ""
-    cap = max_chars if max_chars is not None else _max_pdf_context_extract_chars()
-    try:
-        from io import BytesIO
-
-        from pypdf import PdfReader
-    except ImportError:
-        _log.warning("pypdf no instalado; omitiendo extracción de texto PDF en gateway")
-        return ""
-    try:
-        reader = PdfReader(BytesIO(pdf_bytes))
-        chunks: list[str] = []
-        total = 0
-        for page in reader.pages:
-            t = (page.extract_text() or "").strip()
-            if not t:
-                continue
-            chunks.append(t)
-            total += len(t) + 1
-            if total >= cap:
-                break
-        out = "\n".join(chunks).strip()
-        return out[:cap]
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("extract_pdf_plain_text_from_bytes: %s", exc)
-        return ""
-
-
-async def telegram_download_file_bytes(
-    bot_token: str, file_id: str, *, max_bytes: int | None = None
-) -> bytes:
-    """
-    Descarga bytes desde Telegram Bot API (getFile + file URL).
-    Por defecto aplica el límite de imagen VLM; pasa max_bytes explícito para documentos.
-    """
+async def _telegram_download_file_bytes(bot_token: str, file_id: str) -> bytes:
     api = f"https://api.telegram.org/bot{bot_token}"
     async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
         r = await client.get(f"{api}/getFile", params={"file_id": file_id})
@@ -406,12 +416,11 @@ async def telegram_download_file_bytes(
             raise RuntimeError("Telegram file_path vacío")
         rf = await client.get(f"https://api.telegram.org/file/bot{bot_token}/{file_path}")
         rf.raise_for_status()
-        raw = bytes(rf.content or b"")
-    limit = _max_image_bytes() if max_bytes is None else int(max_bytes)
-    if len(raw) > limit:
-        kind = "archivo" if max_bytes is not None else "imagen"
-        raise RuntimeError(f"{kind} demasiado grande ({len(raw)} > {limit})")
-    return raw
+        data = bytes(rf.content or b"")
+    limit = _max_image_bytes()
+    if len(data) > limit:
+        raise RuntimeError(f"imagen demasiado grande ({len(data)} > {limit})")
+    return data
 
 
 async def _call_openai_vision(
@@ -443,8 +452,46 @@ async def _call_openai_vision(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     endpoint = base_url.rstrip("/") + "/chat/completions"
-    async with httpx.AsyncClient(timeout=httpx.Timeout(http_timeout_s)) as client:
-        r = await client.post(endpoint, json=payload, headers=headers)
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(http_timeout_s),
+        trust_env=_httpx_trust_env_for_openai_base(base_url),
+    ) as client:
+        try:
+            r = await _post_openai_chat_completions_resilient(
+                client=client,
+                endpoint=endpoint,
+                payload=payload,
+                headers=headers,
+                base_url=base_url,
+            )
+        except httpx.RequestError as _req_exc:
+            # region agent log
+            try:
+                _u = httpx.URL(endpoint)
+                _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+                with open(_p, "a", encoding="utf-8") as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "adf9d8",
+                                "hypothesisId": "H5",
+                                "location": "vlm_ingest.py:_call_openai_vision",
+                                "message": "httpx_request_error",
+                                "data": {
+                                    "endpoint_host": _u.host,
+                                    "endpoint_port": _u.port,
+                                    "exc_type": type(_req_exc).__name__,
+                                    "exc_detail": (str(_req_exc) or "")[:400],
+                                },
+                                "timestamp": int(__import__("time").time() * 1000),
+                            }
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
+            raise
         r.raise_for_status()
         data = r.json() if r.content else {}
     try:
@@ -479,8 +526,46 @@ async def _call_openai_vision_multi(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     endpoint = base_url.rstrip("/") + "/chat/completions"
-    async with httpx.AsyncClient(timeout=httpx.Timeout(http_timeout_s)) as client:
-        r = await client.post(endpoint, json=payload, headers=headers)
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(http_timeout_s),
+        trust_env=_httpx_trust_env_for_openai_base(base_url),
+    ) as client:
+        try:
+            r = await _post_openai_chat_completions_resilient(
+                client=client,
+                endpoint=endpoint,
+                payload=payload,
+                headers=headers,
+                base_url=base_url,
+            )
+        except httpx.RequestError as _req_exc:
+            # region agent log
+            try:
+                _u = httpx.URL(endpoint)
+                _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+                with open(_p, "a", encoding="utf-8") as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "adf9d8",
+                                "hypothesisId": "H5",
+                                "location": "vlm_ingest.py:_call_openai_vision_multi",
+                                "message": "httpx_request_error",
+                                "data": {
+                                    "endpoint_host": _u.host,
+                                    "endpoint_port": _u.port,
+                                    "exc_type": type(_req_exc).__name__,
+                                    "exc_detail": (str(_req_exc) or "")[:400],
+                                },
+                                "timestamp": int(__import__("time").time() * 1000),
+                            }
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
+            raise
         r.raise_for_status()
         data = r.json() if r.content else {}
     try:
@@ -619,7 +704,7 @@ async def process_visual_payload(
     if not (file_id or "").strip():
         raise ValueError("file_id vacío")
 
-    image_bytes = await telegram_download_file_bytes(bot_token, file_id)
+    image_bytes = await _telegram_download_file_bytes(bot_token, file_id)
     if not image_bytes:
         raise RuntimeError("imagen vacía")
     image_hash = hashlib.sha256(image_bytes).hexdigest()
@@ -633,16 +718,43 @@ async def process_visual_payload(
             f.write(image_bytes)
             tmp_path = f.name
 
-        mlx_base = (os.environ.get("DUCKCLAW_VLM_MLX_BASE_URL") or "http://127.0.0.1:8081/v1").strip()
-        mlx_model = (
-            os.environ.get("DUCKCLAW_VLM_MLX_MODEL")
-            or os.environ.get("MLX_VISION_MODEL")
-            or os.environ.get("MLX_MODEL_ID")
-            or "Qwen2-VL-2B-Instruct-4bit"
-        ).strip()
+        mlx_base = _mlx_http_base_url()
+        mlx_model = _mlx_http_vision_model().strip()
+        # region agent log
+        try:
+            _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+            _te = _httpx_trust_env_for_openai_base(mlx_base)
+            with open(_p, "a", encoding="utf-8") as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "adf9d8",
+                            "hypothesisId": "H3",
+                            "location": "vlm_ingest.py:process_visual_payload",
+                            "message": "mlx_http_resolve",
+                            "data": {
+                                "mlx_model": mlx_model,
+                                "mlx_base": mlx_base,
+                                "trust_env": _te,
+                                "env_VLM_MLX_PORT": (os.environ.get("VLM_MLX_PORT") or "").strip(),
+                                "env_MLX_PORT": (os.environ.get("MLX_PORT") or "").strip(),
+                                "has_DUCKCLAW_VLM_MLX_BASE_URL": bool(
+                                    (os.environ.get("DUCKCLAW_VLM_MLX_BASE_URL") or "").strip()
+                                ),
+                                "has_VLM_MLX_BASE_URL": bool(
+                                    (os.environ.get("VLM_MLX_BASE_URL") or "").strip()
+                                ),
+                            },
+                            "timestamp": int(__import__("time").time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
         fb_model = (os.environ.get("DUCKCLAW_VLM_FALLBACK_MODEL") or "gpt-4o-mini").strip()
         prompt_use = (caption or "").strip() or _VLM_SYSTEM_PROMPT
-        strict_g4 = _strict_mlx_gemma4_required()
         if _try_mlx_vlm_local_before_http():
             try:
                 summary_l = await _try_mlx_vlm_caption_paths([tmp_path], prompt_use)
@@ -655,18 +767,14 @@ async def process_visual_payload(
                     }
             except Exception as exc:  # noqa: BLE001
                 _log.warning("VLM mlx_vlm local-first falló, se intentará HTTP: %s", exc)
-                if strict_g4:
-                    raise VLMBackendUnavailableError(
-                        "mlx_vlm gemma4 no soportado en esta instalación (sin fallback por modo estricto)"
-                    ) from exc
         mlx_to = _mlx_http_timeout_s()
         cloud_to = _openai_cloud_http_timeout_s()
         gemini_to = _gemini_http_timeout_s()
         summary = ""
         confidence = 0.85
         last_exc: BaseException | None = None
-        backend_order = ["mlx"] if strict_g4 else _vlm_backend_order()
-        for kind in backend_order:
+        gemini_503_in_chain = False
+        for kind in _vlm_backend_order():
             try:
                 if kind == "mlx":
                     summary = await _call_openai_vision(
@@ -705,15 +813,25 @@ async def process_visual_payload(
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if kind == "mlx":
-                    _log.warning("VLM vía MLX falló (base_url=%s): %s", mlx_base, exc)
-                    last_exc = VLMBackendUnavailableError("mlx vlm")
-                    if strict_g4:
-                        raise last_exc
+                    _log.warning(
+                        "VLM vía MLX falló (base_url=%s): %s",
+                        mlx_base,
+                        vlm_exception_for_log(exc),
+                    )
                 elif kind == "gemini":
-                    _log.warning("VLM vía Gemini falló: %s", exc)
-                    last_exc = VLMBackendUnavailableError("gemini")
+                    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+                        if exc.response.status_code == 503:
+                            gemini_503_in_chain = True
+                            _log.warning(
+                                "VLM vía Gemini no disponible (503): %s",
+                                vlm_exception_for_log(exc),
+                            )
+                        else:
+                            _log.warning("VLM vía Gemini falló: %s", vlm_exception_for_log(exc))
+                    else:
+                        _log.warning("VLM vía Gemini falló: %s", vlm_exception_for_log(exc))
                 else:
-                    _log.warning("VLM vía OpenAI cloud falló: %s", exc)
+                    _log.warning("VLM vía OpenAI cloud falló: %s", vlm_exception_for_log(exc))
                 continue
         else:
             summary_fb = ""
@@ -726,7 +844,29 @@ async def process_visual_payload(
                 summary = summary_fb
                 confidence = 0.82
             elif last_exc is not None:
-                raise last_exc
+                # region agent log
+                try:
+                    _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+                    with open(_p, "a", encoding="utf-8") as _df:
+                        _df.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "adf9d8",
+                                    "hypothesisId": "H2",
+                                    "location": "vlm_ingest.py:process_visual_payload",
+                                    "message": "vlm_all_failed",
+                                    "data": {"gemini_503": gemini_503_in_chain},
+                                    "timestamp": int(__import__("time").time() * 1000),
+                                }
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # endregion
+                raise VlmIngestAllFailed(
+                    last_exc, gemini_503=gemini_503_in_chain
+                ) from last_exc
             else:
                 raise RuntimeError("VLM: ningún backend produjo resumen")
         return {
@@ -764,7 +904,7 @@ async def process_visual_album_batch(
                 raise ValueError(f"MIME no permitido: {mt}")
             if not (file_id or "").strip():
                 raise ValueError("file_id vacío")
-            image_bytes = await telegram_download_file_bytes(bot_token, file_id)
+            image_bytes = await _telegram_download_file_bytes(bot_token, file_id)
             if not image_bytes:
                 raise RuntimeError("imagen vacía")
             per_hashes.append(hashlib.sha256(image_bytes).hexdigest())
@@ -776,16 +916,10 @@ async def process_visual_album_batch(
                 tmp_paths.append(f.name)
 
         composite = hashlib.sha256("|".join(sorted(per_hashes)).encode("utf-8")).hexdigest()
-        mlx_base = (os.environ.get("DUCKCLAW_VLM_MLX_BASE_URL") or "http://127.0.0.1:8081/v1").strip()
-        mlx_model = (
-            os.environ.get("DUCKCLAW_VLM_MLX_MODEL")
-            or os.environ.get("MLX_VISION_MODEL")
-            or os.environ.get("MLX_MODEL_ID")
-            or "Qwen2-VL-2B-Instruct-4bit"
-        ).strip()
+        mlx_base = _mlx_http_base_url()
+        mlx_model = _mlx_http_vision_model().strip()
         fb_model = (os.environ.get("DUCKCLAW_VLM_FALLBACK_MODEL") or "gpt-4o-mini").strip()
         caption_use = (caption or "").strip() or "Analiza estas imágenes relacionadas."
-        strict_g4 = _strict_mlx_gemma4_required()
         if _try_mlx_vlm_local_before_http() and tmp_paths:
             try:
                 summary_l = await _try_mlx_vlm_caption_paths(tmp_paths, caption_use)
@@ -799,18 +933,14 @@ async def process_visual_album_batch(
                     }
             except Exception as exc:  # noqa: BLE001
                 _log.warning("VLM mlx_vlm local-first (álbum) falló, se intentará HTTP: %s", exc)
-                if strict_g4:
-                    raise VLMBackendUnavailableError(
-                        "mlx_vlm gemma4 no soportado en esta instalación (sin fallback por modo estricto)"
-                    ) from exc
         mlx_multi_to = max(_mlx_http_timeout_s(), 45.0)
         cloud_multi_to = max(_openai_cloud_http_timeout_s(), 90.0)
         gemini_multi_to = max(_gemini_http_timeout_s(), 90.0)
         summary = ""
         confidence = 0.85
         last_exc: BaseException | None = None
-        backend_order = ["mlx"] if strict_g4 else _vlm_backend_order()
-        for kind in backend_order:
+        gemini_503_in_chain = False
+        for kind in _vlm_backend_order():
             try:
                 if kind == "mlx":
                     summary = await _call_openai_vision_multi(
@@ -846,15 +976,34 @@ async def process_visual_album_batch(
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if kind == "mlx":
-                    _log.warning("VLM (álbum) vía MLX falló (base_url=%s): %s", mlx_base, exc)
-                    last_exc = VLMBackendUnavailableError("mlx vlm")
-                    if strict_g4:
-                        raise last_exc
+                    _log.warning(
+                        "VLM (álbum) vía MLX falló (base_url=%s): %s",
+                        mlx_base,
+                        vlm_exception_for_log(exc),
+                    )
                 elif kind == "gemini":
-                    _log.warning("VLM (álbum) vía Gemini falló: %s", exc)
-                    last_exc = VLMBackendUnavailableError("gemini")
+                    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+                        if exc.response.status_code == 503:
+                            gemini_503_in_chain = True
+                            _log.warning(
+                                "VLM (álbum) Gemini no disponible (503): %s",
+                                vlm_exception_for_log(exc),
+                            )
+                        else:
+                            _log.warning(
+                                "VLM (álbum) vía Gemini falló: %s",
+                                vlm_exception_for_log(exc),
+                            )
+                    else:
+                        _log.warning(
+                            "VLM (álbum) vía Gemini falló: %s",
+                            vlm_exception_for_log(exc),
+                        )
                 else:
-                    _log.warning("VLM (álbum) vía OpenAI cloud falló: %s", exc)
+                    _log.warning(
+                        "VLM (álbum) vía OpenAI cloud falló: %s",
+                        vlm_exception_for_log(exc),
+                    )
                 continue
         else:
             summary_fb = ""
@@ -867,7 +1016,9 @@ async def process_visual_album_batch(
                 summary = summary_fb
                 confidence = 0.82
             elif last_exc is not None:
-                raise last_exc
+                raise VlmIngestAllFailed(
+                    last_exc, gemini_503=gemini_503_in_chain
+                ) from last_exc
             else:
                 raise RuntimeError("VLM: ningún backend produjo resumen")
         return {

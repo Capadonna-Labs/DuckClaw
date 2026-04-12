@@ -18,13 +18,6 @@ class Settings(BaseSettings):
             "DUCKCLAW_CONTEXT_STATE_DELTA_QUEUE",
         ),
     )
-    QUANT_STATE_DELTA_QUEUE_NAME: str = Field(
-        default="duckclaw:state_delta:quant",
-        validation_alias=AliasChoices(
-            "QUANT_STATE_DELTA_QUEUE_NAME",
-            "DUCKCLAW_QUANT_STATE_DELTA_QUEUE",
-        ),
-    )
     NEEDS_EMBEDDING_QUEUE_NAME: str = "duckclaw:needs_embedding"
     
     # Ruta absoluta calculada dinámicamente

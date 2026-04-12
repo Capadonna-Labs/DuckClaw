@@ -68,8 +68,6 @@ _FALLBACK_IMAGE = "python:3.11-slim"
 _SANDBOX_MEMORY = "512m"
 _SANDBOX_TIMEOUT = 30          # segundos de timeout por ejecución
 _MAX_RETRIES_DEFAULT = 3
-# Adjuntos Telegram (sendDocument): extensiones admitidas para rutas en host.
-_SANDBOX_TELEGRAM_DOCUMENT_SUFFIXES = frozenset({".txt", ".md", ".csv", ".xlsx"})
 
 # Directorio base de sesiones en el host
 _TMP_BASE = Path(tempfile.gettempdir()) / "duckclaw_sandbox"
@@ -650,114 +648,6 @@ def _decoded_figure_looks_like_png_or_jpeg(b64: str) -> bool:
     return False
 
 
-def _collect_sandbox_telegram_document_paths(artifacts: list[str] | None) -> list[str]:
-    """Rutas absolutas de artefactos .txt/.md/.csv/.xlsx existentes; orden por nombre."""
-    if not artifacts:
-        return []
-    doc_paths: list[Path] = []
-    for art in artifacts:
-        ap = Path(str(art))
-        if ap.suffix.lower() in _SANDBOX_TELEGRAM_DOCUMENT_SUFFIXES and ap.is_file():
-            doc_paths.append(ap)
-    doc_paths.sort(key=lambda p: p.name)
-    return [str(p.resolve()) for p in doc_paths]
-
-
-def extract_latest_sandbox_document_paths(messages: list[Any] | None) -> list[str]:
-    """
-    Última lista de rutas de documentos entregables del último ``run_sandbox`` con exit_code 0.
-    Prefiere ``sandbox_document_paths`` en el JSON; si falta, filtra ``artifacts``.
-    """
-    if not messages:
-        return []
-    try:
-        from langchain_core.messages import ToolMessage
-    except ImportError:
-        return []
-
-    last_list: list[str] = []
-    for m in messages:
-        if not isinstance(m, ToolMessage):
-            continue
-        if getattr(m, "name", None) != "run_sandbox":
-            continue
-        raw = m.content
-        if raw is None:
-            continue
-        s = raw if isinstance(raw, str) else str(raw)
-        s = s.strip()
-        if not s.startswith("{"):
-            continue
-        try:
-            data = json.loads(s)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(data, dict):
-            continue
-        if data.get("exit_code") != 0:
-            continue
-        paths = data.get("sandbox_document_paths")
-        if isinstance(paths, list):
-            acc = [str(x).strip() for x in paths if isinstance(x, str) and str(x).strip()]
-            if acc:
-                last_list = acc
-                continue
-        arts = data.get("artifacts")
-        if isinstance(arts, list):
-            coll = _collect_sandbox_telegram_document_paths([str(x) for x in arts if isinstance(x, str)])
-            if coll:
-                last_list = coll
-    return last_list
-
-
-def extract_latest_sandbox_figures_base64(messages: list[Any] | None) -> list[str]:
-    """
-    Como extract_latest_sandbox_figure_base64, pero devuelve todas las figuras válidas del último
-    ``run_sandbox`` exitoso (clave ``figures_base64``), o una lista de un elemento si solo hay ``figure_base64``.
-    """
-    if not messages:
-        return []
-    try:
-        from langchain_core.messages import ToolMessage
-    except ImportError:
-        return []
-
-    last_list: list[str] = []
-    for m in messages:
-        if not isinstance(m, ToolMessage):
-            continue
-        if getattr(m, "name", None) != "run_sandbox":
-            continue
-        raw = m.content
-        if raw is None:
-            continue
-        s = raw if isinstance(raw, str) else str(raw)
-        s = s.strip()
-        if not s.startswith("{"):
-            continue
-        try:
-            data = json.loads(s)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(data, dict):
-            continue
-        if data.get("exit_code") != 0:
-            continue
-        figs = data.get("figures_base64")
-        if isinstance(figs, list):
-            acc: list[str] = []
-            for b64 in figs:
-                if isinstance(b64, str) and _decoded_figure_looks_like_png_or_jpeg(b64):
-                    acc.append(b64)
-            if acc:
-                last_list = acc
-                continue
-        b64 = data.get("figure_base64")
-        if isinstance(b64, str) and _decoded_figure_looks_like_png_or_jpeg(b64):
-            last_list = [b64]
-    return last_list
-
-
 def extract_latest_sandbox_figure_base64(messages: list[Any] | None) -> str | None:
     """
     Recorre mensajes del worker (p. ej. ToolMessage de run_sandbox) y devuelve el último
@@ -1250,29 +1140,17 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "output": result.stdout or result.stderr,
             "stdout": result.stdout or "",
             "figure_base64": None,
-            "figures_base64": [],
         }
         if result.artifacts:
             out["artifacts"] = result.artifacts
-            png_paths: list[Path] = []
             for art in result.artifacts:
                 ap = Path(str(art))
                 if ap.suffix.lower() == ".png" and ap.is_file():
-                    png_paths.append(ap)
-            png_paths.sort(key=lambda p: p.name)
-            encoded: list[str] = []
-            for ap in png_paths:
-                try:
-                    encoded.append(base64.standard_b64encode(ap.read_bytes()).decode("ascii"))
-                except OSError:
-                    continue
-            if encoded:
-                out["figures_base64"] = encoded
-                out["figure_base64"] = encoded[0]
-            if result.exit_code == 0:
-                docs = _collect_sandbox_telegram_document_paths(result.artifacts)
-                if docs:
-                    out["sandbox_document_paths"] = docs
+                    try:
+                        out["figure_base64"] = base64.standard_b64encode(ap.read_bytes()).decode("ascii")
+                        break
+                    except OSError:
+                        continue
         if result.timed_out:
             out["warning"] = "Timeout alcanzado"
         if result.attempts > 1:
@@ -1304,10 +1182,8 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
         name="run_sandbox",
         description=(
             "Ejecuta código Python o Bash en un sandbox Docker aislado (sin acceso a red ni al host). "
-            "Usa cuando el usuario pida ejecutar scripts, análisis complejos, modelos, gráficos dinámicos, "
-            "exportar .xlsx/.csv/.txt/.md o código libre. "
+            "Usa cuando el usuario pida ejecutar scripts, análisis complejos, modelos, gráficos dinámicos o código libre. "
             "Para PNG con matplotlib: guardar en /workspace/output/ con savefig(dpi=100, facecolor='white', edgecolor='none'). "
-            "Para Excel/CSV u otros documentos: escribir bajo /workspace/output/ (p. ej. to_excel); con exit_code 0 el gateway puede adjuntarlos por Telegram. "
             "Parámetros: code (str), language ('python'|'bash'), data_sql (SQL para inyectar datos), session_id (str), worker_id (str opcional para política)."
         ),
     )

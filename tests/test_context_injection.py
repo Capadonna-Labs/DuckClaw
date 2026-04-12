@@ -124,33 +124,6 @@ def test_resolve_context_add_body_with_vlm_enrichment() -> None:
     assert _resolve_context_add_body(raw_caption="/hola", current_text=enriched) == (False, "")
 
 
-def test_resolve_context_add_body_with_pdf_gateway_enrichment() -> None:
-    """Tras extracción PDF (o META sin texto), el cuerpo inyectado debe ser el mensaje enriquecido completo."""
-    sys.path.insert(0, str(_REPO / "services" / "api-gateway"))
-    from routers.telegram_inbound_webhook import _resolve_context_add_body  # noqa: PLC0415
-
-    enriched = (
-        "/context --add este es mi cv\n\n"
-        "[CONTENIDO_TEXTO_EXTRAIDO_PDF]\n"
-        "Juan Pérez — Ingeniero de software\n"
-    )
-    ok, body = _resolve_context_add_body(
-        raw_caption="/context --add este es mi cv",
-        current_text=enriched,
-    )
-    assert ok and body == enriched.strip()
-
-    meta_only = (
-        "[META: ATTACHED_DOCUMENT_NOT_PARSED mime=application/pdf] "
-        "Solo caption.\n\n/context --add nota"
-    )
-    ok2, body2 = _resolve_context_add_body(
-        raw_caption="/context --add nota",
-        current_text=meta_only,
-    )
-    assert ok2 and body2 == meta_only.strip()
-
-
 def test_fetch_semantic_memory_snapshot_empty_and_rows(tmp_path: Path) -> None:
     sys.path.insert(0, str(_REPO / "services" / "api-gateway"))
     from core.context_stored_snapshot import fetch_semantic_memory_snapshot  # noqa: PLC0415

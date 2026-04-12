@@ -313,6 +313,39 @@ def test_call_gemini_vision_parses_httpx_response() -> None:
     assert call_kw[1].get("params", {}).get("key") == "fake"
 
 
+def test_mlx_vlm_local_disabled_by_vlm_mlx_disable_local_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_VLM_DISABLE_LOCAL_MLX_VLM", raising=False)
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_DISABLE_LOCAL", raising=False)
+    monkeypatch.setenv("VLM_MLX_DISABLE_LOCAL", "1")
+    assert vlm_mod._mlx_vlm_local_enabled() is False
+    assert vlm_mod._try_mlx_vlm_local_before_http() is False
+
+
+def test_mlx_http_base_url_prefers_vlm_mlx_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_BASE_URL", raising=False)
+    monkeypatch.setenv("VLM_MLX_BASE_URL", "http://127.0.0.1:8080/v1")
+    assert vlm_mod._mlx_http_base_url() == "http://127.0.0.1:8080/v1"
+
+
+def test_mlx_http_base_url_duckclaw_wins_over_vlm_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_VLM_MLX_BASE_URL", "http://10.0.0.1:9000/v1")
+    monkeypatch.setenv("VLM_MLX_BASE_URL", "http://127.0.0.1:8080/v1")
+    assert vlm_mod._mlx_http_base_url() == "http://10.0.0.1:9000/v1"
+
+
+def test_httpx_trust_env_false_for_loopback_openai_base() -> None:
+    assert vlm_mod._httpx_trust_env_for_openai_base("http://127.0.0.1:8080/v1") is False
+    assert vlm_mod._httpx_trust_env_for_openai_base("http://localhost:9000/v1") is False
+    assert vlm_mod._httpx_trust_env_for_openai_base("https://api.openai.com/v1") is True
+
+
+def test_mlx_http_base_url_uses_mlx_port_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_BASE_URL", raising=False)
+    monkeypatch.delenv("VLM_MLX_BASE_URL", raising=False)
+    monkeypatch.setenv("MLX_PORT", "8080")
+    assert vlm_mod._mlx_http_base_url() == "http://127.0.0.1:8080/v1"
+
+
 def test_vlm_backend_order_openai_primary_without_key_falls_back_mlx_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -328,6 +361,45 @@ def test_suffix_for_mime() -> None:
     assert vlm_mod._suffix_for_mime("image/jpeg") == ".jpg"
     assert vlm_mod._suffix_for_mime("image/png") == ".png"
     assert vlm_mod._suffix_for_mime("image/webp") == ".webp"
+
+
+def test_mlx_vlm_model_id_explicit_overrides_gemma_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_VLM_MODEL", raising=False)
+    monkeypatch.delenv("MLX_VLM_MODEL", raising=False)
+    monkeypatch.delenv("MLX_GEMMA4_MODEL_PATH", raising=False)
+    monkeypatch.delenv("MLX_MODEL_ID", raising=False)
+    monkeypatch.delenv("MLX_MODEL_PATH", raising=False)
+    assert vlm_mod._mlx_vlm_model_id() == "mlx-community/gemma-4-e4b-it-4bit"
+
+
+def test_mlx_vlm_model_id_respects_mlx_gemma4_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_VLM_MODEL", raising=False)
+    monkeypatch.delenv("MLX_VLM_MODEL", raising=False)
+    monkeypatch.setenv("MLX_GEMMA4_MODEL_PATH", "/opt/models/gemma4-e4b")
+    assert vlm_mod._mlx_vlm_model_id() == "/opt/models/gemma4-e4b"
+
+
+def test_mlx_vlm_model_id_respects_explicit_vlm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_VLM_MLX_VLM_MODEL", "mlx-community/llava-v1.6-mistral-7b-4bit")
+    assert vlm_mod._mlx_vlm_model_id() == "mlx-community/llava-v1.6-mistral-7b-4bit"
+
+
+def test_vlm_exception_for_log_never_empty_on_blank_message() -> None:
+    assert "Exception" in vlm_mod.vlm_exception_for_log(Exception(""))
+    assert "sin mensaje" in vlm_mod.vlm_exception_for_log(Exception(""))
+
+
+def test_mlx_http_vision_model_ignores_text_only_mlx_model_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PM2 suele fijar MLX_MODEL_ID al LLM de texto (Slayer); VLM HTTP debe usar Gemma por defecto."""
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_MODEL", raising=False)
+    monkeypatch.delenv("MLX_VISION_MODEL", raising=False)
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_VLM_MODEL", raising=False)
+    monkeypatch.delenv("MLX_VLM_MODEL", raising=False)
+    monkeypatch.delenv("MLX_GEMMA4_MODEL_PATH", raising=False)
+    monkeypatch.setenv("MLX_MODEL_ID", "/models/Slayer-8B-V1.1")
+    assert vlm_mod._mlx_http_vision_model() == "mlx-community/gemma-4-e4b-it-4bit"
 
 
 def test_mlx_vlm_processor_repo_maps_llava_mlx_to_hf(monkeypatch: pytest.MonkeyPatch) -> None:

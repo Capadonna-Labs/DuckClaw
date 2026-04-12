@@ -2,7 +2,8 @@
 # Ejecutar en Mac: bash -s < scripts/remote_inspect_db.sh
 # O: ssh user@mac 'bash -s' < scripts/remote_inspect_db.sh
 set -e
-cd /Users/juanjosearevalocamargo/Desktop/duckclaw
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${DUCKCLAW_REPO_ROOT:-$REPO_ROOT}"
 DB=db/telegram.duckdb
 export PATH="/opt/homebrew/bin:$PATH"
 .venv/bin/python3 << 'PY'

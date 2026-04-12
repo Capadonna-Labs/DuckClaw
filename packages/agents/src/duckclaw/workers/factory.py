@@ -18,7 +18,7 @@ from urllib import request as _urllib_request
 
 _log = logging.getLogger(__name__)
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
 
@@ -149,13 +149,6 @@ def _is_finanz_local_account_write_query(text: str) -> bool:
         )
     ):
         return False
-    # Gasto / presupuesto / efectivo local (DuckDB): no requiere verbos tipo "actualizar".
-    if re.search(r"\b(registra|registrar)\b", t) and "gasto" in t:
-        return True
-    if re.search(r"\b(resta|restar|restás|reste|disminuye|disminuir|rebaja|rebajar)\b", t) and (
-        "presupuesto" in t or "efectivo" in t or "categor" in t
-    ):
-        return True
     if not re.search(
         r"\b(actualiza|actualizar|cambia|cambiar|modifica|modificar|ajusta|ajustar|"
         r"pone|poner|ponga|pon\b|establece|establecer|fija|fijar|deja|dejar|corrige|corregir|"
@@ -187,199 +180,6 @@ def _is_finanz_local_account_write_query(text: str) -> bool:
     ):
         return True
     return False
-
-
-def _finanz_local_mutation_anchor_message(incoming: str) -> str:
-    """
-    Directiva reinyectada en cada paso del agente cuando hay intención de mutación local,
-    para evitar que el modelo sustituya montos/descripciones/cuenta por ejemplos del historial o del pre-entrenamiento.
-    """
-    raw = (incoming or "").strip()
-    if not raw:
-        return ""
-    body = raw[:900]
-    return (
-        "[FINANZ_LOCAL_MUTATION_ANCHOR] La tarea activa debe cumplirse con los datos del usuario de abajo; "
-        "cada INSERT/UPDATE debe ser coherente con ese texto.\n"
-        "- Monto: usa solo el importe que indique el usuario (p. ej. «6k» → 6000 en COP si no dice otra moneda). "
-        "Prohibido usar otros montos de memoria o ejemplos (p. ej. 50000, 20000).\n"
-        "- Descripción: refleja el concepto que dio el usuario (p. ej. «weed»), no inventes otro gasto («internet», «servicios») "
-        "si no aparece en su mensaje.\n"
-        "- Si nombra **efectivo** / «cuenta de efectivo», el ajuste de saldo es sobre la fila de `finance_worker.cuentas` "
-        "cuyo `name` coincide con Efectivo (`ILIKE '%Efectivo%'`), no Bancolombia u otro banco salvo que el usuario lo haya dicho.\n"
-        "- «Presupuesto de recreación» / recreación: categoría **Recreacion** (obtén `category_id` con **una** llamada a "
-        "`list_categories` o con `read_sql`/`admin_sql`); no Internet/Spotify u otra si el usuario no la mencionó.\n"
-        "- **No repitas** `list_categories` si ya recibiste la lista o el id en este hilo; el siguiente paso es "
-        "`insert_transaction` y luego los `UPDATE` de cuenta/presupuesto.\n"
-        "- Presupuesto mensual: año y mes **actuales** (EXTRACT(YEAR|MONTH FROM CURRENT_DATE)) salvo que el usuario fije otra fecha explícitamente.\n"
-        "Texto del usuario:\n"
-        f"{body}"
-    )
-
-
-def _insert_system_after_leading_systems(messages: list[Any], system_extra: Any) -> list[Any]:
-    """Inserta un SystemMessage tras el bloque inicial de SystemMessage(s), antes de Human/AI/Tool (contrato tool-use)."""
-    from langchain_core.messages import SystemMessage
-
-    if system_extra is None:
-        return list(messages)
-    if not messages:
-        return [system_extra]
-    i = 0
-    while i < len(messages) and isinstance(messages[i], SystemMessage):
-        i += 1
-    return list(messages[:i]) + [system_extra] + list(messages[i:])
-
-
-def _finanz_parse_local_expense_intent(text: str) -> Optional[dict[str, Any]]:
-    """
-    Extrae monto COP (p. ej. 6k → 6000) y pistas de descripción / recreación desde el mensaje del usuario.
-    Solo para overrides determinísticos cuando el LLM repite plantillas (50k internet).
-    """
-    if not text or not str(text).strip():
-        return None
-    raw = str(text).strip()
-    tl = raw.lower()
-    if not _is_finanz_local_account_write_query(raw):
-        return None
-    amount_cop: Optional[int] = None
-    mk = re.search(r"\b(\d+)\s*k\b", tl, re.IGNORECASE)
-    if mk:
-        amount_cop = int(mk.group(1)) * 1000
-    if amount_cop is None:
-        mc = re.search(r"\b(\d[\d\.,]*)\s*(?:cop|pesos?)\b", tl, re.IGNORECASE)
-        if mc:
-            raw_num = mc.group(1).replace(".", "").replace(",", "")
-            if raw_num.isdigit():
-                amount_cop = int(raw_num)
-    if amount_cop is None:
-        mdn = re.search(r"\bgast[oa]\s+de\s+(\d[\d\.,]*)\b", tl, re.IGNORECASE)
-        if mdn:
-            raw_num = mdn.group(1).replace(".", "").replace(",", "")
-            if raw_num.isdigit():
-                amount_cop = int(raw_num)
-    if amount_cop is None:
-        return None
-    desc: Optional[str] = None
-    md = re.search(
-        r"\ben\s+([a-záéíóúñ0-9][a-záéíóúñ0-9\s]{1,80}?)(?:[.,;]|$)",
-        tl,
-        re.IGNORECASE,
-    )
-    if md:
-        desc = re.sub(r"\s+", " ", md.group(1)).strip()
-        for cut in (" y de la ", " y del ", " y ", " del presupuesto", " de la cuenta", " del saldo"):
-            if cut in desc:
-                desc = desc.split(cut, 1)[0].strip()
-        desc = desc[:120]
-    recreation = ("recreación" in raw.lower()) or ("recreacion" in tl) or ("recreaci" in tl)
-    return {
-        "amount_cop": amount_cop,
-        "description": desc,
-        "recreation_budget": recreation,
-    }
-
-
-def _finanz_resolve_recreation_category_id(db: Any, schema: str) -> Optional[int]:
-    """Id numérico de la categoría cuyo nombre contiene 'recreac' (p. ej. Recreacion)."""
-    try:
-        q = (
-            f"SELECT id FROM {schema}.categories WHERE lower(name) ILIKE '%recreac%' "
-            "ORDER BY id LIMIT 1"
-        )
-        r = db.query(q)
-        rows = json.loads(r) if isinstance(r, str) else (r or [])
-        if rows and isinstance(rows[0], dict) and rows[0].get("id") is not None:
-            return int(rows[0]["id"])
-    except Exception:
-        return None
-    return None
-
-
-def _finanz_patch_admin_sql_for_user_expense(
-    sql: str,
-    *,
-    amount: int,
-    recreation_category_id: Optional[int],
-    recreation_budget: bool,
-) -> str:
-    """Corrige montos/categoría/fecha típicos alucinados en UPDATE locales."""
-    s = sql or ""
-    if not s.strip():
-        return s
-    low = s.lower()
-    # Montos: sustituir 50000 (plantilla frecuente) por el monto del usuario
-    if amount and "50000" in s:
-        s = re.sub(r"\b50000\b", str(int(amount)), s)
-    if recreation_budget and "presupuestos" in low:
-        # Si el UPDATE no encuentra fila del mes, ON CONFLICT garantiza aplicar el descuento igual.
-        if "update finance_worker.presupuestos" in low:
-            _cat_expr = (
-                str(int(recreation_category_id))
-                if recreation_category_id is not None
-                else "(SELECT id FROM finance_worker.categories WHERE lower(name) ILIKE '%recreac%' ORDER BY id LIMIT 1)"
-            )
-            return (
-                "INSERT INTO finance_worker.presupuestos (category_id, amount, year, month)\n"
-                f"VALUES ({_cat_expr}, {-int(amount)}, "
-                "CAST(strftime('%Y', CURRENT_DATE) AS INTEGER), CAST(strftime('%m', CURRENT_DATE) AS INTEGER))\n"
-                "ON CONFLICT(category_id, year, month)\n"
-                f"DO UPDATE SET amount = finance_worker.presupuestos.amount - {int(amount)}"
-            )
-        if recreation_category_id is not None:
-            s = re.sub(
-                r"category_id\s*=\s*8\b",
-                f"category_id = {int(recreation_category_id)}",
-                s,
-                flags=re.IGNORECASE,
-            )
-        s = re.sub(
-            r"year\s*=\s*\d+\s+AND\s+month\s*=\s*\d+",
-            "year = CAST(strftime('%Y', CURRENT_DATE) AS INTEGER) "
-            "AND month = CAST(strftime('%m', CURRENT_DATE) AS INTEGER)",
-            s,
-            flags=re.IGNORECASE,
-        )
-    return s
-
-
-def _finanz_override_local_expense_tool_args(
-    *,
-    tool_name: str,
-    args: dict[str, Any],
-    incoming: str,
-    db: Any,
-    schema: str,
-) -> dict[str, Any]:
-    """Aplica montos/descripción/categoría del mensaje del usuario a insert_transaction / admin_sql."""
-    parsed = _finanz_parse_local_expense_intent(incoming)
-    if not parsed:
-        return args
-    amt = int(parsed["amount_cop"])
-    neg = -abs(amt)
-    rec_id = _finanz_resolve_recreation_category_id(db, schema) if parsed.get("recreation_budget") else None
-    out = dict(args)
-    _did = False
-    if tool_name == "insert_transaction":
-        out["amount"] = float(neg)
-        if parsed.get("description"):
-            out["description"] = str(parsed["description"])[:500]
-        if rec_id is not None:
-            out["category_id"] = int(rec_id)
-        _did = True
-    elif tool_name == "admin_sql":
-        q = str(out.get("query") or "")
-        if q.strip():
-            new_q = _finanz_patch_admin_sql_for_user_expense(
-                q,
-                amount=amt,
-                recreation_category_id=rec_id,
-                recreation_budget=bool(parsed.get("recreation_budget")),
-            )
-            if new_q != q:
-                out["query"] = new_q
-                _did = True
-    return out
 
 
 def _is_finanz_local_accounts_query(text: str) -> bool:
@@ -767,46 +567,12 @@ def _apply_mlx_message_budget(messages: list[Any], *, provider: str) -> list[Any
     )
 
 
-def _deepseek_max_estimated_input_tokens() -> int:
-    """Tope estimado (chars/4) hacia DeepSeek; evita payloads enormes + tools (MCP Reddit)."""
-    raw = (os.environ.get("DUCKCLAW_DEEPSEEK_MAX_INPUT_TOKENS") or "").strip()
-    if raw:
-        try:
-            return max(4000, min(int(raw), 120_000))
-        except ValueError:
-            pass
-    return 10000
-
-
-def _deepseek_tool_message_max_chars() -> int:
-    raw = (os.environ.get("DUCKCLAW_DEEPSEEK_TOOL_MESSAGE_MAX_CHARS") or "").strip()
-    if raw:
-        try:
-            return max(400, min(int(raw), 200_000))
-        except ValueError:
-            pass
-    return 8000
-
-
-def _apply_deepseek_message_budget(messages: list[Any], *, provider: str) -> list[Any]:
-    if (provider or "").strip().lower() != "deepseek" or not messages:
-        return messages
-    return _trim_messages_to_estimated_cap(
-        messages,
-        cap=_deepseek_max_estimated_input_tokens(),
-        tool_cap=_deepseek_tool_message_max_chars(),
-        note_brand="DEEPSEEK",
-    )
-
-
 def _apply_provider_input_budget(messages: list[Any], *, provider: str) -> list[Any]:
-    """Recorte de contexto por proveedor (Groq TPM / MLX VRAM / DeepSeek payloads)."""
+    """Recorte de contexto por proveedor (Groq TPM / MLX VRAM)."""
     pl = (provider or "").strip().lower()
     m = messages
     if pl == "groq":
         m = _apply_groq_message_budget(m, provider=provider)
-    elif pl == "deepseek":
-        m = _apply_deepseek_message_budget(m, provider=provider)
     elif pl in ("mlx", "iotcorelabs"):
         m = _apply_mlx_message_budget(m, provider=provider)
     return m
@@ -934,9 +700,8 @@ def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -
 
 def _compact_run_sandbox_tool_content_for_llm(content: str, max_chars: int) -> str:
     """
-    El JSON de run_sandbox incluye figure_base64 / figures_base64 (grandes) y sandbox_document_paths
-    (rutas largas del host). Para el LLM se omiten/sustituyen; las imágenes viven en
-    state['sandbox_photo_base64'] y state['sandbox_photos_base64']; las rutas en state['sandbox_document_paths'].
+    El JSON de run_sandbox incluye figure_base64 (cientos de KB). Para el LLM se omite ese campo
+    y se acorta el resto; el PNG real vive en state['sandbox_photo_base64'] (tools_node).
     """
     c = content or ""
     s = c.strip()
@@ -949,20 +714,8 @@ def _compact_run_sandbox_tool_content_for_llm(content: str, max_chars: int) -> s
     if not isinstance(data, dict):
         return c[:max_chars] + "\n…[truncado por tamaño]"
     if data.get("figure_base64"):
+        # Quitar del JSON para el LLM; el PNG real sigue en state['sandbox_photo_base64'] (tools_node).
         data.pop("figure_base64", None)
-    if data.get("figures_base64"):
-        data.pop("figures_base64", None)
-    doc_paths = data.get("sandbox_document_paths")
-    if isinstance(doc_paths, list) and doc_paths:
-        data.pop("sandbox_document_paths", None)
-        from pathlib import Path as _Path
-
-        names = []
-        for x in doc_paths:
-            if isinstance(x, str) and str(x).strip():
-                names.append(_Path(str(x).strip()).name)
-        if names:
-            data["sandbox_document_names"] = names
     for key in ("output", "stdout", "stderr"):
         if key in data and isinstance(data[key], str) and len(data[key]) > 4000:
             data[key] = data[key][:4000] + "…[truncado]"
@@ -1438,6 +1191,7 @@ class WorkerFactory:
             llm_model=llm_model,
             llm_base_url=llm_base_url,
             shared_db_path=shared_db_path,
+            tool_surface="full",
         )
 
 
@@ -1453,6 +1207,7 @@ def build_worker_graph(
     llm_base_url: Optional[str] = None,
     shared_db_path: Optional[str] = None,
     reuse_db: Any | None = None,
+    tool_surface: Literal["full", "context_synthesis"] = "full",
 ) -> Any:
     """
     Build a compiled LangGraph for a worker. Used by AgentAssembler._build_worker
@@ -1465,6 +1220,9 @@ def build_worker_graph(
     para que workers con ``read_only: false`` puedan INSERT en quant_core.*.
     Si hace falta ``shared``, se abre otra conexión para no pisar el estado ATTACH entre
     workers distintos en caché.
+
+    ``tool_surface=context_synthesis``: turnos con directivas ``SUMMARIZE_*`` del gateway;
+    omite bridges MCP stdio (GitHub, Reddit, Google Trends) para reducir cold start.
     """
     spec = load_manifest(worker_id, templates_root)
     path = _get_db_path(worker_id, instance_name, db_path)
@@ -1500,26 +1258,28 @@ def build_worker_graph(
 
     system_prompt = load_system_prompt(spec)
     tools = _build_worker_tools(db, spec)
-    if getattr(spec, "github_config", None):
-        try:
-            from duckclaw.forge.skills.github_bridge import register_github_skill
-            register_github_skill(tools, spec.github_config)
-        except Exception:
-            pass
-    if getattr(spec, "reddit_config", None):
-        try:
-            from duckclaw.forge.skills.reddit_bridge import register_reddit_skill
+    if tool_surface == "full":
+        if getattr(spec, "github_config", None):
+            try:
+                from duckclaw.forge.skills.github_bridge import register_github_skill
 
-            register_reddit_skill(tools, spec.reddit_config)
-        except Exception:
-            pass
-    if getattr(spec, "google_trends_config", None) is not None:
-        try:
-            from duckclaw.forge.skills.google_trends_bridge import register_google_trends_skill
+                register_github_skill(tools, spec.github_config)
+            except Exception:
+                pass
+        if getattr(spec, "reddit_config", None):
+            try:
+                from duckclaw.forge.skills.reddit_bridge import register_reddit_skill
 
-            register_google_trends_skill(tools, spec.google_trends_config)
-        except Exception:
-            pass
+                register_reddit_skill(tools, spec.reddit_config)
+            except Exception:
+                pass
+        if getattr(spec, "google_trends_config", None) is not None:
+            try:
+                from duckclaw.forge.skills.google_trends_bridge import register_google_trends_skill
+
+                register_google_trends_skill(tools, spec.google_trends_config)
+            except Exception:
+                pass
     tools_by_name = {t.name: t for t in tools}
 
     # Inferencia Elástica (Hardware-Aware): si el manifest tiene inference y no se pasó provider/model/base_url explícito, detectar hardware
@@ -1546,29 +1306,9 @@ def build_worker_graph(
         model = (llm_model or os.environ.get("DUCKCLAW_LLM_MODEL") or "").strip()
         base_url = (llm_base_url or os.environ.get("DUCKCLAW_LLM_BASE_URL") or "").strip()
 
-    # Si el turno debe usar MLX/IoT local (triplet o env fusionado) pero el objeto LLM heredado apunta
-    # a un host remoto (p. ej. Groq vía _graph_state), reconstruir desde provider/model/base_url; si no,
-    # el worker invoca Groq con model=/ruta/local y aparece el error HF «Repo id must be…».
-    if llm is not None and provider in ("mlx", "iotcorelabs"):
-        from duckclaw.integrations.llm_providers import infer_provider_from_openai_compatible_llm
-
-        _inf_host = (infer_provider_from_openai_compatible_llm(llm) or "").strip().lower()
-        if _inf_host and _inf_host not in ("mlx", "iotcorelabs"):
-            _log.warning(
-                "build_worker_graph: cliente LLM inferido=%s no coincide con triplet local declarado; "
-                "reconstruyendo desde provider=%s model=%s…",
-                _inf_host,
-                provider,
-                (model or "")[:48],
-            )
-            llm = None
-
     if llm is None and provider != "none_llm":
         from duckclaw.integrations.llm_providers import build_llm
-
-        # Ya fusionamos llm_provider/model/base_url con env arriba; prefer_env_provider=False
-        # evita que build_llm vuelva a imponer DUCKCLAW_LLM_* y anule /model (mlx en chat vs groq en PM2).
-        llm = build_llm(provider, model, base_url, prefer_env_provider=False)
+        llm = build_llm(provider, model, base_url)
     elif llm is None:
         llm = None
 
@@ -1634,14 +1374,6 @@ def build_worker_graph(
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             _log.debug("quant skills registration skipped", exc_info=True)
-    if isinstance(_qcfg, dict) and _qcfg.get("enabled") and _lid_q in ("quant_trader", "quanttrader"):
-        try:
-            from duckclaw.forge.skills.quant_trader_bridge import register_quant_trader_skills
-
-            register_quant_trader_skills(db, llm, tools)
-            tools_by_name = {t.name: t for t in tools}
-        except Exception:
-            _log.debug("quant trader skills registration skipped", exc_info=True)
 
     if getattr(spec, "sft_config", None):
         try:
@@ -1864,17 +1596,14 @@ def build_worker_graph(
     tools_sandbox_off = filter_tools_for_sandbox(tools, enabled=False)
     tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}
 
-    # Groq (TPM) y DeepSeek (runtime: petición masiva con MCP Reddit → 400 spurious "Model Not Exist"):
-    # en rutas genéricas se omite reddit_*; rutas forzadas Reddit siguen con `tools` completos.
-    _slim_reddit_for_bind = (provider or "").strip().lower() in ("groq", "deepseek")
-    _tools_for_llm_bind = _groq_tools_without_reddit_for_bind(tools) if _slim_reddit_for_bind else tools
+    _groq_bind = (provider or "").strip().lower() == "groq"
+    _tools_for_llm_bind = _groq_tools_without_reddit_for_bind(tools) if _groq_bind else tools
     _tools_sandbox_off_bind = (
-        _groq_tools_without_reddit_for_bind(tools_sandbox_off) if _slim_reddit_for_bind else tools_sandbox_off
+        _groq_tools_without_reddit_for_bind(tools_sandbox_off) if _groq_bind else tools_sandbox_off
     )
-    if _slim_reddit_for_bind:
+    if _groq_bind:
         _log.info(
-            "%s: bind genérico sin reddit_* (%d tools; forzados Reddit/otros usan set acorde).",
-            (provider or "").strip().lower() or "llm",
+            "Groq: bind genérico sin reddit_* (%d tools; forzados Reddit/otros usan set acorde).",
             len(_tools_for_llm_bind),
         )
 
@@ -1894,23 +1623,9 @@ def build_worker_graph(
 
         # Cache de re-ligado por modo (evita re-bind costoso por chat/turno).
         # parallel_tool_calls=True en APIs OpenAI-compat (incl. MLX): permite varias tool_calls en un turno.
-        # Groq (~12k TPM) y DeepSeek: rutas genéricas sin reddit_* (ver _slim_reddit_for_bind); Reddit forzado usa `tools` completo.
+        # Groq (~12k TPM): rutas genéricas sin reddit_* (ver _tools_for_llm_bind); Reddit forzado usa `tools` completo.
         llm_with_tools_on = _bind_tools(llm, _tools_for_llm_bind)
         llm_with_tools_off = _bind_tools(llm, _tools_sandbox_off_bind)
-        # Finanz: mutaciones locales (gasto/presupuesto) — bind sin IBKR ni ingesta mercado (evita bucle read_sql↔get_ibkr_portfolio y llamadas espurias a fetch_market_data/CFD).
-        _FINANZ_LOCAL_MUT_EXCLUDE = frozenset({"get_ibkr_portfolio", "fetch_market_data", "fetch_lake_ohlcv"})
-        _finanz_local_mut_bind_on = [
-            t for t in _tools_for_llm_bind if getattr(t, "name", None) not in _FINANZ_LOCAL_MUT_EXCLUDE
-        ]
-        _finanz_local_mut_bind_off = [
-            t for t in _tools_sandbox_off_bind if getattr(t, "name", None) not in _FINANZ_LOCAL_MUT_EXCLUDE
-        ]
-        if (_lid or "").strip().lower() == "finanz":
-            llm_with_tools_on_nibkr = _bind_tools(llm, _finanz_local_mut_bind_on)
-            llm_with_tools_off_nibkr = _bind_tools(llm, _finanz_local_mut_bind_off)
-        else:
-            llm_with_tools_on_nibkr = None
-            llm_with_tools_off_nibkr = None
 
         has_ibkr = "get_ibkr_portfolio" in tools_by_name
         has_read_sql = "read_sql" in tools_by_name
@@ -2019,13 +1734,6 @@ def build_worker_graph(
             if not text or not str(text).strip():
                 return False
             return bool(re.search(r"(?:reddit\.com|redd\.it)/", str(text), re.IGNORECASE))
-
-        def _incoming_has_generic_web_url(text: str) -> bool:
-            if not text or not str(text).strip():
-                return False
-            if _incoming_has_reddit_url(text):
-                return False
-            return bool(re.search(r"https?://[^\s)>\]\"']+", str(text), re.IGNORECASE))
 
         def _incoming_looks_like_reddit_post_url(text: str) -> bool:
             if not text or not str(text).strip():
@@ -2308,15 +2016,6 @@ def build_worker_graph(
             else:
                 force_tavily = False
 
-            force_tavily_context_url = bool(
-                (_lid or "").strip().lower() == "finanz"
-                and has_tavily
-                and "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in (incoming or "")
-                and _incoming_has_generic_web_url(incoming)
-                and not already_has_tool_result
-            )
-            force_tavily = bool(force_tavily or force_tavily_context_url)
-
             _reddit_anchor_u: Optional[str] = None
             if _incoming_has_reddit_url(incoming):
                 _reddit_anchor_u = _first_reddit_url_in_text(incoming)
@@ -2449,19 +2148,7 @@ def build_worker_graph(
                 return out
 
             sandbox_enabled = _sandbox_enabled_for_state(state)
-            _finanz_hide_ibkr_bind = bool(
-                (_lid or "").strip().lower() == "finanz"
-                and llm_with_tools_on_nibkr is not None
-                and not telegram_context_summarize_directive
-                and _is_finanz_local_account_write_query(incoming)
-                and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
-                and not is_portfolio
-            )
-            llm_with_tools = (
-                (llm_with_tools_on_nibkr if sandbox_enabled else llm_with_tools_off_nibkr)
-                if _finanz_hide_ibkr_bind
-                else (llm_with_tools_on if sandbox_enabled else llm_with_tools_off)
-            )
+            llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
             forced_name = (
                 "admin_sql"
                 if force_admin_sql
@@ -2516,17 +2203,6 @@ def build_worker_graph(
                         )
                     )
                 ] + _msg_list
-            if (
-                (str(_lid or "").strip().lower() == "finanz")
-                and not telegram_context_summarize_directive
-                and _is_finanz_local_account_write_query(incoming)
-            ):
-                _anchor_txt = _finanz_local_mutation_anchor_message(incoming)
-                if _anchor_txt:
-                    _before_n = len(_msg_list)
-                    _msg_list = _insert_system_after_leading_systems(
-                        _msg_list, SystemMessage(content=_anchor_txt)
-                    )
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             _invoked_llm: Any = llm_with_tools
             if force_admin_sql:
@@ -2628,19 +2304,7 @@ def build_worker_graph(
         new_msgs = list(messages)
         sandbox_enabled = _sandbox_enabled_for_state(state)
         tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
-        sandbox_b64: str | None = (
-            state.get("sandbox_photo_base64") if isinstance(state.get("sandbox_photo_base64"), str) else None
-        )
-        sandbox_photos_b64: list[str] = []
-        _prev_pl = state.get("sandbox_photos_base64")
-        if isinstance(_prev_pl, list):
-            sandbox_photos_b64 = [str(x).strip() for x in _prev_pl if isinstance(x, str) and str(x).strip()]
-        sandbox_document_paths: list[str] = []
-        _prev_docs = state.get("sandbox_document_paths")
-        if isinstance(_prev_docs, list):
-            sandbox_document_paths = [
-                str(x).strip() for x in _prev_docs if isinstance(x, str) and str(x).strip()
-            ]
+        sandbox_b64: str | None = state.get("sandbox_photo_base64") if isinstance(state.get("sandbox_photo_base64"), str) else None
         _hb_head = (state.get("subagent_instance_label") or "").strip() or None
         _hb_uname = (state.get("username") or "").strip() or None
         _hb_plan = (state.get("heartbeat_plan_title") or "").strip() or None
@@ -2737,21 +2401,10 @@ def build_worker_graph(
                     try:
                         _schedule_tool_heartbeat(name)
                         invoke_args: Any = args
-                        if isinstance(args, dict):
+                        if name in ("run_sandbox", "run_browser_sandbox") and isinstance(args, dict):
                             invoke_args = {**args}
-                        if name in ("run_sandbox", "run_browser_sandbox") and isinstance(invoke_args, dict):
                             if not str(invoke_args.get("worker_id") or "").strip():
                                 invoke_args["worker_id"] = worker_id
-                        if isinstance(invoke_args, dict) and (str(_lid or "").strip().lower() == "finanz"):
-                            _inc_ov = (state.get("incoming") or "").strip()
-                            _sch_ov = (getattr(spec, "schema_name", None) or "finance_worker").strip()
-                            invoke_args = _finanz_override_local_expense_tool_args(
-                                tool_name=name,
-                                args=invoke_args,
-                                incoming=_inc_ov,
-                                db=db,
-                                schema=_sch_ov,
-                            )
                         if (
                             name == "run_sandbox"
                             and _lid == "bi_analyst"
@@ -2763,44 +2416,15 @@ def build_worker_graph(
                             _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
                             if not is_chat_heartbeat_enabled(_htid, _hcid):
                                 _send_sandbox_heartbeat_telegram(state)
-                        try:
-                            from duckclaw.forge.skills.quant_tool_context import (
-                                set_quant_tool_chat_id,
-                                set_quant_tool_db_path,
-                                set_quant_tool_tenant_id,
-                                set_quant_tool_user_id,
-                            )
-
-                            set_quant_tool_chat_id(str(state.get("chat_id") or state.get("session_id") or ""))
-                            set_quant_tool_tenant_id(str(state.get("tenant_id") or "default"))
-                            set_quant_tool_user_id(str(state.get("user_id") or state.get("chat_id") or "default"))
-                            set_quant_tool_db_path(str(getattr(db, "_path", "") or ""))
-                        except Exception:
-                            pass
                         result = tool.invoke(invoke_args)
                         content = str(result) if result is not None else "OK"
                         if name in ("run_sandbox", "run_browser_sandbox"):
                             try:
                                 payload = json.loads(content)
                                 if isinstance(payload, dict) and payload.get("exit_code") == 0:
-                                    figs = payload.get("figures_base64")
-                                    if isinstance(figs, list):
-                                        sandbox_photos_b64 = [
-                                            str(x) for x in figs if isinstance(x, str) and len(str(x).strip()) > 32
-                                        ]
                                     fb = payload.get("figure_base64")
-                                    if sandbox_photos_b64:
-                                        sandbox_b64 = sandbox_photos_b64[0]
-                                    elif isinstance(fb, str) and len(fb) > 32:
+                                    if isinstance(fb, str) and len(fb) > 32:
                                         sandbox_b64 = fb
-                                        sandbox_photos_b64 = [fb]
-                                    sdp = payload.get("sandbox_document_paths")
-                                    if isinstance(sdp, list):
-                                        sandbox_document_paths = [
-                                            str(x).strip()
-                                            for x in sdp
-                                            if isinstance(x, str) and str(x).strip()
-                                        ]
                             except (json.JSONDecodeError, TypeError):
                                 pass
                             if not use_cm:
@@ -2832,12 +2456,8 @@ def build_worker_graph(
                     )
                 new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
         out: dict[str, Any] = {**state, "messages": new_msgs}
-        if sandbox_photos_b64:
-            out["sandbox_photos_base64"] = sandbox_photos_b64
         if sandbox_b64:
             out["sandbox_photo_base64"] = sandbox_b64
-        if sandbox_document_paths:
-            out["sandbox_document_paths"] = sandbox_document_paths
         out.update(_identity_fields(state))
         return out
 
@@ -2932,12 +2552,10 @@ def build_worker_graph(
         reply = sanitize_worker_reply_phase1(reply)
         if (getattr(spec, "worker_id", "") or "").strip().lower() == "finanz":
             from duckclaw.forge.skills.quant_market_bridge import (
-                finanz_reconcile_cuentas_placeholder_reply,
                 finanz_reconcile_reply_with_fetch_market_tool,
             )
 
             reply = finanz_reconcile_reply_with_fetch_market_tool(msgs, reply)
-            reply = finanz_reconcile_cuentas_placeholder_reply(msgs, reply)
         reply = format_reddit_mcp_reply_if_applicable(reply)
         suppress_egress = bool(state.get("suppress_subagent_egress"))
 
@@ -3057,22 +2675,6 @@ def build_worker_graph(
         except Exception:
             pass
         reply = sanitize_worker_reply_text(reply or "")
-        if not (reply or "").strip():
-            tool_content = ""
-            for _m in reversed(msgs):
-                if getattr(_m, "type", "") == "tool":
-                    tool_content = str(getattr(_m, "content", "") or "").strip()
-                    if tool_content:
-                        break
-            if tool_content:
-                try:
-                    from duckclaw.utils import format_tool_reply
-
-                    reply = sanitize_worker_reply_text(format_tool_reply(tool_content))
-                except Exception:
-                    reply = tool_content
-            if not (reply or "").strip():
-                reply = "No encontré resultados para responder en este turno."
         if suppress_egress:
             out = {**state, "reply": "", "internal_reply": (reply or ""), "messages": msgs}
         else:
@@ -3080,22 +2682,12 @@ def build_worker_graph(
         sb = (state.get("sandbox_photo_base64") or "").strip()
         if sb:
             out["sandbox_photo_base64"] = sb
-        sb_pl = state.get("sandbox_photos_base64")
-        if isinstance(sb_pl, list) and sb_pl:
-            out["sandbox_photos_base64"] = [str(x) for x in sb_pl if isinstance(x, str) and str(x).strip()]
-        sb_docs = state.get("sandbox_document_paths")
-        if isinstance(sb_docs, list) and sb_docs:
-            out["sandbox_document_paths"] = [str(x).strip() for x in sb_docs if isinstance(x, str) and str(x).strip()]
         out.update(_identity_fields(state))
         return out
 
     def should_continue(state: dict) -> str:
         last = state["messages"][-1]
-        _ptc = getattr(last, "tool_calls", None)
-        _ak_sc = getattr(last, "additional_kwargs", None) or {}
-        _ak_tc_sc = _ak_sc.get("tool_calls") if isinstance(_ak_sc, dict) else None
-        _branch = "tools" if _ptc else "end"
-        return _branch
+        return "tools" if getattr(last, "tool_calls", None) else "end"
 
     # Context-Guard (FactChecker + SelfCorrection) para workers con catalog_retriever
     context_guard_config = getattr(spec, "context_guard_config", None) or {}

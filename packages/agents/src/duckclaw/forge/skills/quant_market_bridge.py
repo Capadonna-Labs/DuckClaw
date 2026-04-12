@@ -24,7 +24,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple
 
 from duckclaw.utils.logger import log_tool_execution_sync
-from duckclaw.forge.skills.quant_tool_context import note_quant_market_evidence_ticker
 
 _log = logging.getLogger(__name__)
 
@@ -548,14 +547,7 @@ def _fetch_market_data_impl(
         )
         if yerr:
             return yerr
-        out = _upsert_bars(db, bars, vix_store, tf, lookback_days, "yfinance")
-        try:
-            data = json.loads(out)
-            if isinstance(data, dict) and data.get("status") == "ok":
-                note_quant_market_evidence_ticker(vix_store)
-        except Exception:
-            pass
-        return out
+        return _upsert_bars(db, bars, vix_store, tf, lookback_days, "yfinance")
 
     use_lake = _use_lake_ssh(tf_norm)
 
@@ -563,14 +555,7 @@ def _fetch_market_data_impl(
         payload, err = _run_lake_ssh_json(tkr, tf, lookback_days)
         if err:
             return err
-        out = _upsert_bars(db, payload, tkr, tf, lookback_days, "lake_ssh")
-        try:
-            data = json.loads(out)
-            if isinstance(data, dict) and data.get("status") == "ok":
-                note_quant_market_evidence_ticker(tkr)
-        except Exception:
-            pass
-        return out
+        return _upsert_bars(db, payload, tkr, tf, lookback_days, "lake_ssh")
 
     base = (os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()
     if not base:
@@ -592,14 +577,7 @@ def _fetch_market_data_impl(
         return err
     if payload is None:
         return json.dumps({"error": "Sin respuesta del gateway IBKR."}, ensure_ascii=False)
-    out = _upsert_bars(db, payload, tkr, tf, lookback_days, "ibkr_http")
-    try:
-        data = json.loads(out)
-        if isinstance(data, dict) and data.get("status") == "ok":
-            note_quant_market_evidence_ticker(tkr)
-    except Exception:
-        pass
-    return out
+    return _upsert_bars(db, payload, tkr, tf, lookback_days, "ibkr_http")
 
 
 def _finanz_reply_already_documents_successful_ingest(reply: str) -> bool:
@@ -620,160 +598,6 @@ def _finanz_reply_already_documents_successful_ingest(reply: str) -> bool:
     if "quant_core.ohlcv_data" in low and "filas" in low and "✅" in r:
         return True
     return False
-
-
-def _finanz_tool_message_body(m: Any) -> str:
-    content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
-    if isinstance(content, list):
-        try:
-            from duckclaw.integrations.llm_providers import lc_message_content_to_text
-
-            return lc_message_content_to_text(m)
-        except Exception:
-            return str(content)
-    if isinstance(content, str):
-        return content
-    return str(content or "")
-
-
-def _finanz_iter_tool_messages(messages: Any) -> list[tuple[str | None, str]]:
-    """(tool_name, body) en orden cronológico (último índice = más reciente)."""
-    seq = list(messages)[-120:] if len(messages) > 120 else list(messages)
-    out: list[tuple[str | None, str]] = []
-    for m in seq:
-        name: str | None = None
-        if isinstance(m, dict):
-            rrole = str(m.get("role") or m.get("type") or "").lower()
-            if rrole not in ("tool", "toolmessage"):
-                continue
-            name = m.get("name") if isinstance(m.get("name"), str) else None
-        else:
-            cls = type(m).__name__
-            if cls != "ToolMessage" and getattr(m, "type", None) != "tool":
-                continue
-            name = getattr(m, "name", None)
-        body = _finanz_tool_message_body(m).strip()
-        out.append((name, body))
-    return out
-
-
-def _finanz_parse_balance_cell(v: Any) -> float | None:
-    if v is None:
-        return None
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip().replace(",", "")
-    try:
-        return float(s)
-    except ValueError:
-        return None
-
-
-def _finanz_read_sql_cuentas_rows_from_messages(messages: Any) -> list[dict[str, Any]] | None:
-    """
-    Último ``read_sql`` cuyo JSON es una lista de filas con name, balance, currency
-    (típico ``finance_worker.cuentas``).
-    """
-    for name, body in reversed(_finanz_iter_tool_messages(messages)):
-        if name != "read_sql":
-            continue
-        try:
-            data = json.loads(body)
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            continue
-        if not isinstance(data, list) or not data:
-            continue
-        row0 = data[0]
-        if not isinstance(row0, dict):
-            continue
-        if not all(k in row0 for k in ("name", "balance", "currency")):
-            continue
-        return list(data)
-    return None
-
-
-def _finanz_get_ibkr_tool_body_from_messages(messages: Any) -> str | None:
-    for name, body in reversed(_finanz_iter_tool_messages(messages)):
-        if name == "get_ibkr_portfolio" and body.strip():
-            return body.strip()
-    return None
-
-
-def _finanz_reply_looks_like_domain_placeholder(reply: str) -> bool:
-    low = (reply or "").lower()
-    if "aguardando el flujo" in low and "dominio" in low:
-        return True
-    if "especifique el dominio" in low:
-        return True
-    return False
-
-
-def _format_finanz_cuentas_summary_from_tools(
-    rows: list[dict[str, Any]], ibkr_text: str | None
-) -> str:
-    from collections import defaultdict
-
-    totals: defaultdict[str, float] = defaultdict(float)
-    lines_body: list[str] = []
-    for row in rows:
-        nm = str(row.get("name") or "?").strip()
-        cur = str(row.get("currency") or "?").strip()
-        bal = _finanz_parse_balance_cell(row.get("balance"))
-        if bal is None:
-            bal = 0.0
-        totals[cur] += bal
-        if cur.upper() == "COP":
-            bal_s = f"{bal:,.0f}".replace(",", ".")
-        else:
-            bal_s = f"{bal:,.2f}"
-        lines_body.append(f"- **{nm}**: {bal_s} {cur}")
-
-    sub_lines: list[str] = []
-    for cur in sorted(totals.keys()):
-        t = totals[cur]
-        if cur.upper() == "COP":
-            ts = f"{t:,.0f}".replace(",", ".")
-        else:
-            ts = f"{t:,.2f}"
-        sub_lines.append(f"**Total cuentas locales en {cur}:** {ts}")
-
-    parts: list[str] = [
-        "**Resumen de cuentas (datos de herramientas en este turno)**",
-        "",
-        "**Cuentas locales (DuckDB)**",
-        "",
-        *lines_body,
-        "",
-        *sub_lines,
-    ]
-    if ibkr_text:
-        parts.extend(["", "**IBKR**", "", ibkr_text])
-    parts.extend(
-        [
-            "",
-            "**Siguientes pasos**",
-            "- Si un saldo no coincide con tu app bancaria, actualiza la fila en la base o pide un desglose por cuenta.",
-        ]
-    )
-    return "\n".join(parts)
-
-
-def finanz_reconcile_cuentas_placeholder_reply(messages: Any, reply: str) -> str:
-    """
-    Tras ``read_sql`` + ``get_ibkr_portfolio`` algunos modelos locales (p. ej. Gemma/MLX) devuelven
-    un texto de desambiguación («dominio») en lugar del resumen. Sustituimos por un resumen
-    determinístico desde los ToolMessage cuando el borrador coincide con ese patrón.
-    """
-    r = (reply or "").strip()
-    if not r or not messages:
-        return reply or ""
-    if not _finanz_reply_looks_like_domain_placeholder(r):
-        return reply or ""
-    rows = _finanz_read_sql_cuentas_rows_from_messages(messages)
-    if not rows:
-        return reply or ""
-    ibkr = _finanz_get_ibkr_tool_body_from_messages(messages)
-    return _format_finanz_cuentas_summary_from_tools(rows, ibkr)
 
 
 def finanz_reconcile_reply_with_fetch_market_tool(messages: Any, reply: str) -> str:

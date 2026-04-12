@@ -6,7 +6,7 @@ network:
     - "siata.gov.co"
 filesystem:
   readonly_mounts:
-    - "/Users/juanjosearevalocamargo/Desktop/duckclaw/db:/workspace/repo_db:ro"
+    - "${DUCKCLAW_DATA_DIR}:/workspace/repo_db:ro"
     - "/tmp/duckclaw_sandbox:/workspace/data:ro"
   ephemeral_volumes:
     - "/workspace/output"

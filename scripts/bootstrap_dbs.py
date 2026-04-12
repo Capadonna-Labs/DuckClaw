@@ -25,31 +25,16 @@ except ImportError:
 import duckdb
 
 from duckclaw.forge.leila_schema import ensure_leila_mvp_schema
-from duckclaw.gateway_db import ensure_usable_duckdb_file, get_gateway_db_path
+from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
 from duckclaw.vaults import db_root, ensure_registry
 from duckclaw.workers.loader import run_schema
 from duckclaw.workers.manifest import load_manifest
 
 
-def _resolve_extra_duckdb(raw: str, seen: set[Path], out: list[Path]) -> None:
-    p = Path(raw).expanduser()
-    if not p.is_absolute():
-        p = (_REPO_ROOT / p).resolve()
-    else:
-        p = p.resolve()
-    if p.suffix.lower() == ".duckdb" and p not in seen:
-        seen.add(p)
-        out.append(p)
-
-
-def _iter_duckdb_targets(extra: list[str], *, only_extra: bool = False) -> list[Path]:
+def _iter_duckdb_targets(extra: list[str]) -> list[Path]:
     seen: set[Path] = set()
     out: list[Path] = []
-    if only_extra:
-        for raw in extra:
-            _resolve_extra_duckdb(raw, seen, out)
-        return out
     root = db_root()
     for sub in ("private", "shared"):
         d = root / sub
@@ -60,7 +45,14 @@ def _iter_duckdb_targets(extra: list[str], *, only_extra: bool = False) -> list[
                     seen.add(r)
                     out.append(p)
     for raw in extra:
-        _resolve_extra_duckdb(raw, seen, out)
+        p = Path(raw).expanduser()
+        if not p.is_absolute():
+            p = (_REPO_ROOT / p).resolve()
+        else:
+            p = p.resolve()
+        if p.suffix.lower() == ".duckdb" and p not in seen:
+            seen.add(p)
+            out.append(p)
     gp = Path(get_gateway_db_path()).expanduser()
     if not gp.is_absolute():
         gp = (_REPO_ROOT / gp).resolve()
@@ -185,7 +177,6 @@ def _install_extensions(con: duckdb.DuckDBPyConnection, extensions: list[str]) -
 
 def bootstrap_file(path: Path, templates_root: Path, extensions: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    ensure_usable_duckdb_file(str(path))
     con = duckdb.connect(str(path), read_only=False)
     try:
         _install_extensions(con, extensions)
@@ -221,11 +212,6 @@ def main() -> int:
         default=None,
         help="Raíz de forge/templates (por defecto packages/agents/.../templates)",
     )
-    parser.add_argument(
-        "--only-extra",
-        action="store_true",
-        help="Solo procesa rutas listadas en extra_dbs (no escanea db/private ni db/shared). Útil para un vault nuevo sin tocar BDs abiertas por el gateway.",
-    )
     args = parser.parse_args()
     templates_root = args.templates_root
     if templates_root is None:
@@ -244,10 +230,7 @@ def main() -> int:
     extensions = _collect_extensions(templates_root)
     print("ensure_registry (system.duckdb)...", flush=True)
     ensure_registry()
-    if args.only_extra and not args.extra_dbs:
-        print("Con --only-extra debes pasar al menos una ruta .duckdb.", file=sys.stderr)
-        return 1
-    targets = _iter_duckdb_targets(list(args.extra_dbs), only_extra=bool(args.only_extra))
+    targets = _iter_duckdb_targets(list(args.extra_dbs))
     if not targets:
         print("No hay archivos .duckdb que procesar.", flush=True)
         return 0

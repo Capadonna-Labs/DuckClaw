@@ -20,7 +20,6 @@ Permitir que un **admin** inyecte texto largo en **memoria semántica** (`main.s
 ## Comando
 
 - `/context --add <texto>` (opcional sufijo de bot: `/context@BotName --add ...`).
-- **Adjunto PDF** con el mismo mensaje: el gateway descarga el fichero (límite `DUCKCLAW_TELEGRAM_MAX_DOCUMENT_BYTES`, default 20 MiB) y extrae texto plano con **pypdf** en proceso (no Strix: el webhook no monta adjuntos en `/workspace` del sandbox). Si hay texto, se anexa bajo `[CONTENIDO_TEXTO_EXTRAIDO_PDF]` y ese bloque completo es lo que se encola y se resume; si no hay texto (PDF escaneado, error, pypdf ausente), se antepone `[META: ATTACHED_DOCUMENT_NOT_PARSED …]` para que el worker no invente el contenido del archivo. Otros MIME no-imagen siguen solo con META + caption hasta haber extractor dedicado.
 - Texto vacío tras `--add`: respuesta determinista de error, **sin LLM**.
 - `/context --summary` (alias: `--peek`, `--db`): **solo lectura** de `main.semantic_memory` en la bóveda del usuario; **no** encola Redis ni escribe. Acuse inmediato + `invoke_agent_chat` en segundo plano con `[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]` y el volcado reciente de filas (mismo RBAC admin que `--add`). Si no hay filas/tabla, mensaje determinista **sin LLM**. El **cuerpo** del resumen en Telegram lo construye el **worker** (`set_reply` / síntesis NL + fallback a viñetas); el gateway solo sustituye por `telegram_stored_context_summary_body_when_model_trivial` si la respuesta del `invoke` sigue siendo trivial (red de seguridad).
 

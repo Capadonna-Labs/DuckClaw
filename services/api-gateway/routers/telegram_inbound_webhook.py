@@ -22,12 +22,13 @@ import os
 import re
 import secrets
 import time
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException, Request, status
+from starlette.requests import ClientDisconnect
 
 from core.config import settings
-from core.telegram_chunking import gateway_multipart_plain_head_tail
 from core.context_injection_delta import (
     build_context_injection_delta,
     context_injection_queue_key,
@@ -38,13 +39,11 @@ from core.context_injection_vault import resolve_telegram_user_vault_db_path
 from core.context_stored_snapshot import fetch_semantic_memory_snapshot
 from core.models import ChatRequest
 from core.vlm_ingest import (
-    VLMBackendUnavailableError,
-    extract_pdf_plain_text_from_bytes,
+    VlmIngestAllFailed,
     process_visual_album_batch,
     process_visual_payload,
     push_vlm_state_delta_redis,
-    telegram_document_download_limit_bytes,
-    telegram_download_file_bytes,
+    vlm_exception_for_log,
 )
 from duckclaw.gateway_db import resolve_env_duckdb_path
 from core.war_rooms import (
@@ -77,6 +76,51 @@ from core.telegram_compact_webhook_routes import (
 
 _log = logging.getLogger("duckclaw.gateway.telegram_inbound_webhook")
 
+_TELEGRAM_GEMINI_VLM_503_TEXT = (
+    "⚠️ Gemini no está disponible para visión en este momento (503). "
+    "Reintenta más tarde o configura MLX local (Gemma VLM / mlx_vlm)."
+)
+
+
+async def _notify_telegram_gemini_vlm_503(*, bot_token: str, chat_id: Any) -> None:
+    """Aviso corto al usuario cuando la cadena VLM falló con Gemini 503."""
+    tok = (bot_token or "").strip()
+    if not tok:
+        return
+    try:
+        client = TelegramBotApiAsyncClient(tok)
+        await client.send_message(
+            chat_id=chat_id,
+            text=_TELEGRAM_GEMINI_VLM_503_TEXT,
+            parse_mode=None,
+        )
+        # region agent log
+        try:
+            import json
+            import time as _time
+
+            _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+            with open(_p, "a", encoding="utf-8") as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "adf9d8",
+                            "hypothesisId": "H2",
+                            "location": "telegram_inbound_webhook.py:_notify_telegram_gemini_vlm_503",
+                            "message": "telegram_gemini_503_notice_sent",
+                            "data": {"chat_id": str(chat_id)},
+                            "timestamp": int(_time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("telegram: no se pudo enviar aviso Gemini VLM 503: %s", exc)
+
+
 _TELEGRAM_WEBHOOK_DEDUPE_KEY_PREFIX = "duckclaw:dedupe:telegram:webhook:update"
 _TELEGRAM_WEBHOOK_DEDUPE_TTL_SECONDS = 172800
 _WORKER_ALIAS_CACHE_TTL_SECONDS = 60
@@ -107,26 +151,19 @@ def _telegram_message_has_vlm_block(s: str) -> bool:
     return "[VLM_CONTEXT" in t and "Contexto visual adjunto:" in t
 
 
-def _telegram_message_has_gateway_document_enrichment(s: str) -> bool:
-    """PDF texto extraído en gateway o META de adjunto no parseado (sin VLM imagen)."""
-    t = (s or "").strip()
-    return "[CONTENIDO_TEXTO_EXTRAIDO_PDF]" in t or "[META: ATTACHED_DOCUMENT_NOT_PARSED" in t
-
-
 def _resolve_context_add_body(*, raw_caption: str, current_text: str) -> tuple[bool, str]:
     """
     /context --add debe detectarse con el caption/texto crudo de Telegram.
 
     Tras VLM el mensaje enriquecido ya no empieza por ``/context``; sin esto,
     ``/context --add`` + foto no encola memoria ni manda SUMMARIZE_NEW_CONTEXT.
-    Si hay bloque VLM o enriquecimiento PDF/META del gateway, el cuerpo a inyectar
-    y resumir es el ``current_text`` completo.
+    Si hay bloque VLM, el cuerpo a inyectar y resumir es el texto enriquecido completo.
     """
     is_add, body = _parse_context_add_command(raw_caption)
     if not is_add:
         return False, ""
     cur = (current_text or "").strip()
-    if _telegram_message_has_vlm_block(cur) or _telegram_message_has_gateway_document_enrichment(cur):
+    if _telegram_message_has_vlm_block(cur):
         return True, cur
     return True, (body or "").strip()
 
@@ -172,12 +209,8 @@ def schedule_telegram_context_summary_background(
     telegram_mcp_state: Any,
     telegram_forced_vault_db_path: str | None,
     reply_token: str | None,
-    redis_session_id: str,
 ) -> None:
     """Invoca el grafo con directiva de resumen y envía la respuesta por Bot API (segundo plano)."""
-    # Mismo session_id que el webhook multiplex (p. ej. quanttrader:1726618406) y lock Redis activo:
-    # si skip_session_lock=True y session_id=chat_id puro, el resumen en background abre DuckDB RO
-    # mientras el usuario manda /team: fly abre RW al mismo .duckdb → «different configuration».
     bg_payload = ChatRequest(
         message=directive_msg,
         chat_id=str(chat_id),
@@ -186,7 +219,7 @@ def schedule_telegram_context_summary_background(
         chat_type=chat_type,
         tenant_id=tenant_id,
         is_system_prompt=True,
-        skip_session_lock=False,
+        skip_session_lock=True,
     )
 
     async def _bg_summarize_task() -> None:
@@ -197,18 +230,15 @@ def schedule_telegram_context_summary_background(
                 return
             with telegram_bot_token_override(tok):
                 try:
-                    # El resumen post `/context` ya trae el contenido en el mensaje:
-                    # usar `:memory:` evita abrir la bóveda real en RO mientras
-                    # DuckClaw-DB-Writer intenta persistir CONTEXT_INJECTION en RW.
                     res = await invoke_agent_chat(
                         bg_payload,
                         worker_id,
-                        redis_session_id,
+                        str(chat_id),
                         tenant_id,
                         redis_client=redis_client,
                         telegram_multipart_tail_delivery="native",
                         telegram_mcp=telegram_mcp_state,
-                        telegram_forced_vault_db_path=":memory:",
+                        telegram_forced_vault_db_path=telegram_forced_vault_db_path,
                         outbound_telegram_bot_token=(reply_token or "").strip() or None,
                     )
                 except HTTPException as exc:
@@ -278,16 +308,7 @@ def schedule_telegram_context_summary_background(
             if isinstance(res, dict) and not used_fb:
                 head_plain = (res.get("telegram_reply_head_plain") or "").strip()
                 tail_plain_ctx = (res.get("telegram_multipart_tail_plain") or "").strip()
-            if tail_plain_ctx and head_plain:
-                body_slice = head_plain
-            else:
-                mh, mt = gateway_multipart_plain_head_tail(reply_local, llm_markdown_to_telegram_html)
-                if mh is not None and (mt or "").strip():
-                    head_plain = mh
-                    tail_plain_ctx = mt
-                    body_slice = head_plain
-                else:
-                    body_slice = reply_local
+            body_slice = head_plain if (tail_plain_ctx and head_plain) else reply_local[:3500]
 
             client_r = TelegramBotApiAsyncClient(tok)
             body_html = llm_markdown_to_telegram_html(body_slice)
@@ -308,7 +329,7 @@ def schedule_telegram_context_summary_background(
 
                 await dispatch_telegram_multipart_tail_async(
                     tail_plain=tail_plain_ctx,
-                    session_id=redis_session_id,
+                    session_id=str(chat_id),
                     user_id=str(vault_uid or "").strip() or str(chat_id),
                     telegram_multipart_tail_delivery="native",
                     effective_telegram_bot_token=resolve_effective_telegram_bot_token,
@@ -522,46 +543,6 @@ async def _ingest_telegram_visual_enrich_text(
             (mime_type or "unknown")[:128],
             private_dm,
         )
-        cap_ok = bool((text or "").strip())
-        # PDF/otros no-imagen con caption o comando → seguir el pipeline (sin VLM), no cortar el webhook.
-        if cap_ok:
-            _log.info(
-                "telegram_inbound tag=VLM_MIME_PASSTHROUGH_CAPTION chat_id=%s mime=%s caption_len=%s",
-                chat_id,
-                (mime_type or "unknown")[:128],
-                len(text or ""),
-            )
-            out_text = text
-            fid = (visual.get("file_id") or "").strip()
-            if mime_type == "application/pdf" and fid and token_v:
-                try:
-                    pdf_raw = await telegram_download_file_bytes(
-                        token_v,
-                        fid,
-                        max_bytes=telegram_document_download_limit_bytes(),
-                    )
-                    extracted = extract_pdf_plain_text_from_bytes(pdf_raw)
-                    if extracted.strip():
-                        out_text = (
-                            f"{text}\n\n"
-                            "[CONTENIDO_TEXTO_EXTRAIDO_PDF]\n"
-                            f"{extracted.strip()}\n"
-                        )
-                        _log.info(
-                            "telegram_inbound tag=PDF_TEXT_EXTRACTED chat_id=%s chars=%s",
-                            chat_id,
-                            len(extracted.strip()),
-                        )
-                except Exception as exc:  # noqa: BLE001
-                    _log.warning("telegram_inbound pdf extract: %s", exc)
-            if out_text is text:
-                meta = (
-                    f"[META: ATTACHED_DOCUMENT_NOT_PARSED mime={(mime_type or 'unknown')[:80]}] "
-                    "El adjunto no aportó texto utilizable en el gateway (no es imagen VLM; PDF vacío/escaneado "
-                    "u otro formato sin extractor). Prohibido inventar contenido del archivo; sintetiza solo el caption.\n\n"
-                )
-                out_text = meta + text
-            return out_text, False
         return text, True
 
     mgid = (visual.get("media_group_id") or "").strip()
@@ -642,15 +623,20 @@ async def _ingest_telegram_visual_enrich_text(
                 private_dm,
             )
             return enriched, False
+    except VlmIngestAllFailed as v_exc:
+        _log.warning(
+            "VLM ingest falló (private_dm=%s): %s",
+            private_dm,
+            vlm_exception_for_log(v_exc.cause),
+        )
+        if v_exc.gemini_503 and (token_v or "").strip():
+            await _notify_telegram_gemini_vlm_503(bot_token=token_v, chat_id=chat_id)
     except Exception as exc:  # noqa: BLE001
-        if isinstance(exc, VLMBackendUnavailableError):
-            try:
-                c = TelegramBotApiAsyncClient(token_v)
-                await c.send_message(chat_id=chat_id, text=str(exc))
-            except Exception as send_exc:  # noqa: BLE001
-                _log.warning("VLM unavailable send_message failed: %s", send_exc)
-            return text, True
-        _log.warning("VLM ingest falló (private_dm=%s): %s", private_dm, exc)
+        _log.warning(
+            "VLM ingest falló (private_dm=%s): %s",
+            private_dm,
+            vlm_exception_for_log(exc),
+        )
     return text, False
 
 
@@ -911,6 +897,12 @@ def build_telegram_inbound_webhook_router(
 
         try:
             body = await request.json()
+        except ClientDisconnect:
+            # Telegram puede cerrar el socket si el handler tarda (p. ej. VLM + grafo); no es 500.
+            _log.info(
+                "telegram_inbound client_disconnect antes de leer JSON (timeout o cierre remoto)"
+            )
+            return {"ok": "true"}
         except json.JSONDecodeError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1169,7 +1161,6 @@ def build_telegram_inbound_webhook_router(
                         user_id,
                     )
                 mime_type = (visual.get("mime_type") or "").strip().lower()
-                skip_vlm = False
                 if mime_type and mime_type not in _VISUAL_ALLOWED_MIME:
                     wr_append_audit(
                         db,
@@ -1179,19 +1170,10 @@ def build_telegram_inbound_webhook_router(
                         event_type="VLM_MIME_REJECTED",
                         payload=(mime_type or "unknown")[:128],
                     )
-                    cap_ok_wr = bool((text or "").strip())
-                    if not cap_ok_wr:
-                        return {"ok": "true"}
-                    skip_vlm = True
-                    _log.info(
-                        "war_room_filter tag=VLM_MIME_PASSTHROUGH_CAPTION tenant_id=%s mime=%s caption_len=%s",
-                        tenant_id,
-                        (mime_type or "unknown")[:128],
-                        len(text or ""),
-                    )
+                    return {"ok": "true"}
                 token_v = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
                 mgid = (visual.get("media_group_id") or "").strip()
-                if token_v and not skip_vlm:
+                if token_v:
                     try:
                         _log.info(
                             "war_room inbound tag=VLM_PAYLOAD_RECEIVED tenant_id=%s user_id=%s "
@@ -1280,22 +1262,32 @@ def build_telegram_inbound_webhook_router(
                                 int(out.get("image_count", 1)),
                                 str(out.get("image_hash") or "")[:12],
                             )
-                    except Exception as exc:  # noqa: BLE001
-                        if isinstance(exc, VLMBackendUnavailableError):
-                            try:
-                                client_vlm = TelegramBotApiAsyncClient(token_v)
-                                await client_vlm.send_message(chat_id=chat_id, text=str(exc))
-                            except Exception as send_exc:  # noqa: BLE001
-                                _log.warning("war_room VLM unavailable send failed: %s", send_exc)
-                            return {"ok": "true"}
-                        _log.warning("VLM ingest falló: %s", exc)
+                    except VlmIngestAllFailed as v_exc:
+                        _log.warning(
+                            "VLM ingest falló: %s",
+                            vlm_exception_for_log(v_exc.cause),
+                        )
                         wr_append_audit(
                             db,
                             tenant_id=tenant_id,
                             sender_id=user_id,
                             target_agent=None,
                             event_type="VLM_INGEST_FAILED",
-                            payload=str(exc)[:500],
+                            payload=vlm_exception_for_log(v_exc.cause)[:500],
+                        )
+                        if v_exc.gemini_503:
+                            await _notify_telegram_gemini_vlm_503(
+                                bot_token=token_v, chat_id=chat_id
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        _log.warning("VLM ingest falló: %s", vlm_exception_for_log(exc))
+                        wr_append_audit(
+                            db,
+                            tenant_id=tenant_id,
+                            sender_id=user_id,
+                            target_agent=None,
+                            event_type="VLM_INGEST_FAILED",
+                            payload=vlm_exception_for_log(exc)[:500],
                         )
 
         is_ctx_add, ctx_body = _resolve_context_add_body(
@@ -1383,7 +1375,6 @@ def build_telegram_inbound_webhook_router(
                 return {"ok": "true"}
 
             telegram_mcp_state = getattr(request.app.state, "telegram_mcp", None)
-            _redis_sess_ctx = f"{path_mux.bot_name}:{chat_id}" if path_mux is not None else str(chat_id)
             schedule_telegram_context_summary_background(
                 directive_msg=_summarize_new_context_directive(ctx_body),
                 telegram_header_html="<b>Resumen del contexto inyectado</b>\n\n",
@@ -1400,7 +1391,6 @@ def build_telegram_inbound_webhook_router(
                 telegram_mcp_state=telegram_mcp_state,
                 telegram_forced_vault_db_path=telegram_forced_vault_db_path,
                 reply_token=reply_token,
-                redis_session_id=_redis_sess_ctx,
             )
 
             await _send_ctx_reply(
@@ -1473,7 +1463,6 @@ def build_telegram_inbound_webhook_router(
                 return {"ok": "true"}
 
             telegram_mcp_sum = getattr(request.app.state, "telegram_mcp", None)
-            _redis_sess_sum = f"{path_mux.bot_name}:{chat_id}" if path_mux is not None else str(chat_id)
             schedule_telegram_context_summary_background(
                 directive_msg=_summarize_stored_context_directive(snapshot),
                 telegram_header_html="<b>Resumen del contexto (base de datos)</b>\n\n",
@@ -1490,7 +1479,6 @@ def build_telegram_inbound_webhook_router(
                 telegram_mcp_state=telegram_mcp_sum,
                 telegram_forced_vault_db_path=telegram_forced_vault_db_path,
                 reply_token=reply_token,
-                redis_session_id=_redis_sess_sum,
             )
             await _send_ctx_summary_reply(
                 llm_markdown_to_telegram_html(
@@ -1508,12 +1496,7 @@ def build_telegram_inbound_webhook_router(
             tenant_id=tenant_id,
         )
 
-        # Evita colisión de estado entre bots distintos en el mismo chat_id de Telegram (DM).
-        # En multiplex por path, usamos sesión namespaced por bot/worker.
-        if path_mux is not None:
-            session_id = f"{path_mux.bot_name}:{chat_id}"
-        else:
-            session_id = str(chat_id)
+        session_id = str(chat_id)
         telegram_mcp = getattr(request.app.state, "telegram_mcp", None)
 
         async def _invoke_and_reply() -> None:
@@ -1569,16 +1552,7 @@ def build_telegram_inbound_webhook_router(
             client_r = TelegramBotApiAsyncClient(token_r)
             tail_plain = (res.get("telegram_multipart_tail_plain") or "").strip() if isinstance(res, dict) else ""
             head_plain = (res.get("telegram_reply_head_plain") or "").strip() if isinstance(res, dict) else ""
-            if tail_plain and head_plain:
-                reply_plain = head_plain
-            else:
-                mh, mt = gateway_multipart_plain_head_tail(reply_local, llm_markdown_to_telegram_html)
-                if mh is not None and (mt or "").strip():
-                    head_plain = mh
-                    tail_plain = mt
-                    reply_plain = head_plain
-                else:
-                    reply_plain = reply_local
+            reply_plain = head_plain if (tail_plain and head_plain) else reply_local[:3500]
             reply_html = llm_markdown_to_telegram_html(reply_plain)
             cap_msg = 4096 - 16
             if len(reply_html) > cap_msg:

@@ -26,45 +26,13 @@ def _ensure_duckclaw_llm_env_from_legacy_llm_vars() -> None:
     if not (os.environ.get("DUCKCLAW_LLM_BASE_URL") or "").strip():
         leg = (os.environ.get("LLM_BASE_URL") or "").strip()
         if leg:
-            p = (
-                (os.environ.get("DUCKCLAW_LLM_PROVIDER") or os.environ.get("LLM_PROVIDER") or "")
-                .strip()
-                .lower()
-            )
-            ll = leg.lower()
-            # .env a veces deja LLM_PROVIDER=deepseek con LLM_BASE_URL=127.0.0.1:8080 (MLX); copiar eso
-            # hace que deepseek-chat golpee el servidor local → 400 "Model Not Exist".
-            if p == "deepseek" and ("127.0.0.1" in ll or "localhost" in ll):
-                os.environ["DUCKCLAW_LLM_BASE_URL"] = normalize_deepseek_base_url("")
-            else:
-                os.environ["DUCKCLAW_LLM_BASE_URL"] = leg
+            os.environ["DUCKCLAW_LLM_BASE_URL"] = leg
 
 
 def mlx_openai_compatible_base_url() -> str:
     """Base OpenAI-compatible para ``mlx_lm.server`` (``MLX_PORT``, default 8080)."""
     port = (os.environ.get("MLX_PORT") or "8080").strip() or "8080"
     return f"http://127.0.0.1:{port}/v1"
-
-
-def normalize_deepseek_base_url(url: Optional[str]) -> str:
-    """
-    PM2/.env suele dejar ``DUCKCLAW_LLM_BASE_URL`` en Groq u OpenAI; si el proveedor activo es DeepSeek
-    pero la tripleta hereda ese host, las peticiones van a Groq con ``model=deepseek-chat`` → 400 Model Not Exist.
-    """
-    default = "https://api.deepseek.com/v1"
-    u = (url or "").strip()
-    if not u:
-        return default
-    ul = u.lower()
-    if "deepseek.com" in ul:
-        return u.rstrip("/")
-    if "127.0.0.1" in ul or "localhost" in ul:
-        return u.rstrip("/")
-    if "groq.com" in ul or "anthropic.com" in ul:
-        return default
-    if "api.openai.com" in ul and "azure" not in ul:
-        return default
-    return u.rstrip("/")
 
 
 def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
@@ -172,11 +140,26 @@ def reconcile_worker_provider_label(
     return (provider or "").strip().lower() or "none_llm"
 
 
-# Repo HF por defecto para `/model model=gemma4` cuando `MLX_GEMMA4_MODEL_PATH` está vacío.
-# Debe coincidir con `MLX_MODEL_PATH` del proceso `mlx_lm.server` al servir ese checkpoint.
+# Repo HF por defecto para alias cortos gemma4 / gemma-4 (OpenAI-compatible MLX / ``mlx_vlm``).
+# Override: ``MLX_GEMMA4_MODEL_PATH`` (ruta local o repo ``org/model``). Usar un id ``mlx-community/gemma-4-*``.
+# E4B alinea con checkpoints locales típicos (p. ej. ``gemma4-e4b``); E2B sigue disponible vía repo HF explícito.
 MLX_GEMMA4_DEFAULT_REPO_ID = "mlx-community/gemma-4-e4b-it-4bit"
 
-_MLX_GEMMA4_ALIASES = frozenset({"gemma4", "gemma-4"})
+
+def _is_gemma4_short_name(requested: str) -> bool:
+    t = (requested or "").strip().lower().replace("_", "-")
+    return t in ("gemma4", "gemma-4")
+
+
+def _resolve_gemma4_openai_model_id() -> str:
+    """Mismo identificador que debe usar el servidor MLX precargado (ruta local o repo HF)."""
+    g4 = (os.environ.get("MLX_GEMMA4_MODEL_PATH") or "").strip()
+    if g4:
+        return g4
+    mlx = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
+    if mlx and "gemma" in mlx.lower():
+        return mlx
+    return MLX_GEMMA4_DEFAULT_REPO_ID
 
 
 def mlx_openai_compatible_model_name(requested: str) -> str:
@@ -188,10 +171,14 @@ def mlx_openai_compatible_model_name(requested: str) -> str:
     En ese caso se usa ``MLX_MODEL_ID`` / ``MLX_MODEL_PATH``. Rutas (``/``, ``./``),
     rutas con subcarpetas (``/``) y pares tipo ``org/model`` se respetan.
 
-    ``gemma4`` / ``gemma-4`` se resuelven con ``MLX_GEMMA4_MODEL_PATH`` o
-    ``MLX_GEMMA4_DEFAULT_REPO_ID`` (antes del fallback genérico a ``MLX_MODEL_PATH``).
+    Alias **gemma4** / **gemma-4** (cualquier capitalización) resuelven a
+    ``MLX_GEMMA4_MODEL_PATH`` si está definido; si no, a ``MLX_MODEL_ID`` / ``MLX_MODEL_PATH``
+    cuando el valor contiene ``gemma`` (mismo id que ``pm2`` suele precargar); si no,
+    ``MLX_GEMMA4_DEFAULT_REPO_ID``.
     """
     r = (requested or "").strip()
+    if _is_gemma4_short_name(r):
+        return _resolve_gemma4_openai_model_id()
     if not r:
         return (
             (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
@@ -201,9 +188,6 @@ def mlx_openai_compatible_model_name(requested: str) -> str:
         return r
     if "/" in r:
         return r
-    if r.lower() in _MLX_GEMMA4_ALIASES:
-        g4 = (os.environ.get("MLX_GEMMA4_MODEL_PATH") or "").strip()
-        return g4 or MLX_GEMMA4_DEFAULT_REPO_ID
     mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
     return mid or r
 
@@ -479,10 +463,7 @@ def bind_tools_with_parallel_default(llm: Any, tools: Sequence[Any], **kwargs: A
         "parallel_tool_calls" in sig.parameters
         and "parallel_tool_calls" not in bind_kwargs
     ):
-        # DeepSeek: parallel tool calls + esquemas grandes (p. ej. MCP Reddit) ha devuelto 400
-        # "Model Not Exist" en runtime pese a modelo/base correctos; desactivar paralelismo aquí.
-        _inf_parallel = (infer_provider_from_openai_compatible_llm(llm) or "").strip().lower()
-        bind_kwargs["parallel_tool_calls"] = _inf_parallel != "deepseek"
+        bind_kwargs["parallel_tool_calls"] = True
     return llm.bind_tools(tools, **bind_kwargs)
 
 
@@ -523,13 +504,6 @@ def build_llm(
         m = m_arg or m_env
         url = url_arg or url_env
 
-    # Env PM2 suele fijar DUCKCLAW_LLM_PROVIDER=groq; el chat puede guardar solo model=deepseek-chat →
-    # tripleta efectiva groq + deepseek-chat y 400 "Model Not Exist" en el host Groq.
-    _ml = (m or "").strip().lower()
-    if p == "groq" and (_ml.startswith("deepseek-") or _ml == "deepseek"):
-        p = "deepseek"
-        url = normalize_deepseek_base_url(url)
-
     if p in ("none_llm", "none", ""):
         return None
 
@@ -557,16 +531,10 @@ def build_llm(
     if p == "deepseek":
         try:
             from langchain_openai import ChatOpenAI
-            # /model model=deepseek guarda el mismo string que el provider; la API solo acepta ids reales (p. ej. deepseek-chat).
-            _raw_ds = (m or "").strip()
-            if not _raw_ds or _raw_ds.lower() == "deepseek":
-                _ds_model = "deepseek-chat"
-            else:
-                _ds_model = _raw_ds
             return ChatOpenAI(
-                model=_ds_model,
+                model=m or "deepseek-chat",
                 temperature=0,
-                base_url=normalize_deepseek_base_url(url),
+                base_url=url or "https://api.deepseek.com/v1",
                 api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
             )
         except Exception:

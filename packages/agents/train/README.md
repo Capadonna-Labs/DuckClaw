@@ -127,4 +127,3 @@ Para enviar trazas a [LangSmith](https://smith.langchain.com/):
 | `model_finetuned/` | Modelo fusionado tras `scripts/mlx_hotswap.sh`. |
 | **`golden_dataset.jsonl`** | **Golden dataset para Model-Guard.** 10-20 consultas sintéticas validadas. |
 | **`conversation_traces/YYYY/MM/DD/traces.jsonl`** | **Trazas de conversaciones (datalake).** Una línea por turno; un archivo por día. Escrito por el API Gateway. Raíz configurable con `DUCKCLAW_CONVERSATION_TRACES_DIR` (por defecto: `train/conversation_traces`). |
-| **`gemma4/YYYY/MM/DD/traces.jsonl`** | **Copia espejo sanada** para SFT Gemma 4 (`mlx_lm.lora`). Generada con `python scripts/sanitize_traces_for_gemma.py` (ver `specs/features/SFT Trace Sanitizer Gemma 4.md`). Suele ignorarse en git al igual que `conversation_traces/`. |

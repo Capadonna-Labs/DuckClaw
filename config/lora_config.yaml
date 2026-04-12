@@ -1,0 +1,22 @@
+# Configuración de SFT para Gemma 4 (DuckClaw Sovereign Harness)
+model: "/Users/juanjosearevalocamargo/Desktop/models/gemma4-text-only" # Ruta a tus pesos locales
+train: true
+data: "packages/agents/train/gemma4" # Directorio donde está dataset_final.jsonl
+seed: 42
+
+# Parámetros de Memoria Estricta (Mac mini)
+batch_size: 1
+iters: 1000
+max_seq_length: 2048 # Protege el KV Cache durante el entrenamiento
+
+# Topología LoRA
+lora_layers: 16
+lora_rank: 8
+lora_alpha: 16
+lora_dropout: 0.05
+learning_rate: 1e-5
+
+# Optimizaciones MLX
+use_dora: false
+save_every: 200
+adapter_path: "models/adapters/gemma4_duckclaw_v1"

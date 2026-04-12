@@ -15,12 +15,11 @@ from typing import Any, Mapping
 
 # Multiplex: solo rutas por worker (+ ACL WR opcional). Orden = prioridad del hub efectivo.
 GATEWAY_DB_ENV_KEYS: tuple[str, ...] = (
-    "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
     "DUCKCLAW_FINANZ_DB_PATH",
     "DUCKCLAW_JOB_HUNTER_DB_PATH",
-    "DUCKCLAW_SIATA_DB_PATH",
-    "DUCKDB_PATH",
+    "DUCKCLAW_SIATA_DB_PATH"
 )
+# "DUCKCLAW_WAR_ROOM_ACL_DB_PATH", "DUCKDB_PATH"
 
 
 class GatewayDbEphemeralReadonly:

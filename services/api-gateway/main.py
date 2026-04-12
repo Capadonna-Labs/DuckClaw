@@ -1266,7 +1266,7 @@ async def _invoke_chat(
     _forced_v = (telegram_forced_vault_db_path or "").strip()
     _telegram_acl_for_guard: str | None = None
     if _forced_v:
-        vault_db_path = resolve_env_duckdb_path(_forced_v)
+        vault_db_path = ":memory:" if _forced_v == ":memory:" else resolve_env_duckdb_path(_forced_v)
         _telegram_acl_for_guard = vault_db_path
     else:
         _ded_vault = _dedicated_gateway_vault_db_path()
@@ -1401,7 +1401,7 @@ async def _invoke_chat(
                         )
                     except OSError as _audit_exc:
                         _gateway_log.info("fly_team_audit path_compare_error=%s", _audit_exc)
-                fly_db = DuckClaw(vpath, read_only=False, engine=_fly_engine)
+                fly_db = DuckClaw(vpath, read_only=True, engine=_fly_engine)
                 from duckclaw.graphs.graph_server import get_db as _fly_acl_db
 
                 prepare_leila_fly_duckdb(

@@ -233,6 +233,31 @@ def _is_finanz_debts_query(text: str) -> bool:
     )
 
 
+def _is_finanz_budgets_query(text: str) -> bool:
+    """Presupuestos en DuckDB local (finance_worker.presupuestos). Obliga read_sql; sin tool el LLM inventa meses/cifras."""
+    if not text or not text.strip():
+        return False
+    t = text.strip().lower()
+    if "[system_directive:" in t:
+        return False
+    return bool(
+        re.search(
+            r"\b("
+            r"resumen\s+(de\s+)?(mis\s+)?presupuestos?|"
+            r"mis\s+presupuestos?|"
+            r"presupuestos?\s+(del\s+)?mes|"
+            r"estado\s+(de\s+)?(mis\s+)?presupuestos?|"
+            r"listado\s+(de\s+)?(mis\s+)?presupuestos?|"
+            r"presupuesto\s+vs\s+real|"
+            r"presupuestos?\s+vs\s+real|"
+            r"cu[aá]nto\s+llevo\s+(gastad[oa]\s+)?(de\s+)?(mis\s+)?presupuestos?|"
+            r"presupuestos?\s+en\s+(la\s+)?(base|db|duckdb)"
+            r")\b",
+            t,
+        )
+    )
+
+
 def _finanz_user_requests_ohlcv_ingest(text: str) -> bool:
     """
     True si el usuario pide traer/descargar velas OHLCV (evita que el LLM invente tool calls).
@@ -2072,6 +2097,12 @@ def build_worker_graph(
                 and _is_finanz_debts_query(incoming)
                 and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
             )
+            force_finanz_presupuestos = (
+                (_lid or "").strip().lower() == "finanz"
+                and has_read_sql
+                and _is_finanz_budgets_query(incoming)
+                and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
+            )
             force_finanz_admin_sql = (
                 (_lid or "").strip().lower() == "finanz"
                 and has_admin_sql
@@ -2089,6 +2120,7 @@ def build_worker_graph(
                 is_portfolio = False
                 force_finanz_cuentas = False
                 force_finanz_deudas = False
+                force_finanz_presupuestos = False
                 force_finanz_admin_sql = False
             # No forzar herramienta si el último mensaje ya es ToolMessage (ya ejecutamos la tool):
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
@@ -2120,6 +2152,7 @@ def build_worker_graph(
                 or is_latest_game
                 or force_finanz_cuentas
                 or force_finanz_deudas
+                or force_finanz_presupuestos
             ) and not already_has_tool_result
             force_portfolio_first = is_portfolio and not already_has_tool_result
             force_portfolio_after_local_cuentas = (
@@ -2199,7 +2232,13 @@ def build_worker_graph(
             if not _worker_use_heuristic_first_tool(spec):
                 force_schema = False
                 force_admin_sql = False
-                force_read_sql = False
+                # No borrar read_sql si finanz exige ledger real (cuentas/deudas/presupuestos).
+                if not (
+                    force_finanz_cuentas
+                    or force_finanz_deudas
+                    or force_finanz_presupuestos
+                ):
+                    force_read_sql = False
                 force_portfolio = False
                 force_tavily = False
                 force_reddit = False

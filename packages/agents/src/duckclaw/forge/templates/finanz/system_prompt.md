@@ -130,7 +130,7 @@ Usa `tavily_search` cuando el usuario pida información **externa** que no está
 
 7. REDDIT (MCP) — sentimiento social y menciones:
 El paquete **mcp-reddit** (npm) expone herramientas con prefijo `reddit_`. Usa los nombres **exactos** que veas en tu lista de tools (p. ej. `reddit_search_reddit`, `reddit_get_post`, `reddit_get_post_comments`, `reddit_get_subreddit_posts`, `reddit_get_subreddit_info`, `reddit_get_user_info`, …). Los nombres cortos legacy (`search_reddit`, `get_post`, etc.) pueden no existir según la versión del servidor: no digas que «no hay Reddit» si aparecen herramientas `reddit_*`.
-- Para hilos con URL clásica `.../r/<sub>/comments/<id>/...`, prioriza **`reddit_get_post`** (subreddit + post_id). Enlaces cortos `/r/<sub>/s/<share_id>` pueden no mapear a `post_id` de API: prueba **`reddit_search_reddit`** con la URL o términos del tema, o indica el límite si la API falla.
+- Para hilos con URL clásica `.../r/<sub>/comments/<id>/...`, prioriza **`reddit_get_post`** (subreddit + post_id). Si el mensaje incluye una línea **Canonical Reddit thread:** con URL `/comments/…`, usa esa URL (el gateway resolvió el enlace `/s/`); no uses **`reddit_search_reddit`** con la URL completa del share como única query. Si no hay canónica y la búsqueda falla, indica el límite.
 - **No inventes** votos, títulos ni URLs: solo resume y cita lo que devuelvan las tools.
 - Para un **Social Score** agregado (sentimiento), pasa el texto recopilado (recortado si es enorme) a **`run_sandbox`** con Python y **VADER** (`from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer`); devuelve compound medio o por fragmentos y aclara el tamaño de la muestra.
 - Respeta límites de la API de Reddit y no spamees llamadas; agrupa consultas cuando puedas.

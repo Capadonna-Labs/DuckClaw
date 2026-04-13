@@ -627,6 +627,97 @@ def _groq_tools_without_reddit_for_bind(tools: list[Any]) -> list[Any]:
     return [t for t in (tools or []) if not str(getattr(t, "name", None) or "").startswith("reddit_")]
 
 
+_REDDIT_SHARE_PATH_RE = re.compile(r"reddit\.com/r/[\w_]+/s/[a-zA-Z0-9]+", re.IGNORECASE)
+_REDDIT_COMMENTS_IN_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?reddit\.com/r/[\w_]+/comments/[a-z0-9]+",
+    re.IGNORECASE,
+)
+# post_id en la ruta (p. ej. 1skcbpd), no el slug /s/xxxx
+_REDDIT_COMMENTS_SUB_POST_RE = re.compile(
+    r"reddit\.com/r/([\w_]+)/comments/([a-z0-9]+)",
+    re.IGNORECASE,
+)
+
+
+def _subreddit_and_post_id_from_reddit_comments_url(url: str) -> tuple[Optional[str], Optional[str]]:
+    m = _REDDIT_COMMENTS_SUB_POST_RE.search(url or "")
+    if not m:
+        return None, None
+    return m.group(1), m.group(2)
+
+
+def _patch_reddit_get_post_args_from_canonical_url(resp: Any, canonical_comments_url: str) -> Any:
+    """
+    tool_choice fuerza reddit_get_post pero el modelo a veces pone el slug /s/... como post_id.
+    Si ya resolvimos la URL canónica, sobrescribimos subreddit/post_id antes de tools_node.
+    """
+    sub, pid = _subreddit_and_post_id_from_reddit_comments_url(canonical_comments_url)
+    if not sub or not pid or resp is None:
+        return resp
+    tcs = list(getattr(resp, "tool_calls", None) or [])
+    if not tcs:
+        return resp
+    new_tcs: list[Any] = []
+    patched_any = False
+    for tc in tcs:
+        if isinstance(tc, dict):
+            name = tc.get("name")
+            if name != "reddit_get_post":
+                new_tcs.append(tc)
+                continue
+            args = dict(tc.get("args") or {})
+            args["subreddit"] = sub
+            args["post_id"] = pid
+            new_tcs.append({**tc, "args": args})
+            patched_any = True
+            continue
+        name = getattr(tc, "name", None)
+        if name != "reddit_get_post":
+            new_tcs.append(tc)
+            continue
+        base = getattr(tc, "args", None)
+        args = dict(base) if isinstance(base, dict) else {}
+        args["subreddit"] = sub
+        args["post_id"] = pid
+        try:
+            new_tcs.append(tc.model_copy(update={"args": args}))
+            patched_any = True
+        except Exception:
+            new_tcs.append(tc)
+    if not patched_any:
+        return resp
+    try:
+        return resp.model_copy(update={"tool_calls": new_tcs})
+    except Exception:
+        return resp
+
+
+def _resolve_reddit_share_url_to_comments_url(url: str, *, timeout: float = 12.0) -> Optional[str]:
+    """
+    Sigue redirecciones HTTP de enlaces de compartir /r/<sub>/s/<slug> hasta la URL canónica
+    .../comments/<post_id>/... para usar reddit_get_post. mcp-reddit suele fallar con
+    reddit_search_reddit(query=<url>) (p. ej. error leyendo 'children').
+    """
+    raw = (url or "").strip()
+    if not raw or not _REDDIT_SHARE_PATH_RE.search(raw):
+        return None
+    ua = (os.environ.get("REDDIT_USER_AGENT") or "duckclaw:share-resolve/0.1 (by duckclaw)").strip()
+    try:
+        req = _urllib_request.Request(raw, headers={"User-Agent": ua, "Accept": "text/html"})
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            final = resp.geturl()
+        if not isinstance(final, str):
+            return None
+        final = final.split("#")[0].split("?")[0].rstrip("/")
+        if not _REDDIT_COMMENTS_IN_URL_RE.search(final):
+            return None
+        if not final.lower().startswith("http"):
+            final = f"https://{final}"
+        return final
+    except Exception:
+        return None
+
+
 def _extract_first_reddit_url(text: str) -> Optional[str]:
     if not text or not str(text).strip():
         return None
@@ -1262,7 +1353,9 @@ def build_worker_graph(
     workers distintos en caché.
 
     ``tool_surface=context_synthesis``: turnos con directivas ``SUMMARIZE_*`` del gateway;
-    omite bridges MCP stdio (GitHub, Reddit, Google Trends) para reducir cold start.
+    omite bridges MCP stdio pesados (GitHub, Google Trends) para reducir cold start.
+    **Reddit** sí se registra si el manifest lo declara: URLs ``/r/.../s/...`` en
+    ``SUMMARIZE_NEW_CONTEXT`` deben poder usar ``reddit_get_post`` / ``reddit_search_reddit``.
     """
     spec = load_manifest(worker_id, templates_root)
     path = _get_db_path(worker_id, instance_name, db_path)
@@ -1306,13 +1399,6 @@ def build_worker_graph(
                 register_github_skill(tools, spec.github_config)
             except Exception:
                 pass
-        if getattr(spec, "reddit_config", None):
-            try:
-                from duckclaw.forge.skills.reddit_bridge import register_reddit_skill
-
-                register_reddit_skill(tools, spec.reddit_config)
-            except Exception:
-                pass
         if getattr(spec, "google_trends_config", None) is not None:
             try:
                 from duckclaw.forge.skills.google_trends_bridge import register_google_trends_skill
@@ -1320,6 +1406,14 @@ def build_worker_graph(
                 register_google_trends_skill(tools, spec.google_trends_config)
             except Exception:
                 pass
+    # Reddit: necesario en SUMMARIZE_NEW_CONTEXT con URL /r/.../s/... (spec Context Injection).
+    if getattr(spec, "reddit_config", None) and tool_surface in ("full", "context_synthesis"):
+        try:
+            from duckclaw.forge.skills.reddit_bridge import register_reddit_skill
+
+            register_reddit_skill(tools, spec.reddit_config)
+        except Exception:
+            pass
     tools_by_name = {t.name: t for t in tools}
 
     # Inferencia Elástica (Hardware-Aware): si el manifest tiene inference y no se pasó provider/model/base_url explícito, detectar hardware
@@ -1829,8 +1923,9 @@ def build_worker_graph(
 
         def _patch_ai_reddit_share_tool_calls(resp: Any, share_url: str) -> Any:
             """
-            Enlaces /r/<sub>/s/<slug> no son post_id de la API de Reddit: reddit_get_post devuelve 404.
-            Sustituye get_post por reddit_search_reddit(query=url) y fija query en búsquedas.
+            Fallback si no hubo resolución HTTP a URL /comments/ en agent_node: el slug /s/ no es post_id.
+            Reescribe get_post → reddit_search_reddit(query=url). Nota: mcp-reddit puede fallar con query=URL;
+            el camino preferido es _resolve_reddit_share_url_to_comments_url + reddit_get_post.
             """
             if not share_url or not _incoming_has_reddit_share_path(share_url):
                 return resp
@@ -2072,6 +2167,14 @@ def build_worker_graph(
             if _reddit_anchor_u and (_reddit_anchor_u not in (incoming or "")):
                 incoming_for_reddit = f"{incoming}\n{_reddit_anchor_u}"
 
+            _reddit_resolved_comments_url: Optional[str] = None
+            if _reddit_anchor_u and _incoming_has_reddit_share_path(_reddit_anchor_u):
+                _reddit_resolved_comments_url = _resolve_reddit_share_url_to_comments_url(_reddit_anchor_u)
+            if _reddit_resolved_comments_url:
+                incoming_for_reddit = (
+                    f"{incoming_for_reddit}\nCanonical Reddit thread: {_reddit_resolved_comments_url}"
+                )
+
             share_slug = _reddit_share_slug_from_incoming(incoming_for_reddit)
             reddit_search_tool_count = _count_tool_messages_named(state.get("messages") or [], "reddit_search_reddit")
             need_share_followup = bool(
@@ -2285,7 +2388,11 @@ def build_worker_graph(
                 _invoked_llm = _ft or llm_with_tools
             elif force_reddit:
                 _fr = None
-                if _incoming_has_reddit_share_path(incoming_for_reddit):
+                if _reddit_resolved_comments_url and _incoming_looks_like_reddit_post_url(
+                    _reddit_resolved_comments_url
+                ):
+                    _fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
+                elif _incoming_has_reddit_share_path(incoming_for_reddit):
                     _fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
                 elif _incoming_looks_like_reddit_post_url(incoming_for_reddit):
                     _fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
@@ -2311,8 +2418,16 @@ def build_worker_graph(
                     and getattr(resp, "tool_calls", None)
                 ):
                     _ru_share = _first_reddit_url_in_text(incoming_for_reddit)
-                    if _ru_share and _incoming_has_reddit_share_path(_ru_share):
+                    if (
+                        _ru_share
+                        and _incoming_has_reddit_share_path(_ru_share)
+                        and not _reddit_resolved_comments_url
+                    ):
                         resp = _patch_ai_reddit_share_tool_calls(resp, _ru_share)
+                    elif _reddit_resolved_comments_url:
+                        resp = _patch_reddit_get_post_args_from_canonical_url(
+                            resp, _reddit_resolved_comments_url
+                        )
             except Exception as exc:
                 _llm_invoke_exc = exc
                 _log.warning("[%s] LLM invoke failed in agent_node: %s", _wl, exc, exc_info=True)
@@ -2338,37 +2453,6 @@ def build_worker_graph(
                     is_transient_inference_connection_error(_llm_invoke_exc)
                 )
                 out["_duckclaw_worker_llm_failure_kind"] = type(_llm_invoke_exc).__name__
-                # region agent log
-                try:
-                    import json as _json_dbg
-                    import time as _time_dbg
-
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-5e21eb.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            _json_dbg.dumps(
-                                {
-                                    "sessionId": "5e21eb",
-                                    "timestamp": int(_time_dbg.time() * 1000),
-                                    "hypothesisId": "H1",
-                                    "location": "factory.py:agent_node",
-                                    "message": "worker swallowed LLM exception; flags for manager",
-                                    "data": {
-                                        "transient": out["_duckclaw_worker_llm_transient"],
-                                        "exc_type": out["_duckclaw_worker_llm_failure_kind"],
-                                    },
-                                    "runId": "post-fix",
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # endregion
             else:
                 for _k in (
                     "_duckclaw_worker_llm_invoke_failed",

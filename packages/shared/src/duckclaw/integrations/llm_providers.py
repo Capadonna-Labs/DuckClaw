@@ -546,7 +546,23 @@ def bind_tools_with_parallel_default(llm: Any, tools: Sequence[Any], **kwargs: A
         "parallel_tool_calls" in sig.parameters
         and "parallel_tool_calls" not in bind_kwargs
     ):
-        bind_kwargs["parallel_tool_calls"] = True
+        env_pt = (os.environ.get("DUCKCLAW_MLX_PARALLEL_TOOL_CALLS") or "").strip().lower()
+        if env_pt in ("0", "false", "no", "off"):
+            bind_kwargs["parallel_tool_calls"] = False
+        elif env_pt in ("1", "true", "yes", "on"):
+            bind_kwargs["parallel_tool_calls"] = True
+        elif infer_provider_from_openai_compatible_llm(llm) == "mlx":
+            # mlx_lm Gemma 4 tool parser hace json.loads estricto sobre el bloque de argumentos;
+            # varias tool_calls en un turno o JSON con comillas simples rompe el servidor (ver mlx_lm/tool_parsers/gemma4.py).
+            model_hint = ""
+            for attr in ("model_name", "model", "model_id"):
+                v = getattr(llm, attr, None)
+                if v is not None and str(v).strip():
+                    model_hint = str(v).strip().lower()
+                    break
+            bind_kwargs["parallel_tool_calls"] = "gemma" not in model_hint
+        else:
+            bind_kwargs["parallel_tool_calls"] = True
     return llm.bind_tools(tools, **bind_kwargs)
 
 

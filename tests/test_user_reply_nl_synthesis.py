@@ -360,3 +360,65 @@ def test_rescind_invokes_llm_when_directive_only_and_listo() -> None:
     )
     assert "Síntesis" in out
     llm.invoke.assert_called_once()
+
+
+def test_replace_bare_stored_echo_builds_bullets_from_vlm_turn() -> None:
+    inc = (
+        mod.SUMMARIZE_NEW_CONTEXT_MARK
+        + "\nUsuario dice: /context --add\n"
+        + "Contexto visual adjunto: Línea A\nLínea B\n"
+        + "[VLM_CONTEXT image_hash=ab confidence=0.7]\n"
+    )
+    out = mod.replace_bare_wrong_summarize_stored_echo(
+        "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]",
+        incoming=inc,
+    )
+    assert "Línea A" in out or "Línea B" in out
+    assert "Resumen del contexto ingresado" in out
+
+
+def test_replace_bare_stored_echo_passthrough_when_not_bare_directive() -> None:
+    assert (
+        mod.replace_bare_wrong_summarize_stored_echo(
+            "Texto normal",
+            incoming=mod.SUMMARIZE_NEW_CONTEXT_MARK + "\nfoo",
+        )
+        == "Texto normal"
+    )
+
+
+def test_repair_summarize_new_context_strips_stored_line_and_rebuilds() -> None:
+    inc = (
+        mod.SUMMARIZE_NEW_CONTEXT_MARK
+        + "\n"
+        + "Apple prepara gafas inteligentes.\n\nMeta AI gana tracción.\n\n"
+        + "Sintetiza esto en bullets.\n"
+    )
+    bad = (
+        "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]\n"
+        "Los usuarios finales esperan ver un resumen de cuentas/saldos"
+    )
+    out = mod.repair_summarize_new_context_egress(bad, incoming=inc)
+    assert "Resumen del contexto ingresado" in out
+    assert "Apple" in out or "gafas" in out.lower()
+    assert "Bancolombia" not in out
+    assert mod.SUMMARIZE_STORED_CONTEXT_MARK not in out
+
+
+def test_repair_summarize_new_context_replaces_hallucinated_ledger() -> None:
+    inc = (
+        mod.SUMMARIZE_NEW_CONTEXT_MARK
+        + "\nCautious hiring: layoffs under 50 people.\n\nGlassdoor 2026 rankings.\n"
+    )
+    bad = (
+        "Los saldos de las cuentas locales: Bancolombia (3.2 M COP), Nequi (1.1 M COP).\n"
+        "IBKR efectivo 4500 USD.\n"
+    )
+    out = mod.repair_summarize_new_context_egress(bad, incoming=inc)
+    assert "hiring" in out.lower() or "layoff" in out.lower() or "glassdoor" in out.lower()
+    assert "Bancolombia" not in out
+    assert "Nequi" not in out
+
+
+def test_repair_summarize_new_context_passthrough_when_not_new_directive() -> None:
+    assert mod.repair_summarize_new_context_egress("hola", incoming="sin directiva") == "hola"

@@ -20,7 +20,7 @@ for envfile in "${REPO_ROOT}/.env" "${ROOT_DIR}/.env"; do
   fi
 done
 # Rutas: desde .env o valores por defecto
-PYTHON_PATH="${MLX_PYTHON:-/Users/juanjosearevalocamargo/Desktop/mlx_env/bin/python}"
+PYTHON_PATH="${MLX_PYTHON:-/Users/juanjosearevalocamargo/Desktop/mlx_env313/bin/python}"
 MODEL_PATH="${MLX_MODEL_PATH:-/Users/juanjosearevalocamargo/Desktop/models/Slayer-8B-V1}"
 
 if [ ! -x "$PYTHON_PATH" ]; then
@@ -56,15 +56,50 @@ else
   echo "[start_mlx] LoRA: DISABLED (define MLX_ADAPTER_PATH en .env del repo o corrige la ruta; pm2 logs debe mostrar ENABLED tras reinicio)"
 fi
 echo "🚀 Cargando modelo desde: $MODEL_PATH"
+# Gemma 4: mlx-lm >= 0.31.2 needs mlx >= 0.30.4; PyPI does not ship those mlx wheels for Python 3.9 on macOS.
+if ! MODEL_PATH_CHECK="$MODEL_PATH" "$PYTHON_PATH" -c "
+import json, os, sys
+from pathlib import Path
+from importlib import metadata as md
+import importlib.util
+mp = os.environ.get('MODEL_PATH_CHECK', '')
+cfg = Path(mp) / 'config.json'
+if not cfg.is_file():
+    sys.exit(0)
+if json.loads(cfg.read_text(encoding='utf-8')).get('model_type') != 'gemma4':
+    sys.exit(0)
+def _ver_tuple():
+    p = [int(x) for x in md.version('mlx-lm').split('.')[:3]]
+    return tuple((p + [0, 0, 0])[:3])
+if _ver_tuple() < (0, 31, 2) or importlib.util.find_spec('mlx_lm.models.gemma4') is None:
+    sys.stderr.write(
+        'ERROR: checkpoint Gemma 4 requiere mlx-lm>=0.31.2 (y Python 3.10+ en macOS; con 3.9 el mlx de PyPI se queda en 0.29.x).\n'
+        'Python: %s | mlx-lm: %s\n'
+        'Crea venv: /opt/homebrew/bin/python3.13 -m venv ~/Desktop/mlx_env313 && '
+        '~/Desktop/mlx_env313/bin/pip install \"mlx-lm>=0.31.2\". En .env: MLX_PYTHON=/ruta/absoluta/al/venv/bin/python. Luego: pm2 restart MLX-Inference\n'
+        % (sys.version.split()[0], md.version('mlx-lm'))
+    )
+    sys.exit(1)
+sys.exit(0)
+"; then
+  exit 1
+fi
+# Entrada Duckclaw: reparación ligera de JSON en tool calls Gemma4 + filtro de UserWarning del servidor dev.
+export DUCKCLAW_DEBUG_LOG="${REPO_ROOT}/.cursor/debug-4a0206.log"
+_MLX_ENTRY="${SCRIPT_DIR}/run_mlx_lm_server.py"
+if [ ! -f "$_MLX_ENTRY" ]; then
+  echo "Error: no se encontró el arranque MLX: $_MLX_ENTRY"
+  exit 1
+fi
 if [ -n "$ADAPTER_PATH" ]; then
   echo "   + adapters LoRA: $ADAPTER_PATH"
-  exec "$PYTHON_PATH" -m mlx_lm.server \
+  exec "$PYTHON_PATH" -W 'ignore::UserWarning:mlx_lm.server' "$_MLX_ENTRY" \
     --model "$MODEL_PATH" \
     --adapter-path "$ADAPTER_PATH" \
     --port "${MLX_PORT}" \
     --host 0.0.0.0
 else
-  exec "$PYTHON_PATH" -m mlx_lm.server \
+  exec "$PYTHON_PATH" -W 'ignore::UserWarning:mlx_lm.server' "$_MLX_ENTRY" \
     --model "$MODEL_PATH" \
     --port "${MLX_PORT}" \
     --host 0.0.0.0

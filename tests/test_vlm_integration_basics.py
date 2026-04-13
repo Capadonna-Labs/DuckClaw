@@ -221,6 +221,7 @@ def test_vlm_backend_order_mlx_only_without_openai(monkeypatch: pytest.MonkeyPat
 
 def test_vlm_backend_order_mlx_then_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("DUCKCLAW_VLM_ALLOW_OPENAI_VISION", "1")
     monkeypatch.delenv("DUCKCLAW_VLM_PRIMARY", raising=False)
     monkeypatch.delenv("DUCKCLAW_VLM_GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -228,8 +229,20 @@ def test_vlm_backend_order_mlx_then_openai(monkeypatch: pytest.MonkeyPatch) -> N
     assert vlm_mod._vlm_backend_order() == ["mlx", "openai"]
 
 
+def test_vlm_backend_order_openai_key_ignored_without_allow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sin opt-in explícito, OPENAI_API_KEY no entra en la cadena VLM (Gemma/mlx_vlm → Gemini)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("DUCKCLAW_VLM_ALLOW_OPENAI_VISION", raising=False)
+    monkeypatch.delenv("DUCKCLAW_VLM_PRIMARY", raising=False)
+    monkeypatch.delenv("DUCKCLAW_VLM_GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    assert vlm_mod._vlm_backend_order() == ["mlx"]
+
+
 def test_vlm_backend_order_openai_first_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("DUCKCLAW_VLM_ALLOW_OPENAI_VISION", "1")
     monkeypatch.setenv("DUCKCLAW_VLM_PRIMARY", "openai")
     monkeypatch.delenv("DUCKCLAW_VLM_GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -239,6 +252,7 @@ def test_vlm_backend_order_openai_first_when_configured(monkeypatch: pytest.Monk
 
 def test_vlm_backend_order_mlx_gemini_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("DUCKCLAW_VLM_ALLOW_OPENAI_VISION", "1")
     monkeypatch.setenv("GEMINI_API_KEY", "g-test")
     monkeypatch.delenv("DUCKCLAW_VLM_PRIMARY", raising=False)
     assert vlm_mod._vlm_backend_order() == ["mlx", "gemini", "openai"]
@@ -246,9 +260,18 @@ def test_vlm_backend_order_mlx_gemini_openai(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_vlm_backend_order_openai_first_with_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("DUCKCLAW_VLM_ALLOW_OPENAI_VISION", "1")
     monkeypatch.setenv("DUCKCLAW_VLM_GEMINI_API_KEY", "g-dedicated")
     monkeypatch.setenv("DUCKCLAW_VLM_PRIMARY", "openai")
     assert vlm_mod._vlm_backend_order() == ["openai", "mlx", "gemini"]
+
+
+def test_vlm_backend_order_mlx_gemini_when_openai_key_but_no_allow(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("DUCKCLAW_VLM_ALLOW_OPENAI_VISION", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "g-test")
+    monkeypatch.delenv("DUCKCLAW_VLM_PRIMARY", raising=False)
+    assert vlm_mod._vlm_backend_order() == ["mlx", "gemini"]
 
 
 def test_vlm_gemini_api_key_prefers_dedicated_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -344,6 +367,42 @@ def test_mlx_http_base_url_uses_mlx_port_when_unset(monkeypatch: pytest.MonkeyPa
     monkeypatch.delenv("VLM_MLX_BASE_URL", raising=False)
     monkeypatch.setenv("MLX_PORT", "8080")
     assert vlm_mod._mlx_http_base_url() == "http://127.0.0.1:8080/v1"
+
+
+def test_skip_mlx_openai_vision_when_loopback_same_port_as_mlx_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Copiar .env con VLM_MLX_BASE_URL=8080 y MLX_PORT=8080 no debe forzar HTTP visión (404)."""
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK", raising=False)
+    monkeypatch.setenv("MLX_PORT", "8080")
+    monkeypatch.setenv("VLM_MLX_BASE_URL", "http://127.0.0.1:8080/v1")
+    base = vlm_mod._mlx_http_base_url()
+    assert vlm_mod._skip_mlx_openai_vision_same_port_as_text_mlx(base) is True
+
+
+def test_skip_mlx_openai_vision_false_when_vlm_on_other_loopback_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK", raising=False)
+    monkeypatch.setenv("MLX_PORT", "8080")
+    assert vlm_mod._skip_mlx_openai_vision_same_port_as_text_mlx("http://127.0.0.1:9090/v1") is False
+
+
+def test_skip_mlx_openai_vision_false_non_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MLX_PORT", "8080")
+    assert (
+        vlm_mod._skip_mlx_openai_vision_same_port_as_text_mlx("https://api.openai.com/v1")
+        is False
+    )
+
+
+def test_skip_mlx_openai_vision_false_when_allow_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MLX_PORT", "8080")
+    monkeypatch.setenv("DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK", "1")
+    assert (
+        vlm_mod._skip_mlx_openai_vision_same_port_as_text_mlx("http://127.0.0.1:8080/v1")
+        is False
+    )
 
 
 def test_vlm_backend_order_openai_primary_without_key_falls_back_mlx_only(

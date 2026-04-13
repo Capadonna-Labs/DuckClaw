@@ -242,10 +242,16 @@ def _finanz_user_requests_ohlcv_ingest(text: str) -> bool:
         return False
     raw = text.strip()
     low = raw.lower()
+    # Inyecciones del gateway (p. ej. fallo VLM): suelen mencionar «ingesta» y tokens MLX/VLM en mayúsculas;
+    # no deben forzar fetch_market_data (evidencia: logs finanz incoming=META… forced_tool=fetch_market_data).
+    if low.startswith("[meta:"):
+        return False
     if "quant_core.ohlcv" in low and any(
         k in low for k in ("trae", "descarga", "importa", "ingesta", "actualiza", "bajar", "pull")
     ):
         return True
+    # No usar la palabra suelta «ingesta» aquí: en español cubre ingesta VLM/memoria y dispara falsos positivos
+    # con acrónimos en mayúsculas (MLX, VLM) en mensajes META del gateway.
     if not any(
         k in low
         for k in (
@@ -254,7 +260,6 @@ def _finanz_user_requests_ohlcv_ingest(text: str) -> bool:
             "candle",
             "fetch_market",
             "fetch market",
-            "ingesta",
         )
     ):
         return False
@@ -2600,6 +2605,8 @@ def build_worker_graph(
         from duckclaw.forge.atoms.user_reply_nl_synthesis import (
             incoming_has_context_summarize_directive,
             maybe_synthesize_reply,
+            repair_summarize_new_context_egress,
+            replace_bare_wrong_summarize_stored_echo,
             rescind_trivial_context_summary_reply,
             state_evidence_for_context_summary_rescind,
         )
@@ -2639,6 +2646,9 @@ def build_worker_graph(
         last = msgs[-1] if msgs else None
         reply = lc_message_content_to_text(last) if last else ""
         reply = sanitize_worker_reply_phase1(reply)
+        _inc_for_ctx = (state.get("incoming") or state.get("input") or "").strip()
+        reply = replace_bare_wrong_summarize_stored_echo(reply, incoming=_inc_for_ctx)
+        reply = repair_summarize_new_context_egress(reply, incoming=_inc_for_ctx)
         if (getattr(spec, "worker_id", "") or "").strip().lower() == "finanz":
             from duckclaw.forge.skills.quant_market_bridge import (
                 finanz_reconcile_reply_with_fetch_market_tool,

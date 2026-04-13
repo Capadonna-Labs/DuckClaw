@@ -28,6 +28,84 @@ _sem: Optional[threading.BoundedSemaphore] = None
 _sem_lock = threading.Lock()
 
 
+_RE_MAC_MINI_CUOTA = re.compile(r"^Mac Mini - Cuota\s+", re.IGNORECASE)
+
+
+def _finanz_row_amount_cop(r: dict[str, str]) -> float:
+    try:
+        return float(r.get("amount") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _finanz_deudas_mac_mini_installment_ids_to_exclude(rows: list[dict[str, str]]) -> set[str]:
+    """
+    Si coexisten fila agregada Mac Mini (TC Bancolombia) y filas «Mac Mini - Cuota …»,
+    excluye esas cuotas del total para no doblar el mismo crédito (evidencia traces 2026-04).
+    """
+    tc = "TC Bancolombia"
+    has_aggregate = False
+    installment_ids: list[str] = []
+    for r in rows:
+        if _finanz_row_amount_cop(r) <= 0:
+            continue
+        cred = (r.get("creditor") or "").strip()
+        desc = (r.get("description") or "").strip()
+        if cred != tc:
+            continue
+        if _RE_MAC_MINI_CUOTA.match(desc):
+            installment_ids.append(str(r.get("id", "")))
+            continue
+        dlow = desc.lower()
+        if "mac mini" not in dlow:
+            continue
+        if "8 cuotas" in dlow or "cuotas mensuales" in dlow:
+            has_aggregate = True
+    if has_aggregate and len(installment_ids) >= 2:
+        return {i for i in installment_ids if i}
+    return set()
+
+
+def _maybe_wrap_finanz_deudas_read_sql(spec: WorkerSpec, query: str, raw: str) -> str:
+    """Anexa totales deduplicados cuando read_sql devuelve filas de finance_worker.deudas."""
+    wid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
+    if wid != "finanz":
+        return raw
+    qlow = query.lower()
+    if "deudas" not in qlow:
+        return raw
+    sch = (getattr(spec, "schema_name", None) or "").strip().lower()
+    if "finance_worker" not in qlow and sch != "finance_worker":
+        return raw
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if isinstance(parsed, dict):
+        return raw
+    if not isinstance(parsed, list) or not parsed:
+        return raw
+    exclude = _finanz_deudas_mac_mini_installment_ids_to_exclude(parsed)
+    if not exclude:
+        return raw
+    naive = sum(_finanz_row_amount_cop(r) for r in parsed if _finanz_row_amount_cop(r) > 0)
+    deduped = sum(
+        _finanz_row_amount_cop(r)
+        for r in parsed
+        if _finanz_row_amount_cop(r) > 0 and str(r.get("id", "")) not in exclude
+    )
+    meta = {
+        "suma_todas_las_filas_cop": naive,
+        "total_recomendado_resumen_cop": deduped,
+        "regla_aplicada": (
+            "Excluidas del total las filas «Mac Mini - Cuota …» (TC Bancolombia) porque coexisten "
+            "con la fila agregada del mismo crédito; no sumar ambas en un único total."
+        ),
+        "ids_excluidos_del_total": sorted(exclude),
+    }
+    return json.dumps({"deudas_filas": parsed, "_totales_resumen_cop": meta}, ensure_ascii=False)
+
+
 def _truncate_read_sql_result_for_llm(raw: str) -> str:
     if not isinstance(raw, str) or len(raw) <= _READ_SQL_MAX_RESPONSE_CHARS:
         return raw
@@ -169,7 +247,8 @@ def run_worker_read_sql(run_query: Callable[[str], str], spec: WorkerSpec, q: st
     q = q.strip()
     upper = q.upper()
     try:
-        return _truncate_read_sql_result_for_llm(run_query(q))
+        raw = _truncate_read_sql_result_for_llm(run_query(q))
+        return _maybe_wrap_finanz_deudas_read_sql(spec, q, raw)
     except Exception as e:
         err = str(e)
         if spec.allowed_tables and any(k in upper for k in ("FROM", "JOIN")):
@@ -177,7 +256,8 @@ def run_worker_read_sql(run_query: Callable[[str], str], spec: WorkerSpec, q: st
                 try_q = _qualify_allowed_tables(q, schema_try, spec)
                 if try_q != q:
                     try:
-                        return _truncate_read_sql_result_for_llm(run_query(try_q))
+                        raw2 = _truncate_read_sql_result_for_llm(run_query(try_q))
+                        return _maybe_wrap_finanz_deudas_read_sql(spec, try_q, raw2)
                     except Exception:
                         pass
         return json.dumps({"error": err})

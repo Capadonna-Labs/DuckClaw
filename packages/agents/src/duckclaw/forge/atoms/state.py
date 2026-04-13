@@ -59,3 +59,9 @@ class ManagerAgentState(TypedDict, total=False):
     # Token Bot API del webhook que originó el turno (multiplex); heartbeats en hilos no heredan ContextVar.
     outbound_telegram_bot_token: Optional[str]
 
+    # Resiliencia Manager: replan tras fallos recuperables (ver agent_resilience + manager_graph).
+    plan_attempt_index: Optional[int]
+    plan_max_attempts: Optional[int]
+    plan_failure_reasons: Optional[list]
+    replan_requested: Optional[bool]
+

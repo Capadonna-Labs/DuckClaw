@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 import re
+import time
 from typing import Any, Optional, Sequence
 
 
@@ -89,6 +91,84 @@ def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
     return ""
 
 
+def is_transient_inference_connection_error(exc: BaseException) -> bool:
+    """Errores transitorios de transporte (backend local remoto, red, reinicios)."""
+    if isinstance(exc, (ConnectionError, TimeoutError, BrokenPipeError)):
+        return True
+    name = type(exc).__name__
+    if name in ("APIConnectionError", "ConnectError", "ReadTimeout", "WriteTimeout", "RemoteProtocolError"):
+        return True
+    low = str(exc).lower()
+    return "connection refused" in low or "connection reset" in low or "eof occurred" in low
+
+
+def _llm_invoke_max_attempts_from_env() -> int:
+    raw = (os.environ.get("DUCKCLAW_LLM_INVOKE_MAX_ATTEMPTS") or "3").strip()
+    try:
+        n = int(raw)
+        return max(1, min(n, 10))
+    except ValueError:
+        return 3
+
+
+def _llm_invoke_retry_delay_sec_from_env() -> float:
+    raw = (os.environ.get("DUCKCLAW_LLM_INVOKE_RETRY_DELAY_SEC") or "0.4").strip()
+    try:
+        return max(0.0, min(float(raw), 30.0))
+    except ValueError:
+        return 0.4
+
+
+def invoke_chat_model_with_transient_retries(
+    llm: Any,
+    messages: Any,
+    **invoke_kwargs: Any,
+) -> Any:
+    """
+    ``llm.invoke`` con reintentos solo ante fallos transitorios (MLX local, red inestable).
+
+    ``DUCKCLAW_LLM_INVOKE_MAX_ATTEMPTS`` (default 3), ``DUCKCLAW_LLM_INVOKE_RETRY_DELAY_SEC`` (default 0.4).
+    """
+    max_attempts = _llm_invoke_max_attempts_from_env()
+    delay_sec = _llm_invoke_retry_delay_sec_from_env()
+    last_exc: BaseException | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return llm.invoke(messages, **invoke_kwargs)
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= max_attempts or not is_transient_inference_connection_error(exc):
+                raise
+            if delay_sec > 0:
+                time.sleep(delay_sec)
+    assert last_exc is not None
+    raise last_exc
+
+
+def invoke_chat_model_with_transient_retries_and_fallback(
+    primary: Any,
+    fallback: Any | None,
+    messages: Any,
+    **invoke_kwargs: Any,
+) -> Any:
+    """
+    Tras reintentos transitorios en el backend **primary**, si sigue fallando y existe **fallback**
+    (otra tripleta vía env), intenta el mismo ``invoke`` en el modelo alternativo (mismo mensaje/tools bind).
+    """
+    _log = logging.getLogger(__name__)
+    try:
+        return invoke_chat_model_with_transient_retries(primary, messages, **invoke_kwargs)
+    except Exception as first_exc:
+        if fallback is None:
+            raise
+        _log.info(
+            "llm invoke: primary failed (%s), trying fallback backend",
+            type(first_exc).__name__,
+            exc_info=False,
+        )
+        return invoke_chat_model_with_transient_retries(fallback, messages, **invoke_kwargs)
+
+
 _REMOTE_USER_FACING_LLM = frozenset({"deepseek", "groq", "openai", "anthropic"})
 _LOCAL_INFERENCE_FAIL_LABELS = frozenset({"mlx", "iotcorelabs"})
 
@@ -110,11 +190,14 @@ def failure_provider_label_for_llm_invoke(llm: Any, reconciled_provider: str) ->
         out = inf
     # PM2/.env a veces dejan DUCKCLAW_* en mlx y LLM_* en deepseek; si la etiqueta sigue siendo local,
     # tomar el primer proveedor remoto explícito en env (no sustituye MLX real si ambos dicen mlx).
-    out_before_env = out
     if out in _LOCAL_INFERENCE_FAIL_LABELS:
         for _ek in ("DUCKCLAW_LLM_PROVIDER", "LLM_PROVIDER"):
             _ev = (os.environ.get(_ek) or "").strip().lower()
             if _ev in _REMOTE_USER_FACING_LLM:
+                # ``LLM_PROVIDER=groq`` suele quedar como default en .env mientras el cliente apunta a
+                # localhost; no culpar a Groq por ``Connection refused`` al motor local.
+                if _ev == "groq" and inf in _LOCAL_INFERENCE_FAIL_LABELS:
+                    continue
                 out = _ev
                 break
     return out
@@ -632,6 +715,19 @@ def build_llm(
                 raise RuntimeError("HuggingFace requiere HUGGINGFACE_API_KEY o HF_TOKEN.")
 
     return None
+
+
+def build_llm_fallback_from_env() -> Optional[Any]:
+    """
+    Segundo LLM opcional para el grafo del worker: ``DUCKCLAW_LLM_FALLBACK_PROVIDER`` (+ MODEL, BASE_URL).
+    No usa ``prefer_env_provider``: la tripleta es explícita. Devuelve None si no está configurado.
+    """
+    p = (os.environ.get("DUCKCLAW_LLM_FALLBACK_PROVIDER") or "").strip().lower()
+    if not p or p in ("none", "none_llm"):
+        return None
+    m = (os.environ.get("DUCKCLAW_LLM_FALLBACK_MODEL") or "").strip()
+    u = (os.environ.get("DUCKCLAW_LLM_FALLBACK_BASE_URL") or "").strip()
+    return build_llm(p, m, u, prefer_env_provider=False)
 
 
 def build_duckclaw_tools(db: Any) -> list[Any]:

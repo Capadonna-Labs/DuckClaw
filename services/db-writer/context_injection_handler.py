@@ -204,12 +204,10 @@ def _sync_handle_context_injection(message: str) -> list[dict[str, Any]]:
                     shared_db_path=target_db_path,
                 )
             finally:
-                _ac = getattr(acl_con, "_con", None)
-                if _ac is not None:
-                    try:
-                        _ac.close()
-                    except Exception:
-                        pass
+                try:
+                    acl_con.close()
+                except Exception:
+                    pass
             if not ok_grant:
                 logger.warning("CONTEXT_INJECTION rejected: no shared grant")
                 return []
@@ -231,23 +229,25 @@ def _sync_handle_context_injection(message: str) -> list[dict[str, Any]]:
     )
 
     needs_events: list[dict[str, Any]] = []
-    con = _connect_duckdb_writable(target_db_path)
-    try:
-        con.execute(_SEMANTIC_MEMORY_DDL)
-        for chunk in parts:
-            row_id = str(uuid.uuid4())
-            emb: list[float] | None = None
-            emb_ok = False
-            try:
-                emb, emb_ok = _embed_chunk(chunk)
-            except Exception as emb_exc:  # noqa: BLE001
-                logger.warning(
-                    "CONTEXT_INJECTION embedding error (se inserta texto sin vector): %s",
-                    emb_exc,
-                )
-                emb, emb_ok = None, False
+    # Cerrar la conexión tras cada chunk: el embedding puede tardar (modelo); sin bloquear
+    # el archivo mientras el gateway u otros procesos necesitan RO.
+    for chunk in parts:
+        row_id = str(uuid.uuid4())
+        emb: list[float] | None = None
+        emb_ok = False
+        try:
+            emb, emb_ok = _embed_chunk(chunk)
+        except Exception as emb_exc:  # noqa: BLE001
+            logger.warning(
+                "CONTEXT_INJECTION embedding error (se inserta texto sin vector): %s",
+                emb_exc,
+            )
+            emb, emb_ok = None, False
 
-            inserted = False
+        inserted = False
+        con = _connect_duckdb_writable(target_db_path)
+        try:
+            con.execute(_SEMANTIC_MEMORY_DDL)
             if emb_ok and emb is not None:
                 try:
                     _insert_row(
@@ -291,9 +291,10 @@ def _sync_handle_context_injection(message: str) -> list[dict[str, Any]]:
                         "tenant_id": tenant_id,
                     }
                 )
-        logger.info("CONTEXT_INJECTION almacenó %s chunks en %s", len(parts), target_db_path)
-    finally:
-        con.close()
+        finally:
+            con.close()
+
+    logger.info("CONTEXT_INJECTION almacenó %s chunks en %s", len(parts), target_db_path)
     return needs_events
 
 

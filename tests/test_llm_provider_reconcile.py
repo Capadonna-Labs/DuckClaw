@@ -89,6 +89,14 @@ def test_failure_label_env_llm_provider_overrides_stale_local_out(monkeypatch) -
     assert failure_provider_label_for_llm_invoke(llm, "mlx") == "deepseek"
 
 
+def test_failure_label_does_not_map_local_mlx_to_stale_groq_env(monkeypatch) -> None:
+    """Cliente en localhost + DUCKCLAW=mlx; ``LLM_PROVIDER=groq`` residual no debe sustituir la etiqueta."""
+    monkeypatch.setenv("DUCKCLAW_LLM_PROVIDER", "mlx")
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    llm = _FakeChatOpenAILike("http://127.0.0.1:8080/v1")
+    assert failure_provider_label_for_llm_invoke(llm, "mlx") == "mlx"
+
+
 class _FakeChatOpenAIModelOnly:
     """Simula ChatOpenAI antes del primer invoke (sin client.base_url poblado)."""
 

@@ -395,20 +395,18 @@ def _invoke_ephemeral_gateway_graph(
                     tp,
                     (tm or "")[:80],
                 )
-        _env_llm_provider = str(_graph_state.get("provider") or "")
-        _invoke_provider = _env_llm_provider
+        _invoke_provider = str(_graph_state.get("provider") or "")
         if ovr.get("llm_provider_override"):
             _invoke_provider = str(ovr.get("llm_provider_override") or "")
         elif trip:
             _invoke_provider = str(trip[0] or "")
         _log.info(
-            "graph_server: llm_invoke_override chat_id=%s trip_source=%s has_trip=%s ovr=%s global_provider=%s env_llm_provider=%s",
+            "graph_server: llm_invoke_override chat_id=%s trip_source=%s has_trip=%s ovr=%s global_provider=%s",
             chat_id,
             trip_source,
             trip is not None,
             bool(ovr),
             _invoke_provider,
-            _env_llm_provider,
         )
     except Exception as exc:
         _log.warning("graph_server: LLM override resolution failed: %s", exc, exc_info=True)

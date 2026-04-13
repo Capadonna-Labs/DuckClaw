@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
-TRAIN_DIR = Path(__file__).resolve().parents[3] / "train"
+TRAIN_DIR = Path(__file__).resolve().parents[4] / "train"
 DEFAULT_GOLDEN_PATH = TRAIN_DIR / "golden_dataset.jsonl"
 DEFAULT_SYSTEM_PROMPT = "Eres un asistente financiero experto."
 ACCURACY_THRESHOLD = 0.95
@@ -40,27 +40,10 @@ def load_golden_dataset(path: Optional[Path | str] = None) -> list[dict[str, Any
 
 
 def _validate_sql_in_completion(completion: str) -> bool:
-    """Valida SQL en tool_call args con sqlglot. Reutiliza lógica de SFT collector."""
-    from duckclaw.rl.rewards import _parse_tool_calls_from_completion
+    """Valida SQL en tool_call args con sqlglot. Misma lógica que forge.sft.sql_tool_validation."""
+    from duckclaw.forge.sft.sql_tool_validation import validate_sql_in_completion
 
-    try:
-        import sqlglot
-    except ImportError:
-        return True
-    tool_calls = _parse_tool_calls_from_completion(completion)
-    for tc in tool_calls:
-        args = tc.get("args") or {}
-        sql = args.get("sql")
-        if not sql or not isinstance(sql, str):
-            continue
-        sql = sql.strip()
-        if not sql:
-            continue
-        try:
-            sqlglot.parse(sql, dialect="duckdb")
-        except Exception:
-            return False
-    return True
+    return validate_sql_in_completion(completion)
 
 
 def _run_inference(model_path: str, prompt: str, system_prompt: str, max_tokens: int = 512) -> str:
@@ -84,9 +67,9 @@ def _execute_tool_calls(db: Any, completion: str, tools_by_name: dict[str, Any])
     """
     Ejecuta cada tool_call contra DuckDB/BI. Retorna True si todos pasan.
     """
-    from duckclaw.rl.rewards import _parse_tool_calls_from_completion
+    from duckclaw.forge.sft.sql_tool_validation import parse_legacy_tool_calls_from_completion
 
-    tool_calls = _parse_tool_calls_from_completion(completion)
+    tool_calls = parse_legacy_tool_calls_from_completion(completion)
     if not tool_calls:
         return True  # Sin tool calls, no hay nada que ejecutar
     for tc in tool_calls:

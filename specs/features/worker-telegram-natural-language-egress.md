@@ -28,6 +28,19 @@ Los mensajes visibles al usuario en Telegram (y trazas alineadas) deben ser **le
 - La evidencia enviada al modelo de síntesis se **trunca** (p. ej. ~12k caracteres) para contener contexto MLX/memoria.
 - `max_tokens` moderado en la invocación de síntesis para respuestas breves por defecto.
 
+## Reintentos de inferencia (fallos transitorios)
+
+Ante errores típicos de **conexión** al backend OpenAI-compatible (p. ej. MLX en `127.0.0.1` reiniciando, `connection refused`, timeouts cortos), el gateway puede **reintentar** el `invoke` del modelo con un **backoff** breve, tanto en el **nodo agente** del worker (`build_worker_graph` → `agent_node`) como en la **síntesis NL** de esta spec.
+
+| Variable | Rol |
+|----------|-----|
+| `DUCKCLAW_LLM_INVOKE_MAX_ATTEMPTS` | Máximo de intentos por invocación (default `3`, tope interno `10`). |
+| `DUCKCLAW_LLM_INVOKE_RETRY_DELAY_SEC` | Pausa entre intentos en segundos (default `0.4`). |
+
+No reemplaza tener **MLX-Inference** (u otro servidor) estable en PM2; solo amortigua ventanas cortas de indisponibilidad.
+
+Implementación: `packages/shared/src/duckclaw/integrations/llm_providers.py` (`invoke_chat_model_with_transient_retries`, `is_transient_inference_connection_error`).
+
 ## Plantillas nuevas
 
 Los autores de templates **no** deben añadir pasos manuales: el default del manifest cubre el criterio. Solo documenten `egress_natural_language_synthesis: false` si necesitan entregar JSON crudo al usuario (casos excepcionales).

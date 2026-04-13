@@ -657,6 +657,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "redis" },
     { name = "requests" },
+    { name = "sqlglot" },
     { name = "tavily-python" },
     { name = "yfinance", version = "1.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "yfinance", version = "1.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
@@ -670,13 +671,15 @@ requires-dist = [
     { name = "google-trends-mcp", marker = "python_full_version >= '3.10' and extra == 'google-trends'", specifier = ">=1.0.2" },
     { name = "langgraph", specifier = ">=0.2.0" },
     { name = "mcp", marker = "python_full_version >= '3.10'", specifier = ">=1.0.0" },
+    { name = "mlx-lm", marker = "extra == 'train'", specifier = ">=0.31.2" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "redis", specifier = ">=5.0.0" },
     { name = "requests", specifier = ">=2.28.0" },
+    { name = "sqlglot", specifier = ">=23.0.0" },
     { name = "tavily-python", specifier = ">=0.5.0" },
     { name = "yfinance", specifier = ">=0.2.40" },
 ]
-provides-extras = ["google-trends"]
+provides-extras = ["google-trends", "train"]
 
 [[package]]
 name = "duckclaw-core"
@@ -786,6 +789,7 @@ dependencies = [
     { name = "prompt-toolkit" },
     { name = "pydantic" },
     { name = "rich" },
+    { name = "tqdm" },
     { name = "typer", version = "0.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "typer", version = "0.24.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
@@ -796,6 +800,7 @@ requires-dist = [
     { name = "prompt-toolkit", specifier = ">=3.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "rich", specifier = ">=13.0.0" },
+    { name = "tqdm", specifier = ">=4.66.0" },
     { name = "typer", specifier = ">=0.9.0" },
 ]
 
@@ -1904,7 +1909,7 @@ wheels = [
 
 [[package]]
 name = "mlx-lm"
-version = "0.31.1"
+version = "0.31.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2", marker = "(python_full_version == '3.10.*' and sys_platform == 'emscripten') or (python_full_version == '3.10.*' and sys_platform == 'win32') or (python_full_version >= '3.10' and sys_platform != 'emscripten' and sys_platform != 'win32')" },
@@ -1916,9 +1921,9 @@ dependencies = [
     { name = "sentencepiece", marker = "(python_full_version == '3.10.*' and sys_platform == 'emscripten') or (python_full_version == '3.10.*' and sys_platform == 'win32') or (python_full_version >= '3.10' and sys_platform != 'emscripten' and sys_platform != 'win32')" },
     { name = "transformers", marker = "(python_full_version == '3.10.*' and sys_platform == 'emscripten') or (python_full_version == '3.10.*' and sys_platform == 'win32') or (python_full_version >= '3.10' and sys_platform != 'emscripten' and sys_platform != 'win32')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/f9/3f5597c62bd5733ebb3c9f96c33f2065db16353d743b8548bb05a01b7dd3/mlx_lm-0.31.1.tar.gz", hash = "sha256:1b2362ea301427004e5dda43b9241d751d4cb80eba641f6b85b29fc493affac5", size = 285473, upload-time = "2026-03-11T02:02:57.466Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/51/d7/66ac623c87f9ca834e49f8c79ff3be69179a6b5f23fc7b257fcd4fbb15bd/mlx_lm-0.31.2.tar.gz", hash = "sha256:2681b7652546d36128f43d6cc7698ec43529a1845a27350394d1843be63c652b", size = 301181, upload-time = "2026-04-07T21:36:51.229Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/8e/2e40713fc673d7268e32222752919075c0024b02635af56531d9ee8317b5/mlx_lm-0.31.1-py3-none-any.whl", hash = "sha256:bfc3e08e919b87bebb6fe2dbea980ece8ae8ee7132b31421aa0923c4286ecfa0", size = 393971, upload-time = "2026-03-11T02:02:54.973Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/67/63b032a4f11d1a634f26cedf4c5e0e33ea027bf189b1a10e1cac2653db92/mlx_lm-0.31.2-py3-none-any.whl", hash = "sha256:a90a7905031b2580b4923f92e0fb156ca287f452bb1a9e41a60dcbc971532d46", size = 407972, upload-time = "2026-04-07T21:36:49.859Z" },
 ]
 
 [[package]]
@@ -3971,6 +3976,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7b/ae/2d9c981590ed9999a0d91755b47fc74f74de286b0f5cee14c9269041e6c4/soupsieve-2.8.3.tar.gz", hash = "sha256:3267f1eeea4251fb42728b6dfb746edc9acaffc4a45b27e19450b676586e8349", size = 118627, upload-time = "2026-01-20T04:27:02.457Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/46/2c/1462b1d0a634697ae9e55b3cecdcb64788e8b7d63f54d923fcd0bb140aed/soupsieve-2.8.3-py3-none-any.whl", hash = "sha256:ed64f2ba4eebeab06cc4962affce381647455978ffc1e36bb79a545b91f45a95", size = 37016, upload-time = "2026-01-20T04:27:01.012Z" },
+]
+
+[[package]]
+name = "sqlglot"
+version = "30.4.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/e9/0014221c8caddeeb24801fee95f8c6306db0b2d8baa36e5f843ac9427f2d/sqlglot-30.4.2.tar.gz", hash = "sha256:02775ae2a0c5c16fe307279c9f2cf107c1b7d6724a6f30306acd2a557472a3cd", size = 5827240, upload-time = "2026-04-08T19:50:23.021Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/fe/1e5289e2e5111d276ff060ae48a2c5795f669b99aeeda0bb005b1815e2c8/sqlglot-30.4.2-py3-none-any.whl", hash = "sha256:f9424479412cabc8f1e7ff9e90a442cd88c6586e8b36cceeb0fc5ca0b8bd3364", size = 670857, upload-time = "2026-04-08T19:50:20.816Z" },
 ]
 
 [[package]]

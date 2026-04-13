@@ -28,6 +28,16 @@ from duckclaw.graphs.subagent_run_id import acquire_subagent_slot, release_subag
 from duckclaw.utils.langsmith_trace import get_tracing_config
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_plan, log_sys, set_log_context
 
+from duckclaw.graphs.agent_resilience import (
+    classify_exception_for_replan,
+    format_exhausted_plan_failure,
+    format_replan_task_suffix,
+    merge_failure_reasons,
+    plan_max_attempts_from_env,
+    replan_enabled,
+    worker_reply_suggests_replan_without_tools,
+)
+
 _log = logging.getLogger(__name__)
 _obs = get_obs_logger()
 _worker_graph_cache: dict[str, Any] = {}
@@ -683,7 +693,9 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     # Contenido de una tabla concreta
     is_table_content_intent = bool(
         re.search(
-            r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|contenido\s+de\s+la\s+tabla|"
+            r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|"
+            r"hay\s+algo\s+en\s+(la\s+)?tabla|hay\s+datos\s+en\s+(la\s+)?tabla|"
+            r"contenido\s+de\s+la\s+tabla|"
             r"muestr(a|ame)\s+la\s+tabla|ver\s+datos\s+de\s+la\s+tabla|registros?\s+de\s+la\s+tabla|"
             r"filas?\s+de\s+la\s+tabla|select\s+\*\s+from)\b",
             t,
@@ -1103,6 +1115,10 @@ def build_manager_graph(
         _ot = (state.get("outbound_telegram_bot_token") or "").strip()
         if _ot:
             out["outbound_telegram_bot_token"] = _ot
+        out["plan_attempt_index"] = 0
+        out["plan_max_attempts"] = plan_max_attempts_from_env()
+        out["plan_failure_reasons"] = []
+        out["replan_requested"] = False
         return out
 
     def greeting_shortcut_node(state: ManagerAgentState) -> ManagerAgentState:
@@ -1220,6 +1236,10 @@ def build_manager_graph(
         # Mantener lógica existente de ruteo / planned_task
         planned, override_worker = _plan_task(incoming, assigned)
         planned_final = planned or incoming
+        _pa_plan = int(state.get("plan_attempt_index") or 0)
+        _max_plan = int(state.get("plan_max_attempts") or plan_max_attempts_from_env())
+        if replan_enabled() and _pa_plan > 0:
+            planned_final = (planned_final or "").strip() + format_replan_task_suffix(_pa_plan, _max_plan)
 
         # Derivar task_summary a partir del mensaje original / planned_task
         task_summary = _task_summary_for_activity(incoming, planned_final)
@@ -1243,6 +1263,7 @@ def build_manager_graph(
             "task_summary": task_summary,
             "plan_title": plan_title or None,
             "tasks": tasks or [],
+            "replan_requested": False,
         }  # type: ignore[assignment]
         if mercenary_spec:
             out["mercenary_spec"] = mercenary_spec
@@ -1352,6 +1373,13 @@ def build_manager_graph(
         worker_graph = None
         worker_cache_key = ""
         _suspend_for_rw_worker = False
+        pa = int(state.get("plan_attempt_index") or 0)
+        max_a = int(state.get("plan_max_attempts") or plan_max_attempts_from_env())
+        reasons_acc = list(state.get("plan_failure_reasons") or [])
+        _tools_list: list[str] = []
+        replan_after = False
+        exhausted_final = False
+        next_plan_attempt = pa
         try:
             global _worker_graph_cache
             slot_token, run_label_n = acquire_subagent_slot(tenant_id, assigned, str(chat_id or ""))
@@ -1446,6 +1474,8 @@ def build_manager_graph(
             }
             if _out_hb_tok:
                 worker_state["outbound_telegram_bot_token"] = _out_hb_tok
+            worker_state["plan_attempt_index"] = pa
+            worker_state["plan_max_attempts"] = max_a
             mission = state.get("active_mission")
             if (
                 isinstance(mission, dict)
@@ -1529,6 +1559,108 @@ def build_manager_graph(
                 assigned,
                 _tools_list if _tools_list else "ninguna",
             )
+            _w_llm_failed = bool(worker_invoke.get("_duckclaw_worker_llm_invoke_failed"))
+            _w_llm_transient = bool(worker_invoke.get("_duckclaw_worker_llm_transient"))
+            _soft_would_match = worker_reply_suggests_replan_without_tools(raw_worker_reply)
+            # region agent log
+            try:
+                import json as _json_mg
+                import time as _time_mg
+
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-5e21eb.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df_mg:
+                    _df_mg.write(
+                        _json_mg.dumps(
+                            {
+                                "sessionId": "5e21eb",
+                                "timestamp": int(_time_mg.time() * 1000),
+                                "hypothesisId": "H2",
+                                "location": "manager_graph.py:invoke_worker_node",
+                                "message": "post-invoke replan inputs",
+                                "data": {
+                                    "worker_llm_failed": _w_llm_failed,
+                                    "worker_llm_transient": _w_llm_transient,
+                                    "failure_kind": worker_invoke.get("_duckclaw_worker_llm_failure_kind"),
+                                    "tools_n": len(_tools_list),
+                                    "soft_regex_match": _soft_would_match,
+                                },
+                                "runId": "post-fix",
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
+            if replan_enabled() and status == "SUCCESS":
+                if _w_llm_failed and _w_llm_transient:
+                    _fk = (worker_invoke.get("_duckclaw_worker_llm_failure_kind") or "error").strip()
+                    _rworker = f"inferencia: fallo de conexión al backend LLM en el worker ({_fk})"
+                    reasons_acc = merge_failure_reasons(reasons_acc, _rworker)
+                    if pa + 1 < max_a:
+                        replan_after = True
+                        next_plan_attempt = pa + 1
+                        log_sys(
+                            _obs,
+                            "manager replan: worker LLM transitorio -> intento %s/%s (%s)",
+                            pa + 2,
+                            max_a,
+                            _rworker,
+                        )
+                    else:
+                        exhausted_final = True
+                elif _w_llm_failed and not _w_llm_transient:
+                    reasons_acc = merge_failure_reasons(
+                        reasons_acc,
+                        "inferencia: error no transitorio en invoke del worker "
+                        f"({(worker_invoke.get('_duckclaw_worker_llm_failure_kind') or 'unknown')})",
+                    )
+                elif not _tools_list and _soft_would_match:
+                    _rsoft = "inferencia: respuesta sin tools con indicios de fallo de backend"
+                    reasons_acc = merge_failure_reasons(reasons_acc, _rsoft)
+                    # region agent log
+                    try:
+                        import json as _json_mg2
+                        import time as _time_mg2
+
+                        with open(
+                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-5e21eb.log",
+                            "a",
+                            encoding="utf-8",
+                        ) as _df2:
+                            _df2.write(
+                                _json_mg2.dumps(
+                                    {
+                                        "sessionId": "5e21eb",
+                                        "timestamp": int(_time_mg2.time() * 1000),
+                                        "hypothesisId": "H3",
+                                        "location": "manager_graph.py:invoke_worker_node",
+                                        "message": "soft replan branch taken",
+                                        "data": {},
+                                        "runId": "post-fix",
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                    except Exception:
+                        pass
+                    # endregion
+                    if pa + 1 < max_a:
+                        replan_after = True
+                        next_plan_attempt = pa + 1
+                        log_sys(
+                            _obs,
+                            "manager replan: señal débil (sin tools) -> intento %s/%s",
+                            pa + 2,
+                            max_a,
+                        )
+                    else:
+                        exhausted_final = True
         except Exception as e:
             msg = str(e)[:2048]
             low = msg.lower()
@@ -1560,6 +1692,21 @@ def build_manager_graph(
             _label_e = f"{assigned} {run_label_n}".strip()
             reply = _prepend_subagent_label_once(reply, _label_e)
             status = "FAILED"
+            _retryable, _rreason = classify_exception_for_replan(e, _duckdb_config_clash)
+            if replan_enabled() and _retryable:
+                reasons_acc = merge_failure_reasons(reasons_acc, _rreason)
+                if pa + 1 < max_a:
+                    replan_after = True
+                    next_plan_attempt = pa + 1
+                    log_sys(
+                        _obs,
+                        "manager replan: excepción recuperable -> intento %s/%s (%s)",
+                        pa + 2,
+                        max_a,
+                        _rreason,
+                    )
+                else:
+                    exhausted_final = True
         finally:
             _wdb = getattr(worker_graph, "_worker_db", None) if worker_graph is not None else None
             if _suspend_for_rw_worker and _wdb is not None and _wdb is not db:
@@ -1578,6 +1725,9 @@ def build_manager_graph(
             set_idle(chat_id)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             append_task_audit(db, chat_id, assigned, incoming, status, elapsed_ms, plan_title=plan_title)
+
+        if exhausted_final:
+            reply = format_exhausted_plan_failure(reasons_acc)
 
         # El manager ya registró en task_audit_log; el Gateway no debe duplicar.
         # assigned_worker_id para que el Gateway lo use en respuesta y trazas.
@@ -1602,6 +1752,19 @@ def build_manager_graph(
         if "handoff_context" in state:
             out["handoff_context"] = state.get("handoff_context")
         out["last_worker_raw_reply"] = raw_worker_reply or reply
+        out["plan_max_attempts"] = max_a
+        if replan_after:
+            out["replan_requested"] = True
+            out["plan_attempt_index"] = next_plan_attempt
+            out["plan_failure_reasons"] = reasons_acc
+        elif exhausted_final:
+            out["replan_requested"] = False
+            out["plan_attempt_index"] = max_a
+            out["plan_failure_reasons"] = reasons_acc
+        else:
+            out["replan_requested"] = False
+            out["plan_attempt_index"] = 0
+            out["plan_failure_reasons"] = []
         return out
 
     def mercenary_node(state: ManagerAgentState) -> ManagerAgentState:
@@ -1705,6 +1868,9 @@ def build_manager_graph(
             return "handoff_job_track"
         if _worker_matches_id(current_worker, "finanz") and _contains_income_injection_request(raw_reply):
             return "handoff_to_target"
+        if state.get("replan_requested"):
+            log_sys(_obs, "manager route: replan -> plan (reintento de planificación)")
+            return "plan"
         mission = state.get("active_mission")
         if not isinstance(mission, dict):
             return "end"
@@ -1930,6 +2096,7 @@ def build_manager_graph(
             "return_to_source": "return_to_source",
             "handoff_to_target": "handoff_to_target",
             "handoff_job_track": "handoff_job_track",
+            "plan": "plan",
             "end": END,
         },
     )

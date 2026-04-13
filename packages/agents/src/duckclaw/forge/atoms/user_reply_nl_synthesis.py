@@ -88,16 +88,6 @@ def context_summary_synthesis_max_output_tokens() -> int:
     )
 
 
-def _is_transient_inference_connection_error(exc: BaseException) -> bool:
-    """Errores habituales cuando MLX reinicia o el puerto local no acepta aún."""
-    if isinstance(exc, (ConnectionError, TimeoutError, BrokenPipeError)):
-        return True
-    name = type(exc).__name__
-    if name in ("APIConnectionError", "ConnectError", "ReadTimeout", "WriteTimeout", "RemoteProtocolError"):
-        return True
-    low = str(exc).lower()
-    return "connection refused" in low or "connection reset" in low or "eof occurred" in low
-
 _FOOTER_HINTS = (
     "este bloque se obtuvo",
     "sintetiza en bullet",
@@ -553,24 +543,16 @@ def synthesize_user_visible_reply(
         )
     )
 
-    def _invoke() -> Any:
-        try:
-            return llm.invoke([sys, human], max_tokens=mt)
-        except TypeError:
-            return llm.invoke([sys, human])
+    from duckclaw.integrations.llm_providers import invoke_chat_model_with_transient_retries
 
     try:
-        resp = _invoke()
-    except Exception as exc:
-        if _is_transient_inference_connection_error(exc):
-            try:
-                resp = _invoke()
-            except Exception:
-                _LOG.warning("nl_reply_synthesis: invoke failed after transient retry", exc_info=True)
-                return ""
-        else:
-            _LOG.warning("nl_reply_synthesis: invoke failed", exc_info=True)
-            return ""
+        try:
+            resp = invoke_chat_model_with_transient_retries(llm, [sys, human], max_tokens=mt)
+        except TypeError:
+            resp = invoke_chat_model_with_transient_retries(llm, [sys, human])
+    except Exception:
+        _LOG.warning("nl_reply_synthesis: invoke failed", exc_info=True)
+        return ""
     out = getattr(resp, "content", None)
     if out is None:
         out = str(resp)

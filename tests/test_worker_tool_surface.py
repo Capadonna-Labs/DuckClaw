@@ -17,7 +17,7 @@ def finanz_db_path(tmp_path: Path) -> str:
 def test_build_worker_graph_context_synthesis_skips_stdio_mcp_registers(
     finanz_db_path: str,
 ) -> None:
-    """No deben invocarse los registros MCP (github/reddit/google_trends) en modo síntesis."""
+    """Modo síntesis: omite GitHub y Google Trends; Reddit sí (URLs /context Reddit)."""
     from duckclaw import DuckClaw
     from duckclaw.workers.factory import build_worker_graph
 
@@ -45,7 +45,7 @@ def test_build_worker_graph_context_synthesis_skips_stdio_mcp_registers(
             tool_surface="context_synthesis",
         )
         m_gh.assert_not_called()
-        m_rd.assert_not_called()
+        m_rd.assert_called_once()
         m_gt.assert_not_called()
 
 

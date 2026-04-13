@@ -19,7 +19,7 @@ No existe `src/reddit` en el repositorio oficial [modelcontextprotocol/servers](
 
 **Paquete npm `mcp-reddit` ≥1.1:** las mismas herramientas se listan con prefijo `reddit_` (p. ej. `reddit_get_post`, `reddit_search_reddit`). El bridge en `reddit_bridge.py` admite **ambos** esquemas de nombres.
 
-**Enlaces de compartir `/r/<sub>/s/<slug>`:** el slug **no** es el `post_id` de la API de Reddit; `reddit_get_post` suele devolver 404. En `factory.py` / `agent_node`, Finanz fuerza **`reddit_search_reddit`** con la URL completa y reescribe llamadas `reddit_get_post` a búsqueda cuando el turno incluye ese patrón.
+**Enlaces de compartir `/r/<sub>/s/<slug>`:** el slug **no** es el `post_id` de la API. El gateway **resuelve la URL** (HTTP, redirecciones) hasta `.../comments/<id>/...`, fuerza **`reddit_get_post`** y **sobrescribe `subreddit`/`post_id`** en la llamada con lo parseado de esa URL canónica (el LLM a veces copia el slug `/s/` como `post_id`). Si la resolución falla, queda el fallback: forzar **`reddit_search_reddit`**.
 
 **Contexto LLM (`tools_node` en `factory.py`):** las herramientas cuyo nombre comienza por `reddit_` pasan su salida por [`duckclaw.utils.formatters`](packages/shared/src/duckclaw/utils/formatters.py) (`format_reddit_mcp_reply_if_applicable`) **antes** de añadir el `ToolMessage` al historial, para evitar JSON masivo en contexto/KV cache (Markdown compacto: cabecera `## r/… (Top N posts)`, score, enlace, extracto truncado).
 

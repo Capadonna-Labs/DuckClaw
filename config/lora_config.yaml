@@ -1,22 +1,40 @@
-# Configuración de SFT para Gemma 4 (DuckClaw Sovereign Harness)
-model: "/Users/juanjosearevalocamargo/Desktop/models/gemma4-text-only" # Ruta a tus pesos locales
+# Configuración de SFT para Gemma 4 (DuckClaw) — consumida por `duckops train -c config/lora_config.yaml`
+# Requisito: mlx-lm >= 0.31.2 (Gemma 4: mlx_lm.models.gemma4). Ver specs/features/Formateo de Datasets (SFT & GRPO).md §5
+# Claves alineadas con mlx_lm CONFIG_DEFAULTS / argparse (no uses lora_layers/lora_rank sueltos).
+#
+# IMPORTANTE: un id tipo "org/repo" NO usa tu copia en ~/Desktop/models: mlx_lm hace
+# snapshot_download al caché de Hugging Face si esa ruta no existe como carpeta local.
+# Para cargar el MLX que ya tienes en disco, `model` debe ser la ruta absoluta al directorio
+# que contiene config.json y model*.safetensors.
+model: "/Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b"
+# Sin copia local (descarga ~5GB al caché HF la primera vez):
+# model: "deadbydawn101/gemma-4-E4B-mlx-4bit"
+
 train: true
-data: "packages/agents/train/gemma4" # Directorio donde está dataset_final.jsonl
+fine_tune_type: lora
+
+# Directorio con train.jsonl, valid.jsonl, test.jsonl — generado por train_sft.py (split train/valid).
+data: "packages/agents/train/gemma4/sft_data_dir"
 seed: 42
 
-# Parámetros de Memoria Estricta (Mac mini)
+# Validación: requiere valid.jsonl no vacío (train_sft.py con SFT_VALID_FRACTION>0).
+steps_per_eval: 100
+val_batches: -1
+
+num_layers: 16
 batch_size: 1
 iters: 1000
-max_seq_length: 2048 # Protege el KV Cache durante el entrenamiento
+steps_per_report: 10
+# Memoria Metal: si ves kIOGPUCommandBufferCallbackErrorOutOfMemory, baja max_seq_length
+# y/o activa grad_checkpoint. El log avisó secuencias >2048 tokens; 1024 reduce mucho VRAM.
+max_seq_length: 1024
+grad_checkpoint: true
 
-# Topología LoRA
-lora_layers: 16
-lora_rank: 8
-lora_alpha: 16
-lora_dropout: 0.05
-learning_rate: 1e-5
+lora_parameters:
+  rank: 8
+  dropout: 0.05
+  scale: 16
 
-# Optimizaciones MLX
-use_dora: false
+learning_rate: 1.0e-5
 save_every: 200
-adapter_path: "models/adapters/gemma4_duckclaw_v1"
+adapter_path: "packages/agents/train/gemma4/adapters_lora_yaml"

@@ -40,32 +40,38 @@ async def download_quote(
         _root = Path(__file__).resolve().parent.parent.parent
         db_path = str(_root / db_path)
     db = DuckClaw(db_path, read_only=True)
-    # Escapar comillas para SQL (DuckClaw.query solo acepta sql string)
-    qid_esc = (quote_id or "").replace("'", "''")[:128]
-    tok_esc = (token or "").replace("'", "''")[:256]
     try:
-        r = db.query(
-            f"SELECT pdf_path, download_token FROM quotes WHERE quote_id = '{qid_esc}' AND download_token = '{tok_esc}'"
-        )
-    except Exception:
-        raise HTTPException(status_code=404, detail="Cotización no encontrada")
-
-    rows = r if isinstance(r, list) else json.loads(r) if isinstance(r, str) else []
-    if not rows or not isinstance(rows, list):
+        # Escapar comillas para SQL (DuckClaw.query solo acepta sql string)
+        qid_esc = (quote_id or "").replace("'", "''")[:128]
+        tok_esc = (token or "").replace("'", "''")[:256]
         try:
-            rows = json.loads(r) if isinstance(r, str) else []
+            r = db.query(
+                f"SELECT pdf_path, download_token FROM quotes WHERE quote_id = '{qid_esc}' AND download_token = '{tok_esc}'"
+            )
         except Exception:
-            rows = []
-    if not rows:
-        raise HTTPException(status_code=404, detail="Cotización no encontrada o token inválido")
+            raise HTTPException(status_code=404, detail="Cotización no encontrada")
 
-    row = rows[0] if isinstance(rows[0], dict) else {}
-    pdf_path = (row.get("pdf_path") or "").strip()
-    if not pdf_path or not Path(pdf_path).is_file():
-        # Buscar en QUOTES_DIR por quote_id
-        candidates = list(Path(QUOTES_DIR).glob(f"*{quote_id}*.pdf"))
-        if not candidates:
-            raise HTTPException(status_code=404, detail="PDF no generado aún")
-        pdf_path = str(candidates[0])
+        rows = r if isinstance(r, list) else json.loads(r) if isinstance(r, str) else []
+        if not rows or not isinstance(rows, list):
+            try:
+                rows = json.loads(r) if isinstance(r, str) else []
+            except Exception:
+                rows = []
+        if not rows:
+            raise HTTPException(status_code=404, detail="Cotización no encontrada o token inválido")
 
-    return FileResponse(pdf_path, media_type="application/pdf", filename=f"cotizacion_{quote_id}.pdf")
+        row = rows[0] if isinstance(rows[0], dict) else {}
+        pdf_path = (row.get("pdf_path") or "").strip()
+        if not pdf_path or not Path(pdf_path).is_file():
+            # Buscar en QUOTES_DIR por quote_id
+            candidates = list(Path(QUOTES_DIR).glob(f"*{quote_id}*.pdf"))
+            if not candidates:
+                raise HTTPException(status_code=404, detail="PDF no generado aún")
+            pdf_path = str(candidates[0])
+
+        return FileResponse(pdf_path, media_type="application/pdf", filename=f"cotizacion_{quote_id}.pdf")
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass

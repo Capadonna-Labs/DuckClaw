@@ -1,11 +1,13 @@
-"""Tests for SFT DataCollector (forge/sft)."""
+"""Tests for SFT DataCollector (forge/sft) — Gemma / conversation_traces."""
 
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-from duckclaw.forge.sft import DataMasker, collect_from_langsmith, collect_traces_to_sft
+import pytest
+
+from duckclaw.forge.sft import DataMasker, GEMMA4_TRAIN_DIR, collect_traces_to_sft
+from duckclaw.forge.sft.gemma_message_flatten import flatten_messages_for_gemma
 
 
 def test_datamasker_emails() -> None:
@@ -23,123 +25,162 @@ def test_datamasker_credit_cards() -> None:
     assert "1234-5678-9012-3456" not in masker.mask(text)
 
 
-def test_chatml_format() -> None:
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write(
-            json.dumps({
-                "prompt": "¿Mejores vendedores?",
-                "completions": [{
-                    "text": '<thought>X</thought>\n<tool_call>{"tool": "get_top_sellers", "args": {"limit": 10}}</tool_call>\n<answer>Ok</answer>',
-                    "reward": 1.0,
-                }],
-            }, ensure_ascii=False) + "\n"
-        )
-        inp = Path(f.name)
-    out = inp.parent / "dataset_sft_test.jsonl"
-    try:
-        records, stats = collect_traces_to_sft(input_path=inp, output_path=out)
-        assert len(records) == 1
-        text = records[0]["text"]
-        assert text.startswith("<s>[INST] <<SYS>>")
-        assert "<</SYS>>" in text
-        assert "[/INST]" in text
-        assert text.endswith("</s>")
-        assert "Eres un asistente financiero experto" in text
-    finally:
-        inp.unlink(missing_ok=True)
-        out.unlink(missing_ok=True)
+def test_default_gemma4_output_path_constant() -> None:
+    assert GEMMA4_TRAIN_DIR.name == "gemma4"
 
 
-def test_sql_valid_included() -> None:
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write(
-            json.dumps({
-                "prompt": "Exporta ventas a Excel",
-                "completions": [{
-                    "text": '<thought>Exportaré</thought>\n<tool_call>{"tool": "export_to_excel", "args": {"sql": "SELECT * FROM olist_orders LIMIT 100", "sheet_name": "datos", "limit": 100}}</tool_call>\n<answer>Listo</answer>',
-                    "reward": 1.0,
-                }],
-            }, ensure_ascii=False) + "\n"
+def test_collect_skips_non_success() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        conv = root / "conversation_traces" / "2026" / "04" / "12"
+        conv.mkdir(parents=True)
+        p = conv / "traces.jsonl"
+        p.write_text(
+            json.dumps(
+                {
+                    "messages": [{"role": "user", "content": "hola"}],
+                    "status": "FAILED",
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
         )
-        inp = Path(f.name)
-    out = inp.parent / "dataset_sft_sql_valid.jsonl"
-    try:
-        records, stats = collect_traces_to_sft(input_path=inp, output_path=out)
+        out = root / "out.jsonl"
+        records, stats = collect_traces_to_sft(traces_root=root, output_path=out, require_valid_sql=False)
+        assert records == []
+        assert stats["skipped_non_success"] == 1
+        assert stats["total_output"] == 0
+
+
+def test_collect_success_messages_format() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        p = root / "t.jsonl"
+        p.write_text(
+            json.dumps(
+                {
+                    "messages": [
+                        {"role": "system", "content": "Sys."},
+                        {"role": "user", "content": "Hola"},
+                        {"role": "assistant", "content": "Hola."},
+                    ],
+                    "status": "SUCCESS",
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        out = root / "dataset.jsonl"
+        records, stats = collect_traces_to_sft(traces_root=root, output_path=out, require_valid_sql=False)
+        assert stats["total_output"] == 1
+        assert "messages" in records[0]
+        assert records[0]["messages"][0]["role"] == "user"
+        assert "Sys." in records[0]["messages"][0]["content"]
+        assert records[0]["messages"][1]["role"] == "assistant"
+
+
+def test_collect_sql_invalid_skipped() -> None:
+    pytest.importorskip("sqlglot")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        p = root / "t.jsonl"
+        bad_sql = "SELEC * FROM x"
+        p.write_text(
+            json.dumps(
+                {
+                    "messages": [
+                        {"role": "user", "content": "q"},
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "type": "function",
+                                    "function": {
+                                        "name": "read_sql",
+                                        "arguments": json.dumps({"sql": bad_sql}),
+                                    },
+                                }
+                            ],
+                        },
+                    ],
+                    "status": "SUCCESS",
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        out = root / "out.jsonl"
+        records, stats = collect_traces_to_sft(traces_root=root, output_path=out, require_valid_sql=True)
+        assert records == []
+        assert stats["skipped_sql"] == 1
+
+
+def test_collect_sql_valid_included() -> None:
+    pytest.importorskip("sqlglot")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        p = root / "t.jsonl"
+        p.write_text(
+            json.dumps(
+                {
+                    "messages": [
+                        {"role": "user", "content": "q"},
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "type": "function",
+                                    "function": {
+                                        "name": "read_sql",
+                                        "arguments": json.dumps(
+                                            {"sql": "SELECT 1 AS one"}
+                                        ),
+                                    },
+                                }
+                            ],
+                        },
+                    ],
+                    "status": "SUCCESS",
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        out = root / "out.jsonl"
+        records, stats = collect_traces_to_sft(traces_root=root, output_path=out, require_valid_sql=True)
         assert len(records) == 1
         assert stats["skipped_sql"] == 0
-    finally:
-        inp.unlink(missing_ok=True)
-        out.unlink(missing_ok=True)
 
 
-def test_sql_invalid_excluded() -> None:
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write(
-            json.dumps({
-                "prompt": "Exporta ventas",
-                "completions": [{
-                    "text": '<thought>X</thought>\n<tool_call>{"tool": "export_to_excel", "args": {"sql": "SELECT FROM invalid syntax here", "sheet_name": "x", "limit": 10}}</tool_call>\n<answer>Ok</answer>',
-                    "reward": 1.0,
-                }],
-            }, ensure_ascii=False) + "\n"
-        )
-        inp = Path(f.name)
-    out = inp.parent / "dataset_sft_sql_invalid.jsonl"
-    try:
-        records, stats = collect_traces_to_sft(input_path=inp, output_path=out)
-        assert len(records) == 0
-        assert stats["skipped_sql"] == 1
-    finally:
-        inp.unlink(missing_ok=True)
-        out.unlink(missing_ok=True)
-
-
-def test_min_reward_filter() -> None:
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write(
-            json.dumps({
-                "prompt": "Pregunta",
-                "completions": [
-                    {"text": "<thought>X</thought>\n<tool_call>{\"tool\": \"list_tables\", \"args\": {}}</tool_call>\n<answer>Ok</answer>", "reward": 0.5},
-                    {"text": "<thought>Y</thought>\n<tool_call>{\"tool\": \"list_tables\", \"args\": {}}</tool_call>\n<answer>Ok</answer>", "reward": 1.0},
-                ],
-            }, ensure_ascii=False) + "\n"
-        )
-        inp = Path(f.name)
-    out = inp.parent / "dataset_sft_reward.jsonl"
-    try:
-        records, stats = collect_traces_to_sft(input_path=inp, output_path=out, min_reward=1.0)
-        assert len(records) == 1
-        assert stats["skipped_reward"] == 1
-    finally:
-        inp.unlink(missing_ok=True)
-        out.unlink(missing_ok=True)
-
-
-def test_collect_from_langsmith_no_project() -> None:
-    """collect_from_langsmith sin LANGSMITH_PROJECT retorna error."""
-    records, stats = collect_from_langsmith(project_name="")
-    assert len(records) == 0
-    assert "error" in stats
-
-
-def test_collect_from_langsmith_mocked() -> None:
-    """collect_from_langsmith con Client mockeado."""
-    mock_run = MagicMock()
-    mock_run.inputs = {"incoming": "¿Mejores vendedores?", "messages": []}
-    mock_run.outputs = {"reply": "<thought>OK</thought>\n<tool_call>{\"tool\": \"get_top_sellers\", \"args\":{}}</tool_call>\n<answer>Listo</answer>"}
-    mock_run.error = None
-
-    with patch("langsmith.Client") as mock_client:
-        mock_client.return_value.list_runs.return_value = [mock_run]
-        with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
-            out_path = Path(f.name)
-        try:
-            records, stats = collect_from_langsmith(
-                project_name="test-project",
-                output_path=out_path,
-            )
-            assert "error" not in stats or stats.get("total_output", 0) >= 0
-            assert stats.get("source") == "langsmith"
-        finally:
-            out_path.unlink(missing_ok=True)
+def test_flatten_tool_roundtrip_alternation() -> None:
+    msgs = [
+        {"role": "system", "content": "S"},
+        {"role": "user", "content": "pregunta"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "tavily_search",
+                        "arguments": json.dumps({"query": "x"}),
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "name": "tavily_search", "content": "resultado"},
+        {"role": "assistant", "content": "respuesta final"},
+    ]
+    flat = flatten_messages_for_gemma(msgs)
+    roles = [m["role"] for m in flat]
+    assert roles[0] == "user"
+    assert roles == ["user", "assistant", "user", "assistant"]
+    assert "[RESULTADO DE HERRAMIENTA tavily_search]" in flat[2]["content"]
+    assert "[TOOL_CALLS_JSON]" in flat[1]["content"]

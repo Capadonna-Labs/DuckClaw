@@ -1,7 +1,7 @@
 """
-SFT_DataCollector — transforma trazas con reward 1.0 en dataset SFT (ChatML).
+SFT_DataCollector — trazas de conversación (SUCCESS) → dataset Gemma/MLX (`messages`).
 
-Spec: specs/Migracion_de_Pipeline_de_Entrenamiento_(GRPO_a_SFT_con_MLX).md
+Spec: specs/features/Formateo de Datasets (SFT & GRPO).md
 """
 
 from __future__ import annotations
@@ -11,116 +11,111 @@ from pathlib import Path
 from typing import Any, Optional
 
 from duckclaw.forge.sft.datamasker import DataMasker
-from duckclaw.rl.rewards import _parse_tool_calls_from_completion
+from duckclaw.forge.sft.gemma_message_flatten import flatten_messages_for_gemma
+from duckclaw.forge.sft.sql_tool_validation import validate_sql_in_openai_messages
+from duckclaw.graphs.conversation_traces import get_conversation_traces_dir
 
-TRAIN_DIR = Path(__file__).resolve().parents[3] / "train"
-DEFAULT_INPUT_PATH = TRAIN_DIR / "grpo_olist_rewarded.jsonl"
-DEFAULT_SFT_DATASET_PATH = TRAIN_DIR / "dataset_sft.jsonl"
-DEFAULT_SYSTEM_PROMPT = "Eres un asistente financiero experto."
-
-
-def _validate_sql_in_completion(completion: str) -> bool:
-    """
-    Extrae SQL de tool_call args (clave 'sql') y valida con sqlglot.
-    Retorna True si no hay SQL o si todo el SQL es válido; False si hay SQL inválido.
-    """
-    try:
-        import sqlglot
-    except ImportError:
-        return True  # Sin sqlglot, no validar
-    tool_calls = _parse_tool_calls_from_completion(completion)
-    for tc in tool_calls:
-        args = tc.get("args") or {}
-        sql = args.get("sql")
-        if not sql or not isinstance(sql, str):
-            continue
-        sql = sql.strip()
-        if not sql:
-            continue
-        try:
-            sqlglot.parse(sql, dialect="duckdb")
-        except Exception:
-            return False
-    return True
+# forge/sft/ es un nivel más profundo que graphs/; usar parents[4] para alinear con agents/train.
+TRAIN_DIR = Path(__file__).resolve().parents[4] / "train"
+GEMMA4_TRAIN_DIR = TRAIN_DIR / "gemma4"
+DEFAULT_SFT_DATASET_PATH = GEMMA4_TRAIN_DIR / "dataset_sft.jsonl"
 
 
 def collect_traces_to_sft(
-    input_path: Optional[Path | str] = None,
+    traces_root: Optional[Path | str] = None,
     output_path: Optional[Path | str] = None,
     *,
-    system_prompt: Optional[str] = None,
-    min_reward: float = 1.0,
     datamasker: Optional[DataMasker] = None,
+    require_valid_sql: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
-    Convierte trazas con reward >= min_reward en dataset SFT (formato ChatML).
+    Lee todos los ``*.jsonl`` bajo ``traces_root`` (recursivo), conserva líneas con
+    ``status == "SUCCESS"``, aplica flattening Gemma y escribe un JSONL con
+    ``{"messages": [...]}`` por línea.
 
-    - input_path: JSONL grupos (default: train/grpo_olist_rewarded.jsonl).
-    - output_path: salida JSONL (default: train/dataset_sft.jsonl).
-    - system_prompt: texto para <<SYS>> (default: "Eres un asistente financiero experto.").
-    - min_reward: solo incluir completions con reward >= min_reward (default 1.0).
-    - datamasker: instancia para anonimizar; si None, se crea una.
-
-    Retorna (lista de registros SFT escritos, estadísticas).
+    - ``traces_root``: raíz del datalake (default: ``get_conversation_traces_dir()``).
+    - ``output_path``: salida (default: ``train/gemma4/dataset_sft.jsonl``), sobrescritura total.
+    - ``require_valid_sql``: si True, descarta ejemplos cuyo SQL en ``tool_calls`` no parsea (sqlglot).
     """
-    inp = Path(input_path) if input_path else DEFAULT_INPUT_PATH
+    root = Path(traces_root) if traces_root else get_conversation_traces_dir()
     out = Path(output_path) if output_path else DEFAULT_SFT_DATASET_PATH
     out.parent.mkdir(parents=True, exist_ok=True)
-    sys_prompt = (system_prompt or DEFAULT_SYSTEM_PROMPT).strip()
     masker = datamasker or DataMasker()
 
-    if not inp.exists():
-        return [], {
-            "input_path": str(inp),
+    if not root.is_dir():
+        stats: dict[str, Any] = {
+            "traces_root": str(root),
             "output_path": str(out),
+            "files_scanned": 0,
+            "lines_read": 0,
             "total_output": 0,
+            "skipped_non_success": 0,
             "skipped_sql": 0,
-            "skipped_reward": 0,
+            "skipped_malformed": 0,
         }
+        return [], stats
 
     records: list[dict[str, Any]] = []
+    files_scanned = 0
+    lines_read = 0
+    skipped_non_success = 0
     skipped_sql = 0
-    skipped_reward = 0
+    skipped_malformed = 0
 
-    with open(inp, "r", encoding="utf-8") as f:
-        for line in f:
+    jsonl_files = sorted(root.rglob("*.jsonl"))
+    files_scanned = len(jsonl_files)
+
+    for fp in jsonl_files:
+        try:
+            text = fp.read_text(encoding="utf-8")
+        except OSError:
+            skipped_malformed += 1
+            continue
+        for line in text.splitlines():
             line = line.strip()
             if not line:
                 continue
+            lines_read += 1
             try:
-                group = json.loads(line)
+                row = json.loads(line)
             except json.JSONDecodeError:
+                skipped_malformed += 1
                 continue
-            prompt = (group.get("prompt") or "").strip()
-            completions = group.get("completions") or []
-            for c in completions:
-                reward = float(c.get("reward", -1))
-                if reward < min_reward:
-                    skipped_reward += 1
-                    continue
-                text = c.get("text") or ""
-                if not text.strip():
-                    continue
-                if not _validate_sql_in_completion(text):
-                    skipped_sql += 1
-                    continue
-                prompt_masked = masker.mask(prompt)
-                completion_masked = masker.mask(text)
-                chatml = (
-                    f"<s>[INST] <<SYS>>\n{sys_prompt}\n<</SYS>>\n"
-                    f"{prompt_masked} [/INST] {completion_masked} </s>"
-                )
-                records.append({"text": chatml})
+            if not isinstance(row, dict):
+                skipped_malformed += 1
+                continue
+            if (row.get("status") or "") != "SUCCESS":
+                skipped_non_success += 1
+                continue
+            messages = row.get("messages")
+            if not isinstance(messages, list) or not messages:
+                skipped_malformed += 1
+                continue
+            if require_valid_sql and not validate_sql_in_openai_messages(messages):
+                skipped_sql += 1
+                continue
+            flat = flatten_messages_for_gemma([m for m in messages if isinstance(m, dict)])
+            if not flat:
+                skipped_malformed += 1
+                continue
+            masked = [
+                {"role": m["role"], "content": masker.mask(m.get("content") or "")}
+                for m in flat
+            ]
+            records.append({"messages": masked})
 
     with open(out, "w", encoding="utf-8") as f:
         for r in records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     stats = {
-        "input_path": str(inp),
-        "output_path": str(out),
+        "traces_root": str(root.resolve()),
+        "output_path": str(out.resolve()),
+        "files_scanned": files_scanned,
+        "lines_read": lines_read,
         "total_output": len(records),
+        "skipped_non_success": skipped_non_success,
         "skipped_sql": skipped_sql,
-        "skipped_reward": skipped_reward,
+        "skipped_malformed": skipped_malformed,
     }
     return records, stats

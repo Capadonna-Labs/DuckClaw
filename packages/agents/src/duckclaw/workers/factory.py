@@ -50,6 +50,15 @@ _NO_TASK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Preguntas por filas/contenido (no catálogo). Incluye «hay algo en la tabla X» (evita confundir con listar tablas).
+_TABLE_CONTENT_PHRASE = re.compile(
+    r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|"
+    r"hay\s+algo\s+en\s+(la\s+)?tabla|hay\s+datos\s+en\s+(la\s+)?tabla|"
+    r"contenido\s+de\s+la\s+tabla|muestr(a|ame)\s+la\s+tabla|ver\s+datos\s+de\s+la\s+tabla|"
+    r"registros?\s+de\s+la\s+tabla|filas?\s+de\s+la\s+tabla|select\s+\*\s+from|select\s+.+\s+from)\b",
+    re.IGNORECASE,
+)
+
 # Preguntas sobre DB/tablas/esquema son siempre tarea concreta (evitar "¿Cuál es mi tarea?")
 _CONCRETE_TASK_KEYWORDS = re.compile(
     r"\b(db|database|base\s+de\s+datos|tablas?|tables?|esquema|schema|nombre\s+de\s+la\s+db|"
@@ -193,6 +202,32 @@ def _is_finanz_local_accounts_query(text: str) -> bool:
         re.search(
             r"\b(resumen\s+(de\s+)?(mis\s+)?cuentas|saldos?\s+(de\s+)?(mis\s+)?cuentas|"
             r"mis\s+cuentas\s+bancarias|cuentas\s+bancarias|estado\s+actual\s+de\s+mis\s+cuentas)\b",
+            t,
+        )
+    )
+
+
+def _is_finanz_debts_query(text: str) -> bool:
+    """Deudas en DuckDB local (finance_worker.deudas). Obliga read_sql para no inventar desde el historial."""
+    if not text or not text.strip():
+        return False
+    t = text.strip().lower()
+    if "[system_directive:" in t:
+        return False
+    return bool(
+        re.search(
+            r"\b("
+            r"resumen\s+(de\s+)?(mis\s+)?deudas|"
+            r"mis\s+deudas|"
+            r"deudas\s+(activas|pendientes|registradas)|"
+            r"cu[aá]nto\s+debo\b|"
+            r"cu[aá]ntas\s+deudas|"
+            r"estado\s+(de\s+)?(mis\s+)?deudas|"
+            r"listado\s+(de\s+)?(mis\s+)?deudas|"
+            r"qu[eé]\s+deudas\s+tengo|"
+            r"total\s+(de\s+)?(mis\s+)?deudas|"
+            r"deudas\s+en\s+(la\s+)?(base|db|duckdb)"
+            r")\b",
             t,
         )
     )
@@ -1317,6 +1352,15 @@ def build_worker_graph(
 
         provider = reconcile_worker_provider_label(llm, provider, llm_provider)
 
+    llm_fallback: Any | None = None
+    if llm is not None:
+        try:
+            from duckclaw.integrations.llm_providers import build_llm_fallback_from_env
+
+            llm_fallback = build_llm_fallback_from_env()
+        except Exception as _fb_exc:
+            _log.debug("LLM fallback skipped: %s", _fb_exc)
+
     _logical_id_early = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
     _cp_early = _normalized_context_pruning(spec)
     llm_summary: Any = None
@@ -1866,12 +1910,7 @@ def build_worker_graph(
             if re.search(r"\btabla\s+o\s+lista\b", t):
                 return False
             # Si piden contenido/filas de una tabla, NO forzar inspect_schema.
-            if re.search(
-                r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|contenido\s+de\s+la\s+tabla|"
-                r"muestr(a|ame)\s+la\s+tabla|ver\s+datos\s+de\s+la\s+tabla|registros?\s+de\s+la\s+tabla|"
-                r"filas?\s+de\s+la\s+tabla|select\s+\*\s+from)\b",
-                t,
-            ):
+            if _TABLE_CONTENT_PHRASE.search(t):
                 return False
             return any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas"))
 
@@ -1881,14 +1920,7 @@ def build_worker_graph(
             t = text.strip().lower()
             if "read_sql" in t and "job_opportunities" in t:
                 return True
-            return bool(
-                re.search(
-                    r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|contenido\s+de\s+la\s+tabla|"
-                    r"muestr(a|ame)\s+la\s+tabla|ver\s+datos\s+de\s+la\s+tabla|registros?\s+de\s+la\s+tabla|"
-                    r"filas?\s+de\s+la\s+tabla|select\s+\*\s+from|select\s+.+\s+from)\b",
-                    t,
-                )
-            )
+            return bool(_TABLE_CONTENT_PHRASE.search(t))
 
         def _is_latest_game_query(text: str) -> bool:
             if not text or not text.strip():
@@ -1934,6 +1966,12 @@ def build_worker_graph(
                 and _is_finanz_local_accounts_query(incoming)
                 and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
             )
+            force_finanz_deudas = (
+                (_lid or "").strip().lower() == "finanz"
+                and has_read_sql
+                and _is_finanz_debts_query(incoming)
+                and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
+            )
             force_finanz_admin_sql = (
                 (_lid or "").strip().lower() == "finanz"
                 and has_admin_sql
@@ -1950,6 +1988,7 @@ def build_worker_graph(
                 is_latest_game = False
                 is_portfolio = False
                 force_finanz_cuentas = False
+                force_finanz_deudas = False
                 force_finanz_admin_sql = False
             # No forzar herramienta si el último mensaje ya es ToolMessage (ya ejecutamos la tool):
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
@@ -1977,7 +2016,10 @@ def build_worker_graph(
             force_schema = is_schema and not already_has_tool_result
             force_admin_sql = force_finanz_admin_sql and not already_has_tool_result
             force_read_sql = (
-                is_table_content or is_latest_game or force_finanz_cuentas
+                is_table_content
+                or is_latest_game
+                or force_finanz_cuentas
+                or force_finanz_deudas
             ) and not already_has_tool_result
             force_portfolio_first = is_portfolio and not already_has_tool_result
             force_portfolio_after_local_cuentas = (
@@ -2141,6 +2183,20 @@ def build_worker_graph(
             if force_plot_docs:
                 force_tavily = True
 
+            if _worker_use_heuristic_first_tool(spec):
+                _pa_esc = int(state.get("plan_attempt_index") or 0)
+                if (
+                    _pa_esc >= 1
+                    and (_lid or "").strip().lower() == "finanz"
+                    and has_read_sql
+                    and not telegram_context_summarize_directive
+                    and not already_has_tool_result
+                ):
+                    from duckclaw.graphs.agent_resilience import resilience_escalation_wants_read_sql
+
+                    if resilience_escalation_wants_read_sql(incoming, _pa_esc):
+                        force_read_sql = True
+
             if jh_fast_text is not None:
                 resp = AIMessage(content=jh_fast_text)
                 out = {**state, "messages": state["messages"] + [resp]}
@@ -2153,11 +2209,11 @@ def build_worker_graph(
                 "admin_sql"
                 if force_admin_sql
                 else (
-                    "inspect_schema"
-                    if force_schema
+                    "read_sql"
+                    if force_read_sql
                     else (
-                        "read_sql"
-                        if force_read_sql
+                        "inspect_schema"
+                        if force_schema
                         else (
                             "get_ibkr_portfolio"
                             if force_portfolio
@@ -2239,25 +2295,11 @@ def build_worker_graph(
             elif force_run_sandbox:
                 _frs = llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
                 _invoked_llm = _frs or llm_with_tools
+            _llm_invoke_exc: BaseException | None = None
             try:
-                if force_admin_sql:
-                    resp = _invoked_llm.invoke(_groq_msgs)
-                elif force_schema and not force_read_sql:
-                    resp = _invoked_llm.invoke(_groq_msgs)
-                elif force_read_sql:
-                    resp = _invoked_llm.invoke(_groq_msgs)
-                elif force_portfolio:
-                    resp = _invoked_llm.invoke(_groq_msgs)
-                elif force_tavily:
-                    resp = _invoked_llm.invoke(_groq_msgs)
-                elif force_reddit:
-                    resp = _invoked_llm.invoke(_groq_msgs)
-                elif force_fetch_market_data:
-                    resp = _invoked_llm.invoke(_groq_msgs)
-                elif force_run_sandbox:
-                    resp = _invoked_llm.invoke(_groq_msgs)
-                else:
-                    resp = _invoked_llm.invoke(_groq_msgs)
+                from duckclaw.integrations.llm_providers import invoke_chat_model_with_transient_retries
+
+                resp = invoke_chat_model_with_transient_retries(_invoked_llm, _groq_msgs)
                 if (
                     (_lid or "").strip().lower() == "finanz"
                     and resp is not None
@@ -2267,6 +2309,7 @@ def build_worker_graph(
                     if _ru_share and _incoming_has_reddit_share_path(_ru_share):
                         resp = _patch_ai_reddit_share_tool_calls(resp, _ru_share)
             except Exception as exc:
+                _llm_invoke_exc = exc
                 _log.warning("[%s] LLM invoke failed in agent_node: %s", _wl, exc, exc_info=True)
                 from duckclaw.integrations.llm_providers import failure_provider_label_for_llm_invoke
 
@@ -2282,6 +2325,52 @@ def build_worker_graph(
                         _tc_names.append(getattr(tc, "name", None))
                 _log.info("[%s] LLM tool_calls=%s", _wl, _tc_names)
             out = {**state, "messages": state["messages"] + [resp]}
+            if _llm_invoke_exc is not None:
+                from duckclaw.integrations.llm_providers import is_transient_inference_connection_error
+
+                out["_duckclaw_worker_llm_invoke_failed"] = True
+                out["_duckclaw_worker_llm_transient"] = bool(
+                    is_transient_inference_connection_error(_llm_invoke_exc)
+                )
+                out["_duckclaw_worker_llm_failure_kind"] = type(_llm_invoke_exc).__name__
+                # region agent log
+                try:
+                    import json as _json_dbg
+                    import time as _time_dbg
+
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-5e21eb.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(
+                            _json_dbg.dumps(
+                                {
+                                    "sessionId": "5e21eb",
+                                    "timestamp": int(_time_dbg.time() * 1000),
+                                    "hypothesisId": "H1",
+                                    "location": "factory.py:agent_node",
+                                    "message": "worker swallowed LLM exception; flags for manager",
+                                    "data": {
+                                        "transient": out["_duckclaw_worker_llm_transient"],
+                                        "exc_type": out["_duckclaw_worker_llm_failure_kind"],
+                                    },
+                                    "runId": "post-fix",
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # endregion
+            else:
+                for _k in (
+                    "_duckclaw_worker_llm_invoke_failed",
+                    "_duckclaw_worker_llm_transient",
+                    "_duckclaw_worker_llm_failure_kind",
+                ):
+                    out.pop(_k, None)
             out.update(_identity_fields(state))
             return out
 

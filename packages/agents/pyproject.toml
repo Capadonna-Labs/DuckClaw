@@ -17,12 +17,17 @@ dependencies = [
     "PyYAML>=6.0.1",
     "tavily-python>=0.5.0",
     "yfinance>=0.2.40",
+    "sqlglot>=23.0.0",
     "mcp>=1.0.0; python_full_version >= '3.10'",
 ]
 
 [project.optional-dependencies]
 google-trends = [
     "google-trends-mcp>=1.0.2; python_full_version >= '3.10'",
+]
+# SFT/LoRA con MLX (Gemma 4 necesita mlx-lm >= 0.31.2 — ver specs/features/Formateo de Datasets)
+train = [
+    "mlx-lm>=0.31.2",
 ]
 
 [tool.setuptools]

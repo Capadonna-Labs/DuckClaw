@@ -6,6 +6,7 @@ Spec: specs/Migracion_de_Pipeline_de_Entrenamiento_(GRPO_a_SFT_con_MLX).md
 
 from duckclaw.forge.sft.collector import (
     DEFAULT_SFT_DATASET_PATH,
+    GEMMA4_TRAIN_DIR,
     collect_traces_to_sft,
 )
 from duckclaw.forge.sft.datamasker import DataMasker
@@ -14,4 +15,5 @@ __all__ = [
     "DataMasker",
     "collect_traces_to_sft",
     "DEFAULT_SFT_DATASET_PATH",
+    "GEMMA4_TRAIN_DIR",
 ]

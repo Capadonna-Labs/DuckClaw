@@ -71,6 +71,12 @@ class DuckClaw:
             return str(self._native.get_version())
         return str(self._con.execute("SELECT version()").fetchone()[0])
 
+    def __enter__(self) -> "DuckClaw":
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc: Any, _tb: Any) -> None:
+        self.close()
+
     def close(self) -> None:
         """Cierra el handle DuckDB para liberar el archivo (conexiones efímeras)."""
         if self._native is not None:

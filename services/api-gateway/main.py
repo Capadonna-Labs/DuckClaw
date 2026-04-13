@@ -225,7 +225,7 @@ def _dedicated_gateway_vault_db_path() -> str | None:
     return dedicated_gateway_db_path_resolved()
 
 try:
-from core.config import settings
+    from core.config import settings
 except ImportError:
     class _Settings:
         PROJECT_NAME = "DuckClaw API Gateway"

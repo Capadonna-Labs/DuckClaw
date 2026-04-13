@@ -114,7 +114,7 @@ El chat de Telegram usa el mismo pipeline que el API Gateway: **ChatOpenAI-compa
 
 1. **Base MLX** (`model` del YAML de entrenamiento) debe coincidir con **`MLX_MODEL_PATH`** / **`MLX_MODEL_ID`** del proceso que arranca el servidor (misma carpeta local o mismo id HF que al entrenar).
 2. **Adapters:** define **`MLX_ADAPTER_PATH`** apuntando al directorio que contiene `adapters.safetensors` y `adapter_config.json` (p. ej. `adapter_path` del `lora_config.yaml`, típicamente `packages/agents/train/gemma4/adapters_lora_yaml` relativo a la raíz del repo).
-3. **`packages/agents/train/scripts/start_mlx.sh`** pasa `--adapter-path` a `python -m mlx_lm.server` cuando `MLX_ADAPTER_PATH` existe; rutas relativas se resuelven contra la raíz del monorepo.
+3. **`packages/agents/train/scripts/start_mlx.sh`** arranca **`run_mlx_lm_server.py`** (delega en `mlx_lm server` de Apple) y pasa `--adapter-path` cuando `MLX_ADAPTER_PATH` existe; incluye una capa fina de **reparación de JSON** en tool calls Gemma 4 cuando la salida del modelo no es JSON estricto. Rutas relativas se resuelven contra la raíz del monorepo.
 4. **Gateway / PM2:** en el `.env` del proceso API Gateway (mismo que documenta `docs/COMANDOS.md`): `DUCKCLAW_LLM_PROVIDER=mlx`, `DUCKCLAW_LLM_BASE_URL=http://127.0.0.1:<MLX_PORT>/v1`, `DUCKCLAW_LLM_MODEL` igual que el id que expone `/v1/models` (o alias `gemma4` si aplica según `mlx_openai_compatible_model_name`).
 5. Reiniciar **`MLX-Inference`** (o el proceso que ejecuta `start_mlx.sh`) y el **gateway** que atiende el webhook de Telegram.
 

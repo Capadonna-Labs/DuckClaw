@@ -299,6 +299,234 @@ def context_summary_synthesis_acceptable(syn: str) -> bool:
     return len(substantive) >= 2
 
 
+_BARE_SUMMARIZE_STORED_REPLY = re.compile(
+    r"^\s*\[SYSTEM_DIRECTIVE:\s*SUMMARIZE_STORED_CONTEXT\]\s*$",
+    re.IGNORECASE,
+)
+
+# Plantillas que Gemma/MLX suele inventar en turnos SUMMARIZE_NEW_CONTEXT (no vienen del texto pegado).
+_NEW_CONTEXT_WRONG_ACCOUNT_TEMPLATES = (
+    "los usuarios finales esperan",
+    "¿qué te gustaría hacer con est",
+    "próximas operaciones pendientes",
+    "siguiente paso: ¿qué te gustaría",
+)
+
+# Términos de ledger local/IBKR: si aparecen en la respuesta pero no en el volcado NEW → alucinación probable.
+_NEW_CONTEXT_LEDGER_LEXEMES = (
+    "bancolombia",
+    "nequi",
+    "davivienda",
+    "ibkr",
+    "inversión ibkr",
+    "inversion ibkr",
+    "saldos guardados en la base",
+    "total disponible en las cuentas locales",
+    "efectivo disponible de",
+)
+
+_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
+
+
+def _agent_debug_log(*, hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "adf9d8",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(__import__("time").time() * 1000),
+        }
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as _f:
+            _f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
+
+
+def _deterministic_new_context_summary(evidence: str) -> str:
+    """
+    Viñetas solo desde el cuerpo del usuario en ``SUMMARIZE_NEW_CONTEXT`` (sin ``--- registro ---``).
+    Último recurso cuando el modelo emite STORED, saldos ficticios o plantillas de cuentas.
+    """
+    s = (evidence or "").strip()
+    if not s:
+        return ""
+    for mark in (SUMMARIZE_NEW_CONTEXT_MARK, SUMMARIZE_STORED_CONTEXT_MARK):
+        if mark in s:
+            i = s.find(mark)
+            s = s[i + len(mark) :].lstrip()
+            break
+    s = _strip_summarize_instruction_tail(s)
+    if not s:
+        return ""
+    bullets: list[str] = []
+    seen_lower: set[str] = set()
+    for para in re.split(r"\n\s*\n+", s):
+        p = " ".join((para or "").split()).strip()
+        if len(p) < 12:
+            continue
+        low = p.lower()
+        if low in seen_lower:
+            continue
+        seen_lower.add(low)
+        bullets.append(p[:480] + ("…" if len(p) > 480 else ""))
+        if len(bullets) >= 12:
+            break
+    if not bullets:
+        for ln in s.splitlines():
+            x = " ".join(ln.split()).strip()
+            if len(x) < 12:
+                continue
+            if x.startswith("[") and "DIRECTIVE" in x:
+                continue
+            xl = x.lower()
+            if xl in seen_lower:
+                continue
+            seen_lower.add(xl)
+            bullets.append(x[:480])
+            if len(bullets) >= 10:
+                break
+    if not bullets:
+        return ""
+    body_lines = ["**Resumen del contexto ingresado**", ""]
+    for b in bullets:
+        body_lines.append(f"- {b}")
+    body_lines.extend(
+        [
+            "",
+            "**Siguientes pasos**",
+            "- Si quieres más detalle sobre un punto, añádelo con `/context --add`.",
+            "- Para ver todo lo guardado: `/context --summary`.",
+        ]
+    )
+    return "\n".join(body_lines)
+
+
+def _new_context_reply_needs_deterministic_reset(reply: str, incoming: str) -> tuple[bool, str]:
+    """
+    True si la respuesta del modelo contradice un turno NEW (marcador STORED, plantillas de cuentas,
+    lexemas de ledger ausentes en el volcado).
+    """
+    r = (reply or "").strip()
+    inc = (incoming or "").strip()
+    if not r:
+        return True, "empty_reply"
+    r_low = r.lower()
+    inc_low = inc.lower()
+    if SUMMARIZE_STORED_CONTEXT_MARK in r:
+        return True, "stored_mark_in_reply"
+    for needle in _NEW_CONTEXT_WRONG_ACCOUNT_TEMPLATES:
+        if needle in r_low and needle not in inc_low:
+            return True, f"template:{needle[:24]}"
+    for lex in _NEW_CONTEXT_LEDGER_LEXEMES:
+        if lex in r_low and lex not in inc_low:
+            return True, f"ledger_lex:{lex}"
+    # Montos COP/USD tipo ledger sin que el usuario pegara símbolo de moneda en el bloque
+    if re.search(r"\$[\d.,]+\s*(cop|usd)\b", r_low):
+        if "$" not in inc and "cop" not in inc_low and "usd" not in inc_low:
+            return True, "currency_amounts_no_evidence"
+    return False, ""
+
+
+def repair_summarize_new_context_egress(reply: str, *, incoming: str) -> str:
+    """
+    Corrige egress en ``SUMMARIZE_NEW_CONTEXT``: MLX/Gemma a veces antepone ``SUMMARIZE_STORED_CONTEXT``
+    o inventa saldos/IBKR pese a que el volcado es solo notas (spec: dominio único, sin cuentas en ese turno).
+    """
+    inc = (incoming or "").strip()
+    if SUMMARIZE_NEW_CONTEXT_MARK not in inc:
+        return reply
+    r = (reply or "").strip()
+    # Quitar una o más líneas iniciales erróneas STORED
+    while r:
+        first_line, _, rest = r.partition("\n")
+        fl = first_line.strip()
+        if re.match(
+            r"^\[SYSTEM_DIRECTIVE:\s*SUMMARIZE_STORED_CONTEXT\]\s*$",
+            fl,
+            re.IGNORECASE,
+        ):
+            r = rest.lstrip()
+            continue
+        break
+    r = r.replace(SUMMARIZE_STORED_CONTEXT_MARK, "").strip()
+    need, reason = _new_context_reply_needs_deterministic_reset(r, inc)
+    if need:
+        det = _deterministic_new_context_summary(inc)
+        if det:
+            _agent_debug_log(
+                hypothesis_id="H1",
+                location="user_reply_nl_synthesis.repair_summarize_new_context_egress",
+                message="replaced_with_deterministic_new_context",
+                data={"reason": reason, "reply_preview": (r or "")[:120]},
+            )
+            return det
+        _agent_debug_log(
+            hypothesis_id="H2",
+            location="user_reply_nl_synthesis.repair_summarize_new_context_egress",
+            message="reset_needed_but_det_empty",
+            data={"reason": reason},
+        )
+    return r if r else (reply or "")
+
+
+def _fallback_bullets_from_visual_context_dump(inc: str) -> str:
+    """
+    Si el modelo devuelve solo la marca STORED en un turno NEW/VLM, viñetas mínimas desde
+    ``Contexto visual adjunto:`` sin segunda llamada LLM.
+    """
+    s = (inc or "").strip()
+    if "Contexto visual adjunto:" not in s or "[VLM_CONTEXT" not in s:
+        return ""
+    i = s.find("Contexto visual adjunto:")
+    chunk = s[i + len("Contexto visual adjunto:") :].strip()
+    j = chunk.find("[VLM_CONTEXT")
+    if j >= 0:
+        chunk = chunk[:j].strip()
+    chunk = chunk[:2800].strip()
+    if not chunk:
+        return ""
+    bullets: list[str] = []
+    for raw_ln in chunk.splitlines():
+        ln = raw_ln.strip()
+        if len(ln) < 4:
+            continue
+        if ln.startswith(("- ", "* ", "• ")):
+            bullets.append(ln[:420])
+        else:
+            bullets.append(f"- {ln[:400]}")
+        if len(bullets) >= 14:
+            break
+    if not bullets:
+        return ""
+    body = "**Resumen del contexto ingresado**\n\n" + "\n".join(bullets)
+    body += (
+        "\n\n**Siguientes pasos**\n"
+        "- Si el visión falló a menudo, revisa ``mlx_vlm`` en el venv del gateway y ``GEMINI_API_KEY``.\n"
+    )
+    return body
+
+
+def replace_bare_wrong_summarize_stored_echo(reply: str, *, incoming: str) -> str:
+    """
+    MLX/Gemma a veces emite solo ``[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]`` en turnos
+    ``SUMMARIZE_NEW_CONTEXT`` o con volcado VLM (confunde con ``--summary``).
+    """
+    r = (reply or "").strip()
+    if not _BARE_SUMMARIZE_STORED_REPLY.match(r):
+        return reply
+    inc = (incoming or "").strip()
+    if SUMMARIZE_NEW_CONTEXT_MARK in inc or (
+        "Contexto visual adjunto:" in inc and "[VLM_CONTEXT" in inc
+    ):
+        fb = _fallback_bullets_from_visual_context_dump(inc)
+        return fb if fb else reply
+    return reply
+
+
 def rescind_trivial_context_summary_reply(
     llm: Any | None,
     spec: Any,

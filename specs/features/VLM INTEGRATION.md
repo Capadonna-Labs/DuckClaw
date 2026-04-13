@@ -38,9 +38,9 @@ El usuario envía capturas de pantalla de mercados (ej. Google Finance, VIX) o f
 3. **Descarga Efímera:** La imagen se descarga a un buffer en memoria o a `/tmp/duckclaw_vlm/` (montado en RAM disk).
 4. **Inferencia Soberana (MLX-VLM):** 
    * Se invoca un modelo cuantizado en Apple Silicon vía **`mlx_vlm` en proceso** (misma familia que Gemma 4 multimodal en disco o HF; sobreescribible con `DUCKCLAW_VLM_MLX_VLM_MODEL`). El cargador pasa `pathlib.Path` al processor/tokenizer (requerido por `mlx_vlm`; evita fallos al unir rutas).
-   * **HTTP** (`DUCKCLAW_VLM_MLX_BASE_URL` / `VLM_MLX_BASE_URL`): solo si hay un servidor **OpenAI-compatible con visión** escuchando (p. ej. `mlx_lm.server` suele ser **texto**; si no hay proceso en el puerto, falla con *connection refused*). Para Gemma 4 **imagen**, lo habitual es **local `mlx_vlm`** con los pesos locales o HF, no solo el puerto de texto.
+   * **HTTP** (`DUCKCLAW_VLM_MLX_BASE_URL` / `VLM_MLX_BASE_URL`): solo si hay un servidor **OpenAI-compatible con visión** en un puerto distinto del `mlx_lm server` de texto. Mismo host:puerto que el LLM de texto → **404** en `/v1/chat/completions` con `image_url` (el gateway omite ese intento salvo `DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK=1`). Para Gemma 4 **imagen**, lo habitual es **`mlx_vlm` en proceso** en el Gateway con los pesos locales o HF.
    * **Prompt del sistema VLM:** *"Describe los datos financieros, texto o código presentes en esta imagen de forma concisa. No inventes datos."*
-   * **Fallback:** Si MLX (local o HTTP OpenAI-compatible) falla, el Gateway intenta **Gemini Flash** vía API REST y, si sigue fallando o no hay clave, **OpenAI Vision** cuando exista `OPENAI_API_KEY`.
+   * **Fallback:** Si MLX (local o HTTP OpenAI-compatible) falla, el Gateway intenta **Gemini Flash** vía API REST. **OpenAI Vision** solo entra en la cadena si se opta explícitamente con `DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1` y existe `OPENAI_API_KEY` (por defecto: MLX → Gemini, sin OpenAI).
 
 ### Variables de entorno (Gateway — visión)
 
@@ -52,7 +52,8 @@ El usuario envía capturas de pantalla de mercados (ej. Google Finance, VIX) o f
 | `DUCKCLAW_VLM_DISABLE_LOCAL_MLX_VLM` | `1` / `true`: no cargar **mlx_vlm** en proceso (solo HTTP u otros backends). |
 | `VLM_MLX_DISABLE_LOCAL` | Alias del anterior (misma semántica). |
 | `DUCKCLAW_VLM_MLX_BASE_URL` | Base OpenAI-compatible para VLM (p. ej. `http://127.0.0.1:8080/v1`). |
-| `VLM_MLX_BASE_URL` | Alias del anterior. Si ninguna está definida, se usa `http://127.0.0.1:{MLX_PORT|8081}/v1`. |
+| `VLM_MLX_BASE_URL` | Alias del anterior. Si ninguna está definida, se usa `http://127.0.0.1:<puerto>/v1` con `VLM_MLX_PORT`, luego `MLX_PORT`, luego 8081. Si ese puerto en loopback es el mismo que el `mlx_lm` de texto, el gateway no envía visión OpenAI ahí (evita 404). |
+| `DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK` | `1`: forzar POST visión al puerto de texto (solo si hay stack custom que lo soporte). |
 | (cliente HTTP) | Para URLs loopback, el gateway usa `httpx` con `trust_env=False` para que `HTTP_PROXY` no rompa la conexión a MLX local. |
 | `DUCKCLAW_VLM_MLX_VLM_PROCESSOR_REPO` | Repo HF para `AutoProcessor` cuando los pesos mlx-community no traen preprocessor válido. |
 | `DUCKCLAW_VLM_GEMINI_API_KEY` | Clave Google AI para VLM (prioridad sobre las demás). |
@@ -61,7 +62,7 @@ El usuario envía capturas de pantalla de mercados (ej. Google Finance, VIX) o f
 | `DUCKCLAW_VLM_GEMINI_MODEL` | Modelo `generateContent` (default: `gemini-2.5-flash`). |
 | `DUCKCLAW_VLM_GEMINI_HTTP_TIMEOUT` | Timeout HTTP en segundos (default acotado ~90s). |
 
-**Orden HTTP:** por defecto `mlx` → `gemini` (si hay clave) → `openai` (si hay clave). Con `DUCKCLAW_VLM_PRIMARY=openai` y `OPENAI_API_KEY`: `openai` → `mlx` → `gemini` (si hay clave).
+**Orden HTTP:** por defecto `mlx` → `gemini` (si hay clave). Con `DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1` y `OPENAI_API_KEY`: se añade `openai` al final (o según `DUCKCLAW_VLM_PRIMARY=openai` para priorizar OpenAI en visión).
 5. **Inyección de Contexto:** El texto resultante del VLM se concatena con el `caption` original del usuario y se envía al *Manager Graph* como un mensaje de texto estándar.
 6. **Ejecución del Worker (Degradación Epistémica):** Finanz recibe: *"Usuario dice: '@Finanz evalúa el impacto...'. Contexto visual adjunto: 'Imagen muestra VIX a 24.55'"*. Finanz **debe** ejecutar `fetch_market_data(symbol="VIX")` para validar el valor real en el ledger antes de calcular la *Temperatura* en su modelo CFD.
 

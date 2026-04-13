@@ -2560,7 +2560,8 @@ def execute_context_toggle(db: Any, chat_id: Any, on_off: str) -> str:
         return "✅ Contexto largo desactivado (solo historial reciente)."
     current = get_chat_state(db, chat_id, "use_rag")
     return (
-        "Uso: `/context on` | `/context off` | `/context --add <texto>` | `/context --summary` (`--summarize`)\n"
+        "Uso: `/context on` | `/context off` | `/context --add` [texto o pie de foto en imagen/álbum] | "
+        "`/context --summary` (`--summarize`)\n"
         f"Estado actual (historial largo): {'on' if current != 'false' else 'off'}."
     )
 

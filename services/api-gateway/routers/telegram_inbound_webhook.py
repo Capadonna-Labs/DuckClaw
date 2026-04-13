@@ -151,6 +151,16 @@ def _telegram_message_has_vlm_block(s: str) -> bool:
     return "[VLM_CONTEXT" in t and "Contexto visual adjunto:" in t
 
 
+def _usuario_dice_line_from_enriched_telegram(cur: str) -> str:
+    """Primera línea ``Usuario dice: …`` del volcado post-VLM (p. ej. álbum: pie en otro frame)."""
+    for ln in (cur or "").splitlines():
+        s = ln.strip()
+        low = s.lower()
+        if low.startswith("usuario dice:"):
+            return s.split(":", 1)[-1].strip()
+    return ""
+
+
 def _resolve_context_add_body(*, raw_caption: str, current_text: str) -> tuple[bool, str]:
     """
     /context --add debe detectarse con el caption/texto crudo de Telegram.
@@ -158,19 +168,52 @@ def _resolve_context_add_body(*, raw_caption: str, current_text: str) -> tuple[b
     Tras VLM el mensaje enriquecido ya no empieza por ``/context``; sin esto,
     ``/context --add`` + foto no encola memoria ni manda SUMMARIZE_NEW_CONTEXT.
     Si hay bloque VLM, el cuerpo a inyectar y resumir es el texto enriquecido completo.
+
+    Álbum: el segundo webhook puede traer caption vacío; el comando va en ``Usuario dice:``
+    (merge de pies de foto) o solo en el caption del primer frame — re-parse desde el volcado.
     """
-    is_add, body = _parse_context_add_command(raw_caption)
+    cur = (current_text or "").strip()
+    caption_candidates = [
+        (raw_caption or "").strip(),
+        _usuario_dice_line_from_enriched_telegram(cur),
+    ]
+    is_add = False
+    body_from_caption = ""
+    for cand in caption_candidates:
+        if not cand:
+            continue
+        ia, bd = _parse_context_add_command(cand)
+        if ia:
+            is_add = True
+            body_from_caption = bd
+            break
     if not is_add:
         return False, ""
-    cur = (current_text or "").strip()
     if _telegram_message_has_vlm_block(cur):
         return True, cur
-    return True, (body or "").strip()
+    return True, (body_from_caption or "").strip()
 
 
 def _parse_context_summary_command(text: str) -> bool:
     """``/context --summary`` | ``--summarize`` | ``--peek`` | ``--db``: leer memoria semántica y resumir (sin escribir)."""
     return bool(_CONTEXT_SUMMARY_RE.match((text or "").strip()))
+
+
+def _merge_album_captions_for_vlm(
+    album_items: list[dict[str, str]], fallback: str
+) -> str:
+    """
+    Telegram suele poner el caption solo en una foto del álbum; otras van vacías.
+    Prioriza un caption que sea ``/context --add`` para que álbum + comando funcione.
+    """
+    caps = [str(it.get("cap") or "").strip() for it in album_items]
+    caps = [c for c in caps if c]
+    if not caps:
+        return (fallback or "").strip()
+    for c in caps:
+        if _parse_context_add_command(c)[0]:
+            return c
+    return caps[0]
 
 
 def _summarize_new_context_directive(injected_text: str) -> str:
@@ -571,10 +614,11 @@ async def _ingest_telegram_visual_enrich_text(
                 caption=text,
             )
             if album_items is None:
-                return text, False
+                # Otro webhook del mismo álbum tiene el lock; el líder hará VLM + /context --add.
+                return text, True
             if not album_items:
-                return text, False
-            cap_merged = next((it["cap"] for it in album_items if it.get("cap")), "") or text
+                return text, True
+            cap_merged = _merge_album_captions_for_vlm(album_items, text)
             if len(album_items) == 1:
                 one = album_items[0]
                 out = await process_visual_payload(
@@ -592,6 +636,7 @@ async def _ingest_telegram_visual_enrich_text(
                     caption=cap_merged,
                     media_group_id=mgid,
                 )
+            user_visible_caption = (cap_merged or "").strip() or (text or "").strip()
         else:
             out = await process_visual_payload(
                 bot_token=token_v,
@@ -600,9 +645,10 @@ async def _ingest_telegram_visual_enrich_text(
                 mime_type=(mime_type or "image/jpeg"),
                 media_group_id=mgid,
             )
+            user_visible_caption = (text or "").strip()
         if out and out.get("vlm_summary"):
             enriched = (
-                f"Usuario dice: {text or '(sin caption)'}\n"
+                f"Usuario dice: {user_visible_caption or '(sin caption)'}\n"
                 f"Contexto visual adjunto: {out['vlm_summary']}\n"
                 f"[VLM_CONTEXT image_hash={out.get('image_hash','')} confidence={out.get('confidence_score',0.0)}]"
             ).strip()
@@ -1008,8 +1054,8 @@ def build_telegram_inbound_webhook_router(
             if has_visual and not (text or "").strip():
                 text = (
                     "[META: VLM_GATEWAY_DOWN] El usuario envió una imagen por Telegram (sin caption); "
-                    "el servicio de visión del gateway no produjo resumen (p. ej. MLX en "
-                    "DUCKCLAW_VLM_MLX_BASE_URL inactivo y sin OPENAI_API_KEY de respaldo). "
+                    "el servicio de visión del gateway no produjo resumen (p. ej. ``mlx_vlm`` en el venv del "
+                    "gateway inactivo, MLX HTTP en el mismo puerto que el LM de texto omitido, o Gemini 503). "
                     "No hay bloque [VLM_CONTEXT]. Pide una descripción breve del contenido. "
                     "No afirmes que no puedes procesar imágenes: aquí falló la ingesta VLM, no el rol del asistente."
                 )
@@ -1208,7 +1254,7 @@ def build_telegram_inbound_webhook_router(
                                 return {"ok": "true"}
                             if not album_items:
                                 return {"ok": "true"}
-                            cap_merged = next((it["cap"] for it in album_items if it.get("cap")), "") or text
+                            cap_merged = _merge_album_captions_for_vlm(album_items, text)
                             if len(album_items) == 1:
                                 one = album_items[0]
                                 out = await process_visual_payload(
@@ -1308,11 +1354,24 @@ def build_telegram_inbound_webhook_router(
                     _log.warning("context_injection send_message failed: %s", exc)
 
             if not ctx_body:
-                await _send_ctx_reply(
-                    llm_markdown_to_telegram_html(
-                        "Uso: `/context --add` requiere texto después de `--add`."
+                if has_visual:
+                    await _send_ctx_reply(
+                        llm_markdown_to_telegram_html(
+                            "No se pudo guardar contexto solo con la imagen: el visor (VLM) no "
+                            "devolvió un resumen usable. Revisa **mlx-vlm** en el venv del gateway, "
+                            "**GEMINI_API_KEY** / **GOOGLE_API_KEY**, o un endpoint VLM en otro puerto; "
+                            "opcional: ``DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1`` si usas OpenAI solo para visión. "
+                            "También puedes añadir texto tras `--add` describiendo el contenido."
+                        )
                     )
-                )
+                else:
+                    await _send_ctx_reply(
+                        llm_markdown_to_telegram_html(
+                            "Uso: `/context --add` con texto después de `--add`, "
+                            "o una imagen/álbum (hasta 3) con ese comando en el pie de foto; "
+                            "si el visor funciona, no hace falta texto adicional."
+                        )
+                    )
                 return {"ok": "true"}
 
             vault_uid = str(user_id or "").strip() or str(chat_id)

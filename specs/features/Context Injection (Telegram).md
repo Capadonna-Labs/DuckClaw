@@ -19,8 +19,8 @@ Permitir que un **admin** inyecte texto largo en **memoria semántica** (`main.s
 
 ## Comando
 
-- `/context --add <texto>` (opcional sufijo de bot: `/context@BotName --add ...`).
-- Texto vacío tras `--add`: respuesta determinista de error, **sin LLM**.
+- `/context --add` [texto opcional] (sufijo de bot: `/context@BotName --add ...`). Válido **solo imagen o álbum** (hasta 3 fotos) con el comando en el **pie de foto**: el VLM rellena el bloque; si el visor falla, mensaje determinista **sin LLM** (no se encola vacío). En **álbum**, el pie puede ir solo en un frame: el merge de captions alimenta VLM y la línea ``Usuario dice:`` del volcado debe repetir ese pie para que `_resolve_context_add_body` detecte `--add` aunque el webhook del frame líder traiga caption vacío.
+- Sin imagen y sin texto tras `--add`: mensaje de uso, **sin LLM**.
 - `/context --summary` (alias: `--peek`, `--db`): **solo lectura** de `main.semantic_memory` en la bóveda del usuario; **no** encola Redis ni escribe. Acuse inmediato + `invoke_agent_chat` en segundo plano con `[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]` y el volcado reciente de filas (mismo RBAC admin que `--add`). Si no hay filas/tabla, mensaje determinista **sin LLM**. El **cuerpo** del resumen en Telegram lo construye el **worker** (`set_reply` / síntesis NL + fallback a viñetas); el gateway solo sustituye por `telegram_stored_context_summary_body_when_model_trivial` si la respuesta del `invoke` sigue siendo trivial (red de seguridad).
 
 ## StateDelta (Redis)

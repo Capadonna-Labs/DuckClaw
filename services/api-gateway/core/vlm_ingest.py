@@ -8,6 +8,7 @@ import logging
 import os
 import tempfile
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -15,6 +16,19 @@ _log = logging.getLogger("duckclaw.gateway.vlm_ingest")
 
 _ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
 _VLM_OPENAI_FIRST = frozenset({"openai", "cloud", "openai_first"})
+
+
+def _vlm_allow_openai_vision() -> bool:
+    """
+    OpenAI como backend VLM solo si se opta explícitamente (p. ej. ``DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1``).
+    Flujo por defecto en DuckClaw: ``mlx_vlm`` / MLX HTTP → Gemini; sin API OpenAI de visión.
+    """
+    return (os.environ.get("DUCKCLAW_VLM_ALLOW_OPENAI_VISION") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def _vlm_gemini_api_key() -> str:
@@ -31,11 +45,12 @@ def _vlm_gemini_api_key() -> str:
 
 def _vlm_backend_order() -> list[str]:
     """
-    Orden de intentos: por defecto MLX HTTP, luego Gemini (si hay clave), luego OpenAI.
-    Con DUCKCLAW_VLM_PRIMARY=openai y OPENAI_API_KEY: openai, mlx, gemini (si clave).
+    Orden de intentos: MLX (HTTP / mismo orden que env), luego Gemini si hay clave.
+    OpenAI visión solo con ``DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1`` y ``OPENAI_API_KEY``.
+    Con DUCKCLAW_VLM_PRIMARY=openai y clave OpenAI y allow: openai, mlx, gemini (si clave).
     """
     primary = (os.environ.get("DUCKCLAW_VLM_PRIMARY") or "mlx").strip().lower()
-    has_oai = bool((os.environ.get("OPENAI_API_KEY") or "").strip())
+    has_oai = bool((os.environ.get("OPENAI_API_KEY") or "").strip()) and _vlm_allow_openai_vision()
     has_gem = bool(_vlm_gemini_api_key())
     if primary in _VLM_OPENAI_FIRST and has_oai:
         seq = ["openai", "mlx"]
@@ -188,11 +203,54 @@ def _httpx_trust_env_for_openai_base(base_url: str) -> bool:
     return True
 
 
+def _text_mlx_stack_port() -> int:
+    """Puerto donde suele escuchar ``mlx_lm server`` (texto), mismo criterio que ``_mlx_http_base_url``."""
+    raw = (os.environ.get("VLM_MLX_PORT") or os.environ.get("MLX_PORT") or "8081").strip()
+    try:
+        return max(1, min(65535, int(raw)))
+    except ValueError:
+        return 8081
+
+
+def _skip_mlx_openai_vision_same_port_as_text_mlx(mlx_base: str) -> bool:
+    """
+    ``mlx_lm server`` en ``MLX_PORT`` **no** implementa mensajes user con ``image_url`` en
+    ``/v1/chat/completions`` → HTTP **404** mientras el texto en el mismo puerto responde **200**
+    (evidencia en logs PM2). No enviar visión OpenAI al mismo puerto loopback que la pila de
+    texto, aunque ``VLM_MLX_BASE_URL`` repita esa URL en ``.env``.
+
+    Forzar el intento: ``DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK=1``.
+    Visión Gemma local: ``pip install mlx-vlm`` en el venv del gateway y quitar
+    ``VLM_MLX_DISABLE_LOCAL`` / alias; o servir visión en **otro** puerto y fijar
+    ``VLM_MLX_BASE_URL`` / ``VLM_MLX_PORT``.
+    """
+    if (os.environ.get("DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return False
+    if not _is_loopback_openai_base(mlx_base):
+        return False
+    try:
+        u = urlparse(mlx_base)
+        vlm_port = u.port
+        if vlm_port is None:
+            vlm_port = 80 if (u.scheme or "http").lower() == "http" else 443
+    except Exception:
+        return False
+    return vlm_port == _text_mlx_stack_port()
+
+
 def _mlx_http_base_url() -> str:
     """
     Servidor OpenAI-compatible para VLM (``/v1/chat/completions``).
     Prioridad: ``DUCKCLAW_VLM_MLX_BASE_URL`` → ``VLM_MLX_BASE_URL`` →
     ``http://127.0.0.1:{VLM_MLX_PORT|MLX_PORT|8081}/v1``.
+
+    Si esa URL usa el **mismo puerto** que ``MLX_PORT`` en loopback, es casi siempre
+    ``mlx_lm`` solo texto — ver ``_skip_mlx_openai_vision_same_port_as_text_mlx``.
     """
     for key in ("DUCKCLAW_VLM_MLX_BASE_URL", "VLM_MLX_BASE_URL"):
         v = (os.environ.get(key) or "").strip().rstrip("/")
@@ -765,6 +823,10 @@ async def process_visual_payload(
                         "confidence_score": 0.82,
                         "media_group_id": (media_group_id or "").strip(),
                     }
+                _log.warning(
+                    "VLM mlx_vlm local-first devolvió texto vacío; se intentará HTTP/cloud. "
+                    "Revisa carga del modelo (pesos/processor) y logs anteriores."
+                )
             except Exception as exc:  # noqa: BLE001
                 _log.warning("VLM mlx_vlm local-first falló, se intentará HTTP: %s", exc)
         mlx_to = _mlx_http_timeout_s()
@@ -777,6 +839,14 @@ async def process_visual_payload(
         for kind in _vlm_backend_order():
             try:
                 if kind == "mlx":
+                    if _skip_mlx_openai_vision_same_port_as_text_mlx(mlx_base):
+                        _log.info(
+                            "VLM: se omite MLX HTTP (mismo puerto que inferencia texto en loopback); "
+                            "mlx_lm no acepta image_url ahí (404). Opciones: mlx_vlm en el gateway "
+                            "(quitar VLM_MLX_DISABLE_LOCAL), visión en otro puerto + VLM_MLX_BASE_URL, "
+                            "o DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK=1."
+                        )
+                        continue
                     summary = await _call_openai_vision(
                         base_url=mlx_base,
                         api_key=(os.environ.get("DUCKCLAW_VLM_MLX_API_KEY") or "").strip(),
@@ -818,6 +888,16 @@ async def process_visual_payload(
                         mlx_base,
                         vlm_exception_for_log(exc),
                     )
+                    if isinstance(exc, httpx.ConnectError) and _is_loopback_openai_base(mlx_base):
+                        _log.info(
+                            "VLM diagnóstico: no hay listener en %s (connection refused). "
+                            "MLX-Inference en MLX_PORT es mlx_lm (solo texto). Si no ejecutas otro "
+                            "servidor OpenAI con visión ahí, **elimina** DUCKCLAW_VLM_MLX_BASE_URL y "
+                            "VLM_MLX_BASE_URL del .env para no intentar un puerto muerto; visión local "
+                            "usa el paquete mlx-vlm en el venv del gateway (uv sync) con "
+                            "VLM_MLX_DISABLE_LOCAL=0.",
+                            mlx_base,
+                        )
                 elif kind == "gemini":
                     if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
                         if exc.response.status_code == 503:
@@ -931,6 +1011,9 @@ async def process_visual_album_batch(
                         "media_group_id": (media_group_id or "").strip(),
                         "image_count": len(items),
                     }
+                _log.warning(
+                    "VLM mlx_vlm local-first (álbum) devolvió texto vacío; se intentará HTTP/cloud."
+                )
             except Exception as exc:  # noqa: BLE001
                 _log.warning("VLM mlx_vlm local-first (álbum) falló, se intentará HTTP: %s", exc)
         mlx_multi_to = max(_mlx_http_timeout_s(), 45.0)
@@ -943,6 +1026,12 @@ async def process_visual_album_batch(
         for kind in _vlm_backend_order():
             try:
                 if kind == "mlx":
+                    if _skip_mlx_openai_vision_same_port_as_text_mlx(mlx_base):
+                        _log.info(
+                            "VLM (álbum): se omite MLX HTTP (mismo puerto que mlx_lm texto); "
+                            "mlx_lm no sirve visión OpenAI en ese endpoint."
+                        )
+                        continue
                     summary = await _call_openai_vision_multi(
                         base_url=mlx_base,
                         api_key=(os.environ.get("DUCKCLAW_VLM_MLX_API_KEY") or "").strip(),
@@ -981,6 +1070,13 @@ async def process_visual_album_batch(
                         mlx_base,
                         vlm_exception_for_log(exc),
                     )
+                    if isinstance(exc, httpx.ConnectError) and _is_loopback_openai_base(mlx_base):
+                        _log.info(
+                            "VLM (álbum) diagnóstico: sin listener en %s. Misma acción que imagen única: "
+                            "quitar URLs VLM MLX del .env si no hay servidor visión dedicado; "
+                            "mlx-vlm en el venv del gateway para visión local.",
+                            mlx_base,
+                        )
                 elif kind == "gemini":
                     if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
                         if exc.response.status_code == 503:

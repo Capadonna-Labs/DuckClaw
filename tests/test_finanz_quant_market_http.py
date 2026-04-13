@@ -249,6 +249,22 @@ def test_finanz_ohlcv_ingest_intent_quant_core_explicit() -> None:
     )
 
 
+def test_finanz_ohlcv_ingest_rejects_meta_vlm_gateway_down() -> None:
+    """META VLM: «ingesta» + MLX/VLM en mayúsculas no deben disparar OHLCV."""
+    meta = (
+        "[META: VLM_GATEWAY_DOWN] El usuario envió una imagen por Telegram (sin caption); "
+        "el servicio de visión no produjo resumen (p. ej. MLX en DUCKCLAW_VLM_MLX_BASE_URL). "
+        "No hay bloque [VLM_CONTEXT]. Aquí falló la ingesta VLM, no el rol del asistente."
+    )
+    assert not _finanz_user_requests_ohlcv_ingest(meta)
+
+
+def test_finanz_ohlcv_ingest_quant_core_still_accepts_ingesta_verb() -> None:
+    assert _finanz_user_requests_ohlcv_ingest(
+        "Ingesta quant_core.ohlcv_data para AAPL con datos frescos"
+    )
+
+
 def test_fetch_market_data_vix_uses_yfinance(
     monkeypatch: pytest.MonkeyPatch, quant_db: duckdb.DuckDBPyConnection
 ) -> None:

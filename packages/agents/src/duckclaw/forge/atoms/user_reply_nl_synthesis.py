@@ -331,6 +331,10 @@ _NEW_CONTEXT_LEDGER_LEXEMES = (
     "efectivo disponible de",
 )
 
+_DEBUG_LOG_PATH_4A0206 = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-4a0206.log"
+_NOISY_UNUSED_RE = re.compile(r"<unused\d+>", re.IGNORECASE)
+_NON_ALNUM_TOKEN_RE = re.compile(r"[^\w<>/-]", re.UNICODE)
+
 _DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
 
 
@@ -437,6 +441,87 @@ def _new_context_reply_needs_deterministic_reset(reply: str, incoming: str) -> t
     return False, ""
 
 
+def _log_4a0206(*, hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "4a0206",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(__import__("time").time() * 1000),
+        }
+        with open(_DEBUG_LOG_PATH_4A0206, "a", encoding="utf-8") as _f:
+            _f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
+
+
+def _new_context_vlm_noise_metrics(incoming: str) -> dict[str, Any]:
+    s = (incoming or "").strip()
+    has_vlm = "[VLM_CONTEXT" in s
+    has_new = SUMMARIZE_NEW_CONTEXT_MARK in s
+    visual = ""
+    if "Contexto visual adjunto:" in s:
+        visual = s.split("Contexto visual adjunto:", 1)[1]
+        visual = visual.split("[VLM_CONTEXT", 1)[0]
+    token_list = [t for t in re.split(r"\s+", visual) if t]
+    token_count = len(token_list)
+    unused_count = len(_NOISY_UNUSED_RE.findall(visual))
+    deployments_count = visual.lower().count("deployments")
+    unique_ratio = (
+        (len(set(t.lower() for t in token_list)) / float(token_count))
+        if token_count
+        else 1.0
+    )
+    junk_token_count = 0
+    for tok in token_list:
+        clean = _NON_ALNUM_TOKEN_RE.sub("", tok)
+        if len(clean) < 2:
+            junk_token_count += 1
+    junk_ratio = (junk_token_count / float(token_count)) if token_count else 0.0
+    noisy = bool(
+        has_new
+        and has_vlm
+        and (
+            unused_count >= 3
+            or deployments_count >= 6
+            or (token_count >= 120 and unique_ratio < 0.45)
+            or (token_count >= 80 and junk_ratio > 0.35)
+        )
+    )
+    return {
+        "has_new_directive": has_new,
+        "has_vlm_context": has_vlm,
+        "token_count": token_count,
+        "unused_count": unused_count,
+        "deployments_count": deployments_count,
+        "unique_ratio": round(unique_ratio, 4),
+        "junk_ratio": round(junk_ratio, 4),
+        "noisy": noisy,
+    }
+
+
+def _deterministic_noisy_vlm_new_context_summary(incoming: str) -> str:
+    s = (incoming or "").strip()
+    m_hash = re.search(r"image_hash=([0-9a-f]{16,64})", s, re.IGNORECASE)
+    m_conf = re.search(r"confidence=([0-9.]+)", s, re.IGNORECASE)
+    h = m_hash.group(1) if m_hash else "N/D"
+    c = m_conf.group(1) if m_conf else "N/D"
+    return (
+        "**Resumen del contexto ingresado**\n\n"
+        "- El texto extraído por visión presenta baja legibilidad y alto ruido sintáctico; no es confiable para inferencias temáticas finas.\n"
+        f"- Evidencia VLM recibida: `image_hash={h}` y `confidence={c}`.\n"
+        "- Se conserva el bloque como contexto bruto en VSS, pero se evita interpretar categorías no explícitas para no alucinar contenido.\n\n"
+        "**Siguientes pasos**\n"
+        "- Reenvía la imagen con mayor resolución o recorte del titular relevante.\n"
+        "- Si el objetivo es precisión, agrega 1-3 líneas de texto manual junto a `/context --add`."
+    )
+
+
 def repair_summarize_new_context_egress(reply: str, *, incoming: str) -> str:
     """
     Corrige egress en ``SUMMARIZE_NEW_CONTEXT``: MLX/Gemma a veces antepone ``SUMMARIZE_STORED_CONTEXT``
@@ -445,6 +530,21 @@ def repair_summarize_new_context_egress(reply: str, *, incoming: str) -> str:
     inc = (incoming or "").strip()
     if SUMMARIZE_NEW_CONTEXT_MARK not in inc:
         return reply
+    _mx = _new_context_vlm_noise_metrics(inc)
+    _log_4a0206(
+        hypothesis_id="H3",
+        location="user_reply_nl_synthesis.repair_summarize_new_context_egress",
+        message="vlm_new_context_noise_metrics",
+        data=_mx,
+    )
+    if bool(_mx.get("noisy")):
+        _log_4a0206(
+            hypothesis_id="H4",
+            location="user_reply_nl_synthesis.repair_summarize_new_context_egress",
+            message="replace_noisy_vlm_summary",
+            data={"reason": "low_signal_vlm_ocr"},
+        )
+        return _deterministic_noisy_vlm_new_context_summary(inc)
     r = (reply or "").strip()
     # Quitar una o más líneas iniciales erróneas STORED
     while r:

@@ -2803,7 +2803,10 @@ def build_worker_graph(
         return out
 
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
+        import json as _json_dbg
+        import time as _time_dbg
         from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
+        from duckclaw.utils import format_tool_reply
         from duckclaw.forge.atoms.user_reply_nl_synthesis import (
             incoming_has_context_summarize_directive,
             maybe_synthesize_reply,
@@ -2977,7 +2980,114 @@ def build_worker_graph(
                     reply = new_r
         except Exception:
             pass
+        try:
+            from duckclaw.forge.atoms.job_hunter_output_validator import spec_is_job_hunter as _jh_spec_check
+
+            _inc_text = (state.get("incoming") or state.get("input") or "").strip().lower()
+            if reply and _jh_spec_check(spec) and "job_opportunity_tracking" in _inc_text and "a2a" in reply.lower():
+                reply = re.sub(r"\bA2A\b\s*", "", reply, flags=re.IGNORECASE)
+                # region agent log
+                try:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-9accbe.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(
+                            _json_dbg.dumps(
+                                {
+                                    "sessionId": "9accbe",
+                                    "timestamp": int(_time_dbg.time() * 1000),
+                                    "hypothesisId": "H9",
+                                    "location": "workers/factory.py:set_reply",
+                                    "message": "removed A2A label from job tracking egress",
+                                    "data": {},
+                                    "runId": "pre-fix",
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # endregion
+            if reply and _jh_spec_check(spec) and "job_opportunity_tracking" in _inc_text:
+                original_reply = reply
+                reply = re.sub(
+                    r"#\s*📊\s*MISIÓN\s+JOB_OPPORTUNITY_TRACKING\s*-\s*COMPLETADA",
+                    "# 📊 SEGUIMIENTO DE VACANTE - COMPLETADO",
+                    reply,
+                    flags=re.IGNORECASE,
+                )
+                reply = re.sub(
+                    r"\bMisión completada exitosamente\.\b",
+                    "Registro completado exitosamente.",
+                    reply,
+                    flags=re.IGNORECASE,
+                )
+                if reply != original_reply:
+                    # region agent log
+                    try:
+                        with open(
+                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-9accbe.log",
+                            "a",
+                            encoding="utf-8",
+                        ) as _df:
+                            _df.write(
+                                _json_dbg.dumps(
+                                    {
+                                        "sessionId": "9accbe",
+                                        "timestamp": int(_time_dbg.time() * 1000),
+                                        "hypothesisId": "H10",
+                                        "location": "workers/factory.py:set_reply",
+                                        "message": "normalized mission wording in job tracking egress",
+                                        "data": {},
+                                        "runId": "pre-fix",
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                    except Exception:
+                        pass
+                    # endregion
+        except Exception:
+            pass
         reply = sanitize_worker_reply_text(reply or "")
+        if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) and msgs:
+            from langchain_core.messages import ToolMessage
+
+            for _m in reversed(msgs):
+                if isinstance(_m, ToolMessage):
+                    _fallback = sanitize_worker_reply_text(format_tool_reply(_m.content))
+                    if _fallback:
+                        # region agent log
+                        try:
+                            with open(
+                                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-9accbe.log",
+                                "a",
+                                encoding="utf-8",
+                            ) as _df:
+                                _df.write(
+                                    _json_dbg.dumps(
+                                        {
+                                            "sessionId": "9accbe",
+                                            "timestamp": int(_time_dbg.time() * 1000),
+                                            "hypothesisId": "H7",
+                                            "location": "workers/factory.py:set_reply",
+                                            "message": "tool fallback used for empty reply",
+                                            "data": {"tool_name": getattr(_m, "name", "")},
+                                            "runId": "pre-fix",
+                                        },
+                                        ensure_ascii=False,
+                                    )
+                                    + "\n"
+                                )
+                        except Exception:
+                            pass
+                        # endregion
+                        reply = _fallback
+                        break
         if suppress_egress:
             out = {**state, "reply": "", "internal_reply": (reply or ""), "messages": msgs}
         else:

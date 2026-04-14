@@ -73,6 +73,37 @@ def _agent_debug_log(
 # endregion
 
 
+# region agent log
+_AGENT_DEBUG_LOG_9ACCBE = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-9accbe.log"
+
+
+def _agent_debug_log_9accbe(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict[str, Any],
+    *,
+    run_id: str = "pre-fix",
+) -> None:
+    try:
+        payload = {
+            "sessionId": "9accbe",
+            "timestamp": int(time.time() * 1000),
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "runId": run_id,
+        }
+        with open(_AGENT_DEBUG_LOG_9ACCBE, "a", encoding="utf-8") as _df:
+            _df.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+# endregion
+
+
 def _tool_name_from_embedded_json_content(text: str) -> str | None:
     """Si el modelo emitió tool como JSON en el texto (p. ej. MLX sin tool_calls), extrae el nombre."""
     from duckclaw.integrations.llm_providers import coerce_json_tool_invoke
@@ -340,6 +371,15 @@ def _worker_should_use_lite_stdio_mcp_surface(text: str) -> bool:
     )
 
 
+def _looks_like_job_add_command(incoming: str) -> bool:
+    raw = (incoming or "").strip().lower()
+    if not raw:
+        return False
+    return (raw.startswith("/job --add ") or raw.startswith("/job add ")) and (
+        "http://" in raw or "https://" in raw
+    )
+
+
 def job_hunter_user_requests_job_search(incoming: str) -> bool:
     """
     True si el texto del usuario (o la TAREA inyectada) implica búsqueda de empleo con acción concreta.
@@ -351,6 +391,22 @@ def job_hunter_user_requests_job_search(incoming: str) -> bool:
     if _incoming_has_context_summary_system_directive(raw):
         return False
     t = raw.lower()
+    is_job_add_command = _looks_like_job_add_command(raw)
+    has_url = "http://" in t or "https://" in t
+    # region agent log
+    _agent_debug_log_9accbe(
+        "H1",
+        "manager_graph.py:job_hunter_user_requests_job_search",
+        "job search classifier entry",
+        {
+            "is_job_add_command": is_job_add_command,
+            "has_url": has_url,
+            "incoming_preview": raw[:160],
+        },
+    )
+    # endregion
+    if is_job_add_command:
+        return False
     if _job_hunter_user_requests_application_tracking(raw):
         return False
     # Tareas internas de síntesis / retorno A2A: no forzar Tavily.
@@ -421,9 +477,22 @@ def job_hunter_user_requests_job_search(incoming: str) -> bool:
         "aplicar",
         "vacantes",
     )
-    return any(x in t for x in job_terms) and (
+    result = any(x in t for x in job_terms) and (
         any(x in t for x in action_terms) or "http" in t or "www." in t
     )
+    # region agent log
+    _agent_debug_log_9accbe(
+        "H2",
+        "manager_graph.py:job_hunter_user_requests_job_search",
+        "job search classifier result",
+        {
+            "result": result,
+            "matched_job_terms": [x for x in job_terms if x in t][:5],
+            "matched_action_terms": [x for x in action_terms if x in t][:5],
+        },
+    )
+    # endregion
+    return result
 
 
 def _user_signals_cashflow_stress(incoming: str) -> bool:
@@ -636,16 +705,39 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
                 "investigación web genérica o presentarte como asistente de investigación abstracto.",
                 None,
             )
-    # Job-Hunter: persistencia-only (A2A desde Finanz). Antes que INCOME_INJECTION para no forzar Tavily.
+    # Job-Hunter: persistencia-only de tracking. Antes que INCOME_INJECTION para no forzar Tavily.
     if _is_job_hunter_worker(worker_id) and "job_opportunity_tracking" in (incoming or "").strip().lower():
         ctx = (incoming or "").strip()
         return (
-            "TAREA: Misión A2A JOB_OPPORTUNITY_TRACKING. Registra en finance_worker.job_opportunities la vacante o "
+            "TAREA: JOB_OPPORTUNITY_TRACKING. Registra en finance_worker.job_opportunities la vacante o "
             "postulación del contexto siguiente. **No** uses tavily_search ni run_browser_sandbox salvo que no exista "
-            "ninguna URL ni dato mínimo de oferta en el contexto. Usa read_sql/admin_sql: INSERT con apply_url (literal del "
-            "mensaje si existe), title, company, location según el texto; status='applied' si el usuario indica que ya postuló, "
-            "si no 'tracking'; notes con detalle breve; applied_at=CURRENT_TIMESTAMP cuando aplique a aplicación ya hecha. "
-            "Si INSERT falla por URL duplicada (índice único), lee la fila y haz UPDATE de status/notes/applied_at.\n\n"
+            "ninguna URL ni dato mínimo de oferta en el contexto. Usa read_sql/admin_sql: primero verifica columnas reales "
+            "de finance_worker.job_opportunities y luego INSERT con apply_url (literal del mensaje si existe), title, company, "
+            "location, status='applied' si el usuario indica que ya postuló, si no 'tracking'; applied_at=CURRENT_TIMESTAMP cuando "
+            "aplique a aplicación ya hecha. **No asumas columnas opcionales** (ej. notes) si no existen en el esquema. "
+            "Si INSERT falla por URL duplicada (índice único), lee la fila y haz UPDATE de columnas existentes.\n\n"
+            f"--- Contexto ---\n{ctx[:6000]}",
+            None,
+        )
+    # Job-Hunter: comando directo /job --add <url> en chat propio -> registrar/actualizar vacante (sin A2A).
+    if _is_job_hunter_worker(worker_id) and _looks_like_job_add_command(incoming or ""):
+        ctx = (incoming or "").strip()
+        # region agent log
+        _agent_debug_log_9accbe(
+            "H6",
+            "manager_graph.py:_plan_task",
+            "job add direct command mapped to job_opportunity_tracking",
+            {"incoming_preview": ctx[:160]},
+        )
+        # endregion
+        return (
+            "TAREA: JOB_OPPORTUNITY_TRACKING. Registra en finance_worker.job_opportunities la vacante o "
+            "postulación del contexto siguiente. **No** uses tavily_search ni run_browser_sandbox salvo que no exista "
+            "ninguna URL ni dato mínimo de oferta en el contexto. Usa read_sql/admin_sql: primero verifica columnas reales "
+            "de finance_worker.job_opportunities y luego INSERT con apply_url (literal del mensaje si existe), title, company, "
+            "location, status='applied' si el usuario indica que ya postuló, si no 'tracking'; applied_at=CURRENT_TIMESTAMP cuando "
+            "aplique a aplicación ya hecha. **No asumas columnas opcionales** (ej. notes) si no existen en el esquema. "
+            "Si INSERT falla por URL duplicada (índice único), lee la fila y haz UPDATE de columnas existentes.\n\n"
             f"--- Contexto ---\n{ctx[:6000]}",
             None,
         )
@@ -1243,10 +1335,37 @@ def build_manager_graph(
             plan_title, tasks = _llm_plan(incoming)
             mercenary_spec = None
 
+        is_job_add_command = _looks_like_job_add_command(incoming)
+        if is_job_add_command and mercenary_spec is not None:
+            # /job --add nunca debe salir por mercenario; forzar flujo normal de tracking.
+            mercenary_spec = None
+            # region agent log
+            _agent_debug_log_9accbe(
+                "H8",
+                "manager_graph.py:plan_node",
+                "mercenary disabled for job add command",
+                {"incoming_preview": incoming[:160]},
+            )
+            # endregion
+
         # Prioridad A2A: en crisis de caja + intención laboral, enrutar a JobHunter si está disponible.
         job_hunter_in_team = _pick_job_hunter_worker(list(available_plan or []))
         cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
-        if job_hunter_in_team and cashflow_job_intent:
+        # region agent log
+        _agent_debug_log_9accbe(
+            "H3",
+            "manager_graph.py:plan_node",
+            "mission intent evaluation",
+            {
+                "assigned_before_override": assigned,
+                "job_hunter_in_team": job_hunter_in_team,
+                "is_job_add_command": is_job_add_command,
+                "cashflow_job_intent": cashflow_job_intent,
+                "incoming_preview": incoming[:160],
+            },
+        )
+        # endregion
+        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command):
             assigned = job_hunter_in_team
 
         # Mantener lógica existente de ruteo / planned_task
@@ -1264,7 +1383,24 @@ def build_manager_graph(
         active_mission: dict[str, Any] | None = None
         # A2A con retorno a Finanz solo si Finanz está en el equipo; si no, Job-Hunter cierra el turno solo (evita handoff fantasma).
         finanz_in_team = _finanz_worker_in_templates(list(available_plan or []))
-        if job_hunter_in_team and cashflow_job_intent and finanz_in_team:
+        # region agent log
+        _agent_debug_log_9accbe(
+            "H4",
+            "manager_graph.py:plan_node",
+            "active mission decision",
+            {
+                "assigned_after_override": assigned,
+                "finanz_in_team": finanz_in_team,
+                "job_hunter_in_team": bool(job_hunter_in_team),
+                "is_job_add_command": is_job_add_command,
+                "cashflow_job_intent": cashflow_job_intent,
+                "will_set_income_mission": bool(
+                    job_hunter_in_team and cashflow_job_intent and finanz_in_team and not is_job_add_command
+                ),
+            },
+        )
+        # endregion
+        if job_hunter_in_team and cashflow_job_intent and finanz_in_team and not is_job_add_command:
             active_mission = {
                 "source_worker": "finanz",
                 "target_worker": "job_hunter",
@@ -1497,6 +1633,21 @@ def build_manager_graph(
                 isinstance(mission, dict)
                 and _worker_matches_id(assigned, mission.get("target_worker"))
             ):
+                # region agent log
+                _agent_debug_log_9accbe(
+                    "H5",
+                    "manager_graph.py:invoke_worker_node",
+                    "a2a handoff heartbeat gate",
+                    {
+                        "assigned_worker": assigned,
+                        "mission_source": str(mission.get("source_worker") or ""),
+                        "mission_target": str(mission.get("target_worker") or ""),
+                        "same_source_target_worker": _worker_matches_id(
+                            assigned, mission.get("source_worker")
+                        ),
+                    },
+                )
+                # endregion
                 worker_state["suppress_subagent_egress"] = True
                 try:
                     from duckclaw.graphs.chat_heartbeat import schedule_chat_heartbeat_dm
@@ -1954,7 +2105,7 @@ def build_manager_graph(
         available = state.get("available_templates") or []
         target_worker = _pick_job_hunter_worker(list(available or [])) or "job_hunter"
         user_ctx = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
-        synthetic = f"TAREA: Misión A2A JOB_OPPORTUNITY_TRACKING.\n{user_ctx}"
+        synthetic = f"TAREA: JOB_OPPORTUNITY_TRACKING.\n{user_ctx}"
         mission_task, _ = _plan_task(synthetic, target_worker)
         active_mission = {
             "source_worker": "finanz",

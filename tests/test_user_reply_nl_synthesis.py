@@ -445,3 +445,29 @@ def test_repair_summarize_new_context_replaces_hallucinated_ledger() -> None:
 
 def test_repair_summarize_new_context_passthrough_when_not_new_directive() -> None:
     assert mod.repair_summarize_new_context_egress("hola", incoming="sin directiva") == "hola"
+
+
+def test_repair_summarize_new_context_replaces_noisy_vlm_dump() -> None:
+    inc = (
+        mod.SUMMARIZE_NEW_CONTEXT_MARK
+        + "\nUsuario dice: /context --add\n"
+        + "Contexto visual adjunto: hadi <unused6222> hadi deployments deployments deployments deployments "
+        + "deployments deployments endpoint endpoint NaN\n"
+        + "[VLM_CONTEXT image_hash=11788e0f12e49d29f271bb2ca1c51ff23a2b7491310fd13830e23286e0b71827 confidence=0.82]\n"
+    )
+    out = mod.repair_summarize_new_context_egress("resumen especulativo", incoming=inc)
+    assert "baja legibilidad" in out.lower()
+    assert "image_hash=11788e0f12e49d29f271bb2ca1c51ff23a2b7491310fd13830e23286e0b71827" in out
+    assert "confidence=0.82" in out
+
+
+def test_repair_summarize_new_context_keeps_clean_vlm_text() -> None:
+    inc = (
+        mod.SUMMARIZE_NEW_CONTEXT_MARK
+        + "\nUsuario dice: /context --add\n"
+        + "Contexto visual adjunto: Exclusive: The US Treasury is seeking access to Anthropic's Myths model to look for vulnerabilities.\n"
+        + "[VLM_CONTEXT image_hash=ab confidence=0.91]\n"
+    )
+    clean_reply = "- Hallazgo: el titular habla de auditoría de seguridad en modelo de Anthropic."
+    out = mod.repair_summarize_new_context_egress(clean_reply, incoming=inc)
+    assert out == clean_reply

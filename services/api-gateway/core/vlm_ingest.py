@@ -102,6 +102,29 @@ def _mlx_vlm_local_enabled() -> bool:
 _mlx_vlm_missing_logged = False
 
 
+def _debug_probe(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    # region agent log
+    try:
+        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-4a0206.log", "a", encoding="utf-8") as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "4a0206",
+                        "runId": "pre-fix",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(__import__("time").time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+
+
 def _try_mlx_vlm_local_before_http() -> bool:
     """Evita colgarse en mlx_lm HTTP (texto) con payloads visuales: local primero si mlx_vlm está instalado."""
     global _mlx_vlm_missing_logged
@@ -112,7 +135,17 @@ def _try_mlx_vlm_local_before_http() -> bool:
     try:
         import importlib.util
 
-        if importlib.util.find_spec("mlx_vlm") is None:
+        mlx_vlm_found = importlib.util.find_spec("mlx_vlm") is not None
+        _debug_probe(
+            "H1",
+            "vlm_ingest.py:_try_mlx_vlm_local_before_http",
+            "mlx_vlm_local_probe",
+            {
+                "local_enabled": True,
+                "mlx_vlm_found": mlx_vlm_found,
+            },
+        )
+        if not mlx_vlm_found:
             if not _mlx_vlm_missing_logged:
                 _mlx_vlm_missing_logged = True
                 _log.info(
@@ -848,6 +881,16 @@ async def process_visual_payload(
         last_exc: BaseException | None = None
         gemini_503_in_chain = False
         for kind in _vlm_backend_order():
+            _debug_probe(
+                "H2",
+                "vlm_ingest.py:process_visual_payload",
+                "vlm_backend_try",
+                {
+                    "backend": kind,
+                    "mlx_base": mlx_base,
+                    "local_enabled": _mlx_vlm_local_enabled(),
+                },
+            )
             try:
                 if kind == "mlx":
                     if _skip_mlx_openai_vision_same_port_as_text_mlx(mlx_base):

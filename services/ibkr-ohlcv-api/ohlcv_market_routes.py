@@ -1,5 +1,5 @@
 """
-Rutas FastAPI para GET /api/market/ohlcv (contrato DuckClaw).
+Rutas FastAPI para GET /api/market/ohlcv y GET /api/market/ibkr/historical (contrato DuckClaw).
 
 Montar con app.include_router en Capadonna Observability (puerto 8002) o en la app
 standalone de main.py.
@@ -8,6 +8,7 @@ standalone de main.py.
 2) Fallback IB Gateway: si el lake no devuelve barras o falla el export, y
    OHLCV_IB_FALLBACK no es ``0``, se ejecuta scripts/capadonna/ibkr_historical_bars.py
    (o OHLCV_IB_PYTHON + OHLCV_IB_SCRIPT) si el script existe / venv tiene ib_async.
+3) ``/api/market/ibkr/historical``: solo IB Gateway (sin intentar lake).
 """
 
 from __future__ import annotations
@@ -262,18 +263,10 @@ def _payload_to_contract_data(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return data
 
 
-@router.get("/api/market/ohlcv", response_model=None)
-def market_ohlcv(
-    request: Request,
-    ticker: str,
-    timeframe: str,
-    lookback_days: int = 7,
-) -> dict[str, Any] | JSONResponse:
-    """Contrato DuckClaw: lake primero; si no hay velas (o lake falla), fallback IB Gateway."""
-    bad = _check_bearer(request)
-    if bad is not None:
-        return bad
-
+def _validated_ohlcv_query(
+    ticker: str, timeframe: str, lookback_days: Any
+) -> JSONResponse | tuple[str, str, int]:
+    """Valida ticker/timeframe/lookback; devuelve JSONResponse 400 o (tkr, tf, lb)."""
     tkr = (ticker or "").strip().upper()
     if not tkr or len(tkr) > 12 or not re.fullmatch(r"[0-9A-Z.\-]+", tkr):
         return JSONResponse(
@@ -292,6 +285,74 @@ def market_ohlcv(
         lb = max(1, min(int(lookback_days), _MAX_LOOKBACK))
     except (TypeError, ValueError):
         lb = 7
+    return (tkr, tf, lb)
+
+
+@router.get("/api/market/ibkr/historical", response_model=None)
+def market_ibkr_historical(
+    request: Request,
+    ticker: str,
+    timeframe: str,
+    lookback_days: int = 7,
+) -> dict[str, Any] | JSONResponse:
+    """Solo IB Gateway vía ibkr_historical_bars.py; no consulta el lake."""
+    bad = _check_bearer(request)
+    if bad is not None:
+        return bad
+
+    validated = _validated_ohlcv_query(ticker, timeframe, lookback_days)
+    if isinstance(validated, JSONResponse):
+        return validated
+    tkr, tf, lb = validated
+
+    if _resolve_ib_paths() is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "message": "IB historical not configured (missing script or OHLCV_IB_FALLBACK=0)",
+            },
+        )
+
+    ib_res = _run_ib_export(tkr, tf, lb)
+    if isinstance(ib_res, JSONResponse):
+        return ib_res
+    if isinstance(ib_res, dict):
+        data_ib = _payload_to_contract_data(ib_res)
+        if data_ib:
+            return {
+                "status": "success",
+                "ticker": tkr,
+                "timeframe": tf,
+                "data": data_ib,
+            }
+        ib_msg = ib_res.get("message") if isinstance(ib_res.get("message"), str) else None
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": ib_msg or f"No OHLCV bars from IB Gateway for {tkr} timeframe={tf} lookback_days={lb}",
+            },
+        )
+    return ib_res
+
+
+@router.get("/api/market/ohlcv", response_model=None)
+def market_ohlcv(
+    request: Request,
+    ticker: str,
+    timeframe: str,
+    lookback_days: int = 7,
+) -> dict[str, Any] | JSONResponse:
+    """Contrato DuckClaw: lake primero; si no hay velas (o lake falla), fallback IB Gateway."""
+    bad = _check_bearer(request)
+    if bad is not None:
+        return bad
+
+    validated = _validated_ohlcv_query(ticker, timeframe, lookback_days)
+    if isinstance(validated, JSONResponse):
+        return validated
+    tkr, tf, lb = validated
 
     lake_err: JSONResponse | None = None
     lake_payload: dict[str, Any] | None = None

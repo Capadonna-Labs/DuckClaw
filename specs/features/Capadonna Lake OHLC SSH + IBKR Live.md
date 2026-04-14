@@ -99,6 +99,7 @@ Cuando el **lake local** (`export_lake_ohlcv.py`) falla (stderr/rc), devuelve JS
 | `OHLCV_IB_FALLBACK` | Si es `0`, no se llama al fallback IB. Por defecto (vacío) se intenta si el script existe. |
 | `OHLCV_IB_PYTHON` / `OHLCV_IB_SCRIPT` | Rutas absolutas al intérprete y a `ibkr_historical_bars.py` (opcional; por defecto: mismo Python que el lake + `scripts/capadonna/ibkr_historical_bars.py` en `Capadonna-Driller`). |
 | `OHLCV_IB_EXPORT_TIMEOUT` | Segundos para el subproceso IB (default `90`). |
+| `OHLCV_IB_CLIENT_ID` | **Recomendado si ves Error 326** (“client id already in use”): id numérico **distinto** del que use el snapshot de cuenta u otro proceso en el mismo Gateway. El script [`ibkr_historical_bars.py`](../../scripts/capadonna/ibkr_historical_bars.py) prioriza esta variable sobre `IB_CLIENT_ID`. Configúrala en el systemd de `capadonna-observability` (p. ej. drop-in `99-ohlcv-ib-client-id.conf`) o en el entorno del proceso que ejecuta uvicorn :8002. Script de ayuda: [`scripts/capadonna/vps_set_ohlcv_ib_client_id.sh`](../../scripts/capadonna/vps_set_ohlcv_ib_client_id.sh). |
 | `IB_HOST` / `IB_PORT` / `IB_CLIENT_ID` | Conexión a TWS/Gateway en **localhost del VPS** (misma convención que `IB_ENV` paper/live → 4002/4001). |
 
 Script de referencia en el monorepo: [`scripts/capadonna/ibkr_historical_bars.py`](../../scripts/capadonna/ibkr_historical_bars.py) — requiere Python 3.10+ y `pip install ib_async` en el venv del proyecto. Contrato stdout: `{"bars":[...]}` con `timestamp`, OHLC, `volume` (como `export_lake_ohlcv`).

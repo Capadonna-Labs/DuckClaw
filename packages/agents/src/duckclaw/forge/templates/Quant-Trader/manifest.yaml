@@ -18,7 +18,9 @@ llm:
   temperature: 0.1
 skills:
   - read_sql
+  - ibkr: {}  # get_ibkr_portfolio: mismo contrato que Finanz (IBKR_PORTFOLIO_API_URL; paper/live vía IBKR_ACCOUNT_MODE)
   - fetch_market_data
+  - fetch_ib_gateway_ohlcv
   - tavily_search
   - research:
       tavily_enabled: true

@@ -369,6 +369,18 @@ def test_mlx_http_base_url_uses_mlx_port_when_unset(monkeypatch: pytest.MonkeyPa
     assert vlm_mod._mlx_http_base_url() == "http://127.0.0.1:8080/v1"
 
 
+def test_mlx_http_vlm_port_separate_from_text_port_not_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """VLM_MLX_PORT=9090 + MLX_PORT=8080: URL de visión no debe omitirse por «mismo puerto que texto»."""
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_BASE_URL", raising=False)
+    monkeypatch.delenv("VLM_MLX_BASE_URL", raising=False)
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK", raising=False)
+    monkeypatch.setenv("MLX_PORT", "8080")
+    monkeypatch.setenv("VLM_MLX_PORT", "9090")
+    base = vlm_mod._mlx_http_base_url()
+    assert base == "http://127.0.0.1:9090/v1"
+    assert vlm_mod._skip_mlx_openai_vision_same_port_as_text_mlx(base) is False
+
+
 def test_skip_mlx_openai_vision_when_loopback_same_port_as_mlx_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

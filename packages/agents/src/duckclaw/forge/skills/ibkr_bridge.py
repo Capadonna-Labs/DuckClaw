@@ -17,6 +17,30 @@ from duckclaw.utils.logger import log_tool_execution_sync
 _log = logging.getLogger(__name__)
 
 
+def _ibkr_account_mode() -> str:
+    m = (os.environ.get("IBKR_ACCOUNT_MODE") or "paper").strip().lower()
+    return m if m in ("paper", "live") else "paper"
+
+
+def _ibkr_portfolio_request_headers(api_key: str) -> dict[str, str]:
+    """Cabeceras GET portafolio; el backend puede usar X-Duckclaw-IBKR-Account-Mode para enrutar paper vs live."""
+    mode = _ibkr_account_mode()
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+        "X-Duckclaw-IBKR-Account-Mode": mode,
+    }
+
+
+def _ibkr_portfolio_preamble() -> str:
+    """Texto previo: deja claro qué modo pide Duckclaw (paper por defecto para trading)."""
+    mode = _ibkr_account_mode()
+    return (
+        f"Cuenta IBKR solicitada (env `IBKR_ACCOUNT_MODE`): **{mode}**. "
+        "El snapshot numérico depende de que `IBKR_PORTFOLIO_API_URL` apunte a un servicio conectado al IB Gateway en **ese** modo.\n\n"
+    )
+
+
 def _extract_portfolio_context(data: Any) -> str:
     """
     Extrae y formatea el contexto del portfolio desde la respuesta JSON de la API.
@@ -27,8 +51,22 @@ def _extract_portfolio_context(data: Any) -> str:
 
     # Si la API devuelve error en el body (aunque HTTP 200)
     err = data.get("error") or data.get("message") or data.get("detail")
-    if err and isinstance(err, str) and ("disconnect" in err.lower() or "gateway" in err.lower() or "unavailable" in err.lower()):
-        return "Error de conexión: El Gateway de IBKR está desconectado en este momento. No puedo acceder a los datos de tu portafolio de inversiones."
+    if err and isinstance(err, str):
+        el = err.lower()
+        # snapshot_unavailable: HTTP OK pero el servicio (p. ej. Capadonna) no pudo leer cuenta/posiciones;
+        # no es lo mismo que IB Gateway caído (véase logs [ibkr] API OK + error en JSON).
+        if "snapshot_unavailable" in el:
+            return (
+                "Snapshot de cuenta IBKR no disponible (`snapshot_unavailable`). "
+                "La URL `IBKR_PORTFOLIO_API_URL` respondió, pero el backend no obtuvo datos de cuenta/posiciones. "
+                "Revisa en el **servidor donde corre la API** (no en el Mac del gateway DuckClaw) que el IB Gateway "
+                "esté logueado en la misma modalidad que pide DuckClaw "
+                f"(`IBKR_ACCOUNT_MODE` actual: **{_ibkr_account_mode()}**): "
+                "desajuste paper vs live (p. ej. `IB_ENV=live` en la API mientras aquí pides paper) es la causa más frecuente. "
+                "Comprueba también que el cliente API no consuma el único slot de sesión si hace falta otro client id."
+            )
+        if "disconnect" in el or "gateway" in el or "unavailable" in el:
+            return "Error de conexión: El Gateway de IBKR está desconectado en este momento. No puedo acceder a los datos de tu portafolio de inversiones."
 
     # Normalizar estructura: portfolio, positions, data.portfolio, cash como posición
     inner = data.get("data")
@@ -73,7 +111,7 @@ def _extract_portfolio_context(data: Any) -> str:
         count = len(portfolio)
 
     lines = [
-        "Estado: IBKR Gateway conectado.",
+        f"Estado: IBKR Gateway conectado (modo cuenta pedido: {_ibkr_account_mode()}).",
         f"Valor total: ${total_value:,.2f}",
         f"Posiciones: {count or 0}",
     ]
@@ -121,7 +159,7 @@ def _get_ibkr_portfolio_impl() -> str:
         import urllib.request
         from urllib.error import HTTPError, URLError
 
-        headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+        headers = _ibkr_portfolio_request_headers(api_key)
 
         def _get(url: str) -> Any:
             req = urllib.request.Request(url, headers=headers, method="GET")
@@ -162,7 +200,7 @@ def _get_ibkr_portfolio_impl() -> str:
             _log.info("[ibkr] Respuesta vacía. Revisa: 1) Capadonna usa IB_ENV=live (no paper) 2) IB Gateway conectado a cuenta live | sample=%r",
                       json.dumps(data, ensure_ascii=False)[:300])
 
-        return _extract_portfolio_context(data)
+        return _ibkr_portfolio_preamble() + _extract_portfolio_context(data)
     except HTTPError as e:
         _log.warning("[ibkr] HTTP %s: %s", e.code, e.reason)
         return "Error de conexión: El Gateway de IBKR está desconectado en este momento. No puedo acceder a los datos de tu portafolio de inversiones."
@@ -196,6 +234,7 @@ def _get_ibkr_portfolio_tool(config: Optional[dict] = None) -> Any:
         name="get_ibkr_portfolio",
         description=(
             "Obtiene saldo, posiciones y valor total de la cuenta IBKR (Interactive Brokers). "
+            "Respeta `IBKR_ACCOUNT_MODE` (paper/live) vía cabecera hacia `IBKR_PORTFOLIO_API_URL`. "
             "OBLIGATORIO para: 'cuanto dinero tengo', 'resumen de mi portfolio', 'portafolio', 'acciones', 'dinero en bolsa'. "
             "Ignora read_sql/admin_sql para estas consultas; los datos vienen de IBKR."
         ),

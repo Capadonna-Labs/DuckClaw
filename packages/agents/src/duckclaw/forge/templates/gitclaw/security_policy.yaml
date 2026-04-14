@@ -1,0 +1,16 @@
+# Strix run_sandbox: sin red en el contenedor; GitHub vía MCP fuera del sandbox.
+# Campos adicionales (paquetes, workspace) son orientativos; el esquema Pydantic solo valida network/filesystem/secrets/timeout.
+network:
+  default: deny
+  allow_list: []
+
+filesystem:
+  readonly_mounts: []
+  ephemeral_volumes:
+    - /tmp/workspace
+
+secrets:
+  in_memory_only: true
+  allowed_secrets: []
+
+max_execution_time_seconds: 30

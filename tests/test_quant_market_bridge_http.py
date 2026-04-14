@@ -10,7 +10,10 @@ from unittest.mock import patch
 
 import pytest
 
-from duckclaw.forge.skills.quant_market_bridge import _http_fetch_json
+from duckclaw.forge.skills.quant_market_bridge import (
+    _fetch_ib_gateway_ohlcv_impl,
+    _http_fetch_json,
+)
 
 
 @pytest.fixture
@@ -47,3 +50,14 @@ def test_http_error_fallback_when_body_not_json(market_url: None) -> None:
     assert _payload is None
     parsed = json.loads(err_s)
     assert "mercado no disponible" in parsed["error"]
+
+
+def test_fetch_ib_gateway_ohlcv_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("IBKR_GATEWAY_OHLCV_URL", raising=False)
+
+    class _Db:
+        pass
+
+    raw = _fetch_ib_gateway_ohlcv_impl(_Db(), ticker="SPY", timeframe="1h", lookback_days=7)
+    body = json.loads(raw)
+    assert body.get("error") == "IBKR_GATEWAY_OHLCV_UNCONFIGURED"

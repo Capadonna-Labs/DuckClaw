@@ -332,7 +332,7 @@ Implementación acoplada al template [finanz](packages/agents/src/duckclaw/forge
 
 | Variable | Uso |
 |----------|-----|
-| `IBKR_PORTFOLIO_API_URL` / `IBKR_PORTFOLIO_API_KEY` | Resumen de portafolio (`get_ibkr_portfolio`), igual que antes. |
+| `IBKR_PORTFOLIO_API_URL` / `IBKR_PORTFOLIO_API_KEY` | Resumen de portafolio (`get_ibkr_portfolio`). Las peticiones envían la cabecera `X-Duckclaw-IBKR-Account-Mode` según `IBKR_ACCOUNT_MODE` (default `paper`) para que tu API enrute al Gateway paper/live. |
 | `IBKR_MARKET_DATA_URL` | **Solo la URL base** del endpoint (sin query), p. ej. `http://100.x.x.x:8002/api/market/ohlcv`. El cliente añade `?ticker=&timeframe=&lookback_days=`. En el VPS, el mismo path puede usar **lake** (`export_lake_ohlcv.py`) y, si no hay barras, **fallback IB** (`scripts/capadonna/ibkr_historical_bars.py`, `ib_async` + `OHLCV_IB_*`; ver spec). Contrato: [Capadonna Lake + IBKR Live](../specs/features/Capadonna%20Lake%20OHLC%20SSH%20+%20IBKR%20Live.md). Referencia: [services/ibkr-ohlcv-api](../services/ibkr-ohlcv-api/main.py). Si no existe esa ruta (404), déjala **vacía**: el lake histórico sigue por SSH. |
 | `IBKR_MARKET_DATA_API_KEY` | Opcional; Bearer para OHLCV. Si no se define, `fetch_market_data` usa `IBKR_PORTFOLIO_API_KEY`. |
 | `IBKR_REALTIME_TIMEFRAMES` | CSV de timeframes que van al gateway HTTP cuando **no** están solo en rama lake (default `1m,5m,15m,30m,1h`). Si un TF está en histórico lake **y** aquí, prevalece IBKR. Añade `1d` si el lake SSH falla y quieres diario por HTTP. |
@@ -343,8 +343,9 @@ Implementación acoplada al template [finanz](packages/agents/src/duckclaw/forge
 | `CAPADONNA_SSH_TIMEOUT` | Segundos (default `120`, máx. `600`). |
 | `CAPADONNA_REMOTE_OHLC_CMD` | Plantilla ejecutada **en el VPS por ssh** (usa rutas absolutas del servidor, p. ej. `/home/capadonna/...`, no `~` de tu Mac). Intérprete: venv del proyecto Capadonna-Driller (`…/.venv/bin/python`) con `duckdb` instalado. Script: `scripts/capadonna/export_lake_ohlcv.py`. Opcional `CAPADONNA_LAKE_DATA_ROOT`. |
 | `CAPADONNA_HISTORICAL_TIMEFRAMES` | CSV de timeframes que van al lake por SSH (default en código `1d,1w,1M,moc`). Incluye `moc` para `data/lake/moc/`. **Mes = `1M` mayúscula; minuto = `1m` minúscula** (el bridge no las mezcla). Requiere host + comando remoto. |
-| `IBKR_ACCOUNT_MODE` | Debe ser `paper` para permitir `execute_order`. |
-| `IBKR_EXECUTE_ORDER_URL` | POST JSON `{"signal_id","paper":true}` (opcional; sin URL la orden no se envía al broker tras HITL). |
+| `IBKR_ACCOUNT_MODE` | Debe ser `paper` para permitir `execute_order` / `execute_approved_signal`. |
+| `IBKR_EXECUTE_ORDER_URL` | POST JSON `{"signal_id","paper":true}` (opcional; sin URL la orden no se envía al broker tras HITL). El **time-in-force** (GTC, bracket, etc.) lo define tu servicio detrás de esta URL, no el monorepo. |
+| `DUCKCLAW_QUANT_HITL_GRANT_TTL_SEC` | Segundos de validez del grant tras `/execute_signal` (default `600`). Para swing o confirmacion lenta, sube (p. ej. `86400`). |
 | `REDIS_URL` / `DUCKCLAW_REDIS_URL` | Recomendado para persistir grants de `/execute_signal` entre procesos; si falta, memoria en proceso (solo mismo worker). |
 
 Ejemplo de bloque (proceso del gateway; no commitear valores reales):
@@ -361,7 +362,7 @@ CAPADONNA_HISTORICAL_TIMEFRAMES=1d,1w,1M,moc
 
 Fly: `/lake` o `/lake status` comprueba env y hace `ssh … true` corto si la config es válida. `/sensors` resume DuckDB, IBKR (portafolio + mercado), Lake, Tavily, Reddit, Google Trends y **browser sandbox** (manifest finanz, Docker, imagen Playwright, red en `security_policy`) en el proceso del gateway.
 
-Telegram (human-in-the-loop): el usuario confirma con `/execute_signal <uuid>` el `signal_id` devuelto por `propose_trade` antes de que el asistente llame `execute_order`.
+Telegram (human-in-the-loop): el usuario confirma con `/execute_signal <uuid>` el `signal_id` devuelto por la propuesta (`propose_trade` en **Finanz**, `propose_trade_signal` en **Quant Trader**). Luego el asistente llama `execute_order` (Finanz) o `execute_approved_signal` (Quant Trader).
 
 ---
 

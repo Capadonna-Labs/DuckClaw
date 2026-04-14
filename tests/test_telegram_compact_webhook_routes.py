@@ -66,3 +66,20 @@ def test_compact_route_to_binding_resolves_vault(
     assert b.worker_id == "finanz"
     assert b.tenant_id == "Finanzas"
     assert b.forced_vault_db_path == str(db.resolve())
+
+
+def test_compact_quanttrader_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    repo = tmp_path / "r"
+    qdb = repo / "db" / "q.duckdb"
+    qdb.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo))
+    monkeypatch.setenv("DUCKCLAW_QUANT_TRADER_DB_PATH", "db/q.duckdb")
+    r = parse_compact_telegram_webhook_routes(
+        "quanttrader:99:tok_quant:/api/v1/telegram/quanttrader"
+    )[0]
+    b = compact_route_to_path_binding(r)
+    assert b.worker_id == "Quant-Trader"
+    assert b.tenant_id == "Cuantitativo"
+    assert b.forced_vault_db_path == str(qdb.resolve())

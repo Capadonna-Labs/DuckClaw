@@ -9,6 +9,9 @@ Uso (en el VPS junto a TWS/Gateway):
 Entorno típico:
   IB_HOST=127.0.0.1  IB_PORT=4002|4001  IB_CLIENT_ID=17  IB_ENV=paper|live
 
+  OHLCV_IB_CLIENT_ID: si está definido, sustituye a IB_CLIENT_ID solo para este script (evita Error 326
+  cuando otro servicio ya usa el mismo client id en el Gateway).
+
 Requisito: Python 3.10+, pip install ib_async en el venv del proyecto Capadonna-Driller.
 ETFs/acciones US: contrato Stock(ticker, 'SMART', 'USD'). Ajustar si el símbolo exige otro exchange.
 """
@@ -97,7 +100,9 @@ async def main_async() -> None:
         ib_env = (os.environ.get("IB_ENV") or os.environ.get("TWS_ENV") or "paper").lower()
         port = 4002 if ib_env == "paper" else 4001
     try:
-        client_id = int((os.environ.get("IB_CLIENT_ID") or "42").strip())
+        client_id = int(
+            (os.environ.get("OHLCV_IB_CLIENT_ID") or os.environ.get("IB_CLIENT_ID") or "42").strip()
+        )
     except ValueError:
         client_id = 42
 

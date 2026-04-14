@@ -84,6 +84,10 @@ for _base in (_repo_root, Path.cwd()):
                 # aunque el proceso traiga un valor vacío heredado del entorno.
                 if _ks == "DUCKCLAW_CHAT_PARALLEL_INVOCATIONS":
                     os.environ[_ks] = _vs
+                # Multiplex Telegram por path: PM2 suele volcar una copia antigua en `env`;
+                # si solo usáramos setdefault, editar .env no añadiría bots nuevos hasta resync manual.
+                elif _ks == "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES" and _vs:
+                    os.environ[_ks] = _vs
                 # Tavily: sin clave la tool no se registra o falla en backend; el .env del repo
                 # debe poder fijarla aunque PM2 herede un valor vacío.
                 elif _ks == "TAVILY_API_KEY" and _vs:
@@ -1404,13 +1408,10 @@ async def _invoke_chat(
 
                 vpath = (vault_db_path or "").strip()
                 Path(vpath).parent.mkdir(parents=True, exist_ok=True)
-                _fly_engine: Literal["auto", "python"] = "auto"
-                if vpath and vpath != ":memory:":
-                    try:
-                        if Path(vpath).resolve() == Path(get_gateway_db_path()).resolve():
-                            _fly_engine = "python"
-                    except OSError:
-                        pass
+                # Siempre motor Python RW para fly: el worker puede haber abierto el mismo .duckdb
+                # con el bridge nativo; mezclar nativo + Python o RO + RW en un PID provoca
+                # «different configuration» en DuckDB.
+                _fly_engine: Literal["auto", "python"] = "python"
                 if (os.environ.get("DUCKCLAW_TEAM_WHITELIST_DEBUG") or "").strip().lower() in (
                     "1",
                     "true",
@@ -1438,6 +1439,48 @@ async def _invoke_chat(
                         )
                     except OSError as _audit_exc:
                         _gateway_log.info("fly_team_audit path_compare_error=%s", _audit_exc)
+                # Libera handles DuckDB del worker cacheado (misma bóveda) antes de abrir fly RW.
+                try:
+                    from duckclaw.graphs.manager_graph import (
+                        clear_worker_graph_cache,
+                        worker_graph_cache_entry_count,
+                    )
+
+                    _fly_cache_n = worker_graph_cache_entry_count()
+                    clear_worker_graph_cache()
+                    import gc as _gc
+
+                    _gc.collect()
+                except Exception:
+                    _fly_cache_n = -1
+                # region agent log
+                try:
+                    import json as _json
+                    import time as _time
+
+                    _dbg_p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
+                    with open(_dbg_p, "a", encoding="utf-8") as _df:
+                        _df.write(
+                            _json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "hypothesisId": "H1",
+                                    "location": "main.py:_invoke_chat:fly",
+                                    "message": "before_fly_duckclaw",
+                                    "data": {
+                                        "fly_cache_entries_before_clear": _fly_cache_n,
+                                        "fly_engine": str(_fly_engine),
+                                        "vault_suffix": (vpath or "")[-120:] if vpath else "",
+                                        "gw_suffix": (get_gateway_db_path() or "")[-120:],
+                                    },
+                                    "timestamp": int(_time.time() * 1000),
+                                }
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # endregion
                 fly_db = DuckClaw(vpath, read_only=False, engine=_fly_engine)
                 from duckclaw.graphs.graph_server import get_db as _fly_acl_db
 

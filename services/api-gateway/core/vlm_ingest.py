@@ -204,12 +204,18 @@ def _httpx_trust_env_for_openai_base(base_url: str) -> bool:
 
 
 def _text_mlx_stack_port() -> int:
-    """Puerto donde suele escuchar ``mlx_lm server`` (texto), mismo criterio que ``_mlx_http_base_url``."""
-    raw = (os.environ.get("VLM_MLX_PORT") or os.environ.get("MLX_PORT") or "8081").strip()
+    """
+    Puerto donde escucha ``mlx_lm server`` (solo texto).
+
+    Debe ser **solo** ``MLX_PORT``: si ``VLM_MLX_PORT`` apunta a otro host para visión HTTP,
+    mezclarlo aquí hacía que ``_skip_mlx_openai_vision_same_port_as_text_mlx`` comparara el
+    puerto VLM consigo mismo y omitiera MLX HTTP aunque texto y visión fueran distintos.
+    """
+    raw = (os.environ.get("MLX_PORT") or "8080").strip()
     try:
         return max(1, min(65535, int(raw)))
     except ValueError:
-        return 8081
+        return 8080
 
 
 def _skip_mlx_openai_vision_same_port_as_text_mlx(mlx_base: str) -> bool:
@@ -644,6 +650,11 @@ def _gemini_model() -> str:
     return (os.environ.get("DUCKCLAW_VLM_GEMINI_MODEL") or "gemini-2.5-flash").strip()
 
 
+def _gemini_fallback_model() -> str:
+    """Un intento extra si el modelo primario devuelve 503 (sobrecarga / outage regional)."""
+    return (os.environ.get("DUCKCLAW_VLM_GEMINI_FALLBACK_MODEL") or "gemini-2.0-flash").strip()
+
+
 def _gemini_http_timeout_s() -> float:
     raw = (os.environ.get("DUCKCLAW_VLM_GEMINI_HTTP_TIMEOUT") or "90").strip()
     try:
@@ -858,15 +869,64 @@ async def process_visual_payload(
                     )
                     confidence = 0.85
                 elif kind == "gemini":
-                    summary = await _call_gemini_vision(
-                        api_key=_vlm_gemini_api_key(),
-                        model=_gemini_model(),
-                        mime_type=mt,
-                        image_bytes=image_bytes,
-                        user_caption=caption,
-                        http_timeout_s=gemini_to,
-                    )
-                    confidence = 0.74
+                    prim_g = _gemini_model()
+                    fb_g = _gemini_fallback_model()
+                    g_key = _vlm_gemini_api_key()
+                    try:
+                        summary = await _call_gemini_vision(
+                            api_key=g_key,
+                            model=prim_g,
+                            mime_type=mt,
+                            image_bytes=image_bytes,
+                            user_caption=caption,
+                            http_timeout_s=gemini_to,
+                        )
+                        confidence = 0.74
+                    except httpx.HTTPStatusError as g_exc:
+                        last_exc = g_exc
+                        if g_exc.response is not None and g_exc.response.status_code == 503:
+                            gemini_503_in_chain = True
+                            _log.warning(
+                                "VLM vía Gemini no disponible (503): %s",
+                                vlm_exception_for_log(g_exc),
+                            )
+                            if fb_g and fb_g.lower() != prim_g.lower():
+                                _log.info(
+                                    "VLM: reintento Gemini con fallback model=%s",
+                                    fb_g,
+                                )
+                                try:
+                                    summary = await _call_gemini_vision(
+                                        api_key=g_key,
+                                        model=fb_g,
+                                        mime_type=mt,
+                                        image_bytes=image_bytes,
+                                        user_caption=caption,
+                                        http_timeout_s=gemini_to,
+                                    )
+                                    confidence = 0.72
+                                except Exception as fb_exc:  # noqa: BLE001
+                                    last_exc = fb_exc
+                                    _log.warning(
+                                        "VLM vía Gemini (fallback) falló: %s",
+                                        vlm_exception_for_log(fb_exc),
+                                    )
+                                    continue
+                            else:
+                                continue
+                        else:
+                            _log.warning(
+                                "VLM vía Gemini falló: %s",
+                                vlm_exception_for_log(g_exc),
+                            )
+                            continue
+                    except Exception as g_exc:  # noqa: BLE001
+                        last_exc = g_exc
+                        _log.warning(
+                            "VLM vía Gemini falló: %s",
+                            vlm_exception_for_log(g_exc),
+                        )
+                        continue
                 else:
                     fb_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
                     summary = await _call_openai_vision(
@@ -1042,14 +1102,62 @@ async def process_visual_album_batch(
                     )
                     confidence = 0.85
                 elif kind == "gemini":
-                    summary = await _call_gemini_vision_multi(
-                        api_key=_vlm_gemini_api_key(),
-                        model=_gemini_model(),
-                        images=dl,
-                        user_caption=caption_use,
-                        http_timeout_s=gemini_multi_to,
-                    )
-                    confidence = 0.74
+                    prim_ga = _gemini_model()
+                    fb_ga = _gemini_fallback_model()
+                    g_key_a = _vlm_gemini_api_key()
+                    try:
+                        summary = await _call_gemini_vision_multi(
+                            api_key=g_key_a,
+                            model=prim_ga,
+                            images=dl,
+                            user_caption=caption_use,
+                            http_timeout_s=gemini_multi_to,
+                        )
+                        confidence = 0.74
+                    except httpx.HTTPStatusError as g_exc:
+                        last_exc = g_exc
+                        if g_exc.response is not None and g_exc.response.status_code == 503:
+                            gemini_503_in_chain = True
+                            _log.warning(
+                                "VLM (álbum) Gemini no disponible (503): %s",
+                                vlm_exception_for_log(g_exc),
+                            )
+                            if fb_ga and fb_ga.lower() != prim_ga.lower():
+                                _log.info(
+                                    "VLM (álbum): reintento Gemini con fallback model=%s",
+                                    fb_ga,
+                                )
+                                try:
+                                    summary = await _call_gemini_vision_multi(
+                                        api_key=g_key_a,
+                                        model=fb_ga,
+                                        images=dl,
+                                        user_caption=caption_use,
+                                        http_timeout_s=gemini_multi_to,
+                                    )
+                                    confidence = 0.72
+                                except Exception as fb_exc:  # noqa: BLE001
+                                    last_exc = fb_exc
+                                    _log.warning(
+                                        "VLM (álbum) Gemini (fallback) falló: %s",
+                                        vlm_exception_for_log(fb_exc),
+                                    )
+                                    continue
+                            else:
+                                continue
+                        else:
+                            _log.warning(
+                                "VLM (álbum) vía Gemini falló: %s",
+                                vlm_exception_for_log(g_exc),
+                            )
+                            continue
+                    except Exception as g_exc:  # noqa: BLE001
+                        last_exc = g_exc
+                        _log.warning(
+                            "VLM (álbum) vía Gemini falló: %s",
+                            vlm_exception_for_log(g_exc),
+                        )
+                        continue
                 else:
                     fb_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
                     summary = await _call_openai_vision_multi(

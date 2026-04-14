@@ -54,6 +54,8 @@ def state_evidence_for_context_summary_rescind(state: dict[str, Any]) -> str:
 
 SUMMARIZE_NEW_CONTEXT_MARK = "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]"
 SUMMARIZE_STORED_CONTEXT_MARK = "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]"
+SUMMARIZE_IMAGE_MARK = "[SYSTEM_DIRECTIVE: SUMMARIZE_IMAGE]"
+VLM_GATEWAY_DOWN_META = "[META: VLM_GATEWAY_DOWN]"
 
 _MAX_EVIDENCE_CHARS = 12000
 _MAX_SYNTH_TOKENS = 768
@@ -303,6 +305,10 @@ _BARE_SUMMARIZE_STORED_REPLY = re.compile(
     r"^\s*\[SYSTEM_DIRECTIVE:\s*SUMMARIZE_STORED_CONTEXT\]\s*$",
     re.IGNORECASE,
 )
+_BARE_SUMMARIZE_IMAGE_REPLY = re.compile(
+    r"^\s*\[SYSTEM_DIRECTIVE:\s*SUMMARIZE_IMAGE\]\s*$",
+    re.IGNORECASE,
+)
 
 # Plantillas que Gemma/MLX suele inventar en turnos SUMMARIZE_NEW_CONTEXT (no vienen del texto pegado).
 _NEW_CONTEXT_WRONG_ACCOUNT_TEMPLATES = (
@@ -508,6 +514,47 @@ def _fallback_bullets_from_visual_context_dump(inc: str) -> str:
         "- Si el visión falló a menudo, revisa ``mlx_vlm`` en el venv del gateway y ``GEMINI_API_KEY``.\n"
     )
     return body
+
+
+def replace_bare_summarize_image_on_vlm_gateway_down(reply: str, *, incoming: str) -> str:
+    """
+    MLX/Gemma a veces emite solo ``SUMMARIZE_IMAGE`` cuando el usuario trae ``[META: VLM_GATEWAY_DOWN]``
+    (ingesta VLM falló: sin píxeles en el prompt del worker).
+    """
+    r = (reply or "").strip()
+    if not _BARE_SUMMARIZE_IMAGE_REPLY.match(r):
+        return reply
+    inc = (incoming or "").strip()
+    if VLM_GATEWAY_DOWN_META not in inc:
+        return reply
+    # region agent log
+    try:
+        _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
+        with open(_p, "a", encoding="utf-8") as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H_IMAGE_EGRESS",
+                        "location": "user_reply_nl_synthesis.replace_bare_summarize_image_on_vlm_gateway_down",
+                        "message": "replaced_bare_summarize_image",
+                        "data": {"incoming_has_meta": True},
+                        "timestamp": int(__import__("time").time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+    return (
+        "La ingesta de visión en el gateway no pudo analizar la imagen en este turno (no hay bloque "
+        "[VLM_CONTEXT]). Si viste un aviso de Gemini 503 o de MLX en el mismo puerto que el LM de texto, "
+        "reintenta más tarde, instala **mlx-vlm** en el venv del gateway, o sirve visión en otro puerto "
+        "(`VLM_MLX_BASE_URL`). Mientras tanto, **describe en texto** qué muestra la imagen (ticker, números, "
+        "pantalla) y sigo con ese contexto."
+    )
 
 
 def replace_bare_wrong_summarize_stored_echo(reply: str, *, incoming: str) -> str:

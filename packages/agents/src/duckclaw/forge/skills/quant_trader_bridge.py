@@ -9,13 +9,19 @@ import urllib.request
 import uuid
 from typing import Any
 
-from duckclaw.forge.skills.quant_market_bridge import _fetch_market_data_impl
+from duckclaw.forge.skills.quant_market_bridge import (
+    _fetch_ib_gateway_ohlcv_impl,
+    _fetch_market_data_impl,
+)
 from duckclaw.forge.skills.quant_state_delta import push_quant_state_delta_sync
+from duckclaw.forge.skills.quant_hitl import consume_execute_order_grant
 from duckclaw.forge.skills.quant_tool_context import (
+    get_quant_tool_chat_id,
     get_quant_tool_db_path,
     get_quant_tool_tenant_id,
     get_quant_tool_user_id,
     has_quant_market_evidence_for_ticker,
+    note_quant_market_evidence_ticker,
 )
 from duckclaw.graphs.sandbox import run_in_sandbox
 from duckclaw.utils.logger import log_tool_execution_sync
@@ -93,7 +99,7 @@ def _propose_trade_signal_impl(
         return json.dumps(
             {
                 "error": "EVIDENCE_UNIQUE_RULE",
-                "message": f"No existe fetch_market_data exitoso para {tkr} en este turno.",
+                "message": f"No existe fetch_market_data o fetch_ib_gateway_ohlcv exitoso para {tkr} en este turno.",
             },
             ensure_ascii=False,
         )
@@ -182,8 +188,21 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
     if not rows:
         return json.dumps({"error": "signal no existe"}, ensure_ascii=False)
     row = rows[0] if isinstance(rows[0], dict) else {}
-    if not bool(row.get("human_approved")):
-        return json.dumps({"error": "human_approved != TRUE"}, ensure_ascii=False)
+    hitl_ok = bool(row.get("human_approved"))
+    if not hitl_ok:
+        cid = get_quant_tool_chat_id() or "default"
+        if consume_execute_order_grant(cid, sid):
+            hitl_ok = True
+    if not hitl_ok:
+        return json.dumps(
+            {
+                "error": "human_approved != TRUE",
+                "message": (
+                    "Confirma con /execute_signal " + sid + " en Telegram y vuelve a llamar execute_approved_signal."
+                ),
+            },
+            ensure_ascii=False,
+        )
     if str(row.get("status") or "").upper() == "DISCARDED":
         return json.dumps({"error": "signal stale/discarded"}, ensure_ascii=False)
     mode = (os.environ.get("IBKR_ACCOUNT_MODE") or "paper").strip().lower()
@@ -238,12 +257,40 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
     from langchain_core.tools import StructuredTool
 
     def _fetch_market_data(ticker: str, timeframe: str = "1d", lookback_days: int = 365) -> str:
-        return _fetch_market_data_impl(
+        raw = _fetch_market_data_impl(
             db,
             ticker=ticker,
             timeframe=timeframe,
             lookback_days=int(lookback_days),
         )
+        try:
+            payload = json.loads(raw)
+            if isinstance(payload, dict) and payload.get("status") == "ok":
+                tkr = str(payload.get("ticker") or ticker or "").strip().upper()
+                if tkr:
+                    note_quant_market_evidence_ticker(tkr)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return raw
+
+    def _fetch_ib_gateway_ohlcv(
+        ticker: str, timeframe: str = "1h", lookback_days: int = 20
+    ) -> str:
+        raw = _fetch_ib_gateway_ohlcv_impl(
+            db,
+            ticker=ticker,
+            timeframe=timeframe,
+            lookback_days=int(lookback_days),
+        )
+        try:
+            payload = json.loads(raw)
+            if isinstance(payload, dict) and payload.get("status") == "ok":
+                tkr = str(payload.get("ticker") or ticker or "").strip().upper()
+                if tkr:
+                    note_quant_market_evidence_ticker(tkr)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return raw
 
     def _execute_sandbox_script(code: str, dependencies: list[str] | None = None) -> str:
         return _execute_sandbox_script_impl(db, llm, code=code, dependencies=dependencies)
@@ -278,6 +325,18 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
     )
     tools.append(
         StructuredTool.from_function(
+            _fetch_ib_gateway_ohlcv,
+            name="fetch_ib_gateway_ohlcv",
+            description=(
+                "OHLCV solo desde IB Gateway vía HTTP (GET /api/market/ibkr/historical; requiere "
+                "IBKR_GATEWAY_OHLCV_URL en el proceso del gateway). No usa lake SSH. Persiste en "
+                "quant_core.ohlcv_data como evidencia. Parámetros típicos: timeframe 1h/30m/1d; "
+                "lookback_days ventana en días (hasta ~4000), p. ej. SPY timeframe=1h lookback_days=20."
+            ),
+        )
+    )
+    tools.append(
+        StructuredTool.from_function(
             _execute_sandbox_script,
             name="execute_sandbox_script",
             description="Ejecuta script de backtesting en sandbox aislado (timeout estricto).",
@@ -296,6 +355,9 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
         StructuredTool.from_function(
             _execute_approved_signal,
             name="execute_approved_signal",
-            description="Ejecuta una senal aprobada por HITL (human_approved=TRUE) en paper trading.",
+            description=(
+                "Ejecuta una senal en paper tras HITL: fila con human_approved=TRUE o confirmacion "
+                "/execute_signal <signal_id> en Telegram (mismo chat). Requiere IBKR_ACCOUNT_MODE=paper."
+            ),
         )
     )

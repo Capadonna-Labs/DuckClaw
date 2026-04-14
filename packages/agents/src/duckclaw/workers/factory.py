@@ -1542,6 +1542,14 @@ def build_worker_graph(
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             _log.debug("quant skills registration skipped", exc_info=True)
+    elif isinstance(_qcfg, dict) and _qcfg.get("enabled") and _lid_q == "quant_trader" and llm is not None:
+        try:
+            from duckclaw.forge.skills.quant_trader_bridge import register_quant_trader_skills
+
+            register_quant_trader_skills(db, llm, tools)
+            tools_by_name = {t.name: t for t in tools}
+        except Exception:
+            _log.debug("quant_trader skills registration skipped", exc_info=True)
 
     if getattr(spec, "sft_config", None):
         try:
@@ -1858,6 +1866,19 @@ def build_worker_graph(
             else None
         )
 
+        has_fetch_ib_gateway = "fetch_ib_gateway_ohlcv" in tools_by_name
+        tool_choice_fetch_ib_gateway = {"type": "function", "function": {"name": "fetch_ib_gateway_ohlcv"}}
+        llm_force_fetch_ib_gateway_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_fetch_ib_gateway)
+            if has_fetch_ib_gateway
+            else None
+        )
+        llm_force_fetch_ib_gateway_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_fetch_ib_gateway)
+            if has_fetch_ib_gateway
+            else None
+        )
+
         _reddit_tool_names = sorted(k for k in tools_by_name if (k or "").startswith("reddit_"))
         has_reddit_tools = bool(_reddit_tool_names)
 
@@ -2060,6 +2081,12 @@ def build_worker_graph(
             _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"
             _log_chat = format_chat_log_identity(str(_chat_ctx).strip() or "default", state.get("username"))
             set_log_context(tenant_id=_tenant_ctx, worker_id=worker_id, chat_id=_log_chat)
+            _ev_msgs = state.get("messages") or []
+            _ev_last = _ev_msgs[-1] if _ev_msgs else None
+            if _lid == "quant_trader" and (_ev_last is None or isinstance(_ev_last, HumanMessage)):
+                from duckclaw.forge.skills.quant_tool_context import reset_quant_market_evidence
+
+                reset_quant_market_evidence()
             _wl = _worker_log_label(worker_id)
             cfg = config or {}
             incoming = (
@@ -2243,10 +2270,36 @@ def build_worker_graph(
                 force_tavily = False
                 force_reddit = False
 
+            # Misma heurística OHLCV que Finanz: Quant Trader también expone fetch_market_data y la usa como
+            # evidencia obligatoria antes de propose_trade_signal (quant_trader_bridge); forzar la tool evita
+            # alucinaciones en pedidos explícitos de velas/descarga. No aplica a portfolio IBKR (force_portfolio).
+            _lid_l = (_lid or "").strip().lower()
+            _ibgw_url = (os.environ.get("IBKR_GATEWAY_OHLCV_URL") or "").strip()
+            # Quant Trader: si hay URL dedicada al GET /api/market/ibkr/historical, forzar esa tool en lugar
+            # de fetch_market_data (evita lake+HTTP genérico cuando el usuario configuró solo IB Gateway).
+            force_fetch_ib_gateway = bool(
+                _lid_l == "quant_trader"
+                and has_fetch_ib_gateway
+                and bool(_ibgw_url)
+                and _finanz_user_requests_ohlcv_ingest(incoming)
+                and not telegram_context_summarize_directive
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_tavily
+                    or force_reddit
+                )
+                and not already_has_tool_result
+            )
+            if not _worker_use_heuristic_first_tool(spec):
+                force_fetch_ib_gateway = False
             force_fetch_market_data = bool(
-                (_lid or "").strip().lower() == "finanz"
+                _lid_l in ("finanz", "quant_trader")
                 and has_fetch_market
                 and _finanz_user_requests_ohlcv_ingest(incoming)
+                and not force_fetch_ib_gateway
                 and not telegram_context_summarize_directive
                 and not (
                     force_schema
@@ -2304,6 +2357,7 @@ def build_worker_graph(
                     or force_portfolio
                     or force_reddit
                     or force_fetch_market_data
+                    or force_fetch_ib_gateway
                 )
                 and not already_has_tool_result
             )
@@ -2321,6 +2375,7 @@ def build_worker_graph(
                     or force_plot_docs
                     or force_reddit
                     or force_fetch_market_data
+                    or force_fetch_ib_gateway
                 )
                 and not already_has_tool_result
             )
@@ -2371,9 +2426,13 @@ def build_worker_graph(
                                     "reddit"
                                     if force_reddit
                                     else (
-                                        "fetch_market_data"
-                                        if force_fetch_market_data
-                                        else ("run_sandbox" if force_run_sandbox else "auto")
+                                        "fetch_ib_gateway_ohlcv"
+                                        if force_fetch_ib_gateway
+                                        else (
+                                            "fetch_market_data"
+                                            if force_fetch_market_data
+                                            else ("run_sandbox" if force_run_sandbox else "auto")
+                                        )
                                     )
                                 )
                             )
@@ -2440,6 +2499,9 @@ def build_worker_graph(
                 if _fr is None:
                     _fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
                 _invoked_llm = _fr or llm_with_tools
+            elif force_fetch_ib_gateway:
+                _ffig = llm_force_fetch_ib_gateway_on if sandbox_enabled else llm_force_fetch_ib_gateway_off
+                _invoked_llm = _ffig or llm_with_tools
             elif force_fetch_market_data:
                 _ffmd = llm_force_fetch_market_on if sandbox_enabled else llm_force_fetch_market_off
                 _invoked_llm = _ffmd or llm_with_tools
@@ -2514,6 +2576,23 @@ def build_worker_graph(
         _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"
         _log_chat = format_chat_log_identity(str(_chat_ctx).strip() or "default", state.get("username"))
         set_log_context(tenant_id=_tenant_ctx, worker_id=worker_id, chat_id=_log_chat)
+        if (
+            "execute_order" in tools_by_name
+            or "execute_approved_signal" in tools_by_name
+            or "propose_trade_signal" in tools_by_name
+        ):
+            from duckclaw.forge.skills.quant_tool_context import (
+                set_quant_tool_chat_id,
+                set_quant_tool_db_path,
+                set_quant_tool_tenant_id,
+                set_quant_tool_user_id,
+            )
+
+            set_quant_tool_chat_id(str(_chat_ctx))
+            set_quant_tool_tenant_id(_tenant_ctx)
+            _q_uid = str(state.get("user_id") or "").strip() or str(_chat_ctx)
+            set_quant_tool_user_id(_q_uid)
+            set_quant_tool_db_path(str(path))
         _wl = _worker_log_label(worker_id)
         messages = state["messages"]
         last = messages[-1]
@@ -2729,6 +2808,7 @@ def build_worker_graph(
             incoming_has_context_summarize_directive,
             maybe_synthesize_reply,
             repair_summarize_new_context_egress,
+            replace_bare_summarize_image_on_vlm_gateway_down,
             replace_bare_wrong_summarize_stored_echo,
             rescind_trivial_context_summary_reply,
             state_evidence_for_context_summary_rescind,
@@ -2771,6 +2851,7 @@ def build_worker_graph(
         reply = sanitize_worker_reply_phase1(reply)
         _inc_for_ctx = (state.get("incoming") or state.get("input") or "").strip()
         reply = replace_bare_wrong_summarize_stored_echo(reply, incoming=_inc_for_ctx)
+        reply = replace_bare_summarize_image_on_vlm_gateway_down(reply, incoming=_inc_for_ctx)
         reply = repair_summarize_new_context_egress(reply, incoming=_inc_for_ctx)
         if (getattr(spec, "worker_id", "") or "").strip().lower() == "finanz":
             from duckclaw.forge.skills.quant_market_bridge import (

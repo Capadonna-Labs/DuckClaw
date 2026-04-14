@@ -18,7 +18,7 @@ _MAX_DRIFT = 0.001  # 0.1 %
 # (runtime: métricas CFD tipo "densidad 0.000152" con SPY ~657).
 _MIN_QUOTE_VS_MIN_ANCHOR_FRAC = 0.01
 _VLM_MARKER = "VLM_CONTEXT"
-_EVIDENCE_TOOLS = {"fetch_market_data", "fetch_lake_ohlcv", "read_sql"}
+_EVIDENCE_TOOLS = {"fetch_market_data", "fetch_ib_gateway_ohlcv", "fetch_lake_ohlcv", "read_sql"}
 
 _NUMERIC_VERIFY_STATUSES = frozenset({"verified", "mismatch", "no_evidence"})
 
@@ -132,7 +132,7 @@ def _ohlc_numbers_from_messages_for_ticker(messages: list[Any], sym: str) -> set
             name = str(getattr(m, "name", "") or "")
             body = str(getattr(m, "content", "") or "")
         name = name.strip()
-        if name not in ("read_sql", "fetch_market_data", "fetch_lake_ohlcv"):
+        if name not in ("read_sql", "fetch_market_data", "fetch_ib_gateway_ohlcv", "fetch_lake_ohlcv"):
             continue
         body = body.strip()
         if not body:
@@ -319,7 +319,7 @@ def quant_reply_price_audit(
                 (
                     "La respuesta fue ajustada: un precio citado no coincide (>0.1%) con la última "
                     f"vela en quant_core para {sym} (close ~ {close:.4f}). Usa read_sql o "
-                    "fetch_market_data antes de citar cotizaciones actuales."
+                    "fetch_market_data/fetch_ib_gateway_ohlcv antes de citar cotizaciones actuales."
                 ),
                 err,
             )
@@ -381,6 +381,6 @@ def enforce_visual_evidence_rule(
             return reply, None
     return (
         "❌ Regla de Evidencia Única: detecté contexto visual y cifras de mercado sin tool call válido en este turno. "
-        "Ejecuta fetch_market_data/fetch_lake_ohlcv o read_sql primero y luego recalculo.",
+        "Ejecuta fetch_market_data/fetch_ib_gateway_ohlcv/fetch_lake_ohlcv o read_sql primero y luego recalculo.",
         "missing_tool_evidence_for_vlm_claim",
     )

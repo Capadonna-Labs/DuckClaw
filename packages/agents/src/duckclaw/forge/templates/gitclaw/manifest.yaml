@@ -1,0 +1,69 @@
+# GitClaw — experto GitHub/Git (ADF)
+# Runtime: WorkerSpec. cognition/execution/version/metadata son documentación ADF;
+# el motor carga soul.md, system_prompt.md y domain_closure.md por convención.
+name: GitClaw
+id: gitclaw
+schema_name: gitclaw
+topology: general
+read_only: false
+risk_level: conservative
+network_access: true
+browser_sandbox: false
+
+# ADF (informativo)
+version: 1.0.0
+type: sovereign_worker
+metadata:
+  domain: software_engineering
+  description: >
+    Experto en GitHub, Git y flujos de desarrollo soberano.
+    Analiza repos, revisa código, gestiona issues y PRs, y automatiza releases.
+
+cognition:
+  soul: ./soul.md
+  system_prompt: ./system_prompt.md
+  domain_closure: ./domain_closure.md
+
+execution:
+  engine: langgraph
+  entrypoint: gitclaw_pipeline
+  policies:
+    timeout_ms: 45000
+    retry:
+      max_attempts: 2
+
+dependency_check:
+  - env: GITHUB_TOKEN
+    message: >
+      Sin GITHUB_TOKEN el bridge MCP GitHub no registra herramientas.
+      En el primer turno, indica al usuario que defina GITHUB_TOKEN y permisos (repo, read:org si aplica).
+  - note: Requiere paquete mcp y npx @modelcontextprotocol/server-github (ver github_bridge).
+
+skills:
+  - search_semantic_context
+  - github:
+      token_env: GITHUB_TOKEN
+      hitl_destructive: true
+
+memory:
+  sql:
+    required_schemas: [gitclaw, main]
+  vss:
+    enabled: true
+    table: main.semantic_memory
+    use_for: [code_search, architecture_decisions, pr_context]
+
+security:
+  network_access: true
+  allowed_domains:
+    - api.github.com
+    - github.com
+
+llm:
+  required: true
+  temperature: 0.2
+
+allowed_tables:
+  - decisions
+  - pr_log
+  - main.semantic_memory

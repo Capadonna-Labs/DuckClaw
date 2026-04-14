@@ -7,6 +7,9 @@ specs/features/Capadonna Lake OHLC SSH + IBKR Live.md
 
 Tiempo real / fallback HTTP: IBKR_MARKET_DATA_URL (GET; query ticker, timeframe,
 lookback_days); IBKR_PORTFOLIO_API_KEY o IBKR_MARKET_DATA_API_KEY opcional Bearer.
+
+Solo IB Gateway (sin lake): IBKR_GATEWAY_OHLCV_URL apunta a GET .../api/market/ibkr/historical
+(mismo contrato query/Bearer que arriba).
 """
 
 from __future__ import annotations
@@ -21,11 +24,26 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from duckclaw.utils.logger import log_tool_execution_sync
 
 _log = logging.getLogger(__name__)
+
+
+def _ibkr_http_timeout_sec() -> float:
+    raw = (
+        os.environ.get("IBKR_HTTP_TIMEOUT_SEC")
+        or os.environ.get("IBKR_GATEWAY_HTTP_TIMEOUT_SEC")
+        or "120"
+    ).strip()
+    try:
+        t = float(raw)
+    except ValueError:
+        t = 120.0
+    return float(max(30, min(t, 300)))
+
 
 _TF_SAFE = re.compile(r"^[0-9A-Za-z]+$")
 
@@ -304,8 +322,10 @@ def fetch_lake_ohlcv(
     )
 
 
-def _http_fetch_json(tkr: str, tf: str, lookback_days: int) -> Tuple[Optional[Any], Optional[str]]:
-    base = (os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()
+def _http_fetch_json_at_base(
+    base: str, tkr: str, tf: str, lookback_days: int
+) -> Tuple[Optional[Any], Optional[str]]:
+    base = (base or "").strip()
     if not base:
         return None, None  # caller builds config error
     q = urllib.parse.urlencode(
@@ -319,8 +339,9 @@ def _http_fetch_json(tkr: str, tf: str, lookback_days: int) -> Tuple[Optional[An
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     req.add_header("Accept", "application/json")
+    _to = _ibkr_http_timeout_sec()
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=_to) as resp:
             body = resp.read().decode("utf-8", errors="replace")
             return json.loads(body), None
     except urllib.error.HTTPError as e:
@@ -338,9 +359,28 @@ def _http_fetch_json(tkr: str, tf: str, lookback_days: int) -> Tuple[Optional[An
         return None, json.dumps({"error": detail}, ensure_ascii=False)
     except urllib.error.URLError as e:
         _log.warning("[quant_market] URLError: %s", e.reason)
-        return None, json.dumps({"error": f"Conexión fallida: {e.reason!s}"}, ensure_ascii=False)
+        reason_s = str(e.reason)
+        errno = getattr(e.reason, "errno", None)
+        refused = "refused" in reason_s.lower() or errno == 61
+        hint = ""
+        if refused:
+            hint = (
+                " Si la API Capadonna (puerto 8002) está en el VPS/Tailscale, "
+                "IBKR_GATEWAY_OHLCV_URL debe usar el mismo host que IBKR_PORTFOLIO_API_URL "
+                "(p. ej. /api/market/ohlcv o /api/market/ibkr/historical). "
+                "127.0.0.1:8002 solo sirve con servicio local o túnel."
+            )
+        return None, json.dumps(
+            {"error": f"Conexión fallida: {reason_s}.{hint}"},
+            ensure_ascii=False,
+        )
     except json.JSONDecodeError as e:
         return None, json.dumps({"error": f"Respuesta no JSON: {e}"}, ensure_ascii=False)
+
+
+def _http_fetch_json(tkr: str, tf: str, lookback_days: int) -> Tuple[Optional[Any], Optional[str]]:
+    base = (os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()
+    return _http_fetch_json_at_base(base, tkr, tf, lookback_days)
 
 
 def _vix_ticker_store(ticker_upper: str) -> Optional[str]:
@@ -456,6 +496,100 @@ def _fetch_vix_yfinance_payload(
     return bars, None
 
 
+def _ts_sort_key(ts: str) -> float:
+    try:
+        return datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S").timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _infer_user_id_for_writer(db_path: str) -> str:
+    parts = Path(db_path).expanduser().resolve().parts
+    if "private" in parts:
+        i = parts.index("private")
+        if i + 1 < len(parts):
+            return str(parts[i + 1])
+    return "default"
+
+
+def _ohlcv_batch_upsert_sql_params(norm_rows: list[tuple[Any, ...]]) -> tuple[str, list[Any]]:
+    parts_sql: list[str] = []
+    flat: list[Any] = []
+    for bt, ts, o, h, l, c, v in norm_rows:
+        parts_sql.append("(?, CAST(? AS TIMESTAMP), ?, ?, ?, ?, ?)")
+        flat.extend([bt, ts, o, h, l, c, v])
+    values_sql = ",\n".join(parts_sql)
+    sql = f"""
+INSERT INTO quant_core.ohlcv_data (ticker, timestamp, open, high, low, close, volume)
+VALUES {values_sql}
+ON CONFLICT (ticker, timestamp) DO UPDATE SET
+    open = excluded.open,
+    high = excluded.high,
+    low = excluded.low,
+    close = excluded.close,
+    volume = excluded.volume
+"""
+    return sql.strip(), flat
+
+
+def _persist_ohlcv_batch(
+    db: Any, norm_rows: list[tuple[Any, ...]]
+) -> tuple[bool, list[tuple[Any, ...]], str]:
+    """
+    Persiste velas en quant_core.ohlcv_data.
+    Workers con manifest read_only usan DuckDB RO: las INSERT directas fallan;
+    se encola un único batch vía Redis (mismo patrón que admin_sql en factory).
+    """
+    if not norm_rows:
+        return True, [], ""
+    sql, flat = _ohlcv_batch_upsert_sql_params(norm_rows)
+    path = str(getattr(db, "_path", "") or "").strip()
+    ro = bool(getattr(db, "_read_only", False))
+    if ro and path and path != ":memory:":
+        from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
+
+        released_ro = False
+        resu = getattr(db, "resume_readonly_file_handle", None)
+        try:
+            susp = getattr(db, "suspend_readonly_file_handle", None)
+            if callable(susp) and callable(resu):
+                susp()
+                released_ro = True
+            resolved = str(Path(path).expanduser().resolve())
+            uid = _infer_user_id_for_writer(resolved)
+            task_id = enqueue_duckdb_write_sync(
+                db_path=resolved,
+                query=sql,
+                params=flat,
+                user_id=uid,
+                tenant_id="default",
+            )
+            poll_to = 15.0 if released_ro else 3.0
+            st = poll_task_status_sync(task_id, timeout_sec=poll_to)
+            if st is None:
+                return (
+                    False,
+                    [],
+                    "Cola db-writer sin confirmación (timeout). Comprueba Redis y el proceso DuckClaw-DB-Writer.",
+                )
+            if st.status != "success":
+                return False, [], (st.detail or "db-writer rechazó o falló la escritura OHLCV.")
+            return True, norm_rows, ""
+        except Exception as e:
+            return False, [], str(e)[:500]
+        finally:
+            if released_ro and callable(resu):
+                try:
+                    resu()
+                except Exception:
+                    pass
+    try:
+        db.execute(sql, flat)
+        return True, norm_rows, ""
+    except Exception as e:
+        return False, [], str(e)[:500]
+
+
 def _upsert_bars(db: Any, data: Any, tkr: str, tf: str, lookback_days: int, source: str) -> str:
     bars = _bars_from_payload(data)
     if not bars and isinstance(data, dict):
@@ -484,40 +618,59 @@ def _upsert_bars(db: Any, data: Any, tkr: str, tf: str, lookback_days: int, sour
             },
             ensure_ascii=False,
         )
-    inserted = 0
+    norm_rows: list[tuple[Any, ...]] = []
     for bar in bars:
         row = _normalize_row(bar, tkr)
-        if not row:
-            continue
-        bt, ts, o, h, l, c, v = row
-        try:
-            db.execute(
-                """
-                INSERT INTO quant_core.ohlcv_data (ticker, timestamp, open, high, low, close, volume)
-                VALUES (?, CAST(? AS TIMESTAMP), ?, ?, ?, ?, ?)
-                ON CONFLICT (ticker, timestamp) DO UPDATE SET
-                    open = excluded.open,
-                    high = excluded.high,
-                    low = excluded.low,
-                    close = excluded.close,
-                    volume = excluded.volume
-                """,
-                (bt, ts, o, h, l, c, v),
-            )
-            inserted += 1
-        except Exception as e:
-            _log.debug("[quant_market] row skip: %s", e)
-    return json.dumps(
-        {
-            "status": "ok",
-            "ticker": tkr,
-            "rows_upserted": inserted,
-            "timeframe": tf,
-            "lookback_days": lookback_days,
-            "source": source,
-        },
-        ensure_ascii=False,
-    )
+        if row:
+            norm_rows.append(row)
+    if not norm_rows:
+        return json.dumps(
+            {
+                "error": "OHLCV_NORMALIZE_FAILED",
+                "ticker": tkr,
+                "timeframe": tf,
+                "lookback_days": lookback_days,
+                "source": source,
+                "bars_in_payload": len(bars),
+                "message": (
+                    "La API devolvió barras que no se pudieron normalizar "
+                    "(timestamp u OHLC inválidos o faltantes)."
+                ),
+            },
+            ensure_ascii=False,
+        )
+    ok, inserted_rows, err_detail = _persist_ohlcv_batch(db, norm_rows)
+    inserted = len(inserted_rows) if ok else 0
+    if not ok:
+        return json.dumps(
+            {
+                "error": "OHLCV_PERSIST_FAILED",
+                "ticker": tkr,
+                "timeframe": tf,
+                "lookback_days": lookback_days,
+                "source": source,
+                "rows_normalized": len(norm_rows),
+                "detail": err_detail,
+                "message": (
+                    "No se pudo persistir velas en quant_core.ohlcv_data. "
+                    f"Detalle: {err_detail}"
+                ),
+            },
+            ensure_ascii=False,
+        )
+    best = max(inserted_rows, key=lambda r: _ts_sort_key(str(r[1])))
+    out: dict[str, Any] = {
+        "status": "ok",
+        "ticker": tkr,
+        "rows_upserted": inserted,
+        "timeframe": tf,
+        "lookback_days": lookback_days,
+        "source": source,
+        "bars_received": len(norm_rows),
+        "last_close": float(best[5]),
+        "last_bar_timestamp": str(best[1]),
+    }
+    return json.dumps(out, ensure_ascii=False)
 
 
 @log_tool_execution_sync(name="fetch_market_data")
@@ -578,6 +731,51 @@ def _fetch_market_data_impl(
     if payload is None:
         return json.dumps({"error": "Sin respuesta del gateway IBKR."}, ensure_ascii=False)
     return _upsert_bars(db, payload, tkr, tf, lookback_days, "ibkr_http")
+
+
+@log_tool_execution_sync(name="fetch_ib_gateway_ohlcv")
+def _fetch_ib_gateway_ohlcv_impl(
+    db: Any,
+    *,
+    ticker: str,
+    timeframe: str = "1h",
+    lookback_days: int = 20,
+) -> str:
+    """
+    OHLCV solo vía HTTP al endpoint IB Gateway (p. ej. /api/market/ibkr/historical).
+    No usa lake SSH ni yfinance; persiste en quant_core.ohlcv_data.
+    """
+    tkr = (ticker or "").strip().upper()
+    if not tkr or len(tkr) > 12:
+        return json.dumps({"error": "Ticker inválido."}, ensure_ascii=False)
+    try:
+        lookback_days = max(1, min(int(lookback_days), 4000))
+    except (TypeError, ValueError):
+        lookback_days = 20
+    tf = (timeframe or "1h").strip() or "1h"
+    if not _TF_SAFE.fullmatch(tf) or len(tf) > 16:
+        return json.dumps({"error": "timeframe inválido (solo alfanumérico, máx. 16)."}, ensure_ascii=False)
+
+    base = (os.environ.get("IBKR_GATEWAY_OHLCV_URL") or "").strip()
+    if not base:
+        return json.dumps(
+            {
+                "error": "IBKR_GATEWAY_OHLCV_UNCONFIGURED",
+                "message": (
+                    "IBKR_GATEWAY_OHLCV_URL está vacío. Define la URL del GET /api/market/ibkr/historical "
+                    "(solo IB Gateway, sin lake) en el proceso del gateway, p. ej. PM2."
+                ),
+            },
+            ensure_ascii=False,
+        )
+    payload, err = _http_fetch_json_at_base(base, tkr, tf, lookback_days)
+    if err:
+        return err
+    if payload is None:
+        return json.dumps(
+            {"error": "Sin respuesta del endpoint IBKR Gateway OHLCV."}, ensure_ascii=False
+        )
+    return _upsert_bars(db, payload, tkr, tf, lookback_days, "ibkr_gateway_http")
 
 
 def _finanz_reply_already_documents_successful_ingest(reply: str) -> bool:

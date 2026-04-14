@@ -1,5 +1,8 @@
 """
-Human-in-the-loop para execute_order: grant vía /execute_signal <uuid>.
+Human-in-the-loop: grant vía /execute_signal <uuid> para execute_order (Finanz)
+y execute_approved_signal (Quant Trader).
+
+TTL del grant: DUCKCLAW_QUANT_HITL_GRANT_TTL_SEC (default 600; sube para swing, p. ej. 86400).
 
 Usa Redis si REDIS_URL o DUCKCLAW_REDIS_URL está definido; si no, memoria en proceso
 (solo válido si gateway y tools comparten el mismo proceso).
@@ -11,9 +14,22 @@ import logging
 import os
 import threading
 import time
+
 _log = logging.getLogger(__name__)
 
-_TTL_SEC = 600
+def _grant_ttl_sec() -> int:
+    raw = (
+        os.environ.get("DUCKCLAW_QUANT_HITL_GRANT_TTL_SEC")
+        or os.environ.get("QUANT_HITL_GRANT_TTL_SEC")
+        or "600"
+    ).strip()
+    try:
+        # Swing / multi-día: subir TTL (p. ej. 86400); tope 14 días; mínimo 60 s.
+        return max(60, min(14 * 86400, int(raw)))
+    except ValueError:
+        return 600
+
+
 _memory_grants: dict[tuple[str, str], float] = {}
 _memory_lock = threading.Lock()
 
@@ -36,20 +52,21 @@ def _key(chat_id: str, signal_id: str) -> str:
 
 
 def grant_execute_order(chat_id: str, signal_id: str) -> None:
-    """Marca que un único execute_order está autorizado para este par chat+señal."""
+    """Marca que un único execute_order / execute_approved_signal está autorizado para chat+señal."""
     cid = (chat_id or "").strip()
     sid = (signal_id or "").strip().lower()
     if not cid or not sid:
         return
+    ttl = _grant_ttl_sec()
     r = _redis_client()
     if r is not None:
         try:
-            r.setex(_key(cid, sid), _TTL_SEC, "1")
+            r.setex(_key(cid, sid), ttl, "1")
             return
         except Exception as e:
             _log.warning("[quant_hitl] redis setex failed: %s", e)
     with _memory_lock:
-        _memory_grants[(cid, sid)] = time.time() + _TTL_SEC
+        _memory_grants[(cid, sid)] = time.time() + ttl
 
 
 def consume_execute_order_grant(chat_id: str, signal_id: str) -> bool:

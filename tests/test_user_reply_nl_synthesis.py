@@ -387,6 +387,29 @@ def test_replace_bare_stored_echo_passthrough_when_not_bare_directive() -> None:
     )
 
 
+def test_replace_bare_summarize_image_on_vlm_gateway_down() -> None:
+    inc = (
+        mod.VLM_GATEWAY_DOWN_META
+        + " El usuario envió una imagen; no hay [VLM_CONTEXT]."
+    )
+    out = mod.replace_bare_summarize_image_on_vlm_gateway_down(
+        mod.SUMMARIZE_IMAGE_MARK,
+        incoming=inc,
+    )
+    assert mod.SUMMARIZE_IMAGE_MARK not in out
+    assert "gateway" in out.lower()
+
+
+def test_replace_bare_summarize_image_passthrough_without_meta() -> None:
+    assert (
+        mod.replace_bare_summarize_image_on_vlm_gateway_down(
+            mod.SUMMARIZE_IMAGE_MARK,
+            incoming="solo texto sin meta",
+        )
+        == mod.SUMMARIZE_IMAGE_MARK
+    )
+
+
 def test_repair_summarize_new_context_strips_stored_line_and_rebuilds() -> None:
     inc = (
         mod.SUMMARIZE_NEW_CONTEXT_MARK

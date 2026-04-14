@@ -3333,7 +3333,7 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ("/setup", "Config key=value"),
         ("/approve", "Aprobar última acción"),
         ("/reject", "Rechazar última acción"),
-        ("/execute_signal <uuid>", "Finanz quant: confirma ejecución de orden (HITL)"),
+        ("/execute_signal <uuid>", "HITL: confirma ejecución (Finanz: execute_order; Quant Trader: execute_approved_signal)"),
         ("/lake", "Estado del túnel SSH Capadonna (env + prueba rápida)"),
     ]
     if _leila_fly_commands_enabled():
@@ -3693,7 +3693,7 @@ def execute_lake_status() -> str:
 
 
 def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
-    """/execute_signal <uuid>: autoriza una llamada a execute_order (HITL) para Finanz quant."""
+    """/execute_signal <uuid>: HITL para Finanz (execute_order) y Quant Trader (execute_approved_signal)."""
     sid = (args or "").strip().lower()
     if not re.match(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -3720,10 +3720,8 @@ def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
         return f"No se pudo registrar la confirmación: {e}"
     return (
         f"Confirmación registrada para la señal {sid}. "
-        "Pide al asistente que ejecute la herramienta execute_order con ese signal_id en esta sesión."
-    
-
-
+        "Pide al asistente que ejecute **execute_order** (Finanz) o **execute_approved_signal** "
+        f"(Quant Trader) con signal_id={sid} en esta sesión."
     )
 def _dispatch_fly_command(
     db: Any,

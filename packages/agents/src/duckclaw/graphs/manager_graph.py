@@ -241,12 +241,28 @@ def _worker_tool_names_from_messages(messages: list[Any] | None) -> list[str]:
     return list(dict.fromkeys(names))
 
 
+def worker_graph_cache_entry_count() -> int:
+    """Cuántos grafos de worker hay en caché (tests / diagnóstico / comandos fly)."""
+    return len(_worker_graph_cache)
+
+
 def clear_worker_graph_cache() -> None:
     """
     Los grafos de worker cierran sobre un DuckClaw concreto; tras cerrar la conexión del manager
     hay que vaciar la caché para no reutilizar handles muertos en la siguiente petición.
+
+    Cierra explícitamente ``_worker_db`` en cada grafo cacheado antes de vaciar: DuckDB no permite
+    dos conexiones al mismo archivo con configuración distinta (p. ej. RW del worker + nuevo RW
+    para /model, /team en fly).
     """
     global _worker_graph_cache
+    for _g in list(_worker_graph_cache.values()):
+        wdb = getattr(_g, "_worker_db", None)
+        if wdb is not None:
+            try:
+                wdb.close()
+            except Exception:
+                pass
     _worker_graph_cache.clear()
 
 

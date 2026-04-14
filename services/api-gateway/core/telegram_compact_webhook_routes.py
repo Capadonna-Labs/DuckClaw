@@ -9,7 +9,7 @@ con ``/api/`` y se detecta con ``rfind(":/api/")``.
 
 Ejemplo::
 
-    finanz:123456:AA...token:/api/v1/telegram/finanz,siata:789:BB...:/api/v1/telegram/siata
+    finanz:123456:AA...token:/api/v1/telegram/finanz,siata:789:BB...:/api/v1/telegram/siata,quanttrader:...:/api/v1/telegram/quanttrader
 """
 
 from __future__ import annotations
@@ -46,6 +46,8 @@ _BOT_PROFILES: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "finanz": ("finanz", "Finanzas", ("DUCKCLAW_FINANZ_DB_PATH",)),
     "siata": ("siata_analyst", "SIATA", ("DUCKCLAW_SIATA_DB_PATH",)),
     "jobhunter": ("Job-Hunter", "Trabajo", ("DUCKCLAW_JOB_HUNTER_DB_PATH",)),
+    # bot_name=quanttrader → worker Quant-Trader (manifest id quant_trader); ver docs/agents/quant_trader.md
+    "quanttrader": ("Quant-Trader", "Cuantitativo", ("DUCKCLAW_QUANT_TRADER_DB_PATH",)),
 }
 
 

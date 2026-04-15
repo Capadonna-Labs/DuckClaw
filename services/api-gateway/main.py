@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import re
-import inspect
 import shutil
 import subprocess
 import sys
@@ -68,76 +67,6 @@ from duckclaw.gateway_db import (
     resolve_env_duckdb_path,
 )
 
-
-def _install_duckdb_connect_probe() -> None:
-    """Debug probe: log RW duckdb.connect callers in Gateway PID."""
-    # region agent log
-    try:
-        import duckdb as _duckdb
-
-        _orig_connect = getattr(_duckdb, "connect", None)
-        if _orig_connect is None or getattr(_orig_connect, "_duckclaw_debug_wrapped", False):
-            return
-
-        def _dbg_connect(database: str = ":memory:", *args: Any, **kwargs: Any):  # type: ignore[no-untyped-def]
-            _ro = kwargs.get("read_only", None)
-            if _ro is None and len(args) >= 1:
-                _ro = bool(args[0])
-            _db = str(database or "")
-            _is_finanzdb1 = "finanzdb1.duckdb" in _db
-            if (_ro is False) or _is_finanzdb1:
-                try:
-                    _frames = inspect.stack(context=0)[1:8]
-                    _callers = []
-                    for _fr in _frames:
-                        _callers.append(
-                            {
-                                "file": str(_fr.filename)[-120:],
-                                "func": str(_fr.function),
-                                "line": int(_fr.lineno),
-                            }
-                        )
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "hypothesisId": (
-                                        "L9_gateway_finanzdb1_connect_any_mode"
-                                        if _is_finanzdb1
-                                        else "L5_gateway_duckdb_rw_connect"
-                                    ),
-                                    "location": "services/api-gateway/main.py:_install_duckdb_connect_probe",
-                                    "message": (
-                                        "duckdb_connect_finanzdb1_called"
-                                        if _is_finanzdb1
-                                        else "duckdb_connect_rw_called"
-                                    ),
-                                    "data": {
-                                        "pid": os.getpid(),
-                                        "database_tail": _db[-140:],
-                                        "read_only": _ro,
-                                        "read_only_from_positional": (kwargs.get("read_only", None) is None and len(args) >= 1),
-                                        "callers": _callers,
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-            return _orig_connect(database, *args, **kwargs)
-
-        setattr(_dbg_connect, "_duckclaw_debug_wrapped", True)
-        _duckdb.connect = _dbg_connect  # type: ignore[assignment]
-    except Exception:
-        pass
-    # endregion
 
 # Cargar .env desde repo root
 _repo_root = Path(__file__).resolve().parent.parent.parent
@@ -281,7 +210,6 @@ def _apply_telegram_token_per_gateway_env(*, matched_pm2_app_name: str | None) -
 _telegram_token_from_pm2_json, _matched_pm2_app_name = _apply_db_path_from_api_gateways_pm2()
 if not _telegram_token_from_pm2_json:
     _apply_telegram_token_per_gateway_env(matched_pm2_app_name=_matched_pm2_app_name)
-_install_duckdb_connect_probe()
 
 
 def _effective_telegram_bot_token() -> str:
@@ -1620,34 +1548,6 @@ async def _invoke_chat(
                     _gc.collect()
                 except Exception:
                     _fly_cache_n = -1
-                # region agent log
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "hypothesisId": "L2_fly_rw_lock",
-                                    "location": "services/api-gateway/main.py:_invoke_chat",
-                                    "message": "about_to_open_fly_rw",
-                                    "data": {
-                                        "pid": os.getpid(),
-                                        "chat_id": str(session_id),
-                                        "vault_db_tail": (vpath or "")[-120:],
-                                        "message_prefix": msg_stripped[:40],
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # endregion
                 fly_db = DuckClaw(vpath, read_only=False, engine=_fly_engine)
                 from duckclaw.graphs.graph_server import get_db as _fly_acl_db
 
@@ -1673,33 +1573,6 @@ async def _invoke_chat(
                 if fly_db is not None:
                     try:
                         fly_db.close()
-                        # region agent log
-                        try:
-                            with open(
-                                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                                "a",
-                                encoding="utf-8",
-                            ) as _df:
-                                _df.write(
-                                    json.dumps(
-                                        {
-                                            "sessionId": "c964f7",
-                                            "hypothesisId": "L2_fly_rw_lock",
-                                            "location": "services/api-gateway/main.py:_invoke_chat",
-                                            "message": "closed_fly_rw",
-                                            "data": {
-                                                "pid": os.getpid(),
-                                                "chat_id": str(session_id),
-                                                "vault_db_tail": (vault_db_path or "")[-120:],
-                                            },
-                                            "timestamp": int(time.time() * 1000),
-                                        }
-                                    )
-                                    + "\n"
-                                )
-                        except Exception:
-                            pass
-                        # endregion
                     except Exception:
                         pass
             if cmd_reply is not None:

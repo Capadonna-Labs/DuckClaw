@@ -4124,33 +4124,6 @@ class TradingSessionCliArgs(BaseModel):
 
 def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArgs], Optional[str]]:
     """Parsea flags de /trading_session."""
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "pre-fix",
-                        "hypothesisId": "H1_trading_session_parse",
-                        "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_parse_trading_session_cli",
-                        "message": "parse_entry",
-                        "data": {
-                            "args_raw": str(args or ""),
-                            "args_repr": repr(args or ""),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     mode: Optional[str] = None
     tickers_raw: list[str] = []
     confirm = False
@@ -4229,36 +4202,6 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
         )
     except ValidationError as exc:
         return None, f"flags inválidos: {exc}"
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "pre-fix",
-                        "hypothesisId": "H1_trading_session_parse",
-                        "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_parse_trading_session_cli",
-                        "message": "parse_result",
-                        "data": {
-                            "mode": parsed.mode,
-                            "confirm": bool(parsed.confirm),
-                            "status": bool(parsed.status),
-                            "stop": bool(parsed.stop),
-                            "tickers_csv": parsed.tickers_csv,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     return parsed, None
 
 
@@ -4430,33 +4373,6 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
             if isinstance(it, dict)
         }
         has_session_goal = "session_goal" in known_cols
-        # region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "post-fix",
-                            "hypothesisId": "H4_schema_drift_session_goal",
-                            "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_read_trading_session_status_summary",
-                            "message": "status_schema_detected",
-                            "data": {
-                                "has_session_goal": has_session_goal,
-                                "known_cols": sorted(list(known_cols))[:12],
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         select_goal = "session_goal" if has_session_goal else "NULL AS session_goal"
         raw = db.query(
             "SELECT mode, tickers, session_uid, status, "
@@ -4517,65 +4433,21 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         tick_line = f"Tick delta: cada ~{format_goals_delta_interval_human(ds)}{cp}"
     else:
         tick_line = "Tick delta: inactivo"
-    # region agent log
     _cs_pnl = ""
     _cs_prev = ""
     _cs_pct = ""
     try:
-        _status_diag_rows: list[dict[str, Any]] = []
-        try:
-            raw_tick = db.query(
-                "SELECT tick_number, fired_at, cfd_summary, outcome "
-                "FROM quant_core.session_ticks "
-                "WHERE session_uid = '" + uid.replace("'", "''") + "' "
-                "ORDER BY tick_number DESC LIMIT 2"
-            )
-            _status_diag_rows = json.loads(raw_tick) if isinstance(raw_tick, str) else (raw_tick or [])
-        except Exception:
-            _status_diag_rows = []
-        try:
-            _cs_pnl = str(get_chat_state(db, chat_id, "trading_session_last_pnl") or "")
-        except Exception:
-            _cs_pnl = ""
-        try:
-            _cs_prev = str(get_chat_state(db, chat_id, "trading_session_prev_pnl") or "")
-        except Exception:
-            _cs_prev = ""
-        try:
-            _cs_pct = str(get_chat_state(db, chat_id, "trading_session_pct_change") or "")
-        except Exception:
-            _cs_pct = ""
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "pre-fix",
-                        "hypothesisId": "H6_trading_status_pnl_sources",
-                        "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_read_trading_session_status_summary",
-                        "message": "status_pnl_sources_snapshot",
-                        "data": {
-                            "chat_id": str(chat_id),
-                            "session_uid": uid,
-                            "pnl_est": pnl_est,
-                            "signals_total": total,
-                            "session_ticks_rows": _status_diag_rows,
-                            "chat_state_trading_session_last_pnl": _cs_pnl,
-                            "chat_state_trading_session_prev_pnl": _cs_prev,
-                            "chat_state_trading_session_pct_change": _cs_pct,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
+        _cs_pnl = str(get_chat_state(db, chat_id, "trading_session_last_pnl") or "")
     except Exception:
-        pass
-    # endregion
+        _cs_pnl = ""
+    try:
+        _cs_prev = str(get_chat_state(db, chat_id, "trading_session_prev_pnl") or "")
+    except Exception:
+        _cs_prev = ""
+    try:
+        _cs_pct = str(get_chat_state(db, chat_id, "trading_session_pct_change") or "")
+    except Exception:
+        _cs_pct = ""
     _pnl_curr_txt = f"{pnl_est:.2f}"
     _pnl_prev_txt = "N/D"
     _pnl_pct_txt = "N/D"
@@ -4606,37 +4478,6 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         f"Cambio vs anterior: {_pnl_pct_txt}\n"
         f"{tick_line}"
     )
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "post-fix",
-                        "hypothesisId": "H8_trading_status_render_payload",
-                        "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_read_trading_session_status_summary",
-                        "message": "status_render_values",
-                        "data": {
-                            "chat_id": str(chat_id),
-                            "session_uid": uid,
-                            "pnl_curr_txt": _pnl_curr_txt,
-                            "pnl_prev_txt": _pnl_prev_txt,
-                            "pnl_pct_txt": _pnl_pct_txt,
-                            "status_preview": _status_text[:260],
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     return _status_text
 
 
@@ -4651,37 +4492,6 @@ def execute_trading_session(
     """/trading_session --mode paper|live [--tickers A,B] [--confirm] [--status] [--stop]."""
     _ = vault_user_id
     parsed, err = _parse_trading_session_cli(args)
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "pre-fix",
-                        "hypothesisId": "H2_trading_session_handler_branch",
-                        "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:execute_trading_session",
-                        "message": "handler_after_parse",
-                        "data": {
-                            "args_raw": str(args or ""),
-                            "parse_err": str(err or ""),
-                            "parsed_is_none": parsed is None,
-                            "parsed_status": (bool(parsed.status) if parsed is not None else None),
-                            "parsed_stop": (bool(parsed.stop) if parsed is not None else None),
-                            "parsed_mode": (str(parsed.mode) if parsed is not None else None),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     if err or parsed is None:
         return (
             f"Error: {err}\n\n"
@@ -4913,30 +4723,6 @@ def _dispatch_fly_command(
     if name == "cancel_signal":
         return execute_cancel_signal(db, chat_id, args, tenant_id=tenant_id)
     if name == "trading_session":
-        # region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "pre-fix",
-                            "hypothesisId": "H3_dispatch_to_new_handler",
-                            "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_dispatch_fly_command",
-                            "message": "dispatch_trading_session",
-                            "data": {"args_raw": str(args or ""), "chat_id": str(chat_id)},
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         return execute_trading_session(
             db,
             chat_id,

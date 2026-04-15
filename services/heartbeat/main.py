@@ -55,32 +55,6 @@ GOALS_TICKER_POLL_SECONDS = int(os.getenv("GOALS_TICKER_POLL_SECONDS", "45"))
 TAILSCALE_AUTH_KEY = os.getenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
 
 
-def _debug_log(hypothesis_id: str, message: str, data: Dict[str, Any]) -> None:
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "hypothesisId": hypothesis_id,
-                        "location": "services/heartbeat/main.py",
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
-
-
 def _agent_config_chat_key(chat_id: Any, suffix: str) -> str:
     try:
         cid = int(str(chat_id).strip())
@@ -252,15 +226,6 @@ async def _run_goals_proactive_tick_one_db(
     except Exception as exc:  # noqa: BLE001
         logger.warning("goals_proactive: no se pudo leer agent_config (%s): %s", db_path, exc)
         return
-    _debug_log(
-        "L1_rw_from_heartbeat",
-        "ticker_scan_rows",
-        {
-            "pid": os.getpid(),
-            "db_path_tail": db_path[-120:] if len(db_path) > 120 else db_path,
-            "rows": len(rows or []),
-        },
-    )
 
     if not rows:
         return
@@ -286,11 +251,6 @@ async def _run_goals_proactive_tick_one_db(
                     "goals_proactive: chat=%s sin goals; limpiando delta",
                     chat_id,
                 )
-                _debug_log(
-                    "L1_rw_from_heartbeat",
-                    "about_to_clear_goals_schedule_enqueued",
-                    {"pid": os.getpid(), "chat_id": str(chat_id), "db_path_tail": db_path[-120:]},
-                )
                 try:
                     for _k, _v in (
                         ("goals_delta_seconds", "0"),
@@ -307,21 +267,11 @@ async def _run_goals_proactive_tick_one_db(
                             key=_k,
                             value=_v,
                         )
-                    _debug_log(
-                        "L1_rw_from_heartbeat",
-                        "clear_goals_schedule_enqueued_ok",
-                        {"pid": os.getpid(), "chat_id": str(chat_id), "db_path_tail": db_path[-120:]},
-                    )
                 except Exception as _exc:
-                    _debug_log(
-                        "L1_rw_from_heartbeat",
-                        "clear_goals_schedule_enqueued_error",
-                        {
-                            "pid": os.getpid(),
-                            "chat_id": str(chat_id),
-                            "db_path_tail": db_path[-120:],
-                            "error": str(_exc)[:240],
-                        },
+                    logger.warning(
+                        "goals_proactive: error al limpiar delta chat=%s: %s",
+                        chat_id,
+                        _exc,
                     )
                 continue
 
@@ -447,16 +397,6 @@ async def _run_goals_proactive_tick_one_db(
                     _resp_text = str(_payload.get("response") or "").strip()
             except Exception:
                 _resp_text = ""
-            _debug_log(
-                "L1_rw_from_heartbeat",
-                "about_to_set_last_fire_enqueued",
-                {
-                    "pid": os.getpid(),
-                    "chat_id": str(chat_id),
-                    "worker_id": str(worker_id),
-                    "db_path_tail": db_path[-120:],
-                },
-            )
             await _enqueue_chat_state_write(
                 db_path=db_path,
                 chat_id=chat_id,
@@ -494,26 +434,11 @@ async def _run_goals_proactive_tick_one_db(
                         key="trading_session_pct_change",
                         value=_pct_txt,
                     )
-                    _debug_log(
-                        "H7_status_reads_pnl_from_heartbeat_db",
-                        "persisted_status_pnl_chat_state",
-                        {
-                            "chat_id": str(chat_id),
-                            "db_path_tail": db_path[-120:],
-                            "curr": _curr_txt,
-                            "prev": _prev_txt,
-                            "pct": _pct_txt,
-                        },
-                    )
             except Exception as _exc:
-                _debug_log(
-                    "H7_status_reads_pnl_from_heartbeat_db",
-                    "persist_status_pnl_error",
-                    {
-                        "chat_id": str(chat_id),
-                        "db_path_tail": db_path[-120:],
-                        "error": str(_exc)[:240],
-                    },
+                logger.debug(
+                    "goals_proactive: persist PnL chat_state chat=%s: %s",
+                    chat_id,
+                    _exc,
                 )
             try:
                 if '"type":"TRADING_TICK"' in message or '"type": "TRADING_TICK"' in message:
@@ -543,16 +468,6 @@ async def _run_goals_proactive_tick_one_db(
                         )
             except Exception:
                 pass
-            _debug_log(
-                "L1_rw_from_heartbeat",
-                "set_last_fire_enqueued_ok",
-                {
-                    "pid": os.getpid(),
-                    "chat_id": str(chat_id),
-                    "worker_id": str(worker_id),
-                    "db_path_tail": db_path[-120:],
-                },
-            )
             logger.info(
                 "goals_proactive: tick OK chat=%s worker=%s",
                 chat_id,
@@ -565,8 +480,6 @@ async def _run_goals_proactive_tick_one_db(
                 chat_id,
                 (resp.text or "")[:200],
             )
-
-    # endregion
 
 
 async def run_heartbeat() -> None:

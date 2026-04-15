@@ -331,29 +331,8 @@ _NEW_CONTEXT_LEDGER_LEXEMES = (
     "efectivo disponible de",
 )
 
-_DEBUG_LOG_PATH_4A0206 = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-4a0206.log"
 _NOISY_UNUSED_RE = re.compile(r"<unused\d+>", re.IGNORECASE)
 _NON_ALNUM_TOKEN_RE = re.compile(r"[^\w<>/-]", re.UNICODE)
-
-_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-
-
-def _agent_debug_log(*, hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "adf9d8",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(__import__("time").time() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as _f:
-            _f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
 
 
 def _deterministic_new_context_summary(evidence: str) -> str:
@@ -441,25 +420,6 @@ def _new_context_reply_needs_deterministic_reset(reply: str, incoming: str) -> t
     return False, ""
 
 
-def _log_4a0206(*, hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "4a0206",
-            "runId": "pre-fix",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(__import__("time").time() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH_4A0206, "a", encoding="utf-8") as _f:
-            _f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
-
-
 def _new_context_vlm_noise_metrics(incoming: str) -> dict[str, Any]:
     s = (incoming or "").strip()
     has_vlm = "[VLM_CONTEXT" in s
@@ -531,19 +491,7 @@ def repair_summarize_new_context_egress(reply: str, *, incoming: str) -> str:
     if SUMMARIZE_NEW_CONTEXT_MARK not in inc:
         return reply
     _mx = _new_context_vlm_noise_metrics(inc)
-    _log_4a0206(
-        hypothesis_id="H3",
-        location="user_reply_nl_synthesis.repair_summarize_new_context_egress",
-        message="vlm_new_context_noise_metrics",
-        data=_mx,
-    )
     if bool(_mx.get("noisy")):
-        _log_4a0206(
-            hypothesis_id="H4",
-            location="user_reply_nl_synthesis.repair_summarize_new_context_egress",
-            message="replace_noisy_vlm_summary",
-            data={"reason": "low_signal_vlm_ocr"},
-        )
         return _deterministic_noisy_vlm_new_context_summary(inc)
     r = (reply or "").strip()
     # Quitar una o más líneas iniciales erróneas STORED
@@ -563,19 +511,7 @@ def repair_summarize_new_context_egress(reply: str, *, incoming: str) -> str:
     if need:
         det = _deterministic_new_context_summary(inc)
         if det:
-            _agent_debug_log(
-                hypothesis_id="H1",
-                location="user_reply_nl_synthesis.repair_summarize_new_context_egress",
-                message="replaced_with_deterministic_new_context",
-                data={"reason": reason, "reply_preview": (r or "")[:120]},
-            )
             return det
-        _agent_debug_log(
-            hypothesis_id="H2",
-            location="user_reply_nl_synthesis.repair_summarize_new_context_egress",
-            message="reset_needed_but_det_empty",
-            data={"reason": reason},
-        )
     return r if r else (reply or "")
 
 

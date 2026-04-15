@@ -353,9 +353,106 @@ def sanitize_worker_reply_phase1(text: str) -> str:
     return _strip_eot(s).strip()
 
 
+# Gemma / mlx-openai-server (8081 texto o visión): <|channel|>thought … <channel|>respuesta
+_GEMMA_CHANNEL_SPLIT_RE = re.compile(r"<(?:\|)?channel\|?>", re.IGNORECASE)
+_GEMMA_ENUM_COT_LINE_RE = re.compile(r"^\s*\d+\.\s+")
+
+
+def _strip_gemma_thinking_process_block(s: str) -> str:
+    """Quita cabecera *Thinking Process:* y viñetas numeradas típicas del CoT en inglés."""
+    t = (s or "").strip()
+    if "thinking process:" not in t.lower()[:160]:
+        return t
+    lines = t.splitlines()
+    out: list[str] = []
+    skip = True
+    for line in lines:
+        if skip:
+            low = line.strip().lower()
+            if low.startswith("thinking process:"):
+                continue
+            if not line.strip():
+                continue
+            if _GEMMA_ENUM_COT_LINE_RE.match(line):
+                continue
+            if "**analyze the request**" in low or "**determine the goal**" in low:
+                continue
+            skip = False
+        if not skip:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def strip_gemma_mlx_channel_leak(text: str) -> str:
+    """
+    Quita fugas de razonamiento interno de Gemma vía MLX (mismo patrón en visión y chat solo texto).
+
+    Evidencia: ``curl`` a ``/v1/chat/completions`` en 8081 devuelve solo ``<|channel>thought`` +
+    *Thinking Process* sin cerrar ``<channel|>``.
+    """
+    original = (text or "").strip()
+    if not original:
+        return original
+    s = original
+    low_full = s.lower()
+    if (
+        "here's a thinking process" in low_full
+        or "thinking process to arrive at the desired output" in low_full
+    ):
+        for sep in ("<channel|>", "<|channel|>"):
+            j = s.rfind(sep)
+            if j >= 0:
+                after = s[j + len(sep) :].strip()
+                if len(after) >= 25:
+                    s = after
+                    low_full = s.lower()
+                break
+    parts = _GEMMA_CHANNEL_SPLIT_RE.split(s)
+    if len(parts) > 1:
+        tail = (parts[-1] or "").strip()
+        tail = re.sub(r"^thought\s*\n+", "", tail, flags=re.IGNORECASE).strip()
+        if len(tail) >= 12:
+            s = tail
+    low = s.lower()
+    if "thinking process to arrive at the desired output" in low and len(s) > 200:
+        for needle in ("el texto es un artículo", "el texto es ", "**datos financieros"):
+            j = low.find(needle)
+            if j > 0:
+                s = s[j:].strip()
+                break
+    s = _strip_gemma_thinking_process_block(s)
+    return s.strip()
+
+
+_GEMMA_PSEUDO_DATE_RE = re.compile(r"<\s*date\s*>([\s\S]*?)</\s*date\s*>", re.IGNORECASE)
+_GEMMA_PSEUDO_TIME_RE = re.compile(r"<\s*time\s*>([\s\S]*?)</\s*time\s*>", re.IGNORECASE)
+_GEMMA_PSEUDO_PERIOD_RE = re.compile(r"<\s*period\s*>([\s\S]*?)</\s*period\s*>", re.IGNORECASE)
+# Evidencia2026-04-15: ``< <21 de abril>`` (doble ``<`` + cierre ``>``, sin ``</date>``).
+_GEMMA_DOUBLE_ANGLE_LEAK_RE = re.compile(r"<\s*<\s*([^<>]+?)\s*>", re.IGNORECASE)
+
+
+def _strip_gemma_pseudo_xml_date_time(text: str) -> str:
+    """Quita envoltorios pseudo-XML (date/time/period) que Gemma/MLX a veces emite al usuario."""
+    s = text or ""
+    s = _GEMMA_PSEUDO_DATE_RE.sub(r"\1", s)
+    s = _GEMMA_PSEUDO_TIME_RE.sub(r"\1", s)
+    s = _GEMMA_PSEUDO_PERIOD_RE.sub(r"\1", s)
+    s = re.sub(r"<\s*date\s*/\s*>", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"<\s*time\s*/\s*>", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"<\s*period\s*/\s*>", "", s, flags=re.IGNORECASE)
+    for _ in range(4):
+        ns = _GEMMA_DOUBLE_ANGLE_LEAK_RE.sub(r"\1", s)
+        if ns == s:
+            break
+        s = ns
+    return s
+
+
 def sanitize_worker_reply_text(text: str) -> str:
     """Limpia respuestas assistant para Telegram/trazas: basura HTTP + EOT + encabezados ``### tool``."""
     s = sanitize_worker_reply_phase1(text or "")
+    s = strip_gemma_mlx_channel_leak(s)
+    s = _strip_gemma_pseudo_xml_date_time(s)
     s = _strip_tool_section_header_lines(s)
     return s.strip()
 

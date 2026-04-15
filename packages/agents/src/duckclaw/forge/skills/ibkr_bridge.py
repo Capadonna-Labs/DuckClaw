@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from typing import Any, Optional, Tuple
 
 from duckclaw.utils.logger import log_tool_execution_sync
@@ -149,53 +148,6 @@ def _extract_portfolio_context(data: Any) -> str:
     if isinstance(portfolio, dict):
         portfolio = list(portfolio.values()) if portfolio else []
 
-    # region agent log
-    try:
-        _sample = portfolio[0] if isinstance(portfolio, list) and portfolio and isinstance(portfolio[0], dict) else {}
-        _has_account_pnl = any(
-            k in (data if isinstance(data, dict) else {})
-            for k in ("unrealized_pnl", "realized_pnl", "total_pnl", "daily_pnl")
-        )
-        _sample_keys = list(_sample.keys())[:30] if isinstance(_sample, dict) else []
-        _has_position_pnl = any(
-            k in _sample_keys
-            for k in (
-                "unrealized_pnl",
-                "realized_pnl",
-                "daily_pnl",
-                "pnl",
-                "unrealizedPnL",
-                "realizedPnL",
-            )
-        )
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "pre-fix",
-                        "hypothesisId": "H1_ibkr_payload_has_pnl",
-                        "location": "packages/agents/src/duckclaw/forge/skills/ibkr_bridge.py:_extract_portfolio_context",
-                        "message": "ibkr_payload_shape",
-                        "data": {
-                            "portfolio_len": len(portfolio) if isinstance(portfolio, list) else 0,
-                            "has_account_pnl": _has_account_pnl,
-                            "has_position_pnl_sample": _has_position_pnl,
-                            "sample_keys": _sample_keys,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
-
     # Incluir cash si viene separado (cash_balance, available_funds, etc.)
     cash_val = data.get("cash") or data.get("cash_balance") or data.get("available_funds")
     if cash_val is None and isinstance(inner, dict):
@@ -297,33 +249,6 @@ def _extract_portfolio_context(data: Any) -> str:
         lines.append("No hay posiciones activas en la cuenta IBKR.")
 
     rendered = "\n".join(lines)
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "pre-fix",
-                        "hypothesisId": "H2_ibkr_render_contains_pnl",
-                        "location": "packages/agents/src/duckclaw/forge/skills/ibkr_bridge.py:_extract_portfolio_context",
-                        "message": "ibkr_render_has_pnl_tokens",
-                        "data": {
-                            "contains_pnl_word": ("pnl" in rendered.lower()),
-                            "render_preview": rendered[:220],
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     return rendered
 
 

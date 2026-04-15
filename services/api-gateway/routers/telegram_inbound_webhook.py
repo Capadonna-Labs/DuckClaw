@@ -44,6 +44,7 @@ from core.vlm_ingest import (
     process_visual_payload,
     push_vlm_state_delta_redis,
     vlm_exception_for_log,
+    vlm_post_inference_cooldown,
 )
 from duckclaw.gateway_db import resolve_env_duckdb_path
 from core.war_rooms import (
@@ -94,29 +95,6 @@ async def _notify_telegram_gemini_vlm_503(*, bot_token: str, chat_id: Any) -> No
             text=_TELEGRAM_GEMINI_VLM_503_TEXT,
             parse_mode=None,
         )
-        # region agent log
-        try:
-            import json
-            import time as _time
-
-            _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-            with open(_p, "a", encoding="utf-8") as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "adf9d8",
-                            "hypothesisId": "H2",
-                            "location": "telegram_inbound_webhook.py:_notify_telegram_gemini_vlm_503",
-                            "message": "telegram_gemini_503_notice_sent",
-                            "data": {"chat_id": str(chat_id)},
-                            "timestamp": int(_time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
     except Exception as exc:  # noqa: BLE001
         _log.warning("telegram: no se pudo enviar aviso Gemini VLM 503: %s", exc)
 
@@ -647,6 +625,7 @@ async def _ingest_telegram_visual_enrich_text(
             )
             user_visible_caption = (text or "").strip()
         if out and out.get("vlm_summary"):
+            await vlm_post_inference_cooldown()
             enriched = (
                 f"Usuario dice: {user_visible_caption or '(sin caption)'}\n"
                 f"Contexto visual adjunto: {out['vlm_summary']}\n"
@@ -1281,6 +1260,7 @@ def build_telegram_inbound_webhook_router(
                                 media_group_id=mgid,
                             )
                         if out and out.get("vlm_summary"):
+                            await vlm_post_inference_cooldown()
                             text = (
                                 f"Usuario dice: {text or '(sin caption)'}\n"
                                 f"Contexto visual adjunto: {out['vlm_summary']}\n"

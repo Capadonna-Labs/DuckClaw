@@ -42,67 +42,6 @@ _log = logging.getLogger(__name__)
 _obs = get_obs_logger()
 _worker_graph_cache: dict[str, Any] = {}
 
-# region agent log
-_AGENT_DEBUG_LOG = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-
-
-def _agent_debug_log(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    *,
-    run_id: str = "pre-fix",
-) -> None:
-    try:
-        payload = {
-            "sessionId": "adf9d8",
-            "timestamp": int(time.time() * 1000),
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "runId": run_id,
-        }
-        with open(_AGENT_DEBUG_LOG, "a", encoding="utf-8") as _df:
-            _df.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-# endregion
-
-
-# region agent log
-_AGENT_DEBUG_LOG_9ACCBE = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-9accbe.log"
-
-
-def _agent_debug_log_9accbe(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    *,
-    run_id: str = "pre-fix",
-) -> None:
-    try:
-        payload = {
-            "sessionId": "9accbe",
-            "timestamp": int(time.time() * 1000),
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "runId": run_id,
-        }
-        with open(_AGENT_DEBUG_LOG_9ACCBE, "a", encoding="utf-8") as _df:
-            _df.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-# endregion
-
 
 def _tool_name_from_embedded_json_content(text: str) -> str | None:
     """Si el modelo emitió tool como JSON en el texto (p. ej. MLX sin tool_calls), extrae el nombre."""
@@ -392,19 +331,6 @@ def job_hunter_user_requests_job_search(incoming: str) -> bool:
         return False
     t = raw.lower()
     is_job_add_command = _looks_like_job_add_command(raw)
-    has_url = "http://" in t or "https://" in t
-    # region agent log
-    _agent_debug_log_9accbe(
-        "H1",
-        "manager_graph.py:job_hunter_user_requests_job_search",
-        "job search classifier entry",
-        {
-            "is_job_add_command": is_job_add_command,
-            "has_url": has_url,
-            "incoming_preview": raw[:160],
-        },
-    )
-    # endregion
     if is_job_add_command:
         return False
     if _job_hunter_user_requests_application_tracking(raw):
@@ -480,18 +406,6 @@ def job_hunter_user_requests_job_search(incoming: str) -> bool:
     result = any(x in t for x in job_terms) and (
         any(x in t for x in action_terms) or "http" in t or "www." in t
     )
-    # region agent log
-    _agent_debug_log_9accbe(
-        "H2",
-        "manager_graph.py:job_hunter_user_requests_job_search",
-        "job search classifier result",
-        {
-            "result": result,
-            "matched_job_terms": [x for x in job_terms if x in t][:5],
-            "matched_action_terms": [x for x in action_terms if x in t][:5],
-        },
-    )
-    # endregion
     return result
 
 
@@ -728,14 +642,6 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     # Job-Hunter: comando directo /job --add <url> en chat propio -> registrar/actualizar vacante (sin A2A).
     if _is_job_hunter_worker(worker_id) and _looks_like_job_add_command(incoming or ""):
         ctx = (incoming or "").strip()
-        # region agent log
-        _agent_debug_log_9accbe(
-            "H6",
-            "manager_graph.py:_plan_task",
-            "job add direct command mapped to job_opportunity_tracking",
-            {"incoming_preview": ctx[:160]},
-        )
-        # endregion
         return (
             "TAREA: JOB_OPPORTUNITY_TRACKING. Registra en finance_worker.job_opportunities la vacante o "
             "postulación del contexto siguiente. **No** uses tavily_search ni run_browser_sandbox salvo que no exista "
@@ -1324,18 +1230,6 @@ def build_manager_graph(
         if not incoming:
             _log.warning("manager plan: incoming vacío en state (keys=%s)", list(state.keys()))
 
-        # region agent log
-        _agent_debug_log(
-            "H1",
-            "manager_graph.py:plan_node",
-            "summarize directive on raw incoming",
-            {
-                "has_summarize_directive": _incoming_has_context_summary_system_directive(incoming),
-                "incoming_len": len(incoming),
-            },
-        )
-        # endregion
-
         _psp = (planner_system_prompt or "").strip()
         mercenary_spec: dict[str, Any] | None = None
         if _incoming_has_context_summary_system_directive(incoming):
@@ -1356,32 +1250,10 @@ def build_manager_graph(
         if is_job_add_command and mercenary_spec is not None:
             # /job --add nunca debe salir por mercenario; forzar flujo normal de tracking.
             mercenary_spec = None
-            # region agent log
-            _agent_debug_log_9accbe(
-                "H8",
-                "manager_graph.py:plan_node",
-                "mercenary disabled for job add command",
-                {"incoming_preview": incoming[:160]},
-            )
-            # endregion
 
         # Prioridad A2A: en crisis de caja + intención laboral, enrutar a JobHunter si está disponible.
         job_hunter_in_team = _pick_job_hunter_worker(list(available_plan or []))
         cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
-        # region agent log
-        _agent_debug_log_9accbe(
-            "H3",
-            "manager_graph.py:plan_node",
-            "mission intent evaluation",
-            {
-                "assigned_before_override": assigned,
-                "job_hunter_in_team": job_hunter_in_team,
-                "is_job_add_command": is_job_add_command,
-                "cashflow_job_intent": cashflow_job_intent,
-                "incoming_preview": incoming[:160],
-            },
-        )
-        # endregion
         if job_hunter_in_team and (cashflow_job_intent or is_job_add_command):
             assigned = job_hunter_in_team
 
@@ -1400,23 +1272,6 @@ def build_manager_graph(
         active_mission: dict[str, Any] | None = None
         # A2A con retorno a Finanz solo si Finanz está en el equipo; si no, Job-Hunter cierra el turno solo (evita handoff fantasma).
         finanz_in_team = _finanz_worker_in_templates(list(available_plan or []))
-        # region agent log
-        _agent_debug_log_9accbe(
-            "H4",
-            "manager_graph.py:plan_node",
-            "active mission decision",
-            {
-                "assigned_after_override": assigned,
-                "finanz_in_team": finanz_in_team,
-                "job_hunter_in_team": bool(job_hunter_in_team),
-                "is_job_add_command": is_job_add_command,
-                "cashflow_job_intent": cashflow_job_intent,
-                "will_set_income_mission": bool(
-                    job_hunter_in_team and cashflow_job_intent and finanz_in_team and not is_job_add_command
-                ),
-            },
-        )
-        # endregion
         if job_hunter_in_team and cashflow_job_intent and finanz_in_team and not is_job_add_command:
             active_mission = {
                 "source_worker": "finanz",
@@ -1578,23 +1433,6 @@ def build_manager_graph(
             )
             if _lite_stdio_mcp:
                 worker_cache_key = f"{worker_cache_key}::ctx_syn"
-            # region agent log
-            _surf = "context_synthesis" if _lite_stdio_mcp else "full"
-            _agent_debug_log(
-                "H1",
-                "manager_graph.py:invoke_worker_node",
-                "worker graph cache + tool_surface",
-                {
-                    "lite_stdio_mcp": bool(_lite_stdio_mcp),
-                    "summarize_directive": _incoming_has_context_summary_system_directive(_combined),
-                    "semantic_followup": _incoming_looks_like_semantic_context_followup(_combined),
-                    "tool_surface": _surf,
-                    "cache_key_ends_ctx_syn": worker_cache_key.endswith("::ctx_syn"),
-                    "graph_cache_hit": worker_cache_key in _worker_graph_cache,
-                },
-                run_id="post-fix",
-            )
-            # endregion
             from duckclaw.workers.factory import _same_duckdb_file
             from duckclaw.workers.manifest import load_manifest
 
@@ -1669,21 +1507,6 @@ def build_manager_graph(
                 isinstance(mission, dict)
                 and _worker_matches_id(assigned, mission.get("target_worker"))
             ):
-                # region agent log
-                _agent_debug_log_9accbe(
-                    "H5",
-                    "manager_graph.py:invoke_worker_node",
-                    "a2a handoff heartbeat gate",
-                    {
-                        "assigned_worker": assigned,
-                        "mission_source": str(mission.get("source_worker") or ""),
-                        "mission_target": str(mission.get("target_worker") or ""),
-                        "same_source_target_worker": _worker_matches_id(
-                            assigned, mission.get("source_worker")
-                        ),
-                    },
-                )
-                # endregion
                 worker_state["suppress_subagent_egress"] = True
                 try:
                     from duckclaw.graphs.chat_heartbeat import schedule_chat_heartbeat_dm
@@ -1765,40 +1588,6 @@ def build_manager_graph(
             _w_llm_failed = bool(worker_invoke.get("_duckclaw_worker_llm_invoke_failed"))
             _w_llm_transient = bool(worker_invoke.get("_duckclaw_worker_llm_transient"))
             _soft_would_match = worker_reply_suggests_replan_without_tools(raw_worker_reply)
-            # region agent log
-            try:
-                import json as _json_mg
-                import time as _time_mg
-
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-5e21eb.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df_mg:
-                    _df_mg.write(
-                        _json_mg.dumps(
-                            {
-                                "sessionId": "5e21eb",
-                                "timestamp": int(_time_mg.time() * 1000),
-                                "hypothesisId": "H2",
-                                "location": "manager_graph.py:invoke_worker_node",
-                                "message": "post-invoke replan inputs",
-                                "data": {
-                                    "worker_llm_failed": _w_llm_failed,
-                                    "worker_llm_transient": _w_llm_transient,
-                                    "failure_kind": worker_invoke.get("_duckclaw_worker_llm_failure_kind"),
-                                    "tools_n": len(_tools_list),
-                                    "soft_regex_match": _soft_would_match,
-                                },
-                                "runId": "post-fix",
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
             if replan_enabled() and status == "SUCCESS":
                 if _w_llm_failed and _w_llm_transient:
                     _fk = (worker_invoke.get("_duckclaw_worker_llm_failure_kind") or "error").strip()
@@ -1825,34 +1614,6 @@ def build_manager_graph(
                 elif not _tools_list and _soft_would_match:
                     _rsoft = "inferencia: respuesta sin tools con indicios de fallo de backend"
                     reasons_acc = merge_failure_reasons(reasons_acc, _rsoft)
-                    # region agent log
-                    try:
-                        import json as _json_mg2
-                        import time as _time_mg2
-
-                        with open(
-                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-5e21eb.log",
-                            "a",
-                            encoding="utf-8",
-                        ) as _df2:
-                            _df2.write(
-                                _json_mg2.dumps(
-                                    {
-                                        "sessionId": "5e21eb",
-                                        "timestamp": int(_time_mg2.time() * 1000),
-                                        "hypothesisId": "H3",
-                                        "location": "manager_graph.py:invoke_worker_node",
-                                        "message": "soft replan branch taken",
-                                        "data": {},
-                                        "runId": "post-fix",
-                                    },
-                                    ensure_ascii=False,
-                                )
-                                + "\n"
-                            )
-                    except Exception:
-                        pass
-                    # endregion
                     if pa + 1 < max_a:
                         replan_after = True
                         next_plan_attempt = pa + 1

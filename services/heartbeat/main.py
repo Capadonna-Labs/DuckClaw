@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List
@@ -23,6 +24,7 @@ import httpx
 import redis.asyncio as redis
 
 from duckclaw import DuckClaw
+from duckclaw.db_write_queue import enqueue_duckdb_write_sync
 from duckclaw.forge.homeostasis import BeliefRegistry, HomeostasisManager
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.graphs.on_the_fly_commands import (
@@ -32,10 +34,8 @@ from duckclaw.graphs.on_the_fly_commands import (
     build_goals_proactive_system_event_message,
     build_trading_tick_system_event_message,
     chat_id_from_goals_delta_config_key,
-    clear_goals_proactive_schedule,
     get_chat_state,
     get_manager_goals,
-    set_chat_state,
 )
 from duckclaw.workers.factory import list_workers
 from duckclaw.workers.manifest import load_manifest
@@ -79,6 +79,37 @@ def _debug_log(hypothesis_id: str, message: str, data: Dict[str, Any]) -> None:
     except Exception:
         pass
     # endregion
+
+
+def _agent_config_chat_key(chat_id: Any, suffix: str) -> str:
+    try:
+        cid = int(str(chat_id).strip())
+        return f"chat_{cid}_{suffix}"
+    except (TypeError, ValueError):
+        return f"chat_{str(chat_id)[:64]}_{suffix}"
+
+
+async def _enqueue_chat_state_write(
+    *,
+    db_path: str,
+    chat_id: Any,
+    tenant_id: str,
+    key: str,
+    value: str,
+) -> None:
+    query = (
+        "INSERT INTO agent_config (key, value) VALUES (?, ?) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+    )
+    ck = _agent_config_chat_key(chat_id, key)
+    await asyncio.to_thread(
+        enqueue_duckdb_write_sync,
+        db_path=db_path,
+        query=query,
+        params=[ck, str(value)[:16384]],
+        user_id=str(chat_id),
+        tenant_id=str(tenant_id or "default"),
+    )
 
 
 def _goals_ticker_scan_db_paths() -> List[str]:
@@ -257,11 +288,41 @@ async def _run_goals_proactive_tick_one_db(
                 )
                 _debug_log(
                     "L1_rw_from_heartbeat",
-                    "about_to_clear_goals_schedule_rw",
+                    "about_to_clear_goals_schedule_enqueued",
                     {"pid": os.getpid(), "chat_id": str(chat_id), "db_path_tail": db_path[-120:]},
                 )
-                with DuckClaw(db_path, read_only=False) as db_rw:
-                    clear_goals_proactive_schedule(db_rw, chat_id)
+                try:
+                    for _k, _v in (
+                        ("goals_delta_seconds", "0"),
+                        ("goals_proactive_last_fire", ""),
+                        ("goals_proactive_anchor", ""),
+                        ("goals_proactive_tenant_id", ""),
+                        ("goals_delta_anchor", ""),
+                        ("goals_delta_meta", ""),
+                    ):
+                        await _enqueue_chat_state_write(
+                            db_path=db_path,
+                            chat_id=chat_id,
+                            tenant_id="default",
+                            key=_k,
+                            value=_v,
+                        )
+                    _debug_log(
+                        "L1_rw_from_heartbeat",
+                        "clear_goals_schedule_enqueued_ok",
+                        {"pid": os.getpid(), "chat_id": str(chat_id), "db_path_tail": db_path[-120:]},
+                    )
+                except Exception as _exc:
+                    _debug_log(
+                        "L1_rw_from_heartbeat",
+                        "clear_goals_schedule_enqueued_error",
+                        {
+                            "pid": os.getpid(),
+                            "chat_id": str(chat_id),
+                            "db_path_tail": db_path[-120:],
+                            "error": str(_exc)[:240],
+                        },
+                    )
                 continue
 
             tenant_id = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
@@ -379,9 +440,16 @@ async def _run_goals_proactive_tick_one_db(
             continue
 
         if 200 <= resp.status_code < 300:
+            _resp_text = ""
+            try:
+                _payload = resp.json() if (resp.text or "").strip().startswith("{") else {}
+                if isinstance(_payload, dict):
+                    _resp_text = str(_payload.get("response") or "").strip()
+            except Exception:
+                _resp_text = ""
             _debug_log(
                 "L1_rw_from_heartbeat",
-                "about_to_set_last_fire_rw",
+                "about_to_set_last_fire_enqueued",
                 {
                     "pid": os.getpid(),
                     "chat_id": str(chat_id),
@@ -389,35 +457,95 @@ async def _run_goals_proactive_tick_one_db(
                     "db_path_tail": db_path[-120:],
                 },
             )
-            with DuckClaw(db_path, read_only=False) as db_rw:
-                set_chat_state(db_rw, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, str(now))
-                try:
-                    if '"type":"TRADING_TICK"' in message or '"type": "TRADING_TICK"' in message:
-                        start = message.find("{")
-                        end = message.rfind("}")
-                        payload_ev = json.loads(message[start : end + 1]) if start >= 0 and end > start else {}
-                        if isinstance(payload_ev, dict):
-                            uid = str(payload_ev.get("session_uid") or "").strip()
-                            tickers = payload_ev.get("tickers") if isinstance(payload_ev.get("tickers"), list) else []
-                            db_rw.execute(
-                                """
-                                INSERT INTO quant_core.session_ticks
-                                    (id, session_uid, tick_number, tickers_processed, signals_proposed, cfd_summary, outcome)
-                                VALUES (gen_random_uuid(), ?, COALESCE((SELECT MAX(tick_number)+1 FROM quant_core.session_ticks WHERE session_uid=?), 1), ?, 0, ?, ?)
-                                """,
-                                [
-                                    uid,
-                                    uid,
-                                    [str(t).strip().upper() for t in tickers if str(t).strip()],
-                                    json.dumps({"source": "heartbeat"}, ensure_ascii=False),
-                                    "ALIGNED",
-                                ],
-                            )
-                except Exception:
-                    pass
+            await _enqueue_chat_state_write(
+                db_path=db_path,
+                chat_id=chat_id,
+                tenant_id=tenant_id or "default",
+                key=_GOALS_PROACTIVE_LAST_FIRE_KEY,
+                value=str(now),
+            )
+            try:
+                if _resp_text:
+                    _m_curr = re.search(r"PnL no realizado=\$([\-0-9,]+(?:\.[0-9]+)?)", _resp_text)
+                    _m_prev = re.search(r"PnL anterior=\$([\-0-9,]+(?:\.[0-9]+)?)", _resp_text)
+                    _m_pct = re.search(r"Cambio vs anterior=([+\-]?[0-9]+(?:\.[0-9]+)?)%", _resp_text)
+                    _curr_txt = _m_curr.group(1).replace(",", "") if _m_curr else ""
+                    _prev_txt = _m_prev.group(1).replace(",", "") if _m_prev else ""
+                    _pct_txt = _m_pct.group(1) if _m_pct else ""
+                    if _curr_txt:
+                        await _enqueue_chat_state_write(
+                            db_path=db_path,
+                            chat_id=chat_id,
+                            tenant_id=tenant_id or "default",
+                            key="trading_session_last_pnl",
+                            value=_curr_txt,
+                        )
+                    await _enqueue_chat_state_write(
+                        db_path=db_path,
+                        chat_id=chat_id,
+                        tenant_id=tenant_id or "default",
+                        key="trading_session_prev_pnl",
+                        value=_prev_txt,
+                    )
+                    await _enqueue_chat_state_write(
+                        db_path=db_path,
+                        chat_id=chat_id,
+                        tenant_id=tenant_id or "default",
+                        key="trading_session_pct_change",
+                        value=_pct_txt,
+                    )
+                    _debug_log(
+                        "H7_status_reads_pnl_from_heartbeat_db",
+                        "persisted_status_pnl_chat_state",
+                        {
+                            "chat_id": str(chat_id),
+                            "db_path_tail": db_path[-120:],
+                            "curr": _curr_txt,
+                            "prev": _prev_txt,
+                            "pct": _pct_txt,
+                        },
+                    )
+            except Exception as _exc:
+                _debug_log(
+                    "H7_status_reads_pnl_from_heartbeat_db",
+                    "persist_status_pnl_error",
+                    {
+                        "chat_id": str(chat_id),
+                        "db_path_tail": db_path[-120:],
+                        "error": str(_exc)[:240],
+                    },
+                )
+            try:
+                if '"type":"TRADING_TICK"' in message or '"type": "TRADING_TICK"' in message:
+                    start = message.find("{")
+                    end = message.rfind("}")
+                    payload_ev = json.loads(message[start : end + 1]) if start >= 0 and end > start else {}
+                    if isinstance(payload_ev, dict):
+                        uid = str(payload_ev.get("session_uid") or "").strip()
+                        tickers = payload_ev.get("tickers") if isinstance(payload_ev.get("tickers"), list) else []
+                        await asyncio.to_thread(
+                            enqueue_duckdb_write_sync,
+                            db_path=db_path,
+                            query=(
+                                "INSERT INTO quant_core.session_ticks "
+                                "(id, session_uid, tick_number, tickers_processed, signals_proposed, cfd_summary, outcome) "
+                                "VALUES (gen_random_uuid(), ?, COALESCE((SELECT MAX(tick_number)+1 FROM quant_core.session_ticks WHERE session_uid=?), 1), ?, 0, ?, ?)"
+                            ),
+                            params=[
+                                uid,
+                                uid,
+                                [str(t).strip().upper() for t in tickers if str(t).strip()],
+                                json.dumps({"source": "heartbeat"}, ensure_ascii=False),
+                                "ALIGNED",
+                            ],
+                            user_id=str(chat_id),
+                            tenant_id=str(tenant_id or "default"),
+                        )
+            except Exception:
+                pass
             _debug_log(
                 "L1_rw_from_heartbeat",
-                "set_last_fire_rw_ok",
+                "set_last_fire_enqueued_ok",
                 {
                     "pid": os.getpid(),
                     "chat_id": str(chat_id),

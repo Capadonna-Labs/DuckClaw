@@ -3,22 +3,29 @@ site_description: DuckClaw architecture, agents, specs, and API docs
 repo_name: duckclaw
 docs_dir: docs
 site_dir: site
+strict: true
 
 theme:
   name: material
   features:
     - navigation.instant
+    - navigation.top
     - navigation.sections
+    - toc.follow
     - content.code.copy
 
 plugins:
-  - search
+  - search:
+      lang:
+        - en
+        - es
   - mkdocstrings:
       handlers:
         python:
           options:
             show_source: false
             show_root_heading: true
+            show_signature_annotations: true
             heading_level: 2
           paths:
             - packages/agents/src
@@ -60,23 +67,11 @@ nav:
       - API Gateway: api/api_gateway.md
   - Operations:
       - Overview: operations/index.md
-
-not_in_nav: |
-  COMANDOS.md
-  Installation.md
-  Troubleshooting-Gateway-PM2.md
-  Observability-2.1-Identidad.md
-  Strix-Sandbox-Security.md
-  Homeostasis-Heartbeat.md
-  Jugar-The-Mind.md
-  Multi-Vault-System.md
-
-exclude_docs: |
-  COMANDOS.md
-  Installation.md
-  Troubleshooting-Gateway-PM2.md
-  Observability-2.1-Identidad.md
-  Strix-Sandbox-Security.md
-  Homeostasis-Heartbeat.md
-  Jugar-The-Mind.md
-  Multi-Vault-System.md
+      - Installation: Installation.md
+      - Commands: COMANDOS.md
+      - Troubleshooting Gateway PM2: Troubleshooting-Gateway-PM2.md
+      - Observability and Identity: Observability-2.1-Identidad.md
+      - Strix Sandbox Security: Strix-Sandbox-Security.md
+      - Homeostasis Heartbeat: Homeostasis-Heartbeat.md
+      - Jugar The Mind: Jugar-The-Mind.md
+      - Multi Vault System: Multi-Vault-System.md

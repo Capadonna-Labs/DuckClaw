@@ -43,11 +43,13 @@ Tras `duckops serve --pm2 --gateway`, el CLI puede avisar si en `config/api_gate
 
 ### Asistente (wizard): resolver conflictos
 
-En el menú inicial con PM2, elige **`r`** — *Resolver conflictos API Gateway* — o ejecuta:
+En el menú inicial con PM2, elige **`r`** — *Resolver conflictos API Gateway* — o ejecuta desde la **raíz del repo** (mismo intérprete que el resto del monorepo):
 
 ```bash
-python scripts/duckclaw_setup_wizard.py --resolve-gateways
+uv run python scripts/duckclaw_setup_wizard.py --resolve-gateways
 ```
+
+Equivalente interactivo: `uv run duckops init` y luego la opción de resolver gateways en el menú (según versión del CLI).
 
 El asistente lista duplicados de puerto/DuckDB, muestra `lsof` si está disponible, prueba si el puerto está ocupado en el host y guía para asignar puertos y rutas distintas; luego regenera `config/ecosystem.api.config.cjs` y puede reiniciar los procesos en PM2.
 

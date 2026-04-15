@@ -72,6 +72,9 @@ _READ_SQL_MAX_RESPONSE_CHARS = max(8_000, int(os.environ.get("DUCKCLAW_READ_SQL_
 # run_sandbox puede volcar cientos de KB; sin context_monitor el ToolMessage iría entero al LLM.
 _RUN_SANDBOX_TOOL_LLM_MAX_CHARS = max(4_000, int(os.environ.get("DUCKCLAW_RUN_SANDBOX_TOOL_LLM_MAX_CHARS", "12000")))
 
+# Cache en memoria por chat para comparar PnL entre ticks consecutivos de /goals.
+_GOALS_PREV_UNREALIZED_PNL_BY_CHAT: dict[str, float] = {}
+
 
 def _truncate_read_sql_result_for_llm(raw: str) -> str:
     if not isinstance(raw, str) or len(raw) <= _READ_SQL_MAX_RESPONSE_CHARS:
@@ -2569,12 +2572,19 @@ def build_worker_graph(
             _resp_content = str(getattr(resp, "content", "") or "").strip()
             if _is_goals_tick and not tool_calls:
                 _portfolio_tool_text = ""
+                _portfolio_tool_text_prev = ""
+                _seen_ibkr = 0
                 for _m in reversed(state.get("messages", [])):
                     if isinstance(_m, ToolMessage) and str(getattr(_m, "name", "") or "") == "get_ibkr_portfolio":
-                        _portfolio_tool_text = str(getattr(_m, "content", "") or "").strip()
+                        _seen_ibkr += 1
+                        if not _portfolio_tool_text:
+                            _portfolio_tool_text = str(getattr(_m, "content", "") or "").strip()
+                            continue
+                        _portfolio_tool_text_prev = str(getattr(_m, "content", "") or "").strip()
                         break
                 _total_value = ""
                 _positions = ""
+                _unreal_prev_txt = ""
                 if _portfolio_tool_text:
                     _m_total = re.search(r"Valor total:\s*\$([0-9,]+(?:\.[0-9]+)?)", _portfolio_tool_text)
                     _m_pos = re.search(r"Posiciones:\s*([0-9]+)", _portfolio_tool_text)
@@ -2585,14 +2595,65 @@ def build_worker_graph(
                     _total_value = _m_total.group(1) if _m_total else ""
                     _positions = _m_pos.group(1) if _m_pos else ""
                     _unreal_txt = _m_unreal.group(1) if _m_unreal else ""
+                    if _portfolio_tool_text_prev:
+                        _m_unreal_prev = re.search(
+                            r"PnL no realizado total \(snapshot\):\s*\$([\-0-9,]+(?:\.[0-9]+)?)",
+                            _portfolio_tool_text_prev,
+                        )
+                        _unreal_prev_txt = _m_unreal_prev.group(1) if _m_unreal_prev else ""
                 else:
                     _unreal_txt = ""
+                # region agent log
+                try:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "pre-fix",
+                                    "hypothesisId": "H4_previous_pnl_availability",
+                                    "location": "packages/agents/src/duckclaw/workers/factory.py:agent_node",
+                                    "message": "goals_prev_pnl_scan",
+                                    "data": {
+                                        "seen_ibkr_tool_messages": _seen_ibkr,
+                                        "current_unreal_txt": _unreal_txt,
+                                        "prev_unreal_txt": _unreal_prev_txt,
+                                        "has_current_tool_text": bool(_portfolio_tool_text),
+                                        "has_prev_tool_text": bool(_portfolio_tool_text_prev),
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                }
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # endregion
                 if _portfolio_tool_text and (_total_value or _positions):
                     if _unreal_txt:
                         try:
                             _unreal_val = float(_unreal_txt.replace(",", ""))
                         except Exception:
                             _unreal_val = 0.0
+                        _chat_key = str(state.get("chat_id") or state.get("session_id") or "").strip()
+                        _prev_unreal_val = (
+                            _GOALS_PREV_UNREALIZED_PNL_BY_CHAT.get(_chat_key) if _chat_key else None
+                        )
+                        _pct_change = None
+                        if _prev_unreal_val is None and _unreal_prev_txt:
+                            try:
+                                _prev_unreal_val = float(_unreal_prev_txt.replace(",", ""))
+                            except Exception:
+                                _prev_unreal_val = None
+                        if _prev_unreal_val is not None:
+                            # Base de comparación: valor absoluto del PnL previo para evitar signo invertido.
+                            _den = abs(_prev_unreal_val)
+                            if _den > 1e-9:
+                                _pct_change = ((_unreal_val - _prev_unreal_val) / _den) * 100.0
                         _state = "ALIGNED" if _unreal_val >= 0 else "MISALIGNED"
                         _act = (
                             "mantener sesion y seguir monitoreo HITL."
@@ -2605,6 +2666,46 @@ def build_worker_graph(
                             f"PnL no realizado=${_unreal_val:,.2f}). "
                             f"Meta 'PnL positivo': {_state}. Accion sugerida: {_act}"
                         )
+                        if _prev_unreal_val is not None:
+                            _fallback_text += f" PnL anterior=${_prev_unreal_val:,.2f}."
+                        else:
+                            _fallback_text += " PnL anterior=N/D."
+                        if _pct_change is not None:
+                            _fallback_text += f" Cambio vs anterior={_pct_change:+.2f}%."
+                        else:
+                            _fallback_text += " Cambio vs anterior=N/D."
+                        if _chat_key:
+                            _GOALS_PREV_UNREALIZED_PNL_BY_CHAT[_chat_key] = _unreal_val
+                        # region agent log
+                        try:
+                            with open(
+                                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                                "a",
+                                encoding="utf-8",
+                            ) as _df:
+                                _df.write(
+                                    json.dumps(
+                                        {
+                                            "sessionId": "c964f7",
+                                            "runId": "post-fix",
+                                            "hypothesisId": "H5_prev_and_pct_rendered",
+                                            "location": "packages/agents/src/duckclaw/workers/factory.py:agent_node",
+                                            "message": "goals_delta_metrics_rendered",
+                                            "data": {
+                                                "chat_key": _chat_key,
+                                                "current_unreal": _unreal_val,
+                                                "prev_unreal": _prev_unreal_val,
+                                                "pct_change": _pct_change,
+                                                "fallback_preview": _fallback_text[:260],
+                                            },
+                                            "timestamp": int(time.time() * 1000),
+                                        }
+                                    )
+                                    + "\n"
+                                )
+                        except Exception:
+                            pass
+                        # endregion
                     else:
                         _fallback_text = (
                             "Revision /goals (proactiva): "

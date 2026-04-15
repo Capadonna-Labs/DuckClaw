@@ -1,0 +1,2039 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="DuckClaw architecture, agents, specs, and API docs">
+      
+      
+      
+      
+        <link rel="prev" href="../Homeostasis-Heartbeat/">
+      
+      
+        <link rel="next" href="../Multi-Vault-System/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Jugar The Mind - DuckClaw Docs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#como-jugar-the-mind-con-duckclaw" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="DuckClaw Docs" class="md-header__button md-logo" aria-label="DuckClaw Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DuckClaw Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Jugar The Mind
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="DuckClaw Docs" class="md-nav__button md-logo" aria-label="DuckClaw Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DuckClaw Docs
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/singleton_writer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Singleton Writer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/tri_cameral_memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tri-Cameral Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/strix_sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strix Sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Agents
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/adf_framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADF Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/finanz/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Finanz
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/quant_trader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quant Trader
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Specs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../specs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../specs/finanz_admin_sql_db_writer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Finanz Admin SQL DB-Writer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../specs/context_injection_telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Injection Telegram
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../specs/telegram_webhook_multiplex/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram Webhook Multiplex
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../specs/vlm_integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VLM Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/db_writer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DB Writer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/api_gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Gateway
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../COMANDOS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Troubleshooting-Gateway-PM2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting Gateway PM2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Observability-2.1-Identidad/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability and Identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Strix-Sandbox-Security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strix Sandbox Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Homeostasis-Heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Homeostasis Heartbeat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jugar The Mind
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jugar The Mind
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-que-es-the-mind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Qué es The Mind
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-configuracion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Configuración
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Configuración">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#equipo-team-y-mensajes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Equipo /team y mensajes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-variables-de-entorno-outbound-n8n" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Variables de entorno (outbound / n8n)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Variables de entorno (outbound / n8n)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#si-no-llegan-los-dms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Si no llegan los DMs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-comandos-del-juego-fly-sin-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Comandos del juego (fly — sin LLM)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagrama-uml-mermaid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagrama UML (Mermaid)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagrama UML (Mermaid)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#modelo-de-datos-tablas-duckdb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modelo de datos (tablas DuckDB)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#secuencia-crear-partida-unirse-iniciar-y-jugar-carta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secuencia: crear partida, unirse, iniciar y jugar carta
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-flujo-recomendado-2-jugadores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Flujo recomendado (2 jugadores)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-verificacion-en-duckdb-boveda-del-usuario" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Verificación en DuckDB (bóveda del usuario)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-reglas-que-aplica-el-motor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Reglas que aplica el motor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-resumen-rapido" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Resumen rápido
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-como-jugarlo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. ¿Como Jugarlo?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-habilidad-especial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Habilidad especial
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-guardado-de-las-partidas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Guardado de las partidas
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagrama-uml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagrama UML
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Multi-Vault-System/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi Vault System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-que-es-the-mind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Qué es The Mind
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-configuracion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Configuración
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Configuración">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#equipo-team-y-mensajes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Equipo /team y mensajes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-variables-de-entorno-outbound-n8n" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Variables de entorno (outbound / n8n)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Variables de entorno (outbound / n8n)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#si-no-llegan-los-dms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Si no llegan los DMs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-comandos-del-juego-fly-sin-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Comandos del juego (fly — sin LLM)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagrama-uml-mermaid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagrama UML (Mermaid)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagrama UML (Mermaid)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#modelo-de-datos-tablas-duckdb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modelo de datos (tablas DuckDB)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#secuencia-crear-partida-unirse-iniciar-y-jugar-carta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secuencia: crear partida, unirse, iniciar y jugar carta
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-flujo-recomendado-2-jugadores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Flujo recomendado (2 jugadores)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-verificacion-en-duckdb-boveda-del-usuario" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Verificación en DuckDB (bóveda del usuario)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-reglas-que-aplica-el-motor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Reglas que aplica el motor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-resumen-rapido" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Resumen rápido
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-como-jugarlo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. ¿Como Jugarlo?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-habilidad-especial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Habilidad especial
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-guardado-de-las-partidas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Guardado de las partidas
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagrama-uml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagrama UML
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="como-jugar-the-mind-con-duckclaw">Cómo jugar The Mind con DuckClaw<a class="headerlink" href="#como-jugar-the-mind-con-duckclaw" title="Permanent link">&para;</a></h1>
+<p>Guía para jugar <strong>The Mind</strong> usando el crupier virtual <strong>TheMindCrupier</strong> y los <strong>fly commands</strong> del API Gateway (estado en la bóveda DuckDB activa de cada usuario).</p>
+<hr />
+<h2 id="1-que-es-the-mind">1. Qué es The Mind<a class="headerlink" href="#1-que-es-the-mind" title="Permanent link">&para;</a></h2>
+<p>The Mind es un juego de cartas cooperativo. Los jugadores tienen cartas numeradas (1–100) y deben jugarlas <strong>en orden ascendente</strong> sin poder hablar de los números. Si alguien juega una carta y otro tenía una menor sin jugarla, pierden una vida. El objetivo es superar los niveles sin quedarse sin vidas.</p>
+<hr />
+<h2 id="2-configuracion">2. Configuración<a class="headerlink" href="#2-configuracion" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p><strong>Añadir el crupier al equipo del chat</strong><br />
+   <div class="highlight"><pre><span></span><code>/workers --add TheMindCrupier
+</code></pre></div>
+   (También vale <code>themindcrupier</code> en minúsculas.)</p>
+</li>
+<li>
+<p><strong>Plantilla de referencia</strong><br />
+   Copia en repo: <code>templates/workers/the_mind_crupier/</code> (canónico en <code>packages/agents/.../TheMindCrupier/</code>).</p>
+</li>
+<li>
+<p><strong>Requisitos</strong>  </p>
+</li>
+<li>Webhook n8n (u otro bridge) para enviar <strong>DM</strong> con <code>chat_id</code> + <code>text</code> (ver abajo).  </li>
+<li>Cada jugador debe hacer <strong><code>/join</code></strong> desde el <strong>DM</strong> del bot para que su <code>chat_id</code> privado quede en <code>the_mind_players</code>.</li>
+</ol>
+<h3 id="equipo-team-y-mensajes">Equipo <code>/team</code> y mensajes<a class="headerlink" href="#equipo-team-y-mensajes" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Si el tenant tiene usuarios en <strong><code>/team</code></strong>, solo esos <code>user_id</code> pueden <strong>crear</strong> partidas (<code>/new_mind</code>), <strong>unirse</strong> (<code>/join</code>) e <strong>iniciar</strong> (<code>/start_mind</code>). Si la lista está vacía, no se aplica esta restricción (compatibilidad).</li>
+<li><strong>Cartas:</strong> cada jugador recibe un <strong>mensaje distinto</strong> por DM (mano propia).</li>
+<li><strong>Avisos del juego</strong> (nivel, errores, victoria): el <strong>mismo texto</strong> se envía en paralelo al <strong>DM de cada jugador</strong> de la partida (no hay chat grupal obligatorio en el motor).</li>
+<li>Tras <strong><code>/new_mind</code></strong>, el bot añade un recordatorio con el listado actual de <code>/team</code> y los pasos para invitar e iniciar.</li>
+</ul>
+<hr />
+<h2 id="3-variables-de-entorno-outbound-n8n">3. Variables de entorno (outbound / n8n)<a class="headerlink" href="#3-variables-de-entorno-outbound-n8n" title="Permanent link">&para;</a></h2>
+<p>El motor usa <strong>la primera URL definida</strong> entre (en orden; alineado con <code>send_proactive_message</code> / homeostasis):</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Uso</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>N8N_OUTBOUND_WEBHOOK_URL</code></td>
+<td>Mismo webhook n8n que mensajes proactivos y el resto de salidas</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_TELEGRAM_SEND_WEBHOOK_URL</code></td>
+<td>Override opcional solo para Telegram</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_SEND_DM_WEBHOOK_URL</code></td>
+<td>Override opcional solo para DM</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Payload JSON:</strong> <code>{"chat_id": "&lt;id&gt;", "user_id": "&lt;id&gt;", "text": "&lt;mensaje&gt;"}</code><br />
+(<code>user_id</code> repite el mismo valor que <code>chat_id</code> para flujos n8n que solo lean <code>user_id</code>.)</p>
+<p><strong>Autenticación opcional:</strong></p>
+<ul>
+<li><code>N8N_AUTH_KEY</code> → cabeceras <code>X-N8N-Auth</code> y <code>X-DuckClaw-Secret</code> (mismo valor, por compatibilidad con distintos nodos HTTP).</li>
+<li><code>DUCKCLAW_WEBHOOK_SECRET</code> → solo <code>X-DuckClaw-Secret</code> (si está definido, tiene prioridad sobre el duplicado desde <code>N8N_AUTH_KEY</code>).</li>
+</ul>
+<hr />
+<h3 id="si-no-llegan-los-dms">Si no llegan los DMs<a class="headerlink" href="#si-no-llegan-los-dms" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Variables en el proceso del gateway (p. ej. PM2 <code>TheMind-Gateway</code>):</strong> debe existir <code>N8N_OUTBOUND_WEBHOOK_URL</code> (recomendado, igual que mensajes proactivos) u otra URL de la tabla. Si ninguna está definida, <code>/start_mind</code> guarda las cartas en DuckDB pero el resumen dirá <code>skipped_no_url</code>.</li>
+<li><strong>n8n:</strong> el workflow de entrada (Telegram → gateway) no sustituye el webhook de <strong>salida</strong>. Necesitas un flujo que reciba el POST del gateway y llame a Telegram <code>sendMessage</code> con el <code>chat_id</code> del JSON.</li>
+<li><strong>Ejecuciones fallidas:</strong> revisa logs del gateway (<code>duckclaw.the_mind_outbound</code>): errores HTTP o timeouts aparecen como warning. En n8n, revisa el webhook de salida (código 401/404).</li>
+<li><strong>Mínimo 2 jugadores:</strong> <code>/start_mind</code> exige dos filas en <code>the_mind_players</code> salvo que definas <code>DUCKCLAW_THE_MIND_ALLOW_SOLO=true</code>.</li>
+</ol>
+<hr />
+<h2 id="4-comandos-del-juego-fly-sin-llm">4. Comandos del juego (fly — sin LLM)<a class="headerlink" href="#4-comandos-del-juego-fly-sin-llm" title="Permanent link">&para;</a></h2>
+<p>El estado vive en DuckDB (<code>the_mind_games</code>, <code>the_mind_players</code>) en la <strong>bóveda activa</strong> del usuario que invoca el comando.</p>
+<table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>Descripción</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>/new_mind</code></strong></td>
+<td>Crea partida (alias de <code>/new_game the_mind</code>). El creador queda registrado como jugador.</td>
+</tr>
+<tr>
+<td><strong><code>/new_game the_mind</code></strong></td>
+<td>Igual que arriba.</td>
+</tr>
+<tr>
+<td><strong><code>/join &lt;game_id&gt;</code></strong></td>
+<td>Unirse desde el DM del bot.</td>
+</tr>
+<tr>
+<td><strong><code>/start_mind [game_id]</code></strong></td>
+<td>Pone la partida en <code>playing</code>, reparte <strong>Nivel 1</strong> (1 carta por jugador), envía cartas por DM y anuncia el inicio a todos. La respuesta resume cuántos DMs fueron OK o fallidos.</td>
+</tr>
+<tr>
+<td><strong><code>/game</code></strong></td>
+<td>Lista partidas en <code>waiting</code> o <code>playing</code> con jugadores, nivel y vidas (alias: <code>/games</code>, <code>/mind_games</code>).</td>
+</tr>
+<tr>
+<td><strong><code>/play &lt;n&gt;</code></strong></td>
+<td>Jugar carta <code>n</code> (1–100). Validación atómica; error = −1 vida y limpieza de cartas menores.</td>
+</tr>
+<tr>
+<td><strong><code>/deal [game_id]</code></strong></td>
+<td>Reparte de nuevo según <code>current_level</code> (p. ej. tras subir de nivel).</td>
+</tr>
+<tr>
+<td><strong><code>/start_game [game_id]</code></strong></td>
+<td>Solo pasa a <code>playing</code> sin repartir (compatibilidad).</td>
+</tr>
+</tbody>
+</table>
+<p>El esquema de tablas se crea con <strong><code>_ensure_the_mind_schema</code></strong> al crear/unirse/jugar; no hace falta un comando solo para DDL.</p>
+<hr />
+<h2 id="diagrama-uml-mermaid">Diagrama UML (Mermaid)<a class="headerlink" href="#diagrama-uml-mermaid" title="Permanent link">&para;</a></h2>
+<p>Los bloques siguientes usan <a href="https://mermaid.js.org/">Mermaid</a>: en GitHub, GitLab, VS Code (extensión Markdown) y Cursor se <strong>renderizan como diagramas</strong> (SVG) sin archivo PNG aparte.</p>
+<h3 id="modelo-de-datos-tablas-duckdb">Modelo de datos (tablas DuckDB)<a class="headerlink" href="#modelo-de-datos-tablas-duckdb" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>classDiagram
+    direction TB
+
+    class the_mind_games {
+        &lt;&lt;table&gt;&gt;
+        +game_id VARCHAR PK
+        +status VARCHAR
+        +current_level INTEGER
+        +lives INTEGER
+        +shurikens INTEGER
+        +cards_played INTEGER[]
+    }
+
+    class the_mind_players {
+        &lt;&lt;table&gt;&gt;
+        +game_id VARCHAR PK,FK
+        +chat_id VARCHAR PK
+        +username VARCHAR
+        +user_id VARCHAR
+        +cards INTEGER[]
+        +is_ready BOOLEAN
+    }
+
+    class the_mind_moves {
+        &lt;&lt;table&gt;&gt;
+        +game_id VARCHAR
+        +chat_id VARCHAR
+        +username VARCHAR
+        +move_type VARCHAR
+        +card_value INTEGER
+        +level INTEGER
+        +created_at TIMESTAMP
+    }
+
+    the_mind_games &quot;1&quot; o-- &quot;*&quot; the_mind_players : partida
+    the_mind_games &quot;1&quot; o-- &quot;*&quot; the_mind_moves : historial
+</code></pre></div>
+<h3 id="secuencia-crear-partida-unirse-iniciar-y-jugar-carta">Secuencia: crear partida, unirse, iniciar y jugar carta<a class="headerlink" href="#secuencia-crear-partida-unirse-iniciar-y-jugar-carta" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>sequenceDiagram
+    autonumber
+    participant JA as Jugador A
+    participant JB as Jugador B
+    participant TG as Telegram
+    participant N as n8n
+    participant GW as API Gateway
+    participant DB as DuckDB bóveda
+
+    JA-&gt;&gt;TG: /new_mind
+    TG-&gt;&gt;N: webhook entrada
+    N-&gt;&gt;GW: DM (chat_id, texto)
+    GW-&gt;&gt;DB: INSERT the_mind_games + jugador creador
+    GW--&gt;&gt;N: respuesta
+    N--&gt;&gt;TG: sendMessage
+
+    JB-&gt;&gt;TG: /join game_id
+    TG-&gt;&gt;GW: (vía n8n)
+    GW-&gt;&gt;DB: INSERT/UPDATE the_mind_players
+
+    JA-&gt;&gt;TG: /start_mind
+    TG-&gt;&gt;GW: (vía n8n)
+    GW-&gt;&gt;DB: estado playing, reparto nivel 1
+    GW-&gt;&gt;N: outbound JSON (chat_id, text) por jugador
+    N-&gt;&gt;TG: DM mano a cada chat_id
+
+    JA-&gt;&gt;TG: /play n
+    TG-&gt;&gt;GW: (vía n8n)
+    GW-&gt;&gt;DB: validación atómica, vidas/mesas
+    GW-&gt;&gt;N: avisos broadcast a la partida
+</code></pre></div>
+<hr />
+<h2 id="5-flujo-recomendado-2-jugadores">5. Flujo recomendado (2 jugadores)<a class="headerlink" href="#5-flujo-recomendado-2-jugadores" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Ambos usuarios deben estar en <strong><code>/team</code></strong> del tenant (Telegram Guard).</li>
+<li><strong>Usuario A:</strong> <code>/new_mind</code> → copia el <code>game_id</code>.</li>
+<li><strong>Usuario B:</strong> en su DM con el bot, <code>/join &lt;game_id&gt;</code>.</li>
+<li><strong>Usuario A (u organizador):</strong> <code>/start_mind</code> o <code>/start_mind &lt;game_id&gt;</code>.</li>
+<li>Cada uno recibe sus cartas por <strong>DM</strong> (webhook). Mensaje público de progreso vía broadcast a todos los <code>chat_id</code> de la partida.</li>
+<li>Por turnos, en DM: <code>/play &lt;n&gt;</code> hasta vaciar el nivel. El motor avanza de nivel o marca victoria al completar el nivel 12.</li>
+</ol>
+<hr />
+<h2 id="6-verificacion-en-duckdb-boveda-del-usuario">6. Verificación en DuckDB (bóveda del usuario)<a class="headerlink" href="#6-verificacion-en-duckdb-boveda-del-usuario" title="Permanent link">&para;</a></h2>
+<p>Sustituye la ruta por la de tu bóveda activa (<code>db/private/&lt;user_id&gt;/...finanzdb1.duckdb</code> o la que muestre <code>/vault</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">the_mind_games</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">game_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;game_...&#39;</span><span class="p">;</span>
+<span class="k">SELECT</span><span class="w"> </span><span class="n">game_id</span><span class="p">,</span><span class="w"> </span><span class="n">chat_id</span><span class="p">,</span><span class="w"> </span><span class="n">username</span><span class="p">,</span><span class="w"> </span><span class="n">cards</span><span class="p">,</span><span class="w"> </span><span class="n">is_ready</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">the_mind_players</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">game_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;game_...&#39;</span><span class="p">;</span>
+</code></pre></div>
+<p>Tras Nivel 1 con 2 jugadores y jugadas correctas: manos vacías, <code>cards_played</code> con las cartas en orden, y mensaje de paso a Nivel 2 (o victoria si estabas en nivel 12).</p>
+<hr />
+<h2 id="7-reglas-que-aplica-el-motor">7. Reglas que aplica el motor<a class="headerlink" href="#7-reglas-que-aplica-el-motor" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Orden:</strong> Si alguien juega <code>num</code> y otro jugador tenía una carta <code>&amp;lt; num</code>, pierden 1 vida y se eliminan de <strong>todas</strong> las manos las cartas <code>&amp;lt; num</code>.</li>
+<li><strong>Cartas en secreto:</strong> Solo por DM; el broadcast no revela manos.</li>
+<li><strong>Niveles:</strong> Tras vaciar todas las manos, se limpia <code>cards_played</code> y se reparte el siguiente nivel (<code>current_level</code> cartas por jugador). Tras completar el nivel 12, estado <code>won</code>.</li>
+</ul>
+<hr />
+<h2 id="8-resumen-rapido">8. Resumen rápido<a class="headerlink" href="#8-resumen-rapido" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>/workers --add TheMindCrupier
+/new_mind
+/join &lt;game_id&gt;          # cada jugador, por DM
+/game                    # opcional: ver partidas activas
+/start_mind [game_id]
+/play 15                  # en tu DM
+</code></pre></div>
+<hr />
+<h2 id="9-como-jugarlo">9. ¿Como Jugarlo?<a class="headerlink" href="#9-como-jugarlo" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p>Todos los jugadores reciben cartas numeradas (según el nivel).</p>
+</li>
+<li>
+<p>Objetivo: jugar todas las cartas en orden ascendente sin hablar ni hacer señales.</p>
+</li>
+<li>
+<p>En cualquier momento, un jugador puede poner su carta si cree que es la siguiente más baja.</p>
+</li>
+<li>
+<p>Si alguien se equivoca (por ejemplo, tenía una carta menor), se pierden vidas.</p>
+</li>
+<li>
+<p>El juego avanza por niveles, con más cartas cada vez.
+A veces hay habilidades especiales (como ver cartas o descartar).</p>
+</li>
+</ol>
+<hr />
+<h2 id="10-habilidad-especial">10. Habilidad especial<a class="headerlink" href="#10-habilidad-especial" title="Permanent link">&para;</a></h2>
+<ul>
+<li>
+<p>⭐ Shuriken </p>
+</li>
+<li>
+<p>Para qué sirve: ayudar al grupo cuando está atascado.</p>
+</li>
+<li>
+<p>Cualquier jugador puede proponer usarlo escirbiendo el comando 
+<code>/shuriken</code></p>
+</li>
+<li>
+<p>si todos los jugadores aceptan (escribiendo el mismo comando) automaticamente se descarta su carta mas baja, como si ya la hubieran jugado.</p>
+</li>
+<li>
+<p>Es muy útil cuando se tiene la sospecha que alguien tiene una carta muy baja y nadie se atreve a jugar.</p>
+</li>
+</ul>
+<hr />
+<h2 id="11-guardado-de-las-partidas">11. Guardado de las partidas<a class="headerlink" href="#11-guardado-de-las-partidas" title="Permanent link">&para;</a></h2>
+<ul>
+<li>
+<p>Todo se guarda en una base de datos local (llamada DuckDB) que está dentro de tu carpeta personal en el servidor. Esto significa que si el bot se apaga o se reinicia, la partida no se pierde; puedes continuar exactamente donde te quedaste.</p>
+</li>
+<li>
+<p>¿Qué información guarda?</p>
+</li>
+<li>
+<p>El bot lleva dos "listas" internas para cada partida:</p>
+</li>
+<li>
+<p>La Lista de la Partida: Aquí anota en qué nivel esta(del 1 al 12), cuántas vidas quedan y qué cartas ya se han puesto sobre la mesa.</p>
+</li>
+</ul>
+<hr />
+<h2 id="diagrama-uml">Diagrama UML<a class="headerlink" href="#diagrama-uml" title="Permanent link">&para;</a></h2>
+<p>```mermaid
+classDiagram
+    direction TB</p>
+<div class="highlight"><pre><span></span><code>class TheMindCrupier {
+    &lt;&lt;Worker/Agent&gt;&gt;
+    +String worker_id
+    +_ensure_the_mind_schema()
+    +handle_command(command)
+    +broadcast_status(game_id)
+    +send_dm(chat_id, text)
+}
+
+class Game {
+    &lt;&lt;DuckDB: the_mind_games&gt;&gt;
+    +String game_id
+    +String tenant_id
+    +Int current_level
+    +Int lives
+    +Int shurikens
+    +String status
+    +List~Int~ cards_played
+    +DateTime created_at
+    +new_mind()
+    +start_game()
+    +next_level()
+    +check_victory()
+}
+
+class Player {
+    &lt;&lt;DuckDB: the_mind_players&gt;&gt;
+    +String game_id
+    +String chat_id
+    +String user_id
+    +String username
+    +List~Int~ cards
+    +Boolean is_ready
+    +join(game_id)
+    +play_card(number)
+    +use_shuriken()
+}
+
+class OutboundWebhook {
+    &lt;&lt;Service&gt;&gt;
+    +String url
+    +String auth_key
+    +send_payload(json)
+}
+
+class TeamConfig {
+    &lt;&lt;Guard&gt;&gt;
+    +List~String~ authorized_users
+    +is_allowed(user_id)
+}
+
+TheMindCrupier --&gt; Game : &quot;Administra&quot;
+TheMindCrupier --&gt; OutboundWebhook : &quot;Envía DMs vía&quot;
+TheMindCrupier ..&gt; TeamConfig : &quot;Valida permisos&quot;
+Game &quot;1&quot; *-- &quot;2..*&quot; Player : &quot;Está compuesta por&quot;
+</code></pre></div>
+<p>Specs adicionales: <code>specs/features/Motor de Juego The Mind (Multi-Channel).md</code>, <code>Multi-Channel Broadcasting (The Mind Engine).md</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.top", "navigation.sections", "toc.follow", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

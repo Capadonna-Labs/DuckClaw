@@ -17,3 +17,14 @@ DuckClaw models memory in three complementary layers:
 - Tenant/user vault resolution keeps private and shared scopes separated.
 - Semantic context ingestion is asynchronous and queue-backed.
 - Worker prompts should treat SQL as hard truth for balances/totals.
+
+## Related specs
+
+- Published hub: [Specs index](../specs/index.md)
+- Telegram semantic injection: [Context Injection Telegram](../specs/context_injection_telegram.md)
+- Repo canonical (read in Git): `specs/core/02_Analytical_Memory_Architecture.md` — analytical memory architecture.
+
+## Related docs
+
+- [ADF Framework](../agents/adf_framework.md) — how workers use memory and tools
+- [Operations hub](../operations/index.md)

@@ -16,4 +16,4 @@ The Strix sandbox isolates untrusted or tool-generated execution from core gatew
 
 ## Related Operations
 
-See also [Strix Sandbox Security](../Strix-Sandbox-Security.md) for operational controls and troubleshooting.
+See also [Strix Sandbox Security](../Strix-Sandbox-Security.md) for operational controls, hardening checklists, and troubleshooting.

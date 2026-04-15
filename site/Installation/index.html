@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../api/api_gateway/">
+        <link rel="prev" href="../operations/">
       
       
-        <link rel="next" href="../Installation/">
+        <link rel="next" href="../COMANDOS/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Overview - DuckClaw Docs</title>
+        <title>Installation - DuckClaw Docs</title>
       
     
     
@@ -68,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#operations-docs" class="md-skip">
+        <a href="#instalacion-y-despliegue-automatizado-duckops-wizard" class="md-skip">
           Skip to content
         </a>
       
@@ -104,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Overview
+              Installation
             
           </span>
         </div>
@@ -878,6 +878,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -897,7 +925,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Installation
   
 
     
@@ -915,7 +943,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Installation
   
 
     
@@ -941,10 +969,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#overview-en" class="md-nav__link">
+  <a href="#1-objetivo-arquitectonico" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Overview (EN)
+        1. Objetivo Arquitectónico
       
     </span>
   </a>
@@ -952,10 +980,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#resumen-es" class="md-nav__link">
+  <a href="#2-prerrequisitos-de-infraestructura-pre-flight" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Resumen (ES)
+        2. Prerrequisitos de Infraestructura (Pre-flight)
       
     </span>
   </a>
@@ -963,10 +991,71 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#quick-entry-acceso-rapido" class="md-nav__link">
+  <a href="#3-flujo-de-ejecucion-del-wizard-duckops-init" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick entry / Acceso rápido
+        3. Flujo de Ejecución del Wizard (duckops init)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Flujo de Ejecución del Wizard (duckops init)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fase-0-deteccion-de-estado-state-awareness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fase 0: Detección de Estado (State Awareness)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fase-1-configuracion-del-cerebro-core-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fase 1: Configuración del Cerebro (Core Config)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fase-2-observabilidad-y-telemetria" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fase 2: Observabilidad y Telemetría
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fase-3-generacion-de-artefactos-y-despliegue-the-forge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fase 3: Generación de Artefactos y Despliegue (The Forge)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-topologia-de-servicios-desplegados" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Topología de Servicios Desplegados
       
     </span>
   </a>
@@ -974,10 +1063,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#related-reading" class="md-nav__link">
+  <a href="#5-protocolo-de-seguridad-manejo-de-secretos" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Related reading
+        5. Protocolo de Seguridad (Manejo de Secretos)
       
     </span>
   </a>
@@ -985,24 +1074,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#operational-guidelines" class="md-nav__link">
+  <a href="#6-guia-rapida-de-operacion-cheat-sheet" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Operational Guidelines
+        6. Guía Rápida de Operación (Cheat Sheet)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Guía Rápida de Operación (Cheat Sheet)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#telegram-memoria-semantica-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Telegram: memoria semántica (/context)
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes
-      
-    </span>
-  </a>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1010,34 +1105,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../Installation/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Installation
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -1273,10 +1340,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#overview-en" class="md-nav__link">
+  <a href="#1-objetivo-arquitectonico" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Overview (EN)
+        1. Objetivo Arquitectónico
       
     </span>
   </a>
@@ -1284,10 +1351,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#resumen-es" class="md-nav__link">
+  <a href="#2-prerrequisitos-de-infraestructura-pre-flight" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Resumen (ES)
+        2. Prerrequisitos de Infraestructura (Pre-flight)
       
     </span>
   </a>
@@ -1295,10 +1362,71 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#quick-entry-acceso-rapido" class="md-nav__link">
+  <a href="#3-flujo-de-ejecucion-del-wizard-duckops-init" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick entry / Acceso rápido
+        3. Flujo de Ejecución del Wizard (duckops init)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Flujo de Ejecución del Wizard (duckops init)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fase-0-deteccion-de-estado-state-awareness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fase 0: Detección de Estado (State Awareness)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fase-1-configuracion-del-cerebro-core-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fase 1: Configuración del Cerebro (Core Config)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fase-2-observabilidad-y-telemetria" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fase 2: Observabilidad y Telemetría
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fase-3-generacion-de-artefactos-y-despliegue-the-forge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fase 3: Generación de Artefactos y Despliegue (The Forge)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-topologia-de-servicios-desplegados" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Topología de Servicios Desplegados
       
     </span>
   </a>
@@ -1306,10 +1434,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#related-reading" class="md-nav__link">
+  <a href="#5-protocolo-de-seguridad-manejo-de-secretos" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Related reading
+        5. Protocolo de Seguridad (Manejo de Secretos)
       
     </span>
   </a>
@@ -1317,24 +1445,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#operational-guidelines" class="md-nav__link">
+  <a href="#6-guia-rapida-de-operacion-cheat-sheet" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Operational Guidelines
+        6. Guía Rápida de Operación (Cheat Sheet)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Guía Rápida de Operación (Cheat Sheet)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#telegram-memoria-semantica-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Telegram: memoria semántica (/context)
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes
-      
-    </span>
-  </a>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1355,77 +1489,96 @@
 
 
 
-<h1 id="operations-docs">Operations Docs<a class="headerlink" href="#operations-docs" title="Permanent link">&para;</a></h1>
-<p>Operational runbooks for installing, running, monitoring, and troubleshooting DuckClaw. <strong>Most pages in this section are Spanish-first;</strong> nav labels may be English for consistency with MkDocs.</p>
-<h2 id="overview-en">Overview (EN)<a class="headerlink" href="#overview-en" title="Permanent link">&para;</a></h2>
+<h1 id="instalacion-y-despliegue-automatizado-duckops-wizard">Instalación y Despliegue Automatizado (DuckOps Wizard)<a class="headerlink" href="#instalacion-y-despliegue-automatizado-duckops-wizard" title="Permanent link">&para;</a></h1>
+<h2 id="1-objetivo-arquitectonico">1. Objetivo Arquitectónico<a class="headerlink" href="#1-objetivo-arquitectonico" title="Permanent link">&para;</a></h2>
+<p>Estandarizar el proceso de aprovisionamiento y despliegue de la plataforma DuckClaw en cualquier entorno (Mac Mini, VPS Linux, Windows) mediante una interfaz de línea de comandos (CLI) interactiva y segura. El <code>DuckOps Wizard</code> elimina la dependencia de scripts Bash frágiles, garantizando que la configuración de variables de entorno, la creación de bases de datos y el registro de microservicios (PM2/Systemd) se realicen bajo principios de <strong>Zero-Trust</strong> y <strong>Soberanía de Datos</strong>.</p>
+<h2 id="2-prerrequisitos-de-infraestructura-pre-flight">2. Prerrequisitos de Infraestructura (Pre-flight)<a class="headerlink" href="#2-prerrequisitos-de-infraestructura-pre-flight" title="Permanent link">&para;</a></h2>
+<p>Antes de invocar el Wizard, el entorno host debe contar con:
+1.  <strong>Gestor de Paquetes:</strong> <code>uv</code> (para resolución ultrarrápida de dependencias Python).
+2.  <strong>Broker de Mensajes:</strong> <code>Redis</code> corriendo en el puerto 6379 (vía Docker, OrbStack o nativo).
+3.  <strong>Gestor de Procesos (Opcional pero recomendado):</strong> <code>pm2</code> (Node.js) o <code>systemd</code> (Linux) para persistencia de servicios.</p>
+<h2 id="3-flujo-de-ejecucion-del-wizard-duckops-init">3. Flujo de Ejecución del Wizard (<code>duckops init</code>)<a class="headerlink" href="#3-flujo-de-ejecucion-del-wizard-duckops-init" title="Permanent link">&para;</a></h2>
+<p>El comando de entrada es <code>uv run duckops init</code>. El flujo interactivo se divide en 4 fases críticas:</p>
+<h3 id="fase-0-deteccion-de-estado-state-awareness">Fase 0: Detección de Estado (State Awareness)<a class="headerlink" href="#fase-0-deteccion-de-estado-state-awareness" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Prefer <strong><code>uv run …</code></strong> from the repository root so the project virtualenv is correct.</li>
-<li>Only <strong><code>db-writer</code></strong> should perform durable DuckDB writes; gateways and workers stay read-oriented by default.</li>
-<li>Canonical product/architecture truth lives under <code>specs/</code> in the repo; these pages are operational glue.</li>
+<li><strong>Lógica:</strong> El Wizard escanea el sistema operativo buscando gestores de procesos (<code>pm2 jlist</code> o <code>systemctl</code>).</li>
+<li><strong>Acción:</strong> Si detecta servicios de DuckClaw previamente instalados (ej. <code>DuckClaw-Gateway</code>, <code>DuckClaw-DB-Writer</code>), interrumpe el flujo de instalación desde cero y ofrece un menú de <strong>Gestión de Servicios</strong> para reiniciar, detener o reconfigurar los procesos existentes en caliente.</li>
 </ul>
-<h2 id="resumen-es">Resumen (ES)<a class="headerlink" href="#resumen-es" title="Permanent link">&para;</a></h2>
+<h3 id="fase-1-configuracion-del-cerebro-core-config">Fase 1: Configuración del Cerebro (Core Config)<a class="headerlink" href="#fase-1-configuracion-del-cerebro-core-config" title="Permanent link">&para;</a></h3>
+<p>Si es una instalación limpia, el Wizard solicita los parámetros fundamentales:
+1.  <strong>Modo del Bot:</strong> <code>echo</code> (pruebas) o <code>langgraph</code> (producción con memoria bicameral).
+2.  <strong>Ruta de Base de Datos:</strong> Solicita el nombre del archivo.
+    *   <em>Seguridad (Habeas Data):</em> El Wizard normaliza automáticamente cualquier input a la carpeta segura <code>db/</code> (ej. <code>powerseal</code> -&gt; <code>db/powerseal.duckdb</code>). Si el archivo no existe, lo crea e inicializa el esquema.
+3.  <strong>Proveedor LLM:</strong> Menú interactivo para seleccionar el motor de inferencia (<code>mlx</code> para Mac M4, <code>deepseek</code>, <code>openai</code>, <code>iotcorelabs</code>, etc.).</p>
+<h3 id="fase-2-observabilidad-y-telemetria">Fase 2: Observabilidad y Telemetría<a class="headerlink" href="#fase-2-observabilidad-y-telemetria" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Usa siempre <strong><code>uv run</code></strong> desde la raíz del monorepo para CLI y scripts.</li>
-<li>Las escrituras ACID a DuckDB pasan por el <strong>DB-Writer</strong>; no abrir atajos de escritura desde workers.</li>
-<li>Antes de cambiar comportamiento en producción, revisa <strong><code>specs/</code></strong> y el <a href="../specs/">índice de specs en el sitio</a>.</li>
+<li><strong>Trazas GRPO:</strong> Pregunta si se deben guardar las trazas locales en <code>train/grpo_olist_traces.jsonl</code> para el futuro pipeline SFT.</li>
+<li><strong>LangSmith:</strong> Configura la exportación de telemetría (requiere <code>LANGCHAIN_API_KEY</code>).</li>
 </ul>
-<h2 id="quick-entry-acceso-rapido">Quick entry / Acceso rápido<a class="headerlink" href="#quick-entry-acceso-rapido" title="Permanent link">&para;</a></h2>
+<h3 id="fase-3-generacion-de-artefactos-y-despliegue-the-forge">Fase 3: Generación de Artefactos y Despliegue (The Forge)<a class="headerlink" href="#fase-3-generacion-de-artefactos-y-despliegue-the-forge" title="Permanent link">&para;</a></h3>
+<p>Una vez confirmados los datos, el Wizard "forja" el entorno:
+1.  <strong>Sincronización de Entorno (<code>.env</code>):</strong> Escribe las variables de forma segura.
+    *   <em>Smart Mapping:</em> Escribe <code>DUCKCLAW_DB_PATH</code> para el grafo y el Gateway y automáticamente inyecta <code>DUCKDB_PATH</code> para que el microservicio <code>db-writer</code> apunte al mismo archivo sin intervención manual.
+2.  <strong>Generación de Configuración PM2/Systemd:</strong> Crea los archivos <code>ecosystem.*.config.cjs</code> o las unidades <code>.service</code> inyectando las rutas absolutas del entorno virtual (<code>.venv/bin/python3</code>) para evitar fallos de <code>PATH</code>.
+3.  <strong>Arranque:</strong> Levanta los microservicios en el orden correcto.</p>
+<h2 id="4-topologia-de-servicios-desplegados">4. Topología de Servicios Desplegados<a class="headerlink" href="#4-topologia-de-servicios-desplegados" title="Permanent link">&para;</a></h2>
+<p>Al finalizar el Wizard, el sistema queda orquestado con los siguientes procesos (visibles vía <code>pm2 list</code>):</p>
 <table>
 <thead>
 <tr>
-<th>Need</th>
-<th>Document</th>
+<th style="text-align: left;">Servicio PM2</th>
+<th style="text-align: left;">Rol Arquitectónico</th>
+<th style="text-align: left;">Comando Subyacente</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Wizard + topology</td>
-<td><a href="../Installation/">Installation</a></td>
+<td style="text-align: left;"><strong><code>DuckClaw-Gateway</code></strong></td>
+<td style="text-align: left;">API Unificada (FastAPI). Recibe tráfico de n8n/Angular, encola escrituras y sirve SSE.</td>
+<td style="text-align: left;"><code>uvicorn main:app --app-dir services/api-gateway</code></td>
 </tr>
 <tr>
-<td>Redis, Telegram, PM2, variables (canonical cheat sheet §8)</td>
-<td><a href="../COMANDOS/">Commands (COMANDOS)</a></td>
+<td style="text-align: left;"><strong><code>DuckClaw-DB-Writer</code></strong></td>
+<td style="text-align: left;">Consumidor Singleton. Lee de Redis y escribe en DuckDB (cola SQL + <strong><code>CONTEXT_INJECTION</code></strong> para <code>/context --add</code> → <code>main.semantic_memory</code>).</td>
+<td style="text-align: left;"><code>python services/db-writer/main.py</code></td>
 </tr>
 <tr>
-<td>Port / DuckDB / PM2 conflicts</td>
-<td><a href="../Troubleshooting-Gateway-PM2/">Troubleshooting Gateway PM2</a></td>
-</tr>
-<tr>
-<td>Logs, LangSmith, fly commands</td>
-<td><a href="../Observability-2.1-Identidad/">Observability and Identity</a></td>
-</tr>
-<tr>
-<td>Sandbox hardening</td>
-<td><a href="../Strix-Sandbox-Security/">Strix Sandbox Security</a></td>
-</tr>
-<tr>
-<td>Proactive n8n / heartbeat</td>
-<td><a href="../Homeostasis-Heartbeat/">Homeostasis Heartbeat</a></td>
-</tr>
-<tr>
-<td>The Mind game</td>
-<td><a href="../Jugar-The-Mind/">Jugar The Mind</a></td>
-</tr>
-<tr>
-<td>Vaults / <code>/vault</code></td>
-<td><a href="../Multi-Vault-System/">Multi Vault System</a></td>
+<td style="text-align: left;"><strong><code>DuckClaw-MLX_Inference</code></strong></td>
+<td style="text-align: left;">(Solo Mac) Servidor MLX local compatible con OpenAI API.</td>
+<td style="text-align: left;"><code>bash mlx/start_mlx.sh</code></td>
 </tr>
 </tbody>
 </table>
-<h2 id="related-reading">Related reading<a class="headerlink" href="#related-reading" title="Permanent link">&para;</a></h2>
+<h2 id="5-protocolo-de-seguridad-manejo-de-secretos">5. Protocolo de Seguridad (Manejo de Secretos)<a class="headerlink" href="#5-protocolo-de-seguridad-manejo-de-secretos" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Architecture:</strong> <a href="../architecture/singleton_writer/">Singleton Writer</a> · <a href="../architecture/tri_cameral_memory/">Tri-Cameral Memory</a> · <a href="../architecture/strix_sandbox/">Strix Sandbox</a></li>
-<li><strong>Specs:</strong> <a href="../specs/">Specs hub</a></li>
-<li><strong>API (HTTP + Python reference):</strong> <a href="../api/api_gateway/">API Gateway</a> · <a href="../api/db_writer/">DB Writer</a></li>
+<li><strong>Censura en Pantalla:</strong> Durante el resumen de configuración, los tokens (ej. Telegram) se muestran censurados (<code>8266...R5ws</code>) para evitar fugas si se comparte pantalla o se toman capturas.</li>
+<li><strong>Volatilidad:</strong> El token de Telegram se solicita en tiempo de ejecución si no existe en el <code>.env</code>, pero <strong>no se guarda en el JSON de preferencias</strong> (<code>wizard_config.json</code>), forzando a que resida únicamente en el <code>.env</code> protegido por permisos del OS.</li>
 </ul>
-<h2 id="operational-guidelines">Operational Guidelines<a class="headerlink" href="#operational-guidelines" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Keep <code>db-writer</code> as the only write path to protect ACID guarantees and idempotency.</li>
-<li>Treat <code>specs/</code> as source of truth before modifying production behaviors.</li>
-<li>Prefer reproducible scripts/commands and record incident learnings in these runbooks.</li>
-</ul>
-<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
-<p>Operational files linked here are part of MkDocs navigation and validated with <code>mkdocs build --strict</code>.</p>
+<h2 id="6-guia-rapida-de-operacion-cheat-sheet">6. Guía Rápida de Operación (Cheat Sheet)<a class="headerlink" href="#6-guia-rapida-de-operacion-cheat-sheet" title="Permanent link">&para;</a></h2>
+<p><strong>Referencia canónica:</strong> los comandos del día a día (PM2, Redis, webhooks, variables) viven en un solo sitio para evitar desalineación: <strong><a href="../COMANDOS/">COMANDOS.md — §8 Cheat sheet del día a día</a></strong>.</p>
+<p>Este documento (<code>Installation.md</code>) se centra en el <strong>wizard</strong>, topología PM2 y flujo de despliegue; no dupliques aquí listas largas de comandos.</p>
+<h3 id="telegram-memoria-semantica-context">Telegram: memoria semántica (<code>/context</code>)<a class="headerlink" href="#telegram-memoria-semantica-context" title="Permanent link">&para;</a></h3>
+<p>Solo <strong>admin</strong> (misma regla que el Telegram Guard: <code>main.authorized_users</code>, War Room, u owner vía <code>DUCKCLAW_OWNER_ID</code> / <code>DUCKCLAW_ADMIN_CHAT_ID</code>).</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Comando</th>
+<th style="text-align: left;">Rol</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>/context --add &lt;texto&gt;</code></td>
+<td style="text-align: left;">Encola persistencia en <code>main.semantic_memory</code> (Redis → <strong>DuckClaw-DB-Writer</strong>). Acuse inmediato; resumen en segundo plano.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>/context --summary</code></td>
+<td style="text-align: left;">Aliases: <code>--summarize</code>, <code>--peek</code>, <code>--db</code>. Solo lectura del volcado reciente; resumen en segundo plano.</td>
+</tr>
+</tbody>
+</table>
+<p>Requisitos: <strong>Redis</strong> y <strong>DuckClaw-DB-Writer</strong> activos para que <code>--add</code> llegue a DuckDB. Cola por defecto <code>duckclaw:state_delta:context</code> (sobrescribible con <code>DUCKCLAW_CONTEXT_STATE_DELTA_QUEUE</code>).</p>
+<p>Especificación: <a href="../specs/context_injection_telegram/">Context Injection Telegram</a>.</p>
 
 
 

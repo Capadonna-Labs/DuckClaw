@@ -28,3 +28,10 @@ Implementa bóvedas privadas por usuario con hot-switch:
 
 - Solo se aceptan rutas dentro de `db/private/{user_id}/`.
 - Se bloquean rutas externas (path traversal o archivos fuera del espacio del usuario).
+
+## See also / Ver también
+
+- [API Gateway (HTTP overview + Python reference)](api/api_gateway.md)
+- [DB Writer](api/db_writer.md)
+- [Singleton Writer](architecture/singleton_writer.md)
+- [Operations hub](operations/index.md)

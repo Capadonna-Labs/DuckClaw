@@ -51,27 +51,9 @@ Al finalizar el Wizard, el sistema queda orquestado con los siguientes procesos 
 
 ## 6. Guía Rápida de Operación (Cheat Sheet)
 
-Estos son los comandos del día a día. La referencia amplia (Redis, webhook Telegram, pool `read_sql`, **context injection**, variables) está en **[docs/COMANDOS.md](COMANDOS.md)**.
+**Referencia canónica:** los comandos del día a día (PM2, Redis, webhooks, variables) viven en un solo sitio para evitar desalineación: **[COMANDOS.md — §8 Cheat sheet del día a día](COMANDOS.md)**.
 
-```bash
-# 1. Instalación desde cero o reconfiguración interactiva
-uv run duckops init
-
-# 2. Levantar el API Gateway manualmente (Modo Dev)
-uv run duckops serve --gateway
-
-# 3. Ver el estado de los servicios en background
-pm2 status
-
-# 4. Ver logs del DB-Writer (SQL + CONTEXT_INJECTION / semantic_memory)
-pm2 logs DuckClaw-DB-Writer
-
-# 5. Ejemplo: gateway con Telegram (nombre según config PM2, p. ej. JobHunter-Gateway)
-pm2 logs JobHunter-Gateway
-
-# 6. Tras cambiar DUCKCLAW_* en PM2
-pm2 restart <NombreDelGateway> --update-env
-```
+Este documento (`Installation.md`) se centra en el **wizard**, topología PM2 y flujo de despliegue; no dupliques aquí listas largas de comandos.
 
 ### Telegram: memoria semántica (`/context`)
 
@@ -84,4 +66,4 @@ Solo **admin** (misma regla que el Telegram Guard: `main.authorized_users`, War 
 
 Requisitos: **Redis** y **DuckClaw-DB-Writer** activos para que `--add` llegue a DuckDB. Cola por defecto `duckclaw:state_delta:context` (sobrescribible con `DUCKCLAW_CONTEXT_STATE_DELTA_QUEUE`).
 
-Especificación: [specs/features/Context Injection (Telegram).md](../specs/features/Context%20Injection%20(Telegram).md).
+Especificación: [Context Injection Telegram](specs/context_injection_telegram.md).

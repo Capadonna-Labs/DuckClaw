@@ -1,6 +1,6 @@
 # Observability 2.1 — Refinamiento de identidad en logs
 
-Extiende [Observabilidad 2.0](../specs/features/Observabilidad%202.0%20(Logging%20Estructurado%20y%20M%C3%A9tricas).md) alineando el **worker** mostrado en cada línea con el modelo mental **manager → worker delegado** y comandos **fly** en el gateway.
+Extiende la línea base de Observabilidad 2.0 alineando el **worker** mostrado en cada línea con el modelo mental **manager -> worker delegado** y comandos **fly** en el gateway.
 
 ## Formato de línea
 

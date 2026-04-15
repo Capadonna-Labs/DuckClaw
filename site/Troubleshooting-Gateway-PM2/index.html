@@ -11,25 +11,25 @@
       
       
       
-        <link rel="prev" href="../telegram_webhook_multiplex/">
+        <link rel="prev" href="../COMANDOS/">
       
       
-        <link rel="next" href="../../api/db_writer/">
+        <link rel="next" href="../Observability-2.1-Identidad/">
       
       
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>VLM Integration - DuckClaw Docs</title>
+        <title>Troubleshooting Gateway PM2 - DuckClaw Docs</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -48,9 +48,9 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -68,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#vlm-integration" class="md-skip">
+        <a href="#gateway-pm2-errores-frecuentes" class="md-skip">
           Skip to content
         </a>
       
@@ -84,7 +84,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="DuckClaw Docs" class="md-header__button md-logo" aria-label="DuckClaw Docs" data-md-component="logo">
+    <a href=".." title="DuckClaw Docs" class="md-header__button md-logo" aria-label="DuckClaw Docs" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -104,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              VLM Integration
+              Troubleshooting Gateway PM2
             
           </span>
         </div>
@@ -182,7 +182,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="DuckClaw Docs" class="md-nav__button md-logo" aria-label="DuckClaw Docs" data-md-component="logo">
+    <a href=".." title="DuckClaw Docs" class="md-nav__button md-logo" aria-label="DuckClaw Docs" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -200,7 +200,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../.." class="md-nav__link">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -279,7 +279,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../architecture/singleton_writer/" class="md-nav__link">
+      <a href="../architecture/singleton_writer/" class="md-nav__link">
         
   
   
@@ -307,7 +307,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../architecture/tri_cameral_memory/" class="md-nav__link">
+      <a href="../architecture/tri_cameral_memory/" class="md-nav__link">
         
   
   
@@ -335,7 +335,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../architecture/strix_sandbox/" class="md-nav__link">
+      <a href="../architecture/strix_sandbox/" class="md-nav__link">
         
   
   
@@ -422,7 +422,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../agents/adf_framework/" class="md-nav__link">
+      <a href="../agents/adf_framework/" class="md-nav__link">
         
   
   
@@ -450,7 +450,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../agents/finanz/" class="md-nav__link">
+      <a href="../agents/finanz/" class="md-nav__link">
         
   
   
@@ -478,7 +478,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../agents/quant_trader/" class="md-nav__link">
+      <a href="../agents/quant_trader/" class="md-nav__link">
         
   
   
@@ -510,8 +510,6 @@
       
   
   
-    
-  
   
   
     
@@ -524,11 +522,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
@@ -549,7 +547,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -567,7 +565,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../specs/" class="md-nav__link">
         
   
   
@@ -595,7 +593,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../finanz_admin_sql_db_writer/" class="md-nav__link">
+      <a href="../specs/finanz_admin_sql_db_writer/" class="md-nav__link">
         
   
   
@@ -623,7 +621,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../context_injection_telegram/" class="md-nav__link">
+      <a href="../specs/context_injection_telegram/" class="md-nav__link">
         
   
   
@@ -651,7 +649,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../telegram_webhook_multiplex/" class="md-nav__link">
+      <a href="../specs/telegram_webhook_multiplex/" class="md-nav__link">
         
   
   
@@ -676,19 +674,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../specs/vlm_integration/" class="md-nav__link">
         
   
   
@@ -704,7 +693,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -776,7 +764,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/db_writer/" class="md-nav__link">
+      <a href="../api/db_writer/" class="md-nav__link">
         
   
   
@@ -804,7 +792,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/api_gateway/" class="md-nav__link">
+      <a href="../api/api_gateway/" class="md-nav__link">
         
   
   
@@ -836,8 +824,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -848,11 +838,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
           <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
@@ -873,7 +863,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -891,7 +881,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operations/" class="md-nav__link">
+      <a href="../operations/" class="md-nav__link">
         
   
   
@@ -919,7 +909,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../Installation/" class="md-nav__link">
+      <a href="../Installation/" class="md-nav__link">
         
   
   
@@ -947,7 +937,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../COMANDOS/" class="md-nav__link">
+      <a href="../COMANDOS/" class="md-nav__link">
         
   
   
@@ -972,10 +962,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../Troubleshooting-Gateway-PM2/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting Gateway PM2
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -991,6 +1008,109 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#puertos-finanz-8000-y-themind-8080" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Puertos: Finanz (8000) y TheMind (8080)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errno-48-address-already-in-use-en-finanz-gateway-8000" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Errno 48] address already in use en Finanz-Gateway (8000)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#could-not-set-lock-on-file-finanzdb1duckdb-duckdb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Could not set lock on file ... finanzdb1.duckdb (DuckDB)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comprobar-duplicados-en-la-config-fusionada" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comprobar duplicados en la config fusionada
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Comprobar duplicados en la config fusionada">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#asistente-wizard-resolver-conflictos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asistente (wizard): resolver conflictos
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#themind-sigue-usando-finanzdb1-o-intenta-el-puerto-8000" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TheMind sigue usando finanzdb1 o intenta el puerto 8000
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#403-acceso-denegado-interactuar-con-este-agente" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        403 — «Acceso denegado… interactuar con este agente»
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1003,7 +1123,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../Observability-2.1-Identidad/" class="md-nav__link">
+      <a href="../Observability-2.1-Identidad/" class="md-nav__link">
         
   
   
@@ -1031,7 +1151,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../Strix-Sandbox-Security/" class="md-nav__link">
+      <a href="../Strix-Sandbox-Security/" class="md-nav__link">
         
   
   
@@ -1059,7 +1179,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../Homeostasis-Heartbeat/" class="md-nav__link">
+      <a href="../Homeostasis-Heartbeat/" class="md-nav__link">
         
   
   
@@ -1087,7 +1207,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../Jugar-The-Mind/" class="md-nav__link">
+      <a href="../Jugar-The-Mind/" class="md-nav__link">
         
   
   
@@ -1115,7 +1235,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../Multi-Vault-System/" class="md-nav__link">
+      <a href="../Multi-Vault-System/" class="md-nav__link">
         
   
   
@@ -1163,6 +1283,97 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#puertos-finanz-8000-y-themind-8080" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Puertos: Finanz (8000) y TheMind (8080)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errno-48-address-already-in-use-en-finanz-gateway-8000" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Errno 48] address already in use en Finanz-Gateway (8000)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#could-not-set-lock-on-file-finanzdb1duckdb-duckdb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Could not set lock on file ... finanzdb1.duckdb (DuckDB)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comprobar-duplicados-en-la-config-fusionada" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comprobar duplicados en la config fusionada
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Comprobar duplicados en la config fusionada">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#asistente-wizard-resolver-conflictos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asistente (wizard): resolver conflictos
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#themind-sigue-usando-finanzdb1-o-intenta-el-puerto-8000" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TheMind sigue usando finanzdb1 o intenta el puerto 8000
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#403-acceso-denegado-interactuar-con-este-agente" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        403 — «Acceso denegado… interactuar con este agente»
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1178,11 +1389,70 @@
 
 
 
-<h1 id="vlm-integration">VLM Integration<a class="headerlink" href="#vlm-integration" title="Permanent link">&para;</a></h1>
-<p><strong>Scope:</strong> vision-language model (VLM) integration for DuckClaw (e.g. image understanding paths, gateway/agents configuration, and operational constraints on Mac vs server).</p>
-<p><strong>Where to read the full spec:</strong> canonical file in the repo:</p>
-<p><code>specs/features/VLM INTEGRATION.md</code></p>
-<p><strong>Related docs:</strong> <a href="../../agents/adf_framework/">Agents overview</a> · <a href="../../operations/">Operations hub</a></p>
+<h1 id="gateway-pm2-errores-frecuentes">Gateway PM2: errores frecuentes<a class="headerlink" href="#gateway-pm2-errores-frecuentes" title="Permanent link">&para;</a></h1>
+<h2 id="puertos-finanz-8000-y-themind-8080">Puertos: Finanz (8000) y TheMind (8080)<a class="headerlink" href="#puertos-finanz-8000-y-themind-8080" title="Permanent link">&para;</a></h2>
+<p>Es un diseño <strong>válido</strong> y <strong>no hay conflicto entre ellos</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Proceso PM2</th>
+<th>Puerto típico</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Finanz-Gateway</code></td>
+<td><strong>8000</strong></td>
+</tr>
+<tr>
+<td><code>TheMind-Gateway</code></td>
+<td><strong>8080</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Cada uno escucha en su puerto; <strong>no</strong> se pisan mutuamente.</p>
+<h2 id="errno-48-address-already-in-use-en-finanz-gateway-8000"><code>[Errno 48] address already in use</code> en <code>Finanz-Gateway</code> (8000)<a class="headerlink" href="#errno-48-address-already-in-use-en-finanz-gateway-8000" title="Permanent link">&para;</a></h2>
+<p>Si <strong>Finanz</strong> falla al enlazar <code>0.0.0.0:8000</code>, el problema <strong>no</strong> es TheMind (está en 8080). Significa que <strong>otro proceso</strong> ya usa el puerto <strong>8000</strong> en tu máquina: otro <code>uvicorn</code>, el IDE, AirPlay Receiver, un contenedor, un segundo PM2 antiguo, etc.</p>
+<p><strong>Diagnosticar:</strong></p>
+<div class="highlight"><pre><span></span><code>lsof<span class="w"> </span>-i<span class="w"> </span>:8000
+<span class="c1"># o</span>
+sudo<span class="w"> </span>lsof<span class="w"> </span>-nP<span class="w"> </span>-iTCP:8000<span class="w"> </span>-sTCP:LISTEN
+</code></pre></div>
+<p>Cierra o detén el proceso que aparezca (o cambia temporalmente el puerto de Finanz solo si aceptas no usar 8000).</p>
+<h2 id="could-not-set-lock-on-file-finanzdb1duckdb-duckdb"><code>Could not set lock on file ... finanzdb1.duckdb</code> (DuckDB)<a class="headerlink" href="#could-not-set-lock-on-file-finanzdb1duckdb-duckdb" title="Permanent link">&para;</a></h2>
+<p>Es <strong>independiente</strong> del puerto. DuckDB permite <strong>un escritor</strong> por fichero. Si otro proceso Python (p. ej. PID distinto en los logs, <strong>DuckClaw-Brain</strong>, o una sesión interactiva) mantiene abierto el mismo <code>.duckdb</code> en escritura, el gateway verá <em>Conflicting lock</em>.</p>
+<p><strong>Dos gateways PM2</strong> (<code>Finanz-Gateway</code>, <code>TheMind-Gateway</code>) <strong>no</strong> deben compartir el mismo <code>DUCKCLAW_DB_PATH</code> en <code>config/api_gateways_pm2.json</code>: asigna un <code>.duckdb</code> por servicio (p. ej. <code>finanzdb1.duckdb</code> para Finanz y <code>the_mind.duckdb</code> para The Mind).</p>
+<p>En <code>/api/v1/agent/chat</code>, el gateway resolvía la <strong>bóveda activa</strong> del usuario (<code>resolve_active_vault</code> → suele ser <code>finanzdb1</code>). En <strong>TheMind-Gateway</strong> (<code>DUCKCLAW_PM2_PROCESS_NAME=TheMind-Gateway</code>) el código usa en su lugar <code>DUCKCLAW_DB_PATH</code> del proceso para no abrir Finanz en dos sitios.</p>
+<ul>
+<li>Un <code>.duckdb</code> por servicio, o</li>
+<li>Un solo proceso escribiendo en ese fichero (<code>pm2 stop</code> del que compita), o</li>
+<li>Revisa que Brain y los gateways no abran la misma ruta en escritura a la vez si no es imprescindible.</li>
+</ul>
+<h2 id="comprobar-duplicados-en-la-config-fusionada">Comprobar duplicados en la config fusionada<a class="headerlink" href="#comprobar-duplicados-en-la-config-fusionada" title="Permanent link">&para;</a></h2>
+<p>Tras <code>duckops serve --pm2 --gateway</code>, el CLI puede avisar si en <code>config/api_gateways_pm2.json</code> hay <strong>el mismo puerto en dos <code>apps</code></strong> o la <strong>misma <code>DUCKCLAW_DB_PATH</code></strong> en varios procesos. Eso <strong>sí</strong> es un error de configuración. <strong>No</strong> aplica cuando son 8000 vs 8080 con rutas coherentes.</p>
+<h3 id="asistente-wizard-resolver-conflictos">Asistente (wizard): resolver conflictos<a class="headerlink" href="#asistente-wizard-resolver-conflictos" title="Permanent link">&para;</a></h3>
+<p>En el menú inicial con PM2, elige <strong><code>r</code></strong> — <em>Resolver conflictos API Gateway</em> — o ejecuta desde la <strong>raíz del repo</strong> (mismo intérprete que el resto del monorepo):</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/duckclaw_setup_wizard.py<span class="w"> </span>--resolve-gateways
+</code></pre></div>
+<p>Equivalente interactivo: <code>uv run duckops init</code> y luego la opción de resolver gateways en el menú (según versión del CLI).</p>
+<p>El asistente lista duplicados de puerto/DuckDB, muestra <code>lsof</code> si está disponible, prueba si el puerto está ocupado en el host y guía para asignar puertos y rutas distintas; luego regenera <code>config/ecosystem.api.config.cjs</code> y puede reiniciar los procesos en PM2.</p>
+<h3 id="themind-sigue-usando-finanzdb1-o-intenta-el-puerto-8000">TheMind sigue usando <code>finanzdb1</code> o intenta el puerto 8000<a class="headerlink" href="#themind-sigue-usando-finanzdb1-o-intenta-el-puerto-8000" title="Permanent link">&para;</a></h3>
+<p>El <code>services/api-gateway/main.py</code> carga <code>.env</code> con <code>setdefault</code>; si PM2 no inyectó bien <code>DUCKCLAW_DB_PATH</code> o hiciste <code>restart</code> sin <code>--update-env</code>, el proceso puede quedarse con la BD del <code>.env</code>. Tras cambiar <code>config/api_gateways_pm2.json</code>, el arranque <strong>corrige</strong> <code>DUCKCLAW_DB_PATH</code> leyendo el bloque que corresponde a este proceso (<code>DUCKCLAW_PM2_PROCESS_NAME</code> o el <code>--port</code> de uvicorn).</p>
+<p>Si el error es <strong><code>[Errno 48]</code> en 8000</strong> para TheMind, PM2 sigue con <strong>args viejos</strong> (<code>--port 8000</code>). Borra y vuelve a crear el proceso para leer el ecosystem:</p>
+<p><code>pm2 delete TheMind-Gateway &amp;&amp; pm2 start config/ecosystem.api.config.cjs --only TheMind-Gateway</code></p>
+<p>(o <code>pm2 restart TheMind-Gateway --update-env</code> si ya coincide el <code>args</code> con puerto 8080).</p>
+<h2 id="403-acceso-denegado-interactuar-con-este-agente"><code>403</code> — «Acceso denegado… interactuar con este agente»<a class="headerlink" href="#403-acceso-denegado-interactuar-con-este-agente" title="Permanent link">&para;</a></h2>
+<p>No es n8n “caído”: es el <strong>Telegram Guard</strong> (<code>authorized_users</code> en DuckDB + caché Redis). El endpoint necesita saber <strong>qué usuario</strong> es:</p>
+<ul>
+<li>Incluye <strong><code>user_id</code></strong> en el JSON (mismo ID numérico de Telegram que en la whitelist), <strong>o</strong></li>
+<li>En chat <strong>privado</strong>, si solo envías <code>chat_id</code> / <code>session_id</code>, el gateway ahora infiere <code>user_id</code> a partir de él (DM: suelen coincidir).</li>
+</ul>
+<p>En <strong>grupos</strong> sigue siendo obligatorio <code>user_id</code> del remitente (el <code>chat_id</code> del grupo no es el del usuario).</p>
+<p>Comprueba con curl (sustituye el ID por el tuyo y el token/cabeceras que uses):</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">&quot;http://localhost:8000/api/v1/agent/chat&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;message&quot;:&quot;test&quot;,&quot;chat_id&quot;:&quot;1726618406&quot;,&quot;user_id&quot;:&quot;1726618406&quot;}&#39;</span>
+</code></pre></div>
 
 
 
@@ -1238,10 +1508,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.top", "navigation.sections", "toc.follow", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.top", "navigation.sections", "toc.follow", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

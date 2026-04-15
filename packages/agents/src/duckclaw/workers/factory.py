@@ -1683,6 +1683,15 @@ def build_worker_graph(
                     prompt = prompt + "\n\n<lead_context>\n" + lead_ctx + "\n</lead_context>"
             except Exception:
                 pass
+        if _lid == "quant_trader":
+            try:
+                from duckclaw.forge.skills.quant_trader_bridge import quant_trading_session_prompt_block
+
+                _qblk = quant_trading_session_prompt_block(db)
+                if _qblk:
+                    prompt = prompt + "\n\n" + _qblk
+            except Exception:
+                pass
         messages = [SystemMessage(content=prompt)]
         for h in (state.get("history") or []):
             role = (h.get("role") or "").lower()
@@ -2537,6 +2546,18 @@ def build_worker_graph(
                 _pl_fail = failure_provider_label_for_llm_invoke(_invoked_llm, provider)
                 resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=_pl_fail))
             tool_calls = getattr(resp, "tool_calls", None) or []
+            _is_goals_tick = (
+                str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
+                and "Revisión periódica de /goals" in str(incoming or "")
+            )
+            if force_portfolio and has_ibkr and _is_goals_tick and not tool_calls:
+                _forced_tid = f"call_forced_ibkr_{int(time.time() * 1000)}"
+                forced_tc = [{"name": "get_ibkr_portfolio", "args": {}, "id": _forced_tid, "type": "tool_call"}]
+                try:
+                    resp = resp.model_copy(update={"tool_calls": forced_tc})
+                except Exception:
+                    resp = AIMessage(content=str(getattr(resp, "content", "") or ""), tool_calls=forced_tc)
+                tool_calls = getattr(resp, "tool_calls", None) or forced_tc
             if tool_calls:
                 _tc_names: list[Any] = []
                 for tc in tool_calls:
@@ -2545,6 +2566,92 @@ def build_worker_graph(
                     else:
                         _tc_names.append(getattr(tc, "name", None))
                 _log.info("[%s] LLM tool_calls=%s", _wl, _tc_names)
+            _resp_content = str(getattr(resp, "content", "") or "").strip()
+            if _is_goals_tick and not tool_calls:
+                _portfolio_tool_text = ""
+                for _m in reversed(state.get("messages", [])):
+                    if isinstance(_m, ToolMessage) and str(getattr(_m, "name", "") or "") == "get_ibkr_portfolio":
+                        _portfolio_tool_text = str(getattr(_m, "content", "") or "").strip()
+                        break
+                _total_value = ""
+                _positions = ""
+                if _portfolio_tool_text:
+                    _m_total = re.search(r"Valor total:\s*\$([0-9,]+(?:\.[0-9]+)?)", _portfolio_tool_text)
+                    _m_pos = re.search(r"Posiciones:\s*([0-9]+)", _portfolio_tool_text)
+                    _m_unreal = re.search(
+                        r"PnL no realizado total \(snapshot\):\s*\$([\-0-9,]+(?:\.[0-9]+)?)",
+                        _portfolio_tool_text,
+                    )
+                    _total_value = _m_total.group(1) if _m_total else ""
+                    _positions = _m_pos.group(1) if _m_pos else ""
+                    _unreal_txt = _m_unreal.group(1) if _m_unreal else ""
+                else:
+                    _unreal_txt = ""
+                if _portfolio_tool_text and (_total_value or _positions):
+                    if _unreal_txt:
+                        try:
+                            _unreal_val = float(_unreal_txt.replace(",", ""))
+                        except Exception:
+                            _unreal_val = 0.0
+                        _state = "ALIGNED" if _unreal_val >= 0 else "MISALIGNED"
+                        _act = (
+                            "mantener sesion y seguir monitoreo HITL."
+                            if _unreal_val >= 0
+                            else "activar reduccion de riesgo y evitar nuevas señales hasta recuperar PnL>=0."
+                        )
+                        _fallback_text = (
+                            "Revision /goals (proactiva): "
+                            f"snapshot IBKR OK (valor total=${_total_value or 'N/D'}, posiciones={_positions or 'N/D'}, "
+                            f"PnL no realizado=${_unreal_val:,.2f}). "
+                            f"Meta 'PnL positivo': {_state}. Accion sugerida: {_act}"
+                        )
+                    else:
+                        _fallback_text = (
+                            "Revision /goals (proactiva): "
+                            f"snapshot IBKR OK (valor total=${_total_value or 'N/D'}, posiciones={_positions or 'N/D'}). "
+                            "Meta 'PnL positivo': estado parcial por falta de PnL realizado/no realizado en este snapshot. "
+                            "Accion sugerida: extraer PnL por posicion y activar reduccion de riesgo si el agregado pasa a negativo."
+                        )
+                elif _portfolio_tool_text:
+                    _fallback_text = (
+                        "Revision /goals (proactiva): snapshot IBKR recibido. "
+                        "Meta 'PnL positivo': se requiere desglose de PnL realizado/no realizado para validar alineacion. "
+                        "Accion sugerida: extraer PnL por posicion y aplicar regla de reduccion de riesgo."
+                    )
+                else:
+                    _fallback_text = ""
+                if _fallback_text:
+                    # region agent log
+                    try:
+                        with open(
+                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                            "a",
+                            encoding="utf-8",
+                        ) as _df:
+                            _df.write(
+                                json.dumps(
+                                    {
+                                        "sessionId": "c964f7",
+                                        "runId": "pre-fix",
+                                        "hypothesisId": "H3_goals_fallback_forces_missing_pnl_text",
+                                        "location": "packages/agents/src/duckclaw/workers/factory.py:agent_node",
+                                        "message": "goals_fallback_applied",
+                                        "data": {
+                                            "has_tool_text": bool(_portfolio_tool_text),
+                                            "fallback_preview": _fallback_text[:220],
+                                        },
+                                        "timestamp": int(time.time() * 1000),
+                                    }
+                                )
+                                + "\n"
+                            )
+                    except Exception:
+                        pass
+                    # endregion
+                    try:
+                        resp = resp.model_copy(update={"content": _fallback_text})
+                    except Exception:
+                        resp = AIMessage(content=_fallback_text)
             out = {**state, "messages": state["messages"] + [resp]}
             if _llm_invoke_exc is not None:
                 from duckclaw.integrations.llm_providers import is_transient_inference_connection_error

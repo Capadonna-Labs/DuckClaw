@@ -34,6 +34,25 @@ CREATE TABLE IF NOT EXISTS finance_worker.trade_signals (
 
 CREATE SCHEMA IF NOT EXISTS quant_core;
 
+-- Sesión activa de trading (singleton por bóveda: id = 'active'). Fly: /trading_session
+CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
+  id VARCHAR PRIMARY KEY,
+  mode VARCHAR NOT NULL,
+  tickers VARCHAR NOT NULL DEFAULT '',
+  session_uid VARCHAR,
+  session_goal JSON,
+  status VARCHAR NOT NULL DEFAULT 'ACTIVE',
+  anchor_equity DOUBLE,
+  peak_equity DOUBLE,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS quant_core.trading_risk_constraints (
+  id VARCHAR PRIMARY KEY,
+  max_drawdown_pct DOUBLE,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS quant_core.ohlcv_data (
   ticker VARCHAR,
   timestamp TIMESTAMP,
@@ -53,7 +72,22 @@ CREATE TABLE IF NOT EXISTS quant_core.trade_signals (
   action VARCHAR,
   confidence_score DOUBLE,
   target_price DOUBLE,
-  stop_loss DOUBLE
+  stop_loss DOUBLE,
+  session_uid VARCHAR,
+  rationale TEXT,
+  status VARCHAR DEFAULT 'PENDING_HITL',
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS quant_core.session_ticks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_uid VARCHAR NOT NULL,
+  tick_number INTEGER NOT NULL,
+  fired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  tickers_processed VARCHAR[],
+  signals_proposed INTEGER DEFAULT 0,
+  cfd_summary JSON,
+  outcome VARCHAR
 );
 
 CREATE TABLE IF NOT EXISTS quant_core.portfolio_positions (

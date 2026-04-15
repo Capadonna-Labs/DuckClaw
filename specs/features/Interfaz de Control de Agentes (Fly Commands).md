@@ -128,14 +128,27 @@ El `session_id` identifica la sesión; el `worker_id` y el system prompt se pers
 
 ## 7. Comandos /goals y /tasks (Implementados)
 
-### `/goals [--reset]`
+### `/goals [--reset] [--delta …]`
 
-Consulta creencias del HomeostasisManager (tabla `agent_beliefs` por worker). Requiere `/role <worker_id>` con homeostasis (finanz, powerseal).
+Consulta creencias del HomeostasisManager (tabla `agent_beliefs` por worker). El registro de claves por defecto para autocompletar objetivos viene del **worker activo** del chat (`/role` / estado del gateway), con fallback al primer template que tenga `homeostasis.yaml`. Con **Quant-Trader** activo, un goal de drawdown máximo se refleja también en `quant_core.trading_risk_constraints` en la bóveda (ver [Quant_Trading_Session_Homeostasis.md](Quant_Trading_Session_Homeostasis.md)).
 
 | Uso | Comportamiento |
 |-----|----------------|
 | `/goals` | Lista beliefs: target, observed, delta, estado (equilibrio/anomalía) |
-| `/goals --reset` | Borra `observed_value` de todas las creencias |
+| `/goals --reset` | Borra goals del chat y la revisión proactiva (`--delta`); en Quant limpia riesgo en bóveda si aplica |
+| `/goals --delta 20min` | Programa revisión periódica (mín. 60s, máx. 7d). Unidades: `s`, `m`/`min`, `h`. Guarda `goals_delta_seconds`, `goals_proactive_tenant_id`, `goals_proactive_schedule_anchor_epoch` (hora de referencia para la cuenta atrás en `/goals`) y reinicia `goals_proactive_last_fire_epoch` en `agent_config`. |
+| `/goals --delta off` | Desactiva el ticker para ese chat |
+
+**Ticker:** `services/heartbeat/main.py` (`_run_goals_proactive_tick`) escanea cada `GOALS_TICKER_POLL_SECONDS` (default 45s) el DuckDB del hub (`get_gateway_db_path()`) **y** todos los `*.duckdb` bajo `db/private/*/` (misma convención que el multiplex Telegram: los fly commands escriben en la bóveda del usuario, p. ej. `quant_traderdb1.duckdb`, distinta del hub `finanzdb1.duckdb`). Override: `DUCKCLAW_GOALS_TICKER_DB_PATH` fuerza una sola ruta (tests o despliegue especial). Si `worker_id` del chat es `manager` o vacío, no se dispara **salvo** heurística multiplex: tenant `goals_proactive_tenant_id` = `Cuantitativo` → worker efectivo `Quant-Trader`. Tras un POST 2xx al gateway (`/api/v1/agent/{worker_id}/chat` con `is_system_prompt` y `skip_session_lock`), se actualiza `goals_proactive_last_fire_epoch` **en el mismo archivo** donde se encontró el schedule. Sin goals, el ticker limpia el schedule en ese archivo.
+
+**Multiplex:** el ticker embebido en el API Gateway reutiliza la misma lógica de escaneo; con varios gateways PM2, cada proceso sigue recorriendo las mismas rutas bajo `db/private/` (idempotencia por chat + `last_fire`).
+
+| Clave `agent_config` | Uso |
+|---------------------|-----|
+| `chat_{id}_goals_delta_seconds` | Intervalo en segundos (>0 activo) |
+| `chat_{id}_goals_proactive_tenant_id` | Tenant efectivo al ejecutar `/goals --delta` |
+| `chat_{id}_goals_proactive_last_fire_epoch` | Ultimo tick exitoso (epoch float) |
+| `chat_{id}_goals_proactive_schedule_anchor_epoch` | Momento en que se ejecutó `/goals --delta` (epoch); la UI estima “próximo en” como ancla + intervalo hasta el primer tick |
 
 ### `/tasks`
 

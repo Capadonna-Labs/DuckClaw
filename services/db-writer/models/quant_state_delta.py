@@ -24,8 +24,17 @@ class TradeSignalMutation(BaseModel):
     proposed_weight: float = Field(..., ge=0.0, le=100.0)
     sandbox_backtest_cid: str = ""
     human_approved: bool = False
-    status: Literal["AWAITING_HITL", "EXECUTED", "DISCARDED"] = "AWAITING_HITL"
+    status: Literal[
+        "PENDING_HITL",
+        "AWAITING_HITL",
+        "EXECUTED",
+        "DISCARDED",
+        "FAILED",
+        "PENDING",
+        "CANCELLED",
+    ] = "PENDING_HITL"
     rationale: str = ""
+    session_uid: str = ""
 
 
 class QuantStateDelta(BaseModel):
@@ -36,6 +45,7 @@ class QuantStateDelta(BaseModel):
         "TRADE_SIGNAL_APPROVED",
         "TRADE_SIGNAL_EXECUTED",
         "TRADE_SIGNAL_DISCARDED",
+        "TRADE_SIGNAL_FAILED",
     ]
     user_id: str = Field(..., min_length=1)
     target_db_path: str = Field(..., min_length=1)

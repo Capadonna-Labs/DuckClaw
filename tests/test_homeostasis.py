@@ -33,6 +33,20 @@ def test_compute_surprise_anomaly() -> None:
     assert r.is_anomaly is True
 
 
+def test_compute_surprise_ceiling_maintain() -> None:
+    """ceiling: DD bajo el techo + banda -> no anomalía."""
+    r = compute_surprise(observed=0.04, target=0.05, threshold=0.01, comparison="ceiling")
+    assert r.is_anomaly is False
+    assert r.delta == pytest.approx(0.0)
+
+
+def test_compute_surprise_ceiling_anomaly() -> None:
+    """ceiling: observed > target + threshold -> anomalía."""
+    r = compute_surprise(observed=0.07, target=0.05, threshold=0.01, comparison="ceiling")
+    assert r.is_anomaly is True
+    assert r.delta == pytest.approx(0.02)
+
+
 def test_compute_surprise_exact_threshold() -> None:
     """Delta equals threshold -> no anomaly (strict >). Use exact values to avoid float precision."""
     r = compute_surprise(observed=5.0, target=10.0, threshold=5.0)
@@ -56,6 +70,17 @@ def test_load_beliefs_from_config_empty() -> None:
     beliefs, actions = load_beliefs_from_config({})
     assert beliefs == []
     assert actions == {}
+
+
+def test_load_beliefs_ceiling_comparison() -> None:
+    """YAML puede declarar comparison: ceiling."""
+    config = {
+        "beliefs": [{"key": "max_portfolio_drawdown_pct", "target": 0.05, "threshold": 0.005, "comparison": "ceiling"}],
+        "actions": [],
+    }
+    beliefs, _ = load_beliefs_from_config(config)
+    assert len(beliefs) == 1
+    assert beliefs[0].comparison == "ceiling"
 
 
 def test_load_beliefs_from_config_valid() -> None:
@@ -143,6 +168,31 @@ def test_homeostasis_manager_restore() -> None:
     assert plan["action"] == "restore"
     assert plan["skill_to_invoke"] == "get_summary"
     assert "Desviación" in plan["message"]
+
+
+def test_homeostasis_manager_ceiling_restore() -> None:
+    """HomeostasisManager con belief ceiling dispara restore cuando DD supera techo."""
+    db = duckclaw.DuckClaw(":memory:")
+    db.execute("CREATE SCHEMA IF NOT EXISTS test_worker_ceiling")
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS test_worker_ceiling.agent_beliefs (
+            belief_key VARCHAR PRIMARY KEY,
+            target_value REAL NOT NULL,
+            observed_value REAL,
+            threshold REAL NOT NULL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    config = {
+        "beliefs": [{"key": "max_portfolio_drawdown_pct", "target": 0.05, "threshold": 0.01, "comparison": "ceiling"}],
+        "actions": [{"trigger": "max_portfolio_drawdown_pct_breach", "skill": "x", "message": "DD alto."}],
+    }
+    from duckclaw.forge.homeostasis import HomeostasisManager
+
+    reg = BeliefRegistry.from_config(config)
+    mgr = HomeostasisManager(db=db, schema="test_worker_ceiling", registry=reg)
+    plan = mgr.check("max_portfolio_drawdown_pct", 0.08, auto_update=True)
+    assert plan["action"] == "restore"
 
 
 def test_homeostasis_manager_unknown_belief() -> None:

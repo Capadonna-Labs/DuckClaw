@@ -3,6 +3,9 @@ import asyncio
 import json
 import logging
 import os
+import re
+import subprocess
+import time
 from pathlib import Path
 
 # Multi-Vault: rutas bajo db/ deben resolver igual que el Gateway (cwd suele ser services/db-writer).
@@ -48,10 +51,12 @@ async def _publish_task_status(
 async def execute_write(redis_client: redis.Redis, message: str) -> None:
     """Ejecuta la consulta SQL de forma segura y confirma en Redis."""
     task_id = "unknown"
+    target_db_path = ""
+    query = ""
     try:
         payload = json.loads(message)
         task_id = str(payload.get("task_id") or "unknown")
-        query = payload.get("query")
+        query = str(payload.get("query") or "")
         params = payload.get("params", [])
         target_db_path = str(payload.get("db_path") or settings.DUCKDB_PATH)
         user_id = str(payload.get("user_id") or "default")
@@ -129,6 +134,55 @@ async def execute_write(redis_client: redis.Redis, message: str) -> None:
     except json.JSONDecodeError:
         logger.error("Error decodificando el mensaje de Redis. Formato JSON inválido.")
     except duckdb.Error as e:
+        # region agent log
+        try:
+            _holder_pid = ""
+            _holder_duckdb_fds: list[str] = []
+            _m = re.search(r"\(PID\s+(\d+)\)", str(e))
+            if _m:
+                _holder_pid = str(_m.group(1))
+                try:
+                    _raw = subprocess.check_output(
+                        ["lsof", "-p", _holder_pid],
+                        text=True,
+                        stderr=subprocess.STDOUT,
+                    )
+                    _holder_duckdb_fds = [
+                        _ln[-240:]
+                        for _ln in _raw.splitlines()
+                        if "duckdb" in _ln.lower()
+                    ][:12]
+                except Exception:
+                    _holder_duckdb_fds = []
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "hypothesisId": "L6_db_writer_lock_detail",
+                            "location": "services/db-writer/main.py:execute_write",
+                            "message": "duckdb_write_error",
+                            "data": {
+                                "pid": os.getpid(),
+                                "task_id": task_id,
+                                "db_path_tail": (target_db_path or "")[-140:],
+                                "query_prefix": (query or "")[:120],
+                                "error": str(e)[:300],
+                                "holder_pid": _holder_pid,
+                                "holder_duckdb_fds": _holder_duckdb_fds,
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
         logger.error("[%s] Error de DuckDB ejecutando la query: %s", task_id, e)
         await _publish_task_status(
             redis_client,

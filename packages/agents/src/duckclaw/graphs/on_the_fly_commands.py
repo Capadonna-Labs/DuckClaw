@@ -17,7 +17,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Callable, Optional, Tuple
+import uuid
+from typing import Any, Callable, Literal, Optional, Tuple
+from pydantic import BaseModel, ConfigDict, ValidationError
 from duckclaw.vaults import (
     create_vault as _vault_create,
     list_vaults as _vault_list,
@@ -37,6 +39,147 @@ from duckclaw.utils.logger import get_obs_logger, log_fly, structured_log_contex
 from duckclaw.utils.telegram_markdown_v2 import TELEGRAM_MARKDOWN_V2_SPECIAL
 
 _PREFIX = "chat_"
+
+# Revisión proactiva /goals --delta (agent_config)
+_GOALS_DELTA_SECONDS_KEY = "goals_delta_seconds"
+_GOALS_PROACTIVE_LAST_FIRE_KEY = "goals_proactive_last_fire_epoch"
+_GOALS_PROACTIVE_ANCHOR_KEY = "goals_proactive_schedule_anchor_epoch"
+_GOALS_PROACTIVE_TENANT_KEY = "goals_proactive_tenant_id"
+_GOALS_DELTA_ANCHOR_LEGACY_KEY = "goals_delta_anchor"
+_GOALS_DELTA_META_KEY = "goals_delta_meta"
+GOALS_DELTA_MIN_SECONDS = 60
+GOALS_DELTA_MAX_SECONDS = 7 * 24 * 3600
+
+
+def parse_goals_delta_arg(fragment: str) -> tuple[Optional[int], Optional[str]]:
+    """
+    Convierte texto tras --delta en segundos. (0, None) = desactivar.
+    (None, err) = error. Requiere mínimo GOALS_DELTA_MIN_SECONDS si > 0.
+    """
+    s = (fragment or "").strip().lower()
+    if not s:
+        return None, "Falta valor tras --delta (ej. 20min, 1h, off)."
+    if s in ("off", "0", "false", "no", "disable"):
+        return 0, None
+    collapsed = re.sub(r"\s+", "", s)
+    m = re.match(r"^(\d+(?:\.\d+)?)([a-z]*)$", collapsed, re.I)
+    if not m:
+        return None, f"No reconozco el intervalo `{fragment}`. Usa ej. 20min, 1h, 45s o off."
+    val = float(m.group(1))
+    unit = (m.group(2) or "m").lower()
+    if unit in ("", "m", "min", "mins", "minute", "minutes"):
+        secs = int(val * 60)
+    elif unit in ("h", "hr", "hrs", "hour", "hours"):
+        secs = int(val * 3600)
+    elif unit in ("s", "sec", "secs", "second", "seconds"):
+        secs = int(val)
+    else:
+        return None, f"Unidad no válida en `{fragment}`."
+    if secs <= 0:
+        return None, "El intervalo debe ser positivo (o usa off)."
+    if secs < GOALS_DELTA_MIN_SECONDS:
+        return None, f"El mínimo es {GOALS_DELTA_MIN_SECONDS}s (~1 min)."
+    if secs > GOALS_DELTA_MAX_SECONDS:
+        return None, "El máximo es 7 días."
+    return secs, None
+
+
+def format_goals_delta_interval_human(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds % 3600 == 0 and seconds >= 3600:
+        return f"{seconds // 3600}h"
+    if seconds % 60 == 0:
+        return f"{seconds // 60} min"
+    return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+
+
+def format_goals_countdown_human(seconds: int) -> str:
+    """Texto breve para tiempo restante hasta el próximo tick programado."""
+    s = max(0, int(seconds))
+    if s <= 0:
+        return "menos de 1 s"
+    if s >= 3600:
+        h, r = divmod(s, 3600)
+        m, _ = divmod(r, 60)
+        return f"{h}h {m}m" if m else f"{h}h"
+    if s >= 60:
+        m, sec = divmod(s, 60)
+        return f"{m} min {sec}s" if sec else f"{m} min"
+    return f"{s}s"
+
+
+def _goals_proactive_interval_countdown_parts(
+    db: Any, chat_id: Any, ds_list: int
+) -> tuple[str, str, str]:
+    """interval_h, countdown_part, last_bit para mensajes de revisión proactiva."""
+    last_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY) or "").strip()
+    anchor_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY) or "").strip()
+    now = time.time()
+    last_f: Optional[float] = None
+    if last_raw:
+        try:
+            last_f = float(last_raw)
+        except (TypeError, ValueError):
+            last_f = None
+    anchor_f: Optional[float] = None
+    if anchor_raw:
+        try:
+            anchor_f = float(anchor_raw)
+        except (TypeError, ValueError):
+            anchor_f = None
+    interval_h = format_goals_delta_interval_human(ds_list)
+    if last_f and last_f > 0:
+        remaining = max(0, int(last_f + float(ds_list) - now + 0.999))
+        countdown_part = f" · próximo en ~{format_goals_countdown_human(remaining)}"
+    elif anchor_f and anchor_f > 0:
+        remaining = max(0, int(anchor_f + float(ds_list) - now + 0.999))
+        countdown_part = f" · próximo en ~{format_goals_countdown_human(remaining)}"
+    else:
+        countdown_part = (
+            f" · próximo en hasta ~{format_goals_countdown_human(max(0, int(ds_list)))} "
+            "(aprox.; vuelve a ejecutar /goals --delta para anclar la hora)"
+        )
+    last_bit = ""
+    if last_f and last_f > 0:
+        try:
+            from datetime import datetime, timezone
+
+            last_bit = (
+                f" · último tick UTC ~{datetime.fromtimestamp(last_f, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+            )
+        except Exception:
+            pass
+
+    return interval_h, countdown_part, last_bit
+
+
+def _goals_proactive_listing_footer(db: Any, chat_id: Any, ds_list: int) -> str:
+    """Pie de /goals cuando hay delta activo: intervalo, cuenta atrás aproximada, último tick."""
+    interval_h, countdown_part, last_bit = _goals_proactive_interval_countdown_parts(
+        db, chat_id, ds_list
+    )
+    return (
+        f"\nRevisión proactiva: cada ~{interval_h}{countdown_part}{last_bit} "
+        "(/goals --delta off para apagar)."
+    )
+
+
+def chat_id_from_goals_delta_config_key(key: str) -> Optional[str]:
+    """Extrae chat_id desde fila agent_config con sufijo _goals_delta_seconds."""
+    suf = f"_{_GOALS_DELTA_SECONDS_KEY}"
+    if not key.startswith(_PREFIX) or not key.endswith(suf):
+        return None
+    return key[len(_PREFIX) : -len(suf)] or None
+
+
+def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
+    set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, "0")
+    set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
+    set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, "")
+    set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, "")
+    set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
+    set_chat_state(db, chat_id, _GOALS_DELTA_META_KEY, "")
 
 
 def _skip_runtime_ddl(db: Any) -> bool:
@@ -2713,12 +2856,13 @@ def _normalize_belief_key(key: str) -> str:
     return "".join(c if c.isalnum() or c == "_" else "_" for c in (key or "").strip())
 
 
-def _get_goals_registry_for_manager() -> Optional[Any]:
-    """Registro de goals válidos para el manager (desde el primer template con homeostasis, ej. finanz)."""
+def _get_goals_registry_fallback_first() -> Optional[Any]:
+    """Primer template con homeostasis (orden del FS); solo como fallback."""
     try:
         from duckclaw.workers.factory import list_workers
         from duckclaw.workers.manifest import load_manifest
         from duckclaw.forge.homeostasis.belief_registry import BeliefRegistry
+
         for wid in list_workers():
             try:
                 spec = load_manifest(wid)
@@ -2731,6 +2875,24 @@ def _get_goals_registry_for_manager() -> Optional[Any]:
     except Exception:
         pass
     return None
+
+
+def _get_goals_registry_for_chat(db: Any, chat_id: Any) -> Optional[Any]:
+    """Registro homeostasis del worker activo del chat; fallback al primer template con YAML."""
+    from duckclaw.forge.homeostasis.belief_registry import BeliefRegistry
+    from duckclaw.workers.manifest import load_manifest
+
+    wid = (get_chat_state(db, chat_id, "worker_id") or "").strip()
+    if wid and wid.lower() != "manager":
+        try:
+            spec = load_manifest(wid)
+            config = getattr(spec, "homeostasis_config", None) or {}
+            registry = BeliefRegistry.from_config(config)
+            if registry.beliefs:
+                return registry
+        except Exception:
+            pass
+    return _get_goals_registry_fallback_first()
 
 
 def get_manager_goals(db: Any, chat_id: Any) -> list:
@@ -2756,6 +2918,60 @@ def _goal_title(goal: dict, fallback_key: str) -> str:
     if t:
         return t[:80] + ("…" if len((goal.get("title") or "").strip()) > 80 else "")
     return (goal.get("belief_key") or fallback_key or "").strip()
+
+
+def build_goals_proactive_system_event_message(goals: list) -> str:
+    titles: list[str] = []
+    for g in goals:
+        if not isinstance(g, dict):
+            continue
+        k = (g.get("belief_key") or "").strip()
+        titles.append(_goal_title(g, k))
+    summary = "; ".join(titles[:12]) if titles else "(sin títulos)"
+    return (
+        "[SYSTEM_EVENT: Revisión periódica de /goals. Objetivos: "
+        f"{summary}. Evalúa con herramientas si hace falta qué tan alineado está el "
+        "contexto actual (portfolio, sesión de trading, etc.) con cumplir cada meta. "
+        "Responde al usuario con un breve análisis o propuesta concreta (mensaje útil; "
+        "si el worker lo permite, señal u orden solo si procede).]"
+    )
+
+
+class TradingTickEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["TRADING_TICK"] = "TRADING_TICK"
+    trigger: str = "trading_session"
+    session_uid: str
+    tickers: list[str]
+    mode: str = "paper"
+    signal_threshold: str = "GAS"
+    directive: str
+
+
+def build_trading_tick_system_event_message(
+    *,
+    session_uid: str,
+    tickers: list[str],
+    mode: str,
+    signal_threshold: str,
+) -> str:
+    event = TradingTickEvent.model_validate(
+        {
+            "session_uid": str(session_uid or "").strip(),
+            "tickers": [str(t or "").strip().upper() for t in (tickers or []) if str(t or "").strip()],
+            "mode": str(mode or "paper").strip().lower() or "paper",
+            "signal_threshold": str(signal_threshold or "GAS").strip().upper() or "GAS",
+            "directive": (
+                "TRADING TICK AUTÓNOMO (HITL): 1) validar sesión ACTIVE; 2) ejecutar evaluate_cfd_state "
+                "con session_uid+tickers; 3) si outcome=ERROR o all_data_failed, reportar ceguera sensorial; "
+                "4) si outcome=MISALIGNED y no hay pending por ticker, proponer máximo 1 señal por ticker con "
+                "propose_trade_signal (NO ejecutar); 5) si mode=live agregar warning de capital real; "
+                "6) si ALIGNED, no enviar resumen al usuario."
+            ),
+        }
+    )
+    return "[SYSTEM_EVENT: " + event.model_dump_json(ensure_ascii=False) + "]"
 
 
 def _natural_language_goal_to_params(db: Any, chat_id: Any, text: str) -> Optional[dict]:
@@ -2799,18 +3015,76 @@ def _natural_language_goal_to_params(db: Any, chat_id: Any, text: str) -> Option
         return None
 
 
-def execute_goals(db: Any, chat_id: Any, args: str) -> str:
-    """/goals [--reset] | /goals <goal>: listar, resetear o añadir. Acepta clave (presupuesto_mensual) o lenguaje natural; el manager convierte a parámetros homeostasis."""
+def execute_goals(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    tenant_id: Any = None,
+    vault_user_id: Any = None,
+) -> str:
+    """/goals [--reset] [--delta …] | /goals <goal>: listar, resetear, programar revisión proactiva o añadir objetivo."""
+    _ = vault_user_id
     from duckclaw.forge.homeostasis.surprise import compute_surprise
-    registry = _get_goals_registry_for_manager()
-    valid_keys = [b.key for b in (registry.beliefs if registry else [])]
+
+    registry = _get_goals_registry_for_chat(db, chat_id)
     goals = get_manager_goals(db, chat_id)
+    tid = str(tenant_id or "default").strip() or "default"
+    active_wid = (get_chat_state(db, chat_id, "worker_id") or "").strip()
 
     raw = (args or "").strip()
+    toks = raw.split()
+
+    if toks and toks[0] == "--delta":
+        if len(toks) < 2:
+            return (
+                "Uso: /goals --delta 20min (o 1h, 90s) · /goals --delta off\n"
+                "El ticker (heartbeat o embebido en el gateway) escanea el hub y las bóvedas "
+                f"en db/private/*/*.duckdb. Intervalo permitido: {GOALS_DELTA_MIN_SECONDS}s … 7d."
+            )
+        dur_parts: list[str] = []
+        i = 1
+        while i < len(toks) and not toks[i].startswith("--"):
+            dur_parts.append(toks[i])
+            i += 1
+        dur_str = "".join(dur_parts)
+        secs, err = parse_goals_delta_arg(dur_str)
+        if err:
+            return err
+        if secs == 0:
+            clear_goals_proactive_schedule(db, chat_id)
+            return "Revisión proactiva desactivada (/goals --delta off)."
+        set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, str(secs))
+        set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, tid)
+        set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
+        _anchor_now = str(time.time())
+        set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, _anchor_now)
+        set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, _anchor_now)
+        set_chat_state(
+            db,
+            chat_id,
+            _GOALS_DELTA_META_KEY,
+            json.dumps({"trigger": "goals_cli"}, ensure_ascii=False),
+        )
+        human = format_goals_delta_interval_human(secs)
+        return (
+            f"Revisión proactiva cada ~{human}. "
+            "El ticker del heartbeat disparará un SYSTEM_EVENT para revisar tus /goals. "
+            "Usa /goals para listar. /goals --delta off para cancelar."
+        )
+
     do_reset = raw.lower() == "--reset"
 
     if do_reset:
+        clear_goals_proactive_schedule(db, chat_id)
         set_manager_goals(db, chat_id, [])
+        if active_wid == _QUANT_TRADER_TEMPLATE_ID:
+            ok_r, det_r = _quant_clear_risk_constraints_vault(db, tenant_id=tid)
+            if not ok_r:
+                return (
+                    "✅ Objetivos reiniciados (aviso: no se limpió riesgo en bóveda: "
+                    f"{det_r}). Crea con /goals <objetivo>."
+                )
         return "✅ Objetivos reiniciados. Crea con /goals <objetivo en lenguaje natural o clave>."
 
     # Añadir: /goals <clave o lenguaje natural>
@@ -2851,19 +3125,56 @@ def execute_goals(db: Any, chat_id: Any, args: str) -> str:
                     "observed_value": None,
                     "title": raw[:120].strip(),
                 }
+        low_raw = raw.lower()
+        if active_wid == _QUANT_TRADER_TEMPLATE_ID and (
+            "drawdown" in low_raw
+            or "draw down" in low_raw
+            or " max dd" in low_raw
+            or low_raw.strip().startswith("dd ")
+        ):
+            _quant_normalize_drawdown_goal(new_goal)
+        if active_wid == _QUANT_TRADER_TEMPLATE_ID and _quant_is_drawdown_goal(new_goal):
+            _quant_normalize_drawdown_goal(new_goal)
         existing = [g for g in goals if (g.get("belief_key") or "").strip() == new_goal["belief_key"]]
         if existing:
             goals = [g for g in goals if (g.get("belief_key") or "").strip() != new_goal["belief_key"]]
         goals.append(new_goal)
         set_manager_goals(db, chat_id, goals)
         title_display = new_goal.get("title") or new_goal["belief_key"]
+        if (
+            active_wid == _QUANT_TRADER_TEMPLATE_ID
+            and (new_goal.get("belief_key") or "").strip() == "max_portfolio_drawdown_pct"
+        ):
+            try:
+                cap = float(new_goal.get("target_value") or 0.0)
+            except (TypeError, ValueError):
+                cap = 0.0
+            ok_m, det_m = _quant_mirror_max_drawdown_to_vault(db, tenant_id=tid, max_dd=cap)
+            if not ok_m:
+                return f"✅ Objetivo añadido (aviso: riesgo no guardado en bóveda: {det_m})"
         return f"✅ Objetivo añadido: {title_display}"
 
     # Listar (por defecto vacío)
-    if not goals:
-        return "🎯 Manager\nNo hay goals. Crea con /goals <objetivo>, ej. /goals disminuir gasto en recreación."
+    try:
+        ds_list = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
+    except ValueError:
+        ds_list = 0
+    if ds_list < 0:
+        ds_list = 0
 
-    lines = ["🎯 Manager"]
+    if not goals:
+        empty = (
+            "\U0001f3af Manager\nNo hay goals. Crea con /goals <objetivo>, ej. /goals disminuir gasto en recreación."
+        )
+        if ds_list > 0:
+            ih, cp, lb = _goals_proactive_interval_countdown_parts(db, chat_id, ds_list)
+            empty += (
+                f"\n(Revisión proactiva cada ~{ih}{cp}{lb}; "
+                "añade objetivos para que el tick tenga metas que revisar.)"
+            )
+        return empty
+
+    lines = ["\U0001f3af Manager"]
     try:
         key_to_belief = {b.key.strip(): b for b in (registry.beliefs if registry else [])}
         for g in goals:
@@ -2879,8 +3190,13 @@ def execute_goals(db: Any, chat_id: Any, args: str) -> str:
             except (TypeError, ValueError):
                 observed = None
             title = _goal_title(g, key)
+            comp = "symmetric"
+            if b is not None:
+                comp = getattr(b, "comparison", "symmetric") or "symmetric"
+            elif key == "max_portfolio_drawdown_pct":
+                comp = "ceiling"
             if observed is not None and target is not None and thresh is not None and (target != 0 or thresh != 0):
-                res = compute_surprise(observed, target, thresh)
+                res = compute_surprise(observed, target, thresh, comparison=comp)
                 st = "⚠️" if res.is_anomaly else "✓"
                 lines.append(f"- {title}: target={target} (obs: {observed}) {st}")
             elif target is not None and thresh is not None:
@@ -2889,7 +3205,8 @@ def execute_goals(db: Any, chat_id: Any, args: str) -> str:
                 lines.append(f"- {title}")
     except Exception as e:
         return f"Error: {e}."
-    return "\n".join(lines) + "\n\n/goals --reset"
+    extra_delta = _goals_proactive_listing_footer(db, chat_id, ds_list) if ds_list > 0 else ""
+    return "\n".join(lines) + extra_delta + "\n\n/goals --reset"
 
 
 def execute_tasks(db: Any, chat_id: Any) -> str:
@@ -3334,6 +3651,11 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ("/approve", "Aprobar última acción"),
         ("/reject", "Rechazar última acción"),
         ("/execute_signal <uuid>", "HITL: confirma ejecución (Finanz: execute_order; Quant Trader: execute_approved_signal)"),
+        ("/cancel_signal <uuid>", "HITL: cancela señal pendiente (PENDING_HITL/AWAITING_HITL)"),
+        (
+            "/trading_session --mode paper|live [--tickers A,B] [--confirm] [--status] [--stop]",
+            "Quant: sesión activa + session_goal + auto delta de /goals (live requiere --confirm)",
+        ),
         ("/lake", "Estado del túnel SSH Capadonna (env + prueba rápida)"),
     ]
     if _leila_fly_commands_enabled():
@@ -3692,9 +4014,697 @@ def execute_lake_status() -> str:
     return "\n".join(lines)
 
 
-def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
+_TRADING_SESSIONS_DDL = """
+CREATE SCHEMA IF NOT EXISTS quant_core;
+CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
+  id VARCHAR PRIMARY KEY,
+  mode VARCHAR NOT NULL,
+  tickers VARCHAR NOT NULL DEFAULT '',
+  session_uid VARCHAR,
+  session_goal JSON,
+  status VARCHAR NOT NULL DEFAULT 'ACTIVE',
+  anchor_equity DOUBLE,
+  peak_equity DOUBLE,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE quant_core.trading_sessions ADD COLUMN IF NOT EXISTS session_uid VARCHAR;
+ALTER TABLE quant_core.trading_sessions ADD COLUMN IF NOT EXISTS session_goal JSON;
+ALTER TABLE quant_core.trading_sessions ADD COLUMN IF NOT EXISTS anchor_equity DOUBLE;
+ALTER TABLE quant_core.trading_sessions ADD COLUMN IF NOT EXISTS peak_equity DOUBLE;
+"""
+
+_TRADING_RISK_DDL = """
+CREATE SCHEMA IF NOT EXISTS quant_core;
+CREATE TABLE IF NOT EXISTS quant_core.trading_risk_constraints (
+  id VARCHAR PRIMARY KEY,
+  max_drawdown_pct DOUBLE,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+# Fila singleton en quant_core.trading_sessions (PK lógica del “estado de sesión”).
+_TRADING_SESSION_ROW_ID = "active"
+_QUANT_TRADER_TEMPLATE_ID = "Quant-Trader"
+
+
+def _quant_is_drawdown_goal(goal: dict) -> bool:
+    k = (goal.get("belief_key") or "").strip().lower()
+    if k == "max_portfolio_drawdown_pct":
+        return True
+    t = (goal.get("title") or "").lower()
+    return "drawdown" in t or "max dd" in t
+
+
+def _quant_normalize_drawdown_goal(goal: dict) -> None:
+    """Ajusta belief_key y target (0–1) para límites de DD."""
+    goal["belief_key"] = "max_portfolio_drawdown_pct"
+    try:
+        tv = float(goal.get("target_value") or 0.0)
+    except (TypeError, ValueError):
+        tv = 0.0
+    if tv > 1.0:
+        tv = tv / 100.0
+    goal["target_value"] = max(0.0, min(1.0, tv))
+
+
+def _quant_mirror_max_drawdown_to_vault(
+    db: Any,
+    *,
+    tenant_id: str,
+    max_dd: float,
+) -> tuple[bool, str]:
+    upsert = """
+INSERT INTO quant_core.trading_risk_constraints (id, max_drawdown_pct)
+VALUES ('active', ?)
+ON CONFLICT (id) DO UPDATE SET
+  max_drawdown_pct = excluded.max_drawdown_pct,
+  updated_at = now()
+"""
+    return _vault_apply_sql_statements(
+        db,
+        [
+            (_TRADING_RISK_DDL, None),
+            (upsert, [float(max_dd)]),
+        ],
+        tenant_id=str(tenant_id or "default").strip() or "default",
+    )
+
+
+def _quant_clear_risk_constraints_vault(db: Any, *, tenant_id: str) -> tuple[bool, str]:
+    return _vault_apply_sql_statements(
+        db,
+        [("DELETE FROM quant_core.trading_risk_constraints WHERE id = 'active'", None)],
+        tenant_id=str(tenant_id or "default").strip() or "default",
+    )
+
+
+class TradingSessionGoal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    objective: str = "maximize_pnl"
+    max_drawdown_pct: float = 2.0
+    position_size_pct: float = 5.0
+    signal_threshold: str = "GAS"
+    tickers: list[str] = []
+    mode: str = "paper"
+
+
+class TradingSessionCliArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Optional[str] = None
+    tickers_csv: str = ""
+    confirm: bool = False
+    stop: bool = False
+    status: bool = False
+    max_drawdown_pct: float = 2.0
+    position_size_pct: float = 5.0
+    signal_threshold: str = "GAS"
+
+
+def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArgs], Optional[str]]:
+    """Parsea flags de /trading_session."""
+    # region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H1_trading_session_parse",
+                        "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_parse_trading_session_cli",
+                        "message": "parse_entry",
+                        "data": {
+                            "args_raw": str(args or ""),
+                            "args_repr": repr(args or ""),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+    mode: Optional[str] = None
+    tickers_raw: list[str] = []
+    confirm = False
+    stop = False
+    status = False
+    max_drawdown = 2.0
+    position_size = 5.0
+    signal_threshold = "GAS"
+    tokens = (args or "").strip().split()
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t == "--mode" and i + 1 < len(tokens):
+            mode = tokens[i + 1].strip().lower()
+            i += 2
+            continue
+        if t == "--tickers" and i + 1 < len(tokens):
+            tickers_raw = [x.strip().upper() for x in tokens[i + 1].split(",") if x.strip()]
+            i += 2
+            continue
+        if t == "--confirm":
+            confirm = True
+            i += 1
+            continue
+        if t == "--stop":
+            stop = True
+            i += 1
+            continue
+        if t == "--status":
+            status = True
+            i += 1
+            continue
+        if t == "--max-drawdown" and i + 1 < len(tokens):
+            try:
+                max_drawdown = float(tokens[i + 1])
+            except ValueError:
+                return None, "--max-drawdown debe ser numérico"
+            i += 2
+            continue
+        if t == "--position-size" and i + 1 < len(tokens):
+            try:
+                position_size = float(tokens[i + 1])
+            except ValueError:
+                return None, "--position-size debe ser numérico"
+            i += 2
+            continue
+        if t == "--signal" and i + 1 < len(tokens):
+            signal_threshold = str(tokens[i + 1] or "").strip().upper()
+            i += 2
+            continue
+        i += 1
+    if stop and status:
+        return None, "Usa --stop o --status, no ambos."
+    if (not stop and not status) and not mode:
+        return None, "Falta --mode paper|live"
+    if mode and mode not in ("paper", "live"):
+        return None, "mode debe ser paper o live"
+    seen: set[str] = set()
+    tickers_ordered: list[str] = []
+    for x in tickers_raw:
+        if x not in seen:
+            seen.add(x)
+            tickers_ordered.append(x)
+    try:
+        parsed = TradingSessionCliArgs.model_validate(
+            {
+                "mode": mode,
+                "tickers_csv": ",".join(tickers_ordered),
+                "confirm": bool(confirm),
+                "stop": bool(stop),
+                "status": bool(status),
+                "max_drawdown_pct": float(max_drawdown),
+                "position_size_pct": float(position_size),
+                "signal_threshold": signal_threshold or "GAS",
+            }
+        )
+    except ValidationError as exc:
+        return None, f"flags inválidos: {exc}"
+    # region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H1_trading_session_parse",
+                        "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_parse_trading_session_cli",
+                        "message": "parse_result",
+                        "data": {
+                            "mode": parsed.mode,
+                            "confirm": bool(parsed.confirm),
+                            "status": bool(parsed.status),
+                            "stop": bool(parsed.stop),
+                            "tickers_csv": parsed.tickers_csv,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+    return parsed, None
+
+
+def _session_goal_from_cli(parsed: TradingSessionCliArgs) -> TradingSessionGoal:
+    threshold = str(parsed.signal_threshold or "GAS").strip().upper() or "GAS"
+    allowed = {"SOLID", "LIQUID", "GAS", "PLASMA"}
+    if threshold not in allowed:
+        threshold = "GAS"
+    tickers = [x.strip().upper() for x in (parsed.tickers_csv or "").split(",") if x.strip()]
+    return TradingSessionGoal.model_validate(
+        {
+            "objective": "maximize_pnl",
+            "max_drawdown_pct": max(0.1, float(parsed.max_drawdown_pct)),
+            "position_size_pct": max(0.1, float(parsed.position_size_pct)),
+            "signal_threshold": threshold,
+            "tickers": tickers,
+            "mode": str(parsed.mode or "paper").strip().lower() or "paper",
+        }
+    )
+
+
+def _vault_apply_sql_statements(
+    db: Any,
+    statements: list[tuple[str, Optional[list[Any]]]],
+    *,
+    tenant_id: str,
+) -> tuple[bool, str]:
+    """Ejecuta sentencias en la bóveda o vía cola Redis si el handle es read_only."""
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        return False, "Ruta de bóveda no resuelta"
+    resolved = str(Path(raw_path).expanduser().resolve())
+    uid = _infer_user_id_for_audit_queue(resolved)
+    tid = str(tenant_id or "default").strip() or "default"
+
+    if not _skip_runtime_ddl(db):
+        try:
+            for sql, params in statements:
+                if params is not None:
+                    db.execute(sql, params)
+                else:
+                    db.execute(sql)
+            return True, ""
+        except Exception as exc:
+            return False, str(exc)[:500]
+
+    try:
+        from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
+    except Exception as exc:
+        return False, f"cola DuckDB no disponible: {exc}"
+
+    released_ro = False
+    try:
+        susp = getattr(db, "suspend_readonly_file_handle", None)
+        resu = getattr(db, "resume_readonly_file_handle", None)
+        if callable(susp) and callable(resu):
+            susp()
+            released_ro = True
+        for sql, params in statements:
+            write_tid = enqueue_duckdb_write_sync(
+                db_path=resolved,
+                query=sql.strip(),
+                params=list(params or []),
+                user_id=uid,
+                tenant_id=tid,
+            )
+            st = poll_task_status_sync(write_tid, timeout_sec=30.0)
+            if st is None:
+                return False, "timeout esperando db-writer"
+            if st.status != "success":
+                return False, (st.detail or "db-writer failed")[:500]
+        return True, ""
+    finally:
+        if released_ro:
+            try:
+                resu2 = getattr(db, "resume_readonly_file_handle", None)
+                if callable(resu2):
+                    resu2()
+            except Exception:
+                pass
+
+
+def _ensure_trading_session_goals_delta(
+    db: Any,
+    *,
+    chat_id: Any,
+    tenant_id: str,
+    session_uid: str,
+) -> tuple[bool, int]:
+    """Activa goals delta por default (5m) si aún no está activo para el chat."""
+    try:
+        current = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
+    except ValueError:
+        current = 0
+    if current > 0:
+        return False, current
+    default_secs = 300
+    set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, str(default_secs))
+    set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, str(tenant_id or "default"))
+    set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
+    now_s = str(time.time())
+    set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, now_s)
+    set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, now_s)
+    set_chat_state(
+        db,
+        chat_id,
+        _GOALS_DELTA_META_KEY,
+        json.dumps({"trigger": "trading_session", "session_uid": session_uid}, ensure_ascii=False),
+    )
+    return True, default_secs
+
+
+def _close_active_trading_session(
+    db: Any,
+    *,
+    chat_id: Any,
+    tenant_id: str,
+) -> tuple[bool, str]:
+    """Cierra sesión ACTIVE y limpia scheduler creado por /trading_session."""
+    session_uid = ""
+    try:
+        raw = db.query(
+            "SELECT session_uid FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if rows and isinstance(rows[0], dict):
+            session_uid = str(rows[0].get("session_uid") or "").strip()
+    except Exception:
+        session_uid = ""
+    ok, detail = _vault_apply_sql_statements(
+        db,
+        [
+            (_TRADING_SESSIONS_DDL, None),
+            ("UPDATE quant_core.trading_sessions SET status='CLOSED', updated_at=now() WHERE id = ?", [_TRADING_SESSION_ROW_ID]),
+        ],
+        tenant_id=tenant_id,
+    )
+    if not ok:
+        return False, detail
+    meta_raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
+    if '"trigger": "trading_session"' in meta_raw or '"trigger":"trading_session"' in meta_raw:
+        clear_goals_proactive_schedule(db, chat_id)
+        set_chat_state(db, chat_id, _GOALS_DELTA_META_KEY, "")
+        set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
+    pnl = 0.0
+    if session_uid:
+        try:
+            esc_uid = session_uid.replace("'", "''")
+            raw2 = db.query(
+                "SELECT COALESCE(SUM(COALESCE(unrealized_pnl,0)),0) AS pnl "
+                "FROM quant_core.trade_signals "
+                f"WHERE session_uid = '{esc_uid}' AND status='EXECUTED'"
+            )
+            rows2 = json.loads(raw2) if isinstance(raw2, str) else (raw2 or [])
+            if rows2 and isinstance(rows2[0], dict):
+                pnl = float(rows2[0].get("pnl") or 0.0)
+        except Exception:
+            pnl = 0.0
+    return True, f"session_uid={session_uid or 'n/a'} | pnl_estimado={pnl:.2f}"
+
+
+def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
+    try:
+        raw_cols = db.query("PRAGMA table_info('quant_core.trading_sessions')")
+        cols_rows = json.loads(raw_cols) if isinstance(raw_cols, str) else (raw_cols or [])
+        known_cols = {
+            str((it or {}).get("name") or "").strip().lower()
+            for it in cols_rows
+            if isinstance(it, dict)
+        }
+        has_session_goal = "session_goal" in known_cols
+        # region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "post-fix",
+                            "hypothesisId": "H4_schema_drift_session_goal",
+                            "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_read_trading_session_status_summary",
+                            "message": "status_schema_detected",
+                            "data": {
+                                "has_session_goal": has_session_goal,
+                                "known_cols": sorted(list(known_cols))[:12],
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
+        select_goal = "session_goal" if has_session_goal else "NULL AS session_goal"
+        raw = db.query(
+            "SELECT mode, tickers, session_uid, status, "
+            + select_goal
+            + " FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception as exc:
+        return f"No se pudo leer trading_sessions: {exc}"
+    if not rows or not isinstance(rows[0], dict):
+        return "No hay sesión de trading registrada."
+    row = rows[0]
+    if str(row.get("status") or "").strip().upper() != "ACTIVE":
+        return "No hay sesión activa."
+    uid = str(row.get("session_uid") or "").strip() or "n/a"
+    mode = str(row.get("mode") or "paper").strip().lower() or "paper"
+    tickers = str(row.get("tickers") or "").strip() or "(vacío)"
+    total = executed = cancelled = pending = 0
+    pnl_est = 0.0
+    try:
+        raw2 = db.query(
+            "SELECT status, COALESCE(unrealized_pnl, 0) AS pnl FROM quant_core.trade_signals "
+            "WHERE session_uid = '" + uid.replace("'", "''") + "'"
+        )
+        rows2 = json.loads(raw2) if isinstance(raw2, str) else (raw2 or [])
+    except Exception:
+        rows2 = []
+    if not rows2:
+        try:
+            raw3 = db.query(
+                "SELECT status FROM finance_worker.trade_signals ORDER BY created_at DESC LIMIT 200"
+            )
+            rows2 = json.loads(raw3) if isinstance(raw3, str) else (raw3 or [])
+        except Exception:
+            rows2 = []
+    for it in rows2:
+        if not isinstance(it, dict):
+            continue
+        st = str(it.get("status") or "").strip().upper()
+        total += 1
+        if st == "EXECUTED":
+            executed += 1
+        elif st in ("CANCELLED", "DISCARDED"):
+            cancelled += 1
+        elif st in ("PENDING_HITL", "AWAITING_HITL", "PENDING"):
+            pending += 1
+        try:
+            pnl_est += float(it.get("pnl") or 0.0)
+        except (TypeError, ValueError):
+            pass
+    try:
+        ds = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
+    except ValueError:
+        ds = 0
+    ds = max(0, ds)
+    if ds > 0:
+        _ih, cp, _lb = _goals_proactive_interval_countdown_parts(db, chat_id, ds)
+        tick_line = f"Tick delta: cada ~{format_goals_delta_interval_human(ds)}{cp}"
+    else:
+        tick_line = "Tick delta: inactivo"
+    return (
+        f"Sesión activa: `{uid}`\n"
+        f"Mode: `{mode}` | Tickers: `{tickers}`\n"
+        f"Señales generadas: {total}\n"
+        f"- Ejecutadas: {executed}\n"
+        f"- Canceladas: {cancelled}\n"
+        f"- Pendientes HITL: {pending}\n"
+        f"PnL estimado: {pnl_est:.2f}\n"
+        f"{tick_line}"
+    )
+
+
+def execute_trading_session(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    tenant_id: Any = None,
+    vault_user_id: Any = None,
+) -> str:
+    """/trading_session --mode paper|live [--tickers A,B] [--confirm] [--status] [--stop]."""
+    _ = vault_user_id
+    parsed, err = _parse_trading_session_cli(args)
+    # region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H2_trading_session_handler_branch",
+                        "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:execute_trading_session",
+                        "message": "handler_after_parse",
+                        "data": {
+                            "args_raw": str(args or ""),
+                            "parse_err": str(err or ""),
+                            "parsed_is_none": parsed is None,
+                            "parsed_status": (bool(parsed.status) if parsed is not None else None),
+                            "parsed_stop": (bool(parsed.stop) if parsed is not None else None),
+                            "parsed_mode": (str(parsed.mode) if parsed is not None else None),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+    if err or parsed is None:
+        return (
+            f"Error: {err}\n\n"
+            "Uso: `/trading_session --mode paper|live [--tickers AAPL,NVDA] [--confirm]`\n"
+            "Extras: `--max-drawdown 2 --position-size 5 --signal GAS --status --stop`\n"
+            "Modo **live** exige añadir **--confirm** en el mismo mensaje (riesgo de capital)."
+        )
+    tid = str(tenant_id or "default").strip() or "default"
+    if parsed.status:
+        return _read_trading_session_status_summary(db, chat_id=chat_id)
+    if parsed.stop:
+        ok_close, detail_close = _close_active_trading_session(
+            db,
+            chat_id=chat_id,
+            tenant_id=tid,
+        )
+        if not ok_close:
+            return f"No se pudo cerrar la sesión: {detail_close}"
+        return f"Sesión cerrada (status=CLOSED). Scheduler limpiado. {detail_close}"
+    mode = str(parsed.mode or "").strip().lower()
+    if mode == "live" and not parsed.confirm:
+        return (
+            "RIESGO DE CAPITAL: modo `live` enruta órdenes al broker real.\n\n"
+            "Si aceptas el riesgo, reenvía el comando con **--confirm**:\n"
+            "`/trading_session --mode live --tickers NVDA --confirm`"
+        )
+    session_uid = str(uuid.uuid4())
+    goal = _session_goal_from_cli(parsed)
+    goal_json = goal.model_dump_json(ensure_ascii=False)
+    upsert = """
+INSERT INTO quant_core.trading_sessions (id, mode, tickers, session_uid, session_goal, status)
+VALUES (?, ?, ?, ?, CAST(? AS JSON), 'ACTIVE')
+ON CONFLICT (id) DO UPDATE SET
+  mode = excluded.mode,
+  tickers = excluded.tickers,
+  session_uid = excluded.session_uid,
+  session_goal = excluded.session_goal,
+  status = 'ACTIVE',
+  updated_at = now()
+"""
+    reset_eq = (
+        "UPDATE quant_core.trading_sessions SET anchor_equity = NULL, peak_equity = NULL WHERE id = ?",
+        [_TRADING_SESSION_ROW_ID],
+    )
+    ok, detail = _vault_apply_sql_statements(
+        db,
+        [
+            (_TRADING_SESSIONS_DDL, None),
+            (
+                upsert,
+                [_TRADING_SESSION_ROW_ID, mode, parsed.tickers_csv or "", session_uid, goal_json],
+            ),
+            reset_eq,
+        ],
+        tenant_id=tid,
+    )
+    if not ok:
+        return f"No se pudo guardar la sesión: {detail}"
+    try:
+        from duckclaw.forge.skills.ibkr_bridge import fetch_ibkr_total_equity_numeric
+
+        eq, _eq_err = fetch_ibkr_total_equity_numeric()
+        if eq is not None:
+            _vault_apply_sql_statements(
+                db,
+                [
+                    (
+                        "UPDATE quant_core.trading_sessions SET anchor_equity = ?, peak_equity = ? WHERE id = ?",
+                        [float(eq), float(eq), _TRADING_SESSION_ROW_ID],
+                    )
+                ],
+                tenant_id=tid,
+            )
+    except Exception:
+        pass
+    enabled, secs = _ensure_trading_session_goals_delta(
+        db,
+        chat_id=chat_id,
+        tenant_id=tid,
+        session_uid=session_uid,
+    )
+    delta_msg = (
+        f"Ticker /goals auto-activado cada ~{format_goals_delta_interval_human(secs)} (trigger=trading_session)."
+        if enabled
+        else f"Ticker /goals ya activo cada ~{format_goals_delta_interval_human(secs)} (se conserva configuración)."
+    )
+    tick_note = f"\nTickers: `{parsed.tickers_csv}`" if parsed.tickers_csv else ""
+    sid = _TRADING_SESSION_ROW_ID
+    return (
+        f"**Id sesión:** `{sid}`\n"
+        f"**Unique ID sesión:** `{session_uid}`\n"
+        f"Sesión de trading **{mode.upper()}** registrada en `quant_core.trading_sessions` (status=ACTIVE)."
+        f"{tick_note}\n"
+        f"session_goal: `{goal_json}`\n"
+        f"{delta_msg}\n"
+        "El reactor Quant debe leer tickers y `status=ACTIVE` antes de proponer señales."
+    )
+
+
+
+def _execute_signal_verify_ledger(db: Any, sid: str) -> tuple[bool, str]:
+    """Comprueba que el UUID exista y sea ejecutable (Quant: finance_worker; Finanz: quant_core)."""
+    if db is None:
+        return True, ""
+    q_sid = sid.replace("'", "''")
+    try:
+        raw = db.query(
+            f"SELECT status FROM finance_worker.trade_signals WHERE signal_id = '{q_sid}' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception:
+        rows = []
+    if rows and isinstance(rows[0], dict):
+        st = str(rows[0].get("status") or "").upper()
+        if st in ("EXECUTED", "FAILED", "DISCARDED", "CANCELLED"):
+            return False, f"Señal ya cerrada ({st})."
+        if st not in ("AWAITING_HITL", "PENDING", "PENDING_HITL"):
+            return False, f"Estado no ejecutable: {st}"
+        return True, ""
+    try:
+        raw2 = db.query(
+            f"SELECT signal_id FROM quant_core.trade_signals WHERE signal_id = '{q_sid}' LIMIT 1"
+        )
+        rows2 = json.loads(raw2) if isinstance(raw2, str) else (raw2 or [])
+    except Exception:
+        rows2 = []
+    if rows2:
+        return True, ""
+    return False, "UUID no encontrado en finance_worker.trade_signals ni quant_core.trade_signals."
+
+
+def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
     """/execute_signal <uuid>: HITL para Finanz (execute_order) y Quant Trader (execute_approved_signal)."""
-    sid = (args or "").strip().lower()
+    sid = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
     if not re.match(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
         sid,
@@ -3712,6 +4722,9 @@ def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
                 return "❌ Acceso denegado: /execute_signal en War Room requiere clearance admin."
     except Exception:
         pass
+    ok_ledger, ledger_msg = _execute_signal_verify_ledger(db, sid)
+    if not ok_ledger:
+        return f"No: {ledger_msg}"
     try:
         from duckclaw.forge.skills.quant_hitl import grant_execute_order
 
@@ -3723,6 +4736,48 @@ def execute_quant_execute_signal(chat_id: Any, args: str) -> str:
         "Pide al asistente que ejecute **execute_order** (Finanz) o **execute_approved_signal** "
         f"(Quant Trader) con signal_id={sid} en esta sesión."
     )
+
+
+def execute_cancel_signal(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
+    """/cancel_signal <signal_id>: marca PENDING_HITL/AWAITING_HITL como CANCELLED."""
+    _ = chat_id
+    sid = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
+    if not re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", sid):
+        return "Uso: /cancel_signal <signal_id_UUID>"
+    tid = str(tenant_id or "default").strip() or "default"
+    qsid = sid.replace("'", "''")
+    try:
+        raw = db.query(
+            "SELECT status FROM finance_worker.trade_signals "
+            f"WHERE signal_id = '{qsid}' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception:
+        rows = []
+    st = str(rows[0].get("status") or "").strip().upper() if rows and isinstance(rows[0], dict) else ""
+    if st and st not in ("PENDING_HITL", "AWAITING_HITL", "PENDING"):
+        return f"No se puede cancelar: estado actual {st}."
+    ok, detail = _vault_apply_sql_statements(
+        db,
+        [
+            (
+                "UPDATE finance_worker.trade_signals SET status='CANCELLED' "
+                "WHERE signal_id = ? AND status IN ('PENDING_HITL','AWAITING_HITL','PENDING')",
+                [sid],
+            ),
+            (
+                "UPDATE quant_core.trade_signals SET status='CANCELLED', updated_at=now() "
+                "WHERE signal_id = ? AND status IN ('PENDING_HITL','AWAITING_HITL','PENDING')",
+                [sid],
+            ),
+        ],
+        tenant_id=tid,
+    )
+    if not ok:
+        return f"No se pudo cancelar la señal: {detail}"
+    return f"❌ Señal {sid} cancelada."
+
+
 def _dispatch_fly_command(
     db: Any,
     chat_id: Any,
@@ -3743,7 +4798,41 @@ def _dispatch_fly_command(
             return execute_lake_status()
         return "Uso: /lake o /lake status"
     if name == "execute_signal":
-        return execute_quant_execute_signal(chat_id, args)
+        return execute_quant_execute_signal(db, chat_id, args)
+    if name == "cancel_signal":
+        return execute_cancel_signal(db, chat_id, args, tenant_id=tenant_id)
+    if name == "trading_session":
+        # region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "pre-fix",
+                            "hypothesisId": "H3_dispatch_to_new_handler",
+                            "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_dispatch_fly_command",
+                            "message": "dispatch_trading_session",
+                            "data": {"args_raw": str(args or ""), "chat_id": str(chat_id)},
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
+        return execute_trading_session(
+            db,
+            chat_id,
+            args,
+            tenant_id=tenant_id,
+            vault_user_id=vault_user_id,
+        )
     if name == "register_wr_member":
         return register_wr_member(db, tenant_id, requester_id, args)
     if name == "get_wr_context":
@@ -3839,7 +4928,13 @@ def _dispatch_fly_command(
     if name == "setup":
         return _execute_setup(db, chat_id, args)
     if name == "goals":
-        return execute_goals(db, chat_id, args)
+        return execute_goals(
+            db,
+            chat_id,
+            args,
+            tenant_id=tenant_id,
+            vault_user_id=vault_user_id,
+        )
     if name == "tasks":
         return execute_tasks(db, chat_id)
     if name == "history":

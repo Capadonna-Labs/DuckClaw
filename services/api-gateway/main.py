@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import inspect
 import shutil
 import subprocess
 import sys
@@ -66,6 +67,77 @@ from duckclaw.gateway_db import (
     raw_gateway_db_path_from_mapping,
     resolve_env_duckdb_path,
 )
+
+
+def _install_duckdb_connect_probe() -> None:
+    """Debug probe: log RW duckdb.connect callers in Gateway PID."""
+    # region agent log
+    try:
+        import duckdb as _duckdb
+
+        _orig_connect = getattr(_duckdb, "connect", None)
+        if _orig_connect is None or getattr(_orig_connect, "_duckclaw_debug_wrapped", False):
+            return
+
+        def _dbg_connect(database: str = ":memory:", *args: Any, **kwargs: Any):  # type: ignore[no-untyped-def]
+            _ro = kwargs.get("read_only", None)
+            if _ro is None and len(args) >= 1:
+                _ro = bool(args[0])
+            _db = str(database or "")
+            _is_finanzdb1 = "finanzdb1.duckdb" in _db
+            if (_ro is False) or _is_finanzdb1:
+                try:
+                    _frames = inspect.stack(context=0)[1:8]
+                    _callers = []
+                    for _fr in _frames:
+                        _callers.append(
+                            {
+                                "file": str(_fr.filename)[-120:],
+                                "func": str(_fr.function),
+                                "line": int(_fr.lineno),
+                            }
+                        )
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "hypothesisId": (
+                                        "L9_gateway_finanzdb1_connect_any_mode"
+                                        if _is_finanzdb1
+                                        else "L5_gateway_duckdb_rw_connect"
+                                    ),
+                                    "location": "services/api-gateway/main.py:_install_duckdb_connect_probe",
+                                    "message": (
+                                        "duckdb_connect_finanzdb1_called"
+                                        if _is_finanzdb1
+                                        else "duckdb_connect_rw_called"
+                                    ),
+                                    "data": {
+                                        "pid": os.getpid(),
+                                        "database_tail": _db[-140:],
+                                        "read_only": _ro,
+                                        "read_only_from_positional": (kwargs.get("read_only", None) is None and len(args) >= 1),
+                                        "callers": _callers,
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                }
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+            return _orig_connect(database, *args, **kwargs)
+
+        setattr(_dbg_connect, "_duckclaw_debug_wrapped", True)
+        _duckdb.connect = _dbg_connect  # type: ignore[assignment]
+    except Exception:
+        pass
+    # endregion
 
 # Cargar .env desde repo root
 _repo_root = Path(__file__).resolve().parent.parent.parent
@@ -209,6 +281,7 @@ def _apply_telegram_token_per_gateway_env(*, matched_pm2_app_name: str | None) -
 _telegram_token_from_pm2_json, _matched_pm2_app_name = _apply_db_path_from_api_gateways_pm2()
 if not _telegram_token_from_pm2_json:
     _apply_telegram_token_per_gateway_env(matched_pm2_app_name=_matched_pm2_app_name)
+_install_duckdb_connect_probe()
 
 
 def _effective_telegram_bot_token() -> str:
@@ -216,6 +289,23 @@ def _effective_telegram_bot_token() -> str:
     from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
 
     return effective_telegram_bot_token_outbound()
+
+
+def _telegram_token_from_compact_routes_for_worker(worker_id: str) -> str:
+    """Fallback: resuelve token por worker desde DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES."""
+    try:
+        from core.telegram_compact_webhook_routes import load_path_webhook_bindings_from_env
+        from duckclaw.integrations.telegram.telegram_agent_token import canonical_manifest_worker_id
+
+        target = canonical_manifest_worker_id(worker_id)
+        if not target:
+            return ""
+        for b in load_path_webhook_bindings_from_env():
+            if canonical_manifest_worker_id(b.worker_id) == target:
+                return str(b.bot_token or "").strip()
+    except Exception:
+        return ""
+    return ""
 
 
 from duckclaw.pm2_gateway_db import dedicated_gateway_db_path_resolved
@@ -332,6 +422,7 @@ def _langsmith_auth_log(*, auth_status: str, user_id: str, tenant_id: str) -> No
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.redis = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
+    app.state.goals_ticker_task = None
     _normalize_local_artifacts_to_db()
     # Forzar que Redis persista dump.rdb dentro de db/ (best-effort).
     try:
@@ -357,7 +448,42 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         _gateway_log.warning("Telegram MCP: no se pudo iniciar (se usa Bot API directa): %s", exc)
 
+    _embed_goals_ticker = (
+        os.environ.get("DUCKCLAW_EMBED_GOALS_TICKER", "true").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
+    if _embed_goals_ticker:
+        try:
+            from services.heartbeat.main import GOALS_TICKER_POLL_SECONDS, _run_goals_proactive_tick
+
+            _poll_s = max(5, int(GOALS_TICKER_POLL_SECONDS))
+
+            async def _goals_ticker_loop() -> None:
+                while True:
+                    try:
+                        await _run_goals_proactive_tick()
+                    except Exception as _loop_exc:  # noqa: BLE001
+                        _gateway_log.warning("embedded goals ticker loop error: %s", _loop_exc)
+                    await asyncio.sleep(_poll_s)
+
+            app.state.goals_ticker_task = asyncio.create_task(_goals_ticker_loop())
+            _gateway_log.info(
+                "embedded goals ticker enabled (poll=%ss, source=services.heartbeat._run_goals_proactive_tick)",
+                _poll_s,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _gateway_log.warning("embedded goals ticker no disponible: %s", exc)
+
     yield
+
+    _gt = getattr(app.state, "goals_ticker_task", None)
+    if _gt is not None:
+        _gt.cancel()
+        try:
+            await _gt
+        except BaseException:
+            pass
+        app.state.goals_ticker_task = None
 
     _tg_mcp = getattr(app.state, "telegram_mcp", None)
     if _tg_mcp is not None:
@@ -913,10 +1039,13 @@ def _outbound_deliver_chat_text_sync(
     chat_id: str,
     user_id: str,
     text: str,
+    worker_id: str | None = None,
+    outbound_telegram_bot_token: str | None = None,
+    prefer_native_bot_api: bool = False,
     telegram_mcp: Any = None,
     redis_url: str | None = None,
     tenant_id: str = "default",
-) -> None:
+) -> bool:
     """
     Entrega texto largo al usuario: MCP (si hay sesión), luego **Bot API nativa**,
     y solo al final webhook n8n si sigue configurado.
@@ -934,9 +1063,9 @@ def _outbound_deliver_chat_text_sync(
             format_chat_id_for_terminal(cid or cid_raw),
             not bool(raw),
         )
-        return
+        return False
 
-    if telegram_mcp is not None:
+    if telegram_mcp is not None and not prefer_native_bot_api:
         try:
             from duckclaw.forge.skills.telegram_mcp_bridge import run_async, send_long_plain_via_mcp_chunks
 
@@ -949,7 +1078,7 @@ def _outbound_deliver_chat_text_sync(
                     format_chat_id_for_terminal(cid),
                     len(raw),
                 )
-                return
+                return True
             _gateway_log.warning("outbound deliver: MCP no entregó todo; fallback nativo chat_id=%s", cid)
         except Exception as exc:  # noqa: BLE001
             _gateway_log.warning("outbound deliver: MCP error %s; fallback nativo", exc)
@@ -967,13 +1096,23 @@ def _outbound_deliver_chat_text_sync(
             except Exception:
                 pass
 
-    token = _effective_telegram_bot_token()
+    token = (outbound_telegram_bot_token or "").strip()
+    worker_token = ""
+    if not token:
+        try:
+            worker_token = (resolve_telegram_token_for_worker_id((worker_id or "").strip()) or "").strip()
+            token = worker_token
+        except Exception:
+            token = ""
+    if not token:
+        token = _telegram_token_from_compact_routes_for_worker((worker_id or "").strip())
+    if not token:
+        token = _effective_telegram_bot_token()
     if token:
         try:
             from duckclaw.integrations.telegram.telegram_outbound_sync import (
                 send_long_plain_text_markdown_v2_chunks_sync,
             )
-
             _gateway_log.info(
                 "outbound deliver: intento Bot API nativo chat_id=%s len_text=%s",
                 format_chat_id_for_terminal(cid),
@@ -991,7 +1130,7 @@ def _outbound_deliver_chat_text_sync(
                     format_chat_id_for_terminal(cid),
                     n,
                 )
-                return
+                return True
             _gateway_log.warning(
                 "outbound deliver: Bot API no envió partes; fallback webhook si existe (chat_id=%s)",
                 format_chat_id_for_terminal(cid),
@@ -1004,6 +1143,7 @@ def _outbound_deliver_chat_text_sync(
             )
 
     _webhook_outbound_chat_reply_sync(chat_id=cid, user_id=uid, text=raw)
+    return False
 
 
 async def _authorize_or_reject(
@@ -1157,6 +1297,8 @@ async def agent_chat(
         )
     redis_client = getattr(http_request.app.state, "redis", None)
     _tg_mcp = getattr(http_request.app.state, "telegram_mcp", None)
+    _deliver_outbound_raw = (http_request.query_params.get("deliver_outbound") or "").strip().lower()
+    _deliver_outbound = _deliver_outbound_raw in ("1", "true", "yes", "on")
     result = await _invoke_chat(
         body,
         worker_id or "finanz",
@@ -1165,6 +1307,30 @@ async def agent_chat(
         redis_client=redis_client,
         telegram_mcp=_tg_mcp,
     )
+    if _deliver_outbound:
+        try:
+            resp_text = (result.get("response") or "").strip() if isinstance(result, dict) else ""
+            if resp_text:
+                uid_out = (body.user_id or "").strip() or session_id
+                loop = asyncio.get_running_loop()
+                _redis_url = str(settings.REDIS_URL)
+                delivered = bool(
+                    await loop.run_in_executor(
+                        None,
+                        lambda: _outbound_deliver_chat_text_sync(
+                            chat_id=session_id,
+                            user_id=uid_out,
+                            text=resp_text,
+                            worker_id=(worker_id or ""),
+                            prefer_native_bot_api=True,
+                            telegram_mcp=_tg_mcp,
+                            redis_url=_redis_url,
+                            tenant_id=tenant_id,
+                        ),
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001
+            _gateway_log.warning("agent_chat forced outbound failed: %s", exc)
     # Cliente HTTP puede cerrar antes (timeout ~300s, proxy, etc.): reenvío best-effort
     # a Telegram por Bot API nativa o webhook n8n.
     _fb = (os.getenv("DUCKCLAW_CHAT_OUTBOUND_ON_CLIENT_DISCONNECT", "true").strip().lower())
@@ -1189,6 +1355,7 @@ async def agent_chat(
                             chat_id=session_id,
                             user_id=uid_fb,
                             text=resp_text,
+                            worker_id=(worker_id or ""),
                             telegram_mcp=_mcp_snap,
                             redis_url=_redis_url,
                             tenant_id=tenant_id,
@@ -1455,25 +1622,25 @@ async def _invoke_chat(
                     _fly_cache_n = -1
                 # region agent log
                 try:
-                    import json as _json
-                    import time as _time
-
-                    _dbg_p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
-                    with open(_dbg_p, "a", encoding="utf-8") as _df:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
                         _df.write(
-                            _json.dumps(
+                            json.dumps(
                                 {
                                     "sessionId": "c964f7",
-                                    "hypothesisId": "H1",
-                                    "location": "main.py:_invoke_chat:fly",
-                                    "message": "before_fly_duckclaw",
+                                    "hypothesisId": "L2_fly_rw_lock",
+                                    "location": "services/api-gateway/main.py:_invoke_chat",
+                                    "message": "about_to_open_fly_rw",
                                     "data": {
-                                        "fly_cache_entries_before_clear": _fly_cache_n,
-                                        "fly_engine": str(_fly_engine),
-                                        "vault_suffix": (vpath or "")[-120:] if vpath else "",
-                                        "gw_suffix": (get_gateway_db_path() or "")[-120:],
+                                        "pid": os.getpid(),
+                                        "chat_id": str(session_id),
+                                        "vault_db_tail": (vpath or "")[-120:],
+                                        "message_prefix": msg_stripped[:40],
                                     },
-                                    "timestamp": int(_time.time() * 1000),
+                                    "timestamp": int(time.time() * 1000),
                                 }
                             )
                             + "\n"
@@ -1506,6 +1673,33 @@ async def _invoke_chat(
                 if fly_db is not None:
                     try:
                         fly_db.close()
+                        # region agent log
+                        try:
+                            with open(
+                                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                                "a",
+                                encoding="utf-8",
+                            ) as _df:
+                                _df.write(
+                                    json.dumps(
+                                        {
+                                            "sessionId": "c964f7",
+                                            "hypothesisId": "L2_fly_rw_lock",
+                                            "location": "services/api-gateway/main.py:_invoke_chat",
+                                            "message": "closed_fly_rw",
+                                            "data": {
+                                                "pid": os.getpid(),
+                                                "chat_id": str(session_id),
+                                                "vault_db_tail": (vault_db_path or "")[-120:],
+                                            },
+                                            "timestamp": int(time.time() * 1000),
+                                        }
+                                    )
+                                    + "\n"
+                                )
+                        except Exception:
+                            pass
+                        # endregion
                     except Exception:
                         pass
             if cmd_reply is not None:
@@ -1553,6 +1747,7 @@ async def _invoke_chat(
                 shared_db_path=shared_db_path,
                 is_system_prompt=is_system_prompt,
                 outbound_telegram_bot_token=(outbound_telegram_bot_token or "").strip() or None,
+                entry_worker_id=(worker_id or "").strip() or None,
             )
         except Exception as exc:
             try:

@@ -627,27 +627,6 @@ def replace_bare_summarize_image_on_vlm_gateway_down(reply: str, *, incoming: st
     inc = (incoming or "").strip()
     if VLM_GATEWAY_DOWN_META not in inc:
         return reply
-    # region agent log
-    try:
-        _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
-        with open(_p, "a", encoding="utf-8") as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H_IMAGE_EGRESS",
-                        "location": "user_reply_nl_synthesis.replace_bare_summarize_image_on_vlm_gateway_down",
-                        "message": "replaced_bare_summarize_image",
-                        "data": {"incoming_has_meta": True},
-                        "timestamp": int(__import__("time").time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     return (
         "La ingesta de visión en el gateway no pudo analizar la imagen en este turno (no hay bloque "
         "[VLM_CONTEXT]). Si viste un aviso de Gemini 503 o de MLX en el mismo puerto que el LM de texto, "

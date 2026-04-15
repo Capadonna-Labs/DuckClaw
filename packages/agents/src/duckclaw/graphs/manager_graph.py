@@ -645,6 +645,12 @@ def _prepend_subagent_label_once(reply: str, label: str) -> str:
     return f"{clean_label}\n\n{clean_reply}"
 
 
+def _is_goals_proactive_system_event(text: str) -> bool:
+    """True si el mensaje es el SYSTEM_EVENT del ticker de /goals --delta (debe ejecutar el worker de la ruta HTTP)."""
+    t = (text or "").strip()
+    return t.startswith("[SYSTEM_EVENT:") and "Revisión periódica de /goals" in t
+
+
 def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     """
     Convierte el mensaje del usuario en una tarea explícita para el subagente.
@@ -1171,6 +1177,7 @@ def build_manager_graph(
         get_chat_state,
         get_effective_team_templates,
         append_task_audit,
+        _resolve_template_id,
     )
     from duckclaw.graphs.activity import set_busy, set_idle
     from duckclaw.workers.factory import build_worker_graph as _build_worker_graph
@@ -1200,6 +1207,16 @@ def build_manager_graph(
                 if (wid or "").strip().lower() == preferred.lower():
                     assigned = (wid or "").strip()
                     break
+        incoming_r = (state.get("incoming") or state.get("input") or "").strip()
+        entry_r = (state.get("entry_worker_id") or "").strip()
+        _goals_ev = _is_goals_proactive_system_event(incoming_r)
+        _all_disk_r = list_workers(troot)
+        _avail_before_goals_merge = list(available)
+        _canon_entry = _resolve_template_id(_all_disk_r, entry_r) if (entry_r and _goals_ev) else None
+        if _canon_entry and _goals_ev:
+            assigned = _canon_entry
+            if _canon_entry not in available:
+                available = list(available) + [_canon_entry]
         out = {"assigned_worker_id": assigned, "available_templates": available}
         # Preservar estado para nodos siguientes (por si el grafo hace merge sustituyendo)
         if "incoming" in state:
@@ -1431,6 +1448,15 @@ def build_manager_graph(
         else:
             out["assigned_worker_id"] = assigned
 
+        route_entry = (state.get("entry_worker_id") or "").strip()
+        if route_entry and _is_goals_proactive_system_event(incoming):
+            _all_plan_disk = list_workers(troot)
+            _canon_re = _resolve_template_id(_all_plan_disk, route_entry)
+            if _canon_re and _canon_re in _all_plan_disk:
+                out["assigned_worker_id"] = _canon_re
+                if _canon_re not in available_plan:
+                    available_plan = list(available_plan) + [_canon_re]
+
         out["available_templates"] = available_plan
         # Preservar estado para invoke_worker
         out["incoming"] = incoming or state.get("incoming") or state.get("input") or state.get("message") or ""
@@ -1497,8 +1523,18 @@ def build_manager_graph(
         planned_task = (state.get("planned_task") or "").strip() or incoming
         plan_title = (state.get("plan_title") or "").strip() or None
         history = state.get("history") or []
-        available = state.get("available_templates") or list_workers(troot)
+        available = list(state.get("available_templates") or list_workers(troot))
         assigned = (state.get("assigned_worker_id") or "").strip() or None
+        _all_iw = list_workers(troot)
+        if assigned and assigned not in available and _is_goals_proactive_system_event(incoming):
+            _entry_iw = (state.get("entry_worker_id") or "").strip()
+            _c_iw = _resolve_template_id(_all_iw, assigned) or (
+                _resolve_template_id(_all_iw, _entry_iw) if _entry_iw else None
+            )
+            if _c_iw and _c_iw in _all_iw:
+                assigned = _c_iw
+                if _c_iw not in available:
+                    available = list(available) + [_c_iw]
         if assigned not in available:
             assigned = available[0] if available else None
         if assigned is None:

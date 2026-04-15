@@ -13,6 +13,8 @@ class Belief:
     key: str
     target: float
     threshold: float
+    # symmetric: |observed - target| > threshold → anomalía. ceiling: observed > target + threshold → anomalía (p. ej. DD máximo).
+    comparison: str = "symmetric"
 
 
 @dataclass
@@ -44,7 +46,11 @@ def load_beliefs_from_config(config: Optional[Dict[str, Any]]) -> Tuple[List[Bel
             try:
                 target = float(b.get("target", 0))
                 threshold = float(b.get("threshold", 0))
-                beliefs.append(Belief(key=str(b["key"]).strip(), target=target, threshold=threshold))
+                comp_raw = str(b.get("comparison") or "symmetric").strip().lower()
+                comparison = comp_raw if comp_raw in ("symmetric", "ceiling") else "symmetric"
+                beliefs.append(
+                    Belief(key=str(b["key"]).strip(), target=target, threshold=threshold, comparison=comparison)
+                )
             except (TypeError, ValueError):
                 pass
 

@@ -105,14 +105,24 @@ class HomeostasisManager:
                 "belief_key": belief_key,
             }
 
-        result = compute_surprise(observed_value, belief.target, belief.threshold)
+        result = compute_surprise(
+            observed_value,
+            belief.target,
+            belief.threshold,
+            comparison=getattr(belief, "comparison", "symmetric") or "symmetric",
+        )
 
         if auto_update:
             self._get_or_create_belief_row(belief_key, belief.target, belief.threshold)
             self._update_observed(belief_key, observed_value)
 
         if result.is_anomaly:
-            trigger = self.registry.trigger_for_belief(belief_key, is_drop=observed_value < belief.target)
+            comp = getattr(belief, "comparison", "symmetric") or "symmetric"
+            if comp == "ceiling":
+                is_drop = False
+            else:
+                is_drop = observed_value < belief.target
+            trigger = self.registry.trigger_for_belief(belief_key, is_drop=is_drop)
             restoration = self.registry.get_action_for_trigger(trigger)
             if not restoration:
                 restoration = self.registry.get_action_for_trigger(f"{belief_key}_breach")

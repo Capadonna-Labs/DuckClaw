@@ -623,6 +623,7 @@ async def _ainvoke(
     shared_db_path: str | None = None,
     is_system_prompt: bool | None = False,
     outbound_telegram_bot_token: str | None = None,
+    entry_worker_id: str | None = None,
 ) -> dict:
     """
     Invoca el grafo y retorna {"reply": str, "messages": list | None}.
@@ -648,6 +649,9 @@ async def _ainvoke(
         state["outbound_telegram_bot_token"] = _tok
     if is_system_prompt:
         state["is_system_prompt"] = True
+    _ew = (entry_worker_id or "").strip()
+    if _ew:
+        state["entry_worker_id"] = _ew
     loop = asyncio.get_event_loop()
 
     trace_cfg = get_tracing_config(tenant_id, "manager", chat_id)
@@ -724,6 +728,7 @@ async def ainvoke_manager_ephemeral(
     shared_db_path: str | None = None,
     is_system_prompt: bool | None = False,
     outbound_telegram_bot_token: str | None = None,
+    entry_worker_id: str | None = None,
 ) -> dict:
     """
     Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
@@ -746,6 +751,7 @@ async def ainvoke_manager_ephemeral(
             shared_db_path=shared_db_path,
             is_system_prompt=is_system_prompt,
             outbound_telegram_bot_token=outbound_telegram_bot_token,
+            entry_worker_id=entry_worker_id,
         )
     finally:
         try:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List
 
 import types
@@ -20,17 +21,18 @@ class DummyRedis:
         self.store[key] = value
 
 
-@pytest.mark.asyncio
-async def test_check_cooldown_sets_and_blocks() -> None:
-    r = DummyRedis()
-    ok_first = await heartbeat.check_cooldown(r, "tenant1", "alertA")
-    ok_second = await heartbeat.check_cooldown(r, "tenant1", "alertA")
-    assert ok_first is True
-    assert ok_second is False
+def test_check_cooldown_sets_and_blocks() -> None:
+    async def _run() -> None:
+        r = DummyRedis()
+        ok_first = await heartbeat.check_cooldown(r, "tenant1", "alertA")
+        ok_second = await heartbeat.check_cooldown(r, "tenant1", "alertA")
+        assert ok_first is True
+        assert ok_second is False
+
+    asyncio.run(_run())
 
 
-@pytest.mark.asyncio
-async def test_run_heartbeat_builds_payloads(monkeypatch: Any) -> None:
+def test_run_heartbeat_builds_payloads(monkeypatch: Any) -> None:
     # Simular anomalies y capturar posts en vez de hacer HTTP real
     anomalies: List[Dict[str, Any]] = [
         {
@@ -89,7 +91,7 @@ async def test_run_heartbeat_builds_payloads(monkeypatch: Any) -> None:
                     timeout=30,
                 )
 
-    await one_shot()
+    asyncio.run(one_shot())
     assert posts
     sent = posts[0]
     assert sent["json"]["is_system_prompt"] is True

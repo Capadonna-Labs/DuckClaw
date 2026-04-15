@@ -6,14 +6,18 @@ DuckClaw Heartbeat Daemon
 Bucle asíncrono que evalúa homeostasis periódicamente y, cuando detecta anomalías,
 inyecta un pensamiento interno ([SYSTEM_EVENT]) en el API Gateway.
 
-La integración específica con HomeostasisManager y la definición de anomalies
-se implementan en una fase posterior.
+Incluye un ticker de revisión /goals --delta (intervalo corto, independiente del
+ciclo largo de homeostasis).
 """
 
 import asyncio
+import json
 import logging
 import os
+import time
+from pathlib import Path
 from typing import Any, Dict, List
+from urllib.parse import quote
 
 import httpx
 import redis.asyncio as redis
@@ -21,6 +25,18 @@ import redis.asyncio as redis
 from duckclaw import DuckClaw
 from duckclaw.forge.homeostasis import BeliefRegistry, HomeostasisManager
 from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.graphs.on_the_fly_commands import (
+    _GOALS_PROACTIVE_LAST_FIRE_KEY,
+    _GOALS_PROACTIVE_TENANT_KEY,
+    _GOALS_DELTA_META_KEY,
+    build_goals_proactive_system_event_message,
+    build_trading_tick_system_event_message,
+    chat_id_from_goals_delta_config_key,
+    clear_goals_proactive_schedule,
+    get_chat_state,
+    get_manager_goals,
+    set_chat_state,
+)
 from duckclaw.workers.factory import list_workers
 from duckclaw.workers.manifest import load_manifest
 
@@ -35,7 +51,82 @@ GATEWAY_URL = os.getenv(
     "http://localhost:8000/api/v1/agent/chat",
 )
 HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "3600"))
+GOALS_TICKER_POLL_SECONDS = int(os.getenv("GOALS_TICKER_POLL_SECONDS", "45"))
 TAILSCALE_AUTH_KEY = os.getenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
+
+
+def _debug_log(hypothesis_id: str, message: str, data: Dict[str, Any]) -> None:
+    # region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "hypothesisId": hypothesis_id,
+                        "location": "services/heartbeat/main.py",
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+
+
+def _goals_ticker_scan_db_paths() -> List[str]:
+    """
+    DuckDB a escanear para /goals --delta.
+
+    Los fly commands (/goals) persisten en la bóveda del usuario (p. ej. quant_traderdb1.duckdb),
+    mientras que get_gateway_db_path() suele apuntar al hub del tenant (p. ej. finanzdb1.duckdb).
+    Sin multiplex, ambos pueden ser el mismo archivo; con Telegram multiplex suelen ser distintos.
+    """
+    raw = (os.getenv("DUCKCLAW_GOALS_TICKER_DB_PATH") or "").strip()
+    if raw:
+        from duckclaw.gateway_db import resolve_env_duckdb_path
+
+        return [resolve_env_duckdb_path(raw)]
+
+    seen: set[str] = set()
+    out: List[str] = []
+
+    def _add(p: str) -> None:
+        s = str(Path(p).expanduser().resolve())
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+
+    try:
+        _add(get_gateway_db_path())
+    except Exception:
+        pass
+
+    try:
+        gw = Path(get_gateway_db_path()).expanduser().resolve()
+        priv_root = gw.parent.parent
+        if priv_root.is_dir() and priv_root.name == "private":
+            for user_dir in sorted(priv_root.iterdir()):
+                if not user_dir.is_dir():
+                    continue
+                for f in sorted(user_dir.glob("*.duckdb")):
+                    _add(str(f))
+    except Exception:
+        pass
+
+    return out
+
+
+def _agent_chat_url_for_worker(gateway_url: str, worker_id: str) -> str:
+    base = gateway_url.rstrip("/").rsplit("/", 1)[0]
+    return f"{base}/{quote(worker_id, safe='')}/chat?deliver_outbound=1"
 
 
 async def check_cooldown(r: redis.Redis, tenant_id: str, alert_type: str) -> bool:
@@ -100,76 +191,338 @@ async def _evaluate_homeostasis() -> List[Dict[str, Any]]:
     return anomalies
 
 
+async def _run_goals_proactive_tick() -> None:
+    """Escanea agent_config y dispara SYSTEM_EVENT de revisión /goals cuando toca."""
+    now = time.time()
+    scan_paths = _goals_ticker_scan_db_paths()
+    headers: Dict[str, str] = {}
+    if TAILSCALE_AUTH_KEY:
+        headers["X-Tailscale-Auth-Key"] = TAILSCALE_AUTH_KEY
+
+    for db_path in scan_paths:
+        await _run_goals_proactive_tick_one_db(
+            db_path, now=now, headers=headers, scan_paths_n=len(scan_paths)
+        )
+
+
+async def _run_goals_proactive_tick_one_db(
+    db_path: str,
+    *,
+    now: float,
+    headers: Dict[str, str],
+    scan_paths_n: int,
+) -> None:
+    try:
+        with DuckClaw(db_path, read_only=True) as db_ro:
+            raw = db_ro.query(
+                "SELECT key, value FROM agent_config WHERE key LIKE 'chat_%_goals_delta_seconds'"
+            )
+            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("goals_proactive: no se pudo leer agent_config (%s): %s", db_path, exc)
+        return
+    _debug_log(
+        "L1_rw_from_heartbeat",
+        "ticker_scan_rows",
+        {
+            "pid": os.getpid(),
+            "db_path_tail": db_path[-120:] if len(db_path) > 120 else db_path,
+            "rows": len(rows or []),
+        },
+    )
+
+    if not rows:
+        return
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("key") or "")
+        chat_id = chat_id_from_goals_delta_config_key(key)
+        if not chat_id:
+            continue
+        try:
+            delta_s = int(str(row.get("value") or "0").strip() or "0")
+        except ValueError:
+            continue
+        if delta_s <= 0:
+            continue
+
+        with DuckClaw(db_path, read_only=True) as db:
+            goals = get_manager_goals(db, chat_id)
+            if not goals:
+                logger.info(
+                    "goals_proactive: chat=%s sin goals; limpiando delta",
+                    chat_id,
+                )
+                _debug_log(
+                    "L1_rw_from_heartbeat",
+                    "about_to_clear_goals_schedule_rw",
+                    {"pid": os.getpid(), "chat_id": str(chat_id), "db_path_tail": db_path[-120:]},
+                )
+                with DuckClaw(db_path, read_only=False) as db_rw:
+                    clear_goals_proactive_schedule(db_rw, chat_id)
+                continue
+
+            tenant_id = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
+            worker_id = (get_chat_state(db, chat_id, "worker_id") or "").strip()
+            if (not worker_id or worker_id.lower() == "manager") and tenant_id.lower() == "cuantitativo":
+                worker_id = "Quant-Trader"
+            if not worker_id or worker_id.lower() == "manager":
+                logger.debug(
+                    "goals_proactive: omitiendo chat=%s (worker_id=%r tenant_id=%r)",
+                    chat_id,
+                    worker_id,
+                    tenant_id,
+                )
+                continue
+
+            if not tenant_id:
+                logger.warning(
+                    "goals_proactive: chat=%s sin goals_proactive_tenant_id; "
+                    "repite /goals --delta tras actualizar",
+                    chat_id,
+                )
+                continue
+
+            last_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY) or "").strip()
+            try:
+                last_fire = float(last_raw) if last_raw else 0.0
+            except ValueError:
+                last_fire = 0.0
+            if last_fire > 0 and (now - last_fire) < float(delta_s):
+                continue
+            meta_raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
+            meta: Dict[str, Any] = {}
+            if meta_raw:
+                try:
+                    maybe_meta = json.loads(meta_raw)
+                    if isinstance(maybe_meta, dict):
+                        meta = maybe_meta
+                except Exception:
+                    meta = {}
+            if str(meta.get("trigger") or "").strip().lower() == "trading_session":
+                session_uid = str(meta.get("session_uid") or "").strip()
+                tickers: list[str] = []
+                mode = "paper"
+                signal_threshold = "GAS"
+                if session_uid:
+                    try:
+                        raw_sess = db.query(
+                            "SELECT mode, tickers, session_goal, session_uid, status "
+                            "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+                        )
+                        sess_rows = json.loads(raw_sess) if isinstance(raw_sess, str) else (raw_sess or [])
+                        if sess_rows and isinstance(sess_rows[0], dict):
+                            row = sess_rows[0]
+                            if str(row.get("status") or "").strip().upper() != "ACTIVE":
+                                message = "[SYSTEM_EVENT: No hay sesión activa. Tick cancelado.]"
+                            else:
+                                mode = str(row.get("mode") or "paper").strip().lower() or "paper"
+                                tickers_csv = str(row.get("tickers") or "").strip()
+                                if tickers_csv:
+                                    tickers = [x.strip().upper() for x in tickers_csv.split(",") if x.strip()]
+                                goal_raw = row.get("session_goal")
+                                try:
+                                    gobj = (
+                                        goal_raw
+                                        if isinstance(goal_raw, dict)
+                                        else json.loads(str(goal_raw or "{}"))
+                                    )
+                                except Exception:
+                                    gobj = {}
+                                if isinstance(gobj, dict):
+                                    signal_threshold = str(gobj.get("signal_threshold") or "GAS").strip().upper() or "GAS"
+                                session_uid = str(row.get("session_uid") or session_uid).strip()
+                                message = build_trading_tick_system_event_message(
+                                    session_uid=session_uid,
+                                    tickers=tickers,
+                                    mode=mode,
+                                    signal_threshold=signal_threshold,
+                                )
+                        else:
+                            message = "[SYSTEM_EVENT: No hay sesión activa. Tick cancelado.]"
+                    except Exception:
+                        message = "[SYSTEM_EVENT: No se pudo resolver la sesión activa. Tick cancelado.]"
+                else:
+                    message = "[SYSTEM_EVENT: No hay session_uid en goals_delta_meta. Tick cancelado.]"
+            else:
+                message = build_goals_proactive_system_event_message(goals)
+
+        payload = {
+            "message": message,
+            "chat_id": str(chat_id),
+            "user_id": str(chat_id),
+            "username": "Usuario",
+            "chat_type": "private",
+            "tenant_id": tenant_id,
+            "is_system_prompt": True,
+            "skip_session_lock": True,
+        }
+        url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    params={"tenant_id": tenant_id, "deliver_outbound": "1"},
+                    json=payload,
+                    headers=headers,
+                    timeout=120.0,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "goals_proactive: error HTTP chat=%s worker=%s: %s",
+                chat_id,
+                worker_id,
+                exc,
+            )
+            continue
+
+        if 200 <= resp.status_code < 300:
+            _debug_log(
+                "L1_rw_from_heartbeat",
+                "about_to_set_last_fire_rw",
+                {
+                    "pid": os.getpid(),
+                    "chat_id": str(chat_id),
+                    "worker_id": str(worker_id),
+                    "db_path_tail": db_path[-120:],
+                },
+            )
+            with DuckClaw(db_path, read_only=False) as db_rw:
+                set_chat_state(db_rw, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, str(now))
+                try:
+                    if '"type":"TRADING_TICK"' in message or '"type": "TRADING_TICK"' in message:
+                        start = message.find("{")
+                        end = message.rfind("}")
+                        payload_ev = json.loads(message[start : end + 1]) if start >= 0 and end > start else {}
+                        if isinstance(payload_ev, dict):
+                            uid = str(payload_ev.get("session_uid") or "").strip()
+                            tickers = payload_ev.get("tickers") if isinstance(payload_ev.get("tickers"), list) else []
+                            db_rw.execute(
+                                """
+                                INSERT INTO quant_core.session_ticks
+                                    (id, session_uid, tick_number, tickers_processed, signals_proposed, cfd_summary, outcome)
+                                VALUES (gen_random_uuid(), ?, COALESCE((SELECT MAX(tick_number)+1 FROM quant_core.session_ticks WHERE session_uid=?), 1), ?, 0, ?, ?)
+                                """,
+                                [
+                                    uid,
+                                    uid,
+                                    [str(t).strip().upper() for t in tickers if str(t).strip()],
+                                    json.dumps({"source": "heartbeat"}, ensure_ascii=False),
+                                    "ALIGNED",
+                                ],
+                            )
+                except Exception:
+                    pass
+            _debug_log(
+                "L1_rw_from_heartbeat",
+                "set_last_fire_rw_ok",
+                {
+                    "pid": os.getpid(),
+                    "chat_id": str(chat_id),
+                    "worker_id": str(worker_id),
+                    "db_path_tail": db_path[-120:],
+                },
+            )
+            logger.info(
+                "goals_proactive: tick OK chat=%s worker=%s",
+                chat_id,
+                worker_id,
+            )
+        else:
+            logger.warning(
+                "goals_proactive: HTTP %s chat=%s body=%s",
+                resp.status_code,
+                chat_id,
+                (resp.text or "")[:200],
+            )
+
+    # endregion
+
+
 async def run_heartbeat() -> None:
     r = redis.from_url(REDIS_URL)
+    interval = float(HEARTBEAT_INTERVAL_SECONDS)
+    poll = max(5, GOALS_TICKER_POLL_SECONDS)
+    # Primer ciclo debe poder evaluar homeostasis de inmediato (antes: evaluar y luego sleep).
+    last_homeo = time.time() - interval
 
     while True:
-        logger.info("Iniciando ciclo de evaluación de Homeostasis...")
         try:
-            anomalies = await _evaluate_homeostasis()
-            logger.info("Anomalías encontradas: %s", len(anomalies))
+            await _run_goals_proactive_tick()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("goals_proactive: ciclo: %s", exc)
 
-            for anomaly in anomalies:
-                tenant_id = str(anomaly.get("tenant_id", "")).strip() or "default"
-                alert_type = str(anomaly.get("belief_key", "")).strip() or "unknown"
-                admin_chat_id = str(anomaly.get("admin_chat_id", "")).strip()
-                observed_value = anomaly.get("observed_value")
+        now = time.time()
+        if now - last_homeo >= interval:
+            logger.info("Iniciando ciclo de evaluación de Homeostasis...")
+            try:
+                anomalies = await _evaluate_homeostasis()
+                logger.info("Anomalías encontradas: %s", len(anomalies))
 
-                if not admin_chat_id:
-                    logger.warning(
-                        "Anomalía sin admin_chat_id (tenant_id=%s, alert_type=%s)",
-                        tenant_id,
-                        alert_type,
-                    )
-                    continue
+                for anomaly in anomalies:
+                    tenant_id = str(anomaly.get("tenant_id", "")).strip() or "default"
+                    alert_type = str(anomaly.get("belief_key", "")).strip() or "unknown"
+                    admin_chat_id = str(anomaly.get("admin_chat_id", "")).strip()
+                    observed_value = anomaly.get("observed_value")
 
-                if not await check_cooldown(r, tenant_id, alert_type):
-                    logger.info(
-                        "Cooldown activo para tenant=%s alert_type=%s; no se envía.",
-                        tenant_id,
-                        alert_type,
-                    )
-                    continue
-
-                logger.info(
-                    "Anomalía detectada en tenant=%s, belief=%s. Inyectando pensamiento...",
-                    tenant_id,
-                    alert_type,
-                )
-
-                message = (
-                    "[SYSTEM_EVENT: Anomalía detectada en "
-                    f"{alert_type}. Valor actual: {observed_value}. "
-                    "Evalúa la situación y notifica al usuario si es crítico.]"
-                )
-                payload = {
-                    "message": message,
-                    "chat_id": admin_chat_id,
-                    "is_system_prompt": True,
-                }
-
-                headers = {}
-                if TAILSCALE_AUTH_KEY:
-                    headers["X-Tailscale-Auth-Key"] = TAILSCALE_AUTH_KEY
-
-                try:
-                    async with httpx.AsyncClient() as client:
-                        await client.post(
-                            GATEWAY_URL,
-                            params={"tenant_id": tenant_id, "worker_id": "finanz"},
-                            json=payload,
-                            headers=headers,
-                            timeout=30,
+                    if not admin_chat_id:
+                        logger.warning(
+                            "Anomalía sin admin_chat_id (tenant_id=%s, alert_type=%s)",
+                            tenant_id,
+                            alert_type,
                         )
-                except Exception as e:  # noqa: BLE001
-                    logger.exception("Error enviando evento al Gateway: %s", e)
+                        continue
 
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Error en ciclo de heartbeat: %s", e)
+                    if not await check_cooldown(r, tenant_id, alert_type):
+                        logger.info(
+                            "Cooldown activo para tenant=%s alert_type=%s; no se envía.",
+                            tenant_id,
+                            alert_type,
+                        )
+                        continue
 
-        await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+                    logger.info(
+                        "Anomalía detectada en tenant=%s, belief=%s. Inyectando pensamiento...",
+                        tenant_id,
+                        alert_type,
+                    )
+
+                    message = (
+                        "[SYSTEM_EVENT: Anomalía detectada en "
+                        f"{alert_type}. Valor actual: {observed_value}. "
+                        "Evalúa la situación y notifica al usuario si es crítico.]"
+                    )
+                    payload = {
+                        "message": message,
+                        "chat_id": admin_chat_id,
+                        "is_system_prompt": True,
+                    }
+
+                    headers: Dict[str, str] = {}
+                    if TAILSCALE_AUTH_KEY:
+                        headers["X-Tailscale-Auth-Key"] = TAILSCALE_AUTH_KEY
+
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            await client.post(
+                                GATEWAY_URL,
+                                params={"tenant_id": tenant_id, "worker_id": "finanz"},
+                                json=payload,
+                                headers=headers,
+                                timeout=30,
+                            )
+                    except Exception as e:  # noqa: BLE001
+                        logger.exception("Error enviando evento al Gateway: %s", e)
+
+            except Exception as e:  # noqa: BLE001
+                logger.exception("Error en ciclo de heartbeat: %s", e)
+
+            last_homeo = time.time()
+
+        await asyncio.sleep(poll)
 
 
 if __name__ == "__main__":
     asyncio.run(run_heartbeat())
-

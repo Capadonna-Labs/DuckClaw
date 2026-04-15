@@ -146,6 +146,57 @@ def _ensure_fly_runtime_tables(con: duckdb.DuckDBPyConnection) -> None:
         );
         """
     )
+    con.execute("CREATE SCHEMA IF NOT EXISTS quant_core;")
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
+            id VARCHAR PRIMARY KEY,
+            mode VARCHAR NOT NULL,
+            tickers VARCHAR NOT NULL DEFAULT '',
+            session_uid VARCHAR,
+            status VARCHAR NOT NULL DEFAULT 'ACTIVE',
+            anchor_equity DOUBLE,
+            peak_equity DOUBLE,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    con.execute("ALTER TABLE quant_core.trading_sessions ADD COLUMN IF NOT EXISTS session_goal JSON;")
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS quant_core.trade_signals (
+            signal_id UUID PRIMARY KEY,
+            ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ticker VARCHAR,
+            strategy_name VARCHAR,
+            action VARCHAR,
+            confidence_score DOUBLE,
+            target_price DOUBLE,
+            stop_loss DOUBLE,
+            session_uid VARCHAR,
+            rationale TEXT,
+            status VARCHAR DEFAULT 'PENDING_HITL',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS session_uid VARCHAR;")
+    con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS rationale TEXT;")
+    con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'PENDING_HITL';")
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS quant_core.session_ticks (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            session_uid VARCHAR NOT NULL,
+            tick_number INTEGER NOT NULL,
+            fired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            tickers_processed VARCHAR[],
+            signals_proposed INTEGER DEFAULT 0,
+            cfd_summary JSON,
+            outcome VARCHAR
+        );
+        """
+    )
 
 
 def _collect_extensions(templates_root: Path) -> list[str]:

@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Optional
+import time
+from typing import Any, Optional, Tuple
 
 from duckclaw.utils.logger import log_tool_execution_sync
 
@@ -30,6 +31,78 @@ def _ibkr_portfolio_request_headers(api_key: str) -> dict[str, str]:
         "Accept": "application/json",
         "X-Duckclaw-IBKR-Account-Mode": mode,
     }
+
+
+def fetch_ibkr_total_equity_numeric() -> Tuple[Optional[float], str]:
+    """
+    Lee solo el valor total de cuenta desde la API IBKR (mismo contrato que get_ibkr_portfolio).
+    Retorna (valor, "") si OK; (None, mensaje corto) si falla configuración o red.
+    """
+    api_url = os.environ.get("IBKR_PORTFOLIO_API_URL", "").strip()
+    api_key = os.environ.get("IBKR_PORTFOLIO_API_KEY", "").strip()
+    positions_url = os.environ.get("IBKR_PORTFOLIO_POSITIONS_URL", "").strip()
+    if not api_url or not api_key:
+        return None, "IBKR_PORTFOLIO_API_URL/KEY no configurados"
+    try:
+        import urllib.request
+        from urllib.error import HTTPError, URLError
+
+        headers = _ibkr_portfolio_request_headers(api_key)
+
+        def _get(url: str) -> Any:
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=15.0) as resp:
+                return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        data = _get(api_url)
+        if not isinstance(data, dict):
+            return None, "respuesta no es JSON objeto"
+        portfolio = data.get("portfolio") or data.get("positions") or []
+        total_val = data.get("total_value") or data.get("net_liquidation") or 0
+        if (not portfolio or total_val == 0) and (positions_url or api_url.endswith("/summary")):
+            fallback_url = positions_url or "/".join(api_url.split("/")[:-2]) + "/positions"
+            try:
+                pos_data = _get(fallback_url)
+                if isinstance(pos_data, dict):
+                    pos_list = pos_data.get("positions") or pos_data.get("portfolio") or (
+                        pos_data if isinstance(pos_data, list) else []
+                    )
+                    if pos_list:
+                        data = dict(data)
+                        data["portfolio"] = pos_list
+                        if not data.get("total_value") and pos_data.get("total_value"):
+                            data["total_value"] = pos_data.get("total_value")
+                        if not data.get("net_liquidation") and pos_data.get("net_liquidation"):
+                            data["total_value"] = data.get("total_value") or pos_data.get("net_liquidation")
+            except Exception:
+                pass
+        portfolio = data.get("portfolio") or data.get("positions") or []
+        total_value = data.get("total_value")
+        if total_value is None:
+            total_value = data.get("net_liquidation") or data.get("equity") or data.get("value") or 0
+        try:
+            total_value = float(total_value)
+        except (TypeError, ValueError):
+            total_value = 0.0
+        if total_value == 0 and portfolio and isinstance(portfolio, list):
+            for p in portfolio:
+                if isinstance(p, dict):
+                    mv = p.get("market_value") or p.get("marketValue") or p.get("value") or 0
+                    try:
+                        total_value += float(mv)
+                    except (TypeError, ValueError):
+                        pass
+        if total_value <= 0:
+            return None, "total_value no disponible o cero"
+        return total_value, ""
+    except HTTPError as e:
+        return None, f"HTTP {e.code}"
+    except URLError as e:
+        return None, str(e.reason)[:120]
+    except (TimeoutError, OSError, json.JSONDecodeError) as e:
+        return None, str(e)[:120]
+    except Exception as e:
+        return None, str(e)[:120]
 
 
 def _ibkr_portfolio_preamble() -> str:
@@ -76,6 +149,53 @@ def _extract_portfolio_context(data: Any) -> str:
     if isinstance(portfolio, dict):
         portfolio = list(portfolio.values()) if portfolio else []
 
+    # region agent log
+    try:
+        _sample = portfolio[0] if isinstance(portfolio, list) and portfolio and isinstance(portfolio[0], dict) else {}
+        _has_account_pnl = any(
+            k in (data if isinstance(data, dict) else {})
+            for k in ("unrealized_pnl", "realized_pnl", "total_pnl", "daily_pnl")
+        )
+        _sample_keys = list(_sample.keys())[:30] if isinstance(_sample, dict) else []
+        _has_position_pnl = any(
+            k in _sample_keys
+            for k in (
+                "unrealized_pnl",
+                "realized_pnl",
+                "daily_pnl",
+                "pnl",
+                "unrealizedPnL",
+                "realizedPnL",
+            )
+        )
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H1_ibkr_payload_has_pnl",
+                        "location": "packages/agents/src/duckclaw/forge/skills/ibkr_bridge.py:_extract_portfolio_context",
+                        "message": "ibkr_payload_shape",
+                        "data": {
+                            "portfolio_len": len(portfolio) if isinstance(portfolio, list) else 0,
+                            "has_account_pnl": _has_account_pnl,
+                            "has_position_pnl_sample": _has_position_pnl,
+                            "sample_keys": _sample_keys,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+
     # Incluir cash si viene separado (cash_balance, available_funds, etc.)
     cash_val = data.get("cash") or data.get("cash_balance") or data.get("available_funds")
     if cash_val is None and isinstance(inner, dict):
@@ -119,6 +239,10 @@ def _extract_portfolio_context(data: Any) -> str:
     if portfolio and isinstance(portfolio, list) and len(portfolio) > 0:
         lines.append("")
         lines.append("Detalle de posiciones:")
+        agg_unreal = 0.0
+        has_unreal = False
+        agg_real = 0.0
+        has_real = False
         for i, pos in enumerate(portfolio[:20], 1):  # Máx 20 para no saturar
             if isinstance(pos, dict):
                 sym = pos.get("symbol") or pos.get("conid") or pos.get("ticker") or "?"
@@ -129,16 +253,78 @@ def _extract_portfolio_context(data: Any) -> str:
                         val = f" ${float(val):,.2f}"
                     except (TypeError, ValueError):
                         val = f" {val}"
-                lines.append(f"  {i}. {sym}: {qty} unidades{val}")
+                pnl_parts: list[str] = []
+                u = (
+                    pos.get("unrealized_pnl")
+                    if pos.get("unrealized_pnl") is not None
+                    else pos.get("unrealizedPnL")
+                )
+                r = (
+                    pos.get("realized_pnl")
+                    if pos.get("realized_pnl") is not None
+                    else pos.get("realizedPnL")
+                )
+                if u is not None and str(u).strip() != "":
+                    try:
+                        fu = float(u)
+                        agg_unreal += fu
+                        has_unreal = True
+                        pnl_parts.append(f"PnL no realizado: ${fu:,.2f}")
+                    except (TypeError, ValueError):
+                        pass
+                if r is not None and str(r).strip() != "":
+                    try:
+                        fr = float(r)
+                        agg_real += fr
+                        has_real = True
+                        pnl_parts.append(f"PnL realizado: ${fr:,.2f}")
+                    except (TypeError, ValueError):
+                        pass
+                pnl_suffix = f" ({' | '.join(pnl_parts)})" if pnl_parts else ""
+                lines.append(f"  {i}. {sym}: {qty} unidades{val}{pnl_suffix}")
             else:
                 lines.append(f"  {i}. {pos}")
         if len(portfolio) > 20:
             lines.append(f"  ... y {len(portfolio) - 20} más")
+        if has_unreal or has_real:
+            lines.append("")
+            if has_unreal:
+                lines.append(f"PnL no realizado total (snapshot): ${agg_unreal:,.2f}")
+            if has_real:
+                lines.append(f"PnL realizado total (snapshot): ${agg_real:,.2f}")
     else:
         lines.append("")
         lines.append("No hay posiciones activas en la cuenta IBKR.")
 
-    return "\n".join(lines)
+    rendered = "\n".join(lines)
+    # region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H2_ibkr_render_contains_pnl",
+                        "location": "packages/agents/src/duckclaw/forge/skills/ibkr_bridge.py:_extract_portfolio_context",
+                        "message": "ibkr_render_has_pnl_tokens",
+                        "data": {
+                            "contains_pnl_word": ("pnl" in rendered.lower()),
+                            "render_preview": rendered[:220],
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+    return rendered
 
 
 @log_tool_execution_sync(name="get_ibkr_portfolio")

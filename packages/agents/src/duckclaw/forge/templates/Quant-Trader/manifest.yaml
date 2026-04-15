@@ -13,6 +13,8 @@ allowed_tables:
   - finance_worker.trade_signals
   - finance_worker.cuentas
   - quant_core.ohlcv_data
+  - quant_core.trading_sessions
+  - quant_core.trading_risk_constraints
 llm:
   required: true
   temperature: 0.1

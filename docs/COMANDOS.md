@@ -364,6 +364,29 @@ Fly: `/lake` o `/lake status` comprueba env y hace `ssh … true` corto si la co
 
 Telegram (human-in-the-loop): el usuario confirma con `/execute_signal <uuid>` el `signal_id` devuelto por la propuesta (`propose_trade` en **Finanz**, `propose_trade_signal` en **Quant Trader**). Luego el asistente llama `execute_order` (Finanz) o `execute_approved_signal` (Quant Trader).
 
+#### Quant Trader: sesión autónoma + `/goals` (HITL)
+
+Comandos fly (chat Quant Trader):
+
+- `/trading_session --mode paper|live [--tickers AAPL,NVDA] [--confirm]`
+- `/trading_session --status`
+- `/trading_session --stop`
+- `/cancel_signal <signal_id>`
+
+Flags extendidos de sesión:
+
+- `--max-drawdown <pct>`: objetivo de DD máximo para `session_goal` (ej. `2` = 2%).
+- `--position-size <pct>`: tamaño base de posición para `session_goal`.
+- `--signal <SOLID|LIQUID|GAS|PLASMA>`: umbral de fase CFD para propuesta.
+
+Notas operativas:
+
+- Al crear sesión, se persiste `session_goal` en `quant_core.trading_sessions`.
+- Si no hay delta activo en `/goals`, se auto-activa en 5 minutos (`300s`) con metadata de trigger `trading_session`.
+- `--stop` marca la sesión `CLOSED`, limpia el scheduler asociado y devuelve resumen con `session_uid` + PnL estimado.
+- `/cancel_signal` solo cancela señales en estado pendiente HITL (`PENDING_HITL`/`AWAITING_HITL`).
+- El ticker proactivo envía `SYSTEM_EVENT` tipo `TRADING_TICK` y **no ejecuta órdenes**: solo evalúa/propone; ejecución siempre requiere `/execute_signal`.
+
 ---
 
 ## 6. DB Writer (si usas escrituras encoladas)

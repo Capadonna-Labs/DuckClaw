@@ -1,0 +1,12 @@
+# Quant-Trader — homeostasis (riesgo de sesión)
+# Spec: specs/features/Quant_Trading_Session_Homeostasis.md
+homeostasis:
+  beliefs:
+    - key: "max_portfolio_drawdown_pct"
+      target: 0.10
+      threshold: 0.01
+      comparison: ceiling
+  actions:
+    - trigger: "max_portfolio_drawdown_pct_breach"
+      skill: "get_ibkr_portfolio"
+      message: "Drawdown de sesión por encima del límite. Revisa cuenta y riesgo antes de nuevas señales."

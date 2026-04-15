@@ -20,6 +20,26 @@ logger = logging.getLogger("db-writer.quant_state_delta")
 _LEDGER_DDL = """
 CREATE SCHEMA IF NOT EXISTS finance_worker;
 
+CREATE SCHEMA IF NOT EXISTS quant_core;
+
+CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
+  id VARCHAR PRIMARY KEY,
+  mode VARCHAR NOT NULL,
+  tickers VARCHAR NOT NULL DEFAULT '',
+  session_uid VARCHAR,
+  session_goal JSON,
+  status VARCHAR NOT NULL DEFAULT 'ACTIVE',
+  anchor_equity DOUBLE,
+  peak_equity DOUBLE,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS quant_core.trading_risk_constraints (
+  id VARCHAR PRIMARY KEY,
+  max_drawdown_pct DOUBLE,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS finance_worker.trading_mandates (
   mandate_id UUID PRIMARY KEY,
   source_worker VARCHAR,
@@ -41,6 +61,21 @@ CREATE TABLE IF NOT EXISTS finance_worker.trade_signals (
   status VARCHAR,
   rationale VARCHAR,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS quant_core.trade_signals (
+  signal_id UUID PRIMARY KEY,
+  ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  ticker VARCHAR,
+  strategy_name VARCHAR,
+  action VARCHAR,
+  confidence_score DOUBLE,
+  target_price DOUBLE,
+  stop_loss DOUBLE,
+  session_uid VARCHAR,
+  rationale VARCHAR,
+  status VARCHAR DEFAULT 'PENDING_HITL',
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -127,6 +162,7 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
 
     if dt == "TRADE_SIGNAL_PROPOSED":
         mut = TradeSignalMutation.model_validate(delta.mutation)
+        st = "PENDING_HITL" if mut.status == "AWAITING_HITL" else mut.status
         con.execute(
             """
             INSERT INTO finance_worker.trade_signals
@@ -151,8 +187,31 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
                 float(mut.proposed_weight),
                 mut.sandbox_backtest_cid,
                 bool(mut.human_approved),
-                mut.status,
+                st,
                 mut.rationale,
+            ),
+        )
+        con.execute(
+            """
+            INSERT INTO quant_core.trade_signals
+              (signal_id, ticker, strategy_name, action, confidence_score, session_uid, rationale, status, updated_at)
+            VALUES
+              (?, ?, 'cfd_auto', ?, 0.0, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (signal_id) DO UPDATE SET
+              ticker=excluded.ticker,
+              action=excluded.action,
+              session_uid=excluded.session_uid,
+              rationale=excluded.rationale,
+              status=excluded.status,
+              updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                mut.signal_id,
+                mut.ticker.upper(),
+                "BUY" if mut.signal_type == "ENTRY" else "SELL",
+                mut.session_uid,
+                mut.rationale,
+                st,
             ),
         )
         return
@@ -181,6 +240,14 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
             """,
             (sid,),
         )
+        con.execute(
+            """
+            UPDATE quant_core.trade_signals
+            SET status='EXECUTED', updated_at=CURRENT_TIMESTAMP
+            WHERE signal_id=?
+            """,
+            (sid,),
+        )
         return
 
     if dt == "TRADE_SIGNAL_DISCARDED":
@@ -189,6 +256,33 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
             UPDATE finance_worker.trade_signals
             SET status='DISCARDED'
             WHERE signal_id=? AND status <> 'EXECUTED'
+            """,
+            (sid,),
+        )
+        con.execute(
+            """
+            UPDATE quant_core.trade_signals
+            SET status='DISCARDED', updated_at=CURRENT_TIMESTAMP
+            WHERE signal_id=? AND status <> 'EXECUTED'
+            """,
+            (sid,),
+        )
+        return
+
+    if dt == "TRADE_SIGNAL_FAILED":
+        con.execute(
+            """
+            UPDATE finance_worker.trade_signals
+            SET status='FAILED'
+            WHERE signal_id=? AND status NOT IN ('EXECUTED', 'DISCARDED')
+            """,
+            (sid,),
+        )
+        con.execute(
+            """
+            UPDATE quant_core.trade_signals
+            SET status='FAILED', updated_at=CURRENT_TIMESTAMP
+            WHERE signal_id=? AND status NOT IN ('EXECUTED', 'DISCARDED')
             """,
             (sid,),
         )

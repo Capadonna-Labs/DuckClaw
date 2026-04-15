@@ -344,6 +344,62 @@ def test_mlx_vlm_local_disabled_by_vlm_mlx_disable_local_alias(monkeypatch: pyte
     assert vlm_mod._try_mlx_vlm_local_before_http() is False
 
 
+def test_mlx_vlm_local_skipped_when_dedicated_vlm_loopback_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """VLM en :8081 y texto en :8080: no mlx_vlm in-process (OOM Metal); usar HTTP MLX-Vision."""
+    monkeypatch.delenv("DUCKCLAW_VLM_HTTP_BEFORE_LOCAL", raising=False)
+    monkeypatch.delenv("DUCKCLAW_VLM_DISABLE_LOCAL_MLX_VLM", raising=False)
+    monkeypatch.delenv("VLM_MLX_DISABLE_LOCAL", raising=False)
+    monkeypatch.setenv("MLX_PORT", "8080")
+    monkeypatch.setenv("VLM_MLX_BASE_URL", "http://127.0.0.1:8081/v1")
+    assert vlm_mod._mlx_vlm_local_enabled() is True
+    assert vlm_mod._try_mlx_vlm_local_before_http() is False
+
+
+def test_sanitize_vlm_strips_gemma_channel_thought_tail() -> None:
+    raw = (
+        "<|channel>thought\nHere's a thinking process to arrive at the desired output:\n\n"
+        "1. **Analyze**\n<channel|>El texto es un artículo financiero de Bloomberg."
+    )
+    out = vlm_mod._sanitize_vlm_visible_text(raw)
+    assert "thinking process" not in out.lower()
+    assert "El texto es un artículo" in out
+
+
+def test_sanitize_vlm_strips_long_english_cot_before_channel_closer() -> None:
+    raw = (
+        "<|channel>thought\nHere's a thinking process to arrive at the desired output:\n\n"
+        "*   **Date:** Updated on April 15, 2020.\n"
+        "5.  **Final Review:** (The resulting Spanish summary is ready.)"
+        "<channel|>El texto es un titular de mercado en Bloomberg sobre indices al alza."
+    )
+    out = vlm_mod._sanitize_vlm_visible_text(raw)
+    assert "thinking process" not in out.lower()
+    assert "final review" not in out.lower()
+    assert "april 15, 2020" not in out.lower()
+    assert "titular de mercado" in out.lower()
+
+
+def test_sanitize_vlm_noop_when_clean() -> None:
+    s = "Titular: S&P 500 y Nasdaq 100 en récord."
+    assert vlm_mod._sanitize_vlm_visible_text(s) == s
+
+
+def test_mlx_vlm_local_skipped_when_vlm_mlx_port_differs_from_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_BASE_URL", raising=False)
+    monkeypatch.delenv("VLM_MLX_BASE_URL", raising=False)
+    monkeypatch.delenv("DUCKCLAW_VLM_HTTP_BEFORE_LOCAL", raising=False)
+    monkeypatch.delenv("DUCKCLAW_VLM_DISABLE_LOCAL_MLX_VLM", raising=False)
+    monkeypatch.delenv("VLM_MLX_DISABLE_LOCAL", raising=False)
+    monkeypatch.setenv("MLX_PORT", "8080")
+    monkeypatch.setenv("VLM_MLX_PORT", "8081")
+    assert vlm_mod._mlx_vlm_local_enabled() is True
+    assert vlm_mod._try_mlx_vlm_local_before_http() is False
+
+
 def test_mlx_http_base_url_prefers_vlm_mlx_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DUCKCLAW_VLM_MLX_BASE_URL", raising=False)
     monkeypatch.setenv("VLM_MLX_BASE_URL", "http://127.0.0.1:8080/v1")

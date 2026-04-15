@@ -499,6 +499,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agents/sft_conversation_traces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFT & conversation traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -688,6 +716,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VLM Integration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -704,6 +750,36 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#operational-quick-reference-gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operational quick reference (gateway)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1163,6 +1239,25 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#operational-quick-reference-gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operational quick reference (gateway)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1182,7 +1277,41 @@
 <p><strong>Scope:</strong> vision-language model (VLM) integration for DuckClaw (e.g. image understanding paths, gateway/agents configuration, and operational constraints on Mac vs server).</p>
 <p><strong>Where to read the full spec:</strong> canonical file in the repo:</p>
 <p><code>specs/features/VLM INTEGRATION.md</code></p>
-<p><strong>Related docs:</strong> <a href="../../agents/adf_framework/">Agents overview</a> · <a href="../../operations/">Operations hub</a></p>
+<h2 id="operational-quick-reference-gateway">Operational quick reference (gateway)<a class="headerlink" href="#operational-quick-reference-gateway" title="Permanent link">&para;</a></h2>
+<p>The API Gateway ingests photos and visual documents for Telegram (and related paths) before the manager graph runs. Typical backends: <strong>MLX</strong> (<code>mlx_vlm</code> in-process or MLX HTTP) → <strong>Gemini</strong> when a key is set → <strong>OpenAI vision</strong> only if explicitly enabled.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GEMINI_API_KEY</code> / <code>GOOGLE_API_KEY</code></td>
+<td>Gemini VLM; also <code>DUCKCLAW_VLM_GEMINI_API_KEY</code>.</td>
+</tr>
+<tr>
+<td><code>OPENAI_API_KEY</code></td>
+<td>Vision only with <code>DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1</code>.</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_VLM_PRIMARY</code></td>
+<td><code>mlx</code> (default) or <code>openai</code> / <code>cloud</code> / <code>openai_first</code>.</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_VLM_ALLOW_OPENAI_VISION</code></td>
+<td>Must be truthy to use OpenAI for vision.</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_VLM_DISABLE_LOCAL_MLX_VLM</code>, <code>VLM_MLX_DISABLE_LOCAL</code>, <code>DUCKCLAW_VLM_MLX_DISABLE_LOCAL</code></td>
+<td>Disable in-process <code>mlx_vlm</code> when set truthy.</td>
+</tr>
+</tbody>
+</table>
+<p>If Gemini returns <strong>503</strong>, users may get a short Telegram notice suggesting retry or local MLX (Gemma VLM / <code>mlx_vlm</code>).</p>
+<p>Full Spanish runbook (Redis, Telegram, PM2, tables above expanded): <strong><a href="../../COMANDOS/">Commands (COMANDOS)</a></strong> §5.2.</p>
+<p><strong>Related docs:</strong> <a href="../../agents/adf_framework/">Agents overview</a> · <a href="../../agents/sft_conversation_traces/">SFT &amp; conversation traces</a> · <a href="../../operations/">Operations hub</a></p>
 
 
 

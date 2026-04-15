@@ -11,34 +11,8 @@ import json
 import os
 import re
 import sys
-import time
 import warnings
-from pathlib import Path
 from typing import Any
-
-
-def _agent_log(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-    # #region agent log
-    raw = os.environ.get("DUCKCLAW_DEBUG_LOG", "").strip()
-    if not raw:
-        return
-    logp = Path(raw)
-    try:
-        rec = {
-            "sessionId": "4a0206",
-            "runId": os.environ.get("DEBUG_RUN_ID", "mlx-server"),
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        logp.parent.mkdir(parents=True, exist_ok=True)
-        with logp.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
-    # #endregion agent log
 
 
 def _json_repair_candidates(s: str) -> list[str]:
@@ -87,18 +61,6 @@ def _install_gemma4_tool_patch() -> None:
         for cand in _json_repair_candidates(json_str):
             try:
                 arguments = json.loads(cand)
-                if cand != json_str:
-                    _agent_log(
-                        "H1",
-                        "run_mlx_lm_server.py:_parse_single",
-                        "json.loads ok after repair",
-                        {
-                            "repair": True,
-                            "cand_len": len(cand),
-                            "orig_len": len(json_str),
-                            "func_name": func_name,
-                        },
-                    )
                 return {"name": func_name, "arguments": arguments}
             except json.JSONDecodeError as e:
                 last_err = e
@@ -116,27 +78,10 @@ def _install_gemma4_tool_patch() -> None:
                 )
                 obj = ast.literal_eval(pyish)
                 if isinstance(obj, dict):
-                    _agent_log(
-                        "H4",
-                        "run_mlx_lm_server.py:_parse_single",
-                        "ast.literal_eval ok",
-                        {"func_name": func_name, "args_len": len(args_str)},
-                    )
                     return {"name": func_name, "arguments": obj}
         except (SyntaxError, ValueError, TypeError):
             pass
         if last_err is not None:
-            _agent_log(
-                "H5",
-                "run_mlx_lm_server.py:_parse_single",
-                "all parses failed",
-                {
-                    "func_name": func_name,
-                    "json_len": len(json_str),
-                    "err_pos": getattr(last_err, "pos", None),
-                    "err_msg": (last_err.msg or "")[:160],
-                },
-            )
             raise last_err
         raise RuntimeError("tool args JSON parse failed (no JSONDecodeError)")
 

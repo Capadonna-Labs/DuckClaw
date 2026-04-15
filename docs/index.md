@@ -30,7 +30,7 @@ uv run mkdocs build --strict
 | Area | What you get | Entry |
 |------|----------------|-------|
 | **Architecture** | ACID mutation contracts, memory model, sandbox boundaries | [Singleton Writer](architecture/singleton_writer.md), [Tri-Cameral Memory](architecture/tri_cameral_memory.md), [Strix Sandbox](architecture/strix_sandbox.md) |
-| **Agents** | ADF, worker templates, role-specific guides | [ADF Framework](agents/adf_framework.md), [Finanz](agents/finanz.md), [Quant Trader](agents/quant_trader.md) |
+| **Agents** | ADF, worker templates, role-specific guides, SFT trace pipeline | [ADF Framework](agents/adf_framework.md), [Finanz](agents/finanz.md), [Quant Trader](agents/quant_trader.md), [SFT & conversation traces](agents/sft_conversation_traces.md) |
 | **Specs** | Curated spec hub + links to canonical files in the repo | [Specs index](specs/index.md) |
 | **API** | **HTTP:** FastAPI routes and behavior (overview in API pages). **Python:** module reference via `mkdocstrings` | [API Gateway](api/api_gateway.md), [DB Writer](api/db_writer.md) |
 | **Operations** | Install, commands, troubleshooting, observability | [Operations hub](operations/index.md) |
@@ -47,4 +47,4 @@ uv run mkdocs build --strict
 - **Arquitectura:** contrato singleton writer, memoria tri-cameral, sandbox Strix.
 - **Especificaciones:** ver [índice de specs](specs/index.md); la fuente canónica sigue en `specs/features/` y `specs/core/` del repo.
 - **API:** las páginas bajo `API` mezclan **visión HTTP** (rutas FastAPI) y **referencia Python** generada con mkdocstrings.
-- **Operaciones:** [instalación, comandos y runbooks](operations/index.md) (principalmente en español).
+- **Operaciones:** [instalación, comandos y runbooks](operations/index.md) (principalmente en español); variables VLM y trazas en [COMANDOS](COMANDOS.md) §5.2–5.3.

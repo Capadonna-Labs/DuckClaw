@@ -387,6 +387,34 @@ Notas operativas:
 - `/cancel_signal` solo cancela señales en estado pendiente HITL (`PENDING_HITL`/`AWAITING_HITL`).
 - El ticker proactivo envía `SYSTEM_EVENT` tipo `TRADING_TICK` y **no ejecuta órdenes**: solo evalúa/propone; ejecución siempre requiere `/execute_signal`.
 
+### 5.2 Visión (VLM) — imágenes en Telegram y `/context`
+
+El gateway enriquece fotos/documentos visuales con un resumen antes de pasar el turno al grafo. Orden de backends por defecto: **MLX** (`mlx_vlm` en el mismo venv del proceso o servicio HTTP MLX) → **Gemini** si hay clave → **OpenAI visión** solo si lo activas explícitamente.
+
+| Variable | Uso |
+|----------|-----|
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Gemini como backend VLM (también se acepta `DUCKCLAW_VLM_GEMINI_API_KEY`). |
+| `OPENAI_API_KEY` | Solo visión si `DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1` (`true`/`1`/`yes`/`on`). |
+| `DUCKCLAW_VLM_PRIMARY` | `mlx` (default) u `openai` / `cloud` / `openai_first` para priorizar OpenAI cuando está permitido. |
+| `DUCKCLAW_VLM_ALLOW_OPENAI_VISION` | `1` para permitir ruta OpenAI; sin esto no se usa visión OpenAI aunque exista la clave. |
+| `DUCKCLAW_VLM_DISABLE_LOCAL_MLX_VLM`, `VLM_MLX_DISABLE_LOCAL`, `DUCKCLAW_VLM_MLX_DISABLE_LOCAL` | Cualquiera en modo “truthy” desactiva `mlx_vlm` en proceso (útil si solo quieres Gemini/API remota). |
+
+Si **Gemini** responde **503** en la cadena VLM, el usuario puede recibir un aviso corto en Telegram sugiriendo reintentar o configurar **MLX local** (Gemma VLM / `mlx_vlm`).
+
+Documentación ampliada: [VLM Integration](specs/vlm_integration.md) (resumen operativo + enlace a spec canónica en `specs/features/`).
+
+### 5.3 Trazas de conversación (SFT / dataset)
+
+Para acumular turnos con herramientas y generar datasets Gemma/MLX:
+
+| Variable | Uso |
+|----------|-----|
+| `DUCKCLAW_SAVE_CONVERSATION_TRACES` | `true`/`1`/`yes` (default en gateway) para escribir trazas; `false` para desactivar. |
+| `DUCKCLAW_CONVERSATION_TRACES_DIR` | Raíz del datalake (default relativo al paquete: `train/conversation_traces`). |
+| `DUCKCLAW_CONVERSATION_TRACES_FORMAT` | `sft` \| `grpo` según el formateo deseado (ver código en `conversation_traces`). |
+
+Rutas típicas: `packages/agents/train/conversation_traces/YYYY/MM/DD/traces.jsonl`. Pipeline SFT (collector, `train_sft.py`, Model-Guard): **[SFT & conversation traces](agents/sft_conversation_traces.md)** en el sitio MkDocs; detalle adicional en el repo `packages/agents/train/README.md`.
+
 ---
 
 ## 6. DB Writer (si usas escrituras encoladas)
@@ -440,6 +468,7 @@ Sin `--db` usa `get_gateway_db_path()` según el `.env` / multiplex actual.
 | 5 | `uv run duckops serve --gateway` |
 | 6 | (Opcional Telegram) `DUCKCLAW_CHAT_PARALLEL_INVOCATIONS=1` + `REDIS_URL` para varias respuestas concurrentes por chat; **§2.2** `DUCKCLAW_TOOL_READ_POOL_*` si varias `read_sql` en un solo turno; reiniciar con `--update-env` |
 | 7 | (Opcional) DB Writer: **§6** (`pm2 start ecosystem.db-writer.config.cjs` o `uv run python services/db-writer/main.py`) — **necesario** para `/context --add` (§2.3) |
+| 8 | (Opcional) VLM: **§5.2**; trazas SFT: **§5.3** y [SFT & conversation traces](agents/sft_conversation_traces.md) |
 
 ---
 
@@ -456,6 +485,8 @@ pm2 flush                                   # Vaciar logs PM2
 pm2 restart BI-Analyst-Gateway --update-env # Nombre según config/api_gateways_pm2.json; tras cambiar DUCKCLAW_*
 # Tras cambiar DUCKCLAW_TOOL_READ_POOL_* o DUCKCLAW_READ_SQL_MAX_RESPONSE_CHARS: mismo restart
 # Telegram (admin): /context --add …  |  /context --summary  — ver §2.3
+# VLM: GEMINI_API_KEY / GOOGLE_API_KEY, opcional DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1 — ver §5.2
+# Trazas: DUCKCLAW_SAVE_CONVERSATION_TRACES, DUCKCLAW_CONVERSATION_TRACES_DIR — ver §5.3 y agents/sft_conversation_traces.md
 ```
 
 Contexto del **wizard** y topología de servicios: [Installation.md](Installation.md). El **cheat sheet** canónico es esta sección (**§8**).

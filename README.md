@@ -26,6 +26,7 @@ duckclaw/
 ├── packages/
 │   ├── core/          # Native layer & bindings (performance-critical paths)
 │   ├── agents/        # LangGraph, workers, forge templates
+│   │   └── train/     # Conversation traces (JSONL), SFT Gemma/MLX pipeline — see train/README.md
 │   ├── shared/        # Shared Python utilities
 │   └── duckops/       # CLI (wizard, serve, etc.)
 ├── services/
@@ -47,8 +48,9 @@ duckclaw/
 ## Key components
 
 - **Singleton DB-Writer**: serializes durable DuckDB writes via Redis queues; keeps ledger-style state consistent.
-- **API Gateway**: FastAPI front door (`services/api-gateway`); agent chat, DB write enqueue, Telegram webhook, health.
+- **API Gateway**: FastAPI front door (`services/api-gateway`); agent chat, DB write enqueue, Telegram webhook, VLM image ingest, health.
 - **duckops**: Python CLI (`uv run duckops …`) for wizard-driven setup and local service control.
+- **Training traces (optional)**: successful chat turns can be written to JSONL under `packages/agents/train/conversation_traces/` for SFT datasets (`DUCKCLAW_SAVE_CONVERSATION_TRACES`, etc.). Site docs: [`docs/agents/sft_conversation_traces.md`](docs/agents/sft_conversation_traces.md) (published under **Agents → SFT & conversation traces** when you run MkDocs); repo README: [`packages/agents/train/README.md`](packages/agents/train/README.md).
 
 ---
 
@@ -60,7 +62,7 @@ uv run duckops init # interactive wizard
 uv run duckops serve --gateway
 ```
 
-Operational detail (Redis, Telegram, PM2, env vars): see [`docs/COMANDOS.md`](docs/COMANDOS.md) and [`docs/Installation.md`](docs/Installation.md).
+Operational detail (Redis, Telegram, PM2, VLM env vars, trace flags): see [`docs/COMANDOS.md`](docs/COMANDOS.md) and [`docs/Installation.md`](docs/Installation.md). VLM architecture hub: [`docs/specs/vlm_integration.md`](docs/specs/vlm_integration.md).
 
 ---
 

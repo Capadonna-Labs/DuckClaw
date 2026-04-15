@@ -56,6 +56,7 @@ nav:
       - ADF Framework: agents/adf_framework.md
       - Finanz: agents/finanz.md
       - Quant Trader: agents/quant_trader.md
+      - SFT & conversation traces: agents/sft_conversation_traces.md
   - Specs:
       - Overview: specs/index.md
       - Finanz Admin SQL DB-Writer: specs/finanz_admin_sql_db_writer.md

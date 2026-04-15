@@ -44,6 +44,57 @@ def test_sanitize_worker_reply_strips_tool_section_headers() -> None:
     assert "Estado: conectado" in out
 
 
+def test_sanitize_worker_reply_strips_gemma_pseudo_date_time_tags() -> None:
+    raw = "Actualizado el <date>15 de abril de 2026</date> a las <time>3:06 PM</time>."
+    out = sanitize_worker_reply_text(raw)
+    assert "<date>" not in out.lower()
+    assert "<time>" not in out.lower()
+    assert "15 de abril de 2026" in out
+    assert "3:06 PM" in out
+
+
+def test_sanitize_worker_reply_strips_gemma_pseudo_period_tag() -> None:
+    """Evidencia2026-04-15: resumen /context con ``<period>…</period>`` en Telegram y traces."""
+    raw = "Datos al <period>15 abr, 3:15:01 p.m. UTC-5</period>."
+    out = sanitize_worker_reply_text(raw)
+    assert "<period>" not in out.lower()
+    assert "</period>" not in out.lower()
+    assert "15 abr, 3:15:01 p.m. UTC-5" in out
+
+
+def test_sanitize_worker_reply_strips_gemma_double_angle_date_leak() -> None:
+    """Evidencia traces2026-04-15: ``< <21 de abril>`` en síntesis Bloomberg."""
+    raw = (
+        "manifestaciones cercanas a la fecha del < <21 de abril>.\n\n**Businessweek**"
+    )
+    out = sanitize_worker_reply_text(raw)
+    assert "< <" not in out
+    assert "21 de abril" in out
+    assert "**Businessweek**" in out
+
+
+def test_sanitize_worker_reply_strips_gemma_mlx_thought_only_cot() -> None:
+    """Evidencia: POST /v1/chat/completions en 8081 con max_tokens bajo solo emite <|channel>thought + Thinking Process."""
+    raw = (
+        '<|channel>thought\nThinking Process:\n\n1.  **Analyze the Request:** The user wants '
+        'to know how to say "Hi" in a single sentence.'
+    )
+    out = sanitize_worker_reply_text(raw)
+    assert "thinking process" not in out.lower()
+    assert "channel" not in out.lower()
+    assert "analyze the request" not in out.lower()
+    assert out == ""
+
+
+def test_sanitize_worker_reply_keeps_text_after_gemma_channel_separator() -> None:
+    raw = (
+        "<|channel>thought\nThinking Process:\n\n1. x\n<channel|>Hola, ¿en qué te ayudo?"
+    )
+    out = sanitize_worker_reply_text(raw)
+    assert "thinking process" not in out.lower()
+    assert "Hola" in out
+
+
 def test_sanitize_worker_reply_phase1_keeps_tool_headers() -> None:
     raw = "### get_ibkr_portfolio\nEstado: ok"
     out = sanitize_worker_reply_phase1(raw)

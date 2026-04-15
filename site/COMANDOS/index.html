@@ -499,6 +499,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/sft_conversation_traces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFT & conversation traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1197,6 +1225,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#52-vision-vlm-imagenes-en-telegram-y-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Visión (VLM) — imágenes en Telegram y /context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-trazas-de-conversacion-sft-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Trazas de conversación (SFT / dataset)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1663,6 +1713,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#52-vision-vlm-imagenes-en-telegram-y-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Visión (VLM) — imágenes en Telegram y /context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-trazas-de-conversacion-sft-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Trazas de conversación (SFT / dataset)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2115,6 +2187,65 @@ uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </s
 <li><code>/cancel_signal</code> solo cancela señales en estado pendiente HITL (<code>PENDING_HITL</code>/<code>AWAITING_HITL</code>).</li>
 <li>El ticker proactivo envía <code>SYSTEM_EVENT</code> tipo <code>TRADING_TICK</code> y <strong>no ejecuta órdenes</strong>: solo evalúa/propone; ejecución siempre requiere <code>/execute_signal</code>.</li>
 </ul>
+<h3 id="52-vision-vlm-imagenes-en-telegram-y-context">5.2 Visión (VLM) — imágenes en Telegram y <code>/context</code><a class="headerlink" href="#52-vision-vlm-imagenes-en-telegram-y-context" title="Permanent link">&para;</a></h3>
+<p>El gateway enriquece fotos/documentos visuales con un resumen antes de pasar el turno al grafo. Orden de backends por defecto: <strong>MLX</strong> (<code>mlx_vlm</code> en el mismo venv del proceso o servicio HTTP MLX) → <strong>Gemini</strong> si hay clave → <strong>OpenAI visión</strong> solo si lo activas explícitamente.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Uso</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GEMINI_API_KEY</code> / <code>GOOGLE_API_KEY</code></td>
+<td>Gemini como backend VLM (también se acepta <code>DUCKCLAW_VLM_GEMINI_API_KEY</code>).</td>
+</tr>
+<tr>
+<td><code>OPENAI_API_KEY</code></td>
+<td>Solo visión si <code>DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1</code> (<code>true</code>/<code>1</code>/<code>yes</code>/<code>on</code>).</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_VLM_PRIMARY</code></td>
+<td><code>mlx</code> (default) u <code>openai</code> / <code>cloud</code> / <code>openai_first</code> para priorizar OpenAI cuando está permitido.</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_VLM_ALLOW_OPENAI_VISION</code></td>
+<td><code>1</code> para permitir ruta OpenAI; sin esto no se usa visión OpenAI aunque exista la clave.</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_VLM_DISABLE_LOCAL_MLX_VLM</code>, <code>VLM_MLX_DISABLE_LOCAL</code>, <code>DUCKCLAW_VLM_MLX_DISABLE_LOCAL</code></td>
+<td>Cualquiera en modo “truthy” desactiva <code>mlx_vlm</code> en proceso (útil si solo quieres Gemini/API remota).</td>
+</tr>
+</tbody>
+</table>
+<p>Si <strong>Gemini</strong> responde <strong>503</strong> en la cadena VLM, el usuario puede recibir un aviso corto en Telegram sugiriendo reintentar o configurar <strong>MLX local</strong> (Gemma VLM / <code>mlx_vlm</code>).</p>
+<p>Documentación ampliada: <a href="../specs/vlm_integration/">VLM Integration</a> (resumen operativo + enlace a spec canónica en <code>specs/features/</code>).</p>
+<h3 id="53-trazas-de-conversacion-sft-dataset">5.3 Trazas de conversación (SFT / dataset)<a class="headerlink" href="#53-trazas-de-conversacion-sft-dataset" title="Permanent link">&para;</a></h3>
+<p>Para acumular turnos con herramientas y generar datasets Gemma/MLX:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Uso</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DUCKCLAW_SAVE_CONVERSATION_TRACES</code></td>
+<td><code>true</code>/<code>1</code>/<code>yes</code> (default en gateway) para escribir trazas; <code>false</code> para desactivar.</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_CONVERSATION_TRACES_DIR</code></td>
+<td>Raíz del datalake (default relativo al paquete: <code>train/conversation_traces</code>).</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_CONVERSATION_TRACES_FORMAT</code></td>
+<td><code>sft</code> | <code>grpo</code> según el formateo deseado (ver código en <code>conversation_traces</code>).</td>
+</tr>
+</tbody>
+</table>
+<p>Rutas típicas: <code>packages/agents/train/conversation_traces/YYYY/MM/DD/traces.jsonl</code>. Pipeline SFT (collector, <code>train_sft.py</code>, Model-Guard): <strong><a href="../agents/sft_conversation_traces/">SFT &amp; conversation traces</a></strong> en el sitio MkDocs; detalle adicional en el repo <code>packages/agents/train/README.md</code>.</p>
 <hr />
 <h2 id="6-db-writer-si-usas-escrituras-encoladas">6. DB Writer (si usas escrituras encoladas)<a class="headerlink" href="#6-db-writer-si-usas-escrituras-encoladas" title="Permanent link">&para;</a></h2>
 <p>El wizard soberano puede generar <code>ecosystem.db-writer.config.cjs</code> en la <strong>raíz del repo</strong>. Además de la cola SQL (<code>duckdb_write_queue</code>), el proceso escucha <strong>CONTEXT_INJECTION</strong> (<code>duckclaw:state_delta:context</code> por defecto) para persistir <code>/context --add</code> en <code>main.semantic_memory</code>.</p>
@@ -2177,6 +2308,10 @@ pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-DB-Writer
 <td>7</td>
 <td>(Opcional) DB Writer: <strong>§6</strong> (<code>pm2 start ecosystem.db-writer.config.cjs</code> o <code>uv run python services/db-writer/main.py</code>) — <strong>necesario</strong> para <code>/context --add</code> (§2.3)</td>
 </tr>
+<tr>
+<td>8</td>
+<td>(Opcional) VLM: <strong>§5.2</strong>; trazas SFT: <strong>§5.3</strong> y <a href="../agents/sft_conversation_traces/">SFT &amp; conversation traces</a></td>
+</tr>
 </tbody>
 </table>
 <hr />
@@ -2191,6 +2326,8 @@ pm2<span class="w"> </span>flush<span class="w">                                
 pm2<span class="w"> </span>restart<span class="w"> </span>BI-Analyst-Gateway<span class="w"> </span>--update-env<span class="w"> </span><span class="c1"># Nombre según config/api_gateways_pm2.json; tras cambiar DUCKCLAW_*</span>
 <span class="c1"># Tras cambiar DUCKCLAW_TOOL_READ_POOL_* o DUCKCLAW_READ_SQL_MAX_RESPONSE_CHARS: mismo restart</span>
 <span class="c1"># Telegram (admin): /context --add …  |  /context --summary  — ver §2.3</span>
+<span class="c1"># VLM: GEMINI_API_KEY / GOOGLE_API_KEY, opcional DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1 — ver §5.2</span>
+<span class="c1"># Trazas: DUCKCLAW_SAVE_CONVERSATION_TRACES, DUCKCLAW_CONVERSATION_TRACES_DIR — ver §5.3 y agents/sft_conversation_traces.md</span>
 </code></pre></div>
 <p>Contexto del <strong>wizard</strong> y topología de servicios: <a href="../Installation/">Installation.md</a>. El <strong>cheat sheet</strong> canónico es esta sección (<strong>§8</strong>).</p>
 

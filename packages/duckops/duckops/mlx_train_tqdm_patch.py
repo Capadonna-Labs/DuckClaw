@@ -306,29 +306,6 @@ def train_with_tqdm(
             name="duckclaw-pbar-time-heartbeat",
         )
         _hb_thread.start()
-        # #region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-5e21eb.log",
-                "a",
-                encoding="utf-8",
-            ) as _dbg:
-                _dbg.write(
-                    json.dumps(
-                        {
-                            "sessionId": "5e21eb",
-                            "hypothesisId": "H2",
-                            "location": "mlx_train_tqdm_patch.py:heartbeat",
-                            "message": "time_heartbeat_started",
-                            "data": {"interval_s": 0.2},
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except OSError:
-            pass
-        # #endregion
 
     try:
         for it, batch in batch_iter:
@@ -465,38 +442,6 @@ def train_with_tqdm(
                 _postfix_fin = "0:00" if _rem <= 0 else _fmt_eta_hhmmss(eta_sec)
                 pbar.update(1)
                 pbar.set_postfix(fin=_postfix_fin, **_train_pf, refresh=True)
-                # #region agent log
-                if it <= 3:
-                    try:
-                        with open(
-                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-5e21eb.log",
-                            "a",
-                            encoding="utf-8",
-                        ) as _dbg:
-                            _dbg.write(
-                                json.dumps(
-                                    {
-                                        "sessionId": "5e21eb",
-                                        "hypothesisId": "H1",
-                                        "location": "mlx_train_tqdm_patch.py:iter_end",
-                                        "message": "pbar_after_iter_done",
-                                        "data": {
-                                            "it": it,
-                                            "pbar_n": getattr(pbar, "n", None),
-                                            "fin": _postfix_fin,
-                                            "ema_train_s": _ema_train_sec,
-                                            "ema_val_s": _ema_val_sec,
-                                            "n_val_rem": n_val_rem,
-                                            "eta_s": eta_sec,
-                                        },
-                                        "timestamp": int(time.time() * 1000),
-                                    }
-                                )
-                                + "\n"
-                            )
-                    except OSError:
-                        pass
-                # #endregion
 
     finally:
         if _hb_stop is not None:

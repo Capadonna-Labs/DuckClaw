@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gc
 import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
 from typing import Any
 from urllib.parse import urlparse
@@ -69,8 +71,24 @@ def _vlm_backend_order() -> list[str]:
 
 _VLM_SYSTEM_PROMPT = (
     "Describe los datos financieros, texto o código presentes en esta imagen de forma concisa. "
-    "No inventes datos."
+    "No inventes datos. "
+    "Las fechas deben transcribirse exactamente como aparecen en la imagen (día/mes/año legibles). "
+    "No completes el año ni el día desde memoria o patrones de entrenamiento; si la fecha no es "
+    "claramente visible, di «fecha no legible en la imagen» y no asumas un año. "
+    "Salida: solo el resumen visible al usuario en español, sin pasos de razonamiento ni inglés."
 )
+
+def _sanitize_vlm_visible_text(raw: str) -> str:
+    """
+    Quita CoT / marcadores de canal que Gemma multimodal puede filtrar al usuario vía MLX-Vision.
+    Evidencia (gateway2026-04-15): ``Contexto visual adjunto: <|channel>thought … <channel|>El texto…``.
+    """
+    from duckclaw.integrations.llm_providers import strip_gemma_mlx_channel_leak
+
+    original = (raw or "").strip()
+    if not original:
+        return original
+    return strip_gemma_mlx_channel_leak(original)
 
 _mlx_vlm_model_proc: tuple[Any, Any] | None = None
 
@@ -102,27 +120,41 @@ def _mlx_vlm_local_enabled() -> bool:
 _mlx_vlm_missing_logged = False
 
 
-def _debug_probe(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-    # region agent log
+def _vlm_gc_before_inference_enabled() -> bool:
+    """``DUCKCLAW_VLM_GC_BEFORE_INFERENCE=0`` desactiva ``gc.collect`` previo (solo gateway / RAM Python)."""
+    return (os.environ.get("DUCKCLAW_VLM_GC_BEFORE_INFERENCE") or "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def _vlm_memory_mitigation() -> None:
+    """
+    Libera presión de heap Python antes/después de VLM (no libera VRAM del proceso MLX-Vision).
+    En Mac mini con memoria unificada, menos RAM en el gateway reduce contención con Metal.
+    """
+    if not _vlm_gc_before_inference_enabled():
+        return
+    gc.collect(0)
+    gc.collect()
+
+
+async def vlm_post_inference_cooldown() -> None:
+    """
+    Pausa opcional tras VLM antes de encolar el turno grande al worker (MLX texto).
+    ``DUCKCLAW_VLM_POST_INFERENCE_COOLDOWN_MS`` (0–30000): en Mac con RAM unificada puede
+    reducir picos cuando MLX-Vision y MLX-Inference compiten por Metal.
+    """
+    raw = (os.environ.get("DUCKCLAW_VLM_POST_INFERENCE_COOLDOWN_MS") or "0").strip()
     try:
-        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-4a0206.log", "a", encoding="utf-8") as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "4a0206",
-                        "runId": "pre-fix",
-                        "hypothesisId": hypothesis_id,
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(__import__("time").time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
+        ms = max(0, min(30_000, int(raw)))
+    except ValueError:
+        ms = 0
+    if ms <= 0:
+        return
+    await asyncio.sleep(ms / 1000.0)
 
 
 def _try_mlx_vlm_local_before_http() -> bool:
@@ -130,21 +162,18 @@ def _try_mlx_vlm_local_before_http() -> bool:
     global _mlx_vlm_missing_logged
     if not _mlx_vlm_local_enabled():
         return False
-    if (os.environ.get("DUCKCLAW_VLM_HTTP_BEFORE_LOCAL") or "").strip().lower() in ("1", "true", "yes"):
+    http_first = (os.environ.get("DUCKCLAW_VLM_HTTP_BEFORE_LOCAL") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    dedicated_http = _dedicated_loopback_vlm_http_configured()
+    if http_first or dedicated_http:
         return False
     try:
         import importlib.util
 
         mlx_vlm_found = importlib.util.find_spec("mlx_vlm") is not None
-        _debug_probe(
-            "H1",
-            "vlm_ingest.py:_try_mlx_vlm_local_before_http",
-            "mlx_vlm_local_probe",
-            {
-                "local_enabled": True,
-                "mlx_vlm_found": mlx_vlm_found,
-            },
-        )
         if not mlx_vlm_found:
             if not _mlx_vlm_missing_logged:
                 _mlx_vlm_missing_logged = True
@@ -196,29 +225,6 @@ async def _post_openai_chat_completions_resilient(
         except httpx.ConnectError:
             if not _is_loopback_openai_base(base_url) or attempt >= _MLX_LOOPBACK_CONNECT_ATTEMPTS - 1:
                 raise
-            # region agent log
-            try:
-                _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-                with open(_p, "a", encoding="utf-8") as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "adf9d8",
-                                "hypothesisId": "H6",
-                                "location": "vlm_ingest.py:_post_openai_chat_completions_resilient",
-                                "message": "mlx_connect_retry",
-                                "data": {
-                                    "attempt": attempt + 1,
-                                    "max": _MLX_LOOPBACK_CONNECT_ATTEMPTS,
-                                },
-                                "timestamp": int(__import__("time").time() * 1000),
-                            }
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
             await asyncio.sleep(_MLX_LOOPBACK_RECONNECT_BASE_S * (2**attempt))
 
 
@@ -249,6 +255,45 @@ def _text_mlx_stack_port() -> int:
         return max(1, min(65535, int(raw)))
     except ValueError:
         return 8080
+
+
+def _dedicated_loopback_vlm_http_configured() -> bool:
+    """
+    True si la visión OpenAI-compat está pensada para un **puerto loopback distinto** al de
+    ``mlx_lm`` (``MLX_PORT``), p. ej. MLX-Vision en :8081 e inferencia texto en :8080.
+
+    En ese caso **no** cargar ``mlx_vlm`` dentro del proceso del gateway: duplica pesos
+    multimodales en Metal y suele terminar en ``kIOGPUCommandBufferCallbackErrorOutOfMemory``
+    (evidencia en logs PM2 al usar ``/context --add`` + foto).
+    """
+    text_port = _text_mlx_stack_port()
+    raw_base = ""
+    for key in ("DUCKCLAW_VLM_MLX_BASE_URL", "VLM_MLX_BASE_URL"):
+        v = (os.environ.get(key) or "").strip().rstrip("/")
+        if v:
+            raw_base = v
+            break
+    if raw_base:
+        if not _is_loopback_openai_base(raw_base):
+            return False
+        try:
+            u = urlparse(raw_base)
+            vlm_port = u.port
+            if vlm_port is None:
+                vlm_port = 80 if (u.scheme or "http").lower() == "http" else 443
+        except Exception:
+            return False
+        return vlm_port != text_port
+    raw_vp = (os.environ.get("VLM_MLX_PORT") or "").strip()
+    if not raw_vp:
+        return False
+    try:
+        vlm_port = max(1, min(65535, int(raw_vp)))
+    except ValueError:
+        return False
+    if vlm_port == text_port:
+        return False
+    return _is_loopback_openai_base(f"http://127.0.0.1:{vlm_port}/v1")
 
 
 def _skip_mlx_openai_vision_same_port_as_text_mlx(mlx_base: str) -> bool:
@@ -460,7 +505,7 @@ def _mlx_vlm_caption_paths_sync(paths: list[str], prompt: str, *, max_tokens: in
         max_tokens=max_tokens,
         verbose=False,
     )
-    return (res.text or "").strip()
+    return _sanitize_vlm_visible_text((res.text or "").strip())
 
 
 async def _try_mlx_vlm_caption_paths(paths: list[str], prompt: str) -> str:
@@ -561,38 +606,14 @@ async def _call_openai_vision(
                 headers=headers,
                 base_url=base_url,
             )
-        except httpx.RequestError as _req_exc:
-            # region agent log
-            try:
-                _u = httpx.URL(endpoint)
-                _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-                with open(_p, "a", encoding="utf-8") as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "adf9d8",
-                                "hypothesisId": "H5",
-                                "location": "vlm_ingest.py:_call_openai_vision",
-                                "message": "httpx_request_error",
-                                "data": {
-                                    "endpoint_host": _u.host,
-                                    "endpoint_port": _u.port,
-                                    "exc_type": type(_req_exc).__name__,
-                                    "exc_detail": (str(_req_exc) or "")[:400],
-                                },
-                                "timestamp": int(__import__("time").time() * 1000),
-                            }
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
+        except httpx.RequestError:
             raise
         r.raise_for_status()
         data = r.json() if r.content else {}
     try:
-        return str(data["choices"][0]["message"]["content"] or "").strip()
+        return _sanitize_vlm_visible_text(
+            str(data["choices"][0]["message"]["content"] or "").strip()
+        )
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Respuesta VLM inválida: {exc}") from exc
 
@@ -635,38 +656,14 @@ async def _call_openai_vision_multi(
                 headers=headers,
                 base_url=base_url,
             )
-        except httpx.RequestError as _req_exc:
-            # region agent log
-            try:
-                _u = httpx.URL(endpoint)
-                _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-                with open(_p, "a", encoding="utf-8") as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "adf9d8",
-                                "hypothesisId": "H5",
-                                "location": "vlm_ingest.py:_call_openai_vision_multi",
-                                "message": "httpx_request_error",
-                                "data": {
-                                    "endpoint_host": _u.host,
-                                    "endpoint_port": _u.port,
-                                    "exc_type": type(_req_exc).__name__,
-                                    "exc_detail": (str(_req_exc) or "")[:400],
-                                },
-                                "timestamp": int(__import__("time").time() * 1000),
-                            }
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
+        except httpx.RequestError:
             raise
         r.raise_for_status()
         data = r.json() if r.content else {}
     try:
-        return str(data["choices"][0]["message"]["content"] or "").strip()
+        return _sanitize_vlm_visible_text(
+            str(data["choices"][0]["message"]["content"] or "").strip()
+        )
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Respuesta VLM inválida: {exc}") from exc
 
@@ -820,41 +817,10 @@ async def process_visual_payload(
             f.write(image_bytes)
             tmp_path = f.name
 
+        _vlm_memory_mitigation()
+
         mlx_base = _mlx_http_base_url()
         mlx_model = _mlx_http_vision_model().strip()
-        # region agent log
-        try:
-            _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-            _te = _httpx_trust_env_for_openai_base(mlx_base)
-            with open(_p, "a", encoding="utf-8") as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "adf9d8",
-                            "hypothesisId": "H3",
-                            "location": "vlm_ingest.py:process_visual_payload",
-                            "message": "mlx_http_resolve",
-                            "data": {
-                                "mlx_model": mlx_model,
-                                "mlx_base": mlx_base,
-                                "trust_env": _te,
-                                "env_VLM_MLX_PORT": (os.environ.get("VLM_MLX_PORT") or "").strip(),
-                                "env_MLX_PORT": (os.environ.get("MLX_PORT") or "").strip(),
-                                "has_DUCKCLAW_VLM_MLX_BASE_URL": bool(
-                                    (os.environ.get("DUCKCLAW_VLM_MLX_BASE_URL") or "").strip()
-                                ),
-                                "has_VLM_MLX_BASE_URL": bool(
-                                    (os.environ.get("VLM_MLX_BASE_URL") or "").strip()
-                                ),
-                            },
-                            "timestamp": int(__import__("time").time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         fb_model = (os.environ.get("DUCKCLAW_VLM_FALLBACK_MODEL") or "gpt-4o-mini").strip()
         prompt_use = (caption or "").strip() or _VLM_SYSTEM_PROMPT
         if _try_mlx_vlm_local_before_http():
@@ -881,16 +847,6 @@ async def process_visual_payload(
         last_exc: BaseException | None = None
         gemini_503_in_chain = False
         for kind in _vlm_backend_order():
-            _debug_probe(
-                "H2",
-                "vlm_ingest.py:process_visual_payload",
-                "vlm_backend_try",
-                {
-                    "backend": kind,
-                    "mlx_base": mlx_base,
-                    "local_enabled": _mlx_vlm_local_enabled(),
-                },
-            )
             try:
                 if kind == "mlx":
                     if _skip_mlx_openai_vision_same_port_as_text_mlx(mlx_base):
@@ -1027,26 +983,6 @@ async def process_visual_payload(
                 summary = summary_fb
                 confidence = 0.82
             elif last_exc is not None:
-                # region agent log
-                try:
-                    _p = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-                    with open(_p, "a", encoding="utf-8") as _df:
-                        _df.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "adf9d8",
-                                    "hypothesisId": "H2",
-                                    "location": "vlm_ingest.py:process_visual_payload",
-                                    "message": "vlm_all_failed",
-                                    "data": {"gemini_503": gemini_503_in_chain},
-                                    "timestamp": int(__import__("time").time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # endregion
                 raise VlmIngestAllFailed(
                     last_exc, gemini_503=gemini_503_in_chain
                 ) from last_exc
@@ -1060,6 +996,11 @@ async def process_visual_payload(
         }
     finally:
         _secure_wipe_remove(tmp_path)
+        try:
+            del image_bytes
+        except Exception:
+            pass
+        _vlm_memory_mitigation()
 
 
 async def process_visual_album_batch(
@@ -1079,6 +1020,7 @@ async def process_visual_album_batch(
     per_hashes: list[str] = []
     dl: list[tuple[str, bytes]] = []
     tmp_paths: list[str] = []
+    composite = ""
     os.makedirs(_tmp_dir(), exist_ok=True)
     try:
         for file_id, mime_type in items:
@@ -1097,6 +1039,8 @@ async def process_visual_album_batch(
             ) as f:
                 f.write(image_bytes)
                 tmp_paths.append(f.name)
+
+        _vlm_memory_mitigation()
 
         composite = hashlib.sha256("|".join(sorted(per_hashes)).encode("utf-8")).hexdigest()
         mlx_base = _mlx_http_base_url()
@@ -1278,6 +1222,11 @@ async def process_visual_album_batch(
     finally:
         for p in tmp_paths:
             _secure_wipe_remove(p)
+        try:
+            dl.clear()
+        except Exception:
+            pass
+        _vlm_memory_mitigation()
 
 
 async def push_vlm_state_delta_redis(

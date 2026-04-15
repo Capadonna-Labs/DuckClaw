@@ -2603,36 +2603,6 @@ def build_worker_graph(
                         _unreal_prev_txt = _m_unreal_prev.group(1) if _m_unreal_prev else ""
                 else:
                     _unreal_txt = ""
-                # region agent log
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "pre-fix",
-                                    "hypothesisId": "H4_previous_pnl_availability",
-                                    "location": "packages/agents/src/duckclaw/workers/factory.py:agent_node",
-                                    "message": "goals_prev_pnl_scan",
-                                    "data": {
-                                        "seen_ibkr_tool_messages": _seen_ibkr,
-                                        "current_unreal_txt": _unreal_txt,
-                                        "prev_unreal_txt": _unreal_prev_txt,
-                                        "has_current_tool_text": bool(_portfolio_tool_text),
-                                        "has_prev_tool_text": bool(_portfolio_tool_text_prev),
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # endregion
                 if _portfolio_tool_text and (_total_value or _positions):
                     if _unreal_txt:
                         try:
@@ -2676,36 +2646,6 @@ def build_worker_graph(
                             _fallback_text += " Cambio vs anterior=N/D."
                         if _chat_key:
                             _GOALS_PREV_UNREALIZED_PNL_BY_CHAT[_chat_key] = _unreal_val
-                        # region agent log
-                        try:
-                            with open(
-                                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                                "a",
-                                encoding="utf-8",
-                            ) as _df:
-                                _df.write(
-                                    json.dumps(
-                                        {
-                                            "sessionId": "c964f7",
-                                            "runId": "post-fix",
-                                            "hypothesisId": "H5_prev_and_pct_rendered",
-                                            "location": "packages/agents/src/duckclaw/workers/factory.py:agent_node",
-                                            "message": "goals_delta_metrics_rendered",
-                                            "data": {
-                                                "chat_key": _chat_key,
-                                                "current_unreal": _unreal_val,
-                                                "prev_unreal": _prev_unreal_val,
-                                                "pct_change": _pct_change,
-                                                "fallback_preview": _fallback_text[:260],
-                                            },
-                                            "timestamp": int(time.time() * 1000),
-                                        }
-                                    )
-                                    + "\n"
-                                )
-                        except Exception:
-                            pass
-                        # endregion
                     else:
                         _fallback_text = (
                             "Revision /goals (proactiva): "
@@ -2722,33 +2662,6 @@ def build_worker_graph(
                 else:
                     _fallback_text = ""
                 if _fallback_text:
-                    # region agent log
-                    try:
-                        with open(
-                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                            "a",
-                            encoding="utf-8",
-                        ) as _df:
-                            _df.write(
-                                json.dumps(
-                                    {
-                                        "sessionId": "c964f7",
-                                        "runId": "pre-fix",
-                                        "hypothesisId": "H3_goals_fallback_forces_missing_pnl_text",
-                                        "location": "packages/agents/src/duckclaw/workers/factory.py:agent_node",
-                                        "message": "goals_fallback_applied",
-                                        "data": {
-                                            "has_tool_text": bool(_portfolio_tool_text),
-                                            "fallback_preview": _fallback_text[:220],
-                                        },
-                                        "timestamp": int(time.time() * 1000),
-                                    }
-                                )
-                                + "\n"
-                            )
-                    except Exception:
-                        pass
-                    # endregion
                     try:
                         resp = resp.model_copy(update={"content": _fallback_text})
                     except Exception:
@@ -3011,8 +2924,6 @@ def build_worker_graph(
         return out
 
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
-        import json as _json_dbg
-        import time as _time_dbg
         from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
         from duckclaw.utils import format_tool_reply
         from duckclaw.forge.atoms.user_reply_nl_synthesis import (
@@ -3194,33 +3105,7 @@ def build_worker_graph(
             _inc_text = (state.get("incoming") or state.get("input") or "").strip().lower()
             if reply and _jh_spec_check(spec) and "job_opportunity_tracking" in _inc_text and "a2a" in reply.lower():
                 reply = re.sub(r"\bA2A\b\s*", "", reply, flags=re.IGNORECASE)
-                # region agent log
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-9accbe.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            _json_dbg.dumps(
-                                {
-                                    "sessionId": "9accbe",
-                                    "timestamp": int(_time_dbg.time() * 1000),
-                                    "hypothesisId": "H9",
-                                    "location": "workers/factory.py:set_reply",
-                                    "message": "removed A2A label from job tracking egress",
-                                    "data": {},
-                                    "runId": "pre-fix",
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # endregion
             if reply and _jh_spec_check(spec) and "job_opportunity_tracking" in _inc_text:
-                original_reply = reply
                 reply = re.sub(
                     r"#\s*📊\s*MISIÓN\s+JOB_OPPORTUNITY_TRACKING\s*-\s*COMPLETADA",
                     "# 📊 SEGUIMIENTO DE VACANTE - COMPLETADO",
@@ -3233,32 +3118,6 @@ def build_worker_graph(
                     reply,
                     flags=re.IGNORECASE,
                 )
-                if reply != original_reply:
-                    # region agent log
-                    try:
-                        with open(
-                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-9accbe.log",
-                            "a",
-                            encoding="utf-8",
-                        ) as _df:
-                            _df.write(
-                                _json_dbg.dumps(
-                                    {
-                                        "sessionId": "9accbe",
-                                        "timestamp": int(_time_dbg.time() * 1000),
-                                        "hypothesisId": "H10",
-                                        "location": "workers/factory.py:set_reply",
-                                        "message": "normalized mission wording in job tracking egress",
-                                        "data": {},
-                                        "runId": "pre-fix",
-                                    },
-                                    ensure_ascii=False,
-                                )
-                                + "\n"
-                            )
-                    except Exception:
-                        pass
-                    # endregion
         except Exception:
             pass
         reply = sanitize_worker_reply_text(reply or "")
@@ -3269,33 +3128,14 @@ def build_worker_graph(
                 if isinstance(_m, ToolMessage):
                     _fallback = sanitize_worker_reply_text(format_tool_reply(_m.content))
                     if _fallback:
-                        # region agent log
-                        try:
-                            with open(
-                                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-9accbe.log",
-                                "a",
-                                encoding="utf-8",
-                            ) as _df:
-                                _df.write(
-                                    _json_dbg.dumps(
-                                        {
-                                            "sessionId": "9accbe",
-                                            "timestamp": int(_time_dbg.time() * 1000),
-                                            "hypothesisId": "H7",
-                                            "location": "workers/factory.py:set_reply",
-                                            "message": "tool fallback used for empty reply",
-                                            "data": {"tool_name": getattr(_m, "name", "")},
-                                            "runId": "pre-fix",
-                                        },
-                                        ensure_ascii=False,
-                                    )
-                                    + "\n"
-                                )
-                        except Exception:
-                            pass
-                        # endregion
                         reply = _fallback
                         break
+        try:
+            from duckclaw.graphs.conversation_traces import sync_final_assistant_egress_in_langchain_messages
+
+            sync_final_assistant_egress_in_langchain_messages(msgs, reply or "")
+        except Exception:
+            pass
         if suppress_egress:
             out = {**state, "reply": "", "internal_reply": (reply or ""), "messages": msgs}
         else:

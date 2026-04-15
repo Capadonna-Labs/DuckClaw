@@ -26,6 +26,8 @@ Operational runbooks for installing, running, monitoring, and troubleshooting Du
 | Proactive n8n / heartbeat | [Homeostasis Heartbeat](../Homeostasis-Heartbeat.md) |
 | The Mind game | [Jugar The Mind](../Jugar-The-Mind.md) |
 | Vaults / `/vault` | [Multi Vault System](../Multi-Vault-System.md) |
+| Vision (VLM) architecture + env vars | [VLM Integration](../specs/vlm_integration.md) · [COMANDOS §5.2](../COMANDOS.md) |
+| Conversation traces / SFT Gemma–MLX | [SFT & conversation traces](../agents/sft_conversation_traces.md) · [COMANDOS §5.3](../COMANDOS.md) |
 
 ## Related reading
 

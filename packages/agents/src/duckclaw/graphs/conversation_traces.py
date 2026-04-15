@@ -156,6 +156,40 @@ def _lc_messages_to_chatml(messages: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+def sync_final_assistant_egress_in_langchain_messages(
+    messages: list[Any], final_assistant_text: str
+) -> bool:
+    """
+    Tras ``set_reply`` el egress suele mutarse (p. ej. ``maybe_synthesize_reply``) pero el
+    último ``AIMessage`` sigue siendo la salida cruda del modelo. Sincroniza ese mensaje
+    con el texto enviado al usuario para que ``traces.jsonl`` y Redis no diverjan.
+
+    Retorna True si se reescribió el último AIMessage.
+    """
+    from langchain_core.messages import AIMessage
+
+    text = (final_assistant_text or "").strip()
+    if not messages or not text:
+        return False
+    last = messages[-1]
+    if not isinstance(last, AIMessage):
+        return False
+    if getattr(last, "tool_calls", None):
+        return False
+    before = _stringify_lc_message_content(getattr(last, "content", None)).strip()
+    if before == text:
+        return False
+    try:
+        messages[-1] = last.model_copy(update={"content": text})
+        return True
+    except Exception:
+        try:
+            messages[-1] = AIMessage(content=text)
+            return True
+        except Exception:
+            return False
+
+
 def align_trace_messages_with_assistant_egress(
     messages: list[dict[str, Any]], assistant_content: str
 ) -> None:

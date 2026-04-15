@@ -1,62 +1,100 @@
-# DuckClaw 🦆⚔️
+# DuckClaw
 
-**High-performance C++ analytical memory layer for sovereign AI agents.**
+**Multi-agent platform** with a zero-trust posture, **DuckDB** as the analytical state store, and a **singleton DB-Writer** path for ACID mutations (Gateway and workers enqueue; `services/db-writer` applies).
 
-Optimized for Cross-Platform (Win/Lin/Mac) · Multi-tenant · Microservices Ready · Powered by DuckDB
+Cross-platform (Windows / Linux / macOS) · Multi-tenant vaults · Microservices-ready · Spec-driven development (`specs/`)
 
 ---
 
-## Architecture (Monorepo)
+## Documentation (MkDocs)
 
-DuckClaw is now organized as a modular monorepo to support high scalability and independent deployments.
+Human-oriented docs (architecture, operations, API overview, curated specs) live under [`docs/`](docs/).
+
+```bash
+uv run mkdocs serve
+uv run mkdocs build --strict
+```
+
+Start here: [`docs/index.md`](docs/index.md) (published site home when built).
+
+---
+
+## Monorepo layout
 
 ```
 duckclaw/
-├── packages/               # Lógica modular
-│   ├── core/              # DuckDB Native (C++)
-│   ├── agents/            # LangGraph & Workers
-│   └── shared/            # Utils, CLI & Integrations
-├── services/              # Microservicios
-│   ├── api-gateway/       # FastAPI Gateway
-│   └── db-writer/         # Singleton Writer Bridge
-├── config/                # Centralización de configuración
-├── data/                  # Datalake & Databases
-├── docker/                # Multi-stage Dockerfiles
-└── specs/                 # Technical Specs (SDM)
+├── packages/
+│   ├── core/          # Native layer & bindings (performance-critical paths)
+│   ├── agents/        # LangGraph, workers, forge templates
+│   ├── shared/        # Shared Python utilities
+│   └── duckops/       # CLI (wizard, serve, etc.)
+├── services/
+│   ├── api-gateway/   # FastAPI ingress
+│   ├── db-writer/     # Singleton writer (Redis → DuckDB)
+│   └── heartbeat/     # Optional proactive / homeostasis daemon
+├── docs/              # MkDocs source (Material theme)
+├── specs/             # Canonical specifications (features + core)
+├── config/            # Gateway, PM2, MCP, etc.
+├── db/                # Local DuckDB vaults (gitignored data)
+├── docker/            # Dockerfiles
+├── tests/             # Pytest suites
+├── mkdocs.yml
+└── pyproject.toml     # Root workspace (uv)
 ```
 
-## Key Components
+---
 
-- **Singleton Writer Bridge**: Prevents DuckDB write locks by queuing all modifications in Redis.
-- **API Gateway**: Decouples network/auth from agent logic, supporting SSE streaming.
-- **Cross-Platform CLI**: `duckops` (Python-based) manages services on Linux, Windows, and macOS.
+## Key components
 
-## Testing the Singleton Writer Pipeline
+- **Singleton DB-Writer**: serializes durable DuckDB writes via Redis queues; keeps ledger-style state consistent.
+- **API Gateway**: FastAPI front door (`services/api-gateway`); agent chat, DB write enqueue, Telegram webhook, health.
+- **duckops**: Python CLI (`uv run duckops …`) for wizard-driven setup and local service control.
 
-The end-to-end flow **API Gateway → Redis → DB Writer → DuckDB** is specified in `specs/04_Singleton_Writer_Pipeline.md` and validated by:
+---
 
-- **Unit tests** (contract + gateway behavior):
+## Developer quick start
 
-  ```bash
-  uv run pytest tests/run_singleton_writer_pipeline.py -v -m "not integration"
-  ```
+```bash
+uv sync
+uv run duckops init # interactive wizard
+uv run duckops serve --gateway
+```
 
-- **Optional integration test** (requires Redis running on `localhost:6379`, e.g. `docker run -d --name duckclaw-redis -p 6379:6379 redis:7-alpine`):
+Operational detail (Redis, Telegram, PM2, env vars): see [`docs/COMANDOS.md`](docs/COMANDOS.md) and [`docs/Installation.md`](docs/Installation.md).
 
-  ```bash
-  RUN_SINGLETON_PIPELINE_INTEGRATION=1 uv run pytest tests/run_singleton_writer_pipeline.py -v -m integration
-  ```
+---
 
-## Quick Start (Docker)
+## Testing the singleton-writer pipeline
+
+End-to-end **API Gateway → Redis → DB Writer → DuckDB** is covered by [`tests/run_singleton_writer_pipeline.py`](tests/run_singleton_writer_pipeline.py). Architecture context: [`docs/architecture/singleton_writer.md`](docs/architecture/singleton_writer.md); infrastructure narrative: `specs/core/01_System_Infrastructure.md` and `specs/core/00_Flujo de Vida del Dato (Wizard).md`.
+
+**Unit tests** (no live Redis):
+
+```bash
+uv run pytest tests/run_singleton_writer_pipeline.py -v -m "not integration"
+```
+
+**Integration** (Redis on `localhost:6379`, e.g. `docker run -d --name duckclaw-redis -p 6379:6379 redis:7-alpine`):
+
+```bash
+RUN_SINGLETON_PIPELINE_INTEGRATION=1 uv run pytest tests/run_singleton_writer_pipeline.py -v -m integration
+```
+
+---
+
+## Docker
 
 ```bash
 docker build -t duckclaw-base -f docker/base/Dockerfile .
 docker build -t duckclaw-api -f docker/api/Dockerfile .
 ```
 
-## Spec-Driven Management (SDM)
+---
 
-This project follows **SDM**. No feature is implemented without an approved specification in `specs/`.
+## Spec-driven development
+
+No substantial feature without an approved spec under [`specs/`](specs/). Index and conventions: [`specs/README.md`](specs/README.md).
 
 ---
+
 Built by [IoTCoreLabs](https://iotcorelabs.io)

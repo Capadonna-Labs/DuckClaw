@@ -4517,16 +4517,127 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         tick_line = f"Tick delta: cada ~{format_goals_delta_interval_human(ds)}{cp}"
     else:
         tick_line = "Tick delta: inactivo"
-    return (
+    # region agent log
+    _cs_pnl = ""
+    _cs_prev = ""
+    _cs_pct = ""
+    try:
+        _status_diag_rows: list[dict[str, Any]] = []
+        try:
+            raw_tick = db.query(
+                "SELECT tick_number, fired_at, cfd_summary, outcome "
+                "FROM quant_core.session_ticks "
+                "WHERE session_uid = '" + uid.replace("'", "''") + "' "
+                "ORDER BY tick_number DESC LIMIT 2"
+            )
+            _status_diag_rows = json.loads(raw_tick) if isinstance(raw_tick, str) else (raw_tick or [])
+        except Exception:
+            _status_diag_rows = []
+        try:
+            _cs_pnl = str(get_chat_state(db, chat_id, "trading_session_last_pnl") or "")
+        except Exception:
+            _cs_pnl = ""
+        try:
+            _cs_prev = str(get_chat_state(db, chat_id, "trading_session_prev_pnl") or "")
+        except Exception:
+            _cs_prev = ""
+        try:
+            _cs_pct = str(get_chat_state(db, chat_id, "trading_session_pct_change") or "")
+        except Exception:
+            _cs_pct = ""
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H6_trading_status_pnl_sources",
+                        "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_read_trading_session_status_summary",
+                        "message": "status_pnl_sources_snapshot",
+                        "data": {
+                            "chat_id": str(chat_id),
+                            "session_uid": uid,
+                            "pnl_est": pnl_est,
+                            "signals_total": total,
+                            "session_ticks_rows": _status_diag_rows,
+                            "chat_state_trading_session_last_pnl": _cs_pnl,
+                            "chat_state_trading_session_prev_pnl": _cs_prev,
+                            "chat_state_trading_session_pct_change": _cs_pct,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+    _pnl_curr_txt = f"{pnl_est:.2f}"
+    _pnl_prev_txt = "N/D"
+    _pnl_pct_txt = "N/D"
+    try:
+        if str(_cs_pnl or "").strip() != "":
+            _pnl_curr_txt = f"{float(str(_cs_pnl).strip()):.2f}"
+    except (TypeError, ValueError):
+        _pnl_curr_txt = f"{pnl_est:.2f}"
+    try:
+        if str(_cs_prev or "").strip() != "":
+            _pnl_prev_txt = f"{float(str(_cs_prev).strip()):.2f}"
+    except (TypeError, ValueError):
+        _pnl_prev_txt = "N/D"
+    try:
+        if str(_cs_pct or "").strip() != "":
+            _pnl_pct_txt = f"{float(str(_cs_pct).strip()):+.2f}%"
+    except (TypeError, ValueError):
+        _pnl_pct_txt = "N/D"
+    _status_text = (
         f"Sesión activa: `{uid}`\n"
         f"Mode: `{mode}` | Tickers: `{tickers}`\n"
         f"Señales generadas: {total}\n"
         f"- Ejecutadas: {executed}\n"
         f"- Canceladas: {cancelled}\n"
         f"- Pendientes HITL: {pending}\n"
-        f"PnL estimado: {pnl_est:.2f}\n"
+        f"PnL actual: {_pnl_curr_txt}\n"
+        f"PnL anterior: {_pnl_prev_txt}\n"
+        f"Cambio vs anterior: {_pnl_pct_txt}\n"
         f"{tick_line}"
     )
+    # region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "post-fix",
+                        "hypothesisId": "H8_trading_status_render_payload",
+                        "location": "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py:_read_trading_session_status_summary",
+                        "message": "status_render_values",
+                        "data": {
+                            "chat_id": str(chat_id),
+                            "session_uid": uid,
+                            "pnl_curr_txt": _pnl_curr_txt,
+                            "pnl_prev_txt": _pnl_prev_txt,
+                            "pnl_pct_txt": _pnl_pct_txt,
+                            "status_preview": _status_text[:260],
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+    return _status_text
 
 
 def execute_trading_session(

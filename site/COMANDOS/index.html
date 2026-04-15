@@ -1,0 +1,2258 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="DuckClaw architecture, agents, specs, and API docs">
+      
+      
+      
+      
+        <link rel="prev" href="../Installation/">
+      
+      
+        <link rel="next" href="../Troubleshooting-Gateway-PM2/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Commands - DuckClaw Docs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#comandos-despliegue-rapido-duckclaw" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="DuckClaw Docs" class="md-header__button md-logo" aria-label="DuckClaw Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DuckClaw Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Commands
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="DuckClaw Docs" class="md-nav__button md-logo" aria-label="DuckClaw Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DuckClaw Docs
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/singleton_writer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Singleton Writer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/tri_cameral_memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tri-Cameral Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/strix_sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strix Sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Agents
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/adf_framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADF Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/finanz/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Finanz
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/quant_trader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quant Trader
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Specs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../specs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../specs/finanz_admin_sql_db_writer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Finanz Admin SQL DB-Writer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../specs/context_injection_telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Injection Telegram
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../specs/telegram_webhook_multiplex/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram Webhook Multiplex
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../specs/vlm_integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VLM Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/db_writer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DB Writer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/api_gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Gateway
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Commands
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#0-prerrequisitos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. Prerrequisitos
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-redis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Redis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Redis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#opcion-a-docker-recomendada-en-dev" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opción A — Docker (recomendada en dev)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-webhook-nativo-telegram-ingress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Webhook nativo Telegram (ingress)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Webhook nativo Telegram (ingress)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#20-un-gateway-pm2-un-webhook-https-recomendado" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.0 Un gateway PM2, un webhook HTTPS (recomendado)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#21-paralelismo-por-chat-y-etiquetas-bi-analyst-n" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Paralelismo por chat y etiquetas «BI-Analyst N»
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-pool-de-lectura-duckdb-varias-read_sql-inspect_schema-en-un-turno" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Pool de lectura DuckDB (varias read_sql / inspect_schema en un turno)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-context-injection-telegram-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Context injection (Telegram /context)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-dependencias-python-del-monorepo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Dependencias Python del monorepo
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Dependencias Python del monorepo">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reddit-mcp-finanz-sentimiento-social" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reddit MCP (Finanz / sentimiento social)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#google-trends-mcp-finanz-interes-macro" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Google Trends MCP (Finanz / interés macro)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cyber-fluid-dynamics-finanz-quant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cyber-Fluid Dynamics (Finanz / quant)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-wizard-aprovisionamiento-interactivo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Wizard — aprovisionamiento interactivo
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-api-gateway-desarrollo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. API Gateway (desarrollo)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. API Gateway (desarrollo)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-finanz-analisis-cuantitativo-ibkr-quant_core" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Finanz + análisis cuantitativo (IBKR / quant_core)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5.1 Finanz + análisis cuantitativo (IBKR / quant_core)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#quant-trader-sesion-autonoma-goals-hitl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quant Trader: sesión autónoma + /goals (HITL)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-db-writer-si-usas-escrituras-encoladas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. DB Writer (si usas escrituras encoladas)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. DB Writer (si usas escrituras encoladas)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#depuracion-telegram-team-whitelist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Depuración Telegram /team (whitelist)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-orden-sugerido-resumen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Orden sugerido (resumen)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-cheat-sheet-del-dia-a-dia" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Cheat sheet del día a día
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Troubleshooting-Gateway-PM2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting Gateway PM2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Observability-2.1-Identidad/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability and Identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Strix-Sandbox-Security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strix Sandbox Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Homeostasis-Heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Homeostasis Heartbeat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Jugar-The-Mind/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jugar The Mind
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Multi-Vault-System/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi Vault System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#0-prerrequisitos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. Prerrequisitos
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-redis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Redis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Redis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#opcion-a-docker-recomendada-en-dev" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opción A — Docker (recomendada en dev)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-webhook-nativo-telegram-ingress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Webhook nativo Telegram (ingress)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Webhook nativo Telegram (ingress)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#20-un-gateway-pm2-un-webhook-https-recomendado" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.0 Un gateway PM2, un webhook HTTPS (recomendado)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#21-paralelismo-por-chat-y-etiquetas-bi-analyst-n" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Paralelismo por chat y etiquetas «BI-Analyst N»
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-pool-de-lectura-duckdb-varias-read_sql-inspect_schema-en-un-turno" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Pool de lectura DuckDB (varias read_sql / inspect_schema en un turno)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-context-injection-telegram-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Context injection (Telegram /context)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-dependencias-python-del-monorepo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Dependencias Python del monorepo
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Dependencias Python del monorepo">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reddit-mcp-finanz-sentimiento-social" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reddit MCP (Finanz / sentimiento social)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#google-trends-mcp-finanz-interes-macro" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Google Trends MCP (Finanz / interés macro)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cyber-fluid-dynamics-finanz-quant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cyber-Fluid Dynamics (Finanz / quant)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-wizard-aprovisionamiento-interactivo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Wizard — aprovisionamiento interactivo
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-api-gateway-desarrollo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. API Gateway (desarrollo)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. API Gateway (desarrollo)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-finanz-analisis-cuantitativo-ibkr-quant_core" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Finanz + análisis cuantitativo (IBKR / quant_core)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5.1 Finanz + análisis cuantitativo (IBKR / quant_core)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#quant-trader-sesion-autonoma-goals-hitl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quant Trader: sesión autónoma + /goals (HITL)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-db-writer-si-usas-escrituras-encoladas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. DB Writer (si usas escrituras encoladas)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. DB Writer (si usas escrituras encoladas)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#depuracion-telegram-team-whitelist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Depuración Telegram /team (whitelist)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-orden-sugerido-resumen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Orden sugerido (resumen)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-cheat-sheet-del-dia-a-dia" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Cheat sheet del día a día
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="comandos-despliegue-rapido-duckclaw">COMANDOS — Despliegue rápido DuckClaw<a class="headerlink" href="#comandos-despliegue-rapido-duckclaw" title="Permanent link">&para;</a></h1>
+<p>Guía mínima para levantar el entorno desde la <strong>raíz del repositorio</strong> (<code>duckclaw/</code>).<br />
+Para contexto y arquitectura, ver <strong><a href="../Installation/">Installation.md</a></strong> (DuckOps Wizard, PM2, seguridad).</p>
+<hr />
+<h2 id="0-prerrequisitos">0. Prerrequisitos<a class="headerlink" href="#0-prerrequisitos" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Node / PM2</strong> (opcional): solo si el wizard registra procesos con PM2.</li>
+<li><strong>uv</strong>: gestor de dependencias Python del monorepo.</li>
+<li><strong>Docker</strong> (opcional): forma más simple de correr Redis.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>/ruta/al/repo/duckclaw
+</code></pre></div>
+<hr />
+<h2 id="1-redis">1. Redis<a class="headerlink" href="#1-redis" title="Permanent link">&para;</a></h2>
+<h3 id="opcion-a-docker-recomendada-en-dev">Opción A — Docker (recomendada en dev)<a class="headerlink" href="#opcion-a-docker-recomendada-en-dev" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--name<span class="w"> </span>redis<span class="w"> </span>-d<span class="w"> </span>-p<span class="w"> </span><span class="m">6379</span>:6379<span class="w"> </span>redis
+</code></pre></div>
+<p>Comprobar que responde:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>redis<span class="w"> </span>redis-cli<span class="w"> </span>ping
+</code></pre></div>
+<p>Debe devolver <code>PONG</code>.</p>
+<p>Detener o borrar el contenedor cuando no lo necesites:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>stop<span class="w"> </span>redis
+docker<span class="w"> </span>rm<span class="w"> </span>redis
+</code></pre></div>
+<p>Variables típicas en <code>.env</code> (el wizard puede escribirlas):</p>
+<div class="highlight"><pre><span></span><code>REDIS_URL=redis://localhost:6379/0
+TELEGRAM_BOT_TOKEN=...          # compat: token por defecto si no usas el nombre por agente
+TELEGRAM_FINANZ_TOKEN=...       # estándar (id `finanz`); alternativa a TELEGRAM_BOT_TOKEN en gateway Finanz
+TELEGRAM_BI_ANALYST_TOKEN=...   # estándar (id `bi_analyst`); antes TELEGRAM_BOT_TOKEN_BI_ANALYST
+TELEGRAM_SIATA_ANALYST_TOKEN=... # id `siata_analyst`; antes TELEGRAM_BOT_TOKEN_SIATA
+TELEGRAM_LEILAASSISTANT_TOKEN=... # id manifest `LeilaAssistant`; antes TELEGRAM_BOT_TOKEN_LEILA
+TELEGRAM_JOB_HUNTER_TOKEN=...   # id `Job-Hunter` / JobHunter-Gateway (según config PM2)
+# Opcional legado: N8N_OUTBOUND_WEBHOOK_URL + DUCKCLAW_TELEGRAM_OUTBOUND_VIA=n8n
+</code></pre></div>
+<p>Los logs PM2 muestran rutas <code>telegram native ...</code> / <code>outbound deliver ...</code> a nivel INFO cuando el gateway envía mensajes.</p>
+<hr />
+<h2 id="2-webhook-nativo-telegram-ingress">2. Webhook nativo Telegram (ingress)<a class="headerlink" href="#2-webhook-nativo-telegram-ingress" title="Permanent link">&para;</a></h2>
+<p>Puedes recibir mensajes del bot <strong>sin n8n</strong>: Telegram hace <code>POST</code> al API Gateway con el objeto <a href="https://core.telegram.org/bots/api#update">Update</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Concepto</th>
+<th>Detalle</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ruta</td>
+<td><code>POST https://&lt;tu-host&gt;/api/v1/telegram/webhook</code> (HTTPS público obligatorio para producción)</td>
+</tr>
+<tr>
+<td>Seguridad</td>
+<td>Con <code>TELEGRAM_WEBHOOK_SECRET</code> en el entorno del gateway, Telegram debe enviar el <strong>mismo</strong> valor como <code>secret_token</code> en <code>setWebhook</code>; llega en la cabecera <code>X-Telegram-Bot-Api-Secret-Token</code>. Si el secreto está vacío, el endpoint acepta updates sin cabecera (solo desarrollo).</td>
+</tr>
+<tr>
+<td>Tailscale</td>
+<td>Esta ruta <strong>no</strong> exige <code>X-Tailscale-Auth-Key</code> (Telegram no puede enviarla).</td>
+</tr>
+<tr>
+<td>Un bot, un webhook</td>
+<td>Antes de apuntar Telegram a DuckClaw, <strong>desactiva</strong> el <em>Telegram Trigger</em> de n8n (u otro servicio) para ese bot; si no, los mensajes seguirán yendo al webhook anterior.</td>
+</tr>
+<tr>
+<td>Redis</td>
+<td>Opcional pero recomendado: deduplica por <code>update_id</code> (evita doble procesamiento en reintentos de Telegram).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="20-un-gateway-pm2-un-webhook-https-recomendado">2.0 Un gateway PM2, un webhook HTTPS (recomendado)<a class="headerlink" href="#20-un-gateway-pm2-un-webhook-https-recomendado" title="Permanent link">&para;</a></h3>
+<p>Cada proceso gateway es el mismo código pero con <strong>env y puerto distintos</strong> (archivo <code>config/api_gateways_pm2.json</code>: p. ej. Finanz-Gateway <code>8000</code>, JobHunter-Gateway <code>8283</code>, BI-Analyst-Gateway <code>8282</code>). Telegram solo llama la URL que configures en <code>setWebhook</code>; si un único <code>tailscale funnel --yes &lt;puerto&gt;</code> apunta solo al JobHunter, <strong>todos</strong> los bots que compartan esa URL entrarán por ese proceso (mal para logs y para ACL). El modelo recomendado:</p>
+<ol>
+<li>Cada bot tiene una URL HTTPS cuya <strong>terminación</strong> llega al <strong>puerto de ese</strong> PM2 (verifica con <code>pm2 describe &lt;nombre&gt;</code> / JSON de puertos).</li>
+<li>Usa siempre el path estándar <code>…/api/v1/telegram/webhook</code> y el <code>secret_token</code> del <strong>mismo</strong> proceso.</li>
+</ol>
+<p><strong>Ingress:</strong> elige cómo mapear Internet → <code>127.0.0.1:&lt;puerto&gt;</code> (al menos una línea por gateway o un proxy que enrute):</p>
+<table>
+<thead>
+<tr>
+<th>Enfoque</th>
+<th>Cuándo usarlo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Túnel / hostname por servicio</strong></td>
+<td>P. ej. Cloudflare Tunnel: dos <code>public_hostnames</code> → <code>http://127.0.0.1:8000</code> y <code>http://127.0.0.1:8283</code>. Cada bot <code>setWebhook</code> apunta al hostname que toca.</td>
+</tr>
+<tr>
+<td><strong>Tailscale Funnel</strong></td>
+<td>Un comando <code>tailscale funnel --bg --yes &lt;puerto&gt;</code> expone <strong>un</strong> puerto por máquina en la URL <code>ts.net</code> habitual; <strong>volver a ejecutarlo con otro puerto reemplaza el destino</strong> de esa misma URL pública. Por eso, si el Sovereign Wizard activa Funnel primero para Finanz (<code>8000</code>) y luego para SIATA (<code>8888</code>), <strong>todos</strong> los bots cuyo <code>setWebhook</code> siga apuntando a <code>https://nodo….ts.net/...</code> recibirán updates en <strong>8888</strong> — no es que PM2 o <code>.env</code> sobrescriban tokens, es el túnel. Para varios gateways: varios hostnames/túneles, proxy con virtual hosts, <strong>Tailscale Serve</strong> con reglas por ruta/host (<a href="https://tailscale.com/kb/1223/funnel/">KB Funnel</a>), o multiplexación (§2.0 Modo B). El wizard muestra un aviso amarillo si detecta cambio de puerto.</td>
+</tr>
+<tr>
+<td><strong>Reverse proxy local (Caddy/nginx)</strong></td>
+<td>Un frontal TLS en <code>443</code> que enruta por host o path a <code>8000</code> / <code>828x</code>; un solo funnel al <code>443</code> del proxy.</td>
+</tr>
+</tbody>
+</table>
+<p>Especificación relacionada: <a href="../specs/telegram_webhook_multiplex/">Telegram Webhook Multiplex</a>.</p>
+<p><strong>Registrar el webhook</strong> (sustituye <code>TOKEN</code>, URL pública que llega <strong>a ese</strong> puerto y <code>TELEGRAM_WEBHOOK_SECRET</code> del env de <strong>ese</strong> proceso):</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-sS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">&quot;https://api.telegram.org/bot&lt;TOKEN&gt;/setWebhook&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;url&quot;: &quot;https://tu-dominio.example/api/v1/telegram/webhook&quot;,</span>
+<span class="s1">    &quot;secret_token&quot;: &quot;&lt;TELEGRAM_WEBHOOK_SECRET&gt;&quot;,</span>
+<span class="s1">    &quot;allowed_updates&quot;: [&quot;message&quot;, &quot;edited_message&quot;]</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+<p>Ejemplo alineado al JSON de gateways (ajusta el host al túnel/proxy real):</p>
+<ul>
+<li>Bot Finanz (<code>TELEGRAM_FINANZ_TOKEN</code>): <code>url</code> debe terminar en el proceso que escucha el puerto <strong>8000</strong> (p. ej. <code>https://finanz.tu-tunnel.example/api/v1/telegram/webhook</code>).</li>
+<li>Bot Job Hunter (<code>TELEGRAM_JOB_HUNTER_TOKEN</code> / <code>TELEGRAM_BOT_TOKEN</code> en ese PM2): <code>url</code> debe terminar en el puerto del <strong>JobHunter-Gateway</strong> (p. ej. <strong>8283</strong> en el repo, o el que tengas en PM2).</li>
+</ul>
+<p>Comprobar estado:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-sS<span class="w"> </span><span class="s2">&quot;https://api.telegram.org/bot&lt;TOKEN&gt;/getWebhookInfo&quot;</span>
+</code></pre></div>
+<p>Quitar webhook (p. ej. antes de cambiar de proveedor):</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-sS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">&quot;https://api.telegram.org/bot&lt;TOKEN&gt;/deleteWebhook&quot;</span>
+</code></pre></div>
+<p><strong>Enrutado al grafo</strong> (variables de entorno del proceso PM2): worker efectivo<br />
+<code>DUCKCLAW_TELEGRAM_DEFAULT_WORKER</code> → <code>DUCKCLAW_DEFAULT_WORKER_ID</code> → <code>finanz</code>; tenant en el body interno<br />
+<code>DUCKCLAW_TELEGRAM_DEFAULT_TENANT</code> → <code>DUCKCLAW_GATEWAY_TENANT_ID</code> → <code>default</code>.<br />
+<code>_invoke_chat</code> sigue aplicando la misma normalización de tenant que <code>POST /api/v1/agent/chat</code>.</p>
+<p><strong>Modo B — Varios bots → misma URL pública (un solo Funnel/puerto):</strong> cuando Tailscale Funnel (u otro túnel) solo puede llegar a <strong>un</strong> puerto local, deja ese puerto como <strong>único</strong> receptor de Telegram (p. ej. tu funnel a <code>127.0.0.1:8888</code> → proceso <strong>SIATA-Gateway</strong>). Los otros gateways PM2 pueden seguir levantados para HTTP interno, pero <strong>no</strong> recibirán el webhook a menos que montes otro túnel.</p>
+<ol>
+<li>En el bloque <code>env</code> del proceso que recibe el funnel, define <strong>todos</strong> los tokens y rutas DuckDB que necesiten los bots (p. ej. <code>TELEGRAM_FINANZ_TOKEN</code>, <code>DUCKCLAW_FINANZ_DB_PATH</code>, <code>TELEGRAM_JOB_HUNTER_TOKEN</code>, <code>DUCKCLAW_JOB_HUNTER_DB_PATH</code>; el propio proceso ya tiene <code>TELEGRAM_SIATA_TOKEN</code> y <code>DUCKCLAW_DB_PATH</code> para SIATA).</li>
+<li>Variable <code>DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES</code>: JSON <strong>array</strong>; cada elemento tiene <code>secret</code> (mismo string que <code>secret_token</code> en <code>setWebhook</code> de <strong>ese</strong> bot), <code>worker_id</code>, <code>tenant_id</code> (opcional), <code>bot_token_env</code>, y <strong><code>vault_db_env</code></strong> (opcional pero recomendado): nombre de variable cuyo valor es la DuckDB de ese bot — sin eso, el grafo usaría el <code>DUCKCLAW_DB_PATH</code> del PM2 equivocado.</li>
+</ol>
+<p>Ejemplo (genera tres secretos distintos, p. ej. <code>openssl rand -hex 32</code>, y úsalos en <code>setWebhook</code> y en <code>secret</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="p">[</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">&quot;secret&quot;</span><span class="p">:</span><span class="s2">&quot;SEC_FINANZ&quot;</span><span class="p">,</span><span class="nt">&quot;worker_id&quot;</span><span class="p">:</span><span class="s2">&quot;finanz&quot;</span><span class="p">,</span><span class="nt">&quot;tenant_id&quot;</span><span class="p">:</span><span class="s2">&quot;Finanzas&quot;</span><span class="p">,</span><span class="nt">&quot;bot_token_env&quot;</span><span class="p">:</span><span class="s2">&quot;TELEGRAM_FINANZ_TOKEN&quot;</span><span class="p">,</span><span class="nt">&quot;vault_db_env&quot;</span><span class="p">:</span><span class="s2">&quot;DUCKCLAW_FINANZ_DB_PATH&quot;</span><span class="p">},</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">&quot;secret&quot;</span><span class="p">:</span><span class="s2">&quot;SEC_SIATA&quot;</span><span class="p">,</span><span class="nt">&quot;worker_id&quot;</span><span class="p">:</span><span class="s2">&quot;siata_analyst&quot;</span><span class="p">,</span><span class="nt">&quot;tenant_id&quot;</span><span class="p">:</span><span class="s2">&quot;SIATA&quot;</span><span class="p">,</span><span class="nt">&quot;bot_token_env&quot;</span><span class="p">:</span><span class="s2">&quot;TELEGRAM_SIATA_TOKEN&quot;</span><span class="p">,</span><span class="nt">&quot;vault_db_env&quot;</span><span class="p">:</span><span class="s2">&quot;DUCKCLAW_DB_PATH&quot;</span><span class="p">},</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">&quot;secret&quot;</span><span class="p">:</span><span class="s2">&quot;SEC_TRABAJO&quot;</span><span class="p">,</span><span class="nt">&quot;worker_id&quot;</span><span class="p">:</span><span class="s2">&quot;Job-Hunter&quot;</span><span class="p">,</span><span class="nt">&quot;tenant_id&quot;</span><span class="p">:</span><span class="s2">&quot;Trabajo&quot;</span><span class="p">,</span><span class="nt">&quot;bot_token_env&quot;</span><span class="p">:</span><span class="s2">&quot;TELEGRAM_JOB_HUNTER_TOKEN&quot;</span><span class="p">,</span><span class="nt">&quot;vault_db_env&quot;</span><span class="p">:</span><span class="s2">&quot;DUCKCLAW_JOB_HUNTER_DB_PATH&quot;</span><span class="p">}</span>
+<span class="p">]</span>
+</code></pre></div>
+<p>En PM2, <code>DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES</code> debe ser <strong>una sola línea</strong> JSON escapada o definida en <code>ecosystem</code> como string. Cada bot: misma <code>url</code> (<code>https://tu-nodo.ts.net/api/v1/telegram/webhook</code>), <strong><code>secret_token</code> distinto</strong> por bot.</p>
+<p>Si además tienes <code>TELEGRAM_WEBHOOK_SECRET</code>, solo los updates cuya cabecera coincida con ese valor usarán el “default” del proceso (worker/tenant/token del PM2); el resto debe coincidir con una entrada de <code>ROUTES</code>. Especificación: <a href="../specs/telegram_webhook_multiplex/">Telegram Webhook Multiplex</a>. Rutas <code>POST …/webhook/finanz</code> y <code>…/webhook/trabajo</code> son <strong>legado</strong>; con un solo funnel suele bastar Modo B + <code>vault_db_env</code>.</p>
+<p><strong>Modo compacto (path por bot, misma base <code>DUCKCLAW_PUBLIC_URL</code>):</strong> si <code>DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES</code> <strong>no</strong> empieza por <code>[</code> y contiene <code>:/api/</code>, se interpreta como lista separada por comas <code>bot_name:bot_token:webhook_path</code>. El gateway crea <code>POST</code> bajo <code>/api/v1/telegram/...</code> (p. ej. <code>/finanz</code>). Perfiles admitidos: <code>finanz</code>, <code>siata</code>, <code>jobhunter</code>. Define las mismas variables de DuckDB que en modo multi-puerto (<code>DUCKCLAW_FINANZ_DB_PATH</code>, <code>DUCKCLAW_JOB_HUNTER_DB_PATH</code>, <code>DUCKCLAW_SIATA_DB_PATH</code> o <code>DUCKCLAW_DB_PATH</code>). <strong>Obligatorio:</strong> tras definir la variable, ejecuta <code>python scripts/register_webhooks.py</code> (con <code>DUCKCLAW_PUBLIC_URL</code> y tokens en la cadena). Si los bots siguen con <code>setWebhook</code> en <code>…/api/v1/telegram/webhook</code>, todos los updates caen en esa ruta y el gateway <strong>no</strong> puede saber qué bot es: en ese modo, el gateway ignora el POST genérico y solo procesa los paths dedicados (<code>…/finanz</code>, <code>…/siata</code>, …). Opcional: <code>TELEGRAM_WEBHOOK_SECRET</code> como <code>secret_token</code> común en el script.</p>
+<p><strong>Prueba local</strong> del router (Telegram no llama a HTTP sin TLS; sirve para depurar en la máquina):</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-sS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://127.0.0.1:8282/api/v1/telegram/webhook<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-Telegram-Bot-Api-Secret-Token: &lt;opcional_si_TELEGRAM_WEBHOOK_SECRET_está_definido&gt;&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;update_id&quot;:1,&quot;message&quot;:{&quot;message_id&quot;:1,&quot;chat&quot;:{&quot;id&quot;:123456789,&quot;type&quot;:&quot;private&quot;},&quot;from&quot;:{&quot;id&quot;:123456789,&quot;is_bot&quot;:false,&quot;first_name&quot;:&quot;Test&quot;},&quot;text&quot;:&quot;hola&quot;}}&#39;</span>
+</code></pre></div>
+<p>Más contexto: revisar la documentación de arquitectura y specs del módulo Telegram en <code>docs/specs/</code>.</p>
+<h3 id="21-paralelismo-por-chat-y-etiquetas-bi-analyst-n">2.1 Paralelismo por chat y etiquetas «BI-Analyst N»<a class="headerlink" href="#21-paralelismo-por-chat-y-etiquetas-bi-analyst-n" title="Permanent link">&para;</a></h3>
+<p>Por defecto el gateway <strong>serializa</strong> las invocaciones al grafo por <code>chat_id</code> (un mensaje en curso por conversación). Para permitir varias peticiones concurrentes en el mismo chat (p. ej. tres preguntas seguidas en Telegram antes de que termine la primera):</p>
+<div class="highlight"><pre><span></span><code>DUCKCLAW_CHAT_PARALLEL_INVOCATIONS=1
+</code></pre></div>
+<p>Valores reconocidos: <code>1</code>, <code>true</code>, <code>yes</code>, <code>on</code> (insensible a mayúsculas). Debe estar definida en el <strong>mismo</strong> proceso que ejecuta el gateway <strong>y</strong> el que carga el grafo (PM2 / <code>.env</code> del <code>BI-Analyst-Gateway</code> u otro gateway que use <code>graph_server</code> con ese entorno).</p>
+<table>
+<thead>
+<tr>
+<th>Aspecto</th>
+<th>Con paralelismo activado</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Webhook</td>
+<td>Responde <code>200</code> enseguida; el grafo sigue en segundo plano (<code>asyncio.create_task</code>).</td>
+</tr>
+<tr>
+<td>Riesgos</td>
+<td>Historial Redis, <code>/tasks</code> y el orden de llegada de respuestas en Telegram pueden <strong>intercalarse</strong>; activar solo si lo necesitas.</td>
+</tr>
+<tr>
+<td>Etiquetas</td>
+<td><code>BI-Analyst 1</code>, <code>BI-Analyst 2</code>, … indican el <strong>número de instancia entre ejecuciones activas</strong> del mismo worker en <strong>ese</strong> chat (ocupación de slot), no un contador monotónico por turno. Si solo queda una corrida, vuelve a ser <code>1</code>.</td>
+</tr>
+<tr>
+<td>Redis</td>
+<td>Recomendado: los slots viven en claves <code>duckclaw:subagent_active:{tenant}:{worker}:{chat}</code> (ZSET); sin Redis coherente entre workers, el fallback en memoria solo vale para un solo proceso.</td>
+</tr>
+</tbody>
+</table>
+<p>Heartbeats de delegación (mensajes «paso actual») pueden incluir el título del plan; límite de caracteres del título en línea:</p>
+<div class="highlight"><pre><span></span><code>DUCKCLAW_HEARTBEAT_PLAN_TITLE_INLINE_MAX=90
+</code></pre></div>
+<p>Si la variable está vacía o no es un entero válido, se usa el valor por defecto del código (no dejes la variable vacía a propósito).</p>
+<h3 id="22-pool-de-lectura-duckdb-varias-read_sql-inspect_schema-en-un-turno">2.2 Pool de lectura DuckDB (varias <code>read_sql</code> / <code>inspect_schema</code> en un turno)<a class="headerlink" href="#22-pool-de-lectura-duckdb-varias-read_sql-inspect_schema-en-un-turno" title="Permanent link">&para;</a></h3>
+<p>Cuando el modelo devuelve <strong>varias</strong> tool calls de solo lectura en el mismo mensaje, el worker puede ejecutarlas <strong>en paralelo</strong> sobre conexiones DuckDB <strong>efímeras <code>read_only</code></strong> (no comparten la conexión interna de <code>DuckClaw</code>). Solo aplica si <strong>todas</strong> las herramientas del turno son <code>read_sql</code> y/o <code>inspect_schema</code>; si en el mismo turno aparece sandbox, <code>admin_sql</code>, etc., se vuelve al modo secuencial.</p>
+<p>Variables de entorno (proceso que ejecuta el grafo del worker, p. ej. PM2 del gateway):</p>
+<div class="highlight"><pre><span></span><code>DUCKCLAW_TOOL_READ_POOL_ENABLED=1          # default activo; 0/false/no/off desactiva
+DUCKCLAW_TOOL_READ_POOL_CONCURRENCY=5    # máximo de lecturas efímeras concurrentes
+DUCKCLAW_TOOL_READ_STMT_TIMEOUT_MS=10000 # timeout de sentencia en ms (DuckDB SET statement_timeout)
+DUCKCLAW_TOOL_READ_POOL_RETRIES=3        # reintentos ante lock/IO transitorio
+</code></pre></div>
+<p>Límite de tamaño de respuesta SQL hacia el LLM (también en el camino efímero):</p>
+<div class="highlight"><pre><span></span><code>DUCKCLAW_READ_SQL_MAX_RESPONSE_CHARS=80000
+</code></pre></div>
+<p>Por <strong>worker</strong>, en <code>manifest.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">tool_read_pool</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">   </span><span class="c1"># desactiva el pool para ese template (pese al default global)</span>
+</code></pre></div>
+<p>Especificación: documento interno de "Concurrent Tool Node (Ephemeral Read-Pool)".</p>
+<h3 id="23-context-injection-telegram-context">2.3 Context injection (Telegram <code>/context</code>)<a class="headerlink" href="#23-context-injection-telegram-context" title="Permanent link">&para;</a></h3>
+<p>Comandos del <strong>webhook nativo</strong> para memoria semántica en la bóveda DuckDB del usuario (<code>main.semantic_memory</code>). Detalle: <a href="../specs/context_injection_telegram/">Context Injection Telegram</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>Efecto</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/context --add &lt;texto&gt;</code></td>
+<td>Solo <strong>admin</strong> (mismo RBAC que Telegram Guard: <code>main.authorized_users</code>, War Room, o owner). Encola un <code>STATE_DELTA</code> en Redis → <strong>DuckClaw-DB-Writer</strong> inserta chunks en <code>main.semantic_memory</code>. Respuesta inmediata de acuse; el <strong>resumen</strong> se genera en segundo plano con <code>[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]</code> (no bloquea el webhook). Sufijo de bot: <code>/context@MiBot --add …</code>.</td>
+</tr>
+<tr>
+<td><code>/context --summary</code></td>
+<td>Alias: <code>--summarize</code>, <code>--peek</code>, <code>--db</code>. <strong>Solo lectura</strong> de filas recientes en <code>main.semantic_memory</code> (sin <code>LPUSH</code>). Acuse + resumen en segundo plano con <code>[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]</code>. Si no hay datos, mensaje fijo <strong>sin</strong> LLM.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Requisitos para <code>--add</code>:</strong> <code>REDIS_URL</code> y proceso <strong>DuckClaw-DB-Writer</strong> activo (cola por defecto <code>duckclaw:state_delta:context</code>). Sin writer, el acuse puede mostrarse pero la persistencia queda pendiente en Redis.</p>
+<p><strong>Variable de cola:</strong> <code>DUCKCLAW_CONTEXT_STATE_DELTA_QUEUE</code> (sobrescribe el nombre de la lista Redis anterior).</p>
+<p><strong>Locks DuckDB (gateway RO vs writer RW):</strong> Tras un <code>--add</code>, el gateway puede abrir la bóveda en solo lectura con reintentos. Opcional: <code>DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS</code> (default <code>24</code>) y <code>DUCKCLAW_GATEWAY_RO_LOCK_BASE_SLEEP_S</code> (default <code>0.15</code>).</p>
+<hr />
+<h2 id="3-dependencias-python-del-monorepo">3. Dependencias Python del monorepo<a class="headerlink" href="#3-dependencias-python-del-monorepo" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync
+</code></pre></div>
+<p>Con extra Telegram (bot por long polling), si lo necesitas:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>telegram
+</code></pre></div>
+<p>El <strong>API Gateway</strong> (Python 3.10+) arranca un cliente MCP hijo si activas el flag (PM2 o <code>.env</code>):</p>
+<div class="highlight"><pre><span></span><code>DUCKCLAW_TELEGRAM_MCP_ENABLED=1
+TELEGRAM_BOT_TOKEN=...
+</code></pre></div>
+<p>Opcional: <code>enabled: true</code> en <code>config/mcp_servers.yaml</code> bajo <code>mcp_servers.telegram</code>. Con la sesión activa, el egress de respuestas largas y fotos sandbox usa <code>telegram_send_*</code> vía MCP; si falla, Bot API directa. Los webhooks n8n de salida solo se usan si <code>DUCKCLAW_TELEGRAM_OUTBOUND_VIA=n8n</code>.</p>
+<p><strong>Probar MCP → Telegram (stdio, sin gateway):</strong> desde la raíz, con <code>TELEGRAM_BOT_TOKEN</code> en <code>.env</code> o en el entorno y tu <code>chat_id</code> (el mismo que usa el bot):</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/smoke_telegram_mcp_stdio.py<span class="w"> </span>TU_CHAT_ID
+</code></pre></div>
+<p>Deberías ver <code>tools MCP: [...]</code> y un JSON con <code>ok: true</code> y <code>message_id</code> si Telegram aceptó el mensaje. Los logs del proceso hijo van por stderr (<code>duckclaw.telegram_mcp</code>).</p>
+<h3 id="reddit-mcp-finanz-sentimiento-social">Reddit MCP (Finanz / sentimiento social)<a class="headerlink" href="#reddit-mcp-finanz-sentimiento-social" title="Permanent link">&para;</a></h3>
+<p>El worker <strong>Finanz</strong> puede cargar herramientas Reddit vía <strong>stdio</strong> (<code>npx --quiet -y mcp-reddit</code>) cuando el manifest incluye un bloque <code>reddit:</code> (ver template <code>packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml</code>).</p>
+<p><strong>Requisitos:</strong> Node.js y <code>npx</code> en el <code>PATH</code> del proceso del API Gateway (igual que GitHub MCP). Variables en el entorno del gateway (no commitear secretos):</p>
+<div class="highlight"><pre><span></span><code>REDDIT_CLIENT_ID=...
+REDDIT_CLIENT_SECRET=...
+REDDIT_USER_AGENT=app:version (by /u/tu_usuario)
+REDDIT_USERNAME=...
+REDDIT_PASSWORD=...
+</code></pre></div>
+<p>Crea la app en <a href="https://www.reddit.com/prefs/apps">reddit.com/prefs/apps</a> (tipo script). Spec: documento interno "Reddit MCP Social Sentiment (QuantClaw)".</p>
+<p>Tras cambiar <code>.env</code>, reinicia el gateway (PM2). Por defecto <code>read_only: true</code> solo registra búsqueda y lectura de posts/comentarios.</p>
+<h3 id="google-trends-mcp-finanz-interes-macro">Google Trends MCP (Finanz / interés macro)<a class="headerlink" href="#google-trends-mcp-finanz-interes-macro" title="Permanent link">&para;</a></h3>
+<p>Instala el paquete del servidor (pytrends, sin API key obligatoria):</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>google-trends
+</code></pre></div>
+<p>El proceso hijo usa el ejecutable <strong><code>google-trends-mcp</code></strong> del mismo entorno que el gateway (o <code>uvx google-trends-mcp</code> si no está en el venv). Bloque en manifest: <code>google_trends:</code> — ver <code>packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml</code>.</p>
+<p>Opcionalmente puedes fijar <code>command</code> y <code>args</code> en YAML para otro lanzador. Limitaciones: acceso no oficial a Google Trends; posibles bloqueos o errores intermitentes. Spec: documento interno "Google Trends MCP (Macro Interest Finanz)".</p>
+<h3 id="cyber-fluid-dynamics-finanz-quant">Cyber-Fluid Dynamics (Finanz / quant)<a class="headerlink" href="#cyber-fluid-dynamics-finanz-quant" title="Permanent link">&para;</a></h3>
+<p>Con <code>quant.cfd: true</code> en el manifest del template Finanz se registra la herramienta <code>record_fluid_state</code> y la tabla <code>quant_core.fluid_state</code> (OHLCV + métricas heurísticas y fase SOLID|LIQUID|GAS|PLASMA). Ver spec interna "Cyber-Fluid Dynamics CFD (Finanz)". Tras aplicar <code>schema.sql</code> nuevo, reinicia el gateway si hace falta recrear el grafo.</p>
+<hr />
+<h2 id="4-wizard-aprovisionamiento-interactivo">4. Wizard — aprovisionamiento interactivo<a class="headerlink" href="#4-wizard-aprovisionamiento-interactivo" title="Permanent link">&para;</a></h2>
+<p><strong><code>duckops init</code></strong> ejecuta por defecto el <strong>Sovereign Wizard v2.0</strong> (TUI con <code>prompt_toolkit</code>, borrador en memoria y escritura solo tras confirmar en <em>Review</em>; atajos Ctrl+Z/Esc, Ctrl+S, Ctrl+R, Tab). Tras <strong>CONFIRMAR</strong>, materializa <code>.env</code>, rutas DuckDB, PM2 según el borrador y puede registrar <code>setWebhook</code>. Opcional: <code>--repo</code> / <code>-C</code> para la raíz del monorepo. Spec: documento interno "DuckClaw Sovereign Wizard (v2.0)".</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>init
+uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>init<span class="w"> </span>--repo<span class="w"> </span>/ruta/al/duckclaw
+</code></pre></div>
+<p>Wizard <strong>clásico</strong> (Rich, <code>scripts/duckclaw_setup_wizard.py</code>): <code>uv run duckops init --classic</code>.</p>
+<p>Borrador rápido (sin tocar el <code>.env</code> del repo): <strong>Ctrl+S</strong> → <code>~/.config/duckclaw/wizard_draft.json</code>.</p>
+<p>Detalle de fases y seguridad: <a href="../Installation/">Installation.md</a>.</p>
+<hr />
+<h2 id="5-api-gateway-desarrollo">5. API Gateway (desarrollo)<a class="headerlink" href="#5-api-gateway-desarrollo" title="Permanent link">&para;</a></h2>
+<p>Desde la raíz del repo:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>serve<span class="w"> </span>--gateway
+</code></pre></div>
+<p>Equivalente orientativo (si prefieres llamar uvicorn a mano; ajusta host/puerto):</p>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>services/api-gateway
+uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </span>main:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span>--reload
+</code></pre></div>
+<p>Comprobación rápida:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:8000/health
+</code></pre></div>
+<p>(Si usas <code>DUCKCLAW_TAILSCALE_AUTH_KEY</code>, añade la cabecera <code>X-Tailscale-Auth-Key</code> en las peticiones, salvo rutas públicas documentadas.)</p>
+<h3 id="51-finanz-analisis-cuantitativo-ibkr-quant_core">5.1 Finanz + análisis cuantitativo (IBKR / quant_core)<a class="headerlink" href="#51-finanz-analisis-cuantitativo-ibkr-quant_core" title="Permanent link">&para;</a></h3>
+<p>Implementación acoplada al template <code>finanz</code> (<code>packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml</code>) y alineada con la guía <a href="../agents/quant_trader/">Quant Trader</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Uso</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>IBKR_PORTFOLIO_API_URL</code> / <code>IBKR_PORTFOLIO_API_KEY</code></td>
+<td>Resumen de portafolio (<code>get_ibkr_portfolio</code>). Las peticiones envían la cabecera <code>X-Duckclaw-IBKR-Account-Mode</code> según <code>IBKR_ACCOUNT_MODE</code> (default <code>paper</code>) para que tu API enrute al Gateway paper/live.</td>
+</tr>
+<tr>
+<td><code>IBKR_MARKET_DATA_URL</code></td>
+<td><strong>Solo la URL base</strong> del endpoint (sin query), p. ej. <code>http://100.x.x.x:8002/api/market/ohlcv</code>. El cliente añade <code>?ticker=&amp;timeframe=&amp;lookback_days=</code>. En el VPS, el mismo path puede usar <strong>lake</strong> (<code>export_lake_ohlcv.py</code>) y, si no hay barras, <strong>fallback IB</strong> (<code>scripts/capadonna/ibkr_historical_bars.py</code>, <code>ib_async</code> + <code>OHLCV_IB_*</code>; ver spec interna). Referencias técnicas en el repo: <code>services/ibkr-ohlcv-api/main.py</code> y documentación interna de Capadonna Lake + IBKR Live. Si no existe esa ruta (404), déjala <strong>vacía</strong>: el lake histórico sigue por SSH.</td>
+</tr>
+<tr>
+<td><code>IBKR_MARKET_DATA_API_KEY</code></td>
+<td>Opcional; Bearer para OHLCV. Si no se define, <code>fetch_market_data</code> usa <code>IBKR_PORTFOLIO_API_KEY</code>.</td>
+</tr>
+<tr>
+<td><code>IBKR_REALTIME_TIMEFRAMES</code></td>
+<td>CSV de timeframes que van al gateway HTTP cuando <strong>no</strong> están solo en rama lake (default <code>1m,5m,15m,30m,1h</code>). Si un TF está en histórico lake <strong>y</strong> aquí, prevalece IBKR. Añade <code>1d</code> si el lake SSH falla y quieres diario por HTTP.</td>
+</tr>
+<tr>
+<td><code>CAPADONNA_SSH_HOST</code></td>
+<td>IP/host Tailscale del VPS con el data lake (histórico).</td>
+</tr>
+<tr>
+<td><code>CAPADONNA_SSH_USER</code></td>
+<td>Usuario SSH (default <code>capadonna</code>).</td>
+</tr>
+<tr>
+<td><code>CAPADONNA_SSH_KEY_PATH</code></td>
+<td>Preferente; ruta local a clave privada (<code>-i</code>), p. ej. <code>~/.ssh/id_ed25519</code>. Si no se define, se usa <code>CAPADONNA_SSH_IDENTITY_FILE</code>.</td>
+</tr>
+<tr>
+<td><code>CAPADONNA_SSH_IDENTITY_FILE</code></td>
+<td>Alias histórico; <code>-i</code> si <code>CAPADONNA_SSH_KEY_PATH</code> está vacío.</td>
+</tr>
+<tr>
+<td><code>CAPADONNA_SSH_TIMEOUT</code></td>
+<td>Segundos (default <code>120</code>, máx. <code>600</code>).</td>
+</tr>
+<tr>
+<td><code>CAPADONNA_REMOTE_OHLC_CMD</code></td>
+<td>Plantilla ejecutada <strong>en el VPS por ssh</strong> (usa rutas absolutas del servidor, p. ej. <code>/home/capadonna/...</code>, no <code>~</code> de tu Mac). Intérprete: venv del proyecto Capadonna-Driller (<code>…/.venv/bin/python</code>) con <code>duckdb</code> instalado. Script: <code>scripts/capadonna/export_lake_ohlcv.py</code>. Opcional <code>CAPADONNA_LAKE_DATA_ROOT</code>.</td>
+</tr>
+<tr>
+<td><code>CAPADONNA_HISTORICAL_TIMEFRAMES</code></td>
+<td>CSV de timeframes que van al lake por SSH (default en código <code>1d,1w,1M,moc</code>). Incluye <code>moc</code> para <code>data/lake/moc/</code>. <strong>Mes = <code>1M</code> mayúscula; minuto = <code>1m</code> minúscula</strong> (el bridge no las mezcla). Requiere host + comando remoto.</td>
+</tr>
+<tr>
+<td><code>IBKR_ACCOUNT_MODE</code></td>
+<td>Debe ser <code>paper</code> para permitir <code>execute_order</code> / <code>execute_approved_signal</code>.</td>
+</tr>
+<tr>
+<td><code>IBKR_EXECUTE_ORDER_URL</code></td>
+<td>POST JSON <code>{"signal_id","paper":true}</code> (opcional; sin URL la orden no se envía al broker tras HITL). El <strong>time-in-force</strong> (GTC, bracket, etc.) lo define tu servicio detrás de esta URL, no el monorepo.</td>
+</tr>
+<tr>
+<td><code>DUCKCLAW_QUANT_HITL_GRANT_TTL_SEC</code></td>
+<td>Segundos de validez del grant tras <code>/execute_signal</code> (default <code>600</code>). Para swing o confirmacion lenta, sube (p. ej. <code>86400</code>).</td>
+</tr>
+<tr>
+<td><code>REDIS_URL</code> / <code>DUCKCLAW_REDIS_URL</code></td>
+<td>Recomendado para persistir grants de <code>/execute_signal</code> entre procesos; si falta, memoria en proceso (solo mismo worker).</td>
+</tr>
+</tbody>
+</table>
+<p>Ejemplo de bloque (proceso del gateway; no commitear valores reales):</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Capadonna Lake (histórico SSH, típ. Tailscale)</span>
+<span class="nv">CAPADONNA_SSH_HOST</span><span class="o">=</span><span class="m">100</span>.x.x.x
+<span class="nv">CAPADONNA_SSH_USER</span><span class="o">=</span>capadonna
+<span class="nv">CAPADONNA_SSH_KEY_PATH</span><span class="o">=</span>~/.ssh/id_ed25519
+<span class="c1"># En el VPS: /home/capadonna/projects/Capadonna-Driller/.venv/bin/pip install duckdb</span>
+<span class="nv">CAPADONNA_REMOTE_OHLC_CMD</span><span class="o">=</span>/home/capadonna/projects/Capadonna-Driller/.venv/bin/python<span class="w"> </span>/home/capadonna/projects/Capadonna-Driller/scripts/export_lake_ohlcv.py<span class="w"> </span><span class="o">{</span>ticker<span class="o">}</span><span class="w"> </span><span class="o">{</span>timeframe<span class="o">}</span><span class="w"> </span><span class="o">{</span>lookback_days<span class="o">}</span>
+<span class="nv">CAPADONNA_HISTORICAL_TIMEFRAMES</span><span class="o">=</span>1d,1w,1M,moc
+</code></pre></div>
+<p>Fly: <code>/lake</code> o <code>/lake status</code> comprueba env y hace <code>ssh … true</code> corto si la config es válida. <code>/sensors</code> resume DuckDB, IBKR (portafolio + mercado), Lake, Tavily, Reddit, Google Trends y <strong>browser sandbox</strong> (manifest finanz, Docker, imagen Playwright, red en <code>security_policy</code>) en el proceso del gateway.</p>
+<p>Telegram (human-in-the-loop): el usuario confirma con <code>/execute_signal &lt;uuid&gt;</code> el <code>signal_id</code> devuelto por la propuesta (<code>propose_trade</code> en <strong>Finanz</strong>, <code>propose_trade_signal</code> en <strong>Quant Trader</strong>). Luego el asistente llama <code>execute_order</code> (Finanz) o <code>execute_approved_signal</code> (Quant Trader).</p>
+<h4 id="quant-trader-sesion-autonoma-goals-hitl">Quant Trader: sesión autónoma + <code>/goals</code> (HITL)<a class="headerlink" href="#quant-trader-sesion-autonoma-goals-hitl" title="Permanent link">&para;</a></h4>
+<p>Comandos fly (chat Quant Trader):</p>
+<ul>
+<li><code>/trading_session --mode paper|live [--tickers AAPL,NVDA] [--confirm]</code></li>
+<li><code>/trading_session --status</code></li>
+<li><code>/trading_session --stop</code></li>
+<li><code>/cancel_signal &lt;signal_id&gt;</code></li>
+</ul>
+<p>Flags extendidos de sesión:</p>
+<ul>
+<li><code>--max-drawdown &lt;pct&gt;</code>: objetivo de DD máximo para <code>session_goal</code> (ej. <code>2</code> = 2%).</li>
+<li><code>--position-size &lt;pct&gt;</code>: tamaño base de posición para <code>session_goal</code>.</li>
+<li><code>--signal &lt;SOLID|LIQUID|GAS|PLASMA&gt;</code>: umbral de fase CFD para propuesta.</li>
+</ul>
+<p>Notas operativas:</p>
+<ul>
+<li>Al crear sesión, se persiste <code>session_goal</code> en <code>quant_core.trading_sessions</code>.</li>
+<li>Si no hay delta activo en <code>/goals</code>, se auto-activa en 5 minutos (<code>300s</code>) con metadata de trigger <code>trading_session</code>.</li>
+<li><code>--stop</code> marca la sesión <code>CLOSED</code>, limpia el scheduler asociado y devuelve resumen con <code>session_uid</code> + PnL estimado.</li>
+<li><code>/cancel_signal</code> solo cancela señales en estado pendiente HITL (<code>PENDING_HITL</code>/<code>AWAITING_HITL</code>).</li>
+<li>El ticker proactivo envía <code>SYSTEM_EVENT</code> tipo <code>TRADING_TICK</code> y <strong>no ejecuta órdenes</strong>: solo evalúa/propone; ejecución siempre requiere <code>/execute_signal</code>.</li>
+</ul>
+<hr />
+<h2 id="6-db-writer-si-usas-escrituras-encoladas">6. DB Writer (si usas escrituras encoladas)<a class="headerlink" href="#6-db-writer-si-usas-escrituras-encoladas" title="Permanent link">&para;</a></h2>
+<p>El wizard soberano puede generar <code>ecosystem.db-writer.config.cjs</code> en la <strong>raíz del repo</strong>. Además de la cola SQL (<code>duckdb_write_queue</code>), el proceso escucha <strong>CONTEXT_INJECTION</strong> (<code>duckclaw:state_delta:context</code> por defecto) para persistir <code>/context --add</code> en <code>main.semantic_memory</code>.</p>
+<p><strong>PM2</strong> (recomendado en servidor; nombre del proceso: <code>DuckClaw-DB-Writer</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Desde la raíz del monorepo</span>
+pm2<span class="w"> </span>start<span class="w"> </span>ecosystem.db-writer.config.cjs
+<span class="c1"># Si el archivo define más de una app y solo quieres el writer:</span>
+pm2<span class="w"> </span>start<span class="w"> </span>ecosystem.db-writer.config.cjs<span class="w"> </span>--only<span class="w"> </span>DuckClaw-DB-Writer
+pm2<span class="w"> </span>save<span class="w">   </span><span class="c1"># opcional: persistir la lista de procesos PM2</span>
+
+<span class="c1"># Tras cambiar REDIS_URL, DUCKDB_PATH o rutas multiplex en ese ecosystem:</span>
+pm2<span class="w"> </span>restart<span class="w"> </span>DuckClaw-DB-Writer<span class="w"> </span>--update-env
+pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-DB-Writer
+</code></pre></div>
+<p>El bloque <code>env</code> del ecosystem debe llevar la misma <strong><code>REDIS_URL</code></strong> (o <code>DUCKCLAW_REDIS_URL</code>) que el gateway y un <strong><code>DUCKDB_PATH</code></strong> coherente con la bóveda donde quieres aplicar las escrituras encoladas (alineado con multiplex / hub del gateway).</p>
+<p><strong>Manual</strong> (desarrollo u one-off):</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>services/db-writer/main.py
+</code></pre></div>
+<h3 id="depuracion-telegram-team-whitelist">Depuración Telegram <code>/team</code> (whitelist)<a class="headerlink" href="#depuracion-telegram-team-whitelist" title="Permanent link">&para;</a></h3>
+<p>Si <code>/team --add</code> responde bien pero <code>/team</code> lista vacío: define <code>DUCKCLAW_TEAM_WHITELIST_DEBUG=1</code>, reinicia el gateway (PM2) y busca en logs <code>fly_team_audit</code> y mensajes del logger <code>duckclaw.team_whitelist</code> (comparan bóveda fly vs hub y la rama <code>reuse_fly</code>).</p>
+<p>Consulta directa en la <code>.duckdb</code> del hub:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/check_authorized_users.py<span class="w"> </span>--db<span class="w"> </span>db/private/TU_USER/finanzdb1.duckdb<span class="w"> </span>--tenant<span class="w"> </span>Finanzas
+</code></pre></div>
+<p>Sin <code>--db</code> usa <code>get_gateway_db_path()</code> según el <code>.env</code> / multiplex actual.</p>
+<hr />
+<h2 id="7-orden-sugerido-resumen">7. Orden sugerido (resumen)<a class="headerlink" href="#7-orden-sugerido-resumen" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Paso</th>
+<th>Comando</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>docker run --name redis -d -p 6379:6379 redis</code> <strong>o</strong> <code>redis-server</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>redis-cli ping</code> → <code>PONG</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>uv sync</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>uv run duckops init</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>uv run duckops serve --gateway</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td>(Opcional Telegram) <code>DUCKCLAW_CHAT_PARALLEL_INVOCATIONS=1</code> + <code>REDIS_URL</code> para varias respuestas concurrentes por chat; <strong>§2.2</strong> <code>DUCKCLAW_TOOL_READ_POOL_*</code> si varias <code>read_sql</code> en un solo turno; reiniciar con <code>--update-env</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td>(Opcional) DB Writer: <strong>§6</strong> (<code>pm2 start ecosystem.db-writer.config.cjs</code> o <code>uv run python services/db-writer/main.py</code>) — <strong>necesario</strong> para <code>/context --add</code> (§2.3)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8-cheat-sheet-del-dia-a-dia">8. Cheat sheet del día a día<a class="headerlink" href="#8-cheat-sheet-del-dia-a-dia" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>init<span class="w">                         </span><span class="c1"># Reconfigurar / instalar</span>
+uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>serve<span class="w"> </span>--gateway<span class="w">              </span><span class="c1"># Solo gateway en dev</span>
+pm2<span class="w"> </span>status<span class="w">                                  </span><span class="c1"># Si usas PM2 tras el wizard</span>
+pm2<span class="w"> </span>logs<span class="w"> </span>BI-Analyst-Gateway<span class="w">                 </span><span class="c1"># Ej.: traza Telegram + subagentes</span>
+pm2<span class="w"> </span>logs<span class="w"> </span>JobHunter-Gateway<span class="w">                  </span><span class="c1"># Job-Hunter + resúmenes /context</span>
+pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-DB-Writer<span class="w">                 </span><span class="c1"># Escrituras + CONTEXT_INJECTION</span>
+pm2<span class="w"> </span>flush<span class="w">                                   </span><span class="c1"># Vaciar logs PM2</span>
+pm2<span class="w"> </span>restart<span class="w"> </span>BI-Analyst-Gateway<span class="w"> </span>--update-env<span class="w"> </span><span class="c1"># Nombre según config/api_gateways_pm2.json; tras cambiar DUCKCLAW_*</span>
+<span class="c1"># Tras cambiar DUCKCLAW_TOOL_READ_POOL_* o DUCKCLAW_READ_SQL_MAX_RESPONSE_CHARS: mismo restart</span>
+<span class="c1"># Telegram (admin): /context --add …  |  /context --summary  — ver §2.3</span>
+</code></pre></div>
+<p>Contexto del <strong>wizard</strong> y topología de servicios: <a href="../Installation/">Installation.md</a>. El <strong>cheat sheet</strong> canónico es esta sección (<strong>§8</strong>).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.top", "navigation.sections", "toc.follow", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

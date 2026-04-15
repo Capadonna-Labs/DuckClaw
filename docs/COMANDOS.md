@@ -1,7 +1,7 @@
 # COMANDOS — Despliegue rápido DuckClaw
 
 Guía mínima para levantar el entorno desde la **raíz del repositorio** (`duckclaw/`).  
-Para contexto y arquitectura, ver **[docs/Installation.md](docs/Installation.md)** (DuckOps Wizard, PM2, seguridad).
+Para contexto y arquitectura, ver **[Installation.md](Installation.md)** (DuckOps Wizard, PM2, seguridad).
 
 ---
 
@@ -71,7 +71,7 @@ Puedes recibir mensajes del bot **sin n8n**: Telegram hace `POST` al API Gateway
 
 ### 2.0 Un gateway PM2, un webhook HTTPS (recomendado)
 
-Cada proceso gateway es el mismo código pero con **env y puerto distintos** ([`config/api_gateways_pm2.json`](config/api_gateways_pm2.json): p. ej. Finanz-Gateway `8000`, JobHunter-Gateway `8283`, BI-Analyst-Gateway `8282`). Telegram solo llama la URL que configures en `setWebhook`; si un único `tailscale funnel --yes <puerto>` apunta solo al JobHunter, **todos** los bots que compartan esa URL entrarán por ese proceso (mal para logs y para ACL). El modelo recomendado:
+Cada proceso gateway es el mismo código pero con **env y puerto distintos** (archivo `config/api_gateways_pm2.json`: p. ej. Finanz-Gateway `8000`, JobHunter-Gateway `8283`, BI-Analyst-Gateway `8282`). Telegram solo llama la URL que configures en `setWebhook`; si un único `tailscale funnel --yes <puerto>` apunta solo al JobHunter, **todos** los bots que compartan esa URL entrarán por ese proceso (mal para logs y para ACL). El modelo recomendado:
 
 1. Cada bot tiene una URL HTTPS cuya **terminación** llega al **puerto de ese** PM2 (verifica con `pm2 describe <nombre>` / JSON de puertos).
 2. Usa siempre el path estándar `…/api/v1/telegram/webhook` y el `secret_token` del **mismo** proceso.
@@ -84,7 +84,7 @@ Cada proceso gateway es el mismo código pero con **env y puerto distintos** ([`
 | **Tailscale Funnel** | Un comando `tailscale funnel --bg --yes <puerto>` expone **un** puerto por máquina en la URL `ts.net` habitual; **volver a ejecutarlo con otro puerto reemplaza el destino** de esa misma URL pública. Por eso, si el Sovereign Wizard activa Funnel primero para Finanz (`8000`) y luego para SIATA (`8888`), **todos** los bots cuyo `setWebhook` siga apuntando a `https://nodo….ts.net/...` recibirán updates en **8888** — no es que PM2 o `.env` sobrescriban tokens, es el túnel. Para varios gateways: varios hostnames/túneles, proxy con virtual hosts, **Tailscale Serve** con reglas por ruta/host ([KB Funnel](https://tailscale.com/kb/1223/funnel/)), o multiplexación (§2.0 Modo B). El wizard muestra un aviso amarillo si detecta cambio de puerto. |
 | **Reverse proxy local (Caddy/nginx)** | Un frontal TLS en `443` que enruta por host o path a `8000` / `828x`; un solo funnel al `443` del proxy. |
 
-Especificación: [specs/features/Telegram Webhook One Gateway One Port.md](specs/features/Telegram%20Webhook%20One%20Gateway%20One%20Port.md).
+Especificación relacionada: [Telegram Webhook Multiplex](specs/telegram_webhook_multiplex.md).
 
 **Registrar el webhook** (sustituye `TOKEN`, URL pública que llega **a ese** puerto y `TELEGRAM_WEBHOOK_SECRET` del env de **ese** proceso):
 
@@ -137,7 +137,7 @@ Ejemplo (genera tres secretos distintos, p. ej. `openssl rand -hex 32`, y úsalo
 
 En PM2, `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` debe ser **una sola línea** JSON escapada o definida en `ecosystem` como string. Cada bot: misma `url` (`https://tu-nodo.ts.net/api/v1/telegram/webhook`), **`secret_token` distinto** por bot.
 
-Si además tienes `TELEGRAM_WEBHOOK_SECRET`, solo los updates cuya cabecera coincida con ese valor usarán el “default” del proceso (worker/tenant/token del PM2); el resto debe coincidir con una entrada de `ROUTES`. Especificación: [specs/features/Telegram Webhook Multiplex (multi-bot).md](specs/features/Telegram%20Webhook%20Multiplex%20(multi-bot).md). Rutas `POST …/webhook/finanz` y `…/webhook/trabajo` son **legado**; con un solo funnel suele bastar Modo B + `vault_db_env`.
+Si además tienes `TELEGRAM_WEBHOOK_SECRET`, solo los updates cuya cabecera coincida con ese valor usarán el “default” del proceso (worker/tenant/token del PM2); el resto debe coincidir con una entrada de `ROUTES`. Especificación: [Telegram Webhook Multiplex](specs/telegram_webhook_multiplex.md). Rutas `POST …/webhook/finanz` y `…/webhook/trabajo` son **legado**; con un solo funnel suele bastar Modo B + `vault_db_env`.
 
 **Modo compacto (path por bot, misma base `DUCKCLAW_PUBLIC_URL`):** si `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` **no** empieza por `[` y contiene `:/api/`, se interpreta como lista separada por comas `bot_name:bot_token:webhook_path`. El gateway crea `POST` bajo `/api/v1/telegram/...` (p. ej. `/finanz`). Perfiles admitidos: `finanz`, `siata`, `jobhunter`. Define las mismas variables de DuckDB que en modo multi-puerto (`DUCKCLAW_FINANZ_DB_PATH`, `DUCKCLAW_JOB_HUNTER_DB_PATH`, `DUCKCLAW_SIATA_DB_PATH` o `DUCKCLAW_DB_PATH`). **Obligatorio:** tras definir la variable, ejecuta `python scripts/register_webhooks.py` (con `DUCKCLAW_PUBLIC_URL` y tokens en la cadena). Si los bots siguen con `setWebhook` en `…/api/v1/telegram/webhook`, todos los updates caen en esa ruta y el gateway **no** puede saber qué bot es: en ese modo, el gateway ignora el POST genérico y solo procesa los paths dedicados (`…/finanz`, `…/siata`, …). Opcional: `TELEGRAM_WEBHOOK_SECRET` como `secret_token` común en el script.
 
@@ -150,7 +150,7 @@ curl -sS -X POST http://127.0.0.1:8282/api/v1/telegram/webhook \
   -d '{"update_id":1,"message":{"message_id":1,"chat":{"id":123456789,"type":"private"},"from":{"id":123456789,"is_bot":false,"first_name":"Test"},"text":"hola"}}'
 ```
 
-Más contexto: [specs/features/Migracion de Orquestacion n8n a Integracion Nativa Telegram.md](specs/features/Migracion%20de%20Orquestacion%20n8n%20a%20Integracion%20Nativa%20Telegram.md).
+Más contexto: revisar la documentación de arquitectura y specs del módulo Telegram en `docs/specs/`.
 
 ### 2.1 Paralelismo por chat y etiquetas «BI-Analyst N»
 
@@ -202,11 +202,11 @@ Por **worker**, en `manifest.yaml`:
 tool_read_pool: false   # desactiva el pool para ese template (pese al default global)
 ```
 
-Especificación: [specs/features/Concurrent Tool Node (Ephemeral Read-Pool).md](specs/features/Concurrent%20Tool%20Node%20(Ephemeral%20Read-Pool).md).
+Especificación: documento interno de "Concurrent Tool Node (Ephemeral Read-Pool)".
 
 ### 2.3 Context injection (Telegram `/context`)
 
-Comandos del **webhook nativo** para memoria semántica en la bóveda DuckDB del usuario (`main.semantic_memory`). Detalle: [specs/features/Context Injection (Telegram).md](specs/features/Context%20Injection%20(Telegram).md).
+Comandos del **webhook nativo** para memoria semántica en la bóveda DuckDB del usuario (`main.semantic_memory`). Detalle: [Context Injection Telegram](specs/context_injection_telegram.md).
 
 | Comando | Efecto |
 |---------|--------|
@@ -252,7 +252,7 @@ Deberías ver `tools MCP: [...]` y un JSON con `ok: true` y `message_id` si Tele
 
 ### Reddit MCP (Finanz / sentimiento social)
 
-El worker **Finanz** puede cargar herramientas Reddit vía **stdio** (`npx --quiet -y mcp-reddit`) cuando el manifest incluye un bloque `reddit:` (ver template [packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml](packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml)).
+El worker **Finanz** puede cargar herramientas Reddit vía **stdio** (`npx --quiet -y mcp-reddit`) cuando el manifest incluye un bloque `reddit:` (ver template `packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml`).
 
 **Requisitos:** Node.js y `npx` en el `PATH` del proceso del API Gateway (igual que GitHub MCP). Variables en el entorno del gateway (no commitear secretos):
 
@@ -264,7 +264,7 @@ REDDIT_USERNAME=...
 REDDIT_PASSWORD=...
 ```
 
-Crea la app en [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) (tipo script). Spec: [specs/features/Reddit MCP Social Sentiment (QuantClaw).md](specs/features/Reddit%20MCP%20Social%20Sentiment%20(QuantClaw).md).
+Crea la app en [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) (tipo script). Spec: documento interno "Reddit MCP Social Sentiment (QuantClaw)".
 
 Tras cambiar `.env`, reinicia el gateway (PM2). Por defecto `read_only: true` solo registra búsqueda y lectura de posts/comentarios.
 
@@ -276,19 +276,19 @@ Instala el paquete del servidor (pytrends, sin API key obligatoria):
 uv sync --extra google-trends
 ```
 
-El proceso hijo usa el ejecutable **`google-trends-mcp`** del mismo entorno que el gateway (o `uvx google-trends-mcp` si no está en el venv). Bloque en manifest: `google_trends:` — ver [packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml](packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml).
+El proceso hijo usa el ejecutable **`google-trends-mcp`** del mismo entorno que el gateway (o `uvx google-trends-mcp` si no está en el venv). Bloque en manifest: `google_trends:` — ver `packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml`.
 
-Opcionalmente puedes fijar `command` y `args` en YAML para otro lanzador. Limitaciones: acceso no oficial a Google Trends; posibles bloqueos o errores intermitentes. Spec: [specs/features/Google Trends MCP (Macro Interest Finanz).md](specs/features/Google%20Trends%20MCP%20(Macro%20Interest%20Finanz).md).
+Opcionalmente puedes fijar `command` y `args` en YAML para otro lanzador. Limitaciones: acceso no oficial a Google Trends; posibles bloqueos o errores intermitentes. Spec: documento interno "Google Trends MCP (Macro Interest Finanz)".
 
 ### Cyber-Fluid Dynamics (Finanz / quant)
 
-Con `quant.cfd: true` en el manifest del template Finanz se registra la herramienta `record_fluid_state` y la tabla `quant_core.fluid_state` (OHLCV + métricas heurísticas y fase SOLID|LIQUID|GAS|PLASMA). Ver spec [specs/features/Cyber-Fluid Dynamics CFD (Finanz).md](specs/features/Cyber-Fluid%20Dynamics%20CFD%20(Finanz).md). Tras aplicar `schema.sql` nuevo, reinicia el gateway si hace falta recrear el grafo.
+Con `quant.cfd: true` en el manifest del template Finanz se registra la herramienta `record_fluid_state` y la tabla `quant_core.fluid_state` (OHLCV + métricas heurísticas y fase SOLID|LIQUID|GAS|PLASMA). Ver spec interna "Cyber-Fluid Dynamics CFD (Finanz)". Tras aplicar `schema.sql` nuevo, reinicia el gateway si hace falta recrear el grafo.
 
 ---
 
 ## 4. Wizard — aprovisionamiento interactivo
 
-**`duckops init`** ejecuta por defecto el **Sovereign Wizard v2.0** (TUI con `prompt_toolkit`, borrador en memoria y escritura solo tras confirmar en *Review*; atajos Ctrl+Z/Esc, Ctrl+S, Ctrl+R, Tab). Tras **CONFIRMAR**, materializa `.env`, rutas DuckDB, PM2 según el borrador y puede registrar `setWebhook`. Opcional: `--repo` / `-C` para la raíz del monorepo. Spec: [specs/features/DuckClaw Sovereign Wizard (v2.0).md](specs/features/DuckClaw%20Sovereign%20Wizard%20(v2.0).md).
+**`duckops init`** ejecuta por defecto el **Sovereign Wizard v2.0** (TUI con `prompt_toolkit`, borrador en memoria y escritura solo tras confirmar en *Review*; atajos Ctrl+Z/Esc, Ctrl+S, Ctrl+R, Tab). Tras **CONFIRMAR**, materializa `.env`, rutas DuckDB, PM2 según el borrador y puede registrar `setWebhook`. Opcional: `--repo` / `-C` para la raíz del monorepo. Spec: documento interno "DuckClaw Sovereign Wizard (v2.0)".
 
 ```bash
 uv run duckops init
@@ -299,7 +299,7 @@ Wizard **clásico** (Rich, `scripts/duckclaw_setup_wizard.py`): `uv run duckops 
 
 Borrador rápido (sin tocar el `.env` del repo): **Ctrl+S** → `~/.config/duckclaw/wizard_draft.json`.
 
-Detalle de fases y seguridad: [docs/Installation.md](docs/Installation.md).
+Detalle de fases y seguridad: [Installation.md](Installation.md).
 
 ---
 
@@ -328,12 +328,12 @@ curl -s http://127.0.0.1:8000/health
 
 ### 5.1 Finanz + análisis cuantitativo (IBKR / quant_core)
 
-Implementación acoplada al template [finanz](packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml) (spec: [Quantitative Trading Worker](specs/features/Quantitative%20Trading%20Worker.md); lake + SSH: [Capadonna Lake OHLC SSH + IBKR Live](specs/features/Capadonna%20Lake%20OHLC%20SSH%20+%20IBKR%20Live.md)).
+Implementación acoplada al template `finanz` (`packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml`) y alineada con la guía [Quant Trader](agents/quant_trader.md).
 
 | Variable | Uso |
 |----------|-----|
 | `IBKR_PORTFOLIO_API_URL` / `IBKR_PORTFOLIO_API_KEY` | Resumen de portafolio (`get_ibkr_portfolio`). Las peticiones envían la cabecera `X-Duckclaw-IBKR-Account-Mode` según `IBKR_ACCOUNT_MODE` (default `paper`) para que tu API enrute al Gateway paper/live. |
-| `IBKR_MARKET_DATA_URL` | **Solo la URL base** del endpoint (sin query), p. ej. `http://100.x.x.x:8002/api/market/ohlcv`. El cliente añade `?ticker=&timeframe=&lookback_days=`. En el VPS, el mismo path puede usar **lake** (`export_lake_ohlcv.py`) y, si no hay barras, **fallback IB** (`scripts/capadonna/ibkr_historical_bars.py`, `ib_async` + `OHLCV_IB_*`; ver spec). Contrato: [Capadonna Lake + IBKR Live](../specs/features/Capadonna%20Lake%20OHLC%20SSH%20+%20IBKR%20Live.md). Referencia: [services/ibkr-ohlcv-api](../services/ibkr-ohlcv-api/main.py). Si no existe esa ruta (404), déjala **vacía**: el lake histórico sigue por SSH. |
+| `IBKR_MARKET_DATA_URL` | **Solo la URL base** del endpoint (sin query), p. ej. `http://100.x.x.x:8002/api/market/ohlcv`. El cliente añade `?ticker=&timeframe=&lookback_days=`. En el VPS, el mismo path puede usar **lake** (`export_lake_ohlcv.py`) y, si no hay barras, **fallback IB** (`scripts/capadonna/ibkr_historical_bars.py`, `ib_async` + `OHLCV_IB_*`; ver spec interna). Referencias técnicas en el repo: `services/ibkr-ohlcv-api/main.py` y documentación interna de Capadonna Lake + IBKR Live. Si no existe esa ruta (404), déjala **vacía**: el lake histórico sigue por SSH. |
 | `IBKR_MARKET_DATA_API_KEY` | Opcional; Bearer para OHLCV. Si no se define, `fetch_market_data` usa `IBKR_PORTFOLIO_API_KEY`. |
 | `IBKR_REALTIME_TIMEFRAMES` | CSV de timeframes que van al gateway HTTP cuando **no** están solo en rama lake (default `1m,5m,15m,30m,1h`). Si un TF está en histórico lake **y** aquí, prevalece IBKR. Añade `1d` si el lake SSH falla y quieres diario por HTTP. |
 | `CAPADONNA_SSH_HOST` | IP/host Tailscale del VPS con el data lake (histórico). |
@@ -458,4 +458,4 @@ pm2 restart BI-Analyst-Gateway --update-env # Nombre según config/api_gateways_
 # Telegram (admin): /context --add …  |  /context --summary  — ver §2.3
 ```
 
-Más comandos: sección **6. Guía Rápida de Operación** en [docs/Installation.md](docs/Installation.md).
+Contexto del **wizard** y topología de servicios: [Installation.md](Installation.md). El **cheat sheet** canónico es esta sección (**§8**).

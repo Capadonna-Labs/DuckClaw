@@ -19,7 +19,7 @@ The Mind es un juego de cartas cooperativo. Los jugadores tienen cartas numerada
    (También vale `themindcrupier` en minúsculas.)
 
 2. **Plantilla de referencia**  
-   Copia en repo: [`templates/workers/the_mind_crupier/`](../templates/workers/the_mind_crupier/README.md) (canónico en `packages/agents/.../TheMindCrupier/`).
+   Copia en repo: `templates/workers/the_mind_crupier/` (canónico en `packages/agents/.../TheMindCrupier/`).
 
 3. **Requisitos**  
    - Webhook n8n (u otro bridge) para enviar **DM** con `chat_id` + `text` (ver abajo).  

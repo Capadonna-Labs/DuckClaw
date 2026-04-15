@@ -826,6 +826,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#write-path-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write-path contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#python-api-reference-mkdocstrings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python API reference (mkdocstrings)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#queue-and-task-status-contracts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1115,6 +1137,230 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../COMANDOS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Troubleshooting-Gateway-PM2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting Gateway PM2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Observability-2.1-Identidad/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability and Identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Strix-Sandbox-Security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strix Sandbox Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Homeostasis-Heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Homeostasis Heartbeat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Jugar-The-Mind/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jugar The Mind
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Multi-Vault-System/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi Vault System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1147,6 +1393,28 @@
       Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#write-path-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write-path contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#python-api-reference-mkdocstrings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python API reference (mkdocstrings)
+      
+    </span>
+  </a>
+  
+</li>
       
         <li class="md-nav__item">
   <a href="#queue-and-task-status-contracts" class="md-nav__link">
@@ -1332,7 +1600,20 @@
 
 
 <h1 id="db-writer-api-reference">DB Writer API Reference<a class="headerlink" href="#db-writer-api-reference" title="Permanent link">&para;</a></h1>
-<p>This reference is generated from Python docstrings.</p>
+<p>This page has two parts: <strong>write-path contract</strong> (for operators and integrators) and <strong>Python API reference</strong> (mkdocstrings).</p>
+<h2 id="write-path-contract">Write-path contract<a class="headerlink" href="#write-path-contract" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Only</strong> <code>services/db-writer</code> should apply durable mutations to DuckDB in production (singleton writer).</li>
+<li>The gateway and agents <strong>enqueue</strong> intents (SQL/state deltas) via Redis; the writer consumes, runs transactional work, and updates task status.</li>
+<li>For HTTP ingress, <code>POST /api/v1/db/write</code> on the API Gateway accepts payloads that target a specific <code>db_path</code> and <code>user_id</code> when using path-aware routing; the writer executes against that path under safety rules.</li>
+</ul>
+<p><strong>Related:</strong></p>
+<ul>
+<li><a href="../../architecture/singleton_writer/">Singleton Writer</a> — architecture contract.</li>
+<li><a href="../../specs/finanz_admin_sql_db_writer/">Finanz Admin SQL DB-Writer</a> — spec pointer (canonical file in <code>specs/features/</code>).</li>
+<li><a href="../../COMANDOS/">Operations / Commands</a> — PM2 and <code>uv run python services/db-writer/main.py</code> for local runs.</li>
+</ul>
+<h2 id="python-api-reference-mkdocstrings">Python API reference (mkdocstrings)<a class="headerlink" href="#python-api-reference-mkdocstrings" title="Permanent link">&para;</a></h2>
 <h2 id="queue-and-task-status-contracts">Queue and Task Status Contracts<a class="headerlink" href="#queue-and-task-status-contracts" title="Permanent link">&para;</a></h2>
 
 
@@ -1423,7 +1704,7 @@
 
 
 <h3 id="duckclaw.db_write_queue.enqueue_duckdb_write_sync" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">enqueue_duckdb_write_sync</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">db_path</span><span class="p">,</span> <span class="n">query</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">user_id</span><span class="o">=</span><span class="s1">&#39;default&#39;</span><span class="p">,</span> <span class="n">tenant_id</span><span class="o">=</span><span class="s1">&#39;default&#39;</span><span class="p">,</span> <span class="n">task_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">queue_name</span><span class="o">=</span><span class="n">DEFAULT_WRITE_QUEUE_NAME</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">enqueue_duckdb_write_sync</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">db_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;default&#39;</span><span class="p">,</span> <span class="n">tenant_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;default&#39;</span><span class="p">,</span> <span class="n">task_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">queue_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_WRITE_QUEUE_NAME</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></code>
 
 <a href="#duckclaw.db_write_queue.enqueue_duckdb_write_sync" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1441,7 +1722,7 @@
 
 
 <h3 id="duckclaw.db_write_queue.poll_task_status_sync" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">poll_task_status_sync</span><span class="p">(</span><span class="n">task_id</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">timeout_sec</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span> <span class="n">interval_sec</span><span class="o">=</span><span class="mf">0.05</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">poll_task_status_sync</span><span class="p">(</span><span class="n">task_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">timeout_sec</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">3.0</span><span class="p">,</span> <span class="n">interval_sec</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.05</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DbWriteTaskStatus</span> <span class="o">|</span> <span class="kc">None</span></code>
 
 <a href="#duckclaw.db_write_queue.poll_task_status_sync" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1552,7 +1833,7 @@ Compatible con código que usa <code>.query</code>, <code>._path</code> y <code>
 
 
 <h3 id="duckclaw.gateway_db.get_gateway_db" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_gateway_db</span><span class="p">()</span></code>
+            <code class="highlight language-python"><span class="n">get_gateway_db</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Any</span></code>
 
 <a href="#duckclaw.gateway_db.get_gateway_db" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1571,7 +1852,7 @@ Compatible con código que usa <code>.query</code>, <code>._path</code> y <code>
 
 
 <h3 id="duckclaw.gateway_db.get_gateway_db_path" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_gateway_db_path</span><span class="p">()</span></code>
+            <code class="highlight language-python"><span class="n">get_gateway_db_path</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">str</span></code>
 
 <a href="#duckclaw.gateway_db.get_gateway_db_path" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1593,7 +1874,7 @@ Compatible con código que usa <code>.query</code>, <code>._path</code> y <code>
 
 
 <h3 id="duckclaw.gateway_db.get_war_room_acl_db_path" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_war_room_acl_db_path</span><span class="p">()</span></code>
+            <code class="highlight language-python"><span class="n">get_war_room_acl_db_path</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">str</span></code>
 
 <a href="#duckclaw.gateway_db.get_war_room_acl_db_path" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1614,7 +1895,7 @@ lectura. Si no, coincide con <code>get_gateway_db_path()</code>.</p>
 
 
 <h3 id="duckclaw.gateway_db.raw_gateway_db_path_from_environ" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">raw_gateway_db_path_from_environ</span><span class="p">()</span></code>
+            <code class="highlight language-python"><span class="n">raw_gateway_db_path_from_environ</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">str</span></code>
 
 <a href="#duckclaw.gateway_db.raw_gateway_db_path_from_environ" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1632,7 +1913,7 @@ lectura. Si no, coincide con <code>get_gateway_db_path()</code>.</p>
 
 
 <h3 id="duckclaw.gateway_db.raw_gateway_db_path_from_mapping" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">raw_gateway_db_path_from_mapping</span><span class="p">(</span><span class="n">mapping</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">raw_gateway_db_path_from_mapping</span><span class="p">(</span><span class="n">mapping</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span></code>
 
 <a href="#duckclaw.gateway_db.raw_gateway_db_path_from_mapping" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1650,7 +1931,7 @@ lectura. Si no, coincide con <code>get_gateway_db_path()</code>.</p>
 
 
 <h3 id="duckclaw.gateway_db.resolve_env_duckdb_path" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">resolve_env_duckdb_path</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">resolve_env_duckdb_path</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></code>
 
 <a href="#duckclaw.gateway_db.resolve_env_duckdb_path" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1694,6 +1975,12 @@ arrancar fuera del repo y abrir otra copia del archivo).</p>
 <script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
         </div>
         
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
       </main>
       
         <footer class="md-footer">
@@ -1723,7 +2010,7 @@ arrancar fuera del repo y abrir otra copia del archivo).</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.top", "navigation.sections", "toc.follow", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
       <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>

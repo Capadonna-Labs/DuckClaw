@@ -7,11 +7,13 @@ Fire-and-forget: el envío corre en un hilo daemon; no bloquear el grafo del age
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
 import threading
+import time
 from urllib.error import HTTPError, URLError
 from urllib import request as urllib_request
 
@@ -325,6 +327,36 @@ def _post_outbound_sync(
         return
 
     token = (outbound_bot_token or "").strip() or effective_telegram_bot_token_outbound()
+    # region agent log
+    try:
+        _fp = hashlib.sha1(token.encode("utf-8")).hexdigest()[:10] if token else ""
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H11_heartbeat_token_choice",
+                        "location": "packages/agents/src/duckclaw/graphs/chat_heartbeat.py:_post_outbound_sync",
+                        "message": "heartbeat_token_selected",
+                        "data": {
+                            "chat_id": str(cid),
+                            "plan": str((plan_title_log or "")[:120]),
+                            "token_fp": _fp,
+                            "has_explicit_token": bool((outbound_bot_token or "").strip()),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     if token:
         try:
             from duckclaw.integrations.telegram.telegram_outbound_sync import (

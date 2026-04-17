@@ -22,6 +22,16 @@ def _ansi_codes(s: str) -> list[str]:
     return re.findall(r"\033\[[0-9;]+m", s)
 
 
+def test_jhonny_uses_pinned_palette(colors_on) -> None:
+    """user_id 7866121890: colores fijos (no hash) para reconocerlo en pm2 logs."""
+    j = format_chat_identity_column_for_terminal("@Jhonny (7866121890)")
+    h = format_chat_identity_column_for_terminal("@Someone (7866121890)")
+    cj, ch = _ansi_codes(j), _ansi_codes(h)
+    assert cj == ch and len(cj) >= 2
+    juan = format_chat_identity_column_for_terminal("@Juan (1726618406)")
+    assert _ansi_codes(juan) != cj
+
+
 def test_juan_and_aleila_not_same_palette_slot(colors_on, monkeypatch) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
     j = format_chat_identity_column_for_terminal("@Juan (1726618406)")

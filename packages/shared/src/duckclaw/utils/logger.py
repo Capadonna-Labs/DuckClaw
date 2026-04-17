@@ -32,6 +32,12 @@ _ANSI_RESET = "\033[0m"
 # `@Nombre (session_id)` — el id puede ser numérico Telegram u otro texto sin paréntesis anidados.
 _LOG_IDENTITY_RE = re.compile(r"^@(?P<alias>.+) \((?P<cid>[^)]+)\)\s*\Z")
 
+# Telegram user_id → par de índices paleta 216 (alias, id) siempre iguales en PM2.
+_PINNED_IDENTITY_COLORS_BY_USER_ID: dict[str, tuple[int, int]] = {
+    # Jhonny — magenta intenso + cyan (distinto del hash por usuario).
+    "7866121890": (201, 51),
+}
+
 
 def _terminal_chat_id_colors_enabled() -> bool:
     if os.environ.get("NO_COLOR", "").strip():
@@ -84,7 +90,15 @@ def format_chat_identity_column_for_terminal(display: str) -> str:
     m = _LOG_IDENTITY_RE.match(s)
     if m:
         alias, cid = m.group("alias"), m.group("cid")
-        ca, cb = _pair_distinct_alias_id_colors(alias, cid)
+        cid_key = str(cid).strip()
+        pinned = _PINNED_IDENTITY_COLORS_BY_USER_ID.get(cid_key)
+        if pinned:
+            ia, ib = int(pinned[0]) % 216, int(pinned[1]) % 216
+            if ia == ib:
+                ib = (ib + 83) % 216
+            ca, cb = _ansi_fg_216_idx(ia), _ansi_fg_216_idx(ib)
+        else:
+            ca, cb = _pair_distinct_alias_id_colors(alias, cid)
         return f"{ca}@{alias}{_ANSI_RESET} ({cb}{cid}{_ANSI_RESET})"
     return f"{chat_id_color_code(s)}{s}{_ANSI_RESET}"
 

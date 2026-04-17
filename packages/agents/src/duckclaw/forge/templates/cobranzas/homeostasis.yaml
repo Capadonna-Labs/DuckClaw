@@ -1,0 +1,12 @@
+homeostasis:
+  beliefs:
+    - key: "contact_rate"
+      target: 0.75
+      threshold: 0.15
+    - key: "agreement_rate"
+      target: 0.40
+      threshold: 0.10
+  actions:
+    - trigger: "contact_rate_drop"
+      skill: "prioritize_pending_accounts"
+      message: "Baja tasa de contacto. Priorizar cuentas con mayor mora y ultimo intento >72h."

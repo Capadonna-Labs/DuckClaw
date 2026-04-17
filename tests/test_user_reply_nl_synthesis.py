@@ -60,6 +60,41 @@ def test_maybe_synthesize_reply_skips_when_spec_off() -> None:
     llm.invoke.assert_not_called()
 
 
+def test_finanz_repair_ibkr_replaces_gateway_disconnect_when_snapshot_unavailable() -> None:
+    from langchain_core.messages import ToolMessage
+
+    tool = ToolMessage(
+        content=(
+            "Cuenta IBKR solicitada: **live**.\n\n"
+            "Snapshot de cuenta IBKR no disponible (`snapshot_unavailable`). "
+            "No es lo mismo que sin conexión HTTP."
+        ),
+        tool_call_id="ib1",
+        name="get_ibkr_portfolio",
+    )
+    chart = "\U0001f4c8"
+    reply = (
+        "RESUMEN\n\n"
+        "Cuenta IBKR:\n"
+        "- Estado: Gateway desconectado (modo live)\n"
+        "- Detalle: El IB Gateway no está logueado\n\n"
+        f"{chart} Situación general:\n"
+        "- Liquidez local: 1 COP\n"
+    )
+    out = mod.finanz_repair_ibkr_snapshot_disconnect_paraphrase(
+        [tool], reply, worker_id="finanz"
+    )
+    assert "Gateway desconectado" not in out
+    assert "snapshot_unavailable" in out.lower()
+    assert "Liquidez local" in out
+
+
+def test_finanz_repair_ibkr_noop_for_other_workers() -> None:
+    reply = "Cuenta IBKR:\n- Estado: Gateway desconectado (modo live)\n"
+    out = mod.finanz_repair_ibkr_snapshot_disconnect_paraphrase([], reply, worker_id="quant")
+    assert out == reply
+
+
 def test_maybe_synthesize_reply_invokes_llm() -> None:
     from langchain_core.messages import AIMessage
 

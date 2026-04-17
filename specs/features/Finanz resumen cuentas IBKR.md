@@ -36,6 +36,18 @@ Texto operativo: mismas viñetas en `system_prompt.md` (sección gastos/cuentas 
 
 Cuando `read_sql` sobre `finance_worker.deudas` devuelve JSON de filas y el worker es **finanz**, `packages/agents/src/duckclaw/workers/read_pool.py` puede envolver la salida en `{ "deudas_filas": [...], "_totales_resumen_cop": { ... } }` si detecta fila agregada TC Bancolombia / Mac Mini con cuotas mensuales duplicadas. El modelo debe usar `total_recomendado_resumen_cop` como total único en COP (ver `system_prompt.md`).
 
+## Modo paper/live y reintento automático
+
+`packages/agents/src/duckclaw/forge/skills/ibkr_bridge.py` envía `X-Duckclaw-IBKR-Account-Mode` según `IBKR_ACCOUNT_MODE` (por defecto `paper` si el env no está definido). Si la API devuelve `snapshot_unavailable` en ese modo (típico cuando el IB Gateway está solo en **live** y DuckClaw pidió **paper**), el bridge **reintenta una vez** el otro modo (paper o live, el opuesto al configurado) cuando `IBKR_ACCOUNT_MODE_ALT_FALLBACK` no está en `0`/`false`. El preámbulo del tool indica el modo **efectivo** del snapshot y sugiere alinear el env (`IBKR_ACCOUNT_MODE=live`) para evitar el reintento.
+
+Si `IBKR_ACCOUNT_MODE=live` y la API sigue devolviendo `snapshot_unavailable` tras el reintento, el fallo está en el **servicio** que expone `IBKR_PORTFOLIO_API_URL` (p. ej. lectura TWS/API en Capadonna), no en el `.env` del gateway DuckClaw. La respuesta del asistente no debe confundir eso con «gateway desconectado» (error HTTP); ver `system_prompt.md` y el texto de `_extract_portfolio_context` en `ibkr_bridge.py`. En egress Telegram, `finanz_repair_ibkr_snapshot_disconnect_paraphrase` fuerza coherencia si el modelo ignora la tool (ver `worker-telegram-natural-language-egress.md`).
+
+En Capadonna, `snapshot_unavailable` en el JSON de portfolio suele indicar que `get_account_snapshot()` devolvió vacío en el servicio (p. ej. `observability_api`); ver `scripts/deprecated/patch_vps_portfolio_single_snapshot.py` como referencia del contrato en VPS.
+
+### Servicio VPS `observability_api` (puerto típico 8002)
+
+El unit systemd `capadonna-observability` suele fijar `IB_ENV=paper` para procesos locales. Eso **no** debe anular el modo que pide DuckClaw: en el servidor, `GET /api/portfolio/summary` y `GET /api/positions` deben leer la cabecera **`X-Duckclaw-IBKR-Account-Mode`** (`paper` | `live`), elegir el puerto de IB Gateway correspondiente (**4002** paper, **4001** live) y, si el snapshot viene vacío, **reintentar una vez** el modo opuesto (misma idea que `IBKR_ACCOUNT_MODE_ALT_FALLBACK` en el bridge). Opcional: `IBKR_SNAPSHOT_CLIENT_ID` para el `clientId` de la API IB (default `999`).
+
 ## Fuera de alcance
 
 - No se añaden nuevas herramientas IBKR distintas de `get_ibkr_portfolio`.

@@ -48,3 +48,7 @@ Los autores de templates **no** deben añadir pasos manuales: el default del man
 ## Validadores posteriores (Finanz y otros)
 
 Tras la síntesis, los validadores existentes (p. ej. auditoría quant/visual en Finanz, Job-Hunter) operan sobre el **texto ya parafraseado**, cuando el flujo los ejecuta.
+
+## Corrección determinista Finanz + IBKR (`snapshot_unavailable`)
+
+Si el último `ToolMessage` de `get_ibkr_portfolio` incluye `snapshot_unavailable` y el borrador de respuesta contiene frases engañosas del tipo «gateway desconectado» / «no logueado» / «necesitas conectar el IB Gateway», **`finanz_repair_ibkr_snapshot_disconnect_paraphrase`** (`user_reply_nl_synthesis.py`) sustituye la sección que empieza en `Cuenta IBKR:` por el texto devuelto por la herramienta. Se invoca desde `set_reply` en `factory.py` **después** de `maybe_synthesize_reply` (y en la ruta de tools embebidas). Objetivo: el Telegram no contradiga el diagnóstico real (API HTTP OK sin snapshot en el servicio portfolio del VPS).

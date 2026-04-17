@@ -1513,6 +1513,15 @@ def build_worker_graph(
         except Exception:
             pass
 
+    if getattr(spec, "openweather_config", None) is not None:
+        try:
+            from duckclaw.forge.skills.openweather_bridge import register_openweather_skill
+
+            register_openweather_skill(tools, spec.openweather_config, getattr(spec, "research_config", None))
+            tools_by_name = {t.name: t for t in tools}
+        except Exception:
+            pass
+
     if getattr(spec, "tailscale_config", None):
         try:
             from duckclaw.forge.skills.tailscale_bridge import register_tailscale_skill
@@ -2927,6 +2936,7 @@ def build_worker_graph(
         from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
         from duckclaw.utils import format_tool_reply
         from duckclaw.forge.atoms.user_reply_nl_synthesis import (
+            finanz_repair_ibkr_snapshot_disconnect_paraphrase,
             incoming_has_context_summarize_directive,
             maybe_synthesize_reply,
             repair_summarize_new_context_egress,
@@ -2991,6 +3001,13 @@ def build_worker_graph(
         def _apply_nl_synthesis(candidate: str) -> str:
             return maybe_synthesize_reply(llm, spec=spec, user_ask=_nl_user_ask(), reply_candidate=candidate)
 
+        def _repair_finanz_ibkr_egress(candidate: str) -> str:
+            return finanz_repair_ibkr_snapshot_disconnect_paraphrase(
+                msgs,
+                candidate,
+                worker_id=str(getattr(spec, "worker_id", "") or ""),
+            )
+
         if not msgs:
             out_empty = {**state, "reply": "Sin respuesta generada."}
             out_empty.update(_identity_fields(state))
@@ -3029,7 +3046,9 @@ def build_worker_graph(
                     _parts.append(f"### {name}\n{format_tool_reply(result)}")
                 _combined = "\n\n".join(_parts)
                 _notify_final_heartbeat()
-                _formatted = sanitize_worker_reply_text(_apply_nl_synthesis(_combined))
+                _formatted = sanitize_worker_reply_text(
+                    _repair_finanz_ibkr_egress(_apply_nl_synthesis(_combined))
+                )
                 out_tool = {**state, "reply": _formatted, "internal_reply": _formatted, "messages": msgs}
                 out_tool.update(_identity_fields(state))
                 return out_tool
@@ -3051,7 +3070,7 @@ def build_worker_graph(
                 out_err = {**state, "reply": _ee, "messages": msgs}
                 out_err.update(_identity_fields(state))
                 return out_err
-        reply = _apply_nl_synthesis(reply or "")
+        reply = _repair_finanz_ibkr_egress(_apply_nl_synthesis(reply or ""))
         _rescind_incoming = state_evidence_for_context_summary_rescind(state)
         reply = rescind_trivial_context_summary_reply(
             llm, spec, incoming=_rescind_incoming, reply_candidate=reply or ""

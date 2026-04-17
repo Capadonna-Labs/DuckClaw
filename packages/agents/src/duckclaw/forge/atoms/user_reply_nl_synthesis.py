@@ -815,13 +815,21 @@ def synthesize_user_visible_reply(
         "- Si la evidencia es un error técnico, explícalo en lenguaje simple sin volver a pegar el JSON crudo entero."
         f"{_reddit_listing_rules}"
     )
-    _finanz_extra = (
-        "\n- Worker Finanz: si la evidencia incluye varias cuentas locales con `balance` y `currency` (p. ej. JSON de "
-        "`read_sql` sobre cuentas), incluye **líneas de subtotal por cada moneda** presente, sumando solo balances de "
-        "la evidencia. Si también hay bloque IBKR, conserva totales del broker en su divisa; **no** unifiques COP y USD "
-        "en un solo total sin tipo de cambio en la evidencia."
-    )
-    _sys_text = _base_rules + (_finanz_extra if (worker_id or "").strip().lower() == "finanz" else "")
+    _finanz_extra = ""
+    if (worker_id or "").strip().lower() == "finanz":
+        _finanz_extra = (
+            "\n- Worker Finanz: si la evidencia incluye varias cuentas locales con `balance` y `currency` (p. ej. JSON de "
+            "`read_sql` sobre cuentas), incluye **líneas de subtotal por cada moneda** presente, sumando solo balances de "
+            "la evidencia. Si también hay bloque IBKR, conserva totales del broker en su divisa; **no** unifiques COP y USD "
+            "en un solo total sin tipo de cambio en la evidencia."
+        )
+        if "snapshot_unavailable" in (raw_evidence or "").lower():
+            _finanz_extra += (
+                "\n- IBKR CRÍTICO: si la evidencia menciona `snapshot_unavailable`, **prohibido** escribir «gateway desconectado», "
+                "«no logueado» o «conectar IB Gateway» como síntesis; parafrasea el diagnóstico de la tool: la API respondió, "
+                "el snapshot no estuvo disponible, revisar el servicio portfolio en el VPS (IB_ENV, clientId, logs)."
+            )
+    _sys_text = _base_rules + _finanz_extra
     sys = SystemMessage(content=_sys_text)
     ev = _truncate_evidence(raw_evidence or "", ev_limit)
     human = HumanMessage(
@@ -900,3 +908,64 @@ def maybe_synthesize_reply(
         if det:
             return det
     return syn_st if syn_st else reply_candidate
+
+
+_IBKR_MISLEADING_GATEWAY_PHRASES = (
+    "gateway desconectado",
+    "no está logueado",
+    "no esta logueado",
+    "necesitas conectar el ib gateway",
+    "necesitas conectar",
+    "ib gateway no está",
+    "ib gateway no esta",
+)
+
+
+def finanz_repair_ibkr_snapshot_disconnect_paraphrase(
+    messages: list[Any],
+    reply: str,
+    *,
+    worker_id: str,
+) -> str:
+    """
+    Corrige egress cuando el LLM ignora ``get_ibkr_portfolio`` con ``snapshot_unavailable`` y
+    inventa «gateway desconectado». Sustituye la sección ``Cuenta IBKR:`` por el texto de la tool.
+    """
+    if (worker_id or "").strip().lower() != "finanz":
+        return reply or ""
+    r = (reply or "").strip()
+    if not r:
+        return reply or ""
+    try:
+        from langchain_core.messages import ToolMessage
+    except ImportError:
+        return reply or ""
+
+    from duckclaw.integrations.llm_providers import lc_message_content_to_text
+
+    tool_body = ""
+    for m in reversed(messages or []):
+        if isinstance(m, ToolMessage) and (getattr(m, "name", None) or "") == "get_ibkr_portfolio":
+            tool_body = lc_message_content_to_text(m)
+            break
+    if not tool_body.strip() or "snapshot_unavailable" not in tool_body.lower():
+        return reply or ""
+    rlow = r.lower()
+    if not any(p in rlow for p in _IBKR_MISLEADING_GATEWAY_PHRASES):
+        return reply or ""
+    ibkr_user = tool_body.strip()
+    if len(ibkr_user) > 1400:
+        ibkr_user = ibkr_user[:1397].rstrip() + "…"
+    replacement = (
+        "Cuenta IBKR (diagnóstico de herramienta; no es caída HTTP: el servicio portfolio no entregó snapshot):\n"
+        + ibkr_user
+    )
+    _chart_emoji = "\U0001f4c8"
+    pat = re.compile(
+        rf"(?ms)^Cuenta IBKR:\s*\n.*?(?=^\s*{_chart_emoji}|^\s*Situación general\s*:|^\s*\*\*Situación|\Z)",
+    )
+    m = pat.search(r)
+    if m:
+        start, end = m.span()
+        return (r[:start] + replacement + "\n\n" + r[end:]).strip()
+    return (r + "\n\n" + replacement).strip()

@@ -9,7 +9,7 @@ import os
 
 # Claves de skills compuestas en manifest (no usar `name` + estas a la vez en el mismo dict).
 _SKILL_DICT_RESERVED_KEYS = frozenset(
-    {"github", "reddit", "google_trends", "research", "tailscale", "sft", "ibkr", "quant"}
+    {"github", "reddit", "google_trends", "research", "tailscale", "sft", "ibkr", "quant", "openweather"}
 )
 
 
@@ -94,6 +94,7 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
     tailscale_config = None
     sft_config = None
     ibkr_config = None
+    openweather_config = None
     for s in skills_list:
         if isinstance(s, dict):
             if "github" in s and github_config is None:
@@ -110,6 +111,8 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
                 sft_config = s["sft"] if isinstance(s.get("sft"), dict) else {}
             if "ibkr" in s and ibkr_config is None:
                 ibkr_config = s["ibkr"] if isinstance(s.get("ibkr"), dict) else {}
+            if "openweather" in s and openweather_config is None:
+                openweather_config = s["openweather"] if isinstance(s.get("openweather"), dict) else {}
     if github_config is None and isinstance(data.get("github"), dict):
         github_config = data["github"]
     if reddit_config is None and isinstance(data.get("reddit"), dict):
@@ -124,6 +127,8 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         sft_config = data["sft"]
     if ibkr_config is None and isinstance(data.get("ibkr"), dict):
         ibkr_config = data["ibkr"]
+    if openweather_config is None and isinstance(data.get("openweather"), dict):
+        openweather_config = data["openweather"]
     quant_config = None
     for s in skills_list:
         if isinstance(s, dict) and "quant" in s and quant_config is None:
@@ -234,6 +239,7 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         tailscale_config=tailscale_config,
         sft_config=sft_config,
         ibkr_config=ibkr_config,
+        openweather_config=openweather_config,
         quant_config=quant_config,
         risk_level=risk_level,
         inference_config=inference_config,
@@ -305,7 +311,7 @@ class WorkerSpec:
         "worker_id", "logical_worker_id", "name", "schema_name", "llm_required", "temperature",
         "topology", "skills_list", "allowed_tables", "read_only", "worker_dir",
         "github_config", "reddit_config", "google_trends_config", "research_config", "tailscale_config", "sft_config",
-        "ibkr_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config", "crm_config",
+        "ibkr_config", "openweather_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config", "crm_config",
         "forge_shared_db_path_env", "forge_apply_schema_to_shared",
         "context_pruning_config",
         "duckdb_extensions",
@@ -337,6 +343,7 @@ class WorkerSpec:
         tailscale_config: Optional[dict] = None,
         sft_config: Optional[dict] = None,
         ibkr_config: Optional[dict] = None,
+        openweather_config: Optional[dict] = None,
         quant_config: Optional[dict] = None,
         risk_level: str = "conservative",
         inference_config: Optional[dict] = None,
@@ -372,6 +379,7 @@ class WorkerSpec:
         self.tailscale_config = tailscale_config
         self.sft_config = sft_config
         self.ibkr_config = ibkr_config
+        self.openweather_config = openweather_config
         self.quant_config = quant_config
         self.risk_level = risk_level if risk_level in ("aggressive", "conservative") else "conservative"
         self.inference_config = inference_config

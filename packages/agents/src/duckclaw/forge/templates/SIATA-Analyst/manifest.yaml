@@ -32,6 +32,11 @@ skills:
       include_answer: true
       max_results: 10
       include_raw_content: false
+  - openweather:
+      enabled: true
+      default_units: metric
+      default_lang: es
+      include_tavily_context: true
 context_guard:
   enabled: true
   max_retries: 2

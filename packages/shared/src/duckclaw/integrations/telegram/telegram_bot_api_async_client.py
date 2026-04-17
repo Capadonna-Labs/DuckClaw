@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -23,6 +26,8 @@ class TelegramBotApiAsyncClient:
         token = (bot_token or "").strip()
         if not token:
             raise ValueError("TelegramBotApiAsyncClient requiere bot_token no vacío.")
+        self._bot_id = token.split(":", 1)[0]
+        self._token_fp = hashlib.sha1(token.encode("utf-8")).hexdigest()[:10]
         self._api_url = f"https://api.telegram.org/bot{token}"
 
     async def send_message(
@@ -34,6 +39,35 @@ class TelegramBotApiAsyncClient:
         disable_web_page_preview: bool | None = True,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+        # region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "pre-fix",
+                            "hypothesisId": "H12_async_client_token",
+                            "location": "packages/shared/src/duckclaw/integrations/telegram/telegram_bot_api_async_client.py:send_message",
+                            "message": "about_to_send",
+                            "data": {
+                                "chat_id": str(chat_id),
+                                "bot_id": str(self._bot_id),
+                                "token_fp": str(self._token_fp),
+                                "text_len": len(str(text or "")),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
         if parse_mode:
             payload["parse_mode"] = parse_mode
         if disable_web_page_preview is not None:

@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -64,6 +66,38 @@ def send_bot_message_sync(
         )
         return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
+    # region agent log
+    try:
+        _bot_id = token.split(":", 1)[0]
+        _fp = hashlib.sha1(token.encode("utf-8")).hexdigest()[:10]
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H13_sync_client_token",
+                        "location": "packages/shared/src/duckclaw/integrations/telegram/telegram_outbound_sync.py:send_bot_message_sync",
+                        "message": "about_to_send",
+                        "data": {
+                            "chat_id": str(cid),
+                            "bot_id": str(_bot_id),
+                            "token_fp": str(_fp),
+                            "parse_mode": str(parse_mode or "none"),
+                            "text_len": len(body),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     payload: dict[str, Any] = {
         "chat_id": cid,
         "text": body,

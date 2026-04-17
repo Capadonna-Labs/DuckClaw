@@ -1,0 +1,29 @@
+name: CobranzasWorker
+id: cobranzas
+schema_name: cobranzas_worker
+topology: general
+read_only: false
+risk_level: conservative
+network_access: false
+
+version: 1.0.0
+type: sovereign_worker
+metadata:
+  domain: cobranzas
+  description: >
+    Worker inicial para gestion de cobranzas, acuerdos de pago y
+    trazabilidad de contacto con enfoque profesional y verificable.
+
+cognition:
+  soul: ./soul.md
+  system_prompt: ./system_prompt.md
+  domain_closure: ./domain_closure.md
+
+llm:
+  required: true
+  temperature: 0.2
+
+allowed_tables:
+  - debts
+  - payments
+  - collection_events

@@ -9,6 +9,7 @@ Endpoints: /api/v1/agent/chat, /api/v1/db/write, homeostasis, system health.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -1036,6 +1037,37 @@ def _outbound_deliver_chat_text_sync(
         token = _telegram_token_from_compact_routes_for_worker((worker_id or "").strip())
     if not token:
         token = _effective_telegram_bot_token()
+    # region agent log
+    try:
+        _fp = hashlib.sha1(token.encode("utf-8")).hexdigest()[:10] if token else ""
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H9_outbound_token_resolution",
+                        "location": "services/api-gateway/main.py:_outbound_deliver_chat_text_sync",
+                        "message": "resolved_outbound_token",
+                        "data": {
+                            "chat_id": str(cid),
+                            "worker_id": str(worker_id or ""),
+                            "token_fp": _fp,
+                            "had_explicit_token": bool((outbound_telegram_bot_token or "").strip()),
+                            "had_worker_token": bool(worker_token),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     if token:
         try:
             from duckclaw.integrations.telegram.telegram_outbound_sync import (
@@ -1086,9 +1118,11 @@ async def _authorize_or_reject(
     Also increments unauthorized attempts and triggers admin alert after 3 attempts.
 
     telegram_guard_acl_db_path:
-        Si el webhook forzó una bóveda distinta (p. ej. ruta legado ``/webhook/finanz`` con
-        ``DUCKCLAW_FINANZ_DB_PATH``), la whitelist ``main.authorized_users`` se lee de esa DuckDB.
-        Con un gateway aislado por bot, suele ser ``None`` y se usa la bóveda del proceso (multiplex / ``get_gateway_db_path``).
+        Bóveda forzada por multiplex Telegram (p. ej. Quant → ``DUCKCLAW_QUANT_TRADER_DB_PATH``).
+        Se usa en otras comprobaciones del request (p. ej. grants / vault); la whitelist
+        ``main.authorized_users`` del Telegram Guard **siempre** se lee del hub
+        ``get_gateway_db_path()`` (mismo archivo que comandos fly ``/team``) para no desalinear
+        altas con rutas por bot.
     """
     # Check 1 (Bypass): owner bypass no DB/Redis access.
     if is_owner:
@@ -1096,13 +1130,42 @@ async def _authorize_or_reject(
         return
 
     redis_client = getattr(app.state, "redis", None)
-    from core.gateway_acl_db import ReadOnlyGatewayAclDb, get_gateway_acl_duckdb, get_war_room_acl_duckdb
+    from core.gateway_acl_db import get_gateway_acl_duckdb, get_war_room_acl_duckdb
 
-    _guard_acl = (telegram_guard_acl_db_path or "").strip()
-    if _guard_acl:
-        db: Any = ReadOnlyGatewayAclDb(str(Path(_guard_acl).expanduser().resolve()))
-    else:
-        db = get_gateway_acl_duckdb()[0]
+    db = get_gateway_acl_duckdb()[0]
+    # #region agent log
+    try:
+        _forced_acl = (telegram_guard_acl_db_path or "").strip()
+        _hub_p = str(getattr(db, "_path", "") or "")
+        _forced_r = str(Path(_forced_acl).expanduser().resolve()) if _forced_acl else ""
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "post-fix",
+                        "hypothesisId": "H14_whitelist_always_hub",
+                        "location": "services/api-gateway/main.py:_authorize_or_reject",
+                        "message": "whitelist_lookup_db",
+                        "data": {
+                            "hub_db_tail": _hub_p[-48:] if _hub_p else "",
+                            "forced_vault_tail": _forced_r[-48:] if _forced_r else "",
+                            "paths_differ": bool(_forced_r and _hub_p and _forced_r != _hub_p),
+                            "tenant_id": str(tenant_id or ""),
+                            "user_id": str(user_id or ""),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     if is_war_room_tenant(tenant_id):
         wr_db = get_war_room_acl_duckdb()
         # Bootstrap WR: mientras no haya miembros registrados, no bloquear al primer operador.

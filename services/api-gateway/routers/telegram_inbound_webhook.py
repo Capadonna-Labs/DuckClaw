@@ -16,6 +16,7 @@ Rutas ``/webhook/finanz`` y ``/webhook/trabajo``: legado para un solo ingress co
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -1587,6 +1588,37 @@ def build_telegram_inbound_webhook_router(
             if not token_r:
                 _log.warning("telegram webhook: hay respuesta pero falta TELEGRAM_BOT_TOKEN")
                 return
+            # region agent log
+            try:
+                _fp = hashlib.sha1(token_r.encode("utf-8")).hexdigest()[:10] if token_r else ""
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "pre-fix",
+                                "hypothesisId": "H10_webhook_reply_token",
+                                "location": "services/api-gateway/routers/telegram_inbound_webhook.py:_invoke_and_reply",
+                                "message": "reply_token_selected",
+                                "data": {
+                                    "chat_id": str(chat_id),
+                                    "worker_id": str(worker_id),
+                                    "tenant_id": str(tenant_id),
+                                    "token_fp": _fp,
+                                    "path_mux": bool(path_mux),
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            }
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
 
             client_r = TelegramBotApiAsyncClient(token_r)
             tail_plain = (res.get("telegram_multipart_tail_plain") or "").strip() if isinstance(res, dict) else ""

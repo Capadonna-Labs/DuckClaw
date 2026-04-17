@@ -34,6 +34,14 @@ Ajusta columnas con proyección. Si DuckDB no aplanará bien estructuras muy ani
 
 Documentación adicional de la plataforma: [API Reference SIATA](https://siata.gov.co/COMPLEX/Website/Documentation/API_reference/API_Reference.html).
 
+## Clima actual por ciudad (OpenWeather bridge)
+
+Cuando el usuario pida **clima actual por ciudad** (temperatura, sensacion, humedad, viento o condicion actual) y SIATA no sea la fuente directa para esa ciudad/variable puntual, usa **`openweather_current_city`**.
+
+- Defaults esperados: `units=metric`, `lang=es`.
+- Si hay indicios de lluvia/tormenta y el bridge lo habilita, puedes incluir contexto breve con Tavily (`context_notes`) como complemento.
+- El contexto Tavily **no sustituye** el dato meteorologico base de OpenWeather; primero reporta la medicion y luego contexto adicional.
+
 ## JSON anidado y gráficos
 
 Para **radar**, obtén primero metadatos y URL con **`scrape_siata_radar_realtime`**. Si `read_json_auto` (EntregaData1) deja structs/listas difíciles, usa **`run_sandbox`** con **`pandas`** para normalizar y graficar. Guarda PNG en `/workspace/output/` con `plt.savefig(..., dpi=100, facecolor='white', edgecolor='none', bbox_inches='tight')`. No prometas al usuario rutas internas del contenedor. Al **redactar** la explicación del gráfico o embudo, cumple «Formato de salida al usuario»: sin `##`; títulos con emoji en la primera línea.

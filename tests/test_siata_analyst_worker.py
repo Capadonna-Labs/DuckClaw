@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, Mock, patch
 import requests
 
 from duckclaw import DuckClaw
-from duckclaw.workers.factory import _build_worker_tools, _truncate_read_sql_result_for_llm
+from duckclaw.workers.factory import (
+    _build_worker_tools,
+    _truncate_read_sql_result_for_llm,
+    build_worker_graph,
+)
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt
 from duckclaw.workers.manifest import load_manifest
 
@@ -22,6 +26,8 @@ def test_siata_analyst_manifest_extensions_and_network() -> None:
     assert spec.network_access is True
     assert spec.allowed_tables == []
     assert "scrape_siata_radar_realtime" in (spec.skills_list or [])
+    assert getattr(spec, "openweather_config", None) is not None
+    assert (spec.openweather_config or {}).get("enabled") is True
 
 
 def test_siata_analyst_prompts_contain_siata_and_read_sql() -> None:
@@ -47,6 +53,28 @@ def test_scrape_siata_radar_skill_registered(tmp_path: Path) -> None:
     tools = _build_worker_tools(db, spec)
     names = {t.name for t in tools}
     assert "scrape_siata_radar_realtime" in names
+
+
+def test_siata_openweather_bridge_registration_called(tmp_path: Path) -> None:
+    db_path = str(tmp_path / "siata_openweather_bridge.duckdb")
+    db = DuckClaw(db_path)
+
+    class _StubLLM:
+        def bind_tools(self, tools: list, **_kwargs):
+            return self
+
+        def invoke(self, *_args, **_kwargs):
+            return type("R", (), {"content": "ok"})()
+
+    with patch("duckclaw.forge.skills.openweather_bridge.register_openweather_skill") as m_ow:
+        build_worker_graph(
+            "SIATA-Analyst",
+            db_path,
+            _StubLLM(),
+            reuse_db=db,
+            tool_surface="full",
+        )
+        m_ow.assert_called_once()
 
 
 def _ok_response(text: str) -> MagicMock:

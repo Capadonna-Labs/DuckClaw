@@ -51,6 +51,7 @@ duckclaw/
 - **API Gateway**: FastAPI front door (`services/api-gateway`); agent chat, DB write enqueue, Telegram webhook, VLM image ingest, health.
 - **duckops**: Python CLI (`uv run duckops …`) for wizard-driven setup and local service control.
 - **Training traces (optional)**: successful chat turns can be written to JSONL under `packages/agents/train/conversation_traces/` for SFT datasets (`DUCKCLAW_SAVE_CONVERSATION_TRACES`, etc.). Site docs: [`docs/agents/sft_conversation_traces.md`](docs/agents/sft_conversation_traces.md) (published under **Agents → SFT & conversation traces** when you run MkDocs); repo README: [`packages/agents/train/README.md`](packages/agents/train/README.md).
+- **CRM**: https://github.com/ManePeqsiCoda/retoPWRSomegahack, https://inputs-rely-speakers-humor.trycloudflare.com/dashboard
 
 ---
 

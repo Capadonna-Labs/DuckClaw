@@ -1740,6 +1740,32 @@ def build_manager_graph(
                         "inferencia: error no transitorio en invoke del worker "
                         f"({(worker_invoke.get('_duckclaw_worker_llm_failure_kind') or 'unknown')})",
                     )
+                elif (assigned or "").strip() == "PQRSD-Assistant":
+                    try:
+                        from duckclaw.forge.atoms.pqrsd_registration_egress_guard import (
+                            pqrsd_persist_tool_used,
+                            pqrsd_reply_claims_internal_registration,
+                        )
+
+                        _pqrsd_replan = pqrsd_reply_claims_internal_registration(
+                            raw_worker_reply
+                        ) and not pqrsd_persist_tool_used(_tools_list)
+                    except Exception:
+                        _pqrsd_replan = False
+                    if _pqrsd_replan:
+                        _rp = "pqrsd: radicación afirmada sin admin_sql ni pqrsd_registrar_radicacion_crm"
+                        reasons_acc = merge_failure_reasons(reasons_acc, _rp)
+                        if pa + 1 < max_a:
+                            replan_after = True
+                            next_plan_attempt = pa + 1
+                            log_sys(
+                                _obs,
+                                "manager replan: PQRSD sin persist -> intento %s/%s",
+                                pa + 2,
+                                max_a,
+                            )
+                        else:
+                            exhausted_final = True
                 elif not _tools_list and _soft_would_match:
                     _rsoft = "inferencia: respuesta sin tools con indicios de fallo de backend"
                     reasons_acc = merge_failure_reasons(reasons_acc, _rsoft)

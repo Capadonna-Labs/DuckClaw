@@ -3920,6 +3920,21 @@ def build_worker_graph(
                 )
         except Exception:
             pass
+        try:
+            if (getattr(spec, "worker_id", "") or "").strip() == "PQRSD-Assistant" and reply:
+                from duckclaw.forge.atoms.pqrsd_registration_egress_guard import (
+                    pqrsd_guard_registration_egress,
+                )
+                from duckclaw.graphs.manager_graph import _worker_tool_names_from_messages
+
+                _tn = _worker_tool_names_from_messages(list(msgs) if msgs else None)
+                reply = pqrsd_guard_registration_egress(
+                    reply,
+                    _tn,
+                    session_id=str(state.get("session_id") or state.get("chat_id") or ""),
+                )
+        except Exception:
+            pass
         reply = sanitize_worker_reply_text(reply or "")
         if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) and msgs:
             from langchain_core.messages import ToolMessage

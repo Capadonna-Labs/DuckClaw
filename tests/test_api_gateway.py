@@ -430,3 +430,10 @@ def test_dedicated_gateway_vault_uses_matched_app_when_pm2_alias_differs(
     monkeypatch.setenv("DUCKCLAW_PM2_MATCHED_APP_NAME", "BI-Analyst-Gateway")
     monkeypatch.setenv("DUCKDB_PATH", str(dbf))
     assert gateway_main._dedicated_gateway_vault_db_path() == str(dbf.resolve())
+
+
+def test_worker_id_is_pqrsd_assistant_normalizes_ids() -> None:
+    assert gateway_main._worker_id_is_pqrsd_assistant("PQRSD-Assistant") is True
+    assert gateway_main._worker_id_is_pqrsd_assistant("pqrsd_assistant") is True
+    assert gateway_main._worker_id_is_pqrsd_assistant("finanz") is False
+    assert gateway_main._worker_id_is_pqrsd_assistant("") is False

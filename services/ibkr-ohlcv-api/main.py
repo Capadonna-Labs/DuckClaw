@@ -2,7 +2,8 @@
 OHLCV HTTP API standalone (contrato DuckClaw). En Capadonna suele montarse el router en
 observability_api.py en lugar de este proceso.
 
-Variables: ver docstring en ohlcv_market_routes.py
+Incluye GET /api/market/ohlcv, GET /api/market/ibkr/historical y POST /api/broker/execute
+(IBKR_EXECUTE_ORDER_URL). Variables: ver docstring en ohlcv_market_routes.py
 """
 
 from __future__ import annotations

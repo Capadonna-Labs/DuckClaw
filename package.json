@@ -1,0 +1,16 @@
+{
+  "name": "duckclaw-repo-root",
+  "private": true,
+  "description": "No es el paquete principal del monorepo. npm run build ejecuta el Next.js CRM; también puedes usar crm:*.",
+  "scripts": {
+    "build": "npm run crm:build",
+    "crm:dev": "npm run dev --prefix external/retoPWRSomegahack",
+    "crm:dev:public": "npm run dev --prefix external/retoPWRSomegahack -- --hostname 0.0.0.0 --port 3000",
+    "crm:origin-check": "uv run python scripts/crm_origin_check.py",
+    "crm:clean": "rm -rf external/retoPWRSomegahack/.next",
+    "crm:bootstrap-db": "uv run python scripts/bootstrap_dbs.py",
+    "crm:build": "npm run build --prefix external/retoPWRSomegahack",
+    "crm:install": "npm install --prefix external/retoPWRSomegahack",
+    "crm:lint": "npm run lint --prefix external/retoPWRSomegahack"
+  }
+}

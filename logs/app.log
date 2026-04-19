@@ -496,3 +496,1338 @@
 2026-04-15 15:11:56 | INFO | Inference worker thread stopped
 2026-04-15 15:11:57 | INFO | MLXVLMHandler cleanup completed successfully
 2026-04-15 15:11:57 | INFO | Resources cleaned up successfully
+2026-04-15 16:07:46 | INFO | Starting server on 0.0.0.0:8081
+2026-04-15 16:07:46 | INFO | Server configuration complete.
+2026-04-15 16:07:46 | INFO | Starting Uvicorn server...
+2026-04-15 16:07:46 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 16:07:51 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 16:07:51 | INFO | Inference worker thread started
+2026-04-15 16:07:51 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-15 16:07:51 | INFO | MLX handler initialized successfully
+2026-04-15 16:29:15 | INFO | Shutting down application
+2026-04-15 16:29:15 | INFO | Cleaning up resources
+2026-04-15 16:29:15 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-15 16:29:15 | INFO | Inference worker thread stopped
+2026-04-15 16:29:17 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-15 16:29:17 | INFO | Resources cleaned up successfully
+2026-04-15 16:29:25 | INFO | Starting server on 0.0.0.0:8081
+2026-04-15 16:29:25 | INFO | Server configuration complete.
+2026-04-15 16:29:25 | INFO | Starting Uvicorn server...
+2026-04-15 16:29:25 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 16:29:30 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 16:29:30 | INFO | Inference worker thread started
+2026-04-15 16:29:30 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-15 16:29:30 | INFO | MLX handler initialized successfully
+2026-04-15 16:29:52 | INFO | Resized image to 201x448 from 576x1280
+2026-04-15 16:35:47 | INFO | Shutting down application
+2026-04-15 16:35:47 | INFO | Cleaning up resources
+2026-04-15 16:35:47 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-15 16:35:47 | INFO | Inference worker thread stopped
+2026-04-15 16:35:48 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-15 16:35:48 | INFO | Resources cleaned up successfully
+2026-04-15 16:35:55 | INFO | Starting server on 0.0.0.0:8081
+2026-04-15 16:35:55 | INFO | Server configuration complete.
+2026-04-15 16:35:55 | INFO | Starting Uvicorn server...
+2026-04-15 16:35:55 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 16:36:00 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 16:36:00 | INFO | Inference worker thread started
+2026-04-15 16:36:00 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-15 16:36:00 | INFO | MLX handler initialized successfully
+2026-04-15 16:36:20 | INFO | Resized image to 201x448 from 576x1280
+2026-04-15 16:45:41 | INFO | Starting server on 0.0.0.0:8081
+2026-04-15 16:45:41 | INFO | Server configuration complete.
+2026-04-15 16:45:41 | INFO | Starting Uvicorn server...
+2026-04-15 16:45:41 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 16:45:49 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 16:45:49 | INFO | Inference worker thread started
+2026-04-15 16:45:49 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-15 16:45:49 | INFO | MLX handler initialized successfully
+2026-04-15 16:45:52 | INFO | Resized image to 201x448 from 576x1280
+2026-04-15 17:00:40 | INFO | Shutting down application
+2026-04-15 17:00:40 | INFO | Cleaning up resources
+2026-04-15 17:00:40 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-15 17:00:40 | INFO | Inference worker thread stopped
+2026-04-15 17:00:41 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-15 17:00:41 | INFO | Resources cleaned up successfully
+2026-04-15 17:00:48 | INFO | Starting server on 0.0.0.0:8081
+2026-04-15 17:00:48 | INFO | Server configuration complete.
+2026-04-15 17:00:48 | INFO | Starting Uvicorn server...
+2026-04-15 17:00:48 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 17:00:53 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 17:00:53 | INFO | Inference worker thread started
+2026-04-15 17:00:53 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-15 17:00:53 | INFO | MLX handler initialized successfully
+2026-04-15 17:01:52 | INFO | Resized image to 201x448 from 576x1280
+2026-04-15 17:06:10 | INFO | Shutting down application
+2026-04-15 17:06:10 | INFO | Cleaning up resources
+2026-04-15 17:06:10 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-15 17:06:10 | INFO | Inference worker thread stopped
+2026-04-15 17:06:11 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-15 17:06:11 | INFO | Resources cleaned up successfully
+2026-04-15 17:06:18 | INFO | Starting server on 0.0.0.0:8081
+2026-04-15 17:06:18 | INFO | Server configuration complete.
+2026-04-15 17:06:18 | INFO | Starting Uvicorn server...
+2026-04-15 17:06:18 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 17:06:23 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 17:06:23 | INFO | Inference worker thread started
+2026-04-15 17:06:23 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-15 17:06:23 | INFO | MLX handler initialized successfully
+2026-04-15 17:06:53 | INFO | Resized image to 305x448 from 873x1280
+2026-04-15 17:10:04 | INFO | Shutting down application
+2026-04-15 17:10:04 | INFO | Cleaning up resources
+2026-04-15 17:10:04 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-15 17:10:04 | INFO | Inference worker thread stopped
+2026-04-15 17:10:05 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-15 17:10:05 | INFO | Resources cleaned up successfully
+2026-04-15 17:10:12 | INFO | Starting server on 0.0.0.0:8081
+2026-04-15 17:10:12 | INFO | Server configuration complete.
+2026-04-15 17:10:12 | INFO | Starting Uvicorn server...
+2026-04-15 17:10:12 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 17:10:17 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-15 17:10:17 | INFO | Inference worker thread started
+2026-04-15 17:10:17 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-15 17:10:17 | INFO | MLX handler initialized successfully
+2026-04-15 17:10:45 | INFO | Resized image to 305x448 from 873x1280
+2026-04-16 08:11:36 | INFO | Starting server on 0.0.0.0:8081
+2026-04-16 08:11:36 | INFO | Server configuration complete.
+2026-04-16 08:11:36 | INFO | Starting Uvicorn server...
+2026-04-16 08:11:36 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 08:11:42 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 08:11:42 | INFO | Inference worker thread started
+2026-04-16 08:11:42 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-16 08:11:42 | INFO | MLX handler initialized successfully
+2026-04-16 08:12:38 | INFO | Resized image to 201x448 from 576x1280
+2026-04-16 08:21:40 | INFO | Resized image to 201x448 from 576x1280
+2026-04-16 08:21:50 | INFO | Starting server on 0.0.0.0:8081
+2026-04-16 08:21:50 | INFO | Server configuration complete.
+2026-04-16 08:21:50 | INFO | Starting Uvicorn server...
+2026-04-16 08:21:50 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 08:21:54 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 08:21:54 | INFO | Inference worker thread started
+2026-04-16 08:21:54 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-16 08:21:54 | INFO | MLX handler initialized successfully
+2026-04-16 13:24:24 | INFO | Resized image to 201x448 from 576x1280
+2026-04-16 14:14:51 | INFO | Starting server on 0.0.0.0:8081
+2026-04-16 14:14:51 | INFO | Server configuration complete.
+2026-04-16 14:14:51 | INFO | Starting Uvicorn server...
+2026-04-16 14:14:51 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 14:14:57 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 14:14:57 | INFO | Inference worker thread started
+2026-04-16 14:14:57 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-16 14:14:57 | INFO | MLX handler initialized successfully
+2026-04-16 14:27:26 | INFO | Resized image to 201x448 from 576x1280
+2026-04-16 16:40:59 | INFO | Shutting down application
+2026-04-16 16:40:59 | INFO | Cleaning up resources
+2026-04-16 16:40:59 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-16 16:40:59 | INFO | Inference worker thread stopped
+2026-04-16 16:41:00 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-16 16:41:00 | INFO | Resources cleaned up successfully
+2026-04-16 16:41:08 | INFO | Starting server on 0.0.0.0:8081
+2026-04-16 16:41:08 | INFO | Server configuration complete.
+2026-04-16 16:41:08 | INFO | Starting Uvicorn server...
+2026-04-16 16:41:08 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 16:41:14 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 16:41:14 | INFO | Inference worker thread started
+2026-04-16 16:41:14 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-16 16:41:14 | INFO | MLX handler initialized successfully
+2026-04-16 16:51:20 | INFO | Shutting down application
+2026-04-16 16:51:20 | INFO | Cleaning up resources
+2026-04-16 16:51:20 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-16 16:51:21 | INFO | Inference worker thread stopped
+2026-04-16 16:51:21 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-16 16:51:21 | INFO | Resources cleaned up successfully
+2026-04-16 16:51:30 | INFO | Starting server on 0.0.0.0:8081
+2026-04-16 16:51:30 | INFO | Server configuration complete.
+2026-04-16 16:51:30 | INFO | Starting Uvicorn server...
+2026-04-16 16:51:30 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 16:51:35 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 16:51:35 | INFO | Inference worker thread started
+2026-04-16 16:51:35 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-16 16:51:35 | INFO | MLX handler initialized successfully
+2026-04-16 17:08:55 | INFO | Shutting down application
+2026-04-16 17:08:55 | INFO | Cleaning up resources
+2026-04-16 17:08:55 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-16 17:08:55 | INFO | Inference worker thread stopped
+2026-04-16 17:08:56 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-16 17:08:56 | INFO | Resources cleaned up successfully
+2026-04-16 17:09:04 | INFO | Starting server on 0.0.0.0:8081
+2026-04-16 17:09:04 | INFO | Server configuration complete.
+2026-04-16 17:09:04 | INFO | Starting Uvicorn server...
+2026-04-16 17:09:04 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 17:09:09 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 17:09:09 | INFO | Inference worker thread started
+2026-04-16 17:09:09 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-16 17:09:09 | INFO | MLX handler initialized successfully
+2026-04-16 18:51:24 | INFO | Resized image to 201x448 from 576x1280
+2026-04-16 18:51:41 | INFO | Starting server on 0.0.0.0:8081
+2026-04-16 18:51:41 | INFO | Server configuration complete.
+2026-04-16 18:51:41 | INFO | Starting Uvicorn server...
+2026-04-16 18:51:41 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 18:51:46 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 18:51:46 | INFO | Inference worker thread started
+2026-04-16 18:51:46 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-16 18:51:46 | INFO | MLX handler initialized successfully
+2026-04-16 18:55:51 | INFO | Resized image to 288x448 from 823x1280
+2026-04-16 18:55:58 | INFO | Starting server on 0.0.0.0:8081
+2026-04-16 18:55:58 | INFO | Server configuration complete.
+2026-04-16 18:55:58 | INFO | Starting Uvicorn server...
+2026-04-16 18:55:58 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 18:56:02 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 18:56:02 | INFO | Inference worker thread started
+2026-04-16 18:56:02 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-16 18:56:02 | INFO | MLX handler initialized successfully
+2026-04-16 18:59:08 | INFO | Resized image to 201x448 from 576x1280
+2026-04-16 18:59:17 | INFO | Starting server on 0.0.0.0:8081
+2026-04-16 18:59:17 | INFO | Server configuration complete.
+2026-04-16 18:59:17 | INFO | Starting Uvicorn server...
+2026-04-16 18:59:17 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 18:59:21 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-16 18:59:21 | INFO | Inference worker thread started
+2026-04-16 18:59:21 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-16 18:59:21 | INFO | MLX handler initialized successfully
+2026-04-17 05:11:27 | INFO | Resized image to 201x448 from 576x1280
+2026-04-17 05:11:43 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 05:11:43 | INFO | Server configuration complete.
+2026-04-17 05:11:43 | INFO | Starting Uvicorn server...
+2026-04-17 05:11:43 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 05:11:47 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 05:11:47 | INFO | Inference worker thread started
+2026-04-17 05:11:47 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 05:11:47 | INFO | MLX handler initialized successfully
+2026-04-17 07:47:29 | INFO | Resized image to 252x448 from 720x1280
+2026-04-17 07:47:38 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 07:47:38 | INFO | Server configuration complete.
+2026-04-17 07:47:38 | INFO | Starting Uvicorn server...
+2026-04-17 07:47:38 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 07:47:43 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 07:47:43 | INFO | Inference worker thread started
+2026-04-17 07:47:43 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 07:47:43 | INFO | MLX handler initialized successfully
+2026-04-17 10:36:03 | INFO | Shutting down application
+2026-04-17 10:36:03 | INFO | Cleaning up resources
+2026-04-17 10:36:03 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 10:36:03 | INFO | Inference worker thread stopped
+2026-04-17 10:36:04 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 10:36:04 | INFO | Resources cleaned up successfully
+2026-04-17 10:36:13 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 10:36:13 | INFO | Server configuration complete.
+2026-04-17 10:36:13 | INFO | Starting Uvicorn server...
+2026-04-17 10:36:13 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 10:36:21 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 10:36:21 | INFO | Inference worker thread started
+2026-04-17 10:36:21 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 10:36:21 | INFO | MLX handler initialized successfully
+2026-04-17 10:39:46 | INFO | Shutting down application
+2026-04-17 10:39:46 | INFO | Cleaning up resources
+2026-04-17 10:39:46 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 10:39:46 | INFO | Inference worker thread stopped
+2026-04-17 10:39:46 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 10:39:46 | INFO | Resources cleaned up successfully
+2026-04-17 10:39:55 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 10:39:55 | INFO | Server configuration complete.
+2026-04-17 10:39:55 | INFO | Starting Uvicorn server...
+2026-04-17 10:39:55 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 10:40:02 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 10:40:02 | INFO | Inference worker thread started
+2026-04-17 10:40:02 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 10:40:02 | INFO | MLX handler initialized successfully
+2026-04-17 11:01:19 | INFO | Shutting down application
+2026-04-17 11:01:19 | INFO | Cleaning up resources
+2026-04-17 11:01:19 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 11:01:19 | INFO | Inference worker thread stopped
+2026-04-17 11:01:20 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 11:01:20 | INFO | Resources cleaned up successfully
+2026-04-17 11:01:28 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 11:01:28 | INFO | Server configuration complete.
+2026-04-17 11:01:28 | INFO | Starting Uvicorn server...
+2026-04-17 11:01:28 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 11:01:39 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 11:01:39 | INFO | Inference worker thread started
+2026-04-17 11:01:39 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 11:01:39 | INFO | MLX handler initialized successfully
+2026-04-17 11:08:55 | INFO | Shutting down application
+2026-04-17 11:08:55 | INFO | Cleaning up resources
+2026-04-17 11:08:55 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 11:08:55 | INFO | Inference worker thread stopped
+2026-04-17 11:08:56 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 11:08:56 | INFO | Resources cleaned up successfully
+2026-04-17 11:09:09 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 11:09:09 | INFO | Server configuration complete.
+2026-04-17 11:09:09 | INFO | Starting Uvicorn server...
+2026-04-17 11:09:09 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 11:09:19 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 11:09:19 | INFO | Inference worker thread started
+2026-04-17 11:09:19 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 11:09:19 | INFO | MLX handler initialized successfully
+2026-04-17 11:15:01 | INFO | Shutting down application
+2026-04-17 11:15:01 | INFO | Cleaning up resources
+2026-04-17 11:15:01 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 11:15:01 | INFO | Inference worker thread stopped
+2026-04-17 11:15:02 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 11:15:02 | INFO | Resources cleaned up successfully
+2026-04-17 11:15:10 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 11:15:10 | INFO | Server configuration complete.
+2026-04-17 11:15:10 | INFO | Starting Uvicorn server...
+2026-04-17 11:15:10 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 11:15:17 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 11:15:17 | INFO | Inference worker thread started
+2026-04-17 11:15:17 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 11:15:17 | INFO | MLX handler initialized successfully
+2026-04-17 11:23:52 | INFO | Shutting down application
+2026-04-17 11:23:52 | INFO | Cleaning up resources
+2026-04-17 11:23:52 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 11:23:52 | INFO | Inference worker thread stopped
+2026-04-17 11:23:53 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 11:23:53 | INFO | Resources cleaned up successfully
+2026-04-17 11:24:06 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 11:24:06 | INFO | Server configuration complete.
+2026-04-17 11:24:06 | INFO | Starting Uvicorn server...
+2026-04-17 11:24:06 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 11:24:14 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 11:24:14 | INFO | Inference worker thread started
+2026-04-17 11:24:14 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 11:24:14 | INFO | MLX handler initialized successfully
+2026-04-17 12:29:21 | INFO | Shutting down application
+2026-04-17 12:29:21 | INFO | Cleaning up resources
+2026-04-17 12:29:21 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 12:29:21 | INFO | Inference worker thread stopped
+2026-04-17 12:29:22 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 12:29:22 | INFO | Resources cleaned up successfully
+2026-04-17 12:29:33 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 12:29:33 | INFO | Server configuration complete.
+2026-04-17 12:29:33 | INFO | Starting Uvicorn server...
+2026-04-17 12:29:33 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 12:29:40 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 12:29:40 | INFO | Inference worker thread started
+2026-04-17 12:29:40 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 12:29:40 | INFO | MLX handler initialized successfully
+2026-04-17 12:30:19 | INFO | Shutting down application
+2026-04-17 12:30:19 | INFO | Cleaning up resources
+2026-04-17 12:30:19 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 12:30:19 | INFO | Inference worker thread stopped
+2026-04-17 12:30:20 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 12:30:20 | INFO | Resources cleaned up successfully
+2026-04-17 12:30:32 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 12:30:32 | INFO | Server configuration complete.
+2026-04-17 12:30:32 | INFO | Starting Uvicorn server...
+2026-04-17 12:30:32 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 12:30:42 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 12:30:42 | INFO | Inference worker thread started
+2026-04-17 12:30:42 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 12:30:42 | INFO | MLX handler initialized successfully
+2026-04-17 12:31:27 | INFO | Shutting down application
+2026-04-17 12:31:27 | INFO | Cleaning up resources
+2026-04-17 12:31:27 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 12:31:27 | INFO | Inference worker thread stopped
+2026-04-17 12:31:28 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 12:31:28 | INFO | Resources cleaned up successfully
+2026-04-17 14:36:37 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 14:36:37 | INFO | Server configuration complete.
+2026-04-17 14:36:37 | INFO | Starting Uvicorn server...
+2026-04-17 14:36:37 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 14:36:45 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 14:36:45 | INFO | Inference worker thread started
+2026-04-17 14:36:45 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 14:36:45 | INFO | MLX handler initialized successfully
+2026-04-17 14:37:04 | INFO | Shutting down application
+2026-04-17 14:37:04 | INFO | Cleaning up resources
+2026-04-17 14:37:04 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 14:37:04 | INFO | Inference worker thread stopped
+2026-04-17 14:37:05 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 14:37:05 | INFO | Resources cleaned up successfully
+2026-04-17 14:44:35 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 14:44:35 | INFO | Server configuration complete.
+2026-04-17 14:44:35 | INFO | Starting Uvicorn server...
+2026-04-17 14:44:35 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 14:44:42 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 14:44:42 | INFO | Inference worker thread started
+2026-04-17 14:44:42 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 14:44:42 | INFO | MLX handler initialized successfully
+2026-04-17 14:44:59 | INFO | Shutting down application
+2026-04-17 14:44:59 | INFO | Cleaning up resources
+2026-04-17 14:44:59 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 14:44:59 | INFO | Inference worker thread stopped
+2026-04-17 14:45:00 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 14:45:00 | INFO | Resources cleaned up successfully
+2026-04-17 14:51:06 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 14:51:06 | INFO | Server configuration complete.
+2026-04-17 14:51:06 | INFO | Starting Uvicorn server...
+2026-04-17 14:51:06 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 14:51:11 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 14:51:11 | INFO | Inference worker thread started
+2026-04-17 14:51:11 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 14:51:11 | INFO | MLX handler initialized successfully
+2026-04-17 15:03:33 | INFO | Shutting down application
+2026-04-17 15:03:33 | INFO | Cleaning up resources
+2026-04-17 15:03:33 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 15:03:33 | INFO | Inference worker thread stopped
+2026-04-17 15:03:33 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 15:03:33 | INFO | Resources cleaned up successfully
+2026-04-17 15:03:41 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 15:03:41 | INFO | Server configuration complete.
+2026-04-17 15:03:41 | INFO | Starting Uvicorn server...
+2026-04-17 15:03:41 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 15:03:47 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 15:03:47 | INFO | Inference worker thread started
+2026-04-17 15:03:47 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 15:03:47 | INFO | MLX handler initialized successfully
+2026-04-17 15:19:24 | INFO | Shutting down application
+2026-04-17 15:19:24 | INFO | Cleaning up resources
+2026-04-17 15:19:24 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 15:19:24 | INFO | Inference worker thread stopped
+2026-04-17 15:19:24 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 15:19:24 | INFO | Resources cleaned up successfully
+2026-04-17 15:19:32 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 15:19:32 | INFO | Server configuration complete.
+2026-04-17 15:19:32 | INFO | Starting Uvicorn server...
+2026-04-17 15:19:32 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 15:19:39 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 15:19:39 | INFO | Inference worker thread started
+2026-04-17 15:19:39 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 15:19:39 | INFO | MLX handler initialized successfully
+2026-04-17 15:42:29 | INFO | Shutting down application
+2026-04-17 15:42:29 | INFO | Cleaning up resources
+2026-04-17 15:42:29 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 15:42:29 | INFO | Inference worker thread stopped
+2026-04-17 15:42:30 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 15:42:30 | INFO | Resources cleaned up successfully
+2026-04-17 15:42:38 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 15:42:38 | INFO | Server configuration complete.
+2026-04-17 15:42:38 | INFO | Starting Uvicorn server...
+2026-04-17 15:42:38 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 15:42:44 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 15:42:44 | INFO | Inference worker thread started
+2026-04-17 15:42:44 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 15:42:44 | INFO | MLX handler initialized successfully
+2026-04-17 15:53:02 | INFO | Shutting down application
+2026-04-17 15:53:02 | INFO | Cleaning up resources
+2026-04-17 15:53:02 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 15:53:02 | INFO | Inference worker thread stopped
+2026-04-17 15:53:02 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 15:53:02 | INFO | Resources cleaned up successfully
+2026-04-17 15:53:10 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 15:53:10 | INFO | Server configuration complete.
+2026-04-17 15:53:10 | INFO | Starting Uvicorn server...
+2026-04-17 15:53:10 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 15:53:15 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 15:53:15 | INFO | Inference worker thread started
+2026-04-17 15:53:15 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 15:53:15 | INFO | MLX handler initialized successfully
+2026-04-17 15:58:11 | INFO | Shutting down application
+2026-04-17 15:58:11 | INFO | Cleaning up resources
+2026-04-17 15:58:11 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 15:58:11 | INFO | Inference worker thread stopped
+2026-04-17 15:58:12 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 15:58:12 | INFO | Resources cleaned up successfully
+2026-04-17 15:58:20 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 15:58:20 | INFO | Server configuration complete.
+2026-04-17 15:58:20 | INFO | Starting Uvicorn server...
+2026-04-17 15:58:20 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 15:58:26 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 15:58:26 | INFO | Inference worker thread started
+2026-04-17 15:58:26 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 15:58:26 | INFO | MLX handler initialized successfully
+2026-04-17 16:06:24 | INFO | Shutting down application
+2026-04-17 16:06:24 | INFO | Cleaning up resources
+2026-04-17 16:06:24 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 16:06:24 | INFO | Inference worker thread stopped
+2026-04-17 16:06:24 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 16:06:24 | INFO | Resources cleaned up successfully
+2026-04-17 16:06:32 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 16:06:32 | INFO | Server configuration complete.
+2026-04-17 16:06:32 | INFO | Starting Uvicorn server...
+2026-04-17 16:06:32 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 16:06:38 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 16:06:38 | INFO | Inference worker thread started
+2026-04-17 16:06:38 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 16:06:38 | INFO | MLX handler initialized successfully
+2026-04-17 16:11:37 | INFO | Shutting down application
+2026-04-17 16:11:37 | INFO | Cleaning up resources
+2026-04-17 16:11:37 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 16:11:37 | INFO | Inference worker thread stopped
+2026-04-17 16:11:37 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 16:11:37 | INFO | Resources cleaned up successfully
+2026-04-17 16:11:46 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 16:11:46 | INFO | Server configuration complete.
+2026-04-17 16:11:46 | INFO | Starting Uvicorn server...
+2026-04-17 16:11:46 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 16:11:51 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 16:11:51 | INFO | Inference worker thread started
+2026-04-17 16:11:51 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 16:11:51 | INFO | MLX handler initialized successfully
+2026-04-17 16:33:37 | INFO | Shutting down application
+2026-04-17 16:33:37 | INFO | Cleaning up resources
+2026-04-17 16:33:37 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 16:33:38 | INFO | Inference worker thread stopped
+2026-04-17 16:33:38 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 16:33:38 | INFO | Resources cleaned up successfully
+2026-04-17 16:33:46 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 16:33:46 | INFO | Server configuration complete.
+2026-04-17 16:33:46 | INFO | Starting Uvicorn server...
+2026-04-17 16:33:46 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 16:33:52 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 16:33:52 | INFO | Inference worker thread started
+2026-04-17 16:33:52 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 16:33:52 | INFO | MLX handler initialized successfully
+2026-04-17 16:34:13 | INFO | Shutting down application
+2026-04-17 16:34:13 | INFO | Cleaning up resources
+2026-04-17 16:34:13 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-17 16:34:13 | INFO | Inference worker thread stopped
+2026-04-17 16:34:14 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-17 16:34:14 | INFO | Resources cleaned up successfully
+2026-04-17 16:34:22 | INFO | Starting server on 0.0.0.0:8081
+2026-04-17 16:34:22 | INFO | Server configuration complete.
+2026-04-17 16:34:22 | INFO | Starting Uvicorn server...
+2026-04-17 16:34:22 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 16:34:29 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-17 16:34:29 | INFO | Inference worker thread started
+2026-04-17 16:34:29 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-17 16:34:29 | INFO | MLX handler initialized successfully
+2026-04-17 17:44:07 | INFO | Resized image to 201x448 from 576x1280
+2026-04-17 17:46:17 | INFO | Resized image to 201x448 from 576x1280
+2026-04-17 17:48:07 | INFO | Resized image to 201x448 from 576x1280
+2026-04-18 05:19:01 | INFO | Shutting down application
+2026-04-18 05:19:01 | INFO | Cleaning up resources
+2026-04-18 05:19:01 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 05:19:01 | INFO | Inference worker thread stopped
+2026-04-18 05:19:02 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 05:19:02 | INFO | Resources cleaned up successfully
+2026-04-18 05:19:11 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 05:19:11 | INFO | Server configuration complete.
+2026-04-18 05:19:11 | INFO | Starting Uvicorn server...
+2026-04-18 05:19:11 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 05:19:21 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 05:19:21 | INFO | Inference worker thread started
+2026-04-18 05:19:21 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 05:19:21 | INFO | MLX handler initialized successfully
+2026-04-18 05:26:23 | INFO | Shutting down application
+2026-04-18 05:26:23 | INFO | Cleaning up resources
+2026-04-18 05:26:23 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 05:26:23 | INFO | Inference worker thread stopped
+2026-04-18 05:26:23 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 05:26:23 | INFO | Resources cleaned up successfully
+2026-04-18 05:26:32 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 05:26:32 | INFO | Server configuration complete.
+2026-04-18 05:26:32 | INFO | Starting Uvicorn server...
+2026-04-18 05:26:32 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 05:26:37 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 05:26:37 | INFO | Inference worker thread started
+2026-04-18 05:26:37 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 05:26:37 | INFO | MLX handler initialized successfully
+2026-04-18 05:41:14 | INFO | Shutting down application
+2026-04-18 05:41:14 | INFO | Cleaning up resources
+2026-04-18 05:41:14 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 05:41:14 | INFO | Inference worker thread stopped
+2026-04-18 05:41:14 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 05:41:14 | INFO | Resources cleaned up successfully
+2026-04-18 05:41:22 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 05:41:22 | INFO | Server configuration complete.
+2026-04-18 05:41:22 | INFO | Starting Uvicorn server...
+2026-04-18 05:41:22 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 05:41:27 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 05:41:27 | INFO | Inference worker thread started
+2026-04-18 05:41:27 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 05:41:27 | INFO | MLX handler initialized successfully
+2026-04-18 05:48:26 | INFO | Shutting down application
+2026-04-18 05:48:26 | INFO | Cleaning up resources
+2026-04-18 05:48:26 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 05:48:27 | INFO | Inference worker thread stopped
+2026-04-18 05:48:27 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 05:48:27 | INFO | Resources cleaned up successfully
+2026-04-18 05:48:35 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 05:48:35 | INFO | Server configuration complete.
+2026-04-18 05:48:35 | INFO | Starting Uvicorn server...
+2026-04-18 05:48:35 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 05:48:40 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 05:48:40 | INFO | Inference worker thread started
+2026-04-18 05:48:40 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 05:48:40 | INFO | MLX handler initialized successfully
+2026-04-18 05:57:06 | INFO | Shutting down application
+2026-04-18 05:57:06 | INFO | Cleaning up resources
+2026-04-18 05:57:06 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 05:57:06 | INFO | Inference worker thread stopped
+2026-04-18 05:57:06 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 05:57:06 | INFO | Resources cleaned up successfully
+2026-04-18 05:57:15 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 05:57:15 | INFO | Server configuration complete.
+2026-04-18 05:57:15 | INFO | Starting Uvicorn server...
+2026-04-18 05:57:15 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 05:57:20 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 05:57:20 | INFO | Inference worker thread started
+2026-04-18 05:57:20 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 05:57:20 | INFO | MLX handler initialized successfully
+2026-04-18 06:07:38 | INFO | Shutting down application
+2026-04-18 06:07:38 | INFO | Cleaning up resources
+2026-04-18 06:07:38 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 06:07:38 | INFO | Inference worker thread stopped
+2026-04-18 06:07:39 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 06:07:39 | INFO | Resources cleaned up successfully
+2026-04-18 06:07:47 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 06:07:47 | INFO | Server configuration complete.
+2026-04-18 06:07:47 | INFO | Starting Uvicorn server...
+2026-04-18 06:07:47 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 06:07:53 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 06:07:53 | INFO | Inference worker thread started
+2026-04-18 06:07:53 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 06:07:53 | INFO | MLX handler initialized successfully
+2026-04-18 06:38:27 | INFO | Shutting down application
+2026-04-18 06:38:27 | INFO | Cleaning up resources
+2026-04-18 06:38:27 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 06:38:27 | INFO | Inference worker thread stopped
+2026-04-18 06:38:28 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 06:38:28 | INFO | Resources cleaned up successfully
+2026-04-18 06:38:37 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 06:38:37 | INFO | Server configuration complete.
+2026-04-18 06:38:37 | INFO | Starting Uvicorn server...
+2026-04-18 06:38:37 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 06:38:52 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 06:38:52 | INFO | Inference worker thread started
+2026-04-18 06:38:52 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 06:38:52 | INFO | MLX handler initialized successfully
+2026-04-18 06:50:45 | INFO | Shutting down application
+2026-04-18 06:50:45 | INFO | Cleaning up resources
+2026-04-18 06:50:45 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 06:50:45 | INFO | Inference worker thread stopped
+2026-04-18 06:50:45 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 06:50:45 | INFO | Resources cleaned up successfully
+2026-04-18 06:50:54 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 06:50:54 | INFO | Server configuration complete.
+2026-04-18 06:50:54 | INFO | Starting Uvicorn server...
+2026-04-18 06:50:54 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 06:51:00 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 06:51:00 | INFO | Inference worker thread started
+2026-04-18 06:51:00 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 06:51:00 | INFO | MLX handler initialized successfully
+2026-04-18 07:00:49 | INFO | Shutting down application
+2026-04-18 07:00:49 | INFO | Cleaning up resources
+2026-04-18 07:00:49 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 07:00:49 | INFO | Inference worker thread stopped
+2026-04-18 07:00:50 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 07:00:50 | INFO | Resources cleaned up successfully
+2026-04-18 07:00:58 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 07:00:58 | INFO | Server configuration complete.
+2026-04-18 07:00:58 | INFO | Starting Uvicorn server...
+2026-04-18 07:00:58 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:01:03 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:01:03 | INFO | Inference worker thread started
+2026-04-18 07:01:03 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 07:01:03 | INFO | MLX handler initialized successfully
+2026-04-18 07:08:31 | INFO | Shutting down application
+2026-04-18 07:08:31 | INFO | Cleaning up resources
+2026-04-18 07:08:31 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 07:08:31 | INFO | Inference worker thread stopped
+2026-04-18 07:08:32 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 07:08:32 | INFO | Resources cleaned up successfully
+2026-04-18 07:08:43 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 07:08:43 | INFO | Server configuration complete.
+2026-04-18 07:08:43 | INFO | Starting Uvicorn server...
+2026-04-18 07:08:43 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:08:49 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:08:49 | INFO | Inference worker thread started
+2026-04-18 07:08:49 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 07:08:49 | INFO | MLX handler initialized successfully
+2026-04-18 07:13:49 | INFO | Shutting down application
+2026-04-18 07:13:49 | INFO | Cleaning up resources
+2026-04-18 07:13:49 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 07:13:49 | INFO | Inference worker thread stopped
+2026-04-18 07:13:50 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 07:13:50 | INFO | Resources cleaned up successfully
+2026-04-18 07:13:59 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 07:13:59 | INFO | Server configuration complete.
+2026-04-18 07:13:59 | INFO | Starting Uvicorn server...
+2026-04-18 07:13:59 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:14:06 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:14:06 | INFO | Inference worker thread started
+2026-04-18 07:14:06 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 07:14:06 | INFO | MLX handler initialized successfully
+2026-04-18 07:26:45 | INFO | Shutting down application
+2026-04-18 07:26:45 | INFO | Cleaning up resources
+2026-04-18 07:26:45 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 07:26:45 | INFO | Inference worker thread stopped
+2026-04-18 07:26:46 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 07:26:46 | INFO | Resources cleaned up successfully
+2026-04-18 07:26:55 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 07:26:55 | INFO | Server configuration complete.
+2026-04-18 07:26:55 | INFO | Starting Uvicorn server...
+2026-04-18 07:26:55 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:27:02 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:27:02 | INFO | Inference worker thread started
+2026-04-18 07:27:02 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 07:27:02 | INFO | MLX handler initialized successfully
+2026-04-18 07:33:31 | INFO | Shutting down application
+2026-04-18 07:33:31 | INFO | Cleaning up resources
+2026-04-18 07:33:31 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 07:33:31 | INFO | Inference worker thread stopped
+2026-04-18 07:33:32 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 07:33:32 | INFO | Resources cleaned up successfully
+2026-04-18 07:33:41 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 07:33:41 | INFO | Server configuration complete.
+2026-04-18 07:33:41 | INFO | Starting Uvicorn server...
+2026-04-18 07:33:41 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:33:48 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:33:48 | INFO | Inference worker thread started
+2026-04-18 07:33:48 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 07:33:48 | INFO | MLX handler initialized successfully
+2026-04-18 07:45:54 | INFO | Shutting down application
+2026-04-18 07:45:54 | INFO | Cleaning up resources
+2026-04-18 07:45:54 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 07:45:54 | INFO | Inference worker thread stopped
+2026-04-18 07:45:55 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 07:45:55 | INFO | Resources cleaned up successfully
+2026-04-18 07:50:32 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 07:50:32 | INFO | Server configuration complete.
+2026-04-18 07:50:32 | INFO | Starting Uvicorn server...
+2026-04-18 07:50:32 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:50:40 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 07:50:40 | INFO | Inference worker thread started
+2026-04-18 07:50:40 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 07:50:40 | INFO | MLX handler initialized successfully
+2026-04-18 08:02:51 | INFO | Shutting down application
+2026-04-18 08:02:52 | INFO | Cleaning up resources
+2026-04-18 08:02:52 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 08:02:52 | INFO | Inference worker thread stopped
+2026-04-18 08:02:53 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 08:02:53 | INFO | Resources cleaned up successfully
+2026-04-18 08:03:06 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 08:03:06 | INFO | Server configuration complete.
+2026-04-18 08:03:06 | INFO | Starting Uvicorn server...
+2026-04-18 08:03:06 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 08:03:11 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 08:03:11 | INFO | Inference worker thread started
+2026-04-18 08:03:11 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 08:03:11 | INFO | MLX handler initialized successfully
+2026-04-18 08:23:22 | INFO | Shutting down application
+2026-04-18 08:23:22 | INFO | Cleaning up resources
+2026-04-18 08:23:22 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 08:23:22 | INFO | Inference worker thread stopped
+2026-04-18 08:23:22 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 08:23:22 | INFO | Resources cleaned up successfully
+2026-04-18 08:23:31 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 08:23:31 | INFO | Server configuration complete.
+2026-04-18 08:23:31 | INFO | Starting Uvicorn server...
+2026-04-18 08:23:31 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 08:23:37 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 08:23:37 | INFO | Inference worker thread started
+2026-04-18 08:23:37 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 08:23:37 | INFO | MLX handler initialized successfully
+2026-04-18 08:36:12 | INFO | Shutting down application
+2026-04-18 08:36:12 | INFO | Cleaning up resources
+2026-04-18 08:36:12 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 08:36:12 | INFO | Inference worker thread stopped
+2026-04-18 08:36:13 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 08:36:13 | INFO | Resources cleaned up successfully
+2026-04-18 08:36:24 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 08:36:24 | INFO | Server configuration complete.
+2026-04-18 08:36:24 | INFO | Starting Uvicorn server...
+2026-04-18 08:36:24 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 08:36:30 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 08:36:30 | INFO | Inference worker thread started
+2026-04-18 08:36:30 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 08:36:30 | INFO | MLX handler initialized successfully
+2026-04-18 08:52:34 | INFO | Shutting down application
+2026-04-18 08:52:34 | INFO | Cleaning up resources
+2026-04-18 08:52:34 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 08:52:34 | INFO | Inference worker thread stopped
+2026-04-18 08:52:34 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 08:52:34 | INFO | Resources cleaned up successfully
+2026-04-18 08:52:43 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 08:52:43 | INFO | Server configuration complete.
+2026-04-18 08:52:43 | INFO | Starting Uvicorn server...
+2026-04-18 08:52:43 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 08:52:49 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 08:52:49 | INFO | Inference worker thread started
+2026-04-18 08:52:49 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 08:52:49 | INFO | MLX handler initialized successfully
+2026-04-18 09:03:57 | INFO | Shutting down application
+2026-04-18 09:03:57 | INFO | Cleaning up resources
+2026-04-18 09:03:57 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 09:03:58 | INFO | Inference worker thread stopped
+2026-04-18 09:03:58 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 09:03:58 | INFO | Resources cleaned up successfully
+2026-04-18 09:04:08 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 09:04:08 | INFO | Server configuration complete.
+2026-04-18 09:04:08 | INFO | Starting Uvicorn server...
+2026-04-18 09:04:08 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 09:04:15 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 09:04:15 | INFO | Inference worker thread started
+2026-04-18 09:04:15 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 09:04:15 | INFO | MLX handler initialized successfully
+2026-04-18 09:10:20 | INFO | Shutting down application
+2026-04-18 09:10:20 | INFO | Cleaning up resources
+2026-04-18 09:10:20 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 09:10:21 | INFO | Inference worker thread stopped
+2026-04-18 09:10:22 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 09:10:22 | INFO | Resources cleaned up successfully
+2026-04-18 09:10:33 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 09:10:33 | INFO | Server configuration complete.
+2026-04-18 09:10:33 | INFO | Starting Uvicorn server...
+2026-04-18 09:10:33 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 09:10:40 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 09:10:40 | INFO | Inference worker thread started
+2026-04-18 09:10:40 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 09:10:40 | INFO | MLX handler initialized successfully
+2026-04-18 09:16:27 | INFO | Shutting down application
+2026-04-18 09:16:27 | INFO | Cleaning up resources
+2026-04-18 09:16:27 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 09:16:28 | INFO | Inference worker thread stopped
+2026-04-18 09:16:28 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 09:16:28 | INFO | Resources cleaned up successfully
+2026-04-18 09:16:42 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 09:16:42 | INFO | Server configuration complete.
+2026-04-18 09:16:42 | INFO | Starting Uvicorn server...
+2026-04-18 09:16:42 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 09:16:54 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 09:16:55 | INFO | Inference worker thread started
+2026-04-18 09:16:55 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 09:16:55 | INFO | MLX handler initialized successfully
+2026-04-18 09:32:25 | INFO | Shutting down application
+2026-04-18 09:32:25 | INFO | Cleaning up resources
+2026-04-18 09:32:25 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 09:32:25 | INFO | Inference worker thread stopped
+2026-04-18 09:32:25 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 09:32:25 | INFO | Resources cleaned up successfully
+2026-04-18 09:32:35 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 09:32:35 | INFO | Server configuration complete.
+2026-04-18 09:32:35 | INFO | Starting Uvicorn server...
+2026-04-18 09:32:35 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 09:32:41 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 09:32:42 | INFO | Inference worker thread started
+2026-04-18 09:32:42 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 09:32:42 | INFO | MLX handler initialized successfully
+2026-04-18 15:14:03 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 15:14:03 | INFO | Server configuration complete.
+2026-04-18 15:14:03 | INFO | Starting Uvicorn server...
+2026-04-18 15:14:03 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 15:14:09 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 15:14:09 | INFO | Inference worker thread started
+2026-04-18 15:14:09 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 15:14:09 | INFO | MLX handler initialized successfully
+2026-04-18 15:39:10 | INFO | Shutting down application
+2026-04-18 15:39:10 | INFO | Cleaning up resources
+2026-04-18 15:39:10 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 15:39:10 | INFO | Inference worker thread stopped
+2026-04-18 15:39:11 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 15:39:11 | INFO | Resources cleaned up successfully
+2026-04-18 16:15:11 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 16:15:11 | INFO | Server configuration complete.
+2026-04-18 16:15:11 | INFO | Starting Uvicorn server...
+2026-04-18 16:15:11 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 16:15:17 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 16:15:17 | INFO | Inference worker thread started
+2026-04-18 16:15:17 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 16:15:17 | INFO | MLX handler initialized successfully
+2026-04-18 17:05:51 | INFO | Shutting down application
+2026-04-18 17:05:51 | INFO | Cleaning up resources
+2026-04-18 17:05:51 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 17:05:51 | INFO | Inference worker thread stopped
+2026-04-18 17:05:52 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 17:05:52 | INFO | Resources cleaned up successfully
+2026-04-18 17:06:00 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 17:06:00 | INFO | Server configuration complete.
+2026-04-18 17:06:00 | INFO | Starting Uvicorn server...
+2026-04-18 17:06:00 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 17:06:06 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 17:06:06 | INFO | Inference worker thread started
+2026-04-18 17:06:06 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 17:06:06 | INFO | MLX handler initialized successfully
+2026-04-18 17:06:10 | INFO | Shutting down application
+2026-04-18 17:06:10 | INFO | Cleaning up resources
+2026-04-18 17:06:10 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 17:06:10 | INFO | Inference worker thread stopped
+2026-04-18 17:06:10 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 17:06:10 | INFO | Resources cleaned up successfully
+2026-04-18 17:06:18 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 17:06:18 | INFO | Server configuration complete.
+2026-04-18 17:06:18 | INFO | Starting Uvicorn server...
+2026-04-18 17:06:18 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 17:06:23 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 17:06:23 | INFO | Inference worker thread started
+2026-04-18 17:06:23 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 17:06:23 | INFO | MLX handler initialized successfully
+2026-04-18 17:26:34 | INFO | Shutting down application
+2026-04-18 17:26:34 | INFO | Cleaning up resources
+2026-04-18 17:26:34 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 17:26:35 | INFO | Inference worker thread stopped
+2026-04-18 17:26:35 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 17:26:35 | INFO | Resources cleaned up successfully
+2026-04-18 17:26:43 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 17:26:43 | INFO | Server configuration complete.
+2026-04-18 17:26:43 | INFO | Starting Uvicorn server...
+2026-04-18 17:26:43 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 17:26:49 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 17:26:49 | INFO | Inference worker thread started
+2026-04-18 17:26:49 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 17:26:49 | INFO | MLX handler initialized successfully
+2026-04-18 17:50:16 | INFO | Shutting down application
+2026-04-18 17:50:16 | INFO | Cleaning up resources
+2026-04-18 17:50:16 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 17:50:17 | INFO | Inference worker thread stopped
+2026-04-18 17:50:17 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 17:50:17 | INFO | Resources cleaned up successfully
+2026-04-18 17:50:25 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 17:50:25 | INFO | Server configuration complete.
+2026-04-18 17:50:25 | INFO | Starting Uvicorn server...
+2026-04-18 17:50:25 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 17:50:31 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 17:50:31 | INFO | Inference worker thread started
+2026-04-18 17:50:31 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 17:50:31 | INFO | MLX handler initialized successfully
+2026-04-18 19:00:18 | INFO | Shutting down application
+2026-04-18 19:00:18 | INFO | Cleaning up resources
+2026-04-18 19:00:18 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 19:00:18 | INFO | Inference worker thread stopped
+2026-04-18 19:00:18 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 19:00:18 | INFO | Resources cleaned up successfully
+2026-04-18 19:00:27 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 19:00:27 | INFO | Server configuration complete.
+2026-04-18 19:00:27 | INFO | Starting Uvicorn server...
+2026-04-18 19:00:27 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 19:00:33 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 19:00:33 | INFO | Inference worker thread started
+2026-04-18 19:00:33 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 19:00:33 | INFO | MLX handler initialized successfully
+2026-04-18 19:20:10 | INFO | Shutting down application
+2026-04-18 19:20:10 | INFO | Cleaning up resources
+2026-04-18 19:20:10 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 19:20:10 | INFO | Inference worker thread stopped
+2026-04-18 19:20:10 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 19:20:10 | INFO | Resources cleaned up successfully
+2026-04-18 19:34:51 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 19:34:51 | INFO | Server configuration complete.
+2026-04-18 19:34:51 | INFO | Starting Uvicorn server...
+2026-04-18 19:34:51 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 19:34:58 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 19:34:58 | INFO | Inference worker thread started
+2026-04-18 19:34:58 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 19:34:58 | INFO | MLX handler initialized successfully
+2026-04-18 19:47:57 | INFO | Shutting down application
+2026-04-18 19:47:57 | INFO | Cleaning up resources
+2026-04-18 19:47:57 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 19:47:57 | INFO | Inference worker thread stopped
+2026-04-18 19:47:57 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 19:47:57 | INFO | Resources cleaned up successfully
+2026-04-18 19:48:05 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 19:48:05 | INFO | Server configuration complete.
+2026-04-18 19:48:05 | INFO | Starting Uvicorn server...
+2026-04-18 19:48:05 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 19:48:11 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 19:48:11 | INFO | Inference worker thread started
+2026-04-18 19:48:11 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 19:48:11 | INFO | MLX handler initialized successfully
+2026-04-18 22:08:13 | INFO | Shutting down application
+2026-04-18 22:08:13 | INFO | Cleaning up resources
+2026-04-18 22:08:13 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 22:08:13 | INFO | Inference worker thread stopped
+2026-04-18 22:08:14 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 22:08:14 | INFO | Resources cleaned up successfully
+2026-04-18 22:08:25 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 22:08:25 | INFO | Server configuration complete.
+2026-04-18 22:08:25 | INFO | Starting Uvicorn server...
+2026-04-18 22:08:25 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 22:08:34 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 22:08:34 | INFO | Inference worker thread started
+2026-04-18 22:08:34 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 22:08:34 | INFO | MLX handler initialized successfully
+2026-04-18 22:08:38 | INFO | Shutting down application
+2026-04-18 22:08:38 | INFO | Cleaning up resources
+2026-04-18 22:08:38 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 22:08:38 | INFO | Inference worker thread stopped
+2026-04-18 22:08:38 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 22:08:38 | INFO | Resources cleaned up successfully
+2026-04-18 22:08:46 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 22:08:46 | INFO | Server configuration complete.
+2026-04-18 22:08:46 | INFO | Starting Uvicorn server...
+2026-04-18 22:08:46 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 22:08:52 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 22:08:52 | INFO | Inference worker thread started
+2026-04-18 22:08:52 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 22:08:52 | INFO | MLX handler initialized successfully
+2026-04-18 22:37:16 | INFO | Shutting down application
+2026-04-18 22:37:16 | INFO | Cleaning up resources
+2026-04-18 22:37:16 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 22:37:16 | INFO | Inference worker thread stopped
+2026-04-18 22:37:17 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 22:37:17 | INFO | Resources cleaned up successfully
+2026-04-18 22:37:27 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 22:37:27 | INFO | Server configuration complete.
+2026-04-18 22:37:27 | INFO | Starting Uvicorn server...
+2026-04-18 22:37:27 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 22:37:36 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 22:37:36 | INFO | Inference worker thread started
+2026-04-18 22:37:36 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 22:37:36 | INFO | MLX handler initialized successfully
+2026-04-18 23:04:10 | INFO | Shutting down application
+2026-04-18 23:04:10 | INFO | Cleaning up resources
+2026-04-18 23:04:10 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 23:04:11 | INFO | Inference worker thread stopped
+2026-04-18 23:04:11 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 23:04:11 | INFO | Resources cleaned up successfully
+2026-04-18 23:04:21 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 23:04:21 | INFO | Server configuration complete.
+2026-04-18 23:04:21 | INFO | Starting Uvicorn server...
+2026-04-18 23:04:21 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:04:27 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:04:27 | INFO | Inference worker thread started
+2026-04-18 23:04:27 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 23:04:27 | INFO | MLX handler initialized successfully
+2026-04-18 23:09:44 | INFO | Shutting down application
+2026-04-18 23:09:44 | INFO | Cleaning up resources
+2026-04-18 23:09:44 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 23:09:44 | INFO | Inference worker thread stopped
+2026-04-18 23:09:45 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 23:09:45 | INFO | Resources cleaned up successfully
+2026-04-18 23:09:54 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 23:09:54 | INFO | Server configuration complete.
+2026-04-18 23:09:54 | INFO | Starting Uvicorn server...
+2026-04-18 23:09:54 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:10:00 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:10:00 | INFO | Inference worker thread started
+2026-04-18 23:10:00 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 23:10:00 | INFO | MLX handler initialized successfully
+2026-04-18 23:25:29 | INFO | Shutting down application
+2026-04-18 23:25:29 | INFO | Cleaning up resources
+2026-04-18 23:25:29 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 23:25:29 | INFO | Inference worker thread stopped
+2026-04-18 23:25:30 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 23:25:30 | INFO | Resources cleaned up successfully
+2026-04-18 23:25:39 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 23:25:39 | INFO | Server configuration complete.
+2026-04-18 23:25:39 | INFO | Starting Uvicorn server...
+2026-04-18 23:25:39 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:25:44 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:25:44 | INFO | Inference worker thread started
+2026-04-18 23:25:44 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 23:25:44 | INFO | MLX handler initialized successfully
+2026-04-18 23:36:23 | INFO | Shutting down application
+2026-04-18 23:36:23 | INFO | Cleaning up resources
+2026-04-18 23:36:23 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 23:36:24 | INFO | Inference worker thread stopped
+2026-04-18 23:36:24 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 23:36:24 | INFO | Resources cleaned up successfully
+2026-04-18 23:36:34 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 23:36:34 | INFO | Server configuration complete.
+2026-04-18 23:36:34 | INFO | Starting Uvicorn server...
+2026-04-18 23:36:34 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:36:40 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:36:40 | INFO | Inference worker thread started
+2026-04-18 23:36:40 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 23:36:40 | INFO | MLX handler initialized successfully
+2026-04-18 23:42:38 | INFO | Shutting down application
+2026-04-18 23:42:38 | INFO | Cleaning up resources
+2026-04-18 23:42:38 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 23:42:38 | INFO | Inference worker thread stopped
+2026-04-18 23:42:39 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 23:42:39 | INFO | Resources cleaned up successfully
+2026-04-18 23:42:47 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 23:42:47 | INFO | Server configuration complete.
+2026-04-18 23:42:47 | INFO | Starting Uvicorn server...
+2026-04-18 23:42:47 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:42:52 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:42:52 | INFO | Inference worker thread started
+2026-04-18 23:42:52 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 23:42:52 | INFO | MLX handler initialized successfully
+2026-04-18 23:58:05 | INFO | Shutting down application
+2026-04-18 23:58:05 | INFO | Cleaning up resources
+2026-04-18 23:58:05 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-18 23:58:05 | INFO | Inference worker thread stopped
+2026-04-18 23:58:05 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-18 23:58:05 | INFO | Resources cleaned up successfully
+2026-04-18 23:58:15 | INFO | Starting server on 0.0.0.0:8081
+2026-04-18 23:58:15 | INFO | Server configuration complete.
+2026-04-18 23:58:15 | INFO | Starting Uvicorn server...
+2026-04-18 23:58:15 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:58:22 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-18 23:58:22 | INFO | Inference worker thread started
+2026-04-18 23:58:23 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-18 23:58:23 | INFO | MLX handler initialized successfully
+2026-04-19 00:04:33 | INFO | Shutting down application
+2026-04-19 00:04:33 | INFO | Cleaning up resources
+2026-04-19 00:04:33 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 00:04:33 | INFO | Inference worker thread stopped
+2026-04-19 00:04:33 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 00:04:33 | INFO | Resources cleaned up successfully
+2026-04-19 04:55:10 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 04:55:10 | INFO | Server configuration complete.
+2026-04-19 04:55:10 | INFO | Starting Uvicorn server...
+2026-04-19 04:55:10 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 04:55:16 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 04:55:16 | INFO | Inference worker thread started
+2026-04-19 04:55:16 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 04:55:16 | INFO | MLX handler initialized successfully
+2026-04-19 05:07:38 | INFO | Shutting down application
+2026-04-19 05:07:38 | INFO | Cleaning up resources
+2026-04-19 05:07:38 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 05:07:38 | INFO | Inference worker thread stopped
+2026-04-19 05:07:38 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 05:07:38 | INFO | Resources cleaned up successfully
+2026-04-19 05:07:47 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 05:07:47 | INFO | Server configuration complete.
+2026-04-19 05:07:47 | INFO | Starting Uvicorn server...
+2026-04-19 05:07:48 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 05:07:54 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 05:07:54 | INFO | Inference worker thread started
+2026-04-19 05:07:54 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 05:07:54 | INFO | MLX handler initialized successfully
+2026-04-19 05:28:16 | INFO | Shutting down application
+2026-04-19 05:28:16 | INFO | Cleaning up resources
+2026-04-19 05:28:16 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 05:28:16 | INFO | Inference worker thread stopped
+2026-04-19 05:28:16 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 05:28:16 | INFO | Resources cleaned up successfully
+2026-04-19 05:28:25 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 05:28:25 | INFO | Server configuration complete.
+2026-04-19 05:28:25 | INFO | Starting Uvicorn server...
+2026-04-19 05:28:25 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 05:28:31 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 05:28:31 | INFO | Inference worker thread started
+2026-04-19 05:28:31 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 05:28:31 | INFO | MLX handler initialized successfully
+2026-04-19 05:57:03 | INFO | Shutting down application
+2026-04-19 05:57:03 | INFO | Cleaning up resources
+2026-04-19 05:57:03 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 05:57:03 | INFO | Inference worker thread stopped
+2026-04-19 05:57:04 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 05:57:04 | INFO | Resources cleaned up successfully
+2026-04-19 05:57:12 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 05:57:12 | INFO | Server configuration complete.
+2026-04-19 05:57:12 | INFO | Starting Uvicorn server...
+2026-04-19 05:57:12 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 05:57:18 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 05:57:18 | INFO | Inference worker thread started
+2026-04-19 05:57:18 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 05:57:18 | INFO | MLX handler initialized successfully
+2026-04-19 06:39:01 | INFO | Resized image to 336x448 from 960x1280
+2026-04-19 06:57:42 | INFO | Resized image to 336x448 from 960x1280
+2026-04-19 08:30:47 | INFO | Resized image to 336x448 from 960x1280
+2026-04-19 08:38:21 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 08:38:21 | INFO | Server configuration complete.
+2026-04-19 08:38:21 | INFO | Starting Uvicorn server...
+2026-04-19 08:38:21 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 08:38:26 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 08:38:26 | INFO | Inference worker thread started
+2026-04-19 08:38:26 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 08:38:26 | INFO | MLX handler initialized successfully
+2026-04-19 08:38:31 | INFO | Shutting down application
+2026-04-19 08:38:31 | INFO | Cleaning up resources
+2026-04-19 08:38:31 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 08:38:31 | INFO | Inference worker thread stopped
+2026-04-19 08:38:31 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 08:38:31 | INFO | Resources cleaned up successfully
+2026-04-19 09:56:34 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 09:56:34 | INFO | Server configuration complete.
+2026-04-19 09:56:34 | INFO | Starting Uvicorn server...
+2026-04-19 09:56:34 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 09:56:42 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 09:56:42 | INFO | Inference worker thread started
+2026-04-19 09:56:42 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 09:56:42 | INFO | MLX handler initialized successfully
+2026-04-19 10:07:48 | INFO | Shutting down application
+2026-04-19 10:07:48 | INFO | Cleaning up resources
+2026-04-19 10:07:48 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 10:07:48 | INFO | Inference worker thread stopped
+2026-04-19 10:07:49 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 10:07:49 | INFO | Resources cleaned up successfully
+2026-04-19 10:07:57 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 10:07:57 | INFO | Server configuration complete.
+2026-04-19 10:07:57 | INFO | Starting Uvicorn server...
+2026-04-19 10:07:57 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 10:08:02 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 10:08:02 | INFO | Inference worker thread started
+2026-04-19 10:08:02 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 10:08:02 | INFO | MLX handler initialized successfully
+2026-04-19 10:31:40 | INFO | Shutting down application
+2026-04-19 10:31:40 | INFO | Cleaning up resources
+2026-04-19 10:31:40 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 10:31:41 | INFO | Inference worker thread stopped
+2026-04-19 10:31:41 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 10:31:41 | INFO | Resources cleaned up successfully
+2026-04-19 10:31:49 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 10:31:49 | INFO | Server configuration complete.
+2026-04-19 10:31:49 | INFO | Starting Uvicorn server...
+2026-04-19 10:31:49 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 10:31:55 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 10:31:55 | INFO | Inference worker thread started
+2026-04-19 10:31:55 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 10:31:55 | INFO | MLX handler initialized successfully
+2026-04-19 10:47:49 | INFO | Shutting down application
+2026-04-19 10:47:49 | INFO | Cleaning up resources
+2026-04-19 10:47:49 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 10:47:49 | INFO | Inference worker thread stopped
+2026-04-19 10:47:49 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 10:47:49 | INFO | Resources cleaned up successfully
+2026-04-19 10:47:58 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 10:47:58 | INFO | Server configuration complete.
+2026-04-19 10:47:58 | INFO | Starting Uvicorn server...
+2026-04-19 10:47:58 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 10:48:04 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 10:48:04 | INFO | Inference worker thread started
+2026-04-19 10:48:04 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 10:48:04 | INFO | MLX handler initialized successfully
+2026-04-19 11:37:16 | INFO | Shutting down application
+2026-04-19 11:37:16 | INFO | Cleaning up resources
+2026-04-19 11:37:16 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 11:37:16 | INFO | Inference worker thread stopped
+2026-04-19 11:37:17 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 11:37:17 | INFO | Resources cleaned up successfully
+2026-04-19 11:37:27 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 11:37:27 | INFO | Server configuration complete.
+2026-04-19 11:37:27 | INFO | Starting Uvicorn server...
+2026-04-19 11:37:27 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 11:37:33 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 11:37:33 | INFO | Inference worker thread started
+2026-04-19 11:37:33 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 11:37:33 | INFO | MLX handler initialized successfully
+2026-04-19 11:40:41 | INFO | Shutting down application
+2026-04-19 11:40:41 | INFO | Cleaning up resources
+2026-04-19 11:40:41 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 11:40:41 | INFO | Inference worker thread stopped
+2026-04-19 11:40:42 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 11:40:42 | INFO | Resources cleaned up successfully
+2026-04-19 11:40:50 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 11:40:50 | INFO | Server configuration complete.
+2026-04-19 11:40:50 | INFO | Starting Uvicorn server...
+2026-04-19 11:40:50 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 11:40:54 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 11:40:54 | INFO | Inference worker thread started
+2026-04-19 11:40:54 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 11:40:54 | INFO | MLX handler initialized successfully
+2026-04-19 11:42:13 | INFO | Shutting down application
+2026-04-19 11:42:13 | INFO | Cleaning up resources
+2026-04-19 11:42:13 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 11:42:13 | INFO | Inference worker thread stopped
+2026-04-19 11:42:13 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 11:42:13 | INFO | Resources cleaned up successfully
+2026-04-19 11:42:21 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 11:42:21 | INFO | Server configuration complete.
+2026-04-19 11:42:21 | INFO | Starting Uvicorn server...
+2026-04-19 11:42:21 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 11:42:26 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 11:42:26 | INFO | Inference worker thread started
+2026-04-19 11:42:26 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 11:42:26 | INFO | MLX handler initialized successfully
+2026-04-19 11:48:32 | INFO | Shutting down application
+2026-04-19 11:48:32 | INFO | Cleaning up resources
+2026-04-19 11:48:32 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 11:48:32 | INFO | Inference worker thread stopped
+2026-04-19 11:48:32 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 11:48:32 | INFO | Resources cleaned up successfully
+2026-04-19 11:48:42 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 11:48:42 | INFO | Server configuration complete.
+2026-04-19 11:48:42 | INFO | Starting Uvicorn server...
+2026-04-19 11:48:42 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 11:48:47 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 11:48:47 | INFO | Inference worker thread started
+2026-04-19 11:48:47 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 11:48:47 | INFO | MLX handler initialized successfully
+2026-04-19 12:01:40 | INFO | Shutting down application
+2026-04-19 12:01:40 | INFO | Cleaning up resources
+2026-04-19 12:01:40 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 12:01:40 | INFO | Inference worker thread stopped
+2026-04-19 12:01:41 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 12:01:41 | INFO | Resources cleaned up successfully
+2026-04-19 12:01:50 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 12:01:50 | INFO | Server configuration complete.
+2026-04-19 12:01:50 | INFO | Starting Uvicorn server...
+2026-04-19 12:01:50 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 12:01:56 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 12:01:56 | INFO | Inference worker thread started
+2026-04-19 12:01:56 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 12:01:56 | INFO | MLX handler initialized successfully
+2026-04-19 12:23:17 | INFO | Shutting down application
+2026-04-19 12:23:17 | INFO | Cleaning up resources
+2026-04-19 12:23:17 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 12:23:17 | INFO | Inference worker thread stopped
+2026-04-19 12:23:18 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 12:23:18 | INFO | Resources cleaned up successfully
+2026-04-19 12:23:27 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 12:23:27 | INFO | Server configuration complete.
+2026-04-19 12:23:27 | INFO | Starting Uvicorn server...
+2026-04-19 12:23:27 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 12:23:32 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 12:23:32 | INFO | Inference worker thread started
+2026-04-19 12:23:32 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 12:23:32 | INFO | MLX handler initialized successfully
+2026-04-19 12:27:21 | INFO | Shutting down application
+2026-04-19 12:27:21 | INFO | Cleaning up resources
+2026-04-19 12:27:21 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 12:27:21 | INFO | Inference worker thread stopped
+2026-04-19 12:27:21 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 12:27:21 | INFO | Resources cleaned up successfully
+2026-04-19 12:27:30 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 12:27:30 | INFO | Server configuration complete.
+2026-04-19 12:27:30 | INFO | Starting Uvicorn server...
+2026-04-19 12:27:30 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 12:27:35 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 12:27:35 | INFO | Inference worker thread started
+2026-04-19 12:27:35 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 12:27:35 | INFO | MLX handler initialized successfully
+2026-04-19 12:32:14 | INFO | Shutting down application
+2026-04-19 12:32:14 | INFO | Cleaning up resources
+2026-04-19 12:32:14 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 12:32:14 | INFO | Inference worker thread stopped
+2026-04-19 12:32:15 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 12:32:15 | INFO | Resources cleaned up successfully
+2026-04-19 12:32:23 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 12:32:23 | INFO | Server configuration complete.
+2026-04-19 12:32:23 | INFO | Starting Uvicorn server...
+2026-04-19 12:32:23 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 12:32:29 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 12:32:29 | INFO | Inference worker thread started
+2026-04-19 12:32:29 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 12:32:29 | INFO | MLX handler initialized successfully
+2026-04-19 12:41:44 | INFO | Shutting down application
+2026-04-19 12:41:44 | INFO | Cleaning up resources
+2026-04-19 12:41:44 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 12:41:45 | INFO | Inference worker thread stopped
+2026-04-19 12:41:45 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 12:41:45 | INFO | Resources cleaned up successfully
+2026-04-19 12:41:54 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 12:41:54 | INFO | Server configuration complete.
+2026-04-19 12:41:54 | INFO | Starting Uvicorn server...
+2026-04-19 12:41:54 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 12:41:59 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 12:41:59 | INFO | Inference worker thread started
+2026-04-19 12:41:59 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 12:41:59 | INFO | MLX handler initialized successfully
+2026-04-19 12:48:06 | INFO | Shutting down application
+2026-04-19 12:48:06 | INFO | Cleaning up resources
+2026-04-19 12:48:06 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 12:48:06 | INFO | Inference worker thread stopped
+2026-04-19 12:48:06 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 12:48:06 | INFO | Resources cleaned up successfully
+2026-04-19 13:00:34 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 13:00:34 | INFO | Server configuration complete.
+2026-04-19 13:00:34 | INFO | Starting Uvicorn server...
+2026-04-19 13:00:34 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 13:00:39 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 13:00:39 | INFO | Inference worker thread started
+2026-04-19 13:00:39 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 13:00:39 | INFO | MLX handler initialized successfully
+2026-04-19 13:19:57 | INFO | Shutting down application
+2026-04-19 13:19:57 | INFO | Cleaning up resources
+2026-04-19 13:19:57 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 13:19:57 | INFO | Inference worker thread stopped
+2026-04-19 13:19:58 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 13:19:58 | INFO | Resources cleaned up successfully
+2026-04-19 13:20:04 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 13:20:04 | INFO | Server configuration complete.
+2026-04-19 13:20:04 | INFO | Starting Uvicorn server...
+2026-04-19 13:20:04 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 13:20:08 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 13:20:08 | INFO | Inference worker thread started
+2026-04-19 13:20:08 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 13:20:08 | INFO | MLX handler initialized successfully
+2026-04-19 13:42:59 | INFO | Shutting down application
+2026-04-19 13:42:59 | INFO | Cleaning up resources
+2026-04-19 13:42:59 | INFO | Cleaning up MLXVLMHandler resources
+2026-04-19 13:43:00 | INFO | Inference worker thread stopped
+2026-04-19 13:43:00 | INFO | MLXVLMHandler cleanup completed successfully
+2026-04-19 13:43:00 | INFO | Resources cleaned up successfully
+2026-04-19 13:43:06 | INFO | Starting server on 0.0.0.0:8081
+2026-04-19 13:43:06 | INFO | Server configuration complete.
+2026-04-19 13:43:06 | INFO | Starting Uvicorn server...
+2026-04-19 13:43:06 | INFO | Initializing MLX handler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 13:43:10 | INFO | Initialized MLXHandler with model path: /Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b
+2026-04-19 13:43:10 | INFO | Inference worker thread started
+2026-04-19 13:43:10 | INFO | Initialized MLXVLMHandler and started inference worker
+2026-04-19 13:43:10 | INFO | MLX handler initialized successfully

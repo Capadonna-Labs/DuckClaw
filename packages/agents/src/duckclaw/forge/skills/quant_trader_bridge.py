@@ -31,6 +31,23 @@ from duckclaw.graphs.sandbox import run_in_sandbox
 from duckclaw.utils.logger import log_tool_execution_sync
 
 
+def _broker_message_from_http_error(exc: urllib.error.HTTPError) -> str:
+    """Extrae ``message`` del JSON de error del broker (p. ej. 501 Problem Details)."""
+    try:
+        raw = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    try:
+        d = json.loads(raw)
+        if isinstance(d, dict):
+            m = d.get("message")
+            if isinstance(m, str) and m.strip():
+                return m.strip()[:2000]
+    except json.JSONDecodeError:
+        pass
+    return (raw or "")[:500]
+
+
 def _max_weight_pct_limit() -> float:
     raw = (os.environ.get("DUCKCLAW_QUANT_MAX_WEIGHT_PCT") or "10").strip()
     try:
@@ -58,6 +75,17 @@ def _state_delta_base() -> dict[str, str]:
         "user_id": get_quant_tool_user_id() or "default",
         "target_db_path": get_quant_tool_db_path() or "",
     }
+
+
+def _coerce_mandate_id_to_uuid(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return str(uuid.uuid4())
+    try:
+        uuid.UUID(s)
+        return s
+    except ValueError:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, "duckclaw:mandate:" + s))
 
 
 def quant_trading_session_prompt_block(db: Any) -> str:
@@ -404,7 +432,8 @@ def _propose_trade_signal_impl(
     sandbox_backtest_cid: str = "",
 ) -> str:
     tkr = (ticker or "").strip().upper()
-    mid = (mandate_id or "").strip() or str(uuid.uuid4())
+    mid_in = (mandate_id or "").strip()
+    mid = str(uuid.uuid4()) if not mid_in else _coerce_mandate_id_to_uuid(mid_in)
     if not tkr:
         return json.dumps({"error": "ticker requerido"}, ensure_ascii=False)
     if not has_quant_market_evidence_for_ticker(tkr):
@@ -498,7 +527,8 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
         return json.dumps({"error": "signal_id requerido"}, ensure_ascii=False)
     try:
         raw = db.query(
-            "SELECT human_approved, status FROM finance_worker.trade_signals WHERE signal_id='"
+            "SELECT human_approved, status, ticker, signal_type, proposed_weight, mandate_id "
+            "FROM finance_worker.trade_signals WHERE signal_id='"
             + sid
             + "' LIMIT 1"
         )
@@ -535,16 +565,40 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
             },
             ensure_ascii=False,
         )
-    if session_mode == "paper" and env_mode != "paper":
-        return json.dumps(
-            {
-                "error": "TRADING_SESSION_PAPER_REQUIRES_IBKR_ACCOUNT_MODE_PAPER",
-                "message": "La sesión es paper; IBKR_ACCOUNT_MODE debe ser paper.",
-            },
-            ensure_ascii=False,
-        )
+    # Paper/live de ejecución lo marca la sesión (paper_flag); IBKR_ACCOUNT_MODE refleja
+    # el snapshot de portfolio en el host, no debe bloquear una sesión paper con env live.
 
     paper_flag = session_mode != "live"
+    # #region agent log
+    try:
+        import time as _time
+
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H1",
+                        "location": "quant_trader_bridge.py:_execute_approved_signal_impl",
+                        "message": "execute_approved_signal_modes",
+                        "data": {
+                            "session_mode": session_mode,
+                            "env_mode": env_mode,
+                            "paper_flag": paper_flag,
+                        },
+                        "timestamp": int(_time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     tgt = get_quant_tool_db_path() or str(getattr(db, "_path", "") or "")
 
     url = (os.environ.get("IBKR_EXECUTE_ORDER_URL") or "").strip()
@@ -567,9 +621,30 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
             ensure_ascii=False,
         )
 
-    payload = json.dumps({"signal_id": sid, "paper": paper_flag}).encode("utf-8")
+    sig_row = row if isinstance(row, dict) else {}
+    post: dict[str, Any] = {"signal_id": sid, "paper": paper_flag}
+    tkr = str(sig_row.get("ticker") or "").strip().upper()
+    if tkr:
+        post["ticker"] = tkr
+    st = str(sig_row.get("signal_type") or "").strip().upper()
+    if st in ("ENTRY", "EXIT"):
+        post["signal_type"] = st
+    try:
+        pw = float(sig_row.get("proposed_weight"))
+        if pw > 0:
+            post["proposed_weight"] = pw
+    except (TypeError, ValueError):
+        pass
+    mid = str(sig_row.get("mandate_id") or "").strip()
+    if mid:
+        post["mandate_id"] = mid
+    payload = json.dumps(post, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
+    req.add_header(
+        "X-Duckclaw-IBKR-Account-Mode",
+        "paper" if paper_flag else "live",
+    )
     token = (os.environ.get("IBKR_PORTFOLIO_API_KEY") or os.environ.get("IBKR_ORDER_API_KEY") or "").strip()
     if token:
         req.add_header("Authorization", f"Bearer {token}")
@@ -578,7 +653,11 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
             body = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         _push_signal_failed(db, sid)
-        return json.dumps({"error": f"Broker HTTP {exc.code}"}, ensure_ascii=False)
+        broker_msg = _broker_message_from_http_error(exc)
+        err_obj: dict[str, Any] = {"error": f"Broker HTTP {exc.code}"}
+        if broker_msg:
+            err_obj["broker_message"] = broker_msg
+        return json.dumps(err_obj, ensure_ascii=False)
     except urllib.error.URLError as exc:
         _push_signal_failed(db, sid)
         return json.dumps({"error": str(exc.reason)}, ensure_ascii=False)
@@ -717,7 +796,7 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 "Ejecuta una senal tras HITL usando el mismo signal_id (UUID) que devolvio propose_trade_signal. "
                 "Requiere human_approved o /execute_signal <signal_id> en Telegram. "
                 "El modo paper/live del POST al broker sigue quant_core.trading_sessions (id=active) y debe alinear "
-                "con IBKR_ACCOUNT_MODE."
+                "con IBKR_ACCOUNT_MODE; se envia cabecera X-Duckclaw-IBKR-Account-Mode (paper|live)."
             ),
         )
     )

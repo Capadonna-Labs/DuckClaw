@@ -317,6 +317,35 @@ def _list_authorized_users(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
     return []
 
 
+def _resolve_team_add_uid_and_username(tokens: list[str]) -> tuple[str, str]:
+    """
+    ``/team --add``: el orden documentado es ``<user_id> [nombre]``, pero en Telegram
+    es habitual escribir ``<nombre> <user_id> [user|admin]``. Si hay exactamente un token
+    con aspecto de Telegram user id (solo dígitos, longitud razonable), se usa como
+    ``user_id`` y el resto como nombre para mostrar.
+    """
+    tks = [t.strip() for t in tokens if t.strip()]
+    if not tks:
+        return "", "Usuario"
+    # Telegram user_id es numérico; en tests se usan ids cortos (p. ej. 999).
+    digit_indices = [i for i, x in enumerate(tks) if x.isdigit() and 3 <= len(x) <= 20]
+    if len(digit_indices) == 1:
+        i = digit_indices[0]
+        uid = tks[i]
+        name_parts = [tks[j] for j in range(len(tks)) if j != i]
+        uname = " ".join(name_parts).strip() or "Usuario"
+        return uid, uname
+    if len(digit_indices) >= 2:
+        i = digit_indices[-1]
+        uid = tks[i]
+        name_parts = [tks[j] for j in range(len(tks)) if j != i]
+        uname = " ".join(name_parts).strip() or "Usuario"
+        return uid, uname
+    uid0 = tks[0]
+    uname = (" ".join(tks[1:]).strip() if len(tks) > 1 else "Usuario") or "Usuario"
+    return uid0, uname
+
+
 def _dedupe_authorized_users_by_user_id(users: list[dict[str, str]]) -> list[dict[str, str]]:
     """
     Unifica filas por ``user_id`` (p. ej. duplicados legacy por distinto casing de ``tenant_id`` en PK).
@@ -1127,7 +1156,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
     """
     Telegram Guard spec: /team lista y muta authorized_users por tenant.
     - /team                           -> lista autorizados (para tenant)
-    - /team --add <user_id> [nombre] [admin] (admin u owner DUCKCLAW_ADMIN_CHAT_ID)
+    - /team --add <user_id> [nombre] [admin|user] (también nombre primero si el id es numérico)
     - /team --rm <user_id>            (admin u owner)
     """
     acl = _team_whitelist_db(db)
@@ -1268,15 +1297,18 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         ids_part = raw[6:].strip() if raw.startswith("--add ") else ""
         tokens = [t for t in ids_part.split() if t.strip()]
         if not tokens:
-            return "Uso: /team --add <user_id> [nombre] [admin]"
+            return "Uso: /team --add <user_id> [nombre] [admin|user]"
         role_out = "user"
         if len(tokens) >= 2 and tokens[-1].lower() == "admin":
             role_out = "admin"
             tokens = tokens[:-1]
+        if len(tokens) >= 2 and tokens[-1].lower() == "user":
+            tokens = tokens[:-1]
         if not tokens:
-            return "Uso: /team --add <user_id> [nombre] [admin]"
-        target_uid = tokens[0]
-        uname = tokens[1] if len(tokens) > 1 else "Usuario"
+            return "Uso: /team --add <user_id> [nombre] [admin|user]"
+        target_uid, uname = _resolve_team_add_uid_and_username(tokens)
+        if not (target_uid or "").strip():
+            return "Uso: /team --add <user_id> [nombre] [admin|user]"
         mut_db, mut_close = _authorized_users_rw_connection(db)
         try:
             _upsert_authorized_user(mut_db, tenant_id=tid, user_id=target_uid, username=uname, role=role_out)
@@ -1284,6 +1316,45 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         finally:
             mut_close()
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
+        # region agent log
+        try:
+            import json as _json  # noqa: PLC0415
+            import time as _time  # noqa: PLC0415
+
+            _mtp = ""
+            try:
+                _fp = getattr(mut_db, "_path", "") or ""
+                _mtp = str(_fp)[-96:] if _fp else ""
+            except Exception:
+                _mtp = ""
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    _json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "pre-fix",
+                            "hypothesisId": "H4_team_add_rw_path",
+                            "location": "on_the_fly_commands.py:execute_team_whitelist",
+                            "message": "team_add_upsert_done",
+                            "data": {
+                                "tenant_norm": str(tid or "").lower()[:64],
+                                "target_uid_len": len(str(target_uid or "")),
+                                "mut_db_path_tail": _mtp,
+                                "uid_is_digits": str(target_uid or "").isdigit(),
+                            },
+                            "timestamp": int(_time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
         target_label = _player_label(uname, target_uid, db=acl, tenant_id=tid)
         return f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'."
 
@@ -4592,6 +4663,29 @@ ON CONFLICT (id) DO UPDATE SET
 
 
 
+def _looks_like_hallucinated_placeholder_uuid(sid: str) -> bool:
+    """
+    Detecta UUID de baja entropía o patrones típicos inventados por el LLM cuando no hubo tool call.
+    No sustituye el ledger: solo mejora el mensaje de error (evidencia: gateway tools usadas=ninguna + e0e5e5e5...).
+    """
+    t = (sid or "").strip().lower()
+    if not t:
+        return False
+    if "e0e5e5e5" in t or "deadbeef" in t:
+        return True
+    try:
+        u = uuid.UUID(t)
+    except ValueError:
+        return False
+    h32 = u.hex
+    if h32 == "0" * 32:
+        return True
+    # uuid4 real suele tener muchos símbolos hex distintos; placeholders repetitivos tienen pocos
+    if len(set(h32)) <= 4:
+        return True
+    return False
+
+
 def _execute_signal_verify_ledger(db: Any, sid: str) -> tuple[bool, str]:
     """Comprueba que el UUID exista y sea ejecutable (Quant: finance_worker; Finanz: quant_core)."""
     if db is None:
@@ -4631,6 +4725,34 @@ def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
         sid,
     ):
         return "Uso: /execute_signal <signal_id_UUID>"
+    if _looks_like_hallucinated_placeholder_uuid(sid):
+        # region agent log
+        try:
+            _p = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+            with _p.open("a", encoding="utf-8") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "hypothesisId": "H4",
+                            "location": "on_the_fly_commands.execute_quant_execute_signal",
+                            "message": "placeholder_uuid_rejected",
+                            "data": {"sid_prefix": sid[:24]},
+                            "timestamp": int(time.time() * 1000),
+                            "runId": "post-fix",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
+        return (
+            "No: ese UUID parece inventado por el modelo (no viene de `propose_trade_signal`). "
+            "Pide al asistente que en el **mismo turno** ejecute OHLCV + `propose_trade_signal` "
+            "y uses solo el `signal_id` del JSON de la herramienta."
+        )
     try:
         from duckclaw.graphs.graph_server import get_db as _get_db
 

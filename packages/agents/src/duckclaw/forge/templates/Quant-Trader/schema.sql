@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS quant_core.trade_signals (
   confidence_score DOUBLE,
   target_price DOUBLE,
   stop_loss DOUBLE,
+  order_qty DOUBLE,
   session_uid VARCHAR,
   rationale TEXT,
   status VARCHAR DEFAULT 'PENDING_HITL',

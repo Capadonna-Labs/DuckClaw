@@ -1,0 +1,49 @@
+# Asistente PQRSD — Alcaldía de Medellín
+# Spec: specs/features/Asistente PQRSD (Alcaldía Medellín).md
+name: Asistente de PQRSD
+id: pqrsd_assistant
+schema_name: pqrsd_assistant
+topology: general
+read_only: false
+risk_level: conservative
+network_access: true
+# Strix browser sandbox: Playwright (Chromium) para interactuar con el portal; no usar mercenario del Manager.
+browser_sandbox: true
+
+version: 1.0.0
+type: sovereign_worker
+metadata:
+  domain: ciudadania_medellin
+  description: >
+    Agente de Gestión Ciudadana: orientación PQRSD/correspondencia, perfil en bóveda,
+    registro interno CRM (radicado MDE-… en DuckDB) y lectura de páginas oficiales con Tavily acotada.
+
+cognition:
+  soul: ./soul.md
+  system_prompt: ./system_prompt.md
+  domain_closure: ./domain_closure.md
+
+llm:
+  required: true
+  temperature: 0.2
+
+allowed_tables:
+  - orientation_notes
+  - radicacion_perfil
+  - radicacion_crm
+
+skills:
+  - pqrsd_portal_fetch
+  - pqrsd_radicacion_perfil
+  - pqrsd_radicacion_crm
+  - pqrsd_sandbox_identificacion
+  - research:
+      tavily_enabled: true
+      audit_langsmith: false
+      search_depth: advanced
+      include_answer: true
+      max_results: 10
+      include_raw_content: false
+      # Tavily: solo resultados del portal oficial (evita YouTube, Scribd, prensa ajena, etc.)
+      include_domains:
+        - https://www.medellin.gov.co

@@ -19,6 +19,22 @@ from duckclaw.utils.logger import log_tool_execution_sync
 _log = logging.getLogger(__name__)
 
 
+def _broker_message_from_http_error(exc: urllib.error.HTTPError) -> str:
+    try:
+        raw = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    try:
+        d = json.loads(raw)
+        if isinstance(d, dict):
+            m = d.get("message")
+            if isinstance(m, str) and m.strip():
+                return m.strip()[:2000]
+    except json.JSONDecodeError:
+        pass
+    return (raw or "")[:500]
+
+
 def _risk_level(spec: Any) -> str:
     rl = (getattr(spec, "risk_level", None) or "conservative").strip().lower()
     return rl if rl in ("aggressive", "conservative") else "conservative"
@@ -57,8 +73,8 @@ def _propose_trade_impl(
         db.execute(
             """
             INSERT INTO quant_core.trade_signals
-            (signal_id, ticker, strategy_name, action, confidence_score, target_price, stop_loss)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (signal_id, ticker, strategy_name, action, confidence_score, target_price, stop_loss, order_qty)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 sid,
@@ -68,6 +84,7 @@ def _propose_trade_impl(
                 float(confidence_score),
                 float(limit_price),
                 float(stop_loss),
+                float(q),
             ),
         )
     except Exception as e:
@@ -124,17 +141,59 @@ def _execute_order_impl(db: Any, spec: Any, signal_id: str) -> str:
             ensure_ascii=False,
         )
 
+    try:
+        raw = db.query(
+            "SELECT ticker, action, order_qty FROM quant_core.trade_signals WHERE signal_id='"
+            + sid
+            + "' LIMIT 1"
+        )
+        sig_rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception as exc:
+        return json.dumps({"error": f"DB_READ_FAILED: {exc}"}, ensure_ascii=False)
+    if not sig_rows:
+        return json.dumps({"error": "signal no existe en quant_core.trade_signals"}, ensure_ascii=False)
+    sig = sig_rows[0] if isinstance(sig_rows[0], dict) else {}
+    act = str(sig.get("action") or "").strip().upper()
+    if act == "HOLD":
+        return json.dumps({"error": "HOLD no se envía al broker."}, ensure_ascii=False)
+    if act not in ("BUY", "SELL"):
+        return json.dumps({"error": "action inválida en señal."}, ensure_ascii=False)
+    try:
+        oq = float(sig.get("order_qty") or 0.0)
+    except (TypeError, ValueError):
+        oq = 0.0
+    if oq <= 0:
+        return json.dumps(
+            {"error": "order_qty ausente o cero; vuelve a proponer la operación tras migración de esquema."},
+            ensure_ascii=False,
+        )
+    tkr = str(sig.get("ticker") or "").strip().upper()
+    if not tkr:
+        return json.dumps({"error": "Señal sin ticker."}, ensure_ascii=False)
+
     token = (os.environ.get("IBKR_PORTFOLIO_API_KEY") or os.environ.get("IBKR_ORDER_API_KEY") or "").strip()
-    payload = json.dumps({"signal_id": sid, "paper": True}).encode("utf-8")
+    post = {
+        "signal_id": sid,
+        "paper": True,
+        "ticker": tkr,
+        "action": act,
+        "quantity": oq,
+    }
+    payload = json.dumps(post, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
+    req.add_header("X-Duckclaw-IBKR-Account-Mode", "paper")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(req, timeout=45) as resp:
             body = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
-        return json.dumps({"error": f"Broker HTTP {e.code}"}, ensure_ascii=False)
+        broker_msg = _broker_message_from_http_error(e)
+        err_obj: dict[str, Any] = {"error": f"Broker HTTP {e.code}"}
+        if broker_msg:
+            err_obj["broker_message"] = broker_msg
+        return json.dumps(err_obj, ensure_ascii=False)
     except urllib.error.URLError as e:
         return json.dumps({"error": str(e.reason)}, ensure_ascii=False)
     return json.dumps({"status": "sent", "signal_id": sid, "broker_response": body[:2000]}, ensure_ascii=False)

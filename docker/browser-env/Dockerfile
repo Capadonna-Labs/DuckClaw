@@ -20,10 +20,13 @@ RUN chmod +x /usr/local/bin/strix-browser-init.sh
 RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
     fluxbox \
+    feh \
+    x11-xserver-utils \
     x11vnc \
     novnc \
     python3-websockify \
     chromium \
+    procps \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

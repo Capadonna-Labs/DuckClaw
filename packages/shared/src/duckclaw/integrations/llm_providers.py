@@ -448,12 +448,36 @@ def _strip_gemma_pseudo_xml_date_time(text: str) -> str:
     return s
 
 
+_DUCKDB_INTERNAL_CRASH_USER_ES = (
+    "Ahora mismo no puedo usar la bóveda de datos del asistente (fallo técnico en el servidor). "
+    "Tu mensaje está bien; reintenta más tarde. Si persiste, quien administra el sistema debe revisar la base DuckDB."
+)
+
+
+def _strip_duckdb_internal_crash_reply(text: str) -> str:
+    """
+    Evita que errores INTERNAL de DuckDB (WAL, stack nativo) lleguen a Telegram/trazas como si fueran
+    respuesta del modelo. Evidencia: pqrsd-assistantdb con WAL inconsistente.
+    """
+    s = (text or "").strip()
+    if not s or "INTERNAL Error:" not in s:
+        return text or ""
+    low = s.lower()
+    walish = "failure while replaying" in low or "replaying wal" in low
+    stackish = "stack trace:" in low or "duckdb_adbc_init" in low or "pyinit__duckdb" in low
+    pathish = ".duckdb" in s
+    if walish or (stackish and pathish):
+        return _DUCKDB_INTERNAL_CRASH_USER_ES
+    return text or ""
+
+
 def sanitize_worker_reply_text(text: str) -> str:
     """Limpia respuestas assistant para Telegram/trazas: basura HTTP + EOT + encabezados ``### tool``."""
     s = sanitize_worker_reply_phase1(text or "")
     s = strip_gemma_mlx_channel_leak(s)
     s = _strip_gemma_pseudo_xml_date_time(s)
     s = _strip_tool_section_header_lines(s)
+    s = _strip_duckdb_internal_crash_reply(s)
     return s.strip()
 
 

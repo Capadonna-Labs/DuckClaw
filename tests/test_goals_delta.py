@@ -14,6 +14,28 @@ from duckclaw.graphs.on_the_fly_commands import (
 import services.heartbeat.main as heartbeat
 
 
+def _patch_heartbeat_sync_duckdb_write(monkeypatch: Any) -> None:
+    """enqueue_duckdb_write_sync solo encola Redis; sin db-writer el .duckdb no cambia en tests."""
+
+    import duckdb
+
+    def _sync(
+        *,
+        db_path: str,
+        query: str,
+        params: list[Any] | None = None,
+        **kwargs: Any,
+    ) -> str:
+        con = duckdb.connect(db_path)
+        try:
+            con.execute(query, list(params or []))
+        finally:
+            con.close()
+        return "test-task"
+
+    monkeypatch.setattr(heartbeat, "enqueue_duckdb_write_sync", _sync)
+
+
 def test_parse_goals_delta_arg_off() -> None:
     assert parse_goals_delta_arg("off") == (0, None)
     assert parse_goals_delta_arg("0") == (0, None)
@@ -98,6 +120,7 @@ def test_run_goals_proactive_tick_posts_system_event(tmp_path: Path, monkeypatch
             return Resp()
 
     monkeypatch.setenv("DUCKCLAW_GOALS_TICKER_DB_PATH", db_path)
+    _patch_heartbeat_sync_duckdb_write(monkeypatch)
     monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
 
     asyncio.run(heartbeat._run_goals_proactive_tick())
@@ -111,6 +134,7 @@ def test_run_goals_proactive_tick_posts_system_event(tmp_path: Path, monkeypatch
     url = posts[0]["args"][0]
     assert "Quant-Trader" in url
     assert "/chat" in url
+    assert posts[0]["kwargs"]["json"].get("vault_db_path") in (None, db_path)
 
     con2 = duckdb.connect(db_path, read_only=True)
     row = con2.execute(
@@ -238,11 +262,14 @@ def test_run_goals_proactive_finds_delta_in_sibling_vault_duckdb(
 
     monkeypatch.delenv("DUCKCLAW_GOALS_TICKER_DB_PATH", raising=False)
     monkeypatch.setattr(heartbeat, "get_gateway_db_path", lambda: hub)
+    _patch_heartbeat_sync_duckdb_write(monkeypatch)
     monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
 
     asyncio.run(heartbeat._run_goals_proactive_tick())
 
     assert len(posts) == 1
+    vault_resolved = str(Path(vault).resolve())
+    assert posts[0]["kwargs"]["json"].get("vault_db_path") == vault_resolved
     con2 = duckdb.connect(vault, read_only=True)
     row = con2.execute(
         "SELECT value FROM agent_config WHERE key = 'chat_77_goals_proactive_last_fire_epoch'"

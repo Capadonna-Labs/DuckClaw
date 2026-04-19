@@ -492,6 +492,18 @@ def _worker_matches_id(worker_id: str | None, alias: str | None) -> bool:
     return _worker_id_alnum_slug(worker_id) == _worker_id_alnum_slug(alias)
 
 
+def _strip_mercenary_spec_for_pqrsd_assistant(out: dict[str, Any]) -> bool:
+    """
+    PQRSD-Assistant usa Strix ``run_browser_sandbox`` (Playwright), no el nodo mercenario.
+    Devuelve True si se eliminó ``mercenary_spec`` del estado del plan.
+    """
+    wid = (out.get("assigned_worker_id") or "").strip()
+    if not out.get("mercenary_spec") or not _worker_matches_id(wid, "pqrsd_assistant"):
+        return False
+    out.pop("mercenary_spec", None)
+    return True
+
+
 def _contains_income_injection_request(text: str) -> bool:
     """Detecta marcador explícito de handoff A2A desde la respuesta de Finanz."""
     t = (text or "").strip().lower()
@@ -565,6 +577,19 @@ def _is_goals_proactive_system_event(text: str) -> bool:
     return t.startswith("[SYSTEM_EVENT:") and "Revisión periódica de /goals" in t
 
 
+def _is_entry_route_system_event(text: str) -> bool:
+    """
+    True si el inbound debe ejecutarse en ``entry_worker_id`` (worker de la ruta HTTP),
+    sin que el manager lo reasigne (p. ej. ticker TRADING_TICK → Quant-Trader vía /quanttrader).
+    """
+    t = (text or "").strip()
+    if _is_goals_proactive_system_event(t):
+        return True
+    if not t.startswith("[SYSTEM_EVENT:"):
+        return False
+    return '"type":"TRADING_TICK"' in t or '"type": "TRADING_TICK"' in t
+
+
 def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     """
     Convierte el mensaje del usuario en una tarea explícita para el subagente.
@@ -575,6 +600,8 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     text = (incoming or "").strip().lstrip("\ufeff")
     if not text:
         return incoming or "", None
+    if _is_entry_route_system_event(text):
+        return text, None
     # Gateway (Telegram /context): el cuerpo puede mencionar DuckDB, "estructura", "schema", tablas, etc.
     # Sin este bypass, _plan_task sustituye el mensaje por TAREA: listar tablas y el worker pierde la directiva.
     if text.startswith("[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]") or text.startswith(
@@ -1115,14 +1142,52 @@ def build_manager_graph(
                     break
         incoming_r = (state.get("incoming") or state.get("input") or "").strip()
         entry_r = (state.get("entry_worker_id") or "").strip()
-        _goals_ev = _is_goals_proactive_system_event(incoming_r)
+        _entry_route_ev = _is_entry_route_system_event(incoming_r)
         _all_disk_r = list_workers(troot)
-        _avail_before_goals_merge = list(available)
-        _canon_entry = _resolve_template_id(_all_disk_r, entry_r) if (entry_r and _goals_ev) else None
-        if _canon_entry and _goals_ev:
-            assigned = _canon_entry
+        # Multiplex Telegram (p. ej. /api/v1/telegram/pqrsd-assistant): el API Gateway
+        # pasa entry_worker_id=PQRSD-Assistant. Antes solo se fusionaba en SYSTEM_EVENT
+        # (TRADING_TICK, goals ticker); los mensajes normales quedaban con assigned=available[0]
+        # (suele ser finanz) → delegación incorrecta. Si hay ruta HTTP, priorizar siempre ese worker.
+        _canon_entry = _resolve_template_id(_all_disk_r, entry_r) if entry_r else None
+        if _canon_entry:
             if _canon_entry not in available:
                 available = list(available) + [_canon_entry]
+            available = [_canon_entry] + [w for w in available if w != _canon_entry]
+            assigned = _canon_entry
+        # #region agent log
+        try:
+            import json as _json_dbg
+            from time import time as _time_dbg
+
+            if entry_r:
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(
+                        _json_dbg.dumps(
+                            {
+                                "sessionId": "8d6707",
+                                "hypothesisId": "H1_entry_route",
+                                "location": "manager_graph.py:router_node",
+                                "message": "entry_worker_merge",
+                                "data": {
+                                    "entry_r": entry_r,
+                                    "canon_entry": _canon_entry,
+                                    "assigned": assigned,
+                                    "available0": (available[0] if available else None),
+                                    "entry_route_system_ev": _entry_route_ev,
+                                },
+                                "timestamp": int(_time_dbg() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+        except Exception:
+            pass
+        # #endregion
         out = {"assigned_worker_id": assigned, "available_templates": available}
         # Preservar estado para nodos siguientes (por si el grafo hace merge sustituyendo)
         if "incoming" in state:
@@ -1304,13 +1369,72 @@ def build_manager_graph(
             out["assigned_worker_id"] = assigned
 
         route_entry = (state.get("entry_worker_id") or "").strip()
-        if route_entry and _is_goals_proactive_system_event(incoming):
+        if route_entry and _is_entry_route_system_event(incoming):
             _all_plan_disk = list_workers(troot)
             _canon_re = _resolve_template_id(_all_plan_disk, route_entry)
             if _canon_re and _canon_re in _all_plan_disk:
                 out["assigned_worker_id"] = _canon_re
                 if _canon_re not in available_plan:
                     available_plan = list(available_plan) + [_canon_re]
+                # #region agent log
+                try:
+                    import json as _json_dbg
+                    from time import time as _time_dbg
+
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(
+                            _json_dbg.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "hypothesisId": "H2",
+                                    "location": "manager_graph.py:plan_node",
+                                    "message": "plan_force_entry_worker",
+                                    "data": {"route_entry": route_entry, "canon_re": _canon_re},
+                                    "timestamp": int(_time_dbg() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # #endregion
+
+        if _strip_mercenary_spec_for_pqrsd_assistant(out):
+            mercenary_spec = None
+            # #region agent log
+            try:
+                import json as _json_dbg
+                from time import time as _time_dbg
+
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(
+                        _json_dbg.dumps(
+                            {
+                                "sessionId": "8d6707",
+                                "hypothesisId": "M1",
+                                "location": "manager_graph.plan_node:pqrsd_strip_mercenary",
+                                "message": "mercenary_spec_cleared_for_pqrsd_assistant",
+                                "data": {
+                                    "assigned_worker_id": (out.get("assigned_worker_id") or "").strip(),
+                                },
+                                "timestamp": int(_time_dbg() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
 
         out["available_templates"] = available_plan
         # Preservar estado para invoke_worker
@@ -1381,7 +1505,7 @@ def build_manager_graph(
         available = list(state.get("available_templates") or list_workers(troot))
         assigned = (state.get("assigned_worker_id") or "").strip() or None
         _all_iw = list_workers(troot)
-        if assigned and assigned not in available and _is_goals_proactive_system_event(incoming):
+        if assigned and assigned not in available and _is_entry_route_system_event(incoming):
             _entry_iw = (state.get("entry_worker_id") or "").strip()
             _c_iw = _resolve_template_id(_all_iw, assigned) or (
                 _resolve_template_id(_all_iw, _entry_iw) if _entry_iw else None
@@ -1526,6 +1650,7 @@ def build_manager_graph(
                         log_username=(state.get("username") or "").strip() or None,
                         log_plan_title="A2A handoff",
                         outbound_bot_token=_out_hb_tok,
+                        routing_worker_id=str(assigned or "").strip() or None,
                     )
                 except Exception:
                     pass
@@ -1564,6 +1689,7 @@ def build_manager_graph(
                 log_username=(state.get("username") or "").strip() or None,
                 log_plan_title=_hb_plan_log,
                 outbound_bot_token=_out_hb_tok,
+                routing_worker_id=str(assigned or "").strip() or None,
             )
             worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
             raw_worker_reply = str(
@@ -1574,7 +1700,10 @@ def build_manager_graph(
             )
             reply = raw_worker_reply
             _label_reply = f"{assigned} {run_label_n}".strip()
-            reply = _prepend_subagent_label_once(reply, _label_reply)
+            # CRM (Next.js): el proxy usa chat_id `crm-ticket-*`; no anteponer etiqueta de subagente.
+            _crm = str(chat_id or "").strip().lower().startswith("crm-ticket-")
+            if not _crm:
+                reply = _prepend_subagent_label_once(reply, _label_reply)
             messages = worker_invoke.get("messages")
             if isinstance(messages, tuple):
                 messages = list(messages)
@@ -1654,7 +1783,9 @@ def build_manager_graph(
                 )
             reply = msg
             _label_e = f"{assigned} {run_label_n}".strip()
-            reply = _prepend_subagent_label_once(reply, _label_e)
+            _crm_e = str(chat_id or "").strip().lower().startswith("crm-ticket-")
+            if not _crm_e:
+                reply = _prepend_subagent_label_once(reply, _label_e)
             status = "FAILED"
             _retryable, _rreason = classify_exception_for_replan(e, _duckdb_config_clash)
             if replan_enabled() and _retryable:

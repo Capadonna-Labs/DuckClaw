@@ -369,6 +369,63 @@ def test_manager_capabilities_fast_path_ok() -> None:
     assert "resumen" in fz or "cuenta" in fz
 
 
+def test_entry_worker_id_routes_normal_message_to_bound_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Telegram multiplex: entry_worker_id debe ganar a available[0] (evita finanz en bot PQRSD)."""
+    from duckclaw.graphs.manager_graph import build_manager_graph
+
+    monkeypatch.delenv("DUCKCLAW_DEFAULT_WORKER_ID", raising=False)
+
+    class _FakeDB:
+        pass
+
+    call_log: list[str] = []
+
+    class _FakeWorkerGraph:
+        def __init__(self, wid: str):
+            self.wid = wid
+
+        def invoke(self, worker_state, _config=None):  # noqa: ANN001
+            call_log.append(self.wid)
+            return {"reply": f"ok from {self.wid}"}
+
+    def _fake_builder(worker_id, *_args, **_kwargs):  # noqa: ANN001
+        return _FakeWorkerGraph(str(worker_id))
+
+    monkeypatch.setattr("duckclaw.workers.factory.build_worker_graph", _fake_builder)
+    monkeypatch.setattr(
+        "duckclaw.workers.factory.list_workers",
+        lambda *_a, **_k: ["finanz", "PQRSD-Assistant"],
+    )
+    monkeypatch.setattr(
+        "duckclaw.graphs.on_the_fly_commands.get_effective_team_templates",
+        lambda *_a, **_k: ["finanz", "PQRSD-Assistant"],
+    )
+    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.get_chat_state", lambda *_a, **_k: "off")
+    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.append_task_audit", lambda *_a, **_k: None)
+    monkeypatch.setattr("duckclaw.graphs.activity.set_busy", lambda *_a, **_k: None)
+    monkeypatch.setattr("duckclaw.graphs.activity.set_idle", lambda *_a, **_k: None)
+    monkeypatch.setattr("duckclaw.graphs.chat_heartbeat.schedule_chat_heartbeat_dm", lambda *_a, **_k: None)
+
+    import duckclaw.graphs.manager_graph as _mgr_mod
+
+    _mgr_mod._worker_graph_cache.clear()
+    graph = build_manager_graph(_FakeDB(), llm=None)
+    out = graph.invoke(
+        {
+            "incoming": "qué puedes hacer en https://www.medellin.gov.co/es/pqrsd/",
+            "input": "qué puedes hacer en https://www.medellin.gov.co/es/pqrsd/",
+            "chat_id": "test-chat-pqrsd",
+            "tenant_id": "PQRS",
+            "user_id": "u1",
+            "entry_worker_id": "PQRSD-Assistant",
+        }
+    )
+
+    assert call_log, "debe invocarse un worker"
+    assert call_log[0] == "PQRSD-Assistant"
+    assert "ok from PQRSD-Assistant" in str(out.get("reply") or "")
+
+
 def test_manager_a2a_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pytest.MonkeyPatch) -> None:
     from duckclaw.graphs.manager_graph import build_manager_graph
 
@@ -632,3 +689,36 @@ def test_worker_tool_names_from_messages_dict_and_object_tool_calls() -> None:
     # AIMessage normaliza tool_calls a objetos; dedupe mantiene un solo read_sql.
     assert "read_sql" in names and "tavily_search" in names
     assert names.index("read_sql") < names.index("tavily_search")
+
+
+def test_entry_route_system_event_trading_tick_and_plan_task_bypass() -> None:
+    from duckclaw.graphs.manager_graph import (
+        _is_entry_route_system_event,
+        _is_goals_proactive_system_event,
+        _plan_task,
+    )
+    from duckclaw.graphs.on_the_fly_commands import build_trading_tick_system_event_message
+
+    tick = build_trading_tick_system_event_message(
+        session_uid="uid-1",
+        tickers=["META", "SPY"],
+        mode="paper",
+        signal_threshold="GAS",
+    )
+    assert _is_entry_route_system_event(tick)
+    assert not _is_goals_proactive_system_event(tick)
+
+    goals = (
+        "[SYSTEM_EVENT: Revisión periódica de /goals. Objetivos: x. "
+        "Evalúa con herramientas si hace falta qué tan alineado está el "
+        "contexto actual con cumplir cada meta. Responde al usuario.]"
+    )
+    assert _is_entry_route_system_event(goals)
+    assert _is_goals_proactive_system_event(goals)
+
+    plain = "cuánto tengo en Nequi"
+    assert not _is_entry_route_system_event(plain)
+
+    task, override = _plan_task(tick, "finanz")
+    assert override is None
+    assert task == tick

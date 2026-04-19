@@ -57,13 +57,27 @@ def test_filter_tools_for_sandbox_removes_run_sandbox() -> None:
         def __init__(self, name: str) -> None:
             self.name = name
 
-    tools = [DummyTool("run_sandbox"), DummyTool("read_sql"), DummyTool("inspect_schema")]
+    tools = [
+        DummyTool("run_sandbox"),
+        DummyTool("run_browser_sandbox"),
+        DummyTool("get_browser_session_url"),
+        DummyTool("pqrsd_run_identificacion_step1"),
+        DummyTool("read_sql"),
+        DummyTool("inspect_schema"),
+    ]
 
     tools_off = filter_tools_for_sandbox(tools, enabled=False)
     assert [t.name for t in tools_off] == ["read_sql", "inspect_schema"]
 
     tools_on = filter_tools_for_sandbox(tools, enabled=True)
-    assert [t.name for t in tools_on] == ["run_sandbox", "read_sql", "inspect_schema"]
+    assert [t.name for t in tools_on] == [
+        "run_sandbox",
+        "run_browser_sandbox",
+        "get_browser_session_url",
+        "pqrsd_run_identificacion_step1",
+        "read_sql",
+        "inspect_schema",
+    ]
 
 
 def test_worker_sandbox_binding_respects_chat_id(tmp_path) -> None:

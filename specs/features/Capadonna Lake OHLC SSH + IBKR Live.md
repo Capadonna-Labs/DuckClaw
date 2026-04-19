@@ -77,6 +77,58 @@ Cuerpo JSON preferente:
 
 DuckClaw incorpora `message` (o `error`) en el texto devuelto a la tool cuando el código HTTP indica fallo.
 
+## Contrato HTTP POST `/api/broker/execute` (HITL → broker; Duckclaw `IBKR_EXECUTE_ORDER_URL`)
+
+Tras `/execute_signal`, Finanz (`execute_order`) y Quant Trader (`execute_approved_signal`) hacen **POST** a `IBKR_EXECUTE_ORDER_URL` con JSON **mínimo** `{"signal_id":"<uuid>","paper":true|false}` (default `paper` en el cuerpo si el receptor lo permite), cabecera **`X-Duckclaw-IBKR-Account-Mode: paper|live`** (alineada con el modo efectivo; Finanz siempre `paper`) y cabecera opcional `Authorization: Bearer` (misma clave que portafolio si se reutiliza).
+
+**Payload enriquecido (recomendado):** el gateway puede incluir en el mismo POST los campos que ya leyó de su DuckDB, para que el VPS **no** necesite una copia estática del `.duckdb` solo para resolver la orden.
+
+| Campos opcionales | Uso |
+|-------------------|-----|
+| `ticker`, `signal_type` (`ENTRY`\|`EXIT`), `proposed_weight` (porcentaje > 0), `mandate_id` (opcional) | Modo **peso** (Quant Trader): el receptor serializa un plan y lo pasa al hook vía env `DUCKCLAW_EMBEDDED_EXECUTE_JSON` (`mode: weight`). |
+| `ticker`, `action` (`BUY`\|`SELL`), `quantity` (> 0) | Modo **acciones** (Finanz): mismo mecanismo con `mode: shares`. |
+
+Si el POST trae datos válidos para **ambos** modos, el receptor prioriza **acciones** sobre peso. Si faltan los campos enriquecidos, el hook sigue el **fallback** actual: leer `finance_worker.trade_signals` en `IBKR_EXECUTE_ORDER_DB_PATH` (DuckDB local en el VPS).
+
+**Implementación de referencia** en el monorepo: ruta **`POST /api/broker/execute`** en [`services/ibkr-ohlcv-api/ohlcv_market_routes.py`](../../services/ibkr-ohlcv-api/ohlcv_market_routes.py) (mismo proceso/puerto que OHLCV, p. ej. `:8002`).
+
+| Comportamiento | Detalle |
+|----------------|---------|
+| Auth | Opcional: si el proceso define `OHLCV_API_KEY` o `IBKR_PORTFOLIO_API_KEY`, exige `Bearer` coincidente. |
+| Modo efectivo (paper por defecto) | Si `OHLCV_BROKER_EXECUTE_FORCE_PAPER` es `1`/`true`, el hook recibe siempre paper (`1`). Si no: la cabecera `X-Duckclaw-IBKR-Account-Mode` manda cuando vale `paper` o `live`; si falta o es inválida, se usa el campo JSON `paper` (default **True** = paper). |
+| Sin hook local | Respuesta **501** si no están definidos `OHLCV_EXECUTE_ORDER_PYTHON` y `OHLCV_EXECUTE_ORDER_SCRIPT` (Duckclaw trata HTTP de error y puede marcar la señal como fallida). |
+| Con hook | Ejecuta `<python> <script> <signal_id> <paper>` donde `paper` es `1` o `0` según el modo efectivo. Si el cuerpo trae plan enriquecido, define `DUCKCLAW_EMBEDDED_EXECUTE_JSON` en el entorno del subproceso. Stdout: JSON objeto (se fusiona en la respuesta) o texto; stderr/rc ≠ 0 → **502**. Timeout `OHLCV_EXECUTE_ORDER_TIMEOUT` (segundos, default 120, máx. 600). |
+
+### Script de referencia `broker_execute_signal.py`
+
+Implementación en el monorepo: [`scripts/capadonna/broker_execute_signal.py`](../../scripts/capadonna/broker_execute_signal.py). **Prioridad:** (1) parsear `DUCKCLAW_EMBEDDED_EXECUTE_JSON` inyectado por el API (`mode: weight` o `mode: shares`); (2) si no hay plan embebido, leer `finance_worker.trade_signals` en **DuckDB local** (`IBKR_EXECUTE_ORDER_DB_PATH`). Envía orden **MKT** con `ib_async` (misma línea que `ibkr_historical_bars.py`). Modo peso: sizing con `equity * (proposed_weight/100)` y precio snapshot; ENTRY → BUY, EXIT → SELL (cantidad acotada a la posición larga).
+
+| Variable (VPS / hook) | Rol |
+|------------------------|-----|
+| `IBKR_EXECUTE_ORDER_DB_PATH` | Opcional si **todo** el tráfico de ejecución lleva payload enriquecido; si falta plan embebido y no hay ruta válida, el hook falla con mensaje claro. Si usas fallback DB: ruta absoluta al `.duckdb` con `finance_worker` (copia/rsync/NFS respecto al gateway). |
+| `DUCKCLAW_EMBEDDED_EXECUTE_JSON` | Solo la define el proceso `ibkr-ohlcv-api` al invocar el hook; no hace falta configurarla en systemd. |
+| `IBKR_EXECUTE_ACCOUNT_EQUITY_USD` | Opcional; si IB no devuelve `NetLiquidation` USD a tiempo, fija equity para el sizing. |
+| `IBKR_EXECUTE_MAX_NOTIONAL_USD` | Opcional; tope de nocional por orden. |
+| `IB_HOST` | Default `127.0.0.1` (Gateway en localhost del VPS). |
+| `IB_PORT_PAPER` / `IB_PORT_LIVE` o `IB_PORT` | Paper default **4002**, live **4001** si no se definen. |
+| `BROKER_EXECUTE_CLIENT_ID` / `IB_CLIENT_ID` | ClientId distinto de otros procesos (evitar Error 326). |
+
+Ejemplo de despliegue al VPS Capadonna:
+
+```bash
+scp scripts/capadonna/broker_execute_signal.py capadonna@<tailscale>:~/projects/Capadonna-Driller/scripts/
+# systemd drop-in (ver ejemplo bajo el servicio observability):
+# Environment=OHLCV_EXECUTE_ORDER_PYTHON=/home/capadonna/projects/Capadonna-Driller/.venv/bin/python
+# Environment=OHLCV_EXECUTE_ORDER_SCRIPT=/home/capadonna/projects/Capadonna-Driller/scripts/broker_execute_signal.py
+# IBKR_EXECUTE_ORDER_DB_PATH solo si necesitas fallback sin POST enriquecido:
+# Environment=IBKR_EXECUTE_ORDER_DB_PATH=/ruta/absoluta/a/la.boveda.duckdb
+```
+
+**Gateway — `.env`**
+
+- `IBKR_EXECUTE_ORDER_URL=http://<tailscale>:8002/api/broker/execute` (mismo host que `IBKR_MARKET_DATA_URL` si comparten `ibkr-ohlcv-api`).
+- En el **VPS**: definir el hook (`OHLCV_EXECUTE_ORDER_*`) con un script que lea la señal (p. ej. DuckDB compartida o API interna) y coloque la orden vía IB Gateway, **o** apuntar `IBKR_EXECUTE_ORDER_URL` a otro microservicio que ya implemente el mismo cuerpo POST.
+
 **Gateway (Mac mini) — `.env`**
 
 - `IBKR_MARKET_DATA_URL=http://<tailscale>:8002/api/market/ohlcv` (sin query).

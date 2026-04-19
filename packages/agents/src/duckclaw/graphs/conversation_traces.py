@@ -5,7 +5,7 @@ Formato según specs/features/Formateo de Datasets (SFT & GRPO).md:
 - "messages": [system, user, assistant] para SFT (ChatML / mlx_lm).
 - session_id, worker_id, timestamp, elapsed_ms, status para auditoría y GRPO (reward_metadata).
 
-Cada turno en train/conversation_traces/YYYY/MM/DD/traces.jsonl.
+Cada turno en train/conversation_traces/YYYY/MM/DD/traces.jsonl (carpeta del día en **UTC**, no hora local).
 """
 
 from __future__ import annotations
@@ -90,7 +90,7 @@ def get_conversation_traces_dir() -> Path:
 
 
 def _path_for_today_utc() -> Path:
-    """Ruta del archivo del día en curso (UTC): .../YYYY/MM/DD/traces.jsonl."""
+    """Ruta del archivo del día en curso (**UTC**): .../YYYY/MM/DD/traces.jsonl."""
     base = get_conversation_traces_dir()
     now = time.gmtime()
     return base / str(now.tm_year) / f"{now.tm_mon:02d}" / f"{now.tm_mday:02d}" / "traces.jsonl"
@@ -297,5 +297,28 @@ def append_conversation_trace(
         try:
             with open(path, "a", encoding="utf-8") as f:
                 f.write(line)
+            # #region agent log
+            try:
+                _dbg = {
+                    "sessionId": "8d6707",
+                    "hypothesisId": "T1",
+                    "location": "conversation_traces.append_conversation_trace:after_write",
+                    "message": "trace_appended_ok",
+                    "data": {
+                        "path": str(path.resolve()),
+                        "worker_id": wid,
+                        "status": (status or "").upper()[:32],
+                    },
+                    "timestamp": int(time.time() * 1000),
+                }
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(json.dumps(_dbg, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+            # #endregion
         except Exception:
             pass

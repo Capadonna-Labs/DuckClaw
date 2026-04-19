@@ -124,6 +124,150 @@ _PLANNED_TASK_PREFIX = (
 )
 
 
+_PQRSD_ACK_ONLY = re.compile(
+    r"^(gracias|muchas\s+gracias|ok\.?|vale\.?|listo\.?|perfecto\.?|entendido\.?)\s*!?$",
+    re.IGNORECASE,
+)
+
+
+def _pqrsd_substantive_forced_fetch(incoming: str, *, summarize_directive: bool) -> bool:
+    """
+    True si conviene forzar ``pqrsd_fetch_canonical`` como primera tool (worker PQRSD).
+    Excluye directivas de resumen, saludos cortos y agradecimientos sin pregunta.
+    """
+    if summarize_directive:
+        return False
+    text = (incoming or "").strip()
+    if not text:
+        return False
+    if _is_no_task(text):
+        return False
+    if _PQRSD_ACK_ONLY.match(text):
+        return False
+    if len(text) <= 12 and text.lower() in {"ok", "vale", "sip", "sí", "si", "👍", "👍🏻"}:
+        return False
+    return True
+
+
+def _pqrsd_sandbox_prefers_chat_datos_over_forced_fetch(incoming: str) -> bool:
+    """
+    True cuando el mensaje sugiere **radicación / llenado de formulario / automatización**
+    en sandbox: en ese caso **no** forzar ``pqrsd_fetch_canonical`` como primera tool
+    para que el modelo pueda **preguntar datos en el chat** antes de invocar tools.
+    """
+    t = (incoming or "").strip().lower()
+    if not t:
+        return False
+    if re.search(r"\bno\s+autorizo\b", t) or re.search(r"\bno\s+consiento\b", t):
+        return False
+    # Evitar falsos positivos de “solo información” (p. ej. plazos) salvo que también
+    # haya señales claras de acción en el portal.
+    if re.search(
+        r"\b(solo\s+quiero\s+saber|informaci[oó]n\s+sobre|cu[aá]nto\s+(demora|tarda)|"
+        r"plazo[s]?\s+de\s+respuesta|tiempo[s]?\s+de\s+respuesta)\b",
+        t,
+    ) and not re.search(
+        r"\b(radicar|radico|radique|radicaci[oó]n|formulario|llenar|ingresar\s+datos|"
+        r"datos\s+para|automatiz|vnc|pqrsd?\s+con\s+ident|an[oó]nima|autorizo|consiento|"
+        r"verificaci[oó]n|otp)\b",
+        t,
+    ):
+        return False
+    return any(
+        re.search(p, t)
+        for p in (
+            r"\b(radicar|radico|radique|radicaci[oó]n|radicacion)\b",
+            r"\b(rellen\w*|llenar)\s+(el\s+)?(formulario|datos)\b",
+            r"\bingresar\s+(los\s+)?datos\b",
+            r"\b(mis\s+datos|datos\s+para(\s+(el|la)\s+(formulario|portal|pqr))?)\b",
+            r"\bautomatiz",
+            r"\b(pqr(s|sd)?|pqrsd)\s+con\s+ident",
+            r"\b(pqr(s|sd)?|pqrsd)\s+an[oó]n",
+            r"\bidentificaci[oó]n\s+an[oó]nima\b",
+            r"\bobtener\s+(el\s+)?(n[uú]mero\s+de\s+)?verificaci[oó]n\b",
+            r"\bn[uú]mero\s+de\s+verificaci[oó]n\b",
+            r"\bc[oó]digo\s+de\s+verificaci[oó]n\b",
+            r"\botp\b",
+            r"\b(autorizo|consiento)\b",
+            r"\bs[ií],?\s*autorizo\b",
+            r"\bvnc\b",
+        )
+    )
+
+
+def _pqrsd_rad_perfil_datos_first(incoming: str) -> bool:
+    """
+    True cuando el mensaje indica intención de **presentar** solicitud/PQRSD/denuncia por el canal
+    Alcaldía y conviene **preguntar datos** (y opcionalmente persistir perfil) **antes** de forzar
+    ``pqrsd_fetch_canonical``. Complementa la heurística de sandbox sin exigir ``/sandbox on``.
+    """
+    t = (incoming or "").strip().lower()
+    if not t:
+        return False
+    if re.search(r"\bno\s+autorizo\b", t) or re.search(r"\bno\s+consiento\b", t):
+        return False
+    if re.search(
+        r"\b(solo\s+quiero\s+saber|informaci[oó]n\s+sobre|cu[aá]nto\s+(demora|tarda)|"
+        r"plazo[s]?\s+de\s+respuesta|tiempo[s]?\s+de\s+respuesta)\b",
+        t,
+    ) and not re.search(
+        r"\b(radicar|solicitud|denuncia|pqrsd|pqr|formulario|presentar|interponer|quiero\s+hacer)\b",
+        t,
+    ):
+        return False
+    return bool(
+        re.search(r"\b(hacer|presentar|quiero)\s+(una\s+)?solicitud\b", t)
+        or re.search(r"\bquiero\s+hacer\s+una\s+solicitud\b", t)
+        or re.search(r"\bquiero\s+hacer\s+una\s+petici[oó]n\b", t)
+        or re.search(r"\bpetici[oó]n\s+(de\s+)?(pqrsd|pqr|pqrs)\b", t)
+        or re.search(r"\b(me\s+gustar[ií]a|quisiera|deseo)\s+hacer\s+(una\s+)?(solicitud|denuncia)\b", t)
+        or re.search(
+            r"\bc[oó]mo\s+(puedo\s+)?(hacer|presentar|interponer|radicar)\s+(una\s+)?"
+            r"(solicitud|denuncia|(?:pqr|pqrs|pqrsd)|petici[oó]n)\b",
+            t,
+        )
+        or re.search(r"\binterponer\s+(una\s+)?(denuncia|queja|reclamo)\b", t)
+        or re.search(
+            r"\bpresentar\s+(una\s+)?((?:pqr|pqrs|pqrsd)|petici[oó]n|queja|reclamo)\b",
+            t,
+        )
+    )
+
+
+def _pqrsd_datos_first_over_forced_fetch(incoming: str) -> bool:
+    """Incluye flujo sandbox (datos en chat) y flujo perfil/radicación explícita."""
+    return _pqrsd_sandbox_prefers_chat_datos_over_forced_fetch(
+        incoming
+    ) or _pqrsd_rad_perfil_datos_first(incoming)
+
+
+def _pqrsd_contact_only_skip_forced_fetch(incoming: str) -> bool:
+    """
+    True cuando el mensaje parece **solo** bloque de identificación/contacto sin relato del caso.
+    Evita forzar ``pqrsd_fetch_canonical`` (y el plano enorme del portal) antes de pedir hechos.
+    """
+    t = (incoming or "").strip()
+    if len(t) < 30:
+        return False
+    if "@" not in t:
+        return False
+    if not re.search(r"\d{6,}", re.sub(r"[.\s]", "", t)):
+        return False
+    narrative = re.compile(
+        r"\b(qu[eé]\s+pas|porque|por\s+que|funcionari|vigilant|secretar[ií]a|oficina|"
+        r"maltrat|retraso|plata|corrup|pas[oó]\b|ayer\b|hoy\b|semana\s+pas|"
+        r"sucedi[oó]|ocurr[ií]|me\s+grit|denunci|reclam|quej[ao]|insul|"
+        r"atenci[oó]n\s+deficient|ventanill|catastr|bibliotec|basur|poste)\b",
+        re.IGNORECASE,
+    )
+    if narrative.search(t):
+        return False
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    if len(lines) >= 2:
+        return True
+    return bool(re.search(r"\b\d{1,3}([.\s]\d{3})+\b", t)) and len(t) < 400
+
+
 def _is_no_task(incoming: str) -> bool:
     """True si el mensaje está vacío o es solo un saludo genérico (sin tarea concreta)."""
     text = (incoming or "").strip()
@@ -292,6 +436,44 @@ def _finanz_user_requests_ohlcv_ingest(text: str) -> bool:
     ):
         return False
     return bool(re.search(r"\b[A-Z]{1,5}\b", raw))
+
+
+def _quant_user_requests_new_trade_signal(text: str) -> bool:
+    """Pedido explícito de crear/proponer señal HITL (Quant Trader). Evidencia: gateway tools usadas=ninguna."""
+    if not text or not str(text).strip():
+        return False
+    low = text.strip().lower()
+    if "[system_directive:" in low or "[system_event:" in low:
+        return False
+    return bool(
+        re.search(
+            r"\b("
+            r"genera(r)?\s+(una\s+)?nueva\s+se[nñ]al|"
+            r"genera(r)?\s+se[nñ]al|"
+            r"crear\s+(una\s+)?se[nñ]al|"
+            r"proponer\s+(una\s+)?se[nñ]al|"
+            r"registr(ar|a)\s+(una\s+)?se[nñ]al|"
+            r"se[nñ]al\s+de\s+rebalanceo|"
+            r"propose\s+(a\s+)?(new\s+)?(trade\s+)?signal"
+            r")\b",
+            low,
+        )
+    )
+
+
+def _quant_fetch_tool_message_looks_successful(last_msg: Any) -> bool:
+    nm = str(getattr(last_msg, "name", None) or "")
+    if nm not in ("fetch_ib_gateway_ohlcv", "fetch_market_data"):
+        return False
+    raw = str(getattr(last_msg, "content", "") or "")
+    try:
+        d = json.loads(raw)
+        if isinstance(d, dict) and d.get("error"):
+            return False
+    except Exception:
+        if raw.strip().lower().startswith("error"):
+            return False
+    return True
 
 
 def _finanz_should_force_ibkr_after_local_cuentas_read(
@@ -899,7 +1081,7 @@ def _truncate_tool_messages(messages: list, max_chars: int) -> list:
             orig_c = c
             if name.startswith("reddit_"):
                 c = format_reddit_mcp_reply_if_applicable(c)
-            if name in ("run_sandbox", "run_browser_sandbox"):
+            if name in ("run_sandbox", "run_browser_sandbox", "pqrsd_run_identificacion_step1"):
                 compacted = _compact_run_sandbox_tool_content_for_llm(c, max_chars)
                 out.append(
                     ToolMessage(
@@ -1079,6 +1261,142 @@ def _send_sandbox_heartbeat_telegram(state: dict) -> None:
         _log.debug("sandbox heartbeat error: %s", exc)
 
 
+def _novnc_pre_dm_always_enabled() -> bool:
+    v = (os.getenv("DUCKCLAW_BROWSER_NOVNC_PRE_DM") or "").strip().lower()
+    return v in ("1", "true", "yes", "on", "always")
+
+
+def _send_novnc_pre_dm_fallback(
+    state: dict,
+    vnc_url: str,
+    *,
+    routing_worker_id: str,
+    novnc_session_id: str = "",
+) -> None:
+    """DM corto con enlace si heartbeat de chat está off y ``DUCKCLAW_BROWSER_NOVNC_PRE_DM=always``."""
+    import threading
+
+    from duckclaw.graphs.chat_heartbeat import (
+        _resolve_heartbeat_outbound_bot_token,
+        normalize_telegram_chat_id_for_outbound,
+    )
+    from duckclaw.graphs import novnc_registry as nr  # noqa: PLC0415
+    from duckclaw.integrations.telegram.telegram_outbound_sync import (
+        send_long_plain_text_markdown_v2_chunks_sync,
+    )
+
+    cid_raw = str(state.get("chat_id") or state.get("session_id") or "").strip()
+    cid = normalize_telegram_chat_id_for_outbound(cid_raw) or cid_raw
+    if not cid or not vnc_url:
+        return
+    _ns = (novnc_session_id or "").strip()
+    if _ns and not nr.consume_initial_vnc_telegram_link(_ns):
+        return
+    tok_ex = (state.get("outbound_telegram_bot_token") or "").strip() or None
+    token = _resolve_heartbeat_outbound_bot_token(
+        tok_ex,
+        (routing_worker_id or "").strip() or None,
+    )
+    if not token:
+        _log.debug("novnc pre-dm: sin token Bot API")
+        return
+    plain = (
+        "🖥️ NoVNC (sandbox browser)\n\n"
+        f"{vnc_url}\n\n"
+        "🌐 El agente ejecutará la automatización en el sandbox."
+    )
+
+    def _run() -> None:
+        try:
+            n = send_long_plain_text_markdown_v2_chunks_sync(
+                bot_token=token,
+                chat_id=cid,
+                plain_text=plain,
+                log=_log,
+            )
+            if n > 0:
+                _log.info("novnc pre-dm fallback: nativo OK chat_id=%r", cid)
+        except Exception as exc:
+            _log.debug("novnc pre-dm fallback failed: %s", exc)
+
+    threading.Thread(target=_run, name="duckclaw-novnc-pre-dm", daemon=True).start()
+
+
+def _schedule_run_browser_novnc_tool_heartbeat(
+    state: dict,
+    *,
+    routing_worker_id: str,
+    vnc_url: str | None,
+    novnc_session_id: str = "",
+) -> None:
+    from duckclaw.graphs import novnc_registry as nr  # noqa: PLC0415
+    from duckclaw.graphs.chat_heartbeat import (
+        format_tool_heartbeat,
+        heartbeat_message_for_tool,
+        is_chat_heartbeat_enabled,
+        schedule_chat_heartbeat_dm,
+    )
+
+    _hb_head = (state.get("subagent_instance_label") or "").strip() or None
+    _hb_uname = (state.get("username") or "").strip() or None
+    _hb_plan = (state.get("heartbeat_plan_title") or "").strip() or None
+    _hb_tok = (state.get("outbound_telegram_bot_token") or "").strip() or None
+    _htid = (state.get("tenant_id") or "default").strip() or "default"
+    _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+    _huid = str(state.get("user_id") or "").strip() or _hcid
+
+    _ns = (novnc_session_id or "").strip()
+    _hb_on = is_chat_heartbeat_enabled(_htid, _hcid)
+
+    if vnc_url:
+        if _hb_on:
+            _include_link = nr.consume_initial_vnc_telegram_link(_ns) if _ns else True
+            if _include_link:
+                body = (
+                    "🖥️ Enlace noVNC (pantalla del navegador en vivo):\n"
+                    f"{vnc_url}\n\n"
+                    "🌐 El agente ejecutará ahora la automatización en el sandbox; puedes seguirla en este enlace."
+                )
+            else:
+                body = (
+                    "🌐 Automatización del sandbox en curso. "
+                    "El enlace noVNC ya se envió al inicio de esta sesión; si lo necesitas otra vez, "
+                    "pide «enlace noVNC» o usa la herramienta get_browser_session_url."
+                )
+        else:
+            body = heartbeat_message_for_tool("run_browser_sandbox")
+    else:
+        body = heartbeat_message_for_tool("run_browser_sandbox")
+
+    _elapsed = _heartbeat_elapsed_sec(state)
+    text = format_tool_heartbeat(
+        _hb_head,
+        body,
+        plan_title=_hb_plan,
+        elapsed_sec=_elapsed,
+    )
+
+    if _hb_on:
+        schedule_chat_heartbeat_dm(
+            _htid,
+            _hcid,
+            _huid,
+            text,
+            log_worker_id=_hb_head,
+            log_username=_hb_uname,
+            log_plan_title=_hb_plan,
+            outbound_bot_token=_hb_tok,
+            routing_worker_id=routing_worker_id,
+        )
+    elif vnc_url and _novnc_pre_dm_always_enabled():
+        _send_novnc_pre_dm_fallback(
+            state,
+            vnc_url,
+            routing_worker_id=routing_worker_id,
+            novnc_session_id=_ns,
+        )
+
+
 def _sync_finanz_lake_beliefs(db: Any, spec: WorkerSpec) -> None:
     """Actualiza observed_value de creencias lake_* según env (Capadonna SSH)."""
     _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
@@ -1201,6 +1519,31 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
         if not query or not query.strip():
             return json.dumps({"error": "Query vacío."})
         q = query.strip()
+        # #region agent log
+        try:
+            _dbg_lp = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
+            with open(_dbg_lp, "a", encoding="utf-8") as _dbg_f:
+                _dbg_f.write(
+                    json.dumps(
+                        {
+                            "sessionId": "8d6707",
+                            "hypothesisId": "H3",
+                            "location": "factory.py:_admin_sql_worker",
+                            "message": "admin_sql_invoked",
+                            "data": {
+                                "db_is_none": db is None,
+                                "q_len": len(q),
+                                "mentions_fecha_creacion": "fecha_creacion" in q.lower(),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         upper = q.upper()
 
         allowed_tables_error = _enforce_allowed_tables(upper)
@@ -1311,11 +1654,11 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
 
 def filter_tools_for_sandbox(tools: list[Any], enabled: bool) -> list[Any]:
     """
-    Helper (unit-testable): si sandbox está OFF, elimina `run_sandbox` y `run_browser_sandbox`.
+    Helper (unit-testable): si sandbox está OFF, elimina `run_sandbox`, `run_browser_sandbox` y `get_browser_session_url`.
     """
     if enabled:
         return list(tools)
-    deny = {"run_sandbox", "run_browser_sandbox"}
+    deny = {"run_sandbox", "run_browser_sandbox", "get_browser_session_url", "pqrsd_run_identificacion_step1"}
     return [t for t in tools if getattr(t, "name", "") not in deny]
 
 
@@ -1538,6 +1881,15 @@ def build_worker_graph(
         except Exception:
             pass
 
+    if getattr(spec, "fmp_config", None) is not None:
+        try:
+            from duckclaw.forge.skills.fmp_bridge import register_fmp_skill
+
+            register_fmp_skill(tools, spec.fmp_config)
+            tools_by_name = {t.name: t for t in tools}
+        except Exception:
+            pass
+
     _qcfg = getattr(spec, "quant_config", None)
     _lid_q = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
     if isinstance(_qcfg, dict) and _qcfg.get("enabled") and _lid_q == "finanz":
@@ -1583,10 +1935,17 @@ def build_worker_graph(
     try:
         security_policy_path = spec.worker_dir / "security_policy.yaml"
         if security_policy_path.is_file() and llm is not None:
-            from duckclaw.graphs.sandbox import browser_sandbox_tool_factory, sandbox_tool_factory
+            from duckclaw.graphs.sandbox import (
+                browser_sandbox_tool_factory,
+                get_browser_session_url_tool_factory,
+                sandbox_tool_factory,
+            )
 
             if getattr(spec, "browser_sandbox", False) and "run_browser_sandbox" not in tools_by_name:
                 tools.append(browser_sandbox_tool_factory(db, llm))
+                tools_by_name = {t.name: t for t in tools}
+            if getattr(spec, "browser_sandbox", False) and "get_browser_session_url" not in tools_by_name:
+                tools.append(get_browser_session_url_tool_factory(db, llm))
                 tools_by_name = {t.name: t for t in tools}
             if "run_sandbox" not in tools_by_name:
                 tools.append(sandbox_tool_factory(db, llm))
@@ -1825,6 +2184,8 @@ def build_worker_graph(
         llm_with_tools_off = _bind_tools(llm, _tools_sandbox_off_bind)
 
         has_ibkr = "get_ibkr_portfolio" in tools_by_name
+        has_fmp_stock = "get_fmp_stock_dividends" in tools_by_name
+        has_fmp_calendar = "get_fmp_dividends_calendar" in tools_by_name
         has_read_sql = "read_sql" in tools_by_name
         has_admin_sql = "admin_sql" in tools_by_name
         has_run_sandbox = "run_sandbox" in tools_by_name
@@ -1832,6 +2193,8 @@ def build_worker_graph(
         tool_choice_read_sql = {"type": "function", "function": {"name": "read_sql"}}
         tool_choice_admin_sql = {"type": "function", "function": {"name": "admin_sql"}}
         tool_choice_portfolio = {"type": "function", "function": {"name": "get_ibkr_portfolio"}}
+        tool_choice_fmp_stock = {"type": "function", "function": {"name": "get_fmp_stock_dividends"}}
+        tool_choice_fmp_calendar = {"type": "function", "function": {"name": "get_fmp_dividends_calendar"}}
         tool_choice_run_sandbox = {"type": "function", "function": {"name": "run_sandbox"}}
 
         llm_force_schema_on = _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_inspect_schema)
@@ -1854,6 +2217,24 @@ def build_worker_graph(
         llm_force_portfolio_off = (
             _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_portfolio) if has_ibkr else None
         )
+        llm_force_fmp_stock_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_fmp_stock) if has_fmp_stock else None
+        )
+        llm_force_fmp_stock_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_fmp_stock)
+            if has_fmp_stock
+            else None
+        )
+        llm_force_fmp_calendar_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_fmp_calendar)
+            if has_fmp_calendar
+            else None
+        )
+        llm_force_fmp_calendar_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_fmp_calendar)
+            if has_fmp_calendar
+            else None
+        )
         llm_force_run_sandbox_on = (
             _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_run_sandbox)
             if has_run_sandbox
@@ -1872,6 +2253,19 @@ def build_worker_graph(
         )
         llm_force_tavily_off = (
             _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_tavily) if has_tavily else None
+        )
+
+        has_pqrsd_fetch = "pqrsd_fetch_canonical" in tools_by_name
+        tool_choice_pqrsd_fetch = {"type": "function", "function": {"name": "pqrsd_fetch_canonical"}}
+        llm_force_pqrsd_fetch_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_pqrsd_fetch)
+            if has_pqrsd_fetch
+            else None
+        )
+        llm_force_pqrsd_fetch_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_pqrsd_fetch)
+            if has_pqrsd_fetch
+            else None
         )
 
         has_fetch_market = "fetch_market_data" in tools_by_name
@@ -1897,6 +2291,19 @@ def build_worker_graph(
         llm_force_fetch_ib_gateway_off = (
             _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_fetch_ib_gateway)
             if has_fetch_ib_gateway
+            else None
+        )
+
+        has_propose_trade_signal = "propose_trade_signal" in tools_by_name
+        tool_choice_propose_trade_signal = {"type": "function", "function": {"name": "propose_trade_signal"}}
+        llm_force_propose_trade_signal_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_propose_trade_signal)
+            if has_propose_trade_signal
+            else None
+        )
+        llm_force_propose_trade_signal_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_propose_trade_signal)
+            if has_propose_trade_signal and "propose_trade_signal" in tools_by_name_sandbox_off
             else None
         )
 
@@ -2066,6 +2473,22 @@ def build_worker_graph(
                 return True
             return bool(re.search(r"\bacciones\b", t))
 
+        def _is_dividends_query(text: str) -> bool:
+            if not text or not text.strip():
+                return False
+            t = text.strip().lower()
+            return any(
+                k in t
+                for k in (
+                    "dividendo",
+                    "dividendos",
+                    "ex-div",
+                    "ex dividend",
+                    "record date",
+                    "payment date",
+                )
+            )
+
         def _is_schema_query(text: str) -> bool:
             if not text or not text.strip():
                 return False
@@ -2104,10 +2527,15 @@ def build_worker_graph(
             set_log_context(tenant_id=_tenant_ctx, worker_id=worker_id, chat_id=_log_chat)
             _ev_msgs = state.get("messages") or []
             _ev_last = _ev_msgs[-1] if _ev_msgs else None
-            if _lid == "quant_trader" and (_ev_last is None or isinstance(_ev_last, HumanMessage)):
-                from duckclaw.forge.skills.quant_tool_context import reset_quant_market_evidence
+            if _lid == "quant_trader":
+                from duckclaw.forge.skills.quant_tool_context import (
+                    bind_quant_market_evidence_chat,
+                    reset_quant_market_evidence,
+                )
 
-                reset_quant_market_evidence()
+                bind_quant_market_evidence_chat(str(_chat_ctx))
+                if _ev_last is None or isinstance(_ev_last, HumanMessage):
+                    reset_quant_market_evidence()
             _wl = _worker_log_label(worker_id)
             cfg = config or {}
             incoming = (
@@ -2212,6 +2640,18 @@ def build_worker_graph(
                 )
             )
             force_portfolio = force_portfolio_first or force_portfolio_after_local_cuentas
+            is_dividends = _is_dividends_query(incoming)
+            force_fmp = bool(
+                is_dividends and not already_has_tool_result and (has_fmp_stock or has_fmp_calendar)
+            )
+            force_fmp_calendar = bool(
+                force_fmp
+                and has_fmp_calendar
+                and any(
+                    k in (incoming or "").strip().lower()
+                    for k in ("próximos", "proximos", "calendario", "between", "entre")
+                )
+            )
 
             jh_fast_text: str | None = None
             if _spec_is_job_hunter() and not already_has_tool_result:
@@ -2273,7 +2713,14 @@ def build_worker_graph(
                 and has_reddit_tools
                 and _reddit_anchor_u is not None
                 and not summarize_stored_directive
-                and not (force_schema or force_admin_sql or force_read_sql or force_portfolio or force_tavily)
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                )
                 and (not already_has_tool_result or need_share_followup)
             )
 
@@ -2288,6 +2735,8 @@ def build_worker_graph(
                 ):
                     force_read_sql = False
                 force_portfolio = False
+                force_fmp = False
+                force_fmp_calendar = False
                 force_tavily = False
                 force_reddit = False
 
@@ -2334,6 +2783,42 @@ def build_worker_graph(
             )
             if not _worker_use_heuristic_first_tool(spec):
                 force_fetch_market_data = False
+
+            force_quant_propose_signal = False
+            force_quant_signal_fetch_ib = False
+            force_quant_signal_fetch_md = False
+            if (
+                _lid_l == "quant_trader"
+                and _quant_user_requests_new_trade_signal(incoming)
+                and _worker_use_heuristic_first_tool(spec)
+            ):
+                if (
+                    not telegram_context_summarize_directive
+                    and already_has_tool_result
+                    and last_msg is not None
+                    and (getattr(last_msg, "name", None) or "") in ("fetch_ib_gateway_ohlcv", "fetch_market_data")
+                    and _quant_fetch_tool_message_looks_successful(last_msg)
+                    and has_propose_trade_signal
+                ):
+                    force_quant_propose_signal = True
+                elif (
+                    not telegram_context_summarize_directive
+                    and not already_has_tool_result
+                    and not (
+                        force_schema
+                        or force_admin_sql
+                        or force_read_sql
+                        or force_portfolio
+                        or force_fmp
+                        or force_tavily
+                        or force_reddit
+                    )
+                ):
+                    if has_fetch_ib_gateway and bool(_ibgw_url):
+                        force_quant_signal_fetch_ib = True
+                    elif has_fetch_market:
+                        force_quant_signal_fetch_md = True
+
             _incoming_l = (incoming or "").lower()
             _is_graph_request = any(
                 k in _incoming_l
@@ -2379,6 +2864,9 @@ def build_worker_graph(
                     or force_reddit
                     or force_fetch_market_data
                     or force_fetch_ib_gateway
+                    or force_quant_propose_signal
+                    or force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
                 )
                 and not already_has_tool_result
             )
@@ -2397,6 +2885,9 @@ def build_worker_graph(
                     or force_reddit
                     or force_fetch_market_data
                     or force_fetch_ib_gateway
+                    or force_quant_propose_signal
+                    or force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
                 )
                 and not already_has_tool_result
             )
@@ -2426,10 +2917,33 @@ def build_worker_graph(
                 out.update(_identity_fields(state))
                 return out
 
+            force_pqrsd_fetch_canonical = bool(
+                _lid_l == "pqrsd_assistant"
+                and has_pqrsd_fetch
+                and _worker_use_heuristic_first_tool(spec)
+                and _pqrsd_substantive_forced_fetch(
+                    incoming, summarize_directive=telegram_context_summarize_directive
+                )
+                and not already_has_tool_result
+            )
+            if not _worker_use_heuristic_first_tool(spec):
+                force_pqrsd_fetch_canonical = False
+
             sandbox_enabled = _sandbox_enabled_for_state(state)
+            _pqrsd_skipped_forced_fetch = False
+            _p_force_pqrsd_before_datos_first = force_pqrsd_fetch_canonical
+            if force_pqrsd_fetch_canonical and _pqrsd_datos_first_over_forced_fetch(incoming):
+                force_pqrsd_fetch_canonical = False
+                _pqrsd_skipped_forced_fetch = True
+            if force_pqrsd_fetch_canonical and _pqrsd_contact_only_skip_forced_fetch(incoming):
+                force_pqrsd_fetch_canonical = False
+                _pqrsd_skipped_forced_fetch = True
             llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
             forced_name = (
-                "admin_sql"
+                "pqrsd_fetch_canonical"
+                if force_pqrsd_fetch_canonical
+                else (
+                    "admin_sql"
                 if force_admin_sql
                 else (
                     "read_sql"
@@ -2441,18 +2955,40 @@ def build_worker_graph(
                             "get_ibkr_portfolio"
                             if force_portfolio
                             else (
-                                "tavily_search"
-                                if force_tavily
+                                "propose_trade_signal"
+                                if force_quant_propose_signal
                                 else (
-                                    "reddit"
-                                    if force_reddit
+                                    "get_fmp_dividends_calendar"
+                                    if force_fmp and force_fmp_calendar
                                     else (
-                                        "fetch_ib_gateway_ohlcv"
-                                        if force_fetch_ib_gateway
+                                        "get_fmp_stock_dividends"
+                                        if force_fmp
                                         else (
-                                            "fetch_market_data"
-                                            if force_fetch_market_data
-                                            else ("run_sandbox" if force_run_sandbox else "auto")
+                                            "tavily_search"
+                                            if force_tavily
+                                            else (
+                                                "reddit"
+                                                if force_reddit
+                                                else (
+                                                    "fetch_ib_gateway_ohlcv"
+                                                    if (
+                                                        force_fetch_ib_gateway
+                                                        or force_quant_signal_fetch_ib
+                                                    )
+                                                    else (
+                                                        "fetch_market_data"
+                                                        if (
+                                                            force_fetch_market_data
+                                                            or force_quant_signal_fetch_md
+                                                        )
+                                                        else (
+                                                            "run_sandbox"
+                                                            if force_run_sandbox
+                                                            else "auto"
+                                                        )
+                                                    )
+                                                )
+                                            )
                                         )
                                     )
                                 )
@@ -2460,7 +2996,90 @@ def build_worker_graph(
                         )
                     )
                 )
+                )
             )
+            # #region agent log
+            if _lid_l == "pqrsd_assistant":
+                try:
+                    import json as _json_dbg_pqrsd
+                    import time as _time_dbg_pqrsd
+
+                    _inc = incoming or ""
+                    _payload_pqrsd = {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H_pqrsd_datos_first",
+                        "location": "factory.py:agent_node",
+                        "message": "pqrsd_forced_fetch_and_datos_first",
+                        "data": {
+                            "rad_perfil_datos_first": _pqrsd_rad_perfil_datos_first(_inc),
+                            "sandbox_datos_first": _pqrsd_sandbox_prefers_chat_datos_over_forced_fetch(
+                                _inc
+                            ),
+                            "datos_first_overall": _pqrsd_datos_first_over_forced_fetch(_inc),
+                            "substantive_forced_fetch": _pqrsd_substantive_forced_fetch(
+                                _inc, summarize_directive=telegram_context_summarize_directive
+                            ),
+                            "force_candidate_before_datos": bool(_p_force_pqrsd_before_datos_first),
+                            "skipped_forced_fetch": bool(_pqrsd_skipped_forced_fetch),
+                            "force_pqrsd_fetch_final": bool(force_pqrsd_fetch_canonical),
+                            "has_pqrsd_fetch_tool": bool(has_pqrsd_fetch),
+                            "has_upsert_radicacion_perfil": "pqrsd_upsert_radicacion_perfil"
+                            in tools_by_name,
+                            "has_registrar_radicacion_crm": "pqrsd_registrar_radicacion_crm"
+                            in tools_by_name,
+                            "forced_name": forced_name,
+                            "incoming_len": len(_inc),
+                            "inject_datos_first_directive": bool(
+                                (_lid or "").strip().lower() == "pqrsd_assistant"
+                                and not already_has_tool_result
+                                and _pqrsd_datos_first_over_forced_fetch(_inc)
+                            ),
+                        },
+                        "timestamp": int(_time_dbg_pqrsd.time() * 1000),
+                    }
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df_pqrsd:
+                        _df_pqrsd.write(_json_dbg_pqrsd.dumps(_payload_pqrsd) + "\n")
+                except Exception:
+                    pass
+            # #endregion
+            # #region agent log
+            if _lid_l == "quant_trader" and (
+                force_quant_propose_signal
+                or force_quant_signal_fetch_ib
+                or force_quant_signal_fetch_md
+            ):
+                try:
+                    import json as _json_dbg
+                    import time as _time_dbg
+
+                    _payload = {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H_quant_forced_tool",
+                        "location": "factory.py:agent_node",
+                        "message": "quant_trade_signal_force_flags",
+                        "data": {
+                            "forced_name": forced_name,
+                            "force_quant_propose_signal": force_quant_propose_signal,
+                            "force_quant_signal_fetch_ib": force_quant_signal_fetch_ib,
+                            "force_quant_signal_fetch_md": force_quant_signal_fetch_md,
+                            "already_has_tool_result": already_has_tool_result,
+                            "wants_new_signal": _quant_user_requests_new_trade_signal(incoming or ""),
+                        },
+                        "timestamp": int(_time_dbg.time() * 1000),
+                    }
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(_json_dbg.dumps(_payload) + "\n")
+                except Exception:
+                    pass
+            # #endregion
             _log.info(
                 "[%s] incoming=%r | is_schema=%s | is_table_content=%s | is_latest_game=%s | "
                 "is_portfolio=%s | ibkr_after_cuentas=%s | forced_tool=%s",
@@ -2476,6 +3095,38 @@ def build_worker_graph(
             from duckclaw.utils.formatters import sanitize_reddit_tool_messages_for_llm
 
             _msg_list = sanitize_reddit_tool_messages_for_llm(list(state["messages"]))
+            _pqrsd_inject_datos_first_directive = bool(
+                (_lid or "").strip().lower() == "pqrsd_assistant"
+                and not already_has_tool_result
+                and _pqrsd_datos_first_over_forced_fetch(incoming)
+            )
+            if _pqrsd_inject_datos_first_directive:
+                _msg_list = [
+                    SystemMessage(
+                        content=(
+                            "[DIRECTIVA_TURNO_PQRSD_DATOS_PRIMERO] No invoques `pqrsd_fetch_canonical` "
+                            "en este turno ni des como primer paso un enlace o tutorial largo al portal web. "
+                            "1) Pregunta si autoriza el tratamiento de datos personales para guardar el perfil "
+                            "mínimo de radicación en la bóveda DuckDB de esta sesión "
+                            "(esquema pqrsd_assistant, tabla radicacion_perfil). Si responde que no, no "
+                            "continúes con guardado en bóveda ni insistas. "
+                            "2) Si autoriza, recopila modo (identificada/anónima), documento si aplica, "
+                            "correo y confirmación iguales. "
+                            "3) Con datos completos y consentimiento explícito, persiste en bóveda: "
+                            "`admin_sql` (UPSERT en pqrsd_assistant.radicacion_perfil) + `read_sql` para "
+                            "validar la fila, O `pqrsd_upsert_radicacion_perfil` + `read_sql`. No invoques "
+                            "`pqrsd_run_identificacion_step1` ni `run_browser_sandbox` para el flujo de "
+                            "identificación hasta haber guardado y verificado en DB (salvo que el usuario "
+                            "rechace la bóveda). "
+                            "4) Cuando tengas el relato del caso y datos mínimos (ubicación/fecha si aplican), "
+                            "registra el caso en CRM interno con `pqrsd_registrar_radicacion_crm` "
+                            "(radicado MDE-YYYYMMDD-NNNN en tabla radicacion_crm); prioriza esta herramienta "
+                            "sobre INSERT manual con `admin_sql`. `read_sql`/`admin_sql` están disponibles "
+                            "solo sobre tablas permitidas del manifest. "
+                            "5) Plazos o texto del portal solo si el usuario lo pide o tras perfil/CRM."
+                        )
+                    )
+                ] + _msg_list
             if not _worker_use_heuristic_first_tool(spec):
                 _msg_list = [
                     SystemMessage(
@@ -2491,6 +3142,9 @@ def build_worker_graph(
             if force_admin_sql:
                 _fa = llm_force_admin_sql_on if sandbox_enabled else llm_force_admin_sql_off
                 _invoked_llm = _fa or llm_with_tools
+            elif force_pqrsd_fetch_canonical:
+                _pf = llm_force_pqrsd_fetch_on if sandbox_enabled else llm_force_pqrsd_fetch_off
+                _invoked_llm = _pf or llm_with_tools
             elif force_schema and not force_read_sql:
                 _invoked_llm = (
                     llm_force_schema_on if sandbox_enabled else llm_force_schema_off
@@ -2502,6 +3156,13 @@ def build_worker_graph(
             elif force_portfolio:
                 _forced_pf = llm_force_portfolio_on if sandbox_enabled else llm_force_portfolio_off
                 _invoked_llm = _forced_pf or llm_with_tools
+            elif force_fmp:
+                _forced_fmp = (
+                    llm_force_fmp_calendar_on if force_fmp_calendar else llm_force_fmp_stock_on
+                ) if sandbox_enabled else (
+                    llm_force_fmp_calendar_off if force_fmp_calendar else llm_force_fmp_stock_off
+                )
+                _invoked_llm = _forced_fmp or llm_with_tools
             elif force_tavily:
                 _ft = llm_force_tavily_on if sandbox_enabled else llm_force_tavily_off
                 _invoked_llm = _ft or llm_with_tools
@@ -2520,10 +3181,17 @@ def build_worker_graph(
                 if _fr is None:
                     _fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
                 _invoked_llm = _fr or llm_with_tools
-            elif force_fetch_ib_gateway:
+            elif force_quant_propose_signal:
+                _fps = (
+                    llm_force_propose_trade_signal_on
+                    if sandbox_enabled
+                    else llm_force_propose_trade_signal_off
+                )
+                _invoked_llm = _fps or llm_with_tools
+            elif force_fetch_ib_gateway or force_quant_signal_fetch_ib:
                 _ffig = llm_force_fetch_ib_gateway_on if sandbox_enabled else llm_force_fetch_ib_gateway_off
                 _invoked_llm = _ffig or llm_with_tools
-            elif force_fetch_market_data:
+            elif force_fetch_market_data or force_quant_signal_fetch_md:
                 _ffmd = llm_force_fetch_market_on if sandbox_enabled else llm_force_fetch_market_off
                 _invoked_llm = _ffmd or llm_with_tools
             elif force_run_sandbox:
@@ -2712,12 +3380,14 @@ def build_worker_graph(
             or "propose_trade_signal" in tools_by_name
         ):
             from duckclaw.forge.skills.quant_tool_context import (
+                bind_quant_market_evidence_chat,
                 set_quant_tool_chat_id,
                 set_quant_tool_db_path,
                 set_quant_tool_tenant_id,
                 set_quant_tool_user_id,
             )
 
+            bind_quant_market_evidence_chat(str(_chat_ctx))
             set_quant_tool_chat_id(str(_chat_ctx))
             set_quant_tool_tenant_id(_tenant_ctx)
             _q_uid = str(state.get("user_id") or "").strip() or str(_chat_ctx)
@@ -2761,6 +3431,7 @@ def build_worker_graph(
                 log_username=_hb_uname,
                 log_plan_title=_hb_plan,
                 outbound_bot_token=_hb_tok,
+                routing_worker_id=worker_id,
             )
 
         if use_ephemeral_parallel:
@@ -2825,12 +3496,106 @@ def build_worker_graph(
                 tool = tool_lookup.get(name)
                 if tool:
                     try:
-                        _schedule_tool_heartbeat(name)
                         invoke_args: Any = args
-                        if name in ("run_sandbox", "run_browser_sandbox") and isinstance(args, dict):
+                        if isinstance(args, dict):
                             invoke_args = {**args}
+                        # #region agent log
+                        if name in ("pqrsd_upsert_radicacion_perfil", "pqrsd_registrar_radicacion_crm"):
+                            try:
+                                _dbg_lp = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
+                                _st_cid = str(
+                                    state.get("chat_id") or state.get("session_id") or ""
+                                ).strip()
+                                _pre_tg = (
+                                    str((invoke_args or {}).get("telegram_chat_id") or "").strip()
+                                    if isinstance(invoke_args, dict)
+                                    else ""
+                                )
+                                with open(_dbg_lp, "a", encoding="utf-8") as _dbg_f:
+                                    _dbg_f.write(
+                                        json.dumps(
+                                            {
+                                                "sessionId": "8d6707",
+                                                "hypothesisId": "H2",
+                                                "location": "factory.py:tool_node:pqrsd_pre",
+                                                "message": "telegram_chat_id_before_branch",
+                                                "data": {
+                                                    "tool": name,
+                                                    "state_chat_id_nonempty": bool(_st_cid),
+                                                    "args_telegram_nonempty": bool(_pre_tg),
+                                                },
+                                                "timestamp": int(time.time() * 1000),
+                                            },
+                                            ensure_ascii=False,
+                                        )
+                                        + "\n"
+                                    )
+                            except Exception:
+                                pass
+                        # #endregion
+                        if name in ("run_sandbox", "run_browser_sandbox", "pqrsd_run_identificacion_step1"):
                             if not str(invoke_args.get("worker_id") or "").strip():
                                 invoke_args["worker_id"] = worker_id
+                            if name in ("run_browser_sandbox", "pqrsd_run_identificacion_step1"):
+                                _cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+                                if _cid and not str(invoke_args.get("session_id") or "").strip():
+                                    from duckclaw.graphs.novnc_registry import sanitize_chat_to_session_id
+
+                                    invoke_args["session_id"] = sanitize_chat_to_session_id(_cid)
+                        if name in ("pqrsd_upsert_radicacion_perfil", "pqrsd_registrar_radicacion_crm"):
+                            if not isinstance(invoke_args, dict):
+                                invoke_args = {}
+                            _cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+                            if _cid and not str(invoke_args.get("telegram_chat_id") or "").strip():
+                                invoke_args["telegram_chat_id"] = _cid
+                        # #region agent log
+                        if name == "pqrsd_registrar_radicacion_crm":
+                            try:
+                                _dbg_lp = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
+                                _post_tg = (
+                                    str((invoke_args or {}).get("telegram_chat_id") or "").strip()
+                                    if isinstance(invoke_args, dict)
+                                    else ""
+                                )
+                                with open(_dbg_lp, "a", encoding="utf-8") as _dbg_f:
+                                    _dbg_f.write(
+                                        json.dumps(
+                                            {
+                                                "sessionId": "8d6707",
+                                                "hypothesisId": "H2",
+                                                "location": "factory.py:tool_node:pqrsd_crm_post_upsert_branch",
+                                                "message": "crm_telegram_after_upsert_only_injection",
+                                                "data": {
+                                                    "args_telegram_nonempty": bool(_post_tg),
+                                                },
+                                                "timestamp": int(time.time() * 1000),
+                                            },
+                                            ensure_ascii=False,
+                                        )
+                                        + "\n"
+                                    )
+                            except Exception:
+                                pass
+                        # #endregion
+                        if name == "get_browser_session_url":
+                            if not isinstance(invoke_args, dict):
+                                invoke_args = {}
+                            _cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+                            if _cid and not str(invoke_args.get("chat_id") or "").strip():
+                                invoke_args["chat_id"] = _cid
+                        if name in ("run_browser_sandbox", "pqrsd_run_identificacion_step1"):
+                            from duckclaw.graphs.sandbox import ensure_browser_novnc_session
+
+                            _sid = str(invoke_args.get("session_id") or "").strip()
+                            _vnc_pre = ensure_browser_novnc_session(worker_id, _sid) if _sid else None
+                            _schedule_run_browser_novnc_tool_heartbeat(
+                                state,
+                                routing_worker_id=worker_id,
+                                vnc_url=_vnc_pre,
+                                novnc_session_id=_sid or "",
+                            )
+                        else:
+                            _schedule_tool_heartbeat(name)
                         if (
                             name == "run_sandbox"
                             and _lid == "bi_analyst"
@@ -2844,7 +3609,7 @@ def build_worker_graph(
                                 _send_sandbox_heartbeat_telegram(state)
                         result = tool.invoke(invoke_args)
                         content = str(result) if result is not None else "OK"
-                        if name in ("run_sandbox", "run_browser_sandbox"):
+                        if name in ("run_sandbox", "run_browser_sandbox", "pqrsd_run_identificacion_step1"):
                             try:
                                 payload = json.loads(content)
                                 if isinstance(payload, dict) and payload.get("exit_code") == 0:
@@ -2859,18 +3624,33 @@ def build_worker_graph(
                                 )
                         if name.startswith("reddit_"):
                             content = format_reddit_mcp_reply_if_applicable(content)
+                        _prev = content[:120] + ("..." if len(content) > 120 else "")
+                        if name in ("pqrsd_run_identificacion_step1", "pqrsd_upsert_radicacion_perfil"):
+                            import re as _re_pqrs
+
+                            _prev = _re_pqrs.sub(
+                                r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+                                "[email]",
+                                _prev,
+                            )
+                            _prev = _re_pqrs.sub(r"\b\d{6,14}\b", "[digits]", _prev)
                         _log.info(
                             "[%s] tool=%s | result_len=%d | preview=%r",
                             _wl,
                             name,
                             len(content),
-                            content[:120] + ("..." if len(content) > 120 else ""),
+                            _prev,
                         )
                     except Exception as e:
                         content = f"Error: {e}"
                         _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
                 else:
-                    if not sandbox_enabled and name in ("run_sandbox", "run_browser_sandbox"):
+                    if not sandbox_enabled and name in (
+                        "run_sandbox",
+                        "run_browser_sandbox",
+                        "get_browser_session_url",
+                        "pqrsd_run_identificacion_step1",
+                    ):
                         content = "Sandbox deshabilitado en esta sesión. Actívalo con /sandbox on."
                     else:
                         content = f"Herramienta desconocida: {name}"
@@ -2975,6 +3755,7 @@ def build_worker_graph(
                 log_username=_un,
                 log_plan_title=_pt,
                 outbound_bot_token=_tok_f,
+                routing_worker_id=str(getattr(spec, "worker_id", "") or "").strip() or None,
             )
 
         msgs = state.get("messages") or []

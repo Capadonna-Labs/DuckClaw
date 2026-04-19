@@ -1,0 +1,15 @@
+# Strix: run_sandbox + run_browser_sandbox (Playwright) — solo hosts del Distrito / portal PQRSD.
+# allow_list documenta dependencias; el contenedor usa red bridge (misma semántica que Job-Hunter/Finanz).
+network:
+  default: allow
+  allow_list:
+    - medellin.gov.co
+    - www.medellin.gov.co
+filesystem:
+  readonly_mounts: []
+  ephemeral_volumes:
+    - "/workspace/output"
+secrets:
+  in_memory_only: true
+  allowed_secrets: []
+max_execution_time_seconds: 300

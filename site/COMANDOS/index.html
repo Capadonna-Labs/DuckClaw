@@ -2142,7 +2142,7 @@ uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </s
 </tr>
 <tr>
 <td><code>IBKR_EXECUTE_ORDER_URL</code></td>
-<td>POST JSON <code>{"signal_id","paper":true}</code> (opcional; sin URL la orden no se envía al broker tras HITL). El <strong>time-in-force</strong> (GTC, bracket, etc.) lo define tu servicio detrás de esta URL, no el monorepo.</td>
+<td>POST JSON <code>{"signal_id","paper":true}</code> (opcional; sin URL la orden no se envía al broker tras HITL) y cabecera <strong>X-Duckclaw-IBKR-Account-Mode: paper|live</strong> (Finanz siempre paper). En el receptor de referencia, modo efectivo: <code>OHLCV_BROKER_EXECUTE_FORCE_PAPER</code>, luego cabecera, luego JSON (default paper). <strong>POST /api/broker/execute</strong> en <code>services/ibkr-ohlcv-api</code>. TIF/brackets: script <code>OHLCV_EXECUTE_ORDER_*</code> o tu servicio en el VPS.</td>
 </tr>
 <tr>
 <td><code>DUCKCLAW_QUANT_HITL_GRANT_TTL_SEC</code></td>

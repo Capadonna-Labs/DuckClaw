@@ -121,6 +121,35 @@ def _ensure_authorized_users(con: duckdb.DuckDBPyConnection) -> None:
     )
 
 
+def _ensure_pqrsd_crm_schema(con: duckdb.DuckDBPyConnection) -> None:
+    """CRM Next (GovTech): specs/features/CRM PQRSD persistencia DuckDB.md"""
+    con.execute("CREATE SCHEMA IF NOT EXISTS pqrsd_crm;")
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pqrsd_crm.tickets (
+          id_ticket VARCHAR PRIMARY KEY,
+          tipo_solicitud VARCHAR NOT NULL,
+          id_secretaria VARCHAR NOT NULL,
+          fecha_creacion TIMESTAMP NOT NULL,
+          fecha_limite TIMESTAMP NOT NULL,
+          estado VARCHAR NOT NULL,
+          contenido_raw VARCHAR NOT NULL,
+          resumen_ia VARCHAR,
+          respuesta_sugerida VARCHAR,
+          canal_origen VARCHAR NOT NULL,
+          nombre_ciudadano VARCHAR NOT NULL,
+          updated_at TIMESTAMP NOT NULL DEFAULT now()
+        );
+        """
+    )
+    con.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_pqrsd_crm_tickets_sec_est
+          ON pqrsd_crm.tickets (id_secretaria, estado);
+        """
+    )
+
+
 def _ensure_fly_runtime_tables(con: duckdb.DuckDBPyConnection) -> None:
     """Tablas que on_the_fly_commands esperaba crear en runtime (ahora solo bootstrap + RO)."""
     con.execute(
@@ -183,6 +212,7 @@ def _ensure_fly_runtime_tables(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS session_uid VARCHAR;")
     con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS rationale TEXT;")
     con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'PENDING_HITL';")
+    con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS order_qty DOUBLE;")
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS quant_core.session_ticks (
@@ -234,6 +264,7 @@ def bootstrap_file(path: Path, templates_root: Path, extensions: list[str]) -> N
         _ensure_authorized_users(con)
         ensure_user_shared_db_access_table(_ExecuteAdapter(con))
         _ensure_war_room_schema_sql(con)
+        _ensure_pqrsd_crm_schema(con)
         _ensure_fly_runtime_tables(con)
         ensure_leila_mvp_schema(_ExecuteAdapter(con))
         for manifest in sorted(templates_root.glob("*/manifest.yaml")):

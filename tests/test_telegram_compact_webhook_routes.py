@@ -83,3 +83,20 @@ def test_compact_quanttrader_binding(
     assert b.worker_id == "Quant-Trader"
     assert b.tenant_id == "Cuantitativo"
     assert b.forced_vault_db_path == str(qdb.resolve())
+
+
+def test_compact_pqrsd_assistant_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    repo = tmp_path / "r"
+    pdb = repo / "db" / "p.duckdb"
+    pdb.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo))
+    monkeypatch.setenv("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH", "db/p.duckdb")
+    r = parse_compact_telegram_webhook_routes(
+        "pqrsd-assistant:88:tok_pqrsd:/api/v1/telegram/pqrsd-assistant"
+    )[0]
+    b = compact_route_to_path_binding(r)
+    assert b.worker_id == "PQRSD-Assistant"
+    assert b.tenant_id == "PQRS"
+    assert b.forced_vault_db_path == str(pdb.resolve())

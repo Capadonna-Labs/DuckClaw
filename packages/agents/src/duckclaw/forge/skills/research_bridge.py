@@ -14,6 +14,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +33,42 @@ class TavilySearchInput(BaseModel):
     )
 
 _TAVILY_ENV = "TAVILY_API_KEY"
+
+
+def _hostname_from_domain_spec(spec: str) -> str:
+    """Normaliza entrada YAML o URL a hostname (p. ej. https://www.medellin.gov.co/foo → medellin.gov.co)."""
+    s = (spec or "").strip()
+    if not s:
+        return ""
+    if "://" in s:
+        host = (urlparse(s).hostname or "").strip().lower()
+    else:
+        host = s.split("/")[0].strip().lower()
+        if ":" in host and host.rsplit(":", 1)[-1].isdigit():
+            host = host.rsplit(":", 1)[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _normalize_include_domains(raw: Any) -> list[str]:
+    """Lista de hostnames para Tavily ``include_domains`` (sin duplicados, orden preservado)."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        items: list[Any] = [raw]
+    elif isinstance(raw, (list, tuple)):
+        items = list(raw)
+    else:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for it in items:
+        h = _hostname_from_domain_spec(str(it))
+        if h and h not in seen:
+            seen.add(h)
+            out.append(h)
+    return out
 
 
 def _run_async_from_sync(coro) -> Any:
@@ -89,7 +126,8 @@ def _format_tavily_results(response: Any) -> str:
 def _tavily_search_tool(config: Optional[dict] = None) -> Optional[Any]:
     """
     Crea un StructuredTool para búsqueda Tavily.
-    config: tavily_enabled, search_depth, include_answer, max_results, topic, include_raw_content.
+    config: tavily_enabled, search_depth, include_answer, max_results, topic, include_raw_content,
+    include_domains (lista de hostnames o URLs; se pasan a Tavily para acotar resultados).
     Por defecto include_raw_content=False (menos tokens); max_results por defecto 15 para margen de filtrado.
     """
     if not _tavily_available():
@@ -114,6 +152,7 @@ def _tavily_search_tool(config: Optional[dict] = None) -> Optional[Any]:
     topic = cfg.get("topic", "general")
     # False = no hinchar contexto con HTML crudo de páginas (contrato skills Job-Hunter).
     include_raw_content = bool(cfg.get("include_raw_content", False))
+    include_domains = _normalize_include_domains(cfg.get("include_domains"))
 
     def _search(query: str) -> str:
         try:
@@ -129,6 +168,8 @@ def _tavily_search_tool(config: Optional[dict] = None) -> Optional[Any]:
                 sig = inspect.signature(client.search)
                 if "include_raw_content" in sig.parameters:
                     search_kwargs["include_raw_content"] = include_raw_content
+                if include_domains and "include_domains" in sig.parameters:
+                    search_kwargs["include_domains"] = include_domains
             except (TypeError, ValueError):
                 pass
             response = client.search(**search_kwargs)
@@ -136,14 +177,20 @@ def _tavily_search_tool(config: Optional[dict] = None) -> Optional[Any]:
         except Exception as e:
             return f"Error Tavily: {e}"
 
+    desc_parts = [
+        "Busca en internet con Tavily (hasta varias decenas de candidatos según configuración; "
+        "resultados resumidos sin raw HTML para ahorrar contexto). "
+        "Parámetro: query (consulta; usa términos concretos en español cuando aplique).",
+    ]
+    if include_domains:
+        desc_parts.append(
+            f" Resultados limitados al(os) dominio(s): {', '.join(include_domains)}."
+        )
+
     return StructuredTool.from_function(
         _search,
         name="tavily_search",
-        description=(
-            "Busca en internet con Tavily (hasta varias decenas de candidatos según configuración; "
-            "resultados resumidos sin raw HTML para ahorrar contexto). "
-            "Parámetro: query (consulta; usa Google Dorks si aplica)."
-        ),
+        description="".join(desc_parts),
         args_schema=TavilySearchInput,
     )
 

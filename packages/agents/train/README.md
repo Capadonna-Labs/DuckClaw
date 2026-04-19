@@ -60,6 +60,14 @@ Para entrenamiento GRPO con Unsloth u otros frameworks que requieren múltiples 
 
 ---
 
+## Trazas sintéticas (PQRSD / Gemma)
+
+Para generar **nuevas líneas JSONL** con un LLM (datos sintéticos) alineados al worker real **`PQRSD-Assistant`** (herramientas `pqrsd_fetch_canonical`, `pqrsd_entity_routing`, `tavily_search`, `read_sql`; `admin_sql` no aplica a este worker en modo solo lectura — **no** herramientas inventadas de “clasificación/radicado”), usa el prompt consolidado en:
+
+- [`prompts/PQRSD_synthetic_traces_gemma4_prompt.md`](prompts/PQRSD_synthetic_traces_gemma4_prompt.md)
+
+Referencia de formato en disco: `conversation_traces/2026/04/19/traces.jsonl` (misma forma de `messages` + metadatos).
+
 ## Formato de trazas (conversation_traces)
 
 Cada línea es un objeto JSON con al menos:

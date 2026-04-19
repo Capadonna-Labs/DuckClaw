@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+from duckclaw.gateway_db import (
+    GatewayDbEphemeralReadonly,
+    default_pqrsd_assistant_vault_path,
+    get_gateway_db_path,
+)
 
 
 def _clear_multiplex_db_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -19,6 +23,15 @@ def _clear_multiplex_db_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "DUCKDB_PATH",
     ):
         monkeypatch.delenv(k, raising=False)
+
+
+def test_default_pqrsd_assistant_vault_path_uses_canonical_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
+    uid = "1726618406"
+    expected = (tmp_path / "db" / "private" / uid / "pqrsd-assistantdb1.duckdb").resolve()
+    assert Path(default_pqrsd_assistant_vault_path(uid)).resolve() == expected
 
 
 def test_gateway_db_ephemeral_readonly_opens_per_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

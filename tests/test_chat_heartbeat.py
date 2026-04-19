@@ -220,6 +220,7 @@ def test_schedule_chat_heartbeat_runs_post_in_background(
         *,
         plan_title_log: str | None = None,
         outbound_bot_token: str | None = None,
+        routing_worker_id: str | None = None,
     ) -> None:
         posted.append((cid, uid, text))
 

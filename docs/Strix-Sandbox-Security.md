@@ -27,7 +27,7 @@ La imagen incluye **noVNC** (websockify en el puerto **6080** dentro del contene
 STRIX_BROWSER_PUBLISH_NOVNC=1
 ```
 
-Luego abre `http://127.0.0.1:6080/vnc.html` en el host. Solo tiene sentido con red tipo `bridge` (p. ej. workers con `network.default: allow` como JobHunter). **No** activar en producción pública: el flujo VNC va sin contraseña pensando en red aislada/ephemeral.
+Con `STRIX_BROWSER_PUBLISH_NOVNC=1` y red `bridge`, Docker publica 6080 a un puerto aleatorio en el host. El gateway proxifica con token en `/api/v1/sandbox/novnc/view/{token}/…`; usa `DUCKCLAW_PUBLIC_URL` para la URL enviada al usuario o `http://127.0.0.1:<puerto>/vnc.html` en dev. **Tailscale Funnel** puede exponer HTTPS al gateway; TTL: `DUCKCLAW_BROWSER_NOVNC_TTL_S` (default 600). Solo `bridge`; el VNC interno sigue sin contraseña (protección: token + TTL).
 
 ## Politica por worker
 

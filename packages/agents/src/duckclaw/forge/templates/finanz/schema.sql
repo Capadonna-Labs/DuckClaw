@@ -92,7 +92,8 @@ CREATE TABLE IF NOT EXISTS quant_core.trade_signals (
     action VARCHAR,
     confidence_score DOUBLE,
     target_price DOUBLE,
-    stop_loss DOUBLE
+    stop_loss DOUBLE,
+    order_qty DOUBLE
 );
 
 CREATE TABLE IF NOT EXISTS quant_core.portfolio_positions (

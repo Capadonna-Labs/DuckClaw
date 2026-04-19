@@ -6,16 +6,41 @@ import asyncio
 import json
 import logging
 import time
+import uuid as uuid_lib
+from pathlib import Path
 from typing import Any
 
 import duckdb
 
 from core.config import settings
 from duckclaw.gateway_db import get_gateway_db_path
-from duckclaw.vaults import validate_user_db_path
+from duckclaw.vaults import db_root, validate_user_db_path
 from models.quant_state_delta import QuantStateDelta, TradeSignalMutation, TradingMandateMutation
 
 logger = logging.getLogger("db-writer.quant_state_delta")
+
+
+# region agent log
+def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    try:
+        pl = {
+            "sessionId": "c964f7",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+            "runId": "post-fix",
+        }
+        _p = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+        with _p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(pl, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+# endregion
+
 
 _LEDGER_DDL = """
 CREATE SCHEMA IF NOT EXISTS finance_worker;
@@ -79,6 +104,51 @@ CREATE TABLE IF NOT EXISTS quant_core.trade_signals (
 );
 """
 
+# Tablas creadas antes de session_uid / columnas usadas en INSERT: IF NOT EXISTS no altera esquema.
+_QUANT_CORE_TRADE_SIGNALS_MIGRATION = """
+ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS session_uid VARCHAR;
+ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS rationale VARCHAR;
+ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS strategy_name VARCHAR;
+ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS action VARCHAR;
+ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS confidence_score DOUBLE;
+ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS status VARCHAR;
+ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
+"""
+
+
+def _coerce_mandate_id_to_uuid(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return str(uuid_lib.uuid4())
+    try:
+        uuid_lib.UUID(s)
+        return s
+    except ValueError:
+        return str(uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, "duckclaw:mandate:" + s))
+
+
+def _infer_private_folder_uid(db_path: str) -> str | None:
+    """Si la ruta es db/private/<carpeta>/..., devuelve el segmento de carpeta (coincide con user_vault_dir)."""
+    try:
+        path = Path(db_path).expanduser().resolve()
+        rel = path.relative_to(db_root().resolve())
+        parts = rel.parts
+        if len(parts) >= 2 and parts[0] == "private":
+            return str(parts[1])
+    except (ValueError, OSError):
+        pass
+    return None
+
+
+def _resolve_quant_user_id_for_path(user_id: str, target_db_path: str, tenant_id: str) -> str | None:
+    """Alinea user_id del delta con db/private/<uid>/ cuando el productor envía default u otro slug."""
+    if validate_user_db_path(user_id, target_db_path, tenant_id=tenant_id):
+        return str(user_id or "default").strip() or "default"
+    inferred = _infer_private_folder_uid(target_db_path)
+    if inferred and validate_user_db_path(inferred, target_db_path, tenant_id=tenant_id):
+        return inferred
+    return None
+
 
 def _is_duckdb_lock_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
@@ -136,6 +206,16 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
     dt = str(delta.delta_type or "").strip()
     if dt == "MANDATE_UPSERT":
         mut = TradingMandateMutation.model_validate(delta.mutation)
+        mid = _coerce_mandate_id_to_uuid(str(mut.mandate_id))
+        # region agent log
+        if str(mut.mandate_id).strip() != mid:
+            _agent_dbg(
+                "H2",
+                "quant_state_delta_handler._apply_delta",
+                "mandate_id_coerced",
+                {"raw": str(mut.mandate_id)[:120], "coerced": mid},
+            )
+        # endregion
         con.execute(
             """
             INSERT INTO finance_worker.trading_mandates
@@ -150,7 +230,7 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
               status=excluded.status
             """,
             (
-                mut.mandate_id,
+                mid,
                 mut.source_worker,
                 mut.asset_class,
                 mut.direction,
@@ -162,6 +242,16 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
 
     if dt == "TRADE_SIGNAL_PROPOSED":
         mut = TradeSignalMutation.model_validate(delta.mutation)
+        mid = _coerce_mandate_id_to_uuid(str(mut.mandate_id))
+        # region agent log
+        if str(mut.mandate_id).strip() != mid:
+            _agent_dbg(
+                "H2",
+                "quant_state_delta_handler._apply_delta",
+                "trade_signal_mandate_coerced",
+                {"raw": str(mut.mandate_id)[:120], "coerced": mid},
+            )
+        # endregion
         st = "PENDING_HITL" if mut.status == "AWAITING_HITL" else mut.status
         con.execute(
             """
@@ -181,7 +271,7 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
             """,
             (
                 mut.signal_id,
-                mut.mandate_id,
+                mid,
                 mut.ticker.upper(),
                 mut.signal_type,
                 float(mut.proposed_weight),
@@ -196,14 +286,14 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
             INSERT INTO quant_core.trade_signals
               (signal_id, ticker, strategy_name, action, confidence_score, session_uid, rationale, status, updated_at)
             VALUES
-              (?, ?, 'cfd_auto', ?, 0.0, ?, ?, ?, CURRENT_TIMESTAMP)
+              (?, ?, 'cfd_auto', ?, 0.0, ?, ?, ?, now())
             ON CONFLICT (signal_id) DO UPDATE SET
               ticker=excluded.ticker,
               action=excluded.action,
               session_uid=excluded.session_uid,
               rationale=excluded.rationale,
               status=excluded.status,
-              updated_at=CURRENT_TIMESTAMP
+              updated_at=now()
             """,
             (
                 mut.signal_id,
@@ -243,7 +333,7 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
         con.execute(
             """
             UPDATE quant_core.trade_signals
-            SET status='EXECUTED', updated_at=CURRENT_TIMESTAMP
+            SET status='EXECUTED', updated_at=now()
             WHERE signal_id=?
             """,
             (sid,),
@@ -262,7 +352,7 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
         con.execute(
             """
             UPDATE quant_core.trade_signals
-            SET status='DISCARDED', updated_at=CURRENT_TIMESTAMP
+            SET status='DISCARDED', updated_at=now()
             WHERE signal_id=? AND status <> 'EXECUTED'
             """,
             (sid,),
@@ -281,7 +371,7 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
         con.execute(
             """
             UPDATE quant_core.trade_signals
-            SET status='FAILED', updated_at=CURRENT_TIMESTAMP
+            SET status='FAILED', updated_at=now()
             WHERE signal_id=? AND status NOT IN ('EXECUTED', 'DISCARDED')
             """,
             (sid,),
@@ -295,11 +385,30 @@ def _sync_handle_quant_state_delta(message: str) -> None:
     data = json.loads(message)
     delta = QuantStateDelta.model_validate(data)
     tenant_id = str(delta.tenant_id or "default").strip() or "default"
-    user_id = str(delta.user_id or "default").strip() or "default"
+    raw_user_id = str(delta.user_id or "default").strip() or "default"
     target_db_path = str(delta.target_db_path or "").strip()
-    if not validate_user_db_path(user_id, target_db_path, tenant_id=tenant_id):
+    resolved_uid = _resolve_quant_user_id_for_path(raw_user_id, target_db_path, tenant_id)
+    if resolved_uid is None:
         logger.warning("QUANT_STATE_DELTA rejected: invalid db_path for user")
+        # region agent log
+        _agent_dbg(
+            "H1",
+            "quant_state_delta_handler._sync_handle_quant_state_delta",
+            "path_rejected",
+            {"raw_user_id": raw_user_id, "target_db_path": target_db_path[:240]},
+        )
+        # endregion
         return
+    user_id = resolved_uid
+    # region agent log
+    if raw_user_id != user_id:
+        _agent_dbg(
+            "H1",
+            "quant_state_delta_handler._sync_handle_quant_state_delta",
+            "user_id_inferred_from_path",
+            {"raw_user_id": raw_user_id, "resolved_user_id": user_id},
+        )
+    # endregion
     if not _validate_shared_acl(target_db_path, user_id=user_id, tenant_id=tenant_id):
         logger.warning("QUANT_STATE_DELTA rejected: no shared grant")
         return
@@ -308,6 +417,18 @@ def _sync_handle_quant_state_delta(message: str) -> None:
     try:
         con.execute("BEGIN TRANSACTION")
         con.execute(_LEDGER_DDL)
+        for _stmt in _QUANT_CORE_TRADE_SIGNALS_MIGRATION.strip().split(";"):
+            _s = _stmt.strip()
+            if _s:
+                con.execute(_s)
+        # region agent log
+        _agent_dbg(
+            "H3",
+            "quant_state_delta_handler._sync_handle_quant_state_delta",
+            "quant_core_trade_signals_migration_applied",
+            {"delta_type": str(delta.delta_type or ""), "target_db_path": target_db_path[:240]},
+        )
+        # endregion
         _apply_delta(con, delta)
         con.execute("COMMIT")
     except Exception:

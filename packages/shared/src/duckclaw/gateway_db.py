@@ -19,6 +19,7 @@ GATEWAY_DB_ENV_KEYS: tuple[str, ...] = (
     "DUCKCLAW_FINANZ_DB_PATH",
     "DUCKCLAW_JOB_HUNTER_DB_PATH",
     "DUCKCLAW_SIATA_DB_PATH",
+    "DUCKCLAW_PQRSD_ASSISTANT_DB_PATH",
     "DUCKDB_PATH",
 )
 
@@ -55,6 +56,21 @@ class GatewayDbEphemeralReadonly:
         return None
 
 
+
+
+# Nombre canónico del archivo DuckDB del worker PQRSD-Assistant por usuario (bootstrap / plantillas).
+PQRSD_ASSISTANT_VAULT_FILENAME = "pqrsd-assistantdb1.duckdb"
+
+
+def default_pqrsd_assistant_vault_path(vault_user_id: str) -> str:
+    """
+    Ruta absoluta a ``db/private/<vault_user_id>/pqrsd-assistantdb1.duckdb``.
+
+    Usada cuando ``DUCKCLAW_PQRSD_ASSISTANT_DB_PATH`` no está definido y el chat va al worker
+    PQRSD-Assistant, para no heredar el vault dedicado del hub (p. ej. Finanz).
+    """
+    uid = (vault_user_id or "").strip() or "default"
+    return resolve_env_duckdb_path(f"db/private/{uid}/{PQRSD_ASSISTANT_VAULT_FILENAME}")
 
 
 def resolve_env_duckdb_path(raw: str) -> str:
@@ -99,7 +115,7 @@ def get_gateway_db_path() -> str:
 
     Primera variable no vacía entre ``DUCKCLAW_WAR_ROOM_ACL_DB_PATH``,
     ``DUCKCLAW_FINANZ_DB_PATH``, ``DUCKCLAW_JOB_HUNTER_DB_PATH``,
-    ``DUCKCLAW_SIATA_DB_PATH``, luego ``DUCKDB_PATH``; resuelta con
+    ``DUCKCLAW_SIATA_DB_PATH``, ``DUCKCLAW_PQRSD_ASSISTANT_DB_PATH``, luego ``DUCKDB_PATH``; resuelta con
     ``resolve_env_duckdb_path``.
     """
     return resolve_env_duckdb_path(raw_gateway_db_path_from_environ())

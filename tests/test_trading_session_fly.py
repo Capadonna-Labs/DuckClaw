@@ -9,6 +9,8 @@ from duckclaw.graphs.on_the_fly_commands import (
     _parse_trading_session_cli,
     _session_goal_from_cli,
     _execute_signal_verify_ledger,
+    _looks_like_hallucinated_placeholder_uuid,
+    execute_quant_execute_signal,
 )
 
 
@@ -94,6 +96,16 @@ def test_execute_signal_verify_finanz_quant_core_only() -> None:
 
     ok, msg = _execute_signal_verify_ledger(_Db(), "22222222-2222-2222-2222-222222222222")
     assert ok and not msg
+
+
+def test_looks_like_hallucinated_placeholder_uuid() -> None:
+    assert _looks_like_hallucinated_placeholder_uuid("e0e5e5e5-5e5e-5e5e-5e5e-5e5e5e5e5e5e")
+    assert not _looks_like_hallucinated_placeholder_uuid("990bdbe0-07a2-4abc-9ebd-756ebd08fca5")
+
+
+def test_execute_quant_execute_signal_rejects_placeholder_uuid() -> None:
+    out = execute_quant_execute_signal(None, "1", "e0e5e5e5-5e5e-5e5e-5e5e-5e5e5e5e5e5e")
+    assert "propose_trade_signal" in out
 
 
 def test_trading_session_upsert_sql_duckdb_prepared_safe() -> None:

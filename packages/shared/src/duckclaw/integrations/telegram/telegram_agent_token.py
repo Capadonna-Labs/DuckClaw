@@ -17,6 +17,7 @@ __all__ = [
     "telegram_agent_token_env_name",
     "resolve_telegram_token_for_worker_id",
     "telegram_token_from_pm2_env_dict",
+    "telegram_worker_ids_match_for_compact_route",
 ]
 
 # Nombre de app PM2 (p. ej. config/api_gateways_pm2.json) → id del worker en Forge.
@@ -45,6 +46,16 @@ def canonical_manifest_worker_id(raw: str) -> str:
     if low == "leilaassistant" or s == "LeilaAssistant":
         return "LeilaAssistant"
     return norm
+
+
+def telegram_worker_ids_match_for_compact_route(a: str, b: str) -> bool:
+    """
+    True si dos identificadores de worker se refieren al mismo bot en rutas compactas.
+    Unifica ``quant_trader`` (manifest) con ``Quant-Trader`` (carpeta HTTP).
+    """
+    xa = canonical_manifest_worker_id(a).lower().replace("_", "")
+    xb = canonical_manifest_worker_id(b).lower().replace("_", "")
+    return bool(xa and xa == xb)
 
 
 def telegram_agent_token_env_name(worker_id: str) -> str:

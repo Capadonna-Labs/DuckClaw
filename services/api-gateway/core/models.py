@@ -51,6 +51,11 @@ class ChatRequest(BaseModel):
         False,
         description="Solo uso interno: no tomar el Redis lock por chat_id (p. ej. CONTEXT_INJECTION en background).",
     )
+    vault_db_path: str | None = Field(
+        None,
+        description="Solo uso interno (p. ej. goals_proactive): forzar la bóveda .duckdb del worker; evita que "
+        "dedicated_gateway_db sustituya al vault del usuario cuando el tick no pasa por webhook multiplex.",
+    )
 
     @field_validator("chat_id", mode="before")
     @classmethod

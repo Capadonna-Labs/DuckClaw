@@ -6,6 +6,7 @@ Cuando la tarea del usuario requiera **trabajo aislado de alto riesgo** (scrapin
 
 - Consultas a la base local, SQL, finanzas, SIATA, retail o flujos ya cubiertos por el worker asignado.
 - Saludos, capacidades o tareas que el subagente resuelva en uno o pocos pasos.
+- **PQRSD / ciudadanía Medellín** (`PQRSD-Assistant`): **no** incluyas `mercenary` en el JSON del planner. Ese equipo usa **Playwright** vía **`run_browser_sandbox`** en el worker (Strix) cuando el usuario activa `/sandbox on`, más `pqrsd_fetch_canonical`. El mercenario aquí **no** aplica y el Manager debe delegar al worker.
 
 ### Contrato
 

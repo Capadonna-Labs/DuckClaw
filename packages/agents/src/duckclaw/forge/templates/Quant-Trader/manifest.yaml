@@ -21,6 +21,7 @@ llm:
 skills:
   - read_sql
   - ibkr: {}  # get_ibkr_portfolio: mismo contrato que Finanz (IBKR_PORTFOLIO_API_URL; paper/live vía IBKR_ACCOUNT_MODE)
+  - fmp: {}  # get_fmp_stock_dividends, get_fmp_dividends_calendar (FMP_API_KEY)
   - fetch_market_data
   - fetch_ib_gateway_ohlcv
   - tavily_search

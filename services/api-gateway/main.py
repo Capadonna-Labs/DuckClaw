@@ -58,11 +58,14 @@ from duckclaw.utils.telegram_markdown_v2 import escape_telegram_html, llm_markdo
 from duckclaw.vaults import resolve_active_vault, validate_user_db_path, vault_scope_id_for_tenant
 from duckclaw.integrations.telegram.telegram_agent_token import (
     PM2_GATEWAY_APP_TO_WORKER_ID,
+    canonical_manifest_worker_id,
     resolve_telegram_token_for_worker_id,
     telegram_token_from_pm2_env_dict,
+    telegram_worker_ids_match_for_compact_route,
 )
 from duckclaw.gateway_db import (
     GATEWAY_DB_ENV_KEYS,
+    default_pqrsd_assistant_vault_path,
     get_gateway_db_path,
     raw_gateway_db_path_from_mapping,
     resolve_env_duckdb_path,
@@ -170,6 +173,7 @@ def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
         "DUCKCLAW_FINANZ_DB_PATH",
         "DUCKCLAW_JOB_HUNTER_DB_PATH",
         "DUCKCLAW_SIATA_DB_PATH",
+        "DUCKCLAW_PQRSD_ASSISTANT_DB_PATH",
     )):
         os.environ.setdefault("DUCKCLAW_FINANZ_DB_PATH", resolve_env_duckdb_path(legacy))
     if not any(os.environ.get(k) for k in GATEWAY_DB_ENV_KEYS):
@@ -223,14 +227,12 @@ def _effective_telegram_bot_token() -> str:
 def _telegram_token_from_compact_routes_for_worker(worker_id: str) -> str:
     """Fallback: resuelve token por worker desde DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES."""
     try:
-        from core.telegram_compact_webhook_routes import load_path_webhook_bindings_from_env
-        from duckclaw.integrations.telegram.telegram_agent_token import canonical_manifest_worker_id
+        from duckclaw.integrations.telegram.compact_webhook_routes import load_path_webhook_bindings_from_env
 
-        target = canonical_manifest_worker_id(worker_id)
-        if not target:
+        if not (worker_id or "").strip():
             return ""
         for b in load_path_webhook_bindings_from_env():
-            if canonical_manifest_worker_id(b.worker_id) == target:
+            if telegram_worker_ids_match_for_compact_route(worker_id, b.worker_id):
                 return str(b.bot_token or "").strip()
     except Exception:
         return ""
@@ -246,6 +248,12 @@ def _dedicated_gateway_vault_db_path() -> str | None:
     esa DuckDB sustituye al vault activo del usuario (fly commands, manager, workers).
     """
     return dedicated_gateway_db_path_resolved()
+
+
+def _worker_id_is_pqrsd_assistant(worker_id: str) -> bool:
+    """True si la ruta/query de chat apunta al template PQRSD (id forge: pqrsd_assistant)."""
+    s = (worker_id or "").strip().lower().replace("-", "_")
+    return s == "pqrsd_assistant"
 
 try:
     from core.config import settings
@@ -284,6 +292,13 @@ _gateway_log.info(
     (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip() or "(unset)",
     (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip() or "(unset)",
 )
+_pqrsd_startup = (os.environ.get("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH") or "").strip()
+if _pqrsd_startup:
+    _gateway_log.info(
+        "PQRSD-Assistant: bóveda del worker (DUCKCLAW_PQRSD_ASSISTANT_DB_PATH) → %s "
+        "(hub ACL/whitelist sigue en gateway_db_path arriba)",
+        resolve_env_duckdb_path(_pqrsd_startup),
+    )
 
 def _normalize_local_artifacts_to_db() -> None:
     """Mueve artefactos locales conocidos a `db/` si aparecen en la raíz."""
@@ -471,6 +486,9 @@ async def _tailscale_auth_middleware(request: Request, call_next):
         return await call_next(request)
     # Telegram Bot API no envía X-Tailscale-Auth-Key; webhook estándar y rutas path-multiplex.
     if path.startswith("/api/v1/telegram/"):
+        return await call_next(request)
+    # noVNC: el usuario abre el enlace en el navegador móvil sin X-Tailscale-Auth-Key; el token sustituye auth.
+    if path.startswith("/api/v1/sandbox/novnc/"):
         return await call_next(request)
     header_key = request.headers.get("X-Tailscale-Auth-Key", "").strip()
     if header_key != auth_key:
@@ -701,10 +719,29 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
     """
     Telegram Guard whitelist lookup with Redis cache (TTL=1h) + DuckDB source of truth.
     """
+    # region agent log
+    _dbg: dict[str, Any] = {
+        "hypothesisId": "H1_redis_H2_duckdb_H3_gateway_path",
+        "redis_hit": False,
+        "db_rows": -1,
+        "gw_tail": "",
+    }
+    try:
+        from duckclaw.gateway_db import get_gateway_db_path as _gw_p  # noqa: PLC0415
+
+        _gp = str(_gw_p() or "")
+        _dbg["gw_tail"] = _gp[-96:] if len(_gp) > 96 else _gp
+        _dbg["db_type"] = type(db).__name__
+    except Exception as _e_dbg:
+        _dbg["gw_err"] = type(_e_dbg).__name__
+    # endregion
     key = f"whitelist:{str(tenant_id or '').strip().lower()}:{user_id}"
     if redis_client is not None:
         try:
             cached = await redis_client.get(key)
+            # region agent log
+            _dbg["redis_hit"] = bool(cached)
+            # endregion
             if cached:
                 return str(cached).strip() or None
         except Exception:
@@ -728,6 +765,9 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
             f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}' LIMIT 1"
         )
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        # region agent log
+        _dbg["db_rows"] = len(rows) if isinstance(rows, list) else -2
+        # endregion
         if rows and isinstance(rows[0], dict):
             role = (rows[0].get("role") or "").strip()
             if role:
@@ -746,6 +786,9 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
                 f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}' LIMIT 1"
             )
             rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            # region agent log
+            _dbg["db_rows_retry"] = len(rows) if isinstance(rows, list) else -2
+            # endregion
             if rows and isinstance(rows[0], dict):
                 role = (rows[0].get("role") or "").strip()
                 if role:
@@ -757,6 +800,35 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
                     return role
         except Exception:
             pass
+    # region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "location": "main.py:_lookup_whitelist_role",
+                        "message": "whitelist_miss",
+                        "data": {
+                            **_dbg,
+                            "tenant_norm": str(tenant_id or "").strip().lower()[:64],
+                            "uid_len": len(str(user_id or "")),
+                            "redis_key_suffix": key[-48:] if len(key) > 48 else key,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     return None
 
 
@@ -1027,38 +1099,57 @@ def _outbound_deliver_chat_text_sync(
 
     token = (outbound_telegram_bot_token or "").strip()
     worker_token = ""
+    token_source = "explicit" if token else "none"
     if not token:
         try:
             worker_token = (resolve_telegram_token_for_worker_id((worker_id or "").strip()) or "").strip()
             token = worker_token
+            if token:
+                token_source = "resolve_telegram_token_for_worker_id"
         except Exception:
             token = ""
     if not token:
         token = _telegram_token_from_compact_routes_for_worker((worker_id or "").strip())
+        if token:
+            token_source = "compact_webhook_routes"
     if not token:
-        token = _effective_telegram_bot_token()
+        _wid = canonical_manifest_worker_id((worker_id or "").strip())
+        _allow_generic = (not _wid) or (_wid.lower() == "finanz")
+        if _allow_generic:
+            token = _effective_telegram_bot_token()
+            if token:
+                token_source = "effective_telegram_bot_token_finanz"
+        else:
+            _gateway_log.warning(
+                "outbound deliver: sin token Bot API para worker_id=%r; no se usa TELEGRAM_BOT_TOKEN "
+                "(evita entregar en el chat del bot Finanz). Defina TELEGRAM_%s_TOKEN o ruta en "
+                "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES.",
+                worker_id,
+                (_wid or "WORKER").upper(),
+            )
     # region agent log
     try:
         _fp = hashlib.sha1(token.encode("utf-8")).hexdigest()[:10] if token else ""
         with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
             "a",
             encoding="utf-8",
         ) as _df:
             _df.write(
                 json.dumps(
                     {
-                        "sessionId": "c964f7",
-                        "runId": "pre-fix",
-                        "hypothesisId": "H9_outbound_token_resolution",
+                        "sessionId": "adf9d8",
+                        "runId": "outbound-verify",
+                        "hypothesisId": "H2_token_fallback_cross_bot",
                         "location": "services/api-gateway/main.py:_outbound_deliver_chat_text_sync",
-                        "message": "resolved_outbound_token",
+                        "message": "outbound_token_resolution",
                         "data": {
                             "chat_id": str(cid),
                             "worker_id": str(worker_id or ""),
+                            "token_source": token_source,
                             "token_fp": _fp,
                             "had_explicit_token": bool((outbound_telegram_bot_token or "").strip()),
-                            "had_worker_token": bool(worker_token),
+                            "had_worker_resolve": bool(worker_token),
                         },
                         "timestamp": int(time.time() * 1000),
                     }
@@ -1133,39 +1224,6 @@ async def _authorize_or_reject(
     from core.gateway_acl_db import get_gateway_acl_duckdb, get_war_room_acl_duckdb
 
     db = get_gateway_acl_duckdb()[0]
-    # #region agent log
-    try:
-        _forced_acl = (telegram_guard_acl_db_path or "").strip()
-        _hub_p = str(getattr(db, "_path", "") or "")
-        _forced_r = str(Path(_forced_acl).expanduser().resolve()) if _forced_acl else ""
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "post-fix",
-                        "hypothesisId": "H14_whitelist_always_hub",
-                        "location": "services/api-gateway/main.py:_authorize_or_reject",
-                        "message": "whitelist_lookup_db",
-                        "data": {
-                            "hub_db_tail": _hub_p[-48:] if _hub_p else "",
-                            "forced_vault_tail": _forced_r[-48:] if _forced_r else "",
-                            "paths_differ": bool(_forced_r and _hub_p and _forced_r != _hub_p),
-                            "tenant_id": str(tenant_id or ""),
-                            "user_id": str(user_id or ""),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     if is_war_room_tenant(tenant_id):
         wr_db = get_war_room_acl_duckdb()
         # Bootstrap WR: mientras no haya miembros registrados, no bloquear al primer operador.
@@ -1464,14 +1522,55 @@ async def _invoke_chat(
     vault_scope = vault_scope_id_for_tenant(tenant_id)
     _, vault_db_path = resolve_active_vault(vault_user_id, vault_scope)
     _forced_v = (telegram_forced_vault_db_path or "").strip()
+    _payload_vault = (getattr(payload, "vault_db_path", None) or "").strip()
     _telegram_acl_for_guard: str | None = None
     if _forced_v:
         vault_db_path = resolve_env_duckdb_path(_forced_v)
         _telegram_acl_for_guard = vault_db_path
+    elif _payload_vault:
+        vault_db_path = resolve_env_duckdb_path(_payload_vault)
+        _telegram_acl_for_guard = vault_db_path
     else:
-        _ded_vault = _dedicated_gateway_vault_db_path()
-        if _ded_vault:
-            vault_db_path = _ded_vault
+        # Hub Finanz + env PQRSD: get_gateway_db_path() prioriza FINANZ; el worker PQRSD debe
+        # usar DUCKCLAW_PQRSD_ASSISTANT_DB_PATH o, si no está definida, db/private/<user>/pqrsd-assistantdb1.duckdb.
+        _pqrsd_raw = (os.environ.get("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH") or "").strip()
+        if _worker_id_is_pqrsd_assistant(worker_id):
+            if _pqrsd_raw:
+                vault_db_path = resolve_env_duckdb_path(_pqrsd_raw)
+            else:
+                vault_db_path = default_pqrsd_assistant_vault_path(vault_user_id)
+        else:
+            _ded_vault = _dedicated_gateway_vault_db_path()
+            if _ded_vault:
+                vault_db_path = _ded_vault
+    # #region agent log
+    if _worker_id_is_pqrsd_assistant(worker_id):
+        try:
+            _dbg_lp = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
+            with open(_dbg_lp, "a", encoding="utf-8") as _dbg_f:
+                _dbg_f.write(
+                    json.dumps(
+                        {
+                            "sessionId": "8d6707",
+                            "hypothesisId": "H1",
+                            "location": "main.py:_invoke_chat:vault",
+                            "message": "pqrsd_vault_resolved",
+                            "data": {
+                                "vault_db_path": (vault_db_path or ""),
+                                "vault_user_id": vault_user_id,
+                                "pqrsd_env_set": bool(
+                                    (os.environ.get("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH") or "").strip()
+                                ),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+    # #endregion
     history = payload.history or []
     is_system_prompt = bool(payload.is_system_prompt or False)
     shared_db_path = (payload.shared_db_path or "").strip() or None
@@ -1917,6 +2016,8 @@ async def _invoke_chat(
         "worker_id": effective_worker_id or worker_id,
         "elapsed_ms": elapsed_ms,
     }
+    if isinstance(usage, dict) and usage:
+        out_resp["usage_tokens"] = usage
     if _telegram_response_parts_count > 1:
         out_resp["response_parts"] = _telegram_response_parts_count
     if telegram_reply_head_plain is not None and (telegram_multipart_tail_plain_for_client or "").strip():
@@ -2003,6 +2104,86 @@ async def enqueue_write(req: WriteRequest):
         )
 
 
+class ReadRequest(BaseModel):
+    query: str = Field(..., description="Consulta SQL SELECT parametrizada")
+    params: list = Field(default_factory=list, description="Parámetros para la consulta")
+    tenant_id: str = Field(default="default", description="ID del tenant")
+    user_id: str | None = Field(default=None, description="ID del usuario dueño de la bóveda")
+    db_path: str | None = Field(default=None, description="Ruta DuckDB (solo lectura)")
+
+
+def _resolve_db_path_for_vault(req: WriteRequest | ReadRequest) -> str:
+    """Resuelve db_path con la misma lógica que enqueue_write (sin encolar)."""
+    user_id = (req.user_id or "").strip() or "default"
+    db_path = (req.db_path or "").strip()
+    tid = (req.tenant_id or "").strip() or None
+    if not db_path:
+        _ded = _dedicated_gateway_vault_db_path()
+        if _ded:
+            db_path = _ded
+        else:
+            _t_eff = str(tid or "default").strip() or "default"
+            _, db_path = resolve_active_vault(user_id, vault_scope_id_for_tenant(_t_eff))
+    return db_path
+
+
+@app.post("/api/v1/db/read")
+async def db_read(req: ReadRequest) -> dict[str, Any]:
+    """Ejecuta SELECT en DuckDB en solo lectura (CRM y clientes internos)."""
+    q = (req.query or "").strip()
+    if not q.upper().startswith("SELECT"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se permiten consultas SELECT.",
+        )
+    user_id = (req.user_id or "").strip() or "default"
+    tid = (req.tenant_id or "").strip() or None
+    db_path = _resolve_db_path_for_vault(req)
+    if not validate_user_db_path(user_id, db_path, tenant_id=tid):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="db_path inválido para el usuario.",
+        )
+    from core.gateway_acl_db import get_gateway_acl_duckdb
+    from duckclaw.shared_db_grants import path_is_under_shared_tree, user_may_access_shared_path
+
+    if path_is_under_shared_tree(db_path) and not user_may_access_shared_path(
+        get_gateway_acl_duckdb()[0],
+        tenant_id=str(tid or "default").strip() or "default",
+        user_id=user_id,
+        shared_db_path=db_path,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sin permiso para leer esta base de datos compartida.",
+        )
+
+    def _exec_read() -> list[dict[str, Any]]:
+        from duckclaw.duckdb_read_compat import duckdb_connect_read_with_rw_fallback
+
+        con = duckdb_connect_read_with_rw_fallback(db_path)
+        try:
+            cur = con.execute(q, req.params or [])
+            desc = cur.description
+            cols = [d[0] for d in desc] if desc else []
+            rows_raw = cur.fetchall()
+            out: list[dict[str, Any]] = []
+            for row in rows_raw:
+                out.append({cols[i]: row[i] for i in range(len(cols))})
+            return out
+        finally:
+            con.close()
+
+    try:
+        rows = await asyncio.to_thread(_exec_read)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    return {"rows": rows}
+
+
 # ── Telegram inbound webhook (integración nativa) ────────────────────────────
 
 try:
@@ -2023,5 +2204,16 @@ except ImportError:
 try:
     from routers.quotes import router as quotes_router
     app.include_router(quotes_router)
+except ImportError:
+    pass
+
+try:
+    from duckclaw.graphs.novnc_routes import build_novnc_router
+
+    app.include_router(
+        build_novnc_router(),
+        prefix="/api/v1/sandbox/novnc",
+        tags=["sandbox-novnc"],
+    )
 except ImportError:
     pass

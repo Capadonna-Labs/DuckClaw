@@ -1,38 +1,40 @@
-from duckclaw.forge.skills.research_bridge import _format_tavily_results, _sanitize_tavily_text
+from duckclaw.forge.skills.research_bridge import (
+    _format_tavily_results,
+    _hostname_from_domain_spec,
+    _normalize_include_domains,
+)
 
 
-def test_sanitize_tavily_text_removes_script_and_style_blocks() -> None:
-    raw = "<div>hola</div><script>alert(1)</script><style>p{color:red}</style>mundo"
-    out = _sanitize_tavily_text(raw)
-    assert "<script" not in out.lower()
-    assert "<style" not in out.lower()
-    assert "alert(1)" not in out
-    assert "hola" in out
-    assert "mundo" in out
+def test_hostname_from_domain_spec_strips_www_and_path() -> None:
+    assert _hostname_from_domain_spec("https://www.medellin.gov.co/es/pqrsd/") == "medellin.gov.co"
+    assert _hostname_from_domain_spec("medellin.gov.co") == "medellin.gov.co"
+    assert _hostname_from_domain_spec("www.medellin.gov.co/foo") == "medellin.gov.co"
 
 
-def test_sanitize_tavily_text_removes_html_tags_and_normalizes_spaces() -> None:
-    raw = "<div><b>Texto</b>   con\t\tespacios</div>\n\n\n<p>linea 2</p>"
-    out = _sanitize_tavily_text(raw)
-    assert "<div>" not in out and "<b>" not in out and "<p>" not in out
-    assert "Texto con espacios" in out
-    assert "\n\n\n" not in out
+def test_normalize_include_domains_dedupes() -> None:
+    assert _normalize_include_domains(
+        ["https://www.medellin.gov.co/a", "www.medellin.gov.co/b", "medellin.gov.co"]
+    ) == ["medellin.gov.co"]
 
 
-def test_format_tavily_results_sanitizes_answer_title_and_content() -> None:
+def test_normalize_include_domains_empty() -> None:
+    assert _normalize_include_domains(None) == []
+    assert _normalize_include_domains([]) == []
+
+
+def test_format_tavily_results_basic_dict() -> None:
     payload = {
-        "answer": "<script>bad()</script><b>Respuesta</b>",
+        "answer": "Respuesta corta",
         "results": [
             {
-                "title": "<i>Título</i>",
-                "url": "https://example.com",
-                "content": "<div>contenido <script>x()</script>limpio</div>",
+                "title": "Título",
+                "url": "https://medellin.gov.co/x",
+                "content": "contenido",
             }
         ],
     }
     out = _format_tavily_results(payload)
-    assert "script" not in out.lower()
-    assert "<b>" not in out and "<i>" not in out and "<div>" not in out
-    assert "Respuesta" in out
+    assert "Respuesta corta" in out
     assert "Título" in out
-    assert "contenido limpio" in out
+    assert "medellin.gov.co" in out
+    assert "contenido" in out

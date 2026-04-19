@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import urllib.error
+import urllib.request
 
 from duckclaw.forge.skills.quant_tool_context import (
     note_quant_market_evidence_ticker,
@@ -17,6 +19,19 @@ from duckclaw.forge.skills.quant_trader_bridge import (
 )
 
 
+def _trade_sig_row(**overrides: object) -> str:
+    base: dict[str, object] = {
+        "human_approved": True,
+        "status": "AWAITING_HITL",
+        "ticker": "SPY",
+        "signal_type": "ENTRY",
+        "proposed_weight": 5.0,
+        "mandate_id": "33333333-3333-3333-3333-333333333333",
+    }
+    base.update(overrides)
+    return json.dumps([base])
+
+
 class _FakeDb:
     def __init__(self) -> None:
         self._path = "/tmp/test_quant_trader.duckdb"
@@ -27,7 +42,7 @@ class _FakeDb:
         if "trading_sessions" in sql:
             return json.dumps([{"mode": "paper"}])
         if "FROM finance_worker.trade_signals" in sql:
-            return json.dumps([{"human_approved": True, "status": "AWAITING_HITL"}])
+            return _trade_sig_row()
         return json.dumps([])
 
 
@@ -83,7 +98,7 @@ def test_execute_approved_signal_requires_human_approval(monkeypatch) -> None:
     class _DbNoApproval(_FakeDb):
         def query(self, sql: str) -> str:
             if "FROM finance_worker.trade_signals" in sql:
-                return json.dumps([{"human_approved": False, "status": "AWAITING_HITL"}])
+                return _trade_sig_row(human_approved=False)
             return super().query(sql)
 
     db = _DbNoApproval()
@@ -100,7 +115,7 @@ def test_execute_approved_signal_accepts_telegram_grant(monkeypatch) -> None:
     class _DbNoApproval(_FakeDb):
         def query(self, sql: str) -> str:
             if "FROM finance_worker.trade_signals" in sql:
-                return json.dumps([{"human_approved": False, "status": "AWAITING_HITL"}])
+                return _trade_sig_row(human_approved=False)
             return super().query(sql)
 
     db = _DbNoApproval()
@@ -122,13 +137,147 @@ def test_execute_approved_signal_accepts_telegram_grant(monkeypatch) -> None:
     assert out.get("paper") is True
 
 
+def test_execute_approved_signal_sends_account_mode_header(monkeypatch) -> None:
+    class _DbOk(_FakeDb):
+        def query(self, sql: str) -> str:
+            if "FROM finance_worker.trade_signals" in sql:
+                return _trade_sig_row()
+            return super().query(sql)
+
+    captured: list[urllib.request.Request] = []
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: object = None) -> object:
+        captured.append(req)
+
+        class _Resp:
+            def read(self) -> bytes:
+                return b"{}"
+
+            def __enter__(self) -> "_Resp":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        return _Resp()
+
+    db = _DbOk()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    set_quant_tool_chat_id("telegram_chat_1")
+    monkeypatch.setenv("IBKR_EXECUTE_ORDER_URL", "http://127.0.0.1:9/order")
+    monkeypatch.setenv("IBKR_ACCOUNT_MODE", "paper")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
+        _fake_urlopen,
+    )
+    json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
+    assert len(captured) == 1
+    hdrs = {k.lower(): v for k, v in captured[0].header_items()}
+    assert hdrs.get("x-duckclaw-ibkr-account-mode") == "paper"
+
+
+def test_execute_approved_signal_post_includes_weight_payload(monkeypatch) -> None:
+    class _DbOk(_FakeDb):
+        def query(self, sql: str) -> str:
+            if "FROM finance_worker.trade_signals" in sql:
+                return _trade_sig_row(ticker="QQQ", proposed_weight=3.5)
+            return super().query(sql)
+
+    bodies: list[dict] = []
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: object = None) -> object:
+        bodies.append(json.loads(req.data.decode("utf-8")))
+
+        class _Resp:
+            def read(self) -> bytes:
+                return b"{}"
+
+            def __enter__(self) -> "_Resp":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        return _Resp()
+
+    db = _DbOk()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    set_quant_tool_chat_id("telegram_chat_1")
+    monkeypatch.setenv("IBKR_EXECUTE_ORDER_URL", "http://127.0.0.1:9/order")
+    monkeypatch.setenv("IBKR_ACCOUNT_MODE", "paper")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
+        _fake_urlopen,
+    )
+    json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
+    assert bodies[0]["ticker"] == "QQQ"
+    assert bodies[0]["proposed_weight"] == 3.5
+    assert bodies[0]["signal_type"] == "ENTRY"
+
+
+def test_execute_approved_signal_live_sends_live_header(monkeypatch) -> None:
+    class _DbLiveOk(_FakeDb):
+        def query(self, sql: str) -> str:
+            if "trading_sessions" in sql and "mode" in sql:
+                return json.dumps([{"mode": "live"}])
+            if "FROM finance_worker.trade_signals" in sql:
+                return _trade_sig_row()
+            return super().query(sql)
+
+    captured: list[urllib.request.Request] = []
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: object = None) -> object:
+        captured.append(req)
+
+        class _Resp:
+            def read(self) -> bytes:
+                return b"{}"
+
+            def __enter__(self) -> "_Resp":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        return _Resp()
+
+    db = _DbLiveOk()
+    set_quant_tool_chat_id("c1")
+    monkeypatch.setenv("IBKR_EXECUTE_ORDER_URL", "http://127.0.0.1:9/order")
+    monkeypatch.setenv("IBKR_ACCOUNT_MODE", "live")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
+        _fake_urlopen,
+    )
+    json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
+    assert len(captured) == 1
+    hdrs = {k.lower(): v for k, v in captured[0].header_items()}
+    assert hdrs.get("x-duckclaw-ibkr-account-mode") == "live"
+
+
 def test_execute_approved_signal_live_session_requires_env_live(monkeypatch) -> None:
     class _DbLive(_FakeDb):
         def query(self, sql: str) -> str:
             if "trading_sessions" in sql:
                 return json.dumps([{"mode": "live"}])
             if "FROM finance_worker.trade_signals" in sql:
-                return json.dumps([{"human_approved": True, "status": "AWAITING_HITL"}])
+                return _trade_sig_row()
             return super().query(sql)
 
     db = _DbLive()
@@ -136,6 +285,46 @@ def test_execute_approved_signal_live_session_requires_env_live(monkeypatch) -> 
     monkeypatch.setenv("IBKR_ACCOUNT_MODE", "paper")
     out = json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
     assert out["error"] == "TRADING_SESSION_LIVE_REQUIRES_IBKR_ACCOUNT_MODE_LIVE"
+
+
+def test_execute_approved_signal_paper_session_allows_ibkr_env_live(monkeypatch) -> None:
+    """Sesión paper debe ejecutar aunque IBKR_ACCOUNT_MODE sea live (header/post usan paper_flag)."""
+    captured: list[urllib.request.Request] = []
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: object = None) -> object:
+        captured.append(req)
+
+        class _Resp:
+            def read(self) -> bytes:
+                return b"{}"
+
+            def __enter__(self) -> "_Resp":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        return _Resp()
+
+    db = _FakeDb()
+    set_quant_tool_chat_id("c1")
+    monkeypatch.setenv("IBKR_EXECUTE_ORDER_URL", "http://127.0.0.1:9/order")
+    monkeypatch.setenv("IBKR_ACCOUNT_MODE", "live")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
+        _fake_urlopen,
+    )
+    out = json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
+    assert out.get("status") == "sent"
+    assert len(captured) == 1
+    hdrs = {k.lower(): v for k, v in captured[0].header_items()}
+    assert hdrs.get("x-duckclaw-ibkr-account-mode") == "paper"
+    body = json.loads(captured[0].data.decode("utf-8"))
+    assert body.get("paper") is True
 
 
 def test_propose_trade_signal_blocked_on_drawdown_breach(monkeypatch) -> None:
@@ -251,3 +440,23 @@ def test_evaluate_cfd_state_no_active_session() -> None:
         )
     )
     assert out["session_active"] is False
+
+
+def test_execute_approved_signal_http_error_includes_broker_json_message(monkeypatch) -> None:
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    monkeypatch.setenv("IBKR_ACCOUNT_MODE", "paper")
+    monkeypatch.setenv("IBKR_EXECUTE_ORDER_URL", "http://127.0.0.1:9/order")
+
+    def _http501(*_a, **_k):
+        fp = io.BytesIO(
+            b'{"status":"error","message":"Order execution hook not configured. Set OHLCV_EXECUTE_ORDER_PYTHON."}'
+        )
+        raise urllib.error.HTTPError("http://127.0.0.1:9/order", 501, "Not Implemented", {}, fp)
+
+    monkeypatch.setattr("duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen", _http501)
+    out = json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
+    assert out.get("error") == "Broker HTTP 501"
+    assert "hook not configured" in (out.get("broker_message") or "").lower()

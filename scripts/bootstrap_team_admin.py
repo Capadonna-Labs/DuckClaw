@@ -11,8 +11,9 @@ Ejemplo (ajusta la variable a tu PM2 / TheMind-Gateway):
 Si DuckDB devuelve lock (PM2 tiene abierta la misma .duckdb): ``pm2 stop TheMind-Gateway``,
 ejecuta el script, luego ``pm2 start TheMind-Gateway``.
 
-Caché Redis (si usas whitelist cacheada):
+Caché Redis (si usas whitelist cacheada; tenant en minúsculas como el gateway):
   redis-cli DEL "whitelist:default:1726618406"
+  redis-cli DEL "whitelist:pqrs:1726618406"
 """
 from __future__ import annotations
 
@@ -30,7 +31,8 @@ def _redis_delete_whitelist_cache(*, tenant_id: str, user_id: str) -> None:
     url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
     if not url:
         return
-    key = f"whitelist:{tid}:{uid}"
+    # Debe coincidir con services/api-gateway/main.py: whitelist:{tenant.lower()}:{user_id}
+    key = f"whitelist:{tid.lower()}:{uid}"
     try:
         import redis as redis_sync  # noqa: PLC0415
 

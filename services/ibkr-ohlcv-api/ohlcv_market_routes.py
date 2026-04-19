@@ -9,6 +9,15 @@ standalone de main.py.
    OHLCV_IB_FALLBACK no es ``0``, se ejecuta scripts/capadonna/ibkr_historical_bars.py
    (o OHLCV_IB_PYTHON + OHLCV_IB_SCRIPT) si el script existe / venv tiene ib_async.
 3) ``/api/market/ibkr/historical``: solo IB Gateway (sin intentar lake).
+4) ``POST /api/broker/execute``: cuerpo JSON mínimo ``{"signal_id","paper"}``; opcional payload
+   enriquecido (``ticker``, ``signal_type``, ``proposed_weight``, ``mandate_id`` para modo peso;
+   ``action``, ``quantity`` para modo acciones) inyectado como ``DUCKCLAW_EMBEDDED_EXECUTE_JSON``
+   en el hook.
+   Cabecera opcional ``X-Duckclaw-IBKR-Account-Mode: paper|live`` (como el portafolio).
+   Modo efectivo: ``OHLCV_BROKER_EXECUTE_FORCE_PAPER`` (1/true) fuerza paper; si no, la
+   cabecera manda si es válida; si falta o es inválida, se usa ``body.paper`` (default True).
+   Auth Bearer opcional (OHLCV_API_KEY / IBKR_PORTFOLIO_API_KEY). Sin hook Python/script,
+   responde 501.
 """
 
 from __future__ import annotations
@@ -23,6 +32,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["market"])
 
@@ -48,6 +58,82 @@ def _check_bearer(request: Request) -> JSONResponse | None:
     got = auth[7:].strip()
     if got != want:
         return _auth_error(401, "Invalid bearer token")
+    return None
+
+
+class _ExecuteApprovedBody(BaseModel):
+    signal_id: str = Field(..., min_length=32, max_length=64)
+    paper: bool = True
+    ticker: str | None = Field(default=None, max_length=32)
+    signal_type: str | None = Field(default=None, max_length=16)
+    proposed_weight: float | None = Field(default=None)
+    mandate_id: str | None = Field(default=None, max_length=64)
+    action: str | None = Field(default=None, max_length=8)
+    quantity: float | None = Field(default=None)
+
+
+def _resolve_execute_order_hook() -> tuple[str, str] | None:
+    py = (os.environ.get("OHLCV_EXECUTE_ORDER_PYTHON") or "").strip()
+    script = (os.environ.get("OHLCV_EXECUTE_ORDER_SCRIPT") or "").strip()
+    if py and script:
+        return py, script
+    return None
+
+
+_DUCKCLAW_IBKR_ACCOUNT_MODE_HEADER = "X-Duckclaw-IBKR-Account-Mode"
+
+
+def _env_truthy(name: str) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _effective_account_mode_paper(request: Request, body: _ExecuteApprovedBody) -> bool:
+    """Paper por defecto si la cabecera falta o no es paper/live."""
+    if _env_truthy("OHLCV_BROKER_EXECUTE_FORCE_PAPER"):
+        return True
+    raw = (request.headers.get(_DUCKCLAW_IBKR_ACCOUNT_MODE_HEADER) or "").strip().lower()
+    if raw == "live":
+        return False
+    if raw == "paper":
+        return True
+    return bool(body.paper)
+
+
+def _embedded_execute_json(body: _ExecuteApprovedBody) -> str | None:
+    """Serializa plan de ejecución para el hook (prioridad: acciones > peso)."""
+    tkr_raw = (body.ticker or "").strip().upper()
+    if tkr_raw:
+        act = (body.action or "").strip().upper()
+        if act in ("BUY", "SELL") and body.quantity is not None:
+            try:
+                q = float(body.quantity)
+            except (TypeError, ValueError):
+                q = 0.0
+            if q > 0:
+                return json.dumps(
+                    {"mode": "shares", "ticker": tkr_raw, "action": act, "quantity": q},
+                    separators=(",", ":"),
+                )
+        if body.proposed_weight is not None:
+            try:
+                w = float(body.proposed_weight)
+            except (TypeError, ValueError):
+                w = 0.0
+            if w > 0:
+                st = (body.signal_type or "ENTRY").strip().upper()
+                if st not in ("ENTRY", "EXIT"):
+                    st = "ENTRY"
+                payload: dict[str, Any] = {
+                    "mode": "weight",
+                    "ticker": tkr_raw,
+                    "signal_type": st,
+                    "proposed_weight": w,
+                }
+                mid = (body.mandate_id or "").strip()
+                if mid:
+                    payload["mandate_id"] = mid
+                return json.dumps(payload, separators=(",", ":"))
     return None
 
 
@@ -409,3 +495,86 @@ def market_ohlcv(
         return lake_err
     msg = hint or f"No OHLCV bars in lake for {tkr} timeframe={tf} lookback_days={lb}"
     return JSONResponse(status_code=400, content={"status": "error", "message": msg})
+
+
+@router.post("/api/broker/execute", response_model=None)
+def post_broker_execute(request: Request, body: _ExecuteApprovedBody) -> JSONResponse | dict[str, Any]:
+    """POST alineado con ``execute_order`` / ``execute_approved_signal`` en Duckclaw."""
+    err = _check_bearer(request)
+    if err is not None:
+        return err
+    hook = _resolve_execute_order_hook()
+    if hook is None:
+        return JSONResponse(
+            status_code=501,
+            content={
+                "status": "error",
+                "message": (
+                    "Order execution hook not configured. Set OHLCV_EXECUTE_ORDER_PYTHON and "
+                    "OHLCV_EXECUTE_ORDER_SCRIPT on this host, or point IBKR_EXECUTE_ORDER_URL elsewhere."
+                ),
+            },
+        )
+    py, script = hook
+    sid = body.signal_id.strip().lower()
+    effective_paper = _effective_account_mode_paper(request, body)
+    paper_flag = "1" if effective_paper else "0"
+    raw_timeout = (os.environ.get("OHLCV_EXECUTE_ORDER_TIMEOUT") or "120").strip() or "120"
+    try:
+        timeout_sec = max(1, min(600, int(raw_timeout)))
+    except ValueError:
+        timeout_sec = 120
+    child_env = os.environ.copy()
+    emb = _embedded_execute_json(body)
+    if emb:
+        child_env["DUCKCLAW_EMBEDDED_EXECUTE_JSON"] = emb
+    try:
+        proc = subprocess.run(
+            [py, script, sid, paper_flag],
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            env=child_env,
+        )
+    except subprocess.TimeoutExpired:
+        return JSONResponse(
+            status_code=504,
+            content={"status": "error", "message": "execute_order hook timed out"},
+        )
+    except OSError as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"execute_order hook failed to start: {exc}"},
+        )
+    out = (proc.stdout or "").strip()
+    err_txt = (proc.stderr or "").strip()
+    if proc.returncode != 0:
+        msg = err_txt
+        if not msg and out.startswith("{"):
+            try:
+                parsed_err = json.loads(out)
+                if isinstance(parsed_err, dict):
+                    inner = parsed_err.get("message")
+                    if isinstance(inner, str) and inner.strip():
+                        msg = inner.strip()[:8000]
+            except json.JSONDecodeError:
+                pass
+        if not msg:
+            msg = f"execute_order hook exited with code {proc.returncode}"
+        return JSONResponse(
+            status_code=502,
+            content={
+                "status": "error",
+                "message": msg,
+            },
+        )
+    if out.startswith("{"):
+        try:
+            parsed = json.loads(out)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            merged: dict[str, Any] = {"status": "success"}
+            merged.update(parsed)
+            return merged
+    return {"status": "success", "message": out[:8000] if out else "(empty stdout)"}

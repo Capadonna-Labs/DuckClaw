@@ -183,6 +183,7 @@ class StrixSandboxManager:
         self.memory = memory
         self._containers: dict[str, Any] = {}
         self._session_image: dict[str, str] = {}
+        self._novnc_host_ports: dict[str, int] = {}
 
     def _session_dirs(self, session_id: str) -> tuple[Path, Path]:
         base = _TMP_BASE / session_id
@@ -293,8 +294,8 @@ class StrixSandboxManager:
         }
         pub = str(os.environ.get("STRIX_BROWSER_PUBLISH_NOVNC", "")).strip().lower()
         if image_override and pub in ("1", "true", "yes", "on") and nm == "bridge":
-            # Solo dev: http://127.0.0.1:6080/vnc.html — VNC sin password en contenedor aislado
-            run_kw["ports"] = {"6080/tcp": ("127.0.0.1", 6080)}
+            # Puerto aleatorio en el host para varias sesiones; proxy en /api/v1/sandbox/novnc/view/{token}/…
+            run_kw["ports"] = {"6080/tcp": ("127.0.0.1", None)}
         container = client.containers.run(resolved_image, **run_kw)
         self._session_image[session_id] = resolved_image
         self._containers[session_id] = container
@@ -328,7 +329,18 @@ class StrixSandboxManager:
         except Exception as e:
             return ExecutionResult(exit_code=1, stdout="", stderr=f"Error al levantar sandbox: {e}")
 
+        if image_override:
+            self._refresh_browser_novnc(session_id, container)
+
         if language == "python":
+            if image_override:
+                coerced = _coerce_playwright_headed_for_novnc(code)
+                if coerced != code:
+                    _log.debug(
+                        "browser sandbox: headless=True -> headless=False for noVNC (session_id=%s)",
+                        session_id,
+                    )
+                code = coerced
             cmd = ["python3", "-c", code]
         elif language == "bash":
             cmd = ["bash", "-c", code]
@@ -403,9 +415,40 @@ class StrixSandboxManager:
                 artifacts.append(str(dest.resolve()))
         return artifacts
 
+    def _refresh_browser_novnc(self, session_id: str, container: Any) -> None:
+        """Publica/registra puerto host→6080 para noVNC (token + TTL)."""
+        pub = str(os.environ.get("STRIX_BROWSER_PUBLISH_NOVNC", "")).strip().lower()
+        if pub not in ("1", "true", "yes", "on"):
+            return
+        try:
+            from duckclaw.graphs import novnc_registry as nr  # noqa: PLC0415
+
+            container.reload()
+            ports = (container.attrs.get("NetworkSettings") or {}).get("Ports") or {}
+            tcp = ports.get("6080/tcp") or []
+            hp = int((tcp[0] or {}).get("HostPort", "0") or 0)
+            if hp <= 0:
+                return
+            old = self._novnc_host_ports.get(session_id)
+            self._novnc_host_ports[session_id] = hp
+            if old != hp:
+                nr.register_session_port(session_id, hp)
+            else:
+                nr.touch(session_id)
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("refresh_browser_novnc skipped: %s", exc)
+
     def cleanup(self, session_id: str) -> None:
         """Para y elimina el contenedor de una sesión."""
         import docker  # noqa: PLC0415
+
+        try:
+            from duckclaw.graphs import novnc_registry as nr  # noqa: PLC0415
+
+            nr.revoke_session(session_id)
+        except Exception:
+            pass
+        self._novnc_host_ports.pop(session_id, None)
 
         container_name = f"strix_sandbox_{session_id}"
         try:
@@ -511,6 +554,78 @@ def _is_security_violation(result: ExecutionResult) -> bool:
             "network is unreachable",
             "urlerror",
         )
+    )
+
+
+def _coerce_playwright_headed_for_novnc(code: str) -> str:
+    """Fuerza ``headless=False`` para que Chromium pinte en Xvfb (:99) y noVNC muestre la ventana.
+
+    Los scripts suelen usar ``headless=True`` (recomendación antigua de “sigilo”); en ese modo
+    Playwright no usa el framebuffer del display virtual y VNC solo muestra el escritorio vacío.
+
+    Opt-out (host/gateway): ``DUCKCLAW_BROWSER_PLAYWRIGHT_HEADLESS=1`` deja el código intacto.
+    """
+    if (os.environ.get("DUCKCLAW_BROWSER_PLAYWRIGHT_HEADLESS") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return code
+    return re.sub(r"\bheadless\s*=\s*True\b", "headless=False", code)
+
+
+def _default_browser_script_for_open_url(url: str) -> str:
+    """Script Playwright mínimo cuando el agente invoca ``run_browser_sandbox`` solo con *url* (sin *code*).
+
+    Tras cerrar Playwright, lanza Chromium del sistema con perfil propio para que la URL siga visible en noVNC
+    (la ventana de Playwright desaparece al terminar ``docker exec``).
+    """
+    url_lit = json.dumps(url)
+    return (
+        "import asyncio\n"
+        "import json\n"
+        "import os\n"
+        "import shutil\n"
+        "import subprocess\n"
+        "import time\n"
+        "from playwright.async_api import async_playwright\n\n"
+        "_SHOW_PROFILE = '/workspace/chrome_vnc_show'\n\n"
+        "def _spawn_visible_chromium(open_url: str) -> None:\n"
+        "    exe = shutil.which('chromium') or shutil.which('chromium-browser')\n"
+        "    if not exe:\n"
+        "        exe = '/usr/bin/chromium'\n"
+        "    if not os.path.isfile(exe):\n"
+        "        return\n"
+        "    subprocess.run(\n"
+        "        ['pkill', '-f', _SHOW_PROFILE],\n"
+        "        stdout=subprocess.DEVNULL,\n"
+        "        stderr=subprocess.DEVNULL,\n"
+        "    )\n"
+        "    time.sleep(0.35)\n"
+        "    subprocess.Popen(\n"
+        "        [exe, '--no-sandbox', '--disable-dev-shm-usage', '--user-data-dir', _SHOW_PROFILE, open_url],\n"
+        "        env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':99')},\n"
+        "        start_new_session=True,\n"
+        "        stdout=subprocess.DEVNULL,\n"
+        "        stderr=subprocess.DEVNULL,\n"
+        "    )\n\n"
+        "async def main():\n"
+        "    async with async_playwright() as p:\n"
+        "        browser = await p.chromium.launch_persistent_context(\n"
+        "            user_data_dir=os.environ.get('STRIX_CHROME_PROFILE_DIR', '/workspace/chrome_profile'),\n"
+        "            headless=False,\n"
+        "            args=['--disable-blink-features=AutomationControlled'],\n"
+        "            viewport={'width': 1280, 'height': 720},\n"
+        "        )\n"
+        "        page = await browser.new_page()\n"
+        f"        await page.goto({url_lit}, wait_until='domcontentloaded', timeout=120000)\n"
+        "        await page.screenshot(path='/workspace/output/browser_sandbox_open.png', full_page=False)\n"
+        "        title = await page.title()\n"
+        "        final_url = page.url\n"
+        "        print(json.dumps({'url': final_url, 'title': title}, ensure_ascii=False))\n"
+        "    _spawn_visible_chromium(final_url)\n\n"
+        "asyncio.run(main())\n"
     )
 
 
@@ -781,6 +896,41 @@ def _parquet_row_count(path: str) -> int | None:
         return None
 
 
+def _extract_last_json_line_dict(stdout: str) -> dict[str, Any] | None:
+    """Última línea JSON objeto en stdout (p. ej. script Playwright que imprime estado al final)."""
+    if not (stdout or "").strip():
+        return None
+    for line in reversed(stdout.strip().splitlines()):
+        s = line.strip()
+        if len(s) < 2 or not s.startswith("{"):
+            continue
+        try:
+            obj = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and obj:
+            return obj
+    return None
+
+
+def _sandbox_stdout_suggests_success_despite_exit(stdout: str, *, exit_code: int) -> bool:
+    """True si hubo salida JSON útil aunque el proceso haya salido con SIGTERM (p. ej. 143) o similar."""
+    if exit_code == 0:
+        return False
+    if exit_code in (124,):  # timeout explícito del manager
+        return False
+    obj = _extract_last_json_line_dict(stdout)
+    if not obj:
+        return False
+    if obj.get("ok") is True:
+        return True
+    if isinstance(obj.get("url"), str) and obj["url"].startswith("http"):
+        return True
+    if isinstance(obj.get("title"), str) and len(obj["title"]) > 3:
+        return True
+    return False
+
+
 def _browser_sandbox_summary(stdout: str, artifacts: list[str]) -> tuple[str, int | None, str | None]:
     """status corto, filas inferidas, nombre de archivo parquet si existe."""
     jobs: int | None = None
@@ -1012,45 +1162,126 @@ def run_mercenary_ephemeral(directive: str, timeout_s: int = 300, *, task_id: st
         return fut.result()
 
 
+def _browser_vnc_url_for_session(session_id: str) -> str | None:
+    """URL noVNC si hay publicación de puerto y registro TTL."""
+    sid = (session_id or "").strip()
+    if not sid:
+        return None
+    pub = str(os.environ.get("STRIX_BROWSER_PUBLISH_NOVNC", "")).strip().lower()
+    if pub not in ("1", "true", "yes", "on"):
+        return None
+    try:
+        from duckclaw.graphs import novnc_registry as nr  # noqa: PLC0415
+
+        tok, port = nr.get_existing_token_and_port(sid)
+        if not tok or not port:
+            return None
+        return nr.build_vnc_url(tok, port)
+    except Exception:
+        return None
+
+
+def ensure_browser_novnc_session(worker_id: str, session_id: str) -> str | None:
+    """Levanta o reutiliza el contenedor browser y registra noVNC (mismos pasos que ``execute`` antes de ``exec_run``).
+
+    Idempotente por ``session_id``: ``run_in_sandbox`` / ``execute`` siguientes reutilizan el contenedor en memoria.
+    Devuelve ``vnc_url`` si hay publicación noVNC y registro; ``None`` si Docker no está disponible o falla el aprovisionamiento.
+    """
+    if not _docker_available():
+        return None
+    wid = (worker_id or "default").strip() or "default"
+    sid = (session_id or "").strip()
+    if not sid:
+        return None
+    manager = _get_manager()
+    policy = load_security_policy(wid)
+    secret_env = _load_allowed_secrets(policy)
+    img = _browser_image_name()
+    data_dir, out_dir = manager._session_dirs(sid)
+    try:
+        container = manager._get_or_create_container(
+            sid,
+            data_dir,
+            out_dir,
+            policy=policy,
+            secret_env=secret_env,
+            image_override=img,
+        )
+        manager._refresh_browser_novnc(sid, container)
+    except Exception as exc:
+        _log.warning("ensure_browser_novnc_session failed session_id=%s: %s", sid, exc)
+        return None
+    return _browser_vnc_url_for_session(sid)
+
+
 def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
     """StructuredTool `run_browser_sandbox` — imagen STRIX_BROWSER_IMAGE, salida Parquet en /workspace/output/."""
     from langchain_core.tools import StructuredTool  # noqa: PLC0415
 
     def _run(
-        code: str,
+        code: str = "",
+        url: str = "",
         language: str = "python",
         data_sql: str = "",
         session_id: str = "",
         worker_id: str = "",
     ) -> str:
+        sid_eff = (session_id or "").strip() or uuid.uuid4().hex[:12]
+        code_eff = (code or "").strip()
+        url_eff = (url or "").strip()
+        if not code_eff and url_eff:
+            code_eff = _default_browser_script_for_open_url(url_eff)
+        if not code_eff:
+            return json.dumps(
+                {
+                    "exit_code": 1,
+                    "status": "error",
+                    "stdout_tail": "",
+                    "stderr_tail": (
+                        "run_browser_sandbox: falta `code` (script Playwright) o `url` (página a abrir en el sandbox)."
+                    ),
+                    "hint": "Pasa `url` con la URL canónica o `code` con el script completo.",
+                },
+                ensure_ascii=False,
+            )
         result = run_in_sandbox(
             db=db,
             llm=llm,
-            code=code,
+            code=code_eff,
             language=language or "python",
-            session_id=session_id or uuid.uuid4().hex[:12],
+            session_id=sid_eff,
             data_sql=data_sql or None,
-            original_request=code,
+            original_request=code_eff,
             worker_id=worker_id or "",
             image_override=_browser_image_name(),
             inject_python_header=False,
         )
         st, jobs_n, parquet_name = _browser_sandbox_summary(result.stdout or "", result.artifacts or [])
+        effective_ok = result.exit_code == 0 and not result.timed_out
+        if not effective_ok and _sandbox_stdout_suggests_success_despite_exit(
+            result.stdout or "", exit_code=int(result.exit_code or 0)
+        ):
+            effective_ok = True
         out: dict[str, Any] = {
             "exit_code": result.exit_code,
-            "status": st if result.exit_code == 0 else "error",
+            "status": st if effective_ok else "error",
             "jobs_extracted": jobs_n,
             "file": parquet_name,
             "stdout_tail": (result.stdout or "")[-_BROWSER_SANDBOX_STDOUT_TAIL:],
             "stderr_tail": (result.stderr or "")[-_BROWSER_SANDBOX_STDERR_TAIL:],
         }
+        if result.exit_code != 0 and not result.timed_out and effective_ok:
+            out["note"] = (
+                "Salida JSON útil detectada pese a código de salida no cero "
+                "(p. ej. proceso terminado por señal tras completar el script)."
+            )
         if result.artifacts:
             out["artifacts"] = result.artifacts
         if result.timed_out:
             out["warning"] = "Timeout alcanzado"
         if result.attempts > 1:
             out["auto_corrected_attempts"] = result.attempts
-        if result.exit_code != 0:
+        if result.exit_code != 0 and not effective_ok:
             raw_err = (result.stderr or result.stdout or "error desconocido").strip()
             err_snip = raw_err[:1500]
             missing_mods = _missing_python_modules_from_traceback(raw_err)
@@ -1065,6 +1296,9 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
                 )
             else:
                 out["hint"] = err_snip
+        vnc_u = _browser_vnc_url_for_session(sid_eff)
+        if vnc_u:
+            out["vnc_url"] = vnc_u
         compact_keys = (
             "exit_code",
             "status",
@@ -1077,6 +1311,8 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "auto_corrected_attempts",
             "hint",
             "missing_pip_packages",
+            "vnc_url",
+            "note",
         )
         # compact_keys incluye stdout_tail/stderr_tail para el contrato con el LLM (MQL5, diagnósticos).
         return json.dumps({k: out[k] for k in compact_keys if k in out}, ensure_ascii=False)
@@ -1091,8 +1327,10 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "**Estándar de sigilo (recomendado en scripts generados):** "
             "usar contexto persistente para cookies/sesión: "
             "p.chromium.launch_persistent_context(user_data_dir=os.environ.get('STRIX_CHROME_PROFILE_DIR','/workspace/chrome_profile'), "
-            "headless=True, args=['--disable-blink-features=AutomationControlled'], user_agent=..., viewport=...); "
-            "si no usas contexto persistente, crea browser.new_context con user_agent realista (no el default de Playwright), viewport ~1920x1080, "
+            "headless=False, args=['--disable-blink-features=AutomationControlled'], user_agent=..., viewport=...); "
+            "(``headless=False`` pinta en Xvfb :99 y se ve en noVNC; el motor puede forzar headed si el script aún pone headless=True salvo "
+            "DUCKCLAW_BROWSER_PLAYWRIGHT_HEADLESS=1). "
+            "Si no usas contexto persistente, crea browser.new_context con user_agent realista (no el default de Playwright), viewport ~1920x1080, "
             "extra_http_headers con Accept-Language (es-ES,en-US,…); si la URL es mql5.com, Referer https://www.mql5.com/ ; "
             "page.add_init_script para ocultar navigator.webdriver; "
             "Navegación: en **mql5.com** sigue la plantilla `finanz/snippets/mql5_playwright_stealth.py`: "
@@ -1102,7 +1340,57 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "**Contrato de salida:** imprime JSON o texto útil a stdout; la tool devuelve stdout_tail/stderr_tail para el agente. "
             "OSINT JobHunter: resúmenes en stdout y/o `/workspace/output/osint_jobs.parquet` (no volcar HTML masivo). "
             "Tras Parquet, `read_sql` con read_parquet y rutas en `artifacts`. "
-            "Parámetros: code, language ('python'|'bash'), data_sql opcional, session_id, worker_id."
+            "Parámetros válidos **únicamente**: **code**, **url**, **language** ('python'|'bash'), "
+            "**data_sql**, **session_id**, **worker_id**. "
+            "No uses claves inventadas (p. ej. interactive, screenshot): serán ignoradas o fallarán. "
+            "Atajo: **url** abre esa URL con Playwright mínimo y captura; **code** es el script completo."
+        ),
+    )
+
+
+def get_browser_session_url_tool_factory(db: Any, llm: Any) -> Any:
+    """StructuredTool `get_browser_session_url` — URL noVNC con token (TTL)."""
+    from langchain_core.tools import StructuredTool  # noqa: PLC0415
+
+    def _run(chat_id: str = "") -> str:
+        from duckclaw.graphs import novnc_registry as nr  # noqa: PLC0415
+
+        sid = nr.sanitize_chat_to_session_id(chat_id or "")
+        ttl = int(os.environ.get("DUCKCLAW_BROWSER_NOVNC_TTL_S", "600"))
+        url = _browser_vnc_url_for_session(sid)
+        if url:
+            nr.touch(sid)
+        if not url:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": (
+                        "Sin sesión noVNC activa para este chat. Ejecuta run_browser_sandbox con "
+                        "/sandbox on; en el host del gateway: STRIX_BROWSER_PUBLISH_NOVNC=1 y red bridge "
+                        "(network no 'none' en security_policy)."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "ok": True,
+                "vnc_url": url,
+                "session_id": sid,
+                "ttl_seconds": ttl,
+            },
+            ensure_ascii=False,
+        )
+
+    return StructuredTool.from_function(
+        _run,
+        name="get_browser_session_url",
+        description=(
+            "Devuelve la URL de noVNC (pantalla del navegador en el sandbox) para **este** chat, "
+            "si hay un contenedor browser activo con publicación de puerto. Úsala cuando el usuario "
+            "pida «muéstrame lo que ves» o «comparte pantalla». Suele existir sesión tras "
+            "`run_browser_sandbox` (el gateway también puede haber preparado noVNC justo antes de ejecutar). "
+            "STRIX_BROWSER_PUBLISH_NOVNC=1 en el proceso del gateway. Parámetro: chat_id (inyectado)."
         ),
     )
 

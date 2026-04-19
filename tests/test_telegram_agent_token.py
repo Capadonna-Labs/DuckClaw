@@ -48,3 +48,10 @@ def test_pm2_env_dict_prefers_worker_token_over_generic_bot_token() -> None:
 def test_pm2_env_dict_finanz_still_falls_back_to_generic_bot_token() -> None:
     env = {"TELEGRAM_BOT_TOKEN": "only-finanz"}
     assert m.telegram_token_from_pm2_env_dict(env, "finanz") == "only-finanz"
+
+
+def test_telegram_worker_ids_match_quant_folder_vs_manifest_id() -> None:
+    """Rutas compactas usan Quant-Trader; el manifest usa quant_trader."""
+    assert m.telegram_worker_ids_match_for_compact_route("Quant-Trader", "quant_trader")
+    assert m.telegram_worker_ids_match_for_compact_route("quant_trader", "Quant-Trader")
+    assert not m.telegram_worker_ids_match_for_compact_route("finanz", "Quant-Trader")

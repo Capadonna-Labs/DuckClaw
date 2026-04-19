@@ -18,6 +18,11 @@ from urllib.error import HTTPError, URLError
 from urllib import request as urllib_request
 
 from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
+from duckclaw.integrations.telegram.telegram_agent_token import (
+    canonical_manifest_worker_id,
+    resolve_telegram_token_for_worker_id,
+    telegram_worker_ids_match_for_compact_route,
+)
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 
 _log = logging.getLogger(__name__)
@@ -252,6 +257,7 @@ def heartbeat_message_for_tool(name: str) -> str:
         "admin_sql": "📊 Paso actual: escritura SQL con admin_sql…",
         "run_sandbox": "⚙️ Paso actual: procesar o graficar en el sandbox (run_sandbox)…",
         "run_browser_sandbox": "🌐 Paso actual: navegación aislada en Strix browser (run_browser_sandbox)…",
+        "get_browser_session_url": "🖥️ Paso actual: enlace noVNC para ver el navegador del sandbox…",
         "inspect_schema": "🗂️ Paso actual: listar qué hay en la base con inspect_schema…",
         "scrape_siata_radar_realtime": "📡 Paso actual: último producto del radar (scrape_siata_radar_realtime)…",
     }
@@ -311,6 +317,43 @@ def format_tool_heartbeat(
     return " — ".join(segments)
 
 
+def _resolve_heartbeat_outbound_bot_token(
+    outbound_bot_token: str | None,
+    routing_worker_id: str | None,
+) -> str:
+    """
+    Token Bot API para DM de heartbeat: explícito, TELEGRAM_<worker>_TOKEN,
+    DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES compacto, o —solo finanz / sin worker—
+    ``effective_telegram_bot_token_outbound()`` (evita enviar con el bot Finanz
+    cuando el turno es de Quant u otro worker multiplex).
+    """
+    explicit = (outbound_bot_token or "").strip()
+    if explicit:
+        return explicit
+    wid = (routing_worker_id or "").strip()
+    if not wid:
+        return effective_telegram_bot_token_outbound()
+    cw = canonical_manifest_worker_id(wid)
+    if not cw or cw.lower() == "finanz":
+        return effective_telegram_bot_token_outbound()
+    t = (resolve_telegram_token_for_worker_id(wid) or "").strip()
+    if t:
+        return t
+    try:
+        from duckclaw.integrations.telegram.compact_webhook_routes import load_path_webhook_bindings_from_env
+
+        for b in load_path_webhook_bindings_from_env():
+            if telegram_worker_ids_match_for_compact_route(wid, b.worker_id):
+                return (str(b.bot_token) or "").strip()
+    except Exception:
+        _log.debug("chat heartbeat: lookup token compact routes failed", exc_info=True)
+    _log.warning(
+        "chat heartbeat: sin token Bot API para worker_id=%r; no se usa TELEGRAM_BOT_TOKEN genérico",
+        wid,
+    )
+    return ""
+
+
 def _post_outbound_sync(
     chat_id: str,
     user_id: str,
@@ -318,6 +361,7 @@ def _post_outbound_sync(
     *,
     plan_title_log: str | None = None,
     outbound_bot_token: str | None = None,
+    routing_worker_id: str | None = None,
 ) -> None:
     cid = normalize_telegram_chat_id_for_outbound(chat_id) or str(chat_id or "").strip()
     uid_raw = str(user_id or "").strip()
@@ -326,21 +370,21 @@ def _post_outbound_sync(
     if not cid or not raw:
         return
 
-    token = (outbound_bot_token or "").strip() or effective_telegram_bot_token_outbound()
+    token = _resolve_heartbeat_outbound_bot_token(outbound_bot_token, routing_worker_id)
     # region agent log
     try:
         _fp = hashlib.sha1(token.encode("utf-8")).hexdigest()[:10] if token else ""
         with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
             "a",
             encoding="utf-8",
         ) as _df:
             _df.write(
                 json.dumps(
                     {
-                        "sessionId": "c964f7",
-                        "runId": "pre-fix",
-                        "hypothesisId": "H11_heartbeat_token_choice",
+                        "sessionId": "adf9d8",
+                        "runId": "heartbeat-token",
+                        "hypothesisId": "H3_chat_heartbeat_compact_token",
                         "location": "packages/agents/src/duckclaw/graphs/chat_heartbeat.py:_post_outbound_sync",
                         "message": "heartbeat_token_selected",
                         "data": {
@@ -348,6 +392,7 @@ def _post_outbound_sync(
                             "plan": str((plan_title_log or "")[:120]),
                             "token_fp": _fp,
                             "has_explicit_token": bool((outbound_bot_token or "").strip()),
+                            "routing_worker_id": str(routing_worker_id or ""),
                         },
                         "timestamp": int(time.time() * 1000),
                     }
@@ -446,6 +491,7 @@ def schedule_chat_heartbeat_dm(
     log_username: str | None = None,
     log_plan_title: str | None = None,
     outbound_bot_token: str | None = None,
+    routing_worker_id: str | None = None,
 ) -> None:
     """
     Si el heartbeat está activo para el chat, encola un POST al webhook (hilo daemon).
@@ -455,6 +501,8 @@ def schedule_chat_heartbeat_dm(
     en ese hilo para que las líneas «chat heartbeat» en PM2 identifiquen al subagente.
     ``log_plan_title`` se añade a la línea de log del envío nativo (título del plan del manager).
     ``outbound_bot_token``: token explícito (p. ej. webhook multiplex); los hilos no heredan ContextVar.
+    ``routing_worker_id``: id de plantilla (p. ej. ``Quant-Trader``) para resolver token desde
+    ``TELEGRAM_*_TOKEN`` o ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` cuando no hay ContextVar.
     """
     if not is_chat_heartbeat_enabled(tenant_id, chat_id):
         return
@@ -472,6 +520,7 @@ def schedule_chat_heartbeat_dm(
     uname_for_log = (log_username or "").strip() or None
     plan_for_log = (log_plan_title or "").strip() or None
     token_for_thread = (outbound_bot_token or "").strip() or None
+    route_wid = (routing_worker_id or "").strip() or None
 
     def _run() -> None:
         if worker_for_log:
@@ -490,6 +539,7 @@ def schedule_chat_heartbeat_dm(
                     msg,
                     plan_title_log=plan_for_log,
                     outbound_bot_token=token_for_thread,
+                    routing_worker_id=route_wid,
                 )
             finally:
                 reset_log_context()
@@ -500,6 +550,7 @@ def schedule_chat_heartbeat_dm(
                 msg,
                 plan_title_log=plan_for_log,
                 outbound_bot_token=token_for_thread,
+                routing_worker_id=route_wid,
             )
 
     threading.Thread(target=_run, name="duckclaw-chat-heartbeat", daemon=True).start()

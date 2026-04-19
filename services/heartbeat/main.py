@@ -24,9 +24,10 @@ import httpx
 import redis.asyncio as redis
 
 from duckclaw import DuckClaw
+from duckclaw.duckdb_read_compat import duckclaw_open_for_read_scan
 from duckclaw.db_write_queue import enqueue_duckdb_write_sync
 from duckclaw.forge.homeostasis import BeliefRegistry, HomeostasisManager
-from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
 from duckclaw.graphs.on_the_fly_commands import (
     _GOALS_PROACTIVE_LAST_FIRE_KEY,
     _GOALS_PROACTIVE_TENANT_KEY,
@@ -53,6 +54,39 @@ GATEWAY_URL = os.getenv(
 HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "3600"))
 GOALS_TICKER_POLL_SECONDS = int(os.getenv("GOALS_TICKER_POLL_SECONDS", "45"))
 TAILSCALE_AUTH_KEY = os.getenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
+
+# Una advertencia corta por ruta cuando el .duckdb no abre (p. ej. WAL inconsistente); evita spam cada poll.
+_GOALS_WAL_WARNED_PATHS: set[str] = set()
+
+
+def _short_duckdb_exception_message(exc: BaseException) -> str:
+    """Una línea útil; DuckDB adjunta párrafos de ayuda y stack al mensaje."""
+    s = str(exc)
+    for sep in (
+        "Stack Trace:",
+        "This error signals an assertion failure",
+        "For more information, see",
+    ):
+        if sep in s:
+            s = s.split(sep, 1)[0].strip()
+    s = " ".join(s.split())
+    if len(s) > 320:
+        s = s[:317] + "..."
+    return s
+
+
+def _goals_proactive_db_wal_or_corruption(exc: BaseException) -> bool:
+    """WAL dañado o estado interno DuckDB al abrir (no es 'tabla ausente' ni lock)."""
+    m = str(exc).lower()
+    if "failure while replaying" in m:
+        return True
+    if "replaying wal" in m:
+        return True
+    if "wal file" in m and "internal" in m:
+        return True
+    if "getdefaultdatabase" in m and "no default database" in m:
+        return True
+    return False
 
 
 def _agent_config_chat_key(chat_id: Any, suffix: str) -> str:
@@ -127,6 +161,64 @@ def _goals_ticker_scan_db_paths() -> List[str]:
         pass
 
     return out
+
+
+def _goals_proactive_db_open_error_is_expected(exc: BaseException) -> bool:
+    """Evita WARNING ruidoso al escanear todo *.duckdb (legacy, sin esquema, o bloqueado)."""
+    msg = str(exc).lower()
+    if "agent_config" in msg and ("does not exist" in msg or "catalog error" in msg):
+        return True
+    if "could not set lock" in msg or "conflicting lock" in msg:
+        return True
+    return False
+
+
+def _resolve_trading_session_vault_path(session_uid: str, candidate_paths: List[str]) -> str | None:
+    """
+    Encuentra el .duckdb donde vive quant_core.trading_sessions (ACTIVE) para este session_uid.
+    El ticker goals puede leer agent_config en finanzdb pero la sesión vive en quant_traderdb1.duckdb;
+    el POST al gateway debe usar esa bóveda o evaluate_cfd_state y OHLCV ven vacíos.
+    """
+    uid = (session_uid or "").strip()
+    for p in candidate_paths:
+        try:
+            with DuckClaw(p, read_only=True) as dbr:
+                raw = dbr.query(
+                    "SELECT session_uid, status FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+                )
+                rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        except Exception:
+            continue
+        if not rows or not isinstance(rows[0], dict):
+            continue
+        row = rows[0]
+        if str(row.get("status") or "").strip().upper() != "ACTIVE":
+            continue
+        row_uid = str(row.get("session_uid") or "").strip()
+        if uid and row_uid and uid != row_uid:
+            continue
+        return str(Path(p).expanduser().resolve())
+    return None
+
+
+def _resolve_quant_trader_vault_path(candidate_paths: List[str]) -> str | None:
+    """
+    Misma bóveda que el webhook multiplex Quant-Trader (quant_traderdb1.duckdb).
+    Sin esto, el POST interno cae en dedicated gateway (p. ej. finanzdb) y quant_core.* queda vacío.
+    """
+    raw = (os.getenv("DUCKCLAW_QUANT_TRADER_DB_PATH") or "").strip()
+    if raw:
+        try:
+            return str(Path(resolve_env_duckdb_path(raw)).expanduser().resolve())
+        except Exception:
+            pass
+    for p in candidate_paths:
+        if "quant_trader" in Path(p).name.lower():
+            try:
+                return str(Path(p).expanduser().resolve())
+            except Exception:
+                continue
+    return None
 
 
 def _agent_chat_url_for_worker(gateway_url: str, worker_id: str) -> str:
@@ -206,7 +298,11 @@ async def _run_goals_proactive_tick() -> None:
 
     for db_path in scan_paths:
         await _run_goals_proactive_tick_one_db(
-            db_path, now=now, headers=headers, scan_paths_n=len(scan_paths)
+            db_path,
+            now=now,
+            headers=headers,
+            scan_paths_n=len(scan_paths),
+            all_scan_paths=scan_paths,
         )
 
 
@@ -216,15 +312,38 @@ async def _run_goals_proactive_tick_one_db(
     now: float,
     headers: Dict[str, str],
     scan_paths_n: int,
+    all_scan_paths: List[str],
 ) -> None:
     try:
-        with DuckClaw(db_path, read_only=True) as db_ro:
+        with duckclaw_open_for_read_scan(db_path) as db_ro:
             raw = db_ro.query(
                 "SELECT key, value FROM agent_config WHERE key LIKE 'chat_%_goals_delta_seconds'"
             )
             rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
     except Exception as exc:  # noqa: BLE001
-        logger.warning("goals_proactive: no se pudo leer agent_config (%s): %s", db_path, exc)
+        path_key = str(Path(db_path).expanduser().resolve())
+        if _goals_proactive_db_open_error_is_expected(exc):
+            logger.debug(
+                "goals_proactive: omitiendo lectura agent_config (%s): %s",
+                db_path,
+                exc,
+            )
+        elif _goals_proactive_db_wal_or_corruption(exc):
+            if path_key not in _GOALS_WAL_WARNED_PATHS:
+                _GOALS_WAL_WARNED_PATHS.add(path_key)
+                logger.warning(
+                    "goals_proactive: bóveda ilegible (WAL/corrupción); se omite goals ticker para %s. "
+                    "Detener servicios que usen el archivo, respaldar .duckdb y .wal, reparar o regenerar (p. ej. bootstrap). %s",
+                    db_path,
+                    _short_duckdb_exception_message(exc),
+                )
+            else:
+                logger.debug(
+                    "goals_proactive: omitiendo %s (DuckDB no disponible)",
+                    db_path,
+                )
+        else:
+            logger.warning("goals_proactive: no se pudo leer agent_config (%s): %s", db_path, exc)
         return
 
     if not rows:
@@ -244,7 +363,7 @@ async def _run_goals_proactive_tick_one_db(
         if delta_s <= 0:
             continue
 
-        with DuckClaw(db_path, read_only=True) as db:
+        with duckclaw_open_for_read_scan(db_path) as db:
             goals = get_manager_goals(db, chat_id)
             if not goals:
                 logger.info(
@@ -319,21 +438,34 @@ async def _run_goals_proactive_tick_one_db(
                 signal_threshold = "GAS"
                 if session_uid:
                     try:
-                        raw_sess = db.query(
-                            "SELECT mode, tickers, session_goal, session_uid, status "
-                            "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+                        sess_db_path = (
+                            _resolve_trading_session_vault_path(session_uid, all_scan_paths) or db_path
                         )
+                        _db_same = str(Path(sess_db_path).resolve()) == str(
+                            Path(getattr(db, "_path", "") or db_path).resolve()
+                        )
+                        if _db_same:
+                            raw_sess = db.query(
+                                "SELECT mode, tickers, session_goal, session_uid, status "
+                                "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+                            )
+                        else:
+                            with DuckClaw(sess_db_path, read_only=True) as sess_conn:
+                                raw_sess = sess_conn.query(
+                                    "SELECT mode, tickers, session_goal, session_uid, status "
+                                    "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+                                )
                         sess_rows = json.loads(raw_sess) if isinstance(raw_sess, str) else (raw_sess or [])
                         if sess_rows and isinstance(sess_rows[0], dict):
-                            row = sess_rows[0]
-                            if str(row.get("status") or "").strip().upper() != "ACTIVE":
+                            sess_row = sess_rows[0]
+                            if str(sess_row.get("status") or "").strip().upper() != "ACTIVE":
                                 message = "[SYSTEM_EVENT: No hay sesión activa. Tick cancelado.]"
                             else:
-                                mode = str(row.get("mode") or "paper").strip().lower() or "paper"
-                                tickers_csv = str(row.get("tickers") or "").strip()
+                                mode = str(sess_row.get("mode") or "paper").strip().lower() or "paper"
+                                tickers_csv = str(sess_row.get("tickers") or "").strip()
                                 if tickers_csv:
                                     tickers = [x.strip().upper() for x in tickers_csv.split(",") if x.strip()]
-                                goal_raw = row.get("session_goal")
+                                goal_raw = sess_row.get("session_goal")
                                 try:
                                     gobj = (
                                         goal_raw
@@ -344,7 +476,7 @@ async def _run_goals_proactive_tick_one_db(
                                     gobj = {}
                                 if isinstance(gobj, dict):
                                     signal_threshold = str(gobj.get("signal_threshold") or "GAS").strip().upper() or "GAS"
-                                session_uid = str(row.get("session_uid") or session_uid).strip()
+                                session_uid = str(sess_row.get("session_uid") or session_uid).strip()
                                 message = build_trading_tick_system_event_message(
                                     session_uid=session_uid,
                                     tickers=tickers,
@@ -360,6 +492,13 @@ async def _run_goals_proactive_tick_one_db(
             else:
                 message = build_goals_proactive_system_event_message(goals)
 
+        _wid = (worker_id or "").strip()
+        vault_for_gateway = str(Path(db_path).expanduser().resolve())
+        _qt_vault: str | None = None
+        if _wid == "Quant-Trader" or _wid.lower() in ("quant-trader", "quant_trader"):
+            _qt_vault = _resolve_quant_trader_vault_path(all_scan_paths)
+            if _qt_vault:
+                vault_for_gateway = _qt_vault
         payload = {
             "message": message,
             "chat_id": str(chat_id),
@@ -370,7 +509,42 @@ async def _run_goals_proactive_tick_one_db(
             "is_system_prompt": True,
             "skip_session_lock": True,
         }
+        if _qt_vault:
+            payload["vault_db_path"] = _qt_vault
         url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
+        # region agent log
+        try:
+            _meta_tr = str(meta.get("trigger") or "").strip().lower()
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "heartbeat-goals-proactive",
+                            "hypothesisId": "H_quant_vault_post",
+                            "location": "services/heartbeat/main.py:_run_goals_proactive_tick_one_db",
+                            "message": "goals_proactive_post",
+                            "data": {
+                                "db_path_tail": str(db_path)[-80:],
+                                "quant_vault_tail": (vault_for_gateway[-80:] if _qt_vault else ""),
+                                "chat_id": str(chat_id),
+                                "worker_id": str(worker_id),
+                                "tenant_id": str(tenant_id),
+                                "meta_trigger": _meta_tr,
+                                "url_tail": url[-120:],
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(

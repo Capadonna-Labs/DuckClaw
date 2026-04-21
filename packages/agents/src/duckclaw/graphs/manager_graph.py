@@ -1376,33 +1376,6 @@ def build_manager_graph(
                 out["assigned_worker_id"] = _canon_re
                 if _canon_re not in available_plan:
                     available_plan = list(available_plan) + [_canon_re]
-                # #region agent log
-                try:
-                    import json as _json_dbg
-                    from time import time as _time_dbg
-
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            _json_dbg.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "hypothesisId": "H2",
-                                    "location": "manager_graph.py:plan_node",
-                                    "message": "plan_force_entry_worker",
-                                    "data": {"route_entry": route_entry, "canon_re": _canon_re},
-                                    "timestamp": int(_time_dbg() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
 
         if _strip_mercenary_spec_for_pqrsd_assistant(out):
             mercenary_spec = None

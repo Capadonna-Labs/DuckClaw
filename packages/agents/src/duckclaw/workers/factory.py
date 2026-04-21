@@ -2380,6 +2380,20 @@ def build_worker_graph(
                     n += 1
             return n
 
+        def _reddit_tool_message_no_data(msg: Any) -> bool:
+            if not isinstance(msg, ToolMessage):
+                return False
+            name = str(getattr(msg, "name", "") or "").strip()
+            if not name.startswith("reddit_"):
+                return False
+            content = str(getattr(msg, "content", "") or "")
+            low = content.lower()
+            if "not found" in low:
+                return True
+            if '"posts": []' in content:
+                return True
+            return False
+
         def _tc_args_as_dict(tc: Any) -> dict[str, Any]:
             if isinstance(tc, dict):
                 args = tc.get("args")
@@ -2602,6 +2616,21 @@ def build_worker_graph(
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
             last_msg = (state.get("messages") or [])[-1] if state.get("messages") else None
             already_has_tool_result = last_msg is not None and isinstance(last_msg, ToolMessage)
+            if (
+                (_lid or "").strip().lower() == "quant_trader"
+                and telegram_context_summarize_directive
+                and _incoming_has_reddit_url(incoming)
+                and _reddit_tool_message_no_data(last_msg)
+            ):
+                _fallback_reply = (
+                    "No pude recuperar ese post específico desde Reddit con el enlace corto "
+                    "(no encontrado o sin resultados). Para mantener trazabilidad del contexto, "
+                    "dejo marcado el estado como `source_unavailable` y no amplio con fuentes externas."
+                )
+                resp = AIMessage(content=_fallback_reply)
+                out = {**state, "messages": state["messages"] + [resp]}
+                out.update(_identity_fields(state))
+                return out
 
             if _spec_is_job_hunter() and not has_tavily and not already_has_tool_result:
                 try:
@@ -2708,8 +2737,15 @@ def build_worker_graph(
             )
             # SUMMARIZE_NEW_CONTEXT con solo URL de Reddit debe poder forzar Reddit (fetch); STORED con URLs en
             # el volcado no debe robar el turno (sintetizar snapshot DuckDB).
-            force_reddit = bool(
+            _allow_reddit_force = bool(
                 _lid == "finanz"
+                or (
+                    _lid == "quant_trader"
+                    and telegram_context_summarize_directive
+                )
+            )
+            force_reddit = bool(
+                _allow_reddit_force
                 and has_reddit_tools
                 and _reddit_anchor_u is not None
                 and not summarize_stored_directive
@@ -3202,8 +3238,9 @@ def build_worker_graph(
                 from duckclaw.integrations.llm_providers import invoke_chat_model_with_transient_retries
 
                 resp = invoke_chat_model_with_transient_retries(_invoked_llm, _groq_msgs)
+                _lid_lower_for_reddit_patch = (_lid or "").strip().lower()
                 if (
-                    (_lid or "").strip().lower() == "finanz"
+                    _lid_lower_for_reddit_patch in ("finanz", "quant_trader")
                     and resp is not None
                     and getattr(resp, "tool_calls", None)
                 ):

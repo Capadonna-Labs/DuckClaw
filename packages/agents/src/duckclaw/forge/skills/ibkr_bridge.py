@@ -256,15 +256,22 @@ def fetch_ibkr_total_equity_numeric() -> Tuple[Optional[float], str]:
 
 def _ibkr_portfolio_preamble(*, effective_mode: str, configured_mode: str) -> str:
     """Texto previo: modo efectivo del snapshot (puede diferir del env si hubo reintento paper/live)."""
+    _exec_note = (
+        "**Nota:** este snapshot es solo la API de posiciones (`IBKR_PORTFOLIO_API_URL`); "
+        "las ejecuciones van por el hook/servicio de ordenes. Un fill reciente puede no verse al instante aqui, "
+        "o no coincidir si portfolio y ejecucion apuntan a distinta cuenta o instancia de Gateway.\n\n"
+    )
     if effective_mode != configured_mode:
         return (
             f"Cuenta IBKR: snapshot en modo **{effective_mode}** "
             f"(env `IBKR_ACCOUNT_MODE` era **{configured_mode}**; ese modo devolvió `snapshot_unavailable` y se reintentó en **{effective_mode}**). "
             f"Para evitar el reintento, define `IBKR_ACCOUNT_MODE={effective_mode}` alineado al IB Gateway.\n\n"
+            + _exec_note
         )
     return (
         f"Cuenta IBKR solicitada (env `IBKR_ACCOUNT_MODE`): **{effective_mode}**. "
         "El snapshot numérico depende de que `IBKR_PORTFOLIO_API_URL` apunte a un servicio conectado al IB Gateway en **ese** modo.\n\n"
+        + _exec_note
     )
 
 

@@ -15,6 +15,7 @@ from duckclaw.forge.skills.quant_tool_context import (
 from duckclaw.forge.skills.quant_trader_bridge import (
     _evaluate_cfd_state_impl,
     _execute_approved_signal_impl,
+    _normalize_proposed_weight_pct,
     _propose_trade_signal_impl,
 )
 
@@ -65,6 +66,40 @@ def test_propose_trade_signal_requires_evidence(monkeypatch) -> None:
         )
     )
     assert out["error"] == "EVIDENCE_UNIQUE_RULE"
+
+
+def test_normalize_proposed_weight_pct_fraction() -> None:
+    assert abs(_normalize_proposed_weight_pct(0.03) - 3.0) < 1e-9
+    assert abs(_normalize_proposed_weight_pct(3.0) - 3.0) < 1e-9
+    assert abs(_normalize_proposed_weight_pct(1.0) - 1.0) < 1e-9
+
+
+def test_propose_trade_signal_interprets_llm_fraction_as_percent(monkeypatch) -> None:
+    """0.03 (fracción tipo '3%') debe persistir como ~3% para el hook VPS."""
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda payload: True,
+    )
+    out = json.loads(
+        _propose_trade_signal_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=0.03,
+            rationale="test",
+        )
+    )
+    assert out["status"] == "PENDING_HITL"
+    assert abs(float(out["proposed_weight"]) - 3.0) < 1e-9
 
 
 def test_propose_trade_signal_applies_riskguard(monkeypatch) -> None:
@@ -227,6 +262,51 @@ def test_execute_approved_signal_post_includes_weight_payload(monkeypatch) -> No
     assert bodies[0]["signal_type"] == "ENTRY"
 
 
+def test_execute_approved_signal_normalizes_fraction_weight_in_post(monkeypatch) -> None:
+    class _DbFrac(_FakeDb):
+        def query(self, sql: str) -> str:
+            if "FROM finance_worker.trade_signals" in sql:
+                return _trade_sig_row(ticker="META", proposed_weight=0.03)
+            return super().query(sql)
+
+    bodies: list[dict] = []
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: object = None) -> object:
+        bodies.append(json.loads(req.data.decode("utf-8")))
+
+        class _Resp:
+            def read(self) -> bytes:
+                return b'{"status":"success","qty":1,"ib_order_id":99}'
+
+            def __enter__(self) -> "_Resp":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        return _Resp()
+
+    db = _DbFrac()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    set_quant_tool_chat_id("telegram_chat_1")
+    monkeypatch.setenv("IBKR_EXECUTE_ORDER_URL", "http://127.0.0.1:9/order")
+    monkeypatch.setenv("IBKR_ACCOUNT_MODE", "paper")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
+        _fake_urlopen,
+    )
+    out = json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
+    assert bodies[0]["proposed_weight"] == 3.0
+    assert out.get("ib_order_id") == 99
+    assert out.get("qty") == 1
+
+
 def test_execute_approved_signal_live_sends_live_header(monkeypatch) -> None:
     class _DbLiveOk(_FakeDb):
         def query(self, sql: str) -> str:
@@ -383,6 +463,62 @@ def test_propose_trade_signal_fails_closed_without_equity_when_dd_cap(monkeypatc
         )
     )
     assert out["error"] == "RISK_EQUITY_UNAVAILABLE"
+
+
+def test_execute_approved_signal_broker_timeout_returns_code(monkeypatch) -> None:
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    set_quant_tool_chat_id("telegram_chat_1")
+    monkeypatch.setenv("IBKR_ACCOUNT_MODE", "paper")
+    monkeypatch.setenv("IBKR_EXECUTE_ORDER_URL", "http://127.0.0.1:9/order")
+    monkeypatch.setenv("IBKR_EXECUTE_ORDER_TIMEOUT_SEC", "180")
+
+    def _timed_out(*_a, **_k):
+        raise urllib.error.URLError("timed out")
+
+    monkeypatch.setattr("duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen", _timed_out)
+    out = json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
+    assert out.get("error") == "BROKER_TIMEOUT"
+    assert out.get("timeout_sec") == 180
+
+
+def test_execute_approved_signal_passes_timeout_to_urlopen(monkeypatch) -> None:
+    captured: list[object] = []
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: object = None) -> object:
+        captured.append(timeout)
+
+        class _Resp:
+            def read(self) -> bytes:
+                return b"{}"
+
+            def __enter__(self) -> "_Resp":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        return _Resp()
+
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    set_quant_tool_chat_id("telegram_chat_1")
+    monkeypatch.setenv("IBKR_EXECUTE_ORDER_URL", "http://127.0.0.1:9/order")
+    monkeypatch.setenv("IBKR_EXECUTE_ORDER_TIMEOUT_SEC", "99")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
+        _fake_urlopen,
+    )
+    json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
+    assert captured == [99.0]
 
 
 def test_execute_approved_signal_broker_error_pushes_failed(monkeypatch) -> None:

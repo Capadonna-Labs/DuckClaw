@@ -8,3 +8,4 @@
 - RiskGuard: `proposed_weight` no puede superar el limite del tenant; si supera, se recorta y se informa.
 - HITL obligatorio: ejecutar requiere `/execute_signal <signal_id>` en Telegram (mismo chat) o fila con `human_approved=true` en `finance_worker.trade_signals`.
 - Paper only: con sesion paper no se marca ejecucion live; el broker recibe `paper` segun `quant_core.trading_sessions.mode` (no exige `IBKR_ACCOUNT_MODE=paper` en el host).
+- Narrativa vs herramientas: no contradigas el JSON de `execute_approved_signal` (p. ej. `ib_order_id` presente) con afirmaciones de «simulacion»; portfolio (`get_ibkr_portfolio`) y ejecucion (hook HTTP) son canales distintos — posiciones sin cambio inmediato no prueban por si solas que la orden no se envio.

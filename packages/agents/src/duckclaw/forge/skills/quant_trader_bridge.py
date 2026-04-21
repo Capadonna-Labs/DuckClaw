@@ -31,6 +31,54 @@ from duckclaw.graphs.sandbox import run_in_sandbox
 from duckclaw.utils.logger import log_tool_execution_sync
 
 
+def _derive_ibkr_execute_order_url_from_portfolio() -> str:
+    """
+    Si ``IBKR_EXECUTE_ORDER_URL`` no está definido pero sí ``IBKR_PORTFOLIO_API_URL``
+    (mismo host :8002), usa ``/api/broker/execute`` para que paper/live envíen orden al hook VPS.
+    """
+    p = (os.environ.get("IBKR_PORTFOLIO_API_URL") or "").strip()
+    if not p:
+        return ""
+    if "/api/broker/execute" in p:
+        return p.split("/api/broker/execute")[0].rstrip("/") + "/api/broker/execute"
+    if "/api/portfolio/" in p:
+        base = p.split("/api/portfolio/")[0].rstrip("/")
+        return f"{base}/api/broker/execute"
+    return ""
+
+
+def _ibkr_execute_order_timeout_sec() -> float:
+    """
+    Timeout del POST al hook de ejecución (``/api/broker/execute`` o ``IBKR_EXECUTE_ORDER_URL``).
+
+    Prioridad: ``IBKR_EXECUTE_ORDER_TIMEOUT_SEC`` → ``IBKR_HTTP_TIMEOUT_SEC`` /
+    ``IBKR_GATEWAY_HTTP_TIMEOUT_SEC`` (mismo criterio que ``quant_market_bridge``) → 120s.
+    Rango: 30–600s (ejecución IBKR puede superar 45s en redes lentas o colas).
+    """
+    raw = (
+        os.environ.get("IBKR_EXECUTE_ORDER_TIMEOUT_SEC")
+        or os.environ.get("IBKR_HTTP_TIMEOUT_SEC")
+        or os.environ.get("IBKR_GATEWAY_HTTP_TIMEOUT_SEC")
+        or "120"
+    ).strip()
+    try:
+        t = float(raw)
+    except ValueError:
+        t = 120.0
+    return float(max(30, min(t, 600)))
+
+
+def _is_broker_post_timeout(exc: BaseException) -> bool:
+    """True si ``urlopen`` falló por tiempo de espera (no confundir con 'connection refused')."""
+    if isinstance(exc, TimeoutError):
+        return True
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, TimeoutError):
+        return True
+    s = (str(reason) + " " + str(exc)).lower()
+    return "timed out" in s
+
+
 def _broker_message_from_http_error(exc: urllib.error.HTTPError) -> str:
     """Extrae ``message`` del JSON de error del broker (p. ej. 501 Problem Details)."""
     try:
@@ -54,6 +102,25 @@ def _max_weight_pct_limit() -> float:
         return max(0.1, min(100.0, float(raw)))
     except ValueError:
         return 10.0
+
+
+def _normalize_proposed_weight_pct(raw: float) -> float:
+    """
+    Alinea con el hook ``broker_execute_signal.py``: ``notional = equity * (peso/100)``.
+
+    El LLM a menudo pasa **fracción** (0.03 = 3%); el hook espera **porcentaje** (3 = 3%).
+    Regla: ``0 < w < 1`` se interpreta como fracción del 100% y se multiplica por 100.
+    ``w >= 1`` se deja como porcentaje (1 = 1%, 15 = 15%).
+    """
+    try:
+        w = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if w <= 0:
+        return w
+    if 0 < w < 1.0:
+        return w * 100.0
+    return w
 
 
 def _liquid_capital(db: Any) -> float:
@@ -452,6 +519,7 @@ def _propose_trade_signal_impl(
         w = float(weight)
     except (TypeError, ValueError):
         return json.dumps({"error": "weight inválido"}, ensure_ascii=False)
+    w = _normalize_proposed_weight_pct(w)
     cap = _liquid_capital(db)
     limit = _max_weight_pct_limit()
     guarded = max(0.0, min(w, limit))
@@ -569,39 +637,42 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
     # el snapshot de portfolio en el host, no debe bloquear una sesión paper con env live.
 
     paper_flag = session_mode != "live"
+    tgt = get_quant_tool_db_path() or str(getattr(db, "_path", "") or "")
+
+    exec_timeout_sec = _ibkr_execute_order_timeout_sec()
+
+    url = (os.environ.get("IBKR_EXECUTE_ORDER_URL") or "").strip()
+    _explicit_exec = bool(url)
+    if not url:
+        url = _derive_ibkr_execute_order_url_from_portfolio()
     # #region agent log
     try:
-        import time as _time
+        import time as _time_dbg_ex
 
+        _payload_ex = {
+            "sessionId": "c964f7",
+            "hypothesisId": "H_execute_broker_path",
+            "location": "quant_trader_bridge.py:_execute_approved_signal_impl",
+            "message": "execute_signal_url_resolution",
+            "data": {
+                "explicit_IBKR_EXECUTE_ORDER_URL": _explicit_exec,
+                "derived_url_nonempty": bool((url or "").strip()) and not _explicit_exec,
+                "resolved_url_nonempty": bool((url or "").strip()),
+                "paper_flag": paper_flag,
+                "will_simulate": not bool((url or "").strip()),
+                "timeout_sec": exec_timeout_sec,
+            },
+            "timestamp": int(_time_dbg_ex.time() * 1000),
+        }
         with open(
             "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
             "a",
             encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H1",
-                        "location": "quant_trader_bridge.py:_execute_approved_signal_impl",
-                        "message": "execute_approved_signal_modes",
-                        "data": {
-                            "session_mode": session_mode,
-                            "env_mode": env_mode,
-                            "paper_flag": paper_flag,
-                        },
-                        "timestamp": int(_time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
+        ) as _df_ex:
+            _df_ex.write(json.dumps(_payload_ex) + "\n")
     except Exception:
         pass
     # #endregion
-    tgt = get_quant_tool_db_path() or str(getattr(db, "_path", "") or "")
-
-    url = (os.environ.get("IBKR_EXECUTE_ORDER_URL") or "").strip()
     if not url:
         push_quant_state_delta_sync(
             {
@@ -632,7 +703,7 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
     try:
         pw = float(sig_row.get("proposed_weight"))
         if pw > 0:
-            post["proposed_weight"] = pw
+            post["proposed_weight"] = _normalize_proposed_weight_pct(pw)
     except (TypeError, ValueError):
         pass
     mid = str(sig_row.get("mandate_id") or "").strip()
@@ -648,8 +719,9 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
     token = (os.environ.get("IBKR_PORTFOLIO_API_KEY") or os.environ.get("IBKR_ORDER_API_KEY") or "").strip()
     if token:
         req.add_header("Authorization", f"Bearer {token}")
+    broker_parsed: dict[str, Any] = {}
     try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
+        with urllib.request.urlopen(req, timeout=exec_timeout_sec) as resp:
             body = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         _push_signal_failed(db, sid)
@@ -660,7 +732,56 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
         return json.dumps(err_obj, ensure_ascii=False)
     except urllib.error.URLError as exc:
         _push_signal_failed(db, sid)
+        if _is_broker_post_timeout(exc):
+            return json.dumps(
+                {
+                    "error": "BROKER_TIMEOUT",
+                    "message": (
+                        "El hook de ejecución no respondió a tiempo. "
+                        "Aumenta IBKR_EXECUTE_ORDER_TIMEOUT_SEC (actual "
+                        f"{exec_timeout_sec:.0f}s) o revisa el servicio en el host del broker."
+                    ),
+                    "timeout_sec": exec_timeout_sec,
+                },
+                ensure_ascii=False,
+            )
         return json.dumps({"error": str(exc.reason)}, ensure_ascii=False)
+
+    try:
+        if body.strip().startswith("{"):
+            _bp = json.loads(body)
+            if isinstance(_bp, dict):
+                broker_parsed = _bp
+    except json.JSONDecodeError:
+        broker_parsed = {}
+    # #region agent log
+    try:
+        import time as _time_dbg_br
+
+        _payload_br = {
+            "sessionId": "c964f7",
+            "hypothesisId": "H_broker_response_parsed",
+            "location": "quant_trader_bridge.py:_execute_approved_signal_impl",
+            "message": "broker_http_ok_body",
+            "data": {
+                "signal_id": sid,
+                "broker_status": broker_parsed.get("status"),
+                "ib_order_id": broker_parsed.get("ib_order_id"),
+                "qty": broker_parsed.get("qty"),
+                "ticker": broker_parsed.get("ticker"),
+                "posted_weight_after_normalize": post.get("proposed_weight"),
+            },
+            "timestamp": int(_time_dbg_br.time() * 1000),
+        }
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df_br:
+            _df_br.write(json.dumps(_payload_br) + "\n")
+    except Exception:
+        pass
+    # #endregion
 
     push_quant_state_delta_sync(
         {
@@ -670,10 +791,17 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
             "mutation": {"signal_id": sid},
         }
     )
-    return json.dumps(
-        {"status": "sent", "signal_id": sid, "paper": paper_flag, "broker_response": body[:2000]},
-        ensure_ascii=False,
-    )
+    out_obj: dict[str, Any] = {
+        "status": "sent",
+        "signal_id": sid,
+        "paper": paper_flag,
+        "broker_response": body[:2000],
+    }
+    if broker_parsed:
+        for k in ("ib_order_id", "qty", "ticker", "action", "notional_usd", "ref_price", "mode"):
+            if k in broker_parsed:
+                out_obj[k] = broker_parsed[k]
+    return json.dumps(out_obj, ensure_ascii=False)
 
 
 def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
@@ -796,7 +924,9 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 "Ejecuta una senal tras HITL usando el mismo signal_id (UUID) que devolvio propose_trade_signal. "
                 "Requiere human_approved o /execute_signal <signal_id> en Telegram. "
                 "El modo paper/live del POST al broker sigue quant_core.trading_sessions (id=active) y debe alinear "
-                "con IBKR_ACCOUNT_MODE; se envia cabecera X-Duckclaw-IBKR-Account-Mode (paper|live)."
+                "con IBKR_ACCOUNT_MODE; se envia cabecera X-Duckclaw-IBKR-Account-Mode (paper|live). "
+                "La respuesta puede incluir campos del broker (p. ej. ib_order_id, qty); citarlos literalmente; "
+                "no es lo mismo que get_ibkr_portfolio (IBKR_PORTFOLIO_API_URL), que es snapshot aparte."
             ),
         )
     )

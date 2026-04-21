@@ -16,7 +16,6 @@ Rutas ``/webhook/finanz`` y ``/webhook/trabajo``: legado para un solo ingress co
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -354,7 +353,7 @@ def schedule_telegram_context_summary_background(
                     session_id=str(chat_id),
                     user_id=str(vault_uid or "").strip() or str(chat_id),
                     telegram_multipart_tail_delivery="native",
-                    effective_telegram_bot_token=resolve_effective_telegram_bot_token,
+                    effective_telegram_bot_token=(lambda _tok=tok: _tok),
                     n8n_outbound_push_sync=_telegram_multipart_tail_sync_stub,
                     telegram_mcp=telegram_mcp_state,
                     redis_client=redis_client,
@@ -1588,38 +1587,6 @@ def build_telegram_inbound_webhook_router(
             if not token_r:
                 _log.warning("telegram webhook: hay respuesta pero falta TELEGRAM_BOT_TOKEN")
                 return
-            # region agent log
-            try:
-                _fp = hashlib.sha1(token_r.encode("utf-8")).hexdigest()[:10] if token_r else ""
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "pre-fix",
-                                "hypothesisId": "H10_webhook_reply_token",
-                                "location": "services/api-gateway/routers/telegram_inbound_webhook.py:_invoke_and_reply",
-                                "message": "reply_token_selected",
-                                "data": {
-                                    "chat_id": str(chat_id),
-                                    "worker_id": str(worker_id),
-                                    "tenant_id": str(tenant_id),
-                                    "token_fp": _fp,
-                                    "path_mux": bool(path_mux),
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            }
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
-
             client_r = TelegramBotApiAsyncClient(token_r)
             tail_plain = (res.get("telegram_multipart_tail_plain") or "").strip() if isinstance(res, dict) else ""
             head_plain = (res.get("telegram_reply_head_plain") or "").strip() if isinstance(res, dict) else ""
@@ -1645,7 +1612,7 @@ def build_telegram_inbound_webhook_router(
                     session_id=str(chat_id),
                     user_id=(str(user_id or "").strip() or str(chat_id)),
                     telegram_multipart_tail_delivery="native",
-                    effective_telegram_bot_token=resolve_effective_telegram_bot_token,
+                    effective_telegram_bot_token=(lambda _tok=token_r: _tok),
                     n8n_outbound_push_sync=_telegram_multipart_tail_sync_stub,
                     telegram_mcp=telegram_mcp,
                     redis_client=redis_client,

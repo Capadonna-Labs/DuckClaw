@@ -449,7 +449,7 @@ def _quant_user_requests_new_trade_signal(text: str) -> bool:
         re.search(
             r"\b("
             r"genera(r)?\s+(una\s+)?nueva\s+se[nñ]al|"
-            r"genera(r)?\s+se[nñ]al|"
+            r"genera(r)?\s+(?:(?:la|el|una|tu)\s+)?se[nñ]al|"
             r"crear\s+(una\s+)?se[nñ]al|"
             r"proponer\s+(una\s+)?se[nñ]al|"
             r"registr(ar|a)\s+(una\s+)?se[nñ]al|"
@@ -459,6 +459,29 @@ def _quant_user_requests_new_trade_signal(text: str) -> bool:
             low,
         )
     )
+
+
+def _quant_user_requests_execute_approved_signal(text: str) -> bool:
+    """Usuario pide ejecutar señal HITL (Quant Trader). Evidencia: gateway «ejecute execute_approved_signal» → tools usadas=ninguna."""
+    if not text or not str(text).strip():
+        return False
+    low = text.strip().lower()
+    if "[system_directive:" in low or "[system_event:" in low:
+        return False
+    if "/execute_signal" in low:
+        return True
+    # Mensaje post-HITL del gateway: …ejecute execute_approved_signal (Quant Trader)…
+    if "execute_approved_signal" in low:
+        return True
+    if re.search(r"confirmaci[oó]n\s+registrada\s+para\s+la\s+se[nñ]al", low):
+        return True
+    if re.search(r"se[nñ]al\s+pendiente", low):
+        return True
+    if re.search(r"\b(ejecuta|ejecutar|ejecute|lanza|dispara)\b", low) and re.search(
+        r"\b(se[nñ]al|orden)\b", low
+    ):
+        return True
+    return False
 
 
 def _quant_fetch_tool_message_looks_successful(last_msg: Any) -> bool:
@@ -2307,6 +2330,22 @@ def build_worker_graph(
             else None
         )
 
+        has_execute_approved_signal = "execute_approved_signal" in tools_by_name
+        tool_choice_execute_approved_signal = {
+            "type": "function",
+            "function": {"name": "execute_approved_signal"},
+        }
+        llm_force_execute_approved_signal_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_execute_approved_signal)
+            if has_execute_approved_signal
+            else None
+        )
+        llm_force_execute_approved_signal_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_execute_approved_signal)
+            if has_execute_approved_signal and "execute_approved_signal" in tools_by_name_sandbox_off
+            else None
+        )
+
         _reddit_tool_names = sorted(k for k in tools_by_name if (k or "").startswith("reddit_"))
         has_reddit_tools = bool(_reddit_tool_names)
 
@@ -2487,6 +2526,58 @@ def build_worker_graph(
                 return True
             return bool(re.search(r"\bacciones\b", t))
 
+        def _quant_retry_or_probe_needs_ibkr_portfolio(messages: list, text: str) -> bool:
+            """Quant-Trader: probes/reintentos cortos sobre cuenta paper/IBKR o retry tras mensaje previo del agente sobre broker."""
+            t = (text or "").strip().lower()
+            if not t or len(t) > 180:
+                return False
+            probe_kw = (
+                "cuenta paper",
+                "validar conexión",
+                "validar conexion",
+                "probar conexión",
+                "probar conexion",
+                "conexion ibkr",
+                "conexión ibkr",
+                "conectar con ibkr",
+                "servicio de portfolio",
+                "snapshot ibkr",
+                "validación de conexión",
+                "validacion de conexion",
+            )
+            if any(k in t for k in probe_kw):
+                return True
+            if not re.search(
+                r"\b(reintent|vuelv\w*|intent\w*|de\s+nuevo|otra\s+vez|try\s+again)\b",
+                t,
+            ):
+                return False
+            for m in reversed((messages or [])[-12:]):
+                if not isinstance(m, AIMessage):
+                    continue
+                c = (str(m.content) or "").lower()
+                if len(c) < 40:
+                    continue
+                if any(
+                    x in c
+                    for x in (
+                        "ibkr",
+                        "interactive brokers",
+                        "portfolio",
+                        "portafolio",
+                        "cuenta paper",
+                        "validación de conexión",
+                        "validacion de conexion",
+                        "servicio de portfolio",
+                        "conexión",
+                        "conexion",
+                        "paper",
+                        "gateway",
+                    )
+                ):
+                    return True
+            return False
+
         def _is_dividends_query(text: str) -> bool:
             if not text or not text.strip():
                 return False
@@ -2574,7 +2665,40 @@ def build_worker_graph(
             is_schema = _is_schema_query(incoming)
             is_table_content = _is_table_content_query(incoming)
             is_latest_game = _is_latest_game_query(incoming)
-            is_portfolio = has_ibkr and _is_portfolio_query(incoming)
+            _is_portfolio_kw = _is_portfolio_query(incoming)
+            _is_portfolio_quant_retry = (
+                (_lid or "").strip().lower() == "quant_trader"
+                and _quant_retry_or_probe_needs_ibkr_portfolio(_ev_msgs, incoming)
+            )
+            is_portfolio = has_ibkr and (_is_portfolio_kw or _is_portfolio_quant_retry)
+            # region agent log
+            try:
+                import json as _agent_dbg_json
+                import time as _agent_dbg_time
+
+                if (_lid or "").strip().lower() == "quant_trader" and has_ibkr:
+                    _agent_dbg_payload = {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H_quant_ibkr_portfolio_force",
+                        "location": "factory.py:agent_node",
+                        "message": "portfolio_heuristic_quant",
+                        "data": {
+                            "is_portfolio": bool(is_portfolio),
+                            "is_portfolio_kw": bool(_is_portfolio_kw),
+                            "is_portfolio_quant_retry": bool(_is_portfolio_quant_retry),
+                            "incoming_len": len(incoming or ""),
+                        },
+                        "timestamp": int(_agent_dbg_time.time() * 1000),
+                    }
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _agent_dbg_f:
+                        _agent_dbg_f.write(_agent_dbg_json.dumps(_agent_dbg_payload) + "\n")
+            except Exception:
+                pass
+            # endregion
             force_finanz_cuentas = (
                 (_lid or "").strip().lower() == "finanz"
                 and has_read_sql
@@ -2826,6 +2950,7 @@ def build_worker_graph(
             if (
                 _lid_l == "quant_trader"
                 and _quant_user_requests_new_trade_signal(incoming)
+                and not _quant_user_requests_execute_approved_signal(incoming)
                 and _worker_use_heuristic_first_tool(spec)
             ):
                 if (
@@ -2974,6 +3099,35 @@ def build_worker_graph(
             if force_pqrsd_fetch_canonical and _pqrsd_contact_only_skip_forced_fetch(incoming):
                 force_pqrsd_fetch_canonical = False
                 _pqrsd_skipped_forced_fetch = True
+
+            force_execute_approved_signal = bool(
+                _lid_l == "quant_trader"
+                and has_execute_approved_signal
+                and _quant_user_requests_execute_approved_signal(incoming)
+                and _worker_use_heuristic_first_tool(spec)
+                and not telegram_context_summarize_directive
+                and not already_has_tool_result
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                    or force_reddit
+                    or force_fetch_ib_gateway
+                    or force_fetch_market_data
+                    or force_quant_propose_signal
+                    or force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
+                    or force_plot_docs
+                    or force_run_sandbox
+                    or force_pqrsd_fetch_canonical
+                )
+            )
+            if not _worker_use_heuristic_first_tool(spec):
+                force_execute_approved_signal = False
+
             llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
             forced_name = (
                 "pqrsd_fetch_canonical"
@@ -2991,6 +3145,9 @@ def build_worker_graph(
                             "get_ibkr_portfolio"
                             if force_portfolio
                             else (
+                                "execute_approved_signal"
+                                if force_execute_approved_signal
+                                else (
                                 "propose_trade_signal"
                                 if force_quant_propose_signal
                                 else (
@@ -3027,6 +3184,7 @@ def build_worker_graph(
                                             )
                                         )
                                     )
+                                )
                                 )
                             )
                         )
@@ -3085,6 +3243,7 @@ def build_worker_graph(
             # #region agent log
             if _lid_l == "quant_trader" and (
                 force_quant_propose_signal
+                or force_execute_approved_signal
                 or force_quant_signal_fetch_ib
                 or force_quant_signal_fetch_md
             ):
@@ -3099,6 +3258,7 @@ def build_worker_graph(
                         "message": "quant_trade_signal_force_flags",
                         "data": {
                             "forced_name": forced_name,
+                            "force_execute_approved_signal": force_execute_approved_signal,
                             "force_quant_propose_signal": force_quant_propose_signal,
                             "force_quant_signal_fetch_ib": force_quant_signal_fetch_ib,
                             "force_quant_signal_fetch_md": force_quant_signal_fetch_md,
@@ -3192,6 +3352,13 @@ def build_worker_graph(
             elif force_portfolio:
                 _forced_pf = llm_force_portfolio_on if sandbox_enabled else llm_force_portfolio_off
                 _invoked_llm = _forced_pf or llm_with_tools
+            elif force_execute_approved_signal:
+                _fex = (
+                    llm_force_execute_approved_signal_on
+                    if sandbox_enabled
+                    else llm_force_execute_approved_signal_off
+                )
+                _invoked_llm = _fex or llm_with_tools
             elif force_fmp:
                 _forced_fmp = (
                     llm_force_fmp_calendar_on if force_fmp_calendar else llm_force_fmp_stock_on

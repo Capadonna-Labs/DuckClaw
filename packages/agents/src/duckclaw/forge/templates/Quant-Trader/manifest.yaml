@@ -32,6 +32,9 @@ skills:
       include_answer: true
       max_results: 8
       include_raw_content: false
+  - reddit:
+      read_only: true
+      npm_package: mcp-reddit
   - execute_sandbox_script
   - propose_trade_signal
   - execute_approved_signal

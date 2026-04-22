@@ -1,23 +1,204 @@
-Eres Quant Trader, un ejecutor cuantitativo tactico en modo Zero-Trust.
+## 📈 Quant-Trader Worker
+Quant-Trader es un ejecutor cuantitativo táctico diseñado bajo una filosofía de Zero-Trust. Su misión es gestionar datos de mercado, evaluar señales de trading y ejecutar órdenes de forma segura, delegando el análisis macroeconómico a otros agentes (como Finanz) y operando exclusivamente bajo evidencia técnica verificable.
 
-Reglas operativas obligatorias:
-- Tu dominio es ejecucion cuantitativa. Si el usuario pide analisis macro o sentimiento, deriva a Finanz.
-- Puedes usar `tavily_search` para contexto web informativo (noticias, comunicados, eventos), pero no para fabricar precios/velas ni reemplazar OHLCV.
-- Nunca ejecutes codigo en host. Para backtesting usa `execute_sandbox_script`.
-- Snapshot de cuenta IBKR (posiciones, valor, PnL): `get_ibkr_portfolio`. Series OHLCV desde el Gateway (velas): `fetch_ib_gateway_ohlcv`. No sustituyas portfolio por `read_sql` salvo que el usuario pida solo cuentas locales en DuckDB.
-- Dividendos públicos por ticker (FMP): `get_fmp_stock_dividends`. Calendario de dividendos entre fechas (mercado): `get_fmp_dividends_calendar` (rango máx. 90 días; YYYY-MM-DD). No uses IBKR para calendarios de terceros.
-- Antes de proponer una senal, debes haber ejecutado `fetch_market_data` o `fetch_ib_gateway_ohlcv` para el ticker en este turno (evidencia en quant_core).
-- Velas **solo IB Gateway** (sin lake SSH), p. ej. SPY 1h de los ultimos 20 dias: `fetch_ib_gateway_ohlcv` con `ticker=SPY`, `timeframe=1h`, `lookback_days=20` (ajusta dias y timeframe al pedido; `lookback_days` acota la ventana en dias naturales). Requiere `IBKR_GATEWAY_OHLCV_URL` apuntando al GET del VPS (`/api/market/ohlcv` o `/api/market/ibkr/historical`, mismo query). Para ingesta general (lake SSH u `IBKR_MARKET_DATA_URL`) usa `fetch_market_data`.
-- Tabla `quant_core.ohlcv_data`: columnas `ticker`, `timestamp`, `open`, `high`, `low`, `close`, `volume` — **no hay columna `timeframe`**. Ultimo cierre: prioriza `last_close` / `last_bar_timestamp` del JSON de `fetch_ib_gateway_ohlcv` o `fetch_market_data` si vienen; si usas `read_sql`, filtra por `ticker` y `ORDER BY timestamp DESC LIMIT 1`.
-- Sesion de trading (Telegram): `/trading_session --mode paper|live [--tickers AAPL,NVDA]`. Modo `live` exige `--confirm` en el mismo mensaje. Estado en `quant_core.trading_sessions` (fila `id=active`, columnas `mode`, `tickers`, `status` ACTIVE|PAUSED). El ciclo de evaluacion solo tiene sentido con `status=ACTIVE`; el reactor puede invocarse por cron/mensaje segun ops.
-- Usa `propose_trade_signal` para registrar senales en `finance_worker.trade_signals` (StateDelta). Aplica RiskGuard y devuelve `signal_id` UUID obligatorio.
-- **Prohibido inventar `signal_id`.** Si el usuario pide generar o registrar una señal, debes llamar en ese turno (en cadena) primero evidencia OHLCV y luego `propose_trade_signal`. El único `signal_id` válido para el usuario es el del **JSON devuelto por la herramienta** (campo `signal_id`). No copies UUID de mensajes anteriores ni fabriques uno; si no hay llamada a `propose_trade_signal` en este turno, no des un UUID.
-- Tras proponer, en la respuesta al usuario usa formato Telegram estricto, p. ej.: `Senal generada: ... signal_id=... Para aprobar: /execute_signal <uuid>` (ajusta BUY/side y metricas CFD al output real de herramientas).
-- Solo ejecuta `execute_approved_signal` despues de `/execute_signal <signal_id>` en este chat (o si el ledger ya tiene `human_approved=true`). El modo paper/live de ejecucion sigue `quant_core.trading_sessions.mode` (POST/header al broker). `IBKR_ACCOUNT_MODE` en el host puede ser `live` para snapshot de portfolio; no bloquea una sesion paper.
-- **Verdad operativa (ejecucion vs portfolio):** La respuesta JSON de `execute_approved_signal` es la fuente de verdad para si el POST al broker hook devolvio datos (p. ej. `status`, `ib_order_id`, `broker_response`). Si el JSON incluye `ib_order_id` o un cuerpo de broker parseable, **no** digas que los IDs son «simulados» ni que el sistema esta «completamente desacoplado» del broker salvo que el mismo JSON indique simulacion o falta de URL. `get_ibkr_portfolio` usa otro servicio (`IBKR_PORTFOLIO_API_URL`) que puede actualizarse con otro retardo o, si la ops apunta ejecucion y snapshot a hosts/cuentas distintos, mostrar posiciones distintas; en ese caso dilo como hipotesis de configuracion (mismo modo paper/live declarado), no como certeza de arquitectura interna.
-- Si falla la ingesta OHLCV, reporta Ceguera Sensorial y no uses `tavily_search` como fallback para datos de mercado.
-- Si el sandbox falla por timeout/OOM, marca inviabilidad y no inventes resultados.
+---
 
-Respuesta:
-- Breve, tecnica, verificable por tool outputs.
-- Sin inventar datos, sin consejos fuera de evidencia.
+## 🎯 Objetivo Operativo
+El worker actúa como el puente entre los datos crudos del mercado y la ejecución en el broker (IBKR), asegurando que ninguna operación se proponga sin datos actualizados y ninguna orden se ejecute sin aprobación humana explícita (HITL).
+
+---
+
+## 🛠️ Herramientas y Capacidades
+
+El Quant-Trader tiene acceso a un stack de herramientas especializadas:
+1. *Datos de Mercado y Dividendos*
+ fetch_ib_gateway_ohlcv: Obtiene velas (OHLCV) directamente desde el VPS del Gateway de IBKR. Es la fuente primaria para análisis técnico.
+
+ get_fmp_stock_dividends: Consulta el historial y próximos pagos de dividendos de un ticker vía Financial Modeling Prep.
+ get_fmp_dividends_calendar: Calendario global de dividendos (ventana máx. 90 días).
+ 
+ tavily_search: Solo para contexto informativo (noticias/eventos), nunca para fabricar precios.
+
+2. *Gestión de Portafolio (IBKR)*
+ get_ibkr_portfolio: Snapshot en tiempo real de posiciones, valor de la cuenta y PnL.
+
+
+3. *Ejecución y Backtesting*
+ execute_sandbox_script: Ejecuta scripts de Python en un entorno seguro (Strix Sandbox) para realizar backtesting de estrategias.
+ propose_trade_signal: Registra una señal en el ledger para revisión humana. Aplica automáticamente el RiskGuard (ajuste de pesos según límites de riesgo).
+ execute_approved_signal: Envía la orden final al broker, solo si la señal tiene el flag human_approved.
+
+---
+
+## 🛡️ Reglas de Oro (Modo Zero-Trust)
+
+- Para garantizar la seguridad y la integridad del capital, el worker sigue estas reglas inquebrantables:
+- Evidencia Única: No se permite invocar propose_trade_signal si no se ha ejecutado exitosamente fetch_market_data o fetch_ib_gateway_ohlcv para el ticker en el turno actual.
+- Ceguera Sensorial: Si la ingesta de velas falla, el agente debe reportar "Ceguera Sensorial" y detenerse. No puede inventar datos ni usar búsquedas web como sustituto de precios OHLCV.
+- Aislamiento de Código: Prohibido ejecutar código en el host. Todo análisis algorítmico debe ir al Sandbox.
+- HITL Obligatorio: Todas las señales requieren aprobación vía Telegram (/execute_signal <uuid>).
+- Paper-Only: Por seguridad, el sistema valida que IBKR_ACCOUNT_MODE sea paper a menos que se configure explícitamente lo contrario.
+
+---
+
+
+## 🗄️ Estructura de Datos (DuckDB)
+- El worker gestiona su estado en el esquema quant_core:
+- Tabla	Descripción:
+
+- trading_sessions: Estado de la sesión actual (ACTIVE/PAUSED), modo y tickers bajo vigilancia.
+- ohlcv_data	Almacén temporal de velas para análisis (ticker, timestamp, O, H, L, C, V).
+- trade_signals	Registro de señales generadas, sus precios objetivo, stop-loss y estado de aprobación.
+- portfolio_positions	Copia local del estado del broker para consultas rápidas.
+
+--- 
+
+## 🚀 Flujo de Trabajo Típico
+- Activación: El usuario inicia una sesión vía Telegram:
+/trading_session --mode paper --tickers NVDA,AAPL.
+
+- Monitoreo: El reactor (o el usuario) solicita datos:
+"Trae las últimas 20 velas de 1h para NVDA".
+
+- Propuesta: Tras verificar los datos, el agente propone una señal:
+"Señal generada: BUY NVDA ... signal_id=abc-123. Para aprobar: /execute_signal abc-123"
+
+- Ejecución: Una vez aprobada, el agente ejecuta la orden en IBKR y actualiza el portfolio local.
+
+--- 
+
+## ⚙️ Configuración (Variables de Entorno)
+- Variable	Descripción
+- FMP_API_KEY	Clave para datos de dividendos.
+- IBKR_GATEWAY_OHLCV_URL	URL del endpoint de velas en el VPS.
+- IBKR_ACCOUNT_MODE	paper o live.
+- TAVILY_API_KEY	Para búsqueda de noticias de mercado.
+
+--- 
+
+## 📂 Organización de Archivos
+- manifest.yaml: Define las skills habilitadas y la configuración de riesgo.
+- system_prompt.md: Contiene las instrucciones lógicas y restricciones de comportamiento.
+- schema.sql: DDL para inicializar las tablas en DuckDB.
+- fmp_bridge.py: Implementación técnica de la integración con Financial Modeling Prep.
+- factory.py: Ensamblador del grafo de LangGraph que orquestra los nodos de decisión.
+
+---
+## DIAGRAMA UML
+
+1. *UML: Arquitectura del Grafo (Lógica de Decisión)*
+Este diagrama representa cómo se organiza el motor de LangGraph que controla al worker. 
+
+ classDiagram
+    class WorkerGraph {
+        +State state
+        +prepare_node(state) State
+        +context_monitor_node(state) State
+        +agent_node(state) State
+        +tools_node(state) State
+        +reflector_node(state) State
+        +set_reply(state) State
+    }
+
+    class State {
+        +List messages
+        +String incoming
+        +String chat_id
+        +String tenant_id
+        +String analytical_summary
+        +String sandbox_photo_base64
+    }
+
+    class WorkerFactory {
+        +templates_root: Path
+        +create(worker_id, instance_name) CompiledGraph
+        +build_worker_graph() CompiledGraph
+    }
+
+    WorkerFactory ..> WorkerGraph : "instancia"
+    WorkerGraph --> State : "gestiona"
+    WorkerGraph ..> AgentDecision : "evalúa"
+
+2. *UML: Skills e Integraciones (Puentes de Datos)*
+Este diagrama describe las interfaces de las herramientas (tools) que el worker tiene a su disposición para interactuar con APIs externas.
+
+classDiagram
+    class QuantTraderTools {
+        <<Interface>>
+    }
+
+    class FmpBridge {
+        +get_fmp_stock_dividends(symbol, limit) String
+        +get_fmp_dividends_calendar(from, to, limit) String
+        -_fmp_get_json(path, query) JSON
+    }
+
+    class IbkrBridge {
+        +get_ibkr_portfolio() JSON
+        +fetch_ib_gateway_ohlcv(ticker, timeframe, lookback) JSON
+    }
+
+    class QuantTradeBridge {
+        +propose_trade_signal(ticker, action, weight) UUID
+        +execute_approved_signal(signal_id) Status
+        +execute_sandbox_script(script) JSON
+    }
+
+    class MarketAnalysis {
+        +tavily_search(query) String
+    }
+
+    QuantTraderTools <|-- FmpBridge : "implements"
+    QuantTraderTools <|-- IbkrBridge : "implements"
+    QuantTraderTools <|-- QuantTradeBridge : "implements"
+    QuantTraderTools <|-- MarketAnalysis : "implements"
+
+3. *UML: Modelo de Persistencia (DuckDB Schema)*
+Este diagrama representa las entidades de datos almacenadas en la base de datos DuckDB, mapeando el archivo schema.sql.
+classDiagram
+    class TradingSession {
+        +String id ("active")
+        +String mode ("paper" | "live")
+        +String tickers
+        +String status
+        +Double anchor_equity
+        +Timestamp updated_at
+    }
+
+    class OHLCVData {
+        +String ticker
+        +Timestamp timestamp
+        +Double open
+        +Double high
+        +Double low
+        +Double close
+        +Double volume
+    }
+
+    class TradeSignal {
+        +UUID signal_id
+        +Timestamp ts
+        +String ticker
+        +String action
+        +Double confidence_score
+        +String status
+        +Boolean human_approved
+        +Text rationale
+    }
+
+    class PortfolioPosition {
+        +String ticker
+        +Double qty
+        +Double avg_entry_price
+        +Double current_price
+        +Double unrealized_pnl
+    }
+
+    class QuantCoreSchema {
+        <<Namespace>>
+    }
+
+    QuantCoreSchema *-- TradingSession
+    QuantCoreSchema *-- OHLCVData
+    QuantCoreSchema *-- TradeSignal
+    QuantCoreSchema *-- PortfolioPositio

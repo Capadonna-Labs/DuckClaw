@@ -1,4 +1,5 @@
 ## 📈 Quant-Trader Worker
+
 Quant-Trader es un ejecutor cuantitativo táctico diseñado bajo una filosofía de Zero-Trust. Su misión es gestionar datos de mercado, evaluar señales de trading y ejecutar órdenes de forma segura, delegando el análisis macroeconómico a otros agentes (como Finanz) y operando exclusivamente bajo evidencia técnica verificable.
 
 ---
@@ -30,7 +31,7 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 
 ---
 
-## 🛡️ Reglas de Oro (Modo Zero-Trust)
+## 🛡️ Reglas (Modo Zero-Trust)
 
 - Para garantizar la seguridad y la integridad del capital, el worker sigue estas reglas inquebrantables:
 - Evidencia Única: No se permite invocar propose_trade_signal si no se ha ejecutado exitosamente fetch_market_data o fetch_ib_gateway_ohlcv para el ticker en el turno actual.
@@ -42,7 +43,8 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 ---
 
 
-## 🗄️ Estructura de Datos (DuckDB)
+## Estructura de Datos (DuckDB)
+
 - El worker gestiona su estado en el esquema quant_core:
 - Tabla	Descripción:
 
@@ -53,7 +55,8 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 
 --- 
 
-## 🚀 Flujo de Trabajo Típico
+## Flujo de Trabajo Típico
+
 - Activación: El usuario inicia una sesión vía Telegram:
 /trading_session --mode paper --tickers NVDA,AAPL.
 
@@ -86,119 +89,103 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 ---
 ## DIAGRAMA UML
 
-1. *UML: Arquitectura del Grafo (Lógica de Decisión)*
-Este diagrama representa cómo se organiza el motor de LangGraph que controla al worker. 
-
- classDiagram
-    class WorkerGraph {
-        +State state
-        +prepare_node(state) State
-        +context_monitor_node(state) State
-        +agent_node(state) State
-        +tools_node(state) State
-        +reflector_node(state) State
-        +set_reply(state) State
-    }
-
-    class State {
-        +List messages
-        +String incoming
-        +String chat_id
-        +String tenant_id
-        +String analytical_summary
-        +String sandbox_photo_base64
-    }
-
-    class WorkerFactory {
-        +templates_root: Path
-        +create(worker_id, instance_name) CompiledGraph
-        +build_worker_graph() CompiledGraph
-    }
-
-    WorkerFactory ..> WorkerGraph : "instancia"
-    WorkerGraph --> State : "gestiona"
-    WorkerGraph ..> AgentDecision : "evalúa"
-
-2. *UML: Skills e Integraciones (Puentes de Datos)*
-Este diagrama describe las interfaces de las herramientas (tools) que el worker tiene a su disposición para interactuar con APIs externas.
+---
 
 classDiagram
-    class QuantTraderTools {
-        <<Interface>>
+    %% Capa de Aplicación (El Worker)
+    class QuantTraderWorker {
+        <<Service>>
+        +String worker_id: quant_trader
+        +String risk_profile: conservative
+        +Boolean read_only: true
+        +Double temperature: 0.1
+        +propose_trade_signal()
+        +execute_approved_signal()
+        +fetch_market_data()
+        +execute_sandbox_script()
     }
 
-    class FmpBridge {
-        +get_fmp_stock_dividends(symbol, limit) String
-        +get_fmp_dividends_calendar(from, to, limit) String
-        -_fmp_get_json(path, query) JSON
+    %% Capa de Persistencia: Esquema Finance Worker
+    namespace Finance_Worker_DB {
+        class Cuenta {
+            +PK id: int
+            +String name
+            +float balance
+            +String currency
+        }
+        class TradingMandate {
+            +PK mandate_id: UUID
+            +String asset_class
+            +String direction
+            +Decimal max_weight_pct
+            +String status
+        }
+        class FinanceSignal {
+            +PK signal_id: UUID
+            +FK mandate_id
+            +Boolean human_approved
+            +String rationale
+        }
     }
 
-    class IbkrBridge {
-        +get_ibkr_portfolio() JSON
-        +fetch_ib_gateway_ohlcv(ticker, timeframe, lookback) JSON
+    %% Capa de Persistencia: Esquema Quant Core
+    namespace Quant_Core_DB {
+        class TradingSession {
+            +PK id: String
+            +String mode
+            +Double anchor_equity
+            +Double peak_equity
+        }
+        class QuantSignal {
+            +PK signal_id: UUID
+            +Double confidence_score
+            +Double target_price
+            +Double stop_loss
+            +String status
+        }
+        class PortfolioPosition {
+            +PK ticker: String
+            +Double qty
+            +Double avg_entry_price
+            +Double unrealized_pnl
+        }
+        class SessionTick {
+            +PK id: UUID
+            +String session_uid
+            +JSON cfd_summary
+        }
     }
 
-    class QuantTradeBridge {
-        +propose_trade_signal(ticker, action, weight) UUID
-        +execute_approved_signal(signal_id) Status
-        +execute_sandbox_script(script) JSON
+    %% Capa de Integración (Skills / APIs Externas)
+    namespace External_Integrations {
+        class IBKR_API {
+            <<Interface>>
+            +get_ibkr_portfolio()
+            +fetch_ib_gateway_ohlcv()
+        }
+        class FMP_API {
+            <<Interface>>
+            +get_fmp_stock_dividends()
+            +get_fmp_calendar()
+        }
+        class Research_Intelligence {
+            <<Interface>>
+            +tavily_search()
+            +reddit_mcp_read()
+        }
     }
 
-    class MarketAnalysis {
-        +tavily_search(query) String
-    }
+    %% Relaciones de Dependencia y Flujo
+    QuantTraderWorker ..> IBKR_API : "Uses for Execution"
+    QuantTraderWorker ..> FMP_API : "Enriches with Data"
+    QuantTraderWorker ..> Research_Intelligence : "Calculates Sentiment"
 
-    QuantTraderTools <|-- FmpBridge : "implements"
-    QuantTraderTools <|-- IbkrBridge : "implements"
-    QuantTraderTools <|-- QuantTradeBridge : "implements"
-    QuantTraderTools <|-- MarketAnalysis : "implements"
-
-3. *UML: Modelo de Persistencia (DuckDB Schema)*
-Este diagrama representa las entidades de datos almacenadas en la base de datos DuckDB, mapeando el archivo schema.sql.
-classDiagram
-    class TradingSession {
-        +String id ("active")
-        +String mode ("paper" | "live")
-        +String tickers
-        +String status
-        +Double anchor_equity
-        +Timestamp updated_at
-    }
-
-    class OHLCVData {
-        +String ticker
-        +Timestamp timestamp
-        +Double open
-        +Double high
-        +Double low
-        +Double close
-        +Double volume
-    }
-
-    class TradeSignal {
-        +UUID signal_id
-        +Timestamp ts
-        +String ticker
-        +String action
-        +Double confidence_score
-        +String status
-        +Boolean human_approved
-        +Text rationale
-    }
-
-    class PortfolioPosition {
-        +String ticker
-        +Double qty
-        +Double avg_entry_price
-        +Double current_price
-        +Double unrealized_pnl
-    }
-
-    class QuantCoreSchema {
-        <<Namespace>>
-    }
-
-    QuantCoreSchema *-- TradingSession
-    QuantCoreSchema *-- OHLCVData
-    QuantCoreSchema *-- TradeSignal
-    QuantCoreSchema *-- PortfolioPositio
+    QuantTraderWorker --> Cuenta : "Monitors Balance"
+    QuantTraderWorker --> TradingMandate : "Follows Strategy"
+    
+    TradingMandate "1" -- "*" FinanceSignal : "Generates"
+    TradingSession "1" -- "*" SessionTick : "Logs Activity"
+    TradingSession "1" -- "*" QuantSignal : "Emits"
+    
+    QuantSignal ..> FinanceSignal : "Refines (Technical)"
+    QuantSignal --> PortfolioPosition : "Affects"

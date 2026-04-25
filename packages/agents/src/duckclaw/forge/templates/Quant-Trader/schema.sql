@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS finance_worker.trade_signals (
 CREATE SCHEMA IF NOT EXISTS quant_core;
 
 -- Sesión activa de trading (singleton por bóveda: id = 'active'). Fly: /trading_session
+-- session_goal JSON: objective maximize_pnl|rebalance_hrp, max_drawdown_pct, position_size_pct, signal_threshold, tickers, mode
 CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
   id VARCHAR PRIMARY KEY,
   mode VARCHAR NOT NULL,
@@ -99,3 +100,19 @@ CREATE TABLE IF NOT EXISTS quant_core.portfolio_positions (
   unrealized_pnl DOUBLE,
   updated_at TIMESTAMP
 );
+
+-- CFD snapshots (evaluate_cfd_state / record_fluid_state); alineado con finanz/schema.sql
+CREATE TABLE IF NOT EXISTS quant_core.fluid_state (
+  ticker VARCHAR NOT NULL,
+  timestamp TIMESTAMP NOT NULL,
+  hex_signature VARCHAR NOT NULL,
+  mass DOUBLE,
+  density DOUBLE,
+  temperature DOUBLE,
+  pressure DOUBLE,
+  viscosity DOUBLE,
+  surface_tension DOUBLE,
+  phase VARCHAR NOT NULL,
+  PRIMARY KEY (ticker, timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_fluid_state_ticker ON quant_core.fluid_state (ticker);

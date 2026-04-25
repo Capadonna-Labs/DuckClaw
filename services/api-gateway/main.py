@@ -9,6 +9,7 @@ Endpoints: /api/v1/agent/chat, /api/v1/db/write, homeostasis, system health.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import hashlib
 import json
 import logging
@@ -70,6 +71,7 @@ from duckclaw.gateway_db import (
     raw_gateway_db_path_from_mapping,
     resolve_env_duckdb_path,
 )
+from duckclaw.debug_session_log import agent_debug_log
 
 
 # Cargar .env desde repo root
@@ -281,6 +283,51 @@ _log_level_name = (os.environ.get("DUCKCLAW_LOG_LEVEL") or "INFO").strip().upper
 _log_level = getattr(logging, _log_level_name, logging.INFO)
 configure_structured_logging(level=_log_level)
 _gateway_log = logging.getLogger("duckclaw.gateway")
+
+
+def _install_duckdb_connect_probe() -> None:
+    # #region agent log
+    try:
+        import duckdb as _dc
+
+        if getattr(_dc, "_duckclaw_probe_installed_c964f7", False):
+            return
+        _orig = _dc.connect
+
+        def _wrapped_connect(*args: Any, **kwargs: Any) -> Any:
+            try:
+                db_path = ""
+                if args:
+                    db_path = str(args[0] or "")
+                elif "database" in kwargs:
+                    db_path = str(kwargs.get("database") or "")
+                elif "db_path" in kwargs:
+                    db_path = str(kwargs.get("db_path") or "")
+                ro = kwargs.get("read_only", None)
+                fr = inspect.stack()[1]
+                agent_debug_log(
+                    "services/api-gateway/main.py:_install_duckdb_connect_probe",
+                    "duckdb_connect_called",
+                    {
+                        "pid": os.getpid(),
+                        "read_only": ro,
+                        "path_tail": db_path[-96:],
+                        "caller": f"{fr.filename}:{fr.lineno}",
+                    },
+                    hypothesis_id="H5",
+                )
+            except Exception:
+                pass
+            return _orig(*args, **kwargs)
+
+        _dc.connect = _wrapped_connect
+        setattr(_dc, "_duckclaw_probe_installed_c964f7", True)
+    except Exception:
+        pass
+    # #endregion
+
+
+_install_duckdb_connect_probe()
 
 
 _obs_log = get_obs_logger()
@@ -719,29 +766,10 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
     """
     Telegram Guard whitelist lookup with Redis cache (TTL=1h) + DuckDB source of truth.
     """
-    # region agent log
-    _dbg: dict[str, Any] = {
-        "hypothesisId": "H1_redis_H2_duckdb_H3_gateway_path",
-        "redis_hit": False,
-        "db_rows": -1,
-        "gw_tail": "",
-    }
-    try:
-        from duckclaw.gateway_db import get_gateway_db_path as _gw_p  # noqa: PLC0415
-
-        _gp = str(_gw_p() or "")
-        _dbg["gw_tail"] = _gp[-96:] if len(_gp) > 96 else _gp
-        _dbg["db_type"] = type(db).__name__
-    except Exception as _e_dbg:
-        _dbg["gw_err"] = type(_e_dbg).__name__
-    # endregion
     key = f"whitelist:{str(tenant_id or '').strip().lower()}:{user_id}"
     if redis_client is not None:
         try:
             cached = await redis_client.get(key)
-            # region agent log
-            _dbg["redis_hit"] = bool(cached)
-            # endregion
             if cached:
                 return str(cached).strip() or None
         except Exception:
@@ -765,9 +793,6 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
             f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}' LIMIT 1"
         )
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        # region agent log
-        _dbg["db_rows"] = len(rows) if isinstance(rows, list) else -2
-        # endregion
         if rows and isinstance(rows[0], dict):
             role = (rows[0].get("role") or "").strip()
             if role:
@@ -786,9 +811,6 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
                 f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}' LIMIT 1"
             )
             rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-            # region agent log
-            _dbg["db_rows_retry"] = len(rows) if isinstance(rows, list) else -2
-            # endregion
             if rows and isinstance(rows[0], dict):
                 role = (rows[0].get("role") or "").strip()
                 if role:
@@ -800,35 +822,6 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
                     return role
         except Exception:
             pass
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "pre-fix",
-                        "location": "main.py:_lookup_whitelist_role",
-                        "message": "whitelist_miss",
-                        "data": {
-                            **_dbg,
-                            "tenant_norm": str(tenant_id or "").strip().lower()[:64],
-                            "uid_len": len(str(user_id or "")),
-                            "redis_key_suffix": key[-48:] if len(key) > 48 else key,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     return None
 
 
@@ -1711,6 +1704,19 @@ async def _invoke_chat(
                 except Exception:
                     _fly_cache_n = -1
                 fly_db = DuckClaw(vpath, read_only=False, engine=_fly_engine)
+                # #region agent log
+                agent_debug_log(
+                    "services/api-gateway/main.py:telegram_ingress",
+                    "fly_db_open_rw",
+                    {
+                        "chat_id": str(session_id),
+                        "pid": os.getpid(),
+                        "path_tail": (vpath or "")[-96:],
+                        "message_head": (msg_stripped or "")[:80],
+                    },
+                    hypothesis_id="H2",
+                )
+                # #endregion
                 from duckclaw.graphs.graph_server import get_db as _fly_acl_db
 
                 prepare_leila_fly_duckdb(
@@ -1735,9 +1741,48 @@ async def _invoke_chat(
                 if fly_db is not None:
                     try:
                         fly_db.close()
+                        # #region agent log
+                        agent_debug_log(
+                            "services/api-gateway/main.py:telegram_ingress",
+                            "fly_db_closed",
+                            {
+                                "chat_id": str(session_id),
+                                "pid": os.getpid(),
+                                "path_tail": (vpath or "")[-96:],
+                                "message_head": (msg_stripped or "")[:80],
+                            },
+                            hypothesis_id="H2",
+                        )
+                        # #endregion
                     except Exception:
                         pass
             if cmd_reply is not None:
+                chart_sent = False
+                try:
+                    from duckclaw.graphs.on_the_fly_commands import pop_fly_outbound_chart_b64
+
+                    photo_b64 = pop_fly_outbound_chart_b64(session_id)
+                    if photo_b64:
+                        png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
+                        if not png_bytes:
+                            png_bytes = decode_sandbox_figure_base64(photo_b64)
+                        if png_bytes:
+                            token = (outbound_telegram_bot_token or "").strip() or _effective_telegram_bot_token()
+                            if token:
+                                loop = asyncio.get_running_loop()
+                                chart_sent = bool(
+                                    await loop.run_in_executor(
+                                        None,
+                                        lambda: send_sandbox_chart_to_telegram_sync(
+                                            bot_token=token,
+                                            chat_id=str(session_id),
+                                            image_bytes=png_bytes,
+                                        ),
+                                    )
+                                )
+                except Exception as exc:
+                    if _gateway_log.isEnabledFor(logging.DEBUG):
+                        _gateway_log.debug("fly chart attach failed: %s", exc)
                 if _gateway_log.isEnabledFor(logging.DEBUG):
                     _gateway_log.debug(
                         "fly (backup) chat=%s: %s",

@@ -5,6 +5,8 @@ MLX SFT Trainer — entrena con LoRA sobre dataset JSONL con clave \"messages\" 
 Requisitos: pip install \"mlx-lm>=0.31.2\" (Gemma 4; extra opcional: pip install -e packages/agents[train])
 Variables de entorno:
   SFT_DATASET_PATH   — default train/gemma4/dataset_sft.jsonl
+  (Para SFT desde trazas ya sanitizadas a gemma4/**/traces.jsonl, no uses este flujo: ejecuta
+   scripts/materialize_sft_data_dir_from_gemma4_sanitized.py y luego mlx/duckops con sft_data_dir.)
   SFT_ADAPTERS_PATH  — default train/gemma4/adapters
   MLX_MODEL_PATH     — ej. deadbydawn101/gemma-4-E4B-mlx-4bit
   SFT_LORA_LAYERS    — capas LoRA (default 42, Gemma 4 ~42 capas)

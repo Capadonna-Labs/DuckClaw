@@ -6,11 +6,17 @@ import duckdb
 
 from duckclaw.graphs.on_the_fly_commands import (
     TradingSessionGoal,
+    build_goals_proactive_system_event_message,
     _parse_trading_session_cli,
     _session_goal_from_cli,
     _execute_signal_verify_ledger,
     _looks_like_hallucinated_placeholder_uuid,
+    _compute_trading_session_pnl_now,
+    _dedupe_trading_session_snapshots,
+    _quant_core_trade_signals_column_names,
     execute_quant_execute_signal,
+    pop_fly_outbound_chart_b64,
+    register_fly_outbound_chart_b64,
 )
 
 
@@ -48,13 +54,94 @@ def test_parse_trading_session_cli_status_stop_modes() -> None:
     assert err_stop is None and p_stop is not None and p_stop.stop is True
 
 
+def test_fly_outbound_chart_register_pop() -> None:
+    register_fly_outbound_chart_b64(999001, "aaa")
+    assert pop_fly_outbound_chart_b64(999001) == "aaa"
+    assert pop_fly_outbound_chart_b64(999001) is None
+    register_fly_outbound_chart_b64(999001, "   ")
+    assert pop_fly_outbound_chart_b64(999001) is None
+
+
+def test_quant_core_trade_signals_column_names() -> None:
+    class D:
+        def query(self, sql: str) -> str:
+            if "table_info" in sql:
+                return json.dumps(
+                    [
+                        {"name": "status"},
+                        {"name": "session_uid"},
+                    ]
+                )
+            return json.dumps([])
+
+    assert _quant_core_trade_signals_column_names(D()) == {"status", "session_uid"}
+
+
+def test_compute_trading_session_pnl_from_trade_signals_sum() -> None:
+    uid = "a7c81171-7aea-4893-9852-a6dbe088e1d4"
+
+    class D:
+        def query(self, sql: str) -> str:
+            if "table_info('quant_core.trade_signals')" in sql:
+                return json.dumps([{"name": "unrealized_pnl"}, {"name": "session_uid"}])
+            if "SUM(unrealized_pnl)" in sql and "trade_signals" in sql:
+                return json.dumps([{"s": 12.25}])
+            return json.dumps([])
+
+    assert abs(_compute_trading_session_pnl_now(D(), uid) - 12.25) < 1e-6
+
+
+def test_dedupe_trading_session_snapshots_consecutive_equal() -> None:
+    assert _dedupe_trading_session_snapshots([-217.64, -217.64, -217.64]) == [-217.64]
+    assert _dedupe_trading_session_snapshots([100.0, 200.0, 200.0, 300.0]) == [100.0, 200.0, 300.0]
+
+
+def test_compute_trading_session_pnl_portfolio_positions_fallback() -> None:
+    uid = "b1c81171-7aea-4893-9852-a6dbe088e1d4"
+
+    class D:
+        def query(self, sql: str) -> str:
+            if "table_info('quant_core.trade_signals')" in sql:
+                return json.dumps([{"name": "status"}])
+            if "portfolio_positions" in sql:
+                return json.dumps([{"s": 88.0}])
+            return json.dumps([])
+
+    assert abs(_compute_trading_session_pnl_now(D(), uid) - 88.0) < 1e-6
+
+
 def test_session_goal_from_cli_defaults() -> None:
     parsed, err = _parse_trading_session_cli("--mode paper --tickers nvda,spy")
     assert err is None and parsed is not None
     goal = _session_goal_from_cli(parsed)
     assert isinstance(goal, TradingSessionGoal)
+    assert goal.objective == "maximize_pnl"
     assert goal.signal_threshold == "GAS"
     assert goal.tickers == ["NVDA", "SPY"]
+
+
+def test_parse_trading_session_objective_rebalance_hrp() -> None:
+    parsed, err = _parse_trading_session_cli(
+        "--mode paper --tickers SPY --objective rebalance_hrp"
+    )
+    assert err is None and parsed is not None
+    assert parsed.objective == "rebalance_hrp"
+    g = _session_goal_from_cli(parsed)
+    assert g.objective == "rebalance_hrp"
+
+
+def test_parse_trading_session_objective_invalid() -> None:
+    parsed, err = _parse_trading_session_cli("--mode paper --objective foo")
+    assert parsed is None and err and "objective" in (err or "").lower()
+
+
+def test_build_goals_proactive_injects_rebalance_hrp() -> None:
+    msg = build_goals_proactive_system_event_message(
+        [{"belief_key": "x", "title": "Test"}],
+        trading_session_objective="rebalance_hrp",
+    )
+    assert "rebalance_hrp" in msg
+    assert "pesos HRP" in msg
 
 
 def test_execute_signal_verify_quant_awaiting() -> None:

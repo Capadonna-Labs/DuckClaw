@@ -424,3 +424,99 @@ def test_run_goals_proactive_trading_session_event_payload(
     msg = posts[0]["kwargs"]["json"]["message"]
     assert "TRADING_TICK" in msg
     assert "uid-123" in msg
+
+
+def test_run_goals_proactive_trading_session_empty_manager_goals_still_ticks(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Sin filas en chat_goals el ticker no debe borrar el delta si trigger=trading_session y worker=Quant."""
+    import duckdb
+
+    db_path = str(tmp_path / "vault_trading_tick_empty_goals.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        """
+        CREATE TABLE agent_config (
+          key VARCHAR PRIMARY KEY,
+          value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.execute(
+        """
+        CREATE SCHEMA IF NOT EXISTS quant_core;
+        CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
+          id VARCHAR PRIMARY KEY,
+          mode VARCHAR NOT NULL,
+          tickers VARCHAR NOT NULL DEFAULT '',
+          session_uid VARCHAR,
+          session_goal JSON,
+          status VARCHAR NOT NULL DEFAULT 'ACTIVE',
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO quant_core.trading_sessions (id, mode, tickers, session_uid, session_goal, status) VALUES (?, ?, ?, ?, CAST(? AS JSON), ?)",
+        [
+            "active",
+            "paper",
+            "NVDA,SPY",
+            "uid-999",
+            json.dumps({"signal_threshold": "GAS"}),
+            "ACTIVE",
+        ],
+    )
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)",
+        [
+            "chat_77_goals_delta_seconds",
+            "1",
+            "chat_77_goals",
+            json.dumps([]),
+            "chat_77_worker_id",
+            "Quant-Trader",
+            "chat_77_goals_proactive_tenant_id",
+            "Cuantitativo",
+            "chat_77_goals_proactive_last_fire_epoch",
+            "",
+            "chat_77_goals_delta_meta",
+            json.dumps({"trigger": "trading_session", "session_uid": "uid-999"}),
+        ],
+    )
+    con.close()
+
+    posts: list[dict[str, Any]] = []
+
+    class Resp:
+        status_code = 200
+        text = "ok"
+
+    class DummyClient:
+        async def __aenter__(self) -> DummyClient:
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+        async def post(self, *a: Any, **kw: Any) -> Resp:
+            posts.append({"args": a, "kwargs": kw})
+            return Resp()
+
+    monkeypatch.setenv("DUCKCLAW_GOALS_TICKER_DB_PATH", db_path)
+    monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
+
+    asyncio.run(heartbeat._run_goals_proactive_tick())
+
+    assert len(posts) == 1
+    msg = posts[0]["kwargs"]["json"]["message"]
+    assert "TRADING_TICK" in msg
+    assert "uid-999" in msg
+
+    con2 = duckdb.connect(db_path)
+    row = con2.execute(
+        "SELECT value FROM agent_config WHERE key = 'chat_77_goals_delta_seconds'"
+    ).fetchone()
+    con2.close()
+    assert row is not None and str(row[0]).strip() == "1"

@@ -2,6 +2,9 @@
 Human-in-the-loop: grant vía /execute_signal <uuid> para execute_order (Finanz)
 y execute_approved_signal (Quant Trader).
 
+Con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1, propose_trade_signal puede emitir
+grant_execute_order + execute_approved_signal en el mismo flujo (paper por defecto).
+
 TTL del grant: DUCKCLAW_QUANT_HITL_GRANT_TTL_SEC (default 600; sube para swing, p. ej. 86400).
 
 Usa Redis si REDIS_URL o DUCKCLAW_REDIS_URL está definido; si no, memoria en proceso

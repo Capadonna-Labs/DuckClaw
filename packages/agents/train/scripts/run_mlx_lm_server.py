@@ -88,12 +88,43 @@ def _install_gemma4_tool_patch() -> None:
     g4._parse_single = _parse_single_wrapped
 
 
+def _env_load_strict() -> bool:
+    return (os.environ.get("DUCKCLAW_MLX_LOAD_STRICT") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _install_mlx_load_model_skip_extra_weights() -> None:
+    """Gemma4 e4b checkpoints can list K/V tensors for layers 24+ where the MLX module
+    uses shared KV and omits k_proj/v_proj (see `gemma4_text.Attention.has_kv`).
+    `mlx_lm` loads with strict=True by default and fails with "Received N parameters
+    not in model". Dropping unmapped keys is correct for inference.
+
+    Set ``DUCKCLAW_MLX_LOAD_STRICT=1`` to use the library default (strict load).
+    """
+    if _env_load_strict():
+        return
+    import mlx_lm.utils as mlu
+
+    _orig = mlu.load_model
+
+    def _load_model(*args: Any, **kwargs: Any) -> Any:
+        kwargs["strict"] = False
+        return _orig(*args, **kwargs)
+
+    mlu.load_model = _load_model  # type: ignore[assignment]
+
+
 def main() -> None:
     warnings.filterwarnings(
         "ignore",
         message=".*not recommended for production.*",
         category=UserWarning,
     )
+    _install_mlx_load_model_skip_extra_weights()
     _install_gemma4_tool_patch()
     server_args = sys.argv[1:]
     sys.argv = [sys.argv[0], "server", *server_args]

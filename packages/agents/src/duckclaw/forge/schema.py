@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 from typing import Dict, List, Literal
 
@@ -90,7 +92,10 @@ def security_policy_to_docker_kwargs(policy: SecurityPolicy) -> Dict[str, object
         parts = [p.strip() for p in str(mount).split(":")]
         if len(parts) < 2:
             continue
-        host_path = parts[0]
+        host_path = os.path.expanduser(os.path.expandvars(parts[0].strip()))
+        if not host_path or re.search(r"\$\{", host_path):
+            # P. ej. ${DUCKCLAW_DATA_DIR} sin variable en el entorno → Docker 400 al crear el contenedor
+            continue
         container_path = parts[1]
         mode = parts[2] if len(parts) > 2 and parts[2] else "ro"
         volumes[host_path] = {"bind": container_path, "mode": mode}

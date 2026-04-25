@@ -13,21 +13,21 @@ El worker actúa como el puente entre los datos crudos del mercado y la ejecuci�
 
 El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 1. *Datos de Mercado y Dividendos*
- fetch_ib_gateway_ohlcv: Obtiene velas (OHLCV) directamente desde el VPS del Gateway de IBKR. Es la fuente primaria para análisis técnico.
+    fetch_ib_gateway_ohlcv: Obtiene velas (OHLCV) directamente desde el VPS del Gateway de IBKR. Es la fuente primaria para análisis técnico.
 
- get_fmp_stock_dividends: Consulta el historial y próximos pagos de dividendos de un ticker vía Financial Modeling Prep.
- get_fmp_dividends_calendar: Calendario global de dividendos (ventana máx. 90 días).
- 
- tavily_search: Solo para contexto informativo (noticias/eventos), nunca para fabricar precios.
+    get_fmp_stock_dividends: Consulta el historial y próximos pagos de dividendos de un ticker vía Financial Modeling Prep.
+    get_fmp_dividends_calendar: Calendario global de dividendos (ventana máx. 90 días).
+
+    tavily_search: Solo para contexto informativo (noticias/eventos), nunca para fabricar precios.
 
 2. *Gestión de Portafolio (IBKR)*
- get_ibkr_portfolio: Snapshot en tiempo real de posiciones, valor de la cuenta y PnL.
+    get_ibkr_portfolio: Snapshot en tiempo real de posiciones, valor de la cuenta y PnL.
 
 
 3. *Ejecución y Backtesting*
- execute_sandbox_script: Ejecuta scripts de Python en un entorno seguro (Strix Sandbox) para realizar backtesting de estrategias.
- propose_trade_signal: Registra una señal en el ledger para revisión humana. Aplica automáticamente el RiskGuard (ajuste de pesos según límites de riesgo).
- execute_approved_signal: Envía la orden final al broker, solo si la señal tiene el flag human_approved.
+    execute_sandbox_script: Ejecuta scripts de Python en un entorno seguro (Strix Sandbox) para realizar backtesting de estrategias.
+    propose_trade_signal: Registra una señal en el ledger para revisión humana. Aplica automáticamente el RiskGuard (ajuste de pesos según límites de riesgo).
+    execute_approved_signal: Envía la orden final al broker, solo si la señal tiene el flag human_approved.
 
 ---
 

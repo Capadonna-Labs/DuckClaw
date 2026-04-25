@@ -9,8 +9,8 @@ FROM python:3.11-slim
 # Instalar uv como gestor de paquetes.
 RUN pip install --no-cache-dir uv
 
-# Dependencias analíticas requeridas por la spec (pandas, matplotlib, duckdb)
-# + scipy, sklearn para análisis avanzado
+# Dependencias analíticas: pandas, matplotlib, duckdb; scipy + sklearn (HRP, ML ligero);
+# Cabecera inyectada en sandbox.py menciona pandas, scipy, etc.
 # + yfinance (VIX/series Yahoo dentro del contenedor; requiere red si se descarga en vivo)
 RUN pip install --no-cache-dir \
         pandas==2.2.3 \
@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir \
         duckdb==1.2.0 \
         scipy==1.14.1 \
         scikit-learn==1.6.1 \
+        PyPortfolioOpt==1.6.0 \
         pyarrow==19.0.1 \
         requests==2.32.3 \
         vaderSentiment==3.3.2 \

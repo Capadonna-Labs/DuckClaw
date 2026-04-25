@@ -2,6 +2,10 @@
 # Spec: specs/features/Quant_Trading_Session_Homeostasis.md
 homeostasis:
   beliefs:
+    - key: "hrp_session_rebalance"
+      target: 0.0
+      threshold: 0.0
+      comparison: symmetric
     - key: "max_portfolio_drawdown_pct"
       target: 0.10
       threshold: 0.01

@@ -34,7 +34,7 @@ _log = logging.getLogger(__name__)
 # Cabecera inyectada antes del código del usuario (Strix / run_sandbox).
 # Telegram sendPhoto rechaza PNG con transparencia o procesamiento raro (IMAGE_PROCESS_FAILED):
 # fondo blanco opaco + dpi moderado en savefig y rcParams por defecto.
-_SANDBOX_PYTHON_HEADER = """# Available: pandas, numpy, matplotlib, mplfinance, seaborn, scipy
+_SANDBOX_PYTHON_HEADER = """# Available: pandas, numpy, matplotlib, mplfinance, seaborn, scipy, pypfopt (PyPortfolioOpt: HRP, efficient_frontier, etc.)
 # Gráficos en /workspace/output/*.png — compatible con Telegram sendPhoto:
 #   plt.savefig('/workspace/output/mi_chart.png', dpi=100, facecolor='white', edgecolor='none', bbox_inches='tight')
 try:
@@ -120,16 +120,167 @@ def _browser_image_name() -> str:
     return os.environ.get("STRIX_BROWSER_IMAGE", _DEFAULT_BROWSER_IMAGE).strip() or _DEFAULT_BROWSER_IMAGE
 
 
+def _debug_log_sandbox_docker_run_failure(
+    exc: BaseException,
+    *,
+    resolved_image: str,
+    container_name: str,
+    run_kw: dict[str, Any],
+) -> None:
+    # #region agent log
+    try:
+        vols = run_kw.get("volumes") or {}
+        host_paths = [str(k) for k in vols.keys()]
+        payload: dict[str, Any] = {
+            "sessionId": "c964f7",
+            "runId": "pre-fix",
+            "hypothesisId": "H1-H5",
+            "location": "sandbox.py:_get_or_create_container",
+            "message": "containers.run_failed",
+            "data": {
+                "exc_type": type(exc).__name__,
+                "exc_str": str(exc)[:2500],
+                "resolved_image": resolved_image,
+                "container_name": container_name,
+                "network_mode": str(run_kw.get("network_mode") or ""),
+                "volume_host_paths": host_paths[:24],
+                "has_unexpanded_dollar": any("$" in p for p in host_paths),
+                "tmpfs_keys": list((run_kw.get("tmpfs") or {}).keys()),
+                "mem_limit": str(run_kw.get("mem_limit") or ""),
+            },
+            "timestamp": int(time.time() * 1000),
+        }
+        try:
+            import docker as _docker_mod
+
+            if isinstance(exc, _docker_mod.errors.APIError):
+                api_e = exc
+                payload["data"]["api_status_code"] = getattr(api_e, "status_code", None)
+                exp = getattr(api_e, "explanation", None)
+                if exp is not None:
+                    payload["data"]["api_explanation"] = str(exp)[:2000]
+                resp = getattr(api_e, "response", None)
+                if resp is not None:
+                    try:
+                        payload["data"]["api_response_text"] = (getattr(resp, "text", None) or "")[:2000]
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        _lp = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+        _lp.parent.mkdir(parents=True, exist_ok=True)
+        with _lp.open("a", encoding="utf-8") as _df:
+            _df.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
+
+def _debug_log_pypfopt_import_probe(
+    container: Any,
+    *,
+    session_id: str,
+    resolved_image: str | None,
+) -> None:
+    # #region agent log
+    try:
+        pr = container.exec_run(
+            cmd=["python3", "-c", "import pypfopt; print('pypfopt_import_ok')"],
+            workdir="/workspace",
+            demux=True,
+        )
+        out_b, err_b = pr.output or (b"", b"")
+        out_s = (out_b or b"").decode("utf-8", errors="replace").strip()[:500]
+        err_s = (err_b or b"").decode("utf-8", errors="replace").strip()[:1500]
+        exit_c = pr.exit_code if pr.exit_code is not None else -1
+        payload: dict[str, Any] = {
+            "sessionId": "c964f7",
+            "runId": "pre-fix",
+            "hypothesisId": "H2",
+            "location": "sandbox.py:StrixSandboxManager.execute",
+            "message": "pypfopt_import_probe",
+            "data": {
+                "session_id_prefix": (session_id or "")[:20],
+                "resolved_image": resolved_image or "",
+                "exit_code": int(exit_c),
+                "stdout_tail": out_s,
+                "stderr_tail": err_s,
+            },
+            "timestamp": int(time.time() * 1000),
+        }
+        _lp = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+        _lp.parent.mkdir(parents=True, exist_ok=True)
+        with _lp.open("a", encoding="utf-8") as _df:
+            _df.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception as e:
+        try:
+            _lp2 = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+            _lp2.parent.mkdir(parents=True, exist_ok=True)
+            with _lp2.open("a", encoding="utf-8") as _df2:
+                _df2.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "pre-fix",
+                            "hypothesisId": "H2",
+                            "location": "sandbox.py:_debug_log_pypfopt_import_probe",
+                            "message": "pypfopt_import_probe_exception",
+                            "data": {"exc": str(e)[:500]},
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+    # #endregion
+
+
+def _debug_log_ensure_image_result(
+    *,
+    want: str,
+    resolved: str,
+    used_fallback: bool,
+) -> None:
+    # #region agent log
+    try:
+        payload: dict[str, Any] = {
+            "sessionId": "c964f7",
+            "runId": "pre-fix",
+            "hypothesisId": "H1",
+            "location": "sandbox.py:_ensure_image",
+            "message": "sandbox_image_resolved",
+            "data": {
+                "requested": want,
+                "resolved": resolved,
+                "used_python_slim_fallback": used_fallback,
+                "fallback_tag": _FALLBACK_IMAGE,
+                "env_STRIX_SANDBOX_IMAGE": (os.environ.get("STRIX_SANDBOX_IMAGE") or "").strip() or None,
+            },
+            "timestamp": int(time.time() * 1000),
+        }
+        _lp = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+        _lp.parent.mkdir(parents=True, exist_ok=True)
+        with _lp.open("a", encoding="utf-8") as _df:
+            _df.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
+
 def _ensure_image(client: Any, image: str | None = None, *, allow_python_fallback: bool = True) -> str:
     """Verifica que la imagen esté disponible; opcionalmente pull. Sin fallback para imágenes browser explícitas."""
     want = (image or _image_name()).strip()
     try:
         client.images.get(want)
+        _debug_log_ensure_image_result(want=want, resolved=want, used_fallback=False)
         return want
     except Exception:
         pass
     try:
         client.images.pull(want)
+        _debug_log_ensure_image_result(want=want, resolved=want, used_fallback=False)
         return want
     except Exception as first_err:
         if not allow_python_fallback or want != _image_name():
@@ -142,6 +293,7 @@ def _ensure_image(client: Any, image: str | None = None, *, allow_python_fallbac
             want,
             _FALLBACK_IMAGE,
         )
+        _debug_log_ensure_image_result(want=want, resolved=_FALLBACK_IMAGE, used_fallback=True)
         return _FALLBACK_IMAGE
     except Exception as e:
         raise RuntimeError(f"No se pudo obtener ninguna imagen Docker para el sandbox: {e}") from e
@@ -171,6 +323,8 @@ class StrixSandboxManager:
     - mem_limit=512m
     - Montaje de datos en modo read-only; output en read-write
     """
+
+    _pypfopt_import_probe_sessions: set[str] = set()
 
     def __init__(
         self,
@@ -296,7 +450,16 @@ class StrixSandboxManager:
         if image_override and pub in ("1", "true", "yes", "on") and nm == "bridge":
             # Puerto aleatorio en el host para varias sesiones; proxy en /api/v1/sandbox/novnc/view/{token}/…
             run_kw["ports"] = {"6080/tcp": ("127.0.0.1", None)}
-        container = client.containers.run(resolved_image, **run_kw)
+        try:
+            container = client.containers.run(resolved_image, **run_kw)
+        except Exception as _run_exc:
+            _debug_log_sandbox_docker_run_failure(
+                _run_exc,
+                resolved_image=str(resolved_image),
+                container_name=container_name,
+                run_kw=run_kw,
+            )
+            raise
         self._session_image[session_id] = resolved_image
         self._containers[session_id] = container
         return container
@@ -388,6 +551,14 @@ class StrixSandboxManager:
             stdout = (raw_stdout or b"").decode("utf-8", errors="replace").strip()
             stderr = (raw_stderr or b"").decode("utf-8", errors="replace").strip()
             timed_out = False
+            if language == "python" and not image_override:
+                if session_id not in StrixSandboxManager._pypfopt_import_probe_sessions:
+                    StrixSandboxManager._pypfopt_import_probe_sessions.add(session_id)
+                    _debug_log_pypfopt_import_probe(
+                        container,
+                        session_id=session_id,
+                        resolved_image=self._session_image.get(session_id),
+                    )
         except Exception as e:
             return ExecutionResult(exit_code=1, stdout="", stderr=f"Error de ejecución: {e}")
 
@@ -765,7 +936,7 @@ def _decoded_figure_looks_like_png_or_jpeg(b64: str) -> bool:
 
 def extract_latest_sandbox_figure_base64(messages: list[Any] | None) -> str | None:
     """
-    Recorre mensajes del worker (p. ej. ToolMessage de run_sandbox) y devuelve el último
+    Recorre mensajes del worker (ToolMessage de run_sandbox/execute_sandbox_script) y devuelve el último
     `figure_base64` válido cuando exit_code == 0. Usado en el manager para enviar el PNG por Telegram.
     Ignora JSON compactado sin figura real (p. ej. sin clave figure_base64 o datos no imagen).
     """
@@ -780,7 +951,7 @@ def extract_latest_sandbox_figure_base64(messages: list[Any] | None) -> str | No
     for m in messages:
         if not isinstance(m, ToolMessage):
             continue
-        if getattr(m, "name", None) != "run_sandbox":
+        if getattr(m, "name", None) not in ("run_sandbox", "execute_sandbox_script"):
             continue
         raw = m.content
         if raw is None:
@@ -800,6 +971,50 @@ def extract_latest_sandbox_figure_base64(messages: list[Any] | None) -> str | No
         b64 = data.get("figure_base64")
         if isinstance(b64, str) and _decoded_figure_looks_like_png_or_jpeg(b64):
             last = b64
+            continue
+        artifacts = data.get("artifacts")
+        if isinstance(artifacts, list):
+            for art in reversed(artifacts):
+                try:
+                    ap = Path(str(art))
+                except Exception:
+                    continue
+                if ap.suffix.lower() != ".png" or not ap.is_file():
+                    continue
+                try:
+                    candidate = base64.standard_b64encode(ap.read_bytes()).decode("ascii")
+                except OSError:
+                    continue
+                if _decoded_figure_looks_like_png_or_jpeg(candidate):
+                    # #region agent log
+                    try:
+                        import time
+
+                        with open(
+                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                            "a",
+                            encoding="utf-8",
+                        ) as df:
+                            df.write(
+                                json.dumps(
+                                    {
+                                        "sessionId": "c964f7",
+                                        "runId": "portfolio-chart",
+                                        "hypothesisId": "H_artifact_fallback",
+                                        "location": "sandbox.py:extract_latest_sandbox_figure_base64",
+                                        "message": "figure_recovered_from_artifact_png",
+                                        "data": {"artifact_path": str(ap), "bytes_len": ap.stat().st_size},
+                                        "timestamp": int(time.time() * 1000),
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                    except Exception:
+                        pass
+                    # #endregion
+                    last = candidate
+                    break
     return last
 
 

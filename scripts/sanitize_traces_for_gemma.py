@@ -2,6 +2,10 @@
 """
 Sanitiza trazas ChatML (conversation_traces) para SFT Gemma 4 / mlx_lm.lora.
 
+Escribe un espejo bajo train/gemma4/YYYY/MM/DD/traces.jsonl (clave \"text\"). Para rellenar
+train/gemma4/sft_data_dir/{train,valid,test}.jsonl a partir de ese espejo, ejecuta después:
+  uv run python scripts/materialize_sft_data_dir_from_gemma4_sanitized.py
+
 Spec: specs/features/SFT Trace Sanitizer Gemma 4.md
 """
 
@@ -65,6 +69,63 @@ def clean_content(text: str) -> str:
     s = re.sub(r"[ \t]+\n", "\n", s)
     s = re.sub(r"\n{3,}", "\n\n", s)
     return s.strip()
+
+
+# Asistente que devuelve JSON de "Mercenario (sandbox)" u otro placeholder sin HRP real.
+_RE_JSON_STUB_STATUS = re.compile(
+    r'"status"\s*:\s*"(stub_[a-z0-9_]+)"',
+    re.IGNORECASE,
+)
+
+
+def assistant_stub_match_kind(text: str) -> str | None:
+    """
+    None si no es stub. Solo JSON con "status": "stub_*" (no substring suelto) para
+    evitar falsos positivos cuando el asistente menciona stub_completed en prosa
+    o en markdown `Status: stub_completed` con análisis válido detrás.
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+    if _RE_JSON_STUB_STATUS.search(t):
+        return "json_stub_status"
+    return None
+
+
+def assistant_content_is_stub_or_placeholder(text: str) -> bool:
+    """
+    True si el contenido del asistente es claramente un stub/placeholder
+    (p. ej. status stub_completed) — no es material útil para SFT.
+    """
+    return assistant_stub_match_kind(text) is not None
+
+
+def trace_stub_match_info(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Primer turno assistant que dispara stub; detalle para diagnóstico (debug SFT)."""
+    for idx, m in enumerate(messages):
+        if (m.get("role") or "").lower() != "assistant":
+            continue
+        cleaned = clean_content(_message_text(m))
+        kind = assistant_stub_match_kind(cleaned)
+        if not kind:
+            continue
+        info: dict[str, Any] = {
+            "kind": kind,
+            "assistant_turn_index": idx,
+            "content_len": len(cleaned),
+            "preview": cleaned[:400].replace("\n", " "),
+        }
+        if kind == "json_stub_status":
+            m2 = _RE_JSON_STUB_STATUS.search(cleaned)
+            if m2:
+                info["status_value"] = m2.group(1)
+        return info
+    return None
+
+
+def trace_has_stub_assistant(messages: list[dict[str, Any]]) -> bool:
+    """True si algún turno assistant contiene stub/placeholder (tras clean_content)."""
+    return trace_stub_match_info(messages) is not None
 
 
 def _message_text(msg: dict[str, Any]) -> str:
@@ -374,6 +435,14 @@ class SftGemmaRow(BaseModel):
     worker_id: str | None = None
 
 
+def _rel_under_root(root: Path, path: Path) -> str:
+    """Ruta corta para logs (evita líneas larguísimas que el terminal parte y parecen duplicadas)."""
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path)
+
+
 class GemmaSanitizer:
     def __init__(
         self,
@@ -425,6 +494,7 @@ class GemmaSanitizer:
             "lines_read": 0,
             "lines_kept": 0,
             "lines_dropped_evidence": 0,
+            "lines_dropped_stub": 0,
             "lines_dropped_other": 0,
         }
         for fp in self.iter_input_files():
@@ -449,12 +519,24 @@ class GemmaSanitizer:
                     stats["lines_dropped_other"] += 1
                     continue
 
+                stub_info = trace_stub_match_info(messages)
+                if stub_info is not None:
+                    stats["lines_dropped_stub"] += 1
+                    _LOG.debug(
+                        "RECHAZADO STUB: kind=%s | status_value=%s | session_id=%s | file=%s",
+                        stub_info.get("kind"),
+                        stub_info.get("status_value"),
+                        rec.get("session_id"),
+                        fp,
+                    )
+                    continue
+
                 ok, reason = self.validate_evidence_rule(messages)
                 if not ok:
                     stats["lines_dropped_evidence"] += 1
                     preview = _assistant_preview_for_evidence_log(messages)
-                    _LOG.info(
-                        "🔍 RECHAZADO POR EVIDENCIA: %s | reason=%s | session_id=%s | file=%s",
+                    _LOG.debug(
+                        "RECHAZADO POR EVIDENCIA: %s | reason=%s | session_id=%s | file=%s",
                         preview or "(sin texto assistant)",
                         reason,
                         rec.get("session_id"),
@@ -481,18 +563,32 @@ class GemmaSanitizer:
             if out_lines and not dry_run:
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
-                _LOG.info("wrote %s (%s lines)", out_path, len(out_lines))
+                _LOG.info(
+                    "wrote %s (%s lines)",
+                    _rel_under_root(self.output_root, out_path),
+                    len(out_lines),
+                )
             elif out_lines and dry_run:
-                _LOG.info("dry-run would write %s (%s lines)", out_path, len(out_lines))
+                _LOG.info(
+                    "dry-run would write %s (%s lines)",
+                    _rel_under_root(self.output_root, out_path),
+                    len(out_lines),
+                )
 
-        total_dropped = stats["lines_dropped_evidence"] + stats["lines_dropped_other"]
+        total_dropped = (
+            stats["lines_dropped_evidence"]
+            + stats["lines_dropped_stub"]
+            + stats["lines_dropped_other"]
+        )
         if stats["lines_read"] > 0:
             drop_rate = total_dropped / stats["lines_read"]
             _LOG.info(
-                "summary: read=%s kept=%s dropped_evidence=%s dropped_other=%s drop_rate=%.2f%%",
+                "summary: read=%s kept=%s dropped_evidence=%s dropped_stub=%s "
+                "dropped_other=%s drop_rate=%.2f%%",
                 stats["lines_read"],
                 stats["lines_kept"],
                 stats["lines_dropped_evidence"],
+                stats["lines_dropped_stub"],
                 stats["lines_dropped_other"],
                 100.0 * drop_rate,
             )
@@ -514,7 +610,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--output-root", type=Path, default=default_out)
     p.add_argument("--input-glob", default="**/traces.jsonl")
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="DEBUG: además, una línea por fila rechazada (stub / evidencia).",
+    )
     args = p.parse_args(argv)
 
     logging.basicConfig(

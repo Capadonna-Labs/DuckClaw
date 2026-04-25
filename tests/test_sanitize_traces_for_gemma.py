@@ -10,12 +10,48 @@ import pytest
 from scripts.sanitize_traces_for_gemma import (
     GemmaSanitizer,
     apply_gemma_template,
+    assistant_content_is_stub_or_placeholder,
     clean_content,
     needs_evidence,
     tool_content_indicates_success,
+    trace_has_stub_assistant,
     validate_evidence_rule,
     validate_evidence_turn,
 )
+
+
+def test_assistant_stub_detects_json_stub_status() -> None:
+    assert assistant_content_is_stub_or_placeholder(
+        '{"status": "stub_completed", "x": 1}'
+    )
+
+
+def test_assistant_stub_ignores_prose_mentioning_stub_word() -> None:
+    # No coincidir por substring: evita perder análisis que cita "stub_completed" en prosa
+    assert not assistant_content_is_stub_or_placeholder(
+        "Status: `stub_completed` (sandbox) según el log; luego hacemos el CFD completo."
+    )
+
+
+def test_assistant_stub_detects_json_status_stub_prefix() -> None:
+    assert assistant_content_is_stub_or_placeholder('{"status": "stub_merc"}')
+
+
+def test_assistant_stub_allows_normal_json() -> None:
+    assert not assistant_content_is_stub_or_placeholder('{"status": "ok", "a": 1}')
+
+
+def test_trace_has_stub_any_assistant() -> None:
+    assert trace_has_stub_assistant(
+        [
+            {"role": "user", "content": "h"},
+            {"role": "assistant", "content": "fine"},
+            {"role": "assistant", "content": '{"status":"stub_completed"}'},
+        ]
+    )
+    assert not trace_has_stub_assistant(
+        [{"role": "user", "content": "h"}, {"role": "assistant", "content": "Hola."}]
+    )
 
 
 def test_clean_content_strips_redacted_thinking() -> None:
@@ -176,3 +212,27 @@ def test_export_keeps_line_with_evidence_ok(tmp_path: Path) -> None:
     row = json.loads(line)
     assert "text" in row
     assert row["session_id"] == "s1"
+
+
+def test_export_drops_line_with_stub_even_if_evidence_would_pass(tmp_path: Path) -> None:
+    inp = tmp_path / "conversation_traces" / "2026" / "01" / "01"
+    inp.mkdir(parents=True)
+    trace = {
+        "messages": [
+            {"role": "user", "content": "hola"},
+            {"role": "tool", "name": "read_sql", "content": '[{"a":1}]'},
+            {
+                "role": "assistant",
+                "content": '```json\n{"status": "stub_completed"}\n```',
+            },
+        ],
+        "session_id": "stub-session",
+    }
+    (inp / "traces.jsonl").write_text(json.dumps(trace, ensure_ascii=False) + "\n", encoding="utf-8")
+    out_root = tmp_path / "gemma4"
+    san = GemmaSanitizer(input_root=tmp_path / "conversation_traces", output_root=out_root)
+    stats = san.export_dataset(dry_run=False)
+    assert stats["lines_kept"] == 0
+    assert stats["lines_dropped_stub"] == 1
+    out_file = out_root / "2026" / "01" / "01" / "traces.jsonl"
+    assert not out_file.is_file()

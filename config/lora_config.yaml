@@ -13,7 +13,10 @@ model: "/Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b"
 train: true
 fine_tune_type: lora
 
-# Directorio con train.jsonl, valid.jsonl, test.jsonl — generado por train_sft.py (split train/valid).
+# Directorio con train.jsonl, valid.jsonl, test.jsonl.
+# Tras limpiar trazas (sanitize_traces_for_gemma.py) materializa el split aquí con:
+#   uv run python scripts/materialize_sft_data_dir_from_gemma4_sanitized.py
+# Alternativa: train_sft.py rellena este dir desde dataset_sft.jsonl (otro pipeline, clave "messages").
 data: "packages/agents/train/gemma4/sft_data_dir"
 seed: 42
 

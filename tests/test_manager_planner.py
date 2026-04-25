@@ -722,3 +722,80 @@ def test_entry_route_system_event_trading_tick_and_plan_task_bypass() -> None:
     task, override = _plan_task(tick, "finanz")
     assert override is None
     assert task == tick
+
+
+def test_quant_hrp_affirm_followup_hits_on_procede() -> None:
+    from duckclaw.graphs.manager_graph import _try_quant_hrp_affirm_followup
+
+    last = (
+        "Objetivo `rebalance_hrp`. **¿Procedo con la generación de señales de rebalanceo HRP para META y SPY?**"
+    )
+    got = _try_quant_hrp_affirm_followup(
+        "Procede",
+        [{"role": "assistant", "content": last}],
+        "Quant-Trader",
+        "Cuantitativo",
+        ["Quant-Trader"],
+    )
+    assert got is not None
+    assert got[0].lower().find("rebalanceo") != -1 or "hrp" in got[0].lower()
+    assert "propose_trade_signal" in got[2].lower() or "TAREA" in got[2]
+    assert got[3] == "Quant-Trader"
+
+
+def test_quant_hrp_affirm_followup_hits_deseas_senales_compra() -> None:
+    from duckclaw.graphs.manager_graph import _try_quant_hrp_affirm_followup
+
+    last = (
+        "¿Deseas que genere señales de compra para ambos tickers (con pesos calculados por HRP) "
+        "para iniciar el rebalanceo? `rebalance_hrp`"
+    )
+    got = _try_quant_hrp_affirm_followup(
+        "Procede",
+        [{"role": "assistant", "content": last}],
+        "Quant-Trader",
+        "Cuantitativo",
+        ["Quant-Trader"],
+    )
+    assert got is not None
+    assert got[3] == "Quant-Trader"
+
+
+def test_quant_hrp_affirm_followup_finds_hrp_not_only_newest_assistant() -> None:
+    """Si hubo otra rama (p. ej. TSLA) tras el análisis HRP, 'Procede' debe anclar al HRP reciente escaneado."""
+    from duckclaw.graphs.manager_graph import _try_quant_hrp_affirm_followup
+
+    ts = "## 📊 ANÁLISIS TSLA\n### ¿Autorizas probar QQQ con timeframe 1h?"  # no HRP; no debe bastar
+    hrp = (
+        "**Revisión HRP**\n- objetivo `rebalance_hrp`\n"
+        "¿Deseas que genere señales de compra para META y SPY para el rebalanceo?"
+    )
+    got = _try_quant_hrp_affirm_followup(
+        "Procede",
+        [
+            {"role": "user", "content": "hola"},
+            {"role": "assistant", "content": hrp},
+            {"role": "user", "content": "ok"},
+            {"role": "assistant", "content": ts},
+        ],
+        "Quant-Trader",
+        "Cuantitativo",
+        ["Quant-Trader"],
+    )
+    assert got is not None
+    assert "HRP" in got[0] or "rebalanceo" in got[0]
+
+
+def test_quant_hrp_affirm_followup_rejects_unrelated_thread() -> None:
+    from duckclaw.graphs.manager_graph import _try_quant_hrp_affirm_followup
+
+    assert (
+        _try_quant_hrp_affirm_followup(
+            "Procede",
+            [{"role": "assistant", "content": "Bienvenido, ¿en qué te ayudo?"}],
+            "Quant-Trader",
+            "Cuantitativo",
+            ["Quant-Trader"],
+        )
+        is None
+    )

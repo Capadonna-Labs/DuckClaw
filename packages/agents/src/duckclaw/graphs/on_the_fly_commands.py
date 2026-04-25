@@ -6,6 +6,7 @@ Spec: specs/interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -49,6 +50,20 @@ _GOALS_DELTA_ANCHOR_LEGACY_KEY = "goals_delta_anchor"
 _GOALS_DELTA_META_KEY = "goals_delta_meta"
 GOALS_DELTA_MIN_SECONDS = 60
 GOALS_DELTA_MAX_SECONDS = 7 * 24 * 3600
+
+# Gráfica PNG (base64) para respuestas fly: api-gateway hace pop y sendPhoto
+_FLY_OUTBOUND_CHART_B64: dict[str, str] = {}
+
+
+def register_fly_outbound_chart_b64(session_id: Any, b64: str) -> None:
+    s = (b64 or "").strip()
+    if not s:
+        return
+    _FLY_OUTBOUND_CHART_B64[str(session_id).strip()] = s
+
+
+def pop_fly_outbound_chart_b64(session_id: Any) -> str | None:
+    return _FLY_OUTBOUND_CHART_B64.pop(str(session_id).strip(), None)
 
 
 def parse_goals_delta_arg(fragment: str) -> tuple[Optional[int], Optional[str]]:
@@ -2991,7 +3006,11 @@ def _goal_title(goal: dict, fallback_key: str) -> str:
     return (goal.get("belief_key") or fallback_key or "").strip()
 
 
-def build_goals_proactive_system_event_message(goals: list) -> str:
+def build_goals_proactive_system_event_message(
+    goals: list,
+    *,
+    trading_session_objective: str | None = None,
+) -> str:
     titles: list[str] = []
     for g in goals:
         if not isinstance(g, dict):
@@ -2999,9 +3018,22 @@ def build_goals_proactive_system_event_message(goals: list) -> str:
         k = (g.get("belief_key") or "").strip()
         titles.append(_goal_title(g, k))
     summary = "; ".join(titles[:12]) if titles else "(sin títulos)"
+    obj = (trading_session_objective or "").strip().lower()
+    extra = ""
+    if obj == "rebalance_hrp":
+        extra = (
+            " **Sesión `quant_core.trading_sessions` (session_goal.objective=rebalance_hrp):** el veredicto "
+            "debe **priorizar** alineación cartera IBKR vs **pesos HRP** del sandbox (desviación por ticker, "
+            "HITL); no basta con constatar PnL>0. "
+        )
+    elif obj == "maximize_pnl":
+        extra = (
+            " **Sesión (session_goal.objective=maximize_pnl):** puedes anclar el cierre a PnL/riesgo según "
+            "sesión; si además hiciste HRP en sandbox, cita desviación vs cartera. "
+        )
     return (
         "[SYSTEM_EVENT: Revisión periódica de /goals. Objetivos: "
-        f"{summary}. Evalúa con herramientas si hace falta qué tan alineado está el "
+        f"{summary}.{extra}Evalúa con herramientas si hace falta qué tan alineado está el "
         "contexto actual (portfolio, sesión de trading, etc.) con cumplir cada meta. "
         "Responde al usuario con un breve análisis o propuesta concreta (mensaje útil; "
         "si el worker lo permite, señal u orden solo si procede).]"
@@ -3038,7 +3070,13 @@ def build_trading_tick_system_event_message(
                 "con session_uid+tickers; 3) si outcome=ERROR o all_data_failed, reportar ceguera sensorial; "
                 "4) si outcome=MISALIGNED y no hay pending por ticker, proponer máximo 1 señal por ticker con "
                 "propose_trade_signal (NO ejecutar); 5) si mode=live agregar warning de capital real; "
-                "6) si ALIGNED, no enviar resumen al usuario."
+                "6) si ALIGNED, no enviar resumen al usuario; "
+                "7) REBALANCEO HRP: mismos tickers de sesión, OHLCV suficiente (fetch_ib_gateway_ohlcv o read_sql "
+                "sobre quant_core.ohlcv_data), luego execute_sandbox_script: **preferir PyPortfolioOpt** "
+                "(import pypfopt; pypfopt.hierarchical_portfolio.HRPOpt + risk_models.sample_cov sobre DataFrame de retornos; "
+                "optimize() → pesos que suman 1). Solo si pypfopt falla, HRP manual con pandas/scipy. "
+                "Comparar vs get_ibkr_portfolio; si desviación relevante y sin HITL pendiente por ticker, máximo 1 "
+                "propose_trade_signal de rebalanceo por ticker (NO ejecutar)."
             ),
         }
     )
@@ -3131,11 +3169,33 @@ def execute_goals(
         _anchor_now = str(time.time())
         set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, _anchor_now)
         set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, _anchor_now)
+        meta_obj: dict[str, Any] = {"trigger": "goals_cli"}
+        if active_wid == _QUANT_TRADER_TEMPLATE_ID:
+            try:
+                ex_raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
+                if ex_raw:
+                    em = json.loads(ex_raw)
+                    if (
+                        isinstance(em, dict)
+                        and str(em.get("trigger") or "").strip().lower() == "trading_session"
+                    ):
+                        raw_sess = db.query(
+                            "SELECT session_uid, status FROM quant_core.trading_sessions "
+                            "WHERE id = 'active' LIMIT 1"
+                        )
+                        sr = json.loads(raw_sess) if isinstance(raw_sess, str) else (raw_sess or [])
+                        if sr and isinstance(sr[0], dict):
+                            st = str(sr[0].get("status") or "").strip().upper()
+                            db_uid = str(sr[0].get("session_uid") or "").strip()
+                            if st == "ACTIVE" and db_uid:
+                                meta_obj = {"trigger": "trading_session", "session_uid": db_uid}
+            except Exception:
+                pass
         set_chat_state(
             db,
             chat_id,
             _GOALS_DELTA_META_KEY,
-            json.dumps({"trigger": "goals_cli"}, ensure_ascii=False),
+            json.dumps(meta_obj, ensure_ascii=False),
         )
         human = format_goals_delta_interval_human(secs)
         return (
@@ -3724,7 +3784,7 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ("/execute_signal <uuid>", "HITL: confirma ejecución (Finanz: execute_order; Quant Trader: execute_approved_signal)"),
         ("/cancel_signal <uuid>", "HITL: cancela señal pendiente (PENDING_HITL/AWAITING_HITL)"),
         (
-            "/trading_session --mode paper|live [--tickers A,B] [--confirm] [--status] [--stop]",
+            "/trading_session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp] [--confirm] [--status] [--stop]",
             "Quant: sesión activa + session_goal + auto delta de /goals (live requiere --confirm)",
         ),
         ("/lake", "Estado del túnel SSH Capadonna (env + prueba rápida)"),
@@ -4116,6 +4176,26 @@ CREATE TABLE IF NOT EXISTS quant_core.trading_risk_constraints (
 # Fila singleton en quant_core.trading_sessions (PK lógica del “estado de sesión”).
 _TRADING_SESSION_ROW_ID = "active"
 _QUANT_TRADER_TEMPLATE_ID = "Quant-Trader"
+_TRADING_SESSION_PNL_SNAPSHOTS_KEY = "trading_session_pnl_snapshots_json"
+_TRADING_SESSION_PNL_HIST_UID_KEY = "trading_session_pnl_hist_uid"
+
+
+def _dedupe_trading_session_snapshots(snaps: list[Any]) -> list[float]:
+    """Elimina valores consecutivos ~iguales (mismo snapshot repetido en cada /status)."""
+    out: list[float] = []
+    for x in snaps or []:
+        try:
+            fx = float(x)
+        except (TypeError, ValueError):
+            continue
+        if not out:
+            out.append(fx)
+            continue
+        prev = out[-1]
+        eps = max(1e-4, 1e-6 * max(1.0, abs(fx), abs(prev)))
+        if abs(fx - prev) > eps:
+            out.append(fx)
+    return out
 
 
 def _quant_is_drawdown_goal(goal: dict) -> bool:
@@ -4172,7 +4252,7 @@ def _quant_clear_risk_constraints_vault(db: Any, *, tenant_id: str) -> tuple[boo
 class TradingSessionGoal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    objective: str = "maximize_pnl"
+    objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
     max_drawdown_pct: float = 2.0
     position_size_pct: float = 5.0
     signal_threshold: str = "GAS"
@@ -4191,6 +4271,7 @@ class TradingSessionCliArgs(BaseModel):
     max_drawdown_pct: float = 2.0
     position_size_pct: float = 5.0
     signal_threshold: str = "GAS"
+    objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
 
 
 def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArgs], Optional[str]]:
@@ -4203,6 +4284,7 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
     max_drawdown = 2.0
     position_size = 5.0
     signal_threshold = "GAS"
+    objective: str = "maximize_pnl"
     tokens = (args or "").strip().split()
     i = 0
     while i < len(tokens):
@@ -4245,6 +4327,10 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
             signal_threshold = str(tokens[i + 1] or "").strip().upper()
             i += 2
             continue
+        if t == "--objective" and i + 1 < len(tokens):
+            objective = str(tokens[i + 1] or "").strip().lower()
+            i += 2
+            continue
         i += 1
     if stop and status:
         return None, "Usa --stop o --status, no ambos."
@@ -4252,6 +4338,11 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
         return None, "Falta --mode paper|live"
     if mode and mode not in ("paper", "live"):
         return None, "mode debe ser paper o live"
+    if objective not in ("maximize_pnl", "rebalance_hrp"):
+        if stop or status:
+            objective = "maximize_pnl"
+        else:
+            return None, "objective debe ser maximize_pnl o rebalance_hrp"
     seen: set[str] = set()
     tickers_ordered: list[str] = []
     for x in tickers_raw:
@@ -4269,6 +4360,7 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
                 "max_drawdown_pct": float(max_drawdown),
                 "position_size_pct": float(position_size),
                 "signal_threshold": signal_threshold or "GAS",
+                "objective": str(objective).strip().lower() or "maximize_pnl",
             }
         )
     except ValidationError as exc:
@@ -4282,9 +4374,12 @@ def _session_goal_from_cli(parsed: TradingSessionCliArgs) -> TradingSessionGoal:
     if threshold not in allowed:
         threshold = "GAS"
     tickers = [x.strip().upper() for x in (parsed.tickers_csv or "").split(",") if x.strip()]
+    oj = str(getattr(parsed, "objective", "maximize_pnl") or "maximize_pnl").strip().lower()
+    if oj not in ("maximize_pnl", "rebalance_hrp"):
+        oj = "maximize_pnl"
     return TradingSessionGoal.model_validate(
         {
-            "objective": "maximize_pnl",
+            "objective": oj,
             "max_drawdown_pct": max(0.1, float(parsed.max_drawdown_pct)),
             "position_size_pct": max(0.1, float(parsed.position_size_pct)),
             "signal_threshold": threshold,
@@ -4362,27 +4457,43 @@ def _ensure_trading_session_goals_delta(
     tenant_id: str,
     session_uid: str,
 ) -> tuple[bool, int]:
-    """Activa goals delta por default (5m) si aún no está activo para el chat."""
+    """Activa goals delta por default (5m) si hace falta; siempre enlaza meta al tick de sesión Quant."""
     try:
         current = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
     except ValueError:
         current = 0
-    if current > 0:
-        return False, current
     default_secs = 300
-    set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, str(default_secs))
+    enabled = False
+    if current <= 0:
+        current = default_secs
+        set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, str(current))
+        set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
+        now_s = str(time.time())
+        set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, now_s)
+        set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, now_s)
+        enabled = True
     set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, str(tenant_id or "default"))
-    set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
-    now_s = str(time.time())
-    set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, now_s)
-    set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, now_s)
     set_chat_state(
         db,
         chat_id,
         _GOALS_DELTA_META_KEY,
         json.dumps({"trigger": "trading_session", "session_uid": session_uid}, ensure_ascii=False),
     )
-    return True, default_secs
+    if not get_manager_goals(db, chat_id):
+        set_manager_goals(
+            db,
+            chat_id,
+            [
+                {
+                    "belief_key": "hrp_session_rebalance",
+                    "target_value": 0.0,
+                    "threshold": 0.0,
+                    "observed_value": None,
+                    "title": "Rebalanceo HRP (pypfopt) vs cartera IBKR en cada tick",
+                }
+            ],
+        )
+    return enabled, current
 
 
 def _close_active_trading_session(
@@ -4431,6 +4542,14 @@ def _close_active_trading_session(
                 pnl = float(rows2[0].get("pnl") or 0.0)
         except Exception:
             pnl = 0.0
+    try:
+        set_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY, "[]")
+        set_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY, "")
+        set_chat_state(db, chat_id, "trading_session_last_pnl", "")
+        set_chat_state(db, chat_id, "trading_session_prev_pnl", "")
+        set_chat_state(db, chat_id, "trading_session_pct_change", "")
+    except Exception:
+        pass
     return True, f"session_uid={session_uid or 'n/a'} | pnl_estimado={pnl:.2f}"
 
 
@@ -4462,11 +4581,11 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
     mode = str(row.get("mode") or "paper").strip().lower() or "paper"
     tickers = str(row.get("tickers") or "").strip() or "(vacío)"
     total = executed = cancelled = pending = 0
-    pnl_est = 0.0
     try:
         raw2 = db.query(
-            "SELECT status, COALESCE(unrealized_pnl, 0) AS pnl FROM quant_core.trade_signals "
-            "WHERE session_uid = '" + uid.replace("'", "''") + "'"
+            "SELECT status FROM quant_core.trade_signals WHERE session_uid = '"
+            + uid.replace("'", "''")
+            + "'"
         )
         rows2 = json.loads(raw2) if isinstance(raw2, str) else (raw2 or [])
     except Exception:
@@ -4490,10 +4609,51 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
             cancelled += 1
         elif st in ("PENDING_HITL", "AWAITING_HITL", "PENDING"):
             pending += 1
+    pnl_now = _compute_trading_session_pnl_now(db, uid)
+    old_last_s = str(get_chat_state(db, chat_id, "trading_session_last_pnl") or "").strip()
+    hist_uid_s = str(get_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or "").strip()
+    if hist_uid_s != uid:
+        snapshots: list[float] = []
+    else:
         try:
-            pnl_est += float(it.get("pnl") or 0.0)
+            _raw_hist = get_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
+            snapshots = json.loads(_raw_hist) if _raw_hist.strip() else []
+        except Exception:
+            snapshots = []
+    if not isinstance(snapshots, list):
+        snapshots = []
+    snapshots = _dedupe_trading_session_snapshots(snapshots)
+    prev_val: float | None = None
+    if old_last_s:
+        try:
+            prev_val = float(old_last_s)
+        except (TypeError, ValueError):
+            prev_val = None
+    pct_num: float | None = None
+    if prev_val is not None and abs(prev_val) > 1e-12:
+        pct_num = (pnl_now - prev_val) / abs(prev_val) * 100.0
+    _append_snap = True
+    if snapshots:
+        try:
+            _last_s = float(snapshots[-1])
+            _eps = max(1e-4, 1e-6 * max(1.0, abs(pnl_now), abs(_last_s)))
+            if abs(float(pnl_now) - _last_s) <= _eps:
+                _append_snap = False
         except (TypeError, ValueError):
             pass
+    if _append_snap:
+        snapshots.append(float(pnl_now))
+    snapshots = [float(x) for x in snapshots[-64:]]
+    set_chat_state(db, chat_id, "trading_session_last_pnl", f"{pnl_now:.6f}".rstrip("0").rstrip("."))
+    set_chat_state(db, chat_id, "trading_session_prev_pnl", old_last_s)
+    set_chat_state(
+        db,
+        chat_id,
+        "trading_session_pct_change",
+        f"{pct_num:.6f}".rstrip("0").rstrip(".") if pct_num is not None else "",
+    )
+    set_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY, json.dumps(snapshots))
+    set_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY, uid)
     try:
         ds = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
     except ValueError:
@@ -4504,39 +4664,9 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         tick_line = f"Tick delta: cada ~{format_goals_delta_interval_human(ds)}{cp}"
     else:
         tick_line = "Tick delta: inactivo"
-    _cs_pnl = ""
-    _cs_prev = ""
-    _cs_pct = ""
-    try:
-        _cs_pnl = str(get_chat_state(db, chat_id, "trading_session_last_pnl") or "")
-    except Exception:
-        _cs_pnl = ""
-    try:
-        _cs_prev = str(get_chat_state(db, chat_id, "trading_session_prev_pnl") or "")
-    except Exception:
-        _cs_prev = ""
-    try:
-        _cs_pct = str(get_chat_state(db, chat_id, "trading_session_pct_change") or "")
-    except Exception:
-        _cs_pct = ""
-    _pnl_curr_txt = f"{pnl_est:.2f}"
-    _pnl_prev_txt = "N/D"
-    _pnl_pct_txt = "N/D"
-    try:
-        if str(_cs_pnl or "").strip() != "":
-            _pnl_curr_txt = f"{float(str(_cs_pnl).strip()):.2f}"
-    except (TypeError, ValueError):
-        _pnl_curr_txt = f"{pnl_est:.2f}"
-    try:
-        if str(_cs_prev or "").strip() != "":
-            _pnl_prev_txt = f"{float(str(_cs_prev).strip()):.2f}"
-    except (TypeError, ValueError):
-        _pnl_prev_txt = "N/D"
-    try:
-        if str(_cs_pct or "").strip() != "":
-            _pnl_pct_txt = f"{float(str(_cs_pct).strip()):+.2f}%"
-    except (TypeError, ValueError):
-        _pnl_pct_txt = "N/D"
+    _pnl_curr_txt = f"{pnl_now:.2f}"
+    _pnl_prev_txt = f"{prev_val:.2f}" if prev_val is not None else "N/D"
+    _pnl_pct_txt = f"{pct_num:+.2f}%" if pct_num is not None else "N/D"
     _status_text = (
         f"Sesión activa: `{uid}`\n"
         f"Mode: `{mode}` | Tickers: `{tickers}`\n"
@@ -4552,6 +4682,167 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
     return _status_text
 
 
+def _quant_core_trade_signals_column_names(db: Any) -> set[str]:
+    try:
+        raw = db.query("PRAGMA table_info('quant_core.trade_signals')")
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        return {
+            str((it or {}).get("name") or "").strip().lower()
+            for it in rows
+            if isinstance(it, dict)
+        }
+    except Exception:
+        return set()
+
+
+def _compute_trading_session_pnl_now(db: Any, session_uid: str) -> float:
+    """PnL agregado para la sesión: trade_signals (si hay columna), portfolio_positions, luego snapshot IBKR."""
+    uid = (session_uid or "").strip()
+    if not uid or uid == "n/a":
+        return 0.0
+    esc = uid.replace("'", "''")
+    cols = _quant_core_trade_signals_column_names(db)
+    if "unrealized_pnl" in cols:
+        try:
+            raw = db.query(
+                f"SELECT COALESCE(SUM(unrealized_pnl), 0) AS s "
+                f"FROM quant_core.trade_signals WHERE session_uid = '{esc}'"
+            )
+            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            if rows and isinstance(rows[0], dict):
+                v = float(rows[0].get("s") or 0.0)
+                if abs(v) > 1e-12:
+                    return v
+        except Exception:
+            pass
+    try:
+        raw = db.query(
+            "SELECT COALESCE(SUM(unrealized_pnl), 0) AS s FROM quant_core.portfolio_positions"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if rows and isinstance(rows[0], dict):
+            v = float(rows[0].get("s") or 0.0)
+            if abs(v) > 1e-12:
+                return v
+    except Exception:
+        pass
+    try:
+        from duckclaw.forge.skills.ibkr_bridge import fetch_ibkr_unrealized_pnl_total_numeric
+
+        ibkr_u, _err = fetch_ibkr_unrealized_pnl_total_numeric()
+        if ibkr_u is not None:
+            return float(ibkr_u)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None:
+    """Serie PnL acumulado (señales EXECUTED) → PNG base64, o None."""
+    try:
+        raw = db.query(
+            "SELECT mode, session_uid, status FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception:
+        return None
+    if not rows or not isinstance(rows[0], dict):
+        return None
+    row = rows[0]
+    if str(row.get("status") or "").strip().upper() != "ACTIVE":
+        return None
+    mode = str(row.get("mode") or "paper").strip().lower() or "paper"
+    uid = str(row.get("session_uid") or "").strip()
+    if not uid or uid == "n/a":
+        return None
+    esc = uid.replace("'", "''")
+    executed_pnls: list[float] = []
+    pnl_total = 0.0
+    _sig_cols = _quant_core_trade_signals_column_names(db)
+    has_unrealized = "unrealized_pnl" in _sig_cols
+    if has_unrealized:
+        try:
+            raw_ex = db.query(
+                "SELECT COALESCE(unrealized_pnl, 0) AS pnl FROM quant_core.trade_signals "
+                f"WHERE session_uid = '{esc}' AND UPPER(TRIM(COALESCE(status,''))) = 'EXECUTED' "
+                "ORDER BY COALESCE(ts, updated_at) ASC"
+            )
+            r_ex = json.loads(raw_ex) if isinstance(raw_ex, str) else (raw_ex or [])
+            for it in r_ex or []:
+                if isinstance(it, dict):
+                    try:
+                        executed_pnls.append(float(it.get("pnl") or 0.0))
+                    except (TypeError, ValueError):
+                        executed_pnls.append(0.0)
+            raw_all = db.query(
+                f"SELECT COALESCE(unrealized_pnl, 0) AS pnl FROM quant_core.trade_signals "
+                f"WHERE session_uid = '{esc}'"
+            )
+            r_all = json.loads(raw_all) if isinstance(raw_all, str) else (raw_all or [])
+            for it in r_all or []:
+                if isinstance(it, dict):
+                    try:
+                        pnl_total += float(it.get("pnl") or 0.0)
+                    except (TypeError, ValueError):
+                        pass
+        except Exception:
+            return None
+    cum: list[float] = [0.0]
+    if executed_pnls:
+        for p in executed_pnls:
+            cum.append(cum[-1] + p)
+    else:
+        hist_uid_g = str(get_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or "").strip()
+        if hist_uid_g == uid.strip():
+            try:
+                snap_raw = get_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
+                snap_list = json.loads(snap_raw) if (snap_raw or "").strip() else []
+            except Exception:
+                snap_list = []
+            if isinstance(snap_list, list) and len(snap_list) > 0:
+                snap_clean = _dedupe_trading_session_snapshots(snap_list)
+                if snap_clean:
+                    cum = [0.0]
+                    for it in snap_clean:
+                        try:
+                            cum.append(float(it))
+                        except (TypeError, ValueError):
+                            cum.append(cum[-1])
+                else:
+                    pnl_total = _compute_trading_session_pnl_now(db, uid)
+                    cum = [0.0, pnl_total]
+            else:
+                pnl_total = _compute_trading_session_pnl_now(db, uid)
+                cum = [0.0, pnl_total]
+        else:
+            pnl_total = _compute_trading_session_pnl_now(db, uid)
+            cum = [0.0, pnl_total]
+    try:
+        from io import BytesIO
+
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        return None
+    n = len(cum)
+    x = list(range(n))
+    fig, ax = plt.subplots(figsize=(6, 3.2), dpi=100)
+    ax.plot(x, cum, color="#2563eb", linewidth=2, marker="o", markersize=3)
+    ax.axhline(0, color="#94a3b8", linewidth=0.8)
+    ax.set_xlabel("Paso (0 = inicio)")
+    ax.set_ylabel("PnL ($)")
+    ax.set_title(f"Rendimiento · {mode} · {uid[:8]}…", fontsize=10)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=100, facecolor="white", edgecolor="none", bbox_inches="tight")
+    plt.close(fig)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return b64
+
+
 def execute_trading_session(
     db: Any,
     chat_id: Any,
@@ -4560,19 +4851,27 @@ def execute_trading_session(
     tenant_id: Any = None,
     vault_user_id: Any = None,
 ) -> str:
-    """/trading_session --mode paper|live [--tickers A,B] [--confirm] [--status] [--stop]."""
+    """/trading_session --mode paper|live [--tickers A,B] [--objective ...] [--confirm] [--status] [--stop]."""
     _ = vault_user_id
     parsed, err = _parse_trading_session_cli(args)
     if err or parsed is None:
         return (
             f"Error: {err}\n\n"
             "Uso: `/trading_session --mode paper|live [--tickers AAPL,NVDA] [--confirm]`\n"
-            "Extras: `--max-drawdown 2 --position-size 5 --signal GAS --status --stop`\n"
+            "Extras: `--objective maximize_pnl|rebalance_hrp` · `--max-drawdown 2` · "
+            "`--position-size 5` · `--signal GAS` · `--status` · `--stop`\n"
             "Modo **live** exige añadir **--confirm** en el mismo mensaje (riesgo de capital)."
         )
     tid = str(tenant_id or "default").strip() or "default"
     if parsed.status:
-        return _read_trading_session_status_summary(db, chat_id=chat_id)
+        out = _read_trading_session_status_summary(db, chat_id=chat_id)
+        try:
+            b64c = _build_trading_session_pnl_chart_b64(db, chat_id=chat_id)
+        except Exception:
+            b64c = None
+        if b64c:
+            register_fly_outbound_chart_b64(chat_id, b64c)
+        return out
     if parsed.stop:
         ok_close, detail_close = _close_active_trading_session(
             db,
@@ -4651,6 +4950,14 @@ ON CONFLICT (id) DO UPDATE SET
     )
     tick_note = f"\nTickers: `{parsed.tickers_csv}`" if parsed.tickers_csv else ""
     sid = _TRADING_SESSION_ROW_ID
+    try:
+        set_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY, "[]")
+        set_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY, str(session_uid))
+        set_chat_state(db, chat_id, "trading_session_last_pnl", "")
+        set_chat_state(db, chat_id, "trading_session_prev_pnl", "")
+        set_chat_state(db, chat_id, "trading_session_pct_change", "")
+    except Exception:
+        pass
     return (
         f"**Id sesión:** `{sid}`\n"
         f"**Unique ID sesión:** `{session_uid}`\n"

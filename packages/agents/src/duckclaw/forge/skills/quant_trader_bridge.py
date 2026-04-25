@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 import os
 import statistics
+import time
 import urllib.error
 import urllib.request
 import uuid
+import base64
 from datetime import datetime, timezone
 from typing import Any, Optional, Tuple
+from pathlib import Path
 
 from duckclaw.forge.skills.ibkr_bridge import fetch_ibkr_total_equity_numeric
 from duckclaw.forge.skills.quant_market_bridge import (
@@ -18,7 +21,7 @@ from duckclaw.forge.skills.quant_market_bridge import (
 )
 from duckclaw.forge.skills.quant_cfd_bridge import _record_fluid_state_impl
 from duckclaw.forge.skills.quant_state_delta import push_quant_state_delta_sync
-from duckclaw.forge.skills.quant_hitl import consume_execute_order_grant
+from duckclaw.forge.skills.quant_hitl import consume_execute_order_grant, grant_execute_order
 from duckclaw.forge.skills.quant_tool_context import (
     get_quant_tool_chat_id,
     get_quant_tool_db_path,
@@ -102,6 +105,165 @@ def _max_weight_pct_limit() -> float:
         return max(0.1, min(100.0, float(raw)))
     except ValueError:
         return 10.0
+
+
+def _env_truthy(name: str) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _auto_execute_wait_timeout_sec() -> float:
+    raw = (os.environ.get("DUCKCLAW_QUANT_AUTO_EXECUTE_WAIT_SEC") or "5").strip()
+    try:
+        t = float(raw)
+    except ValueError:
+        t = 5.0
+    return max(0.2, min(t, 60.0))
+
+
+def _quant_auto_execute_allowed_for_session_mode(db: Any) -> bool:
+    """Auto-ejecución: paper por defecto; live requiere DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE."""
+    m = _trading_session_mode(db)
+    if m == "paper":
+        return True
+    if m == "live":
+        return _env_truthy("DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE")
+    return True
+
+
+def _wait_until_signal_row_visible(db: Any, signal_id: str, *, timeout_sec: float) -> bool:
+    """
+    Tras encolar StateDelta, el db-writer persiste con latencia. Poll hasta que la fila exista o timeout.
+
+    Con DuckDB, un handle RO mantiene lock de archivo: el db-writer no puede escribir la fila
+    mientras el gateway tenga la conexión abierta. Entre cada intento, suspendemos el RO
+    (mismo criterio que read_sql) para ceder el archivo al writer, luego reabrimos y consultamos.
+    """
+    sid = (signal_id or "").strip()
+    if not sid:
+        return False
+    deadline = time.time() + float(timeout_sec)
+    esc = sid.replace("'", "''")
+    q = (
+        "SELECT 1 AS ok FROM finance_worker.trade_signals WHERE signal_id='"
+        + esc
+        + "' LIMIT 1"
+    )
+    step = 0.05
+    susp = getattr(db, "suspend_readonly_file_handle", None)
+    resu = getattr(db, "resume_readonly_file_handle", None)
+    ro = bool(getattr(db, "_read_only", False))
+    release_each_iter = ro and callable(susp) and callable(resu)
+    iteration = 0
+    t0 = time.time()
+    # #region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "autoexec-wait-suspend",
+                        "hypothesisId": "H_lock",
+                        "location": "quant_trader_bridge._wait_until_signal_row_visible",
+                        "message": "wait_start",
+                        "data": {
+                            "signal_id_prefix": esc[:8],
+                            "timeout_sec": float(timeout_sec),
+                            "release_each_iter": release_each_iter,
+                            "ro": ro,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+    while time.time() < deadline:
+        iteration += 1
+        if release_each_iter:
+            try:
+                susp()
+            except Exception:
+                pass
+            time.sleep(step)
+            try:
+                resu()
+            except Exception:
+                pass
+        try:
+            raw = db.query(q)
+            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        except Exception:
+            rows = []
+        if rows and isinstance(rows[0], dict):
+            # #region agent log
+            try:
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "autoexec-wait-suspend",
+                                "hypothesisId": "H_lock",
+                                "location": "quant_trader_bridge._wait_until_signal_row_visible",
+                                "message": "row_visible",
+                                "data": {
+                                    "iterations": iteration,
+                                    "elapsed_ms": int((time.time() - t0) * 1000),
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
+            return True
+        if not release_each_iter:
+            time.sleep(step)
+    # #region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "autoexec-wait-suspend",
+                        "hypothesisId": "H_lock",
+                        "location": "quant_trader_bridge._wait_until_signal_row_visible",
+                        "message": "wait_timeout",
+                        "data": {
+                            "iterations": iteration,
+                            "elapsed_ms": int((time.time() - t0) * 1000),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+    return False
 
 
 def _normalize_proposed_weight_pct(raw: float) -> float:
@@ -463,6 +625,18 @@ def _push_signal_failed(db: Any, sid: str) -> None:
     )
 
 
+def _signal_id_looks_placeholder(sid: str) -> bool:
+    """Heurística: UUIDs que el LLM suele inventar (no existen en trade_signals)."""
+    s = (sid or "").strip().lower()
+    if not s:
+        return False
+    return bool(
+        s.startswith("9999")
+        or s.startswith("00000000")
+        or "ffff" in s
+    )
+
+
 @log_tool_execution_sync(name="execute_sandbox_script")
 def _execute_sandbox_script_impl(
     db: Any, llm: Any, *, code: str, dependencies: list[str] | None = None
@@ -475,13 +649,49 @@ def _execute_sandbox_script_impl(
         language="python",
         original_request="quant backtest script",
         max_retries=1,
-        worker_id="quant_trader",
+        # Carpeta de plantilla es Quant-Trader/; "quant_trader" no existe → política por defecto sin montajes RO.
+        worker_id="Quant-Trader",
     )
     payload = {
         "exit_code": int(result.exit_code),
         "stdout": (result.stdout or "")[:8000],
         "stderr": (result.stderr or "")[:4000],
     }
+    if result.artifacts:
+        payload["artifacts"] = result.artifacts
+        # No inyectar figure_base64 completo al contexto del LLM (puede disparar >100k tokens).
+        # El manager extrae la imagen desde artifacts (ruta local) y la envía por Telegram.
+    # region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H1",
+                        "location": "quant_trader_bridge._execute_sandbox_script_impl",
+                        "message": "execute_sandbox_payload_built",
+                        "data": {
+                            "exit_code": int(result.exit_code),
+                            "artifacts_count": len(result.artifacts or []),
+                            "has_png_artifact": any(
+                                Path(str(a)).suffix.lower() == ".png" for a in (result.artifacts or [])
+                            ),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     if int(result.exit_code) != 0:
         payload["error"] = "SANDBOX_EXECUTION_FAILED"
     return json.dumps(payload, ensure_ascii=False)
@@ -573,19 +783,56 @@ def _propose_trade_signal_impl(
     )
     if not (ok_m and ok_s):
         return json.dumps({"error": "No se pudo encolar StateDelta en Redis"}, ensure_ascii=False)
-    return json.dumps(
-        {
-            "status": "PENDING_HITL",
-            "session_uid": session_uid,
-            "signal_id": signal_id,
-            "mandate_id": mid,
-            "ticker": tkr,
-            "proposed_weight": guarded,
-            "liquid_capital": cap,
-            "hint": f"Senal {signal_id} lista. Requiere /execute_signal {signal_id}",
-        },
-        ensure_ascii=False,
-    )
+
+    out: dict[str, Any] = {
+        "status": "PENDING_HITL",
+        "session_uid": session_uid,
+        "signal_id": signal_id,
+        "mandate_id": mid,
+        "ticker": tkr,
+        "proposed_weight": guarded,
+        "liquid_capital": cap,
+        "hint": f"Senal {signal_id} lista. Requiere /execute_signal {signal_id}",
+    }
+
+    if not _env_truthy("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS"):
+        return json.dumps(out, ensure_ascii=False)
+    if not _quant_auto_execute_allowed_for_session_mode(db):
+        out["auto_execute"] = {
+            "skipped": True,
+            "reason": "LIVE_SESSION_REQUIRES_ALLOW_LIVE",
+            "message": (
+                "Sesión live: define DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE=1 para auto-ejecutar; "
+                "o aprueba con /execute_signal y execute_approved_signal."
+            ),
+        }
+        return json.dumps(out, ensure_ascii=False)
+
+    wait_to = _auto_execute_wait_timeout_sec()
+    if not _wait_until_signal_row_visible(db, signal_id, timeout_sec=wait_to):
+        out["auto_execute"] = {
+            "error": "SIGNAL_ROW_TIMEOUT",
+            "message": (
+                f"La señal aún no estaba en DuckDB tras {wait_to:.1f}s (db-writer). "
+                "Aprobación manual con /execute_signal sigue disponible."
+            ),
+        }
+        return json.dumps(out, ensure_ascii=False)
+
+    cid = get_quant_tool_chat_id() or "default"
+    grant_execute_order(cid, signal_id)
+    exec_raw = _execute_approved_signal_impl(db, signal_id=signal_id)
+    exec_obj: Any = exec_raw
+    try:
+        if isinstance(exec_raw, str) and exec_raw.strip().startswith("{"):
+            exec_obj = json.loads(exec_raw)
+    except json.JSONDecodeError:
+        pass
+    out["auto_executed"] = True
+    out["execution"] = exec_obj
+    if isinstance(exec_obj, dict) and str(exec_obj.get("status") or "").lower() in ("sent", "simulated"):
+        out["hint"] = f"Auto-ejecutada signal_id={signal_id}. Revisa execution para broker/ib_order_id."
+    return json.dumps(out, ensure_ascii=False)
 
 
 @log_tool_execution_sync(name="execute_approved_signal")
@@ -604,7 +851,76 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
     except Exception as exc:
         return json.dumps({"error": f"DB_READ_FAILED: {exc}"}, ensure_ascii=False)
     if not rows:
-        return json.dumps({"error": "signal no existe"}, ensure_ascii=False)
+        # #region agent log
+        _qc_check: str | bool = False
+        _qc_err: str = ""
+        try:
+            _raw2 = db.query(
+                "SELECT 1 AS ok FROM quant_core.trade_signals WHERE signal_id='"
+                + sid
+                + "' LIMIT 1"
+            )
+            _r2 = json.loads(_raw2) if isinstance(_raw2, str) else (_raw2 or [])
+            _qc_check = bool(_r2)
+        except Exception as _e_qc:  # noqa: BLE001
+            _qc_err = str(_e_qc)[:200]
+        _ph = _signal_id_looks_placeholder(sid)
+        try:
+            _ts = int(time.time() * 1000)
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df_sig:
+                _df_sig.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "post-fix",
+                            "hypothesisId": "H1_finance_no_row",
+                            "location": "quant_trader_bridge._execute_approved_signal_impl",
+                            "message": "no_row_finance_worker_trade_signals",
+                            "data": {
+                                "signal_id": sid,
+                                "db_path": (get_quant_tool_db_path() or str(getattr(db, "_path", "") or ""))[
+                                    -120:
+                                ],
+                                "looks_placeholder_uuid": _ph,
+                                "exists_in_quant_core": _qc_check,
+                                "quant_core_lookup_error": _qc_err or None,
+                            },
+                            "timestamp": _ts,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
+        if _ph:
+            return json.dumps(
+                {
+                    "error": "signal no existe",
+                    "reason": "SIGNAL_ID_NOT_IN_LEDGER",
+                    "message": (
+                        "Este signal_id no está en finance_worker.trade_signals. "
+                        "No inventes UUIDs: primero propose_trade_signal (el signal_id sale en el JSON de la tool) "
+                        "o usa el uuid de una señal PENDING listada con read_sql; luego /execute_signal o otra llamada a execute_approved_signal."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "error": "signal no existe",
+                "message": (
+                    "Ninguna fila con ese signal_id. Revisa read_sql sobre finance_worker.trade_signals "
+                    "o vuelve a proponer con propose_trade_signal."
+                ),
+            },
+            ensure_ascii=False,
+        )
     row = rows[0] if isinstance(rows[0], dict) else {}
     hitl_ok = bool(row.get("human_approved"))
     if not hitl_ok:
@@ -902,7 +1218,14 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
         StructuredTool.from_function(
             _execute_sandbox_script,
             name="execute_sandbox_script",
-            description="Ejecuta script de backtesting en sandbox aislado (timeout estricto).",
+            description=(
+                "Ejecuta Python en contenedor Strix (Docker). Imagen por defecto duckclaw/sandbox:latest "
+                "(build: docker/sandbox/Dockerfile) con pandas, numpy, scipy, scikit-learn, PyPortfolioOpt (import pypfopt), matplotlib, duckdb. "
+                "El sandbox no ve quant_core: no conectar duckdb a tablas del vault; usa read_sql/fetch en el host y pasa arrays/DataFrames, "
+                "o lee /workspace/data/*.csv si hubo inyección explícita. "
+                "Timeout según Quant-Trader/security_policy.yaml. Requiere Docker en el host y la imagen construida "
+                "(o STRIX_SANDBOX_IMAGE). HRP y backtests van aquí, no en el host."
+            ),
         )
     )
     tools.append(
@@ -911,8 +1234,9 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
             name="propose_trade_signal",
             description=(
                 "Propone una senal en finance_worker.trade_signals via StateDelta; aplica EvidenceUnique y RiskGuard. "
-                "Devuelve signal_id (UUID): cit ese valor literal en la respuesta al usuario y la linea "
-                "`/execute_signal <signal_id>` para HITL."
+                "Con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1 (paper) puede en cadena esperar a la fila, grant y "
+                "execute_approved_signal; live requiere DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE=1. "
+                "Devuelve signal_id (UUID): cita ese valor y `/execute_signal <signal_id>` para HITL si no auto."
             ),
         )
     )
@@ -922,7 +1246,8 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
             name="execute_approved_signal",
             description=(
                 "Ejecuta una senal tras HITL usando el mismo signal_id (UUID) que devolvio propose_trade_signal. "
-                "Requiere human_approved o /execute_signal <signal_id> en Telegram. "
+                "Requiere human_approved o /execute_signal <signal_id> en Telegram (o encadenado desde propose si "
+                "DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS). "
                 "El modo paper/live del POST al broker sigue quant_core.trading_sessions (id=active) y debe alinear "
                 "con IBKR_ACCOUNT_MODE; se envia cabecera X-Duckclaw-IBKR-Account-Mode (paper|live). "
                 "La respuesta puede incluir campos del broker (p. ej. ib_order_id, qty); citarlos literalmente; "

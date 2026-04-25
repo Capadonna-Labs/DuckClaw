@@ -53,6 +53,8 @@ GATEWAY_URL = os.getenv(
 )
 HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "3600"))
 GOALS_TICKER_POLL_SECONDS = int(os.getenv("GOALS_TICKER_POLL_SECONDS", "45"))
+# POST a /api/v1/agent/chat para el tick de /goals: turnos Quant (varias tools + sandbox) suelen >120s
+_GOALS_PROACTIVE_HTTP_TIMEOUT = float(os.environ.get("DUCKCLAW_GOALS_PROACTIVE_HTTP_TIMEOUT", "300"))
 TAILSCALE_AUTH_KEY = os.getenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
 
 # Una advertencia corta por ruta cuando el .duckdb no abre (p. ej. WAL inconsistente); evita spam cada poll.
@@ -365,7 +367,24 @@ async def _run_goals_proactive_tick_one_db(
 
         with duckclaw_open_for_read_scan(db_path) as db:
             goals = get_manager_goals(db, chat_id)
-            if not goals:
+            meta_raw_pre = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
+            meta_pre: Dict[str, Any] = {}
+            if meta_raw_pre:
+                try:
+                    _mp = json.loads(meta_raw_pre)
+                    if isinstance(_mp, dict):
+                        meta_pre = _mp
+                except Exception:
+                    meta_pre = {}
+            tenant_id = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
+            worker_id = (get_chat_state(db, chat_id, "worker_id") or "").strip()
+            if (not worker_id or worker_id.lower() == "manager") and tenant_id.lower() == "cuantitativo":
+                worker_id = "Quant-Trader"
+            _wid_pre = (worker_id or "").strip()
+            _is_qt = _wid_pre == "Quant-Trader" or _wid_pre.lower() in ("quant-trader", "quant_trader")
+            _ts_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "trading_session"
+            allow_empty_goals = bool(not goals and _ts_trigger and _is_qt)
+            if not goals and not allow_empty_goals:
                 logger.info(
                     "goals_proactive: chat=%s sin goals; limpiando delta",
                     chat_id,
@@ -394,10 +413,6 @@ async def _run_goals_proactive_tick_one_db(
                     )
                 continue
 
-            tenant_id = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
-            worker_id = (get_chat_state(db, chat_id, "worker_id") or "").strip()
-            if (not worker_id or worker_id.lower() == "manager") and tenant_id.lower() == "cuantitativo":
-                worker_id = "Quant-Trader"
             if not worker_id or worker_id.lower() == "manager":
                 logger.debug(
                     "goals_proactive: omitiendo chat=%s (worker_id=%r tenant_id=%r)",
@@ -490,7 +505,32 @@ async def _run_goals_proactive_tick_one_db(
                 else:
                     message = "[SYSTEM_EVENT: No hay session_uid en goals_delta_meta. Tick cancelado.]"
             else:
-                message = build_goals_proactive_system_event_message(goals)
+                trading_obj: str | None = None
+                if _is_qt:
+                    _qpath = _resolve_quant_trader_vault_path(all_scan_paths)
+                    if _qpath:
+                        try:
+                            with DuckClaw(_qpath, read_only=True) as _qdb:
+                                raw_sg = _qdb.query(
+                                    "SELECT session_goal FROM quant_core.trading_sessions "
+                                    "WHERE id = 'active' LIMIT 1"
+                                )
+                            srows = (
+                                json.loads(raw_sg) if isinstance(raw_sg, str) else (raw_sg or [])
+                            )
+                            if srows and isinstance(srows[0], dict):
+                                sgr = srows[0].get("session_goal")
+                                if isinstance(sgr, str):
+                                    sgr = json.loads(sgr)
+                                if isinstance(sgr, dict):
+                                    o = str(sgr.get("objective") or "").strip().lower()
+                                    if o in ("maximize_pnl", "rebalance_hrp"):
+                                        trading_obj = o
+                        except Exception:
+                            trading_obj = None
+                message = build_goals_proactive_system_event_message(
+                    goals, trading_session_objective=trading_obj
+                )
 
         _wid = (worker_id or "").strip()
         vault_for_gateway = str(Path(db_path).expanduser().resolve())
@@ -552,7 +592,7 @@ async def _run_goals_proactive_tick_one_db(
                     params={"tenant_id": tenant_id, "deliver_outbound": "1"},
                     json=payload,
                     headers=headers,
-                    timeout=120.0,
+                    timeout=_GOALS_PROACTIVE_HTTP_TIMEOUT,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
@@ -580,7 +620,11 @@ async def _run_goals_proactive_tick_one_db(
             )
             try:
                 if _resp_text:
-                    _m_curr = re.search(r"PnL no realizado=\$([\-0-9,]+(?:\.[0-9]+)?)", _resp_text)
+                    _m_curr = re.search(
+                        r"(?:PnL no realizado=\$|PnL no realizado total \(snapshot\):\s*\$)"
+                        r"([\-0-9,]+(?:\.[0-9]+)?)",
+                        _resp_text,
+                    )
                     _m_prev = re.search(r"PnL anterior=\$([\-0-9,]+(?:\.[0-9]+)?)", _resp_text)
                     _m_pct = re.search(r"Cambio vs anterior=([+\-]?[0-9]+(?:\.[0-9]+)?)%", _resp_text)
                     _curr_txt = _m_curr.group(1).replace(",", "") if _m_curr else ""

@@ -10,4 +10,5 @@ filesystem:
 secrets:
   in_memory_only: true
   allowed_secrets: []
-max_execution_time_seconds: 30
+# HRP / backtests pueden superar 30s con varios tickers y clustering
+max_execution_time_seconds: 120

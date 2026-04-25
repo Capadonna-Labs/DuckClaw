@@ -504,6 +504,31 @@ def _strip_mercenary_spec_for_pqrsd_assistant(out: dict[str, Any]) -> bool:
     return True
 
 
+def _should_disable_mercenary_for_quant_signal_intent(
+    incoming: str, assigned_worker_id: str | None
+) -> bool:
+    """Quant-Trader: señales/ejecución deben pasar por worker tools, nunca por mercenario stub."""
+    if not _worker_matches_id(assigned_worker_id or "", "quant_trader"):
+        return False
+    low = (incoming or "").strip().lower()
+    if not low:
+        return False
+    if "/execute_signal" in low:
+        return True
+    signal_markers = (
+        "señal",
+        "senal",
+        "signal_id",
+        "propose_trade_signal",
+        "execute_approved_signal",
+        "rebalance",
+        "ticker",
+        "tickers",
+        "ibkr",
+    )
+    return any(k in low for k in signal_markers)
+
+
 def _contains_income_injection_request(text: str) -> bool:
     """Detecta marcador explícito de handoff A2A desde la respuesta de Finanz."""
     t = (text or "").strip().lower()
@@ -588,6 +613,200 @@ def _is_entry_route_system_event(text: str) -> bool:
     if not t.startswith("[SYSTEM_EVENT:"):
         return False
     return '"type":"TRADING_TICK"' in t or '"type": "TRADING_TICK"' in t
+
+
+# --- Quant-Trader: "Procede" / sí corto tras pregunta HRP → evitar plan LLM "Inicio de sesión" ---
+
+_QUANT_HRP_AFFIRM_RE = re.compile(
+    r"^\s*("
+    r"sí|si|ok|dale|adelante|procede|proceda|proceder|"
+    r"confirmo|yes|vamos|listo|claro"
+    r")\s*\.?[\s!¡?¿]*$",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _stringify_turn_content_for_hrp(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for p in content:
+            if isinstance(p, dict) and (str(p.get("type") or "").lower() == "text"):
+                parts.append(str(p.get("text") or ""))
+            elif isinstance(p, str):
+                parts.append(p)
+        return " ".join(x for x in parts if x)
+    return str(content)
+
+
+def _iter_assistant_bodies_newest_first(history: Any) -> list[str]:
+    """
+    Cuerpos de mensajes assistant (texto) de más reciente a más antiguo.
+    Omite turnos vacíos o solo tool (en historial plano de gateway no suelen existir).
+    """
+    out: list[str] = []
+    if not history:
+        return out
+    for turn in reversed(list(history)):
+        if not isinstance(turn, dict):
+            continue
+        r = str(turn.get("role") or turn.get("type") or "").lower()
+        if r not in ("assistant", "ai", "model"):
+            continue
+        body = _stringify_turn_content_for_hrp(turn.get("content")).strip()
+        if body:
+            out.append(body)
+    return out
+
+
+def _find_hrp_rebalance_affirm_context_assistant_body(history: Any) -> str | None:
+    """
+    Localiza el asistente más reciente cuyo texto pide cierre/continuación de un hilo
+    HRP (no solo el último mensaje del asistente: p. ej. TSLA vino después del HRP).
+    """
+    for body in _iter_assistant_bodies_newest_first(history):
+        if _assistant_asks_hrp_rebalance_followup(body):
+            return body
+    return None
+
+
+def _assistant_asks_hrp_rebalance_followup(assistant_text: str) -> bool:
+    t = (assistant_text or "").strip()
+    if not t:
+        return False
+    low = t.lower()
+    # Frase típica en español pidiendo señales de compra (no "¿procedo?")
+    if "deseas" in low and "genere" in low and any(
+        x in low for x in ("señal", "señales", "compra", "rebalance", "hrp", "meta", "spy")
+    ):
+        return True
+    if "rebalance_hrp" in low or "rebalanceo hrp" in low or ("rebalanceo" in low and "hrp" in low):
+        if "?" in t or "¿" in t or "procedo" in low or "señal" in low or "rebalance" in low:
+            return True
+    if ("procedo" in low or "proceda" in low) and any(
+        x in low
+        for x in (
+            "señal",
+            "rebalance",
+            "hrp",
+            "meta",
+            "spy",
+            "alineación",
+            "alineacion",
+            "ibkr",
+        )
+    ):
+        return True
+    if "revisión" in low and "alineación" in low and "hrp" in low and "ibkr" in low:
+        return True
+    if "pypfopt" in low or "pyportfolioopt" in low or "hierarchical risk" in low or (
+        "hrp" in low and any(x in low for x in ("óptim", "optim", "peso", "pypfopt"))
+    ):
+        if "?" in t or "procedo" in low or "señal" in low or "rebalance" in low or "deseas" in low:
+            return True
+    return False
+
+
+def _try_quant_hrp_affirm_followup(
+    incoming: str,
+    history: Any,
+    assigned: str,
+    tenant_id: str,
+    available_plan: list[str],
+) -> tuple[str, list[str], str, str] | None:
+    # region agent log
+    _dbg = {
+        "sessionId": "c964f7",
+        "hypothesisId": "H1",
+        "location": "manager_graph._try_quant_hrp_affirm_followup",
+        "message": "quant_hrp_followup_probe",
+        "data": {
+            "affirm_match": bool(_QUANT_HRP_AFFIRM_RE.match((incoming or "").strip())),
+            "tenant": (tenant_id or "").strip(),
+            "assigned": (assigned or "").strip(),
+            "has_quant_trader": "Quant-Trader" in [str(x) for x in (available_plan or [])],
+        },
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(json.dumps(_dbg, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
+    if not _QUANT_HRP_AFFIRM_RE.match((incoming or "").strip()):
+        return None
+    plans = [str(x) for x in (available_plan or []) if x]
+    if "Quant-Trader" not in plans:
+        return None
+    w = (assigned or "").strip()
+    _tid = (tenant_id or "").strip().lower()
+    if w != "Quant-Trader" and _tid != "cuantitativo":
+        return None
+    _bodies = _iter_assistant_bodies_newest_first(history)
+    last_a = _find_hrp_rebalance_affirm_context_assistant_body(history)
+    # region agent log
+    _dbg1b = {
+        "sessionId": "c964f7",
+        "hypothesisId": "H4",
+        "location": "manager_graph._try_quant_hrp_affirm_followup",
+        "message": "hrp_affirm_context_scan",
+        "data": {
+            "assistant_turns_with_text": len(_bodies),
+            "hrp_context_found": bool(last_a),
+        },
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(json.dumps(_dbg1b, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
+    if not last_a:
+        return None
+    # region agent log
+    _dbg2 = {
+        "sessionId": "c964f7",
+        "hypothesisId": "H2",
+        "location": "manager_graph._try_quant_hrp_affirm_followup",
+        "message": "quant_hrp_followup_hit",
+        "data": {"last_assistant_len": len(last_a)},
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(json.dumps(_dbg2, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
+    title = "Confirmación rebalanceo HRP (META/SPY)"
+    task_list = [
+        "El usuario confirmó (mensaje corto) continuar con el hilo de rebalanceo HRP / señales respecto a la pregunta anterior del asistente.",
+        "Flujo: sesión quant_core; get_ibkr_portfolio; fetch_ib_gateway_ohlcv META/SPY; evaluate_cfd_state; propose_trade_signal con HITL según reglas del worker.",
+    ]
+    planned = (
+        "TAREA: El usuario acaba de confirmar con un mensaje corto (p. ej. Procede / Sí) que desea **continuar** con el **rebalanceo HRP** "
+        "o la generación de señales descrita en el mensaje anterior del asistente (sesión quant_core.trading_sessions, objetivo **rebalance_hrp**, tickers acordados). "
+        "**Prohibido** en este turno: saludo de «inicio de sesión», listar capacidades genéricas, o iniciar búsqueda de otros activos (TSLA, NVDA, QQQ, IWM, etc.) ajenos a la sesión. "
+        "Ejecuta el flujo operativo de Quant-Trader: datos de sesión y cartera, OHLCV según reglas, `evaluate_cfd_state`, luego `propose_trade_signal` alineado a HRP y políticas de riesgo/HITL."
+    )
+    return (title, task_list, planned, "Quant-Trader")
 
 
 def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
@@ -1295,36 +1514,82 @@ def build_manager_graph(
         if not incoming:
             _log.warning("manager plan: incoming vacío en state (keys=%s)", list(state.keys()))
 
-        _psp = (planner_system_prompt or "").strip()
-        mercenary_spec: dict[str, Any] | None = None
-        if _incoming_has_context_summary_system_directive(incoming):
-            plan_title, tasks = _llm_plan(incoming)
+        _hrp_fast: tuple[str, list[str], str, str] | None = None
+        if incoming:
+            _hrp_fast = _try_quant_hrp_affirm_followup(
+                incoming,
+                state.get("history"),
+                assigned,
+                _tid,
+                [str(x) for x in (available_plan or []) if x],
+            )
+        if _hrp_fast:
+            # region agent log
+            try:
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "hypothesisId": "H3",
+                                "location": "manager_graph.plan_node:hrp_fast",
+                                "message": "used_quant_hrp_followup_bypassing_llm_planner",
+                                "data": {"plan_title": _hrp_fast[0][:80]},
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
+            plan_title, tasks, _inject_hrp, _ov_hrp = _hrp_fast
             mercenary_spec = None
-        elif llm is not None and _psp:
-            _parsed = _llm_plan_from_model(llm, incoming, _psp)
-            if _parsed:
-                plan_title, tasks, mercenary_spec = _parsed
+        else:
+            _psp = (planner_system_prompt or "").strip()
+            mercenary_spec = None
+            if _incoming_has_context_summary_system_directive(incoming):
+                plan_title, tasks = _llm_plan(incoming)
+            elif llm is not None and _psp:
+                _parsed = _llm_plan_from_model(llm, incoming, _psp)
+                if _parsed:
+                    plan_title, tasks, mercenary_spec = _parsed
+                else:
+                    plan_title, tasks = _llm_plan(incoming)
+                    mercenary_spec = None
             else:
                 plan_title, tasks = _llm_plan(incoming)
-                mercenary_spec = None
-        else:
-            plan_title, tasks = _llm_plan(incoming)
-            mercenary_spec = None
 
         is_job_add_command = _looks_like_job_add_command(incoming)
         if is_job_add_command and mercenary_spec is not None:
             # /job --add nunca debe salir por mercenario; forzar flujo normal de tracking.
             mercenary_spec = None
+        if mercenary_spec is not None and _should_disable_mercenary_for_quant_signal_intent(
+            incoming, assigned
+        ):
+            mercenary_spec = None
 
         # Prioridad A2A: en crisis de caja + intención laboral, enrutar a JobHunter si está disponible.
         job_hunter_in_team = _pick_job_hunter_worker(list(available_plan or []))
         cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
-        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command):
+        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _hrp_fast:
             assigned = job_hunter_in_team
 
         # Mantener lógica existente de ruteo / planned_task
-        planned, override_worker = _plan_task(incoming, assigned)
-        planned_final = planned or incoming
+        if _hrp_fast:
+            if _ov_hrp and _ov_hrp in (available_plan or []):
+                assigned = _ov_hrp
+            override_worker = _ov_hrp
+            planned = _inject_hrp
+            planned_final = _inject_hrp
+        else:
+            planned, override_worker = _plan_task(incoming, assigned)
+            planned_final = planned or incoming
         _pa_plan = int(state.get("plan_attempt_index") or 0)
         _max_plan = int(state.get("plan_max_attempts") or plan_max_attempts_from_env())
         if replan_enabled() and _pa_plan > 0:
@@ -1400,6 +1665,38 @@ def build_manager_graph(
                                     "assigned_worker_id": (out.get("assigned_worker_id") or "").strip(),
                                 },
                                 "timestamp": int(_time_dbg() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
+
+        if mercenary_spec is None and _should_disable_mercenary_for_quant_signal_intent(
+            incoming, out.get("assigned_worker_id")
+        ):
+            # #region agent log
+            try:
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df_qm:
+                    _df_qm.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "quant-signals",
+                                "hypothesisId": "H_mercenary_hijack_quant",
+                                "location": "manager_graph.plan_node",
+                                "message": "mercenary_disabled_for_quant_signal_intent",
+                                "data": {
+                                    "assigned_worker_id": (out.get("assigned_worker_id") or "").strip(),
+                                    "incoming_len": len(incoming or ""),
+                                },
+                                "timestamp": int(time.time() * 1000),
                             },
                             ensure_ascii=False,
                         )
@@ -1839,6 +2136,34 @@ def build_manager_graph(
             b64 = (worker_invoke.get("sandbox_photo_base64") or "").strip()
         if not b64 and messages is not None:
             b64 = extract_latest_sandbox_figure_base64(messages) or ""
+        # region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "pre-fix",
+                            "hypothesisId": "H2",
+                            "location": "manager_graph.invoke_worker_node",
+                            "message": "sandbox_photo_extraction_result",
+                            "data": {
+                                "has_messages": bool(messages is not None),
+                                "sandbox_photo_base64_len": len(b64),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
         if b64:
             out["sandbox_photo_base64"] = b64
         if "active_mission" in state:

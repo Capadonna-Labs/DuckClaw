@@ -254,6 +254,55 @@ def fetch_ibkr_total_equity_numeric() -> Tuple[Optional[float], str]:
         return None, str(e)[:120]
 
 
+def fetch_ibkr_unrealized_pnl_total_numeric() -> Tuple[Optional[float], str]:
+    """
+    Suma unrealized_pnl de todas las posiciones del snapshot IBKR (mismo contrato que get_ibkr_portfolio).
+    Retorna (suma, "") si hay payload usable; (None, mensaje) si falla configuración o red.
+    Si el snapshot no trae unrealized por posición, retorna (0.0, "").
+    """
+    api_url = os.environ.get("IBKR_PORTFOLIO_API_URL", "").strip()
+    api_key = os.environ.get("IBKR_PORTFOLIO_API_KEY", "").strip()
+    positions_url = os.environ.get("IBKR_PORTFOLIO_POSITIONS_URL", "").strip()
+    if not api_url or not api_key:
+        return None, "IBKR_PORTFOLIO_API_URL/KEY no configurados"
+    try:
+        from urllib.error import HTTPError, URLError
+
+        data, _, _ = _ibkr_resolve_payload_with_optional_alt(api_url, api_key, positions_url)
+        if not isinstance(data, dict):
+            return None, "respuesta no es JSON objeto"
+        portfolio = data.get("portfolio") or data.get("positions") or []
+        if not portfolio or not isinstance(portfolio, list):
+            return 0.0, ""
+        agg = 0.0
+        has_any = False
+        for pos in portfolio:
+            if not isinstance(pos, dict):
+                continue
+            u = (
+                pos.get("unrealized_pnl")
+                if pos.get("unrealized_pnl") is not None
+                else pos.get("unrealizedPnL")
+            )
+            if u is not None and str(u).strip() != "":
+                try:
+                    agg += float(u)
+                    has_any = True
+                except (TypeError, ValueError):
+                    pass
+        if not has_any:
+            return 0.0, ""
+        return agg, ""
+    except HTTPError as e:
+        return None, f"HTTP {e.code}"
+    except URLError as e:
+        return None, str(e.reason)[:120]
+    except (TimeoutError, OSError, json.JSONDecodeError) as e:
+        return None, str(e)[:120]
+    except Exception as e:
+        return None, str(e)[:120]
+
+
 def _ibkr_portfolio_preamble(*, effective_mode: str, configured_mode: str) -> str:
     """Texto previo: modo efectivo del snapshot (puede diferir del env si hubo reintento paper/live)."""
     _exec_note = (

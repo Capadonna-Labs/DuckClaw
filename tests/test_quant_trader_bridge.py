@@ -146,6 +146,28 @@ def test_execute_approved_signal_requires_human_approval(monkeypatch) -> None:
     assert out["error"] == "human_approved != TRUE"
 
 
+def test_execute_approved_signal_missing_placeholder_id_explains_ledger() -> None:
+    """LLM-invented UUIDs (e.g. 0000ffff-…) are not in finance_worker.trade_signals."""
+
+    class _NoRows:
+        def query(self, sql: str) -> str:
+            if "FROM finance_worker.trade_signals" in sql:
+                return "[]"
+            if "FROM quant_core.trade_signals" in sql:
+                return "[]"
+            return "[]"
+
+    out = json.loads(
+        _execute_approved_signal_impl(
+            _NoRows(),
+            signal_id="0000ffff-1111-2222-3333-444455556666",
+        )
+    )
+    assert out["error"] == "signal no existe"
+    assert out.get("reason") == "SIGNAL_ID_NOT_IN_LEDGER"
+    assert "propose_trade_signal" in (out.get("message") or "")
+
+
 def test_execute_approved_signal_accepts_telegram_grant(monkeypatch) -> None:
     class _DbNoApproval(_FakeDb):
         def query(self, sql: str) -> str:
@@ -596,3 +618,133 @@ def test_execute_approved_signal_http_error_includes_broker_json_message(monkeyp
     out = json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
     assert out.get("error") == "Broker HTTP 501"
     assert "hook not configured" in (out.get("broker_message") or "").lower()
+
+
+def test_propose_trade_signal_auto_execute_disabled_by_default(monkeypatch) -> None:
+    """Sin DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS, la respuesta no encadena ejecución."""
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda payload: True,
+    )
+    out = json.loads(
+        _propose_trade_signal_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+        )
+    )
+    assert out.get("status") == "PENDING_HITL"
+    assert "auto_executed" not in out
+
+
+def test_propose_auto_execute_skips_live_without_allow_live(monkeypatch) -> None:
+    class _DbLive(_FakeDb):
+        def query(self, sql: str) -> str:
+            if "trading_sessions" in sql and "mode" in sql and "id = 'active'" in sql:
+                return json.dumps([{"mode": "live"}])
+            return super().query(sql)
+
+    db = _DbLive()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    monkeypatch.setenv("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS", "1")
+    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE", raising=False)
+    out = json.loads(
+        _propose_trade_signal_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+        )
+    )
+    assert out.get("status") == "PENDING_HITL"
+    assert out.get("auto_execute", {}).get("skipped") is True
+    assert "auto_executed" not in out
+
+
+def test_propose_auto_execute_paper_chains_to_simulated_execute(monkeypatch) -> None:
+    class _DbPendingHitl(_FakeDb):
+        def query(self, sql: str) -> str:
+            if "FROM finance_worker.trade_signals" in sql and "human_approved" in sql:
+                return _trade_sig_row(human_approved=False)
+            return super().query(sql)
+
+    db = _DbPendingHitl()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    set_quant_tool_chat_id("tg_auto_exec_1")
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    monkeypatch.setenv("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS", "1")
+    monkeypatch.delenv("IBKR_EXECUTE_ORDER_URL", raising=False)
+    out = json.loads(
+        _propose_trade_signal_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+        )
+    )
+    assert out.get("auto_executed") is True
+    ex = out.get("execution")
+    assert isinstance(ex, dict) and ex.get("status") == "simulated"
+
+
+def test_propose_auto_execute_row_timeout_surfaces_error(monkeypatch) -> None:
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._wait_until_signal_row_visible",
+        lambda _db, _sid, **kwargs: False,
+    )
+    monkeypatch.setenv("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS", "1")
+    out = json.loads(
+        _propose_trade_signal_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+        )
+    )
+    assert out.get("status") == "PENDING_HITL"
+    assert out.get("auto_execute", {}).get("error") == "SIGNAL_ROW_TIMEOUT"
+    assert "auto_executed" not in out

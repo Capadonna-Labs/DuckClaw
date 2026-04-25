@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
+from duckclaw.debug_session_log import agent_debug_log
 
 try:
     from langchain_core.runnables import RunnableConfig
@@ -28,6 +29,7 @@ except ImportError:
     RunnableConfig = Any  # type: ignore[misc, assignment]
 
 from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
+from duckclaw.debug_session_log import agent_debug_log
 from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_sync, set_log_context
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 from duckclaw.gateway_db import get_gateway_db_path
@@ -450,10 +452,16 @@ def _quant_user_requests_new_trade_signal(text: str) -> bool:
             r"\b("
             r"genera(r)?\s+(una\s+)?nueva\s+se[nñ]al|"
             r"genera(r)?\s+(?:(?:la|el|una|tu)\s+)?se[nñ]al|"
+            r"genera(r)?\s+se[nñ]ales|"
             r"crear\s+(una\s+)?se[nñ]al|"
+            r"crear\s+se[nñ]ales|"
             r"proponer\s+(una\s+)?se[nñ]al|"
+            r"proponer\s+se[nñ]ales|"
             r"registr(ar|a)\s+(una\s+)?se[nñ]al|"
+            r"registr(ar|a)\s+se[nñ]ales|"
             r"se[nñ]al\s+de\s+rebalanceo|"
+            r"se[nñ]ales\s+para\s+tickers?|"
+            r"se[nñ]ales\s+con\s+(s[ií]mbolos|simbolos)\s+diferentes|"
             r"propose\s+(a\s+)?(new\s+)?(trade\s+)?signal"
             r")\b",
             low,
@@ -480,6 +488,22 @@ def _quant_user_requests_execute_approved_signal(text: str) -> bool:
     if re.search(r"\b(ejecuta|ejecutar|ejecute|lanza|dispara)\b", low) and re.search(
         r"\b(se[nñ]al|orden)\b", low
     ):
+        return True
+    return False
+
+
+def _quant_user_requests_autoexec_validation(text: str) -> bool:
+    """Intención explícita: validar que auto-ejecución realmente impacta DB + portfolio IBKR."""
+    if not text or not str(text).strip():
+        return False
+    low = text.strip().lower()
+    if "[system_directive:" in low or "[system_event:" in low:
+        return False
+    if "auto-ejecuci" in low or "autoejecuci" in low or "auto ejecuci" in low:
+        return True
+    if "valida" in low and "funcionando" in low and "señal" in low:
+        return True
+    if "valida" in low and "ibkr" in low and "db" in low:
         return True
     return False
 
@@ -1774,6 +1798,23 @@ def build_worker_graph(
     else:
         # Manifest ``read_only: false`` (p. ej. Finanz): conexión RW para INSERT en quant_core.* / señales.
         db = DuckClaw(path, read_only=bool(spec.read_only))
+    # #region agent log
+    try:
+        agent_debug_log(
+            "workers/factory.py:build_worker_graph",
+            "worker_db_open_mode",
+            {
+                "worker_id": worker_id,
+                "spec_read_only": bool(spec.read_only),
+                "skip_private": bool(skip_private),
+                "db_read_only": bool(getattr(db, "_read_only", False)),
+                "path_tail": (str(getattr(db, "_path", "") or "")[-96:]),
+            },
+            hypothesis_id="H4",
+        )
+    except Exception:
+        pass
+    # #endregion
     _apply_forge_attaches(
         db,
         path,
@@ -2578,6 +2619,17 @@ def build_worker_graph(
                     return True
             return False
 
+        def _quant_execution_bug_probe_needs_ibkr_portfolio(text: str) -> bool:
+            """Quant-Trader: consultas de verificación de bug/ejecución deben citar snapshot real de IBKR."""
+            t = (text or "").strip().lower()
+            if not t:
+                return False
+            has_bug_probe = any(k in t for k in ("bug", "falla", "falla", "error", "verifica", "revisa"))
+            has_execution_context = any(
+                k in t for k in ("ejec", "señal", "senal", "order id", "ib order", "broker", "paper")
+            )
+            return has_bug_probe and has_execution_context
+
         def _is_dividends_query(text: str) -> bool:
             if not text or not text.strip():
                 return False
@@ -2670,7 +2722,15 @@ def build_worker_graph(
                 (_lid or "").strip().lower() == "quant_trader"
                 and _quant_retry_or_probe_needs_ibkr_portfolio(_ev_msgs, incoming)
             )
-            is_portfolio = has_ibkr and (_is_portfolio_kw or _is_portfolio_quant_retry)
+            _wants_new_signal = bool(
+                (_lid or "").strip().lower() == "quant_trader"
+                and _quant_user_requests_new_trade_signal(incoming)
+            )
+            _is_exec_bug_probe = (
+                (_lid or "").strip().lower() == "quant_trader"
+                and _quant_execution_bug_probe_needs_ibkr_portfolio(incoming)
+            )
+            is_portfolio = has_ibkr and (_is_portfolio_kw or _is_portfolio_quant_retry or _is_exec_bug_probe)
             # region agent log
             try:
                 import json as _agent_dbg_json
@@ -2686,6 +2746,8 @@ def build_worker_graph(
                             "is_portfolio": bool(is_portfolio),
                             "is_portfolio_kw": bool(_is_portfolio_kw),
                             "is_portfolio_quant_retry": bool(_is_portfolio_quant_retry),
+                            "wants_new_signal": bool(_wants_new_signal),
+                            "is_exec_bug_probe": bool(_is_exec_bug_probe),
                             "incoming_len": len(incoming or ""),
                         },
                         "timestamp": int(_agent_dbg_time.time() * 1000),
@@ -3128,6 +3190,35 @@ def build_worker_graph(
             if not _worker_use_heuristic_first_tool(spec):
                 force_execute_approved_signal = False
 
+            force_quant_autoexec_validation_read_sql = bool(
+                _lid_l == "quant_trader"
+                and has_read_sql
+                and _quant_user_requests_autoexec_validation(incoming)
+                and _worker_use_heuristic_first_tool(spec)
+                and not telegram_context_summarize_directive
+                and not already_has_tool_result
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                    or force_reddit
+                    or force_fetch_ib_gateway
+                    or force_fetch_market_data
+                    or force_quant_propose_signal
+                    or force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
+                    or force_plot_docs
+                    or force_run_sandbox
+                    or force_pqrsd_fetch_canonical
+                    or force_execute_approved_signal
+                )
+            )
+            if force_quant_autoexec_validation_read_sql:
+                force_read_sql = True
+
             llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
             forced_name = (
                 "pqrsd_fetch_canonical"
@@ -3333,6 +3424,50 @@ def build_worker_graph(
                         )
                     )
                 ] + _msg_list
+            _quant_autoexec_validation_intent = bool(
+                (_lid or "").strip().lower() == "quant_trader"
+                and _quant_user_requests_autoexec_validation(incoming)
+                and not telegram_context_summarize_directive
+            )
+            if _quant_autoexec_validation_intent:
+                _msg_list = [
+                    SystemMessage(
+                        content=(
+                            "[DIRECTIVA_EVIDENCIA_AUTOEXEC] Para validar auto-ejecución debes usar evidencia real en este turno: "
+                            "1) `read_sql` sobre finance_worker.trade_signals (conteo/estado/ib_order_id de señales ejecutadas), "
+                            "2) `get_ibkr_portfolio` para estado real de posiciones/cash. "
+                            "Si falta alguna evidencia, responde explícitamente que no se puede validar todavía y NO infieras resultados."
+                        )
+                    )
+                ] + _msg_list
+                # #region agent log
+                try:
+                    import json as _json_dbg_qv
+                    import time as _time_dbg_qv
+
+                    _payload_qv = {
+                        "sessionId": "c964f7",
+                        "runId": "quant-autoexec-validation",
+                        "hypothesisId": "H_no_tool_hallucination",
+                        "location": "factory.py:agent_node",
+                        "message": "quant_autoexec_validation_intent",
+                        "data": {
+                            "forced_name": forced_name,
+                            "already_has_tool_result": bool(already_has_tool_result),
+                            "force_read_sql": bool(force_read_sql),
+                            "force_portfolio": bool(force_portfolio),
+                        },
+                        "timestamp": int(_time_dbg_qv.time() * 1000),
+                    }
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df_qv:
+                        _df_qv.write(_json_dbg_qv.dumps(_payload_qv) + "\n")
+                except Exception:
+                    pass
+                # #endregion
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             _invoked_llm: Any = llm_with_tools
             if force_admin_sql:
@@ -3450,103 +3585,162 @@ def build_worker_graph(
                     else:
                         _tc_names.append(getattr(tc, "name", None))
                 _log.info("[%s] LLM tool_calls=%s", _wl, _tc_names)
+            # #region agent log
+            try:
+                if _is_exec_bug_probe:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df_bug:
+                        _df_bug.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "exec-bug-check",
+                                    "hypothesisId": "H_bugcheck_without_tools",
+                                    "location": "factory.py:agent_node",
+                                    "message": "exec_bug_probe_tool_calls_state",
+                                    "data": {
+                                        "forced_portfolio_by_bug_probe": bool(_is_exec_bug_probe),
+                                        "has_tool_calls": bool(tool_calls),
+                                        "tool_call_names": [
+                                            (tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None))
+                                            for tc in (tool_calls or [])
+                                        ],
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+            except Exception:
+                pass
+            # #endregion
             _resp_content = str(getattr(resp, "content", "") or "").strip()
             if _is_goals_tick and not tool_calls:
-                _portfolio_tool_text = ""
-                _portfolio_tool_text_prev = ""
-                _seen_ibkr = 0
-                for _m in reversed(state.get("messages", [])):
-                    if isinstance(_m, ToolMessage) and str(getattr(_m, "name", "") or "") == "get_ibkr_portfolio":
-                        _seen_ibkr += 1
-                        if not _portfolio_tool_text:
-                            _portfolio_tool_text = str(getattr(_m, "content", "") or "").strip()
-                            continue
-                        _portfolio_tool_text_prev = str(getattr(_m, "content", "") or "").strip()
-                        break
-                _total_value = ""
-                _positions = ""
-                _unreal_prev_txt = ""
-                if _portfolio_tool_text:
-                    _m_total = re.search(r"Valor total:\s*\$([0-9,]+(?:\.[0-9]+)?)", _portfolio_tool_text)
-                    _m_pos = re.search(r"Posiciones:\s*([0-9]+)", _portfolio_tool_text)
-                    _m_unreal = re.search(
-                        r"PnL no realizado total \(snapshot\):\s*\$([\-0-9,]+(?:\.[0-9]+)?)",
-                        _portfolio_tool_text,
-                    )
-                    _total_value = _m_total.group(1) if _m_total else ""
-                    _positions = _m_pos.group(1) if _m_pos else ""
-                    _unreal_txt = _m_unreal.group(1) if _m_unreal else ""
-                    if _portfolio_tool_text_prev:
-                        _m_unreal_prev = re.search(
-                            r"PnL no realizado total \(snapshot\):\s*\$([\-0-9,]+(?:\.[0-9]+)?)",
-                            _portfolio_tool_text_prev,
-                        )
-                        _unreal_prev_txt = _m_unreal_prev.group(1) if _m_unreal_prev else ""
-                else:
-                    _unreal_txt = ""
-                if _portfolio_tool_text and (_total_value or _positions):
-                    if _unreal_txt:
-                        try:
-                            _unreal_val = float(_unreal_txt.replace(",", ""))
-                        except Exception:
-                            _unreal_val = 0.0
-                        _chat_key = str(state.get("chat_id") or state.get("session_id") or "").strip()
-                        _prev_unreal_val = (
-                            _GOALS_PREV_UNREALIZED_PNL_BY_CHAT.get(_chat_key) if _chat_key else None
-                        )
-                        _pct_change = None
-                        if _prev_unreal_val is None and _unreal_prev_txt:
-                            try:
-                                _prev_unreal_val = float(_unreal_prev_txt.replace(",", ""))
-                            except Exception:
-                                _prev_unreal_val = None
-                        if _prev_unreal_val is not None:
-                            # Base de comparación: valor absoluto del PnL previo para evitar signo invertido.
-                            _den = abs(_prev_unreal_val)
-                            if _den > 1e-9:
-                                _pct_change = ((_unreal_val - _prev_unreal_val) / _den) * 100.0
-                        _state = "ALIGNED" if _unreal_val >= 0 else "MISALIGNED"
-                        _act = (
-                            "mantener sesion y seguir monitoreo HITL."
-                            if _unreal_val >= 0
-                            else "activar reduccion de riesgo y evitar nuevas señales hasta recuperar PnL>=0."
-                        )
-                        _fallback_text = (
-                            "Revision /goals (proactiva): "
-                            f"snapshot IBKR OK (valor total=${_total_value or 'N/D'}, posiciones={_positions or 'N/D'}, "
-                            f"PnL no realizado=${_unreal_val:,.2f}). "
-                            f"Meta 'PnL positivo': {_state}. Accion sugerida: {_act}"
-                        )
-                        if _prev_unreal_val is not None:
-                            _fallback_text += f" PnL anterior=${_prev_unreal_val:,.2f}."
-                        else:
-                            _fallback_text += " PnL anterior=N/D."
-                        if _pct_change is not None:
-                            _fallback_text += f" Cambio vs anterior={_pct_change:+.2f}%."
-                        else:
-                            _fallback_text += " Cambio vs anterior=N/D."
-                        if _chat_key:
-                            _GOALS_PREV_UNREALIZED_PNL_BY_CHAT[_chat_key] = _unreal_val
+                # Ticks proactivos con sesión rebalance_hrp (o ya hubo sandbox en el hilo): no sustituir
+                # la respuesta del modelo por el resumen genérico de «PnL positivo».
+                _incoming_s = str(incoming or "")
+                _inc_lower = _incoming_s.lower()
+                _goals_hrp_context = "rebalance_hrp" in _inc_lower or "objective=rebalance_hrp" in _inc_lower
+                _goals_hrp_from_sql = False
+                for _m in state.get("messages", []):
+                    if isinstance(_m, ToolMessage) and str(getattr(_m, "name", "") or "") == "read_sql":
+                        _c = str(getattr(_m, "content", "") or "").lower()
+                        if "rebalance_hrp" in _c or "objective" in _c and "rebalance" in _c:
+                            _goals_hrp_from_sql = True
+                            break
+                if _goals_hrp_context or _goals_hrp_from_sql:
+                    if (_resp_content or "").strip():
+                        pass  # conservar veredicto del LLM (HRP / alineación)
                     else:
-                        _fallback_text = (
-                            "Revision /goals (proactiva): "
-                            f"snapshot IBKR OK (valor total=${_total_value or 'N/D'}, posiciones={_positions or 'N/D'}). "
-                            "Meta 'PnL positivo': estado parcial por falta de PnL realizado/no realizado en este snapshot. "
-                            "Accion sugerida: extraer PnL por posicion y activar reduccion de riesgo si el agregado pasa a negativo."
+                        _hrp_stub = (
+                            "Revision /goals (proactiva): objetivo de sesion **rebalance_hrp**. "
+                            "Usa en el hilo la salida de `get_ibkr_portfolio` y `execute_sandbox_script` "
+                            "(pesos HRP vs cartera); no apliques el resumen automatico de meta «PnL positivo» a este tick."
                         )
-                elif _portfolio_tool_text:
-                    _fallback_text = (
-                        "Revision /goals (proactiva): snapshot IBKR recibido. "
-                        "Meta 'PnL positivo': se requiere desglose de PnL realizado/no realizado para validar alineacion. "
-                        "Accion sugerida: extraer PnL por posicion y aplicar regla de reduccion de riesgo."
-                    )
+                        try:
+                            resp = resp.model_copy(update={"content": _hrp_stub})
+                        except Exception:
+                            resp = AIMessage(content=_hrp_stub)
                 else:
-                    _fallback_text = ""
-                if _fallback_text:
-                    try:
-                        resp = resp.model_copy(update={"content": _fallback_text})
-                    except Exception:
-                        resp = AIMessage(content=_fallback_text)
+                    _portfolio_tool_text = ""
+                    _portfolio_tool_text_prev = ""
+                    _seen_ibkr = 0
+                    for _m in reversed(state.get("messages", [])):
+                        if isinstance(_m, ToolMessage) and str(getattr(_m, "name", "") or "") == "get_ibkr_portfolio":
+                            _seen_ibkr += 1
+                            if not _portfolio_tool_text:
+                                _portfolio_tool_text = str(getattr(_m, "content", "") or "").strip()
+                                continue
+                            _portfolio_tool_text_prev = str(getattr(_m, "content", "") or "").strip()
+                            break
+                    _total_value = ""
+                    _positions = ""
+                    _unreal_prev_txt = ""
+                    if _portfolio_tool_text:
+                        _m_total = re.search(r"Valor total:\s*\$([0-9,]+(?:\.[0-9]+)?)", _portfolio_tool_text)
+                        _m_pos = re.search(r"Posiciones:\s*([0-9]+)", _portfolio_tool_text)
+                        _m_unreal = re.search(
+                            r"PnL no realizado total \(snapshot\):\s*\$([\-0-9,]+(?:\.[0-9]+)?)",
+                            _portfolio_tool_text,
+                        )
+                        _total_value = _m_total.group(1) if _m_total else ""
+                        _positions = _m_pos.group(1) if _m_pos else ""
+                        _unreal_txt = _m_unreal.group(1) if _m_unreal else ""
+                        if _portfolio_tool_text_prev:
+                            _m_unreal_prev = re.search(
+                                r"PnL no realizado total \(snapshot\):\s*\$([\-0-9,]+(?:\.[0-9]+)?)",
+                                _portfolio_tool_text_prev,
+                            )
+                            _unreal_prev_txt = _m_unreal_prev.group(1) if _m_unreal_prev else ""
+                    else:
+                        _unreal_txt = ""
+                    if _portfolio_tool_text and (_total_value or _positions):
+                        if _unreal_txt:
+                            try:
+                                _unreal_val = float(_unreal_txt.replace(",", ""))
+                            except Exception:
+                                _unreal_val = 0.0
+                            _chat_key = str(state.get("chat_id") or state.get("session_id") or "").strip()
+                            _prev_unreal_val = (
+                                _GOALS_PREV_UNREALIZED_PNL_BY_CHAT.get(_chat_key) if _chat_key else None
+                            )
+                            _pct_change = None
+                            if _prev_unreal_val is None and _unreal_prev_txt:
+                                try:
+                                    _prev_unreal_val = float(_unreal_prev_txt.replace(",", ""))
+                                except Exception:
+                                    _prev_unreal_val = None
+                            if _prev_unreal_val is not None:
+                                # Base de comparación: valor absoluto del PnL previo para evitar signo invertido.
+                                _den = abs(_prev_unreal_val)
+                                if _den > 1e-9:
+                                    _pct_change = ((_unreal_val - _prev_unreal_val) / _den) * 100.0
+                            _state = "ALIGNED" if _unreal_val >= 0 else "MISALIGNED"
+                            _act = (
+                                "mantener sesion y seguir monitoreo HITL."
+                                if _unreal_val >= 0
+                                else "activar reduccion de riesgo y evitar nuevas señales hasta recuperar PnL>=0."
+                            )
+                            _fallback_text = (
+                                "Revision /goals (proactiva): "
+                                f"snapshot IBKR OK (valor total=${_total_value or 'N/D'}, posiciones={_positions or 'N/D'}, "
+                                f"PnL no realizado=${_unreal_val:,.2f}). "
+                                f"Meta 'PnL positivo': {_state}. Accion sugerida: {_act}"
+                            )
+                            if _prev_unreal_val is not None:
+                                _fallback_text += f" PnL anterior=${_prev_unreal_val:,.2f}."
+                            else:
+                                _fallback_text += " PnL anterior=N/D."
+                            if _pct_change is not None:
+                                _fallback_text += f" Cambio vs anterior={_pct_change:+.2f}%."
+                            else:
+                                _fallback_text += " Cambio vs anterior=N/D."
+                            if _chat_key:
+                                _GOALS_PREV_UNREALIZED_PNL_BY_CHAT[_chat_key] = _unreal_val
+                        else:
+                            _fallback_text = (
+                                "Revision /goals (proactiva): "
+                                f"snapshot IBKR OK (valor total=${_total_value or 'N/D'}, posiciones={_positions or 'N/D'}). "
+                                "Meta 'PnL positivo': estado parcial por falta de PnL realizado/no realizado en este snapshot. "
+                                "Accion sugerida: extraer PnL por posicion y activar reduccion de riesgo si el agregado pasa a negativo."
+                            )
+                    elif _portfolio_tool_text:
+                        _fallback_text = (
+                            "Revision /goals (proactiva): snapshot IBKR recibido. "
+                            "Meta 'PnL positivo': se requiere desglose de PnL realizado/no realizado para validar alineacion. "
+                            "Accion sugerida: extraer PnL por posicion y aplicar regla de reduccion de riesgo."
+                        )
+                    else:
+                        _fallback_text = ""
+                    if _fallback_text:
+                        try:
+                            resp = resp.model_copy(update={"content": _fallback_text})
+                        except Exception:
+                            resp = AIMessage(content=_fallback_text)
             out = {**state, "messages": state["messages"] + [resp]}
             if _llm_invoke_exc is not None:
                 from duckclaw.integrations.llm_providers import is_transient_inference_connection_error
@@ -3601,6 +3795,36 @@ def build_worker_graph(
         messages = state["messages"]
         last = messages[-1]
         tool_calls = getattr(last, "tool_calls", None) or []
+        _tool_round = int(state.get("_tool_round") or 0) + 1
+        # #region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "loop-pre-fix",
+                            "hypothesisId": "H_loop_rounds",
+                            "location": "factory.py:tools_node",
+                            "message": "tools_round_start",
+                            "data": {
+                                "tool_round": _tool_round,
+                                "n_tool_calls": len(tool_calls),
+                                "tool_names": [str((tc.get("name") or "")).strip() for tc in tool_calls],
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         new_msgs = list(messages)
         sandbox_enabled = _sandbox_enabled_for_state(state)
         tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
@@ -3615,6 +3839,23 @@ def build_worker_graph(
             read_pool.read_pool_active_for_worker(spec)
             and read_pool.should_parallelize_ephemeral_tool_calls(tool_calls)
         )
+        # #region agent log
+        if use_ephemeral_parallel:
+            try:
+                _nw = min(len(tool_calls), read_pool.read_pool_max_concurrency())
+                agent_debug_log(
+                    "factory.py:tools_node:ephemeral_parallel",
+                    "ephemeral read-pool branch",
+                    {
+                        "n_calls": len(tool_calls),
+                        "n_workers": _nw,
+                        "tool_names": [((tc.get("name") or "").strip()) for tc in tool_calls],
+                    },
+                    hypothesis_id="H3",
+                )
+            except Exception:
+                pass
+        # #endregion
 
         def _schedule_tool_heartbeat(tool_name: str) -> None:
             _htid = (state.get("tenant_id") or "default").strip() or "default"
@@ -3737,7 +3978,12 @@ def build_worker_graph(
                             except Exception:
                                 pass
                         # #endregion
-                        if name in ("run_sandbox", "run_browser_sandbox", "pqrsd_run_identificacion_step1"):
+                        if name in (
+                            "run_sandbox",
+                            "run_browser_sandbox",
+                            "pqrsd_run_identificacion_step1",
+                            "execute_sandbox_script",
+                        ):
                             if not str(invoke_args.get("worker_id") or "").strip():
                                 invoke_args["worker_id"] = worker_id
                             if name in ("run_browser_sandbox", "pqrsd_run_identificacion_step1"):
@@ -3820,6 +4066,51 @@ def build_worker_graph(
                                     fb = payload.get("figure_base64")
                                     if isinstance(fb, str) and len(fb) > 32:
                                         sandbox_b64 = fb
+                                # #region agent log
+                                try:
+                                    with open(
+                                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                                        "a",
+                                        encoding="utf-8",
+                                    ) as _df:
+                                        _df.write(
+                                            json.dumps(
+                                                {
+                                                    "sessionId": "c964f7",
+                                                    "runId": "loop-pre-fix",
+                                                    "hypothesisId": "H_chart_render_quality",
+                                                    "location": "factory.py:tools_node",
+                                                    "message": "sandbox_tool_result_observed",
+                                                    "data": {
+                                                        "tool_round": _tool_round,
+                                                        "tool_name": name,
+                                                        "exit_code": payload.get("exit_code"),
+                                                        "has_figure_base64": bool(payload.get("figure_base64")),
+                                                        "has_artifacts": bool(payload.get("artifacts")),
+                                                        "stdout_has_donut": "donut" in str(payload.get("stdout") or "").lower(),
+                                                        "stdout_has_pie": "pie" in str(payload.get("stdout") or "").lower(),
+                                                        "stdout_has_bar": (
+                                                            "barra" in str(payload.get("stdout") or "").lower()
+                                                            or "bar chart" in str(payload.get("stdout") or "").lower()
+                                                            or "barh" in str(payload.get("stdout") or "").lower()
+                                                        ),
+                                                        "stdout_has_maxmin_labels": (
+                                                            "máx:" in str(payload.get("stdout") or "").lower()
+                                                            or "max:" in str(payload.get("stdout") or "").lower()
+                                                            or "mín:" in str(payload.get("stdout") or "").lower()
+                                                            or "min:" in str(payload.get("stdout") or "").lower()
+                                                        ),
+                                                        "result_len": len(content),
+                                                    },
+                                                    "timestamp": int(time.time() * 1000),
+                                                },
+                                                ensure_ascii=False,
+                                            )
+                                            + "\n"
+                                        )
+                                except Exception:
+                                    pass
+                                # #endregion
                             except (json.JSONDecodeError, TypeError):
                                 pass
                             if not use_cm:
@@ -3865,7 +4156,7 @@ def build_worker_graph(
                         sandbox_enabled,
                     )
                 new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
-        out: dict[str, Any] = {**state, "messages": new_msgs}
+        out: dict[str, Any] = {**state, "messages": new_msgs, "_tool_round": _tool_round}
         if sandbox_b64:
             out["sandbox_photo_base64"] = sandbox_b64
         out.update(_identity_fields(state))
@@ -4167,7 +4458,36 @@ def build_worker_graph(
 
     def should_continue(state: dict) -> str:
         last = state["messages"][-1]
-        return "tools" if getattr(last, "tool_calls", None) else "end"
+        _has_tools = bool(getattr(last, "tool_calls", None))
+        # #region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "loop-pre-fix",
+                            "hypothesisId": "H_should_continue_loop",
+                            "location": "factory.py:should_continue",
+                            "message": "route_decision",
+                            "data": {
+                                "tool_round": int(state.get("_tool_round") or 0),
+                                "has_tool_calls": _has_tools,
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
+        return "tools" if _has_tools else "end"
 
     # Context-Guard (FactChecker + SelfCorrection) para workers con catalog_retriever
     context_guard_config = getattr(spec, "context_guard_config", None) or {}

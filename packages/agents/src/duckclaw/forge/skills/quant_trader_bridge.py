@@ -1120,6 +1120,69 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
     return json.dumps(out_obj, ensure_ascii=False)
 
 
+@log_tool_execution_sync(name="run_quant_signal_cycle")
+def _run_quant_signal_cycle_impl(
+    db: Any,
+    *,
+    mandate_id: str,
+    ticker: str,
+    weight: float,
+    rationale: str = "",
+    signal_type: str = "ENTRY",
+    execute_now: bool = False,
+) -> str:
+    """
+    Operación compuesta determinista:
+    1) propose_trade_signal
+    2) opcional execute_approved_signal con el signal_id real del ledger.
+    """
+    proposed_raw = _propose_trade_signal_impl(
+        db,
+        mandate_id=mandate_id,
+        ticker=ticker,
+        weight=weight,
+        rationale=rationale,
+        signal_type=signal_type,
+    )
+    try:
+        proposed_obj = json.loads(proposed_raw) if isinstance(proposed_raw, str) else proposed_raw
+    except Exception:
+        proposed_obj = {"raw": str(proposed_raw)}
+    if not isinstance(proposed_obj, dict):
+        return json.dumps({"error": "INVALID_PROPOSE_RESPONSE", "proposed": proposed_obj}, ensure_ascii=False)
+    if proposed_obj.get("error"):
+        return json.dumps({"status": "failed", "proposed": proposed_obj}, ensure_ascii=False)
+    sid = str(proposed_obj.get("signal_id") or "").strip().lower()
+    if not sid:
+        return json.dumps(
+            {
+                "status": "failed",
+                "error": "MISSING_SIGNAL_ID",
+                "message": "propose_trade_signal no devolvió signal_id.",
+                "proposed": proposed_obj,
+            },
+            ensure_ascii=False,
+        )
+    out: dict[str, Any] = {
+        "status": "proposed",
+        "signal_id": sid,
+        "proposed": proposed_obj,
+    }
+    if not execute_now:
+        return json.dumps(out, ensure_ascii=False)
+    exec_raw = _execute_approved_signal_impl(db, signal_id=sid)
+    try:
+        exec_obj = json.loads(exec_raw) if isinstance(exec_raw, str) else exec_raw
+    except Exception:
+        exec_obj = {"raw": str(exec_raw)}
+    out["execution"] = exec_obj
+    if isinstance(exec_obj, dict) and exec_obj.get("error"):
+        out["status"] = "execution_failed"
+    else:
+        out["status"] = "executed"
+    return json.dumps(out, ensure_ascii=False)
+
+
 def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
     from langchain_core.tools import StructuredTool
 
@@ -1195,6 +1258,24 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
             signal_threshold=signal_threshold,
         )
 
+    def _run_quant_signal_cycle(
+        mandate_id: str,
+        ticker: str,
+        weight: float,
+        rationale: str = "",
+        signal_type: str = "ENTRY",
+        execute_now: bool = False,
+    ) -> str:
+        return _run_quant_signal_cycle_impl(
+            db,
+            mandate_id=mandate_id,
+            ticker=ticker,
+            weight=weight,
+            rationale=rationale,
+            signal_type=signal_type,
+            execute_now=bool(execute_now),
+        )
+
     tools.append(
         StructuredTool.from_function(
             _fetch_market_data,
@@ -1263,6 +1344,17 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 "Evalúa el estado CFD de la sesión activa en un solo paso: valida sesión ACTIVE, "
                 "ingesta OHLCV por ticker, calcula temperatura/mass/fase, persiste fluid_state y "
                 "retorna outcome ALIGNED/MISALIGNED más gating de pending HITL."
+            ),
+        )
+    )
+    tools.append(
+        StructuredTool.from_function(
+            _run_quant_signal_cycle,
+            name="run_quant_signal_cycle",
+            description=(
+                "Flujo único para señal Quant: propone (propose_trade_signal) y opcionalmente ejecuta "
+                "(execute_approved_signal) usando el signal_id real del ledger. Reduce orquestación tool-by-tool; "
+                "si execute_now=false devuelve signal_id y estado PENDING_HITL, si true intenta ejecución inmediata."
             ),
         )
     )

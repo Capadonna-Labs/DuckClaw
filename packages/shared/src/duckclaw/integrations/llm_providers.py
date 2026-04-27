@@ -66,6 +66,8 @@ def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
             bases.append(str(bu).strip().lower())
     u = " ".join(bases)
     if u:
+        if "googleapis.com" in u or "generativelanguage" in u:
+            return "gemini"
         if "deepseek" in u:
             return "deepseek"
         if "groq.com" in u:
@@ -88,6 +90,12 @@ def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
             break
     if "deepseek" in mn:
         return "deepseek"
+    if "gemini" in mn:
+        return "gemini"
+    tname = type(llm).__name__.lower()
+    tmod = getattr(type(llm), "__module__", "").lower()
+    if "google" in tname or "genai" in tname or "google_genai" in tmod:
+        return "gemini"
     return ""
 
 
@@ -119,6 +127,121 @@ def _llm_invoke_retry_delay_sec_from_env() -> float:
         return 0.4
 
 
+def _llm_rate_limit_max_attempts_from_env() -> int:
+    raw = (os.environ.get("DUCKCLAW_LLM_RATE_LIMIT_MAX_ATTEMPTS") or "4").strip()
+    try:
+        n = int(raw)
+        return max(1, min(n, 10))
+    except ValueError:
+        return 4
+
+
+def _llm_rate_limit_base_delay_sec_from_env() -> float:
+    raw = (os.environ.get("DUCKCLAW_LLM_RATE_LIMIT_BASE_DELAY_SEC") or "2.0").strip()
+    try:
+        return max(0.2, min(float(raw), 120.0))
+    except ValueError:
+        return 2.0
+
+
+def _llm_rate_limit_max_sleep_sec_from_env() -> float:
+    raw = (os.environ.get("DUCKCLAW_LLM_RATE_LIMIT_MAX_SLEEP_SEC") or "20").strip()
+    try:
+        return max(1.0, min(float(raw), 300.0))
+    except ValueError:
+        return 20.0
+
+
+_PROVIDER_COOLDOWN_UNTIL: dict[str, float] = {}
+
+
+def _is_rate_limit_error(exc: BaseException) -> bool:
+    name = type(exc).__name__.lower()
+    if "ratelimit" in name:
+        return True
+    code = getattr(exc, "status_code", None)
+    if code == 429:
+        return True
+    resp = getattr(exc, "response", None)
+    if getattr(resp, "status_code", None) == 429:
+        return True
+    low = str(exc).lower()
+    return "429" in low or "too many requests" in low or "rate limit" in low
+
+
+def _retry_after_seconds_from_exc(exc: BaseException) -> float | None:
+    try:
+        resp = getattr(exc, "response", None)
+        headers = getattr(resp, "headers", None)
+        if headers and isinstance(headers, dict):
+            ra = headers.get("retry-after") or headers.get("Retry-After")
+            if ra is not None:
+                v = float(str(ra).strip())
+                if v > 0:
+                    return min(v, 120.0)
+    except Exception:
+        pass
+    try:
+        # Groq suele devolver el hint en el mensaje JSON:
+        # "... Please try again in 22.065s ..."
+        low = str(exc).lower()
+        m_ms = re.search(
+            r"try\s+again\s+in\s+(?:(\d+)\s*m)?\s*([0-9]+(?:\.[0-9]+)?)\s*s",
+            low,
+            re.IGNORECASE,
+        )
+        if m_ms:
+            mins = float(m_ms.group(1) or 0.0)
+            secs = float(m_ms.group(2) or 0.0)
+            v = (mins * 60.0) + secs
+            if v > 0:
+                return min(v, 3600.0)
+        m_s = re.search(r"try\s+again\s+in\s+([0-9]+(?:\.[0-9]+)?)s", low, re.IGNORECASE)
+        if m_s:
+            v = float(m_s.group(1))
+            if v > 0:
+                return min(v, 3600.0)
+    except Exception:
+        pass
+    return None
+
+
+def _debug_log_rate_limit_pause(
+    *,
+    provider: str,
+    attempt: int,
+    wait_sec: float,
+    reason: str,
+) -> None:
+    # region agent log
+    try:
+        import json as _json
+
+        payload = {
+            "sessionId": "c964f7",
+            "runId": "groq-rate-limit-pause",
+            "hypothesisId": "H_groq_429_backoff",
+            "location": "llm_providers.invoke_chat_model_with_transient_retries",
+            "message": "rate_limit_pause",
+            "data": {
+                "provider": provider,
+                "attempt": attempt,
+                "wait_sec": round(float(wait_sec), 3),
+                "reason": reason,
+            },
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _f:
+            _f.write(_json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
+
+
 def invoke_chat_model_with_transient_retries(
     llm: Any,
     messages: Any,
@@ -131,12 +254,55 @@ def invoke_chat_model_with_transient_retries(
     """
     max_attempts = _llm_invoke_max_attempts_from_env()
     delay_sec = _llm_invoke_retry_delay_sec_from_env()
+    rate_limit_max_attempts = _llm_rate_limit_max_attempts_from_env()
+    rate_limit_base_delay = _llm_rate_limit_base_delay_sec_from_env()
+    rate_limit_max_sleep = _llm_rate_limit_max_sleep_sec_from_env()
+    provider = (infer_provider_from_openai_compatible_llm(llm) or "").strip().lower() or "unknown"
+    cooldown_until = _PROVIDER_COOLDOWN_UNTIL.get(provider, 0.0)
+    now = time.time()
+    if cooldown_until > now:
+        wait = cooldown_until - now
+        _debug_log_rate_limit_pause(
+            provider=provider,
+            attempt=0,
+            wait_sec=wait,
+            reason="provider_cooldown",
+        )
+        time.sleep(wait)
     last_exc: BaseException | None = None
+    rate_limit_attempt = 0
     for attempt in range(1, max_attempts + 1):
         try:
             return llm.invoke(messages, **invoke_kwargs)
         except Exception as exc:
             last_exc = exc
+            if _is_rate_limit_error(exc):
+                rate_limit_attempt += 1
+                if rate_limit_attempt >= rate_limit_max_attempts:
+                    raise
+                wait_rl = _retry_after_seconds_from_exc(exc)
+                if wait_rl is None:
+                    wait_rl = min(rate_limit_base_delay * (2 ** (rate_limit_attempt - 1)), 120.0)
+                _PROVIDER_COOLDOWN_UNTIL[provider] = max(
+                    _PROVIDER_COOLDOWN_UNTIL.get(provider, 0.0),
+                    time.time() + float(wait_rl),
+                )
+                if wait_rl > rate_limit_max_sleep:
+                    _debug_log_rate_limit_pause(
+                        provider=provider,
+                        attempt=rate_limit_attempt,
+                        wait_sec=wait_rl,
+                        reason="rate_limit_deferred",
+                    )
+                    raise
+                _debug_log_rate_limit_pause(
+                    provider=provider,
+                    attempt=rate_limit_attempt,
+                    wait_sec=wait_rl,
+                    reason="rate_limit_429",
+                )
+                time.sleep(wait_rl)
+                continue
             if attempt >= max_attempts or not is_transient_inference_connection_error(exc):
                 raise
             if delay_sec > 0:
@@ -748,6 +914,24 @@ def build_llm(
         except Exception:
             raise RuntimeError("Anthropic requiere langchain-anthropic y ANTHROPIC_API_KEY.")
 
+    if p == "gemini":
+        key = (
+            (os.environ.get("GOOGLE_API_KEY") or "").strip()
+            or (os.environ.get("GEMINI_API_KEY") or "").strip()
+        )
+        if not key:
+            raise RuntimeError("Gemini requiere GOOGLE_API_KEY (o GEMINI_API_KEY).")
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+
+            return ChatGoogleGenerativeAI(
+                model=m or "gemini-2.0-flash",
+                temperature=0,
+                google_api_key=key,
+            )
+        except Exception:
+            raise RuntimeError("Gemini requiere langchain-google-genai y GOOGLE_API_KEY.")
+
     if p == "deepseek":
         try:
             from langchain_openai import ChatOpenAI
@@ -776,12 +960,17 @@ def build_llm(
             else:
                 groq_base = (url or _groq_default).rstrip("/")
             _mx = (os.environ.get("DUCKCLAW_GROQ_MAX_OUTPUT_TOKENS") or "").strip()
+            _mr = (os.environ.get("DUCKCLAW_GROQ_CLIENT_MAX_RETRIES") or "0").strip()
             _kwargs: dict[str, Any] = {
                 "model": m or "llama-3.3-70b-versatile",
                 "temperature": 0,
                 "base_url": groq_base,
                 "api_key": key,
             }
+            try:
+                _kwargs["max_retries"] = max(0, min(int(_mr), 8))
+            except ValueError:
+                _kwargs["max_retries"] = 0
             if _mx:
                 try:
                     _kwargs["max_tokens"] = max(256, min(int(_mx), 8192))

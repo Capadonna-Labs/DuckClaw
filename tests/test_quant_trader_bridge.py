@@ -17,6 +17,7 @@ from duckclaw.forge.skills.quant_trader_bridge import (
     _execute_approved_signal_impl,
     _normalize_proposed_weight_pct,
     _propose_trade_signal_impl,
+    _run_quant_signal_cycle_impl,
 )
 
 
@@ -748,3 +749,64 @@ def test_propose_auto_execute_row_timeout_surfaces_error(monkeypatch) -> None:
     assert out.get("status") == "PENDING_HITL"
     assert out.get("auto_execute", {}).get("error") == "SIGNAL_ROW_TIMEOUT"
     assert "auto_executed" not in out
+
+
+def test_run_quant_signal_cycle_propose_only(monkeypatch) -> None:
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    out = json.loads(
+        _run_quant_signal_cycle_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+            execute_now=False,
+        )
+    )
+    assert out.get("status") == "proposed"
+    assert out.get("signal_id")
+    assert isinstance(out.get("proposed"), dict)
+
+
+def test_run_quant_signal_cycle_execute_now(monkeypatch) -> None:
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    set_quant_tool_chat_id("telegram_chat_1")
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.consume_execute_order_grant",
+        lambda _cid, _sid: True,
+    )
+    monkeypatch.delenv("IBKR_EXECUTE_ORDER_URL", raising=False)
+    out = json.loads(
+        _run_quant_signal_cycle_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+            execute_now=True,
+        )
+    )
+    assert out.get("status") in ("executed", "execution_failed")
+    assert isinstance(out.get("execution"), dict)

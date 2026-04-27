@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from duckclaw.workers.factory import (
+    _quant_extract_signal_id,
+    _quant_extract_tickers,
+    _quant_is_proceed_like,
     _quant_user_requests_execute_approved_signal,
     _quant_user_requests_new_trade_signal,
 )
@@ -32,3 +35,20 @@ def test_post_hitl_gateway_message_triggers_execute_tool() -> None:
     )
     assert _quant_user_requests_execute_approved_signal(body)
     assert not _quant_user_requests_new_trade_signal(body)
+
+
+def test_quant_proceed_like_variants_match() -> None:
+    assert _quant_is_proceed_like("Procede")
+    assert _quant_is_proceed_like("sigue con la ejecución")
+    assert _quant_is_proceed_like("adelante")
+    assert not _quant_is_proceed_like("[SYSTEM_EVENT: Revisión periódica de /goals]")
+
+
+def test_quant_extract_signal_id_reads_uuid() -> None:
+    sid = _quant_extract_signal_id("ejecuta señal 592876eb-7336-4fe9-bf7b-d870b5a8850c ahora")
+    assert sid == "592876eb-7336-4fe9-bf7b-d870b5a8850c"
+
+
+def test_quant_extract_tickers_dedupes_and_filters() -> None:
+    out = _quant_extract_tickers("Genera señal para AAPL y MSFT; luego AAPL")
+    assert out == ["AAPL", "MSFT"]

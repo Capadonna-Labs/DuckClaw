@@ -14,6 +14,7 @@ El worker actúa como el puente entre los datos crudos del mercado y la ejecuci�
 El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 1. *Datos de Mercado y Dividendos*
     fetch_ib_gateway_ohlcv: Obtiene velas (OHLCV) directamente desde el VPS del Gateway de IBKR. Es la fuente primaria para análisis técnico.
+    fetch_market_data: Ingesta alternativa de OHLCV para marcos compatibles (persistiendo en `quant_core.ohlcv_data`).
 
     get_fmp_stock_dividends: Consulta el historial y próximos pagos de dividendos de un ticker vía Financial Modeling Prep.
     get_fmp_dividends_calendar: Calendario global de dividendos (ventana máx. 90 días).
@@ -22,12 +23,19 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 
 2. *Gestión de Portafolio (IBKR)*
     get_ibkr_portfolio: Snapshot en tiempo real de posiciones, valor de la cuenta y PnL.
+    evaluate_cfd_state: Evalúa fase/umbral por ticker para decidir si hay contexto accionable de señal.
 
 
 3. *Ejecución y Backtesting*
     execute_sandbox_script: Ejecuta scripts de Python en un entorno seguro (Strix Sandbox) para realizar backtesting de estrategias.
     propose_trade_signal: Registra una señal en el ledger para revisión humana. Aplica automáticamente el RiskGuard (ajuste de pesos según límites de riesgo).
+    run_quant_signal_cycle: Tool compuesta que propone señal y, si aplica, encadena ejecución usando el `signal_id` real del ledger.
     execute_approved_signal: Envía la orden final al broker, solo si la señal tiene el flag human_approved.
+
+4. *Comandos Fly de Operación Determinista*
+    /quant_cycle: Orquesta en un solo comando `fetch -> portfolio -> evaluate -> signal`, con salida estructurada por etapas.
+    /execute_signal <uuid>: Aprobación HITL para ejecutar una señal pendiente.
+    /cancel_signal <uuid>: Cancelación de una señal pendiente en ledger.
 
 ---
 

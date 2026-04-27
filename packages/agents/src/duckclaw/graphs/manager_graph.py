@@ -710,6 +710,27 @@ def _assistant_asks_hrp_rebalance_followup(assistant_text: str) -> bool:
     return False
 
 
+def _quant_operational_intent_requires_fly_command(incoming: str) -> bool:
+    """Intención operativa clara de señal/ejecución que debe forzar UX de `/quant_cycle`."""
+    t = (incoming or "").strip().lower()
+    if not t:
+        return False
+    if t.startswith("/quant_cycle"):
+        return False
+    if re.search(
+        r"\b(genera|genera(r)?|crea|crear|ejecuta|ejecutar|lanza|activar|activa|procede|proceder)\b",
+        t,
+    ) and re.search(r"\b(señal|senal|trade|entrada|compra|rebalance|hrp)\b", t):
+        return True
+    if "señal real" in t or "senal real" in t:
+        return True
+    if "genera una señal" in t or "genera una senal" in t:
+        return True
+    if "ejecút" in t or "ejecut" in t:
+        return True
+    return False
+
+
 def _try_quant_hrp_affirm_followup(
     incoming: str,
     history: Any,
@@ -837,6 +858,15 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
             return (incoming or "").strip(), None
     t = text.lower()
     override: Optional[str] = None
+    if (worker_id or "").strip().lower() == "quant-trader" and _quant_operational_intent_requires_fly_command(text):
+        return (
+            "TAREA: Intención operativa cuant detectada. No hagas tool chaining manual en este turno. "
+            "Responde con una sugerencia explícita de **un solo fly command** listo para ejecutar por el usuario: "
+            "`/quant_cycle --tickers <...> --timeframe 1h --lookback_days 20 --objective rebalance_hrp --execute auto`. "
+            "Incluye parámetros completos inferidos del contexto (tickers, objetivo, ventana) y una línea breve explicando "
+            "que el comando ejecuta pipeline determinista end-to-end (fetch+portfolio+evaluate+signal+ejecución condicional).",
+            None,
+        )
     # MVP Leila: saludos cortos → respuesta de tienda (evita tono “agente de investigación”).
     if (worker_id or "").strip() == "LeilaAssistant":
         plain = (incoming or "").strip()

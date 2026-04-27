@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 
 import duckdb
+import pytest
 
 from duckclaw.graphs.on_the_fly_commands import (
     TradingSessionGoal,
     build_goals_proactive_system_event_message,
+    _parse_quant_cycle_cli,
     _parse_trading_session_cli,
     _session_goal_from_cli,
     _execute_signal_verify_ledger,
@@ -14,6 +16,12 @@ from duckclaw.graphs.on_the_fly_commands import (
     _compute_trading_session_pnl_now,
     _dedupe_trading_session_snapshots,
     _quant_core_trade_signals_column_names,
+    _TRADING_SESSION_PNL_HIST_UID_KEY,
+    _TRADING_SESSION_PNL_SNAPSHOTS_KEY,
+    _trading_session_snapshots_for_tearsheet_label,
+    _trading_session_coalesce_unreliable_pnl_tick,
+    _compute_trading_session_pnl_now_with_confidence,
+    execute_quant_cycle,
     execute_quant_execute_signal,
     pop_fly_outbound_chart_b64,
     register_fly_outbound_chart_b64,
@@ -54,6 +62,91 @@ def test_parse_trading_session_cli_status_stop_modes() -> None:
     assert err_stop is None and p_stop is not None and p_stop.stop is True
 
 
+def test_parse_quant_cycle_cli_defaults_and_valid_flags() -> None:
+    parsed, err = _parse_quant_cycle_cli(
+        "--tickers nvda,SPY --timeframe 4h --lookback_days 30 --objective rebalance_hrp --execute auto --signal gas --weight 7.5"
+    )
+    assert err is None and parsed is not None
+    assert parsed.tickers_csv == "NVDA,SPY"
+    assert parsed.timeframe == "4h"
+    assert parsed.lookback_days == 30
+    assert parsed.objective == "rebalance_hrp"
+    assert parsed.execute == "auto"
+    assert parsed.signal_threshold == "GAS"
+    assert abs(parsed.weight_pct - 7.5) < 1e-9
+
+
+def test_parse_quant_cycle_cli_invalid_execute() -> None:
+    parsed, err = _parse_quant_cycle_cli("--tickers NVDA --execute now")
+    assert parsed is None
+    assert "execute" in (err or "").lower()
+
+
+def test_execute_quant_cycle_structured_output(monkeypatch) -> None:
+    class _Db:
+        _path = "/tmp/test-quant-cycle.duckdb"
+
+        def query(self, sql: str) -> str:
+            if "FROM quant_core.trading_sessions" in sql:
+                return json.dumps([{"session_uid": "sess-1", "tickers": "NVDA"}])
+            return json.dumps([])
+
+    def _fake_fetch(db, *, ticker: str, timeframe: str, lookback_days: int) -> str:
+        _ = (db, timeframe, lookback_days)
+        return json.dumps({"status": "ok", "ticker": ticker, "rows_upserted": 12})
+
+    def _fake_portfolio() -> str:
+        return "portfolio ok"
+
+    def _fake_eval(db, *, session_uid: str, tickers: list[str], signal_threshold: str) -> str:
+        _ = (db, signal_threshold)
+        return json.dumps(
+            {
+                "outcome": "ACTIONABLE",
+                "session_uid": session_uid,
+                "results": [
+                    {
+                        "ticker": tickers[0],
+                        "ok": True,
+                        "phase_rank": 3,
+                        "threshold_rank": 2,
+                        "has_pending_hitl": False,
+                    }
+                ],
+            }
+        )
+
+    def _fake_signal(
+        db,
+        *,
+        mandate_id: str,
+        ticker: str,
+        weight: float,
+        rationale: str,
+        signal_type: str,
+        execute_now: bool,
+    ) -> str:
+        _ = (db, mandate_id, weight, rationale, signal_type, execute_now)
+        return json.dumps({"status": "PENDING_HITL", "signal_id": "11111111-1111-1111-1111-111111111111"})
+
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_market_bridge._fetch_ib_gateway_ohlcv_impl",
+        _fake_fetch,
+    )
+    monkeypatch.setattr("duckclaw.forge.skills.ibkr_bridge._get_ibkr_portfolio_impl", _fake_portfolio)
+    monkeypatch.setattr("duckclaw.forge.skills.quant_trader_bridge._evaluate_cfd_state_impl", _fake_eval)
+    monkeypatch.setattr("duckclaw.forge.skills.quant_trader_bridge._run_quant_signal_cycle_impl", _fake_signal)
+
+    out = execute_quant_cycle(_Db(), "chat-1", "--tickers NVDA --execute auto", tenant_id="t1")
+    assert "Ciclo Quant determinista ejecutado." in out
+    assert "```json" in out
+    payload = json.loads(out.split("```json\n", 1)[1].split("\n```", 1)[0])
+    assert payload["command"] == "quant_cycle"
+    assert payload["session_uid"] == "sess-1"
+    assert payload["stages"]["signal"]["signal_id"] == "11111111-1111-1111-1111-111111111111"
+    assert payload["policy_decision"] == "HITL_REQUIRED"
+
+
 def test_fly_outbound_chart_register_pop() -> None:
     register_fly_outbound_chart_b64(999001, "aaa")
     assert pop_fly_outbound_chart_b64(999001) == "aaa"
@@ -91,9 +184,80 @@ def test_compute_trading_session_pnl_from_trade_signals_sum() -> None:
     assert abs(_compute_trading_session_pnl_now(D(), uid) - 12.25) < 1e-6
 
 
+def test_trading_session_coalesce_unreliable_uses_prev() -> None:
+    assert _trading_session_coalesce_unreliable_pnl_tick(0.0, False, 400.0) == 400.0
+    assert _trading_session_coalesce_unreliable_pnl_tick(0.0, True, 400.0) == 0.0
+    assert _trading_session_coalesce_unreliable_pnl_tick(0.0, False, None) == 0.0
+
+
+def test_compute_trading_session_pnl_unreliable_when_ibkr_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uid = "a7c81171-7aea-4893-9852-a6dbe088e1d4"
+
+    class D:
+        def query(self, sql: str) -> str:
+            if "table_info('quant_core.trade_signals')" in sql:
+                return json.dumps([{"name": "unrealized_pnl"}, {"name": "session_uid"}])
+            if "SUM(unrealized_pnl)" in sql and "trade_signals" in sql:
+                return json.dumps([{"s": 0.0}])
+            if "portfolio_positions" in sql:
+                return json.dumps([{"s": 0.0}])
+            return json.dumps([])
+
+    def _ib_none() -> tuple[None, str]:
+        return None, "gateway down"
+
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.ibkr_bridge.fetch_ibkr_unrealized_pnl_total_numeric",
+        _ib_none,
+    )
+    v, ok = _compute_trading_session_pnl_now_with_confidence(D(), uid)
+    assert abs(v) < 1e-12
+    assert ok is False
+
+
 def test_dedupe_trading_session_snapshots_consecutive_equal() -> None:
     assert _dedupe_trading_session_snapshots([-217.64, -217.64, -217.64]) == [-217.64]
     assert _dedupe_trading_session_snapshots([100.0, 200.0, 200.0, 300.0]) == [100.0, 200.0, 300.0]
+
+
+def test_trading_session_snapshots_for_tearsheet_label_empty_on_uid_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_get(db: object, chat_id: object, key: str) -> str:
+        if key == _TRADING_SESSION_PNL_HIST_UID_KEY:
+            return "other-uid"
+        if key == _TRADING_SESSION_PNL_SNAPSHOTS_KEY:
+            return "[1.0, 2.0, 3.0]"
+        return ""
+
+    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.get_chat_state", _fake_get)
+    class _Db:
+        _path = "/tmp/x.duckdb"
+
+    out = _trading_session_snapshots_for_tearsheet_label(
+        _Db(), "c1", session_uid="want-this-uid"
+    )
+    assert out == []
+
+
+def test_trading_session_snapshots_for_tearsheet_label_returns_deduped(monkeypatch: pytest.MonkeyPatch) -> None:
+    uid = "a7c81171-7aea-4893-9852-a6dbe088e1d4"
+
+    def _fake_get(db: object, chat_id: object, key: str) -> str:
+        if key == _TRADING_SESSION_PNL_HIST_UID_KEY:
+            return uid
+        if key == _TRADING_SESSION_PNL_SNAPSHOTS_KEY:
+            return "[100.0, 200.0, 200.0, 150.0]"
+        return ""
+
+    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.get_chat_state", _fake_get)
+    class _Db:
+        _path = "/tmp/x.duckdb"
+
+    got = _trading_session_snapshots_for_tearsheet_label(_Db(), "c1", session_uid=uid)
+    assert got == [100.0, 200.0, 150.0]
 
 
 def test_compute_trading_session_pnl_portfolio_positions_fallback() -> None:

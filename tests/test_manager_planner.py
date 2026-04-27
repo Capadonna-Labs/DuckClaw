@@ -28,6 +28,15 @@ def test_plan_task_job_hunter_uses_tavily_not_run_sandbox_only() -> None:
     assert task2 == "busca un trabajo de data scientist en Colombia y pásame la url"
 
 
+def test_plan_task_quant_operational_intent_prefers_fly_command() -> None:
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    task, override = _plan_task("Genera una señal real y ejecútala para NVDA", "Quant-Trader")
+    assert override is None
+    assert "/quant_cycle" in task
+    assert "tool chaining manual" in task.lower()
+
+
 def test_cashflow_stress_intent_detection() -> None:
     from duckclaw.graphs.manager_graph import _user_signals_cashflow_stress
 

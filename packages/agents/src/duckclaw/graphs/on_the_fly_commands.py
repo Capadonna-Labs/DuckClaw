@@ -9,10 +9,12 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import re
 import shutil
+import statistics
 import subprocess
 import time
 import urllib.error
@@ -53,6 +55,36 @@ GOALS_DELTA_MAX_SECONDS = 7 * 24 * 3600
 
 # Gráfica PNG (base64) para respuestas fly: api-gateway hace pop y sendPhoto
 _FLY_OUTBOUND_CHART_B64: dict[str, str] = {}
+
+
+def _debug_log_model_config(
+    *,
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict[str, Any],
+    run_id: str = "gemini_cfg_debug_v1",
+) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "c964f7",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _f:
+            _f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
 
 
 def register_fly_outbound_chart_b64(session_id: Any, b64: str) -> None:
@@ -3416,7 +3448,7 @@ def get_effective_system_prompt(db: Any, worker_id: Optional[str] = None) -> str
     return current if current else ""
 
 
-_PROVIDERS = ("mlx", "ollama", "openai", "anthropic", "deepseek", "groq")
+_PROVIDERS = ("mlx", "ollama", "openai", "anthropic", "deepseek", "groq", "gemini")
 
 # Modelo por defecto al cambiar provider (evita "Model Not Exist" al pasar de MLX a cloud)
 _DEFAULT_MODEL_BY_PROVIDER = {
@@ -3424,6 +3456,7 @@ _DEFAULT_MODEL_BY_PROVIDER = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-5-haiku-20241022",
     "groq": "llama-3.3-70b-versatile",
+    "gemini": "gemini-2.0-flash",
     "mlx": "",  # usa MLX_MODEL_ID o /v1/models
     "ollama": "llama3.2",
 }
@@ -3434,6 +3467,7 @@ _DEFAULT_BASE_URL_BY_PROVIDER = {
     "groq": "https://api.groq.com/openai/v1",
     "openai": "",
     "anthropic": "",
+    "gemini": "",
     "mlx": "",
     "ollama": "http://127.0.0.1:11434",
 }
@@ -3447,27 +3481,44 @@ def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str,
     )
 
     _ensure_duckclaw_llm_env_from_legacy_llm_vars()
-    p = (
-        get_chat_state(db, chat_id, "llm_provider")
-        or _get_global_config(db, "llm_provider")
-        or os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx")
-    ).strip().lower()
-    m = (
-        get_chat_state(db, chat_id, "llm_model")
-        or _get_global_config(db, "llm_model")
-        or os.environ.get("DUCKCLAW_LLM_MODEL", "")
-    ).strip()
-    u = (
-        get_chat_state(db, chat_id, "llm_base_url")
-        or _get_global_config(db, "llm_base_url")
-        or os.environ.get("DUCKCLAW_LLM_BASE_URL", "")
-    ).strip()
+    p_chat = (get_chat_state(db, chat_id, "llm_provider") or "").strip()
+    p_global = (_get_global_config(db, "llm_provider") or "").strip()
+    p_env = (os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx") or "").strip()
+    p = (p_chat or p_global or p_env).strip().lower()
+    m_chat = (get_chat_state(db, chat_id, "llm_model") or "").strip()
+    m_global = (_get_global_config(db, "llm_model") or "").strip()
+    m_env = (os.environ.get("DUCKCLAW_LLM_MODEL", "") or "").strip()
+    m = (m_chat or m_global or m_env).strip()
+    u_chat = (get_chat_state(db, chat_id, "llm_base_url") or "").strip()
+    u_global = (_get_global_config(db, "llm_base_url") or "").strip()
+    u_env = (os.environ.get("DUCKCLAW_LLM_BASE_URL", "") or "").strip()
+    u = (u_chat or u_global or u_env).strip()
     if p == "mlx":
         ul = u.lower()
         if (not u) or "groq.com" in ul or "deepseek.com" in ul:
             u = mlx_openai_compatible_base_url()
         if not m:
             m = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
+    _debug_log_model_config(
+        hypothesis_id="H_sources_priority",
+        location="on_the_fly_commands._effective_llm_triplet_for_chat_ui",
+        message="effective_triplet_computed",
+        data={
+            "chat_id": str(chat_id),
+            "provider": p,
+            "model": m[:80],
+            "base_url": u[:120],
+            "src_provider": "chat" if p_chat else ("global" if p_global else "env"),
+            "src_model": "chat" if m_chat else ("global" if m_global else "env"),
+            "src_base_url": "chat" if u_chat else ("global" if u_global else "env"),
+            "chat_provider": p_chat[:60],
+            "chat_base_url": u_chat[:120],
+            "global_provider": p_global[:60],
+            "global_base_url": u_global[:120],
+            "env_provider": p_env[:60],
+            "env_base_url": u_env[:120],
+        },
+    )
     return (p, m, u)
 
 
@@ -3483,20 +3534,33 @@ def chat_has_llm_chat_state_override(db: Any, chat_id: Any) -> bool:
 
 def resolve_llm_triplet_for_chat_invocation(db: Any, chat_id: Any) -> tuple[str, str, str] | None:
     """Si el chat tiene llm_* en agent_config, devuelve tripleta para build_llm; si no, None (usar cache env del gateway)."""
-    if not chat_has_llm_chat_state_override(db, chat_id):
+    has_override = chat_has_llm_chat_state_override(db, chat_id)
+    _debug_log_model_config(
+        hypothesis_id="H_override_gate",
+        location="on_the_fly_commands.resolve_llm_triplet_for_chat_invocation",
+        message="chat_override_gate",
+        data={"chat_id": str(chat_id), "has_override": bool(has_override)},
+    )
+    if not has_override:
         return None
     return _effective_llm_triplet_for_chat_ui(db, chat_id)
 
 
 def execute_model(db: Any, chat_id: Any, args: str) -> str:
     """/model [provider=mlx] [model=...] [base_url=...]: cambia proveedor/modelo LLM en caliente. Sin args muestra el actual."""
+    _debug_log_model_config(
+        hypothesis_id="H_write_apply",
+        location="on_the_fly_commands.execute_model",
+        message="execute_model_entry",
+        data={"chat_id": str(chat_id), "args": (args or "")[:180]},
+    )
     if not args or not args.strip():
         provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id)
         provider = provider or "—"
         model = model or "—"
         u_show = base_url or "—"
         base_url = u_show[:50] + "…" if len(u_show) > 50 else u_show
-        return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model model=Slayer-8B"
+        return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model provider=gemini | /model model=Slayer-8B"
     for part in args.split("|"):
         part = part.strip()
         if "=" in part:
@@ -3522,11 +3586,112 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
                         set_chat_state(db, chat_id, "llm_base_url", default_url)
                     else:
                         set_chat_state(db, chat_id, "llm_base_url", "")
+                _debug_log_model_config(
+                    hypothesis_id="H_write_apply",
+                    location="on_the_fly_commands.execute_model",
+                    message="provider_written",
+                    data={
+                        "chat_id": str(chat_id),
+                        "provider_arg": (v or "").lower(),
+                        "default_model": (_DEFAULT_MODEL_BY_PROVIDER.get((v or "").lower(), "") or "")[:80],
+                        "default_base_url": (_DEFAULT_BASE_URL_BY_PROVIDER.get((v or "").lower(), "") or "")[:120],
+                    },
+                )
             elif k == "model":
                 set_chat_state(db, chat_id, "llm_model", v)
             elif k == "base_url":
                 set_chat_state(db, chat_id, "llm_base_url", v)
+    _p, _m, _u = _effective_llm_triplet_for_chat_ui(db, chat_id)
+    _debug_log_model_config(
+        hypothesis_id="H_write_apply",
+        location="on_the_fly_commands.execute_model",
+        message="execute_model_exit",
+        data={"chat_id": str(chat_id), "provider": _p, "model": _m[:80], "base_url": _u[:120]},
+    )
     return "✅ Modelo actualizado. Los próximos mensajes usarán esta config."
+
+
+def _parse_pipe_kv_args(args: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in (args or "").split("|"):
+        p = part.strip()
+        if "=" not in p:
+            continue
+        k, _, v = p.partition("=")
+        k = k.strip().lower()
+        v = v.strip()
+        if k:
+            out[k] = v
+    return out
+
+
+def _gemini_models_list_from_api(api_key: str) -> tuple[list[str], str | None]:
+    url = "https://generativelanguage.googleapis.com/v1beta/models"
+    req = urllib.request.Request(
+        f"{url}?key={urllib.parse.quote(api_key)}",
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            status = getattr(resp, "status", 200)
+            body = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        return [], f"Gemini API HTTP {e.code}: {(detail or '').strip()[:220] or 'sin detalle'}"
+    except Exception as e:
+        return [], f"No pude consultar Gemini models: {e}"
+    if status < 200 or status >= 300:
+        return [], f"Gemini API devolvió HTTP {status}."
+    try:
+        payload = json.loads(body or "{}")
+    except json.JSONDecodeError:
+        return [], "Gemini API devolvió una respuesta no-JSON."
+    models = payload.get("models")
+    if not isinstance(models, list):
+        return [], "Gemini API no devolvió la lista de modelos."
+    usable: list[str] = []
+    for row in models:
+        if not isinstance(row, dict):
+            continue
+        raw_name = str(row.get("name") or "").strip()
+        if not raw_name:
+            continue
+        methods = row.get("supportedGenerationMethods") or []
+        if isinstance(methods, list) and methods:
+            method_names = {str(m).strip() for m in methods if str(m).strip()}
+            if "generateContent" not in method_names:
+                continue
+        short_name = raw_name.split("/")[-1]
+        if short_name:
+            usable.append(short_name)
+    dedup = sorted(set(usable))
+    if "gemini-2.0-flash" in dedup:
+        dedup = ["gemini-2.0-flash"] + [m for m in dedup if m != "gemini-2.0-flash"]
+    return dedup, None
+
+
+def execute_models(db: Any, chat_id: Any, args: str) -> str:
+    """/models provider=gemini: lista modelos disponibles del proveedor."""
+    kv = _parse_pipe_kv_args(args)
+    provider = (kv.get("provider") or "").strip().lower()
+    if not provider:
+        provider = (_effective_llm_triplet_for_chat_ui(db, chat_id)[0] or "").strip().lower()
+    if not provider:
+        return "Uso: /models provider=gemini"
+    if provider != "gemini":
+        return "Por ahora /models soporta solo provider=gemini."
+    key = ((os.environ.get("GOOGLE_API_KEY") or "").strip() or (os.environ.get("GEMINI_API_KEY") or "").strip())
+    if not key:
+        return "Falta GOOGLE_API_KEY (o GEMINI_API_KEY) para listar modelos de Gemini."
+    models, err = _gemini_models_list_from_api(key)
+    if err:
+        return f"No se pudo listar modelos Gemini. {err}"
+    if not models:
+        return "Gemini no devolvió modelos utilizables para generateContent."
+    preview = "\n".join(f"- {m}" for m in models[:30])
+    more = "" if len(models) <= 30 else f"\n... y {len(models) - 30} más."
+    hint = "\nSugerencia: /model provider=gemini | model=gemini-2.0-flash"
+    return f"Modelos Gemini disponibles ({len(models)}):\n{preview}{more}{hint}"
 
 
 def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
@@ -3762,6 +3927,7 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ("/goals", "Objetivos de homeostasis"),
         ("/prompt <worker_id>", "Ver prompt; --change <texto> para cambiar"),
         ("/model", "Ver o cambiar LLM (provider/model)"),
+        ("/models", "Listar modelos disponibles de un provider (ej. gemini)"),
         ("/skills <worker_id>", "Herramientas del template"),
         ("/forget", "Borrar historial de la conversación"),
         ("/context", "on|off (historial); en Telegram: --add / --summary (memoria semántica)"),
@@ -3786,6 +3952,10 @@ def execute_help(db: Any, chat_id: Any) -> str:
         (
             "/trading_session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp] [--confirm] [--status] [--stop]",
             "Quant: sesión activa + session_goal + auto delta de /goals (live requiere --confirm)",
+        ),
+        (
+            "/quant_cycle [--tickers A,B] [--timeframe 1h] [--lookback_days 20] [--objective maximize_pnl|rebalance_hrp] [--execute auto|off]",
+            "Quant: pipeline determinista (fetch -> portfolio -> evaluate -> señal) con salida estructurada",
         ),
         ("/lake", "Estado del túnel SSH Capadonna (env + prueba rápida)"),
     ]
@@ -4274,6 +4444,18 @@ class TradingSessionCliArgs(BaseModel):
     objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
 
 
+class QuantCycleCliArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tickers_csv: str = ""
+    timeframe: str = "1h"
+    lookback_days: int = 20
+    objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
+    execute: Literal["auto", "off"] = "auto"
+    signal_threshold: str = "GAS"
+    weight_pct: float = 5.0
+
+
 def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArgs], Optional[str]]:
     """Parsea flags de /trading_session."""
     mode: Optional[str] = None
@@ -4361,6 +4543,92 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
                 "position_size_pct": float(position_size),
                 "signal_threshold": signal_threshold or "GAS",
                 "objective": str(objective).strip().lower() or "maximize_pnl",
+            }
+        )
+    except ValidationError as exc:
+        return None, f"flags inválidos: {exc}"
+    return parsed, None
+
+
+def _parse_quant_cycle_cli(args: str) -> tuple[Optional[QuantCycleCliArgs], Optional[str]]:
+    """Parsea flags de /quant_cycle."""
+    tickers_raw: list[str] = []
+    timeframe = "1h"
+    lookback_days = 20
+    objective = "maximize_pnl"
+    execute = "auto"
+    signal_threshold = "GAS"
+    weight_pct = 5.0
+    tokens = (args or "").strip().split()
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t == "--tickers" and i + 1 < len(tokens):
+            tickers_raw = [x.strip().upper() for x in str(tokens[i + 1] or "").split(",") if x.strip()]
+            i += 2
+            continue
+        if t == "--timeframe" and i + 1 < len(tokens):
+            timeframe = str(tokens[i + 1] or "").strip()
+            i += 2
+            continue
+        if t in ("--lookback_days", "--lookback-days") and i + 1 < len(tokens):
+            try:
+                lookback_days = int(tokens[i + 1])
+            except ValueError:
+                return None, "--lookback_days debe ser entero"
+            i += 2
+            continue
+        if t == "--objective" and i + 1 < len(tokens):
+            objective = str(tokens[i + 1] or "").strip().lower()
+            i += 2
+            continue
+        if t == "--execute" and i + 1 < len(tokens):
+            execute = str(tokens[i + 1] or "").strip().lower()
+            i += 2
+            continue
+        if t == "--signal" and i + 1 < len(tokens):
+            signal_threshold = str(tokens[i + 1] or "").strip().upper()
+            i += 2
+            continue
+        if t in ("--weight", "--weight-pct") and i + 1 < len(tokens):
+            try:
+                weight_pct = float(tokens[i + 1])
+            except ValueError:
+                return None, "--weight debe ser numérico"
+            i += 2
+            continue
+        i += 1
+    if objective not in ("maximize_pnl", "rebalance_hrp"):
+        return None, "objective debe ser maximize_pnl o rebalance_hrp"
+    if execute not in ("auto", "off"):
+        return None, "execute debe ser auto u off"
+    if not re.fullmatch(r"[A-Za-z0-9]+", timeframe or ""):
+        return None, "timeframe inválido (solo alfanumérico)"
+    if lookback_days < 1 or lookback_days > 4000:
+        return None, "lookback_days debe estar entre 1 y 4000"
+    if weight_pct <= 0:
+        return None, "weight debe ser mayor a 0"
+    allowed_threshold = {"SOLID", "LIQUID", "GAS", "PLASMA"}
+    if signal_threshold not in allowed_threshold:
+        signal_threshold = "GAS"
+    seen: set[str] = set()
+    tickers_ordered: list[str] = []
+    for x in tickers_raw:
+        if not re.fullmatch(r"[A-Z0-9]{1,8}", x):
+            return None, f"ticker inválido: {x}"
+        if x not in seen:
+            seen.add(x)
+            tickers_ordered.append(x)
+    try:
+        parsed = QuantCycleCliArgs.model_validate(
+            {
+                "tickers_csv": ",".join(tickers_ordered),
+                "timeframe": timeframe,
+                "lookback_days": int(lookback_days),
+                "objective": objective,
+                "execute": execute,
+                "signal_threshold": signal_threshold,
+                "weight_pct": float(weight_pct),
             }
         )
     except ValidationError as exc:
@@ -4563,10 +4831,18 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
             if isinstance(it, dict)
         }
         has_session_goal = "session_goal" in known_cols
+        has_anchor_equity = "anchor_equity" in known_cols
+        has_peak_equity = "peak_equity" in known_cols
         select_goal = "session_goal" if has_session_goal else "NULL AS session_goal"
+        select_anchor = "anchor_equity" if has_anchor_equity else "NULL AS anchor_equity"
+        select_peak = "peak_equity" if has_peak_equity else "NULL AS peak_equity"
         raw = db.query(
             "SELECT mode, tickers, session_uid, status, "
             + select_goal
+            + ", "
+            + select_anchor
+            + ", "
+            + select_peak
             + " FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
         )
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
@@ -4609,7 +4885,7 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
             cancelled += 1
         elif st in ("PENDING_HITL", "AWAITING_HITL", "PENDING"):
             pending += 1
-    pnl_now = _compute_trading_session_pnl_now(db, uid)
+    pnl_raw, pnl_reliable = _compute_trading_session_pnl_now_with_confidence(db, uid)
     old_last_s = str(get_chat_state(db, chat_id, "trading_session_last_pnl") or "").strip()
     hist_uid_s = str(get_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or "").strip()
     if hist_uid_s != uid:
@@ -4623,6 +4899,42 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
     if not isinstance(snapshots, list):
         snapshots = []
     snapshots = _dedupe_trading_session_snapshots(snapshots)
+    _prev_for_carry: float | None = None
+    if snapshots:
+        try:
+            _prev_for_carry = float(snapshots[-1])
+        except (TypeError, ValueError):
+            _prev_for_carry = None
+    pnl_now = _trading_session_coalesce_unreliable_pnl_tick(
+        pnl_raw, pnl_reliable, _prev_for_carry
+    )
+    # region agent log
+    try:
+        _p2 = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+        with _p2.open("a", encoding="utf-8") as _f2:
+            _f2.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H_pnl_gateway_carry",
+                        "location": "on_the_fly_commands._read_trading_session_status_summary:pnl_coalesce",
+                        "message": "pnl_tick_coalesce",
+                        "data": {
+                            "reliable": pnl_reliable,
+                            "raw": float(pnl_raw),
+                            "after": float(pnl_now),
+                            "had_prev": _prev_for_carry is not None,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                        "runId": "ib-down-carry",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     prev_val: float | None = None
     if old_last_s:
         try:
@@ -4630,8 +4942,6 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         except (TypeError, ValueError):
             prev_val = None
     pct_num: float | None = None
-    if prev_val is not None and abs(prev_val) > 1e-12:
-        pct_num = (pnl_now - prev_val) / abs(prev_val) * 100.0
     _append_snap = True
     if snapshots:
         try:
@@ -4644,7 +4954,10 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
     if _append_snap:
         snapshots.append(float(pnl_now))
     snapshots = [float(x) for x in snapshots[-64:]]
-    set_chat_state(db, chat_id, "trading_session_last_pnl", f"{pnl_now:.6f}".rstrip("0").rstrip("."))
+    _display_pnl = float(snapshots[-1]) if snapshots else float(pnl_now)
+    if prev_val is not None and abs(prev_val) > 1e-12:
+        pct_num = (_display_pnl - prev_val) / abs(prev_val) * 100.0
+    set_chat_state(db, chat_id, "trading_session_last_pnl", f"{_display_pnl:.6f}".rstrip("0").rstrip("."))
     set_chat_state(db, chat_id, "trading_session_prev_pnl", old_last_s)
     set_chat_state(
         db,
@@ -4664,9 +4977,61 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         tick_line = f"Tick delta: cada ~{format_goals_delta_interval_human(ds)}{cp}"
     else:
         tick_line = "Tick delta: inactivo"
-    _pnl_curr_txt = f"{pnl_now:.2f}"
+    try:
+        _anchor_eq = float(row.get("anchor_equity") or 0.0)
+    except (TypeError, ValueError):
+        _anchor_eq = 0.0
+    _tearsheet = _compute_tick_tearsheet_metrics_from_pnl(
+        snapshots=snapshots,
+        anchor_equity=_anchor_eq,
+    )
+    _pnl_curr_txt = f"{_display_pnl:.2f}"
     _pnl_prev_txt = f"{prev_val:.2f}" if prev_val is not None else "N/D"
     _pnl_pct_txt = f"{pct_num:+.2f}%" if pct_num is not None else "N/D"
+    _sharpe_txt = (
+        f"{_tearsheet['sharpe']:+.2f}" if _tearsheet.get("sharpe") is not None else "N/D"
+    )
+    _sortino_txt = (
+        f"{_tearsheet['sortino']:+.2f}" if _tearsheet.get("sortino") is not None else "N/D"
+    )
+    _vol_txt = (
+        f"{_tearsheet['volatility_pct']:.2f}%"
+        if _tearsheet.get("volatility_pct") is not None
+        else "N/D"
+    )
+    _mdd_txt = (
+        f"{_tearsheet['max_drawdown_pct']:.2f}%"
+        if _tearsheet.get("max_drawdown_pct") is not None
+        else "N/D"
+    )
+    # region agent log
+    try:
+        _p = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+        with _p.open("a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H_tearsheet_metrics",
+                        "location": "on_the_fly_commands._read_trading_session_status_summary",
+                        "message": "tearsheet_metrics_computed",
+                        "data": {
+                            "session_uid": uid[:12],
+                            "snapshots_len": len(snapshots),
+                            "anchor_equity": _anchor_eq,
+                            "has_sharpe": _tearsheet.get("sharpe") is not None,
+                            "has_mdd": _tearsheet.get("max_drawdown_pct") is not None,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                        "runId": "post-fix",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     _status_text = (
         f"Sesión activa: `{uid}`\n"
         f"Mode: `{mode}` | Tickers: `{tickers}`\n"
@@ -4677,6 +5042,11 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         f"PnL actual: {_pnl_curr_txt}\n"
         f"PnL anterior: {_pnl_prev_txt}\n"
         f"Cambio vs anterior: {_pnl_pct_txt}\n"
+        "📊 Tearsheet (tick-based):\n"
+        f"- ⚡ Sharpe: {_sharpe_txt}\n"
+        f"- 🛡️ Sortino: {_sortino_txt}\n"
+        f"- 🌪️ Volatilidad: {_vol_txt}\n"
+        f"- 📉 Max Drawdown: {_mdd_txt}\n"
         f"{tick_line}"
     )
     return _status_text
@@ -4695,11 +5065,32 @@ def _quant_core_trade_signals_column_names(db: Any) -> set[str]:
         return set()
 
 
-def _compute_trading_session_pnl_now(db: Any, session_uid: str) -> float:
-    """PnL agregado para la sesión: trade_signals (si hay columna), portfolio_positions, luego snapshot IBKR."""
+def _trading_session_coalesce_unreliable_pnl_tick(
+    raw: float, reliable: bool, previous_last: float | None
+) -> float:
+    """
+    Si ninguna fuente pudo leer PnL con certeza (p. ej. IB Gateway abajo y todo devuelve 0),
+    reutilizar el último tick en lugar de 0, para no distorsionar la serie del gráfico.
+    """
+    if reliable:
+        return float(raw)
+    if previous_last is not None:
+        return float(previous_last)
+    return float(raw)
+
+
+def _compute_trading_session_pnl_now_with_confidence(
+    db: Any, session_uid: str
+) -> tuple[float, bool]:
+    """
+    PnL agregado: trade_signals (sum no nula), portfolio_positions, luego IBKR.
+    Retorna (valor, fiable). fiable == False si se llega a 0 sin que ninguna fuente
+    haya dado un número (IBKR con None, sin snapshot usable).
+    Un (0, True) indica 0 con respuesta explícita (p. ej. IB devolvió 0.0 y portfolio vacío).
+    """
     uid = (session_uid or "").strip()
     if not uid or uid == "n/a":
-        return 0.0
+        return (0.0, True)
     esc = uid.replace("'", "''")
     cols = _quant_core_trade_signals_column_names(db)
     if "unrealized_pnl" in cols:
@@ -4712,7 +5103,7 @@ def _compute_trading_session_pnl_now(db: Any, session_uid: str) -> float:
             if rows and isinstance(rows[0], dict):
                 v = float(rows[0].get("s") or 0.0)
                 if abs(v) > 1e-12:
-                    return v
+                    return (v, True)
         except Exception:
             pass
     try:
@@ -4723,7 +5114,7 @@ def _compute_trading_session_pnl_now(db: Any, session_uid: str) -> float:
         if rows and isinstance(rows[0], dict):
             v = float(rows[0].get("s") or 0.0)
             if abs(v) > 1e-12:
-                return v
+                return (v, True)
     except Exception:
         pass
     try:
@@ -4731,17 +5122,114 @@ def _compute_trading_session_pnl_now(db: Any, session_uid: str) -> float:
 
         ibkr_u, _err = fetch_ibkr_unrealized_pnl_total_numeric()
         if ibkr_u is not None:
-            return float(ibkr_u)
+            return (float(ibkr_u), True)
     except Exception:
         pass
-    return 0.0
+    return (0.0, False)
+
+
+def _compute_trading_session_pnl_now(db: Any, session_uid: str) -> float:
+    v, _ = _compute_trading_session_pnl_now_with_confidence(db, session_uid)
+    return v
+
+
+def _trading_session_snapshots_for_tearsheet_label(
+    db: Any, chat_id: Any, *, session_uid: str
+) -> list[float]:
+    """
+    Misma fuente de serie que el bloque "Tearsheet (tick-based)" de
+    _read_trading_session_status_summary: snapshots guardados en agent_config
+    (PnL agregado por tick), alineados a session_uid.
+    Debe usarse en la anotación del PNG para no divergir del texto.
+    """
+    uid = (session_uid or "").strip()
+    if not uid or uid == "n/a":
+        return []
+    hist_uid_s = str(get_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or "").strip()
+    if hist_uid_s != uid:
+        return []
+    try:
+        _raw = get_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
+        snapshots = json.loads(_raw) if _raw.strip() else []
+    except Exception:
+        return []
+    if not isinstance(snapshots, list) or not snapshots:
+        return []
+    try:
+        return _dedupe_trading_session_snapshots([float(x) for x in snapshots])
+    except (TypeError, ValueError):
+        return []
+
+
+def _compute_tick_tearsheet_metrics_from_pnl(
+    *,
+    snapshots: list[float],
+    anchor_equity: float,
+) -> dict[str, float | None]:
+    """
+    Métricas estilo tearsheet a partir de snapshots de PnL.
+    Son métricas "tick-based" (sin calendario fijo) y se anualizan con 252 pasos.
+    """
+    out: dict[str, float | None] = {
+        "sharpe": None,
+        "sortino": None,
+        "volatility_pct": None,
+        "max_drawdown_pct": None,
+    }
+    if anchor_equity <= 0:
+        return out
+    if not isinstance(snapshots, list) or len(snapshots) < 3:
+        return out
+    try:
+        pnl_series = [float(x) for x in snapshots]
+    except (TypeError, ValueError):
+        return out
+    equity = [anchor_equity + p for p in pnl_series]
+    if len(equity) < 3:
+        return out
+    rets: list[float] = []
+    for i in range(1, len(equity)):
+        prev = float(equity[i - 1])
+        curr = float(equity[i])
+        if prev <= 0:
+            continue
+        rets.append((curr / prev) - 1.0)
+    if len(rets) < 2:
+        return out
+    try:
+        mean_r = statistics.fmean(rets)
+        std_r = statistics.pstdev(rets)
+    except Exception:
+        return out
+    if std_r > 1e-12:
+        out["sharpe"] = (mean_r / std_r) * math.sqrt(252.0)
+        out["volatility_pct"] = std_r * math.sqrt(252.0) * 100.0
+    downside = [r for r in rets if r < 0]
+    if downside:
+        try:
+            down_std = statistics.pstdev(downside)
+            if down_std > 1e-12:
+                out["sortino"] = (mean_r / down_std) * math.sqrt(252.0)
+        except Exception:
+            pass
+    peak = equity[0]
+    max_dd = 0.0
+    for v in equity:
+        if v > peak:
+            peak = v
+        if peak > 0:
+            dd = (v / peak) - 1.0
+            if dd < max_dd:
+                max_dd = dd
+    out["max_drawdown_pct"] = max_dd * 100.0
+    return out
 
 
 def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None:
     """Serie PnL acumulado (señales EXECUTED) → PNG base64, o None."""
     try:
         raw = db.query(
-            "SELECT mode, session_uid, status FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+            "SELECT mode, session_uid, status, anchor_equity FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
         )
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
     except Exception:
@@ -4755,6 +5243,10 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
     uid = str(row.get("session_uid") or "").strip()
     if not uid or uid == "n/a":
         return None
+    try:
+        _anchor_eq = float(row.get("anchor_equity") or 0.0)
+    except (TypeError, ValueError):
+        _anchor_eq = 0.0
     esc = uid.replace("'", "''")
     executed_pnls: list[float] = []
     pnl_total = 0.0
@@ -4787,11 +5279,26 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
                         pass
         except Exception:
             return None
+    # Misma serie "tick" que el tearsheet: si hay snapshots alineados a la sesión,
+    # trazar la curva con ellos. El acumulado por filas EXECUTED + unrealized_pnl
+    # suele divergir de SUM/PnL agregado y de los snapshots (p. ej. PnL actual 0 vs curva ~400).
+    _snap_for_line: list[float] = _trading_session_snapshots_for_tearsheet_label(
+        db, chat_id, session_uid=uid
+    )
+    pnl_line_source = "executed"
     cum: list[float] = [0.0]
-    if executed_pnls:
+    if _snap_for_line:
+        pnl_line_source = "snapshots"
+        for it in _snap_for_line:
+            try:
+                cum.append(float(it))
+            except (TypeError, ValueError):
+                cum.append(cum[-1])
+    elif executed_pnls:
         for p in executed_pnls:
             cum.append(cum[-1] + p)
     else:
+        pnl_line_source = "fallback"
         hist_uid_g = str(get_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or "").strip()
         if hist_uid_g == uid.strip():
             try:
@@ -4828,13 +5335,127 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
         return None
     n = len(cum)
     x = list(range(n))
-    fig, ax = plt.subplots(figsize=(6, 3.2), dpi=100)
-    ax.plot(x, cum, color="#2563eb", linewidth=2, marker="o", markersize=3)
+    # Tearsheet: misma lista que la curva cuando hay snapshots; si no, derivada de `cum`.
+    _snap_for_metrics = _snap_for_line or _trading_session_snapshots_for_tearsheet_label(
+        db, chat_id, session_uid=uid
+    )
+    _tearsheet = _compute_tick_tearsheet_metrics_from_pnl(
+        snapshots=_snap_for_metrics
+        if _snap_for_metrics
+        else [float(v) for v in cum],
+        anchor_equity=_anchor_eq,
+    )
+    # #region agent log
+    try:
+        _p = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+        with _p.open("a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "tearsheet_overlay_align",
+                        "hypothesisId": "H_pnl_line_series",
+                        "location": "on_the_fly_commands._build_trading_session_pnl_chart_b64:metrics_source",
+                        "message": "tearsheet_overlay_source",
+                        "data": {
+                            "pnl_line_source": pnl_line_source,
+                            "use_chat_snapshots": bool(_snap_for_metrics),
+                            "chat_snap_len": len(_snap_for_metrics or []),
+                            "cum_len": len(cum),
+                            "last_cum": float(cum[-1]) if cum else None,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+    _sharpe_txt = (
+        f"{_tearsheet['sharpe']:+.2f}" if _tearsheet.get("sharpe") is not None else "N/D"
+    )
+    _sortino_txt = (
+        f"{_tearsheet['sortino']:+.2f}" if _tearsheet.get("sortino") is not None else "N/D"
+    )
+    _vol_txt = (
+        f"{_tearsheet['volatility_pct']:.2f}%"
+        if _tearsheet.get("volatility_pct") is not None
+        else "N/D"
+    )
+    _mdd_txt = (
+        f"{_tearsheet['max_drawdown_pct']:.2f}%"
+        if _tearsheet.get("max_drawdown_pct") is not None
+        else "N/D"
+    )
+    equity_curve = [_anchor_eq + float(v) for v in cum] if _anchor_eq > 0 else []
+    drawdowns: list[float] = []
+    if equity_curve:
+        peak = equity_curve[0]
+        for v in equity_curve:
+            if v > peak:
+                peak = v
+            drawdowns.append(((v / peak) - 1.0) * 100.0 if peak > 0 else 0.0)
+    else:
+        drawdowns = [0.0 for _ in cum]
+    fig, (ax, ax_dd) = plt.subplots(
+        2,
+        1,
+        figsize=(7.2, 4.8),
+        dpi=110,
+        gridspec_kw={"height_ratios": [3.0, 1.2]},
+    )
+    ax.plot(x, cum, color="#2563eb", linewidth=2, marker="o", markersize=2.8, label="PnL acumulado")
     ax.axhline(0, color="#94a3b8", linewidth=0.8)
-    ax.set_xlabel("Paso (0 = inicio)")
     ax.set_ylabel("PnL ($)")
-    ax.set_title(f"Rendimiento · {mode} · {uid[:8]}…", fontsize=10)
+    ax.set_title(f"Trading Session Tearsheet · {mode} · {uid[:8]}…", fontsize=10)
     ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
+    ax.text(
+        0.99,
+        0.02,
+        f"Sharpe: {_sharpe_txt} | Sortino: {_sortino_txt} | Vol: {_vol_txt} | MaxDD: {_mdd_txt}",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=8,
+        color="#111827",
+        bbox={"facecolor": "white", "alpha": 0.78, "edgecolor": "#d1d5db", "pad": 2.5},
+    )
+    ax_dd.plot(x, drawdowns, color="#dc2626", linewidth=1.6)
+    ax_dd.fill_between(x, drawdowns, [0.0 for _ in drawdowns], color="#fecaca", alpha=0.6)
+    ax_dd.axhline(0, color="#9ca3af", linewidth=0.8)
+    ax_dd.set_xlabel("Paso (0 = inicio)")
+    ax_dd.set_ylabel("DD %")
+    ax_dd.grid(True, alpha=0.25)
+    # region agent log
+    try:
+        _p = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+        with _p.open("a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H_tearsheet_metrics",
+                        "location": "on_the_fly_commands._build_trading_session_pnl_chart_b64",
+                        "message": "tearsheet_chart_render",
+                        "data": {
+                            "points": n,
+                            "anchor_equity": _anchor_eq,
+                            "has_sharpe": _tearsheet.get("sharpe") is not None,
+                            "has_drawdown": bool(drawdowns),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                        "runId": "post-fix",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     fig.tight_layout()
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=100, facecolor="white", edgecolor="none", bbox_inches="tight")
@@ -4968,6 +5589,325 @@ ON CONFLICT (id) DO UPDATE SET
         "El reactor Quant debe leer tickers y `status=ACTIVE` antes de proponer señales."
     )
 
+
+def execute_quant_cycle(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    tenant_id: Any = None,
+    vault_user_id: Any = None,
+) -> str:
+    """/quant_cycle: ciclo determinista Quant (fetch+portfolio+evaluate+signal) en un solo comando."""
+    _ = vault_user_id
+    parsed, err = _parse_quant_cycle_cli(args)
+    if err or parsed is None:
+        return (
+            f"Error: {err}\n\n"
+            "Uso: `/quant_cycle [--tickers AAPL,NVDA] [--timeframe 1h] [--lookback_days 20]`\n"
+            "Extras: `--objective maximize_pnl|rebalance_hrp` · `--signal GAS|LIQUID|SOLID|PLASMA` · "
+            "`--weight 5` · `--execute auto|off`\n"
+            "Si no pasas `--tickers`, se usan los de `quant_core.trading_sessions` (id=active) o `SPY` por defecto."
+        )
+    from duckclaw.forge.skills.ibkr_bridge import _get_ibkr_portfolio_impl
+    from duckclaw.forge.skills.quant_market_bridge import _fetch_ib_gateway_ohlcv_impl
+    from duckclaw.forge.skills.quant_tool_context import (
+        bind_quant_market_evidence_chat,
+        note_quant_market_evidence_ticker,
+        reset_quant_market_evidence,
+        set_quant_tool_chat_id,
+        set_quant_tool_db_path,
+        set_quant_tool_tenant_id,
+        set_quant_tool_user_id,
+    )
+    from duckclaw.forge.skills.quant_trader_bridge import (
+        _evaluate_cfd_state_impl,
+        _run_quant_signal_cycle_impl,
+    )
+
+    tid = str(tenant_id or "default").strip() or "default"
+    cid = str(chat_id).strip() or "default"
+    uid = cid
+    # #region agent log
+    try:
+        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "quant_cycle_debug_v1",
+                        "hypothesisId": "H3",
+                        "location": "on_the_fly_commands.py:execute_quant_cycle:entry",
+                        "message": "quant_cycle_parsed_args",
+                        "data": {
+                            "args": (args or "")[:200],
+                            "objective": str(getattr(parsed, "objective", "") or ""),
+                            "execute": str(getattr(parsed, "execute", "") or ""),
+                            "timeframe": str(getattr(parsed, "timeframe", "") or ""),
+                            "lookback_days": int(getattr(parsed, "lookback_days", 0) or 0),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+    set_quant_tool_chat_id(cid)
+    set_quant_tool_tenant_id(tid)
+    set_quant_tool_user_id(uid)
+    set_quant_tool_db_path(str(getattr(db, "_path", "") or ""))
+    bind_quant_market_evidence_chat(cid)
+    reset_quant_market_evidence()
+
+    session_uid = ""
+    session_tickers: list[str] = []
+    try:
+        raw = db.query(
+            "SELECT session_uid, tickers FROM quant_core.trading_sessions "
+            "WHERE id = 'active' AND status = 'ACTIVE' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if rows and isinstance(rows[0], dict):
+            session_uid = str(rows[0].get("session_uid") or "").strip()
+            session_tickers = [
+                x.strip().upper()
+                for x in str(rows[0].get("tickers") or "").split(",")
+                if x.strip()
+            ]
+    except Exception:
+        pass
+    tickers = [x.strip().upper() for x in (parsed.tickers_csv or "").split(",") if x.strip()]
+    if not tickers:
+        tickers = list(session_tickers)
+    if not tickers:
+        tickers = ["SPY"]
+    # #region agent log
+    try:
+        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "quant_cycle_debug_v1",
+                        "hypothesisId": "H4",
+                        "location": "on_the_fly_commands.py:execute_quant_cycle:tickers_resolved",
+                        "message": "quant_cycle_ticker_resolution",
+                        "data": {
+                            "parsed_tickers_csv": str(parsed.tickers_csv or ""),
+                            "session_tickers": session_tickers[:20],
+                            "resolved_tickers": tickers[:20],
+                            "session_uid": session_uid,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+
+    fetch_stage: list[dict[str, Any]] = []
+    for tkr in tickers:
+        raw_fetch = _fetch_ib_gateway_ohlcv_impl(
+            db,
+            ticker=tkr,
+            timeframe=parsed.timeframe,
+            lookback_days=int(parsed.lookback_days),
+        )
+        try:
+            obj = json.loads(raw_fetch) if isinstance(raw_fetch, str) else raw_fetch
+        except Exception:
+            obj = {"error": "INVALID_FETCH_RESPONSE", "raw": str(raw_fetch)[:220]}
+        if isinstance(obj, dict) and obj.get("status") == "ok":
+            note_quant_market_evidence_ticker(tkr)
+        fetch_stage.append({"ticker": tkr, "result": obj})
+
+    portfolio_raw = _get_ibkr_portfolio_impl()
+    eval_raw = _evaluate_cfd_state_impl(
+        db,
+        session_uid=session_uid,
+        tickers=tickers,
+        signal_threshold=parsed.signal_threshold,
+    )
+    try:
+        eval_obj = json.loads(eval_raw) if isinstance(eval_raw, str) else eval_raw
+    except Exception:
+        eval_obj = {"error": "INVALID_EVAL_RESPONSE", "raw": str(eval_raw)[:300]}
+
+    should_propose = False
+    target_ticker = tickers[0]
+    rank_probe: list[dict[str, Any]] = []
+    if isinstance(eval_obj, dict):
+        results = eval_obj.get("results")
+        if isinstance(results, list):
+            for r in results:
+                if not isinstance(r, dict):
+                    continue
+                rank_probe.append(
+                    {
+                        "ticker": str(r.get("ticker") or ""),
+                        "ok": bool(r.get("ok")),
+                        "has_pending_hitl": bool(r.get("has_pending_hitl")),
+                        "phase_rank": r.get("phase_rank"),
+                        "threshold_rank": r.get("threshold_rank"),
+                    }
+                )
+                if bool(r.get("ok")) and not bool(r.get("has_pending_hitl")):
+                    try:
+                        pr = int(r.get("phase_rank") or 0)
+                        tr = int(r.get("threshold_rank") or 0)
+                    except Exception:
+                        pr, tr = 0, 99
+                    if pr >= tr:
+                        should_propose = True
+                        target_ticker = str(r.get("ticker") or target_ticker).strip().upper()
+                        break
+    # #region agent log
+    try:
+        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "quant_cycle_debug_v1",
+                        "hypothesisId": "H2",
+                        "location": "on_the_fly_commands.py:execute_quant_cycle:eval_gate",
+                        "message": "quant_cycle_eval_to_signal_gate",
+                        "data": {
+                            "eval_outcome": (eval_obj.get("outcome") if isinstance(eval_obj, dict) else ""),
+                            "should_propose": should_propose,
+                            "target_ticker": target_ticker,
+                            "rank_probe": rank_probe[:20],
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+
+    signal_obj: dict[str, Any] = {
+        "status": "skipped",
+        "reason": "ALIGNED_OR_INSUFFICIENT_SIGNAL_CONTEXT",
+        "message": "No se propuso señal en este ciclo porque la evaluación no exige acción.",
+    }
+    if should_propose:
+        raw_signal = _run_quant_signal_cycle_impl(
+            db,
+            mandate_id="",
+            ticker=target_ticker,
+            weight=float(parsed.weight_pct),
+            rationale=(
+                f"/quant_cycle objective={parsed.objective} timeframe={parsed.timeframe} "
+                f"lookback_days={int(parsed.lookback_days)} execute={parsed.execute}"
+            ),
+            signal_type="ENTRY",
+            execute_now=False,
+        )
+        try:
+            parsed_signal = json.loads(raw_signal) if isinstance(raw_signal, str) else raw_signal
+            signal_obj = parsed_signal if isinstance(parsed_signal, dict) else {"raw": str(raw_signal)[:800]}
+        except Exception:
+            signal_obj = {"raw": str(raw_signal)[:800]}
+
+    fetch_errors = [x for x in fetch_stage if isinstance(x.get("result"), dict) and x["result"].get("error")]
+    portfolio_error = ""
+    if str(portfolio_raw or "").strip().lower().startswith("error"):
+        portfolio_error = str(portfolio_raw or "")
+    eval_error = str(eval_obj.get("error") or "") if isinstance(eval_obj, dict) else ""
+    signal_error = str(signal_obj.get("error") or "") if isinstance(signal_obj, dict) else ""
+
+    policy_decision = "HITL_REQUIRED"
+    if isinstance(signal_obj, dict) and bool(signal_obj.get("auto_executed")):
+        policy_decision = "AUTO_EXECUTED"
+    elif isinstance(signal_obj, dict) and isinstance(signal_obj.get("auto_execute"), dict):
+        auto_exec = signal_obj.get("auto_execute") or {}
+        if auto_exec.get("skipped"):
+            policy_decision = f"AUTO_EXECUTION_SKIPPED:{str(auto_exec.get('reason') or 'UNKNOWN')}"
+        elif auto_exec.get("error"):
+            policy_decision = f"AUTO_EXECUTION_ERROR:{str(auto_exec.get('error') or 'UNKNOWN')}"
+    elif parsed.execute == "off":
+        policy_decision = "PROPOSED_WITH_HITL_ONLY"
+    # #region agent log
+    try:
+        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "quant_cycle_debug_v1",
+                        "hypothesisId": "H1",
+                        "location": "on_the_fly_commands.py:execute_quant_cycle:policy",
+                        "message": "quant_cycle_policy_decision",
+                        "data": {
+                            "signal_status": (signal_obj.get("status") if isinstance(signal_obj, dict) else ""),
+                            "signal_id_present": bool(
+                                isinstance(signal_obj, dict) and str(signal_obj.get("signal_id") or "").strip()
+                            ),
+                            "auto_executed": bool(
+                                isinstance(signal_obj, dict) and signal_obj.get("auto_executed")
+                            ),
+                            "execute_flag": parsed.execute,
+                            "policy_decision": policy_decision,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+
+    out_obj: dict[str, Any] = {
+        "status": "ok",
+        "command": "quant_cycle",
+        "objective": parsed.objective,
+        "policy_decision": policy_decision,
+        "session_uid": session_uid,
+        "params": {
+            "tickers": tickers,
+            "timeframe": parsed.timeframe,
+            "lookback_days": int(parsed.lookback_days),
+            "signal_threshold": parsed.signal_threshold,
+            "weight_pct": float(parsed.weight_pct),
+            "execute": parsed.execute,
+        },
+        "stages": {
+            "fetch": fetch_stage,
+            "portfolio": {"summary_text": str(portfolio_raw or "")[:1200]},
+            "evaluation": eval_obj,
+            "signal": signal_obj,
+        },
+        "errors_by_stage": {
+            "fetch": [x.get("result", {}).get("error") for x in fetch_errors],
+            "portfolio": portfolio_error,
+            "evaluation": eval_error,
+            "signal": signal_error,
+        },
+    }
+    signal_id = str(signal_obj.get("signal_id") or "").strip() if isinstance(signal_obj, dict) else ""
+    signal_status = str(signal_obj.get("status") or "").strip() if isinstance(signal_obj, dict) else ""
+    human_msg = [
+        "Ciclo Quant determinista ejecutado.",
+        f"- Tickers: {', '.join(tickers)}",
+        f"- Evaluación: {str(eval_obj.get('outcome') if isinstance(eval_obj, dict) else 'N/A')}",
+        f"- Señal: {signal_status or 'skipped'}",
+    ]
+    if signal_id:
+        human_msg.append(f"- signal_id: `{signal_id}`")
+    if signal_id and signal_status.upper() in ("PROPOSED", "PENDING_HITL", "PENDING"):
+        human_msg.append(f"- HITL: `/execute_signal {signal_id}`")
+    return "\n".join(human_msg) + "\n\n```json\n" + json.dumps(out_obj, ensure_ascii=False, indent=2) + "\n```"
 
 
 def _looks_like_hallucinated_placeholder_uuid(sid: str) -> bool:
@@ -5159,6 +6099,14 @@ def _dispatch_fly_command(
             tenant_id=tenant_id,
             vault_user_id=vault_user_id,
         )
+    if name == "quant_cycle":
+        return execute_quant_cycle(
+            db,
+            chat_id,
+            args,
+            tenant_id=tenant_id,
+            vault_user_id=vault_user_id,
+        )
     if name == "register_wr_member":
         return register_wr_member(db, tenant_id, requester_id, args)
     if name == "get_wr_context":
@@ -5251,6 +6199,8 @@ def _dispatch_fly_command(
         return execute_prompt(db, chat_id, args)
     if name in ("model", "provider", "llm"):
         return execute_model(db, chat_id, args)
+    if name in ("models",):
+        return execute_models(db, chat_id, args)
     if name == "setup":
         return _execute_setup(db, chat_id, args)
     if name == "goals":

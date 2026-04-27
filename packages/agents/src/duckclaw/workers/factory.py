@@ -523,6 +523,165 @@ def _quant_fetch_tool_message_looks_successful(last_msg: Any) -> bool:
     return True
 
 
+def _quant_is_proceed_like(text: str) -> bool:
+    if not text or not str(text).strip():
+        return False
+    low = str(text).strip().lower()
+    if "[system_directive:" in low or "[system_event:" in low:
+        return False
+    return bool(re.search(r"\b(procede|continu(a|ar)|sigue|adelante|hazlo)\b", low))
+
+
+def _quant_extract_signal_id(text: str) -> str:
+    raw = str(text or "")
+    m = re.search(
+        r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    return str(m.group(0)).lower() if m else ""
+
+
+def _quant_extract_tickers(text: str) -> list[str]:
+    raw = str(text or "")
+    if not raw:
+        return []
+    banned = {
+        "SYSTEM",
+        "EVENT",
+        "GOALS",
+        "HITL",
+        "IBKR",
+        "UUID",
+        "JSON",
+        "SQL",
+        "HRP",
+        "CFD",
+        "PNL",
+        "LIVE",
+        "PAPER",
+        "PARA",
+        "LUEGO",
+        "CON",
+        "DEL",
+        "LAS",
+        "LOS",
+        "QUE",
+        "UNA",
+        "UNO",
+        "POR",
+        "AND",
+        "THE",
+        "FOR",
+        "TO",
+        "Y",
+        "O",
+    }
+    out: list[str] = []
+    seen: set[str] = set()
+    for tk in re.findall(r"\b[A-Z]{1,5}\b", raw):
+        tk = tk.upper()
+        if tk in banned:
+            continue
+        if tk not in seen:
+            out.append(tk)
+            seen.add(tk)
+    return out
+
+
+def _quant_last_human_index(messages: list[Any]) -> int:
+    from langchain_core.messages import HumanMessage
+
+    # #region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+            "a",
+            encoding="utf-8",
+        ) as _df_qhi:
+            _df_qhi.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "debug-humanmessage",
+                        "hypothesisId": "H1_missing_import",
+                        "location": "factory.py:_quant_last_human_index",
+                        "message": "enter_quant_last_human_index",
+                        "data": {
+                            "messages_len": len(messages or []),
+                            "humanmessage_in_globals": bool("HumanMessage" in globals()),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+    for i in range(len(messages) - 1, -1, -1):
+        try:
+            if isinstance(messages[i], HumanMessage):
+                return i
+        except NameError as exc:
+            # #region agent log
+            try:
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df_qhi_err:
+                    _df_qhi_err.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "debug-humanmessage",
+                                "hypothesisId": "H1_missing_import",
+                                "location": "factory.py:_quant_last_human_index",
+                                "message": "name_error_humanmessage",
+                                "data": {
+                                    "index": i,
+                                    "error": str(exc),
+                                    "message_type": type(messages[i]).__name__,
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
+            raise
+    return -1
+
+
+def _quant_tool_called_since(messages: list[Any], from_idx: int, tool_name: str) -> bool:
+    from langchain_core.messages import ToolMessage
+
+    for m in messages[max(0, from_idx + 1) :]:
+        if isinstance(m, ToolMessage) and str(getattr(m, "name", "") or "") == tool_name:
+            return True
+    return False
+
+
+def _quant_latest_tool_json_since(messages: list[Any], from_idx: int, tool_name: str) -> dict[str, Any]:
+    from langchain_core.messages import ToolMessage
+
+    for m in reversed(messages[max(0, from_idx + 1) :]):
+        if not isinstance(m, ToolMessage) or str(getattr(m, "name", "") or "") != tool_name:
+            continue
+        try:
+            raw = str(getattr(m, "content", "") or "")
+            data = json.loads(raw) if raw.strip().startswith("{") else {}
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
 def _finanz_should_force_ibkr_after_local_cuentas_read(
     messages: list[Any] | None,
     *,
@@ -2387,6 +2546,22 @@ def build_worker_graph(
             else None
         )
 
+        has_evaluate_cfd_state = "evaluate_cfd_state" in tools_by_name
+        tool_choice_evaluate_cfd_state = {
+            "type": "function",
+            "function": {"name": "evaluate_cfd_state"},
+        }
+        llm_force_evaluate_cfd_state_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_evaluate_cfd_state)
+            if has_evaluate_cfd_state
+            else None
+        )
+        llm_force_evaluate_cfd_state_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_evaluate_cfd_state)
+            if has_evaluate_cfd_state and "evaluate_cfd_state" in tools_by_name_sandbox_off
+            else None
+        )
+
         _reddit_tool_names = sorted(k for k in tools_by_name if (k or "").startswith("reddit_"))
         has_reddit_tools = bool(_reddit_tool_names)
 
@@ -2714,6 +2889,10 @@ def build_worker_graph(
                 or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
             )
             summarize_stored_directive = "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
+            _is_goals_tick_msg = (
+                str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
+                and "Revisión periódica de /goals" in str(incoming or "")
+            )
             is_schema = _is_schema_query(incoming)
             is_table_content = _is_table_content_query(incoming)
             is_latest_game = _is_latest_game_query(incoming)
@@ -2726,11 +2905,24 @@ def build_worker_graph(
                 (_lid or "").strip().lower() == "quant_trader"
                 and _quant_user_requests_new_trade_signal(incoming)
             )
+            _is_quant_operational_directive = bool(
+                (_lid or "").strip().lower() == "quant_trader"
+                and str(incoming or "").strip().lower().startswith(
+                    "tarea: intención operativa cuant detectada".lower()
+                )
+            )
             _is_exec_bug_probe = (
                 (_lid or "").strip().lower() == "quant_trader"
                 and _quant_execution_bug_probe_needs_ibkr_portfolio(incoming)
             )
             is_portfolio = has_ibkr and (_is_portfolio_kw or _is_portfolio_quant_retry or _is_exec_bug_probe)
+            if (_lid or "").strip().lower() == "quant_trader" and _wants_new_signal:
+                # En comandos operativos de nueva señal no forzar `get_ibkr_portfolio` first.
+                # Con Groq esto puede inducir tool_use_failed al mezclar tool_call + texto.
+                is_portfolio = False
+            if (_lid or "").strip().lower() == "quant_trader" and _is_goals_tick_msg:
+                # En ticks /goals no forzar "solo portfolio": primero debe correr el ciclo CFD/HRP.
+                is_portfolio = False
             # region agent log
             try:
                 import json as _agent_dbg_json
@@ -2747,10 +2939,13 @@ def build_worker_graph(
                             "is_portfolio_kw": bool(_is_portfolio_kw),
                             "is_portfolio_quant_retry": bool(_is_portfolio_quant_retry),
                             "wants_new_signal": bool(_wants_new_signal),
+                            "is_quant_operational_directive": bool(_is_quant_operational_directive),
                             "is_exec_bug_probe": bool(_is_exec_bug_probe),
                             "incoming_len": len(incoming or ""),
+                            "incoming_prefix": str(incoming or "")[:120],
                         },
                         "timestamp": int(_agent_dbg_time.time() * 1000),
+                        "runId": "groq-tool-routing-debug",
                     }
                     with open(
                         "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
@@ -3009,18 +3204,54 @@ def build_worker_graph(
             force_quant_propose_signal = False
             force_quant_signal_fetch_ib = False
             force_quant_signal_fetch_md = False
+            force_quant_goals_evaluate_cfd = False
             if (
                 _lid_l == "quant_trader"
                 and _quant_user_requests_new_trade_signal(incoming)
                 and not _quant_user_requests_execute_approved_signal(incoming)
                 and _worker_use_heuristic_first_tool(spec)
             ):
+                _has_eval_for_turn = _quant_tool_called_since(
+                    state.get("messages") or [],
+                    _quant_last_human_index(state.get("messages") or []),
+                    "evaluate_cfd_state",
+                )
+                # #region agent log
+                try:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df_qprop_gate:
+                        _df_qprop_gate.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "debug-propose-gate",
+                                    "hypothesisId": "H3_propose_before_eval",
+                                    "location": "factory.py:agent_node",
+                                    "message": "quant_propose_gate_eval_check",
+                                    "data": {
+                                        "has_eval_for_turn": bool(_has_eval_for_turn),
+                                        "already_has_tool_result": bool(already_has_tool_result),
+                                        "last_tool_name": str(getattr(last_msg, "name", "") or ""),
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # #endregion
                 if (
                     not telegram_context_summarize_directive
                     and already_has_tool_result
                     and last_msg is not None
                     and (getattr(last_msg, "name", None) or "") in ("fetch_ib_gateway_ohlcv", "fetch_market_data")
                     and _quant_fetch_tool_message_looks_successful(last_msg)
+                    and _has_eval_for_turn
                     and has_propose_trade_signal
                 ):
                     force_quant_propose_signal = True
@@ -3041,6 +3272,29 @@ def build_worker_graph(
                         force_quant_signal_fetch_ib = True
                     elif has_fetch_market:
                         force_quant_signal_fetch_md = True
+            if (
+                _lid_l == "quant_trader"
+                and _is_goals_tick_msg
+                and has_evaluate_cfd_state
+                and _worker_use_heuristic_first_tool(spec)
+                and not telegram_context_summarize_directive
+                and not already_has_tool_result
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                    or force_reddit
+                    or force_fetch_ib_gateway
+                    or force_fetch_market_data
+                    or force_quant_propose_signal
+                    or force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
+                )
+            ):
+                force_quant_goals_evaluate_cfd = True
 
             _incoming_l = (incoming or "").lower()
             _is_graph_request = any(
@@ -3219,6 +3473,191 @@ def build_worker_graph(
             if force_quant_autoexec_validation_read_sql:
                 force_read_sql = True
 
+            _quant_proceed_like = bool(_lid_l == "quant_trader" and _quant_is_proceed_like(incoming))
+            _quant_deterministic_cycle = bool(
+                _lid_l == "quant_trader"
+                and _worker_use_heuristic_first_tool(spec)
+                and not telegram_context_summarize_directive
+                and (
+                    _wants_new_signal
+                    or _is_goals_tick_msg
+                    or _quant_proceed_like
+                )
+            )
+            # #region agent log
+            try:
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df_qpipe:
+                    _df_qpipe.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "debug-humanmessage",
+                                "hypothesisId": "H2_path_activation",
+                                "location": "factory.py:agent_node",
+                                "message": "quant_deterministic_gate",
+                                "data": {
+                                    "worker": _lid_l,
+                                    "deterministic_cycle": _quant_deterministic_cycle,
+                                    "wants_new_signal": _wants_new_signal,
+                                    "is_goals_tick": _is_goals_tick_msg,
+                                    "is_proceed_like": _quant_proceed_like,
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
+            _last_human_idx = _quant_last_human_index(state.get("messages") or [])
+            _has_fetch_since_last_human = _quant_tool_called_since(
+                state.get("messages") or [], _last_human_idx, "fetch_ib_gateway_ohlcv"
+            ) or _quant_tool_called_since(state.get("messages") or [], _last_human_idx, "fetch_market_data")
+            _has_portfolio_since_last_human = _quant_tool_called_since(
+                state.get("messages") or [], _last_human_idx, "get_ibkr_portfolio"
+            )
+            _has_eval_since_last_human = _quant_tool_called_since(
+                state.get("messages") or [], _last_human_idx, "evaluate_cfd_state"
+            )
+            _quant_tickers = _quant_extract_tickers(incoming)
+            if not _quant_tickers:
+                _ev_eval = _quant_latest_tool_json_since(
+                    state.get("messages") or [], _last_human_idx, "evaluate_cfd_state"
+                )
+                _ev_res = _ev_eval.get("results")
+                if isinstance(_ev_res, list):
+                    for _r in _ev_res:
+                        if isinstance(_r, dict) and str(_r.get("ticker") or "").strip():
+                            _quant_tickers.append(str(_r.get("ticker")).strip().upper())
+            if not _quant_tickers:
+                _quant_tickers = ["SPY"]
+            _quant_primary_ticker = _quant_tickers[0]
+            _quant_session_uid = ""
+            _ev_eval2 = _quant_latest_tool_json_since(
+                state.get("messages") or [], _last_human_idx, "evaluate_cfd_state"
+            )
+            if isinstance(_ev_eval2, dict):
+                _quant_session_uid = str(_ev_eval2.get("session_uid") or "").strip()
+            if not _quant_session_uid:
+                _m_uid = re.search(r'"session_uid"\s*:\s*"([^"]+)"', str(incoming or ""))
+                if _m_uid:
+                    _quant_session_uid = str(_m_uid.group(1) or "").strip()
+            _quant_signal_id = _quant_extract_signal_id(incoming)
+            if not _quant_signal_id and _quant_user_requests_execute_approved_signal(incoming):
+                _m = state.get("messages") or []
+                for _msg in reversed(_m):
+                    if isinstance(_msg, ToolMessage) and str(getattr(_msg, "name", "") or "") == "propose_trade_signal":
+                        _sid = _quant_extract_signal_id(str(getattr(_msg, "content", "") or ""))
+                        if _sid:
+                            _quant_signal_id = _sid
+                            break
+            _quant_can_force_pipeline_step = bool(
+                _quant_deterministic_cycle
+                and not already_has_tool_result
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                    or force_reddit
+                    or force_plot_docs
+                    or force_run_sandbox
+                    or force_pqrsd_fetch_canonical
+                    or force_execute_approved_signal
+                )
+            )
+            if _quant_can_force_pipeline_step and (not _has_fetch_since_last_human):
+                _fetch_name = "fetch_ib_gateway_ohlcv" if (has_fetch_ib_gateway and bool(_ibgw_url)) else "fetch_market_data"
+                _fetch_args = {
+                    "ticker": _quant_primary_ticker,
+                    "timeframe": "1h",
+                    "lookback_days": 20,
+                }
+                _forced_tid = f"call_quant_pipeline_fetch_{int(time.time() * 1000)}"
+                _forced_tc = [{"name": _fetch_name, "args": _fetch_args, "id": _forced_tid, "type": "tool_call"}]
+                _log.info("[%s] quant deterministic stage=fetch tool=%s ticker=%s", _wl, _fetch_name, _quant_primary_ticker)
+                _forced_resp = AIMessage(content="", tool_calls=_forced_tc)
+                _out_forced = {**state, "messages": state["messages"] + [_forced_resp]}
+                _out_forced["quant_pipeline_context"] = {
+                    "mode": "goals" if _is_goals_tick_msg else "signal",
+                    "tickers": _quant_tickers,
+                    "session_uid": _quant_session_uid,
+                }
+                _out_forced.update(_identity_fields(state))
+                return _out_forced
+            if _quant_can_force_pipeline_step and _has_fetch_since_last_human and not _has_portfolio_since_last_human and has_ibkr:
+                _forced_tid = f"call_quant_pipeline_portfolio_{int(time.time() * 1000)}"
+                _forced_tc = [{"name": "get_ibkr_portfolio", "args": {}, "id": _forced_tid, "type": "tool_call"}]
+                _log.info("[%s] quant deterministic stage=portfolio", _wl)
+                _forced_resp = AIMessage(content="", tool_calls=_forced_tc)
+                _out_forced = {**state, "messages": state["messages"] + [_forced_resp]}
+                _out_forced["quant_pipeline_context"] = {
+                    "mode": "goals" if _is_goals_tick_msg else "signal",
+                    "tickers": _quant_tickers,
+                    "session_uid": _quant_session_uid,
+                }
+                _out_forced.update(_identity_fields(state))
+                return _out_forced
+            if _quant_can_force_pipeline_step and _has_fetch_since_last_human and (not _has_eval_since_last_human) and has_evaluate_cfd_state:
+                _forced_tid = f"call_quant_pipeline_eval_{int(time.time() * 1000)}"
+                _forced_tc = [
+                    {
+                        "name": "evaluate_cfd_state",
+                        "args": {
+                            "session_uid": _quant_session_uid,
+                            "tickers": _quant_tickers,
+                            "signal_threshold": "GAS",
+                        },
+                        "id": _forced_tid,
+                        "type": "tool_call",
+                    }
+                ]
+                _log.info("[%s] quant deterministic stage=evaluate_cfd tickers=%s", _wl, ",".join(_quant_tickers))
+                _forced_resp = AIMessage(content="", tool_calls=_forced_tc)
+                _out_forced = {**state, "messages": state["messages"] + [_forced_resp]}
+                _out_forced["quant_pipeline_context"] = {
+                    "mode": "goals" if _is_goals_tick_msg else "signal",
+                    "tickers": _quant_tickers,
+                    "session_uid": _quant_session_uid,
+                }
+                _out_forced.update(_identity_fields(state))
+                return _out_forced
+            if (
+                _lid_l == "quant_trader"
+                and _quant_user_requests_execute_approved_signal(incoming)
+                and has_execute_approved_signal
+                and _quant_signal_id
+                and not already_has_tool_result
+            ):
+                _forced_tid = f"call_quant_execute_signal_{int(time.time() * 1000)}"
+                _forced_tc = [
+                    {
+                        "name": "execute_approved_signal",
+                        "args": {"signal_id": _quant_signal_id},
+                        "id": _forced_tid,
+                        "type": "tool_call",
+                    }
+                ]
+                _log.info("[%s] quant deterministic stage=execute signal_id=%s", _wl, _quant_signal_id)
+                _forced_resp = AIMessage(content="", tool_calls=_forced_tc)
+                _out_forced = {**state, "messages": state["messages"] + [_forced_resp]}
+                _out_forced["quant_pipeline_context"] = {
+                    "mode": "execute",
+                    "tickers": _quant_tickers,
+                    "session_uid": _quant_session_uid,
+                    "signal_id": _quant_signal_id,
+                }
+                _out_forced.update(_identity_fields(state))
+                return _out_forced
+
             llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
             forced_name = (
                 "pqrsd_fetch_canonical"
@@ -3238,6 +3677,9 @@ def build_worker_graph(
                             else (
                                 "execute_approved_signal"
                                 if force_execute_approved_signal
+                                else (
+                                "evaluate_cfd_state"
+                                if force_quant_goals_evaluate_cfd
                                 else (
                                 "propose_trade_signal"
                                 if force_quant_propose_signal
@@ -3275,6 +3717,7 @@ def build_worker_graph(
                                             )
                                         )
                                     )
+                                )
                                 )
                                 )
                             )
@@ -3337,6 +3780,7 @@ def build_worker_graph(
                 or force_execute_approved_signal
                 or force_quant_signal_fetch_ib
                 or force_quant_signal_fetch_md
+                or force_quant_goals_evaluate_cfd
             ):
                 try:
                     import json as _json_dbg
@@ -3353,6 +3797,7 @@ def build_worker_graph(
                             "force_quant_propose_signal": force_quant_propose_signal,
                             "force_quant_signal_fetch_ib": force_quant_signal_fetch_ib,
                             "force_quant_signal_fetch_md": force_quant_signal_fetch_md,
+                            "force_quant_goals_evaluate_cfd": force_quant_goals_evaluate_cfd,
                             "already_has_tool_result": already_has_tool_result,
                             "wants_new_signal": _quant_user_requests_new_trade_signal(incoming or ""),
                         },
@@ -3468,6 +3913,25 @@ def build_worker_graph(
                 except Exception:
                     pass
                 # #endregion
+            _qp_ctx = state.get("quant_pipeline_context")
+            if (
+                (_lid or "").strip().lower() == "quant_trader"
+                and isinstance(_qp_ctx, dict)
+                and _quant_deterministic_cycle
+                and _has_fetch_since_last_human
+                and _has_eval_since_last_human
+            ):
+                _msg_list = [
+                    SystemMessage(
+                        content=(
+                            "[DIRECTIVA_QUANT_PIPELINE_DETERMINISTA] El backend ya ejecutó ingesta/evaluación "
+                            "(fetch -> portfolio -> evaluate_cfd_state). En este turno NO repitas esas tools; "
+                            "usa el contexto de resultados para: "
+                            "1) proponer señal (propose_trade_signal) con argumentos completos, o "
+                            "2) interpretar estado y próximos pasos si no procede señal."
+                        )
+                    )
+                ] + _msg_list
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             _invoked_llm: Any = llm_with_tools
             if force_admin_sql:
@@ -3494,6 +3958,13 @@ def build_worker_graph(
                     else llm_force_execute_approved_signal_off
                 )
                 _invoked_llm = _fex or llm_with_tools
+            elif force_quant_goals_evaluate_cfd:
+                _fec = (
+                    llm_force_evaluate_cfd_state_on
+                    if sandbox_enabled
+                    else llm_force_evaluate_cfd_state_off
+                )
+                _invoked_llm = _fec or llm_with_tools
             elif force_fmp:
                 _forced_fmp = (
                     llm_force_fmp_calendar_on if force_fmp_calendar else llm_force_fmp_stock_on
@@ -3520,12 +3991,9 @@ def build_worker_graph(
                     _fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
                 _invoked_llm = _fr or llm_with_tools
             elif force_quant_propose_signal:
-                _fps = (
-                    llm_force_propose_trade_signal_on
-                    if sandbox_enabled
-                    else llm_force_propose_trade_signal_off
-                )
-                _invoked_llm = _fps or llm_with_tools
+                # En 8B, forzar propose_trade_signal termina a menudo en args vacíos ({}).
+                # Dejamos selección libre con tools para que el modelo emita args completos.
+                _invoked_llm = llm_with_tools
             elif force_fetch_ib_gateway or force_quant_signal_fetch_ib:
                 _ffig = llm_force_fetch_ib_gateway_on if sandbox_enabled else llm_force_fetch_ib_gateway_off
                 _invoked_llm = _ffig or llm_with_tools
@@ -3536,6 +4004,44 @@ def build_worker_graph(
                 _frs = llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
                 _invoked_llm = _frs or llm_with_tools
             _llm_invoke_exc: BaseException | None = None
+            # #region agent log
+            try:
+                if _lid_l == "quant_trader" and (
+                    force_quant_propose_signal
+                    or force_execute_approved_signal
+                    or force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
+                    or force_fetch_ib_gateway
+                    or force_fetch_market_data
+                ):
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df_qpre:
+                        _df_qpre.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "post-fix",
+                                    "hypothesisId": "H_quant_forced_tool_lost",
+                                    "location": "factory.py:agent_node",
+                                    "message": "quant_forced_pre_invoke",
+                                    "data": {
+                                        "forced_name": forced_name,
+                                        "sandbox_enabled": bool(sandbox_enabled),
+                                        "uses_default_llm_with_tools": bool(_invoked_llm is llm_with_tools),
+                                        "incoming_len": len(str(incoming or "")),
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+            except Exception:
+                pass
+            # #endregion
             try:
                 from duckclaw.integrations.llm_providers import invoke_chat_model_with_transient_retries
 
@@ -3577,6 +4083,149 @@ def build_worker_graph(
                 except Exception:
                     resp = AIMessage(content=str(getattr(resp, "content", "") or ""), tool_calls=forced_tc)
                 tool_calls = getattr(resp, "tool_calls", None) or forced_tc
+            _is_quant_forced_without_tools = (
+                (_lid_l == "quant_trader")
+                and not tool_calls
+                and (
+                    force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
+                    or force_execute_approved_signal
+                    or force_quant_goals_evaluate_cfd
+                    or force_fetch_ib_gateway
+                    or force_fetch_market_data
+                )
+            )
+            if _is_quant_forced_without_tools:
+                _fallback_tool_name = (
+                    "execute_approved_signal"
+                    if force_execute_approved_signal
+                    else (
+                        "evaluate_cfd_state"
+                        if force_quant_goals_evaluate_cfd
+                        else (
+                            "fetch_ib_gateway_ohlcv"
+                            if (force_quant_signal_fetch_ib or force_fetch_ib_gateway)
+                            else (
+                                "fetch_market_data"
+                                if (force_quant_signal_fetch_md or force_fetch_market_data)
+                                else ""
+                            )
+                        )
+                    )
+                )
+                if _fallback_tool_name:
+                    _forced_tid = f"call_forced_quant_{int(time.time() * 1000)}"
+                    forced_tc = [
+                        {
+                            "name": _fallback_tool_name,
+                            "args": {},
+                            "id": _forced_tid,
+                            "type": "tool_call",
+                        }
+                    ]
+                    try:
+                        resp = resp.model_copy(update={"tool_calls": forced_tc})
+                    except Exception:
+                        resp = AIMessage(content=str(getattr(resp, "content", "") or ""), tool_calls=forced_tc)
+                    tool_calls = getattr(resp, "tool_calls", None) or forced_tc
+                    # #region agent log
+                    try:
+                        with open(
+                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                            "a",
+                            encoding="utf-8",
+                        ) as _df_qinject:
+                            _df_qinject.write(
+                                json.dumps(
+                                    {
+                                        "sessionId": "c964f7",
+                                        "runId": "post-fix",
+                                        "hypothesisId": "H_quant_forced_tool_lost",
+                                        "location": "factory.py:agent_node",
+                                        "message": "quant_forced_toolcall_injected",
+                                        "data": {
+                                            "forced_name": forced_name,
+                                            "fallback_tool_name": _fallback_tool_name,
+                                            "response_len_before_inject": len(
+                                                str(getattr(resp, "content", "") or "")
+                                            ),
+                                        },
+                                        "timestamp": int(time.time() * 1000),
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                    except Exception:
+                        pass
+                    # #endregion
+            if (_lid_l == "quant_trader") and force_quant_propose_signal and not tool_calls:
+                _fallback_tool_name = (
+                    "run_quant_signal_cycle"
+                    if ("run_quant_signal_cycle" in tools_by_name)
+                    else "propose_trade_signal"
+                )
+                _fallback_args = (
+                    {
+                        "mandate_id": "",
+                        "ticker": _quant_primary_ticker,
+                        "weight": 5.0,
+                        "rationale": "Deterministic pipeline fallback after CFD evaluation.",
+                        "signal_type": "ENTRY",
+                        "execute_now": False,
+                    }
+                    if _fallback_tool_name == "run_quant_signal_cycle"
+                    else {
+                        "mandate_id": "",
+                        "ticker": _quant_primary_ticker,
+                        "weight": 5.0,
+                        "rationale": "Deterministic pipeline fallback after CFD evaluation.",
+                        "signal_type": "ENTRY",
+                    }
+                )
+                _forced_tid = f"call_forced_quant_propose_{int(time.time() * 1000)}"
+                forced_tc = [
+                    {
+                        "name": _fallback_tool_name,
+                        "args": _fallback_args,
+                        "id": _forced_tid,
+                        "type": "tool_call",
+                    }
+                ]
+                try:
+                    resp = resp.model_copy(update={"tool_calls": forced_tc})
+                except Exception:
+                    resp = AIMessage(content=str(getattr(resp, "content", "") or ""), tool_calls=forced_tc)
+                tool_calls = getattr(resp, "tool_calls", None) or forced_tc
+                # #region agent log
+                try:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df_qprop_fallback:
+                        _df_qprop_fallback.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "post-fix",
+                                    "hypothesisId": "H4_no_toolcall_propose",
+                                    "location": "factory.py:agent_node",
+                                    "message": "quant_propose_fallback_injected",
+                                    "data": {
+                                        "fallback_tool_name": _fallback_tool_name,
+                                        "ticker": _quant_primary_ticker,
+                                        "weight": 5.0,
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # #endregion
             if tool_calls:
                 _tc_names: list[Any] = []
                 for tc in tool_calls:
@@ -3585,6 +4234,49 @@ def build_worker_graph(
                     else:
                         _tc_names.append(getattr(tc, "name", None))
                 _log.info("[%s] LLM tool_calls=%s", _wl, _tc_names)
+            # #region agent log
+            try:
+                if _lid_l == "quant_trader" and (
+                    force_quant_propose_signal
+                    or force_execute_approved_signal
+                    or force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
+                    or force_fetch_ib_gateway
+                    or force_fetch_market_data
+                ):
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df_qpost:
+                        _df_qpost.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "post-fix",
+                                    "hypothesisId": "H_quant_forced_tool_lost",
+                                    "location": "factory.py:agent_node",
+                                    "message": "quant_forced_post_invoke",
+                                    "data": {
+                                        "forced_name": forced_name,
+                                        "llm_invoke_failed": bool(_llm_invoke_exc),
+                                        "has_tool_calls": bool(tool_calls),
+                                        "tool_call_names": [
+                                            (tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None))
+                                            for tc in (tool_calls or [])
+                                        ],
+                                        "response_len": len(str(getattr(resp, "content", "") or "")),
+                                        "response_head": str(getattr(resp, "content", "") or "")[:180],
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+            except Exception:
+                pass
+            # #endregion
             # #region agent log
             try:
                 if _is_exec_bug_probe:
@@ -3619,6 +4311,53 @@ def build_worker_graph(
                 pass
             # #endregion
             _resp_content = str(getattr(resp, "content", "") or "").strip()
+            # #region agent log
+            try:
+                if _is_goals_tick and (_lid or "").strip().lower() == "quant_trader":
+                    _resp_low = (_resp_content or "").lower()
+                    _asks_manual_hrp = any(
+                        _k in _resp_low
+                        for _k in (
+                            "pesos objetivo",
+                            "proporcione los pesos",
+                            "proporciona los pesos",
+                            "necesito los pesos",
+                            "desea que ejecute",
+                            "si desea",
+                        )
+                    )
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df_goals:
+                        _df_goals.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "goals-pre-fix",
+                                    "hypothesisId": "H_goals_not_proactive",
+                                    "location": "factory.py:agent_node",
+                                    "message": "goals_tick_completion_shape",
+                                    "data": {
+                                        "has_tool_calls": bool(tool_calls),
+                                        "tool_call_names": [
+                                            (tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None))
+                                            for tc in (tool_calls or [])
+                                        ],
+                                        "forced_name": forced_name,
+                                        "asks_manual_hrp": bool(_asks_manual_hrp),
+                                        "response_len": len(_resp_content or ""),
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+            except Exception:
+                pass
+            # #endregion
             if _is_goals_tick and not tool_calls:
                 # Ticks proactivos con sesión rebalance_hrp (o ya hubo sandbox en el hilo): no sustituir
                 # la respuesta del modelo por el resumen genérico de «PnL positivo».

@@ -91,101 +91,96 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 
 ---
 
+```mermaid
+---
+config:
+  layout: elk
+---
 classDiagram
-    %% Capa de Aplicación (El Worker)
-    class QuantTraderWorker {
-        <<Service>>
-        +String worker_id: quant_trader
-        +String risk_profile: conservative
-        +Boolean read_only: true
-        +Double temperature: 0.1
-        +propose_trade_signal()
-        +execute_approved_signal()
-        +fetch_market_data()
-        +execute_sandbox_script()
+  namespace Finance_Worker_DB {
+    class Cuenta {
+      +PK id: int
+      +String name
+      +float balance
+      +String currency
     }
 
-    %% Capa de Persistencia: Esquema Finance Worker
-    namespace Finance_Worker_DB {
-        class Cuenta {
-            +PK id: int
-            +String name
-            +float balance
-            +String currency
-        }
-        class TradingMandate {
-            +PK mandate_id: UUID
-            +String asset_class
-            +String direction
-            +Decimal max_weight_pct
-            +String status
-        }
-        class FinanceSignal {
-            +PK signal_id: UUID
-            +FK mandate_id
-            +Boolean human_approved
-            +String rationale
-        }
+    class TradingMandate {
+      +PK mandate_id: UUID
+      +String asset_class
+      +String direction
+      +Decimal max_weight_pct
+      +String status
     }
 
-    %% Capa de Persistencia: Esquema Quant Core
-    namespace Quant_Core_DB {
-        class TradingSession {
-            +PK id: String
-            +String mode
-            +Double anchor_equity
-            +Double peak_equity
-        }
-        class QuantSignal {
-            +PK signal_id: UUID
-            +Double confidence_score
-            +Double target_price
-            +Double stop_loss
-            +String status
-        }
-        class PortfolioPosition {
-            +PK ticker: String
-            +Double qty
-            +Double avg_entry_price
-            +Double unrealized_pnl
-        }
-        class SessionTick {
-            +PK id: UUID
-            +String session_uid
-            +JSON cfd_summary
-        }
+    class FinanceSignal {
+      +PK signal_id: UUID
+      +FK mandate_id
+      +Boolean human_approved
+      +String rationale
+    }
+  }
+
+  namespace Quant_Core_DB {
+    class TradingSession {
+      +PK id: String
+      +String mode
+      +Double anchor_equity
+      +Double peak_equity
     }
 
-    %% Capa de Integración (Skills / APIs Externas)
-    namespace External_Integrations {
-        class IBKR_API {
-            <<Interface>>
-            +get_ibkr_portfolio()
-            +fetch_ib_gateway_ohlcv()
-        }
-        class FMP_API {
-            <<Interface>>
-            +get_fmp_stock_dividends()
-            +get_fmp_calendar()
-        }
-        class Research_Intelligence {
-            <<Interface>>
-            +tavily_search()
-            +reddit_mcp_read()
-        }
+    class QuantSignal {
+      +PK signal_id: UUID
+      +Double confidence_score
+      +Double target_price
+      +Double stop_loss
+      +String status
     }
 
-    %% Relaciones de Dependencia y Flujo
-    QuantTraderWorker ..> IBKR_API : "Uses for Execution"
-    QuantTraderWorker ..> FMP_API : "Enriches with Data"
-    QuantTraderWorker ..> Research_Intelligence : "Calculates Sentiment"
+    class PortfolioPosition {
+      +PK ticker: String
+      +Double qty
+      +Double avg_entry_price
+      +Double unrealized_pnl
+    }
 
-    QuantTraderWorker --> Cuenta : "Monitors Balance"
-    QuantTraderWorker --> TradingMandate : "Follows Strategy"
-    
-    TradingMandate "1" -- "*" FinanceSignal : "Generates"
-    TradingSession "1" -- "*" SessionTick : "Logs Activity"
-    TradingSession "1" -- "*" QuantSignal : "Emits"
-    
-    QuantSignal ..> FinanceSignal : "Refines (Technical)"
-    QuantSignal --> PortfolioPosition : "Affects"
+    class SessionTick {
+      +PK id: UUID
+      +String session_uid
+      +JSON cfd_summary
+    }
+  }
+
+  namespace External_Integrations {
+    class IBKR_API {
+      <<Interface>>
+      +get_ibkr_portfolio()
+      +fetch_ib_gateway_ohlcv()
+    }
+
+    class FMP_API {
+      <<Interface>>
+      +get_fmp_stock_dividends()
+      +get_fmp_calendar()
+    }
+
+    class Research_Intelligence {
+      <<Interface>>
+      +tavily_search()
+      +reddit_mcp_read()
+    }
+  }
+
+  class QuantTraderWorker
+
+  QuantTraderWorker ..> IBKR_API : "Uses for Execution"
+  QuantTraderWorker ..> FMP_API : "Enriches with Data"
+  QuantTraderWorker ..> Research_Intelligence : "Calculates Sentiment"
+  QuantTraderWorker --> Cuenta : "Monitors Balance"
+  QuantTraderWorker --> TradingMandate : "Follows Strategy"
+  TradingMandate "1" -- "*" FinanceSignal : "Generates"
+  TradingSession "1" -- "*" SessionTick : "Logs Activity"
+  TradingSession "1" -- "*" QuantSignal : "Emits"
+  QuantSignal ..> FinanceSignal : "Refines (Technical)"
+  QuantSignal --> PortfolioPosition : "Affects"
+  

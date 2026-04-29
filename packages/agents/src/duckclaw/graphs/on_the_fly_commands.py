@@ -3947,7 +3947,7 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ("/setup", "Config key=value"),
         ("/approve", "Aprobar última acción"),
         ("/reject", "Rechazar última acción"),
-        ("/execute_signal <uuid>", "HITL: confirma ejecución (Finanz: execute_order; Quant Trader: execute_approved_signal)"),
+        ("/execute_signal <uuid>", "HITL: confirma ejecución (Quant Trader: execute_approved_signal)"),
         ("/cancel_signal <uuid>", "HITL: cancela señal pendiente (PENDING_HITL/AWAITING_HITL)"),
         (
             "/trading_session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp] [--confirm] [--status] [--stop]",
@@ -5965,7 +5965,7 @@ def _execute_signal_verify_ledger(db: Any, sid: str) -> tuple[bool, str]:
 
 
 def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
-    """/execute_signal <uuid>: HITL para Finanz (execute_order) y Quant Trader (execute_approved_signal)."""
+    """/execute_signal <uuid>: HITL para Quant Trader (execute_approved_signal)."""
     sid = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
     if not re.match(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -6023,7 +6023,7 @@ def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
         return f"No se pudo registrar la confirmación: {e}"
     return (
         f"Confirmación registrada para la señal {sid}. "
-        "Pide al asistente que ejecute **execute_order** (Finanz) o **execute_approved_signal** "
+        "Pide al asistente que ejecute **execute_approved_signal** "
         f"(Quant Trader) con signal_id={sid} en esta sesión."
     )
 

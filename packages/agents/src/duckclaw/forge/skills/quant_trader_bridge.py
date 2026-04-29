@@ -14,7 +14,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional, Tuple
 from pathlib import Path
 
-from duckclaw.forge.skills.ibkr_bridge import fetch_ibkr_total_equity_numeric
+from duckclaw.forge.skills.ibkr_bridge import (
+    _ibkr_resolve_payload_with_optional_alt,
+    fetch_ibkr_total_equity_numeric,
+)
 from duckclaw.forge.skills.quant_market_bridge import (
     _fetch_ib_gateway_ohlcv_impl,
     _fetch_market_data_impl,
@@ -697,6 +700,259 @@ def _execute_sandbox_script_impl(
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _hrp_collect_price_series_from_ib_gateway(
+    db: Any,
+    *,
+    tickers: list[str],
+    timeframe: str,
+    lookback_days: int,
+) -> tuple[dict[str, list[float]], list[dict[str, Any]]]:
+    series: dict[str, list[float]] = {}
+    ingest: list[dict[str, Any]] = []
+    for tkr in tickers:
+        raw = _fetch_ib_gateway_ohlcv_impl(
+            db,
+            ticker=tkr,
+            timeframe=timeframe,
+            lookback_days=int(lookback_days),
+        )
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = {"error": "invalid_json", "raw": raw[:800]}
+        ingest.append({"ticker": tkr, "result": payload})
+        if not isinstance(payload, dict) or payload.get("status") != "ok":
+            continue
+        note_quant_market_evidence_ticker(tkr)
+        esc = tkr.replace("'", "''")
+        q = (
+            "SELECT close FROM quant_core.ohlcv_data "
+            f"WHERE ticker = '{esc}' ORDER BY timestamp DESC LIMIT 800"
+        )
+        try:
+            rows_raw = db.query(q)
+            rows = json.loads(rows_raw) if isinstance(rows_raw, str) else (rows_raw or [])
+        except Exception:
+            rows = []
+        closes: list[float] = []
+        for row in reversed(rows):
+            if not isinstance(row, dict):
+                continue
+            try:
+                c = float(row.get("close"))
+            except (TypeError, ValueError):
+                continue
+            if c > 0:
+                closes.append(c)
+        if len(closes) >= 4:
+            series[tkr] = closes
+    return series, ingest
+
+
+def _hrp_current_weights_from_ibkr(tickers: list[str]) -> tuple[dict[str, float], dict[str, Any]]:
+    api_url = (os.environ.get("IBKR_PORTFOLIO_API_URL") or "").strip()
+    api_key = (os.environ.get("IBKR_PORTFOLIO_API_KEY") or "").strip()
+    positions_url = (os.environ.get("IBKR_PORTFOLIO_POSITIONS_URL") or "").strip()
+    if not api_url or not api_key:
+        return ({t: 0.0 for t in tickers}, {"warning": "IBKR_PORTFOLIO_API_URL/KEY no configurados."})
+    try:
+        data, effective_mode, configured_mode = _ibkr_resolve_payload_with_optional_alt(
+            api_url, api_key, positions_url
+        )
+    except Exception as exc:
+        return ({t: 0.0 for t in tickers}, {"warning": f"No se pudo leer portafolio IBKR: {str(exc)[:300]}"})
+    if not isinstance(data, dict):
+        return ({t: 0.0 for t in tickers}, {"warning": "Snapshot IBKR inválido (no dict)."})
+    portfolio = data.get("portfolio") or data.get("positions") or []
+    if isinstance(portfolio, dict):
+        portfolio = list(portfolio.values()) if portfolio else []
+    total_value = data.get("total_value")
+    if total_value is None:
+        total_value = data.get("net_liquidation") or data.get("equity") or data.get("value") or 0
+    try:
+        total_f = float(total_value)
+    except (TypeError, ValueError):
+        total_f = 0.0
+    if total_f <= 0 and isinstance(portfolio, list):
+        for pos in portfolio:
+            if not isinstance(pos, dict):
+                continue
+            mv = pos.get("market_value") or pos.get("marketValue") or pos.get("value") or 0
+            try:
+                total_f += max(0.0, float(mv))
+            except (TypeError, ValueError):
+                continue
+    requested = {t.upper() for t in tickers}
+    alloc: dict[str, float] = {t: 0.0 for t in requested}
+    if isinstance(portfolio, list):
+        for pos in portfolio:
+            if not isinstance(pos, dict):
+                continue
+            sym = str(pos.get("symbol") or pos.get("ticker") or "").strip().upper()
+            if not sym or sym not in requested:
+                continue
+            mv = pos.get("market_value") or pos.get("marketValue") or pos.get("value") or 0
+            try:
+                alloc[sym] += max(0.0, float(mv))
+            except (TypeError, ValueError):
+                continue
+    if total_f > 0:
+        weights = {t: float(alloc.get(t, 0.0)) / total_f for t in requested}
+    else:
+        weights = {t: 0.0 for t in requested}
+    return (
+        weights,
+        {
+            "configured_mode": configured_mode,
+            "effective_mode": effective_mode,
+            "total_value": total_f,
+        },
+    )
+
+
+def _build_hrp_sandbox_script(
+    *,
+    price_series: dict[str, list[float]],
+    current_weights: dict[str, float],
+    threshold: float,
+) -> str:
+    return f"""
+import json
+import numpy as np
+import pandas as pd
+
+PRICE_SERIES = {json.dumps(price_series, ensure_ascii=False)}
+CURRENT_WEIGHTS = {json.dumps(current_weights, ensure_ascii=False)}
+REBALANCE_THRESHOLD = {float(threshold)}
+
+def _normalize(weights):
+    clipped = {{k: max(float(v), 0.0) for k, v in weights.items()}}
+    total = float(sum(clipped.values()))
+    if total <= 0:
+        n = max(1, len(clipped))
+        return {{k: 1.0 / n for k in clipped}}
+    return {{k: v / total for k, v in clipped.items()}}
+
+def _manual_hrp(returns_df):
+    from scipy.cluster.hierarchy import linkage, leaves_list
+    from scipy.spatial.distance import squareform
+    cov = returns_df.cov()
+    corr = returns_df.corr().fillna(0.0)
+    dist = np.sqrt(np.clip((1.0 - corr.values) / 2.0, 0.0, 1.0))
+    order_idx = leaves_list(linkage(squareform(dist, checks=False), method="single")).tolist()
+    tickers = [cov.columns[int(i)] for i in order_idx]
+    cov_diag = np.diag(cov.loc[tickers, tickers].values)
+    inv_var = np.where(cov_diag > 0, 1.0 / cov_diag, 0.0)
+    if float(inv_var.sum()) <= 0:
+        raw = {{t: 1.0 for t in tickers}}
+    else:
+        raw = {{t: float(inv_var[i]) for i, t in enumerate(tickers)}}
+    return _normalize(raw)
+
+def _compute_hrp(returns_df):
+    try:
+        from pypfopt import HRPOpt, risk_models
+        cov = risk_models.sample_cov(returns_df)
+        hrp = HRPOpt(returns=returns_df, cov_matrix=cov)
+        return _normalize(hrp.optimize()), "pypfopt"
+    except Exception:
+        return _manual_hrp(returns_df), "manual_scipy"
+
+prices = pd.DataFrame(PRICE_SERIES).apply(pd.to_numeric, errors="coerce").dropna(how="any")
+if prices.shape[0] < 4 or prices.shape[1] < 2:
+    print(json.dumps({{"ok": False, "error": "Datos insuficientes para HRP (min 4 filas, 2 activos)."}}, ensure_ascii=False))
+    raise SystemExit(0)
+
+returns_df = prices.pct_change().dropna(how="any")
+targets, method = _compute_hrp(returns_df)
+tickers = sorted(targets.keys())
+current = _normalize({{t: float(CURRENT_WEIGHTS.get(t, 0.0)) for t in tickers}})
+deltas = {{t: float(targets[t] - current.get(t, 0.0)) for t in tickers}}
+max_abs_delta = max(abs(v) for v in deltas.values()) if deltas else 0.0
+
+print(json.dumps({{
+    "ok": True,
+    "method": method,
+    "tickers": tickers,
+    "target_weights": targets,
+    "current_weights": current,
+    "weight_deltas": deltas,
+    "max_abs_delta": max_abs_delta,
+    "rebalance_required": bool(max_abs_delta >= REBALANCE_THRESHOLD),
+    "threshold": REBALANCE_THRESHOLD,
+    "n_obs": int(returns_df.shape[0]),
+}}, ensure_ascii=False))
+""".strip()
+
+
+@log_tool_execution_sync(name="hrp_rebalance_ib_gateway")
+def _hrp_rebalance_ib_gateway_impl(
+    db: Any,
+    llm: Any,
+    *,
+    tickers: list[str],
+    timeframe: str = "1h",
+    lookback_days: int = 30,
+    rebalance_threshold: float = 0.03,
+) -> str:
+    del llm
+    tk = [str(t or "").strip().upper() for t in (tickers or []) if str(t or "").strip()]
+    tk = list(dict.fromkeys(tk))
+    if len(tk) < 2:
+        return json.dumps({"error": "Debes enviar al menos 2 tickers."}, ensure_ascii=False)
+    prices, ingest = _hrp_collect_price_series_from_ib_gateway(
+        db, tickers=tk, timeframe=timeframe, lookback_days=int(lookback_days)
+    )
+    if len(prices) < 2:
+        return json.dumps(
+            {
+                "error": "INSUFFICIENT_OHLCV",
+                "message": "No se obtuvieron series válidas desde IB Gateway para al menos 2 tickers.",
+                "ingest": ingest,
+            },
+            ensure_ascii=False,
+        )
+    ib_weights, ib_meta = _hrp_current_weights_from_ibkr(list(prices.keys()))
+    code = _build_hrp_sandbox_script(
+        price_series=prices,
+        current_weights=ib_weights,
+        threshold=float(max(0.0001, rebalance_threshold)),
+    )
+    result = run_in_sandbox(
+        db=db,
+        llm=None,
+        code=code,
+        language="python",
+        original_request="hrp rebalance from ib_gateway",
+        max_retries=1,
+        worker_id="Quant-Trader",
+    )
+    out: dict[str, Any] = {
+        "exit_code": int(result.exit_code),
+        "stderr": (result.stderr or "")[:2000],
+        "ingest": ingest,
+        "ibkr_meta": ib_meta,
+    }
+    if int(result.exit_code) != 0:
+        out["error"] = "SANDBOX_EXECUTION_FAILED"
+        out["stdout"] = (result.stdout or "")[:3000]
+        return json.dumps(out, ensure_ascii=False)
+    parsed: dict[str, Any] | None = None
+    for line in reversed((result.stdout or "").splitlines()):
+        s = line.strip()
+        if not s.startswith("{"):
+            continue
+        try:
+            obj = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            parsed = obj
+            break
+    out["result"] = parsed or {"ok": False, "error": "No se pudo parsear JSON de sandbox."}
+    return json.dumps(out, ensure_ascii=False)
+
+
 @log_tool_execution_sync(name="propose_trade_signal")
 def _propose_trade_signal_impl(
     db: Any,
@@ -1225,6 +1481,21 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
     def _execute_sandbox_script(code: str, dependencies: list[str] | None = None) -> str:
         return _execute_sandbox_script_impl(db, llm, code=code, dependencies=dependencies)
 
+    def _hrp_rebalance_ib_gateway(
+        tickers: list[str],
+        timeframe: str = "1h",
+        lookback_days: int = 30,
+        rebalance_threshold: float = 0.03,
+    ) -> str:
+        return _hrp_rebalance_ib_gateway_impl(
+            db,
+            llm,
+            tickers=tickers,
+            timeframe=timeframe,
+            lookback_days=int(lookback_days),
+            rebalance_threshold=float(rebalance_threshold),
+        )
+
     def _propose_trade_signal(
         mandate_id: str,
         ticker: str,
@@ -1306,6 +1577,18 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 "o lee /workspace/data/*.csv si hubo inyección explícita. "
                 "Timeout según Quant-Trader/security_policy.yaml. Requiere Docker en el host y la imagen construida "
                 "(o STRIX_SANDBOX_IMAGE). HRP y backtests van aquí, no en el host."
+            ),
+        )
+    )
+    tools.append(
+        StructuredTool.from_function(
+            _hrp_rebalance_ib_gateway,
+            name="hrp_rebalance_ib_gateway",
+            description=(
+                "Pipeline completo para rebalanceo HRP: 1) ingesta OHLCV por ticker desde IB Gateway "
+                "(`fetch_ib_gateway_ohlcv`), 2) snapshot de pesos actuales desde `IBKR_PORTFOLIO_API_URL`, "
+                "3) cálculo de pesos objetivo HRP en sandbox Strix (pypfopt con fallback scipy). "
+                "Devuelve JSON con `target_weights`, `current_weights`, `weight_deltas` y `rebalance_required`."
             ),
         )
     )

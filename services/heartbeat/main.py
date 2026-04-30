@@ -451,6 +451,7 @@ async def _run_goals_proactive_tick_one_db(
                 tickers: list[str] = []
                 mode = "paper"
                 signal_threshold = "GAS"
+                objective = "maximize_pnl"
                 if session_uid:
                     try:
                         sess_db_path = (
@@ -491,12 +492,44 @@ async def _run_goals_proactive_tick_one_db(
                                     gobj = {}
                                 if isinstance(gobj, dict):
                                     signal_threshold = str(gobj.get("signal_threshold") or "GAS").strip().upper() or "GAS"
+                                    objective = str(gobj.get("objective") or "maximize_pnl").strip().lower() or "maximize_pnl"
                                 session_uid = str(sess_row.get("session_uid") or session_uid).strip()
+                                # region agent log
+                                try:
+                                    with open(
+                                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                                        "a",
+                                        encoding="utf-8",
+                                    ) as _df:
+                                        _df.write(
+                                            json.dumps(
+                                                {
+                                                    "sessionId": "c964f7",
+                                                    "runId": "overnight_goals_debug_v2",
+                                                    "hypothesisId": "H6",
+                                                    "location": "services/heartbeat/main.py:trading_session_meta_resolved",
+                                                    "message": "heartbeat_trading_session_objective",
+                                                    "data": {
+                                                        "chat_id": str(chat_id),
+                                                        "session_uid": session_uid,
+                                                        "objective": objective,
+                                                        "tickers_count": len(tickers or []),
+                                                    },
+                                                    "timestamp": int(time.time() * 1000),
+                                                },
+                                                ensure_ascii=False,
+                                            )
+                                            + "\n"
+                                        )
+                                except Exception:
+                                    pass
+                                # endregion
                                 message = build_trading_tick_system_event_message(
                                     session_uid=session_uid,
                                     tickers=tickers,
                                     mode=mode,
                                     signal_threshold=signal_threshold,
+                                    objective=objective,
                                 )
                         else:
                             message = "[SYSTEM_EVENT: No hay sesión activa. Tick cancelado.]"

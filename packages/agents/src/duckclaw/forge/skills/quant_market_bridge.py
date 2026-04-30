@@ -20,6 +20,7 @@ import os
 import re
 import shlex
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -497,6 +498,109 @@ def _fetch_vix_yfinance_payload(
     return bars, None
 
 
+def _fetch_symbol_yfinance_payload(
+    *,
+    ticker_store: str,
+    tf: str,
+    lookback_days: int,
+) -> Tuple[Optional[list[dict[str, Any]]], Optional[str]]:
+    """
+    OHLCV genérico vía Yahoo Finance para tickers equity/ETF (fallback cuando lake/IBKR fallan).
+    Ejecuta en el gateway (no sandbox).
+    """
+    try:
+        import yfinance as yf  # type: ignore[import-untyped]
+    except ImportError:
+        return None, json.dumps(
+            {
+                "error": "YFINANCE_IMPORT_ERROR",
+                "message": "Instala yfinance en el venv del gateway (dependencia duckclaw-agents).",
+            },
+            ensure_ascii=False,
+        )
+    tf_norm = _normalize_timeframe_route_key(tf)
+    interval = _yfinance_interval_for_tf(tf_norm)
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=lookback_days)
+    try:
+        tk_yf = yf.Ticker(ticker_store)
+        hist = tk_yf.history(
+            start=start.strftime("%Y-%m-%d"),
+            end=(end + timedelta(days=1)).strftime("%Y-%m-%d"),
+            interval=interval,
+            auto_adjust=False,
+            prepost=False,
+        )
+    except Exception as e:
+        _log.warning("[quant_market] yfinance %s: %s", ticker_store, e)
+        return None, json.dumps(
+            {
+                "error": "YFINANCE_FETCH_FAILED",
+                "ticker": ticker_store,
+                "timeframe": tf,
+                "message": str(e)[:500],
+            },
+            ensure_ascii=False,
+        )
+    if hist is None or hist.empty:
+        return None, json.dumps(
+            {
+                "error": "YFINANCE_EMPTY",
+                "ticker": ticker_store,
+                "timeframe": tf,
+                "message": f"yfinance devolvió 0 velas para {ticker_store}.",
+            },
+            ensure_ascii=False,
+        )
+    bars: list[dict[str, Any]] = []
+    for ts_idx, row in hist.iterrows():
+        try:
+            ts_dt = ts_idx.to_pydatetime() if hasattr(ts_idx, "to_pydatetime") else ts_idx
+            if getattr(ts_dt, "tzinfo", None) is not None:
+                ts_dt = ts_dt.astimezone(timezone.utc).replace(tzinfo=None)
+            o = float(row["Open"])
+            h = float(row["High"])
+            l = float(row["Low"])
+            c = float(row["Close"])
+            v_raw = row.get("Volume")
+            v = 0.0
+            if v_raw is not None:
+                try:
+                    vf = float(v_raw)
+                    if vf == vf:
+                        v = vf
+                except (TypeError, ValueError):
+                    pass
+            bars.append(
+                {
+                    "ticker": ticker_store,
+                    "timestamp": ts_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "open": o,
+                    "high": h,
+                    "low": l,
+                    "close": c,
+                    "volume": v,
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not bars:
+        return None, json.dumps(
+            {
+                "error": "YFINANCE_PARSE_FAILED",
+                "ticker": ticker_store,
+                "message": f"No se pudieron normalizar velas de {ticker_store}.",
+            },
+            ensure_ascii=False,
+        )
+    return bars, None
+
+
+def _yfinance_fallback_enabled() -> bool:
+    raw = (os.environ.get("DUCKCLAW_YFINANCE_FALLBACK_ENABLED") or "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
 def _ts_sort_key(ts: str) -> float:
     try:
         return datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S").timestamp()
@@ -768,11 +872,117 @@ def _fetch_market_data_impl(
     if use_lake:
         payload, err = _run_lake_ssh_json(tkr, tf, lookback_days)
         if err:
+            if _yfinance_fallback_enabled():
+                bars, yerr = _fetch_symbol_yfinance_payload(
+                    ticker_store=tkr, tf=tf, lookback_days=lookback_days
+                )
+                if yerr is None and bars is not None:
+                    # region agent log
+                    try:
+                        with open(
+                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                            "a",
+                            encoding="utf-8",
+                        ) as _df:
+                            _df.write(
+                                json.dumps(
+                                    {
+                                        "sessionId": "c964f7",
+                                        "runId": "vss-evidence-post-fix",
+                                        "hypothesisId": "H_VSS5",
+                                        "location": "quant_market_bridge._fetch_market_data_impl",
+                                        "message": "yfinance_fallback_after_lake_error",
+                                        "data": {
+                                            "ticker": tkr,
+                                            "timeframe": tf,
+                                            "lookback_days": int(lookback_days),
+                                            "lake_err": str(err)[:220],
+                                        },
+                                        "timestamp": int(time.time() * 1000),
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                    except Exception:
+                        pass
+                    # endregion
+                    return _upsert_bars(db, bars, tkr, tf, lookback_days, "yfinance_fallback")
             return err
+        if isinstance(payload, dict) and payload.get("error") == "LAKE_EMPTY_BARS" and _yfinance_fallback_enabled():
+            bars, yerr = _fetch_symbol_yfinance_payload(
+                ticker_store=tkr, tf=tf, lookback_days=lookback_days
+            )
+            if yerr is None and bars is not None:
+                # region agent log
+                try:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "vss-evidence-post-fix",
+                                    "hypothesisId": "H_VSS5",
+                                    "location": "quant_market_bridge._fetch_market_data_impl",
+                                    "message": "yfinance_fallback_after_lake_empty_bars",
+                                    "data": {
+                                        "ticker": tkr,
+                                        "timeframe": tf,
+                                        "lookback_days": int(lookback_days),
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # endregion
+                return _upsert_bars(db, bars, tkr, tf, lookback_days, "yfinance_fallback")
         return _upsert_bars(db, payload, tkr, tf, lookback_days, "lake_ssh")
 
     base = (os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()
     if not base:
+        if _yfinance_fallback_enabled():
+            bars, yerr = _fetch_symbol_yfinance_payload(
+                ticker_store=tkr, tf=tf, lookback_days=lookback_days
+            )
+            if yerr is None and bars is not None:
+                # region agent log
+                try:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "vss-evidence-post-fix",
+                                    "hypothesisId": "H_VSS5",
+                                    "location": "quant_market_bridge._fetch_market_data_impl",
+                                    "message": "yfinance_fallback_without_ibkr_http_url",
+                                    "data": {
+                                        "ticker": tkr,
+                                        "timeframe": tf,
+                                        "lookback_days": int(lookback_days),
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # endregion
+                return _upsert_bars(db, bars, tkr, tf, lookback_days, "yfinance_fallback")
         return json.dumps(
             {
                 "error": "IBKR_MARKET_HTTP_UNCONFIGURED",
@@ -788,8 +998,20 @@ def _fetch_market_data_impl(
         )
     payload, err = _http_fetch_json(tkr, tf, lookback_days)
     if err:
+        if _yfinance_fallback_enabled():
+            bars, yerr = _fetch_symbol_yfinance_payload(
+                ticker_store=tkr, tf=tf, lookback_days=lookback_days
+            )
+            if yerr is None and bars is not None:
+                return _upsert_bars(db, bars, tkr, tf, lookback_days, "yfinance_fallback")
         return err
     if payload is None:
+        if _yfinance_fallback_enabled():
+            bars, yerr = _fetch_symbol_yfinance_payload(
+                ticker_store=tkr, tf=tf, lookback_days=lookback_days
+            )
+            if yerr is None and bars is not None:
+                return _upsert_bars(db, bars, tkr, tf, lookback_days, "yfinance_fallback")
         return json.dumps({"error": "Sin respuesta del gateway IBKR."}, ensure_ascii=False)
     return _upsert_bars(db, payload, tkr, tf, lookback_days, "ibkr_http")
 

@@ -3051,8 +3051,43 @@ def build_goals_proactive_system_event_message(
         titles.append(_goal_title(g, k))
     summary = "; ".join(titles[:12]) if titles else "(sin títulos)"
     obj = (trading_session_objective or "").strip().lower()
+    # #region agent log
+    try:
+        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "overnight_goals_debug_v1",
+                        "hypothesisId": "H4",
+                        "location": "on_the_fly_commands.build_goals_proactive_system_event_message:entry",
+                        "message": "proactive_system_event_objective",
+                        "data": {
+                            "trading_session_objective": obj,
+                            "goals_count": len(goals or []),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     extra = ""
-    if obj == "rebalance_hrp":
+    if obj == "overnight_gap_squeeze":
+        extra = (
+            " **MISIÓN: OVERNIGHT GAP SQUEEZE (HRP + MOC Proxy):** "
+            "1) Ingesta OHLCV 1m de los tickers de la sesión via `fetch_market_data`. "
+            "2) Ingesta de portfolio actual via `get_ibkr_portfolio`. "
+            "3) Ejecuta `run_sandbox` con el script `overnight_squeeze_standalone.py`. "
+            "4) El script debe: a) Aplicar Kalman a la serie 1m. b) Calcular el 'MOC Proxy' (Suma de Volumen Direccional últimos 15m). "
+            "c) Calcular pesos HRP con límite del 35%. "
+            "5) Si MOC Proxy > 0 (Presión de Compra) y Kalman es alcista: Proponer rebalanceo hacia los pesos HRP. "
+            "6) Si MOC Proxy < 0: Abortar rebalanceo (Fase Sólida/Plasma detectada)."
+        )
+    elif obj == "rebalance_hrp":
         extra = (
             " **Sesión `quant_core.trading_sessions` (session_goal.objective=rebalance_hrp):** el veredicto "
             "debe **priorizar** alineación cartera IBKR vs **pesos HRP** del sandbox (desviación por ticker, "
@@ -3081,6 +3116,7 @@ class TradingTickEvent(BaseModel):
     tickers: list[str]
     mode: str = "paper"
     signal_threshold: str = "GAS"
+    objective: str = "maximize_pnl"
     directive: str
 
 
@@ -3090,26 +3126,66 @@ def build_trading_tick_system_event_message(
     tickers: list[str],
     mode: str,
     signal_threshold: str,
+    objective: str = "maximize_pnl",
 ) -> str:
+    _obj = str(objective or "maximize_pnl").strip().lower() or "maximize_pnl"
+    if _obj not in ("maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"):
+        _obj = "maximize_pnl"
+    _directive = (
+        "TRADING TICK AUTÓNOMO (HITL): 1) validar sesión ACTIVE; 2) ejecutar evaluate_cfd_state "
+        "con session_uid+tickers; 3) si outcome=ERROR o all_data_failed, reportar ceguera sensorial; "
+        "4) si outcome=MISALIGNED y no hay pending por ticker, proponer máximo 1 señal por ticker con "
+        "propose_trade_signal (NO ejecutar); 5) si mode=live agregar warning de capital real; "
+        "6) si ALIGNED, no enviar resumen al usuario."
+    )
+    if _obj == "rebalance_hrp":
+        _directive += (
+            " 7) REBALANCEO HRP: mismos tickers de sesión, OHLCV suficiente (fetch_ib_gateway_ohlcv o read_sql "
+            "sobre quant_core.ohlcv_data), luego execute_sandbox_script: **preferir PyPortfolioOpt** "
+            "(import pypfopt; pypfopt.hierarchical_portfolio.HRPOpt + risk_models.sample_cov sobre DataFrame de retornos; "
+            "optimize() → pesos que suman 1). Solo si pypfopt falla, HRP manual con pandas/scipy. "
+            "Comparar vs get_ibkr_portfolio; si desviación relevante y sin HITL pendiente por ticker, máximo 1 "
+            "propose_trade_signal de rebalanceo por ticker (NO ejecutar)."
+        )
+    elif _obj == "overnight_gap_squeeze":
+        _directive += (
+            " 7) OVERNIGHT GAP SQUEEZE: priorizar setup de cierre para captura de gap overnight; "
+            "usar evidencia OHLCV reciente + estado CFD por ticker para detectar compresión previa al cierre; "
+            "si no hay condiciones claras de squeeze, abstenerse de proponer señal."
+        )
+    # #region agent log
+    try:
+        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "overnight_goals_debug_v2",
+                        "hypothesisId": "H5",
+                        "location": "on_the_fly_commands.build_trading_tick_system_event_message:objective_directive",
+                        "message": "trading_tick_directive_selected",
+                        "data": {
+                            "objective": _obj,
+                            "tickers_count": len(tickers or []),
+                            "mode": str(mode or "paper"),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     event = TradingTickEvent.model_validate(
         {
             "session_uid": str(session_uid or "").strip(),
             "tickers": [str(t or "").strip().upper() for t in (tickers or []) if str(t or "").strip()],
             "mode": str(mode or "paper").strip().lower() or "paper",
             "signal_threshold": str(signal_threshold or "GAS").strip().upper() or "GAS",
-            "directive": (
-                "TRADING TICK AUTÓNOMO (HITL): 1) validar sesión ACTIVE; 2) ejecutar evaluate_cfd_state "
-                "con session_uid+tickers; 3) si outcome=ERROR o all_data_failed, reportar ceguera sensorial; "
-                "4) si outcome=MISALIGNED y no hay pending por ticker, proponer máximo 1 señal por ticker con "
-                "propose_trade_signal (NO ejecutar); 5) si mode=live agregar warning de capital real; "
-                "6) si ALIGNED, no enviar resumen al usuario; "
-                "7) REBALANCEO HRP: mismos tickers de sesión, OHLCV suficiente (fetch_ib_gateway_ohlcv o read_sql "
-                "sobre quant_core.ohlcv_data), luego execute_sandbox_script: **preferir PyPortfolioOpt** "
-                "(import pypfopt; pypfopt.hierarchical_portfolio.HRPOpt + risk_models.sample_cov sobre DataFrame de retornos; "
-                "optimize() → pesos que suman 1). Solo si pypfopt falla, HRP manual con pandas/scipy. "
-                "Comparar vs get_ibkr_portfolio; si desviación relevante y sin HITL pendiente por ticker, máximo 1 "
-                "propose_trade_signal de rebalanceo por ticker (NO ejecutar)."
-            ),
+            "objective": _obj,
+            "directive": _directive,
         }
     )
     return "[SYSTEM_EVENT: " + event.model_dump_json(ensure_ascii=False) + "]"
@@ -3325,6 +3401,48 @@ def execute_goals(
     if ds_list < 0:
         ds_list = 0
 
+    # #region agent log
+    try:
+        _sess_obj = ""
+        _raw_s = db.query(
+            "SELECT session_goal FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+        )
+        _rows_s = json.loads(_raw_s) if isinstance(_raw_s, str) else (_raw_s or [])
+        if _rows_s and isinstance(_rows_s[0], dict):
+            _sg = _rows_s[0].get("session_goal")
+            if isinstance(_sg, dict):
+                _sess_obj = str(_sg.get("objective") or "").strip().lower()
+            elif isinstance(_sg, str) and _sg.strip():
+                try:
+                    _sgj = json.loads(_sg)
+                    if isinstance(_sgj, dict):
+                        _sess_obj = str(_sgj.get("objective") or "").strip().lower()
+                except Exception:
+                    _sess_obj = ""
+        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "overnight_goals_debug_v1",
+                        "hypothesisId": "H3",
+                        "location": "on_the_fly_commands.execute_goals:list_state",
+                        "message": "goals_list_requested",
+                        "data": {
+                            "chat_id": str(chat_id),
+                            "goals_count": len(goals or []),
+                            "goal_keys": [str((g or {}).get("belief_key") or "") for g in (goals or [])[:5]],
+                            "session_objective": _sess_obj,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     if not goals:
         empty = (
             "\U0001f3af Manager\nNo hay goals. Crea con /goals <objetivo>, ej. /goals disminuir gasto en recreación."
@@ -3950,11 +4068,11 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ("/execute_signal <uuid>", "HITL: confirma ejecución (Quant Trader: execute_approved_signal)"),
         ("/cancel_signal <uuid>", "HITL: cancela señal pendiente (PENDING_HITL/AWAITING_HITL)"),
         (
-            "/trading_session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp] [--confirm] [--status] [--stop]",
+            "/trading_session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--confirm] [--status] [--stop]",
             "Quant: sesión activa + session_goal + auto delta de /goals (live requiere --confirm)",
         ),
         (
-            "/quant_cycle [--tickers A,B] [--timeframe 1h] [--lookback_days 20] [--objective maximize_pnl|rebalance_hrp] [--execute auto|off]",
+            "/quant_cycle [--tickers A,B] [--timeframe 1h] [--lookback_days 20] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--execute auto|off]",
             "Quant: pipeline determinista (fetch -> portfolio -> evaluate -> señal) con salida estructurada",
         ),
         ("/lake", "Estado del túnel SSH Capadonna (env + prueba rápida)"),
@@ -4422,7 +4540,8 @@ def _quant_clear_risk_constraints_vault(db: Any, *, tenant_id: str) -> tuple[boo
 class TradingSessionGoal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
+    # objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
+    objective: Literal["maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"] = "maximize_pnl"
     max_drawdown_pct: float = 2.0
     position_size_pct: float = 5.0
     signal_threshold: str = "GAS"
@@ -4441,7 +4560,8 @@ class TradingSessionCliArgs(BaseModel):
     max_drawdown_pct: float = 2.0
     position_size_pct: float = 5.0
     signal_threshold: str = "GAS"
-    objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
+    # objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
+    objective: Literal["maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"] = "maximize_pnl"
 
 
 class QuantCycleCliArgs(BaseModel):
@@ -4450,7 +4570,7 @@ class QuantCycleCliArgs(BaseModel):
     tickers_csv: str = ""
     timeframe: str = "1h"
     lookback_days: int = 20
-    objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
+    objective: Literal["maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"] = "maximize_pnl"
     execute: Literal["auto", "off"] = "auto"
     signal_threshold: str = "GAS"
     weight_pct: float = 5.0
@@ -4520,11 +4640,11 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
         return None, "Falta --mode paper|live"
     if mode and mode not in ("paper", "live"):
         return None, "mode debe ser paper o live"
-    if objective not in ("maximize_pnl", "rebalance_hrp"):
+    if objective not in ("maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"):
         if stop or status:
             objective = "maximize_pnl"
         else:
-            return None, "objective debe ser maximize_pnl o rebalance_hrp"
+            return None, "objective debe ser maximize_pnl, rebalance_hrp u overnight_gap_squeeze"
     seen: set[str] = set()
     tickers_ordered: list[str] = []
     for x in tickers_raw:
@@ -4598,8 +4718,8 @@ def _parse_quant_cycle_cli(args: str) -> tuple[Optional[QuantCycleCliArgs], Opti
             i += 2
             continue
         i += 1
-    if objective not in ("maximize_pnl", "rebalance_hrp"):
-        return None, "objective debe ser maximize_pnl o rebalance_hrp"
+    if objective not in ("maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"):
+        return None, "objective debe ser maximize_pnl, rebalance_hrp u overnight_gap_squeeze"
     if execute not in ("auto", "off"):
         return None, "execute debe ser auto u off"
     if not re.fullmatch(r"[A-Za-z0-9]+", timeframe or ""):
@@ -4643,7 +4763,7 @@ def _session_goal_from_cli(parsed: TradingSessionCliArgs) -> TradingSessionGoal:
         threshold = "GAS"
     tickers = [x.strip().upper() for x in (parsed.tickers_csv or "").split(",") if x.strip()]
     oj = str(getattr(parsed, "objective", "maximize_pnl") or "maximize_pnl").strip().lower()
-    if oj not in ("maximize_pnl", "rebalance_hrp"):
+    if oj not in ("maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"):
         oj = "maximize_pnl"
     return TradingSessionGoal.model_validate(
         {
@@ -4747,19 +4867,94 @@ def _ensure_trading_session_goals_delta(
         _GOALS_DELTA_META_KEY,
         json.dumps({"trigger": "trading_session", "session_uid": session_uid}, ensure_ascii=False),
     )
+    # #region agent log
+    try:
+        _sess_obj = ""
+        _raw_s = db.query(
+            "SELECT session_goal FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+        )
+        _rows_s = json.loads(_raw_s) if isinstance(_raw_s, str) else (_raw_s or [])
+        if _rows_s and isinstance(_rows_s[0], dict):
+            _sg = _rows_s[0].get("session_goal")
+            if isinstance(_sg, dict):
+                _sess_obj = str(_sg.get("objective") or "").strip().lower()
+            elif isinstance(_sg, str) and _sg.strip():
+                try:
+                    _sgj = json.loads(_sg)
+                    if isinstance(_sgj, dict):
+                        _sess_obj = str(_sgj.get("objective") or "").strip().lower()
+                except Exception:
+                    _sess_obj = ""
+        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "runId": "overnight_goals_debug_v1",
+                        "hypothesisId": "H1",
+                        "location": "on_the_fly_commands._ensure_trading_session_goals_delta:meta_seed",
+                        "message": "goals_delta_meta_seeded",
+                        "data": {
+                            "chat_id": str(chat_id),
+                            "session_uid": str(session_uid),
+                            "enabled_new": bool(enabled),
+                            "delta_seconds": int(current),
+                            "session_objective": _sess_obj,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     if not get_manager_goals(db, chat_id):
+        _seed_goal = {
+            "belief_key": "hrp_session_rebalance",
+            "target_value": 0.0,
+            "threshold": 0.0,
+            "observed_value": None,
+            "title": "Rebalanceo HRP (pypfopt) vs cartera IBKR en cada tick",
+        }
+        if _sess_obj == "overnight_gap_squeeze":
+            _seed_goal = {
+                "belief_key": "overnight_gap_squeeze_session",
+                "target_value": 0.0,
+                "threshold": 0.0,
+                "observed_value": None,
+                "title": "Overnight Gap Squeeze (cierre + gap) en cada tick",
+            }
+        # #region agent log
+        try:
+            with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "overnight_goals_debug_v1",
+                            "hypothesisId": "H2",
+                            "location": "on_the_fly_commands._ensure_trading_session_goals_delta:default_goal",
+                            "message": "seeding_default_manager_goal",
+                            "data": {
+                                "chat_id": str(chat_id),
+                                "session_objective": _sess_obj,
+                                "default_goal_key": str(_seed_goal.get("belief_key") or ""),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         set_manager_goals(
             db,
             chat_id,
-            [
-                {
-                    "belief_key": "hrp_session_rebalance",
-                    "target_value": 0.0,
-                    "threshold": 0.0,
-                    "observed_value": None,
-                    "title": "Rebalanceo HRP (pypfopt) vs cartera IBKR en cada tick",
-                }
-            ],
+            [_seed_goal],
         )
     return enabled, current
 
@@ -5479,7 +5674,7 @@ def execute_trading_session(
         return (
             f"Error: {err}\n\n"
             "Uso: `/trading_session --mode paper|live [--tickers AAPL,NVDA] [--confirm]`\n"
-            "Extras: `--objective maximize_pnl|rebalance_hrp` · `--max-drawdown 2` · "
+            "Extras: `--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze` · `--max-drawdown 2` · "
             "`--position-size 5` · `--signal GAS` · `--status` · `--stop`\n"
             "Modo **live** exige añadir **--confirm** en el mismo mensaje (riesgo de capital)."
         )
@@ -5605,7 +5800,7 @@ def execute_quant_cycle(
         return (
             f"Error: {err}\n\n"
             "Uso: `/quant_cycle [--tickers AAPL,NVDA] [--timeframe 1h] [--lookback_days 20]`\n"
-            "Extras: `--objective maximize_pnl|rebalance_hrp` · `--signal GAS|LIQUID|SOLID|PLASMA` · "
+            "Extras: `--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze` · `--signal GAS|LIQUID|SOLID|PLASMA` · "
             "`--weight 5` · `--execute auto|off`\n"
             "Si no pasas `--tickers`, se usan los de `quant_core.trading_sessions` (id=active) o `SPY` por defecto."
         )

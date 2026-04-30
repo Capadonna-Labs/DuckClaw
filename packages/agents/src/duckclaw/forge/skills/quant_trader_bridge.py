@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import statistics
 import time
@@ -286,6 +287,28 @@ def _normalize_proposed_weight_pct(raw: float) -> float:
     if 0 < w < 1.0:
         return w * 100.0
     return w
+
+
+def _coerce_positive_weight(value: Any) -> Optional[float]:
+    """Convierte peso a float positivo finito; acepta strings con '%'."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip().replace("%", "")
+        if not s:
+            return None
+        try:
+            v = float(s)
+        except ValueError:
+            return None
+    else:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return None
+    if not math.isfinite(v) or v <= 0:
+        return None
+    return _normalize_proposed_weight_pct(v)
 
 
 def _liquid_capital(db: Any) -> float:
@@ -969,7 +992,38 @@ def _propose_trade_signal_impl(
     mid = str(uuid.uuid4()) if not mid_in else _coerce_mandate_id_to_uuid(mid_in)
     if not tkr:
         return json.dumps({"error": "ticker requerido"}, ensure_ascii=False)
-    if not has_quant_market_evidence_for_ticker(tkr):
+    has_evidence = has_quant_market_evidence_for_ticker(tkr)
+    if not has_evidence:
+        # region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "vss-evidence-pre-fix",
+                            "hypothesisId": "H_VSS2",
+                            "location": "quant_trader_bridge._propose_trade_signal_impl",
+                            "message": "evidence_gate_blocked",
+                            "data": {
+                                "ticker": tkr,
+                                "chat_id_ctx": get_quant_tool_chat_id(),
+                                "mandate_id_prefix": str(mid)[:8],
+                                "signal_type": str(signal_type or "").upper(),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
         return json.dumps(
             {
                 "error": "EVIDENCE_UNIQUE_RULE",
@@ -985,6 +1039,8 @@ def _propose_trade_signal_impl(
         w = float(weight)
     except (TypeError, ValueError):
         return json.dumps({"error": "weight inválido"}, ensure_ascii=False)
+    if not math.isfinite(w) or w <= 0:
+        return json.dumps({"error": "weight inválido (debe ser > 0 y finito)"}, ensure_ascii=False)
     w = _normalize_proposed_weight_pct(w)
     cap = _liquid_capital(db)
     limit = _max_weight_pct_limit()
@@ -1077,7 +1133,16 @@ def _propose_trade_signal_impl(
 
     cid = get_quant_tool_chat_id() or "default"
     grant_execute_order(cid, signal_id)
-    exec_raw = _execute_approved_signal_impl(db, signal_id=signal_id)
+    exec_raw = _execute_approved_signal_impl(
+        db,
+        signal_id=signal_id,
+        override_order_payload={
+            "ticker": tkr,
+            "signal_type": "ENTRY" if str(signal_type).upper() != "EXIT" else "EXIT",
+            "proposed_weight": float(guarded),
+            "mandate_id": mid,
+        },
+    )
     exec_obj: Any = exec_raw
     try:
         if isinstance(exec_raw, str) and exec_raw.strip().startswith("{"):
@@ -1092,7 +1157,12 @@ def _propose_trade_signal_impl(
 
 
 @log_tool_execution_sync(name="execute_approved_signal")
-def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
+def _execute_approved_signal_impl(
+    db: Any,
+    *,
+    signal_id: str,
+    override_order_payload: Optional[dict[str, Any]] = None,
+) -> str:
     sid = (signal_id or "").strip().lower()
     if not sid:
         return json.dumps({"error": "signal_id requerido"}, ensure_ascii=False)
@@ -1217,34 +1287,6 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
     _explicit_exec = bool(url)
     if not url:
         url = _derive_ibkr_execute_order_url_from_portfolio()
-    # #region agent log
-    try:
-        import time as _time_dbg_ex
-
-        _payload_ex = {
-            "sessionId": "c964f7",
-            "hypothesisId": "H_execute_broker_path",
-            "location": "quant_trader_bridge.py:_execute_approved_signal_impl",
-            "message": "execute_signal_url_resolution",
-            "data": {
-                "explicit_IBKR_EXECUTE_ORDER_URL": _explicit_exec,
-                "derived_url_nonempty": bool((url or "").strip()) and not _explicit_exec,
-                "resolved_url_nonempty": bool((url or "").strip()),
-                "paper_flag": paper_flag,
-                "will_simulate": not bool((url or "").strip()),
-                "timeout_sec": exec_timeout_sec,
-            },
-            "timestamp": int(_time_dbg_ex.time() * 1000),
-        }
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df_ex:
-            _df_ex.write(json.dumps(_payload_ex) + "\n")
-    except Exception:
-        pass
-    # #endregion
     if not url:
         push_quant_state_delta_sync(
             {
@@ -1265,20 +1307,25 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
         )
 
     sig_row = row if isinstance(row, dict) else {}
+    ov = override_order_payload if isinstance(override_order_payload, dict) else {}
     post: dict[str, Any] = {"signal_id": sid, "paper": paper_flag}
-    tkr = str(sig_row.get("ticker") or "").strip().upper()
+    tkr = str(sig_row.get("ticker") or ov.get("ticker") or "").strip().upper()
     if tkr:
         post["ticker"] = tkr
-    st = str(sig_row.get("signal_type") or "").strip().upper()
+    st = str(sig_row.get("signal_type") or ov.get("signal_type") or "").strip().upper()
     if st in ("ENTRY", "EXIT"):
         post["signal_type"] = st
-    try:
-        pw = float(sig_row.get("proposed_weight"))
-        if pw > 0:
-            post["proposed_weight"] = _normalize_proposed_weight_pct(pw)
-    except (TypeError, ValueError):
-        pass
-    mid = str(sig_row.get("mandate_id") or "").strip()
+    pw_source = "none"
+    pw_row = _coerce_positive_weight(sig_row.get("proposed_weight"))
+    if pw_row is not None:
+        post["proposed_weight"] = pw_row
+        pw_source = "db_row"
+    if "proposed_weight" not in post:
+        pw_override = _coerce_positive_weight(ov.get("proposed_weight"))
+        if pw_override is not None:
+            post["proposed_weight"] = pw_override
+            pw_source = "override"
+    mid = str(sig_row.get("mandate_id") or ov.get("mandate_id") or "").strip()
     if mid:
         post["mandate_id"] = mid
     payload = json.dumps(post, ensure_ascii=False).encode("utf-8")
@@ -1292,32 +1339,99 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     broker_parsed: dict[str, Any] = {}
+    released_ro_for_broker = False
+    susp = getattr(db, "suspend_readonly_file_handle", None)
+    resu = getattr(db, "resume_readonly_file_handle", None)
+    ro = bool(getattr(db, "_read_only", False))
+    if ro and callable(susp) and callable(resu):
+        try:
+            susp()
+            released_ro_for_broker = True
+            # #region agent log
+            try:
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df_l1:
+                    _df_l1.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "lock-hardening",
+                                "hypothesisId": "H_LOCK1",
+                                "location": "quant_trader_bridge._execute_approved_signal_impl",
+                                "message": "released_ro_before_broker_http",
+                                "data": {"signal_id": sid, "released_ro_for_broker": True},
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
+        except Exception:
+            released_ro_for_broker = False
     try:
-        with urllib.request.urlopen(req, timeout=exec_timeout_sec) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        _push_signal_failed(db, sid)
-        broker_msg = _broker_message_from_http_error(exc)
-        err_obj: dict[str, Any] = {"error": f"Broker HTTP {exc.code}"}
-        if broker_msg:
-            err_obj["broker_message"] = broker_msg
-        return json.dumps(err_obj, ensure_ascii=False)
-    except urllib.error.URLError as exc:
-        _push_signal_failed(db, sid)
-        if _is_broker_post_timeout(exc):
-            return json.dumps(
-                {
-                    "error": "BROKER_TIMEOUT",
-                    "message": (
-                        "El hook de ejecución no respondió a tiempo. "
-                        "Aumenta IBKR_EXECUTE_ORDER_TIMEOUT_SEC (actual "
-                        f"{exec_timeout_sec:.0f}s) o revisa el servicio en el host del broker."
-                    ),
-                    "timeout_sec": exec_timeout_sec,
-                },
-                ensure_ascii=False,
-            )
-        return json.dumps({"error": str(exc.reason)}, ensure_ascii=False)
+        try:
+            with urllib.request.urlopen(req, timeout=exec_timeout_sec) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            _push_signal_failed(db, sid)
+            broker_msg = _broker_message_from_http_error(exc)
+            err_obj: dict[str, Any] = {"error": f"Broker HTTP {exc.code}"}
+            if broker_msg:
+                err_obj["broker_message"] = broker_msg
+            return json.dumps(err_obj, ensure_ascii=False)
+        except urllib.error.URLError as exc:
+            _push_signal_failed(db, sid)
+            if _is_broker_post_timeout(exc):
+                return json.dumps(
+                    {
+                        "error": "BROKER_TIMEOUT",
+                        "message": (
+                            "El hook de ejecución no respondió a tiempo. "
+                            "Aumenta IBKR_EXECUTE_ORDER_TIMEOUT_SEC (actual "
+                            f"{exec_timeout_sec:.0f}s) o revisa el servicio en el host del broker."
+                        ),
+                        "timeout_sec": exec_timeout_sec,
+                    },
+                    ensure_ascii=False,
+                )
+            return json.dumps({"error": str(exc.reason)}, ensure_ascii=False)
+    finally:
+        if released_ro_for_broker and callable(resu):
+            try:
+                resu()
+                # #region agent log
+                try:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df_l2:
+                        _df_l2.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "lock-hardening",
+                                    "hypothesisId": "H_LOCK1",
+                                    "location": "quant_trader_bridge._execute_approved_signal_impl",
+                                    "message": "resumed_ro_after_broker_http",
+                                    "data": {"signal_id": sid},
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # #endregion
+            except Exception:
+                pass
 
     try:
         if body.strip().startswith("{"):
@@ -1326,35 +1440,6 @@ def _execute_approved_signal_impl(db: Any, *, signal_id: str) -> str:
                 broker_parsed = _bp
     except json.JSONDecodeError:
         broker_parsed = {}
-    # #region agent log
-    try:
-        import time as _time_dbg_br
-
-        _payload_br = {
-            "sessionId": "c964f7",
-            "hypothesisId": "H_broker_response_parsed",
-            "location": "quant_trader_bridge.py:_execute_approved_signal_impl",
-            "message": "broker_http_ok_body",
-            "data": {
-                "signal_id": sid,
-                "broker_status": broker_parsed.get("status"),
-                "ib_order_id": broker_parsed.get("ib_order_id"),
-                "qty": broker_parsed.get("qty"),
-                "ticker": broker_parsed.get("ticker"),
-                "posted_weight_after_normalize": post.get("proposed_weight"),
-            },
-            "timestamp": int(_time_dbg_br.time() * 1000),
-        }
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df_br:
-            _df_br.write(json.dumps(_payload_br) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
     push_quant_state_delta_sync(
         {
             **_state_delta_base(),
@@ -1426,7 +1511,50 @@ def _run_quant_signal_cycle_impl(
     }
     if not execute_now:
         return json.dumps(out, ensure_ascii=False)
-    exec_raw = _execute_approved_signal_impl(db, signal_id=sid)
+    if bool(proposed_obj.get("auto_executed")) and proposed_obj.get("execution") is not None:
+        exec_obj = proposed_obj.get("execution")
+        out["execution"] = exec_obj
+        out["execution_source"] = "propose_auto_execute"
+        if isinstance(exec_obj, dict) and exec_obj.get("error"):
+            out["status"] = "execution_failed"
+        else:
+            out["status"] = "executed"
+        # #region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                "a",
+                encoding="utf-8",
+            ) as _df_l3:
+                _df_l3.write(
+                    json.dumps(
+                        {
+                            "sessionId": "c964f7",
+                            "runId": "lock-hardening",
+                            "hypothesisId": "H_LOCK2",
+                            "location": "quant_trader_bridge._run_quant_signal_cycle_impl",
+                            "message": "skip_duplicate_execute_approved_signal",
+                            "data": {"signal_id": sid, "execute_now": bool(execute_now)},
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
+        return json.dumps(out, ensure_ascii=False)
+    exec_raw = _execute_approved_signal_impl(
+        db,
+        signal_id=sid,
+        override_order_payload={
+            "ticker": str(proposed_obj.get("ticker") or ticker or "").strip().upper(),
+            "signal_type": str(proposed_obj.get("signal_type") or signal_type or "ENTRY").strip().upper(),
+            "proposed_weight": proposed_obj.get("proposed_weight"),
+            "mandate_id": str(proposed_obj.get("mandate_id") or mandate_id or "").strip(),
+        },
+    )
     try:
         exec_obj = json.loads(exec_raw) if isinstance(exec_raw, str) else exec_raw
     except Exception:
@@ -1455,6 +1583,37 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 tkr = str(payload.get("ticker") or ticker or "").strip().upper()
                 if tkr:
                     note_quant_market_evidence_ticker(tkr)
+            # region agent log
+            try:
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "vss-evidence-pre-fix",
+                                "hypothesisId": "H_VSS1",
+                                "location": "quant_trader_bridge.register_quant_trader_skills._fetch_market_data",
+                                "message": "fetch_market_data_result",
+                                "data": {
+                                    "ticker_arg": str(ticker or "").upper(),
+                                    "ticker_payload": str((payload or {}).get("ticker") or "").upper() if isinstance(payload, dict) else "",
+                                    "status": (payload or {}).get("status") if isinstance(payload, dict) else None,
+                                    "error": (payload or {}).get("error") if isinstance(payload, dict) else None,
+                                    "has_evidence_after": has_quant_market_evidence_for_ticker(str((payload or {}).get("ticker") or ticker or "").strip().upper()),
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
         except (json.JSONDecodeError, TypeError):
             pass
         return raw
@@ -1474,6 +1633,37 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 tkr = str(payload.get("ticker") or ticker or "").strip().upper()
                 if tkr:
                     note_quant_market_evidence_ticker(tkr)
+            # region agent log
+            try:
+                with open(
+                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "vss-evidence-pre-fix",
+                                "hypothesisId": "H_VSS3",
+                                "location": "quant_trader_bridge.register_quant_trader_skills._fetch_ib_gateway_ohlcv",
+                                "message": "fetch_ib_gateway_ohlcv_result",
+                                "data": {
+                                    "ticker_arg": str(ticker or "").upper(),
+                                    "status": (payload or {}).get("status") if isinstance(payload, dict) else None,
+                                    "error": (payload or {}).get("error") if isinstance(payload, dict) else None,
+                                    "ibkr_gateway_url_configured": bool((os.environ.get("IBKR_GATEWAY_OHLCV_URL") or "").strip()),
+                                    "has_evidence_after": has_quant_market_evidence_for_ticker(str((payload or {}).get("ticker") or ticker or "").strip().upper()),
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
         except (json.JSONDecodeError, TypeError):
             pass
         return raw

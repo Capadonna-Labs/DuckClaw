@@ -76,6 +76,12 @@ def test_parse_quant_cycle_cli_defaults_and_valid_flags() -> None:
     assert abs(parsed.weight_pct - 7.5) < 1e-9
 
 
+def test_parse_quant_cycle_cli_objective_overnight_gap_squeeze() -> None:
+    parsed, err = _parse_quant_cycle_cli("--tickers SPY --objective overnight_gap_squeeze --execute off")
+    assert err is None and parsed is not None
+    assert parsed.objective == "overnight_gap_squeeze"
+
+
 def test_parse_quant_cycle_cli_invalid_execute() -> None:
     parsed, err = _parse_quant_cycle_cli("--tickers NVDA --execute now")
     assert parsed is None
@@ -292,6 +298,16 @@ def test_parse_trading_session_objective_rebalance_hrp() -> None:
     assert parsed.objective == "rebalance_hrp"
     g = _session_goal_from_cli(parsed)
     assert g.objective == "rebalance_hrp"
+
+
+def test_parse_trading_session_objective_overnight_gap_squeeze() -> None:
+    parsed, err = _parse_trading_session_cli(
+        "--mode paper --tickers SPY --objective overnight_gap_squeeze"
+    )
+    assert err is None and parsed is not None
+    assert parsed.objective == "overnight_gap_squeeze"
+    g = _session_goal_from_cli(parsed)
+    assert g.objective == "overnight_gap_squeeze"
 
 
 def test_parse_trading_session_objective_invalid() -> None:

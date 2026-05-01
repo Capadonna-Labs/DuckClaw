@@ -111,12 +111,17 @@ def test_register_fmp_skill_none():
     assert tools == []
 
 
-def test_register_fmp_skill_enabled_adds_two():
+def test_register_fmp_skill_enabled_adds_four():
     tools: list = []
     register_fmp_skill(tools, {})
-    assert len(tools) == 2
+    assert len(tools) == 4
     names = {t.name for t in tools}
-    assert names == {"get_fmp_stock_dividends", "get_fmp_dividends_calendar"}
+    assert names == {
+        "get_fmp_stock_dividends",
+        "get_fmp_dividends_calendar",
+        "get_fmp_earnings_calendar",
+        "get_fmp_earnings_transcript",
+    }
 
 
 def test_register_fmp_skill_disabled():

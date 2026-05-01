@@ -35,6 +35,7 @@ class TradeSignalMutation(BaseModel):
     ] = "PENDING_HITL"
     rationale: str = ""
     session_uid: str = ""
+    strategy_name: str = Field(default="cfd_auto", min_length=1, max_length=64)
 
 
 class QuantStateDelta(BaseModel):

@@ -8,8 +8,8 @@ specs/features/Capadonna Lake OHLC SSH + IBKR Live.md
 Tiempo real / fallback HTTP: IBKR_MARKET_DATA_URL (GET; query ticker, timeframe,
 lookback_days); IBKR_PORTFOLIO_API_KEY o IBKR_MARKET_DATA_API_KEY opcional Bearer.
 
-Solo IB Gateway (sin lake): IBKR_GATEWAY_OHLCV_URL apunta a GET .../api/market/ibkr/historical
-(mismo contrato query/Bearer que arriba).
+``fetch_ib_gateway_ohlcv`` prioriza lake SSH e ``IBKR_MARKET_DATA_URL`` cuando apliquen; ``IBKR_GATEWAY_OHLCV_URL``
+es fallback GET ``.../api/market/ibkr/historical`` (mismo contrato query/Bearer que ``IBKR_MARKET_DATA_URL``).
 """
 
 from __future__ import annotations
@@ -1025,8 +1025,14 @@ def _fetch_ib_gateway_ohlcv_impl(
     lookback_days: int = 20,
 ) -> str:
     """
-    OHLCV solo vía HTTP al endpoint IB Gateway (p. ej. /api/market/ibkr/historical).
-    No usa lake SSH ni yfinance; persiste en quant_core.ohlcv_data.
+    Persiste OHLCV en quant_core.ohlcv_data con la misma prioridad operativa que el agente
+    necesita frente al VPS, evitando IBKR_GATEWAY_OHLCV_URL cuando ya hay otra vía:
+
+    1. Lake SSH — si ``_use_lake_ssh(tf)`` (CAPADONNA_* + CAPADONNA_HISTORICAL_TIMEFRAMES
+       sin solapamiento ganador en IBKR_REALTIME_TIMEFRAMES): delega en ``_fetch_market_data_impl``.
+    2. IBKR_MARKET_DATA_URL — si está definido, intenta ``_fetch_market_data_impl``; con éxito
+       (``status`` ok) retorna sin llamar al endpoint dedicado del gateway.
+    3. IBKR_GATEWAY_OHLCV_URL — fallback HTTP (p. ej. /api/market/ibkr/historical).
     """
     tkr = (ticker or "").strip().upper()
     if not tkr or len(tkr) > 12:
@@ -1039,14 +1045,36 @@ def _fetch_ib_gateway_ohlcv_impl(
     if not _TF_SAFE.fullmatch(tf) or len(tf) > 16:
         return json.dumps({"error": "timeframe inválido (solo alfanumérico, máx. 16)."}, ensure_ascii=False)
 
+    tf_norm = _normalize_timeframe_route_key(tf)
+    if _use_lake_ssh(tf_norm):
+        return _fetch_market_data_impl(
+            db, ticker=tkr, timeframe=tf, lookback_days=lookback_days
+        )
+
+    market_attempt: Optional[str] = None
+    market_url = (os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()
+    if market_url:
+        market_attempt = _fetch_market_data_impl(
+            db, ticker=tkr, timeframe=tf, lookback_days=lookback_days
+        )
+        try:
+            parsed = json.loads(market_attempt)
+        except (json.JSONDecodeError, TypeError):
+            parsed = {}
+        if isinstance(parsed, dict) and parsed.get("status") == "ok":
+            return market_attempt
+
     base = (os.environ.get("IBKR_GATEWAY_OHLCV_URL") or "").strip()
     if not base:
+        if market_attempt is not None:
+            return market_attempt
         return json.dumps(
             {
                 "error": "IBKR_GATEWAY_OHLCV_UNCONFIGURED",
                 "message": (
-                    "IBKR_GATEWAY_OHLCV_URL está vacío. Define la URL del GET /api/market/ibkr/historical "
-                    "(solo IB Gateway, sin lake) en el proceso del gateway, p. ej. PM2."
+                    "IBKR_GATEWAY_OHLCV_URL está vacío y no hubo ingesta exitosa vía lake ni "
+                    "IBKR_MARKET_DATA_URL. Define IBKR_MARKET_DATA_URL (recomendado para intradía) "
+                    "o IBKR_GATEWAY_OHLCV_URL (GET /api/market/ibkr/historical) en el proceso del gateway."
                 ),
             },
             ensure_ascii=False,

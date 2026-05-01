@@ -532,6 +532,28 @@ def _quant_is_proceed_like(text: str) -> bool:
     return bool(re.search(r"\b(procede|continu(a|ar)|sigue|adelante|hazlo)\b", low))
 
 
+def _quant_user_requests_inspect_macro_pgq(text: str) -> bool:
+    """Usuario (o manager wrapper) pidió ejecutar grafo PGQ macro; debe invocarse la tool, no inventar estado."""
+    if not text or not str(text).strip():
+        return False
+    low = str(text).strip().lower()
+    if "[system_directive:" in low or "[system_event:" in low:
+        return False
+    collapsed = re.sub(r"[\s_]+", "", low, flags=re.UNICODE)
+    if "inspectmacropgq" in collapsed:
+        return True
+    # "inspect macro pgq" / "inspector pgq macro" / español cercano
+    if "macropgq" in collapsed and ("inspect" in low or "inspeccion" in low):
+        return True
+    return bool(
+        re.search(
+            r"(inspect(\s|_)*(macro\s*)?pgq|pgq\s*(macro\s*)?(inspect|inspeccion))",
+            low,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _quant_extract_signal_id(text: str) -> str:
     raw = str(text or "")
     m = re.search(
@@ -2562,6 +2584,8 @@ def build_worker_graph(
             else None
         )
 
+        has_inspect_macro_pgq = "inspect_macro_pgq" in tools_by_name
+
         _reddit_tool_names = sorted(k for k in tools_by_name if (k or "").startswith("reddit_"))
         has_reddit_tools = bool(_reddit_tool_names)
 
@@ -3557,6 +3581,64 @@ def build_worker_graph(
                         if _sid:
                             _quant_signal_id = _sid
                             break
+            _regime_macro_pgq = ""
+            _m_rm = re.search(
+                r"\b(REGIMEN_[A-Z0-9_]+)\b",
+                str(incoming or ""),
+                flags=re.IGNORECASE,
+            )
+            if _m_rm:
+                _regime_macro_pgq = str(_m_rm.group(1) or "").strip().upper()
+            if (
+                _lid_l == "quant_trader"
+                and has_inspect_macro_pgq
+                and _quant_user_requests_inspect_macro_pgq(incoming)
+                and _worker_use_heuristic_first_tool(spec)
+                and not telegram_context_summarize_directive
+                and not already_has_tool_result
+            ):
+                _forced_tid_im = f"call_inspect_macro_pgq_{int(time.time() * 1000)}"
+                _forced_tc_im = [
+                    {
+                        "name": "inspect_macro_pgq",
+                        "args": {"regime_focus": _regime_macro_pgq},
+                        "id": _forced_tid_im,
+                        "type": "tool_call",
+                    }
+                ]
+                _log.info("[%s] quant deterministic inspect_macro_pgq regime=%r", _wl, _regime_macro_pgq)
+                # #region agent log
+                try:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df_im:
+                        _df_im.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "runId": "pgq-route",
+                                    "hypothesisId": "H_PGQ_FORCED_TOOL",
+                                    "location": "factory.py:agent_node",
+                                    "message": "forced_inspect_macro_pgq",
+                                    "data": {
+                                        "regime_focus_len": len(_regime_macro_pgq),
+                                        "incoming_prefix": str(incoming or "")[:100],
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # #endregion
+                _forced_resp_im = AIMessage(content="", tool_calls=_forced_tc_im)
+                _out_im = {**state, "messages": state["messages"] + [_forced_resp_im]}
+                _out_im.update(_identity_fields(state))
+                return _out_im
             _quant_can_force_pipeline_step = bool(
                 _quant_deterministic_cycle
                 and not already_has_tool_result
@@ -3726,6 +3808,39 @@ def build_worker_graph(
                 )
                 )
             )
+            # #region agent log
+            if _lid_l == "quant_trader" and telegram_context_summarize_directive:
+                try:
+                    _inc_a = incoming or ""
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _dfa:
+                        _dfa.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "c964f7",
+                                    "hypothesisId": "H_MOC_summarize_path",
+                                    "location": "factory.py:agent_node",
+                                    "message": "quant_summarize_directive_tool_path",
+                                    "data": {
+                                        "forced_tool": forced_name,
+                                        "incoming_has_context_anchor": "CONTEXT_ANCLA_TIEMPO"
+                                        in _inc_a,
+                                        "has_get_current_time_tool": "get_current_time"
+                                        in tools_by_name,
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                    "runId": "cot-moc-anchor",
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+            # #endregion
             # #region agent log
             if _lid_l == "pqrsd_assistant":
                 try:

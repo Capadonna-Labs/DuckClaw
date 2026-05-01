@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import statistics
 import time
 import urllib.error
@@ -13,6 +14,7 @@ import uuid
 import base64
 from datetime import datetime, timezone
 from typing import Any, Optional, Tuple
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from duckclaw.forge.skills.ibkr_bridge import (
@@ -133,6 +135,54 @@ def _quant_auto_execute_allowed_for_session_mode(db: Any) -> bool:
     if m == "live":
         return _env_truthy("DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE")
     return True
+
+
+def _quant_now_bogota() -> datetime:
+    """Momento efectivo para gating auto-ejecución MOC (tests monkeypatch)."""
+    try:
+        return datetime.now(ZoneInfo("America/Bogota"))
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
+def _quant_ignore_moc_time_gates() -> bool:
+    """Dev/CI: omitir ventana MOC para propose + auto-exec (evitar en prod)."""
+    return _env_truthy("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES") or _env_truthy(
+        "DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW"
+    )
+
+
+def _quant_auto_execute_inside_moc_window() -> tuple[bool, str, dict[str, Any]]:
+    """
+    Lun–vie America/Bogota dentro de DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW.
+
+    Default 14:40:00–14:59:30 COT (véase duckclaw.forge.skills.moc_execution_window).
+
+    Usado por: (1) bloqueo de propose_trade_signal salvo strategy_name=moc_hrp_cfd;
+    (2) cadena auto-exec con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS.
+
+    Bypass: DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES o DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW=1.
+    """
+    if _quant_ignore_moc_time_gates():
+        return True, "", {}
+
+    from duckclaw.forge.skills.moc_execution_window import parse_moc_execution_window_bounds
+
+    now = _quant_now_bogota()
+    start_s, end_s, win_label = parse_moc_execution_window_bounds()
+    meta: dict[str, Any] = {
+        "window": f"{win_label} America/Bogota (lun-vie)",
+        "local_iso": now.date().isoformat() + "T" + now.strftime("%H:%M:%S"),
+    }
+
+    if now.weekday() >= 5:
+        return False, "WEEKEND", meta
+
+    cur_s = now.hour * 3600 + now.minute * 60 + int(now.second)
+    if cur_s < start_s or cur_s > end_s:
+        return False, "OUTSIDE_MOC_WINDOW", meta
+
+    return True, "", meta
 
 
 def _wait_until_signal_row_visible(db: Any, signal_id: str, *, timeout_sec: float) -> bool:
@@ -376,7 +426,9 @@ def quant_trading_session_prompt_block(db: Any) -> str:
         f"- Estado: **ACTIVE** · modo `{mode}` · session_uid `{uid}`\n"
         f"- Tickers: `{tickers or '(cualquiera)'}`{max_dd_s}\n"
         "Mientras la sesión esté ACTIVE, evalúa mercado con herramientas, respeta el límite de DD si existe, "
-        "y si hay setup válido propón señal con `propose_trade_signal` (tras evidencia OHLCV del ticker)."
+        "y si hay setup válido propón señal con `propose_trade_signal` (tras evidencia OHLCV del ticker); "
+        "fuera de ventana MOC COT configurada (default 14:40:00–14:59:30; env) la tool no crea filas Ledger para "
+        "`strategy_name` distinto de `moc_hrp_cfd` (fase prep; error `OUTSIDE_MOC_PREP_WINDOW`)."
     )
 
 
@@ -986,12 +1038,38 @@ def _propose_trade_signal_impl(
     rationale: str = "",
     signal_type: str = "ENTRY",
     sandbox_backtest_cid: str = "",
+    strategy_name: str = "cfd_auto",
+    session_uid_override: str = "",
 ) -> str:
     tkr = (ticker or "").strip().upper()
     mid_in = (mandate_id or "").strip()
     mid = str(uuid.uuid4()) if not mid_in else _coerce_mandate_id_to_uuid(mid_in)
     if not tkr:
         return json.dumps({"error": "ticker requerido"}, ensure_ascii=False)
+
+    strat_eff = (strategy_name or "cfd_auto").strip() or "cfd_auto"
+    if strat_eff != "moc_hrp_cfd":
+        ok_gate, gate_reason, gate_meta = _quant_auto_execute_inside_moc_window()
+        if not ok_gate:
+            prep_hint = (
+                "Fase preparación (overnight gap squeeze / CFD): recolecta contexto con "
+                "evaluate_cfd_state, fetch_market_data, fetch_ib_gateway_ohlcv, read_sql, get_ibkr_portfolio; "
+                "no invoques propose_trade_signal hasta la ventana MOC (default 14:40:00–14:59:30 COT; env DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW)."
+            )
+            return json.dumps(
+                {
+                    "error": "OUTSIDE_MOC_PREP_WINDOW",
+                    "reason": gate_reason,
+                    "message": (
+                        f"Fuera de ventana MOC ({gate_meta.get('window', '')}): no se crean señales Ledger. "
+                        + ("Fin de semana. " if gate_reason == "WEEKEND" else "")
+                        + prep_hint
+                    ),
+                    **gate_meta,
+                },
+                ensure_ascii=False,
+            )
+
     has_evidence = has_quant_market_evidence_for_ticker(tkr)
     if not has_evidence:
         # region agent log
@@ -1039,8 +1117,14 @@ def _propose_trade_signal_impl(
         w = float(weight)
     except (TypeError, ValueError):
         return json.dumps({"error": "weight inválido"}, ensure_ascii=False)
-    if not math.isfinite(w) or w <= 0:
-        return json.dumps({"error": "weight inválido (debe ser > 0 y finito)"}, ensure_ascii=False)
+    st_up = str(signal_type or "").strip().upper()
+    if not math.isfinite(w):
+        return json.dumps({"error": "weight inválido"}, ensure_ascii=False)
+    if w <= 0:
+        if st_up == "EXIT":
+            w = 0.01  # nominal % para ledger EXIT (p. ej. MOC rebalance-down)
+        else:
+            return json.dumps({"error": "weight inválido (debe ser > 0 y finito)"}, ensure_ascii=False)
     w = _normalize_proposed_weight_pct(w)
     cap = _liquid_capital(db)
     limit = _max_weight_pct_limit()
@@ -1060,7 +1144,7 @@ def _propose_trade_signal_impl(
 
     signal_id = str(uuid.uuid4())
     sess = _active_session_snapshot(db)
-    session_uid = str(sess.get("session_uid") or "").strip()
+    session_uid = str((session_uid_override or "").strip() or (sess.get("session_uid") or "")).strip()
     ok_m = push_quant_state_delta_sync(
         {
             **base,
@@ -1083,13 +1167,14 @@ def _propose_trade_signal_impl(
                 "signal_id": signal_id,
                 "mandate_id": mid,
                 "ticker": tkr,
-                "signal_type": "ENTRY" if str(signal_type).upper() != "EXIT" else "EXIT",
+                "signal_type": "ENTRY" if st_up != "EXIT" else "EXIT",
                 "proposed_weight": float(guarded),
                 "sandbox_backtest_cid": (sandbox_backtest_cid or "").strip(),
                 "human_approved": False,
                 "status": "PENDING_HITL",
                 "rationale": rr,
                 "session_uid": session_uid,
+                "strategy_name": (strategy_name or "cfd_auto").strip() or "cfd_auto",
             },
         }
     )
@@ -1107,6 +1192,10 @@ def _propose_trade_signal_impl(
         "hint": f"Senal {signal_id} lista. Requiere /execute_signal {signal_id}",
     }
 
+    strat = strat_eff
+    if strat == "moc_hrp_cfd":
+        return json.dumps(out, ensure_ascii=False)
+
     if not _env_truthy("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS"):
         return json.dumps(out, ensure_ascii=False)
     if not _quant_auto_execute_allowed_for_session_mode(db):
@@ -1117,6 +1206,22 @@ def _propose_trade_signal_impl(
                 "Sesión live: define DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE=1 para auto-ejecutar; "
                 "o aprueba con /execute_signal y execute_approved_signal."
             ),
+        }
+        return json.dumps(out, ensure_ascii=False)
+
+    ok_moc, moc_reason, moc_meta = _quant_auto_execute_inside_moc_window()
+    if not ok_moc:
+        msg_parts = [
+            "Auto-ejecución encadenada solo dentro de ventana MOC configurada ",
+            f"({moc_meta.get('window', '')}); fuera usa /execute_signal <uuid>.",
+        ]
+        if moc_reason == "WEEKEND":
+            msg_parts.insert(0, "Fin de semana: ")
+        out["auto_execute"] = {
+            "skipped": True,
+            "reason": moc_reason,
+            "message": "".join(msg_parts),
+            **moc_meta,
         }
         return json.dumps(out, ensure_ascii=False)
 
@@ -1693,6 +1798,7 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
         rationale: str = "",
         signal_type: str = "ENTRY",
         sandbox_backtest_cid: str = "",
+        strategy_name: str = "cfd_auto",
     ) -> str:
         return _propose_trade_signal_impl(
             db,
@@ -1702,6 +1808,7 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
             rationale=rationale,
             signal_type=signal_type,
             sandbox_backtest_cid=sandbox_backtest_cid,
+            strategy_name=strategy_name,
         )
 
     def _execute_approved_signal(signal_id: str) -> str:
@@ -1749,10 +1856,11 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
             _fetch_ib_gateway_ohlcv,
             name="fetch_ib_gateway_ohlcv",
             description=(
-                "OHLCV solo desde IB Gateway vía HTTP (GET /api/market/ibkr/historical; requiere "
-                "IBKR_GATEWAY_OHLCV_URL en el proceso del gateway). No usa lake SSH. Persiste en "
-                "quant_core.ohlcv_data como evidencia. Parámetros típicos: timeframe 1h/30m/1d; "
-                "lookback_days ventana en días (hasta ~4000), p. ej. SPY timeframe=1h lookback_days=20."
+                "OHLCV que persiste en quant_core.ohlcv_data. Orden efectivo: 1) lake SSH si el timeframe está en "
+                "CAPADONNA_HISTORICAL_TIMEFRAMES y fuera del solape IBKR_REALTIME_TIMEFRAMES (misma regla que "
+                "fetch_market_data); 2) IBKR_MARKET_DATA_URL si está definido y responde ok; "
+                "3) IBKR_GATEWAY_OHLCV_URL (GET /api/market/ibkr/historical) como último recurso. "
+                "Parámetros típicos: timeframe 1h/30m/1d; lookback_days hasta ~4000."
             ),
         )
     )
@@ -1775,8 +1883,8 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
             _hrp_rebalance_ib_gateway,
             name="hrp_rebalance_ib_gateway",
             description=(
-                "Pipeline completo para rebalanceo HRP: 1) ingesta OHLCV por ticker desde IB Gateway "
-                "(`fetch_ib_gateway_ohlcv`), 2) snapshot de pesos actuales desde `IBKR_PORTFOLIO_API_URL`, "
+                "Pipeline completo para rebalanceo HRP: 1) ingesta OHLCV por ticker (`fetch_ib_gateway_ohlcv`; "
+                "lake o HTTP según CAPADONNA_*/IBKR_*), 2) snapshot de pesos actuales desde `IBKR_PORTFOLIO_API_URL`, "
                 "3) cálculo de pesos objetivo HRP en sandbox Strix (pypfopt con fallback scipy). "
                 "Devuelve JSON con `target_weights`, `current_weights`, `weight_deltas` y `rebalance_required`."
             ),
@@ -1788,9 +1896,15 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
             name="propose_trade_signal",
             description=(
                 "Propone una senal en finance_worker.trade_signals via StateDelta; aplica EvidenceUnique y RiskGuard. "
-                "Con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1 (paper) puede en cadena esperar a la fila, grant y "
-                "execute_approved_signal; live requiere DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE=1. "
-                "Devuelve signal_id (UUID): cita ese valor y `/execute_signal <signal_id>` para HITL si no auto."
+                "Salvo strategy_name=moc_hrp_cfd (batch PM2), no crea señales fuera de ventana MOC America/Bogota "
+                "(env DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW, formato HH:MM[:SS]-HH:MM[:SS], "
+                "default 14:40:00-14:59:30 lun-vie COT): error OUTSIDE_MOC_PREP_WINDOW "
+                "(prep intradía = solo contexto; bypass dev: DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES o "
+                "DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW=1). "
+                "moc_hrp_cfd solo PENDING_HITL (sin auto-exec encadenada). "
+                "Con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1 (paper) puede en cadena execute_approved_signal solo dentro de "
+                "esa misma ventana; live exige ALLOW_LIVE. "
+                "Devuelve signal_id (UUID): `/execute_signal <signal_id>` si sigue pendiente."
             ),
         )
     )
@@ -1800,8 +1914,8 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
             name="execute_approved_signal",
             description=(
                 "Ejecuta una senal tras HITL usando el mismo signal_id (UUID) que devolvio propose_trade_signal. "
-                "Requiere human_approved o /execute_signal <signal_id> en Telegram (o encadenado desde propose si "
-                "DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS). "
+                "Requiere human_approved o /execute_signal <signal_id> en Telegram "
+                "(o encadenado desde propose si AUTO_EXECUTE+MOC window). "
                 "El modo paper/live del POST al broker sigue quant_core.trading_sessions (id=active) y debe alinear "
                 "con IBKR_ACCOUNT_MODE; se envia cabecera X-Duckclaw-IBKR-Account-Mode (paper|live). "
                 "La respuesta puede incluir campos del broker (p. ej. ib_order_id, qty); citarlos literalmente; "

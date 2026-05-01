@@ -32,6 +32,17 @@ CREATE TABLE IF NOT EXISTS finance_worker.trade_signals (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE SCHEMA IF NOT EXISTS main;
+
+CREATE TABLE IF NOT EXISTS main.semantic_memory (
+  id VARCHAR PRIMARY KEY,
+  content TEXT NOT NULL,
+  source VARCHAR DEFAULT 'manual_injection',
+  embedding FLOAT[384],
+  embedding_status VARCHAR DEFAULT 'PENDING',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE SCHEMA IF NOT EXISTS quant_core;
 
 -- Sesión activa de trading (singleton por bóveda: id = 'active'). Fly: /trading_session
@@ -89,8 +100,26 @@ CREATE TABLE IF NOT EXISTS quant_core.session_ticks (
   tickers_processed VARCHAR[],
   signals_proposed INTEGER DEFAULT 0,
   cfd_summary JSON,
-  outcome VARCHAR
+  outcome VARCHAR,
+  moc_executed BOOLEAN DEFAULT FALSE,
+  moc_notional DECIMAL(15, 2),
+  moc_n_orders INTEGER
 );
+
+-- Core-Satellite: pesos HRP semanales + MOC CFD (specs/features/Core-Satellite HRP Weekly + MOC CFD.md)
+CREATE TABLE IF NOT EXISTS quant_core.hrp_mandates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticker VARCHAR(20) NOT NULL,
+  hrp_weight DOUBLE NOT NULL,
+  hrp_weight_capped DOUBLE NOT NULL,
+  lookback_days INTEGER NOT NULL,
+  n_observations INTEGER NOT NULL,
+  computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  valid_until TIMESTAMP NOT NULL,
+  shrinkage_method VARCHAR(50) DEFAULT 'ledoit_wolf'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hrp_mandates_ticker_day
+  ON quant_core.hrp_mandates (ticker, date_trunc('day', computed_at));
 
 CREATE TABLE IF NOT EXISTS quant_core.portfolio_positions (
   ticker VARCHAR PRIMARY KEY,
@@ -116,3 +145,37 @@ CREATE TABLE IF NOT EXISTS quant_core.fluid_state (
   PRIMARY KEY (ticker, timestamp)
 );
 CREATE INDEX IF NOT EXISTS idx_fluid_state_ticker ON quant_core.fluid_state (ticker);
+
+-- MOC macro grafo PGQ + override manual — specs/features/MOC Macro PGQ VSS.md
+CREATE TABLE IF NOT EXISTS quant_core.macro_nodes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    node_type VARCHAR(50) NOT NULL,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    properties JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS quant_core.macro_edges (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    src_node_id UUID REFERENCES quant_core.macro_nodes(id),
+    dst_node_id UUID REFERENCES quant_core.macro_nodes(id),
+    edge_type VARCHAR(60) NOT NULL,
+    weight DECIMAL(8,4),
+    valid_from TIMESTAMP,
+    valid_until TIMESTAMP,
+    evidence TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_macro_edges_src ON quant_core.macro_edges(src_node_id);
+CREATE INDEX IF NOT EXISTS idx_macro_edges_dst ON quant_core.macro_edges(dst_node_id);
+CREATE INDEX IF NOT EXISTS idx_macro_edges_type ON quant_core.macro_edges(edge_type);
+
+CREATE TABLE IF NOT EXISTS quant_core.macro_manual_state (
+    id VARCHAR PRIMARY KEY,
+    regime_override VARCHAR,
+    confidence DOUBLE,
+    evidence TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

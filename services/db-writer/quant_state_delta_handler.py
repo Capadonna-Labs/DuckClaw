@@ -102,6 +102,34 @@ CREATE TABLE IF NOT EXISTS quant_core.trade_signals (
   status VARCHAR DEFAULT 'PENDING_HITL',
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS quant_core.hrp_mandates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticker VARCHAR(20) NOT NULL,
+  hrp_weight DOUBLE NOT NULL,
+  hrp_weight_capped DOUBLE NOT NULL,
+  lookback_days INTEGER NOT NULL,
+  n_observations INTEGER NOT NULL,
+  computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  valid_until TIMESTAMP NOT NULL,
+  shrinkage_method VARCHAR(50) DEFAULT 'ledoit_wolf'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hrp_mandates_ticker_day
+  ON quant_core.hrp_mandates (ticker, date_trunc('day', computed_at));
+
+CREATE TABLE IF NOT EXISTS quant_core.session_ticks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_uid VARCHAR NOT NULL,
+  tick_number INTEGER NOT NULL,
+  fired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  tickers_processed VARCHAR[],
+  signals_proposed INTEGER DEFAULT 0,
+  cfd_summary JSON,
+  outcome VARCHAR
+);
+ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_executed BOOLEAN DEFAULT FALSE;
+ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_notional DECIMAL(15,2);
+ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_n_orders INTEGER;
 """
 
 # Tablas creadas antes de session_uid / columnas usadas en INSERT: IF NOT EXISTS no altera esquema.
@@ -281,14 +309,16 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
                 mut.rationale,
             ),
         )
+        strat_s = (mut.strategy_name or "cfd_auto").strip() or "cfd_auto"
         con.execute(
             """
             INSERT INTO quant_core.trade_signals
               (signal_id, ticker, strategy_name, action, confidence_score, session_uid, rationale, status, updated_at)
             VALUES
-              (?, ?, 'cfd_auto', ?, 0.0, ?, ?, ?, now())
+              (?, ?, ?, ?, 0.0, ?, ?, ?, now())
             ON CONFLICT (signal_id) DO UPDATE SET
               ticker=excluded.ticker,
+              strategy_name=excluded.strategy_name,
               action=excluded.action,
               session_uid=excluded.session_uid,
               rationale=excluded.rationale,
@@ -298,6 +328,7 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
             (
                 mut.signal_id,
                 mut.ticker.upper(),
+                strat_s,
                 "BUY" if mut.signal_type == "ENTRY" else "SELL",
                 mut.session_uid,
                 mut.rationale,

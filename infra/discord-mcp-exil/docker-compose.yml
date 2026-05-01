@@ -1,0 +1,13 @@
+# Despliegue en VPS junto Capadonna-Driller — network_mode host evita NAT;
+# MCP escucha HOST/PORT del .env (default 127.0.0.1:8010 para no pisar Duckclaw :8000).
+# Token Discord: cliente MCP envía Authorization; no pongas TOKEN del bot prod si ya corre capadonna-bot.
+services:
+  discord-mcp-exil:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: discord-mcp-exil
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env

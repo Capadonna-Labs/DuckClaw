@@ -2,8 +2,11 @@
 Human-in-the-loop: grant vía /execute_signal <uuid> para execute_order (Finanz)
 y execute_approved_signal (Quant Trader).
 
-Con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1, propose_trade_signal puede emitir
-grant_execute_order + execute_approved_signal en el mismo flujo (paper por defecto).
+Salvo strategy_name=moc_hrp_cfd, propose_trade_signal no crea señales Ledger fuera
+de ventana MOC America/Bogota (OUTSIDE_MOC_PREP_WINDOW). Con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1,
+tras una propuesta válida puede emitir grant_execute_order + execute_approved_signal encadenados
+solo dentro de esa misma ventana (paper por defecto; live con ALLOW_LIVE); véase spec
+Core-Satellite / DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW y DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES.
 
 TTL del grant: DUCKCLAW_QUANT_HITL_GRANT_TTL_SEC (default 600; sube para swing, p. ej. 86400).
 

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import io
 import json
+
+import pytest
 import urllib.error
 import urllib.request
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from duckclaw.forge.skills.quant_tool_context import (
     note_quant_market_evidence_ticker,
@@ -19,6 +23,11 @@ from duckclaw.forge.skills.quant_trader_bridge import (
     _propose_trade_signal_impl,
     _run_quant_signal_cycle_impl,
 )
+
+
+@pytest.fixture(autouse=True)
+def _quant_ignore_moc_time_gate_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES", "1")
 
 
 def _trade_sig_row(**overrides: object) -> str:
@@ -691,6 +700,11 @@ def test_propose_auto_execute_paper_chains_to_simulated_execute(monkeypatch) -> 
             return super().query(sql)
 
     db = _DbPendingHitl()
+    fixed_moc = datetime(2026, 5, 1, 14, 45, 0, tzinfo=ZoneInfo("America/Bogota"))
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._quant_now_bogota",
+        lambda: fixed_moc,
+    )
     set_quant_tool_tenant_id("default")
     set_quant_tool_user_id("u1")
     set_quant_tool_db_path(db._path)
@@ -726,6 +740,10 @@ def test_propose_auto_execute_row_timeout_surfaces_error(monkeypatch) -> None:
     set_quant_tool_db_path(db._path)
     note_quant_market_evidence_ticker("SPY")
     monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._quant_now_bogota",
+        lambda: datetime(2026, 5, 1, 14, 50, 0, tzinfo=ZoneInfo("America/Bogota")),
+    )
+    monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
         lambda: 10.0,
     )
@@ -748,6 +766,147 @@ def test_propose_auto_execute_row_timeout_surfaces_error(monkeypatch) -> None:
     )
     assert out.get("status") == "PENDING_HITL"
     assert out.get("auto_execute", {}).get("error") == "SIGNAL_ROW_TIMEOUT"
+    assert "auto_executed" not in out
+
+
+def test_propose_trade_signal_inside_moc_at_1456_allows_ledger(monkeypatch) -> None:
+    """14:56 COT dentro de ventana default 14:40:00-14:59:30: sí propone (con evidencia)."""
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.delenv("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW", raising=False)
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._quant_now_bogota",
+        lambda: datetime(2026, 5, 1, 14, 56, 0, tzinfo=ZoneInfo("America/Bogota")),
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    out = json.loads(
+        _propose_trade_signal_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+        )
+    )
+    assert out.get("status") == "PENDING_HITL"
+
+
+def test_propose_trade_signal_outside_moc_after_145930(monkeypatch) -> None:
+    """14:59:31 COT está fuera del fin inclusivo default (14:59:30)."""
+    pushes: list[object] = []
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.delenv("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW", raising=False)
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._quant_now_bogota",
+        lambda: datetime(2026, 5, 1, 14, 59, 31, tzinfo=ZoneInfo("America/Bogota")),
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda payload: pushes.append(payload) or True,
+    )
+    out = json.loads(
+        _propose_trade_signal_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+        )
+    )
+    assert out.get("error") == "OUTSIDE_MOC_PREP_WINDOW"
+    assert pushes == []
+
+
+def test_propose_trade_signal_outside_moc_prep_window_blocked(monkeypatch) -> None:
+    """Prep intradía (p. ej. 14:12 COT): no Ledger ni auto-exec para cfd_auto."""
+    pushes: list[object] = []
+
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.delenv("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW", raising=False)
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._quant_now_bogota",
+        lambda: datetime(2026, 5, 1, 14, 12, 0, tzinfo=ZoneInfo("America/Bogota")),
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda payload: pushes.append(payload) or True,
+    )
+    monkeypatch.setenv("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS", "1")
+    out = json.loads(
+        _propose_trade_signal_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+        )
+    )
+    assert out.get("error") == "OUTSIDE_MOC_PREP_WINDOW"
+    assert out.get("reason") == "OUTSIDE_MOC_WINDOW"
+    assert pushes == []
+    assert "auto_executed" not in out
+
+
+def test_propose_trade_signal_moc_hrp_allowed_outside_moc_window(monkeypatch) -> None:
+    """PM2 batch puede proponer moc_hrp_cfd antes del tramo MOC COT."""
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.delenv("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW", raising=False)
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._quant_now_bogota",
+        lambda: datetime(2026, 5, 1, 14, 12, 0, tzinfo=ZoneInfo("America/Bogota")),
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda _payload: True,
+    )
+    out = json.loads(
+        _propose_trade_signal_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+            strategy_name="moc_hrp_cfd",
+        )
+    )
+    assert out.get("status") == "PENDING_HITL"
+    assert out.get("signal_id")
     assert "auto_executed" not in out
 
 

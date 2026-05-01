@@ -1,7 +1,9 @@
 """
-FMP Bridge — dividendos por ticker y calendario global (read-only).
+FMP Bridge — dividendos, calendario de earnings y transcripts (read-only).
 
-Spec: specs/features/Integración FMP dividendos (read-only).md
+Specs:
+- specs/features/Integración FMP dividendos (read-only).md
+- specs/features/Integración FMP earnings calendario y transcripts (read-only).md
 Requiere: FMP_API_KEY. Opcional: FMP_API_BASE (default https://financialmodelingprep.com).
 """
 
@@ -128,6 +130,18 @@ class FmpDividendsCalendarInput(BaseModel):
     limit: int = Field(default=200, ge=1, le=200, description="Máximo de filas del calendario.")
 
 
+class FmpEarningsCalendarInput(BaseModel):
+    from_date: str = Field(..., description="Inicio del rango (YYYY-MM-DD).")
+    to_date: str = Field(..., description="Fin del rango (YYYY-MM-DD).")
+    limit: int = Field(default=200, ge=1, le=250, description="Máximo de filas.")
+
+
+class FmpEarningsTranscriptInput(BaseModel):
+    ticker: str = Field(..., description="Ticker bursátil (ej. AAPL, META).")
+    year: int = Field(..., ge=2000, le=2100, description="Año fiscal del transcript.")
+    quarter: int = Field(..., ge=1, le=4, description="Trimestre 1–4.")
+
+
 def _get_fmp_stock_dividends_impl(symbol: str, limit: int = 40) -> str:
     sym = (symbol or "").strip().upper()
     if not sym or not sym.replace(".", "").isalnum():
@@ -189,6 +203,115 @@ def _get_fmp_dividends_calendar_impl(from_date: str, to_date: str, limit: int = 
     return _format_dividend_rows(rows, title=title, max_rows=limit)
 
 
+_EARN_DATE_KEYS = ("date", "earningDate")
+
+
+def _earnings_calendar_sort_key(row: dict[str, Any]) -> str:
+    for k in _EARN_DATE_KEYS:
+        v = row.get(k)
+        if v:
+            return str(v)[:10]
+    return ""
+
+
+def _format_earnings_calendar_rows(rows: list[dict[str, Any]], *, title: str, max_rows: int) -> str:
+    if not rows:
+        return f"{title}: sin filas."
+    lines = [title, ""]
+    for r in rows[:max_rows]:
+        sym = str(r.get("symbol") or r.get("ticker") or "—")
+        dt = str(r.get("date") or r.get("earningDate") or "—")
+        eps_a = r.get("eps") or r.get("epsActual")
+        eps_e = r.get("epsEstimated")
+        tm = str(r.get("time") or r.get("timeZone") or "")
+        rev_a = r.get("revenue")
+        rev_e = r.get("revenueEstimated")
+        parts = [f"- **{sym}** día {dt}"]
+        if tm:
+            parts.append(tm)
+        if eps_a is not None or eps_e is not None:
+            parts.append(f"EPS actual/est {eps_a}/{eps_e}")
+        if rev_a is not None or rev_e is not None:
+            parts.append(f"rev actual/est {rev_a}/{rev_e}")
+        lines.append(" · ".join(parts))
+    if len(rows) > max_rows:
+        lines.append(f"\n… y {len(rows) - max_rows} filas más (reducir ventana o bajar limit).")
+    return "\n".join(lines)
+
+
+def _extract_transcript_body(data: Any) -> tuple[str, str]:
+    """
+    Respuesta estable o legada puede ser lista, dict único u objeto con transcript/content.
+    Retorna (cuerpo, nota formato).
+    """
+    if isinstance(data, list):
+        if not data:
+            return "", "lista vacía"
+        raw = data[0]
+    elif isinstance(data, dict):
+        raw = data
+    else:
+        return "", "formato JSON inesperado"
+
+    if not isinstance(raw, dict):
+        return "", "fila transcript no es objeto"
+
+    for key in ("content", "transcript", "fullText"):
+        txt = raw.get(key)
+        if isinstance(txt, str) and txt.strip():
+            return txt.strip(), ""
+
+    return "", "sin campo content/transcript/fullText conocido"
+
+
+def _get_fmp_earnings_calendar_impl(from_date: str, to_date: str, limit: int = 200) -> str:
+    try:
+        d0 = _parse_iso_date("from_date", from_date)
+        d1 = _parse_iso_date("to_date", to_date)
+    except ValueError as e:
+        return str(e)
+    if d0 > d1:
+        return "from_date no puede ser posterior a to_date."
+    if (d1 - d0).days > _MAX_CALENDAR_SPAN_DAYS:
+        return f"El rango no puede superar {_MAX_CALENDAR_SPAN_DAYS} días (recibido {(d1 - d0).days})."
+
+    f_s = d0.isoformat()
+    t_s = d1.isoformat()
+    try:
+        data = _fmp_get_json("stable/earnings-calendar", {"from": f_s, "to": t_s})
+    except ValueError as e:
+        return str(e)
+
+    if not isinstance(data, list):
+        return "FMP devolvió un formato inesperado para earnings-calendar."
+    rows = [r for r in data if isinstance(r, dict)]
+    rows.sort(key=_earnings_calendar_sort_key)
+    title = f"Calendario earnings FMP {f_s} … {t_s} (hasta {limit} filas)"
+    return _format_earnings_calendar_rows(rows, title=title, max_rows=limit)
+
+
+def _get_fmp_earnings_transcript_impl(ticker: str, year: int, quarter: int) -> str:
+    sym = (ticker or "").strip().upper()
+    if not sym or not sym.replace(".", "").isalnum():
+        return "Indica un ticker válido (ej. META)."
+    try:
+        data = _fmp_get_json(
+            "stable/earning-call-transcript",
+            {"symbol": sym, "year": str(int(year)), "quarter": str(int(quarter))},
+        )
+    except ValueError as e:
+        return str(e)
+
+    body, err = _extract_transcript_body(data)
+    header = (
+        f"Transcript FMP **{sym}** Q{quarter} {year} ({len(body)} caracteres). "
+        f"No pegar texto completo al usuario; preferir sandbox spec (snippet earnings_transcript_sentiment_sandbox)."
+    )
+    if err:
+        return f"{header}\n\nFMP: {err}."
+    return f"{header}\n\n---\n{body}"
+
+
 def _stock_dividends_tool(config: Optional[dict] = None) -> Any:
     from langchain_core.tools import StructuredTool
 
@@ -225,9 +348,46 @@ def _dividends_calendar_tool(config: Optional[dict] = None) -> Any:
     )
 
 
+def _earnings_calendar_tool(config: Optional[dict] = None) -> Any:
+    from langchain_core.tools import StructuredTool
+
+    def _run(from_date: str, to_date: str, limit: int = 200) -> str:
+        return _get_fmp_earnings_calendar_impl(from_date, to_date, limit)
+
+    return StructuredTool.from_function(
+        name="get_fmp_earnings_calendar",
+        description=(
+            "Calendario de reportes earnings FMP entre from_date y to_date (YYYY-MM-DD), máx. 90 días de ventana. "
+            "Usar antes de HRP rebalance fuerte o overnight para catalizadores cercanos por símbolo. "
+            "Requiere FMP_API_KEY."
+        ),
+        func=_run,
+        args_schema=FmpEarningsCalendarInput,
+    )
+
+
+def _earnings_transcript_tool(config: Optional[dict] = None) -> Any:
+    from langchain_core.tools import StructuredTool
+
+    def _run(ticker: str, year: int, quarter: int) -> str:
+        return _get_fmp_earnings_transcript_impl(ticker, year, quarter)
+
+    return StructuredTool.from_function(
+        name="get_fmp_earnings_transcript",
+        description=(
+            "Transcripción completa de llamada earnings vía FMP (symbol, año, trimestre 1–4). "
+            "Salida muy larga: no reproducir integramente al usuario; pasar texto a execute_sandbox_script "
+            "con snippets/Quant-Trader/earnings_transcript_sentiment_sandbox.py para JSON compacto. "
+            "Requiere FMP_API_KEY."
+        ),
+        func=_run,
+        args_schema=FmpEarningsTranscriptInput,
+    )
+
+
 def register_fmp_skill(tools_list: list[Any], fmp_config: Optional[dict] = None) -> None:
     """
-    Registra get_fmp_stock_dividends y get_fmp_dividends_calendar.
+    Registra tools FMP: dividendos, calendario dividendos, calendario earnings, transcript earnings.
     fmp_config None → no registrar. enabled: false → no registrar.
     """
     if fmp_config is None:
@@ -238,5 +398,7 @@ def register_fmp_skill(tools_list: list[Any], fmp_config: Optional[dict] = None)
     try:
         tools_list.append(_stock_dividends_tool(cfg))
         tools_list.append(_dividends_calendar_tool(cfg))
+        tools_list.append(_earnings_calendar_tool(cfg))
+        tools_list.append(_earnings_transcript_tool(cfg))
     except Exception:
         _log.debug("register_fmp_skill omitido", exc_info=True)

@@ -6,7 +6,12 @@ import json
 import os
 import pkgutil
 import inspect
+import time
 from typing import Any, Literal, Optional
+
+_DEBUG_SESSION_C964F7_LOG = (
+    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
+)
 
 __path__ = pkgutil.extend_path(__path__, __name__)
 
@@ -70,22 +75,48 @@ class DuckClaw:
             pass
         # #endregion
 
+    def _ensure_python_exec_connection(self) -> None:
+        """Reabre conexión Python si quedó en None tras suspend_readonly_file_handle."""
+        if self._native is not None:
+            return
+        if self._con is not None:
+            return
+        rp = (self._path or "").strip()
+        if self._read_only and rp not in ("", ":memory:"):
+            # #region agent log
+            try:
+                with open(_DEBUG_SESSION_C964F7_LOG, "a", encoding="utf-8") as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "hypothesisId": "H_RO_RECOVER",
+                                "location": "duckclaw/__init__.py:DuckClaw._ensure_python_exec_connection",
+                                "message": "auto_resume_ro_before_execute",
+                                "data": {"path_tail": rp[-64:]},
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
+            try:
+                self.resume_readonly_file_handle()
+            except Exception:
+                pass
+        if self._con is None:
+            raise RuntimeError(
+                "DuckDB: conexión cerrada (_con is None). En vaults read_only suele pasar si "
+                "suspend_readonly_file_handle() no fue seguido de resume_readonly_file_handle()."
+            )
+
     def query(self, sql: str) -> str:
         if self._native is not None:
             return self._native.query(sql)
-        # #region agent log
-        if self._con is None:
-            agent_debug_log(
-                "duckclaw/__init__.py:DuckClaw.query",
-                "query with _con is None",
-                {
-                    "read_only": self._read_only,
-                    "path_tail": (self._path or "")[-64:],
-                    "sql_head": (sql or "")[:120],
-                },
-                hypothesis_id="H1",
-            )
-        # #endregion
+        self._ensure_python_exec_connection()
         result = self._con.execute(sql)
         rows = result.fetchall()
         names = [d[0] for d in result.description]
@@ -97,19 +128,7 @@ class DuckClaw:
             if params is not None:
                 return self._native.execute(sql, params)
             return self._native.execute(sql)
-        # #region agent log
-        if self._con is None:
-            agent_debug_log(
-                "duckclaw/__init__.py:DuckClaw.execute",
-                "execute with _con is None",
-                {
-                    "read_only": self._read_only,
-                    "path_tail": (self._path or "")[-64:],
-                    "sql_head": (sql or "")[:120],
-                },
-                hypothesis_id="H1",
-            )
-        # #endregion
+        self._ensure_python_exec_connection()
         if params is not None:
             self._con.execute(sql, params)
         else:
@@ -119,6 +138,7 @@ class DuckClaw:
     def get_version(self) -> str:
         if self._native is not None:
             return str(self._native.get_version())
+        self._ensure_python_exec_connection()
         return str(self._con.execute("SELECT version()").fetchone()[0])
 
     def __enter__(self) -> "DuckClaw":

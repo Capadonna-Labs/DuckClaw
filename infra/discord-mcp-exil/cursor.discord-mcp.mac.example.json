@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "discord-exil": {
+      "command": "python3",
+      "args": ["-m", "discord_mcp.main"],
+      "env": {
+        "HOST": "127.0.0.1",
+        "PORT": "8010",
+        "LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}

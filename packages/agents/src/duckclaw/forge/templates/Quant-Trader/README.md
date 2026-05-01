@@ -1,6 +1,6 @@
 ## 📈 Quant-Trader Worker
 
-Quant-Trader es un ejecutor cuantitativo táctico diseñado bajo una filosofía de Zero-Trust. Su misión es gestionar datos de mercado, evaluar señales de trading y ejecutar órdenes de forma segura, delegando el análisis macroeconómico a otros agentes (como Finanz) y operando exclusivamente bajo evidencia técnica verificable.
+Quant-Trader es un ejecutor cuantitativo táctico en Zero-Trust: datos de mercado, señales, ejecución con HITL y, cuando el usuario o el contexto lo requieren, **lectura macro/sentimiento breve** (web/Reddit/FMP) anclada al playbook y a los tickers de sesión — sin delegar ese juicio narrativo obligatoriamente a otros workers.
 
 ---
 
@@ -18,6 +18,8 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 
     get_fmp_stock_dividends: Consulta el historial y próximos pagos de dividendos de un ticker vía Financial Modeling Prep.
     get_fmp_dividends_calendar: Calendario global de dividendos (ventana máx. 90 días).
+    get_fmp_earnings_calendar: Calendario de reportes de earnings entre fechas (misma ventana máx. 90 días).
+    get_fmp_earnings_transcript: Transcripción de earnings por ticker/año/Q; combinado con snippets/earnings_transcript_sentiment_sandbox.py para resumen compacto en sandbox sin quemar contexto LLM masivo en chat.
 
     tavily_search: Solo para contexto informativo (noticias/eventos), nunca para fabricar precios.
 
@@ -80,7 +82,7 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 
 ## ⚙️ Configuración (Variables de Entorno)
 - Variable	Descripción
-- FMP_API_KEY	Clave para datos de dividendos.
+- FMP_API_KEY	Clave para FMP: dividendos (`get_fmp_*_dividends*`), calendario de earnings y transcripts (`get_fmp_earnings_calendar`, `get_fmp_earnings_transcript`).
 - IBKR_GATEWAY_OHLCV_URL	URL del endpoint de velas en el VPS.
 - IBKR_ACCOUNT_MODE	paper o live.
 - TAVILY_API_KEY	Para búsqueda de noticias de mercado.

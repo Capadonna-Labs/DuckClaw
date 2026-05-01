@@ -36,8 +36,10 @@ Exponer datos de dividendos vía [Financial Modeling Prep](https://financialmode
 
 ## Manifest
 
-Skill compuesta `fmp: {}` en `manifest.yaml`; `enabled: false` desactiva el registro de ambas tools.
+Skill compuesta `fmp: {}` en `manifest.yaml`; `enabled: false` desactiva **todas** las tools registradas desde `register_fmp_skill` (dividendos + earnings/transcript cuando estén enlazadas a ese bloque — ver spec earnings).
 
 ## Fuera de alcance
 
-Otros endpoints FMP (earnings, splits, fundamentals) no forman parte de esta spec.
+Calendario de earnings, transcripts de earnings calls y flujos de sentimiento están especificados en [Integración FMP earnings calendario y transcripts (read-only)](./Integración%20FMP%20earnings%20calendario%20y%20transcripts%20(read-only).md).
+
+Otros endpoints FMP no cubiertos (p. ej. splits, fundamentals ampliados) quedan fuera hasta nueva spec.

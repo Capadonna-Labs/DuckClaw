@@ -22,6 +22,7 @@ import time
 import traceback
 import uuid
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -31,6 +32,26 @@ from urllib.error import URLError
 # Multi-Vault: mismo `db/` que el resto del monorepo aunque el cwd del proceso no sea la raíz.
 _REPO_ROOT_FOR_DB = Path(__file__).resolve().parent.parent.parent
 os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_REPO_ROOT_FOR_DB))
+
+# NDJSON sólo para modo debug DuckClaw Cursor (telegram ingress); sin tokens.
+_DUCKCLAW_DEBUG_INGRESS_PATH = _REPO_ROOT_FOR_DB / ".cursor" / "debug-c964f7.log"
+
+
+def _duckclaw_debug_ingress_ndjson(payload: dict[str, Any]) -> None:
+    # #region agent log
+    try:
+        with _DUCKCLAW_DEBUG_INGRESS_PATH.open("a", encoding="utf-8") as _df:
+            _df.write(
+                json.dumps(
+                    {"sessionId": "c964f7", **payload},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+    # #endregion
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -72,6 +93,7 @@ from duckclaw.gateway_db import (
     resolve_env_duckdb_path,
 )
 from duckclaw.debug_session_log import agent_debug_log
+from duckclaw.channels import GatewayDeliveryContext
 
 
 # Cargar .env desde repo root
@@ -347,6 +369,60 @@ if _pqrsd_startup:
         resolve_env_duckdb_path(_pqrsd_startup),
     )
 
+
+def _uvicorn_listen_port_defaulting_8000() -> int:
+    try:
+        for i, x in enumerate(sys.argv):
+            if x == "--port" and i + 1 < len(sys.argv):
+                return int(sys.argv[i + 1])
+    except (ValueError, IndexError):
+        pass
+    return 8000
+
+
+def _warn_if_loopback_8000_steals_telegram_funnel() -> None:
+    """
+    Funnel suele hacer proxy a http://127.0.0.1:8000. Si otro proceso (p.ej. discord_mcp con
+    MCP HTTP default) enlaza 127.0.0.1:8000, Telegram recibe 404 del proceso equivocado aunque
+    DuckClaw escuche en *:8000.
+    """
+    if _uvicorn_listen_port_defaulting_8000() != 8000:
+        return
+    lsof_bin = shutil.which("lsof")
+    if not lsof_bin:
+        return
+    try:
+        proc = subprocess.run(
+            [lsof_bin, "-nP", "-iTCP:8000", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return
+    out = (proc.stdout or "").strip()
+    if "127.0.0.1:8000" not in out:
+        return
+    low = out.lower()
+    condensed = " | ".join(out.splitlines()[:10])
+    if "discord_mcp" in low or "-m discord_mcp.main" in low:
+        _gateway_log.error(
+            "Conflicto Telegram/Funnel: hay LISTEN en 127.0.0.1:8000 relacionado con discord_mcp; "
+            "las peticiones a 127.0.0.1:8000 no llegarán a este gateway. Ejecuta "
+            "`bash scripts/telegram/stop_discord_mcp_port_8000.sh` o arranca MCP con HOST=127.0.0.1 "
+            "PORT=8010. lsof (recorte): %s",
+            condensed,
+        )
+        return
+    listen_hits = [ln for ln in out.splitlines() if "LISTEN" in ln]
+    if len(listen_hits) >= 2:
+        _gateway_log.warning(
+            "Puerto 8000: múltiples LISTEN; curl/Funnel a 127.0.0.1 pueden no ser DuckClaw. "
+            "lsof (recorte): %s",
+            condensed,
+        )
+
+
 def _normalize_local_artifacts_to_db() -> None:
     """Mueve artefactos locales conocidos a `db/` si aparecen en la raíz."""
     try:
@@ -412,6 +488,7 @@ def _langsmith_auth_log(*, auth_status: str, user_id: str, tenant_id: str) -> No
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _warn_if_loopback_8000_steals_telegram_funnel()
     app.state.redis = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
     app.state.goals_ticker_task = None
     _normalize_local_artifacts_to_db()
@@ -549,6 +626,33 @@ async def _tailscale_auth_middleware(request: Request, call_next):
 app.middleware("http")(_tailscale_auth_middleware)
 
 
+async def _telegram_http_ingress_probe_middleware(request: Request, call_next):
+    """
+    Registra cualquier POST bajo /api/v1/telegram antes del router.
+
+    Si envías un mensaje al bot y aquí no aparece nada, Telegram no está alcanzando
+    este proceso (webhook URL, túnel, otro puerto o bot distinto). Con multiplex
+    compacto, ``/api/v1/telegram/webhook`` puede devolver 200 sin ejecutar el agente.
+    """
+    p = request.url.path or ""
+    if request.method.upper() == "POST" and p.startswith("/api/v1/telegram"):
+        _gateway_log.info("telegram_http_ingress: path=%s", p)
+        _duckclaw_debug_ingress_ndjson(
+            {
+                "hypothesisId": "H-INGRESS",
+                "location": "main.py:_telegram_http_ingress_probe_middleware",
+                "message": "post_telegram_api_path",
+                "data": {"path": p, "has_query": bool(request.url.query)},
+                "timestamp": int(time.time() * 1000),
+            }
+        )
+    return await call_next(request)
+
+
+# Último registrado = primero en la cadena entrante: ver HTTP antes de auth/CORS internos.
+app.middleware("http")(_telegram_http_ingress_probe_middleware)
+
+
 # ── Locks por chat (concurrencia por grupo) ────────────────────────────────────
 
 @asynccontextmanager
@@ -634,9 +738,23 @@ async def root():
     }
 
 
+def _telegram_path_route_count(app: FastAPI) -> int:
+    """Útil cuando ``:8000`` devuelve 404 en multiplex: proceso equivocado suele tener 0 rutas telegram."""
+    n = 0
+    for r in app.routes:
+        p = getattr(r, "path", "") or ""
+        if p.startswith("/api/v1/telegram/"):
+            n += 1
+    return n
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "api-gateway"}
+    return {
+        "status": "ok",
+        "service": "api-gateway",
+        "telegram_path_routes_registered": _telegram_path_route_count(app),
+    }
 
 
 # ── System health ─────────────────────────────────────────────────────────────
@@ -1190,6 +1308,44 @@ def _outbound_deliver_chat_text_sync(
     return False
 
 
+def _deliver_outbound_by_channel(
+    dc: GatewayDeliveryContext,
+    *,
+    chat_id: str,
+    user_id: str,
+    text: str,
+    worker_id: str | None,
+    tenant_id: str,
+    redis_url: str | None,
+    prefer_native_bot_api: bool = False,
+) -> bool:
+    """Entrega best-effort según canal (Telegram: MCP/n8n/Bot API; Discord: PATCH @original)."""
+    ch = (dc.channel or "telegram").strip().lower()
+    if ch == "telegram":
+        return _outbound_deliver_chat_text_sync(
+            chat_id=chat_id,
+            user_id=user_id,
+            text=text,
+            worker_id=worker_id,
+            outbound_telegram_bot_token=dc.outbound_bot_token,
+            prefer_native_bot_api=prefer_native_bot_api or dc.prefer_native_bot_api,
+            telegram_mcp=dc.telegram_mcp,
+            redis_url=redis_url,
+            tenant_id=tenant_id,
+        )
+    if ch == "discord":
+        from core.discord_interactions import discord_followup_edit_original_sync
+
+        return discord_followup_edit_original_sync(
+            application_id=(dc.discord_application_id or "").strip(),
+            interaction_token=(dc.discord_interaction_token or "").strip(),
+            bot_token=(dc.outbound_bot_token or "").strip(),
+            content=text or "",
+        )
+    _gateway_log.warning("deliver outbound: canal desconocido %r", dc.channel)
+    return False
+
+
 async def _authorize_or_reject(
     *,
     tenant_id: str,
@@ -1339,6 +1495,12 @@ async def agent_chat(
         )
     redis_client = getattr(http_request.app.state, "redis", None)
     _tg_mcp = getattr(http_request.app.state, "telegram_mcp", None)
+    _dc_http = GatewayDeliveryContext.from_legacy_telegram(
+        telegram_multipart_tail_delivery=None,
+        telegram_mcp=_tg_mcp,
+        telegram_forced_vault_db_path=None,
+        outbound_telegram_bot_token=None,
+    )
     _deliver_outbound_raw = (http_request.query_params.get("deliver_outbound") or "").strip().lower()
     _deliver_outbound = _deliver_outbound_raw in ("1", "true", "yes", "on")
     result = await _invoke_chat(
@@ -1356,20 +1518,26 @@ async def agent_chat(
                 uid_out = (body.user_id or "").strip() or session_id
                 loop = asyncio.get_running_loop()
                 _redis_url = str(settings.REDIS_URL)
-                delivered = bool(
-                    await loop.run_in_executor(
-                        None,
-                        lambda: _outbound_deliver_chat_text_sync(
-                            chat_id=session_id,
-                            user_id=uid_out,
-                            text=resp_text,
-                            worker_id=(worker_id or ""),
-                            prefer_native_bot_api=True,
-                            telegram_mcp=_tg_mcp,
-                            redis_url=_redis_url,
-                            tenant_id=tenant_id,
-                        ),
-                    )
+                _dc_deliver = GatewayDeliveryContext(
+                    channel=_dc_http.channel,
+                    telegram_multipart_tail_delivery=_dc_http.telegram_multipart_tail_delivery,
+                    telegram_mcp=_dc_http.telegram_mcp,
+                    telegram_forced_vault_db_path=_dc_http.telegram_forced_vault_db_path,
+                    outbound_bot_token=_dc_http.outbound_bot_token,
+                    prefer_native_bot_api=True,
+                )
+                await loop.run_in_executor(
+                    None,
+                    lambda: _deliver_outbound_by_channel(
+                        _dc_deliver,
+                        chat_id=session_id,
+                        user_id=uid_out,
+                        text=resp_text,
+                        worker_id=(worker_id or ""),
+                        tenant_id=tenant_id,
+                        redis_url=_redis_url,
+                        prefer_native_bot_api=True,
+                    ),
                 )
         except Exception as exc:  # noqa: BLE001
             _gateway_log.warning("agent_chat forced outbound failed: %s", exc)
@@ -1391,16 +1559,22 @@ async def agent_chat(
                     loop = asyncio.get_running_loop()
                     _mcp_snap = _tg_mcp
                     _redis_url = str(settings.REDIS_URL)
+                    _dc_fb = GatewayDeliveryContext.from_legacy_telegram(
+                        telegram_multipart_tail_delivery=None,
+                        telegram_mcp=_mcp_snap,
+                        telegram_forced_vault_db_path=None,
+                        outbound_telegram_bot_token=None,
+                    )
                     await loop.run_in_executor(
                         None,
-                        lambda: _outbound_deliver_chat_text_sync(
+                        lambda: _deliver_outbound_by_channel(
+                            _dc_fb,
                             chat_id=session_id,
                             user_id=uid_fb,
                             text=resp_text,
                             worker_id=(worker_id or ""),
-                            telegram_mcp=_mcp_snap,
-                            redis_url=_redis_url,
                             tenant_id=tenant_id,
+                            redis_url=_redis_url,
                         ),
                     )
         except Exception as exc:  # noqa: BLE001
@@ -1494,13 +1668,40 @@ async def _invoke_chat(
     telegram_mcp: Any = None,
     telegram_forced_vault_db_path: str | None = None,
     outbound_telegram_bot_token: str | None = None,
+    delivery_context: GatewayDeliveryContext | None = None,
 ):
     """
     Orquesta la llamada al grafo LangGraph a partir de un ChatRequest.
 
     - session_id: ya resuelto (body + query + headers); debe ser el mismo en todos los POST del hilo.
     - telegram_multipart_tail_delivery: ``native`` | ``n8n`` | None (inferido por env) para partes 2..N del mensaje.
+    - delivery_context: si se omite, se reconstruye desde kwargs ``telegram_*`` (compatibilidad).
     """
+    if delivery_context is not None:
+        dc = delivery_context
+    else:
+        dc = GatewayDeliveryContext.from_legacy_telegram(
+            telegram_multipart_tail_delivery=telegram_multipart_tail_delivery,
+            telegram_mcp=telegram_mcp,
+            telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+            outbound_telegram_bot_token=outbound_telegram_bot_token,
+        )
+    # Telegram: si llegan kwargs legacy junto a ``delivery_context`` (p. ej. webhook),
+    # los valores explícitos no-None tienen prioridad para evitar desalinear MCP/token/bóveda.
+    _ch_eff = (dc.channel or "telegram").strip().lower()
+    if _ch_eff == "telegram":
+        _patch: dict[str, Any] = {}
+        if telegram_multipart_tail_delivery is not None:
+            _patch["telegram_multipart_tail_delivery"] = telegram_multipart_tail_delivery
+        if telegram_mcp is not None:
+            _patch["telegram_mcp"] = telegram_mcp
+        if telegram_forced_vault_db_path is not None:
+            _patch["telegram_forced_vault_db_path"] = telegram_forced_vault_db_path
+        if outbound_telegram_bot_token is not None:
+            _patch["outbound_bot_token"] = (outbound_telegram_bot_token or "").strip() or None
+        if _patch:
+            dc = replace(dc, **_patch)
+
     message = (payload.message or "").strip()
     session_id = (session_id or "default").strip() or "default"
     tenant_id = _effective_tenant_id(tenant_id)
@@ -1514,7 +1715,7 @@ async def _invoke_chat(
     vault_user_id = user_id or session_id
     vault_scope = vault_scope_id_for_tenant(tenant_id)
     _, vault_db_path = resolve_active_vault(vault_user_id, vault_scope)
-    _forced_v = (telegram_forced_vault_db_path or "").strip()
+    _forced_v = (dc.telegram_forced_vault_db_path or "").strip()
     _payload_vault = (getattr(payload, "vault_db_path", None) or "").strip()
     _telegram_acl_for_guard: str | None = None
     if _forced_v:
@@ -1591,7 +1792,10 @@ async def _invoke_chat(
     # y antes de invocar cualquier lógica LangGraph.
     owner_user_id = (os.getenv("DUCKCLAW_OWNER_ID") or os.getenv("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
     is_owner = bool(owner_user_id and user_id and str(user_id).strip() == str(owner_user_id).strip())
-    if not is_system_prompt:
+    _discord_guard_bypass = (
+        dc.channel == "discord" and bool(dc.extra.get("discord_bypass_guard"))
+    )
+    if not is_system_prompt and not _discord_guard_bypass:
         await _authorize_or_reject(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -1766,8 +1970,8 @@ async def _invoke_chat(
                         png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
                         if not png_bytes:
                             png_bytes = decode_sandbox_figure_base64(photo_b64)
-                        if png_bytes:
-                            token = (outbound_telegram_bot_token or "").strip() or _effective_telegram_bot_token()
+                        if png_bytes and (dc.channel or "telegram").strip().lower() == "telegram":
+                            token = (dc.outbound_bot_token or "").strip() or _effective_telegram_bot_token()
                             if token:
                                 loop = asyncio.get_running_loop()
                                 chart_sent = bool(
@@ -1826,7 +2030,7 @@ async def _invoke_chat(
                 vault_db_path=vault_db_path,
                 shared_db_path=shared_db_path,
                 is_system_prompt=is_system_prompt,
-                outbound_telegram_bot_token=(outbound_telegram_bot_token or "").strip() or None,
+                outbound_telegram_bot_token=(dc.outbound_bot_token or "").strip() or None,
                 entry_worker_id=(worker_id or "").strip() or None,
             )
         except Exception as exc:
@@ -1947,8 +2151,8 @@ async def _invoke_chat(
                     len(raw_try),
                     len("".join(photo_b64.split())) % 4,
                 )
-            if png_bytes:
-                token = (outbound_telegram_bot_token or "").strip() or _effective_telegram_bot_token()
+            if png_bytes and (dc.channel or "telegram").strip().lower() == "telegram":
+                token = (dc.outbound_bot_token or "").strip() or _effective_telegram_bot_token()
                 # Evitar cruce de bot al enviar imágenes: para charts del sandbox usar
                 # Bot API del token efectivo de la ruta actual (no MCP global).
                 if token:
@@ -1966,7 +2170,7 @@ async def _invoke_chat(
                 if not chart_sent and not token:
                     _gateway_log.warning(
                         "sandbox chart: hay PNG del sandbox pero no hay token de salida para este request "
-                        "(outbound_telegram_bot_token ni token efectivo del contexto)."
+                        "(outbound_bot_token ni token efectivo del contexto)."
                     )
     if chart_sent:
         reply_plain_for_storage = _strip_lines_mentioning_workspace_output(reply_plain_for_storage or "")
@@ -2238,6 +2442,22 @@ try:
         build_telegram_inbound_webhook_router(
             invoke_agent_chat=_invoke_chat,
             resolve_effective_telegram_bot_token=_effective_telegram_bot_token,
+        )
+    )
+except ImportError as _tg_imp_err:
+    _gateway_log.error(
+        "Telegram webhook router omitido (import falló). Los POST /api/v1/telegram/* devolverán 404: %s",
+        _tg_imp_err,
+        exc_info=True,
+    )
+
+try:
+    from routers.discord_inbound_webhook import build_discord_interactions_router
+
+    app.include_router(
+        build_discord_interactions_router(
+            invoke_agent_chat=_invoke_chat,
+            app_state_holder=app.state,
         )
     )
 except ImportError:

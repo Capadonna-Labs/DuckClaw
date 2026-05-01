@@ -101,6 +101,15 @@ def test_parse_context_add_command() -> None:
     assert _parse_context_summary_command("/context --db") is True
     assert _parse_context_summary_command("/context --add x") is False
 
+    # Telegram a vecoes antepone invisibles: sin normalizar ``^/context`` no matcheaba.
+    ok_zwsp, bod_z = _parse_context_add_command("\u2060/context --add después_zwsp")
+    assert ok_zwsp and bod_z == "después_zwsp"
+    ok_bom, bod_bom = _parse_context_add_command("\ufeff/context --add después_bom")
+    assert ok_bom and bod_bom == "después_bom"
+    raw_url = "https://ejemplo.invalid/a"
+    ok_url, bod_url = _parse_context_add_command(f"\u200b/context --add {raw_url}")
+    assert ok_url and bod_url == raw_url
+
 
 def test_resolve_context_add_body_with_vlm_enrichment() -> None:
     """Caption /context --add no coincide con el texto post-VLM; el cuerpo debe ser el bloque completo."""
@@ -235,3 +244,59 @@ def test_fetch_semantic_memory_snapshot_ephemeral_after_stale_reuse(tmp_path: Pa
     )
     assert "ephemeral sees this" in out
     assert "registro" in out
+
+
+def test_context_time_anchor_moc_inside_friday_1456_default_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sys.path.insert(0, str(_REPO / "services" / "api-gateway"))
+    from datetime import datetime  # noqa: PLC0415
+
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    from routers.telegram_inbound_webhook import _context_time_anchor_block  # noqa: PLC0415
+
+    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW", raising=False)
+    ts = datetime(2026, 5, 1, 14, 56, 0, tzinfo=ZoneInfo("America/Bogota"))
+    _b, meta = _context_time_anchor_block(now_cot=ts, directive_kind="test")
+    assert meta["dentro_de_ventana_moc"] is True
+
+
+def test_context_time_anchor_moc_inside_friday_1443() -> None:
+    sys.path.insert(0, str(_REPO / "services" / "api-gateway"))
+    from datetime import datetime  # noqa: PLC0415
+
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    from routers.telegram_inbound_webhook import _context_time_anchor_block  # noqa: PLC0415
+
+    ts = datetime(2026, 5, 1, 14, 43, tzinfo=ZoneInfo("America/Bogota"))
+    block, meta = _context_time_anchor_block(now_cot=ts, directive_kind="test")
+    assert meta["dentro_de_ventana_moc"] is True
+    assert meta["fin_de_semana"] is False
+    assert "CONTEXT_ANCLA_TIEMPO" in block
+    assert "Sí" in block
+
+
+def test_context_time_anchor_outside_before_window() -> None:
+    sys.path.insert(0, str(_REPO / "services" / "api-gateway"))
+    from datetime import datetime  # noqa: PLC0415
+
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    from routers.telegram_inbound_webhook import _context_time_anchor_block  # noqa: PLC0415
+
+    ts = datetime(2026, 5, 1, 14, 12, tzinfo=ZoneInfo("America/Bogota"))
+    _b, meta = _context_time_anchor_block(now_cot=ts, directive_kind="test")
+    assert meta["dentro_de_ventana_moc"] is False
+
+
+def test_summarize_new_context_directive_embeds_anchor_block() -> None:
+    sys.path.insert(0, str(_REPO / "services" / "api-gateway"))
+    from routers.telegram_inbound_webhook import _summarize_new_context_directive  # noqa: PLC0415
+
+    out = _summarize_new_context_directive("payload line")
+    assert out.startswith("[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]")
+    assert "CONTEXT_ANCLA_TIEMPO" in out
+    assert "dentro_de_ventana_moc" in out
+    assert "payload line" in out

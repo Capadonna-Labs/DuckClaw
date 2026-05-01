@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -24,6 +25,7 @@ except ImportError:
 
 import duckdb
 
+from duckclaw.forge.atoms.macro_pgq_seed import ensure_macro_pgq_seed
 from duckclaw.forge.leila_schema import ensure_leila_mvp_schema
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
@@ -32,14 +34,46 @@ from duckclaw.workers.loader import run_schema
 from duckclaw.workers.manifest import load_manifest
 
 
-def _iter_duckdb_targets(extra: list[str]) -> list[Path]:
+def _bootstrap_path_skipped_default_scan(p: Path) -> bool:
+    """Copias bajo dirs backup_* suelen ser snapshots rotos/incompatibles con el WAL."""
+    return any(part.startswith("backup_") for part in p.parts)
+
+
+def _resolve_extra_db(raw: str) -> Optional[Path]:
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        p = (_REPO_ROOT / p).resolve()
+    else:
+        p = p.resolve()
+    if p.suffix.lower() != ".duckdb":
+        return None
+    if not p.exists() and not p.parent.is_dir():
+        return None
+    return p
+
+
+def _iter_duckdb_targets(extra: list[str], *, only_explicit: bool) -> list[Path]:
+    """Si only_explicit=True, solo rutas pasadas como argumentos (sin rglob ni gateway implícito)."""
     seen: set[Path] = set()
     out: list[Path] = []
+    if only_explicit:
+        for raw in extra:
+            rp = _resolve_extra_db(raw)
+            if rp is None:
+                print(f"  [skip] No es un .duckdb existente: {raw}", file=sys.stderr)
+                continue
+            if rp.resolve() not in seen:
+                seen.add(rp.resolve())
+                out.append(rp)
+        return out
+
     root = db_root()
     for sub in ("private", "shared"):
         d = root / sub
         if d.is_dir():
             for p in d.rglob("*.duckdb"):
+                if _bootstrap_path_skipped_default_scan(p):
+                    continue
                 r = p.resolve()
                 if r not in seen:
                     seen.add(r)
@@ -50,8 +84,8 @@ def _iter_duckdb_targets(extra: list[str]) -> list[Path]:
             p = (_REPO_ROOT / p).resolve()
         else:
             p = p.resolve()
-        if p.suffix.lower() == ".duckdb" and p not in seen:
-            seen.add(p)
+        if p.suffix.lower() == ".duckdb" and p.resolve() not in seen:
+            seen.add(p.resolve())
             out.append(p)
     gp = Path(get_gateway_db_path()).expanduser()
     if not gp.is_absolute():
@@ -227,6 +261,31 @@ def _ensure_fly_runtime_tables(con: duckdb.DuckDBPyConnection) -> None:
         );
         """
     )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS quant_core.hrp_mandates (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            ticker VARCHAR(20) NOT NULL,
+            hrp_weight DOUBLE NOT NULL,
+            hrp_weight_capped DOUBLE NOT NULL,
+            lookback_days INTEGER NOT NULL,
+            n_observations INTEGER NOT NULL,
+            computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            valid_until TIMESTAMP NOT NULL,
+            shrinkage_method VARCHAR(50) DEFAULT 'ledoit_wolf'
+        );
+        """
+    )
+    try:
+        con.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_hrp_mandates_ticker_day "
+            "ON quant_core.hrp_mandates (ticker, date_trunc('day', computed_at));"
+        )
+    except Exception:
+        pass
+    con.execute("ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_executed BOOLEAN DEFAULT FALSE;")
+    con.execute("ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_notional DECIMAL(15,2);")
+    con.execute("ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_n_orders INTEGER;")
 
 
 def _collect_extensions(templates_root: Path) -> list[str]:
@@ -277,6 +336,10 @@ def bootstrap_file(path: Path, templates_root: Path, extensions: list[str]) -> N
                 run_schema(_ExecuteAdapter(con), spec, seed_beliefs=False)
             except Exception as exc:
                 print(f"  [warn] run_schema {wid}: {exc}", file=sys.stderr)
+        try:
+            ensure_macro_pgq_seed(con)
+        except Exception as exc:
+            print(f"  [warn] macro_pgq_seed: {exc}", file=sys.stderr)
     finally:
         con.close()
 
@@ -287,6 +350,11 @@ def main() -> int:
         "extra_dbs",
         nargs="*",
         help="Rutas .duckdb adicionales (relativas al repo o absolutas)",
+    )
+    parser.add_argument(
+        "--only",
+        action="store_true",
+        help="Procesar únicamente los .duckdb listados como argumentos (sin escanear db/private|shared). Requiere al menos una ruta.",
     )
     parser.add_argument(
         "--templates-root",
@@ -312,7 +380,10 @@ def main() -> int:
     extensions = _collect_extensions(templates_root)
     print("ensure_registry (system.duckdb)...", flush=True)
     ensure_registry()
-    targets = _iter_duckdb_targets(list(args.extra_dbs))
+    if args.only and not args.extra_dbs:
+        print("Uso: --only requiere al menos una ruta .duckdb.", file=sys.stderr)
+        return 1
+    targets = _iter_duckdb_targets(list(args.extra_dbs), only_explicit=bool(args.only))
     if not targets:
         print("No hay archivos .duckdb que procesar.", flush=True)
         return 0

@@ -372,6 +372,9 @@ Comandos fly (chat Quant Trader):
 - `/trading_session --status`
 - `/trading_session --stop`
 - `/cancel_signal <signal_id>`
+- `/execute_all_moc <session_uid>` — HITL en bloque: ejecuta todas las señales `moc_hrp_cfd` `PENDING_HITL` para el `session_uid` del ciclo MOC.
+
+**Core-Satellite HRP+MOC** (spec `specs/features/Core-Satellite HRP Weekly + MOC CFD.md`): PM2 sobre el host del vault con `TZ=America/Bogota`; `scripts/quant/hrp_weekly_job.py` (domingo ~20:00 COT ejemplo) y `MOC_PHASE=calc|remind|expire scripts/quant/moc_pipeline.py`. Universo HRP/MOC por `HRP_CORE_SATELLITE_UNIVERSE`; alertas opcionales vía `DUCKCLAW_QUANT_ALERT_CHAT_ID` + `N8N_OUTBOUND_WEBHOOK_URL`; escrituras vía singleton writer (`enqueue_duckdb_write_sync`) + proceso db-writer.
 
 Flags extendidos de sesión:
 

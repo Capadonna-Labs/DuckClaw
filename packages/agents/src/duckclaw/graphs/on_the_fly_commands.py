@@ -38,6 +38,7 @@ from duckclaw.forge.skills.the_mind_outbound import (
     deal_cards_for_level,
     send_telegram_dm,
 )
+from duckclaw.graphs.trading_hours_cot import quant_event_horario_line
 from duckclaw.utils.logger import get_obs_logger, log_fly, structured_log_context
 from duckclaw.utils.telegram_markdown_v2 import TELEGRAM_MARKDOWN_V2_SPECIAL
 
@@ -693,6 +694,8 @@ def parse_command(text: str) -> Tuple[str, str]:
         return "", ""
     parts = text.strip().split(maxsplit=1)
     name = (parts[0] or "").lstrip("/").lower()
+    if "@" in name:
+        name = name.split("@", 1)[0]
     args = (parts[1] if len(parts) > 1 else "").strip()
     return name, args
 
@@ -3078,14 +3081,17 @@ def build_goals_proactive_system_event_message(
     extra = ""
     if obj == "overnight_gap_squeeze":
         extra = (
-            " **MISIÓN: OVERNIGHT GAP SQUEEZE (HRP + MOC Proxy):** "
-            "1) Ingesta OHLCV 1m de los tickers de la sesión via `fetch_market_data`. "
-            "2) Ingesta de portfolio actual via `get_ibkr_portfolio`. "
-            "3) Ejecuta `run_sandbox` con el script `overnight_squeeze_standalone.py`. "
-            "4) El script debe: a) Aplicar Kalman a la serie 1m. b) Calcular el 'MOC Proxy' (Suma de Volumen Direccional últimos 15m). "
-            "c) Calcular pesos HRP con límite del 35%. "
-            "5) Si MOC Proxy > 0 (Presión de Compra) y Kalman es alcista: Proponer rebalanceo hacia los pesos HRP. "
-            "6) Si MOC Proxy < 0: Abortar rebalanceo (Fase Sólida/Plasma detectada)."
+            " **MISIÓN: OVERNIGHT GAP SQUEEZE — FASE PREP + MOC (HRP + MOC Proxy):** "
+            "Durante 08:30–15:00 COT lun–vie: **solo** recolectar contexto (CFD/OHLCV/portfolio/sandbox/read_sql). "
+            "**No** invocar `propose_trade_signal` para `cfd_auto`/no-MOC **hasta** la ventana MOC configurada (default ~14:40–14:59:30 COT; `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW`); "
+            "la tool bloquea con `OUTSIDE_MOC_PREP_WINDOW` antes (prep overnight gap squeeze); el pipeline PM2 `moc_pipeline.py` "
+            "(moc_hrp_cfd) no lo sustituyes. Dentro del tramo MOC, diferir ejecución batch a ese job/flujo `/execute_all_moc`. "
+            "1) OHLCV 1m vía `fetch_market_data`. "
+            "2) Portfolio vía `get_ibkr_portfolio`. "
+            "3) Sandbox script `overnight_squeeze_standalone.py`. "
+            "4) Script: Kalman 1m, MOC Proxy (volumen direccional 15m), HRP tope 35%. "
+            "5) Tras ventana MOC permitida por gateway: si MOC Proxy > 0 + Kalman alcista y procede playbook, una señal hacia HRP; "
+            "si MOC Proxy < 0 → abortar narrativa Sólida/Plasma sin Ledger antes del MOC."
         )
     elif obj == "rebalance_hrp":
         extra = (
@@ -3098,8 +3104,16 @@ def build_goals_proactive_system_event_message(
             " **Sesión (session_goal.objective=maximize_pnl):** puedes anclar el cierre a PnL/riesgo según "
             "sesión; si además hiciste HRP en sandbox, cita desviación vs cartera. "
         )
+    _cot_ctx = ""
+    if obj == "overnight_gap_squeeze":
+        try:
+            _cot_ctx = quant_event_horario_line() + " "
+        except Exception:
+            _cot_ctx = ""
     return (
-        "[SYSTEM_EVENT: Revisión periódica de /goals. Objetivos: "
+        "[SYSTEM_EVENT: "
+        + _cot_ctx
+        + "Revisión periódica de /goals. Objetivos: "
         f"{summary}.{extra}Evalúa con herramientas si hace falta qué tan alineado está el "
         "contexto actual (portfolio, sesión de trading, etc.) con cumplir cada meta. "
         "Responde al usuario con un breve análisis o propuesta concreta (mensaje útil; "
@@ -3134,8 +3148,9 @@ def build_trading_tick_system_event_message(
     _directive = (
         "TRADING TICK AUTÓNOMO (HITL): 1) validar sesión ACTIVE; 2) ejecutar evaluate_cfd_state "
         "con session_uid+tickers; 3) si outcome=ERROR o all_data_failed, reportar ceguera sensorial; "
-        "4) si outcome=MISALIGNED y no hay pending por ticker, proponer máximo 1 señal por ticker con "
-        "propose_trade_signal (NO ejecutar); 5) si mode=live agregar warning de capital real; "
+        "4) si outcome=MISALIGNED y no hay pending por ticker, `propose_trade_signal` como mucho 1 por ticker "
+        "solo dentro ventana MOC COT configurada (default ~14:40–14:59:30; véase env); fuera = prep sin Ledger "
+        "`OUTSIDE_MOC_PREP_WINDOW` (excepción job `moc_hrp_cfd`); NO ejecutar; 5) si mode=live agregar warning de capital real; "
         "6) si ALIGNED, no enviar resumen al usuario."
     )
     if _obj == "rebalance_hrp":
@@ -3145,13 +3160,15 @@ def build_trading_tick_system_event_message(
             "(import pypfopt; pypfopt.hierarchical_portfolio.HRPOpt + risk_models.sample_cov sobre DataFrame de retornos; "
             "optimize() → pesos que suman 1). Solo si pypfopt falla, HRP manual con pandas/scipy. "
             "Comparar vs get_ibkr_portfolio; si desviación relevante y sin HITL pendiente por ticker, máximo 1 "
-            "propose_trade_signal de rebalanceo por ticker (NO ejecutar)."
+            "`propose_trade_signal` de rebalanceo por ticker dentro de ventana MOC permitida por gateway (NO ejecutar fuera)."
         )
     elif _obj == "overnight_gap_squeeze":
         _directive += (
-            " 7) OVERNIGHT GAP SQUEEZE: priorizar setup de cierre para captura de gap overnight; "
-            "usar evidencia OHLCV reciente + estado CFD por ticker para detectar compresión previa al cierre; "
-            "si no hay condiciones claras de squeeze, abstenerse de proponer señal."
+            " 7) OVERNIGHT GAP SQUEEZE (PREP antes de MOC): en 08:30–15:00 COT lun–vie recolectar contexto "
+            "(evaluate_cfd_state, fetch_ib_gateway_ohlcv/fetch_market_data, read_sql, get_ibkr_portfolio, sandbox según playbook). "
+            "**No** `propose_trade_signal` hasta ventana MOC (default ~14:40–14:59:30 COT salvo env); antes el gateway "
+            "devuelve `OUTSIDE_MOC_PREP_WINDOW`. Señales batch `moc_hrp_cfd` = solo PM2. "
+            "Dentro de ventana permitida por tool: como mucho una propuesta Ledger coherente con CFD si el setup procede."
         )
     # #region agent log
     try:
@@ -3188,7 +3205,12 @@ def build_trading_tick_system_event_message(
             "directive": _directive,
         }
     )
-    return "[SYSTEM_EVENT: " + event.model_dump_json(ensure_ascii=False) + "]"
+    _cot_line = ""
+    try:
+        _cot_line = quant_event_horario_line() + " "
+    except Exception:
+        _cot_line = ""
+    return "[SYSTEM_EVENT: " + _cot_line + event.model_dump_json(ensure_ascii=False) + "]"
 
 
 def _natural_language_goal_to_params(db: Any, chat_id: Any, text: str) -> Optional[dict]:
@@ -4066,6 +4088,10 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ("/approve", "Aprobar última acción"),
         ("/reject", "Rechazar última acción"),
         ("/execute_signal <uuid>", "HITL: confirma ejecución (Quant Trader: execute_approved_signal)"),
+        (
+            "/execute_all_moc <session_uid>",
+            "HITL Quant: ejecuta todas las señales moc_hrp_cfd pendientes de esa sesión MOC",
+        ),
         ("/cancel_signal <uuid>", "HITL: cancela señal pendiente (PENDING_HITL/AWAITING_HITL)"),
         (
             "/trading_session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--confirm] [--status] [--stop]",
@@ -4074,6 +4100,14 @@ def execute_help(db: Any, chat_id: Any) -> str:
         (
             "/quant_cycle [--tickers A,B] [--timeframe 1h] [--lookback_days 20] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--execute auto|off]",
             "Quant: pipeline determinista (fetch -> portfolio -> evaluate -> señal) con salida estructurada",
+        ),
+        (
+            "/profile",
+            "Quant: muestra perfil de inversión inferido desde VSS (semantic_memory)",
+        ),
+        (
+            "/macro --update REGIMEN_* [confidence=0.8] [evidence=\"…\"]",
+            "Quant admin: registra régimen macro manual para el pipeline MOC (singleton writer)",
         ),
         ("/lake", "Estado del túnel SSH Capadonna (env + prueba rápida)"),
     ]
@@ -5244,6 +5278,32 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         f"- 📉 Max Drawdown: {_mdd_txt}\n"
         f"{tick_line}"
     )
+    # region agent log
+    try:
+        _plog = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
+        with _plog.open("a", encoding="utf-8") as _pf:
+            _pf.write(
+                json.dumps(
+                    {
+                        "sessionId": "c964f7",
+                        "hypothesisId": "H_status_macro_omitted",
+                        "location": "on_the_fly_commands._read_trading_session_status_summary:return",
+                        "message": "trading_session_status_built",
+                        "data": {
+                            "includes_macro_or_profile_block": False,
+                            "session_uid_prefix": uid[:8],
+                            "tickers_chars": len(tickers),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                        "runId": "pre-fix",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     return _status_text
 
 
@@ -6223,6 +6283,177 @@ def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
     )
 
 
+def execute_quant_profile(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
+    """`/profile`: perfil inferido desde VSS (Quantum vault)."""
+    del args
+    from duckclaw.forge.atoms.investor_profile_vss import format_profile_summary, get_investor_profile
+    from duckclaw.forge.skills.quant_tool_context import set_quant_tool_db_path
+
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if raw_path:
+        set_quant_tool_db_path(raw_path)
+    tid = str(tenant_id or get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
+    try:
+        profile = get_investor_profile(db, tid)
+    except Exception as exc:
+        return f"No se pudo leer el perfil: {exc}"
+    return format_profile_summary(profile)
+
+
+def execute_quant_macro_update(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    requester_id: Any = None,
+    tenant_id: Any = None,
+) -> str:
+    """`/macro --update …`: sólo admin/owner — escribe macro_manual_state vía Singleton Writer."""
+    from duckclaw.forge.atoms.macro_fly_parse import parse_macro_update_cli
+
+    tid = str(tenant_id or get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
+    rid = str(requester_id or get_chat_state(db, chat_id, "last_requester_id") or "").strip()
+    if not (_is_gateway_owner_user(rid) or _is_team_admin(db, tenant_id=tid, requester_id=rid)):
+        return "❌ Acceso denegado: `/macro --update` requiere admin del tenant u owner."
+
+    parsed, err = parse_macro_update_cli(args)
+    if not parsed:
+        return err or "Parse inválido."
+
+    rg = str(parsed["regime"] or "").strip().upper()
+    stmts: list[tuple[str, Optional[list[Any]]]] = [
+        ("DELETE FROM quant_core.macro_manual_state WHERE id = 'singleton'", None),
+        (
+            "INSERT INTO quant_core.macro_manual_state (id, regime_override, confidence, evidence, updated_at) "
+            "VALUES ('singleton', ?, ?, ?, CURRENT_TIMESTAMP)",
+            [
+                rg,
+                float(parsed["confidence"]),
+                str(parsed["evidence"] or "")[:8000],
+            ],
+        ),
+    ]
+
+    ok, detail = _vault_apply_sql_statements(db, stmts, tenant_id=tid)
+    if not ok:
+        return f"No se pudo registrar el régimen manual: {detail}"
+    conf_pct = float(parsed["confidence"]) * 100.0
+    return (
+        "✅ Régimen manual actualizado (singleton writer).\n"
+        f"- Régimen: {rg} (conf objetivo fly {conf_pct:.0f}%)\n"
+        "El pipeline MOC usará esta pista antes de las reglas por VIX.\n"
+        "Contexto opcional para VSS: /context --add … en la misma bóveda."
+    )
+
+
+def execute_quant_execute_all_moc(db: Any, chat_id: Any, args: str) -> str:
+    """/execute_all_moc <session_uid>: aprueba y ejecuta en secuencia señales MOC batch."""
+    from duckclaw.forge.skills.quant_hitl import grant_execute_order
+    from duckclaw.forge.skills.quant_tool_context import (
+        set_quant_tool_chat_id,
+        set_quant_tool_db_path,
+    )
+    from duckclaw.forge.skills.quant_trader_bridge import _execute_approved_signal_impl
+
+    session_uid = (args or "").strip().split()[0] if (args or "").strip() else ""
+    if not re.match(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        session_uid,
+        re.IGNORECASE,
+    ):
+        return "Uso: /execute_all_moc <session_uid_UUID>"
+    try:
+        from duckclaw.graphs.graph_server import get_db as _get_db
+
+        _db = _get_db()
+        tid = str(get_chat_state(_db, chat_id, "tenant_id") or "default").strip() or "default"
+        rid = str(get_chat_state(_db, chat_id, "last_requester_id") or "").strip()
+        if _is_wr_tenant(tid):
+            clearance = _wr_member_clearance(_db, tenant_id=tid, user_id=rid)
+            if not (_is_gateway_owner_user(rid) or clearance == "admin"):
+                return "❌ Acceso denegado: /execute_all_moc en War Room requiere clearance admin."
+    except Exception:
+        pass
+
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if raw_path:
+        set_quant_tool_db_path(raw_path)
+    set_quant_tool_chat_id(str(chat_id).strip())
+
+    esc = session_uid.replace("'", "''")
+    sql = (
+        "SELECT CAST(fs.signal_id AS VARCHAR) AS signal_id "
+        "FROM finance_worker.trade_signals fs "
+        "INNER JOIN quant_core.trade_signals q ON q.signal_id = fs.signal_id "
+        f"WHERE q.session_uid = '{esc}' AND COALESCE(q.strategy_name, '') = 'moc_hrp_cfd' "
+        "AND UPPER(COALESCE(fs.status, '')) = 'PENDING_HITL' ORDER BY fs.ticker NULLS LAST"
+    )
+    try:
+        raw = db.query(sql)
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception as exc:
+        return f"No se pudieron listar señales MOC: {exc}"
+    signal_ids = [
+        str((r or {}).get("signal_id") or "").strip().lower()
+        for r in rows
+        if isinstance(r, dict) and (r or {}).get("signal_id")
+    ]
+    if not signal_ids:
+        return (
+            "No hay señales PENDING_HITL `moc_hrp_cfd` para esa session_uid "
+            "(o ya fueron ejecutadas/canceladas)."
+        )
+
+    ib_order_ids: list[str] = []
+    notionals_parts: list[str] = []
+    skipped: list[str] = []
+
+    cid = str(chat_id or "").strip() or "default"
+    for sid in signal_ids:
+        ok_ledger, ledger_msg = _execute_signal_verify_ledger(db, sid)
+        if not ok_ledger:
+            skipped.append(f"{sid[:13]}… — {ledger_msg}")
+            continue
+        grant_execute_order(cid, sid)
+        exec_raw = _execute_approved_signal_impl(db, signal_id=sid)
+        ej: dict[str, Any] = {}
+        try:
+            if isinstance(exec_raw, str) and exec_raw.strip().startswith("{"):
+                ej = json.loads(exec_raw)
+        except json.JSONDecodeError:
+            ej = {}
+        oid = ej.get("ib_order_id") or ej.get("order_id") or ej.get("broker_order_id")
+        if oid is not None:
+            ib_order_ids.append(str(oid))
+        for key in ("notional_usd", "notional", "amount_usd", "usd_notional"):
+            if ej.get(key) is not None:
+                try:
+                    notionals_parts.append(f"{sid[:8]}:{float(ej.get(key)):,.0f}")
+                except (TypeError, ValueError):
+                    pass
+                break
+
+    def _summarize_notional(parts: list[str]) -> float:
+        total = 0.0
+        for p in parts:
+            try:
+                total += abs(float((p.split(":", maxsplit=1)[-1] or "").replace(",", "")))
+            except (ValueError, TypeError):
+                continue
+        return total
+
+    total_n = _summarize_notional(notionals_parts)
+    rep = (
+        f"✅ MOC ejecutado: {len(signal_ids) - len(skipped)} órdenes "
+        f"(listadas {len(signal_ids)}).\n"
+        f"Notional declarado (~sum componentes Telegram): USD {total_n:,.0f}\n"
+        f"IDs: {', '.join(ib_order_ids) if ib_order_ids else '(extraer desde execution JSON)'}"
+    )
+    if skipped:
+        rep += "\nOmitidas:\n" + "\n".join(skipped[:12])
+    return rep
+
+
 def execute_cancel_signal(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
     """/cancel_signal <signal_id>: marca PENDING_HITL/AWAITING_HITL como CANCELLED."""
     _ = chat_id
@@ -6284,6 +6515,14 @@ def _dispatch_fly_command(
         return "Uso: /lake o /lake status"
     if name == "execute_signal":
         return execute_quant_execute_signal(db, chat_id, args)
+    if name == "execute_all_moc":
+        return execute_quant_execute_all_moc(db, chat_id, args)
+    if name == "profile":
+        return execute_quant_profile(db, chat_id, args, tenant_id=tenant_id)
+    if name == "macro":
+        return execute_quant_macro_update(
+            db, chat_id, args, requester_id=requester_id, tenant_id=tenant_id
+        )
     if name == "cancel_signal":
         return execute_cancel_signal(db, chat_id, args, tenant_id=tenant_id)
     if name == "trading_session":

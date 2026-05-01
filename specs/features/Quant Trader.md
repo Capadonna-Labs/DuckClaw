@@ -4,10 +4,10 @@
 
 
 ### Objetivo
-Orquestar la ejecución táctica cuantitativa y generación de señales de trading bajo un entorno Zero-Trust. El worker **Quant Trader** actúa como ejecutor aislado, delegando el análisis macro a `Finanz`, procesando backtesting exclusivamente dentro del Strix Sandbox, y requiriendo autorización explícita (HITL) para cualquier mutación de estado en el broker (IBKR).
+Orquestar la ejecución táctica cuantitativa y generación de señales de trading bajo un entorno Zero-Trust. El worker **Quant Trader** actúa como ejecutor aislado; puede ofrecer **síntesis macro y de sentimiento** acotada (herramientas web/Reddit/FMP + vínculo a tickers/sesión) sin sustituir OHLCV para propuestas. El backtesting corre en Strix Sandbox; toda orden al broker exige autorización explícita (HITL).
 
 ### Contexto
-- **Orquestación:** Invocado vía Manager Handoff (UX: "A2A Contract") tras un intent emitido por `Finanz` o el usuario.
+- **Orquestación:** Invocado vía Manager Handoff (UX: "A2A Contract") tras un intent del usuario u otro worker (p. ej. `Finanz`).
 - **Aislamiento:** `network_access: false`. Comunicación externa restringida a MCP Servers (IBKR, Strix Sandbox).
 - **Entorno de Ejecución:** `IBKR_ACCOUNT_MODE=paper` inyectado por el harness.
 - **Cómputo:** Prohibida la ejecución de código en el host. Todo script (Pandas, NumPy, TA-Lib) corre en contenedores efímeros OrbStack.
@@ -40,7 +40,7 @@ CREATE TABLE finance_worker.trade_signals (
 ```
 
 ### Flujo Cognitivo
-1. **Ingesta de Mandato:** Recibe el payload del Manager con el contexto del mandato de `Finanz`.
+1. **Ingesta de Mandato:** Recibe el payload del Manager (mandato previo o pedido directo del usuario).
 2. **Recolección de Evidencia:** Ejecuta `fetch_market_data` vía IBKR MCP para obtener OHLCV intradía/histórico.
 3. **Cuantificación Aislada:** Genera script de Python (estrategia, cálculo de z-score, reversión a la media) y lo envía a `execute_sandbox_script`.
 4. **Síntesis y Propuesta:** Analiza el `stdout` (JSON) del Sandbox. Si la señal es positiva, invoca `propose_trade_signal`.
@@ -57,7 +57,7 @@ CREATE TABLE finance_worker.trade_signals (
 ### Validaciones
 - **Regla de Evidencia Única:** El nodo Validator rechaza cualquier `propose_trade_signal` si no existe un registro de `fetch_market_data` exitoso para el mismo `ticker` en el turno actual del LangGraph state.
 - **RiskGuard Determinista:** Si `proposed_weight` > límite global del tenant (ej. 10% del capital líquido), el nodo Python sobrescribe el peso al máximo permitido antes de persistir en DuckDB, notificando la reducción en el rationale.
-- **Domain Closure:** El worker rechazará responder a preguntas macroeconómicas o de sentimiento de mercado, indicando que su dominio es estrictamente ejecución cuantitativa y derivando el intent a `Finanz`.
+- **Domain Closure:** La ejecución y las señales siguen ancladas a evidencia OHLCV/portfolio. Preguntas o contexto sobre macro/sentimiento se responden **dentro del worker** con herramientas permitidas (p. ej. búsqueda web, Reddit, calendarios FMP), sin usar narrativa como sustituto de velas para `propose_trade_signal`.
 
 ### Edge cases
 - **Ceguera Sensorial (IBKR Down/Rate Limit):** Si `fetch_market_data` falla, el worker aborta el pipeline inmediatamente con el payload: *"🔴 Ceguera Sensorial: Imposible validar OHLCV para {ticker}. Mandato suspendido."* No se permite fallback a Tavily ni extrapolación de datos.

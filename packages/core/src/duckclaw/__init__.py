@@ -9,10 +9,6 @@ import inspect
 import time
 from typing import Any, Literal, Optional
 
-_DEBUG_SESSION_C964F7_LOG = (
-    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
-)
-
 __path__ = pkgutil.extend_path(__path__, __name__)
 
 try:
@@ -21,8 +17,6 @@ except ImportError:
     _NativeDuckClaw = None
 
 import duckdb as _duckdb
-
-from duckclaw.debug_session_log import agent_debug_log
 
 
 class DuckClaw:
@@ -54,26 +48,6 @@ class DuckClaw:
             self._native = _NativeDuckClaw(self._path)
         else:
             self._con = _duckdb.connect(self._path, read_only=self._read_only)
-        # #region agent log
-        try:
-            _db_tail = (self._path or "")[-96:]
-            if _db_tail.endswith(".duckdb"):
-                _fr = inspect.stack()[1]
-                agent_debug_log(
-                    "duckclaw/__init__.py:DuckClaw.__init__",
-                    "duckdb_handle_open",
-                    {
-                        "pid": os.getpid(),
-                        "read_only": self._read_only,
-                        "native": self._native is not None,
-                        "path_tail": _db_tail,
-                        "caller": f"{_fr.filename}:{_fr.lineno}",
-                    },
-                    hypothesis_id="H1",
-                )
-        except Exception:
-            pass
-        # #endregion
 
     def _ensure_python_exec_connection(self) -> None:
         """Reabre conexión Python si quedó en None tras suspend_readonly_file_handle."""
@@ -83,26 +57,6 @@ class DuckClaw:
             return
         rp = (self._path or "").strip()
         if self._read_only and rp not in ("", ":memory:"):
-            # #region agent log
-            try:
-                with open(_DEBUG_SESSION_C964F7_LOG, "a", encoding="utf-8") as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "hypothesisId": "H_RO_RECOVER",
-                                "location": "duckclaw/__init__.py:DuckClaw._ensure_python_exec_connection",
-                                "message": "auto_resume_ro_before_execute",
-                                "data": {"path_tail": rp[-64:]},
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
             try:
                 self.resume_readonly_file_handle()
             except Exception:
@@ -149,24 +103,6 @@ class DuckClaw:
 
     def close(self) -> None:
         """Cierra el handle DuckDB para liberar el archivo (conexiones efímeras)."""
-        # #region agent log
-        try:
-            _db_tail = (self._path or "")[-96:]
-            if _db_tail.endswith(".duckdb"):
-                agent_debug_log(
-                    "duckclaw/__init__.py:DuckClaw.close",
-                    "duckdb_handle_close",
-                    {
-                        "pid": os.getpid(),
-                        "read_only": self._read_only,
-                        "native": self._native is not None,
-                        "path_tail": _db_tail,
-                    },
-                    hypothesis_id="H3",
-                )
-        except Exception:
-            pass
-        # #endregion
         if self._native is not None:
             try:
                 self._native.execute("CHECKPOINT")
@@ -198,14 +134,6 @@ class DuckClaw:
             except Exception:
                 pass
             self._con = None
-        # #region agent log
-        agent_debug_log(
-            "duckclaw/__init__.py:suspend_readonly_file_handle",
-            "after suspend (RO handle released)",
-            {"read_only": self._read_only, "path_tail": (self._path or "")[-64:]},
-            hypothesis_id="H2",
-        )
-        # #endregion
 
     def resume_readonly_file_handle(self) -> None:
         """Reabre la conexión RO tras ``suspend_readonly_file_handle``."""
@@ -213,14 +141,6 @@ class DuckClaw:
             return
         if self._con is None:
             self._con = _duckdb.connect(self._path, read_only=True)
-        # #region agent log
-        agent_debug_log(
-            "duckclaw/__init__.py:resume_readonly_file_handle",
-            "after resume (RO handle open)",
-            {"read_only": self._read_only, "path_tail": (self._path or "")[-64:]},
-            hypothesis_id="H2",
-        )
-        # #endregion
 
 
 __all__ = ["DuckClaw"]

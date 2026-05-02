@@ -43,11 +43,11 @@ import numpy as np
 PRICES = json.loads({payload_lit})
 prices_df = pd.DataFrame(PRICES).apply(pd.to_numeric, errors="coerce").dropna(how="any")
 if prices_df.shape[0] < 61 or prices_df.shape[1] < 2:
-    print(json.dumps({{"ok": False, "error": "Filas/col insuf Ledoit/HRP"}}}, ensure_ascii=False))
+    print(json.dumps({{"ok": False, "error": "Filas/col insuf Ledoit/HRP"}}), ensure_ascii=False))
     raise SystemExit(0)
 returns_df = prices_df.pct_change().dropna(how="any")
 if returns_df.shape[0] < 30:
-    print(json.dumps({{"ok": False, "error": "Retornos insuficientes"}}}, ensure_ascii=False))
+    print(json.dumps({{"ok": False, "error": "Retornos insuficientes"}}), ensure_ascii=False))
     raise SystemExit(0)
 try:
     from pypfopt import HRPOpt, risk_models
@@ -57,7 +57,7 @@ try:
     if hasattr(raw, "to_dict"):
         raw = raw.to_dict()
 except Exception as e:
-    print(json.dumps({{"ok": False, "error": str(e)[:800]}}, ensure_ascii=False))
+    print(json.dumps({{"ok": False, "error": str(e)[:800]}}), ensure_ascii=False))
     raise SystemExit(0)
 cap = 0.40
 weights = {{str(k): min(float(raw[k]), cap) for k in raw.keys()}}
@@ -72,7 +72,7 @@ print(json.dumps({{
     "weights_raw": raw,
     "weights_capped": weights,
     "n_observations": int(returns_df.shape[0]),
-}}, ensure_ascii=False))
+}}), ensure_ascii=False))
 '''.strip()
 
 

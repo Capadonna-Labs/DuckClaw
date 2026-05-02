@@ -31,33 +31,6 @@ def _search_semantic_memory_rows(db: Any, query: str, limit: int) -> list[dict[s
         return []
     try:
         rows, diag = search_semantic_memory_hybrid(db, q, max(1, min(int(limit), 40)))
-        # region agent log
-        try:
-            import json as _json
-            import time
-            from pathlib import Path
-
-            _lp = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-            with _lp.open("a", encoding="utf-8") as _lf:
-                _lf.write(
-                    _json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "hypothesisId": "H_vss_hybrid_resolve",
-                            "location": "investor_profile_vss._search_semantic_memory_rows",
-                            "message": "hybrid_semantic_resolve",
-                            "data": {"mode": diag.get("mode"), "n": len(rows), "query_prefix": q[:40]},
-                            "timestamp": int(time.time() * 1000),
-                            "runId": "post-fix",
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-
-        # endregion
         return rows
     except Exception:
         return []

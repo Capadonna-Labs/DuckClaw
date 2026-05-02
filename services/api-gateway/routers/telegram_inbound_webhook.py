@@ -94,29 +94,6 @@ def _context_time_anchor_block(
         "window_cot": win_s,
         "directive_kind": directive_kind,
     }
-    # #region agent log
-    try:
-        _root = Path(__file__).resolve().parents[3]
-        _dbg = _root / ".cursor" / "debug-c964f7.log"
-        with open(_dbg, "a", encoding="utf-8") as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H_MOC_anchor",
-                        "location": "telegram_inbound_webhook._context_time_anchor_block",
-                        "message": "summarize_directive_time_anchor_built",
-                        "data": dict(meta),
-                        "timestamp": int(time.time() * 1000),
-                        "runId": "cot-moc-anchor",
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     return block, meta
 from core.war_rooms import (
     hit_rate_limit,
@@ -148,37 +125,6 @@ from core.telegram_compact_webhook_routes import (
 )
 
 _log = logging.getLogger("duckclaw.gateway.telegram_inbound_webhook")
-
-_DUCKCLAW_DEBUG_SESSION = "c964f7"
-_DEBUG_NDJSON_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
-
-
-def _duckclaw_dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-    """NDJSON session debug (duckclaw/.cursor/debug-c964f7.log). Sin PII ni tokens."""
-    # #region agent log
-    try:
-        import json as _json_dbg
-        import time as _time_dbg
-
-        with open(_DEBUG_NDJSON_PATH, "a", encoding="utf-8") as _df:
-            _df.write(
-                _json_dbg.dumps(
-                    {
-                        "sessionId": _DUCKCLAW_DEBUG_SESSION,
-                        "hypothesisId": hypothesis_id,
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(_time_dbg.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
-
 
 _TELEGRAM_GEMINI_VLM_503_TEXT = (
     "⚠️ Gemini no está disponible para visión en este momento (503). "
@@ -1128,28 +1074,12 @@ def build_telegram_inbound_webhook_router(
                         update_id,
                         early_chat_id,
                     )
-                    # #region agent log
-                    _duckclaw_dbg(
-                        "H2",
-                        "telegram_inbound_webhook.py:dedupe",
-                        "dedupe_drop",
-                        {"update_id": update_id, "early_chat_id_tail": str(early_chat_id)[-4:]},
-                    )
-                    # #endregion
                     return {"ok": "true"}
             except Exception as exc:  # noqa: BLE001
                 _log.warning("telegram webhook dedupe omitido (redis): %s", exc)
 
         msg = body.get("message") or body.get("edited_message")
         if not isinstance(msg, dict):
-            # #region agent log
-            _duckclaw_dbg(
-                "H1",
-                "telegram_inbound_webhook.py:no_message_dict",
-                "early_return_no_editable_message",
-                {"keys_sample": list(body.keys())[:12]},
-            )
-            # #endregion
             return {"ok": "true"}
 
         chat = msg.get("chat") or {}
@@ -1177,24 +1107,6 @@ def build_telegram_inbound_webhook_router(
         chat_type = str(chat.get("type") or "private")
         tenant_id = war_room_tenant_for_chat(chat_type, chat_id, tenant_id)
 
-        # #region agent log
-        _duckclaw_dbg(
-            "H1",
-            "telegram_inbound_webhook.py:after_tenant",
-            "inbound_shape",
-            {
-                "path_tail": str(request.url.path)[-48:],
-                "worker_id": str(worker_id or ""),
-                "tenant_tail": str(tenant_id)[-24:],
-                "is_war_room": is_war_room_tenant(tenant_id),
-                "chat_type": str(chat_type or ""),
-                "text_len": len(text or ""),
-                "text_prefix": (text or "")[:72],
-                "parallel_http": _telegram_webhook_parallel_processing_enabled(),
-                "slash": bool(is_slash_command),
-            },
-        )
-        # #endregion
 
         # DM / chat privado: fotos/álbumes pasan por VLM (no solo War Rooms).
         if has_visual and not is_war_room_tenant(tenant_id):
@@ -1243,14 +1155,6 @@ def build_telegram_inbound_webhook_router(
             if not bootstrap_mode and not sender_is_member and not sender_is_owner:
                 event = "UNAUTHORIZED_COMMAND_ATTEMPT" if is_slash_command else "UNAUTHORIZED_MEMBER"
                 _log.info("war_room_filter tag=unauthorized_member tenant_id=%s user_id=%s", tenant_id, user_id)
-                # #region agent log
-                _duckclaw_dbg(
-                    "H3",
-                    "telegram_inbound_webhook.py:war_room",
-                    "silent_return_unauthorized_member",
-                    {"tenant_tail": str(tenant_id)[-24:], "is_slash": bool(is_slash_command)},
-                )
-                # #endregion
                 wr_append_audit(
                     db,
                     tenant_id=tenant_id,
@@ -1285,19 +1189,6 @@ def build_telegram_inbound_webhook_router(
                 bootstrap_mode=bootstrap_mode,
             )
             if not wr_gate.allowed:
-                # #region agent log
-                _duckclaw_dbg(
-                    "H3",
-                    "telegram_inbound_webhook.py:war_room_gate",
-                    "silent_return_gate",
-                    {
-                        "decision": wr_gate.decision,
-                        "has_visual": bool(has_visual),
-                        "text_prefix": (text or "")[:64],
-                        "is_slash": bool(is_slash_command),
-                    },
-                )
-                # #endregion
                 _log.info(
                     "war_room_gate decision=%s tenant_id=%s user_id=%s chat_id=%s has_visual=%s text_preview=%s",
                     wr_gate.decision,
@@ -1528,32 +1419,11 @@ def build_telegram_inbound_webhook_router(
             raw_caption=telegram_raw_caption,
             current_text=text,
         )
-        # #region agent log
-        _duckclaw_dbg(
-            "H4",
-            "telegram_inbound_webhook.py:context_resolution",
-            "is_ctx_add",
-            {
-                "is_ctx_add": bool(is_ctx_add),
-                "ctx_body_len": len((ctx_body or "").strip()),
-                "has_route_token": bool((reply_token or "").strip()),
-                "has_resolve_effective": bool((resolve_effective_telegram_bot_token() or "").strip()),
-            },
-        )
-        # #endregion
         if is_ctx_add:
             token_ctx = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
 
             async def _send_ctx_reply(html: str) -> None:
                 if not token_ctx:
-                    # #region agent log
-                    _duckclaw_dbg(
-                        "H4",
-                        "telegram_inbound_webhook.py:_send_ctx_reply",
-                        "no_bot_token_skip_send",
-                        {"html_len": len(html or "")},
-                    )
-                    # #endregion
                     _log.warning("context_injection: sin token de bot para responder")
                     return
                 try:
@@ -1808,17 +1678,6 @@ def build_telegram_inbound_webhook_router(
 
             reply_local = (res.get("response") or "").strip() if isinstance(res, dict) else ""
             if not reply_local:
-                # #region agent log
-                _duckclaw_dbg(
-                    "H5",
-                    "telegram_inbound_webhook.py:_invoke_and_reply",
-                    "empty_agent_response",
-                    {
-                        "msg_len": len(payload.message or ""),
-                        "worker_id": str(worker_id or ""),
-                    },
-                )
-                # #endregion
                 _log.warning(
                     "telegram webhook: invoke_agent_chat devolvió respuesta vacía tenant_id=%s "
                     "chat_id=%s msg_len=%s worker_id=%s",
@@ -1870,25 +1729,9 @@ def build_telegram_inbound_webhook_router(
                 with telegram_bot_token_override(reply_token):
                     await _invoke_and_reply()
             except Exception as exc:  # noqa: BLE001
-                # #region agent log
-                _duckclaw_dbg(
-                    "H5",
-                    "telegram_inbound_webhook.py:_invoke_and_reply_safe",
-                    "background_task_exception",
-                    {"exc_type": type(exc).__name__},
-                )
-                # #endregion
                 _log.exception("telegram webhook: fallo en invocación en segundo plano: %s", exc)
 
         if _telegram_webhook_parallel_processing_enabled():
-            # #region agent log
-            _duckclaw_dbg(
-                "H5",
-                "telegram_inbound_webhook.py:parallel_exit",
-                "scheduled_background_invoke",
-                {"text_len": len(text or ""), "worker_id": str(worker_id or "")},
-            )
-            # #endregion
             asyncio.create_task(_invoke_and_reply_safe())
             return {"ok": "true"}
 
@@ -1913,17 +1756,6 @@ def build_telegram_inbound_webhook_router(
                 ", ".join(b.webhook_path for b in _compact_path_bindings),
                 _upd,
             )
-            # #region agent log
-            _duckclaw_dbg(
-                "H-MUX-GENERIC-URL",
-                "telegram_inbound_webhook.py:telegram_bot_update_webhook_compact_ignored",
-                "multiplex active: generic /webhook accepted but not dispatched to workers",
-                {
-                    "update_id": _upd,
-                    "configured_paths": [str(b.webhook_path) for b in _compact_path_bindings],
-                },
-            )
-            # #endregion
             return {"ok": "true"}
 
     else:

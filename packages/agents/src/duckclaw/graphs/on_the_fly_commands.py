@@ -66,26 +66,8 @@ def _debug_log_model_config(
     data: dict[str, Any],
     run_id: str = "gemini_cfg_debug_v1",
 ) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "c964f7",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _f:
-            _f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
+    """Reserved for optional NDJSON debug (no-op)."""
+    del hypothesis_id, location, message, data, run_id
 
 
 def register_fly_outbound_chart_b64(session_id: Any, b64: str) -> None:
@@ -1366,45 +1348,6 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         finally:
             mut_close()
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
-        # region agent log
-        try:
-            import json as _json  # noqa: PLC0415
-            import time as _time  # noqa: PLC0415
-
-            _mtp = ""
-            try:
-                _fp = getattr(mut_db, "_path", "") or ""
-                _mtp = str(_fp)[-96:] if _fp else ""
-            except Exception:
-                _mtp = ""
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    _json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "pre-fix",
-                            "hypothesisId": "H4_team_add_rw_path",
-                            "location": "on_the_fly_commands.py:execute_team_whitelist",
-                            "message": "team_add_upsert_done",
-                            "data": {
-                                "tenant_norm": str(tid or "").lower()[:64],
-                                "target_uid_len": len(str(target_uid or "")),
-                                "mut_db_path_tail": _mtp,
-                                "uid_is_digits": str(target_uid or "").isdigit(),
-                            },
-                            "timestamp": int(_time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         target_label = _player_label(uname, target_uid, db=acl, tenant_id=tid)
         return f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'."
 
@@ -3054,30 +2997,6 @@ def build_goals_proactive_system_event_message(
         titles.append(_goal_title(g, k))
     summary = "; ".join(titles[:12]) if titles else "(sin títulos)"
     obj = (trading_session_objective or "").strip().lower()
-    # #region agent log
-    try:
-        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "overnight_goals_debug_v1",
-                        "hypothesisId": "H4",
-                        "location": "on_the_fly_commands.build_goals_proactive_system_event_message:entry",
-                        "message": "proactive_system_event_objective",
-                        "data": {
-                            "trading_session_objective": obj,
-                            "goals_count": len(goals or []),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     extra = ""
     if obj == "overnight_gap_squeeze":
         extra = (
@@ -3170,31 +3089,6 @@ def build_trading_tick_system_event_message(
             "devuelve `OUTSIDE_MOC_PREP_WINDOW`. Señales batch `moc_hrp_cfd` = solo PM2. "
             "Dentro de ventana permitida por tool: como mucho una propuesta Ledger coherente con CFD si el setup procede."
         )
-    # #region agent log
-    try:
-        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "overnight_goals_debug_v2",
-                        "hypothesisId": "H5",
-                        "location": "on_the_fly_commands.build_trading_tick_system_event_message:objective_directive",
-                        "message": "trading_tick_directive_selected",
-                        "data": {
-                            "objective": _obj,
-                            "tickers_count": len(tickers or []),
-                            "mode": str(mode or "paper"),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     event = TradingTickEvent.model_validate(
         {
             "session_uid": str(session_uid or "").strip(),
@@ -3423,48 +3317,6 @@ def execute_goals(
     if ds_list < 0:
         ds_list = 0
 
-    # #region agent log
-    try:
-        _sess_obj = ""
-        _raw_s = db.query(
-            "SELECT session_goal FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-        )
-        _rows_s = json.loads(_raw_s) if isinstance(_raw_s, str) else (_raw_s or [])
-        if _rows_s and isinstance(_rows_s[0], dict):
-            _sg = _rows_s[0].get("session_goal")
-            if isinstance(_sg, dict):
-                _sess_obj = str(_sg.get("objective") or "").strip().lower()
-            elif isinstance(_sg, str) and _sg.strip():
-                try:
-                    _sgj = json.loads(_sg)
-                    if isinstance(_sgj, dict):
-                        _sess_obj = str(_sgj.get("objective") or "").strip().lower()
-                except Exception:
-                    _sess_obj = ""
-        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "overnight_goals_debug_v1",
-                        "hypothesisId": "H3",
-                        "location": "on_the_fly_commands.execute_goals:list_state",
-                        "message": "goals_list_requested",
-                        "data": {
-                            "chat_id": str(chat_id),
-                            "goals_count": len(goals or []),
-                            "goal_keys": [str((g or {}).get("belief_key") or "") for g in (goals or [])[:5]],
-                            "session_objective": _sess_obj,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     if not goals:
         empty = (
             "\U0001f3af Manager\nNo hay goals. Crea con /goals <objetivo>, ej. /goals disminuir gasto en recreación."
@@ -4901,9 +4753,8 @@ def _ensure_trading_session_goals_delta(
         _GOALS_DELTA_META_KEY,
         json.dumps({"trigger": "trading_session", "session_uid": session_uid}, ensure_ascii=False),
     )
-    # #region agent log
+    _sess_obj = ""
     try:
-        _sess_obj = ""
         _raw_s = db.query(
             "SELECT session_goal FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
         )
@@ -4919,31 +4770,9 @@ def _ensure_trading_session_goals_delta(
                         _sess_obj = str(_sgj.get("objective") or "").strip().lower()
                 except Exception:
                     _sess_obj = ""
-        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "overnight_goals_debug_v1",
-                        "hypothesisId": "H1",
-                        "location": "on_the_fly_commands._ensure_trading_session_goals_delta:meta_seed",
-                        "message": "goals_delta_meta_seeded",
-                        "data": {
-                            "chat_id": str(chat_id),
-                            "session_uid": str(session_uid),
-                            "enabled_new": bool(enabled),
-                            "delta_seconds": int(current),
-                            "session_objective": _sess_obj,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
     except Exception:
-        pass
-    # #endregion
+        _sess_obj = ""
+
     if not get_manager_goals(db, chat_id):
         _seed_goal = {
             "belief_key": "hrp_session_rebalance",
@@ -4960,31 +4789,6 @@ def _ensure_trading_session_goals_delta(
                 "observed_value": None,
                 "title": "Overnight Gap Squeeze (cierre + gap) en cada tick",
             }
-        # #region agent log
-        try:
-            with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
-                _f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "overnight_goals_debug_v1",
-                            "hypothesisId": "H2",
-                            "location": "on_the_fly_commands._ensure_trading_session_goals_delta:default_goal",
-                            "message": "seeding_default_manager_goal",
-                            "data": {
-                                "chat_id": str(chat_id),
-                                "session_objective": _sess_obj,
-                                "default_goal_key": str(_seed_goal.get("belief_key") or ""),
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         set_manager_goals(
             db,
             chat_id,
@@ -5137,33 +4941,6 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
     pnl_now = _trading_session_coalesce_unreliable_pnl_tick(
         pnl_raw, pnl_reliable, _prev_for_carry
     )
-    # region agent log
-    try:
-        _p2 = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-        with _p2.open("a", encoding="utf-8") as _f2:
-            _f2.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H_pnl_gateway_carry",
-                        "location": "on_the_fly_commands._read_trading_session_status_summary:pnl_coalesce",
-                        "message": "pnl_tick_coalesce",
-                        "data": {
-                            "reliable": pnl_reliable,
-                            "raw": float(pnl_raw),
-                            "after": float(pnl_now),
-                            "had_prev": _prev_for_carry is not None,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                        "runId": "ib-down-carry",
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     prev_val: float | None = None
     if old_last_s:
         try:
@@ -5233,34 +5010,6 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         if _tearsheet.get("max_drawdown_pct") is not None
         else "N/D"
     )
-    # region agent log
-    try:
-        _p = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-        with _p.open("a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H_tearsheet_metrics",
-                        "location": "on_the_fly_commands._read_trading_session_status_summary",
-                        "message": "tearsheet_metrics_computed",
-                        "data": {
-                            "session_uid": uid[:12],
-                            "snapshots_len": len(snapshots),
-                            "anchor_equity": _anchor_eq,
-                            "has_sharpe": _tearsheet.get("sharpe") is not None,
-                            "has_mdd": _tearsheet.get("max_drawdown_pct") is not None,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                        "runId": "post-fix",
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     _status_text = (
         f"Sesión activa: `{uid}`\n"
         f"Mode: `{mode}` | Tickers: `{tickers}`\n"
@@ -5278,32 +5027,6 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         f"- 📉 Max Drawdown: {_mdd_txt}\n"
         f"{tick_line}"
     )
-    # region agent log
-    try:
-        _plog = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-        with _plog.open("a", encoding="utf-8") as _pf:
-            _pf.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H_status_macro_omitted",
-                        "location": "on_the_fly_commands._read_trading_session_status_summary:return",
-                        "message": "trading_session_status_built",
-                        "data": {
-                            "includes_macro_or_profile_block": False,
-                            "session_uid_prefix": uid[:8],
-                            "tickers_chars": len(tickers),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                        "runId": "pre-fix",
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     return _status_text
 
 
@@ -5600,34 +5323,6 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
         else [float(v) for v in cum],
         anchor_equity=_anchor_eq,
     )
-    # #region agent log
-    try:
-        _p = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-        with _p.open("a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "tearsheet_overlay_align",
-                        "hypothesisId": "H_pnl_line_series",
-                        "location": "on_the_fly_commands._build_trading_session_pnl_chart_b64:metrics_source",
-                        "message": "tearsheet_overlay_source",
-                        "data": {
-                            "pnl_line_source": pnl_line_source,
-                            "use_chat_snapshots": bool(_snap_for_metrics),
-                            "chat_snap_len": len(_snap_for_metrics or []),
-                            "cum_len": len(cum),
-                            "last_cum": float(cum[-1]) if cum else None,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     _sharpe_txt = (
         f"{_tearsheet['sharpe']:+.2f}" if _tearsheet.get("sharpe") is not None else "N/D"
     )
@@ -5684,33 +5379,6 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
     ax_dd.set_xlabel("Paso (0 = inicio)")
     ax_dd.set_ylabel("DD %")
     ax_dd.grid(True, alpha=0.25)
-    # region agent log
-    try:
-        _p = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-        with _p.open("a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H_tearsheet_metrics",
-                        "location": "on_the_fly_commands._build_trading_session_pnl_chart_b64",
-                        "message": "tearsheet_chart_render",
-                        "data": {
-                            "points": n,
-                            "anchor_equity": _anchor_eq,
-                            "has_sharpe": _tearsheet.get("sharpe") is not None,
-                            "has_drawdown": bool(drawdowns),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                        "runId": "post-fix",
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     fig.tight_layout()
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=100, facecolor="white", edgecolor="none", bbox_inches="tight")
@@ -5883,33 +5551,6 @@ def execute_quant_cycle(
     tid = str(tenant_id or "default").strip() or "default"
     cid = str(chat_id).strip() or "default"
     uid = cid
-    # #region agent log
-    try:
-        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "quant_cycle_debug_v1",
-                        "hypothesisId": "H3",
-                        "location": "on_the_fly_commands.py:execute_quant_cycle:entry",
-                        "message": "quant_cycle_parsed_args",
-                        "data": {
-                            "args": (args or "")[:200],
-                            "objective": str(getattr(parsed, "objective", "") or ""),
-                            "execute": str(getattr(parsed, "execute", "") or ""),
-                            "timeframe": str(getattr(parsed, "timeframe", "") or ""),
-                            "lookback_days": int(getattr(parsed, "lookback_days", 0) or 0),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     set_quant_tool_chat_id(cid)
     set_quant_tool_tenant_id(tid)
     set_quant_tool_user_id(uid)
@@ -5939,32 +5580,6 @@ def execute_quant_cycle(
         tickers = list(session_tickers)
     if not tickers:
         tickers = ["SPY"]
-    # #region agent log
-    try:
-        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "quant_cycle_debug_v1",
-                        "hypothesisId": "H4",
-                        "location": "on_the_fly_commands.py:execute_quant_cycle:tickers_resolved",
-                        "message": "quant_cycle_ticker_resolution",
-                        "data": {
-                            "parsed_tickers_csv": str(parsed.tickers_csv or ""),
-                            "session_tickers": session_tickers[:20],
-                            "resolved_tickers": tickers[:20],
-                            "session_uid": session_uid,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
 
     fetch_stage: list[dict[str, Any]] = []
     for tkr in tickers:
@@ -6022,32 +5637,6 @@ def execute_quant_cycle(
                         should_propose = True
                         target_ticker = str(r.get("ticker") or target_ticker).strip().upper()
                         break
-    # #region agent log
-    try:
-        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "quant_cycle_debug_v1",
-                        "hypothesisId": "H2",
-                        "location": "on_the_fly_commands.py:execute_quant_cycle:eval_gate",
-                        "message": "quant_cycle_eval_to_signal_gate",
-                        "data": {
-                            "eval_outcome": (eval_obj.get("outcome") if isinstance(eval_obj, dict) else ""),
-                            "should_propose": should_propose,
-                            "target_ticker": target_ticker,
-                            "rank_probe": rank_probe[:20],
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
 
     signal_obj: dict[str, Any] = {
         "status": "skipped",
@@ -6091,37 +5680,6 @@ def execute_quant_cycle(
             policy_decision = f"AUTO_EXECUTION_ERROR:{str(auto_exec.get('error') or 'UNKNOWN')}"
     elif parsed.execute == "off":
         policy_decision = "PROPOSED_WITH_HITL_ONLY"
-    # #region agent log
-    try:
-        with open("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log", "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "quant_cycle_debug_v1",
-                        "hypothesisId": "H1",
-                        "location": "on_the_fly_commands.py:execute_quant_cycle:policy",
-                        "message": "quant_cycle_policy_decision",
-                        "data": {
-                            "signal_status": (signal_obj.get("status") if isinstance(signal_obj, dict) else ""),
-                            "signal_id_present": bool(
-                                isinstance(signal_obj, dict) and str(signal_obj.get("signal_id") or "").strip()
-                            ),
-                            "auto_executed": bool(
-                                isinstance(signal_obj, dict) and signal_obj.get("auto_executed")
-                            ),
-                            "execute_flag": parsed.execute,
-                            "policy_decision": policy_decision,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
 
     out_obj: dict[str, Any] = {
         "status": "ok",
@@ -6228,28 +5786,6 @@ def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
     ):
         return "Uso: /execute_signal <signal_id_UUID>"
     if _looks_like_hallucinated_placeholder_uuid(sid):
-        # region agent log
-        try:
-            _p = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-            with _p.open("a", encoding="utf-8") as _f:
-                _f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "hypothesisId": "H4",
-                            "location": "on_the_fly_commands.execute_quant_execute_signal",
-                            "message": "placeholder_uuid_rejected",
-                            "data": {"sid_prefix": sid[:24]},
-                            "timestamp": int(time.time() * 1000),
-                            "runId": "post-fix",
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         return (
             "No: ese UUID parece inventado por el modelo (no viene de `propose_trade_signal`). "
             "Pide al asistente que en el **mismo turno** ejecute OHLCV + `propose_trade_signal` "

@@ -210,36 +210,6 @@ def _wait_until_signal_row_visible(db: Any, signal_id: str, *, timeout_sec: floa
     release_each_iter = ro and callable(susp) and callable(resu)
     iteration = 0
     t0 = time.time()
-    # #region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "autoexec-wait-suspend",
-                        "hypothesisId": "H_lock",
-                        "location": "quant_trader_bridge._wait_until_signal_row_visible",
-                        "message": "wait_start",
-                        "data": {
-                            "signal_id_prefix": esc[:8],
-                            "timeout_sec": float(timeout_sec),
-                            "release_each_iter": release_each_iter,
-                            "ro": ro,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     while time.time() < deadline:
         iteration += 1
         if release_each_iter:
@@ -258,65 +228,9 @@ def _wait_until_signal_row_visible(db: Any, signal_id: str, *, timeout_sec: floa
         except Exception:
             rows = []
         if rows and isinstance(rows[0], dict):
-            # #region agent log
-            try:
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "autoexec-wait-suspend",
-                                "hypothesisId": "H_lock",
-                                "location": "quant_trader_bridge._wait_until_signal_row_visible",
-                                "message": "row_visible",
-                                "data": {
-                                    "iterations": iteration,
-                                    "elapsed_ms": int((time.time() - t0) * 1000),
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
             return True
         if not release_each_iter:
             time.sleep(step)
-    # #region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "autoexec-wait-suspend",
-                        "hypothesisId": "H_lock",
-                        "location": "quant_trader_bridge._wait_until_signal_row_visible",
-                        "message": "wait_timeout",
-                        "data": {
-                            "iterations": iteration,
-                            "elapsed_ms": int((time.time() - t0) * 1000),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     return False
 
 
@@ -739,37 +653,6 @@ def _execute_sandbox_script_impl(
         payload["artifacts"] = result.artifacts
         # No inyectar figure_base64 completo al contexto del LLM (puede disparar >100k tokens).
         # El manager extrae la imagen desde artifacts (ruta local) y la envía por Telegram.
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "pre-fix",
-                        "hypothesisId": "H1",
-                        "location": "quant_trader_bridge._execute_sandbox_script_impl",
-                        "message": "execute_sandbox_payload_built",
-                        "data": {
-                            "exit_code": int(result.exit_code),
-                            "artifacts_count": len(result.artifacts or []),
-                            "has_png_artifact": any(
-                                Path(str(a)).suffix.lower() == ".png" for a in (result.artifacts or [])
-                            ),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     if int(result.exit_code) != 0:
         payload["error"] = "SANDBOX_EXECUTION_FAILED"
     return json.dumps(payload, ensure_ascii=False)
@@ -1072,36 +955,6 @@ def _propose_trade_signal_impl(
 
     has_evidence = has_quant_market_evidence_for_ticker(tkr)
     if not has_evidence:
-        # region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "vss-evidence-pre-fix",
-                            "hypothesisId": "H_VSS2",
-                            "location": "quant_trader_bridge._propose_trade_signal_impl",
-                            "message": "evidence_gate_blocked",
-                            "data": {
-                                "ticker": tkr,
-                                "chat_id_ctx": get_quant_tool_chat_id(),
-                                "mandate_id_prefix": str(mid)[:8],
-                                "signal_type": str(signal_type or "").upper(),
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         return json.dumps(
             {
                 "error": "EVIDENCE_UNIQUE_RULE",
@@ -1282,53 +1135,6 @@ def _execute_approved_signal_impl(
     except Exception as exc:
         return json.dumps({"error": f"DB_READ_FAILED: {exc}"}, ensure_ascii=False)
     if not rows:
-        # #region agent log
-        _qc_check: str | bool = False
-        _qc_err: str = ""
-        try:
-            _raw2 = db.query(
-                "SELECT 1 AS ok FROM quant_core.trade_signals WHERE signal_id='"
-                + sid
-                + "' LIMIT 1"
-            )
-            _r2 = json.loads(_raw2) if isinstance(_raw2, str) else (_raw2 or [])
-            _qc_check = bool(_r2)
-        except Exception as _e_qc:  # noqa: BLE001
-            _qc_err = str(_e_qc)[:200]
-        _ph = _signal_id_looks_placeholder(sid)
-        try:
-            _ts = int(time.time() * 1000)
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df_sig:
-                _df_sig.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "post-fix",
-                            "hypothesisId": "H1_finance_no_row",
-                            "location": "quant_trader_bridge._execute_approved_signal_impl",
-                            "message": "no_row_finance_worker_trade_signals",
-                            "data": {
-                                "signal_id": sid,
-                                "db_path": (get_quant_tool_db_path() or str(getattr(db, "_path", "") or ""))[
-                                    -120:
-                                ],
-                                "looks_placeholder_uuid": _ph,
-                                "exists_in_quant_core": _qc_check,
-                                "quant_core_lookup_error": _qc_err or None,
-                            },
-                            "timestamp": _ts,
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         if _ph:
             return json.dumps(
                 {
@@ -1452,31 +1258,6 @@ def _execute_approved_signal_impl(
         try:
             susp()
             released_ro_for_broker = True
-            # #region agent log
-            try:
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df_l1:
-                    _df_l1.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "lock-hardening",
-                                "hypothesisId": "H_LOCK1",
-                                "location": "quant_trader_bridge._execute_approved_signal_impl",
-                                "message": "released_ro_before_broker_http",
-                                "data": {"signal_id": sid, "released_ro_for_broker": True},
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
         except Exception:
             released_ro_for_broker = False
     try:
@@ -1510,31 +1291,6 @@ def _execute_approved_signal_impl(
         if released_ro_for_broker and callable(resu):
             try:
                 resu()
-                # #region agent log
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df_l2:
-                        _df_l2.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "lock-hardening",
-                                    "hypothesisId": "H_LOCK1",
-                                    "location": "quant_trader_bridge._execute_approved_signal_impl",
-                                    "message": "resumed_ro_after_broker_http",
-                                    "data": {"signal_id": sid},
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
             except Exception:
                 pass
 
@@ -1624,31 +1380,6 @@ def _run_quant_signal_cycle_impl(
             out["status"] = "execution_failed"
         else:
             out["status"] = "executed"
-        # #region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df_l3:
-                _df_l3.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "lock-hardening",
-                            "hypothesisId": "H_LOCK2",
-                            "location": "quant_trader_bridge._run_quant_signal_cycle_impl",
-                            "message": "skip_duplicate_execute_approved_signal",
-                            "data": {"signal_id": sid, "execute_now": bool(execute_now)},
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         return json.dumps(out, ensure_ascii=False)
     exec_raw = _execute_approved_signal_impl(
         db,
@@ -1688,37 +1419,6 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 tkr = str(payload.get("ticker") or ticker or "").strip().upper()
                 if tkr:
                     note_quant_market_evidence_ticker(tkr)
-            # region agent log
-            try:
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "vss-evidence-pre-fix",
-                                "hypothesisId": "H_VSS1",
-                                "location": "quant_trader_bridge.register_quant_trader_skills._fetch_market_data",
-                                "message": "fetch_market_data_result",
-                                "data": {
-                                    "ticker_arg": str(ticker or "").upper(),
-                                    "ticker_payload": str((payload or {}).get("ticker") or "").upper() if isinstance(payload, dict) else "",
-                                    "status": (payload or {}).get("status") if isinstance(payload, dict) else None,
-                                    "error": (payload or {}).get("error") if isinstance(payload, dict) else None,
-                                    "has_evidence_after": has_quant_market_evidence_for_ticker(str((payload or {}).get("ticker") or ticker or "").strip().upper()),
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
         except (json.JSONDecodeError, TypeError):
             pass
         return raw
@@ -1738,37 +1438,6 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 tkr = str(payload.get("ticker") or ticker or "").strip().upper()
                 if tkr:
                     note_quant_market_evidence_ticker(tkr)
-            # region agent log
-            try:
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "vss-evidence-pre-fix",
-                                "hypothesisId": "H_VSS3",
-                                "location": "quant_trader_bridge.register_quant_trader_skills._fetch_ib_gateway_ohlcv",
-                                "message": "fetch_ib_gateway_ohlcv_result",
-                                "data": {
-                                    "ticker_arg": str(ticker or "").upper(),
-                                    "status": (payload or {}).get("status") if isinstance(payload, dict) else None,
-                                    "error": (payload or {}).get("error") if isinstance(payload, dict) else None,
-                                    "ibkr_gateway_url_configured": bool((os.environ.get("IBKR_GATEWAY_OHLCV_URL") or "").strip()),
-                                    "has_evidence_after": has_quant_market_evidence_for_ticker(str((payload or {}).get("ticker") or ticker or "").strip().upper()),
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
         except (json.JSONDecodeError, TypeError):
             pass
         return raw

@@ -122,15 +122,15 @@ curl -sS -X POST "https://api.telegram.org/bot<TOKEN>/deleteWebhook"
 
 **Modo B — Varios bots → misma URL pública (un solo Funnel/puerto):** cuando Tailscale Funnel (u otro túnel) solo puede llegar a **un** puerto local, deja ese puerto como **único** receptor de Telegram (p. ej. tu funnel a `127.0.0.1:8888` → proceso **SIATA-Gateway**). Los otros gateways PM2 pueden seguir levantados para HTTP interno, pero **no** recibirán el webhook a menos que montes otro túnel.
 
-1. En el bloque `env` del proceso que recibe el funnel, define **todos** los tokens y rutas DuckDB que necesiten los bots (p. ej. `TELEGRAM_FINANZ_TOKEN`, `DUCKCLAW_FINANZ_DB_PATH`, `TELEGRAM_JOB_HUNTER_TOKEN`, `DUCKCLAW_JOB_HUNTER_DB_PATH`; el propio proceso ya tiene `TELEGRAM_SIATA_TOKEN` y `DUCKCLAW_DB_PATH` para SIATA).
-2. Variable `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`: JSON **array**; cada elemento tiene `secret` (mismo string que `secret_token` en `setWebhook` de **ese** bot), `worker_id`, `tenant_id` (opcional), `bot_token_env`, y **`vault_db_env`** (opcional pero recomendado): nombre de variable cuyo valor es la DuckDB de ese bot — sin eso, el grafo usaría el `DUCKCLAW_DB_PATH` del PM2 equivocado.
+1. En el bloque `env` del proceso que recibe el funnel, define **todos** los tokens y rutas DuckDB que necesiten los bots (p. ej. `TELEGRAM_FINANZ_TOKEN`, `DUCKCLAW_FINANZ_DB_PATH`, `TELEGRAM_JOB_HUNTER_TOKEN`, `DUCKCLAW_JOB_HUNTER_DB_PATH`, `TELEGRAM_SIATA_TOKEN`, `DUCKCLAW_SIATA_DB_PATH`, …).
+2. Variable `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`: JSON **array**; cada elemento tiene `secret` (mismo string que `secret_token` en `setWebhook` de **ese** bot), `worker_id`, `tenant_id` (opcional), `bot_token_env`, y **`vault_db_env`** (opcional pero recomendado): nombre de variable cuyo valor es la DuckDB de ese bot — sin eso, el grafo usaría el **hub** del proceso (`DUCKDB_PATH` / multiplex), típicamente incorrecto para otro worker.
 
 Ejemplo (genera tres secretos distintos, p. ej. `openssl rand -hex 32`, y úsalos en `setWebhook` y en `secret`):
 
 ```json
 [
   {"secret":"SEC_FINANZ","worker_id":"finanz","tenant_id":"Finanzas","bot_token_env":"TELEGRAM_FINANZ_TOKEN","vault_db_env":"DUCKCLAW_FINANZ_DB_PATH"},
-  {"secret":"SEC_SIATA","worker_id":"siata_analyst","tenant_id":"SIATA","bot_token_env":"TELEGRAM_SIATA_TOKEN","vault_db_env":"DUCKCLAW_DB_PATH"},
+  {"secret":"SEC_SIATA","worker_id":"siata_analyst","tenant_id":"SIATA","bot_token_env":"TELEGRAM_SIATA_TOKEN","vault_db_env":"DUCKCLAW_SIATA_DB_PATH"},
   {"secret":"SEC_TRABAJO","worker_id":"Job-Hunter","tenant_id":"Trabajo","bot_token_env":"TELEGRAM_JOB_HUNTER_TOKEN","vault_db_env":"DUCKCLAW_JOB_HUNTER_DB_PATH"}
 ]
 ```
@@ -139,7 +139,7 @@ En PM2, `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` debe ser **una sola línea** JSON esc
 
 Si además tienes `TELEGRAM_WEBHOOK_SECRET`, solo los updates cuya cabecera coincida con ese valor usarán el “default” del proceso (worker/tenant/token del PM2); el resto debe coincidir con una entrada de `ROUTES`. Especificación: [Telegram Webhook Multiplex](specs/telegram_webhook_multiplex.md). Rutas `POST …/webhook/finanz` y `…/webhook/trabajo` son **legado**; con un solo funnel suele bastar Modo B + `vault_db_env`.
 
-**Modo compacto (path por bot, misma base `DUCKCLAW_PUBLIC_URL`):** si `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` **no** empieza por `[` y contiene `:/api/`, se interpreta como lista separada por comas `bot_name:bot_token:webhook_path`. El gateway crea `POST` bajo `/api/v1/telegram/...` (p. ej. `/finanz`). Perfiles admitidos: `finanz`, `siata`, `jobhunter`. Define las mismas variables de DuckDB que en modo multi-puerto (`DUCKCLAW_FINANZ_DB_PATH`, `DUCKCLAW_JOB_HUNTER_DB_PATH`, `DUCKCLAW_SIATA_DB_PATH` o `DUCKCLAW_DB_PATH`). **Obligatorio:** tras definir la variable, ejecuta `python scripts/register_webhooks.py` (con `DUCKCLAW_PUBLIC_URL` y tokens en la cadena). Si los bots siguen con `setWebhook` en `…/api/v1/telegram/webhook`, todos los updates caen en esa ruta y el gateway **no** puede saber qué bot es: en ese modo, el gateway ignora el POST genérico y solo procesa los paths dedicados (`…/finanz`, `…/siata`, …). Opcional: `TELEGRAM_WEBHOOK_SECRET` como `secret_token` común en el script.
+**Modo compacto (path por bot, misma base `DUCKCLAW_PUBLIC_URL`):** si `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` **no** empieza por `[` y contiene `:/api/`, se interpreta como lista separada por comas `bot_name:bot_token:webhook_path`. El gateway crea `POST` bajo `/api/v1/telegram/...` (p. ej. `/finanz`). Perfiles admitidos: `finanz`, `siata`, `jobhunter`. Define las mismas variables de DuckDB que en modo multi-puerto (`DUCKCLAW_FINANZ_DB_PATH`, `DUCKCLAW_JOB_HUNTER_DB_PATH`, `DUCKCLAW_SIATA_DB_PATH`, `DUCKDB_PATH` según proceso; wizard legado: también `DUCKCLAW_DB_PATH` en algunos `.env`). **Obligatorio:** tras definir la variable, ejecuta `python scripts/register_webhooks.py` (con `DUCKCLAW_PUBLIC_URL` y tokens en la cadena). Si los bots siguen con `setWebhook` en `…/api/v1/telegram/webhook`, todos los updates caen en esa ruta y el gateway **no** puede saber qué bot es: en ese modo, el gateway ignora el POST genérico y solo procesa los paths dedicados (`…/finanz`, `…/siata`, …). Opcional: `TELEGRAM_WEBHOOK_SECRET` como `secret_token` común en el script.
 
 **Prueba local** del router (Telegram no llama a HTTP sin TLS; sirve para depurar en la máquina):
 

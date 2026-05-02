@@ -182,6 +182,7 @@ def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
         "DUCKCLAW_FINANZ_DB_PATH",
         "DUCKCLAW_JOB_HUNTER_DB_PATH",
         "DUCKCLAW_SIATA_DB_PATH",
+        "DUCKCLAW_QUANT_TRADER_DB_PATH",
         "DUCKCLAW_PQRSD_ASSISTANT_DB_PATH",
     )):
         os.environ.setdefault("DUCKCLAW_FINANZ_DB_PATH", resolve_env_duckdb_path(legacy))

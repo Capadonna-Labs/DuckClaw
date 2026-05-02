@@ -164,7 +164,7 @@ O como PM2: `DuckClaw-DB-Writer`.
 3. `CREATE TABLE IF NOT EXISTS agent_beliefs`.
 4. Ejecución de `templates/workers/<worker>/schema.sql`.
 
-**Ruta por defecto:** `DUCKCLAW_DB_PATH` en `.env` o `db/gateway.duckdb` (relativo a la raíz del repo).
+**Ruta por defecto:** resolución canónica vía multiplex y `DUCKDB_PATH` (`duckclaw.gateway_db.GATEWAY_DB_ENV_KEYS`). El wizard sigue escribiendo `DUCKCLAW_DB_PATH` + `DUCKDB_PATH` en `.env`; sin ellas suele aplicarse `db/gateway.duckdb` (relativo a la raíz del repo).
 
 ---
 
@@ -263,7 +263,9 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 
 | Variable                      | Uso                                                 |
 | ----------------------------- | --------------------------------------------------- |
-| `DUCKCLAW_DB_PATH`            | Ruta de la `.duckdb` (ej. `db/duckclawdb2.duckdb`). |
+| `DUCKDB_PATH`                 | Hub / ruta efectiva cuando no multiplex otras claves (`GATEWAY_DB_ENV_KEYS`).       |
+| `DUCKCLAW_*_DB_PATH`          | Bóveda por perfil en orden gateway: `FINANZ`, `JOB_HUNTER`, `SIATA`, `QUANT_TRADER`, `PQRSD_ASSISTANT` (`GATEWAY_DB_ENV_KEYS` en código).                           |
+| `DUCKCLAW_DB_PATH`            | Convención histórica en `.env` (wizard duplica `DUCKDB_PATH` para db-writer).       |
 | `DUCKCLAW_WRITE_QUEUE_URL`    | Redis para la cola de escritura.                    |
 | `DUCKCLAW_REDIS_URL`          | Redis para ActivityManager (`/tasks`).              |
 | `DUCKCLAW_TAILSCALE_AUTH_KEY` | Auth para n8n y clientes.                           |
@@ -316,17 +318,17 @@ Sustituye scripts `.sh` por un CLI en Python: mantenible, cross-platform (macOS,
 
 Al iniciar, el wizard lista los procesos PM2 detectados. Si el usuario elige "Gestionar servicio de persistencia", puede editar:
 
-- **DuckClaw-Gateway**: Regenera `ecosystem.api.config.cjs` vía `duckops serve --pm2 --gateway`. Escribe `DUCKCLAW_DB_PATH` y `DUCKDB_PATH` en `.env`. El Gateway encola escrituras en Redis y sirve el agente.
+- **DuckClaw-Gateway**: Regenera `ecosystem.api.config.cjs` vía `duckops serve --pm2 --gateway`. Escribe en `.env` rutas hub (`DUCKCLAW_DB_PATH` + `DUCKDB_PATH` donde el wizard aplica Smart Mapping). El Gateway encola escrituras en Redis y sirve el agente.
 - **DuckClaw-DB-Writer**: Genera `ecosystem.db-writer.config.cjs` con `cwd=services/db-writer`, `REDIS_URL` y `DUCKDB_PATH`. El consumidor hace BRPOP sobre `duckdb_write_queue` y escribe en DuckDB.
 - **DuckClaw-Brain**: Genera `ecosystem.core.config.cjs` para el bot Telegram (polling directo, sin pasar por n8n).
 
 **Configuración de la base de datos**
 
-- **Prioridad:** `DUCKCLAW_DB_PATH` en `.env` → `~/.config/duckclaw/wizard_config.json` → `db/duckclaw.duckdb`.
+- **Prioridad (.env hub):** `DUCKDB_PATH` / multiplex + `DUCKCLAW_DB_PATH` (wizard) → `~/.config/duckclaw/wizard_config.json` → `db/duckclaw.duckdb`.
 - **Normalización:** Cualquier ruta se normaliza a `db/<nombre>.duckdb` respecto a la raíz del repo.
 - **Compatibilidad:** Al escribir `DUCKCLAW_DB_PATH`, el wizard escribe también `DUCKDB_PATH` para que `services/db-writer` use la misma ruta.
 - **Creación automática:** Al confirmar o guardar, se crea el archivo `.duckdb` en `db/` si no existe.
-- **Varios API Gateways (PM2):** La fuente de verdad por proceso es el bloque `env` de `config/api_gateways_pm2.json`: cada app PM2 tiene su propio `DUCKCLAW_DB_PATH` (y, si aplica, `DUCKCLAW_SHARED_DB_PATH` y `DUCKDB_PATH`). Al ejecutar `duckops serve --pm2 --gateway` o el deploy PM2 del wizard soberano, las variables del `.env` compartido se fusionan en ese bloque pero **no sustituyen** esas rutas de bóveda si ya estaban definidas en el JSON (evita que al añadir otro gateway la ruta de Finanz pase a ser la del último valor genérico del `.env`). Para cambiar la bóveda de un gateway existente de forma explícita: volver a materializar el borrador soberano para ese nombre, editar `config/api_gateways_pm2.json`, o `duckops serve --pm2 --gateway --gateway-db-path <ruta>`.
+- **Varios API Gateways (PM2):** La fuente de verdad por proceso es el bloque `env` de `config/api_gateways_pm2.json`: rutas dedicadas (`DUCKCLAW_*_DB_PATH`, `DUCKDB_PATH`; plantilla `config/api_gateways_pm2.json.example`). Compat merge: también `DUCKCLAW_DB_PATH` en JSON legado (`DUCKCLAW_SHARED_DB_PATH` si aplica). Al ejecutar `duckops serve --pm2 --gateway` o el deploy PM2 del wizard soberano, las variables del `.env` compartido se fusionan en ese bloque pero **no sustituyen** esas rutas de bóveda si ya estaban definidas en el JSON (evita que al añadir otro gateway la ruta de Finanz pase a ser la del último valor genérico del `.env`). Para cambiar la bóveda de un gateway existente de forma explícita: volver a materializar el borrador soberano para ese nombre, editar `config/api_gateways_pm2.json`, o `duckops serve --pm2 --gateway --gateway-db-path <ruta>`.
 
 **Logs `[tenant:worker N]` (subagent_slot_rank)**
 

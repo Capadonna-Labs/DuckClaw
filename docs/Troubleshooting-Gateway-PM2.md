@@ -34,9 +34,9 @@ Cierra o detén el proceso que aparezca (o cambia temporalmente el puerto de Fin
 
 Es **independiente** del puerto. DuckDB permite **un escritor** por fichero. Si otro proceso Python (p. ej. PID distinto en los logs, **DuckClaw-Brain**, o una sesión interactiva) mantiene abierto el mismo `.duckdb` en escritura, el gateway verá *Conflicting lock*.
 
-**Dos gateways PM2** (`Finanz-Gateway`, `TheMind-Gateway`) **no** deben compartir el mismo `DUCKCLAW_DB_PATH` en `config/api_gateways_pm2.json`: asigna un `.duckdb` por servicio (p. ej. `finanzdb1.duckdb` para Finanz y `the_mind.duckdb` para The Mind).
+**Dos gateways PM2** (`Finanz-Gateway`, `TheMind-Gateway`) **no** deben apuntar al **mismo fichero DuckDB**: en `config/api_gateways_pm2.json` usa rutas dedicadas (`DUCKCLAW_FINANZ_DB_PATH` para Finanz, `DUCKDB_PATH` u otra clave multiplex para The Mind; orden en `GATEWAY_DB_ENV_KEYS`: `packages/shared/src/duckclaw/gateway_db.py`; plantilla **`config/api_gateways_pm2.json.example`**).
 
-En `/api/v1/agent/chat`, el gateway resolvía la **bóveda activa** del usuario (`resolve_active_vault` → suele ser `finanzdb1`). En **TheMind-Gateway** (`DUCKCLAW_PM2_PROCESS_NAME=TheMind-Gateway`) el código usa en su lugar `DUCKCLAW_DB_PATH` del proceso para no abrir Finanz en dos sitios.
+En `/api/v1/agent/chat`, el gateway resolvía la **bóveda activa** del usuario (`resolve_active_vault` → suele ser `finanzdb1`). En **TheMind-Gateway** (`DUCKCLAW_PM2_PROCESS_NAME=TheMind-Gateway`), el bloque `env` del JSON debe llevar **`DUCKDB_PATH`** (o la clave multiplex que corresponda) para esa `.duckdb` y así no reutilizar el vault de Finanz. Si aparece sólo la variable legado **`DUCKCLAW_DB_PATH`** en el JSON, `main.py` puede mapearla a `DUCKCLAW_FINANZ_DB_PATH` cuando no hay otras rutas multiplex; para plantillas nuevas evita depender de eso.
 
 - Un `.duckdb` por servicio, o
 - Un solo proceso escribiendo en ese fichero (`pm2 stop` del que compita), o
@@ -44,7 +44,7 @@ En `/api/v1/agent/chat`, el gateway resolvía la **bóveda activa** del usuario 
 
 ## Comprobar duplicados en la config fusionada
 
-Tras `uv run duckops serve --pm2 --gateway` (escenario multi-gateway con `api_gateways_pm2.json`), el CLI puede avisar si hay **el mismo puerto en dos `apps`** o la **misma `DUCKCLAW_DB_PATH`** en varios procesos. Eso **sí** es un error de configuración. **No** aplica cuando son 8000 vs 8080 con rutas coherentes.
+Tras `uv run duckops serve --pm2 --gateway` (escenario multi-gateway con `api_gateways_pm2.json`), el CLI puede avisar si hay **el mismo puerto en dos `apps`** o la **misma ruta DuckDB efectiva** (`raw_gateway_db_path_from_mapping`; incluye compat con `DUCKCLAW_DB_PATH`) en varios procesos. Eso **sí** es un error de configuración. **No** aplica cuando son 8000 vs 8080 con rutas coherentes.
 
 ### Asistente (wizard): resolver conflictos
 
@@ -60,7 +60,7 @@ El asistente lista duplicados de puerto/DuckDB, muestra `lsof` si está disponib
 
 ### TheMind sigue usando `finanzdb1` o intenta el puerto 8000
 
-El `services/api-gateway/main.py` carga `.env` con `setdefault`; si PM2 no inyectó bien `DUCKCLAW_DB_PATH` o hiciste `restart` sin `--update-env`, el proceso puede quedarse con la BD del `.env`. Tras cambiar `config/api_gateways_pm2.json`, el arranque **corrige** `DUCKCLAW_DB_PATH` leyendo el bloque que corresponde a este proceso (`DUCKCLAW_PM2_PROCESS_NAME` o el `--port` de uvicorn).
+El `services/api-gateway/main.py` carga `.env` con `setdefault`; si PM2 no volcó bien **`DUCKDB_PATH` / `DUCKCLAW_*_DB_PATH`** desde el JSON o hiciste `restart` sin `--update-env`, el proceso puede quedarse con la BD genérica del `.env`. Tras cambiar `config/api_gateways_pm2.json`, el arranque **corrige** esas claves desde el bloque que corresponde al proceso (`DUCKCLAW_PM2_PROCESS_NAME` o el `--port` de uvicorn).
 
 Si el error es **`[Errno 48]` en 8000** para TheMind, PM2 sigue con **args viejos** (`--port 8000`). Borra y vuelve a crear el proceso para leer el ecosystem:
 

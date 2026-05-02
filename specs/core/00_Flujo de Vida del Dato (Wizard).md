@@ -319,7 +319,7 @@ Sustituye scripts `.sh` por un CLI en Python: mantenible, cross-platform (macOS,
 Al iniciar, el wizard lista los procesos PM2 detectados. Si el usuario elige "Gestionar servicio de persistencia", puede editar:
 
 - **DuckClaw-Gateway**: Regenera `ecosystem.api.config.cjs` vía `duckops serve --pm2 --gateway`. Escribe en `.env` rutas hub (`DUCKCLAW_DB_PATH` + `DUCKDB_PATH` donde el wizard aplica Smart Mapping). El Gateway encola escrituras en Redis y sirve el agente.
-- **DuckClaw-DB-Writer**: Genera `ecosystem.db-writer.config.cjs` con `cwd=services/db-writer`, `REDIS_URL` y `DUCKDB_PATH`. El consumidor hace BRPOP sobre `duckdb_write_queue` y escribe en DuckDB.
+- **DuckClaw-DB-Writer**: Si no existe `config/ecosystem.db-writer.config.cjs` portable, el wizard legado puede generar `ecosystem.db-writer.config.cjs` en la raíz; el repositorio canónico usa `config/ecosystem.db-writer.config.cjs` (lee `.env`: `DUCKCLAW_REPO_ROOT`, `DUCKCLAW_PM2_PYTHON`, `REDIS_URL`, `DUCKDB_PATH`). El consumidor hace BRPOP sobre `duckdb_write_queue` y escribe en DuckDB.
 - **DuckClaw-Brain**: Genera `ecosystem.core.config.cjs` para el bot Telegram (polling directo, sin pasar por n8n).
 
 **Configuración de la base de datos**

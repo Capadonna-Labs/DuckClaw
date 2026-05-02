@@ -1050,7 +1050,13 @@ def _edit_db_writer_service(console: Console, state: dict[str, Any], repo_root: 
     new_redis = Prompt.ask("REDIS_URL", default=redis_url).strip() or redis_url
     _write_env_file(repo_root, "DUCKCLAW_DB_PATH", new_db)
     _write_env_file(repo_root, "REDIS_URL", new_redis)
-    if not Confirm.ask("¿Generar/actualizar ecosystem.db-writer.config.cjs?", default=True):
+    portable = repo_root / "config" / "ecosystem.db-writer.config.cjs"
+    if portable.is_file():
+        console.print(
+            "[dim]PM2 DB-Writer:[/] existe [bold]config/ecosystem.db-writer.config.cjs[/] portable "
+            "(lee `.env`). No se genera ecosystem en la raíz; ajusta `DUCKDB_PATH` / `REDIS_URL` en `.env` y "
+            "`pm2 start config/ecosystem.db-writer.config.cjs`."
+        )
         return
     from duckclaw.ops.manager import resolve_repo_pm2_python  # noqa: PLC0415
 
@@ -1073,7 +1079,9 @@ module.exports = {{
       watch: false,
       env: {{
         PYTHONPATH: "{repo_root}",
+        DUCKCLAW_REPO_ROOT: "{repo_root}",
         REDIS_URL: "{new_redis}",
+        DUCKCLAW_REDIS_URL: "{new_redis}",
         DUCKDB_PATH: "{abs_db}",
       }},
     }},
@@ -1082,7 +1090,7 @@ module.exports = {{
 """
     config_path = repo_root / "ecosystem.db-writer.config.cjs"
     config_path.write_text(config_content, encoding="utf-8")
-    console.print(f"[green]✓[/] Config: [dim]{config_path}[/]")
+    console.print(f"[green]✓[/] Config (legado raíz): [dim]{config_path}[/]")
     action_table = Table(show_header=False, box=None)
     action_table.add_column("", style="bold cyan", width=3)
     action_table.add_column("")

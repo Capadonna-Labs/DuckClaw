@@ -1,0 +1,14 @@
+network:
+  default: deny
+  allow_list: []
+filesystem:
+  readonly_mounts:
+    - "${DUCKCLAW_DATA_DIR}:/workspace/repo_db:ro"
+    - "/tmp/duckclaw_sandbox:/workspace/data:ro"
+  ephemeral_volumes:
+    - "/workspace/output"
+secrets:
+  in_memory_only: true
+  allowed_secrets: []
+# HRP / backtests pueden superar 30s con varios tickers y clustering
+max_execution_time_seconds: 120

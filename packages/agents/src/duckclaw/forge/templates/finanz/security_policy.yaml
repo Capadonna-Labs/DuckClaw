@@ -12,7 +12,8 @@ network:
     - query2.finance.yahoo.com
 filesystem:
   readonly_mounts:
-    - "/Users/juanjosearevalocamargo/Desktop/duckclaw/db:/workspace/repo_db:ro"
+    # Host: expande DUCKCLAW_REPO_ROOT (entorno o inferido desde el paquete al montar).
+    - "${DUCKCLAW_REPO_ROOT}/db:/workspace/repo_db:ro"
     - "/tmp/duckclaw_sandbox:/workspace/data:ro"
   ephemeral_volumes:
     - "/workspace/output"

@@ -1,9 +1,17 @@
-import json, shutil
+import json
+import os
+import shutil
 from pathlib import Path
+
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-BASE_PATH = Path("/Users/juanjosearevalocamargo/Desktop/models")
+_models = (os.environ.get("DUCKCLAW_MODELS_DIR") or "").strip()
+BASE_PATH = (
+    Path(_models).expanduser()
+    if _models
+    else (Path(__file__).resolve().parent.parent / "models")
+)
 SOURCE_DIR = BASE_PATH / "gemma4-e4b"
 TARGET_DIR = BASE_PATH / "gemma4-text-only"
 SOURCE_SAFE = SOURCE_DIR / "model.safetensors"

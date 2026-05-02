@@ -5,10 +5,11 @@
 # IMPORTANTE: un id tipo "org/repo" NO usa tu copia en ~/Desktop/models: mlx_lm hace
 # snapshot_download al caché de Hugging Face si esa ruta no existe como carpeta local.
 # Para cargar el MLX que ya tienes en disco, `model` debe ser la ruta absoluta al directorio
-# que contiene config.json y model*.safetensors.
-model: "/Users/juanjosearevalocamargo/Desktop/models/gemma4-e4b"
+# que contiene config.json y model*.safetensors (o exporta GEMMA4_MLX_MODEL en tu shell).
 # Sin copia local (descarga ~5GB al caché HF la primera vez):
-# model: "deadbydawn101/gemma-4-E4B-mlx-4bit"
+model: "deadbydawn101/gemma-4-E4B-mlx-4bit"
+# Copia local (ejemplo; sustituye por tu ruta o usa variable en un wrapper):
+# model: "/ruta/absoluta/a/gemma4-e4b"
 
 train: true
 fine_tune_type: lora

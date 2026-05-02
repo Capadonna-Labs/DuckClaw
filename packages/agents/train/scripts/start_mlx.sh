@@ -25,7 +25,11 @@ if [ -z "$PYTHON_PATH" ]; then
   echo "Error: define MLX_PYTHON en ${REPO_ROOT}/.env (ruta absoluta al python del venv con mlx-lm). Ej.: MLX_PYTHON=\$HOME/mlx_venv/bin/python. Ver .env.example."
   exit 1
 fi
-MODEL_PATH="${MLX_MODEL_PATH:-/Users/juanjosearevalocamargo/Desktop/models/Slayer-8B-V1}"
+MODEL_PATH="${MLX_MODEL_PATH:-}"
+if [ -z "$MODEL_PATH" ]; then
+  echo "Error: define MLX_MODEL_PATH en ${REPO_ROOT}/.env (ruta al modelo MLX en disco). Ej.: MLX_MODEL_PATH=\$HOME/models/Slayer-8B-V1"
+  exit 1
+fi
 
 if [ ! -x "$PYTHON_PATH" ]; then
   echo "Error: Python no encontrado o no ejecutable: $PYTHON_PATH. Corrige MLX_PYTHON o recrea el venv (p. ej. /opt/homebrew/bin/python3.13 -m venv ~/Desktop/mlx_env313 && pip install 'mlx-lm>=0.31.2')."

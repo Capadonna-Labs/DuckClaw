@@ -3,7 +3,7 @@
 
 ```bash
 uv run duckops serve --pm2 --gateway
-pm2 start ecosystem.db-writer.config.cjs
+pm2 start config/ecosystem.db-writer.config.cjs
 pm2 save
 uv run python scripts/doctor.py
 uv run duckops init                         # Reconfigurar / instalar

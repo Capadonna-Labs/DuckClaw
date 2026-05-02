@@ -85,6 +85,23 @@ def test_compact_quanttrader_binding(
     assert b.forced_vault_db_path == str(qdb.resolve())
 
 
+def test_compact_marco_assistant_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    repo = tmp_path / "r"
+    adb = repo / "db" / "private" / "u" / "axis.duckdb"
+    adb.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo))
+    monkeypatch.setenv("DUCKCLAW_AXIS_DB_PATH", "db/private/u/axis.duckdb")
+    r = parse_compact_telegram_webhook_routes(
+        "marco_assistant:77:tok_marco:/api/v1/telegram/marco_assistant"
+    )[0]
+    b = compact_route_to_path_binding(r)
+    assert b.worker_id == "research_worker"
+    assert b.tenant_id == "Marco"
+    assert b.forced_vault_db_path == str(adb.resolve())
+
+
 def test_compact_pqrsd_assistant_binding(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:

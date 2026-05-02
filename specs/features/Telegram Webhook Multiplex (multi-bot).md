@@ -39,6 +39,6 @@ Alternativa sin cabeceras por bot: `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` como lista
 
 (el token puede contener `:`; el path se detecta con `rfind(":/api/")`). El API Gateway registra un `POST` por path e inyecta `request.state.duckclaw_telegram_path_binding` (worker, tenant, token, bóveda).
 
-Perfiles `bot_name` admitidos hoy: `finanz`, `siata`, `jobhunter` (mapeo a `worker_id` y variables de bóveda en `core/telegram_compact_webhook_routes.py`).
+Perfiles `bot_name` admitidos hoy: `finanz`, `siata`, `jobhunter`, `quanttrader`, `pqrsd-assistant`, `marco_assistant` (este último: worker `research_worker`, tenant `Marco`, bóveda `DUCKCLAW_AXIS_DB_PATH`; mapeo en `packages/shared/.../compact_webhook_routes.py`).
 
 Registro: `python scripts/register_webhooks.py` lee `DUCKCLAW_PUBLIC_URL` + la variable compacta y llama `setWebhook` por bot. Si la variable empieza por `[`, se interpreta como Modo B JSON y no se registran rutas compactas.

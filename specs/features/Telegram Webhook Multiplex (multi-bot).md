@@ -22,7 +22,7 @@ Variable opcional: `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` — JSON lista de objetos:
 - `worker_id` (string, obligatorio): id del grafo (p. ej. `finanz`, `bi_analyst`, `siata_analyst`).
 - `tenant_id` (string, opcional): por defecto `default`.
 - `bot_token_env` (string, obligatorio): nombre de variable con el token Bot API para **respuestas** de ese bot (convención estándar: `TELEGRAM_<ID_MANIFEST_EN_MAYÚSCULAS>_TOKEN`, p. ej. `TELEGRAM_BI_ANALYST_TOKEN`; los nombres `TELEGRAM_BOT_TOKEN_*` siguen funcionando como legado).
-- `vault_db_env` (string, opcional): nombre de variable cuyo valor es la ruta DuckDB de la **bóveda** de ese bot (p. ej. `DUCKCLAW_FINANZ_DB_PATH`). Si falta, el proceso multiplex usa el `DUCKCLAW_DB_PATH` del PM2 (típicamente incorrecto para otro worker). Obligatorio cuando cada bot tiene su propio `.duckdb`.
+- `vault_db_env` (string, opcional): nombre de variable cuyo valor es la ruta DuckDB de la **bóveda** de ese bot (p. ej. `DUCKCLAW_FINANZ_DB_PATH`). Si falta, el proceso multiplex usa el hub del proceso PM2 (`DUCKDB_PATH` / orden `GATEWAY_DB_ENV_KEYS`; legado: `DUCKCLAW_DB_PATH`) — típicamente incorrecto para otro worker. Obligatorio cuando cada bot tiene su propio `.duckdb`.
 
 Reglas de autorización:
 

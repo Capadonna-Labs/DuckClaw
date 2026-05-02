@@ -60,7 +60,7 @@ Esta skill permite al usuario (y al agente) manipular su ecosistema de datos.
 
 La resolución de rutas ocurre en `build_worker_graph` (`packages/agents/.../workers/factory.py`):
 
-1.  **Bóveda activa (HTTP/Gateway):** el `vault_db_path` llega desde `resolve_active_vault(user_id, scope_id=vault_scope_id_for_tenant(tenant_efectivo))` o equivalente dedicado (`DUCKCLAW_DB_PATH` en gateways con BD fija).
+1.  **Bóveda activa (HTTP/Gateway):** el `vault_db_path` llega desde `resolve_active_vault(user_id, scope_id=vault_scope_id_for_tenant(tenant_efectivo))` o equivalente dedicado (`DUCKDB_PATH` / multiplex en gateways con BD fija en PM2 JSON).
 2.  **Contexto dual (opcional):** si el `manifest.yaml` declara `forge_context.shared_db_path_env`, se lee esa variable de entorno y se ejecuta un segundo `ATTACH ... AS shared`. La petición puede sobrescribir con `shared_db_path` en el body del chat.
 3.  **Inyección SQL (best-effort):**
     ```sql

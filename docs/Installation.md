@@ -31,7 +31,7 @@ Si es una instalación limpia, el Wizard solicita los parámetros fundamentales:
 ### Fase 3: Generación de Artefactos y Despliegue (The Forge)
 Una vez confirmados los datos, el Wizard "forja" el entorno:
 1.  **Sincronización de Entorno (`.env`):** Escribe las variables de forma segura.
-    *   *Smart Mapping:* Escribe `DUCKCLAW_DB_PATH` para el grafo y el Gateway y automáticamente inyecta `DUCKDB_PATH` para que el microservicio `db-writer` apunte al mismo archivo sin intervención manual.
+    *   *Smart Mapping:* El wizard sigue escribiendo **`DUCKCLAW_DB_PATH`** en `.env` (convención histórica) y duplica **`DUCKDB_PATH`** para que `db-writer` comparta archivo. La resolución runtime del gateway prioriza multiplex (`DUCKCLAW_*_DB_PATH`) y **`DUCKDB_PATH`** (`duckclaw.gateway_db`); en PM2 multi-instancia usa `config/api_gateways_pm2.json` (plantilla `config/api_gateways_pm2.json.example`).
 2.  **Generación de Configuración PM2/Systemd:** Crea los archivos `ecosystem.*.config.cjs` o las unidades `.service` inyectando las rutas absolutas del entorno virtual (`.venv/bin/python3`) para evitar fallos de `PATH`.
 3.  **Arranque:** Levanta los microservicios en el orden correcto.
 

@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Aislar cada bot de Telegram en **su** proceso API Gateway (PM2): mismos logs, misma `DUCKCLAW_DB_PATH`, mismo `TELEGRAM_WEBHOOK_SECRET` y tokens de respuesta, sin multiplexar varios bots en un solo uvicorn salvo necesidad operativa.
+Aislar cada bot de Telegram en **su** proceso API Gateway (PM2): mismos logs, misma **ruta efectiva DuckDB** del proceso (`DUCKDB_PATH` o la clave multiplex que corresponda; wizard legado `DUCKCLAW_DB_PATH`), mismo `TELEGRAM_WEBHOOK_SECRET` y tokens de respuesta, sin multiplexar varios bots en un solo uvicorn salvo necesidad operativa.
 
 ## Contrato
 

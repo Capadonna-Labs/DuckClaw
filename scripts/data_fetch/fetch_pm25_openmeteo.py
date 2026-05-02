@@ -10,28 +10,6 @@ from typing import Any
 import pandas as pd
 import requests
 
-_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-07d446.log"
-
-
-def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict[str, Any], run_id: str = "baseline") -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "07d446",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(datetime.now().timestamp() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Descarga PM2.5 horario desde Open-Meteo Air Quality.")
     parser.add_argument("--start-date", required=True, help="Fecha inicio (YYYY-MM-DD)")
@@ -64,14 +42,6 @@ def fetch_openmeteo(start_date: str, end_date: str, lat: float, lon: float, zone
         "end_date": end_date,
         "timezone": "America/Bogota",
     }
-    # #region agent log
-    _agent_debug_log(
-        "H6",
-        "fetch_pm25_openmeteo.py:fetch_openmeteo",
-        "openmeteo_request",
-        {"start_date": start_date, "end_date": end_date, "lat": lat, "lon": lon, "zone": zone},
-    )
-    # #endregion
     resp = requests.get(url, params=params, timeout=45)
     resp.raise_for_status()
     payload = resp.json()
@@ -80,14 +50,6 @@ def fetch_openmeteo(start_date: str, end_date: str, lat: float, lon: float, zone
     pm = hourly.get("pm2_5", [])
     df = pd.DataFrame({"datetime": times, "pm25": pm})
     if df.empty:
-        # #region agent log
-        _agent_debug_log(
-            "H6",
-            "fetch_pm25_openmeteo.py:fetch_openmeteo",
-            "openmeteo_empty",
-            {"rows": 0},
-        )
-        # #endregion
         return pd.DataFrame(columns=["date", "zone", "station", "pm25", "source", "lat", "lon"])
     df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
     out = pd.DataFrame(
@@ -101,18 +63,6 @@ def fetch_openmeteo(start_date: str, end_date: str, lat: float, lon: float, zone
             "lon": lon,
         }
     ).dropna(subset=["date", "pm25"])
-    # #region agent log
-    _agent_debug_log(
-        "H6",
-        "fetch_pm25_openmeteo.py:fetch_openmeteo",
-        "openmeteo_rows_after_parse",
-        {
-            "rows": int(len(out)),
-            "min_date": str(pd.to_datetime(out["date"], errors="coerce").min()) if not out.empty else None,
-            "max_date": str(pd.to_datetime(out["date"], errors="coerce").max()) if not out.empty else None,
-        },
-    )
-    # #endregion
     return out
 
 
@@ -140,19 +90,6 @@ def fetch_openmeteo_multi(start_date: str, end_date: str, profile: str, station:
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(
         columns=["date", "zone", "station", "pm25", "source", "lat", "lon"]
     )
-    # #region agent log
-    _agent_debug_log(
-        "H7",
-        "fetch_pm25_openmeteo.py:fetch_openmeteo_multi",
-        "multi_city_aggregate",
-        {
-            "profile": profile,
-            "cities_count": len(cities),
-            "rows_total": int(len(out)),
-            "zones": sorted(out["zone"].dropna().astype(str).unique().tolist()) if not out.empty else [],
-        },
-    )
-    # #endregion
     return out
 
 

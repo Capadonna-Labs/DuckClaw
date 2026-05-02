@@ -32,27 +32,6 @@ def _log(hypothesis_id: str, message: str, data: dict) -> None:
 
 
 def main() -> None:
-    # region agent log
-    repo = Path(__file__).resolve().parents[1]
-    crm = repo / "external" / "retoPWRSomegahack"
-    for label, p in (("repo_root", repo), ("crm_app", crm)):
-        try:
-            u = shutil.disk_usage(str(p if p.exists() else repo))
-            _log(
-                "H5",
-                "disk_usage",
-                {
-                    "path": str(p),
-                    "label": label,
-                    "total_bytes": u.total,
-                    "used_bytes": u.used,
-                    "free_bytes": u.free,
-                    "free_gib": round(u.free / (1024**3), 2),
-                },
-            )
-        except OSError as e:
-            _log("H5", "disk_usage_error", {"path": str(p), "error": str(e)[:200]})
-    # endregion agent log
 
     targets = [
         ("H1", "http://127.0.0.1:3000/", "IPv4 loopback"),

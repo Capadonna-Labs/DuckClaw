@@ -213,33 +213,7 @@ def _debug_log_rate_limit_pause(
     wait_sec: float,
     reason: str,
 ) -> None:
-    # region agent log
-    try:
-        import json as _json
-
-        payload = {
-            "sessionId": "c964f7",
-            "runId": "groq-rate-limit-pause",
-            "hypothesisId": "H_groq_429_backoff",
-            "location": "llm_providers.invoke_chat_model_with_transient_retries",
-            "message": "rate_limit_pause",
-            "data": {
-                "provider": provider,
-                "attempt": attempt,
-                "wait_sec": round(float(wait_sec), 3),
-                "reason": reason,
-            },
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _f:
-            _f.write(_json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
+    del provider, attempt, wait_sec, reason
 
 
 def invoke_chat_model_with_transient_retries(

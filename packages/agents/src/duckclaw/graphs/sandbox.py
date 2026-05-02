@@ -127,53 +127,7 @@ def _debug_log_sandbox_docker_run_failure(
     container_name: str,
     run_kw: dict[str, Any],
 ) -> None:
-    # #region agent log
-    try:
-        vols = run_kw.get("volumes") or {}
-        host_paths = [str(k) for k in vols.keys()]
-        payload: dict[str, Any] = {
-            "sessionId": "c964f7",
-            "runId": "pre-fix",
-            "hypothesisId": "H1-H5",
-            "location": "sandbox.py:_get_or_create_container",
-            "message": "containers.run_failed",
-            "data": {
-                "exc_type": type(exc).__name__,
-                "exc_str": str(exc)[:2500],
-                "resolved_image": resolved_image,
-                "container_name": container_name,
-                "network_mode": str(run_kw.get("network_mode") or ""),
-                "volume_host_paths": host_paths[:24],
-                "has_unexpanded_dollar": any("$" in p for p in host_paths),
-                "tmpfs_keys": list((run_kw.get("tmpfs") or {}).keys()),
-                "mem_limit": str(run_kw.get("mem_limit") or ""),
-            },
-            "timestamp": int(time.time() * 1000),
-        }
-        try:
-            import docker as _docker_mod
-
-            if isinstance(exc, _docker_mod.errors.APIError):
-                api_e = exc
-                payload["data"]["api_status_code"] = getattr(api_e, "status_code", None)
-                exp = getattr(api_e, "explanation", None)
-                if exp is not None:
-                    payload["data"]["api_explanation"] = str(exp)[:2000]
-                resp = getattr(api_e, "response", None)
-                if resp is not None:
-                    try:
-                        payload["data"]["api_response_text"] = (getattr(resp, "text", None) or "")[:2000]
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        _lp = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-        _lp.parent.mkdir(parents=True, exist_ok=True)
-        with _lp.open("a", encoding="utf-8") as _df:
-            _df.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
+    del exc, resolved_image, container_name, run_kw
 
 
 def _debug_log_pypfopt_import_probe(
@@ -182,59 +136,7 @@ def _debug_log_pypfopt_import_probe(
     session_id: str,
     resolved_image: str | None,
 ) -> None:
-    # #region agent log
-    try:
-        pr = container.exec_run(
-            cmd=["python3", "-c", "import pypfopt; print('pypfopt_import_ok')"],
-            workdir="/workspace",
-            demux=True,
-        )
-        out_b, err_b = pr.output or (b"", b"")
-        out_s = (out_b or b"").decode("utf-8", errors="replace").strip()[:500]
-        err_s = (err_b or b"").decode("utf-8", errors="replace").strip()[:1500]
-        exit_c = pr.exit_code if pr.exit_code is not None else -1
-        payload: dict[str, Any] = {
-            "sessionId": "c964f7",
-            "runId": "pre-fix",
-            "hypothesisId": "H2",
-            "location": "sandbox.py:StrixSandboxManager.execute",
-            "message": "pypfopt_import_probe",
-            "data": {
-                "session_id_prefix": (session_id or "")[:20],
-                "resolved_image": resolved_image or "",
-                "exit_code": int(exit_c),
-                "stdout_tail": out_s,
-                "stderr_tail": err_s,
-            },
-            "timestamp": int(time.time() * 1000),
-        }
-        _lp = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-        _lp.parent.mkdir(parents=True, exist_ok=True)
-        with _lp.open("a", encoding="utf-8") as _df:
-            _df.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception as e:
-        try:
-            _lp2 = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-            _lp2.parent.mkdir(parents=True, exist_ok=True)
-            with _lp2.open("a", encoding="utf-8") as _df2:
-                _df2.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "pre-fix",
-                            "hypothesisId": "H2",
-                            "location": "sandbox.py:_debug_log_pypfopt_import_probe",
-                            "message": "pypfopt_import_probe_exception",
-                            "data": {"exc": str(e)[:500]},
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-    # #endregion
+    del container, session_id, resolved_image
 
 
 def _debug_log_ensure_image_result(
@@ -243,30 +145,7 @@ def _debug_log_ensure_image_result(
     resolved: str,
     used_fallback: bool,
 ) -> None:
-    # #region agent log
-    try:
-        payload: dict[str, Any] = {
-            "sessionId": "c964f7",
-            "runId": "pre-fix",
-            "hypothesisId": "H1",
-            "location": "sandbox.py:_ensure_image",
-            "message": "sandbox_image_resolved",
-            "data": {
-                "requested": want,
-                "resolved": resolved,
-                "used_python_slim_fallback": used_fallback,
-                "fallback_tag": _FALLBACK_IMAGE,
-                "env_STRIX_SANDBOX_IMAGE": (os.environ.get("STRIX_SANDBOX_IMAGE") or "").strip() or None,
-            },
-            "timestamp": int(time.time() * 1000),
-        }
-        _lp = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-        _lp.parent.mkdir(parents=True, exist_ok=True)
-        with _lp.open("a", encoding="utf-8") as _df:
-            _df.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
+    del want, resolved, used_fallback
 
 
 def _ensure_image(client: Any, image: str | None = None, *, allow_python_fallback: bool = True) -> str:
@@ -986,33 +865,6 @@ def extract_latest_sandbox_figure_base64(messages: list[Any] | None) -> str | No
                 except OSError:
                     continue
                 if _decoded_figure_looks_like_png_or_jpeg(candidate):
-                    # #region agent log
-                    try:
-                        import time
-
-                        with open(
-                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                            "a",
-                            encoding="utf-8",
-                        ) as df:
-                            df.write(
-                                json.dumps(
-                                    {
-                                        "sessionId": "c964f7",
-                                        "runId": "portfolio-chart",
-                                        "hypothesisId": "H_artifact_fallback",
-                                        "location": "sandbox.py:extract_latest_sandbox_figure_base64",
-                                        "message": "figure_recovered_from_artifact_png",
-                                        "data": {"artifact_path": str(ap), "bytes_len": ap.stat().st_size},
-                                        "timestamp": int(time.time() * 1000),
-                                    },
-                                    ensure_ascii=False,
-                                )
-                                + "\n"
-                            )
-                    except Exception:
-                        pass
-                    # #endregion
                     last = candidate
                     break
     return last

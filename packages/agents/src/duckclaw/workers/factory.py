@@ -614,68 +614,11 @@ def _quant_extract_tickers(text: str) -> list[str]:
 def _quant_last_human_index(messages: list[Any]) -> int:
     from langchain_core.messages import HumanMessage
 
-    # #region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df_qhi:
-            _df_qhi.write(
-                json.dumps(
-                    {
-                        "sessionId": "c964f7",
-                        "runId": "debug-humanmessage",
-                        "hypothesisId": "H1_missing_import",
-                        "location": "factory.py:_quant_last_human_index",
-                        "message": "enter_quant_last_human_index",
-                        "data": {
-                            "messages_len": len(messages or []),
-                            "humanmessage_in_globals": bool("HumanMessage" in globals()),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     for i in range(len(messages) - 1, -1, -1):
         try:
             if isinstance(messages[i], HumanMessage):
                 return i
         except NameError as exc:
-            # #region agent log
-            try:
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df_qhi_err:
-                    _df_qhi_err.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "debug-humanmessage",
-                                "hypothesisId": "H1_missing_import",
-                                "location": "factory.py:_quant_last_human_index",
-                                "message": "name_error_humanmessage",
-                                "data": {
-                                    "index": i,
-                                    "error": str(exc),
-                                    "message_type": type(messages[i]).__name__,
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
             raise
     return -1
 
@@ -1747,31 +1690,6 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
         if not query or not query.strip():
             return json.dumps({"error": "Query vacío."})
         q = query.strip()
-        # #region agent log
-        try:
-            _dbg_lp = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
-            with open(_dbg_lp, "a", encoding="utf-8") as _dbg_f:
-                _dbg_f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "8d6707",
-                            "hypothesisId": "H3",
-                            "location": "factory.py:_admin_sql_worker",
-                            "message": "admin_sql_invoked",
-                            "data": {
-                                "db_is_none": db is None,
-                                "q_len": len(q),
-                                "mentions_fecha_creacion": "fecha_creacion" in q.lower(),
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         upper = q.upper()
 
         allowed_tables_error = _enforce_allowed_tables(upper)
@@ -1979,23 +1897,6 @@ def build_worker_graph(
     else:
         # Manifest ``read_only: false`` (p. ej. Finanz): conexión RW para INSERT en quant_core.* / señales.
         db = DuckClaw(path, read_only=bool(spec.read_only))
-    # #region agent log
-    try:
-        agent_debug_log(
-            "workers/factory.py:build_worker_graph",
-            "worker_db_open_mode",
-            {
-                "worker_id": worker_id,
-                "spec_read_only": bool(spec.read_only),
-                "skip_private": bool(skip_private),
-                "db_read_only": bool(getattr(db, "_read_only", False)),
-                "path_tail": (str(getattr(db, "_path", "") or "")[-96:]),
-            },
-            hypothesis_id="H4",
-        )
-    except Exception:
-        pass
-    # #endregion
     _apply_forge_attaches(
         db,
         path,
@@ -2947,39 +2848,6 @@ def build_worker_graph(
             if (_lid or "").strip().lower() == "quant_trader" and _is_goals_tick_msg:
                 # En ticks /goals no forzar "solo portfolio": primero debe correr el ciclo CFD/HRP.
                 is_portfolio = False
-            # region agent log
-            try:
-                import json as _agent_dbg_json
-                import time as _agent_dbg_time
-
-                if (_lid or "").strip().lower() == "quant_trader" and has_ibkr:
-                    _agent_dbg_payload = {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H_quant_ibkr_portfolio_force",
-                        "location": "factory.py:agent_node",
-                        "message": "portfolio_heuristic_quant",
-                        "data": {
-                            "is_portfolio": bool(is_portfolio),
-                            "is_portfolio_kw": bool(_is_portfolio_kw),
-                            "is_portfolio_quant_retry": bool(_is_portfolio_quant_retry),
-                            "wants_new_signal": bool(_wants_new_signal),
-                            "is_quant_operational_directive": bool(_is_quant_operational_directive),
-                            "is_exec_bug_probe": bool(_is_exec_bug_probe),
-                            "incoming_len": len(incoming or ""),
-                            "incoming_prefix": str(incoming or "")[:120],
-                        },
-                        "timestamp": int(_agent_dbg_time.time() * 1000),
-                        "runId": "groq-tool-routing-debug",
-                    }
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _agent_dbg_f:
-                        _agent_dbg_f.write(_agent_dbg_json.dumps(_agent_dbg_payload) + "\n")
-            except Exception:
-                pass
-            # endregion
             force_finanz_cuentas = (
                 (_lid or "").strip().lower() == "finanz"
                 and has_read_sql
@@ -3240,35 +3108,6 @@ def build_worker_graph(
                     _quant_last_human_index(state.get("messages") or []),
                     "evaluate_cfd_state",
                 )
-                # #region agent log
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df_qprop_gate:
-                        _df_qprop_gate.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "debug-propose-gate",
-                                    "hypothesisId": "H3_propose_before_eval",
-                                    "location": "factory.py:agent_node",
-                                    "message": "quant_propose_gate_eval_check",
-                                    "data": {
-                                        "has_eval_for_turn": bool(_has_eval_for_turn),
-                                        "already_has_tool_result": bool(already_has_tool_result),
-                                        "last_tool_name": str(getattr(last_msg, "name", "") or ""),
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
                 if (
                     not telegram_context_summarize_directive
                     and already_has_tool_result
@@ -3508,37 +3347,6 @@ def build_worker_graph(
                     or _quant_proceed_like
                 )
             )
-            # #region agent log
-            try:
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df_qpipe:
-                    _df_qpipe.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "debug-humanmessage",
-                                "hypothesisId": "H2_path_activation",
-                                "location": "factory.py:agent_node",
-                                "message": "quant_deterministic_gate",
-                                "data": {
-                                    "worker": _lid_l,
-                                    "deterministic_cycle": _quant_deterministic_cycle,
-                                    "wants_new_signal": _wants_new_signal,
-                                    "is_goals_tick": _is_goals_tick_msg,
-                                    "is_proceed_like": _quant_proceed_like,
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
             _last_human_idx = _quant_last_human_index(state.get("messages") or [])
             _has_fetch_since_last_human = _quant_tool_called_since(
                 state.get("messages") or [], _last_human_idx, "fetch_ib_gateway_ohlcv"
@@ -3607,34 +3415,6 @@ def build_worker_graph(
                     }
                 ]
                 _log.info("[%s] quant deterministic inspect_macro_pgq regime=%r", _wl, _regime_macro_pgq)
-                # #region agent log
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df_im:
-                        _df_im.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "pgq-route",
-                                    "hypothesisId": "H_PGQ_FORCED_TOOL",
-                                    "location": "factory.py:agent_node",
-                                    "message": "forced_inspect_macro_pgq",
-                                    "data": {
-                                        "regime_focus_len": len(_regime_macro_pgq),
-                                        "incoming_prefix": str(incoming or "")[:100],
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
                 _forced_resp_im = AIMessage(content="", tool_calls=_forced_tc_im)
                 _out_im = {**state, "messages": state["messages"] + [_forced_resp_im]}
                 _out_im.update(_identity_fields(state))
@@ -3808,125 +3588,6 @@ def build_worker_graph(
                 )
                 )
             )
-            # #region agent log
-            if _lid_l == "quant_trader" and telegram_context_summarize_directive:
-                try:
-                    _inc_a = incoming or ""
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _dfa:
-                        _dfa.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "hypothesisId": "H_MOC_summarize_path",
-                                    "location": "factory.py:agent_node",
-                                    "message": "quant_summarize_directive_tool_path",
-                                    "data": {
-                                        "forced_tool": forced_name,
-                                        "incoming_has_context_anchor": "CONTEXT_ANCLA_TIEMPO"
-                                        in _inc_a,
-                                        "has_get_current_time_tool": "get_current_time"
-                                        in tools_by_name,
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                    "runId": "cot-moc-anchor",
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-            # #endregion
-            # #region agent log
-            if _lid_l == "pqrsd_assistant":
-                try:
-                    import json as _json_dbg_pqrsd
-                    import time as _time_dbg_pqrsd
-
-                    _inc = incoming or ""
-                    _payload_pqrsd = {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H_pqrsd_datos_first",
-                        "location": "factory.py:agent_node",
-                        "message": "pqrsd_forced_fetch_and_datos_first",
-                        "data": {
-                            "rad_perfil_datos_first": _pqrsd_rad_perfil_datos_first(_inc),
-                            "sandbox_datos_first": _pqrsd_sandbox_prefers_chat_datos_over_forced_fetch(
-                                _inc
-                            ),
-                            "datos_first_overall": _pqrsd_datos_first_over_forced_fetch(_inc),
-                            "substantive_forced_fetch": _pqrsd_substantive_forced_fetch(
-                                _inc, summarize_directive=telegram_context_summarize_directive
-                            ),
-                            "force_candidate_before_datos": bool(_p_force_pqrsd_before_datos_first),
-                            "skipped_forced_fetch": bool(_pqrsd_skipped_forced_fetch),
-                            "force_pqrsd_fetch_final": bool(force_pqrsd_fetch_canonical),
-                            "has_pqrsd_fetch_tool": bool(has_pqrsd_fetch),
-                            "has_upsert_radicacion_perfil": "pqrsd_upsert_radicacion_perfil"
-                            in tools_by_name,
-                            "has_registrar_radicacion_crm": "pqrsd_registrar_radicacion_crm"
-                            in tools_by_name,
-                            "forced_name": forced_name,
-                            "incoming_len": len(_inc),
-                            "inject_datos_first_directive": bool(
-                                (_lid or "").strip().lower() == "pqrsd_assistant"
-                                and not already_has_tool_result
-                                and _pqrsd_datos_first_over_forced_fetch(_inc)
-                            ),
-                        },
-                        "timestamp": int(_time_dbg_pqrsd.time() * 1000),
-                    }
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df_pqrsd:
-                        _df_pqrsd.write(_json_dbg_pqrsd.dumps(_payload_pqrsd) + "\n")
-                except Exception:
-                    pass
-            # #endregion
-            # #region agent log
-            if _lid_l == "quant_trader" and (
-                force_quant_propose_signal
-                or force_execute_approved_signal
-                or force_quant_signal_fetch_ib
-                or force_quant_signal_fetch_md
-                or force_quant_goals_evaluate_cfd
-            ):
-                try:
-                    import json as _json_dbg
-                    import time as _time_dbg
-
-                    _payload = {
-                        "sessionId": "c964f7",
-                        "hypothesisId": "H_quant_forced_tool",
-                        "location": "factory.py:agent_node",
-                        "message": "quant_trade_signal_force_flags",
-                        "data": {
-                            "forced_name": forced_name,
-                            "force_execute_approved_signal": force_execute_approved_signal,
-                            "force_quant_propose_signal": force_quant_propose_signal,
-                            "force_quant_signal_fetch_ib": force_quant_signal_fetch_ib,
-                            "force_quant_signal_fetch_md": force_quant_signal_fetch_md,
-                            "force_quant_goals_evaluate_cfd": force_quant_goals_evaluate_cfd,
-                            "already_has_tool_result": already_has_tool_result,
-                            "wants_new_signal": _quant_user_requests_new_trade_signal(incoming or ""),
-                        },
-                        "timestamp": int(_time_dbg.time() * 1000),
-                    }
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(_json_dbg.dumps(_payload) + "\n")
-                except Exception:
-                    pass
-            # #endregion
             _log.info(
                 "[%s] incoming=%r | is_schema=%s | is_table_content=%s | is_latest_game=%s | "
                 "is_portfolio=%s | ibkr_after_cuentas=%s | forced_tool=%s",
@@ -4000,34 +3661,6 @@ def build_worker_graph(
                         )
                     )
                 ] + _msg_list
-                # #region agent log
-                try:
-                    import json as _json_dbg_qv
-                    import time as _time_dbg_qv
-
-                    _payload_qv = {
-                        "sessionId": "c964f7",
-                        "runId": "quant-autoexec-validation",
-                        "hypothesisId": "H_no_tool_hallucination",
-                        "location": "factory.py:agent_node",
-                        "message": "quant_autoexec_validation_intent",
-                        "data": {
-                            "forced_name": forced_name,
-                            "already_has_tool_result": bool(already_has_tool_result),
-                            "force_read_sql": bool(force_read_sql),
-                            "force_portfolio": bool(force_portfolio),
-                        },
-                        "timestamp": int(_time_dbg_qv.time() * 1000),
-                    }
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df_qv:
-                        _df_qv.write(_json_dbg_qv.dumps(_payload_qv) + "\n")
-                except Exception:
-                    pass
-                # #endregion
             _qp_ctx = state.get("quant_pipeline_context")
             if (
                 (_lid or "").strip().lower() == "quant_trader"
@@ -4119,44 +3752,6 @@ def build_worker_graph(
                 _frs = llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
                 _invoked_llm = _frs or llm_with_tools
             _llm_invoke_exc: BaseException | None = None
-            # #region agent log
-            try:
-                if _lid_l == "quant_trader" and (
-                    force_quant_propose_signal
-                    or force_execute_approved_signal
-                    or force_quant_signal_fetch_ib
-                    or force_quant_signal_fetch_md
-                    or force_fetch_ib_gateway
-                    or force_fetch_market_data
-                ):
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df_qpre:
-                        _df_qpre.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "post-fix",
-                                    "hypothesisId": "H_quant_forced_tool_lost",
-                                    "location": "factory.py:agent_node",
-                                    "message": "quant_forced_pre_invoke",
-                                    "data": {
-                                        "forced_name": forced_name,
-                                        "sandbox_enabled": bool(sandbox_enabled),
-                                        "uses_default_llm_with_tools": bool(_invoked_llm is llm_with_tools),
-                                        "incoming_len": len(str(incoming or "")),
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-            except Exception:
-                pass
-            # #endregion
             try:
                 from duckclaw.integrations.llm_providers import invoke_chat_model_with_transient_retries
 
@@ -4243,37 +3838,6 @@ def build_worker_graph(
                     except Exception:
                         resp = AIMessage(content=str(getattr(resp, "content", "") or ""), tool_calls=forced_tc)
                     tool_calls = getattr(resp, "tool_calls", None) or forced_tc
-                    # #region agent log
-                    try:
-                        with open(
-                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                            "a",
-                            encoding="utf-8",
-                        ) as _df_qinject:
-                            _df_qinject.write(
-                                json.dumps(
-                                    {
-                                        "sessionId": "c964f7",
-                                        "runId": "post-fix",
-                                        "hypothesisId": "H_quant_forced_tool_lost",
-                                        "location": "factory.py:agent_node",
-                                        "message": "quant_forced_toolcall_injected",
-                                        "data": {
-                                            "forced_name": forced_name,
-                                            "fallback_tool_name": _fallback_tool_name,
-                                            "response_len_before_inject": len(
-                                                str(getattr(resp, "content", "") or "")
-                                            ),
-                                        },
-                                        "timestamp": int(time.time() * 1000),
-                                    },
-                                    ensure_ascii=False,
-                                )
-                                + "\n"
-                            )
-                    except Exception:
-                        pass
-                    # #endregion
             if (_lid_l == "quant_trader") and force_quant_propose_signal and not tool_calls:
                 _fallback_tool_name = (
                     "run_quant_signal_cycle"
@@ -4312,35 +3876,6 @@ def build_worker_graph(
                 except Exception:
                     resp = AIMessage(content=str(getattr(resp, "content", "") or ""), tool_calls=forced_tc)
                 tool_calls = getattr(resp, "tool_calls", None) or forced_tc
-                # #region agent log
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df_qprop_fallback:
-                        _df_qprop_fallback.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "post-fix",
-                                    "hypothesisId": "H4_no_toolcall_propose",
-                                    "location": "factory.py:agent_node",
-                                    "message": "quant_propose_fallback_injected",
-                                    "data": {
-                                        "fallback_tool_name": _fallback_tool_name,
-                                        "ticker": _quant_primary_ticker,
-                                        "weight": 5.0,
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
             if tool_calls:
                 _tc_names: list[Any] = []
                 for tc in tool_calls:
@@ -4349,136 +3884,18 @@ def build_worker_graph(
                     else:
                         _tc_names.append(getattr(tc, "name", None))
                 _log.info("[%s] LLM tool_calls=%s", _wl, _tc_names)
-            # #region agent log
-            try:
-                if _lid_l == "quant_trader" and (
-                    force_quant_propose_signal
-                    or force_execute_approved_signal
-                    or force_quant_signal_fetch_ib
-                    or force_quant_signal_fetch_md
-                    or force_fetch_ib_gateway
-                    or force_fetch_market_data
-                ):
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df_qpost:
-                        _df_qpost.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "post-fix",
-                                    "hypothesisId": "H_quant_forced_tool_lost",
-                                    "location": "factory.py:agent_node",
-                                    "message": "quant_forced_post_invoke",
-                                    "data": {
-                                        "forced_name": forced_name,
-                                        "llm_invoke_failed": bool(_llm_invoke_exc),
-                                        "has_tool_calls": bool(tool_calls),
-                                        "tool_call_names": [
-                                            (tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None))
-                                            for tc in (tool_calls or [])
-                                        ],
-                                        "response_len": len(str(getattr(resp, "content", "") or "")),
-                                        "response_head": str(getattr(resp, "content", "") or "")[:180],
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-            except Exception:
-                pass
-            # #endregion
-            # #region agent log
-            try:
-                if _is_exec_bug_probe:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df_bug:
-                        _df_bug.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "exec-bug-check",
-                                    "hypothesisId": "H_bugcheck_without_tools",
-                                    "location": "factory.py:agent_node",
-                                    "message": "exec_bug_probe_tool_calls_state",
-                                    "data": {
-                                        "forced_portfolio_by_bug_probe": bool(_is_exec_bug_probe),
-                                        "has_tool_calls": bool(tool_calls),
-                                        "tool_call_names": [
-                                            (tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None))
-                                            for tc in (tool_calls or [])
-                                        ],
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-            except Exception:
-                pass
-            # #endregion
             _resp_content = str(getattr(resp, "content", "") or "").strip()
-            # #region agent log
-            try:
-                if _is_goals_tick and (_lid or "").strip().lower() == "quant_trader":
-                    _resp_low = (_resp_content or "").lower()
-                    _asks_manual_hrp = any(
-                        _k in _resp_low
-                        for _k in (
-                            "pesos objetivo",
-                            "proporcione los pesos",
-                            "proporciona los pesos",
-                            "necesito los pesos",
-                            "desea que ejecute",
-                            "si desea",
-                        )
-                    )
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df_goals:
-                        _df_goals.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "goals-pre-fix",
-                                    "hypothesisId": "H_goals_not_proactive",
-                                    "location": "factory.py:agent_node",
-                                    "message": "goals_tick_completion_shape",
-                                    "data": {
-                                        "has_tool_calls": bool(tool_calls),
-                                        "tool_call_names": [
-                                            (tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None))
-                                            for tc in (tool_calls or [])
-                                        ],
-                                        "forced_name": forced_name,
-                                        "asks_manual_hrp": bool(_asks_manual_hrp),
-                                        "response_len": len(_resp_content or ""),
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-            except Exception:
-                pass
-            # #endregion
             if _is_goals_tick and not tool_calls:
-                # Ticks proactivos con sesión rebalance_hrp (o ya hubo sandbox en el hilo): no sustituir
+                # Ticks proactivos con sesión rebalance_hrp / overnight_gap_squeeze (o ya hubo sandbox en el hilo): no sustituir
                 # la respuesta del modelo por el resumen genérico de «PnL positivo».
                 _incoming_s = str(incoming or "")
                 _inc_lower = _incoming_s.lower()
                 _goals_hrp_context = "rebalance_hrp" in _inc_lower or "objective=rebalance_hrp" in _inc_lower
+                _goals_overnight_context = (
+                    "overnight_gap_squeeze" in _inc_lower
+                    or "objective=overnight_gap_squeeze" in _inc_lower
+                    or "overnight gap squeeze" in _inc_lower
+                )
                 _goals_hrp_from_sql = False
                 for _m in state.get("messages", []):
                     if isinstance(_m, ToolMessage) and str(getattr(_m, "name", "") or "") == "read_sql":
@@ -4499,6 +3916,19 @@ def build_worker_graph(
                             resp = resp.model_copy(update={"content": _hrp_stub})
                         except Exception:
                             resp = AIMessage(content=_hrp_stub)
+                elif _goals_overnight_context:
+                    if (_resp_content or "").strip():
+                        pass  # conservar veredicto del LLM (prep / gap / MOC)
+                    else:
+                        _ov_stub = (
+                            "Revision /goals (proactiva): objetivo de sesion **overnight_gap_squeeze**. "
+                            "Prioriza alineacion prep/MOC y gap squeeze segun el SYSTEM_EVENT; "
+                            "no apliques el resumen automatico de meta «PnL positivo» a este tick."
+                        )
+                        try:
+                            resp = resp.model_copy(update={"content": _ov_stub})
+                        except Exception:
+                            resp = AIMessage(content=_ov_stub)
                 else:
                     _portfolio_tool_text = ""
                     _portfolio_tool_text_prev = ""
@@ -4650,35 +4080,6 @@ def build_worker_graph(
         last = messages[-1]
         tool_calls = getattr(last, "tool_calls", None) or []
         _tool_round = int(state.get("_tool_round") or 0) + 1
-        # #region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "loop-pre-fix",
-                            "hypothesisId": "H_loop_rounds",
-                            "location": "factory.py:tools_node",
-                            "message": "tools_round_start",
-                            "data": {
-                                "tool_round": _tool_round,
-                                "n_tool_calls": len(tool_calls),
-                                "tool_names": [str((tc.get("name") or "")).strip() for tc in tool_calls],
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         new_msgs = list(messages)
         sandbox_enabled = _sandbox_enabled_for_state(state)
         tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
@@ -4693,23 +4094,6 @@ def build_worker_graph(
             read_pool.read_pool_active_for_worker(spec)
             and read_pool.should_parallelize_ephemeral_tool_calls(tool_calls)
         )
-        # #region agent log
-        if use_ephemeral_parallel:
-            try:
-                _nw = min(len(tool_calls), read_pool.read_pool_max_concurrency())
-                agent_debug_log(
-                    "factory.py:tools_node:ephemeral_parallel",
-                    "ephemeral read-pool branch",
-                    {
-                        "n_calls": len(tool_calls),
-                        "n_workers": _nw,
-                        "tool_names": [((tc.get("name") or "").strip()) for tc in tool_calls],
-                    },
-                    hypothesis_id="H3",
-                )
-            except Exception:
-                pass
-        # #endregion
 
         def _schedule_tool_heartbeat(tool_name: str) -> None:
             _htid = (state.get("tenant_id") or "default").strip() or "default"
@@ -4798,40 +4182,6 @@ def build_worker_graph(
                         invoke_args: Any = args
                         if isinstance(args, dict):
                             invoke_args = {**args}
-                        # #region agent log
-                        if name in ("pqrsd_upsert_radicacion_perfil", "pqrsd_registrar_radicacion_crm"):
-                            try:
-                                _dbg_lp = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
-                                _st_cid = str(
-                                    state.get("chat_id") or state.get("session_id") or ""
-                                ).strip()
-                                _pre_tg = (
-                                    str((invoke_args or {}).get("telegram_chat_id") or "").strip()
-                                    if isinstance(invoke_args, dict)
-                                    else ""
-                                )
-                                with open(_dbg_lp, "a", encoding="utf-8") as _dbg_f:
-                                    _dbg_f.write(
-                                        json.dumps(
-                                            {
-                                                "sessionId": "8d6707",
-                                                "hypothesisId": "H2",
-                                                "location": "factory.py:tool_node:pqrsd_pre",
-                                                "message": "telegram_chat_id_before_branch",
-                                                "data": {
-                                                    "tool": name,
-                                                    "state_chat_id_nonempty": bool(_st_cid),
-                                                    "args_telegram_nonempty": bool(_pre_tg),
-                                                },
-                                                "timestamp": int(time.time() * 1000),
-                                            },
-                                            ensure_ascii=False,
-                                        )
-                                        + "\n"
-                                    )
-                            except Exception:
-                                pass
-                        # #endregion
                         if name in (
                             "run_sandbox",
                             "run_browser_sandbox",
@@ -4852,35 +4202,6 @@ def build_worker_graph(
                             _cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
                             if _cid and not str(invoke_args.get("telegram_chat_id") or "").strip():
                                 invoke_args["telegram_chat_id"] = _cid
-                        # #region agent log
-                        if name == "pqrsd_registrar_radicacion_crm":
-                            try:
-                                _dbg_lp = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
-                                _post_tg = (
-                                    str((invoke_args or {}).get("telegram_chat_id") or "").strip()
-                                    if isinstance(invoke_args, dict)
-                                    else ""
-                                )
-                                with open(_dbg_lp, "a", encoding="utf-8") as _dbg_f:
-                                    _dbg_f.write(
-                                        json.dumps(
-                                            {
-                                                "sessionId": "8d6707",
-                                                "hypothesisId": "H2",
-                                                "location": "factory.py:tool_node:pqrsd_crm_post_upsert_branch",
-                                                "message": "crm_telegram_after_upsert_only_injection",
-                                                "data": {
-                                                    "args_telegram_nonempty": bool(_post_tg),
-                                                },
-                                                "timestamp": int(time.time() * 1000),
-                                            },
-                                            ensure_ascii=False,
-                                        )
-                                        + "\n"
-                                    )
-                            except Exception:
-                                pass
-                        # #endregion
                         if name == "get_browser_session_url":
                             if not isinstance(invoke_args, dict):
                                 invoke_args = {}
@@ -4920,51 +4241,6 @@ def build_worker_graph(
                                     fb = payload.get("figure_base64")
                                     if isinstance(fb, str) and len(fb) > 32:
                                         sandbox_b64 = fb
-                                # #region agent log
-                                try:
-                                    with open(
-                                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                                        "a",
-                                        encoding="utf-8",
-                                    ) as _df:
-                                        _df.write(
-                                            json.dumps(
-                                                {
-                                                    "sessionId": "c964f7",
-                                                    "runId": "loop-pre-fix",
-                                                    "hypothesisId": "H_chart_render_quality",
-                                                    "location": "factory.py:tools_node",
-                                                    "message": "sandbox_tool_result_observed",
-                                                    "data": {
-                                                        "tool_round": _tool_round,
-                                                        "tool_name": name,
-                                                        "exit_code": payload.get("exit_code"),
-                                                        "has_figure_base64": bool(payload.get("figure_base64")),
-                                                        "has_artifacts": bool(payload.get("artifacts")),
-                                                        "stdout_has_donut": "donut" in str(payload.get("stdout") or "").lower(),
-                                                        "stdout_has_pie": "pie" in str(payload.get("stdout") or "").lower(),
-                                                        "stdout_has_bar": (
-                                                            "barra" in str(payload.get("stdout") or "").lower()
-                                                            or "bar chart" in str(payload.get("stdout") or "").lower()
-                                                            or "barh" in str(payload.get("stdout") or "").lower()
-                                                        ),
-                                                        "stdout_has_maxmin_labels": (
-                                                            "máx:" in str(payload.get("stdout") or "").lower()
-                                                            or "max:" in str(payload.get("stdout") or "").lower()
-                                                            or "mín:" in str(payload.get("stdout") or "").lower()
-                                                            or "min:" in str(payload.get("stdout") or "").lower()
-                                                        ),
-                                                        "result_len": len(content),
-                                                    },
-                                                    "timestamp": int(time.time() * 1000),
-                                                },
-                                                ensure_ascii=False,
-                                            )
-                                            + "\n"
-                                        )
-                                except Exception:
-                                    pass
-                                # #endregion
                             except (json.JSONDecodeError, TypeError):
                                 pass
                             if not use_cm:
@@ -5313,34 +4589,6 @@ def build_worker_graph(
     def should_continue(state: dict) -> str:
         last = state["messages"][-1]
         _has_tools = bool(getattr(last, "tool_calls", None))
-        # #region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "loop-pre-fix",
-                            "hypothesisId": "H_should_continue_loop",
-                            "location": "factory.py:should_continue",
-                            "message": "route_decision",
-                            "data": {
-                                "tool_round": int(state.get("_tool_round") or 0),
-                                "has_tool_calls": _has_tools,
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         return "tools" if _has_tools else "end"
 
     # Context-Guard (FactChecker + SelfCorrection) para workers con catalog_retriever

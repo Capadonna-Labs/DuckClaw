@@ -494,36 +494,6 @@ async def _run_goals_proactive_tick_one_db(
                                     signal_threshold = str(gobj.get("signal_threshold") or "GAS").strip().upper() or "GAS"
                                     objective = str(gobj.get("objective") or "maximize_pnl").strip().lower() or "maximize_pnl"
                                 session_uid = str(sess_row.get("session_uid") or session_uid).strip()
-                                # region agent log
-                                try:
-                                    with open(
-                                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                                        "a",
-                                        encoding="utf-8",
-                                    ) as _df:
-                                        _df.write(
-                                            json.dumps(
-                                                {
-                                                    "sessionId": "c964f7",
-                                                    "runId": "overnight_goals_debug_v2",
-                                                    "hypothesisId": "H6",
-                                                    "location": "services/heartbeat/main.py:trading_session_meta_resolved",
-                                                    "message": "heartbeat_trading_session_objective",
-                                                    "data": {
-                                                        "chat_id": str(chat_id),
-                                                        "session_uid": session_uid,
-                                                        "objective": objective,
-                                                        "tickers_count": len(tickers or []),
-                                                    },
-                                                    "timestamp": int(time.time() * 1000),
-                                                },
-                                                ensure_ascii=False,
-                                            )
-                                            + "\n"
-                                        )
-                                except Exception:
-                                    pass
-                                # endregion
                                 message = build_trading_tick_system_event_message(
                                     session_uid=session_uid,
                                     tickers=tickers,
@@ -557,7 +527,11 @@ async def _run_goals_proactive_tick_one_db(
                                     sgr = json.loads(sgr)
                                 if isinstance(sgr, dict):
                                     o = str(sgr.get("objective") or "").strip().lower()
-                                    if o in ("maximize_pnl", "rebalance_hrp"):
+                                    if o in (
+                                        "maximize_pnl",
+                                        "rebalance_hrp",
+                                        "overnight_gap_squeeze",
+                                    ):
                                         trading_obj = o
                         except Exception:
                             trading_obj = None
@@ -585,39 +559,6 @@ async def _run_goals_proactive_tick_one_db(
         if _qt_vault:
             payload["vault_db_path"] = _qt_vault
         url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
-        # region agent log
-        try:
-            _meta_tr = str(meta.get("trigger") or "").strip().lower()
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "heartbeat-goals-proactive",
-                            "hypothesisId": "H_quant_vault_post",
-                            "location": "services/heartbeat/main.py:_run_goals_proactive_tick_one_db",
-                            "message": "goals_proactive_post",
-                            "data": {
-                                "db_path_tail": str(db_path)[-80:],
-                                "quant_vault_tail": (vault_for_gateway[-80:] if _qt_vault else ""),
-                                "chat_id": str(chat_id),
-                                "worker_id": str(worker_id),
-                                "tenant_id": str(tenant_id),
-                                "meta_trigger": _meta_tr,
-                                "url_tail": url[-120:],
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(

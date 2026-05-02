@@ -88,11 +88,18 @@ def security_policy_to_docker_kwargs(policy: SecurityPolicy) -> Dict[str, object
     Translate policy to secure docker run kwargs.
     """
     volumes: Dict[str, Dict[str, str]] = {}
+    _repo_fallback = str(Path(__file__).resolve().parents[5])
     for mount in policy.filesystem.readonly_mounts:
         parts = [p.strip() for p in str(mount).split(":")]
         if len(parts) < 2:
             continue
-        host_path = os.path.expanduser(os.path.expandvars(parts[0].strip()))
+        raw_host = parts[0].strip()
+        rr = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip() or _repo_fallback
+        if "${DUCKCLAW_REPO_ROOT}" in raw_host or "$DUCKCLAW_REPO_ROOT" in raw_host:
+            raw_host = (
+                raw_host.replace("${DUCKCLAW_REPO_ROOT}", rr).replace("$DUCKCLAW_REPO_ROOT", rr)
+            )
+        host_path = os.path.expanduser(os.path.expandvars(raw_host))
         if not host_path or re.search(r"\$\{", host_path):
             # P. ej. ${DUCKCLAW_DATA_DIR} sin variable en el entorno → Docker 400 al crear el contenedor
             continue

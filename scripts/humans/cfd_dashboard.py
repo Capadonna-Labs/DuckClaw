@@ -34,6 +34,9 @@ def _debug_log_dashboard(
 ) -> None:
     # region agent log
     try:
+        _repo = Path(__file__).resolve().parents[2]
+        _log_path = _repo / ".cursor" / "debug-c964f7.log"
+        _log_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "sessionId": "c964f7",
             "runId": run_id,
@@ -43,11 +46,7 @@ def _debug_log_dashboard(
             "data": data,
             "timestamp": int(time.time() * 1000),
         }
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as f:
+        with _log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
         pass

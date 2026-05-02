@@ -6,7 +6,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-LOG_PATH = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-94f69d.log")
+LOG_PATH = Path(__file__).resolve().parent.parent / ".cursor" / "debug-94f69d.log"
 RUN_ID = f"run-{int(time.time())}"
 
 

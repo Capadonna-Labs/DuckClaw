@@ -6,13 +6,17 @@ admin_sql ni pqrsd_registrar_radicacion_crm (evidencia: gateway «tools usadas=n
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 _PQRSD_PERSIST_TOOLS = frozenset({"admin_sql", "pqrsd_registrar_radicacion_crm"})
 
-_DEBUG_LOG = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
+_rr = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
+_REPO = Path(_rr).resolve() if _rr else Path(__file__).resolve().parents[5]
+_DEBUG_LOG = Path(os.environ.get("DUCKCLAW_DEBUG_PQRSD_LOG") or _REPO / ".cursor" / "debug-8d6707.log")
 
 _CLAIMS = re.compile(
     r"(Radicado\s+interno\s*:|quedó\s+registrad[oa]\s+en\s+el\s+sistema\s+interno|"
@@ -23,7 +27,8 @@ _CLAIMS = re.compile(
 
 def _append_debug_ndjson(payload: dict[str, Any]) -> None:
     try:
-        with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
+        _DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with _DEBUG_LOG.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except OSError:
         pass

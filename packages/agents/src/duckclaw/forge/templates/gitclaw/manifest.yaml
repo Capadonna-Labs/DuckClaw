@@ -37,7 +37,7 @@ dependency_check:
     message: >
       Sin GITHUB_TOKEN el bridge MCP GitHub no registra herramientas.
       En el primer turno, indica al usuario que defina GITHUB_TOKEN y permisos (repo, read:org si aplica).
-  - note: Requiere paquete mcp y npx @modelcontextprotocol/server-github (ver github_bridge).
+  - note: Requiere paquete mcp, Docker local e imagen ghcr.io/github/github-mcp-server (ver github_bridge, scripts/doctor.py).
 
 skills:
   - search_semantic_context

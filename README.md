@@ -67,6 +67,58 @@ Operational detail (Redis, Telegram, PM2, VLM env vars, trace flags): see [`docs
 
 ---
 
+## Herramientas de Desarrollo
+
+### Vibe Kanban (Planning Board)
+
+Planning board con soporte para agentes de código. Requiere **Node.js ≥ 20**. Ejecutar solo en el Mac mini local (no en el VPS); no publicar por túnel por defecto (acceso vía localhost o Tailscale).
+
+```bash
+npm run kanban
+# o directamente:
+npx vibe-kanban --port 3333
+```
+
+Acceso: http://localhost:3333
+
+PM2 (opcional): `pm2 start config/ecosystem.vibe-kanban.cjs`
+
+**GitHub MCP en Vibe Kanban:** si la app no admite archivo de proyecto, configura MCP en **Settings → MCP Servers** (documentación en [Connecting MCP Servers](https://www.vibekanban.com/docs/settings-beta/mcp-servers)). Usa la misma imagen Docker oficial `ghcr.io/github/github-mcp-server` con `GITHUB_PERSONAL_ACCESS_TOKEN` y toolsets como `repos,issues,pull_requests` (omitir `projects`).
+
+### CFD Dashboard
+
+Dashboard de trading cuantitativo:
+
+```bash
+streamlit run scripts/humans/cfd_dashboard.py
+```
+
+Acceso: http://localhost:8501
+
+### Diagnóstico rápido (Doctor)
+
+```bash
+uv run python scripts/doctor.py
+```
+
+### GitHub MCP Docker (protocolo MCP real)
+
+El Doctor valida PAT + imagen, pero **no** abre una sesión stdio completa. Si pruebas a mano con un solo mensaje JSON hacia Docker, típico error del servidor oficial:
+
+```text
+method invalid during initialization  method=tools/list
+```
+
+Eso aparece porque el transporte MCP exige el handshake (**`initialize`**, luego **`notifications/initialized`**) antes de **`tools/list`**. DuckClaw y el siguiente script usan el cliente Python **`mcp`**, que ya hace ese orden al listar herramientas.
+
+```bash
+uv run python scripts/smoke_github_mcp_stdio.py
+```
+
+No pongas el PAT en la línea de `docker run` (sale en histórico de shell); usa solo `GITHUB_TOKEN` en `.env` o variables de entorno.
+
+---
+
 ## Testing the singleton-writer pipeline
 
 End-to-end **API Gateway → Redis → DB Writer → DuckDB** is covered by [`tests/run_singleton_writer_pipeline.py`](tests/run_singleton_writer_pipeline.py). Architecture context: [`docs/architecture/singleton_writer.md`](docs/architecture/singleton_writer.md); infrastructure narrative: `specs/core/01_System_Infrastructure.md` and `specs/core/00_Flujo de Vida del Dato (Wizard).md`.

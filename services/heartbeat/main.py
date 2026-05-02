@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import quote
@@ -53,6 +54,8 @@ GATEWAY_URL = os.getenv(
 )
 HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "3600"))
 GOALS_TICKER_POLL_SECONDS = int(os.getenv("GOALS_TICKER_POLL_SECONDS", "45"))
+GITHUB_MCP_HEALTH_SECONDS = float(os.getenv("DUCKCLAW_GITHUB_MCP_HEALTH_SECONDS", "300"))
+_GITHUB_PAT_401_AUDIT_COOLDOWN_KEY = "duckclaw:heartbeat:github_pat_401_audit_v1"
 # POST a /api/v1/agent/chat para el tick de /goals: turnos Quant (varias tools + sandbox) suelen >120s
 _GOALS_PROACTIVE_HTTP_TIMEOUT = float(os.environ.get("DUCKCLAW_GOALS_PROACTIVE_HTTP_TIMEOUT", "300"))
 TAILSCALE_AUTH_KEY = os.getenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
@@ -674,18 +677,126 @@ async def _run_goals_proactive_tick_one_db(
             )
 
 
+async def _docker_daemon_reachable() -> bool:
+    """Comprueba si el CLI ``docker`` puede hablar con el daemon (OrbStack / Docker Desktop)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "info",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return False
+    try:
+        rc = await asyncio.wait_for(proc.wait(), timeout=18.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return False
+    return rc == 0
+
+
+async def _github_pat_api_user_status(token: str) -> int | None:
+    """GET /user; retorna status HTTP o None si error de red/timeouts. No loguear el token."""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"token {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                timeout=15.0,
+            )
+            return int(resp.status_code)
+    except Exception:
+        return None
+
+
+def _enqueue_github_pat_invalid_task_audit() -> None:
+    """Mejor esfuerzo: registrar en task_audit_log vía singleton writer (401 PAT)."""
+    from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
+
+    dp = ""
+    try:
+        dp = str(get_gateway_db_path() or "").strip()
+    except Exception:
+        return
+    if not dp:
+        return
+    db_path = str(Path(dp).expanduser().resolve())
+    task_id = f"TASK-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+    qp = "GitHub PAT inválido o expirado (401) — revisa GITHUB_TOKEN en .env"
+    plan = "github_pat_invalid"
+    tenant = (os.environ.get("DUCKCLAW_GITHUB_MCP_HEALTH_AUDIT_TENANT") or "system").strip() or "system"
+    sql = (
+        "INSERT INTO task_audit_log (task_id, tenant_id, worker_id, query_prefix, status, duration_ms, plan_title) "
+        "VALUES (?, ?, ?, ?, 'FAILED', 0, ?)"
+    )
+    tid = enqueue_duckdb_write_sync(
+        db_path=db_path,
+        query=sql,
+        params=[task_id, tenant, "heartbeat", qp, plan],
+        user_id="default",
+        tenant_id=tenant,
+    )
+    poll_task_status_sync(tid, timeout_sec=12.0)
+
+
+async def _github_mcp_health_tick(r: redis.Redis) -> None:
+    docker_ok = await _docker_daemon_reachable()
+    if not docker_ok:
+        logger.warning(
+            "GitHub MCP health: docker no responde (`docker info`). GitHub MCP desde gateway requerirá Docker."
+        )
+
+    token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+    if not token:
+        return
+
+    status = await _github_pat_api_user_status(token)
+    if status is None:
+        logger.warning("GitHub MCP health: error de red o timeout al llamar api.github.com/user")
+        return
+    if status == 200:
+        logger.debug("GitHub MCP health: PAT OK (api.github.com/user 200)")
+        return
+    if status == 401:
+        logger.error("GitHub MCP health: GITHUB_TOKEN inválido o expirado (401)")
+        try:
+            set_ok = await r.set(_GITHUB_PAT_401_AUDIT_COOLDOWN_KEY, "1", ex=3600, nx=True)
+        except Exception:
+            set_ok = None
+        if set_ok:
+            await asyncio.to_thread(_enqueue_github_pat_invalid_task_audit)
+        return
+
+    logger.warning("GitHub MCP health: api.github.com/user → HTTP %s", status)
+
+
 async def run_heartbeat() -> None:
     r = redis.from_url(REDIS_URL)
     interval = float(HEARTBEAT_INTERVAL_SECONDS)
     poll = max(5, GOALS_TICKER_POLL_SECONDS)
     # Primer ciclo debe poder evaluar homeostasis de inmediato (antes: evaluar y luego sleep).
     last_homeo = time.time() - interval
+    last_github_health = 0.0
 
     while True:
         try:
             await _run_goals_proactive_tick()
         except Exception as exc:  # noqa: BLE001
             logger.exception("goals_proactive: ciclo: %s", exc)
+
+        now_mono = time.monotonic()
+        if now_mono - last_github_health >= GITHUB_MCP_HEALTH_SECONDS:
+            try:
+                await _github_mcp_health_tick(r)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("GitHub MCP health: tick falló: %s", exc)
+            last_github_health = now_mono
 
         now = time.time()
         if now - last_homeo >= interval:

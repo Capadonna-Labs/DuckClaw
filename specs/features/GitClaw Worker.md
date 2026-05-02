@@ -27,8 +27,11 @@ Worker declarativo **GitClaw** (`id: gitclaw`): experto en GitHub/Git para el te
 
 ## Dependencias operativas
 
-- `GITHUB_TOKEN` con permisos acordes al caso (repo, `read:org` si aplica).
-- Paquete `mcp` y disponibilidad de `npx @modelcontextprotocol/server-github` en el proceso del gateway (ver consolidado en `specs/core/03_Skills_and_Tooling_Framework.md`).
+- `GITHUB_TOKEN` (PAT) con permisos acordes al caso (`repo`, `read:org`, `read:user` según uso; generate en github.com/settings/tokens).
+- Paquete `mcp` en el proceso del gateway; **Docker** con imagen oficial **`ghcr.io/github/github-mcp-server`** disponible localmente (OrbStack / Docker Desktop en Mac mini). El bridge ya no usa `npx @modelcontextprotocol/server-github`.
+- OrbStack equivale funcionalmente a Docker para `docker run` stdio desde el mismo host que ejecuta el gateway PM2.
+
+Ver también: `scripts/doctor.py` (GitHub MCP + imagen Docker), heartbeat (`DUCKCLAW_GITHUB_MCP_HEALTH_SECONDS`) para validación periódica del PAT ante `api.github.com`.
 
 ## Criterios de aceptación
 

@@ -650,18 +650,6 @@ def _persist_ohlcv_batch(
     sql, flat = _ohlcv_batch_upsert_sql_params(norm_rows)
     path = str(getattr(db, "_path", "") or "").strip()
     ro = bool(getattr(db, "_read_only", False))
-    # #region agent log
-    try:
-        _pname = Path(path).name if path else ""
-        agent_debug_log(
-            "quant_market_bridge._persist_ohlcv_batch:entry",
-            "persist ohlcv batch",
-            {"ro": ro, "path_basename": _pname, "n_rows": len(norm_rows), "use_writer_queue": bool(ro and path and path != ":memory:")},
-            hypothesis_id="H2",
-        )
-    except Exception:
-        pass
-    # #endregion
     if ro and path and path != ":memory:":
         from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
 
@@ -672,17 +660,6 @@ def _persist_ohlcv_batch(
             if callable(susp) and callable(resu):
                 susp()
                 released_ro = True
-            # #region agent log
-            try:
-                agent_debug_log(
-                    "quant_market_bridge._persist_ohlcv_batch:after_susp",
-                    "after suspend RO; before enqueue",
-                    {"released_ro": released_ro, "path_basename": Path(path).name if path else ""},
-                    hypothesis_id="H2",
-                )
-            except Exception:
-                pass
-            # #endregion
             resolved = str(Path(path).expanduser().resolve())
             uid = _infer_user_id_for_writer(resolved)
             task_id = enqueue_duckdb_write_sync(
@@ -694,21 +671,6 @@ def _persist_ohlcv_batch(
             )
             poll_to = 15.0 if released_ro else 3.0
             st = poll_task_status_sync(task_id, timeout_sec=poll_to)
-            # #region agent log
-            try:
-                agent_debug_log(
-                    "quant_market_bridge._persist_ohlcv_batch:after_poll",
-                    "poll db-writer",
-                    {
-                        "st_is_none": st is None,
-                        "st_status": (getattr(st, "status", None) or "") if st is not None else None,
-                        "detail_len": len((getattr(st, "detail", None) or "") or "") if st is not None else 0,
-                    },
-                    hypothesis_id="H2",
-                )
-            except Exception:
-                pass
-            # #endregion
             if st is None:
                 return (
                     False,
@@ -719,31 +681,9 @@ def _persist_ohlcv_batch(
                 return False, [], (st.detail or "db-writer rechazó o falló la escritura OHLCV.")
             return True, norm_rows, ""
         except Exception as e:
-            # #region agent log
-            try:
-                agent_debug_log(
-                    "quant_market_bridge._persist_ohlcv_batch:except",
-                    "persist exception",
-                    {"err_head": str(e)[:200]},
-                    hypothesis_id="H2",
-                )
-            except Exception:
-                pass
-            # #endregion
             return False, [], str(e)[:500]
         finally:
             if released_ro and callable(resu):
-                # #region agent log
-                try:
-                    agent_debug_log(
-                        "quant_market_bridge._persist_ohlcv_batch:finally_resu",
-                        "before resume RO handle",
-                        {"path_basename": Path(path).name if path else ""},
-                        hypothesis_id="H2",
-                    )
-                except Exception:
-                    pass
-                # #endregion
                 try:
                     resu()
                 except Exception:
@@ -877,36 +817,6 @@ def _fetch_market_data_impl(
                     ticker_store=tkr, tf=tf, lookback_days=lookback_days
                 )
                 if yerr is None and bars is not None:
-                    # region agent log
-                    try:
-                        with open(
-                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                            "a",
-                            encoding="utf-8",
-                        ) as _df:
-                            _df.write(
-                                json.dumps(
-                                    {
-                                        "sessionId": "c964f7",
-                                        "runId": "vss-evidence-post-fix",
-                                        "hypothesisId": "H_VSS5",
-                                        "location": "quant_market_bridge._fetch_market_data_impl",
-                                        "message": "yfinance_fallback_after_lake_error",
-                                        "data": {
-                                            "ticker": tkr,
-                                            "timeframe": tf,
-                                            "lookback_days": int(lookback_days),
-                                            "lake_err": str(err)[:220],
-                                        },
-                                        "timestamp": int(time.time() * 1000),
-                                    },
-                                    ensure_ascii=False,
-                                )
-                                + "\n"
-                            )
-                    except Exception:
-                        pass
-                    # endregion
                     return _upsert_bars(db, bars, tkr, tf, lookback_days, "yfinance_fallback")
             return err
         if isinstance(payload, dict) and payload.get("error") == "LAKE_EMPTY_BARS" and _yfinance_fallback_enabled():
@@ -914,35 +824,6 @@ def _fetch_market_data_impl(
                 ticker_store=tkr, tf=tf, lookback_days=lookback_days
             )
             if yerr is None and bars is not None:
-                # region agent log
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "vss-evidence-post-fix",
-                                    "hypothesisId": "H_VSS5",
-                                    "location": "quant_market_bridge._fetch_market_data_impl",
-                                    "message": "yfinance_fallback_after_lake_empty_bars",
-                                    "data": {
-                                        "ticker": tkr,
-                                        "timeframe": tf,
-                                        "lookback_days": int(lookback_days),
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # endregion
                 return _upsert_bars(db, bars, tkr, tf, lookback_days, "yfinance_fallback")
         return _upsert_bars(db, payload, tkr, tf, lookback_days, "lake_ssh")
 
@@ -953,35 +834,6 @@ def _fetch_market_data_impl(
                 ticker_store=tkr, tf=tf, lookback_days=lookback_days
             )
             if yerr is None and bars is not None:
-                # region agent log
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "c964f7",
-                                    "runId": "vss-evidence-post-fix",
-                                    "hypothesisId": "H_VSS5",
-                                    "location": "quant_market_bridge._fetch_market_data_impl",
-                                    "message": "yfinance_fallback_without_ibkr_http_url",
-                                    "data": {
-                                        "ticker": tkr,
-                                        "timeframe": tf,
-                                        "lookback_days": int(lookback_days),
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # endregion
                 return _upsert_bars(db, bars, tkr, tf, lookback_days, "yfinance_fallback")
         return json.dumps(
             {

@@ -33,25 +33,10 @@ from urllib.error import URLError
 _REPO_ROOT_FOR_DB = Path(__file__).resolve().parent.parent.parent
 os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_REPO_ROOT_FOR_DB))
 
-# NDJSON sólo para modo debug DuckClaw Cursor (telegram ingress); sin tokens.
-_DUCKCLAW_DEBUG_INGRESS_PATH = _REPO_ROOT_FOR_DB / ".cursor" / "debug-c964f7.log"
-
-
 def _duckclaw_debug_ingress_ndjson(payload: dict[str, Any]) -> None:
-    # #region agent log
-    try:
-        with _DUCKCLAW_DEBUG_INGRESS_PATH.open("a", encoding="utf-8") as _df:
-            _df.write(
-                json.dumps(
-                    {"sessionId": "c964f7", **payload},
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
+    """No-op; antes escribía NDJSON de diagnóstico de ingress Telegram."""
+    del payload
 
-    # #endregion
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -308,45 +293,7 @@ _gateway_log = logging.getLogger("duckclaw.gateway")
 
 
 def _install_duckdb_connect_probe() -> None:
-    # #region agent log
-    try:
-        import duckdb as _dc
-
-        if getattr(_dc, "_duckclaw_probe_installed_c964f7", False):
-            return
-        _orig = _dc.connect
-
-        def _wrapped_connect(*args: Any, **kwargs: Any) -> Any:
-            try:
-                db_path = ""
-                if args:
-                    db_path = str(args[0] or "")
-                elif "database" in kwargs:
-                    db_path = str(kwargs.get("database") or "")
-                elif "db_path" in kwargs:
-                    db_path = str(kwargs.get("db_path") or "")
-                ro = kwargs.get("read_only", None)
-                fr = inspect.stack()[1]
-                agent_debug_log(
-                    "services/api-gateway/main.py:_install_duckdb_connect_probe",
-                    "duckdb_connect_called",
-                    {
-                        "pid": os.getpid(),
-                        "read_only": ro,
-                        "path_tail": db_path[-96:],
-                        "caller": f"{fr.filename}:{fr.lineno}",
-                    },
-                    hypothesis_id="H5",
-                )
-            except Exception:
-                pass
-            return _orig(*args, **kwargs)
-
-        _dc.connect = _wrapped_connect
-        setattr(_dc, "_duckclaw_probe_installed_c964f7", True)
-    except Exception:
-        pass
-    # #endregion
+    pass
 
 
 _install_duckdb_connect_probe()
@@ -1238,38 +1185,6 @@ def _outbound_deliver_chat_text_sync(
                 worker_id,
                 (_wid or "WORKER").upper(),
             )
-    # region agent log
-    try:
-        _fp = hashlib.sha1(token.encode("utf-8")).hexdigest()[:10] if token else ""
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "adf9d8",
-                        "runId": "outbound-verify",
-                        "hypothesisId": "H2_token_fallback_cross_bot",
-                        "location": "services/api-gateway/main.py:_outbound_deliver_chat_text_sync",
-                        "message": "outbound_token_resolution",
-                        "data": {
-                            "chat_id": str(cid),
-                            "worker_id": str(worker_id or ""),
-                            "token_source": token_source,
-                            "token_fp": _fp,
-                            "had_explicit_token": bool((outbound_telegram_bot_token or "").strip()),
-                            "had_worker_resolve": bool(worker_token),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     if token:
         try:
             from duckclaw.integrations.telegram.telegram_outbound_sync import (
@@ -1737,34 +1652,6 @@ async def _invoke_chat(
             _ded_vault = _dedicated_gateway_vault_db_path()
             if _ded_vault:
                 vault_db_path = _ded_vault
-    # #region agent log
-    if _worker_id_is_pqrsd_assistant(worker_id):
-        try:
-            _dbg_lp = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
-            with open(_dbg_lp, "a", encoding="utf-8") as _dbg_f:
-                _dbg_f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "8d6707",
-                            "hypothesisId": "H1",
-                            "location": "main.py:_invoke_chat:vault",
-                            "message": "pqrsd_vault_resolved",
-                            "data": {
-                                "vault_db_path": (vault_db_path or ""),
-                                "vault_user_id": vault_user_id,
-                                "pqrsd_env_set": bool(
-                                    (os.environ.get("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH") or "").strip()
-                                ),
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-    # #endregion
     history = payload.history or []
     is_system_prompt = bool(payload.is_system_prompt or False)
     shared_db_path = (payload.shared_db_path or "").strip() or None
@@ -1908,19 +1795,6 @@ async def _invoke_chat(
                 except Exception:
                     _fly_cache_n = -1
                 fly_db = DuckClaw(vpath, read_only=False, engine=_fly_engine)
-                # #region agent log
-                agent_debug_log(
-                    "services/api-gateway/main.py:telegram_ingress",
-                    "fly_db_open_rw",
-                    {
-                        "chat_id": str(session_id),
-                        "pid": os.getpid(),
-                        "path_tail": (vpath or "")[-96:],
-                        "message_head": (msg_stripped or "")[:80],
-                    },
-                    hypothesis_id="H2",
-                )
-                # #endregion
                 from duckclaw.graphs.graph_server import get_db as _fly_acl_db
 
                 prepare_leila_fly_duckdb(
@@ -1945,19 +1819,6 @@ async def _invoke_chat(
                 if fly_db is not None:
                     try:
                         fly_db.close()
-                        # #region agent log
-                        agent_debug_log(
-                            "services/api-gateway/main.py:telegram_ingress",
-                            "fly_db_closed",
-                            {
-                                "chat_id": str(session_id),
-                                "pid": os.getpid(),
-                                "path_tail": (vpath or "")[-96:],
-                                "message_head": (msg_stripped or "")[:80],
-                            },
-                            hypothesis_id="H2",
-                        )
-                        # #endregion
                     except Exception:
                         pass
             if cmd_reply is not None:

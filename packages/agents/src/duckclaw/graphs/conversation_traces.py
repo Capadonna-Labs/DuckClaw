@@ -297,28 +297,5 @@ def append_conversation_trace(
         try:
             with open(path, "a", encoding="utf-8") as f:
                 f.write(line)
-            # #region agent log
-            try:
-                _dbg = {
-                    "sessionId": "8d6707",
-                    "hypothesisId": "T1",
-                    "location": "conversation_traces.append_conversation_trace:after_write",
-                    "message": "trace_appended_ok",
-                    "data": {
-                        "path": str(path.resolve()),
-                        "worker_id": wid,
-                        "status": (status or "").upper()[:32],
-                    },
-                    "timestamp": int(time.time() * 1000),
-                }
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(json.dumps(_dbg, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # #endregion
         except Exception:
             pass

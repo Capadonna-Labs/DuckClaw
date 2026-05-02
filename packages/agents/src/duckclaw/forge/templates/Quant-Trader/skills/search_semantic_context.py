@@ -4,34 +4,9 @@ from __future__ import annotations
 
 import json
 import os
-import time
-from pathlib import Path
 from typing import Any
 
 from langchain_core.tools import StructuredTool
-
-_DEBUG_SESSION_LOG = Path(
-    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
-)
-
-
-def _agent_dbg_skill(data: dict[str, Any], *, hypothesis_id: str, location: str) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "c964f7",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "timestamp": int(time.time() * 1000),
-            "runId": "pre-fix",
-            **data,
-        }
-        with _DEBUG_SESSION_LOG.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-    # endregion
 
 
 def get_tools(db: Any, schema_name: str, spec: Any = None) -> list:
@@ -69,23 +44,6 @@ def get_tools(db: Any, schema_name: str, spec: Any = None) -> list:
             except Exception:
                 pass
             mode = diag.get("mode") or "none"
-            # region agent log
-            _agent_dbg_skill(
-                {
-                    "message": "search_semantic_context_hybrid_diag",
-                    "data": {
-                        "has_mlx_embeddings_url": has_mlx_url,
-                        "emb_runtime_ok": emb_runtime_ok,
-                        "ready_rows_approx": ready_count,
-                        "mode": mode,
-                        "matching_rows": len(rows),
-                        "tokens": lexical_tokens(q)[:6],
-                    },
-                },
-                hypothesis_id="H_vss_hybrid_gateway",
-                location="Quant-Trader/skills/search_semantic_context:hybrid",
-            )
-            # endregion
             if not rows:
                 return ""
             badge = "[vector]" if mode == "vector" else "[lexical]"

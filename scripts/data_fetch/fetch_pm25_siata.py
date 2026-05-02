@@ -12,28 +12,6 @@ import requests
 
 
 DEFAULT_SIATA_URL = "https://siata.gov.co/EntregaData1/Datos_SIATA_Aire_pm25.json"
-_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-07d446.log"
-
-
-def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict[str, Any], run_id: str = "baseline") -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "07d446",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(datetime.now().timestamp() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Descarga PM2.5 desde SIATA (EntregaData1).")
     parser.add_argument("--start-date", required=True, help="Fecha inicio (YYYY-MM-DD)")
@@ -58,14 +36,6 @@ def _pick_column(columns: list[str], candidates: list[str]) -> str | None:
 
 
 def fetch_siata(url: str, start_date: str, end_date: str, zone_default: str) -> pd.DataFrame:
-    # #region agent log
-    _agent_debug_log(
-        "H5",
-        "fetch_pm25_siata.py:fetch_siata",
-        "fetch_args",
-        {"start_date": start_date, "end_date": end_date, "url": url},
-    )
-    # #endregion
     response = requests.get(url, timeout=45)
     response.raise_for_status()
     payload = response.json()
@@ -110,32 +80,8 @@ def fetch_siata(url: str, start_date: str, end_date: str, zone_default: str) -> 
     out["date"] = out["date"].dt.date
     out = out.dropna(subset=["date", "pm25"])
     out = out[out["pm25"] >= 0].copy()  # SIATA usa negativos como sentinel de missing/calidad.
-    # #region agent log
-    _agent_debug_log(
-        "H5",
-        "fetch_pm25_siata.py:fetch_siata",
-        "siata_available_range_before_filter",
-        {
-            "rows": int(len(out)),
-            "min_date": str(out["date"].min()) if not out.empty else None,
-            "max_date": str(out["date"].max()) if not out.empty else None,
-        },
-    )
-    # #endregion
     mask = (out["date"] >= pd.to_datetime(start_date).date()) & (out["date"] <= pd.to_datetime(end_date).date())
     filtered = out.loc[mask].copy()
-    # #region agent log
-    _agent_debug_log(
-        "H5",
-        "fetch_pm25_siata.py:fetch_siata",
-        "siata_rows_after_filter",
-        {
-            "rows": int(len(filtered)),
-            "min_date": str(filtered["date"].min()) if not filtered.empty else None,
-            "max_date": str(filtered["date"].max()) if not filtered.empty else None,
-        },
-    )
-    # #endregion
     return filtered
 
 

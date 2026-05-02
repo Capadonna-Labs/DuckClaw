@@ -25,24 +25,7 @@ def _agent_debug_log(
     message: str,
     data: dict[str, Any],
 ) -> None:
-    # #region agent log
-    try:
-        import time
-
-        payload: dict[str, Any] = {
-            "sessionId": "adf9d8",
-            "runId": "ibkr-portfolio",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as df:
-            df.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
+    del hypothesis_id, location, message, data
 
 
 def _ibkr_account_mode() -> str:

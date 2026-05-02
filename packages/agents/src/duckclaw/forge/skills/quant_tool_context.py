@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import threading
-import time
 from contextvars import ContextVar
 
 _quant_chat_id: ContextVar[str] = ContextVar("duckclaw_quant_chat_id", default="")
@@ -17,26 +15,6 @@ _quant_user_id: ContextVar[str] = ContextVar("duckclaw_quant_user_id", default="
 _evidence_lock = threading.Lock()
 _evidence_by_chat: dict[str, set[str]] = {}
 _tls_evidence_chat: threading.local = threading.local()
-
-_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
-
-
-def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict[str, object]) -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "c964f7",
-            "timestamp": int(time.time() * 1000),
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": {**data, "thread": threading.get_ident()},
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as _f:
-            _f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
 
 
 def set_quant_tool_chat_id(chat_id: str) -> None:
@@ -89,14 +67,6 @@ def reset_quant_market_evidence() -> None:
     k = _evidence_bucket_key()
     with _evidence_lock:
         _evidence_by_chat[k] = set()
-    # #region agent log
-    _agent_debug_log(
-        "H2",
-        "quant_tool_context.reset_quant_market_evidence",
-        "cleared bucket",
-        {"key": k},
-    )
-    # #endregion
 
 
 def note_quant_market_evidence_ticker(ticker: str) -> None:
@@ -108,15 +78,6 @@ def note_quant_market_evidence_ticker(ticker: str) -> None:
         if k not in _evidence_by_chat:
             _evidence_by_chat[k] = set()
         _evidence_by_chat[k].add(t)
-        _sz = len(_evidence_by_chat[k])
-    # #region agent log
-    _agent_debug_log(
-        "H1",
-        "quant_tool_context.note_quant_market_evidence_ticker",
-        "noted ticker",
-        {"key": k, "ticker": t, "size": _sz},
-    )
-    # #endregion
 
 
 def has_quant_market_evidence_for_ticker(ticker: str) -> bool:
@@ -127,12 +88,4 @@ def has_quant_market_evidence_for_ticker(ticker: str) -> bool:
     with _evidence_lock:
         s = _evidence_by_chat.get(k)
         ok = bool(s and t in s)
-    # #region agent log
-    _agent_debug_log(
-        "H1",
-        "quant_tool_context.has_quant_market_evidence_for_ticker",
-        "check",
-        {"key": k, "ticker": t, "has": ok},
-    )
-    # #endregion
     return ok

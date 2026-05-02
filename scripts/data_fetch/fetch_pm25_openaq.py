@@ -12,28 +12,6 @@ from typing import Any
 import pandas as pd
 import requests
 
-_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-07d446.log"
-
-
-def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict[str, Any], run_id: str = "baseline") -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "07d446",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(datetime.now().timestamp() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Descarga PM2.5 desde OpenAQ v3.")
     parser.add_argument("--start-date", required=True, help="Fecha inicio (YYYY-MM-DD)")
@@ -116,14 +94,6 @@ def fetch_openaq(
     limit: int,
     max_sensors: int,
 ) -> pd.DataFrame:
-    # #region agent log
-    _agent_debug_log(
-        "H2",
-        "fetch_pm25_openaq.py:fetch_openaq",
-        "fetch_args",
-        {"start_date": start_date, "end_date": end_date, "city": city, "country": country, "limit": limit},
-    )
-    # #endregion
     if not api_key:
         print("warning=No hay OPENAQ_API_KEY disponible (env, .env o --api-key).")
         return pd.DataFrame(columns=["date", "zone", "station", "pm25", "source", "lat", "lon"])
@@ -152,14 +122,6 @@ def fetch_openaq(
     if not filtered_locs:
         print(f"warning=No hubo match exacto para city={city}; usando locations PM2.5 del país {country}.")
         filtered_locs = locations
-    # #region agent log
-    _agent_debug_log(
-        "H3",
-        "fetch_pm25_openaq.py:fetch_openaq",
-        "locations_and_city_match",
-        {"locations_total": len(locations), "locations_filtered": len(filtered_locs)},
-    )
-    # #endregion
 
     sensors: list[dict[str, Any]] = []
     for loc in filtered_locs:
@@ -186,14 +148,6 @@ def fetch_openaq(
         if isinstance(sid, int):
             uniq[sid] = s
     sensors = list(uniq.values())[:max_sensors]
-    # #region agent log
-    _agent_debug_log(
-        "H3",
-        "fetch_pm25_openaq.py:fetch_openaq",
-        "pm25_sensors_selected",
-        {"sensor_count": len(sensors), "sensor_ids_sample": [s.get("sensor_id") for s in sensors[:8]]},
-    )
-    # #endregion
 
     all_rows: list[dict[str, Any]] = []
     per_sensor_counts: list[dict[str, Any]] = []
@@ -227,14 +181,6 @@ def fetch_openaq(
             )
 
     if not all_rows:
-        # #region agent log
-        _agent_debug_log(
-            "H4",
-            "fetch_pm25_openaq.py:fetch_openaq",
-            "no_measurements_for_range",
-            {"per_sensor_counts": per_sensor_counts[:15], "sensor_count": len(sensors)},
-        )
-        # #endregion
         return pd.DataFrame(columns=["date", "zone", "station", "pm25", "source", "lat", "lon"])
     normalized = pd.DataFrame(all_rows)
     normalized["date"] = pd.to_datetime(normalized["date"], errors="coerce").dt.date.astype("string")

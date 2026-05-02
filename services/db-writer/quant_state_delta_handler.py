@@ -20,26 +20,6 @@ from models.quant_state_delta import QuantStateDelta, TradeSignalMutation, Tradi
 logger = logging.getLogger("db-writer.quant_state_delta")
 
 
-# region agent log
-def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-    try:
-        pl = {
-            "sessionId": "c964f7",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-            "runId": "post-fix",
-        }
-        _p = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-        with _p.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(pl, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-# endregion
 
 
 _LEDGER_DDL = """
@@ -235,15 +215,6 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
     if dt == "MANDATE_UPSERT":
         mut = TradingMandateMutation.model_validate(delta.mutation)
         mid = _coerce_mandate_id_to_uuid(str(mut.mandate_id))
-        # region agent log
-        if str(mut.mandate_id).strip() != mid:
-            _agent_dbg(
-                "H2",
-                "quant_state_delta_handler._apply_delta",
-                "mandate_id_coerced",
-                {"raw": str(mut.mandate_id)[:120], "coerced": mid},
-            )
-        # endregion
         con.execute(
             """
             INSERT INTO finance_worker.trading_mandates
@@ -271,15 +242,6 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
     if dt == "TRADE_SIGNAL_PROPOSED":
         mut = TradeSignalMutation.model_validate(delta.mutation)
         mid = _coerce_mandate_id_to_uuid(str(mut.mandate_id))
-        # region agent log
-        if str(mut.mandate_id).strip() != mid:
-            _agent_dbg(
-                "H2",
-                "quant_state_delta_handler._apply_delta",
-                "trade_signal_mandate_coerced",
-                {"raw": str(mut.mandate_id)[:120], "coerced": mid},
-            )
-        # endregion
         st = "PENDING_HITL" if mut.status == "AWAITING_HITL" else mut.status
         con.execute(
             """
@@ -421,25 +383,8 @@ def _sync_handle_quant_state_delta(message: str) -> None:
     resolved_uid = _resolve_quant_user_id_for_path(raw_user_id, target_db_path, tenant_id)
     if resolved_uid is None:
         logger.warning("QUANT_STATE_DELTA rejected: invalid db_path for user")
-        # region agent log
-        _agent_dbg(
-            "H1",
-            "quant_state_delta_handler._sync_handle_quant_state_delta",
-            "path_rejected",
-            {"raw_user_id": raw_user_id, "target_db_path": target_db_path[:240]},
-        )
-        # endregion
         return
     user_id = resolved_uid
-    # region agent log
-    if raw_user_id != user_id:
-        _agent_dbg(
-            "H1",
-            "quant_state_delta_handler._sync_handle_quant_state_delta",
-            "user_id_inferred_from_path",
-            {"raw_user_id": raw_user_id, "resolved_user_id": user_id},
-        )
-    # endregion
     if not _validate_shared_acl(target_db_path, user_id=user_id, tenant_id=tenant_id):
         logger.warning("QUANT_STATE_DELTA rejected: no shared grant")
         return
@@ -452,14 +397,6 @@ def _sync_handle_quant_state_delta(message: str) -> None:
             _s = _stmt.strip()
             if _s:
                 con.execute(_s)
-        # region agent log
-        _agent_dbg(
-            "H3",
-            "quant_state_delta_handler._sync_handle_quant_state_delta",
-            "quant_core_trade_signals_migration_applied",
-            {"delta_type": str(delta.delta_type or ""), "target_db_path": target_db_path[:240]},
-        )
-        # endregion
         _apply_delta(con, delta)
         con.execute("COMMIT")
     except Exception:

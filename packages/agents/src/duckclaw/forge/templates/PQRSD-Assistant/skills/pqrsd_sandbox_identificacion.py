@@ -32,48 +32,7 @@ TOOL_NAME = "pqrsd_run_identificacion_step1"
 
 
 def _debug_pqrsd_step1_log(result: Any, *, session_id: str) -> None:
-    # #region agent log
-    """NDJSON local para verificar hipótesis de flujo (sin PII)."""
-    tail = (result.stdout or "")[-6000:]
-    ok_hint: bool | None = None
-    if '"ok": true' in tail:
-        ok_hint = True
-    elif '"ok": false' in tail:
-        ok_hint = False
-    root = Path(__file__).resolve()
-    for _ in range(14):
-        if (root / ".cursor").is_dir():
-            break
-        parent = root.parent
-        if parent == root:
-            return
-        root = parent
-    log_path = root / ".cursor" / "debug-8d6707.log"
-    payload = {
-        "sessionId": "8d6707",
-        "timestamp": int(time.time() * 1000),
-        "location": "pqrsd_sandbox_identificacion.py:_run",
-        "message": "pqrsd_run_identificacion_step1 sandbox finished",
-        "data": {
-            "exit_code": int(result.exit_code or 0),
-            "timed_out": bool(result.timed_out),
-            "stdout_ok_hint": ok_hint,
-            "has_error_key": '"error"' in tail,
-            "session_id_nonempty": bool((session_id or "").strip()),
-            "goog_te_in_stdout": "goog-te-combo" in tail,
-            "select_secretarias_in_stdout": "select_secretarias" in tail,
-            "mercurio_iframe_in_stdout": "mercurio_iframe" in tail,
-            "radicacion_iframe_form_ready_in_stdout": "iframe_form_ready" in tail,
-            "radicacion_clicked_parent_in_stdout": "clicked_parent" in tail,
-        },
-        "hypothesisId": "H_parent_vs_iframe_radicacion_button",
-    }
-    try:
-        with log_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
-    # #endregion
+    del result, session_id
 
 
 class PqrsdIdentificacionInput(BaseModel):

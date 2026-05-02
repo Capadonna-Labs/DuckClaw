@@ -371,37 +371,6 @@ def _post_outbound_sync(
         return
 
     token = _resolve_heartbeat_outbound_bot_token(outbound_bot_token, routing_worker_id)
-    # region agent log
-    try:
-        _fp = hashlib.sha1(token.encode("utf-8")).hexdigest()[:10] if token else ""
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "adf9d8",
-                        "runId": "heartbeat-token",
-                        "hypothesisId": "H3_chat_heartbeat_compact_token",
-                        "location": "packages/agents/src/duckclaw/graphs/chat_heartbeat.py:_post_outbound_sync",
-                        "message": "heartbeat_token_selected",
-                        "data": {
-                            "chat_id": str(cid),
-                            "plan": str((plan_title_log or "")[:120]),
-                            "token_fp": _fp,
-                            "has_explicit_token": bool((outbound_bot_token or "").strip()),
-                            "routing_worker_id": str(routing_worker_id or ""),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     if token:
         try:
             from duckclaw.integrations.telegram.telegram_outbound_sync import (

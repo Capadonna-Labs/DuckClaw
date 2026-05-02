@@ -58,35 +58,6 @@ def build_novnc_router() -> APIRouter:
             for k, v in request.headers.items()
             if k.lower() not in _HOP_BY_HOP and k.lower() != "host"
         }
-        # #region agent log
-        try:
-            import json as _json  # noqa: PLC0415
-            import time as _time  # noqa: PLC0415
-
-            _log_path = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
-            with open(_log_path, "a", encoding="utf-8") as _lf:
-                _lf.write(
-                    _json.dumps(
-                        {
-                            "sessionId": "8d6707",
-                            "hypothesisId": "H-upstream",
-                            "location": "novnc_routes.py:http_proxy:pre",
-                            "message": "novnc_http_proxy",
-                            "data": {
-                                "port": port,
-                                "method": request.method,
-                                "path": path[:120],
-                                "token_prefix": (token or "")[:8],
-                            },
-                            "timestamp": int(_time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
                 r = await client.request(
@@ -96,59 +67,7 @@ def build_novnc_router() -> APIRouter:
                     headers=fwd_headers,
                 )
         except httpx.RequestError as exc:
-            # #region agent log
-            try:
-                import json as _json2  # noqa: PLC0415
-                import time as _time2  # noqa: PLC0415
-
-                _log_path2 = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
-                with open(_log_path2, "a", encoding="utf-8") as _lf2:
-                    _lf2.write(
-                        _json2.dumps(
-                            {
-                                "sessionId": "8d6707",
-                                "hypothesisId": "H-upstream",
-                                "location": "novnc_routes.py:http_proxy:err",
-                                "message": "novnc_upstream_request_error",
-                                "data": {
-                                    "port": port,
-                                    "exc_type": type(exc).__name__,
-                                    "exc": str(exc)[:300],
-                                },
-                                "timestamp": int(_time2.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
             raise HTTPException(status_code=502, detail=f"noVNC upstream: {exc}") from exc
-        # #region agent log
-        try:
-            import json as _json3  # noqa: PLC0415
-            import time as _time3  # noqa: PLC0415
-
-            _log_path3 = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
-            with open(_log_path3, "a", encoding="utf-8") as _lf3:
-                _lf3.write(
-                    _json3.dumps(
-                        {
-                            "sessionId": "8d6707",
-                            "hypothesisId": "H-upstream",
-                            "location": "novnc_routes.py:http_proxy:ok",
-                            "message": "novnc_upstream_ok",
-                            "data": {"port": port, "status_code": r.status_code},
-                            "timestamp": int(_time3.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         out_h = {k: v for k, v in r.headers.items() if k.lower() not in _HOP_BY_HOP}
         return Response(content=r.content, status_code=r.status_code, headers=out_h)
 
@@ -167,33 +86,6 @@ def build_novnc_router() -> APIRouter:
             await websocket.close(code=4404)
             return
         uri = f"ws://127.0.0.1:{port}/websockify"
-        # #region agent log
-        try:
-            import json as _json_ws  # noqa: PLC0415
-            import time as _time_ws  # noqa: PLC0415
-
-            _log_ws = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log"
-            with open(_log_ws, "a", encoding="utf-8") as _lfw:
-                _lfw.write(
-                    _json_ws.dumps(
-                        {
-                            "sessionId": "8d6707",
-                            "hypothesisId": "H-ws-proxy",
-                            "location": "novnc_routes.py:websocket_proxy:accept",
-                            "message": "novnc_ws_route_matched",
-                            "data": {
-                                "port": port,
-                                "token_prefix": (token or "")[:8],
-                            },
-                            "timestamp": int(_time_ws.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         await websocket.accept()
 
         async def pump_client_to_upstream(up: Any) -> None:

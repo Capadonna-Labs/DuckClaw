@@ -16,28 +16,6 @@ if str(_ROOT) not in sys.path:
 
 from scripts.data_prep.health_contract import build_health_proxy, load_health_dataset
 
-_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-07d446.log"
-
-
-def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict, run_id: str = "baseline") -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "07d446",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(datetime.now().timestamp() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Construye dataset maestro PM2.5 + salud.")
     parser.add_argument("--start-date", required=True, help="Fecha inicio (YYYY-MM-DD)")
@@ -81,14 +59,6 @@ def build_master(args: argparse.Namespace) -> tuple[pd.DataFrame, dict]:
     start_date = pd.to_datetime(_validate_date(args.start_date)).date()
     end_date = pd.to_datetime(_validate_date(args.end_date)).date()
     pm_frames = []
-    # #region agent log
-    _agent_debug_log(
-        "H1",
-        "build_master_dataset.py:build_master",
-        "build_master_input_range",
-        {"start_date": str(start_date), "end_date": str(end_date)},
-    )
-    # #endregion
     for source_name, fp in (("OpenAQ", args.openaq_file), ("SIATA", args.siata_file)):
         df = _load_table(fp)
         if df.empty:
@@ -107,18 +77,6 @@ def build_master(args: argparse.Namespace) -> tuple[pd.DataFrame, dict]:
 
     pm = pd.concat(pm_frames, ignore_index=True)
     pm = pm[(pm["date"] >= start_date) & (pm["date"] <= end_date)].copy()
-    # #region agent log
-    _agent_debug_log(
-        "H2",
-        "build_master_dataset.py:build_master",
-        "pm_after_date_filter",
-        {
-            "rows": int(len(pm)),
-            "min_date": str(pm["date"].min()) if not pm.empty else None,
-            "max_date": str(pm["date"].max()) if not pm.empty else None,
-        },
-    )
-    # #endregion
     rows_before = len(pm)
     null_pct_before = float(pm.isna().mean().mean() * 100.0)
     pm = pm.drop_duplicates(subset=["date", "zone", "pm25"])
@@ -157,19 +115,6 @@ def build_master(args: argparse.Namespace) -> tuple[pd.DataFrame, dict]:
 
     merged["date"] = pd.to_datetime(merged["date"], errors="coerce").dt.date.astype("string")
     merged = merged.sort_values(["date", "zone"]).reset_index(drop=True)
-    # #region agent log
-    _agent_debug_log(
-        "H3",
-        "build_master_dataset.py:build_master",
-        "merged_output_date_range",
-        {
-            "rows": int(len(merged)),
-            "min_date": str(pd.to_datetime(merged["date"], errors="coerce").min()) if not merged.empty else None,
-            "max_date": str(pd.to_datetime(merged["date"], errors="coerce").max()) if not merged.empty else None,
-            "used_health_proxy": bool(used_health_proxy),
-        },
-    )
-    # #endregion
 
     metadata = {
         "start_date": str(start_date),

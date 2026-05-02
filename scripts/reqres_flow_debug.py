@@ -56,9 +56,6 @@ def get_json(url: str, headers: dict[str, str]) -> tuple[int, str]:
 def main() -> int:
     api_key = load_env_key()
     has_key = bool(api_key)
-    # #region agent log
-    debug_log("H1", "scripts/reqres_flow_debug.py:61", "Loaded API key presence", {"hasApiKey": has_key})
-    # #endregion
 
     login_headers = {
         "Content-Type": "application/json",
@@ -75,20 +72,6 @@ def main() -> int:
     except json.JSONDecodeError:
         body_is_json = False
 
-    # #region agent log
-    debug_log(
-        "H1,H2,H3,H4",
-        "scripts/reqres_flow_debug.py:81",
-        "Login response observed",
-        {
-            "status": status,
-            "bodyIsJson": body_is_json,
-            "keys": sorted(parsed.keys()) if body_is_json else [],
-            "hasTokenField": "token" in parsed if body_is_json else False,
-            "hasErrorField": "error" in parsed if body_is_json else False,
-        },
-    )
-    # #endregion
 
     if not body_is_json or "token" not in parsed:
         print("LOGIN_FAILED")
@@ -97,9 +80,6 @@ def main() -> int:
         return 1
 
     token = str(parsed["token"])
-    # #region agent log
-    debug_log("H4", "scripts/reqres_flow_debug.py:102", "Token extracted safely", {"tokenLength": len(token)})
-    # #endregion
 
     create_headers = {
         "Content-Type": "application/json",
@@ -115,19 +95,6 @@ def main() -> int:
     )
     create_parsed = json.loads(create_body) if create_body.startswith("{") else {}
     user_id = str(create_parsed.get("data", {}).get("id", ""))
-    # #region agent log
-    debug_log(
-        "H6,H7",
-        "scripts/reqres_flow_debug.py:118",
-        "Create collection record response observed",
-        {
-            "status": create_status,
-            "hasDataField": isinstance(create_parsed.get("data"), dict),
-            "hasRecordId": bool(user_id),
-            "keys": sorted(create_parsed.keys()),
-        },
-    )
-    # #endregion
 
     if not user_id:
         print("CREATE_FAILED")
@@ -146,18 +113,6 @@ def main() -> int:
     )
     get_parsed = json.loads(get_body) if get_body.startswith("{") else {}
     fetched_id = str(get_parsed.get("data", {}).get("id", ""))
-    # #region agent log
-    debug_log(
-        "H8",
-        "scripts/reqres_flow_debug.py:134",
-        "Get collection record response observed",
-        {
-            "status": get_status,
-            "topLevelKeys": sorted(get_parsed.keys()) if isinstance(get_parsed, dict) else [],
-            "fetchedIdMatchesCreated": fetched_id == user_id and bool(fetched_id),
-        },
-    )
-    # #endregion
 
     if get_status != 200:
         print("GET_FAILED")

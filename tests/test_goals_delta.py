@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from duckclaw.graphs.on_the_fly_commands import (
+    build_goals_proactive_system_event_message,
     chat_id_from_goals_delta_config_key,
     format_goals_countdown_human,
     format_goals_delta_interval_human,
@@ -69,6 +70,16 @@ def test_format_goals_countdown_human() -> None:
     assert format_goals_countdown_human(0) == "menos de 1 s"
     assert "45" in format_goals_countdown_human(45)
     assert "min" in format_goals_countdown_human(125)
+
+
+def test_build_goals_proactive_system_event_includes_overnight_mission() -> None:
+    msg = build_goals_proactive_system_event_message(
+        [{"belief_key": "overnight_squeeze", "title": "Overnight Gap Squeeze (cierre + gap)"}],
+        trading_session_objective="overnight_gap_squeeze",
+    )
+    assert "[SYSTEM_EVENT:" in msg
+    assert "MISIÓN: OVERNIGHT GAP SQUEEZE" in msg
+    assert "Revisión periódica de /goals" in msg
 
 
 def test_run_goals_proactive_tick_posts_system_event(tmp_path: Path, monkeypatch: Any) -> None:

@@ -25,33 +25,6 @@ _log = logging.getLogger(__name__)
 _OPENWEATHER_API_URL = "https://api.openweathermap.org/data/2.5/weather"
 _OPENWEATHER_KEY_ENV = "OPENWEATHER_API_KEY"
 _TAVILY_KEY_ENV = "TAVILY_API_KEY"
-_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-07d446.log"
-
-
-def _agent_debug_log(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    *,
-    run_id: str = "baseline",
-) -> None:
-    # #region agent log
-    try:
-        payload: dict[str, Any] = {
-            "sessionId": "07d446",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
 
 
 class OpenWeatherCurrentInput(BaseModel):
@@ -81,21 +54,6 @@ def _sanitize_lang(lang: str | None, default_lang: str = "es") -> str:
 
 def _fetch_openweather_current(*, city: str, country: str | None, units: str, lang: str) -> dict[str, Any]:
     api_key = (os.environ.get(_OPENWEATHER_KEY_ENV) or "").strip()
-    # #region agent log
-    _agent_debug_log(
-        "H1",
-        "openweather_bridge.py:_fetch_openweather_current",
-        "api_key_presence",
-        {
-            "has_api_key": bool(api_key),
-            "api_key_len": len(api_key),
-            "city_len": len(city or ""),
-            "country_present": bool((country or "").strip()),
-            "units": units,
-            "lang": lang,
-        },
-    )
-    # #endregion
     if not api_key:
         return {
             "ok": False,
@@ -111,17 +69,6 @@ def _fetch_openweather_current(*, city: str, country: str | None, units: str, la
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="replace"))
-        # #region agent log
-        _agent_debug_log(
-            "H4",
-            "openweather_bridge.py:_fetch_openweather_current",
-            "openweather_http_ok",
-            {
-                "response_has_name": bool((payload or {}).get("name") if isinstance(payload, dict) else False),
-                "response_has_weather": bool((payload or {}).get("weather") if isinstance(payload, dict) else False),
-            },
-        )
-        # #endregion
         return {"ok": True, "payload": payload, "request_url": url}
     except urllib.error.HTTPError as exc:
         body = ""
@@ -257,19 +204,6 @@ def _openweather_current_tool(
     def _run(city: str, country: str | None = None, units: str = "metric", lang: str = "es") -> str:
         resolved_units = _sanitize_units(units, default_units)
         resolved_lang = _sanitize_lang(lang, default_lang)
-        # #region agent log
-        _agent_debug_log(
-            "H3",
-            "openweather_bridge.py:_openweather_current_tool/_run",
-            "tool_invoke_inputs",
-            {
-                "city_len": len(city or ""),
-                "country_present": bool((country or "").strip()),
-                "resolved_units": resolved_units,
-                "resolved_lang": resolved_lang,
-            },
-        )
-        # #endregion
         fetched = _fetch_openweather_current(
             city=city,
             country=country,
@@ -322,20 +256,6 @@ def register_openweather_skill(
     openweather_config: Optional[dict] = None,
     research_config: Optional[dict] = None,
 ) -> None:
-    # #region agent log
-    _agent_debug_log(
-        "H2",
-        "openweather_bridge.py:register_openweather_skill",
-        "register_called",
-        {
-            "openweather_config_is_none": openweather_config is None,
-            "research_config_present": research_config is not None,
-            "enabled_flag": (openweather_config or {}).get("enabled")
-            if isinstance(openweather_config, dict)
-            else None,
-        },
-    )
-    # #endregion
     if openweather_config is None:
         return
     try:

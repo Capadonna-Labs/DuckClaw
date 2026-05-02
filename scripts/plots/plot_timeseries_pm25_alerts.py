@@ -10,28 +10,6 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import pandas as pd
 
-_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-07d446.log"
-
-
-def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict, run_id: str = "baseline") -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "07d446",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(datetime.now().timestamp() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serie temporal PM2.5 con periodos críticos.")
     parser.add_argument("--start-date", required=True, help="Fecha inicio (YYYY-MM-DD)")
@@ -49,19 +27,6 @@ def main() -> int:
 
     df = pd.read_parquet(args.master_file) if args.master_file.endswith(".parquet") else pd.read_csv(args.master_file)
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    # #region agent log
-    _agent_debug_log(
-        "H4",
-        "plot_timeseries_pm25_alerts.py:main",
-        "timeseries_input_args",
-        {
-            "start_date_arg": args.start_date,
-            "end_date_arg": args.end_date,
-            "master_file": args.master_file,
-            "df_rows": int(len(df)),
-        },
-    )
-    # #endregion
     mask = (df["date"] >= pd.to_datetime(args.start_date)) & (df["date"] <= pd.to_datetime(args.end_date))
     work = df.loc[mask].copy()
     ts = (
@@ -70,18 +35,6 @@ def main() -> int:
         .sort_values("date")
         .rename(columns={"pm25_daily_mean": "pm25"})
     )
-    # #region agent log
-    _agent_debug_log(
-        "H3",
-        "plot_timeseries_pm25_alerts.py:main",
-        "timeseries_grouped_range",
-        {
-            "rows": int(len(ts)),
-            "min_date": str(ts["date"].min()) if not ts.empty else None,
-            "max_date": str(ts["date"].max()) if not ts.empty else None,
-        },
-    )
-    # #endregion
     ts["critical"] = ts["pm25"] > float(args.threshold)
 
     plt.figure(figsize=(12, 6))
@@ -109,15 +62,6 @@ def main() -> int:
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     plt.xticks(rotation=35, ha="right")
-    # #region agent log
-    labels = [t.get_text() for t in ax.get_xticklabels()]
-    _agent_debug_log(
-        "H5",
-        "plot_timeseries_pm25_alerts.py:main",
-        "timeseries_xtick_labels",
-        {"labels": labels[:10], "label_count": len(labels)},
-    )
-    # #endregion
     plt.tight_layout()
 
     png = out_dir / "timeseries_pm25_alerts.png"

@@ -738,30 +738,6 @@ def _try_quant_hrp_affirm_followup(
     tenant_id: str,
     available_plan: list[str],
 ) -> tuple[str, list[str], str, str] | None:
-    # region agent log
-    _dbg = {
-        "sessionId": "c964f7",
-        "hypothesisId": "H1",
-        "location": "manager_graph._try_quant_hrp_affirm_followup",
-        "message": "quant_hrp_followup_probe",
-        "data": {
-            "affirm_match": bool(_QUANT_HRP_AFFIRM_RE.match((incoming or "").strip())),
-            "tenant": (tenant_id or "").strip(),
-            "assigned": (assigned or "").strip(),
-            "has_quant_trader": "Quant-Trader" in [str(x) for x in (available_plan or [])],
-        },
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(json.dumps(_dbg, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
     if not _QUANT_HRP_AFFIRM_RE.match((incoming or "").strip()):
         return None
     plans = [str(x) for x in (available_plan or []) if x]
@@ -773,49 +749,8 @@ def _try_quant_hrp_affirm_followup(
         return None
     _bodies = _iter_assistant_bodies_newest_first(history)
     last_a = _find_hrp_rebalance_affirm_context_assistant_body(history)
-    # region agent log
-    _dbg1b = {
-        "sessionId": "c964f7",
-        "hypothesisId": "H4",
-        "location": "manager_graph._try_quant_hrp_affirm_followup",
-        "message": "hrp_affirm_context_scan",
-        "data": {
-            "assistant_turns_with_text": len(_bodies),
-            "hrp_context_found": bool(last_a),
-        },
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(json.dumps(_dbg1b, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
     if not last_a:
         return None
-    # region agent log
-    _dbg2 = {
-        "sessionId": "c964f7",
-        "hypothesisId": "H2",
-        "location": "manager_graph._try_quant_hrp_affirm_followup",
-        "message": "quant_hrp_followup_hit",
-        "data": {"last_assistant_len": len(last_a)},
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(json.dumps(_dbg2, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
     title = "Confirmación rebalanceo HRP (META/SPY)"
     task_list = [
         "El usuario confirmó (mensaje corto) continuar con el hilo de rebalanceo HRP / señales respecto a la pregunta anterior del asistente.",
@@ -1410,40 +1345,6 @@ def build_manager_graph(
                 available = list(available) + [_canon_entry]
             available = [_canon_entry] + [w for w in available if w != _canon_entry]
             assigned = _canon_entry
-        # #region agent log
-        try:
-            import json as _json_dbg
-            from time import time as _time_dbg
-
-            if entry_r:
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(
-                        _json_dbg.dumps(
-                            {
-                                "sessionId": "8d6707",
-                                "hypothesisId": "H1_entry_route",
-                                "location": "manager_graph.py:router_node",
-                                "message": "entry_worker_merge",
-                                "data": {
-                                    "entry_r": entry_r,
-                                    "canon_entry": _canon_entry,
-                                    "assigned": assigned,
-                                    "available0": (available[0] if available else None),
-                                    "entry_route_system_ev": _entry_route_ev,
-                                },
-                                "timestamp": int(_time_dbg() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-        except Exception:
-            pass
-        # #endregion
         out = {"assigned_worker_id": assigned, "available_templates": available}
         # Preservar estado para nodos siguientes (por si el grafo hace merge sustituyendo)
         if "incoming" in state:
@@ -1561,30 +1462,6 @@ def build_manager_graph(
                 [str(x) for x in (available_plan or []) if x],
             )
         if _hrp_fast:
-            # region agent log
-            try:
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "hypothesisId": "H3",
-                                "location": "manager_graph.plan_node:hrp_fast",
-                                "message": "used_quant_hrp_followup_bypassing_llm_planner",
-                                "data": {"plan_title": _hrp_fast[0][:80]},
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
             plan_title, tasks, _inject_hrp, _ov_hrp = _hrp_fast
             mercenary_spec = None
         else:
@@ -1681,67 +1558,11 @@ def build_manager_graph(
 
         if _strip_mercenary_spec_for_pqrsd_assistant(out):
             mercenary_spec = None
-            # #region agent log
-            try:
-                import json as _json_dbg
-                from time import time as _time_dbg
-
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-8d6707.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df:
-                    _df.write(
-                        _json_dbg.dumps(
-                            {
-                                "sessionId": "8d6707",
-                                "hypothesisId": "M1",
-                                "location": "manager_graph.plan_node:pqrsd_strip_mercenary",
-                                "message": "mercenary_spec_cleared_for_pqrsd_assistant",
-                                "data": {
-                                    "assigned_worker_id": (out.get("assigned_worker_id") or "").strip(),
-                                },
-                                "timestamp": int(_time_dbg() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
 
         if mercenary_spec is None and _should_disable_mercenary_for_quant_signal_intent(
             incoming, out.get("assigned_worker_id")
         ):
-            # #region agent log
-            try:
-                with open(
-                    "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _df_qm:
-                    _df_qm.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "quant-signals",
-                                "hypothesisId": "H_mercenary_hijack_quant",
-                                "location": "manager_graph.plan_node",
-                                "message": "mercenary_disabled_for_quant_signal_intent",
-                                "data": {
-                                    "assigned_worker_id": (out.get("assigned_worker_id") or "").strip(),
-                                    "incoming_len": len(incoming or ""),
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
+            pass
 
         out["available_templates"] = available_plan
         # Preservar estado para invoke_worker
@@ -2173,34 +1994,6 @@ def build_manager_graph(
             b64 = (worker_invoke.get("sandbox_photo_base64") or "").strip()
         if not b64 and messages is not None:
             b64 = extract_latest_sandbox_figure_base64(messages) or ""
-        # region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "c964f7",
-                            "runId": "pre-fix",
-                            "hypothesisId": "H2",
-                            "location": "manager_graph.invoke_worker_node",
-                            "message": "sandbox_photo_extraction_result",
-                            "data": {
-                                "has_messages": bool(messages is not None),
-                                "sandbox_photo_base64_len": len(b64),
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         if b64:
             out["sandbox_photo_base64"] = b64
         if "active_mission" in state:

@@ -21,6 +21,7 @@ GATEWAY_DB_ENV_KEYS: tuple[str, ...] = (
     "DUCKCLAW_SIATA_DB_PATH",
     "DUCKCLAW_QUANT_TRADER_DB_PATH",
     "DUCKCLAW_PQRSD_ASSISTANT_DB_PATH",
+    "DUCKCLAW_AXIS_DB_PATH",
     "DUCKDB_PATH",
 )
 
@@ -117,7 +118,7 @@ def get_gateway_db_path() -> str:
     Primera variable no vacía entre ``DUCKCLAW_WAR_ROOM_ACL_DB_PATH``,
     ``DUCKCLAW_FINANZ_DB_PATH``, ``DUCKCLAW_JOB_HUNTER_DB_PATH``,
     ``DUCKCLAW_SIATA_DB_PATH``, ``DUCKCLAW_QUANT_TRADER_DB_PATH``,
-    ``DUCKCLAW_PQRSD_ASSISTANT_DB_PATH``, luego ``DUCKDB_PATH``; resuelta con
+    ``DUCKCLAW_PQRSD_ASSISTANT_DB_PATH``, ``DUCKCLAW_AXIS_DB_PATH``, luego ``DUCKDB_PATH``; resuelta con
     ``resolve_env_duckdb_path``.
     """
     return resolve_env_duckdb_path(raw_gateway_db_path_from_environ())

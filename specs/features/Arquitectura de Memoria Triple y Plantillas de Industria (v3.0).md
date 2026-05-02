@@ -39,7 +39,7 @@ Este nodo en LangGraph decide qué capa de memoria consultar según la intenció
 
 El comando de inicialización automatiza la creación del entorno:
 
-1.  **Tenant Isolation (Multi-Vault):** bóveda por defecto `db/private/{tenant_id}/default.duckdb` (misma ruta que `DUCKCLAW_DB_PATH` cuando se usa `--industry`; ver wizard).
+1.  **Tenant Isolation (Multi-Vault):** bóveda por defecto `db/private/{tenant_id}/default.duckdb` (misma ruta hub que wizard/`DUCKDB_PATH` cuando se usa `--industry`; ver wizard).
 2.  **Schema Injection:** Ejecuta el `schema.sql` de la plantilla seleccionada.
 3.  **Master Data Seeding:** Carga `seed_data.sql` (ej. inserta los roles `admin`, `manager`, `viewer`).
 4.  **Worker Activation:** Registra los agentes base en la tabla `main.agent_config`.

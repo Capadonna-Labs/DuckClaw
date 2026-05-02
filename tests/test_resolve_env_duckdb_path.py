@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
+from duckclaw.gateway_db import (
+    GATEWAY_DB_ENV_KEYS,
+    get_gateway_db_path,
+    raw_gateway_db_path_from_mapping,
+    resolve_env_duckdb_path,
+)
 
 
 def test_relative_path_joins_duckclaw_repo_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -32,10 +37,25 @@ def test_get_gateway_db_falls_back_to_finanz_when_no_duckclaw_db_path(
     monkeypatch.delenv("DUCKCLAW_WAR_ROOM_ACL_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKCLAW_JOB_HUNTER_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKCLAW_SIATA_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_TRADER_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKDB_PATH", raising=False)
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo))
     monkeypatch.setenv("DUCKCLAW_FINANZ_DB_PATH", "db/f.duckdb")
     assert Path(get_gateway_db_path()) == f.resolve()
+
+
+def test_gateway_db_env_keys_includes_quant_before_pqrsd() -> None:
+    keys = list(GATEWAY_DB_ENV_KEYS)
+    assert keys.index("DUCKCLAW_QUANT_TRADER_DB_PATH") < keys.index("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH")
+
+
+def test_raw_mapping_prefers_quant_over_duckdb_path() -> None:
+    m = {
+        "DUCKDB_PATH": "/tmp/hub.duckdb",
+        "DUCKCLAW_QUANT_TRADER_DB_PATH": "/tmp/quant.duckdb",
+    }
+    assert raw_gateway_db_path_from_mapping(m) == "/tmp/quant.duckdb"
 
 
 def test_absolute_path_unchanged_modulo_resolve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

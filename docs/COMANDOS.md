@@ -303,9 +303,11 @@ Detalle de fases y seguridad: [Installation.md](Installation.md).
 
 ---
 
-## 5. API Gateway (desarrollo)
+## 5. API Gateway
 
-Desde la raíz del repo:
+Desde la raíz del monorepo salvo donde se indique.
+
+### Sin PM2 (desarrollo)
 
 ```bash
 uv run duckops serve --gateway
@@ -318,13 +320,47 @@ cd services/api-gateway
 uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Comprobación rápida:
+Comprobación rápida (ajusta puerto si el servicio usa otro):
 
 ```bash
 curl -s http://127.0.0.1:8000/health
 ```
 
 (Si usas `DUCKCLAW_TAILSCALE_AUTH_KEY`, añade la cabecera `X-Tailscale-Auth-Key` en las peticiones, salvo rutas públicas documentadas.)
+
+### Gateway con PM2 — proceso único (`DuckClaw-Gateway`)
+
+`duckops serve --pm2` **genera** (o sobrescribe) `config/ecosystem.api.config.cjs` con el intérprete y `cwd` correctos y **arranca** el proceso si no existe, o **lo reinicia** si ya está registrado en PM2. Con `--gateway`, el nombre PM2 por defecto es **`DuckClaw-Gateway`** (`--name` lo puede cambiar; sin `--gateway` el default histórico es `DuckClaw-API`).
+
+```bash
+uv run duckops serve --pm2 --gateway
+```
+
+Si el ecosystem ya existe y solo quieres levantarlo (p. ej. tras `pm2 delete`):
+
+```bash
+pm2 start config/ecosystem.api.config.cjs
+pm2 start config/ecosystem.api.config.cjs --only DuckClaw-Gateway
+```
+
+Tras cambiar variables en `.env` o en el bloque `env` del ecosystem:
+
+```bash
+pm2 restart DuckClaw-Gateway --update-env
+pm2 logs DuckClaw-Gateway
+```
+
+**Varios gateways en un host** (`Finanz-Gateway`, `JobHunter-Gateway`, SIATA, etc.): suelen declararse en `config/api_gateways_pm2.json` y ecosystemes/reglas del wizard; ver **§2** y [Troubleshooting Gateway PM2](Troubleshooting-Gateway-PM2.md).
+
+### Diagnóstico local antes de Telegram o MCP
+
+Checks de repo, `.env`, Redis (URL + ping), rutas DuckDB del gateway, Docker, paquete `mcp`, PAT GitHub ↔ `api.github.com` e imagen `ghcr.io/github/github-mcp-server`:
+
+```bash
+uv run python scripts/doctor.py
+```
+
+Si el servidor MCP oficial responde `method invalid` a un `tools/list` crudo contra Docker, el orden del protocolo MCP es incorrecto (handshake antes de listar herramientas); ver también `scripts/smoke_github_mcp_stdio.py` y el README del repo.
 
 ### 5.1 Finanz + análisis cuantitativo (IBKR / quant_core)
 
@@ -467,8 +503,9 @@ Sin `--db` usa `get_gateway_db_path()` según el `.env` / multiplex actual.
 | 1 | `docker run --name redis -d -p 6379:6379 redis` **o** `redis-server` |
 | 2 | `redis-cli ping` → `PONG` |
 | 3 | `uv sync` |
+| 3b | (Opcional) `uv run python scripts/doctor.py` — diagnóstico local (Redis, Docker, GitHub MCP, …) |
 | 4 | `uv run duckops init` |
-| 5 | `uv run duckops serve --gateway` |
+| 5 | `uv run duckops serve --gateway` (dev) **o** `uv run duckops serve --pm2 --gateway` (PM2 **`DuckClaw-Gateway`**, **§5**) |
 | 6 | (Opcional Telegram) `DUCKCLAW_CHAT_PARALLEL_INVOCATIONS=1` + `REDIS_URL` para varias respuestas concurrentes por chat; **§2.2** `DUCKCLAW_TOOL_READ_POOL_*` si varias `read_sql` en un solo turno; reiniciar con `--update-env` |
 | 7 | (Opcional) DB Writer: **§6** (`pm2 start ecosystem.db-writer.config.cjs` o `uv run python services/db-writer/main.py`) — **necesario** para `/context --add` (§2.3) |
 | 8 | (Opcional) VLM: **§5.2**; trazas SFT: **§5.3** y [SFT & conversation traces](agents/sft_conversation_traces.md) |
@@ -479,12 +516,17 @@ Sin `--db` usa `get_gateway_db_path()` según el `.env` / multiplex actual.
 
 ```bash
 uv run duckops init                         # Reconfigurar / instalar
-uv run duckops serve --gateway              # Solo gateway en dev
+uv run python scripts/doctor.py             # Diagnóstico local (§5)
+uv run duckops serve --gateway              # Gateway en dev (sin PM2)
+uv run duckops serve --pm2 --gateway        # Genera ecosystem + PM2 DuckClaw-Gateway (§5)
+pm2 start config/ecosystem.api.config.cjs --only DuckClaw-Gateway  # Si el ecosystem ya existe
 pm2 status                                  # Si usas PM2 tras el wizard
-pm2 logs BI-Analyst-Gateway                 # Ej.: traza Telegram + subagentes
+pm2 logs DuckClaw-Gateway                   # Gateway único por defecto (duckops --pm2 --gateway)
+pm2 logs BI-Analyst-Gateway                 # Ej.: traza Telegram + subagentes (multi-gateway)
 pm2 logs JobHunter-Gateway                  # Job-Hunter + resúmenes /context
 pm2 logs DuckClaw-DB-Writer                 # Escrituras + CONTEXT_INJECTION
 pm2 flush                                   # Vaciar logs PM2
+pm2 restart DuckClaw-Gateway --update-env   # Tras cambiar .env en setup de un solo gateway
 pm2 restart BI-Analyst-Gateway --update-env # Nombre según config/api_gateways_pm2.json; tras cambiar DUCKCLAW_*
 # Tras cambiar DUCKCLAW_TOOL_READ_POOL_* o DUCKCLAW_READ_SQL_MAX_RESPONSE_CHARS: mismo restart
 # Telegram (admin): /context --add …  |  /context --summary  — ver §2.3

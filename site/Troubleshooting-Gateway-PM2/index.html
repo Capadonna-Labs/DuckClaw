@@ -1053,6 +1053,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#alcance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alcance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#puertos-finanz-8000-y-themind-8080" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1318,6 +1329,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#alcance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alcance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#puertos-finanz-8000-y-themind-8080" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1418,6 +1440,11 @@
 
 
 <h1 id="gateway-pm2-errores-frecuentes">Gateway PM2: errores frecuentes<a class="headerlink" href="#gateway-pm2-errores-frecuentes" title="Permanent link">&para;</a></h1>
+<h2 id="alcance">Alcance<a class="headerlink" href="#alcance" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Un solo proceso PM2:</strong> el flujo habitual es <code>uv run duckops serve --pm2 --gateway</code> → nombre <strong><code>DuckClaw-Gateway</code></strong>, archivo <code>config/ecosystem.api.config.cjs</code>. Reinicio/logs: <code>pm2 restart DuckClaw-Gateway --update-env</code>, <code>pm2 logs DuckClaw-Gateway</code>. Guía canónica: <a href="../COMANDOS/">COMANDOS §5</a>; diagnóstico local: <code>uv run python scripts/doctor.py</code>.</li>
+<li><strong>Esta página</strong> se centra en <strong>varios gateways en el mismo host</strong> (p. ej. <code>Finanz-Gateway</code>, <code>TheMind-Gateway</code>, entradas en <code>config/api_gateways_pm2.json</code>) y en conflictos de puerto, DuckDB bloqueado o argumentos PM2 obsoletos.</li>
+</ul>
 <h2 id="puertos-finanz-8000-y-themind-8080">Puertos: Finanz (8000) y TheMind (8080)<a class="headerlink" href="#puertos-finanz-8000-y-themind-8080" title="Permanent link">&para;</a></h2>
 <p>Es un diseño <strong>válido</strong> y <strong>no hay conflicto entre ellos</strong>:</p>
 <table>
@@ -1457,7 +1484,7 @@ sudo<span class="w"> </span>lsof<span class="w"> </span>-nP<span class="w"> </sp
 <li>Revisa que Brain y los gateways no abran la misma ruta en escritura a la vez si no es imprescindible.</li>
 </ul>
 <h2 id="comprobar-duplicados-en-la-config-fusionada">Comprobar duplicados en la config fusionada<a class="headerlink" href="#comprobar-duplicados-en-la-config-fusionada" title="Permanent link">&para;</a></h2>
-<p>Tras <code>duckops serve --pm2 --gateway</code>, el CLI puede avisar si en <code>config/api_gateways_pm2.json</code> hay <strong>el mismo puerto en dos <code>apps</code></strong> o la <strong>misma <code>DUCKCLAW_DB_PATH</code></strong> en varios procesos. Eso <strong>sí</strong> es un error de configuración. <strong>No</strong> aplica cuando son 8000 vs 8080 con rutas coherentes.</p>
+<p>Tras <code>uv run duckops serve --pm2 --gateway</code> (escenario multi-gateway con <code>api_gateways_pm2.json</code>), el CLI puede avisar si hay <strong>el mismo puerto en dos <code>apps</code></strong> o la <strong>misma <code>DUCKCLAW_DB_PATH</code></strong> en varios procesos. Eso <strong>sí</strong> es un error de configuración. <strong>No</strong> aplica cuando son 8000 vs 8080 con rutas coherentes.</p>
 <h3 id="asistente-wizard-resolver-conflictos">Asistente (wizard): resolver conflictos<a class="headerlink" href="#asistente-wizard-resolver-conflictos" title="Permanent link">&para;</a></h3>
 <p>En el menú inicial con PM2, elige <strong><code>r</code></strong> — <em>Resolver conflictos API Gateway</em> — o ejecuta desde la <strong>raíz del repo</strong> (mismo intérprete que el resto del monorepo):</p>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/duckclaw_setup_wizard.py<span class="w"> </span>--resolve-gateways
@@ -1467,7 +1494,8 @@ sudo<span class="w"> </span>lsof<span class="w"> </span>-nP<span class="w"> </sp
 <h3 id="themind-sigue-usando-finanzdb1-o-intenta-el-puerto-8000">TheMind sigue usando <code>finanzdb1</code> o intenta el puerto 8000<a class="headerlink" href="#themind-sigue-usando-finanzdb1-o-intenta-el-puerto-8000" title="Permanent link">&para;</a></h3>
 <p>El <code>services/api-gateway/main.py</code> carga <code>.env</code> con <code>setdefault</code>; si PM2 no inyectó bien <code>DUCKCLAW_DB_PATH</code> o hiciste <code>restart</code> sin <code>--update-env</code>, el proceso puede quedarse con la BD del <code>.env</code>. Tras cambiar <code>config/api_gateways_pm2.json</code>, el arranque <strong>corrige</strong> <code>DUCKCLAW_DB_PATH</code> leyendo el bloque que corresponde a este proceso (<code>DUCKCLAW_PM2_PROCESS_NAME</code> o el <code>--port</code> de uvicorn).</p>
 <p>Si el error es <strong><code>[Errno 48]</code> en 8000</strong> para TheMind, PM2 sigue con <strong>args viejos</strong> (<code>--port 8000</code>). Borra y vuelve a crear el proceso para leer el ecosystem:</p>
-<p><code>pm2 delete TheMind-Gateway &amp;&amp; pm2 start config/ecosystem.api.config.cjs --only TheMind-Gateway</code></p>
+<div class="highlight"><pre><span></span><code>pm2<span class="w"> </span>delete<span class="w"> </span>TheMind-Gateway<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>pm2<span class="w"> </span>start<span class="w"> </span>config/ecosystem.api.config.cjs<span class="w"> </span>--only<span class="w"> </span>TheMind-Gateway
+</code></pre></div>
 <p>(o <code>pm2 restart TheMind-Gateway --update-env</code> si ya coincide el <code>args</code> con puerto 8080).</p>
 <h2 id="403-acceso-denegado-interactuar-con-este-agente"><code>403</code> — «Acceso denegado… interactuar con este agente»<a class="headerlink" href="#403-acceso-denegado-interactuar-con-este-agente" title="Permanent link">&para;</a></h2>
 <p>No es n8n “caído”: es el <strong>Telegram Guard</strong> (<code>authorized_users</code> en DuckDB + caché Redis). El endpoint necesita saber <strong>qué usuario</strong> es:</p>

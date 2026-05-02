@@ -1186,16 +1186,49 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-api-gateway-desarrollo" class="md-nav__link">
+  <a href="#5-api-gateway" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. API Gateway (desarrollo)
+        5. API Gateway
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="5. API Gateway (desarrollo)">
+    <nav class="md-nav" aria-label="5. API Gateway">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sin-pm2-desarrollo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sin PM2 (desarrollo)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gateway-con-pm2-proceso-unico-duckclaw-gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gateway con PM2 — proceso único (DuckClaw-Gateway)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostico-local-antes-de-telegram-o-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnóstico local antes de Telegram o MCP
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#51-finanz-analisis-cuantitativo-ibkr-quant_core" class="md-nav__link">
@@ -1674,16 +1707,49 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-api-gateway-desarrollo" class="md-nav__link">
+  <a href="#5-api-gateway" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. API Gateway (desarrollo)
+        5. API Gateway
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="5. API Gateway (desarrollo)">
+    <nav class="md-nav" aria-label="5. API Gateway">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sin-pm2-desarrollo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sin PM2 (desarrollo)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gateway-con-pm2-proceso-unico-duckclaw-gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gateway con PM2 — proceso único (DuckClaw-Gateway)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostico-local-antes-de-telegram-o-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnóstico local antes de Telegram o MCP
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#51-finanz-analisis-cuantitativo-ibkr-quant_core" class="md-nav__link">
@@ -2070,18 +2136,37 @@ uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </s
 <p>Borrador rápido (sin tocar el <code>.env</code> del repo): <strong>Ctrl+S</strong> → <code>~/.config/duckclaw/wizard_draft.json</code>.</p>
 <p>Detalle de fases y seguridad: <a href="../Installation/">Installation.md</a>.</p>
 <hr />
-<h2 id="5-api-gateway-desarrollo">5. API Gateway (desarrollo)<a class="headerlink" href="#5-api-gateway-desarrollo" title="Permanent link">&para;</a></h2>
-<p>Desde la raíz del repo:</p>
+<h2 id="5-api-gateway">5. API Gateway<a class="headerlink" href="#5-api-gateway" title="Permanent link">&para;</a></h2>
+<p>Desde la raíz del monorepo salvo donde se indique.</p>
+<h3 id="sin-pm2-desarrollo">Sin PM2 (desarrollo)<a class="headerlink" href="#sin-pm2-desarrollo" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>serve<span class="w"> </span>--gateway
 </code></pre></div>
 <p>Equivalente orientativo (si prefieres llamar uvicorn a mano; ajusta host/puerto):</p>
 <div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>services/api-gateway
 uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </span>main:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span>--reload
 </code></pre></div>
-<p>Comprobación rápida:</p>
+<p>Comprobación rápida (ajusta puerto si el servicio usa otro):</p>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:8000/health
 </code></pre></div>
 <p>(Si usas <code>DUCKCLAW_TAILSCALE_AUTH_KEY</code>, añade la cabecera <code>X-Tailscale-Auth-Key</code> en las peticiones, salvo rutas públicas documentadas.)</p>
+<h3 id="gateway-con-pm2-proceso-unico-duckclaw-gateway">Gateway con PM2 — proceso único (<code>DuckClaw-Gateway</code>)<a class="headerlink" href="#gateway-con-pm2-proceso-unico-duckclaw-gateway" title="Permanent link">&para;</a></h3>
+<p><code>duckops serve --pm2</code> <strong>genera</strong> (o sobrescribe) <code>config/ecosystem.api.config.cjs</code> con el intérprete y <code>cwd</code> correctos y <strong>arranca</strong> el proceso si no existe, o <strong>lo reinicia</strong> si ya está registrado en PM2. Con <code>--gateway</code>, el nombre PM2 por defecto es <strong><code>DuckClaw-Gateway</code></strong> (<code>--name</code> lo puede cambiar; sin <code>--gateway</code> el default histórico es <code>DuckClaw-API</code>).</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>serve<span class="w"> </span>--pm2<span class="w"> </span>--gateway
+</code></pre></div>
+<p>Si el ecosystem ya existe y solo quieres levantarlo (p. ej. tras <code>pm2 delete</code>):</p>
+<div class="highlight"><pre><span></span><code>pm2<span class="w"> </span>start<span class="w"> </span>config/ecosystem.api.config.cjs
+pm2<span class="w"> </span>start<span class="w"> </span>config/ecosystem.api.config.cjs<span class="w"> </span>--only<span class="w"> </span>DuckClaw-Gateway
+</code></pre></div>
+<p>Tras cambiar variables en <code>.env</code> o en el bloque <code>env</code> del ecosystem:</p>
+<div class="highlight"><pre><span></span><code>pm2<span class="w"> </span>restart<span class="w"> </span>DuckClaw-Gateway<span class="w"> </span>--update-env
+pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-Gateway
+</code></pre></div>
+<p><strong>Varios gateways en un host</strong> (<code>Finanz-Gateway</code>, <code>JobHunter-Gateway</code>, SIATA, etc.): suelen declararse en <code>config/api_gateways_pm2.json</code> y ecosystemes/reglas del wizard; ver <strong>§2</strong> y <a href="../Troubleshooting-Gateway-PM2/">Troubleshooting Gateway PM2</a>.</p>
+<h3 id="diagnostico-local-antes-de-telegram-o-mcp">Diagnóstico local antes de Telegram o MCP<a class="headerlink" href="#diagnostico-local-antes-de-telegram-o-mcp" title="Permanent link">&para;</a></h3>
+<p>Checks de repo, <code>.env</code>, Redis (URL + ping), rutas DuckDB del gateway, Docker, paquete <code>mcp</code>, PAT GitHub ↔ <code>api.github.com</code> e imagen <code>ghcr.io/github/github-mcp-server</code>:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/doctor.py
+</code></pre></div>
+<p>Si el servidor MCP oficial responde <code>method invalid</code> a un <code>tools/list</code> crudo contra Docker, el orden del protocolo MCP es incorrecto (handshake antes de listar herramientas); ver también <code>scripts/smoke_github_mcp_stdio.py</code> y el README del repo.</p>
 <h3 id="51-finanz-analisis-cuantitativo-ibkr-quant_core">5.1 Finanz + análisis cuantitativo (IBKR / quant_core)<a class="headerlink" href="#51-finanz-analisis-cuantitativo-ibkr-quant_core" title="Permanent link">&para;</a></h3>
 <p>Implementación acoplada al template <code>finanz</code> (<code>packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml</code>) y alineada con la guía <a href="../agents/quant_trader/">Quant Trader</a>.</p>
 <table>
@@ -2142,7 +2227,7 @@ uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </s
 </tr>
 <tr>
 <td><code>IBKR_EXECUTE_ORDER_URL</code></td>
-<td>POST JSON <code>{"signal_id","paper":true}</code> (opcional; sin URL la orden no se envía al broker tras HITL) y cabecera <strong>X-Duckclaw-IBKR-Account-Mode: paper|live</strong> (Finanz siempre paper). En el receptor de referencia, modo efectivo: <code>OHLCV_BROKER_EXECUTE_FORCE_PAPER</code>, luego cabecera, luego JSON (default paper). <strong>POST /api/broker/execute</strong> en <code>services/ibkr-ohlcv-api</code>. TIF/brackets: script <code>OHLCV_EXECUTE_ORDER_*</code> o tu servicio en el VPS.</td>
+<td>POST JSON mínimo <code>{"signal_id","paper":true}</code> (opcional; sin URL la orden no se envía al broker tras HITL). El gateway puede <strong>enriquecer</strong> el cuerpo con <code>ticker</code>, <code>signal_type</code>, <code>proposed_weight</code>, <code>mandate_id</code> (Quant Trader) o <code>action</code>, <code>quantity</code> (Finanz) para que el VPS no dependa de copiar el <code>.duckdb</code>; el receptor inyecta <code>DUCKCLAW_EMBEDDED_EXECUTE_JSON</code> en el hook. Cabecera <strong><code>X-Duckclaw-IBKR-Account-Mode: paper|live</code></strong> (coherente con sesión/env; Finanz siempre paper). Modo efectivo en el receptor: <code>OHLCV_BROKER_EXECUTE_FORCE_PAPER</code>, luego cabecera, luego JSON (default paper). <strong><code>POST /api/broker/execute</code></strong> en <code>services/ibkr-ohlcv-api</code>. TIF/brackets: <code>OHLCV_EXECUTE_ORDER_*</code> o tu servicio en el VPS.</td>
 </tr>
 <tr>
 <td><code>DUCKCLAW_QUANT_HITL_GRANT_TTL_SEC</code></td>
@@ -2172,7 +2257,9 @@ uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </s
 <li><code>/trading_session --status</code></li>
 <li><code>/trading_session --stop</code></li>
 <li><code>/cancel_signal &lt;signal_id&gt;</code></li>
+<li><code>/execute_all_moc &lt;session_uid&gt;</code> — HITL en bloque: ejecuta todas las señales <code>moc_hrp_cfd</code> <code>PENDING_HITL</code> para el <code>session_uid</code> del ciclo MOC.</li>
 </ul>
+<p><strong>Core-Satellite HRP+MOC</strong> (spec <code>specs/features/Core-Satellite HRP Weekly + MOC CFD.md</code>): PM2 sobre el host del vault con <code>TZ=America/Bogota</code>; <code>scripts/quant/hrp_weekly_job.py</code> (domingo ~20:00 COT ejemplo) y <code>MOC_PHASE=calc|remind|expire scripts/quant/moc_pipeline.py</code>. Universo HRP/MOC por <code>HRP_CORE_SATELLITE_UNIVERSE</code>; alertas opcionales vía <code>DUCKCLAW_QUANT_ALERT_CHAT_ID</code> + <code>N8N_OUTBOUND_WEBHOOK_URL</code>; escrituras vía singleton writer (<code>enqueue_duckdb_write_sync</code>) + proceso db-writer.</p>
 <p>Flags extendidos de sesión:</p>
 <ul>
 <li><code>--max-drawdown &lt;pct&gt;</code>: objetivo de DD máximo para <code>session_goal</code> (ej. <code>2</code> = 2%).</li>
@@ -2293,12 +2380,16 @@ pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-DB-Writer
 <td><code>uv sync</code></td>
 </tr>
 <tr>
+<td>3b</td>
+<td>(Opcional) <code>uv run python scripts/doctor.py</code> — diagnóstico local (Redis, Docker, GitHub MCP, …)</td>
+</tr>
+<tr>
 <td>4</td>
 <td><code>uv run duckops init</code></td>
 </tr>
 <tr>
 <td>5</td>
-<td><code>uv run duckops serve --gateway</code></td>
+<td><code>uv run duckops serve --gateway</code> (dev) <strong>o</strong> <code>uv run duckops serve --pm2 --gateway</code> (PM2 <strong><code>DuckClaw-Gateway</code></strong>, <strong>§5</strong>)</td>
 </tr>
 <tr>
 <td>6</td>
@@ -2317,12 +2408,17 @@ pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-DB-Writer
 <hr />
 <h2 id="8-cheat-sheet-del-dia-a-dia">8. Cheat sheet del día a día<a class="headerlink" href="#8-cheat-sheet-del-dia-a-dia" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>init<span class="w">                         </span><span class="c1"># Reconfigurar / instalar</span>
-uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>serve<span class="w"> </span>--gateway<span class="w">              </span><span class="c1"># Solo gateway en dev</span>
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/doctor.py<span class="w">             </span><span class="c1"># Diagnóstico local (§5)</span>
+uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>serve<span class="w"> </span>--gateway<span class="w">              </span><span class="c1"># Gateway en dev (sin PM2)</span>
+uv<span class="w"> </span>run<span class="w"> </span>duckops<span class="w"> </span>serve<span class="w"> </span>--pm2<span class="w"> </span>--gateway<span class="w">        </span><span class="c1"># Genera ecosystem + PM2 DuckClaw-Gateway (§5)</span>
+pm2<span class="w"> </span>start<span class="w"> </span>config/ecosystem.api.config.cjs<span class="w"> </span>--only<span class="w"> </span>DuckClaw-Gateway<span class="w">  </span><span class="c1"># Si el ecosystem ya existe</span>
 pm2<span class="w"> </span>status<span class="w">                                  </span><span class="c1"># Si usas PM2 tras el wizard</span>
-pm2<span class="w"> </span>logs<span class="w"> </span>BI-Analyst-Gateway<span class="w">                 </span><span class="c1"># Ej.: traza Telegram + subagentes</span>
+pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-Gateway<span class="w">                   </span><span class="c1"># Gateway único por defecto (duckops --pm2 --gateway)</span>
+pm2<span class="w"> </span>logs<span class="w"> </span>BI-Analyst-Gateway<span class="w">                 </span><span class="c1"># Ej.: traza Telegram + subagentes (multi-gateway)</span>
 pm2<span class="w"> </span>logs<span class="w"> </span>JobHunter-Gateway<span class="w">                  </span><span class="c1"># Job-Hunter + resúmenes /context</span>
 pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-DB-Writer<span class="w">                 </span><span class="c1"># Escrituras + CONTEXT_INJECTION</span>
 pm2<span class="w"> </span>flush<span class="w">                                   </span><span class="c1"># Vaciar logs PM2</span>
+pm2<span class="w"> </span>restart<span class="w"> </span>DuckClaw-Gateway<span class="w"> </span>--update-env<span class="w">   </span><span class="c1"># Tras cambiar .env en setup de un solo gateway</span>
 pm2<span class="w"> </span>restart<span class="w"> </span>BI-Analyst-Gateway<span class="w"> </span>--update-env<span class="w"> </span><span class="c1"># Nombre según config/api_gateways_pm2.json; tras cambiar DUCKCLAW_*</span>
 <span class="c1"># Tras cambiar DUCKCLAW_TOOL_READ_POOL_* o DUCKCLAW_READ_SQL_MAX_RESPONSE_CHARS: mismo restart</span>
 <span class="c1"># Telegram (admin): /context --add …  |  /context --summary  — ver §2.3</span>

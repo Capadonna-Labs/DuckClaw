@@ -1471,7 +1471,7 @@
 <p>La imagen incluye <strong>noVNC</strong> (websockify en el puerto <strong>6080</strong> dentro del contenedor). Para depuración en máquina de confianza, puedes publicar el puerto con la variable de entorno del <strong>proceso que crea el sandbox</strong> (gateway / graph):</p>
 <div class="highlight"><pre><span></span><code>STRIX_BROWSER_PUBLISH_NOVNC=1
 </code></pre></div>
-<p>Luego abre <code>http://127.0.0.1:6080/vnc.html</code> en el host. Solo tiene sentido con red tipo <code>bridge</code> (p. ej. workers con <code>network.default: allow</code> como JobHunter). <strong>No</strong> activar en producción pública: el flujo VNC va sin contraseña pensando en red aislada/ephemeral.</p>
+<p>Con <code>STRIX_BROWSER_PUBLISH_NOVNC=1</code> y red <code>bridge</code>, Docker publica 6080 a un puerto aleatorio en el host. El gateway proxifica con token en <code>/api/v1/sandbox/novnc/view/{token}/…</code>; usa <code>DUCKCLAW_PUBLIC_URL</code> para la URL enviada al usuario o <code>http://127.0.0.1:&lt;puerto&gt;/vnc.html</code> en dev. <strong>Tailscale Funnel</strong> puede exponer HTTPS al gateway; TTL: <code>DUCKCLAW_BROWSER_NOVNC_TTL_S</code> (default 600). Solo <code>bridge</code>; el VNC interno sigue sin contraseña (protección: token + TTL).</p>
 <h2 id="politica-por-worker">Politica por worker<a class="headerlink" href="#politica-por-worker" title="Permanent link">&para;</a></h2>
 <p>Cada worker puede declarar <code>security_policy.yaml</code> junto a su <code>manifest.yaml</code>.
 Si falta el archivo, se aplica una politica estricta por defecto (deny-all).</p>

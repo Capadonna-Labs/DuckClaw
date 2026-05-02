@@ -1,5 +1,10 @@
 # Gateway PM2: errores frecuentes
 
+## Alcance
+
+- **Un solo proceso PM2:** el flujo habitual es `uv run duckops serve --pm2 --gateway` → nombre **`DuckClaw-Gateway`**, archivo `config/ecosystem.api.config.cjs`. Reinicio/logs: `pm2 restart DuckClaw-Gateway --update-env`, `pm2 logs DuckClaw-Gateway`. Guía canónica: [COMANDOS §5](COMANDOS.md); diagnóstico local: `uv run python scripts/doctor.py`.
+- **Esta página** se centra en **varios gateways en el mismo host** (p. ej. `Finanz-Gateway`, `TheMind-Gateway`, entradas en `config/api_gateways_pm2.json`) y en conflictos de puerto, DuckDB bloqueado o argumentos PM2 obsoletos.
+
 ## Puertos: Finanz (8000) y TheMind (8080)
 
 Es un diseño **válido** y **no hay conflicto entre ellos**:
@@ -39,7 +44,7 @@ En `/api/v1/agent/chat`, el gateway resolvía la **bóveda activa** del usuario 
 
 ## Comprobar duplicados en la config fusionada
 
-Tras `duckops serve --pm2 --gateway`, el CLI puede avisar si en `config/api_gateways_pm2.json` hay **el mismo puerto en dos `apps`** o la **misma `DUCKCLAW_DB_PATH`** en varios procesos. Eso **sí** es un error de configuración. **No** aplica cuando son 8000 vs 8080 con rutas coherentes.
+Tras `uv run duckops serve --pm2 --gateway` (escenario multi-gateway con `api_gateways_pm2.json`), el CLI puede avisar si hay **el mismo puerto en dos `apps`** o la **misma `DUCKCLAW_DB_PATH`** en varios procesos. Eso **sí** es un error de configuración. **No** aplica cuando son 8000 vs 8080 con rutas coherentes.
 
 ### Asistente (wizard): resolver conflictos
 
@@ -59,7 +64,9 @@ El `services/api-gateway/main.py` carga `.env` con `setdefault`; si PM2 no inyec
 
 Si el error es **`[Errno 48]` en 8000** para TheMind, PM2 sigue con **args viejos** (`--port 8000`). Borra y vuelve a crear el proceso para leer el ecosystem:
 
-`pm2 delete TheMind-Gateway && pm2 start config/ecosystem.api.config.cjs --only TheMind-Gateway`
+```bash
+pm2 delete TheMind-Gateway && pm2 start config/ecosystem.api.config.cjs --only TheMind-Gateway
+```
 
 (o `pm2 restart TheMind-Gateway --update-env` si ya coincide el `args` con puerto 8080).
 

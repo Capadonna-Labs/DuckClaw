@@ -19,7 +19,7 @@ Operational runbooks for installing, running, monitoring, and troubleshooting Du
 | Need | Document |
 |------|----------|
 | Wizard + topology | [Installation](../Installation.md) |
-| Redis, Telegram, PM2, variables (canonical cheat sheet §8) | [Commands (COMANDOS)](../COMANDOS.md) |
+| Redis, Telegram, PM2 (`duckops serve --pm2 --gateway`), `doctor.py`, variables (canonical cheat sheet §8) | [Commands (COMANDOS)](../COMANDOS.md) |
 | Port / DuckDB / PM2 conflicts | [Troubleshooting Gateway PM2](../Troubleshooting-Gateway-PM2.md) |
 | Logs, LangSmith, fly commands | [Observability and Identity](../Observability-2.1-Identidad.md) |
 | Sandbox hardening | [Strix Sandbox Security](../Strix-Sandbox-Security.md) |

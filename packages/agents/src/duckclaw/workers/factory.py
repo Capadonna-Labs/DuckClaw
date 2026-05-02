@@ -1913,7 +1913,13 @@ def build_worker_graph(
             try:
                 from duckclaw.forge.skills.github_bridge import register_github_skill
 
-                register_github_skill(tools, spec.github_config)
+                lw = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
+                register_github_skill(
+                    tools,
+                    spec.github_config,
+                    logical_worker_id=lw,
+                    manifest_worker_slug=str(spec.worker_id or "").strip(),
+                )
             except Exception:
                 pass
         if getattr(spec, "google_trends_config", None) is not None:

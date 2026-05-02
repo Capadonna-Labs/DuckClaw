@@ -971,6 +971,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#duckclaw.gateway_db.default_pqrsd_assistant_vault_path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        default_pqrsd_assistant_vault_path
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#duckclaw.gateway_db.get_gateway_db" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1540,6 +1551,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#duckclaw.gateway_db.default_pqrsd_assistant_vault_path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        default_pqrsd_assistant_vault_path
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#duckclaw.gateway_db.get_gateway_db" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1860,6 +1882,26 @@ Compatible con código que usa <code>.query</code>, <code>._path</code> y <code>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="duckclaw.gateway_db.default_pqrsd_assistant_vault_path" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">default_pqrsd_assistant_vault_path</span><span class="p">(</span><span class="n">vault_user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></code>
+
+<a href="#duckclaw.gateway_db.default_pqrsd_assistant_vault_path" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Ruta absoluta a <code>db/private/&lt;vault_user_id&gt;/pqrsd-assistantdb1.duckdb</code>.</p>
+<p>Usada cuando <code>DUCKCLAW_PQRSD_ASSISTANT_DB_PATH</code> no está definido y el chat va al worker
+PQRSD-Assistant, para no heredar el vault dedicado del hub (p. ej. Finanz).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="duckclaw.gateway_db.get_gateway_db" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">get_gateway_db</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Any</span></code>
 
@@ -1890,7 +1932,7 @@ Compatible con código que usa <code>.query</code>, <code>._path</code> y <code>
         <p>Ruta absoluta del DuckDB del gateway (hub ACL / whitelist).</p>
 <p>Primera variable no vacía entre <code>DUCKCLAW_WAR_ROOM_ACL_DB_PATH</code>,
 <code>DUCKCLAW_FINANZ_DB_PATH</code>, <code>DUCKCLAW_JOB_HUNTER_DB_PATH</code>,
-<code>DUCKCLAW_SIATA_DB_PATH</code>, luego <code>DUCKDB_PATH</code>; resuelta con
+<code>DUCKCLAW_SIATA_DB_PATH</code>, <code>DUCKCLAW_PQRSD_ASSISTANT_DB_PATH</code>, luego <code>DUCKDB_PATH</code>; resuelta con
 <code>resolve_env_duckdb_path</code>.</p>
 
 

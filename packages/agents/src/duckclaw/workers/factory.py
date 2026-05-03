@@ -598,6 +598,9 @@ def _quant_extract_tickers(text: str) -> list[str]:
         "TO",
         "Y",
         "O",
+        # Manager synthetic tasks start with "TAREA: …" — not a valid equity symbol.
+        "TAREA",
+        "TASK",
     }
     out: list[str] = []
     seen: set[str] = set()
@@ -2850,6 +2853,9 @@ def build_worker_graph(
             if (_lid or "").strip().lower() == "quant_trader" and _wants_new_signal:
                 # En comandos operativos de nueva señal no forzar `get_ibkr_portfolio` first.
                 # Con Groq esto puede inducir tool_use_failed al mezclar tool_call + texto.
+                is_portfolio = False
+            if (_lid or "").strip().lower() == "quant_trader" and _is_quant_operational_directive:
+                # TAREA sintética del manager incluye texto tipo "fetch+portfolio+..."; no forzar IBKR.
                 is_portfolio = False
             if (_lid or "").strip().lower() == "quant_trader" and _is_goals_tick_msg:
                 # En ticks /goals no forzar "solo portfolio": primero debe correr el ciclo CFD/HRP.

@@ -34,7 +34,10 @@ _log = logging.getLogger(__name__)
 # Cabecera inyectada antes del código del usuario (Strix / run_sandbox).
 # Telegram sendPhoto rechaza PNG con transparencia o procesamiento raro (IMAGE_PROCESS_FAILED):
 # fondo blanco opaco + dpi moderado en savefig y rcParams por defecto.
-_SANDBOX_PYTHON_HEADER = """# Available: pandas, numpy, matplotlib, mplfinance, seaborn, scipy, pypfopt (PyPortfolioOpt: HRP, efficient_frontier, etc.)
+_SANDBOX_PYTHON_HEADER = """# Available: pandas, numpy, matplotlib, mplfinance, seaborn, scipy, duckdb, pyarrow,
+# PyPortfolioOpt (import pypfopt), ML4T diagnostic/backtest imports (ej. ml4t.diagnostic, ml4t.backtest).
+# Ingestión de mercado: usar datos del HOST (fetch_*/read_sql inyectados) o /workspace/data/* RO —
+# política Quant default sin red; NO ml4t-data remoto dentro del sandbox.
 # Gráficos en /workspace/output/*.png — compatible con Telegram sendPhoto:
 #   plt.savefig('/workspace/output/mi_chart.png', dpi=100, facecolor='white', edgecolor='none', bbox_inches='tight')
 try:
@@ -64,8 +67,8 @@ _DEFAULT_BROWSER_IMAGE = "duckclaw/browser-env:latest"
 # Límites de texto devuelto al LLM en run_browser_sandbox (evitar reventar contexto; MQL5 puede ser largo).
 _BROWSER_SANDBOX_STDOUT_TAIL = 4000
 _BROWSER_SANDBOX_STDERR_TAIL = 1500
-_FALLBACK_IMAGE = "python:3.11-slim"
-_SANDBOX_MEMORY = "512m"
+_FALLBACK_IMAGE = "python:3.12-slim"
+_SANDBOX_MEMORY = "768m"
 _SANDBOX_TIMEOUT = 30          # segundos de timeout por ejecución
 _MAX_RETRIES_DEFAULT = 3
 
@@ -199,7 +202,7 @@ class StrixSandboxManager:
     Spec: sección 4 y 6 de Sandbox_de_Ejecucion_Libre_Basado_en_Strix.md
     - network_mode=none (Zero exfiltration)
     - --cap-drop=ALL
-    - mem_limit=512m
+    - mem_limit=768m (default DuckClaw; ML4T + Playwright headroom)
     - Montaje de datos en modo read-only; output en read-write
     """
 
@@ -1102,7 +1105,7 @@ def _mercenary_run_blocking(directive: str, limit: int, tid: str) -> dict[str, A
         "command": _mercenary_entrypoint_command(),
         "name": cname,
         "detach": True,
-        "mem_limit": str(policy_kw.get("mem_limit", "512m")),
+        "mem_limit": str(policy_kw.get("mem_limit", _SANDBOX_MEMORY)),
         "nano_cpus": int(policy_kw.get("nano_cpus", int(1e9))),
         "network_mode": str(policy_kw.get("network_mode", "none")),
         "cap_drop": policy_kw.get("cap_drop", ["ALL"]),

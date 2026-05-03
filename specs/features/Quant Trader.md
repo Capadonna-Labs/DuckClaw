@@ -50,17 +50,24 @@ CREATE TABLE finance_worker.trade_signals (
 
 ### Contratos (Skills)
 - `fetch_market_data(ticker: str, timeframe: str) -> dict`: Retorna OHLCV. Sujeto a Regla de Evidencia Única.
-- `execute_sandbox_script(code: str, dependencies: list[str]) -> dict`: Ejecuta lógica quant en Strix. Retorna `stdout` sanitizado. Timeout estricto: 30s.
+- `execute_sandbox_script(code: str, dependencies: list[str]) -> dict`: Ejecuta lógica quant en Strix. Retorna `stdout` sanitizado. Timeout efectivo según [`security_policy.yaml`](packages/agents/src/duckclaw/forge/templates/Quant-Trader/security_policy.yaml) del worker.
 - `propose_trade_signal(mandate_id: str, ticker: str, weight: float, rationale: str) -> dict`: Emite intent de señal. Dispara el RiskGuard determinista.
 - `execute_approved_signal(signal_id: str) -> dict`: Envía la orden al IBKR MCP. Falla determinísticamente si `human_approved != TRUE` en DuckDB.
 
+### ML4T (sandbox + batch, sin ml4t-data)
+
+- La imagen DuckClaw `docker/sandbox` incluye **`ml4t-diagnostic[backtest]`** (métricas y librería `ml4t.backtest`). **No** se integra **`ml4t-data`**; la serie de precios sigue entrando por **`fetch_market_data`**, **`fetch_ib_gateway_ohlcv`** y **`read_sql`** contra Duck gestionado por DuckClaw.
+- **Sandbox Quant (Telegram):** red **`deny`** por defecto; solo computar sobre OHLCV/arrays inyectados por el host o ficheros montados RO.
+- Jobs **batch offline** (`network none`): `scripts/quant/run_ml4t_batch_docker.sh` monta DuckDB solo lectura y corre diagnósticos / resumen vectorial sobre `quant_core.ohlcv_data`; documentado en [`docs/COMANDOS.md`](docs/COMANDOS.md).
+- **`ml4t.diagnostic.integration.DataQualityReport`:** en Telegram/sandbox debe armarse mediante la plantilla `packages/agents/src/duckclaw/forge/templates/Quant-Trader/snippets/ml4t_dqr_from_ohlcv_sandbox.py` sobre filas OHLC vigentes (`read_sql`/`fetch_*` mismo turno), no mediante dict incompleto: el contrato ML4T exige `symbol`, `source`, `frequency`, `date_range` (UTC), métricas anidadas y `DataAnomaly` bien tipados — de lo contrario pydantic lanza errores de validación (p. ej. «6 validation errors for DataQualityReport»).
+
 ### Validaciones
-- **Regla de Evidencia Única:** El nodo Validator rechaza cualquier `propose_trade_signal` si no existe un registro de `fetch_market_data` exitoso para el mismo `ticker` en el turno actual del LangGraph state.
+- **Regla de Evidencia Única:** El Validator rechaza `propose_trade_signal` si no hubo **`fetch_market_data` *o*** **`fetch_ib_gateway_ohlcv` exitoso** para el mismo `ticker` en el turno actual (véase mensaje tool `EVIDENCE_UNIQUE_RULE` en código).
 - **RiskGuard Determinista:** Si `proposed_weight` > límite global del tenant (ej. 10% del capital líquido), el nodo Python sobrescribe el peso al máximo permitido antes de persistir en DuckDB, notificando la reducción en el rationale.
 - **Domain Closure:** La ejecución y las señales siguen ancladas a evidencia OHLCV/portfolio. Preguntas o contexto sobre macro/sentimiento se responden **dentro del worker** con herramientas permitidas (p. ej. búsqueda web, Reddit, calendarios FMP), sin usar narrativa como sustituto de velas para `propose_trade_signal`.
 
 ### Edge cases
-- **Ceguera Sensorial (IBKR Down/Rate Limit):** Si `fetch_market_data` falla, el worker aborta el pipeline inmediatamente con el payload: *"🔴 Ceguera Sensorial: Imposible validar OHLCV para {ticker}. Mandato suspendido."* No se permite fallback a Tavily ni extrapolación de datos.
+- **Ceguera Sensorial:** Si falla la ingesta OHLCV necesaria en ese paso, la respuesta al usuario sigue la línea **canónica del template Quant-Trader (Caveman / harness):** `🔴 Ceguera Sensorial:[herramienta] no retornó datos. STOP.` — sin párrafos extra. **Prohibido** usar Tavily (u otras fuentes web) como sustituto de precios u OHLCV. Sustituir `[herramienta]` por el nombre exacto de la tool que falló.
 - **Sandbox OOM / Timeout:** Si el script de backtesting excede memoria o tiempo en OrbStack, el worker reporta el fallo técnico y marca el mandato como `REJECTED` por inviabilidad computacional.
 - **HITL Timeout:** Si el usuario no ejecuta `/execute_signal` en un plazo de 4 horas (configurable por tenant), un cronjob del Singleton Writer marca la señal como `DISCARDED` (Stale Signal) para evitar ejecuciones con datos de mercado caducados.
 - **Manager Routing Failure:** Si el payload del "A2A Contract" llega malformado, el worker emite un log a `task_audit_log` y solicita retransmisión al Manager sin mutar el ledger.

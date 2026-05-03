@@ -25,6 +25,23 @@ def test_load_security_policy_finanz_file_is_valid() -> None:
     assert "mql5.com" in hosts or "www.mql5.com" in hosts
 
 
+def test_quant_trader_security_policy_sandbox_ttl() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    worker_dir = (
+        repo_root
+        / "packages"
+        / "agents"
+        / "src"
+        / "duckclaw"
+        / "forge"
+        / "templates"
+        / "Quant-Trader"
+    )
+    policy = load_security_policy("Quant-Trader", worker_dir=worker_dir)
+    assert policy.network.default == "deny"
+    assert policy.max_execution_time_seconds == 600
+
+
 def test_job_hunter_security_policy_browser_ttl() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     worker_dir = (

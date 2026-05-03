@@ -52,3 +52,15 @@ def test_quant_extract_signal_id_reads_uuid() -> None:
 def test_quant_extract_tickers_dedupes_and_filters() -> None:
     out = _quant_extract_tickers("Genera señal para AAPL y MSFT; luego AAPL")
     assert out == ["AAPL", "MSFT"]
+
+
+def test_quant_extract_tickers_ignores_tarea_prefix_meta_spy() -> None:
+    """Evidencia gateway: ticker=TAREA al forzar fetch; el prefijo TAREA: no es símbolo."""
+    body = (
+        "TAREA: El usuario acaba de confirmar con un mensaje corto (p. ej. Procede / Sí) que desea continuar "
+        "con el rebalanceo HRP (META/SPY). Flujo: fetch_ib_gateway_ohlcv META/SPY; evaluate_cfd_state;"
+    )
+    out = _quant_extract_tickers(body)
+    assert "TAREA" not in out
+    assert out[0] == "META"
+    assert "SPY" in out

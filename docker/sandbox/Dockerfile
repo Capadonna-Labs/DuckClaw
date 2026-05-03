@@ -1,17 +1,20 @@
 # duckclaw/sandbox — imagen base para el Strix Sandbox
-# Spec: specs/Sandbox_de_Ejecucion_Libre_Basado_en_Strix.md §2
+# Spec: specs/features/Strix Sandbox & Security Policy Engine (Zero-Trust Execution).md §2
+#
+# ML4T: solo diagnostic + event backtest runtime (extras [backtest]), sin ml4t-data —
+# ingestión de mercado sigue en DuckClaw (Gateway / DuckDB).
 #
 # Build: docker build -t duckclaw/sandbox:latest docker/sandbox/
 # Uso  : gestionado automáticamente por StrixSandboxManager
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Instalar uv como gestor de paquetes.
 RUN pip install --no-cache-dir uv
 
-# Dependencias analíticas: pandas, matplotlib, duckdb; scipy + sklearn (HRP, ML ligero);
-# Cabecera inyectada en sandbox.py menciona pandas, scipy, etc.
-# + yfinance (VIX/series Yahoo dentro del contenedor; requiere red si se descarga en vivo)
+# Dependencias analíticas: pandas, matplotlib, duckdb; scipy + sklearn (HRP);
+# Cabecera inyectada en sandbox.py menciona pandas, scipy, pypfopt, ML4T (diagnostic/backtest).
+# + yfinance (VIX/Yahoo; solo si sandbox tiene red o datos cacheados offline)
 RUN pip install --no-cache-dir \
         pandas==2.2.3 \
         matplotlib==3.9.4 \
@@ -27,6 +30,12 @@ RUN pip install --no-cache-dir \
         yfinance==0.2.66 \
     && rm -rf /root/.cache/pip
 
+# ML4T: diagnóstico + motor backtest — sin extras [data] ni [viz]/[all] (pip install ml4t-diagnostic[backtest]==0.1.0b15)
+RUN pip install --no-cache-dir "ml4t-diagnostic[backtest]==0.1.0b15" \
+    && rm -rf /root/.cache/pip
+
+RUN python -c "import ml4t.diagnostic, ml4t.backtest as _bt; print('ml4t ok:', _bt.__file__)"
+
 # Dependencias browser/LLM para automatización en sandbox (según requerimiento).
 RUN uv pip install --system browser-use langchain-openai playwright \
     && python -m playwright install --with-deps chromium
@@ -37,7 +46,9 @@ RUN mkdir -p /workspace/data /workspace/output
 WORKDIR /workspace
 
 # Usuario sin privilegios (refuerza --cap-drop=ALL en runtime)
-RUN useradd -m sandbox
+RUN useradd -m sandbox \
+    && chown -R sandbox:sandbox /workspace
+
 USER sandbox
 
 CMD ["tail", "-f", "/dev/null"]

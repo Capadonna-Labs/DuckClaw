@@ -10,5 +10,5 @@ filesystem:
 secrets:
   in_memory_only: true
   allowed_secrets: []
-# HRP / backtests pueden superar 30s con varios tickers y clustering
-max_execution_time_seconds: 120
+# ML4T HRP (Ledoit-Wolf + clustering) y backtests multi-activo: >120s frecuentes; techo = schema.le
+max_execution_time_seconds: 600

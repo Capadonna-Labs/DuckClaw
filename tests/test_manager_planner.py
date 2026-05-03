@@ -37,6 +37,16 @@ def test_plan_task_quant_operational_intent_prefers_fly_command() -> None:
     assert "tool chaining manual" in task.lower()
 
 
+def test_plan_task_quant_backtest_keeps_original_user_text() -> None:
+    """'ejecuta un backtest' must not trigger TAREA fly (would poison portfolio detection)."""
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    msg = "ejecuta un backtest"
+    task, override = _plan_task(msg, "Quant-Trader")
+    assert override is None
+    assert task.strip() == msg
+
+
 def test_cashflow_stress_intent_detection() -> None:
     from duckclaw.graphs.manager_graph import _user_signals_cashflow_stress
 

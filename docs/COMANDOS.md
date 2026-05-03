@@ -6,6 +6,7 @@
 uv run duckops serve --pm2 --gateway
 pm2 start ecosystem.db-writer.config.cjs
 pm2 save
+pm2 list
 ```
 
 ## Utilidad
@@ -23,3 +24,4 @@ pm2 logs JobHunter-Gateway
 pm2 logs DuckClaw-DB-Writer
 pm2 restart DuckClaw-Gateway --update-env        # Tras .env
 ```
+

@@ -8,11 +8,13 @@ Implementar un entorno de ejecución efímero y aislado (Sandbox) basado en cont
 Dado que el host es una Mac Mini M4, se utilizará el motor de contenedores de OrbStack configurado para ejecución sin privilegios.
 
 *   **Imagen Base:** `python:3.12-slim` (o una imagen personalizada `duckclaw-strix-base` pre-empaquetada con `polars`, `pyarrow` y `requests`).
-*   **Imagen `docker/sandbox` (referencia):** además de pandas, matplotlib, mplfinance, seaborn, duckdb, scipy, scikit-learn, pyarrow, requests, vaderSentiment, incluye **`yfinance`** para scripts que descarguen datos Yahoo (^VIX, etc.). Si la política de red del worker es `deny`, las llamadas de red de `yfinance` fallarán en runtime; el import y el código offline siguen siendo válidos.
+*   **Imagen `docker/sandbox` (referencia):** pandas, matplotlib, mplfinance, seaborn, duckdb, scipy, scikit-learn, pyarrow, requests, vaderSentiment, **`yfinance`** (falla si `network=deny` salvo modo offline/cache), **`ml4t-diagnostic[backtest]`** (métricas y motor backtest ML4T; sin **ml4t-data** para no duplicar la ingesta DuckClaw).
+*   **Jobs batch ML4T offline (`network none`):** `scripts/quant/run_ml4t_batch_docker.sh` monta el `.duckdb` **solo lectura** y ejecuta diagnósticos/vector summaries sobre `quant_core.ohlcv_data`; no sustituye al Singleton Writer.
+*   **Quant-Trader `execute_sandbox_script`:** plantilla `forge/templates/Quant-Trader/security_policy.yaml` → `max_execution_time_seconds: 600` (techo Pydantic `le=600`). Backtests HRP/ML4T cortaban en 120s.
 *   **Restricciones de Daemon:**
     *   Ejecución forzada con `--user 1000:1000`.
     *   Drop de todas las capabilities del kernel: `--cap-drop=ALL`.
-    *   Límites de recursos (cgroups): Máximo 512MB RAM, 1 CPU core por ejecución.
+    *   Límites de recursos (cgroups): **768MB** RAM por defecto DuckClaw (stack ML4T + navegadores), 1 CPU core por ejecución (ajuste documentado junto al worker si hiciera falta).
 
 ## 3. Motor de Políticas Declarativas (Pydantic Schema)
 
@@ -89,7 +91,7 @@ Este es el puente entre LangGraph y el demonio de contenedores.
             "volumes": policy.filesystem.readonly_mounts,
             "tmpfs": {vol: "" for vol in policy.filesystem.ephemeral_volumes},
             "environment": {k: get_secret(k) for k in policy.secrets.allowed_secrets},
-            "mem_limit": "512m",
+            "mem_limit": "768m",
             "detach": True
         }
         

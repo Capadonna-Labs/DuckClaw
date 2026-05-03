@@ -715,6 +715,18 @@ def _quant_operational_intent_requires_fly_command(incoming: str) -> bool:
     t = (incoming or "").strip().lower()
     if not t:
         return False
+    # Backtests / simulación histórica (sandbox, ML4T, etc.) no son instrucciones de fly `quant_cycle`.
+    if any(
+        k in t
+        for k in (
+            "backtest",
+            "backtesting",
+            "walk-forward",
+            "walk forward",
+            "retrotest",
+        )
+    ):
+        return False
     if t.startswith("/quant_cycle"):
         return False
     if re.search(
@@ -756,10 +768,12 @@ def _try_quant_hrp_affirm_followup(
         "El usuario confirmó (mensaje corto) continuar con el hilo de rebalanceo HRP / señales respecto a la pregunta anterior del asistente.",
         "Flujo: sesión quant_core; get_ibkr_portfolio; fetch_ib_gateway_ohlcv META/SPY; evaluate_cfd_state; propose_trade_signal con HITL según reglas del worker.",
     ]
+    # Prefijo con símbolos evita que `_quant_extract_tickers` tome "TAREA" o ejemplos (TSLA, …) como ticker primario.
     planned = (
+        "(META/SPY) "
         "TAREA: El usuario acaba de confirmar con un mensaje corto (p. ej. Procede / Sí) que desea **continuar** con el **rebalanceo HRP** "
         "o la generación de señales descrita en el mensaje anterior del asistente (sesión quant_core.trading_sessions, objetivo **rebalance_hrp**, tickers acordados). "
-        "**Prohibido** en este turno: saludo de «inicio de sesión», listar capacidades genéricas, o iniciar búsqueda de otros activos (TSLA, NVDA, QQQ, IWM, etc.) ajenos a la sesión. "
+        "**Prohibido** en este turno: saludo de «inicio de sesión», listar capacidades genéricas, o iniciar búsqueda de otros activos (tsla, nvda, qqq, iwm, etc.) ajenos a la sesión. "
         "Ejecuta el flujo operativo de Quant-Trader: datos de sesión y cartera, OHLCV según reglas, `evaluate_cfd_state`, luego `propose_trade_signal` alineado a HRP y políticas de riesgo/HITL."
     )
     return (title, task_list, planned, "Quant-Trader")

@@ -114,7 +114,7 @@ def security_policy_to_docker_kwargs(policy: SecurityPolicy) -> Dict[str, object
         "cap_drop": ["ALL"],
         "security_opt": ["no-new-privileges"],
         "user": "1000:1000",
-        "mem_limit": "512m",
+        "mem_limit": "768m",
         "nano_cpus": int(1e9),
         "volumes": volumes,
         "tmpfs": tmpfs,

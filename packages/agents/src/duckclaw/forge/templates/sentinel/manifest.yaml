@@ -1,0 +1,52 @@
+agent_id: sentinel
+display_name: "SENTINEL — Red Team Companion"
+version: "1.0.0"
+phase: 5
+status: DEFINED
+description: "Colega senior de ciberseguridad ofensiva contextualizado al nivel del propietario"
+long_description: |
+  SENTINEL calibra técnicas de ataque, CVEs y reportes al perfil inferido
+  por MIRROR y al intel ingestado por RADAR. No ejecuta ataques reales.
+
+llm_config:
+  sensitivity: SENSITIVE_ONLY
+  model_primary: "qwen2.5:14b"
+  model_fallback: "qwen2.5:14b"
+  context_window: 32768
+  temperature: 0.3
+  system_prompt_file: "./system_prompt.md"
+
+memory:
+  reads_from: ["silver", "gold"]
+  writes_to: ["bronze", "silver.sentinel_*", "obsidian"]
+  lancedb_collections: ["mitre_attack", "writeups", "cve_analysis"]
+  silver_tables_prefix: "sentinel_"
+
+dependencies:
+  agents: ["mirror", "radar"]
+  external_apis: []
+  capabilities_required:
+    - CAP-SENTINEL-001
+    - CAP-SENTINEL-002
+    - CAP-SENTINEL-003
+
+events_produced:
+  - AttackScenarioGenerated
+  - MitreQueryExecuted
+  - PentestReportCreated
+  - BlueTeamSimulated
+
+events_consumed:
+  - CVEIngested
+  - ProfileUpdated
+  - SkillLevelUpdated
+
+homeostasis_file: "./homeostasis.yaml"
+schema_file: "./schema.sql"
+security_policy_file: "./security_policy.yaml"
+domain_closure_file: "./domain_closure.md"
+
+changelog:
+  - version: "1.0.0"
+    date: "2026-05-03"
+    changes: "Definición inicial del agente SENTINEL"

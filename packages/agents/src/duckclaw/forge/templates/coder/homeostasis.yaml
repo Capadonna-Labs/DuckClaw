@@ -1,0 +1,30 @@
+agent_id: coder
+homeostasis_version: "1.0.0"
+
+anomaly_rules:
+
+  - id: HA-CODER-001
+    name: "Repo activo sin indexar"
+    condition:
+      table: coder_repos
+      filter: "status = 'ACTIVE'"
+      check: "last_indexed IS NULL OR last_indexed < now() - INTERVAL '7 days'"
+    action: SUGGEST
+    message: "El repo {name} no ha sido indexado recientemente. ¿Lo analizo?"
+    severity: INFO
+    bronze_event: RepoIndexRequired
+
+  - id: HA-CODER-002
+    name: "Error recurrente detectado"
+    condition:
+      table: coder_errors
+      check: "COUNT(*) FILTER (WHERE error_type = X AND occurred_at > now() - INTERVAL '7 days') > 2"
+    action: NOTIFY_OWNER
+    message: "El error '{error_type}' apareció {count} veces esta semana. ¿Lo documentamos?"
+    severity: WARNING
+    bronze_event: CodePatternDetected
+
+health_checks:
+  - check: silver_tables_exist
+    interval: boot
+    action_on_fail: QUARANTINE

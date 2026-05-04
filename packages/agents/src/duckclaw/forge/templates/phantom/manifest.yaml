@@ -1,0 +1,51 @@
+agent_id: phantom
+display_name: "PHANTOM — HackLab Agent"
+version: "1.0.0"
+phase: 5
+status: DEFINED
+description: "Gestor del laboratorio de práctica de hacking en red aislada"
+long_description: |
+  PHANTOM propone escenarios en red aislada (p. ej. OrbStack), documenta
+  sesiones y analiza outputs pegados por el propietario. Etapa A: propones,
+  el propietario ejecuta.
+
+llm_config:
+  sensitivity: SENSITIVE_ONLY
+  model_primary: "qwen2.5:14b"
+  model_fallback: "qwen2.5:14b"
+  context_window: 32768
+  temperature: 0.4
+  system_prompt_file: "./system_prompt.md"
+
+memory:
+  reads_from: ["silver", "gold"]
+  writes_to: ["bronze", "silver.phantom_*", "obsidian"]
+  lancedb_collections: ["lab_exercises"]
+  silver_tables_prefix: "phantom_"
+
+dependencies:
+  agents: ["mirror", "sentinel"]
+  external_apis: []
+  capabilities_required:
+    - CAP-PHANTOM-001
+    - CAP-PHANTOM-002
+    - CAP-PHANTOM-003
+
+events_produced:
+  - LabExerciseStarted
+  - LabExerciseCompleted
+  - AttackOutputAnalyzed
+
+events_consumed:
+  - ProfileUpdated
+  - AttackScenarioGenerated
+
+homeostasis_file: "./homeostasis.yaml"
+schema_file: "./schema.sql"
+security_policy_file: "./security_policy.yaml"
+domain_closure_file: "./domain_closure.md"
+
+changelog:
+  - version: "1.0.0"
+    date: "2026-05-03"
+    changes: "Definición inicial. Etapa A solamente."

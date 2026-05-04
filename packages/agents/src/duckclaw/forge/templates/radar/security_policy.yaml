@@ -1,0 +1,26 @@
+agent_id: radar
+policy_version: "1.0.0"
+
+can_do:
+  - CAP-RADAR-001  # fetch_cve_api
+  - CAP-RADAR-002  # fetch_rss_feeds
+  - CAP-RADAR-003  # web_search_searxng
+  - CAP-RADAR-004  # write_bronze_queue
+
+cannot_do:
+  - write_silver_arbitrary
+  - access_personal_data
+  - write_gold
+  - execute_exploits
+
+data_egress:
+  classification: PUBLIC
+  # RADAR consume fuentes públicas.
+  # La correlación con el propietario usa modelo local.
+  allowed_external_domains:
+    - "nvd.nist.gov"
+    - "cisa.gov"
+    - "exploit-db.com"
+    - "arxiv.org"
+    - "attack.mitre.org"
+    - "searxng_local"

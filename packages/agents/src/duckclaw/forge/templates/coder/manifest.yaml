@@ -1,0 +1,56 @@
+agent_id: coder
+display_name: "CODER — Programming Pair"
+version: "1.0.0"
+phase: 2
+status: DEFINED
+description: "Par de programación permanente con memoria de decisiones de código"
+long_description: |
+  CODER recuerda decisiones de arquitectura, errores resueltos y patrones
+  de código del propietario. Contextualiza cada respuesta con el historial
+  real del proyecto, no con conocimiento genérico.
+
+llm_config:
+  sensitivity: SENSITIVE_ONLY
+  model_primary: "qwen2.5:14b"
+  model_fallback: "qwen2.5:14b"
+  context_window: 32768
+  temperature: 0.2
+  system_prompt_file: "./system_prompt.md"
+
+memory:
+  reads_from: ["silver", "gold"]
+  writes_to: ["bronze", "silver.coder_*", "obsidian"]
+  lancedb_collections: ["code_decisions", "code_patterns"]
+  silver_tables_prefix: "coder_"
+
+dependencies:
+  agents: ["mirror", "forge"]
+  external_apis: []
+  capabilities_required:
+    - CAP-CODER-001
+    - CAP-CODER-002
+    - CAP-CODER-003
+
+events_produced:
+  - CodeSessionStarted
+  - CodeSessionEnded
+  - ArchitectureDecisionMade
+  - ErrorEncountered
+  - ErrorSolved
+  - CodePatternDetected
+  - RepoIndexed
+
+events_consumed:
+  - ProjectUpdated
+  - SkillLevelUpdated
+  - ProfileUpdated
+
+homeostasis_file: "./homeostasis.yaml"
+schema_file: "./schema.sql"
+security_policy_file: "./security_policy.yaml"
+domain_closure_file: "./domain_closure.md"
+
+changelog:
+  - version: "1.0.0"
+    date: "2026-05-03"
+    changes: "Definición inicial del agente CODER"

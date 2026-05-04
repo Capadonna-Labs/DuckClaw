@@ -1,0 +1,33 @@
+agent_id: sentinel
+policy_version: "1.0.0"
+
+can_do:
+  - CAP-SENTINEL-001  # read_radar_cve_intel
+  - CAP-SENTINEL-002  # write_sentinel_silver
+  - CAP-SENTINEL-003  # write_obsidian_writeups
+  - CAP-SENTINEL-004  # read_mirror_profile
+
+cannot_do:
+  - execute_real_world_attacks
+  - external_network_access_without_capability
+  - modify_other_agents_silver
+  - approve_permissions
+  - read_phantom_lab_raw_disk
+
+data_egress:
+  classification: SENSITIVE_ONLY
+  never_egress:
+    - sentinel_cve_analyses
+    - sentinel_pentest_reports
+    - sentinel_attack_scenarios
+    - owner_context_from_mirror
+
+sandbox:
+  filesystem_access:
+    allowed_paths:
+      - "data/silver/sentinel_*"
+      - "data/obsidian/security/"
+    denied_paths:
+      - "vault/"
+      - "~/.ssh/"
+  network_access: none

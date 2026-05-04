@@ -1,0 +1,32 @@
+agent_id: maestro
+policy_version: "1.0.0"
+
+can_do:
+  - CAP-MAESTRO-001  # read_aggregated_agent_context
+  - CAP-MAESTRO-002  # write_maestro_silver
+  - CAP-MAESTRO-003  # write_obsidian_curriculum
+  - CAP-MAESTRO-004  # invoke_mirror_summary
+
+cannot_do:
+  - external_network_access
+  - modify_other_agents_silver
+  - approve_permissions
+  - execute_code_autonomously
+
+data_egress:
+  classification: SENSITIVE_ONLY
+  never_egress:
+    - maestro_curriculum
+    - maestro_study_sessions
+    - maestro_quizzes
+    - inferred_owner_profile
+
+sandbox:
+  filesystem_access:
+    allowed_paths:
+      - "data/silver/maestro_*"
+      - "data/obsidian/learning/"
+    denied_paths:
+      - "vault/"
+      - "~/.ssh/"
+  network_access: none

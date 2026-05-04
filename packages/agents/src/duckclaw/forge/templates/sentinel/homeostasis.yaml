@@ -1,0 +1,28 @@
+agent_id: sentinel
+homeostasis_version: "1.0.0"
+
+anomaly_rules:
+  - id: HA-SENTINEL-001
+    name: "CVE crítico sin análisis en Silver"
+    condition:
+      table: sentinel_cve_analyses
+      check: "ingested_cvss_ge_9_without_row_within_24h"
+    action: NOTIFY_OWNER
+    message: "CVE {cve_id} crítico requiere análisis registrado"
+    severity: CRITICAL
+    bronze_event: AlertTriggered
+
+  - id: HA-SENTINEL-002
+    name: "Escenario de ataque sin referencia MITRE"
+    condition:
+      table: sentinel_attack_scenarios
+      check: "mitre_refs IS NULL OR json_array_length(mitre_refs) = 0"
+    action: SUGGEST
+    message: "Escenario {title} sin IDs MITRE; completar antes de publicar"
+    severity: INFO
+    bronze_event: AttackScenarioGenerated
+
+health_checks:
+  - check: silver_tables_exist
+    interval: boot
+    action_on_fail: QUARANTINE

@@ -1,0 +1,31 @@
+agent_id: phantom
+policy_version: "1.0.0"
+
+can_do:
+  - CAP-PHANTOM-001  # propose_lab_scenario
+  - CAP-PHANTOM-002  # write_phantom_silver
+  - CAP-PHANTOM-003  # write_obsidian_lab_notes
+
+cannot_do:
+  - instruct_real_world_attacks
+  - external_network_to_non_lab_targets
+  - modify_other_agents_silver
+  - approve_permissions
+  - execute_on_host_outside_sandbox
+
+data_egress:
+  classification: SENSITIVE_ONLY
+  never_egress:
+    - phantom_lab_sessions
+    - phantom_output_analysis
+    - lab_topology_secrets
+
+sandbox:
+  network_access: none
+  filesystem_access:
+    allowed_paths:
+      - "data/silver/phantom_*"
+      - "data/obsidian/lab/"
+    denied_paths:
+      - "vault/"
+      - "~/.ssh/"

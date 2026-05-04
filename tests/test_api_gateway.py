@@ -154,17 +154,26 @@ def test_chat_request_username_coerces_dict_to_str() -> None:
 def test_chat_parallel_invocations_env() -> None:
     import os
 
-    prev = os.environ.get("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS")
+    prev_d = os.environ.get("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS")
+    prev_c = os.environ.get("CHAT_PARALLEL_INVOCATIONS")
     try:
         os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = ""
+        os.environ.pop("CHAT_PARALLEL_INVOCATIONS", None)
         assert gateway_main._chat_parallel_invocations_enabled() is False
         os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = "true"
         assert gateway_main._chat_parallel_invocations_enabled() is True
+        os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = ""
+        os.environ["CHAT_PARALLEL_INVOCATIONS"] = "true"
+        assert gateway_main._chat_parallel_invocations_enabled() is True
     finally:
-        if prev is None:
+        if prev_d is None:
             os.environ.pop("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS", None)
         else:
-            os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = prev
+            os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = prev_d
+        if prev_c is None:
+            os.environ.pop("CHAT_PARALLEL_INVOCATIONS", None)
+        else:
+            os.environ["CHAT_PARALLEL_INVOCATIONS"] = prev_c
 
 
 def test_clean_agent_response_removes_menus() -> None:

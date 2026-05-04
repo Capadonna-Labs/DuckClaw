@@ -33,11 +33,6 @@ from urllib.error import URLError
 _REPO_ROOT_FOR_DB = Path(__file__).resolve().parent.parent.parent
 os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_REPO_ROOT_FOR_DB))
 
-def _duckclaw_debug_ingress_ndjson(payload: dict[str, Any]) -> None:
-    """No-op; antes escribía NDJSON de diagnóstico de ingress Telegram."""
-    del payload
-
-
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -585,15 +580,6 @@ async def _telegram_http_ingress_probe_middleware(request: Request, call_next):
     p = request.url.path or ""
     if request.method.upper() == "POST" and p.startswith("/api/v1/telegram"):
         _gateway_log.info("telegram_http_ingress: path=%s", p)
-        _duckclaw_debug_ingress_ndjson(
-            {
-                "hypothesisId": "H-INGRESS",
-                "location": "main.py:_telegram_http_ingress_probe_middleware",
-                "message": "post_telegram_api_path",
-                "data": {"path": p, "has_query": bool(request.url.query)},
-                "timestamp": int(time.time() * 1000),
-            }
-        )
     return await call_next(request)
 
 
@@ -638,13 +624,13 @@ def _chat_parallel_invocations_enabled() -> bool:
     pueden ejecutar el grafo a la vez; «BI-Analyst N» es el índice entre instancias
     activas del mismo worker en ese chat (1 si eres el único en curso, 2 si hay dos, …).
     Riesgo: orden del historial Redis y estado /tasks pueden intercalarse; activar solo si lo necesitas.
+
+    ``CHAT_PARALLEL_INVOCATIONS`` es alias de ``DUCKCLAW_CHAT_PARALLEL_INVOCATIONS`` (ver ``.env.example``).
     """
-    return (os.environ.get("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS") or "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    for key in ("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS", "CHAT_PARALLEL_INVOCATIONS"):
+        if (os.environ.get(key) or "").strip().lower() in ("1", "true", "yes", "on"):
+            return True
+    return False
 
 
 @asynccontextmanager

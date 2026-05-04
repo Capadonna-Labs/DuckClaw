@@ -63,13 +63,11 @@ from functools import partial
 
 
 def _parallel_chat_invocations_enabled() -> bool:
-    """Alineado con DUCKCLAW_CHAT_PARALLEL_INVOCATIONS en services/api-gateway/main.py."""
-    return (os.environ.get("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS") or "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    """Alineado con services/api-gateway/main.py (incl. alias CHAT_PARALLEL_INVOCATIONS)."""
+    for key in ("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS", "CHAT_PARALLEL_INVOCATIONS"):
+        if (os.environ.get(key) or "").strip().lower() in ("1", "true", "yes", "on"):
+            return True
+    return False
 
 
 from duckclaw.utils.langsmith_trace import get_tracing_config

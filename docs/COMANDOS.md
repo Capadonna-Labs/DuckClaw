@@ -61,5 +61,10 @@ Equipo:
 
 /heartbeat on                 # Muestra el uso de tools 
 /heartbeat off                # oculta el uso de tools
+
+/context on
+/context off
+/context --summary 
+/context --add Documentacion especifica 
 ```
 

@@ -1,0 +1,28 @@
+agent_id: phantom
+homeostasis_version: "1.0.0"
+
+anomaly_rules:
+  - id: HA-PHANTOM-001
+    name: "Sesión de lab abierta demasiado tiempo"
+    condition:
+      table: phantom_lab_sessions
+      check: "completed_at IS NULL AND started_at < now() - INTERVAL '8 hours'"
+    action: NOTIFY_OWNER
+    message: "Sesión {scenario_title} lleva horas abierta. ¿Cerramos o documentamos?"
+    severity: INFO
+    bronze_event: LabExerciseStarted
+
+  - id: HA-PHANTOM-002
+    name: "Ejercicio sin análisis de output"
+    condition:
+      table: phantom_exercises
+      check: "status = 'DONE' AND NOT EXISTS (SELECT 1 FROM phantom_output_analysis a WHERE a.session_id = session_id)"
+    action: SUGGEST
+    message: "Ejercicio completado sin análisis; pega output para cerrar el ciclo"
+    severity: INFO
+    bronze_event: LabExerciseCompleted
+
+health_checks:
+  - check: silver_tables_exist
+    interval: boot
+    action_on_fail: QUARANTINE

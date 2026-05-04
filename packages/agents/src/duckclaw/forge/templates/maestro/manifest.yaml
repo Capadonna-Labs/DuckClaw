@@ -1,0 +1,53 @@
+agent_id: maestro
+display_name: "MAESTRO — Adaptive Tutor"
+version: "1.0.0"
+phase: 6
+status: DEFINED
+description: "Tutor adaptativo de por vida con visión completa del propietario"
+long_description: |
+  MAESTRO orquesta aprendizaje usando FORGE, CODER, MIRROR, SENTINEL y RADAR.
+  Propone el siguiente paso sin preguntas genéricas de chatbot.
+
+llm_config:
+  sensitivity: SENSITIVE_ONLY
+  model_primary: "qwen2.5:14b"
+  model_fallback: "qwen2.5:14b"
+  context_window: 32768
+  temperature: 0.5
+  system_prompt_file: "./system_prompt.md"
+
+memory:
+  reads_from: ["bronze", "silver", "gold"]
+  writes_to: ["bronze", "silver.maestro_*", "obsidian"]
+  lancedb_collections: ["curriculum", "study_sessions"]
+  silver_tables_prefix: "maestro_"
+
+dependencies:
+  agents: ["mirror", "forge", "coder", "sentinel", "radar"]
+  external_apis: []
+  capabilities_required:
+    - CAP-MAESTRO-001
+    - CAP-MAESTRO-002
+    - CAP-MAESTRO-003
+    - CAP-MAESTRO-004
+
+events_produced:
+  - StudySessionStarted
+  - ConceptExplained
+  - QuizGenerated
+  - CurriculumUpdated
+  - MilestoneReached
+  - StudyStreakUpdated
+
+events_consumed:
+  - "ALL"  # usa contexto completo de todos los agentes
+
+homeostasis_file: "./homeostasis.yaml"
+schema_file: "./schema.sql"
+security_policy_file: "./security_policy.yaml"
+domain_closure_file: "./domain_closure.md"
+
+changelog:
+  - version: "1.0.0"
+    date: "2026-05-03"
+    changes: "Definición inicial del agente MAESTRO"

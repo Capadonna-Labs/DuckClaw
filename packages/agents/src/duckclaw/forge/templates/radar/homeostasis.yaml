@@ -1,0 +1,22 @@
+agent_id: radar
+homeostasis_version: "1.0.0"
+
+anomaly_rules:
+  - id: HA-RADAR-001
+    name: "API externa sin respuesta"
+    condition:
+      check: "last_successful_fetch > now() - INTERVAL '12 hours'"
+      per_source: true
+    action: NOTIFY_OWNER
+    message: "La fuente {source} lleva {hours}h sin responder"
+    severity: WARNING
+    bronze_event: AlertTriggered
+
+  - id: HA-RADAR-002
+    name: "CVE crítico detectado"
+    condition:
+      check: "cvss_score >= 9.0 AND aplica_mi_stack = TRUE"
+    action: IMMEDIATE_ALERT
+    message: "CVE CRÍTICO: {cve_id} (CVSS {score}) afecta tu stack"
+    severity: CRITICAL
+    bronze_event: AlertTriggered

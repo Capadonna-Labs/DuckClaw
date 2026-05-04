@@ -1,0 +1,55 @@
+agent_id: radar
+display_name: "RADAR — External Intelligence"
+version: "1.0.0"
+phase: 4
+status: DEFINED
+description: "Monitoreo de inteligencia técnica externa 24/7"
+
+llm_config:
+  sensitivity: BOTH
+  model_primary: "deepseek-chat"
+  model_fallback: "qwen2.5:14b"
+  context_window: 64000
+  temperature: 0.1
+  system_prompt_file: "./system_prompt.md"
+
+memory:
+  reads_from: ["gold"]
+  writes_to: ["bronze"]
+  lancedb_collections: ["cve_intel", "news_intel"]
+  silver_tables_prefix: "radar_"
+
+dependencies:
+  agents: ["mirror"]
+  external_apis:
+    - "nvd.nist.gov"
+    - "cisa.gov"
+    - "exploit-db.com"
+    - "arxiv.org"
+    - "attack.mitre.org"
+  capabilities_required:
+    - CAP-RADAR-001
+    - CAP-RADAR-002
+    - CAP-RADAR-003
+    - CAP-RADAR-004
+
+events_produced:
+  - CVEIngested
+  - NewsIngested
+  - PaperIngested
+  - ExploitDetected
+  - AlertTriggered
+  - IntelReportGenerated
+
+events_consumed:
+  - ProfileUpdated  # de MIRROR, para filtrar por stack del propietario
+
+homeostasis_file: "./homeostasis.yaml"
+schema_file: "./schema.sql"
+security_policy_file: "./security_policy.yaml"
+domain_closure_file: "./domain_closure.md"
+
+changelog:
+  - version: "1.0.0"
+    date: "2026-05-03"
+    changes: "Definición inicial del agente RADAR"

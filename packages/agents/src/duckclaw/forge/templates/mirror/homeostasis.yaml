@@ -1,0 +1,24 @@
+agent_id: mirror
+homeostasis_version: "1.0.0"
+
+anomaly_rules:
+
+  - id: HA-MIRROR-001
+    name: "Skill sin actualizar por mucho tiempo"
+    condition:
+      table: mirror_skills
+      check: "last_updated < now() - INTERVAL '14 days'"
+    action: RECOMPUTE
+    message: "Recalculando niveles de habilidades desactualizados"
+    severity: INFO
+    bronze_event: ProfileUpdated
+
+  - id: HA-MIRROR-002
+    name: "Gold profile no reconstruido"
+    condition:
+      table: gold_my_profile
+      check: "generated_at < now() - INTERVAL '25 hours'"
+    action: REBUILD_GOLD
+    message: "Gold profile tiene más de 25h. Reconstruyendo."
+    severity: WARNING
+    bronze_event: ProfileUpdated

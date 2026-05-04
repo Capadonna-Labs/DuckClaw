@@ -1,0 +1,36 @@
+agent_id: coder
+policy_version: "1.0.0"
+
+can_do:
+  - CAP-CODER-001  # read_local_git_repos
+  - CAP-CODER-002  # write_code_context
+  - CAP-CODER-003  # read_forge_projects
+  - CAP-CODER-004  # write_obsidian_vault
+  - CAP-CODER-005  # analyze_code_patterns
+
+cannot_do:
+  - external_network_access
+  - execute_code_autonomously
+  - modify_other_agents_silver
+  - access_phantom_lab
+  - approve_permissions
+
+data_egress:
+  classification: SENSITIVE_ONLY
+  never_egress:
+    - coder_repos
+    - coder_decisions
+    - coder_patterns
+    - coder_errors
+    - local_source_code
+
+sandbox:
+  filesystem_access:
+    allowed_paths:
+      - "data/silver/coder_*"
+      - "data/obsidian/codigo/"
+      - "~/Developer/"  # solo lectura de repos locales
+    denied_paths:
+      - "vault/"
+      - "~/.ssh/"
+  network_access: none

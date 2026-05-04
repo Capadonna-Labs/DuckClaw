@@ -1,0 +1,28 @@
+agent_id: maestro
+homeostasis_version: "1.0.0"
+
+anomaly_rules:
+  - id: HA-MAESTRO-001
+    name: "Racha de estudio rota"
+    condition:
+      table: maestro_study_sessions
+      check: "max(streak_day) gap > 2 days without session"
+    action: NOTIFY_OWNER
+    message: "Racha interrumpida; propongo sesión corta de recuperación"
+    severity: INFO
+    bronze_event: StudyStreakUpdated
+
+  - id: HA-MAESTRO-002
+    name: "Currículo desalineado con MIRROR"
+    condition:
+      type: HEURISTIC
+      check: "curriculum_max_level > mirror_max_skill_plus_2"
+    action: SUGGEST
+    message: "Tema demasiado avanzado vs nivel inferido; rebalancear módulos"
+    severity: WARNING
+    bronze_event: CurriculumUpdated
+
+health_checks:
+  - check: silver_tables_exist
+    interval: boot
+    action_on_fail: QUARANTINE

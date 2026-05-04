@@ -1,0 +1,52 @@
+agent_id: mirror
+display_name: "MIRROR — Living Owner Profile"
+version: "1.0.0"
+phase: 3
+status: DEFINED
+description: "Modelo vivo del perfil técnico del propietario, inferido desde Bronze"
+long_description: |
+  MIRROR no interactúa directamente con el propietario. Es un proceso
+  interno que lee Bronze y Silver, infiere el perfil técnico del propietario
+  y lo pone disponible para que los demás agentes personalicen sus respuestas.
+
+llm_config:
+  sensitivity: SENSITIVE_ONLY
+  model_primary: "qwen2.5:14b"
+  model_fallback: "qwen2.5:14b"
+  context_window: 32768
+  temperature: 0.1
+  system_prompt_file: "./system_prompt.md"
+
+memory:
+  reads_from: ["bronze", "silver"]
+  writes_to: ["bronze", "gold.my_profile", "silver.mirror_skills"]
+  lancedb_collections: []
+  silver_tables_prefix: "mirror_"
+
+dependencies:
+  agents: []
+  external_apis: []
+  capabilities_required:
+    - CAP-MIRROR-001
+    - CAP-MIRROR-002
+    - CAP-MIRROR-003
+
+events_produced:
+  - SkillLevelUpdated
+  - BehavioralPatternDetected
+  - DomainConnectionFound
+  - ProfileUpdated
+  - InactivityDetected
+
+events_consumed:
+  - ALL  # lee todos los eventos de Bronze
+
+homeostasis_file: "./homeostasis.yaml"
+schema_file: "./schema.sql"
+security_policy_file: "./security_policy.yaml"
+domain_closure_file: "./domain_closure.md"
+
+changelog:
+  - version: "1.0.0"
+    date: "2026-05-03"
+    changes: "Definición inicial del agente MIRROR"

@@ -1,0 +1,22 @@
+agent_id: mirror
+policy_version: "1.0.0"
+
+can_do:
+  - CAP-MIRROR-001  # read_bronze_all
+  - CAP-MIRROR-002  # write_gold_profile
+  - CAP-MIRROR-003  # write_silver_skills
+  - CAP-MIRROR-004  # notify_agents
+
+cannot_do:
+  - write_silver_arbitrary
+  - external_network_access
+  - direct_user_interaction
+  - approve_permissions
+
+data_egress:
+  classification: SENSITIVE_ONLY
+  never_egress:
+    - gold_my_profile
+    - mirror_skills
+    - mirror_preferences
+    - bronze_events

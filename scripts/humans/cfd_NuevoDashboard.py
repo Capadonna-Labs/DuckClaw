@@ -12,10 +12,32 @@ from dotenv import load_dotenv
 import time
 from datetime import datetime
 
-# 1. Configuración de Entorno
-env_path = Path(__file__).resolve().parent.parent.parent / '.env'
+# 1. Configuración de Entorno y Rutas
+import sys
+from pathlib import Path
+
+# Localizar la raíz del repositorio (3 niveles arriba de este script)
+repo_root = Path(__file__).resolve().parent.parent.parent
+env_path = repo_root / '.env'
 load_dotenv(dotenv_path=env_path)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+# 1. Agregar la raíz al path para imports tipo 'packages.agents...'
+if str(repo_root) not in sys.path:
+    sys.path.append(str(repo_root))
+
+# 2. Agregar todas las carpetas 'src' de los paquetes al path 
+# Esto permite que 'import duckclaw' funcione correctamente
+packages_dir = repo_root / "packages"
+if packages_dir.exists():
+    for pkg in packages_dir.iterdir():
+        src_path = pkg / "src"
+        if src_path.exists():
+            # Insertamos al inicio para que tenga prioridad
+            sys.path.insert(0, str(src_path))
+
+print(f"--- Sistema de rutas inicializado ---")
+print(f"Buscando DB en: {os.getenv('DUCKCLAW_QUANT_SCRIPT_DB')}")
+
 
 from packages.agents.src.duckclaw.forge.skills.ibkr_bridge import (
     fetch_ibkr_total_equity_numeric, 

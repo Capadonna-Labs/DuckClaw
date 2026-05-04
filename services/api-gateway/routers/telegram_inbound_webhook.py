@@ -502,13 +502,15 @@ def _telegram_webhook_default_tenant_id() -> str:
 
 
 def _telegram_webhook_parallel_processing_enabled() -> bool:
-    """Alineado con _chat_parallel_invocations_enabled del gateway: respuesta HTTP 200 al instante."""
-    return (os.environ.get("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS") or "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    """Alineado con _chat_parallel_invocations_enabled del gateway: respuesta HTTP 200 al instante.
+
+    ``CHAT_PARALLEL_INVOCATIONS`` es alias documentado en ``.env.example``; sin activar el paralelo
+    el webhook espera al grafo y Telegram/proxy suelen cortar con 502.
+    """
+    for key in ("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS", "CHAT_PARALLEL_INVOCATIONS"):
+        if (os.environ.get(key) or "").strip().lower() in ("1", "true", "yes", "on"):
+            return True
+    return False
 
 
 def _normalize_alias(value: str) -> str:
@@ -1056,7 +1058,6 @@ def build_telegram_inbound_webhook_router(
             len(str((_em.get("caption") if _em else None) or "")),
             bool(_em and _em.get("reply_to_message")),
         )
-
         redis_client = getattr(request.app.state, "redis", None)
         if update_id is not None and redis_client is not None:
             _fp = telegram_webhook_header_fingerprint(header_secret)

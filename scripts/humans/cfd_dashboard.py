@@ -95,12 +95,56 @@ def _resolve_quant_db_path() -> str | None:
 
 st.set_page_config(page_title="DuckClaw CFD Command Center", layout="wide", page_icon="🦆")
 
-# Estilo Dark Aeroespacial
+# Estilo Cyber-Industrial Premium
+
 st.markdown("""
     <style>
-    .main { background-color: #0f172a; color: #f8f9fa; }
-    .stMetric { background-color: #1e293b; padding: 15px; border-radius: 10px; border: 1px solid #334155; }
-    [data-testid="stMetricValue"] { font-size: 26px; color: #ef4444; }
+    /* Fondo más profundo y profesional */
+    .main { 
+        background-color: #0b0f19; 
+        color: #f1f5f9; 
+    }
+
+    /* Tarjetas de métricas con efecto Glass y borde neón sutil */
+    .stMetric {
+        background: linear-gradient(145deg, #111827, #111b2d);
+        padding: 20px !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(0, 242, 255, 0.1) !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+        transition: all 0.3s ease-in-out;
+    }
+
+    /* Efecto de iluminación al pasar el ratón */
+    .stMetric:hover {
+        border: 1px solid #00f2ff !important;
+        box-shadow: 0 0 15px rgba(0, 242, 255, 0.2);
+        transform: translateY(-3px);
+    }
+
+    /* El valor numérico principal (Glow Cyan) */
+    [data-testid="stMetricValue"] {
+        font-size: 32px !important;
+        color: #00f2ff !important;
+        font-family: 'JetBrains Mono', 'Roboto Mono', monospace;
+        font-weight: 800;
+        text-shadow: 0 0 10px rgba(0, 242, 255, 0.4);
+    }
+
+    /* Las etiquetas de texto (Equity, PnL, etc.) */
+    [data-testid="stMetricLabel"] {
+        color: #94a3b8 !important;
+        font-size: 13px !important;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        font-weight: 600;
+    }
+    
+    /* Personalización de la barra lateral */
+    section[data-testid="stSidebar"] {
+        background-color: #080c14;
+        border-right: 1px solid rgba(255, 255, 255, 0.05);
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -292,30 +336,67 @@ def _fmt_pct(v: float | None) -> str:
 
 def build_pnl_curve(pnl_history):
     if not pnl_history:
-        return go.Figure().update_layout(template="plotly_dark", title="Esperando datos...")
+        return go.Figure().update_layout(template="plotly_dark", title="Esperando flujo de datos...")
     
     steps = list(range(len(pnl_history)))
     
     fig = go.Figure()
+    
+    # Línea con suavizado (spline) y relleno degradado
     fig.add_trace(go.Scatter(
-        x=steps, y=pnl_history, mode='lines', name='PnL ($)',
-        line=dict(color='#60a5fa', width=2), fill='tozeroy', fillcolor='rgba(96, 165, 250, 0.1)'
+        x=steps, 
+        y=pnl_history, 
+        mode='lines', 
+        name='PnL Net ($)',
+        line=dict(color='#00f2ff', width=3, shape='spline'), # Cyan Neón
+        fill='tozeroy', 
+        fillcolor='rgba(0, 242, 255, 0.08)',
+        hoverlabel=dict(bgcolor="#0f172a"),
     ))
     
-    fig.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.3)
+    # Línea de referencia Cero más técnica
+    fig.add_hline(y=0, line_dash="solid", line_color="rgba(255, 255, 255, 0.15)", line_width=1)
     
     fig.update_layout(
-        height=300, margin=dict(l=0, r=0, t=20, b=0),
-        xaxis=dict(title="Paso (Tick)", showgrid=True, gridcolor='rgba(148, 163, 184, 0.1)'),
-        yaxis=dict(title="PnL ($)", showgrid=True, gridcolor='rgba(148, 163, 184, 0.1)'),
-        paper_bgcolor='rgba(15, 23, 42, 0.5)', plot_bgcolor='rgba(30, 41, 59, 0.3)',
-        template="plotly_dark", hovermode='x unified'
+        height=320, 
+        margin=dict(l=10, r=10, t=30, b=10),
+        xaxis=dict(
+            title="Ticks de Ejecución", 
+            showgrid=True, 
+            gridcolor='rgba(255, 255, 255, 0.03)',
+            tickfont=dict(color='#64748b')
+        ),
+        yaxis=dict(
+            title="Balance ($)", 
+            showgrid=True, 
+            gridcolor='rgba(255, 255, 255, 0.03)',
+            tickfont=dict(color='#64748b')
+        ),
+        paper_bgcolor='rgba(0,0,0,0)', # Transparente para usar el fondo del CSS
+        plot_bgcolor='rgba(0,0,0,0)',
+        template="plotly_dark", 
+        hovermode='x unified'
     )
     return fig
 
-_PHASE_COLORS = {"GAS": "#22c55e", "PLASMA": "#ef4444", "SOLID": "#3b82f6", "LIQUID": "#f59e0b"}
-_PHASE_ZONE_COLORS = {"SOLID": "#1a237e", "LIQUID": "#1b5e20", "GAS": "#e65100", "PLASMA": "#b71c1c"}
-_ASSET_COLORS = {"META": "#ef4444", "SPY": "#3b82f6"}
+_PHASE_COLORS = {
+    "GAS": "#fbbf24",    # Ámbar
+    "PLASMA": "#f43f5e", # Rosa / Rojo neón
+    "SOLID": "#0ea5e9",  # Azul
+    "LIQUID": "#a855f7"  # Violeta
+}
+
+_PHASE_ZONE_COLORS = {
+    "SOLID": "#0c1a2b",  # Fondos desaturados
+    "LIQUID": "#1a102b", 
+    "GAS": "#2b1c0c", 
+    "PLASMA": "#2b0c0c"
+}
+
+_ASSET_COLORS = {
+    "META": "#ff00ff",   # Magenta
+    "SPY": "#00ffcc"     # Turquesa brillante
+}
 
 
 def _phase_from_temp(temp: float | None) -> str:

@@ -15,7 +15,7 @@ En esos turnos el contenido a sintetizar **ya va en el mensaje**; se evita levan
 
 2. **Manager `invoke_worker_node`**: si `planned_task` o `incoming` contienen la misma directiva:
    - La clave de caché del grafo del worker incluye el sufijo `::ctx_syn`.
-   - Se construye el worker con `tool_surface=context_synthesis` en `build_worker_graph`.
+   - Si la directiva es exactamente `SUMMARIZE_NEW_CONTEXT` o `SUMMARIZE_STORED_CONTEXT`, la caché también lleva `::sum_vault_ro` y `build_worker_graph` recibe `open_vault_read_only=True`: la bóveda se abre en **solo lectura** para no competir por bloqueo exclusivo con **db-writer** (inyección de contexto en cola). DuckDB permite conexiones RO concurrentes con un proceso en RW.
 
    **Follow-up a memoria indexada (sin directiva):** mensajes que parecen preguntar por notas ya en VSS (p. ej. «¿hay algo sobre X en el contexto?», «qué hay anotado sobre…») usan la **misma** superficie `context_synthesis` y sufijo `::ctx_syn` vía heurística en código (`_incoming_looks_like_semantic_context_followup`). No afecta al fast path del planner LLM salvo los turnos con directiva `SUMMARIZE_*`.
 

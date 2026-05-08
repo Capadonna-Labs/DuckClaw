@@ -425,8 +425,8 @@ def _user_signals_cashflow_stress(incoming: str) -> bool:
         "no me alcanza",
         "no me va a alcanzar",
         "flujo de caja",
-        "deudas",
-        "deuda",
+        # No incluir «deuda(s)» suelta: consultas de ledger en DuckDB (finanz) suelen decir
+        # «resumen de mis deudas» y no deben disparar INCOME_INJECTION / A2A Job-Hunter.
         "necesito ingresos",
         "ingreso extra",
         "ingresos extra",
@@ -1507,6 +1507,36 @@ def build_manager_graph(
         cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
         if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _hrp_fast:
             assigned = job_hunter_in_team
+        # region agent log
+        try:
+            _walk = Path(__file__).resolve()
+            for _ in range(10):
+                _cursor_dir = _walk / ".cursor"
+                if _cursor_dir.is_dir():
+                    _dbg_path = _cursor_dir / "debug-c964f7.log"
+                    _payload = {
+                        "sessionId": "c964f7",
+                        "runId": "debt-route",
+                        "hypothesisId": "H1",
+                        "location": "manager_graph.py:plan_node",
+                        "message": "cashflow_job_intent vs job_hunter assignment",
+                        "data": {
+                            "incoming_has_deuda": "deuda" in (incoming or "").lower(),
+                            "cashflow_job_intent": bool(cashflow_job_intent),
+                            "assigned_after_a2a_rule": str(assigned or ""),
+                            "job_hunter_in_team": bool(job_hunter_in_team),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                    with _dbg_path.open("a", encoding="utf-8") as _df:
+                        _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+                    break
+                if _walk == _walk.parent:
+                    break
+                _walk = _walk.parent
+        except Exception:
+            pass
+        # endregion
 
         # Mantener lógica existente de ruteo / planned_task
         if _hrp_fast:
@@ -1670,6 +1700,7 @@ def build_manager_graph(
         task_summary = (state.get("task_summary") or "").strip() or _task_summary_for_activity(incoming, planned_task)
         _combined = planned_task or incoming
         _lite_stdio_mcp = _worker_should_use_lite_stdio_mcp_surface(_combined)
+        _summarize_vault_ro = _incoming_has_context_summary_system_directive(_combined)
         t0 = time.monotonic()
         reply = ""
         messages = None
@@ -1699,6 +1730,8 @@ def build_manager_graph(
             )
             if _lite_stdio_mcp:
                 worker_cache_key = f"{worker_cache_key}::ctx_syn"
+            if _summarize_vault_ro:
+                worker_cache_key = f"{worker_cache_key}::sum_vault_ro"
             from duckclaw.workers.factory import _same_duckdb_file
             from duckclaw.workers.manifest import load_manifest
 
@@ -1733,6 +1766,7 @@ def build_manager_graph(
                     shared_db_path=shared_db_path or None,
                     reuse_db=db,
                     tool_surface="context_synthesis" if _lite_stdio_mcp else "full",
+                    open_vault_read_only=_summarize_vault_ro,
                 )
             worker_graph = _worker_graph_cache[worker_cache_key]
             set_log_context(

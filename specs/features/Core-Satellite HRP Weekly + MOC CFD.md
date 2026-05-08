@@ -20,9 +20,11 @@ Dos pipelines operativos desacoplados:
 | `DUCKCLAW_MOC_MACRO_VSS` | `1` = válvula MOC v2 con régimen PGQ + perfil VSS (véase spec macro). |
 | `DUCKCLAW_MOC_VSS_TIMEOUT_SEC` | Timeout lectura VSS en el job MOC (default `3`). |
 | `DUCKCLAW_MOC_PROFILE_LLM` | `1` opcional para parse LLM del perfil. |
-| `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW` | Franja **HH:MM[:SS]-HH:MM[:SS]** en **America/Bogota** **lun–vie** (inclusiva en inicio y fin; segundos opcionales, p. ej. `14:40-14:55` o `14:40:00-14:59:30`). **(a)** `propose_trade_signal` con `strategy_name` distinto de `moc_hrp_cfd` **solo** crea filas Ledger dentro de esta ventana (fuera → `OUTSIDE_MOC_PREP_WINDOW`). **(b)** Con `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1`, la auto-exec encadenada a `execute_approved_signal` también exige esta ventana. Default **`14:40:00-14:59:30`**. |
-| `DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES` | **`1`** omite **(a)** y **(b)** respecto del horario MOC (solo dev/CI; evitar en prod). |
+| `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW` | Franja **HH:MM[:SS]-HH:MM[:SS]** en **America/Bogota** **lun–vie** (inclusiva en inicio y fin; segundos opcionales). **(a)** Por defecto, `propose_trade_signal` con `strategy_name` distinto de `moc_hrp_cfd` **puede** crear filas `PENDING_HITL` en cualquier horario (lun–vie); opt-in **`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1`** restaura el bloqueo fuera de ventana (`OUTSIDE_MOC_PREP_WINDOW`). **(b)** Con `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1`, la auto-exec encadenada a `execute_approved_signal` **siempre** exige esta ventana (salvo bypass dev). Default **`14:40:00-14:59:30`**. |
+| `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER` | **`1`** = `propose_trade_signal` (strategy ≠ `moc_hrp_cfd`) solo crea Ledger dentro de `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW`; fuera → `OUTSIDE_MOC_PREP_WINDOW`. Default **desactivado** (señales “anytime”; ejecución automática sigue anclada a MOC). |
+| `DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES` | **`1`** omite la compuerta de **horario MOC** para la auto-exec encadenada **(b)** (y hace que el opt-in **(a)** nunca bloquee, al considerar “dentro de ventana”). Solo dev/CI; evitar en prod. |
 | `DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW` | Alias legacy de **`DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES`** (`1` = mismo efecto). |
+| `DUCKCLAW_MOC_BATCH_AUTO_EXECUTE` | **`1`** + `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1` + ventana MOC + reglas paper/live: tras `propose_trade_signal` con `strategy_name=moc_hrp_cfd` (p. ej. job PM2), encadena la misma auto-ejecución que `cfd_auto` (grant + `execute_approved_signal`). Default **`0`** (solo HITL para batch MOC). |
 
 **Macro PGQ + perfil:** [MOC Macro PGQ VSS.md](./MOC%20Macro%20PGQ%20VSS.md).
 
@@ -34,12 +36,13 @@ Restricción: **no** ejecutar HRP intradía automáticamente; solo cron dominica
 
 **Dentro de 08:30–15:00 COT (lun–vie operativo):**
 
-- Sesión Telegram con `session_goal.objective=overnight_gap_squeeze`: **antes** del tramo MOC típico es **solo preparación** (ingestas OHLCv/portfolio/CFD, sandbox, lectura DuckDB): **no** llamar `propose_trade_signal` para `cfd_auto` u otras hasta la ventana MOC configurada — la herramienta devuelve `OUTSIDE_MOC_PREP_WINDOW`; las señales batch del PM2 siguen siendo `moc_hrp_cfd`. No **reemplazar** el job [`moc_pipeline.py`](scripts/quant/moc_pipeline.py).
+- **Acumulación intradía (sin ledger HITL):** la tool `accumulate_moc_intraday_state` encola `INTRADAY_MOC_ACCUM_UPSERT` → db-writer hace UPSERT en `quant_core.intraday_moc_accum` (`UNIQUE(session_uid, ticker, trading_date)` en COT). Permite varias actualizaciones del JSON `payload` (merge superficial de claves). Tras `finalized_at` en fila, no se aceptan más merges. No sustituye `propose_trade_signal` en ventana MOC.
+- Sesión Telegram con `session_goal.objective=overnight_gap_squeeze`: priorizar ingestas OHLCV/portfolio/CFD, sandbox y lectura DuckDB; **`accumulate_moc_intraday_state`** para hints (postura explícita, watchlist, `force_hold`) cuando no haya catalizador intradía claro. **`propose_trade_signal`** puede crear Ledger cuando haya evidencia de mercado del turno y reglas de riesgo lo permitan; la **auto-ejecución** encadenada sigue solo en ventana MOC; batch **`moc_hrp_cfd`** = PM2 [`moc_pipeline.py`](scripts/quant/moc_pipeline.py) (no sustituir). Con **`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1`** se vuelve a bloquear propuesta fuera de ventana (`OUTSIDE_MOC_PREP_WINDOW`).
 - No usar sólo timestamps de última fila en `quant_core.ohlcv_data` como “hora local del trader” sin `get_current_time` o caveat explícito.
 
 **Ventana típica MOC en host (lun–vie, COT según cron PM2 ejemplo):**
 
-- Crons de referencia: ~**14:40** calc, ~**14:50** remind, ~**14:55** expire (véase tabla más abajo). La ventana **ejecutable/propose** en gateway default se extiende hasta **14:59:30** COT para capturar cola de cierre; alinear env con ops si el PM2 difiere.
+- Crons de referencia: ~**14:40** calc, ~**14:50** remind, ~**14:55** expire (véase tabla más abajo). La ventana **auto-exec MOC** en gateway default se extiende hasta **14:59:30** COT para capturar cola de cierre; alinear env con ops si el PM2 difiere.
 - En esa franja las señales `strategy_name=moc_hrp_cfd` generadas/expiradas por el pipeline tienen **autoridad**: el tick proactivo de Telegram (`TRADING_TICK` / `/goals`) **no** debe contradictor ellas ni duplicar un segundo flujo propio “MOC” al mismo efecto.
 
 **Ejecución batch tras MOC:** ver sección `/execute_all_moc` más abajo.
@@ -66,6 +69,8 @@ Los jobs establecen `bind_quant_market_evidence_chat("__moc__")` / `"__hrp_weekl
 
 Env `MOC_PHASE=calc|remind|expire`.
 
+**Simulación intradía:** `python scripts/quant/moc_pipeline.py --dry-run` (con `MOC_PHASE` y `DUCKCLAW_QUANT_SCRIPT_DB` como en prod). Ejecuta lecturas (vault read-only, IBKR, allocations) e imprime el cuerpo Telegram y JSON resumen; **no** envía Telegram, **no** encola SQL, **no** llama `propose_trade_signal`, **no** escribe `~/.duckclaw_moc_session.json` ni `semantic_memory` MOC.
+
 **Crons** (lun–vie ejemplo, servidor en `America/Bogota`): 14:40 calc, 14:50 remind, 14:55 expire.
 
 ### Fase calc
@@ -75,10 +80,12 @@ Env `MOC_PHASE=calc|remind|expire`.
 3. Equity desde `_get_ibkr_portfolio_impl`: `total_value` o `net_liquidation`. Si **equity &lt; 10000 USD** → STOP y mensaje **Capital insuficiente para operar HRP-CFD**.
 4. Por ticker: fase CFD = último `quant_core.fluid_state.phase` orden `timestamp DESC LIMIT 1`. Sin historia → **`SOLID`** (válvula 0.4).
 5. Si `DUCKCLAW_MOC_MACRO_VSS=1`: una vez por ciclo — `detect_current_regime`, `get_investor_profile` (timeouts VSS); por ticker — `calculate_target_allocation_v2`. Si no — `calculate_target_allocation` (átomo legacy): válvulas GAS/LIQUID/SOLID/PLASMA.
-6. `action != HOLD` → `_propose_trade_signal_impl(..., proposed_weight = target_weight*100, strategy_name=moc_hrp_cfd)`. Con `strategy_name=moc_hrp_cfd` **no** aplica auto-ejecución aunque `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1`.
+5b. **Hints intradía:** leer `quant_core.intraday_moc_accum` para `trading_date` = hoy COT y `session_uid` = fila `quant_core.trading_sessions` `id='active'`. Si hay `payload` por ticker, aplicar `apply_intraday_accum_hints_to_allocation` (mandato HRP sigue siendo **techo**; `weight_scale` acota al cap). Sin fila → mismo cálculo que antes.
+6. `action != HOLD` → `_propose_trade_signal_impl(..., proposed_weight = target_weight*100, strategy_name=moc_hrp_cfd)`. Con `strategy_name=moc_hrp_cfd` la auto-ejecución encadenada **solo** si `DUCKCLAW_MOC_BATCH_AUTO_EXECUTE=1` y `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1` y ventana MOC y sesión/mode OK; en caso contrario solo HITL (comportamiento histórico).
 
-**Otras estrategias** (`overnight_gap_squeeze`, `cfd_auto`, etc.): `propose_trade_signal` está **bloqueado** fuera de la ventana MOC (misma env que auto-exec) salvo bypass dev; la **propuesta** de Ledger no aparece antes del tramo MOC (`OUTSIDE_MOC_PREP_WINDOW`). Con `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1`, la cadena hasta `execute_approved_signal` **también** exige esa ventana.
+**Otras estrategias** (`overnight_gap_squeeze`, `cfd_auto`, etc.): por defecto `propose_trade_signal` **puede** crear Ledger fuera del tramo MOC; la cadena automática hasta `execute_approved_signal` con `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1` **sí** exige ventana MOC. Opt-in **`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1`**: bloqueo de propuesta fuera de ventana (`OUTSIDE_MOC_PREP_WINDOW`). Bypass dev: `DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES`.
 7. Persistir estado del ciclo (`MOC_SESSION_UID` UUID en archivo bajo `$TMPDIR`/`.duckclaw_moc_session` o env para fases siguientes).
+8. Tras calc exitoso (propuestas y persistencia habituales), marcar `finalized_at` en filas `intraday_moc_accum` del **mismo** `session_uid` activo y `trading_date` del día (vía cola singleton), para congelar acumulación intradía.
 
 ### Fase remind
 
@@ -94,7 +101,7 @@ Comando fly: aprueba en bloque tras `grant_execute_order` por señal y `_execute
 
 ## DDL
 
-Ver `packages/agents/.../Quant-Trader/schema.sql`: `quant_core.hrp_mandates`, columnas extra `quant_core.session_ticks` (`moc_executed`, `moc_notional`, `moc_n_orders`).
+Ver `packages/agents/.../Quant-Trader/schema.sql`: `quant_core.hrp_mandates`, columnas extra `quant_core.session_ticks` (`moc_executed`, `moc_notional`, `moc_n_orders`), tabla `quant_core.intraday_moc_accum` (acumulación intradía MOC).
 
 ## Estado delta
 

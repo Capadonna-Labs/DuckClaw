@@ -28,7 +28,7 @@ from duckclaw import DuckClaw
 from duckclaw.duckdb_read_compat import duckclaw_open_for_read_scan
 from duckclaw.db_write_queue import enqueue_duckdb_write_sync
 from duckclaw.forge.homeostasis import BeliefRegistry, HomeostasisManager
-from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
+from duckclaw.gateway_db import get_gateway_db_path, iter_goals_ticker_duckdb_paths, resolve_env_duckdb_path
 from duckclaw.graphs.on_the_fly_commands import (
     _GOALS_PROACTIVE_LAST_FIRE_KEY,
     _GOALS_PROACTIVE_TENANT_KEY,
@@ -126,46 +126,8 @@ async def _enqueue_chat_state_write(
 
 
 def _goals_ticker_scan_db_paths() -> List[str]:
-    """
-    DuckDB a escanear para /goals --delta.
-
-    Los fly commands (/goals) persisten en la bóveda del usuario (p. ej. quant_traderdb1.duckdb),
-    mientras que get_gateway_db_path() suele apuntar al hub del tenant (p. ej. finanzdb1.duckdb).
-    Sin multiplex, ambos pueden ser el mismo archivo; con Telegram multiplex suelen ser distintos.
-    """
-    raw = (os.getenv("DUCKCLAW_GOALS_TICKER_DB_PATH") or "").strip()
-    if raw:
-        from duckclaw.gateway_db import resolve_env_duckdb_path
-
-        return [resolve_env_duckdb_path(raw)]
-
-    seen: set[str] = set()
-    out: List[str] = []
-
-    def _add(p: str) -> None:
-        s = str(Path(p).expanduser().resolve())
-        if s not in seen:
-            seen.add(s)
-            out.append(s)
-
-    try:
-        _add(get_gateway_db_path())
-    except Exception:
-        pass
-
-    try:
-        gw = Path(get_gateway_db_path()).expanduser().resolve()
-        priv_root = gw.parent.parent
-        if priv_root.is_dir() and priv_root.name == "private":
-            for user_dir in sorted(priv_root.iterdir()):
-                if not user_dir.is_dir():
-                    continue
-                for f in sorted(user_dir.glob("*.duckdb")):
-                    _add(str(f))
-    except Exception:
-        pass
-
-    return out
+    """Delega en ``iter_goals_ticker_duckdb_paths`` (paquete shared) para una sola fuente de verdad."""
+    return iter_goals_ticker_duckdb_paths()
 
 
 def _goals_proactive_db_open_error_is_expected(exc: BaseException) -> bool:
@@ -438,6 +400,36 @@ async def _run_goals_proactive_tick_one_db(
                 last_fire = float(last_raw) if last_raw else 0.0
             except ValueError:
                 last_fire = 0.0
+            # region agent log
+            try:
+                with Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log").open(
+                    "a", encoding="utf-8"
+                ) as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "verify-runtime",
+                                "hypothesisId": "H_runtime_stale_or_meta_overwrite",
+                                "location": "heartbeat._run_goals_proactive_tick:delta_gate",
+                                "message": "goals_tick_precheck",
+                                "data": {
+                                    "chat_id": str(chat_id),
+                                    "worker_id": str(worker_id or ""),
+                                    "tenant_id": str(tenant_id or ""),
+                                    "delta_s": int(delta_s),
+                                    "last_fire": float(last_fire),
+                                    "since_last": float(now - last_fire) if last_fire > 0 else None,
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
             if last_fire > 0 and (now - last_fire) < float(delta_s):
                 continue
             meta_raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
@@ -449,6 +441,33 @@ async def _run_goals_proactive_tick_one_db(
                         meta = maybe_meta
                 except Exception:
                     meta = {}
+            # region agent log
+            try:
+                with Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log").open(
+                    "a", encoding="utf-8"
+                ) as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "verify-runtime",
+                                "hypothesisId": "H_meta_trigger_branch",
+                                "location": "heartbeat._run_goals_proactive_tick:meta",
+                                "message": "goals_tick_meta",
+                                "data": {
+                                    "chat_id": str(chat_id),
+                                    "meta_trigger": str(meta.get("trigger") or ""),
+                                    "has_session_uid": bool(str(meta.get("session_uid") or "").strip()),
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
             if str(meta.get("trigger") or "").strip().lower() == "trading_session":
                 session_uid = str(meta.get("session_uid") or "").strip()
                 tickers: list[str] = []
@@ -541,6 +560,35 @@ async def _run_goals_proactive_tick_one_db(
                 message = build_goals_proactive_system_event_message(
                     goals, trading_session_objective=trading_obj
                 )
+            # region agent log
+            try:
+                _kind = "TRADING_TICK" if ('"type":"TRADING_TICK"' in message or '"type": "TRADING_TICK"' in message) else "GOALS_REVIEW"
+                with Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log").open(
+                    "a", encoding="utf-8"
+                ) as _df:
+                    _df.write(
+                        json.dumps(
+                            {
+                                "sessionId": "c964f7",
+                                "runId": "verify-runtime",
+                                "hypothesisId": "H_message_type_mismatch",
+                                "location": "heartbeat._run_goals_proactive_tick:message",
+                                "message": "goals_tick_message_kind",
+                                "data": {
+                                    "chat_id": str(chat_id),
+                                    "message_kind": _kind,
+                                    "meta_trigger": str(meta.get("trigger") or ""),
+                                    "message_preview": str(message or "")[:120],
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # endregion
 
         _wid = (worker_id or "").strip()
         vault_for_gateway = str(Path(db_path).expanduser().resolve())

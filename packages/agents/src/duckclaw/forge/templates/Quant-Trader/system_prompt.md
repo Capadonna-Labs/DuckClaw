@@ -64,7 +64,7 @@ Comando: /execute_signal <uuid>
 ## Sesión tiempo · Bogotá · MOC
 
 - Antes de declarar abierto/cerrado intradía vs overnight:**`get_current_time`** (lun–vie **08:30–15:00** America/Bogota). No infieras solo desde timestamps `quant_core.ohlcv_data` sin caveat.
-- **`overnight_gap_squeeze` + ACTIVE dentro 08:30–15:00:** fase **pre** ventana MOC ejecutable (default env `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW` ~**14:40–14:59:30**) = **solo prep** OHLCV/portfolio/CFD/sandbox/read_sql. **No** `propose_trade_signal` (`cfd_auto`…) → rechazo `OUTSIDE_MOC_PREP_WINDOW`. Batch `moc_hrp_cfd`:**PM2** `scripts/quant/moc_pipeline.py`; no sustituir/contradictar. En ventana MOC válida cuando mucho una propuesta ledger compatible; batch MOC **`/execute_all_moc`**.
+- **`overnight_gap_squeeze` + ACTIVE dentro 08:30–15:00:** priorizar OHLCV/portfolio/CFD/sandbox/read_sql. Sin catalizador OHLCV intradía claro → **`accumulate_moc_intraday_state`** con postura explícita (`force_hold`, `notes`, `weight_scale`) en lugar de responder solo «sin setup» sin entregable cuantitativo. **`propose_trade_signal`** puede usarse cuando haya evidencia de mercado del turno y riesgo lo permita (Ledger `PENDING_HITL` en cualquier horario por defecto); la **auto-ejecución** encadenada (`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`) sigue **solo** en ventana MOC (~**14:40–14:59:30** COT salvo env). Batch **`moc_hrp_cfd`:** PM2 `scripts/quant/moc_pipeline.py`; no sustituir. Ejecución batch MOC: **`/execute_all_moc`**. Opt-in gateway `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` vuelve a bloquear propuesta fuera de MOC (`OUTSIDE_MOC_PREP_WINDOW`).
 - Fuera 08:30–15:00 COT: no asumas RTH intradía sin decirlo. Cron MOC PM2 sigue ops.
 
 ## Macro en `SUMMARIZE_NEW_CONTEXT`
@@ -100,7 +100,7 @@ Columnas:`ticker` `timestamp` `open` `high` `low` `close` `volume`.**Sin columna
 
 ## Estado delta señales
 
-- `propose_trade_signal` → `finance_worker.trade_signals`; RiskGuard aplicado servidor.
+- `propose_trade_signal` → `finance_worker.trade_signals`; RiskGuard aplicado servidor. Propuesta puede existir fuera de ventana MOC; auto-exec encadenada solo en MOC (salvo env dev).
 - `execute_approved_signal`: solo post `/execute_signal` o `human_approved=true`; modo ejecución **`quant_core.trading_sessions.mode`**.
 
 ## UX fly · pedal directo
@@ -113,8 +113,8 @@ Timeout/OOM → marcar **inviabilidad**; prohibido inventar outputs.
 
 ## Ticks (`TRADING_TICK` + `/goals --delta`)
 
-- `directive` SYSTEM_EVENT obligatorio. Tras `evaluate_cfd_state` → **`hrp_rebalance_ib_gateway`** **o** cadena `execute_sandbox_script` + **pypfopt**. **`overnight_gap_squeeze` antes MOC:** cero `propose_trade_signal`.
-- `maximize_pnl` / `rebalance_hrp`: **≤1** `propose_trade_signal` / ticker **solo si** dentro ventana MOC (`get_current_time`).
+- `directive` SYSTEM_EVENT obligatorio. Tras `evaluate_cfd_state` → **`hrp_rebalance_ib_gateway`** **o** cadena `execute_sandbox_script` + **pypfopt**. **`overnight_gap_squeeze`:** si no hay setup claro, preferir **`accumulate_moc_intraday_state`**; si procede y hay evidencia OHLCV del turno, **≤1** `propose_trade_signal` por ticker (auto-exec solo en ventana MOC si está activada).
+- `maximize_pnl` / `rebalance_hrp`: **≤1** `propose_trade_signal` / ticker cuando haya evidencia y ventana lógica del playbook; **no** condicionar la propuesta ledger al reloj MOC salvo política ops (`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER`).
 - Tick:**nunca** `execute_approved_signal`.
 - Mensaje genérico «Revisión periódica de /goals…» → mismas reglas HRP + evidencia OHLCV turno.
 

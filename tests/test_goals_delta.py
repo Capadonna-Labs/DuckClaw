@@ -8,8 +8,11 @@ from typing import Any
 from duckclaw.graphs.on_the_fly_commands import (
     build_goals_proactive_system_event_message,
     chat_id_from_goals_delta_config_key,
+    clear_goals_proactive_schedule,
+    execute_goals,
     format_goals_countdown_human,
     format_goals_delta_interval_human,
+    get_chat_state,
     parse_goals_delta_arg,
 )
 import services.heartbeat.main as heartbeat
@@ -272,7 +275,7 @@ def test_run_goals_proactive_finds_delta_in_sibling_vault_duckdb(
             return Resp()
 
     monkeypatch.delenv("DUCKCLAW_GOALS_TICKER_DB_PATH", raising=False)
-    monkeypatch.setattr(heartbeat, "get_gateway_db_path", lambda: hub)
+    monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: hub)
     _patch_heartbeat_sync_duckdb_write(monkeypatch)
     monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
 
@@ -531,3 +534,154 @@ def test_run_goals_proactive_trading_session_empty_manager_goals_still_ticks(
     ).fetchone()
     con2.close()
     assert row is not None and str(row[0]).strip() == "1"
+
+
+def test_execute_goals_delta_cli_forces_goals_cli_meta_and_cooldown_now(
+    tmp_path: Path,
+) -> None:
+    """Explicit `/goals --delta` must not inherit trading_session meta (avoids full TRADING_TICK on poll)."""
+    import duckdb
+
+    from duckclaw import DuckClaw
+
+    db_path = str(tmp_path / "execute_goals_cli_meta.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        """
+        CREATE TABLE agent_config (
+          key VARCHAR PRIMARY KEY,
+          value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.execute(
+        """
+        CREATE SCHEMA IF NOT EXISTS quant_core;
+        CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
+          id VARCHAR PRIMARY KEY,
+          mode VARCHAR NOT NULL,
+          tickers VARCHAR NOT NULL DEFAULT '',
+          session_uid VARCHAR,
+          session_goal JSON,
+          status VARCHAR NOT NULL DEFAULT 'ACTIVE',
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO quant_core.trading_sessions (id, mode, tickers, session_uid, session_goal, status) VALUES (?, ?, ?, ?, CAST(? AS JSON), ?)",
+        [
+            "active",
+            "paper",
+            "SPY",
+            "uid-abc",
+            json.dumps({"objective": "overnight_gap_squeeze", "signal_threshold": "GAS"}),
+            "ACTIVE",
+        ],
+    )
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?)",
+        [
+            "chat_51_worker_id",
+            "Quant-Trader",
+            "chat_51_goals",
+            json.dumps([{"belief_key": "k", "title": "G"}]),
+            "chat_51_goals_delta_meta",
+            json.dumps({"trigger": "trading_session", "session_uid": "uid-abc"}),
+            "chat_51_goals_proactive_last_fire_epoch",
+            "",
+        ],
+    )
+    con.close()
+
+    with DuckClaw(db_path, read_only=False) as db:
+        out = execute_goals(db, 51, "--delta 1h", tenant_id="Cuantitativo")
+    assert "Revisión proactiva" in (out or "")
+
+    with DuckClaw(db_path, read_only=True) as db:
+        meta_raw = (get_chat_state(db, 51, "goals_delta_meta") or "").strip()
+        em = json.loads(meta_raw) if meta_raw else {}
+        assert em.get("trigger") == "goals_cli"
+        last = (get_chat_state(db, 51, "goals_proactive_last_fire_epoch") or "").strip()
+    assert last and float(last) > 0
+
+
+def test_clear_goals_delta_off_clears_schedule_on_hub_and_sibling_vault(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """/goals --delta off debe poner goals_delta_seconds=0 en hub y bóveda; si no, el ticker sigue en bucle."""
+    import duckdb
+
+    from duckclaw import DuckClaw
+
+    priv = tmp_path / "private" / "u1"
+    priv.mkdir(parents=True)
+    hub = str(priv / "finanzdb1.duckdb")
+    vault = str(priv / "quant_traderdb1.duckdb")
+
+    def _bootstrap(p: str) -> None:
+        c = duckdb.connect(p)
+        c.execute(
+            "CREATE TABLE agent_config (key VARCHAR PRIMARY KEY, value TEXT, "
+            "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        )
+        c.close()
+
+    _bootstrap(hub)
+    _bootstrap(vault)
+
+    def _seed(p: str) -> None:
+        c = duckdb.connect(p)
+        c.executemany(
+            "INSERT INTO agent_config (key, value) VALUES (?, ?)",
+            [
+                ("chat_42_goals_delta_seconds", "120"),
+                ("chat_42_goals_proactive_tenant_id", "Cuantitativo"),
+            ],
+        )
+        c.close()
+
+    _seed(hub)
+    _seed(vault)
+
+    monkeypatch.delenv("DUCKCLAW_GOALS_TICKER_DB_PATH", raising=False)
+    monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: hub)
+
+    with DuckClaw(vault, read_only=False, engine="python") as dbv:
+        clear_goals_proactive_schedule(dbv, 42)
+
+    for p in (hub, vault):
+        con = duckdb.connect(p, read_only=True)
+        row = con.execute(
+            "SELECT value FROM agent_config WHERE key = 'chat_42_goals_delta_seconds' LIMIT 1"
+        ).fetchone()
+        con.close()
+        assert row is not None and int(str(row[0]).strip() or "0") == 0
+
+
+def test_iter_goals_delta_clear_paths_scoped_excludes_other_private_vaults(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """``off`` no debe enumerar DuckDB de otros ``db/private/<uid>`` (reduce bloqueos)."""
+    from duckclaw.gateway_db import iter_goals_delta_clear_duckdb_paths
+
+    root = tmp_path / "db" / "private"
+    u_a = root / "111"
+    u_b = root / "222"
+    u_a.mkdir(parents=True)
+    u_b.mkdir(parents=True)
+    hub_a = u_a / "finanzdb1.duckdb"
+    quant_a = u_a / "quant_traderdb1.duckdb"
+    other_b = u_b / "finanzdb1.duckdb"
+    hub_a.touch()
+    quant_a.touch()
+    other_b.touch()
+
+    monkeypatch.delenv("DUCKCLAW_GOALS_TICKER_DB_PATH", raising=False)
+    monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: str(hub_a))
+
+    paths = {str(Path(p).resolve()) for p in iter_goals_delta_clear_duckdb_paths(primary_fly_db_path=str(quant_a))}
+    assert str(hub_a.resolve()) in paths
+    assert str(quant_a.resolve()) in paths
+    assert str(other_b.resolve()) not in paths

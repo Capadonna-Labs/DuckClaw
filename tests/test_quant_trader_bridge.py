@@ -64,7 +64,7 @@ def test_propose_trade_signal_requires_evidence(monkeypatch) -> None:
     set_quant_tool_db_path(db._path)
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda payload: True,
+        lambda payload, **__: True,
     )
     out = json.loads(
         _propose_trade_signal_impl(
@@ -97,7 +97,7 @@ def test_propose_trade_signal_interprets_llm_fraction_as_percent(monkeypatch) ->
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda payload: True,
+        lambda payload, **__: True,
     )
     out = json.loads(
         _propose_trade_signal_impl(
@@ -124,7 +124,7 @@ def test_propose_trade_signal_applies_riskguard(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda payload: True,
+        lambda payload, **__: True,
     )
     out = json.loads(
         _propose_trade_signal_impl(
@@ -196,7 +196,7 @@ def test_execute_approved_signal_accepts_telegram_grant(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.delenv("IBKR_EXECUTE_ORDER_URL", raising=False)
     out = json.loads(_execute_approved_signal_impl(db, signal_id="11111111-1111-1111-1111-111111111111"))
@@ -237,7 +237,7 @@ def test_execute_approved_signal_sends_account_mode_header(monkeypatch) -> None:
     monkeypatch.setenv("IBKR_ACCOUNT_MODE", "paper")
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
@@ -282,7 +282,7 @@ def test_execute_approved_signal_post_includes_weight_payload(monkeypatch) -> No
     monkeypatch.setenv("IBKR_ACCOUNT_MODE", "paper")
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
@@ -327,7 +327,7 @@ def test_execute_approved_signal_normalizes_fraction_weight_in_post(monkeypatch)
     monkeypatch.setenv("IBKR_ACCOUNT_MODE", "paper")
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
@@ -371,7 +371,7 @@ def test_execute_approved_signal_live_sends_live_header(monkeypatch) -> None:
     monkeypatch.setenv("IBKR_ACCOUNT_MODE", "live")
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
@@ -424,7 +424,7 @@ def test_execute_approved_signal_paper_session_allows_ibkr_env_live(monkeypatch)
     monkeypatch.setenv("IBKR_ACCOUNT_MODE", "live")
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
@@ -543,7 +543,7 @@ def test_execute_approved_signal_passes_timeout_to_urlopen(monkeypatch) -> None:
     monkeypatch.setenv("IBKR_EXECUTE_ORDER_TIMEOUT_SEC", "99")
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.urllib.request.urlopen",
@@ -574,7 +574,7 @@ def test_execute_approved_signal_broker_error_pushes_failed(monkeypatch) -> None
 
     payloads: list = []
 
-    def _capture(p: dict) -> bool:
+    def _capture(p: dict, **__: object) -> bool:
         payloads.append(p)
         return True
 
@@ -643,7 +643,7 @@ def test_propose_trade_signal_auto_execute_disabled_by_default(monkeypatch) -> N
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda payload: True,
+        lambda payload, **__: True,
     )
     out = json.loads(
         _propose_trade_signal_impl(
@@ -675,7 +675,7 @@ def test_propose_auto_execute_skips_live_without_allow_live(monkeypatch) -> None
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.setenv("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS", "1")
     monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE", raising=False)
@@ -716,7 +716,7 @@ def test_propose_auto_execute_paper_chains_to_simulated_execute(monkeypatch) -> 
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.setenv("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS", "1")
     monkeypatch.delenv("IBKR_EXECUTE_ORDER_URL", raising=False)
@@ -749,7 +749,7 @@ def test_propose_auto_execute_row_timeout_surfaces_error(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge._wait_until_signal_row_visible",
@@ -789,7 +789,7 @@ def test_propose_trade_signal_inside_moc_at_1456_allows_ledger(monkeypatch) -> N
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     out = json.loads(
         _propose_trade_signal_impl(
@@ -803,7 +803,7 @@ def test_propose_trade_signal_inside_moc_at_1456_allows_ledger(monkeypatch) -> N
 
 
 def test_propose_trade_signal_outside_moc_after_145930(monkeypatch) -> None:
-    """14:59:31 COT está fuera del fin inclusivo default (14:59:30)."""
+    """14:59:31 COT está fuera del fin inclusivo default (14:59:30); propuesta Ledger sigue permitida."""
     pushes: list[object] = []
     db = _FakeDb()
     set_quant_tool_tenant_id("default")
@@ -813,6 +813,7 @@ def test_propose_trade_signal_outside_moc_after_145930(monkeypatch) -> None:
     monkeypatch.delenv("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES", raising=False)
     monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW", raising=False)
     monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER", raising=False)
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge._quant_now_bogota",
         lambda: datetime(2026, 5, 1, 14, 59, 31, tzinfo=ZoneInfo("America/Bogota")),
@@ -823,7 +824,7 @@ def test_propose_trade_signal_outside_moc_after_145930(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda payload: pushes.append(payload) or True,
+        lambda payload, **__: pushes.append(payload) or True,
     )
     out = json.loads(
         _propose_trade_signal_impl(
@@ -833,12 +834,14 @@ def test_propose_trade_signal_outside_moc_after_145930(monkeypatch) -> None:
             weight=5.0,
         )
     )
-    assert out.get("error") == "OUTSIDE_MOC_PREP_WINDOW"
-    assert pushes == []
+    assert out.get("status") == "PENDING_HITL"
+    assert out.get("signal_id")
+    assert len(pushes) >= 2
+    assert "auto_executed" not in out
 
 
-def test_propose_trade_signal_outside_moc_prep_window_blocked(monkeypatch) -> None:
-    """Prep intradía (p. ej. 14:12 COT): no Ledger ni auto-exec para cfd_auto."""
+def test_propose_trade_signal_outside_moc_prep_auto_execute_skipped(monkeypatch) -> None:
+    """Prep intradía (p. ej. 14:12 COT): Ledger permitido; auto-exec encadenada omitida fuera de ventana MOC."""
     pushes: list[object] = []
 
     db = _FakeDb()
@@ -846,6 +849,47 @@ def test_propose_trade_signal_outside_moc_prep_window_blocked(monkeypatch) -> No
     set_quant_tool_user_id("u1")
     set_quant_tool_db_path(db._path)
     note_quant_market_evidence_ticker("SPY")
+    monkeypatch.delenv("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW", raising=False)
+    monkeypatch.delenv("DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER", raising=False)
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._quant_now_bogota",
+        lambda: datetime(2026, 5, 1, 14, 12, 0, tzinfo=ZoneInfo("America/Bogota")),
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge._max_weight_pct_limit",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
+        lambda payload, **__: pushes.append(payload) or True,
+    )
+    monkeypatch.setenv("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS", "1")
+    out = json.loads(
+        _propose_trade_signal_impl(
+            db,
+            mandate_id="11111111-1111-1111-1111-111111111111",
+            ticker="SPY",
+            weight=5.0,
+        )
+    )
+    assert out.get("status") == "PENDING_HITL"
+    assert out.get("signal_id")
+    ae = out.get("auto_execute")
+    assert isinstance(ae, dict) and ae.get("skipped") is True
+    assert ae.get("reason") == "OUTSIDE_MOC_WINDOW"
+    assert len(pushes) >= 2
+    assert "auto_executed" not in out
+
+
+def test_propose_trade_signal_outside_moc_blocked_when_legacy_env(monkeypatch) -> None:
+    """DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1 restaura rechazo fuera de ventana MOC (cfd_auto)."""
+    db = _FakeDb()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    note_quant_market_evidence_ticker("SPY")
+    monkeypatch.setenv("DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER", "1")
     monkeypatch.delenv("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES", raising=False)
     monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW", raising=False)
     monkeypatch.setattr(
@@ -858,9 +902,8 @@ def test_propose_trade_signal_outside_moc_prep_window_blocked(monkeypatch) -> No
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda payload: pushes.append(payload) or True,
+        lambda _payload, **__: True,
     )
-    monkeypatch.setenv("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS", "1")
     out = json.loads(
         _propose_trade_signal_impl(
             db,
@@ -871,8 +914,6 @@ def test_propose_trade_signal_outside_moc_prep_window_blocked(monkeypatch) -> No
     )
     assert out.get("error") == "OUTSIDE_MOC_PREP_WINDOW"
     assert out.get("reason") == "OUTSIDE_MOC_WINDOW"
-    assert pushes == []
-    assert "auto_executed" not in out
 
 
 def test_propose_trade_signal_moc_hrp_allowed_outside_moc_window(monkeypatch) -> None:
@@ -894,7 +935,7 @@ def test_propose_trade_signal_moc_hrp_allowed_outside_moc_window(monkeypatch) ->
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     out = json.loads(
         _propose_trade_signal_impl(
@@ -922,7 +963,7 @@ def test_run_quant_signal_cycle_propose_only(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     out = json.loads(
         _run_quant_signal_cycle_impl(
@@ -951,7 +992,7 @@ def test_run_quant_signal_cycle_execute_now(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync",
-        lambda _payload: True,
+        lambda _payload, **__: True,
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.quant_trader_bridge.consume_execute_order_grant",

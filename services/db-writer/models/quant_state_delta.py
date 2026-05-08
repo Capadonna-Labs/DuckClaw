@@ -16,6 +16,19 @@ class TradingMandateMutation(BaseModel):
     status: Literal["PENDING", "ANALYZING", "FULFILLED", "REJECTED"] = "PENDING"
 
 
+class IntradayMocAccumMutation(BaseModel):
+    """UPSERT en quant_core.intraday_moc_accum (merge superficial de payload)."""
+
+    session_uid: str = Field(..., min_length=4, max_length=128)
+    ticker: str = Field(..., min_length=1, max_length=32)
+    patch: dict[str, object] = Field(default_factory=dict)
+    trading_date: str = Field(
+        default="",
+        max_length=16,
+        description="YYYY-MM-DD COT; vacío = fecha actual server-side en handler",
+    )
+
+
 class TradeSignalMutation(BaseModel):
     signal_id: str = Field(..., min_length=8)
     mandate_id: str = Field(..., min_length=8)
@@ -42,6 +55,7 @@ class QuantStateDelta(BaseModel):
     tenant_id: str = Field(..., min_length=1)
     delta_type: Literal[
         "MANDATE_UPSERT",
+        "INTRADAY_MOC_ACCUM_UPSERT",
         "TRADE_SIGNAL_PROPOSED",
         "TRADE_SIGNAL_APPROVED",
         "TRADE_SIGNAL_EXECUTED",

@@ -1859,6 +1859,7 @@ def build_worker_graph(
     shared_db_path: Optional[str] = None,
     reuse_db: Any | None = None,
     tool_surface: Literal["full", "context_synthesis"] = "full",
+    open_vault_read_only: bool = False,
 ) -> Any:
     """
     Build a compiled LangGraph for a worker. Used by AgentAssembler._build_worker
@@ -1876,6 +1877,10 @@ def build_worker_graph(
     omite bridges MCP stdio pesados (GitHub, Google Trends) para reducir cold start.
     **Reddit** sí se registra si el manifest lo declara: URLs ``/r/.../s/...`` en
     ``SUMMARIZE_NEW_CONTEXT`` deben poder usar ``reddit_get_post`` / ``reddit_search_reddit``.
+
+    ``open_vault_read_only``: para ``SUMMARIZE_NEW_CONTEXT`` / ``SUMMARIZE_STORED_CONTEXT`` el worker no debe
+    escribir en la bóveda (spec Context Injection). Abrir RW compite con el **db-writer** cuando éste inserta
+    contexto vía cola en el mismo ``.duckdb``; DuckDB permite **solo lectura** concurrente con otro proceso en RW.
     """
     spec = load_manifest(worker_id, templates_root)
     path = _get_db_path(worker_id, instance_name, db_path)
@@ -1893,18 +1898,20 @@ def build_worker_graph(
         and _same_duckdb_file(reuse_path, path)
         and not (shared_resolved or "").strip()
         and not reuse_read_only
+        and not open_vault_read_only
     )
+    effective_vault_ro = bool(spec.read_only) or bool(open_vault_read_only)
     if skip_private:
         db = reuse_db
         _log.debug("build_worker_graph: reuse DuckClaw (same file, no shared, skip private ATTACH) path=%s", path)
     else:
-        # Manifest ``read_only: false`` (p. ej. Finanz): conexión RW para INSERT en quant_core.* / señales.
-        db = DuckClaw(path, read_only=bool(spec.read_only))
+        # RW: manifest quant_core / señales. RO: manifest read_only o turnos SUMMARIZE_* (sin INSERT en vault).
+        db = DuckClaw(path, read_only=effective_vault_ro)
     _apply_forge_attaches(
         db,
         path,
         shared_resolved,
-        private_attach_read_only=bool(spec.read_only),
+        private_attach_read_only=effective_vault_ro,
         shared_attach_read_only=True,
         skip_private_attach=skip_private,
     )

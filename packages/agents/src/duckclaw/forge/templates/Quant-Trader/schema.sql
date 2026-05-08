@@ -121,6 +121,18 @@ CREATE TABLE IF NOT EXISTS quant_core.hrp_mandates (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_hrp_mandates_ticker_day
   ON quant_core.hrp_mandates (ticker, date_trunc('day', computed_at));
 
+-- Acumulador intradía MOC (hints hasta calc PM2) — specs/features/Core-Satellite HRP Weekly + MOC CFD.md
+CREATE TABLE IF NOT EXISTS quant_core.intraday_moc_accum (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_uid VARCHAR NOT NULL,
+  ticker VARCHAR(20) NOT NULL,
+  trading_date DATE NOT NULL,
+  payload JSON NOT NULL DEFAULT '{}',
+  finalized_at TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(session_uid, ticker, trading_date)
+);
+
 CREATE TABLE IF NOT EXISTS quant_core.portfolio_positions (
   ticker VARCHAR PRIMARY KEY,
   qty DOUBLE,

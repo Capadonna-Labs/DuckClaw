@@ -55,6 +55,28 @@ def test_cashflow_stress_intent_detection() -> None:
     assert not _user_signals_cashflow_stress("muéstrame el esquema de tablas")
 
 
+def test_ledger_debt_queries_do_not_signal_cashflow_stress() -> None:
+    """Resúmenes/consultas de deudas en DuckDB (finanz); no deben disparar A2A INCOME_INJECTION."""
+    from duckclaw.graphs.manager_graph import (
+        _user_signals_cashflow_stress,
+        job_hunter_user_requests_job_search,
+    )
+
+    for msg in (
+        "Dame un resumen de mis deudas",
+        "Consultar las deudas no necesita contrato A2A",
+        "lista de deudas",
+    ):
+        assert not _user_signals_cashflow_stress(msg), msg
+        assert not job_hunter_user_requests_job_search(msg), msg
+
+
+def test_debt_plus_liquidity_stress_still_signals_cashflow() -> None:
+    from duckclaw.graphs.manager_graph import _user_signals_cashflow_stress
+
+    assert _user_signals_cashflow_stress("tengo deudas y no me alcanza para pagar este mes")
+
+
 def test_strip_leading_subagent_instance_headers() -> None:
     from duckclaw.graphs.manager_graph import (
         _prepend_subagent_label_once,

@@ -15,11 +15,14 @@ import duckdb
 from core.config import settings
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.vaults import db_root, validate_user_db_path
-from models.quant_state_delta import QuantStateDelta, TradeSignalMutation, TradingMandateMutation
+from models.quant_state_delta import (
+    IntradayMocAccumMutation,
+    QuantStateDelta,
+    TradeSignalMutation,
+    TradingMandateMutation,
+)
 
 logger = logging.getLogger("db-writer.quant_state_delta")
-
-
 
 
 _LEDGER_DDL = """
@@ -112,6 +115,19 @@ ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_notional DECIM
 ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_n_orders INTEGER;
 """
 
+_INTRADAY_MOC_ACCUM_DDL = """
+CREATE TABLE IF NOT EXISTS quant_core.intraday_moc_accum (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_uid VARCHAR NOT NULL,
+  ticker VARCHAR NOT NULL,
+  trading_date DATE NOT NULL,
+  payload JSON NOT NULL DEFAULT '{}',
+  finalized_at TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(session_uid, ticker, trading_date)
+);
+"""
+
 # Tablas creadas antes de session_uid / columnas usadas en INSERT: IF NOT EXISTS no altera esquema.
 _QUANT_CORE_TRADE_SIGNALS_MIGRATION = """
 ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS session_uid VARCHAR;
@@ -122,6 +138,36 @@ ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS confidence_score D
 ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS status VARCHAR;
 ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
 """
+
+
+def _merge_intraday_accum_payload(existing: Any, patch: dict[str, object]) -> str:
+    base: dict[str, object] = {}
+    if existing is not None:
+        try:
+            if isinstance(existing, str) and existing.strip():
+                parsed = json.loads(existing)
+                if isinstance(parsed, dict):
+                    base = dict(parsed)
+            elif isinstance(existing, dict):
+                base = dict(existing)
+        except (json.JSONDecodeError, TypeError):
+            base = {}
+    merged = {**base, **patch}
+    return json.dumps(merged, ensure_ascii=False)
+
+
+def _resolve_trading_date_for_accum(raw: str) -> str:
+    from datetime import datetime
+
+    s = (raw or "").strip()
+    if s and len(s) == 10 and s[4] == "-" and s[7] == "-":
+        return s
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo("America/Bogota")).date().isoformat()
+    except Exception:
+        return datetime.now().date().isoformat()
 
 
 def _coerce_mandate_id_to_uuid(raw: str) -> str:
@@ -237,6 +283,48 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
                 mut.status,
             ),
         )
+        return
+
+    if dt == "INTRADAY_MOC_ACCUM_UPSERT":
+        mut = IntradayMocAccumMutation.model_validate(delta.mutation)
+        td = _resolve_trading_date_for_accum(mut.trading_date)
+        tku = str(mut.ticker or "").strip().upper()
+        if not tku:
+            raise ValueError("ticker requerido para INTRADAY_MOC_ACCUM_UPSERT")
+        su = str(mut.session_uid or "").strip()
+        if not su:
+            raise ValueError("session_uid requerido para INTRADAY_MOC_ACCUM_UPSERT")
+        row = con.execute(
+            """
+            SELECT id, payload, finalized_at
+            FROM quant_core.intraday_moc_accum
+            WHERE session_uid = ? AND ticker = ? AND trading_date = ?::DATE
+            """,
+            (su, tku, td),
+        ).fetchone()
+        if row is not None and row[2] is not None:
+            raise ValueError("intraday_moc_accum ya finalizado para session/ticker/fecha")
+        patch = mut.patch if isinstance(mut.patch, dict) else {}
+        prev_payload: Any = row[1] if row is not None else None
+        merged_json = _merge_intraday_accum_payload(prev_payload, patch)
+        if row is None:
+            con.execute(
+                """
+                INSERT INTO quant_core.intraday_moc_accum
+                  (id, session_uid, ticker, trading_date, payload, updated_at)
+                VALUES (gen_random_uuid(), ?, ?, ?::DATE, ?::JSON, now())
+                """,
+                (su, tku, td, merged_json),
+            )
+        else:
+            con.execute(
+                """
+                UPDATE quant_core.intraday_moc_accum
+                SET payload = ?::JSON, updated_at = now()
+                WHERE id = ? AND finalized_at IS NULL
+                """,
+                (merged_json, row[0]),
+            )
         return
 
     if dt == "TRADE_SIGNAL_PROPOSED":
@@ -394,6 +482,10 @@ def _sync_handle_quant_state_delta(message: str) -> None:
         con.execute("BEGIN TRANSACTION")
         con.execute(_LEDGER_DDL)
         for _stmt in _QUANT_CORE_TRADE_SIGNALS_MIGRATION.strip().split(";"):
+            _s = _stmt.strip()
+            if _s:
+                con.execute(_s)
+        for _stmt in _INTRADAY_MOC_ACCUM_DDL.strip().split(";"):
             _s = _stmt.strip()
             if _s:
                 con.execute(_s)

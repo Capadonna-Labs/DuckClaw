@@ -286,6 +286,20 @@ def _ensure_fly_runtime_tables(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_executed BOOLEAN DEFAULT FALSE;")
     con.execute("ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_notional DECIMAL(15,2);")
     con.execute("ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_n_orders INTEGER;")
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS quant_core.intraday_moc_accum (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          session_uid VARCHAR NOT NULL,
+          ticker VARCHAR NOT NULL,
+          trading_date DATE NOT NULL,
+          payload JSON NOT NULL DEFAULT '{}',
+          finalized_at TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(session_uid, ticker, trading_date)
+        );
+        """
+    )
 
 
 def _collect_extensions(templates_root: Path) -> list[str]:

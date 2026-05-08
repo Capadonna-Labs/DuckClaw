@@ -204,12 +204,105 @@ def chat_id_from_goals_delta_config_key(key: str) -> Optional[str]:
 
 
 def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
-    set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, "0")
-    set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
-    set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, "")
-    set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, "")
-    set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
-    set_chat_state(db, chat_id, _GOALS_DELTA_META_KEY, "")
+    """
+    Apaga el ticker ``/goals --delta`` en el hub y en las bóvedas del **mismo** usuario que
+    ``db._path`` (``.../private/<uid>/*.duckdb``), más el hub vía ``get_gateway_db_path``. El
+    heartbeat puede seguir escaneando más archivos para *descubrir* ticks; abrir en RW todas las
+    DuckDB del árbol ``private`` al hacer ``off`` competía por bloqueos con db-writer.
+    """
+
+    def _apply_clear(conn: Any) -> None:
+        set_chat_state(conn, chat_id, _GOALS_DELTA_SECONDS_KEY, "0")
+        set_chat_state(conn, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
+        set_chat_state(conn, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, "")
+        set_chat_state(conn, chat_id, _GOALS_PROACTIVE_TENANT_KEY, "")
+        set_chat_state(conn, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
+        set_chat_state(conn, chat_id, _GOALS_DELTA_META_KEY, "")
+
+    _apply_clear(db)
+
+    primary_resolved = ""
+    try:
+        raw_p = str(getattr(db, "_path", "") or "").strip()
+        if raw_p:
+            primary_resolved = str(Path(raw_p).expanduser().resolve())
+    except Exception:
+        primary_resolved = str(getattr(db, "_path", "") or "").strip()
+
+    paths_touched: list[str] = []
+    if primary_resolved:
+        paths_touched.append(primary_resolved)
+
+    from duckclaw import DuckClaw as _DuckClaw
+    from duckclaw.db_write_queue import enqueue_duckdb_write_sync
+    from duckclaw.gateway_db import iter_goals_delta_clear_duckdb_paths
+
+    _upsert_q = (
+        "INSERT INTO agent_config (key, value) VALUES (?, ?) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+    )
+
+    def _enqueue_clear_remote(_db_path: str) -> None:
+        for _sk, _sv in (
+            (_GOALS_DELTA_SECONDS_KEY, "0"),
+            (_GOALS_PROACTIVE_LAST_FIRE_KEY, ""),
+            (_GOALS_PROACTIVE_ANCHOR_KEY, ""),
+            (_GOALS_PROACTIVE_TENANT_KEY, ""),
+            (_GOALS_DELTA_ANCHOR_LEGACY_KEY, ""),
+            (_GOALS_DELTA_META_KEY, ""),
+        ):
+            _ck = _chat_key(chat_id, _sk)
+            enqueue_duckdb_write_sync(
+                db_path=str(Path(_db_path).expanduser().resolve()),
+                query=_upsert_q,
+                params=[_ck, str(_sv)[:16384]],
+                user_id=str(chat_id),
+                tenant_id="default",
+            )
+
+    for _p in iter_goals_delta_clear_duckdb_paths(primary_fly_db_path=primary_resolved):
+        _rp = ""
+        try:
+            _rp = str(Path(_p).expanduser().resolve())
+        except OSError:
+            _rp = str(_p)
+        if primary_resolved and _rp == primary_resolved:
+            continue
+        try:
+            with _DuckClaw(_p, read_only=False, engine="python") as _d2:
+                _apply_clear(_d2)
+            paths_touched.append(_rp or _p)
+        except Exception:
+            try:
+                _enqueue_clear_remote(_p)
+                paths_touched.append(f"enqueued:{_rp or _p}")
+            except Exception:
+                continue
+
+    # region agent log
+    try:
+        _dbg = {
+            "sessionId": "c964f7",
+            "timestamp": int(time.time() * 1000),
+            "location": "on_the_fly_commands.clear_goals_proactive_schedule",
+            "message": "goals_delta_off_paths",
+            "hypothesisId": "H1_sibling_vault_stale_delta",
+            "runId": "post-fix",
+            "data": {
+                "chat_id": str(chat_id),
+                "primary_db": primary_resolved,
+                "paths_touched_n": len(paths_touched),
+                "paths_touched_tail": [x[-80:] if len(x) > 80 else x for x in paths_touched],
+                "clear_scope": "hub_plus_same_private_uid",
+            },
+        }
+        with Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log").open(
+            "a", encoding="utf-8"
+        ) as _df:
+            _df.write(json.dumps(_dbg, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
 
 
 def _skip_runtime_ddl(db: Any) -> bool:
@@ -3000,17 +3093,20 @@ def build_goals_proactive_system_event_message(
     extra = ""
     if obj == "overnight_gap_squeeze":
         extra = (
-            " **MISIÓN: OVERNIGHT GAP SQUEEZE — FASE PREP + MOC (HRP + MOC Proxy):** "
-            "Durante 08:30–15:00 COT lun–vie: **solo** recolectar contexto (CFD/OHLCV/portfolio/sandbox/read_sql). "
-            "**No** invocar `propose_trade_signal` para `cfd_auto`/no-MOC **hasta** la ventana MOC configurada (default ~14:40–14:59:30 COT; `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW`); "
-            "la tool bloquea con `OUTSIDE_MOC_PREP_WINDOW` antes (prep overnight gap squeeze); el pipeline PM2 `moc_pipeline.py` "
-            "(moc_hrp_cfd) no lo sustituyes. Dentro del tramo MOC, diferir ejecución batch a ese job/flujo `/execute_all_moc`. "
+            " **MISIÓN: OVERNIGHT GAP SQUEEZE — PREP + MOC (HRP + MOC Proxy):** "
+            "Durante 08:30–15:00 COT lun–vie: recolectar contexto (CFD/OHLCV/portfolio/sandbox/read_sql). "
+            "Sin catalizador intradía claro → **`accumulate_moc_intraday_state`** (postura explícita: watchlist, sizing 0/HOLD, régimen) "
+            "en lugar de solo «sin setup». **`propose_trade_signal`** puede crearse cuando haya evidencia del turno y riesgo lo permita "
+            "(Ledger `PENDING_HITL` en cualquier horario por defecto); la **auto-ejecución** encadenada solo en ventana MOC "
+            "(default ~14:40–14:59:30 COT; `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW` + `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`). "
+            "Opt-in `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` restaura bloqueo fuera de MOC (`OUTSIDE_MOC_PREP_WINDOW`). "
+            "Pipeline PM2 `moc_pipeline.py` (moc_hrp_cfd) no lo sustituyes; batch MOC `/execute_all_moc`. "
             "1) OHLCV 1m vía `fetch_market_data`. "
             "2) Portfolio vía `get_ibkr_portfolio`. "
             "3) Sandbox script `overnight_squeeze_standalone.py`. "
             "4) Script: Kalman 1m, MOC Proxy (volumen direccional 15m), HRP tope 35%. "
-            "5) Tras ventana MOC permitida por gateway: si MOC Proxy > 0 + Kalman alcista y procede playbook, una señal hacia HRP; "
-            "si MOC Proxy < 0 → abortar narrativa Sólida/Plasma sin Ledger antes del MOC."
+            "5) Si MOC Proxy > 0 + Kalman alcista y procede playbook, una señal hacia HRP; "
+            "si MOC Proxy < 0 → postura defensiva documentada (accumulate) antes de forzar narrativa sin Ledger."
         )
     elif obj == "rebalance_hrp":
         extra = (
@@ -3068,8 +3164,11 @@ def build_trading_tick_system_event_message(
         "TRADING TICK AUTÓNOMO (HITL): 1) validar sesión ACTIVE; 2) ejecutar evaluate_cfd_state "
         "con session_uid+tickers; 3) si outcome=ERROR o all_data_failed, reportar ceguera sensorial; "
         "4) si outcome=MISALIGNED y no hay pending por ticker, `propose_trade_signal` como mucho 1 por ticker "
-        "solo dentro ventana MOC COT configurada (default ~14:40–14:59:30; véase env); fuera = prep sin Ledger "
-        "`OUTSIDE_MOC_PREP_WINDOW` (excepción job `moc_hrp_cfd`); NO ejecutar; 5) si mode=live agregar warning de capital real; "
+        "cuando haya evidencia OHLCV del turno y riesgo lo permita (propuesta Ledger permitida fuera de ventana MOC por defecto); "
+        "la **auto-ejecución** encadenada (`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`) solo dentro ventana MOC COT "
+        "(default ~14:40–14:59:30; véase env); fuera de esa ventana no hay cadena auto grant+execute; "
+        "opt-in `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` bloquea propuesta fuera de MOC (`OUTSIDE_MOC_PREP_WINDOW`; excepción job `moc_hrp_cfd`); "
+        "NO ejecutar en tick; 5) si mode=live agregar warning de capital real; "
         "6) si ALIGNED, no enviar resumen al usuario."
     )
     if _obj == "rebalance_hrp":
@@ -3079,15 +3178,15 @@ def build_trading_tick_system_event_message(
             "(import pypfopt; pypfopt.hierarchical_portfolio.HRPOpt + risk_models.sample_cov sobre DataFrame de retornos; "
             "optimize() → pesos que suman 1). Solo si pypfopt falla, HRP manual con pandas/scipy. "
             "Comparar vs get_ibkr_portfolio; si desviación relevante y sin HITL pendiente por ticker, máximo 1 "
-            "`propose_trade_signal` de rebalanceo por ticker dentro de ventana MOC permitida por gateway (NO ejecutar fuera)."
+            "`propose_trade_signal` de rebalanceo por ticker cuando proceda (Ledger fuera de MOC permitido por defecto; auto-exec solo en ventana MOC si está activada)."
         )
     elif _obj == "overnight_gap_squeeze":
         _directive += (
-            " 7) OVERNIGHT GAP SQUEEZE (PREP antes de MOC): en 08:30–15:00 COT lun–vie recolectar contexto "
+            " 7) OVERNIGHT GAP SQUEEZE: en 08:30–15:00 COT lun–vie recolectar contexto "
             "(evaluate_cfd_state, fetch_ib_gateway_ohlcv/fetch_market_data, read_sql, get_ibkr_portfolio, sandbox según playbook). "
-            "**No** `propose_trade_signal` hasta ventana MOC (default ~14:40–14:59:30 COT salvo env); antes el gateway "
-            "devuelve `OUTSIDE_MOC_PREP_WINDOW`. Señales batch `moc_hrp_cfd` = solo PM2. "
-            "Dentro de ventana permitida por tool: como mucho una propuesta Ledger coherente con CFD si el setup procede."
+            "Sin setup claro → `accumulate_moc_intraday_state`; con evidencia y playbook alineado → como mucho 1 `propose_trade_signal` por ticker "
+            "(fuera de ventana MOC permitido por defecto; auto-exec encadenada solo en MOC). "
+            "Señales batch `moc_hrp_cfd` = solo PM2. Opt-in `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER` → `OUTSIDE_MOC_PREP_WINDOW` fuera de MOC."
         )
     event = TradingTickEvent.model_validate(
         {
@@ -3189,38 +3288,45 @@ def execute_goals(
             return "Revisión proactiva desactivada (/goals --delta off)."
         set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, str(secs))
         set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, tid)
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
-        _anchor_now = str(time.time())
+        # Cooldown starts now so the first tick waits ~secs (not the next 45s gateway poll).
+        _fire_anchor = str(time.time())
+        set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, _fire_anchor)
+        _anchor_now = _fire_anchor
         set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, _anchor_now)
         set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, _anchor_now)
+        # Explicit `/goals --delta` is always a lightweight goals review (heartbeat uses
+        # build_goals_proactive_system_event_message). Full TRADING_TICK scheduling stays
+        # in `_ensure_trading_session_goals_delta` when a Quant session starts.
         meta_obj: dict[str, Any] = {"trigger": "goals_cli"}
-        if active_wid == _QUANT_TRADER_TEMPLATE_ID:
-            try:
-                ex_raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
-                if ex_raw:
-                    em = json.loads(ex_raw)
-                    if (
-                        isinstance(em, dict)
-                        and str(em.get("trigger") or "").strip().lower() == "trading_session"
-                    ):
-                        raw_sess = db.query(
-                            "SELECT session_uid, status FROM quant_core.trading_sessions "
-                            "WHERE id = 'active' LIMIT 1"
-                        )
-                        sr = json.loads(raw_sess) if isinstance(raw_sess, str) else (raw_sess or [])
-                        if sr and isinstance(sr[0], dict):
-                            st = str(sr[0].get("status") or "").strip().upper()
-                            db_uid = str(sr[0].get("session_uid") or "").strip()
-                            if st == "ACTIVE" and db_uid:
-                                meta_obj = {"trigger": "trading_session", "session_uid": db_uid}
-            except Exception:
-                pass
         set_chat_state(
             db,
             chat_id,
             _GOALS_DELTA_META_KEY,
             json.dumps(meta_obj, ensure_ascii=False),
         )
+        # region agent log
+        try:
+            _dbg_goals_delta = {
+                "sessionId": "c964f7",
+                "timestamp": int(time.time() * 1000),
+                "location": "on_the_fly_commands.execute_goals:--delta",
+                "message": "goals_delta_cli_meta",
+                "hypothesisId": "H_explicit_delta_goals_cli",
+                "runId": "post-fix",
+                "data": {
+                    "chat_id": str(chat_id),
+                    "secs": secs,
+                    "meta_trigger": meta_obj.get("trigger"),
+                    "last_fire_epoch_set": bool(_fire_anchor),
+                },
+            }
+            with Path(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
+            ).open("a", encoding="utf-8") as _dfg:
+                _dfg.write(json.dumps(_dbg_goals_delta, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+        # endregion
         human = format_goals_delta_interval_human(secs)
         return (
             f"Revisión proactiva cada ~{human}. "

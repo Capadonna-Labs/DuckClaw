@@ -148,3 +148,106 @@ def get_gateway_db() -> Any:
     if path:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     return GatewayDbEphemeralReadonly(path)
+
+
+def iter_goals_ticker_duckdb_paths() -> list[str]:
+    """
+    Rutas ``.duckdb`` que escanea el ticker de ``/goals --delta`` (heartbeat / gateway embebido).
+
+    Debe coincidir con ``services/heartbeat/main.py`` histórico: hub + ``db/private/*/*.duckdb``,
+    o override ``DUCKCLAW_GOALS_TICKER_DB_PATH``. Centralizado para que ``/goals --delta off``
+    limpie el schedule en **todos** los archivos donde pudo persistirse (multiplex Telegram).
+    """
+    raw = (os.getenv("DUCKCLAW_GOALS_TICKER_DB_PATH") or "").strip()
+    if raw:
+        return [resolve_env_duckdb_path(raw)]
+
+    seen: set[str] = set()
+    out: list[str] = []
+
+    def _add(p: str) -> None:
+        s = str(Path(p).expanduser().resolve())
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+
+    try:
+        _add(get_gateway_db_path())
+    except Exception:
+        pass
+
+    try:
+        gw = Path(get_gateway_db_path()).expanduser().resolve()
+        priv_root = gw.parent.parent
+        if priv_root.is_dir() and priv_root.name == "private":
+            for user_dir in sorted(priv_root.iterdir()):
+                if not user_dir.is_dir():
+                    continue
+                for f in sorted(user_dir.glob("*.duckdb")):
+                    _add(str(f))
+    except Exception:
+        pass
+
+    return out
+
+
+def iter_goals_delta_clear_duckdb_paths(*, primary_fly_db_path: str) -> list[str]:
+    """
+    Rutas a tocar al apagar ``/goals --delta`` desde la conexión ``fly_db`` actual.
+
+    El ticker del heartbeat sigue usando ``iter_goals_ticker_duckdb_paths()`` (hub + todo
+    ``db/private/*/*.duckdb``) para descubrir schedules. Limpiar el mismo conjunto desde el
+    gateway abría decenas de archivos y competía por bloqueos con db-writer y otras sesiones.
+
+    Aquí solo se devuelve: hub ``get_gateway_db_path()`` + ``*.duckdb`` del directorio
+    ``.../private/<uid>/`` donde vive ``primary_fly_db_path`` (mismo criterio que
+    ``parent.parent.name == "private"``). Si ``primary_fly_db_path`` no encaja en ese patrón,
+    se añade al menos el archivo resuelto del primario además del hub.
+
+    Override ``DUCKCLAW_GOALS_TICKER_DB_PATH``: un solo archivo, igual que el ticker.
+    """
+    raw = (os.getenv("DUCKCLAW_GOALS_TICKER_DB_PATH") or "").strip()
+    if raw:
+        return [resolve_env_duckdb_path(raw)]
+
+    seen: set[str] = set()
+    out: list[str] = []
+
+    def _add(p: str) -> None:
+        if not (p or "").strip():
+            return
+        try:
+            s = str(Path(p).expanduser().resolve())
+        except OSError:
+            s = str(Path(p).expanduser())
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+
+    try:
+        _add(get_gateway_db_path())
+    except Exception:
+        pass
+
+    raw_primary = (primary_fly_db_path or "").strip()
+    if not raw_primary:
+        return out
+
+    try:
+        pp = Path(raw_primary).expanduser().resolve()
+    except OSError:
+        pp = Path(raw_primary).expanduser()
+
+    if pp.suffix.lower() == ".duckdb" and pp.parent.is_dir():
+        try:
+            if pp.parent.parent.name == "private":
+                for f in sorted(pp.parent.glob("*.duckdb")):
+                    _add(str(f))
+            else:
+                _add(str(pp))
+        except Exception:
+            _add(str(pp))
+    elif pp.is_file():
+        _add(str(pp))
+
+    return out

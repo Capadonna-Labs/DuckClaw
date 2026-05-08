@@ -82,3 +82,45 @@ def test_build_worker_graph_full_calls_mcp_registers_when_manifest_has_them(
         # finanz manifest tiene reddit y google_trends; github solo si está en manifest
         m_rd.assert_called_once()
         m_gt.assert_called_once()
+
+
+@pytest.fixture
+def isolated_finanz_db_path(tmp_path: Path) -> str:
+    """Archivo distinto del ``reuse_db`` del manager para no mezclar RW+RO en el mismo PID."""
+    p = tmp_path / "finanz_summarize_ro.duckdb"
+    return str(p)
+
+
+def test_build_worker_graph_summarize_directive_opens_vault_read_only(
+    isolated_finanz_db_path: str,
+) -> None:
+    """SUMMARIZE_* debe abrir la bóveda RO (evita lock vs db-writer durante context injection)."""
+    from duckclaw import DuckClaw
+    from duckclaw.workers.factory import build_worker_graph
+
+    class _StubLLM:
+        def bind_tools(self, tools: list, **_kwargs):
+            return self
+
+        def invoke(self, *_args, **_kwargs):
+            return type("R", (), {"content": "ok"})()
+
+    opened: list[tuple[bool, ...]] = []
+
+    real_dc = DuckClaw
+    _bootstrap = DuckClaw(isolated_finanz_db_path)
+    _bootstrap.close()
+
+    def _tracking_dc(path: str, read_only: bool = False, **kwargs: object):
+        opened.append((bool(read_only),))
+        return real_dc(path, read_only=read_only, **kwargs)
+
+    with patch("duckclaw.DuckClaw", side_effect=_tracking_dc):
+        build_worker_graph(
+            "finanz",
+            isolated_finanz_db_path,
+            _StubLLM(),
+            tool_surface="context_synthesis",
+            open_vault_read_only=True,
+        )
+    assert any(ro is True for (ro,) in opened), "expected at least one DuckClaw(..., read_only=True)"

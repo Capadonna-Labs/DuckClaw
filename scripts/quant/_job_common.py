@@ -3,8 +3,70 @@
 from __future__ import annotations
 
 import os
+import sys
+import time
 from pathlib import Path
 from typing import Any
+
+
+def _is_duckdb_file_lock_error(exc: BaseException) -> bool:
+    """Contención al abrir el mismo archivo (db-writer RW u otro RO/RW ver packages/agents/.../graph_server.py)."""
+    msg = str(exc).lower()
+    return (
+        "lock" in msg
+        or "conflicting" in msg
+        or "different configuration" in msg
+    )
+
+
+def open_duckclaw_readonly_retry(db_path: str) -> Any:
+    """
+    Abre DuckClaw en RO al vault con backoff si DuckDB rechaza por lock externo.
+
+    Replica criterios de ``graph_server._open_duckclaw_readonly_with_retry`` para jobs PM2
+    (singleton db-writer u otra conexión sobre el mismo .duckdb).
+    """
+    from duckclaw import DuckClaw
+
+    resolved = str(Path(db_path).expanduser().resolve())
+    raw_attempts = (
+        os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS")
+        or os.environ.get("DUCKCLAW_QUANT_JOB_RO_LOCK_ATTEMPTS")
+        or "40"
+    ).strip()
+    try:
+        attempts = max(1, min(int(raw_attempts), 120))
+    except ValueError:
+        attempts = 40
+    raw_sleep = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_BASE_SLEEP_S") or "0.18").strip()
+    try:
+        base_sleep_s = float(raw_sleep)
+    except ValueError:
+        base_sleep_s = 0.18
+    base_sleep_s = max(0.05, base_sleep_s)
+
+    last: BaseException | None = None
+    for i in range(attempts):
+        try:
+            db = DuckClaw(resolved, read_only=True)
+            return db
+        except Exception as exc:
+            last = exc
+            if _is_duckdb_file_lock_error(exc):
+                delay_s = base_sleep_s * min(i + 1, 15)
+                if i + 1 < attempts:
+                    print(
+                        f"[quant_job] DuckDB lock intento {i + 1}/{attempts} ({type(exc).__name__}); "
+                        f"reintento en {delay_s:.2f}s",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    time.sleep(delay_s)
+                continue
+            raise
+
+    assert last is not None
+    raise last
 
 try:
     import httpx  # noqa: TID252

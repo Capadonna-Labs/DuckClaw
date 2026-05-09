@@ -400,36 +400,6 @@ async def _run_goals_proactive_tick_one_db(
                 last_fire = float(last_raw) if last_raw else 0.0
             except ValueError:
                 last_fire = 0.0
-            # region agent log
-            try:
-                with Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log").open(
-                    "a", encoding="utf-8"
-                ) as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "verify-runtime",
-                                "hypothesisId": "H_runtime_stale_or_meta_overwrite",
-                                "location": "heartbeat._run_goals_proactive_tick:delta_gate",
-                                "message": "goals_tick_precheck",
-                                "data": {
-                                    "chat_id": str(chat_id),
-                                    "worker_id": str(worker_id or ""),
-                                    "tenant_id": str(tenant_id or ""),
-                                    "delta_s": int(delta_s),
-                                    "last_fire": float(last_fire),
-                                    "since_last": float(now - last_fire) if last_fire > 0 else None,
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
             if last_fire > 0 and (now - last_fire) < float(delta_s):
                 continue
             meta_raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
@@ -441,33 +411,6 @@ async def _run_goals_proactive_tick_one_db(
                         meta = maybe_meta
                 except Exception:
                     meta = {}
-            # region agent log
-            try:
-                with Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log").open(
-                    "a", encoding="utf-8"
-                ) as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "verify-runtime",
-                                "hypothesisId": "H_meta_trigger_branch",
-                                "location": "heartbeat._run_goals_proactive_tick:meta",
-                                "message": "goals_tick_meta",
-                                "data": {
-                                    "chat_id": str(chat_id),
-                                    "meta_trigger": str(meta.get("trigger") or ""),
-                                    "has_session_uid": bool(str(meta.get("session_uid") or "").strip()),
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
             if str(meta.get("trigger") or "").strip().lower() == "trading_session":
                 session_uid = str(meta.get("session_uid") or "").strip()
                 tickers: list[str] = []
@@ -560,35 +503,6 @@ async def _run_goals_proactive_tick_one_db(
                 message = build_goals_proactive_system_event_message(
                     goals, trading_session_objective=trading_obj
                 )
-            # region agent log
-            try:
-                _kind = "TRADING_TICK" if ('"type":"TRADING_TICK"' in message or '"type": "TRADING_TICK"' in message) else "GOALS_REVIEW"
-                with Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log").open(
-                    "a", encoding="utf-8"
-                ) as _df:
-                    _df.write(
-                        json.dumps(
-                            {
-                                "sessionId": "c964f7",
-                                "runId": "verify-runtime",
-                                "hypothesisId": "H_message_type_mismatch",
-                                "location": "heartbeat._run_goals_proactive_tick:message",
-                                "message": "goals_tick_message_kind",
-                                "data": {
-                                    "chat_id": str(chat_id),
-                                    "message_kind": _kind,
-                                    "meta_trigger": str(meta.get("trigger") or ""),
-                                    "message_preview": str(message or "")[:120],
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # endregion
 
         _wid = (worker_id or "").strip()
         vault_for_gateway = str(Path(db_path).expanduser().resolve())

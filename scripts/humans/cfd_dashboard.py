@@ -9,7 +9,6 @@ import math
 import statistics
 from pathlib import Path
 from dotenv import load_dotenv
-import time
 from datetime import datetime
 
 # 1. Configuración de Entorno
@@ -22,35 +21,6 @@ from packages.agents.src.duckclaw.forge.skills.ibkr_bridge import (
     fetch_ibkr_unrealized_pnl_total_numeric,
     _get_ibkr_portfolio_impl
 )
-
-
-def _debug_log_dashboard(
-    *,
-    hypothesis_id: str,
-    message: str,
-    data: dict,
-    run_id: str = "cfd_dashboard_launch_v1",
-) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "c964f7",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": "scripts/humans/cfd_dashboard.py",
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log",
-            "a",
-            encoding="utf-8",
-        ) as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
 
 
 def _resolve_quant_db_path() -> str | None:
@@ -67,29 +37,11 @@ def _resolve_quant_db_path() -> str | None:
         if not candidate.is_absolute():
             candidate = (repo_root / candidate).resolve()
         if candidate.exists():
-            _debug_log_dashboard(
-                hypothesis_id="H_db_path_resolution",
-                message="db_path_resolved_from_env",
-                data={"source_tail": p[-120:], "resolved_tail": str(candidate)[-180:]},
-            )
             return str(candidate)
     discovered = sorted(repo_root.glob("db/private/*/quant_traderdb1.duckdb"), reverse=True)
     if discovered:
         picked = str(discovered[0].resolve())
-        _debug_log_dashboard(
-            hypothesis_id="H_db_path_resolution",
-            message="db_path_resolved_by_glob",
-            data={"resolved_tail": picked[-180:], "candidates_count": len(discovered)},
-        )
         return picked
-    _debug_log_dashboard(
-        hypothesis_id="H_db_path_resolution",
-        message="db_path_resolution_failed",
-        data={
-            "has_quant_script_db": bool((os.environ.get("DUCKCLAW_QUANT_SCRIPT_DB") or "").strip()),
-            "has_quant_trader_db_path": bool((os.environ.get("DUCKCLAW_QUANT_TRADER_DB_PATH") or "").strip()),
-        },
-    )
     return None
 
 
@@ -221,11 +173,6 @@ def _compute_tick_tearsheet_metrics_from_pnl(*, snapshots: list[float], anchor_e
 
 def _extract_snapshots_from_config(config_df: pd.DataFrame, active_uid: str) -> tuple[list[float], str]:
     if config_df.empty:
-        _debug_log_dashboard(
-            hypothesis_id="H_snapshot_source_mismatch",
-            message="snapshot_extract_empty_config",
-            data={"active_uid_tail": str(active_uid)[-12:]},
-        )
         return [], "fallback"
     try:
         uid_rows = config_df[
@@ -233,16 +180,6 @@ def _extract_snapshots_from_config(config_df: pd.DataFrame, active_uid: str) -> 
             & (config_df["value"].astype(str) == str(active_uid))
         ]
         if uid_rows.empty:
-            _debug_log_dashboard(
-                hypothesis_id="H_snapshot_source_mismatch",
-                message="snapshot_extract_no_uid_match",
-                data={
-                    "active_uid_tail": str(active_uid)[-12:],
-                    "hist_uid_rows_total": int(
-                        config_df["key"].astype(str).str.endswith("trading_session_pnl_hist_uid").sum()
-                    ),
-                },
-            )
             return [], "fallback"
         chat_prefixes = [
             str(k).replace("trading_session_pnl_hist_uid", "") for k in uid_rows["key"].tolist()
@@ -251,29 +188,12 @@ def _extract_snapshots_from_config(config_df: pd.DataFrame, active_uid: str) -> 
         key = f"{chat_prefix}trading_session_pnl_snapshots_json"
         snap_rows = config_df[config_df["key"] == key]
         if snap_rows.empty:
-            _debug_log_dashboard(
-                hypothesis_id="H_snapshot_source_mismatch",
-                message="snapshot_extract_missing_snap_key",
-                data={"active_uid_tail": str(active_uid)[-12:], "chat_prefix_tail": chat_prefix[-16:]},
-            )
             return [], "fallback"
         snapshots = json.loads(str(snap_rows["value"].values[0]))
         if not isinstance(snapshots, list):
             return [], "fallback"
         clean = [float(x) for x in snapshots]
         deduped = _dedupe_snapshots(clean)
-        _debug_log_dashboard(
-            hypothesis_id="H_snapshot_source_mismatch",
-            message="snapshot_extract_selected_series",
-            data={
-                "active_uid_tail": str(active_uid)[-12:],
-                "chat_prefix_tail": chat_prefix[-16:],
-                "candidate_prefix_count": len(chat_prefixes),
-                "raw_len": len(clean),
-                "deduped_len": len(deduped),
-                "last_raw": None if not clean else round(float(clean[-1]), 4),
-            },
-        )
         return deduped, "snapshot"
     except Exception:
         return [], "fallback"
@@ -371,21 +291,6 @@ def build_pnl_curve(pnl_history):
     return fig
 
 def main():
-    script_ctx_present = False
-    try:
-        from streamlit.runtime.scriptrunner import get_script_run_ctx
-
-        script_ctx_present = get_script_run_ctx() is not None
-    except Exception:
-        script_ctx_present = False
-    _debug_log_dashboard(
-        hypothesis_id="H_streamlit_bare_mode",
-        message="main_entry",
-        data={
-            "script_ctx_present": bool(script_ctx_present),
-            "argv": [str(x) for x in sys.argv[:4]],
-        },
-    )
     st.sidebar.title("Operacion Manual")
     if st.sidebar.button("Refrescar Telemetria", width="stretch"):
         st.rerun()
@@ -417,20 +322,6 @@ def main():
     pnl_delta_pct = ((pnl_current - pnl_prev) / abs(pnl_prev) * 100.0) if (pnl_prev is not None and abs(pnl_prev) > 1e-12) else None
     metrics = _compute_tick_tearsheet_metrics_from_pnl(snapshots=pnl_history, anchor_equity=anchor_equity)
     displayed_equity = live_equity if live_equity is not None else (anchor_equity + pnl_current)
-
-    _debug_log_dashboard(
-        hypothesis_id="H_status_mirror_alignment",
-        message="dashboard_series_aligned",
-        data={
-            "session_uid": active_uid[:12],
-            "series_source": str(meta.get("series_source")),
-            "pnl_current": round(float(pnl_current), 4),
-            "pnl_live_now": None if meta.get("pnl_live_now") is None else round(float(meta["pnl_live_now"]), 4),
-            "pnl_equity_delta": None if meta.get("pnl_equity_delta") is None else round(float(meta["pnl_equity_delta"]), 4),
-            "anchor_equity": round(float(anchor_equity), 4),
-            "len": len(pnl_history),
-        },
-    )
 
     st.markdown("## DuckClaw Quant Observability")
     source_chip = str(meta.get("series_source", "fallback")).upper()
@@ -532,9 +423,4 @@ def main():
         st.code(portfolio_text, language="text")
 
 if __name__ == "__main__":
-    _debug_log_dashboard(
-        hypothesis_id="H_entrypoint_invocation",
-        message="python_entrypoint_called",
-        data={"argv": [str(x) for x in sys.argv[:6]], "cwd": os.getcwd()},
-    )
     main()

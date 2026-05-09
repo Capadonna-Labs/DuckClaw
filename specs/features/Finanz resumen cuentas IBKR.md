@@ -36,9 +36,22 @@ Texto operativo: mismas viñetas en `system_prompt.md` (sección gastos/cuentas 
 
 Cuando `read_sql` sobre `finance_worker.deudas` devuelve JSON de filas y el worker es **finanz**, `packages/agents/src/duckclaw/workers/read_pool.py` puede envolver la salida en `{ "deudas_filas": [...], "_totales_resumen_cop": { ... } }` si detecta fila agregada TC Bancolombia / Mac Mini con cuotas mensuales duplicadas. El modelo debe usar `total_recomendado_resumen_cop` como total único en COP (ver `system_prompt.md`).
 
-## Modo paper/live y reintento automático
+## Finanz: IBKR solo **live** y aviso sesión Quant **paper**
+
+En el worker **finanz** (manifest `id: finanz`), la herramienta `get_ibkr_portfolio` se sustituye en `packages/agents/src/duckclaw/workers/factory.py` por la variante `replace_get_ibkr_portfolio_with_finanz_live_variant` (`ibkr_bridge.py`):
+
+1. **Un solo GET** con cabecera `X-Duckclaw-IBKR-Account-Mode: live` (cuenta real). **No** hay reintento al modo paper ni uso de `IBKR_ACCOUNT_MODE` para el snapshot en Finanz, para no mezclar cifras de simulación con la cuenta live en el mismo bloque IBKR del resumen.
+2. Si en la bóveda Finanz existe `quant_core.trading_sessions` con fila `id = 'active'`, `status = ACTIVE` y `mode = paper`, la salida de la tool **añade** un aviso explícito en español (playbook Quant paper aparte). Si en ese turno Finanz **sí** mostró números IBKR live, el aviso aclara que ese bloque no es el playbook paper; si Finanz **omitió** montos por cuenta paper IBKR, el aviso lo dice (`finanz_active_paper_quant_session_notice`, flag `ibkr_numeric_snapshot_shown`).
+3. El modelo debe **reproducir** ese aviso cuando la tool lo incluya y **no** inventar cifras IBKR si la tool indicó modo paper sin saldos.
+4. **Cuenta paper en Finanz — sin cifras:** si el modo económico del snapshot es **paper** (inferido por `_ibkr_infer_snapshot_account_mode` o forzado por `IBKR_FINANZ_ASSUMED_SNAPSHOT_MODE=paper`), la tool **no** debe volcar saldos, efectivo ni posiciones; solo un texto que indique que el IB Gateway / snapshot está en **paper**, no **live**, y pasos para ver cuenta real en Finanz. Objetivo: no mezclar montos de simulación en el resumen de cuentas del usuario.
+5. **Verdad del snapshot vs cabecera (inferido paper):** cuando el JSON trae señales paper pese a cabecera live, aplica el mismo comportamiento de la viñeta anterior (sin cifras + discrepancia explicada).
+6. **Sin metadatos en el JSON:** si el servicio no devuelve modo ni id de cuenta, Finanz no afirma «cuenta real»: la tool puede usar preámbulo **modo no verificado** y entonces **sí** puede incluir números del JSON con advertencia. Override: `IBKR_FINANZ_ASSUMED_SNAPSHOT_MODE=paper|live`. Si el usuario fija `=paper`, aplicar viñeta 4 (sin cifras). La síntesis NL no fuerza «Live» cuando la evidencia es «no verificado»; `finanz_repair_ibkr_tool_live_vs_reply_paper` no reescribe Paper→Live en ese caso. Si la evidencia dice que Finanz **no** muestra saldos IBKR (modo paper), **prohibido** inventar montos del broker.
+
+## Modo paper/live y reintento automático (otros workers)
 
 `packages/agents/src/duckclaw/forge/skills/ibkr_bridge.py` envía `X-Duckclaw-IBKR-Account-Mode` según `IBKR_ACCOUNT_MODE` (por defecto `paper` si el env no está definido). Si la API devuelve `snapshot_unavailable` en ese modo (típico cuando el IB Gateway está solo en **live** y DuckClaw pidió **paper**), el bridge **reintenta una vez** el otro modo (paper o live, el opuesto al configurado) cuando `IBKR_ACCOUNT_MODE_ALT_FALLBACK` no está en `0`/`false`. El preámbulo del tool indica el modo **efectivo** del snapshot y sugiere alinear el env (`IBKR_ACCOUNT_MODE=live`) para evitar el reintento.
+
+**Excepción:** el worker **finanz** usa la variante live-only descrita arriba; no aplica el reintento paper/live de esta subsección a `get_ibkr_portfolio` en Finanz.
 
 Si `IBKR_ACCOUNT_MODE=live` y la API sigue devolviendo `snapshot_unavailable` tras el reintento, el fallo está en el **servicio** que expone `IBKR_PORTFOLIO_API_URL` (p. ej. lectura TWS/API en Capadonna), no en el `.env` del gateway DuckClaw. La respuesta del asistente no debe confundir eso con «gateway desconectado» (error HTTP); ver `system_prompt.md` y el texto de `_extract_portfolio_context` en `ibkr_bridge.py`. En egress Telegram, `finanz_repair_ibkr_snapshot_disconnect_paraphrase` fuerza coherencia si el modelo ignora la tool (ver `worker-telegram-natural-language-egress.md`).
 

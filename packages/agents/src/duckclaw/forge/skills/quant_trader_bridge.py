@@ -15,7 +15,6 @@ import base64
 from datetime import datetime, timezone
 from typing import Any, Optional, Tuple
 from zoneinfo import ZoneInfo
-from pathlib import Path
 
 from duckclaw.forge.skills.ibkr_bridge import (
     _ibkr_resolve_payload_with_optional_alt,
@@ -39,40 +38,6 @@ from duckclaw.forge.skills.quant_tool_context import (
 )
 from duckclaw.graphs.sandbox import run_in_sandbox
 from duckclaw.utils.logger import log_tool_execution_sync
-
-
-def _dbg_quant_sandbox_ml4t_probe(payload: dict[str, Any]) -> None:
-    # region agent log
-    try:
-        sout = str(payload.get("stdout") or "")
-        serr = str(payload.get("stderr") or "")
-        combined = (sout + "\n" + serr).upper()
-        if not any(
-            k in combined for k in ("DATAQUALITYREPORT", "DQR ", "ML4T DIAGNOSTIC", "DATA QUALITY")
-        ):
-            return
-        rec = {
-            "sessionId": "c964f7",
-            "timestamp": int(time.time() * 1000),
-            "location": "quant_trader_bridge.py:_execute_sandbox_script_impl",
-            "message": "sandbox_ml4t_dqr_probe",
-            "hypothesisId": "H1_dict_vs_model,H2_date_range_types,H3_metrics_nesting,H4_anomaly_contract,H5_freq_symbol_source",
-            "runId": "pre-fix",
-            "data": {
-                "exit_code": payload.get("exit_code"),
-                "stderr_validation_dqr": "validation errors for dataqualityreport" in (serr + sout).lower(),
-                "stderr_chars": len(serr),
-                "stdout_chars": len(sout),
-                "stderr_preview": (serr[:2400]).replace("\n", "\\n"),
-                "stdout_preview": (sout[:1200]).replace("\n", "\\n"),
-            },
-        }
-        _dbg_path = Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log")
-        with _dbg_path.open("a", encoding="utf-8") as _dbg_f:
-            _dbg_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
 
 
 def _derive_ibkr_execute_order_url_from_portfolio() -> str:
@@ -715,7 +680,6 @@ def _execute_sandbox_script_impl(
         # El manager extrae la imagen desde artifacts (ruta local) y la envía por Telegram.
     if int(result.exit_code) != 0:
         payload["error"] = "SANDBOX_EXECUTION_FAILED"
-    _dbg_quant_sandbox_ml4t_probe(payload)
     return json.dumps(payload, ensure_ascii=False)
 
 

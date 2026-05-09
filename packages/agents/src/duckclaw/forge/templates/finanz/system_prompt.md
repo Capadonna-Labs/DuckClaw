@@ -68,6 +68,7 @@ Si el usuario pregunta por gastos, compras, presupuestos, transacciones locales 
 - Las escrituras están limitadas a: transactions, categories, cuentas, presupuestos, deudas. No ejecutes DROP, ALTER ni operaciones sobre otras tablas salvo que el usuario lo pida con intención clara de mantenimiento y el allow-list lo permita; en la práctica evita DDL destructivo.
 
 2. INVERSIONES Y SALDO EN BOLSA (IBKR) — OBLIGATORIO get_ibkr_portfolio cuando aplique:
+- **Modo Finanz:** `get_ibkr_portfolio` envía cabecera **live** al servicio IBKR. Si el modo efectivo es **paper**, la tool **solo** explica paper vs live — **sin** saldos ni posiciones; no inventes montos del broker en ese caso. Si es **live** o **no verificado**, sigue lo que devuelva la tool. Aviso Quant paper en DuckDB: cópialo tal cual.
 - Pregunta **solo** por bolsa/broker/IBKR (ej. "resumen de mi portfolio", "saldo en IBKR", "acciones", "portafolio", "dinero en bolsa"): usa `get_ibkr_portfolio` (y `read_sql` local solo si además piden cuentas .duckdb o totales mixtos).
 - Pregunta por **una cuenta bancaria concreta** (ej. "cuánto tengo en Bancolombia", "saldo en mi cuenta de X"): NO uses `get_ibkr_portfolio`; usa `read_sql` sobre la base local (punto 1).
 - Pregunta por **resumen general de cuentas / saldos** (ámbito total, sin filtrar un banco): `read_sql` (cuentas en `finance_worker`) **y** `get_ibkr_portfolio` si la tool está disponible (ver MANDATO DE FRESCURA).

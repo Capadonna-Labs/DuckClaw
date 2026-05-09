@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -41,6 +42,18 @@ from duckclaw.graphs.agent_resilience import (
 _log = logging.getLogger(__name__)
 _obs = get_obs_logger()
 _worker_graph_cache: dict[str, Any] = {}
+_vault_invoke_guard = threading.Lock()
+_vault_invoke_locks: dict[str, threading.Lock] = {}
+
+
+def _vault_lock_key(path: str) -> str:
+    p = (path or "").strip()
+    if not p or p == ":memory:":
+        return ""
+    try:
+        return str(Path(p).expanduser().resolve())
+    except Exception:
+        return str(Path(p).expanduser())
 
 
 def _tool_name_from_embedded_json_content(text: str) -> str | None:
@@ -1507,36 +1520,6 @@ def build_manager_graph(
         cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
         if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _hrp_fast:
             assigned = job_hunter_in_team
-        # region agent log
-        try:
-            _walk = Path(__file__).resolve()
-            for _ in range(10):
-                _cursor_dir = _walk / ".cursor"
-                if _cursor_dir.is_dir():
-                    _dbg_path = _cursor_dir / "debug-c964f7.log"
-                    _payload = {
-                        "sessionId": "c964f7",
-                        "runId": "debt-route",
-                        "hypothesisId": "H1",
-                        "location": "manager_graph.py:plan_node",
-                        "message": "cashflow_job_intent vs job_hunter assignment",
-                        "data": {
-                            "incoming_has_deuda": "deuda" in (incoming or "").lower(),
-                            "cashflow_job_intent": bool(cashflow_job_intent),
-                            "assigned_after_a2a_rule": str(assigned or ""),
-                            "job_hunter_in_team": bool(job_hunter_in_team),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                    with _dbg_path.open("a", encoding="utf-8") as _df:
-                        _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-                    break
-                if _walk == _walk.parent:
-                    break
-                _walk = _walk.parent
-        except Exception:
-            pass
-        # endregion
 
         # Mantener lógica existente de ruteo / planned_task
         if _hrp_fast:
@@ -1713,6 +1696,7 @@ def build_manager_graph(
         worker_graph = None
         worker_cache_key = ""
         _suspend_for_rw_worker = False
+        _vault_lock_obj: threading.Lock | None = None
         pa = int(state.get("plan_attempt_index") or 0)
         max_a = int(state.get("plan_max_attempts") or plan_max_attempts_from_env())
         reasons_acc = list(state.get("plan_failure_reasons") or [])
@@ -1732,21 +1716,33 @@ def build_manager_graph(
                 worker_cache_key = f"{worker_cache_key}::ctx_syn"
             if _summarize_vault_ro:
                 worker_cache_key = f"{worker_cache_key}::sum_vault_ro"
-            from duckclaw.workers.factory import _same_duckdb_file
+            from duckclaw.workers.factory import _get_db_path, _same_duckdb_file
             from duckclaw.workers.manifest import load_manifest
 
             spec_inv = load_manifest(assigned, troot)
-            vault_eff = (vault_db_path or db_path or "").strip()
             mgr_path = str(getattr(db, "_path", "") or "").strip()
+            worker_resolved = _get_db_path(
+                assigned, tenant_id, (vault_db_path or db_path or None)
+            ).strip()
+            # Misma resolución que build_worker_graph; vault_db_path crudo puede diverger del path real.
+            _needs_rw_vault = (not bool(spec_inv.read_only)) and (not bool(_summarize_vault_ro))
             # DuckDB: no RO+RW simultáneo al mismo archivo. Suspender el RO del manager antes
             # de abrir el worker RW; leer sandbox/chat_state antes (sin worker RW abierto).
             _suspend_for_rw_worker = bool(
                 getattr(db, "_read_only", False)
-                and not spec_inv.read_only
-                and vault_eff
+                and _needs_rw_vault
+                and worker_resolved
                 and mgr_path
-                and _same_duckdb_file(mgr_path, vault_eff)
+                and _same_duckdb_file(mgr_path, worker_resolved)
             )
+            # Serializa acceso al .duckdb: dos webhooks concurrentes no deben abrir dos DuckClaw RW.
+            _vk = _vault_lock_key(worker_resolved)
+            if _vk:
+                with _vault_invoke_guard:
+                    if _vk not in _vault_invoke_locks:
+                        _vault_invoke_locks[_vk] = threading.Lock()
+                    _vault_lock_obj = _vault_invoke_locks[_vk]
+                _vault_lock_obj.acquire()
             _cfg_db = _agent_config_db_for_vault(db, vault_db_path or None)
             raw_sb = get_chat_state(_cfg_db, chat_id, "sandbox_enabled")
             sb_on = (raw_sb or "").strip().lower() in ("true", "1", "on", "sí", "si")
@@ -2022,6 +2018,11 @@ def build_manager_graph(
             set_idle(chat_id)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             append_task_audit(db, chat_id, assigned, incoming, status, elapsed_ms, plan_title=plan_title)
+            if _vault_lock_obj is not None:
+                try:
+                    _vault_lock_obj.release()
+                except Exception:
+                    pass
 
         if exhausted_final:
             reply = format_exhausted_plan_failure(reasons_acc)

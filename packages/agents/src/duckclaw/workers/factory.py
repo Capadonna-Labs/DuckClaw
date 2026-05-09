@@ -350,7 +350,8 @@ def _is_finanz_local_accounts_query(text: str) -> bool:
     return bool(
         re.search(
             r"\b(resumen\s+(de\s+)?(mis\s+)?cuentas|saldos?\s+(de\s+)?(mis\s+)?cuentas|"
-            r"mis\s+cuentas\s+bancarias|cuentas\s+bancarias|estado\s+actual\s+de\s+mis\s+cuentas)\b",
+            r"mis\s+cuentas\s+bancarias|cuentas\s+bancarias|estado\s+actual\s+de\s+mis\s+cuentas|"
+            r"estatus\s+de\s+mis\s+cuentas)\b",
             t,
         )
     )
@@ -1906,14 +1907,28 @@ def build_worker_graph(
         _log.debug("build_worker_graph: reuse DuckClaw (same file, no shared, skip private ATTACH) path=%s", path)
     else:
         # RW: manifest quant_core / señales. RO: manifest read_only o turnos SUMMARIZE_* (sin INSERT en vault).
-        db = DuckClaw(path, read_only=effective_vault_ro)
+        # Motor Python para RW en archivo: el manager ya abrió RO con duckdb Python; mezclar bridge C++ (auto)
+        # + Python en el mismo .duckdb en un PID provoca «different configuration» (misma causa que fly en api-gateway).
+        _engine: Literal["auto", "python"] = (
+            "python"
+            if not effective_vault_ro and (path or "").strip() not in ("", ":memory:")
+            else "auto"
+        )
+        db = DuckClaw(path, read_only=effective_vault_ro, engine=_engine)
+    # La conexión DuckClaw ya es al archivo de la bóveda; ATTACH del mismo path como `private`
+    # abre otra vista del mismo archivo y en DuckDB suele disparar «different configuration».
+    db_open_path = str(getattr(db, "_path", "") or path or "").strip()
+    vault_path_for_attach = str(path or "").strip()
+    skip_private_attach = bool(skip_private) or _same_duckdb_file(
+        db_open_path, vault_path_for_attach
+    )
     _apply_forge_attaches(
         db,
         path,
         shared_resolved,
         private_attach_read_only=effective_vault_ro,
         shared_attach_read_only=True,
-        skip_private_attach=skip_private,
+        skip_private_attach=skip_private_attach,
     )
 
     system_prompt = load_system_prompt(spec)
@@ -2037,8 +2052,15 @@ def build_worker_graph(
 
     if getattr(spec, "ibkr_config", None) is not None:
         try:
-            from duckclaw.forge.skills.ibkr_bridge import register_ibkr_skill
+            from duckclaw.forge.skills.ibkr_bridge import (
+                register_ibkr_skill,
+                replace_get_ibkr_portfolio_with_finanz_live_variant,
+            )
+
             register_ibkr_skill(tools, spec.ibkr_config)
+            _lid_ibkr = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
+            if _lid_ibkr == "finanz":
+                replace_get_ibkr_portfolio_with_finanz_live_variant(tools, str(path))
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             pass
@@ -4361,6 +4383,8 @@ def build_worker_graph(
         from duckclaw.utils import format_tool_reply
         from duckclaw.forge.atoms.user_reply_nl_synthesis import (
             finanz_repair_ibkr_snapshot_disconnect_paraphrase,
+            finanz_repair_ibkr_tool_live_vs_reply_paper,
+            finanz_strip_ibkr_block_without_tool_in_turn,
             incoming_has_context_summarize_directive,
             maybe_synthesize_reply,
             repair_summarize_new_context_egress,
@@ -4496,6 +4520,14 @@ def build_worker_graph(
                 out_err.update(_identity_fields(state))
                 return out_err
         reply = _repair_finanz_ibkr_egress(_apply_nl_synthesis(reply or ""))
+        _wid_fin = str(getattr(spec, "worker_id", "") or "")
+        reply = finanz_repair_ibkr_tool_live_vs_reply_paper(msgs, reply, worker_id=_wid_fin)
+        reply = finanz_strip_ibkr_block_without_tool_in_turn(
+            msgs,
+            reply,
+            worker_id=_wid_fin,
+            user_ask=_inc_for_ctx,
+        )
         _rescind_incoming = state_evidence_for_context_summary_rescind(state)
         reply = rescind_trivial_context_summary_reply(
             llm, spec, incoming=_rescind_incoming, reply_candidate=reply or ""

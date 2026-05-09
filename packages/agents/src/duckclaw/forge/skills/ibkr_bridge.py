@@ -10,22 +10,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Optional, Tuple
+import re
+from typing import Any, Literal, Optional, Tuple
 
 from duckclaw.utils.logger import log_tool_execution_sync
 
 _log = logging.getLogger(__name__)
-
-_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log"
-
-
-def _agent_debug_log(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict[str, Any],
-) -> None:
-    del hypothesis_id, location, message, data
 
 
 def _ibkr_account_mode() -> str:
@@ -72,6 +62,94 @@ def _ibkr_snapshot_has_substance(data: Any) -> bool:
         except (TypeError, ValueError):
             pass
     return False
+
+
+_DU_PAPER_ACCOUNT_ID = re.compile(r"^DU\d+$", re.IGNORECASE)
+
+
+def _ibkr_normalize_mode_token(raw: str) -> Optional[Literal["paper", "live"]]:
+    s = raw.strip().lower()
+    if s in ("paper", "demo", "sim", "simulation", "sandbox"):
+        return "paper"
+    if s in ("live", "real", "production"):
+        return "live"
+    return None
+
+
+def _ibkr_infer_snapshot_account_mode(data: Any) -> Optional[Literal["paper", "live"]]:
+    """
+    Mejor esfuerzo: modo económico del snapshot según el JSON del servicio (no la cabecera enviada).
+    IBKR suele usar cuentas paper con id tipo DU######.
+    """
+    if not isinstance(data, dict):
+        return None
+
+    def _from_dict(d: dict[str, Any]) -> Optional[Literal["paper", "live"]]:
+        for key in (
+            "account_mode",
+            "ib_account_mode",
+            "snapshot_account_mode",
+            "ib_env",
+            "ib_env_mode",
+            "environment",
+            "trading_mode",
+            "account_type",
+        ):
+            v = d.get(key)
+            if isinstance(v, str):
+                m = _ibkr_normalize_mode_token(v)
+                if m:
+                    return m
+        if d.get("paper") is True or d.get("is_paper") is True:
+            return "paper"
+        if d.get("paper") is False or d.get("is_paper") is False:
+            return "live"
+        for key in ("account_id", "accountId", "account", "acct_id", "acctId", "ib_account"):
+            v = d.get(key)
+            if isinstance(v, str) and _DU_PAPER_ACCOUNT_ID.match(v.strip()):
+                return "paper"
+            if isinstance(v, dict):
+                for ak in ("accountId", "account_id", "id", "acctId"):
+                    aid = v.get(ak)
+                    if isinstance(aid, str) and _DU_PAPER_ACCOUNT_ID.match(aid.strip()):
+                        return "paper"
+        return None
+
+    got = _from_dict(data)
+    if got:
+        return got
+    inner = data.get("data")
+    if isinstance(inner, dict):
+        got = _from_dict(inner)
+        if got:
+            return got
+
+    def _walk(obj: Any, depth: int) -> Optional[Literal["paper", "live"]]:
+        if depth > 3:
+            return None
+        if isinstance(obj, dict):
+            for vv in obj.values():
+                if isinstance(vv, str) and _DU_PAPER_ACCOUNT_ID.match(vv.strip()):
+                    return "paper"
+                r = _walk(vv, depth + 1)
+                if r:
+                    return r
+        elif isinstance(obj, list):
+            for it in obj[:40]:
+                r = _walk(it, depth + 1)
+                if r:
+                    return r
+        return None
+
+    return _walk(data, 0)
+
+
+def _finanz_env_assumed_snapshot_mode() -> Optional[Literal["paper", "live"]]:
+    """Override local cuando el JSON del servicio no declara modo (p. ej. observability sin `account_id`)."""
+    raw = (os.environ.get("IBKR_FINANZ_ASSUMED_SNAPSHOT_MODE") or "").strip().lower()
+    if raw in ("paper", "live"):
+        return raw  # type: ignore[return-value]
+    return None
 
 
 def _ibkr_fetch_portfolio_payload(
@@ -121,6 +199,70 @@ def _ibkr_fetch_portfolio_payload(
     return data
 
 
+def _ibkr_resolve_payload_live_only(
+    api_url: str,
+    api_key: str,
+    positions_url: str,
+) -> tuple[dict[str, Any], str, str]:
+    """
+    Un solo GET en modo **live** (cuenta real). Sin reintento al modo paper:
+    uso del worker Finanz para no mezclar números de simulación con cuenta live.
+    """
+    data = _ibkr_fetch_portfolio_payload(api_url, api_key, positions_url, "live")
+    return data, "live", "live"
+
+
+def finanz_active_paper_quant_session_notice(
+    finanz_db_path: str,
+    *,
+    ibkr_numeric_snapshot_shown: bool = True,
+) -> str:
+    """
+    Si en la bóveda Finanz existe `quant_core.trading_sessions` (id=active) en
+    status ACTIVE y mode paper, devuelve un aviso breve para la respuesta al usuario.
+
+    ``ibkr_numeric_snapshot_shown``: False cuando Finanz omitió montos IBKR (cuenta paper).
+    """
+    p = (finanz_db_path or "").strip()
+    if not p:
+        return ""
+    try:
+        from duckclaw import DuckClaw
+
+        with DuckClaw(p, read_only=True) as db_ro:
+            raw = db_ro.query(
+                "SELECT mode, status, tickers FROM quant_core.trading_sessions "
+                "WHERE id = 'active' LIMIT 1"
+            )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if not rows or not isinstance(rows[0], dict):
+            return ""
+        row = rows[0]
+        if str(row.get("status") or "").strip().upper() != "ACTIVE":
+            return ""
+        if str(row.get("mode") or "").strip().lower() != "paper":
+            return ""
+        tickers = str(row.get("tickers") or "").strip()
+        tick_part = f" Tickers sesión: {tickers}." if tickers else ""
+        if ibkr_numeric_snapshot_shown:
+            ibkr_part = (
+                "El bloque IBKR de arriba es **solo cuenta live** (real); no lo interpretes como "
+                "saldo del playbook en simulación."
+            )
+        else:
+            ibkr_part = (
+                "En este turno **no hay cifras del broker** en el mensaje (Gateway en cuenta paper). "
+                "El playbook Quant en paper es aparte."
+            )
+        return (
+            "\n\n---\n**Aviso (Finanz):** hay una **sesión de trading Quant en modo paper** "
+            "registrada como ACTIVA en tu DuckDB (`quant_core.trading_sessions`)."
+            f"{tick_part} {ibkr_part} Para el ciclo paper usa el bot/worker Quant.\n"
+        )
+    except Exception:
+        return ""
+
+
 def _ibkr_resolve_payload_with_optional_alt(
     api_url: str,
     api_key: str,
@@ -132,26 +274,7 @@ def _ibkr_resolve_payload_with_optional_alt(
     en el modo configurado reintenta una vez el otro modo (paper<->live).
     """
     configured = _ibkr_account_mode()
-    raw_env = os.environ.get("IBKR_ACCOUNT_MODE")
-    _agent_debug_log(
-        "H1",
-        "ibkr_bridge.py:_ibkr_resolve_payload_with_optional_alt",
-        "ibkr_env_and_configured_mode",
-        {"IBKR_ACCOUNT_MODE_raw": raw_env, "configured_mode": configured},
-    )
     data = _ibkr_fetch_portfolio_payload(api_url, api_key, positions_url, configured)
-    portfolio = data.get("portfolio") or data.get("positions") or []
-    _agent_debug_log(
-        "H2",
-        "ibkr_bridge.py:_ibkr_resolve_payload_with_optional_alt",
-        "after_primary_fetch",
-        {
-            "configured_mode": configured,
-            "portfolio_len": len(portfolio) if isinstance(portfolio, list) else 0,
-            "error": str(data.get("error") or ""),
-            "needs_alt": _ibkr_error_suggests_mode_mismatch(data),
-        },
-    )
     effective = configured
     fb = (os.environ.get("IBKR_ACCOUNT_MODE_ALT_FALLBACK") or "1").strip().lower()
     if fb in ("0", "false", "no"):
@@ -160,16 +283,6 @@ def _ibkr_resolve_payload_with_optional_alt(
     if _ibkr_error_suggests_mode_mismatch(data):
         alt = "live" if configured == "paper" else "paper"
         data_alt = _ibkr_fetch_portfolio_payload(api_url, api_key, positions_url, alt)
-        _agent_debug_log(
-            "H4",
-            "ibkr_bridge.py:_ibkr_resolve_payload_with_optional_alt",
-            "after_alt_fetch",
-            {
-                "alt_mode": alt,
-                "alt_error": str(data_alt.get("error") or "") if isinstance(data_alt, dict) else "",
-                "alt_substance": _ibkr_snapshot_has_substance(data_alt),
-            },
-        )
         if _ibkr_snapshot_has_substance(data_alt):
             data = data_alt
             effective = alt
@@ -178,17 +291,6 @@ def _ibkr_resolve_payload_with_optional_alt(
                 configured,
                 effective,
             )
-    _agent_debug_log(
-        "H3",
-        "ibkr_bridge.py:_ibkr_resolve_payload_with_optional_alt",
-        "resolved_effective_mode",
-        {
-            "configured_mode": configured,
-            "effective_mode": effective,
-            "used_alt": effective != configured,
-            "has_substance": _ibkr_snapshot_has_substance(data),
-        },
-    )
     return data, effective, configured
 
 
@@ -447,6 +549,163 @@ def _extract_portfolio_context(data: Any, *, account_mode_for_display: Optional[
 
     rendered = "\n".join(lines)
     return rendered
+
+
+def _get_ibkr_portfolio_finanz_impl(finanz_db_path: str) -> str:
+    """
+    Variante **Finanz**: GET con cabecera **live**; etiqueta del texto según JSON, env o «no verificado».
+    """
+    api_url = os.environ.get("IBKR_PORTFOLIO_API_URL", "").strip()
+    api_key = os.environ.get("IBKR_PORTFOLIO_API_KEY", "").strip()
+    positions_url = os.environ.get("IBKR_PORTFOLIO_POSITIONS_URL", "").strip()
+
+    if not api_url or not api_key:
+        _log.warning("[ibkr] Credenciales no configuradas (IBKR_PORTFOLIO_API_URL/KEY)")
+        return "Error de configuración: Las credenciales de la API de IBKR no están configuradas en el entorno."
+
+    notice_err = finanz_active_paper_quant_session_notice(
+        finanz_db_path, ibkr_numeric_snapshot_shown=True
+    )
+    try:
+        from urllib.error import HTTPError, URLError
+
+        data, effective, configured = _ibkr_resolve_payload_live_only(api_url, api_key, positions_url)
+        portfolio = data.get("portfolio") or data.get("positions") or []
+        plen = len(portfolio) if isinstance(portfolio, list) else 0
+        inferred = _ibkr_infer_snapshot_account_mode(data)
+        assumed = _finanz_env_assumed_snapshot_mode()
+        economic: Optional[Literal["paper", "live"]]
+        if inferred in ("paper", "live"):
+            economic = inferred
+        elif assumed in ("paper", "live"):
+            economic = assumed
+        else:
+            economic = None
+
+        _log.info(
+            "[ibkr/finanz] API OK (live-only) | effective_mode=%s | inferred=%s | assumed=%s | economic=%s | total_value=%s | portfolio_len=%s",
+            effective,
+            inferred,
+            assumed,
+            economic,
+            data.get("total_value"),
+            plen,
+        )
+
+        if economic == "paper":
+            paper_src = "inferred_json" if inferred == "paper" else "assumed_env"
+            if inferred == "paper":
+                _log.warning(
+                    "[ibkr/finanz] Cabecera live pero el JSON sugiere cuenta paper — Finanz omite saldos paper"
+                )
+                body_paper = (
+                    "**Finanz — IBKR (modo paper):** este worker **no muestra saldos**, efectivo ni posiciones de cuenta "
+                    "**paper** (simulación). La respuesta del servicio indica cuenta **paper**, no **live** (real), "
+                    "aunque DuckClaw envió cabecera **live**.\n\n"
+                    "**Siguientes pasos:** en el VPS, que el portfolio API honre `X-Duckclaw-IBKR-Account-Mode: live` y "
+                    "que IB Gateway esté en modo/puerto **live** (4001) si quieres ver cifras de cuenta real en Finanz."
+                )
+            else:
+                body_paper = (
+                    "**Finanz — IBKR (modo paper):** este worker **no muestra saldos**, efectivo ni posiciones de cuenta "
+                    "**paper**. Según `IBKR_FINANZ_ASSUMED_SNAPSHOT_MODE=paper` en el gateway, tratamos el modo como "
+                    "**paper**, no **live** (el JSON del servicio no declaró cuenta de forma fiable).\n\n"
+                    "**Siguientes pasos:** cuando IB Gateway sea **live** y el API lo refleje, quita este env o usa "
+                    "`IBKR_FINANZ_ASSUMED_SNAPSHOT_MODE=live` y vuelve a pedir el resumen."
+                )
+            _log.info("[ibkr/finanz] paper mode — balances suppressed | source=%s", paper_src)
+            return body_paper + finanz_active_paper_quant_session_notice(
+                finanz_db_path, ibkr_numeric_snapshot_shown=False
+            )
+        elif economic == "live":
+            display_mode = "live"
+            if inferred == "live":
+                pre = (
+                    "**Finanz — cuenta IBKR (live):** el servicio declaró snapshot **live** en el JSON; "
+                    "la petición también usó cabecera **live**.\n\n"
+                )
+            else:
+                pre = (
+                    "**Finanz — cuenta IBKR (live):** etiqueta **live** por `IBKR_FINANZ_ASSUMED_SNAPSHOT_MODE=live` "
+                    "(el JSON del servicio no declaró modo; la petición usó cabecera **live**).\n\n"
+                )
+        else:
+            display_mode = "no verificado (API sin metadatos de cuenta)"
+            pre = (
+                "**Finanz — cuenta IBKR (modo no verificado):** DuckClaw envió cabecera **live**, "
+                "pero **la respuesta HTTP no incluye** campos que permitan distinguir cuenta real vs paper "
+                "(p. ej. `account_id` tipo DU…, `ib_env`, `paper`). "
+                "**No** presentes estas cifras como «cuenta real» sin más. "
+                "Si en TWS solo tienes paper, asume simulación. "
+                "Puedes fijar etiqueta en el gateway: `IBKR_FINANZ_ASSUMED_SNAPSHOT_MODE=paper` o `=live`. "
+                "Lo correcto a medio plazo es que el servicio portfolio en el VPS añada el modo o el id de cuenta al JSON.\n\n"
+            )
+
+        body = _extract_portfolio_context(data, account_mode_for_display=display_mode)
+        return pre + body + finanz_active_paper_quant_session_notice(
+            finanz_db_path, ibkr_numeric_snapshot_shown=True
+        )
+    except HTTPError as e:
+        _log.warning("[ibkr/finanz] HTTP %s: %s", e.code, e.reason)
+        return (
+            "Error de conexión: El Gateway de IBKR está desconectado en este momento. "
+            "No puedo acceder a los datos de tu portafolio de inversiones."
+            + notice_err
+        )
+    except URLError as e:
+        _log.warning("[ibkr/finanz] URLError: %s", e.reason)
+        if "timed out" in str(e.reason).lower() or "timeout" in str(e.reason).lower():
+            return "Error de conexión: Timeout al conectar con el servidor de IBKR. Intenta más tarde." + notice_err
+        return (
+            "Error de conexión: El Gateway de IBKR está desconectado en este momento. "
+            "No puedo acceder a los datos de tu portafolio de inversiones."
+            + notice_err
+        )
+    except (TimeoutError, OSError) as e:
+        _log.warning("[ibkr/finanz] Timeout/OSError: %s", e)
+        if "timed out" in str(e).lower() or "timeout" in type(e).__name__.lower():
+            return "Error de conexión: Timeout al conectar con el servidor de IBKR. Intenta más tarde." + notice_err
+        return (
+            "Error de conexión: El Gateway de IBKR está desconectado en este momento. "
+            "No puedo acceder a los datos de tu portafolio de inversiones."
+            + notice_err
+        )
+    except json.JSONDecodeError as e:
+        _log.warning("[ibkr/finanz] JSON decode error: %s", e)
+        return "Error interno: La API de IBKR devolvió una respuesta no válida." + notice_err
+    except Exception as e:
+        _log.exception("[ibkr/finanz] Unexpected error")
+        return f"Error interno al procesar el portafolio: {str(e)}" + notice_err
+
+
+def replace_get_ibkr_portfolio_with_finanz_live_variant(tools: list[Any], finanz_db_path: str) -> None:
+    """Sustituye la tool estándar por la variante live-only + aviso sesión paper Quant."""
+    from langchain_core.tools import StructuredTool
+
+    db_path = str(finanz_db_path or "").strip()
+    if not db_path:
+        return
+
+    for i, t in enumerate(tools):
+        if getattr(t, "name", None) != "get_ibkr_portfolio":
+            continue
+
+        def _finanz_ibkr_call() -> str:
+            return _get_ibkr_portfolio_finanz_impl(db_path)
+
+        tools[i] = StructuredTool.from_function(
+            _finanz_ibkr_call,
+            name="get_ibkr_portfolio",
+            description=(
+                "Broker IBKR en Finanz: petición con cabecera **live**. Si el snapshot es **paper** (metadatos JSON o "
+                "`IBKR_FINANZ_ASSUMED_SNAPSHOT_MODE=paper`), la tool **no** devuelve montos — solo aviso modo paper vs live. "
+                "Si es **live** o modo no verificado, puede incluir totales/posiciones según política. "
+                "Aviso opcional si sesión Quant paper ACTIVA en DuckDB. "
+                "OBLIGATORIO cuando el usuario pide resumen amplio de cuentas con broker. "
+                "Ignora read_sql para posiciones que solo existen en IBKR."
+            ),
+        )
+        return
 
 
 @log_tool_execution_sync(name="get_ibkr_portfolio")

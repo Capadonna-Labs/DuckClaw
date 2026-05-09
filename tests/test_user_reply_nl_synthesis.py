@@ -506,3 +506,64 @@ def test_repair_summarize_new_context_keeps_clean_vlm_text() -> None:
     clean_reply = "- Hallazgo: el titular habla de auditoría de seguridad en modelo de Anthropic."
     out = mod.repair_summarize_new_context_egress(clean_reply, incoming=inc)
     assert out == clean_reply
+
+
+def test_finanz_repair_ibkr_skips_relabel_when_tool_unverified() -> None:
+    from langchain_core.messages import ToolMessage
+
+    tool = ToolMessage(
+        content=(
+            "**Finanz — cuenta IBKR (modo no verificado):** texto.\n\n"
+            "Estado: IBKR Gateway conectado (modo cuenta del snapshot: no verificado (API sin metadatos de cuenta)).\n"
+        ),
+        tool_call_id="ib1",
+        name="get_ibkr_portfolio",
+    )
+    reply = "📊 X\n\nIBKR (USD) - Paper\n- Efectivo: $1\n"
+    out = mod.finanz_repair_ibkr_tool_live_vs_reply_paper([tool], reply, worker_id="finanz")
+    assert "Paper" in out
+
+
+def test_finanz_repair_ibkr_live_vs_paper_relabels_when_tool_live() -> None:
+    from langchain_core.messages import ToolMessage
+
+    tool = ToolMessage(
+        content=(
+            "**Finanz — cuenta IBKR (live):** snapshot.\n\n"
+            "Estado: IBKR Gateway conectado (modo cuenta del snapshot: live).\n"
+            "Valor total: $1\n"
+        ),
+        tool_call_id="ib1",
+        name="get_ibkr_portfolio",
+    )
+    reply = "📊 X\n\nIBKR (USD) - Paper\n- Efectivo: $1\n"
+    out = mod.finanz_repair_ibkr_tool_live_vs_reply_paper([tool], reply, worker_id="finanz")
+    assert "Paper" not in out
+    assert "Live" in out
+
+
+def test_finanz_strip_ibkr_block_without_tool_in_turn() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    msgs = [
+        HumanMessage(content="Dame un resumen de mis cuentas"),
+        AIMessage(content="sin tools"),
+    ]
+    reply = (
+        "📊 Local\n\n"
+        "💰 Total: 1 COP\n\n"
+        "IBKR (USD) - Paper\n"
+        "- Efectivo: $999\n\n"
+        "TOTAL COMBINADO\n"
+        "- Local: 1\n"
+        "- IBKR: 2\n"
+    )
+    out = mod.finanz_strip_ibkr_block_without_tool_in_turn(
+        msgs,
+        reply,
+        worker_id="finanz",
+        user_ask="Dame un resumen de mis cuentas",
+    )
+    assert "IBKR (USD) - Paper" not in out
+    assert "TOTAL COMBINADO" not in out
+    assert "get_ibkr_portfolio" in out.lower()

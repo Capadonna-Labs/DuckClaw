@@ -93,7 +93,6 @@ sys.exit(0)
   exit 1
 fi
 # Entrada Duckclaw: reparación ligera de JSON en tool calls Gemma4 + filtro de UserWarning del servidor dev.
-export DUCKCLAW_DEBUG_LOG="${REPO_ROOT}/.cursor/debug-4a0206.log"
 _MLX_ENTRY="${SCRIPT_DIR}/run_mlx_lm_server.py"
 if [ ! -f "$_MLX_ENTRY" ]; then
   echo "Error: no se encontró el arranque MLX: $_MLX_ENTRY"

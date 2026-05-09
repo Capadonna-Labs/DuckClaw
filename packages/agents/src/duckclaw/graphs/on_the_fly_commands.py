@@ -279,32 +279,6 @@ def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
             except Exception:
                 continue
 
-    # region agent log
-    try:
-        _dbg = {
-            "sessionId": "c964f7",
-            "timestamp": int(time.time() * 1000),
-            "location": "on_the_fly_commands.clear_goals_proactive_schedule",
-            "message": "goals_delta_off_paths",
-            "hypothesisId": "H1_sibling_vault_stale_delta",
-            "runId": "post-fix",
-            "data": {
-                "chat_id": str(chat_id),
-                "primary_db": primary_resolved,
-                "paths_touched_n": len(paths_touched),
-                "paths_touched_tail": [x[-80:] if len(x) > 80 else x for x in paths_touched],
-                "clear_scope": "hub_plus_same_private_uid",
-            },
-        }
-        with Path("/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log").open(
-            "a", encoding="utf-8"
-        ) as _df:
-            _df.write(json.dumps(_dbg, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
-
-
 def _skip_runtime_ddl(db: Any) -> bool:
     """Si True, no ejecutar CREATE/ALTER en runtime (asumir scripts/bootstrap_dbs.py)."""
     return bool(getattr(db, "_read_only", False))
@@ -3304,29 +3278,6 @@ def execute_goals(
             _GOALS_DELTA_META_KEY,
             json.dumps(meta_obj, ensure_ascii=False),
         )
-        # region agent log
-        try:
-            _dbg_goals_delta = {
-                "sessionId": "c964f7",
-                "timestamp": int(time.time() * 1000),
-                "location": "on_the_fly_commands.execute_goals:--delta",
-                "message": "goals_delta_cli_meta",
-                "hypothesisId": "H_explicit_delta_goals_cli",
-                "runId": "post-fix",
-                "data": {
-                    "chat_id": str(chat_id),
-                    "secs": secs,
-                    "meta_trigger": meta_obj.get("trigger"),
-                    "last_fire_epoch_set": bool(_fire_anchor),
-                },
-            }
-            with Path(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-c964f7.log"
-            ).open("a", encoding="utf-8") as _dfg:
-                _dfg.write(json.dumps(_dbg_goals_delta, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-        # endregion
         human = format_goals_delta_interval_human(secs)
         return (
             f"Revisión proactiva cada ~{human}. "
@@ -3877,7 +3828,12 @@ def prepare_leila_fly_duckdb(
             return
     from duckclaw.workers.factory import _apply_forge_attaches
 
-    _apply_forge_attaches(db, (vault_path or "").strip(), shared)
+    _apply_forge_attaches(
+        db,
+        (vault_path or "").strip(),
+        shared,
+        skip_private_attach=True,
+    )
     setattr(db, "_leila_shared_catalog_attached", True)
 
 

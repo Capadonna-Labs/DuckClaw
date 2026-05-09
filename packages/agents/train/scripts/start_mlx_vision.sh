@@ -95,46 +95,6 @@ else
   exit 1
 fi
 
-# region agent log — H1 puerto ocupado (huérfano mlx-openai-server vs segunda instancia PM2)
-_DBG_LOG="${REPO_ROOT}/.cursor/debug-c964f7.log"
-if command -v python3 >/dev/null 2>&1; then
-  VISION_PORT="${VISION_PORT}" REPO_ROOT="${REPO_ROOT}" _DBG_LOG="${_DBG_LOG}" python3 -c '
-import json, os, subprocess, time
-port = os.environ.get("VISION_PORT", "")
-log_path = os.environ.get("_DBG_LOG", "")
-payload = {
-    "sessionId": "c964f7",
-    "runId": "mlx-vision-preflight",
-    "hypothesisId": "H1",
-    "location": "start_mlx_vision.sh:preflight",
-    "message": "TCP LISTEN antes de exec mlx-openai-server",
-    "data": {"VISION_PORT": port, "busy": False, "lsof": ""},
-    "timestamp": int(time.time() * 1000),
-}
-try:
-    r = subprocess.run(
-        ["lsof", "-nP", "-iTCP:" + port, "-sTCP:LISTEN"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    out = (r.stdout or "").strip()
-    payload["data"]["lsof"] = out[:4000]
-    payload["data"]["busy"] = bool(out)
-except Exception as e:
-    payload["data"]["error"] = str(e)[:500]
-try:
-    d = os.path.dirname(log_path)
-    if d:
-        os.makedirs(d, exist_ok=True)
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-except OSError:
-    pass
-' || true
-fi
-# endregion
-
 if lsof -nP -iTCP:"${VISION_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "[start_mlx_vision] ERROR: el puerto TCP ${VISION_PORT} ya tiene LISTEN (proceso huérfano o segunda copia)."
   lsof -nP -iTCP:"${VISION_PORT}" -sTCP:LISTEN || true

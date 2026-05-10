@@ -683,6 +683,175 @@ def _execute_sandbox_script_impl(
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _quant_cash_ticker(ticker: str) -> bool:
+    t = (ticker or "").strip().upper()
+    return t in ("CASH", "$CASH")
+
+
+def _build_greeks_sandbox_script(
+    S: float, K: float, T: float, r: float, sigma: float, option_type: str
+) -> str:
+    ot = str(option_type or "call").strip().lower()
+    if ot not in ("call", "put"):
+        ot = "call"
+    head = f"""import numpy as np
+from scipy.stats import norm
+import json
+import math
+
+def safe(v):
+    # Sanitizar NaN/Inf antes de JSON — BSM puede
+    # producirlos en casos extremos (S/K muy alejados)
+    return 0.0 if (math.isnan(v) or math.isinf(v)) else round(float(v), 6)
+
+S, K, T, r, sigma = {float(S)}, {float(K)}, {float(T)}, {float(r)}, {float(sigma)}
+option_type = {repr(ot)}
+
+"""
+    tail = """
+if T <= 1e-10 or sigma <= 1e-10:
+    result = {
+        "delta": 0.0,
+        "gamma": 0.0,
+        "vega": 0.0,
+        "theta": 0.0,
+        "valid": False,
+        "reason": "T o sigma <= 0",
+    }
+else:
+    d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma*np.sqrt(T))
+    d2 = d1 - sigma*np.sqrt(T)
+    n_d1 = norm.pdf(d1)
+    N_d1 = norm.cdf(d1)
+    N_d2 = norm.cdf(d2)
+
+    if option_type == "call":
+        delta = N_d1
+        theta = (-(S*sigma*n_d1)/(2*np.sqrt(T))
+                 - r*K*np.exp(-r*T)*N_d2) / 365.0
+    else:
+        delta = N_d1 - 1
+        theta = (-(S*sigma*n_d1)/(2*np.sqrt(T))
+                 + r*K*np.exp(-r*T)*norm.cdf(-d2)) / 365.0
+
+    gamma = n_d1 / (S*sigma*np.sqrt(T))
+    vega  = (S*np.sqrt(T)*n_d1) / 100.0
+
+    result = {
+        "delta": safe(delta),
+        "gamma": safe(gamma),
+        "vega":  safe(vega),
+        "theta": safe(theta),
+        "valid": True,
+        "method": "bsm_synthetic",
+    }
+
+print(json.dumps(result))
+"""
+    return head + tail
+
+
+@log_tool_execution_sync(name="calculate_synthetic_greeks")
+def _calculate_synthetic_greeks_impl(
+    db: Any,
+    llm: Any,
+    *,
+    ticker: str,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    sigma: float,
+    option_type: str = "call",
+) -> str:
+    tkr = (ticker or "").strip()
+    if _quant_cash_ticker(tkr):
+        return json.dumps(
+            {
+                "delta": 0.0,
+                "gamma": 0.0,
+                "vega": 0.0,
+                "theta": 0.0,
+                "valid": False,
+                "reason": "CASH",
+                "ticker": tkr.strip().upper() or "CASH",
+            },
+            ensure_ascii=False,
+        )
+    if S <= 0:
+        return json.dumps({"error": "S debe ser > 0"}, ensure_ascii=False)
+    if T <= 0:
+        return json.dumps(
+            {
+                "delta": 0,
+                "gamma": 0,
+                "vega": 0,
+                "theta": 0,
+                "valid": False,
+                "reason": "T<=0",
+                "ticker": tkr.strip().upper(),
+            },
+            ensure_ascii=False,
+        )
+    if sigma <= 0:
+        return json.dumps(
+            {
+                "delta": 0,
+                "gamma": 0,
+                "vega": 0,
+                "theta": 0,
+                "valid": False,
+                "reason": "sigma<=0",
+                "ticker": tkr.strip().upper(),
+            },
+            ensure_ascii=False,
+        )
+
+    script = _build_greeks_sandbox_script(S, K, T, r, sigma, option_type)
+    ex = run_in_sandbox(
+        db=db,
+        llm=llm,
+        code=script,
+        language="python",
+        original_request="calculate_synthetic_greeks",
+        max_retries=1,
+        worker_id="Quant-Trader",
+    )
+    if int(ex.exit_code) != 0:
+        return json.dumps(
+            {
+                "error": "SANDBOX_EXECUTION_FAILED",
+                "stderr": (ex.stderr or "")[:500],
+            },
+            ensure_ascii=False,
+        )
+    raw_out = (ex.stdout or "").strip()
+    greeks: Any = None
+    try:
+        greeks = json.loads(raw_out)
+    except json.JSONDecodeError:
+        for line in reversed(raw_out.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    greeks = json.loads(line)
+                    break
+                except json.JSONDecodeError:
+                    continue
+    if greeks is None:
+        return json.dumps(
+            {"error": "SANDBOX_PARSE_FAILED", "raw": raw_out[:200]},
+            ensure_ascii=False,
+        )
+    if not isinstance(greeks, dict):
+        return json.dumps(
+            {"error": "SANDBOX_PARSE_FAILED", "raw": raw_out[:200]},
+            ensure_ascii=False,
+        )
+    greeks["ticker"] = tkr.strip().upper()
+    return json.dumps(greeks, ensure_ascii=False)
+
+
 def _hrp_collect_price_series_from_ib_gateway(
     db: Any,
     *,
@@ -1567,6 +1736,27 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
     def _execute_sandbox_script(code: str, dependencies: list[str] | None = None) -> str:
         return _execute_sandbox_script_impl(db, llm, code=code, dependencies=dependencies)
 
+    def _calculate_synthetic_greeks(
+        ticker: str,
+        S: float,
+        K: float,
+        T: float,
+        r: float,
+        sigma: float,
+        option_type: str = "call",
+    ) -> str:
+        return _calculate_synthetic_greeks_impl(
+            db,
+            llm,
+            ticker=ticker,
+            S=float(S),
+            K=float(K),
+            T=float(T),
+            r=float(r),
+            sigma=float(sigma),
+            option_type=option_type,
+        )
+
     def _hrp_rebalance_ib_gateway(
         tickers: list[str],
         timeframe: str = "1h",
@@ -1678,6 +1868,20 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 "series vienen de fetch_market_data/fetch_ib_gateway_ohlcv/read_sql en el host o /workspace/data RO. "
                 "Prohibido rotular salida «ML4T …» sin import real. "
                 "Timeout según Quant-Trader/security_policy.yaml. Requiere Docker y STRIX_SANDBOX_IMAGE opcional."
+            ),
+        )
+    )
+    tools.append(
+        StructuredTool.from_function(
+            _calculate_synthetic_greeks,
+            name="calculate_synthetic_greeks",
+            description=(
+                "Calcula las Griegas sintéticas (Delta, Gamma, Vega, Theta) de un activo usando Black-Scholes-Merton en "
+                "el Strix Sandbox. Son pseudo-Griegas aplicadas a equities — no son Griegas reales de opciones. "
+                "Parámetros: S (precio actual, de tool call de este turno), K (strike o precio de referencia, usar S "
+                "para at-the-money), T (tiempo en años, ej. 18/365 para próximo rebalanceo), r (tasa libre de riesgo, "
+                "usar yield proxy de SHY del turno actual), sigma (volatilidad histórica de ohlcv_data, misma sesión), "
+                "option_type ('call' para long, 'put' para short). Persistir resultados via record_fluid_state."
             ),
         )
     )

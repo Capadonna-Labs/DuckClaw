@@ -832,6 +832,9 @@ def synthesize_user_visible_reply(
             "respeta **Paper** en el titular IBKR."
             "\n- Si la evidencia incluye **«Finanz — IBKR (modo paper):»** y **«no muestra saldos»** (u omitió montos), "
             "**prohibido** añadir líneas con efectivo USD, valor total cartera o lista de tickers IBKR inventados o del historial."
+            "\n- Presupuestos: si la evidencia trae filas tipo presupuesto vs real (categoría, presupuestado, gastado, **disponible**), "
+            "para cada categoría con cupo mensual muestra **disponible** como «… disponible: …»; **no** uses «acumulado» para esa cifra "
+            "(eso sería confundir cupo restante con gasto ya gastado)."
         )
         if "snapshot_unavailable" in (raw_evidence or "").lower():
             _finanz_extra += (

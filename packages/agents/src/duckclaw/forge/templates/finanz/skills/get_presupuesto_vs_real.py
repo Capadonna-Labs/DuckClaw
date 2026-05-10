@@ -12,7 +12,7 @@ def get_tools(db: Any, schema_name: str, spec: Any = None) -> list:
     schema = schema_name
 
     def get_presupuesto_vs_real(year: int = 0, month: int = 0) -> str:
-        """Compara presupuesto vs gasto real por categoría. year y month opcionales (default: mes actual)."""
+        """Presupuesto vs gasto del mes por categoría; incluye disponible (cupo restante). year/month opcionales (mes actual)."""
         try:
             from datetime import datetime
             now = datetime.now()
@@ -24,7 +24,7 @@ def get_tools(db: Any, schema_name: str, spec: Any = None) -> list:
                 f"""
                 SELECT c.name AS categoria, COALESCE(p.amount, 0) AS presupuestado,
                        COALESCE(SUM(CASE WHEN t.amount < 0 THEN ABS(t.amount) ELSE 0 END), 0) AS gastado,
-                       COALESCE(p.amount, 0) - COALESCE(SUM(CASE WHEN t.amount < 0 THEN ABS(t.amount) ELSE 0 END), 0) AS diferencia
+                       COALESCE(p.amount, 0) - COALESCE(SUM(CASE WHEN t.amount < 0 THEN ABS(t.amount) ELSE 0 END), 0) AS disponible
                 FROM {schema}.categories c
                 LEFT JOIN {schema}.presupuestos p ON p.category_id = c.id AND p.year = {y} AND p.month = {m}
                 LEFT JOIN {schema}.transactions t ON t.category_id = c.id
@@ -41,6 +41,10 @@ def get_tools(db: Any, schema_name: str, spec: Any = None) -> list:
         StructuredTool.from_function(
             get_presupuesto_vs_real,
             name="get_presupuesto_vs_real",
-            description="Compara presupuesto vs gasto real por categoría. year y month opcionales (default: mes actual). Muestra presupuestado, gastado y diferencia.",
+            description=(
+                "Presupuesto vs gasto del mes por categoría. Devuelve presupuestado (cupo), gastado (suma de gastos del mes) y "
+                "disponible (cupo restante = presupuestado − gastado). En mensajes al usuario, para categorías con presupuestado > 0 "
+                "muestra el disponible como «Categoría disponible: $…», no como «acumulado». year/month opcionales (default mes actual)."
+            ),
         )
     ]

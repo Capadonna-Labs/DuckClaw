@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS quant_core.fluid_state (
     pressure DOUBLE,
     viscosity DOUBLE,
     surface_tension DOUBLE,
+    delta DOUBLE,
+    gamma DOUBLE,
+    vega DOUBLE,
+    theta DOUBLE,
     phase VARCHAR NOT NULL,
     PRIMARY KEY (ticker, timestamp)
 )
@@ -37,10 +41,19 @@ CREATE TABLE IF NOT EXISTS quant_core.fluid_state (
 _FLUID_STATE_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_fluid_state_ticker ON quant_core.fluid_state (ticker)"
 )
+# Migración idempotente: DuckDB admite una sola orden ALTER por statement; encadenar con ';'.
+_FLUID_STATE_ALTER_GREEKS_SQL = (
+    "ALTER TABLE quant_core.fluid_state ADD COLUMN IF NOT EXISTS delta DOUBLE; "
+    "ALTER TABLE quant_core.fluid_state ADD COLUMN IF NOT EXISTS gamma DOUBLE; "
+    "ALTER TABLE quant_core.fluid_state ADD COLUMN IF NOT EXISTS vega DOUBLE; "
+    "ALTER TABLE quant_core.fluid_state ADD COLUMN IF NOT EXISTS theta DOUBLE"
+)
 # Un solo execute (db-writer / duckdb) para bootstrap en modo RO vía cola
 _FLUID_STATE_DDL_BUNDLE = (
     "CREATE SCHEMA IF NOT EXISTS quant_core; "
     + _FLUID_STATE_TABLE_SQL.strip()
+    + "; "
+    + _FLUID_STATE_ALTER_GREEKS_SQL.strip()
     + "; "
     + _FLUID_STATE_INDEX_SQL.strip()
     + ";"
@@ -129,6 +142,10 @@ def _ensure_fluid_state_table(db: Any) -> None:
     except Exception:
         pass
     try:
+        db.execute(_FLUID_STATE_ALTER_GREEKS_SQL.strip())
+    except Exception:
+        pass
+    try:
         db.execute(_FLUID_STATE_INDEX_SQL)
     except Exception:
         pass
@@ -149,6 +166,10 @@ def _compute_hex_signature(
     pressure: Optional[float],
     viscosity: Optional[float],
     surface_tension: Optional[float],
+    delta: Optional[float] = None,
+    gamma: Optional[float] = None,
+    vega: Optional[float] = None,
+    theta: Optional[float] = None,
 ) -> str:
     payload = {
         "ticker": ticker.upper(),
@@ -160,6 +181,10 @@ def _compute_hex_signature(
         "pressure": pressure,
         "viscosity": viscosity,
         "surface_tension": surface_tension,
+        "delta": delta,
+        "gamma": gamma,
+        "vega": vega,
+        "theta": theta,
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
@@ -179,6 +204,10 @@ def _record_fluid_state_impl(
     pressure: Optional[float] = None,
     viscosity: Optional[float] = None,
     surface_tension: Optional[float] = None,
+    delta: Optional[float] = None,
+    gamma: Optional[float] = None,
+    vega: Optional[float] = None,
+    theta: Optional[float] = None,
 ) -> str:
     tkr = (ticker or "").strip().upper()
     ph = _norm_phase(phase)
@@ -197,16 +226,29 @@ def _record_fluid_state_impl(
     hx = (hex_signature or "").strip()
     if not hx:
         hx = _compute_hex_signature(
-            tkr, ts, ph, mass, density, temperature, pressure, viscosity, surface_tension
+            tkr,
+            ts,
+            ph,
+            mass,
+            density,
+            temperature,
+            pressure,
+            viscosity,
+            surface_tension,
+            delta,
+            gamma,
+            vega,
+            theta,
         )
 
     ro = bool(getattr(db, "_read_only", False))
     insert_sql = """
             INSERT INTO quant_core.fluid_state (
                 ticker, timestamp, hex_signature,
-                mass, density, temperature, pressure, viscosity, surface_tension, phase
+                mass, density, temperature, pressure, viscosity, surface_tension,
+                delta, gamma, vega, theta, phase
             )
-            VALUES (?, CAST(? AS TIMESTAMP), ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, CAST(? AS TIMESTAMP), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (ticker, timestamp) DO UPDATE SET
                 hex_signature = excluded.hex_signature,
                 mass = excluded.mass,
@@ -215,9 +257,28 @@ def _record_fluid_state_impl(
                 pressure = excluded.pressure,
                 viscosity = excluded.viscosity,
                 surface_tension = excluded.surface_tension,
+                delta = excluded.delta,
+                gamma = excluded.gamma,
+                vega = excluded.vega,
+                theta = excluded.theta,
                 phase = excluded.phase
             """
-    insert_params = [tkr, ts, hx, mass, density, temperature, pressure, viscosity, surface_tension, ph]
+    insert_params = [
+        tkr,
+        ts,
+        hx,
+        mass,
+        density,
+        temperature,
+        pressure,
+        viscosity,
+        surface_tension,
+        delta,
+        gamma,
+        vega,
+        theta,
+        ph,
+    ]
 
     if ro:
         ok, err = _enqueue_mutation(db, sql=_FLUID_STATE_DDL_BUNDLE, params=None)
@@ -265,6 +326,10 @@ def register_quant_cfd_skill(db: Any, spec: Any, tools: list[Any]) -> None:
         pressure: Optional[float] = None,
         viscosity: Optional[float] = None,
         surface_tension: Optional[float] = None,
+        delta: Optional[float] = None,
+        gamma: Optional[float] = None,
+        vega: Optional[float] = None,
+        theta: Optional[float] = None,
     ) -> str:
         return _record_fluid_state_impl(
             db,
@@ -278,6 +343,10 @@ def register_quant_cfd_skill(db: Any, spec: Any, tools: list[Any]) -> None:
             pressure=pressure,
             viscosity=viscosity,
             surface_tension=surface_tension,
+            delta=delta,
+            gamma=gamma,
+            vega=vega,
+            theta=theta,
         )
 
     tools.append(
@@ -288,6 +357,8 @@ def register_quant_cfd_skill(db: Any, spec: Any, tools: list[Any]) -> None:
                 "Persiste un snapshot CFD en quant_core.fluid_state (Cyber-Fluid Dynamics). "
                 "fases: SOLID|LIQUID|GAS|PLASMA. Opcionales: mass, density, temperature, pressure, "
                 "viscosity, surface_tension (métricas típicamente de run_sandbox). "
+                "Opcionales BSM sintético (float | None, default None): delta, gamma, vega, theta — "
+                "p. ej. desde calculate_synthetic_greeks + persistencia en esta tool. "
                 "timestamp opcional; hex_signature opcional (se deriva si vacío). "
                 "Tras calcular el reactor en sandbox, usa esto para auditoría del estado del fluido."
             ),

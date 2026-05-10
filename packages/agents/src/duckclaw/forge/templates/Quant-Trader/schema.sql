@@ -153,6 +153,10 @@ CREATE TABLE IF NOT EXISTS quant_core.fluid_state (
   pressure DOUBLE,
   viscosity DOUBLE,
   surface_tension DOUBLE,
+  delta DOUBLE,
+  gamma DOUBLE,
+  vega DOUBLE,
+  theta DOUBLE,
   phase VARCHAR NOT NULL,
   PRIMARY KEY (ticker, timestamp)
 );

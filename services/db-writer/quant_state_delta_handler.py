@@ -7,6 +7,7 @@ import json
 import logging
 import time
 import uuid as uuid_lib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +17,10 @@ from core.config import settings
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.vaults import db_root, validate_user_db_path
 from models.quant_state_delta import (
+    ConversationCompactionMutation,
     IntradayMocAccumMutation,
     QuantStateDelta,
+    SemanticMemoryUpsertMutation,
     TradeSignalMutation,
     TradingMandateMutation,
 )
@@ -129,6 +132,27 @@ CREATE TABLE IF NOT EXISTS quant_core.intraday_moc_accum (
 """
 
 # Tablas creadas antes de session_uid / columnas usadas en INSERT: IF NOT EXISTS no altera esquema.
+_DREAMER_SEMANTIC_TELEGRAM_DDL = """
+CREATE SCHEMA IF NOT EXISTS main;
+CREATE TABLE IF NOT EXISTS main.semantic_memory (
+  id VARCHAR PRIMARY KEY,
+  content TEXT NOT NULL,
+  source VARCHAR DEFAULT 'manual_injection',
+  embedding FLOAT[384],
+  embedding_status VARCHAR DEFAULT 'PENDING',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE main.semantic_memory ADD COLUMN IF NOT EXISTS topic VARCHAR;
+ALTER TABLE main.semantic_memory ADD COLUMN IF NOT EXISTS confidence_score DOUBLE;
+ALTER TABLE main.semantic_memory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
+CREATE TABLE IF NOT EXISTS telegram_conversation (
+  chat_id BIGINT,
+  role TEXT,
+  content TEXT,
+  received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 _QUANT_CORE_TRADE_SIGNALS_MIGRATION = """
 ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS session_uid VARCHAR;
 ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS rationale VARCHAR;
@@ -387,6 +411,49 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
         )
         return
 
+    if dt == "SEMANTIC_MEMORY_UPSERT":
+        mut = SemanticMemoryUpsertMutation.model_validate(delta.mutation)
+        tbl = (mut.table or "").strip().lower()
+        if tbl != "main.semantic_memory":
+            raise ValueError("SEMANTIC_MEMORY_UPSERT: mutation.table debe ser main.semantic_memory")
+        row_id = (mut.memory_id or "").strip() or str(uuid_lib.uuid4())
+        con.execute(
+            """
+            INSERT INTO main.semantic_memory
+              (id, content, source, topic, confidence_score, updated_at, embedding_status)
+            VALUES (?, ?, ?, ?, ?, now(), 'PENDING')
+            ON CONFLICT (id) DO UPDATE SET
+              content = excluded.content,
+              source = excluded.source,
+              topic = excluded.topic,
+              confidence_score = excluded.confidence_score,
+              updated_at = now()
+            """,
+            (
+                row_id,
+                mut.insight,
+                mut.source,
+                mut.topic,
+                float(mut.confidence_score),
+            ),
+        )
+        return
+
+    if dt == "CONVERSATION_COMPACTION":
+        mut = ConversationCompactionMutation.model_validate(delta.mutation)
+        tbn = (mut.table or "").strip().lower()
+        if tbn != "telegram_conversation":
+            raise ValueError("CONVERSATION_COMPACTION: mutation.table debe ser telegram_conversation")
+        cutoff = datetime.now(timezone.utc) - timedelta(days=int(mut.days))
+        con.execute(
+            """
+            DELETE FROM telegram_conversation
+            WHERE chat_id = ? AND received_at < ?
+            """,
+            (mut.chat_id, cutoff),
+        )
+        return
+
     sid = str((delta.mutation or {}).get("signal_id") or "").strip()
     if not sid:
         raise ValueError("signal_id requerido para transición de señal")
@@ -486,6 +553,10 @@ def _sync_handle_quant_state_delta(message: str) -> None:
             if _s:
                 con.execute(_s)
         for _stmt in _INTRADAY_MOC_ACCUM_DDL.strip().split(";"):
+            _s = _stmt.strip()
+            if _s:
+                con.execute(_s)
+        for _stmt in _DREAMER_SEMANTIC_TELEGRAM_DDL.strip().split(";"):
             _s = _stmt.strip()
             if _s:
                 con.execute(_s)

@@ -29,6 +29,35 @@ class IntradayMocAccumMutation(BaseModel):
     )
 
 
+class SemanticMemoryUpsertMutation(BaseModel):
+    """INSERT/UPSERT fila en main.semantic_memory (job Dreamer / ingestión remota)."""
+
+    topic: str = Field(..., min_length=1, max_length=500)
+    insight: str = Field(..., min_length=1)
+    confidence_score: float = Field(..., ge=0.0, le=1.0)
+    source: str = Field(default="dreamer_job", max_length=160)
+    table: str = Field(
+        default="main.semantic_memory",
+        description="Debe ser main.semantic_memory; otros valores se rechazan.",
+    )
+    memory_id: str = Field(
+        default="",
+        max_length=64,
+        description="UUID opcional para idempotencia ON CONFLICT (id). Vacío = nueva fila.",
+    )
+
+
+class ConversationCompactionMutation(BaseModel):
+    """DELETE parametrizado en telegram_conversation por antigüedad (chat_id = tenant Telegram)."""
+
+    days: int = Field(default=7, ge=1, le=3650)
+    chat_id: int = Field(..., description="Telegram chat_id (mismo valor que --tenant-id numérico).")
+    table: str = Field(
+        default="telegram_conversation",
+        description="Debe ser telegram_conversation.",
+    )
+
+
 class TradeSignalMutation(BaseModel):
     signal_id: str = Field(..., min_length=8)
     mandate_id: str = Field(..., min_length=8)
@@ -56,6 +85,8 @@ class QuantStateDelta(BaseModel):
     delta_type: Literal[
         "MANDATE_UPSERT",
         "INTRADAY_MOC_ACCUM_UPSERT",
+        "SEMANTIC_MEMORY_UPSERT",
+        "CONVERSATION_COMPACTION",
         "TRADE_SIGNAL_PROPOSED",
         "TRADE_SIGNAL_APPROVED",
         "TRADE_SIGNAL_EXECUTED",

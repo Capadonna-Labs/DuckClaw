@@ -25,7 +25,7 @@ Valores permitidos en `quant_core.fluid_state.phase`: `SOLID`, `LIQUID`, `GAS`, 
 5. **Trading (opcional):** `propose_trade` con `strategy_name` p. ej. `cfd` — mismas reglas HITL / paper que el resto de quant.
 
 **Esquema**  
-Tabla `quant_core.fluid_state`: ver [packages/agents/src/duckclaw/forge/templates/finanz/schema.sql](packages/agents/src/duckclaw/forge/templates/finanz/schema.sql).
+Tabla `quant_core.fluid_state`: ver [packages/agents/src/duckclaw/forge/templates/finanz/schema.sql](packages/agents/src/duckclaw/forge/templates/finanz/schema.sql). Columnas opcionales **delta, gamma, vega, theta** (pseudo-Griegas BSM sintéticas calculadas en Strix Sandbox vía tool Quant-Trader `calculate_synthetic_greeks`; persistencia solo con `record_fluid_state`).
 
 **Herramienta**  
 `record_fluid_state` en [packages/agents/src/duckclaw/forge/skills/quant_cfd_bridge.py](packages/agents/src/duckclaw/forge/skills/quant_cfd_bridge.py). Activa con `quant.cfd: true` en [finanz/manifest.yaml](packages/agents/src/duckclaw/forge/templates/finanz/manifest.yaml).

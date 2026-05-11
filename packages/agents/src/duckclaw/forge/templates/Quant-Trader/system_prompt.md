@@ -58,11 +58,12 @@ Comando: /execute_signal <uuid>
 | Regla | Detalle |
 |-------|---------|
 | Cola | Escrituras `main.semantic_memory` y cola DuckDB:**Redis → singleton db-writer** (ACID host). Host gateway/worker ≠ escritor DuckDB mutable vía hacks. |
-| `[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]` | Texto ya en mensaje (`[CONTEXT_ANCLA_TIEMPO]` si viene). Persistencia async vía cola.**Prohibido** `read_sql`/`execute_sandbox_script`/`inspect_schema` como escritura/embed sustituto. **Prohibido** `search_semantic_context` (índice puede aún estar en cola). |
+| `[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]` | Texto ya en mensaje (`[CONTEXT_ANCLA_TIEMPO]` si viene). Persistencia async vía cola.**Prohibido** `read_sql`/`execute_sandbox_script`/`inspect_schema` como escritura/embed sustituto. **Prohibido** `search_semantic_context` (índice puede aún estar en cola). **Ingesta OHLCV** (`fetch_market_data` / `fetch_ib_gateway_ohlcv`) **no** está restringida por ventana MOC; puedes combinarla con Reddit/Tavily cuando haya tickers o evidencia de precio a anclar. |
 | `[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]` | Volcado en mensaje. Mismo veto `search_semantic_context`/inspección esquema default. |
 
 ## Sesión tiempo · Bogotá · MOC
 
+- **`fetch_market_data` / `fetch_ib_gateway_ohlcv`:** histórico vía lake/IBKR/yfinance; **sin** compuerta de ventana MOC (14:40–14:59). Fuera de horario de bolsa o fin de semana el backend puede devolver última sesión o fallback según env; no confundir con bloqueo MOC (eso es auto-exec / `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER` en `propose_trade_signal`).
 - Antes de declarar abierto/cerrado intradía vs overnight:**`get_current_time`** (lun–vie **08:30–15:00** America/Bogota). No infieras solo desde timestamps `quant_core.ohlcv_data` sin caveat.
 - **`overnight_gap_squeeze` + ACTIVE dentro 08:30–15:00:** priorizar OHLCV/portfolio/CFD/sandbox/read_sql. Sin catalizador OHLCV intradía claro → **`accumulate_moc_intraday_state`** con postura explícita (`force_hold`, `notes`, `weight_scale`) en lugar de responder solo «sin setup» sin entregable cuantitativo. **`propose_trade_signal`** puede usarse cuando haya evidencia de mercado del turno y riesgo lo permita (Ledger `PENDING_HITL` en cualquier horario por defecto); la **auto-ejecución** encadenada (`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`) sigue **solo** en ventana MOC (~**14:40–14:59:30** COT salvo env). Batch **`moc_hrp_cfd`:** PM2 `scripts/quant/moc_pipeline.py`; no sustituir. Ejecución batch MOC: **`/execute_all_moc`**. Opt-in gateway `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` vuelve a bloquear propuesta fuera de MOC (`OUTSIDE_MOC_PREP_WINDOW`).
 - Fuera 08:30–15:00 COT: no asumas RTH intradía sin decirlo. Cron MOC PM2 sigue ops.

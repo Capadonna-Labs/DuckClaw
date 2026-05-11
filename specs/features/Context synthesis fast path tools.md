@@ -23,6 +23,8 @@ En esos turnos el contenido a sintetizar **ya va en el mensaje**; se evita levan
 
    El resto de herramientas del manifest (SQL, Tavily, sandbox, IBKR, etc.) se mantiene; el system prompt del worker ya indica no usar búsqueda semántica innecesaria en esos turnos.
 
+4. **Quant Trader · OHLCV vs ventana MOC:** la ingesta `fetch_market_data` / `fetch_ib_gateway_ohlcv` **no** está limitada por la ventana MOC de auto-execución (~14:40–14:59 COT). En turnos `SUMMARIZE_*` el gateway puede inyectar la directiva `[DIRECTIVA_OHLCV_FUERA_VENTANA_MOC]` para que el modelo combine Reddit/Tavily con velas cuando haya tickers. Opt-in para **forzar** la primera tool de ingesta igual que en chat normal: `DUCKCLAW_QUANT_OHLCV_ON_CONTEXT_SUMMARY=1` y texto del usuario con palabras clave OHLCV + símbolo (misma heurística que `force_fetch_market_data` en `workers/factory.py`).
+
 ## Default
 
 `tool_surface=full` (comportamiento anterior) para invocaciones que no son síntesis de contexto vía directiva, p. ej. `AgentAssembler` / `WorkerFactory.create`.

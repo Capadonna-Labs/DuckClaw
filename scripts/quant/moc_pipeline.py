@@ -2,7 +2,7 @@
 """
 Pipeline MOC Core-Satellite CFD — specs/features/Core-Satellite HRP Weekly + MOC CFD.md
 
-``MOC_PHASE=calc|remind|expire`` (cron weekday ~14:40 / 14:50 / 14:55 America/Bogota).
+``MOC_PHASE=calc|remind|expire`` (cron weekday ~14:40 / 14:50 / 14:59 America/Bogota).
 
 ``--dry-run``: mismas lecturas (vault read-only, IBKR, allocations); sin Telegram, colas DB,
 ``propose_trade_signal``, ``~/.duckclaw_moc_session.json`` ni inserts semánticos.
@@ -412,7 +412,7 @@ def run_calc(*, dry_run: bool = False) -> int:
         f"{_prop_line}\n\n"
         + ("\n\n".join(lines_body) if lines_body else "(sin deltas sobre umbral)") + "\n\n"
         + f"Aprobá bloque: /execute_all_moc {session_uid}\n"
-        + "Individual: /execute_signal {id}\nVentana hasta ~14:55 COT (expire automático)."
+        + "Individual: /execute_signal {id}\nVentana hasta ~14:59 COT (expire automático)."
     )
     body = body_core
     if dry_run:

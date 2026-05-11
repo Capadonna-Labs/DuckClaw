@@ -24,6 +24,7 @@ Dos pipelines operativos desacoplados:
 | `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER` | **`1`** = `propose_trade_signal` (strategy ≠ `moc_hrp_cfd`) solo crea Ledger dentro de `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW`; fuera → `OUTSIDE_MOC_PREP_WINDOW`. Default **desactivado** (señales “anytime”; ejecución automática sigue anclada a MOC). |
 | `DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES` | **`1`** omite la compuerta de **horario MOC** para la auto-exec encadenada **(b)** (y hace que el opt-in **(a)** nunca bloquee, al considerar “dentro de ventana”). Solo dev/CI; evitar en prod. |
 | `DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW` | Alias legacy de **`DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES`** (`1` = mismo efecto). |
+| `DUCKCLAW_QUANT_OHLCV_ON_CONTEXT_SUMMARY` | **`1`** (opt-in): en turnos `[SYSTEM_DIRECTIVE: SUMMARIZE_*]` del Quant Trader, si el texto pide ingesta OHLCV explícita (heurística velas/símbolo), se permite forzar `fetch_market_data` / `fetch_ib_gateway_ohlcv` igual que fuera de síntesis. No modifica la ventana MOC de ejecución. Default: desactivado. |
 | `DUCKCLAW_MOC_BATCH_AUTO_EXECUTE` | **`1`** + `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1` + ventana MOC + reglas paper/live: tras `propose_trade_signal` con `strategy_name=moc_hrp_cfd` (p. ej. job PM2), encadena la misma auto-ejecución que `cfd_auto` (grant + `execute_approved_signal`). Default **`0`** (solo HITL para batch MOC). |
 
 **Macro PGQ + perfil:** [MOC Macro PGQ VSS.md](./MOC%20Macro%20PGQ%20VSS.md).
@@ -42,7 +43,7 @@ Restricción: **no** ejecutar HRP intradía automáticamente; solo cron dominica
 
 **Ventana típica MOC en host (lun–vie, COT según cron PM2 ejemplo):**
 
-- Crons de referencia: ~**14:40** calc, ~**14:50** remind, ~**14:55** expire (véase tabla más abajo). La ventana **auto-exec MOC** en gateway default se extiende hasta **14:59:30** COT para capturar cola de cierre; alinear env con ops si el PM2 difiere.
+- Crons de referencia: ~**14:40** calc, ~**14:50** remind, ~**14:59** expire (véase tabla más abajo). La ventana **auto-exec MOC** en gateway default se extiende hasta **14:59:30** COT para capturar cola de cierre; alinear env con ops si el PM2 difiere.
 - En esa franja las señales `strategy_name=moc_hrp_cfd` generadas/expiradas por el pipeline tienen **autoridad**: el tick proactivo de Telegram (`TRADING_TICK` / `/goals`) **no** debe contradictor ellas ni duplicar un segundo flujo propio “MOC” al mismo efecto.
 
 **Ejecución batch tras MOC:** ver sección `/execute_all_moc` más abajo.
@@ -71,7 +72,7 @@ Env `MOC_PHASE=calc|remind|expire`.
 
 **Simulación intradía:** `python scripts/quant/moc_pipeline.py --dry-run` (con `MOC_PHASE` y `DUCKCLAW_QUANT_SCRIPT_DB` como en prod). Ejecuta lecturas (vault read-only, IBKR, allocations) e imprime el cuerpo Telegram y JSON resumen; **no** envía Telegram, **no** encola SQL, **no** llama `propose_trade_signal`, **no** escribe `~/.duckclaw_moc_session.json` ni `semantic_memory` MOC.
 
-**Crons** (lun–vie ejemplo, servidor en `America/Bogota`): 14:40 calc, 14:50 remind, 14:55 expire.
+**Crons** (lun–vie ejemplo, servidor en `America/Bogota`): 14:40 calc, 14:50 remind, 14:59 expire (alineado al cierre de ventana gateway).
 
 ### Fase calc
 

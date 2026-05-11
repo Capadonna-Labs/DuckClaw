@@ -62,6 +62,10 @@ o
 
 - Si `mercenary` está presente y bien formado, el turno va **solo** a `mercenary_node` → `END` (no `invoke_worker` en ese turno).
 
+### Post-procesamiento Manager (Quant-Trader)
+
+- Si el inbound es **solo** una línea HTTP(S) (mensaje efectivamente vacío fuera del URL), el Manager **elimina** `mercenary` del plan antes de serializar estado: la imagen efímera actual ejecuta entrada **stub** (no scraping de medios sin red). El worker Quant-Trader resuelve lectura externa con sus tools declaradas (`tavily_search`, etc.).
+
 ## Herramienta declarativa
 
 - Skill `deploy_mercenary` bajo `forge/templates/Manager/skills/deploy_mercenary.py` (StructuredTool) para uso programático o futuros nodos; el grafo puede invocar el mismo núcleo en `sandbox.py` sin segundo LLM.

@@ -39,6 +39,9 @@ def format_replan_task_suffix(plan_attempt_index: int, max_attempts: int) -> str
     return (
         f"\n\n[REPLAN intento {attempt_human}/{max_attempts}] "
         "Prioriza herramientas con datos verificables (read_sql, inspect_schema, get_ibkr_portfolio). "
+        "Si el tema es **finanzas locales** (deudas, cuotas, presupuestos, gastos, transacciones en DuckDB), "
+        "**obliga** read_sql de estado actual y, si hay cambios, **admin_sql** y/o **insert_deuda** "
+        "antes de afirmar persistencia; cierra con read_sql de verificación. "
         "Evita repetir una estrategia que ya falló; usa llamadas mínimas y cita evidencia de tools en la respuesta."
     )
 
@@ -122,7 +125,21 @@ def resilience_escalation_wants_read_sql(incoming: str, plan_attempt_index: int)
             "movimiento",
         )
         return any(k in low for k in keys)
-    keys = ("cuenta", "cuentas", "saldo", "balance", "extracto", "movimiento", "iban")
+    keys = (
+        "cuenta",
+        "cuentas",
+        "saldo",
+        "balance",
+        "extracto",
+        "movimiento",
+        "iban",
+        "deuda",
+        "deudas",
+        "cuota",
+        "presupuesto",
+        "gasto",
+        "transacc",
+    )
     return any(k in low for k in keys)
 
 

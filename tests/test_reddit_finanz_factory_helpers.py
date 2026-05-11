@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from duckclaw.workers.factory import (
@@ -10,8 +11,13 @@ from duckclaw.workers.factory import (
     _groq_tools_without_reddit_for_bind,
     _most_recent_reddit_url_in_human_messages,
     _patch_reddit_get_post_args_from_canonical_url,
+    _quant_trader_reddit_history_anchor_intent,
     _resolve_reddit_share_url_to_comments_url,
     _subreddit_and_post_id_from_reddit_comments_url,
+    incoming_is_schema_query_heuristic,
+    quant_trader_lone_reddit_url_message,
+    reddit_share_search_query_for_attempt,
+    reddit_share_shortlink_fallback_query,
 )
 
 
@@ -34,6 +40,29 @@ def test_most_recent_reddit_url_from_humans() -> None:
     assert _most_recent_reddit_url_in_human_messages([older, newer]) == "https://www.reddit.com/r/b/s/ShareSlug1"
 
 
+def test_quant_trader_reddit_history_anchor_retry_without_url() -> None:
+    share = "https://www.reddit.com/r/wallstreetbets/s/wAmLggXf0Y"
+    msgs = [
+        HumanMessage(content=f"Mira {share}"),
+        HumanMessage(content="vuelve a intentar, ya cambié la variable de entorno"),
+    ]
+    assert _quant_trader_reddit_history_anchor_intent(
+        "vuelve a intentar, ya cambié la variable de entorno", msgs
+    )
+
+
+def test_quant_trader_reddit_history_anchor_false_when_url_in_turn() -> None:
+    share = "https://www.reddit.com/r/x/s/AbCdEfGhIj"
+    msgs = [HumanMessage(content="algo"), HumanMessage(content=f"retry {share}")]
+    assert not _quant_trader_reddit_history_anchor_intent(f"lee {share}", msgs)
+
+
+def test_quant_trader_reddit_history_anchor_requires_share_link() -> None:
+    classic = "https://www.reddit.com/r/foo/comments/abc123/title"
+    msgs = [HumanMessage(content=classic), HumanMessage(content="reintenta")]
+    assert not _quant_trader_reddit_history_anchor_intent("reintenta", msgs)
+
+
 def test_resolve_reddit_share_url_follows_redirect_to_comments() -> None:
     share = "https://www.reddit.com/r/worldnews/s/oKlI2Uc2lf"
     canonical = "https://www.reddit.com/r/worldnews/comments/abc123xyz/us_begins_blockade"
@@ -46,6 +75,43 @@ def test_resolve_reddit_share_url_follows_redirect_to_comments() -> None:
 
     with patch("duckclaw.workers.factory._urllib_request.urlopen", return_value=mock_cm):
         assert _resolve_reddit_share_url_to_comments_url(share) == canonical
+
+
+def test_resolve_reddit_share_url_rejects_app_share_tracking_redirect() -> None:
+    """Evidencia gateway: /s/… 301 a /comments/<id>?share_id=…&utm_medium=android_app puede ser post incorrecto."""
+    share = "https://www.reddit.com/r/USNEWS/s/Fuaino2nbg"
+    tracked = (
+        "https://www.reddit.com/r/USNEWS/comments/1t95z0u/title/"
+        "?share_id=BsNx2q_jvW5sdc_wpg_m9&utm_source=share&utm_medium=android_app"
+    )
+    mock_resp = MagicMock()
+    mock_resp.geturl.return_value = tracked
+    mock_cm = MagicMock()
+    mock_cm.__enter__.return_value = mock_resp
+    mock_cm.__exit__.return_value = False
+
+    with patch("duckclaw.workers.factory._urllib_request.urlopen", return_value=mock_cm):
+        assert _resolve_reddit_share_url_to_comments_url(share) is None
+
+
+def test_resolve_reddit_share_url_trust_env_restores_tracking_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    share = "https://www.reddit.com/r/USNEWS/s/Fuaino2nbg"
+    tracked = (
+        "https://www.reddit.com/r/USNEWS/comments/1t95z0u/title/"
+        "?share_id=BsNx2q_jvW5sdc_wpg_m9&utm_source=share"
+    )
+    mock_resp = MagicMock()
+    mock_resp.geturl.return_value = tracked
+    mock_cm = MagicMock()
+    mock_cm.__enter__.return_value = mock_resp
+    mock_cm.__exit__.return_value = False
+
+    monkeypatch.setenv("DUCKCLAW_REDDIT_TRUST_SHARE_TRACKING_REDIRECT", "1")
+    with patch("duckclaw.workers.factory._urllib_request.urlopen", return_value=mock_cm):
+        expected = tracked.split("#")[0].split("?")[0].rstrip("/")
+        assert _resolve_reddit_share_url_to_comments_url(share) == expected
 
 
 def test_resolve_reddit_share_url_returns_none_when_not_share_link() -> None:
@@ -72,6 +138,46 @@ def test_patch_reddit_get_post_overwrites_slug_with_real_post_id() -> None:
     out = _patch_reddit_get_post_args_from_canonical_url(msg, canonical)
     assert out.tool_calls[0]["args"]["post_id"] == "1skcbpd"
     assert out.tool_calls[0]["args"]["subreddit"] == "worldnews"
+
+
+def test_schema_heuristic_false_for_lone_article_url_with_estructura_slug() -> None:
+    u = (
+        "https://www.elconfidencial.com/tecnologia/ciencia/"
+        "2026-05-10/europa-colombia-estructura-5-5-km-1qrt_4350818/"
+    )
+    assert not incoming_is_schema_query_heuristic(u)
+
+
+def test_schema_heuristic_true_for_explicit_table_question() -> None:
+    assert incoming_is_schema_query_heuristic("qué tablas hay en duckdb")
+
+
+def test_reddit_share_shortlink_fallback_query_not_raw_url() -> None:
+    u = "https://www.reddit.com/r/USNEWS/s/h3kvg1pisI"
+    assert reddit_share_shortlink_fallback_query(u) == "r/USNEWS shortlink h3kvg1pisI"
+    assert "http" not in reddit_share_shortlink_fallback_query(u)
+
+
+def test_reddit_share_search_query_for_attempt_progression() -> None:
+    u = "https://www.reddit.com/r/USNEWS/s/h3kvg1pisI"
+    assert reddit_share_search_query_for_attempt(u, 0) == "r/USNEWS shortlink h3kvg1pisI"
+    assert reddit_share_search_query_for_attempt(u, 1) == "USNEWS h3kvg1pisI"
+    assert reddit_share_search_query_for_attempt(u, 2) == "h3kvg1pisI"
+
+
+def test_quant_lone_reddit_url_message_for_share_link() -> None:
+    anchor = "https://www.reddit.com/r/USNEWS/s/h3kvg1pisI"
+    assert quant_trader_lone_reddit_url_message(
+        "quant_trader",
+        anchor,
+        anchor,
+    )
+    assert not quant_trader_lone_reddit_url_message(
+        "quant_trader",
+        f"Mira este post\n{anchor}",
+        anchor,
+    )
+    assert not quant_trader_lone_reddit_url_message("finanz", anchor, anchor)
 
 
 def test_groq_tools_without_reddit_for_bind_filters_prefix() -> None:

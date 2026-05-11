@@ -8,6 +8,39 @@ from pathlib import Path
 import pytest
 
 
+def test_plan_task_finanz_tool_pressure_rewrites_planned_task() -> None:
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    msg = "No usaste ninguna tool, vuelve a intentar (USA LAS TOOLS)"
+    task, override = _plan_task(msg, "finanz")
+    assert override is None
+    assert "read_sql" in task.lower()
+    assert "admin_sql" in task.lower() or "insert_deuda" in task.lower()
+    assert "prohibido" in task.lower() or "evidencia duckdb" in task.lower()
+
+
+def test_sanitize_finanz_manager_plan_title_fixes_sin_herramientas() -> None:
+    from duckclaw.graphs.manager_graph import _sanitize_finanz_manager_plan_title
+
+    assert (
+        _sanitize_finanz_manager_plan_title(
+            "Reintentar sin herramientas",
+            "USA LAS TOOLS por favor",
+            "finanz",
+        )
+        == "Consulta y persistencia DuckDB"
+    )
+    assert (
+        _sanitize_finanz_manager_plan_title("Reintentar sin herramientas", "hola", "finanz")
+        == "Ejecutar con herramientas DuckDB"
+    )
+    assert _sanitize_finanz_manager_plan_title("Consultar saldos", "hola", "finanz") == "Consultar saldos"
+    assert (
+        _sanitize_finanz_manager_plan_title("Reintentar sin herramientas", "hola", "bi-analyst")
+        == "Reintentar sin herramientas"
+    )
+
+
 def test_plan_task_job_hunter_uses_tavily_not_run_sandbox_only() -> None:
     from duckclaw.graphs.manager_graph import _plan_task
 
@@ -839,4 +872,58 @@ def test_quant_hrp_affirm_followup_rejects_unrelated_thread() -> None:
             ["Quant-Trader"],
         )
         is None
+    )
+
+
+def test_plan_task_lone_http_url_skips_estructura_slug_false_positive() -> None:
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    url = (
+        "https://www.elconfidencial.com/tecnologia/ciencia/"
+        "2026-05-10/europa-colombia-estructura-5-5-km-1qrt_4350818/"
+    )
+    planned, ov = _plan_task(url, "Quant-Trader")
+    assert ov is None
+    assert planned.strip() == url.strip()
+    planned2, _ = _plan_task(" " + url + "\n", "Quant-Trader")
+    assert planned2.strip() == url.strip()
+
+
+def test_should_disable_mercenary_quant_lone_http_url_only() -> None:
+    from duckclaw.graphs.manager_graph import _should_disable_mercenary_for_quant_lone_https_url
+
+    article = (
+        "https://www.elconfidencial.com/tecnologia/ciencia/"
+        "2026-05-10/europa-colombia-estructura-5-5-km-1qrt_4350818/"
+    )
+    assert _should_disable_mercenary_for_quant_lone_https_url(article, "Quant-Trader")
+    assert _should_disable_mercenary_for_quant_lone_https_url(f"  {article}\n", "quant_trader")
+    assert _should_disable_mercenary_for_quant_lone_https_url("http://example.com/a", "Quant-Trader")
+    assert not _should_disable_mercenary_for_quant_lone_https_url(
+        f"{article}\n léelo mañana", "Quant-Trader"
+    )
+    assert not _should_disable_mercenary_for_quant_lone_https_url(article, "finanz")
+    assert not _should_disable_mercenary_for_quant_lone_https_url("", "Quant-Trader")
+
+
+def test_should_disable_mercenary_quant_external_research_blob() -> None:
+    from duckclaw.graphs.manager_graph import _should_disable_mercenary_for_quant_external_research
+
+    assert _should_disable_mercenary_for_quant_external_research(
+        "Investiga los tratos recientes entre OpenAI-MSFT-AMZ",
+        "Quant-Trader",
+        ["Buscar noticias recientes sobre acuerdos entre OpenAI, Microsoft y Amazon"],
+        "Tratos recientes OpenAI-MSFT-AMZ",
+    )
+    assert not _should_disable_mercenary_for_quant_external_research(
+        "Investiga los tratos recientes entre OpenAI-MSFT-AMZ",
+        "finanz",
+        ["Buscar noticias"],
+        "Plan",
+    )
+    assert not _should_disable_mercenary_for_quant_external_research(
+        "cuánto tengo en IBKR",
+        "Quant-Trader",
+        [],
+        "Portfolio",
     )

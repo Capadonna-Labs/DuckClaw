@@ -128,6 +128,7 @@ Opcional en `WorkerSpec` / YAML: `concurrent_read_tools: [read_sql, inspect_sche
 | Sobrecarga de FD / mmap | Semáforo + límite por defecto 5. |
 | Consultas pesadas en paralelo | Timeout + límites existentes en prompts/manifest; opción de desactivar pool por worker. |
 | GIL | Lectura DuckDB en threads; no esperar paralelismo CPU puro en Python; objetivo es I/O y lock de lectura. |
+| **Mismo .duckdb que muta `db-writer` (Quant-Trader)** | Las conexiones RO efímeras en hilos **no** pasan por `DuckClaw.suspend_readonly_file_handle()` del proceso gateway; pueden mantener el lock de archivo y bloquear `QUANT_STATE_DELTA` / cola SQL sobre `quant_trader*.duckdb` (véase `specs/features/Finanz admin_sql db-writer.md`). Mitigación: manifest `tool_read_pool: false` en **Quant-Trader** para forzar `read_sql` vía la sesión única RO que sí coopera con suspend antes de encolar escrituras. |
 
 ## 13. Implementación sugerida (post-aprobación spec)
 

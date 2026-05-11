@@ -737,11 +737,29 @@ def _find_hrp_rebalance_affirm_context_assistant_body(history: Any) -> str | Non
     return None
 
 
+def _assistant_proposes_hold_or_skip_aggressive_hrp(low: str) -> bool:
+    """
+    El asistente pide confirmar postura defensiva / no ejecutar HRP agresivo.
+    No debe acoplarse a ``_try_quant_hrp_affirm_followup`` (sí/Confirmo → rebalance).
+    """
+    if "no ejecut" in low and "hrp" in low:
+        return True
+    if "propongo mantener" in low:
+        return True
+    if "mantener las" in low and "defensiv" in low:
+        return True
+    if "sin ejecutar" in low and "hrp" in low:
+        return True
+    return False
+
+
 def _assistant_asks_hrp_rebalance_followup(assistant_text: str) -> bool:
     t = (assistant_text or "").strip()
     if not t:
         return False
     low = t.lower()
+    if _assistant_proposes_hold_or_skip_aggressive_hrp(low):
+        return False
     # Frase típica en español pidiendo señales de compra (no "¿procedo?")
     if "deseas" in low and "genere" in low and any(
         x in low for x in ("señal", "señales", "compra", "rebalance", "hrp", "meta", "spy")
@@ -766,8 +784,9 @@ def _assistant_asks_hrp_rebalance_followup(assistant_text: str) -> bool:
         return True
     if "revisión" in low and "alineación" in low and "hrp" in low and "ibkr" in low:
         return True
+    # Cuidado: "peso" solapa con "Peso tech …" en avisos defensivos (falso positivo con "?" al final).
     if "pypfopt" in low or "pyportfolioopt" in low or "hierarchical risk" in low or (
-        "hrp" in low and any(x in low for x in ("óptim", "optim", "peso", "pypfopt"))
+        "hrp" in low and any(x in low for x in ("óptim", "optim", "pypfopt"))
     ):
         if "?" in t or "procedo" in low or "señal" in low or "rebalance" in low or "deseas" in low:
             return True
@@ -917,13 +936,28 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     lone = text.strip()
     if _LONE_HTTP_URL_ONLY_LINE.match(lone):
         return lone, None
-    # /context --add + foto: VLM antepone «Usuario dice:…»; evitar heurísticas db/tablas (p. ej. nombre+datos).
+    # VLM (fotos/capturas): OCR/plantillas suelen incluir «tabla/tables/schema» sin pedir inventario DuckDB.
+    # Sin bypass, _plan_task reemplazaba el mensaje por TAREA: listar tablas → worker perdía el plan del manager
+    # (ej. IB «Cambios en calificaciones» → inspect_schema; logs 2026-05-11 gateway).
     if "[VLM_CONTEXT" in text and "Contexto visual adjunto:" in text:
-        tctx = text.lower()
-        if "/context" in tctx and "--add" in tctx:
-            return (incoming or "").strip(), None
+        return (incoming or "").strip(), None
     t = text.lower()
     override: Optional[str] = None
+    _explicit_duckdb_schema_request = bool(
+        re.search(
+            r"\b(listar\s+tablas|tablas\s+disponibles|qu[ée]\s+tablas|que\s+tablas|"
+            r"tablas\s+de\s+la\s+base|tablas\s+en\s+(la\s+)?(base|duckdb)|"
+            r"show\s+tables|information_schema\.tables|"
+            r"esquema\s+de\s+la\s+base|schema\s+de\s+la\s+base|estructura\s+de\s+la\s+base|"
+            r"listar\s+(el\s+)?esquema|ver\s+(el\s+)?esquema|mostrar\s+(el\s+)?esquema|"
+            r"nombre\s+de\s+la\s+db|nombre\s+db)\b",
+            t,
+        )
+        or (
+            re.search(r"\b(tables|tablas)\b", t)
+            and re.search(r"\b(base|duckdb|datos|database|bd)\b", t)
+        )
+    )
     if (worker_id or "").strip().lower() == "quant-trader" and _quant_operational_intent_requires_fly_command(text):
         return (
             "TAREA: Intención operativa cuant detectada. No hagas tool chaining manual en este turno. "
@@ -1018,9 +1052,9 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
             None,
         )
     # Intención DB/tablas/nombre → si el rol es personalizable, usar finanz (especialista) si está disponible
-    is_db_intent = (
-        re.search(r"\b(nombre\s+de\s+la\s+db|db|tablas?|tables?|esquema|schema|estructura|disponibles)\b", t)
-        or "tablas" in t
+    is_db_intent = bool(
+        _explicit_duckdb_schema_request
+        or re.search(r"\b(db|esquema|schema|estructura|disponibles)\b", t)
         or ("nombre" in t and ("db" in t or "base" in t or "datos" in t))
     )
     if is_db_intent and (worker_id or "").strip().lower() == "personalizable":
@@ -1093,11 +1127,8 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
         )
         return task, override
 
-    # Tablas / esquema / estructura
-    if re.search(
-        r"\b(tablas?|tables?|esquema|schema|estructura|listar\s+tablas|disponibles)\b",
-        t,
-    ) or "tablas" in t or "qué tablas" in t or "que tablas" in t:
+    # Tablas / esquema: mismo criterio que is_db_intent explícito (evitar «tabla» suelta en informes IB/ocr).
+    if _explicit_duckdb_schema_request:
         task = (
             "TAREA: El usuario quiere ver las tablas de la base de datos. "
             "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /team, /tasks, /help y a crear objetivos con /crons."

@@ -26,7 +26,10 @@ from duckclaw.forge.skills.quant_market_bridge import (
 )
 from duckclaw.forge.skills.quant_cfd_bridge import _record_fluid_state_impl
 from duckclaw.forge.skills.quant_state_delta import push_quant_state_delta_sync
-from duckclaw.forge.skills.intraday_accum_window import inside_reference_equity_rth_cot
+from duckclaw.forge.skills.intraday_accum_window import (
+    inside_reference_accumulation_trading_week_cot,
+    inside_reference_equity_rth_cot,
+)
 from duckclaw.forge.skills.quant_hitl import consume_execute_order_grant, grant_execute_order
 from duckclaw.forge.skills.quant_tool_context import (
     get_quant_tool_chat_id,
@@ -401,21 +404,25 @@ def quant_trading_session_prompt_block(db: Any) -> str:
     tickers = (row.get("tickers") or "").strip()
     uid = (row.get("session_uid") or "").strip()
     mode = (row.get("mode") or "").strip()
-    return (
+    _out = (
         "## Sesión de trading (reactor)\n"
         f"- Estado: **ACTIVE** · modo `{mode}` · session_uid `{uid}`\n"
         f"- Tickers: `{tickers or '(cualquiera)'}`{max_dd_s}\n"
         "Mientras la sesión esté ACTIVE, evalúa mercado con herramientas, respeta el límite de DD si existe, "
-        "y si hay setup válido propón señal con `propose_trade_signal` (tras evidencia OHLCV del ticker); "
-        "la propuesta ledger puede crearse en cualquier horario; la **auto-ejecución** encadenada "
-        "(env `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`) sigue solo dentro de ventana MOC COT "
-        "(default 14:40:00–14:59:30). Para restaurar bloqueo de propuesta fuera de MOC: "
-        "`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` → error `OUTSIDE_MOC_PREP_WINDOW`. "
-        "Durante lun–vie 08:30–15:00 COT, sesión ACTIVE, opcional hints sin ledger via "
+        "y si hay setup válido propón señal con `propose_trade_signal` (tras evidencia OHLCV del ticker). "
+        "La propuesta ledger puede crearse en cualquier horario (salvo opt-in abajo). "
+        "Con **auto-ejecución** encadenada (`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`), la ventana depende de "
+        "**`strategy_name`**: por defecto **RTH referencia** lun–vie **08:30–15:00 COT**; las estrategias en "
+        "`DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES` (default `overnight_gap_moc`) solo auto-ejecutan en "
+        "ventana **MOC** (~14:40–14:59:30 COT salvo env). "
+        "Opt-in `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` también bloquea **crear** propuesta fuera de MOC "
+        "→ `OUTSIDE_MOC_PREP_WINDOW`. "
+        "En **lun–vie** (cualquier hora COT), sesión ACTIVE, hints sin ledger vía "
         "`accumulate_moc_intraday_state` (merge cola hasta MOC calc PM2; no substituye `propose_trade_signal`). "
         "Ticks proactivos: tras confirmar ACTIVE, llama **`schedule_quant_trading_proactive_ticks`** "
         "(interval_seconds=0 o el intervalo pedido; persiste igual que `/crons --delta`, vía cola escritor)."
     )
+    return _out
 
 
 def _quant_drawdown_risk_gate(db: Any) -> Optional[Tuple[str, str]]:
@@ -1172,16 +1179,22 @@ def _accumulate_moc_intraday_state_impl(
     if _quant_ignore_moc_time_gates():
         ok_rth, rth_reason, rth_meta = True, "", {}
     else:
-        ok_rth, rth_reason, rth_meta = inside_reference_equity_rth_cot()
+        ok_rth, rth_reason, rth_meta = inside_reference_accumulation_trading_week_cot()
     if not ok_rth:
+        msg = (
+            "Fin de semana: acumulación desactivada por DUCKCLAW_MOC_ACCUM_BLOCK_WEEKEND=1. "
+            "Quita esa variable para el default (sáb/dom permitidos)."
+            if rth_reason == "WEEKEND"
+            else (
+                "Acumulación no disponible en este momento; revisa calendario COT "
+                "(dev: DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES)."
+            )
+        )
         return json.dumps(
             {
-                "error": "OUTSIDE_REFERENCE_RTH_ACCUM_WINDOW",
+                "error": "OUTSIDE_ACCUM_TRADING_WEEK_WINDOW",
                 "reason": rth_reason,
-                "message": (
-                    "Solo lun–vie 08:30–15:00 America/Bogota (spec ref. RTH COT); "
-                    "dev: DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES."
-                ),
+                "message": msg,
                 **rth_meta,
             },
             ensure_ascii=False,

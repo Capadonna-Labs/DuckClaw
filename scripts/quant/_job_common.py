@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -74,6 +75,73 @@ except ImportError:
     httpx = None  # type: ignore[misc, assignment]
 
 
+def _quant_alert_chat_id() -> str:
+    """Destino DM: explícito cuant o dueño (mismo criterio que alertas operador)."""
+    return (os.getenv("DUCKCLAW_QUANT_ALERT_CHAT_ID") or os.getenv("DUCKCLAW_OWNER_ID") or "").strip()
+
+
+def _quant_native_bot_token() -> str:
+    """
+    Token Bot API sin n8n: TELEGRAM_BOT_TOKEN, resolución Quant-Trader, o segmento ``quanttrader``
+    en ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` (formato ``…:TOKEN:/api/…`` con TOKEN típ. ``A…``).
+    """
+    t = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    if t:
+        return t
+    try:
+        from duckclaw.integrations.telegram.telegram_agent_token import resolve_telegram_token_for_worker_id
+
+        w = (resolve_telegram_token_for_worker_id("Quant-Trader") or "").strip()
+        if w:
+            return w
+    except Exception:
+        pass
+    raw = (os.getenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()
+    if not raw or raw.startswith("[") or ":/api/" not in raw:
+        return ""
+    for chunk in raw.split(","):
+        entry = chunk.strip()
+        if "quanttrader" not in entry.lower():
+            continue
+        # Formato típico: ``quanttrader:<bot_id>:<secreto>:/api/…`` (token BotFather = ``bot_id:secreto``).
+        m = re.search(r"(?i)quanttrader:(\d+:[A-Za-z0-9_-]{25,}):/api/", entry)
+        if m:
+            return m.group(1).strip()
+        # Compacto sin id numérico: ``quanttrader:<token>:/api/…``
+        m2 = re.search(r"(?i)quanttrader:([A-Za-z0-9_-]{35,}):/api/", entry)
+        if m2:
+            return m2.group(1).strip()
+    return ""
+
+
+def _send_quant_alert_native_bot_api(text: str, *, chat_id: str) -> bool:
+    try:
+        from duckclaw.integrations.telegram.telegram_outbound_sync import (
+            send_long_plain_text_markdown_v2_chunks_sync,
+        )
+
+        token = _quant_native_bot_token()
+        if not token:
+            return False
+        import logging
+
+        log = logging.getLogger("duckclaw.quant_job_outbound")
+        n = send_long_plain_text_markdown_v2_chunks_sync(
+            bot_token=token,
+            chat_id=chat_id,
+            plain_text=str(text),
+            log=log,
+        )
+        return n > 0
+    except Exception as exc:
+        print(
+            f"[quant_job] native Telegram send failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+
+
 def infer_vault_user_id(db_path: str) -> str:
     parts = Path(db_path).expanduser().resolve().parts
     if "private" in parts:
@@ -112,22 +180,95 @@ def enqueue_vault_sql(
     return True, ""
 
 
-def send_quant_alert_message(text: str) -> None:
-    if not httpx:
-        return
-    webhook_url = os.environ.get("N8N_OUTBOUND_WEBHOOK_URL", "").strip()
-    chat = os.environ.get("DUCKCLAW_QUANT_ALERT_CHAT_ID", "").strip()
-    if not webhook_url or not chat:
-        return
-    headers: dict[str, str] = {}
-    auth_key = os.environ.get("N8N_AUTH_KEY", "").strip()
-    if auth_key:
-        headers["X-DuckClaw-Secret"] = auth_key
-    body = {"chat_id": chat, "text": str(text).replace("<", "&lt;"), "parse_mode": "HTML"}
-    try:
-        httpx.post(webhook_url, json=body, headers=headers, timeout=12.0)
-    except Exception:
-        pass
+def quant_outbound_env_ready() -> tuple[bool, str]:
+    """True si hay canal de salida: webhook n8n (opcional) o Bot API nativo (token + chat)."""
+    chat = _quant_alert_chat_id()
+    if not chat:
+        return False, "no_chat_DUCKCLAW_QUANT_ALERT_or_OWNER"
+    webhook = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
+    if httpx and webhook:
+        return True, "webhook"
+    if _quant_native_bot_token():
+        return True, "native_bot_api"
+    if webhook and not httpx:
+        return False, "httpx_not_installed_for_webhook"
+    return False, "no_webhook_and_no_bot_token"
+
+
+def log_quant_outbound_readiness(component: str, *, phase: str = "") -> None:
+    """Una línea stderr para validar PM2/cron (webhook n8n y/o Bot API nativo)."""
+    ok, reason = quant_outbound_env_ready()
+    ph = f" phase={phase}" if phase else ""
+    if ok:
+        mode = "native Bot API" if reason == "native_bot_api" else "n8n webhook"
+        print(f"[{component}]{ph} outbound_configured=yes ({mode})", file=sys.stderr, flush=True)
+    else:
+        print(
+            f"[{component}]{ph} outbound_configured=no ({reason}); "
+            "define N8N_OUTBOUND_WEBHOOK_URL+httpx, o token Bot (TELEGRAM_* / WEBHOOK_ROUTES quanttrader) "
+            "+ DUCKCLAW_QUANT_ALERT_CHAT_ID o DUCKCLAW_OWNER_ID",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+def send_quant_alert_message(text: str) -> bool:
+    """
+    Telegram: intenta POST webhook n8n si está configurado; si no hay 2xx o no hay webhook,
+    envía por **Bot API nativo** (mismo stack que heartbeat) con token resuelto y chat.
+    """
+    chat = _quant_alert_chat_id()
+    if not chat:
+        print(
+            "[quant_job] outbound skip: sin chat (DUCKCLAW_QUANT_ALERT_CHAT_ID o DUCKCLAW_OWNER_ID)",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+
+    webhook_url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
+    if httpx and webhook_url:
+        headers: dict[str, str] = {}
+        auth_key = os.getenv("N8N_AUTH_KEY", "").strip()
+        if auth_key:
+            headers["X-DuckClaw-Secret"] = auth_key
+        body = {
+            "chat_id": chat,
+            "user_id": chat,
+            "text": str(text).replace("<", "&lt;"),
+            "parse_mode": "HTML",
+        }
+        try:
+            resp = httpx.post(webhook_url, json=body, headers=headers, timeout=12.0)
+            if resp.is_success:
+                return True
+            snippet = (resp.text or "").strip().replace("\n", " ")[:500]
+            print(
+                f"[quant_job] outbound webhook HTTP {resp.status_code}: {snippet} — intento nativo",
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception as exc:
+            print(
+                f"[quant_job] outbound webhook failed: {type(exc).__name__}: {exc} — intento nativo",
+                file=sys.stderr,
+                flush=True,
+            )
+    elif webhook_url and not httpx:
+        print("[quant_job] outbound: httpx ausente; solo intento nativo Bot API", file=sys.stderr, flush=True)
+
+    if _send_quant_alert_native_bot_api(text, chat_id=chat):
+        return True
+    if not _quant_native_bot_token():
+        print(
+            "[quant_job] outbound skip: sin token Bot API resoluble (TELEGRAM_BOT_TOKEN, "
+            "Quant-Trader, o segmento quanttrader en DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES)",
+            file=sys.stderr,
+            flush=True,
+        )
+    else:
+        print("[quant_job] outbound: nativo Bot API no entregó partes OK", file=sys.stderr, flush=True)
+    return False
 
 
 def fetch_ibkr_equity_and_positions_mv() -> tuple[float, dict[str, float], str]:

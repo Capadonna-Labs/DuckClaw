@@ -264,6 +264,33 @@ def test_plan_task_context_add_vlm_passthrough_not_get_db_path() -> None:
     assert "get_db_path" not in task.lower()
 
 
+def test_plan_task_vlm_ib_screenshot_passthrough_not_tables_task() -> None:
+    """Captura IB (OCR con «tabla») + VLM: no sustituir por TAREA listar tablas / inspect_schema."""
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    incoming = (
+        "Usuario dice: (sin caption)\n"
+        "Contexto visual adjunto: **InteractiveBrokers**\n"
+        "**FYI: Cambios en las Calificaciones de Analistas**\n"
+        "La siguiente tabla resume QCOM@NASDAQ …\n"
+        "[VLM_CONTEXT image_hash=0cba confidence=0.9]"
+    )
+    task, override = _plan_task(incoming, "Quant-Trader")
+    assert override is None
+    assert task == incoming
+    assert "TAREA: El usuario quiere ver las tablas" not in task
+
+
+def test_plan_task_explicit_tablas_de_la_base_still_rewrites() -> None:
+    """Sin VLM, pedido explícito de inventario de tablas sigue generando TAREA."""
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    task, override = _plan_task("Muéstrame las tablas de la base duckdb", "Quant-Trader")
+    assert override is None
+    assert "TAREA: El usuario quiere ver las tablas" in task
+    assert "information_schema" in task.lower() or "show tables" in task.lower()
+
+
 def test_plan_task_bi_analyst_meta_capabilities() -> None:
     from duckclaw.graphs.manager_graph import _plan_task
 
@@ -874,6 +901,29 @@ def test_quant_hrp_affirm_followup_rejects_unrelated_thread() -> None:
         _try_quant_hrp_affirm_followup(
             "Procede",
             [{"role": "assistant", "content": "Bienvenido, ¿en qué te ayudo?"}],
+            "Quant-Trader",
+            "Cuantitativo",
+            ["Quant-Trader"],
+        )
+        is None
+    )
+
+
+def test_quant_hrp_affirm_followup_rejects_confirm_defensive_hold() -> None:
+    """'Confirmo' a 'mantener defensivo / no ejecutar HRP agresivo' no debe disparar rebalance HRP."""
+    from duckclaw.graphs.manager_graph import _try_quant_hrp_affirm_followup
+
+    last_assistant = (
+        "14:46 COT — Ventana MOC abierta. Portfolio actual vs HRP fresco:\n"
+        "| Ticker | Actual | HRP fresco |\n"
+        "| META | short | 18% |\n"
+        "⚠️ HRP fresco es más agresivo. Peso tech (META 18%, MSFT 7%) vs postura DEFENSIVA con VIX 18.\n"
+        "Propongo mantener las 10 señales actuales (defensivas) y no ejecutar HRP agresivo hoy. ¿Confirmas?"
+    )
+    assert (
+        _try_quant_hrp_affirm_followup(
+            "Confirmo",
+            [{"role": "assistant", "content": last_assistant}],
             "Quant-Trader",
             "Cuantitativo",
             ["Quant-Trader"],

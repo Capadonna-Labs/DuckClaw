@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from duckclaw.workers.factory import (
     _extract_first_reddit_url,
     _finanz_followup_reddit_read_intent,
+    _quant_trader_vlm_incoming_suggests_market_figure,
     _groq_tools_without_reddit_for_bind,
     _most_recent_reddit_url_in_human_messages,
     _patch_reddit_get_post_args_from_canonical_url,
@@ -61,6 +62,31 @@ def test_quant_trader_reddit_history_anchor_requires_share_link() -> None:
     classic = "https://www.reddit.com/r/foo/comments/abc123/title"
     msgs = [HumanMessage(content=classic), HumanMessage(content="reintenta")]
     assert not _quant_trader_reddit_history_anchor_intent("reintenta", msgs)
+
+
+def test_quant_trader_vlm_incoming_market_figure_detection() -> None:
+    vlm = (
+        "Usuario dice: (sin caption)\nContexto visual adjunto: Advanced Micro Devices: 465.00.\n"
+        "[VLM_CONTEXT image_hash=abc]"
+    )
+    assert _quant_trader_vlm_incoming_suggests_market_figure(vlm)
+    assert not _quant_trader_vlm_incoming_suggests_market_figure("solo texto 465.00 sin vlm")
+    assert not _quant_trader_vlm_incoming_suggests_market_figure(
+        "Contexto visual adjunto: sin decimal tipo cotización"
+    )
+
+
+def test_quant_trader_reddit_anchor_suppressed_when_vlm_turn_is_newer() -> None:
+    """Retry genérico no debe forzar reddit_* si hubo foto/VLM después del share."""
+    share = "https://www.reddit.com/r/quant/s/AbCdEfGhIj"
+    msgs = [
+        HumanMessage(content=f"Mira {share}"),
+        HumanMessage(
+            content="Usuario dice: (sin caption)\nContexto visual adjunto: AMD 465 semiconductor.\n[VLM_CONTEXT image_hash=test123trunc...]"
+        ),
+        HumanMessage(content="vuelve a intentar"),
+    ]
+    assert not _quant_trader_reddit_history_anchor_intent("vuelve a intentar", msgs)
 
 
 def test_resolve_reddit_share_url_follows_redirect_to_comments() -> None:

@@ -15,6 +15,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.error import URLError
 from urllib import request as _urllib_request
+from urllib.parse import parse_qs, urlparse
 
 _log = logging.getLogger(__name__)
 from pathlib import Path
@@ -52,6 +53,21 @@ _NO_TASK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Debe coincidir con duckclaw.graphs.manager_graph._LONE_HTTP_URL_ONLY_LINE.
+_LONE_HTTP_URL_ONLY_LINE = re.compile(r"^\s*https?://[^\s]+\s*$", re.I)
+
+
+def quant_trader_lone_reddit_url_message(logical_worker_id: str, incoming: str, reddit_anchor_url: Optional[str]) -> bool:
+    """
+    Quant pegó sólo una URL de Reddit sin directiva SUMMARIZE_*: permite force_reddit
+    (evita respuesta texto sin reddit_*).
+    """
+    if (logical_worker_id or "").strip().lower() != "quant_trader":
+        return False
+    if not reddit_anchor_url:
+        return False
+    return bool(_LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip()))
+
 # Preguntas por filas/contenido (no catálogo). Incluye «hay algo en la tabla X» (evita confundir con listar tablas).
 _TABLE_CONTENT_PHRASE = re.compile(
     r"\b(que\s+hay\s+en\s+la\s+tabla|qué\s+hay\s+en\s+la\s+tabla|"
@@ -60,6 +76,30 @@ _TABLE_CONTENT_PHRASE = re.compile(
     r"registros?\s+de\s+la\s+tabla|filas?\s+de\s+la\s+tabla|select\s+\*\s+from|select\s+.+\s+from)\b",
     re.IGNORECASE,
 )
+
+
+def incoming_is_schema_query_heuristic(text: str) -> bool:
+    """
+    ¿Forzar inspect_schema? No si el usuario pegó sólo una URL HTTP(S): el path puede
+    contener palabras como «estructura» sin relacionarse con DuckDB.
+    Exportado para tests.
+    """
+    if not text or not text.strip():
+        return False
+    if bool(_LONE_HTTP_URL_ONLY_LINE.match(text.strip())):
+        return False
+    t = text.strip().lower()
+    if "read_sql" in t and "job_opportunities" in t:
+        return False
+    if re.search(r"\btabla\s+o\s+lista\b", t):
+        return False
+    if _TABLE_CONTENT_PHRASE.search(t):
+        return False
+    return any(
+        k in t
+        for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas")
+    )
+
 
 # Preguntas sobre DB/tablas/esquema son siempre tarea concreta (evitar "¿Cuál es mi tarea?")
 _CONCRETE_TASK_KEYWORDS = re.compile(
@@ -439,6 +479,25 @@ def _finanz_user_requests_ohlcv_ingest(text: str) -> bool:
     ):
         return False
     return bool(re.search(r"\b[A-Z]{1,5}\b", raw))
+
+
+def _duckclaw_env_truthy(name: str) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _quant_ohlcv_context_summary_forced_fetch_enabled() -> bool:
+    """Opt-in: forzar ingesta OHLCV en turnos SUMMARIZE_* cuando el texto pide velas explícitas."""
+    return _duckclaw_env_truthy("DUCKCLAW_QUANT_OHLCV_ON_CONTEXT_SUMMARY")
+
+
+def _quant_summarize_allows_forced_ohlcv_fetch(incoming: str, worker_lid: str) -> bool:
+    """SUMMARIZE_* no bloquea fetch_market_data si Quant + env + heurística OHLCV del usuario."""
+    if not _quant_ohlcv_context_summary_forced_fetch_enabled():
+        return False
+    if (worker_lid or "").strip().lower() != "quant_trader":
+        return False
+    return _finanz_user_requests_ohlcv_ingest(incoming)
 
 
 def _quant_user_requests_new_trade_signal(text: str) -> bool:
@@ -1024,6 +1083,72 @@ _REDDIT_COMMENTS_SUB_POST_RE = re.compile(
 )
 
 
+def reddit_share_shortlink_fallback_query(share_url: str) -> str:
+    """
+    reddit_search_reddit con ``query=<URL /s/…>`` rompe el servidor MCP (`children`).
+    Preferir texto ``r/<subreddit> shortlink <slug>`` (alineado con la spec Reddit MCP).
+    """
+    raw = (share_url or "").strip()
+    m = re.search(r"/r/([\w_]+)/s/([a-zA-Z0-9]+)", raw, re.IGNORECASE)
+    if m:
+        return f"r/{m.group(1)} shortlink {m.group(2)}"
+    return raw
+
+
+def reddit_share_search_query_for_attempt(share_url: str, attempt_index: int) -> str:
+    """
+    Evidencia gateway: ``r/<sub> shortlink <slug>`` devolvió hilos irrelevantes (p. ej. r/all).
+    Segundo intento: query más corta ``<sub> <slug>``; siguientes: sólo ``<slug>``.
+    ``attempt_index`` = nº de ToolMessage ``reddit_search_reddit`` ya en el historial antes de esta llamada.
+    """
+    raw = (share_url or "").strip()
+    slug_m = re.search(r"/s/([a-zA-Z0-9]+)", raw, re.IGNORECASE)
+    slug = slug_m.group(1) if slug_m else ""
+    sub_m = re.search(r"/r/([\w_]+)/s/", raw, re.IGNORECASE)
+    sub = sub_m.group(1) if sub_m else ""
+    if attempt_index <= 0:
+        return reddit_share_shortlink_fallback_query(raw)
+    if slug and sub:
+        if attempt_index == 1:
+            return f"{sub} {slug}"
+        return slug
+    return reddit_share_shortlink_fallback_query(raw)
+
+
+def _reddit_trust_share_tracking_redirect() -> bool:
+    """
+    Reddit puede 301 /r/*/s/<slug> hacia .../comments/<id>/?share_id=&utm_=android_app
+    donde <id> no coincide con lo que enlazaba el cliente. Default: **no confiar**.
+    Override: ``DUCKCLAW_REDDIT_TRUST_SHARE_TRACKING_REDIRECT=1``.
+    """
+    return (os.environ.get("DUCKCLAW_REDDIT_TRUST_SHARE_TRACKING_REDIRECT") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _reddit_comments_url_has_share_tracking(canonical_comments_url: str) -> bool:
+    """
+    Redirects intermedios típicos de «compartir desde app»: utm_medium=android_app + share_id=…
+    (evidencia runtime: mismo slug /s/Fu… redirige vía servidor a otro submission).
+    """
+    try:
+        q = parse_qs(urlparse(canonical_comments_url).query or "")
+        if q.get("share_id"):
+            return True
+        utm_src = [str(x).lower() for x in q.get("utm_source", [])]
+        utm_med = [str(x).lower() for x in q.get("utm_medium", [])]
+        if "share" in utm_src:
+            return True
+        if any(x in {"android_app", "iphone_app", "mobile_app"} for x in utm_med):
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def _subreddit_and_post_id_from_reddit_comments_url(url: str) -> tuple[Optional[str], Optional[str]]:
     m = _REDDIT_COMMENTS_SUB_POST_RE.search(url or "")
     if not m:
@@ -1090,10 +1215,14 @@ def _resolve_reddit_share_url_to_comments_url(url: str, *, timeout: float = 12.0
     try:
         req = _urllib_request.Request(raw, headers={"User-Agent": ua, "Accept": "text/html"})
         with _urllib_request.urlopen(req, timeout=timeout) as resp:
-            final = resp.geturl()
-        if not isinstance(final, str):
+            raw_final = resp.geturl()
+        if not isinstance(raw_final, str):
             return None
-        final = final.split("#")[0].split("?")[0].rstrip("/")
+        if not _reddit_trust_share_tracking_redirect() and _reddit_comments_url_has_share_tracking(
+            raw_final
+        ):
+            return None
+        final = raw_final.split("#")[0].split("?")[0].rstrip("/")
         if not _REDDIT_COMMENTS_IN_URL_RE.search(final):
             return None
         if not final.lower().startswith("http"):
@@ -1154,6 +1283,45 @@ def _most_recent_reddit_url_in_human_messages(messages: list[Any]) -> Optional[s
         if u:
             return u
     return None
+
+
+def _quant_trader_reddit_history_anchor_intent(incoming: str, messages: list[Any]) -> bool:
+    """
+    Mensaje corto tipo reintento sin URL en el turno actual, pero el último Human con Reddit
+    pegó un enlace /r/.../s/... — misma situación que /context --add (el share sigue en el payload).
+    """
+    inc = (incoming or "").strip()
+    if len(inc) > 220:
+        return False
+    if _extract_first_reddit_url(inc):
+        return False
+    u = _most_recent_reddit_url_in_human_messages(messages or [])
+    if not u or not _REDDIT_SHARE_PATH_RE.search(u):
+        return False
+    if not inc:
+        return False
+    low = inc.lower()
+    if re.search(
+        r"\b(reintent|reintenta|vuelv\w*\s+a|intent\w*|de\s+nuevo|otra\s+vez|retry|try\s+again)\b",
+        low,
+    ):
+        return True
+    return any(
+        k in low
+        for k in (
+            "reddit",
+            "enlace",
+            "link",
+            "post",
+            "url",
+            "acort",
+            "shortlink",
+            "variable",
+            "entorno",
+            "mismo enlace",
+            "misma url",
+        )
+    )
 
 
 def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -> str:
@@ -2627,17 +2795,18 @@ def build_worker_graph(
                         pass
             return {}
 
-        def _patch_ai_reddit_share_tool_calls(resp: Any, share_url: str) -> Any:
+        def _patch_ai_reddit_share_tool_calls(resp: Any, share_url: str, *, attempt_index: int = 0) -> Any:
             """
             Fallback si no hubo resolución HTTP a URL /comments/ en agent_node: el slug /s/ no es post_id.
-            Reescribe get_post → reddit_search_reddit(query=url). Nota: mcp-reddit puede fallar con query=URL;
-            el camino preferido es _resolve_reddit_share_url_to_comments_url + reddit_get_post.
+            Reescribe get_post (o search con query=URL) → reddit_search_reddit con query shortlink.
+            El camino preferido sigue siendo _resolve_reddit_share_url_to_comments_url + reddit_get_post.
             """
             if not share_url or not _incoming_has_reddit_share_path(share_url):
                 return resp
             tcs = list(getattr(resp, "tool_calls", None) or [])
             if not tcs:
                 return resp
+            _q_safe = reddit_share_search_query_for_attempt(share_url, attempt_index)
             patched: list[Any] = []
             changed = False
             for tc in tcs:
@@ -2645,17 +2814,27 @@ def build_worker_graph(
                 tid = (tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)) or ""
                 if name == "reddit_get_post":
                     patched.append(
-                        {"name": "reddit_search_reddit", "args": {"query": share_url}, "id": tid}
+                        {"name": "reddit_search_reddit", "args": {"query": _q_safe}, "id": tid}
                     )
                     changed = True
                     continue
-                if name == "reddit_search_reddit" and isinstance(tc, dict):
-                    args = _tc_args_as_dict(tc)
-                    args["query"] = share_url
-                    new_tc = {**tc, "args": args}
-                    new_tc.pop("arguments", None)
-                    patched.append(new_tc)
-                    changed = True
+                if name == "reddit_search_reddit":
+                    if isinstance(tc, dict):
+                        args = _tc_args_as_dict(tc)
+                        args["query"] = _q_safe
+                        new_tc = {**tc, "args": args}
+                        new_tc.pop("arguments", None)
+                        patched.append(new_tc)
+                        changed = True
+                        continue
+                    try:
+                        base = getattr(tc, "args", None)
+                        args = dict(base) if isinstance(base, dict) else {}
+                        args["query"] = _q_safe
+                        patched.append(tc.model_copy(update={"args": args}))
+                        changed = True
+                    except Exception:
+                        patched.append(tc)
                     continue
                 patched.append(tc)
             if not changed:
@@ -2785,19 +2964,7 @@ def build_worker_graph(
             )
 
         def _is_schema_query(text: str) -> bool:
-            if not text or not text.strip():
-                return False
-            t = text.strip().lower()
-            # TAREA explícita: leer filas en job_opportunities → read_sql, no inspect_schema.
-            if "read_sql" in t and "job_opportunities" in t:
-                return False
-            # "tabla o lista" = formato de presentación, no pedido de esquema DuckDB.
-            if re.search(r"\btabla\s+o\s+lista\b", t):
-                return False
-            # Si piden contenido/filas de una tabla, NO forzar inspect_schema.
-            if _TABLE_CONTENT_PHRASE.search(t):
-                return False
-            return any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas"))
+            return incoming_is_schema_query_heuristic(text)
 
         def _is_table_content_query(text: str) -> bool:
             if not text or not text.strip():
@@ -2851,6 +3018,10 @@ def build_worker_graph(
                 "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in (incoming or "")
                 or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
             )
+            _summarize_ok_for_forced_ohlcv = (
+                not telegram_context_summarize_directive
+                or _quant_summarize_allows_forced_ohlcv_fetch(incoming, str(_lid or ""))
+            )
             summarize_stored_directive = "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
             _is_goals_tick_msg = (
                 str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
@@ -2878,6 +3049,10 @@ def build_worker_graph(
                 (_lid or "").strip().lower() == "quant_trader"
                 and _quant_execution_bug_probe_needs_ibkr_portfolio(incoming)
             )
+            _q_reddit_hist = (
+                (_lid or "").strip().lower() == "quant_trader"
+                and _quant_trader_reddit_history_anchor_intent(incoming, _ev_msgs)
+            )
             is_portfolio = has_ibkr and (_is_portfolio_kw or _is_portfolio_quant_retry or _is_exec_bug_probe)
             if (_lid or "").strip().lower() == "quant_trader" and _wants_new_signal:
                 # En comandos operativos de nueva señal no forzar `get_ibkr_portfolio` first.
@@ -2888,6 +3063,9 @@ def build_worker_graph(
                 is_portfolio = False
             if (_lid or "").strip().lower() == "quant_trader" and _is_goals_tick_msg:
                 # En ticks /goals no forzar "solo portfolio": primero debe correr el ciclo CFD/HRP.
+                is_portfolio = False
+            if (_lid or "").strip().lower() == "quant_trader" and _q_reddit_hist:
+                # Reintento sin re-pegar URL: misma lógica que SUMMARIZE (share en contexto); no adelantar IBKR.
                 is_portfolio = False
             force_finanz_cuentas = (
                 (_lid or "").strip().lower() == "finanz"
@@ -2930,21 +3108,6 @@ def build_worker_graph(
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
             last_msg = (state.get("messages") or [])[-1] if state.get("messages") else None
             already_has_tool_result = last_msg is not None and isinstance(last_msg, ToolMessage)
-            if (
-                (_lid or "").strip().lower() == "quant_trader"
-                and telegram_context_summarize_directive
-                and _incoming_has_reddit_url(incoming)
-                and _reddit_tool_message_no_data(last_msg)
-            ):
-                _fallback_reply = (
-                    "No pude recuperar ese post específico desde Reddit con el enlace corto "
-                    "(no encontrado o sin resultados). Para mantener trazabilidad del contexto, "
-                    "dejo marcado el estado como `source_unavailable` y no amplio con fuentes externas."
-                )
-                resp = AIMessage(content=_fallback_reply)
-                out = {**state, "messages": state["messages"] + [resp]}
-                out.update(_identity_fields(state))
-                return out
 
             if _spec_is_job_hunter() and not has_tavily and not already_has_tool_result:
                 try:
@@ -3027,6 +3190,8 @@ def build_worker_graph(
                 _reddit_anchor_u = _first_reddit_url_in_text(incoming)
             elif (_lid or "").strip().lower() == "finanz" and _finanz_followup_reddit_read_intent(incoming):
                 _reddit_anchor_u = _most_recent_reddit_url_in_human_messages(state.get("messages") or [])
+            elif (_lid or "").strip().lower() == "quant_trader" and _q_reddit_hist:
+                _reddit_anchor_u = _most_recent_reddit_url_in_human_messages(state.get("messages") or [])
             incoming_for_reddit = incoming
             if _reddit_anchor_u and (_reddit_anchor_u not in (incoming or "")):
                 incoming_for_reddit = f"{incoming}\n{_reddit_anchor_u}"
@@ -3048,14 +3213,23 @@ def build_worker_graph(
                 and (last_msg.name or "") == "reddit_search_reddit"
                 and share_slug not in str(last_msg.content or "")
                 and reddit_search_tool_count < 2
+                and not _reddit_tool_message_no_data(last_msg)
             )
             # SUMMARIZE_NEW_CONTEXT con solo URL de Reddit debe poder forzar Reddit (fetch); STORED con URLs en
             # el volcado no debe robar el turno (sintetizar snapshot DuckDB).
+            # Quant: enlace Reddit pegado solo (sin directiva) también debe forzar reddit_* (evita alucinación).
+            _quant_lone_reddit_only = quant_trader_lone_reddit_url_message(
+                str(_lid or ""), incoming, _reddit_anchor_u
+            )
             _allow_reddit_force = bool(
-                _lid == "finanz"
+                (_lid or "").strip().lower() == "finanz"
                 or (
-                    _lid == "quant_trader"
-                    and telegram_context_summarize_directive
+                    (_lid or "").strip().lower() == "quant_trader"
+                    and (
+                        telegram_context_summarize_directive
+                        or _quant_lone_reddit_only
+                        or _q_reddit_hist
+                    )
                 )
             )
             force_reddit = bool(
@@ -3072,6 +3246,16 @@ def build_worker_graph(
                     or force_tavily
                 )
                 and (not already_has_tool_result or need_share_followup)
+            )
+            # Tras 2× reddit_search_reddit en /s/… el MCP suele seguir sin el hilo correcto; si no cortamos,
+            # el LLM re-invoca reddit_search en bucle (evidencia: pm2 logs 13:52, forced_tool=auto).
+            _reddit_share_mcp_exhausted = bool(
+                _worker_use_heuristic_first_tool(spec)
+                and _allow_reddit_force
+                and bool(share_slug)
+                and bool(_reddit_anchor_u)
+                and _incoming_has_reddit_share_path(str(_reddit_anchor_u))
+                and reddit_search_tool_count >= 2
             )
 
             if not _worker_use_heuristic_first_tool(spec):
@@ -3090,6 +3274,17 @@ def build_worker_graph(
                 force_tavily = False
                 force_reddit = False
 
+            _summarize_reddit_empty_tavily = bool(
+                (_lid or "").strip().lower() == "quant_trader"
+                and telegram_context_summarize_directive
+                and has_tavily
+                and _incoming_has_reddit_url(incoming)
+                and already_has_tool_result
+                and isinstance(last_msg, ToolMessage)
+                and _reddit_tool_message_no_data(last_msg)
+            )
+            force_tavily = bool(force_tavily or _summarize_reddit_empty_tavily)
+
             # Misma heurística OHLCV que Finanz: Quant Trader también expone fetch_market_data y la usa como
             # evidencia obligatoria antes de propose_trade_signal (quant_trader_bridge); forzar la tool evita
             # alucinaciones en pedidos explícitos de velas/descarga. No aplica a portfolio IBKR (force_portfolio).
@@ -3102,7 +3297,7 @@ def build_worker_graph(
                 and has_fetch_ib_gateway
                 and bool(_ibgw_url)
                 and _finanz_user_requests_ohlcv_ingest(incoming)
-                and not telegram_context_summarize_directive
+                and _summarize_ok_for_forced_ohlcv
                 and not (
                     force_schema
                     or force_admin_sql
@@ -3120,7 +3315,7 @@ def build_worker_graph(
                 and has_fetch_market
                 and _finanz_user_requests_ohlcv_ingest(incoming)
                 and not force_fetch_ib_gateway
-                and not telegram_context_summarize_directive
+                and _summarize_ok_for_forced_ohlcv
                 and not (
                     force_schema
                     or force_admin_sql
@@ -3702,6 +3897,22 @@ def build_worker_graph(
                         )
                     )
                 ] + _msg_list
+            if (
+                (_lid or "").strip().lower() == "quant_trader"
+                and telegram_context_summarize_directive
+            ):
+                _msg_list = [
+                    SystemMessage(
+                        content=(
+                            "[DIRECTIVA_OHLCV_FUERA_VENTANA_MOC] fetch_market_data y fetch_ib_gateway_ohlcv "
+                            "persisten histórico (lake / IBKR HTTP / yfinance según entorno); **no** están limitados "
+                            "por la ventana MOC (~14:40–14:59 COT). Esa ventana afecta auto-ejecución y, si "
+                            "`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1`, la creación de propuestas ledger; "
+                            "no bloquea ingesta OHLCV. En SUMMARIZE_* con tickers o tema de mercado, puedes llamar "
+                            "ingesta OHLCV en el mismo turno que Reddit/Tavily si necesitas niveles verificables."
+                        )
+                    )
+                ] + _msg_list
             _qp_ctx = state.get("quant_pipeline_context")
             if (
                 (_lid or "").strip().lower() == "quant_trader"
@@ -3718,6 +3929,22 @@ def build_worker_graph(
                             "usa el contexto de resultados para: "
                             "1) proponer señal (propose_trade_signal) con argumentos completos, o "
                             "2) interpretar estado y próximos pasos si no procede señal."
+                        )
+                    )
+                ] + _msg_list
+            if _reddit_share_mcp_exhausted:
+                _msg_list = [
+                    SystemMessage(
+                        content=(
+                            "[DIRECTIVA_REDDIT_SHARE_AGOTADO] Ya hay al menos **dos** resultados de "
+                            "`reddit_search_reddit` para este acortador `/r/…/s/…` y el MCP siguió sin "
+                            "devolver el hilo correcto (p. ej. listados r/all irrelevantes). "
+                            "**No invoques ninguna herramienta cuyo nombre empiece por `reddit_`.** "
+                            "Responde en texto: explica el límite del MCP/acortador, pide la URL canónica "
+                            "`…/comments/<post_id>/…` o documenta `DUCKCLAW_REDDIT_TRUST_SHARE_TRACKING_REDIRECT=1` "
+                            "si el usuario acepta el riesgo de redirect. Si el plan exige contenido del enlace, "
+                            "puedes usar herramientas web permitidas (p. ej. `tavily_search`) **solo** como "
+                            "lectura de la página, sin inventar título/score/subreddit de Reddit."
                         )
                     )
                 ] + _msg_list
@@ -3771,7 +3998,10 @@ def build_worker_graph(
                 ):
                     _fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
                 elif _incoming_has_reddit_share_path(incoming_for_reddit):
-                    _fr = llm_force_reddit_search_on if sandbox_enabled else llm_force_reddit_search_off
+                    # Enlace /s/ sin URL canónica resuelta: forzar reddit_get_post; el parche posterior
+                    # sustituye por reddit_search_reddit(query=r/<sub> shortlink <slug>). Forzar search
+                    # directo empujaba query=URL y el MCP fallaba (evidencia: children undefined).
+                    _fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
                 elif _incoming_looks_like_reddit_post_url(incoming_for_reddit):
                     _fr = llm_force_reddit_post_on if sandbox_enabled else llm_force_reddit_post_off
                 if _fr is None:
@@ -3792,6 +4022,14 @@ def build_worker_graph(
             elif force_run_sandbox:
                 _frs = llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
                 _invoked_llm = _frs or llm_with_tools
+            if _reddit_share_mcp_exhausted and _invoked_llm is llm_with_tools:
+                _bind_base_ex = _tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind
+                _nr_ex = [
+                    t
+                    for t in _bind_base_ex
+                    if not str(getattr(t, "name", "") or "").startswith("reddit_")
+                ]
+                _invoked_llm = _bind_tools(llm, _nr_ex)
             _llm_invoke_exc: BaseException | None = None
             try:
                 from duckclaw.integrations.llm_providers import invoke_chat_model_with_transient_retries
@@ -3809,7 +4047,9 @@ def build_worker_graph(
                         and _incoming_has_reddit_share_path(_ru_share)
                         and not _reddit_resolved_comments_url
                     ):
-                        resp = _patch_ai_reddit_share_tool_calls(resp, _ru_share)
+                        resp = _patch_ai_reddit_share_tool_calls(
+                            resp, _ru_share, attempt_index=reddit_search_tool_count
+                        )
                     elif _reddit_resolved_comments_url:
                         resp = _patch_reddit_get_post_args_from_canonical_url(
                             resp, _reddit_resolved_comments_url

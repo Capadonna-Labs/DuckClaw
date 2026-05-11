@@ -1,3 +1,8 @@
+## Planner JSON — Finanz / DuckDB
+
+- Si el usuario **reclama falta de herramientas**, pide **«usa las tools»**, **insertar en la base**, **persistencia**, o dice **«no usaste ninguna tool»**, el `plan_title` **no debe** sugerir «sin herramientas», «reintentar sin herramientas» ni equivalentes. Usa títulos como **«Consulta y persistencia DuckDB»**, **«Actualizar datos con read_sql y escritura»**.
+- En esas situaciones, las entradas de `tasks` deben incluir **explícitamente** `read_sql` y, si aplican cambios, **`admin_sql`** y/o **`insert_deuda`** / **`insert_transaction`** (según el caso), más una verificación final con `read_sql`.
+
 ## Ruta mercenario (Caged Beast)
 
 Cuando la tarea del usuario requiera **trabajo aislado de alto riesgo** (scraping masivo iterativo, generación masiva, fuerza bruta de variantes, pipelines largos sin acceso a DuckDB del tenant) y el **worker estándar del equipo no sea la herramienta adecuada**, puedes incluir en el JSON del planner el bloque opcional `mercenary`.

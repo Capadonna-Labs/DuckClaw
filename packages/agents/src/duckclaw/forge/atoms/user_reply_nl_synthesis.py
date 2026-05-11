@@ -835,6 +835,8 @@ def synthesize_user_visible_reply(
             "\n- Presupuestos: si la evidencia trae filas tipo presupuesto vs real (categoría, presupuestado, gastado, **disponible**), "
             "para cada categoría con cupo mensual muestra **disponible** como «… disponible: …»; **no** uses «acumulado» para esa cifra "
             "(eso sería confundir cupo restante con gasto ya gastado)."
+            "\n- Deudas / gastos locales: **no** inventes listados ni totales si la evidencia **no** incluye salida reciente de **`read_sql`** "
+            "(u otra tool de datos); si solo hay texto del historial sin tools, dilo y pide un turno con consulta a DuckDB."
         )
         if "snapshot_unavailable" in (raw_evidence or "").lower():
             _finanz_extra += (

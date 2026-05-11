@@ -517,6 +517,24 @@ def _strip_mercenary_spec_for_pqrsd_assistant(out: dict[str, Any]) -> bool:
     return True
 
 
+_LONE_HTTP_URL_ONLY_LINE = re.compile(
+    r"^\s*https?://[^\s]+\s*$",
+    re.I,
+)
+
+
+def _should_disable_mercenary_for_quant_lone_https_url(
+    incoming: str, assigned_worker_id: str | None
+) -> bool:
+    """
+    Mensaje sólo URL (HTTPS/HTTP): el mercenario actual escribe sólo stub (sin scraping real);
+    Quant-Trader debe usar tools de lectura web (p. ej. tavily) vía grafo worker.
+    """
+    if not _worker_matches_id(assigned_worker_id or "", "quant_trader"):
+        return False
+    return bool(_LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip()))
+
+
 def _should_disable_mercenary_for_quant_signal_intent(
     incoming: str, assigned_worker_id: str | None
 ) -> bool:
@@ -540,6 +558,38 @@ def _should_disable_mercenary_for_quant_signal_intent(
         "ibkr",
     )
     return any(k in low for k in signal_markers)
+
+
+_QUANT_WEB_RESEARCH_MERCENARY_STRIP_RE = re.compile(
+    r"\b(?:investiga(?:r)?|buscar|búsqueda|noticias|acuerdos?|tratos?|"
+    r"hallazgos|comunicados?|"
+    r"search\s+for|web\s+search|news\s+(?:about|recent)|tavily)\b",
+    re.I,
+)
+
+
+def _should_disable_mercenary_for_quant_external_research(
+    incoming: str,
+    assigned_worker_id: str | None,
+    tasks: list[str] | None,
+    plan_title: str | None,
+) -> bool:
+    """
+    Quant-Trader: planes tipo «investigar / buscar noticias» deben usar tavily/reddit en el worker;
+    el mercenario actual sólo devuelve stub_completed.
+    """
+    if not _worker_matches_id(assigned_worker_id or "", "quant_trader"):
+        return False
+    blob = " ".join(
+        [
+            incoming or "",
+            plan_title or "",
+            " ".join(str(t) for t in (tasks or []) if t),
+        ]
+    )
+    if not blob.strip():
+        return False
+    return bool(_QUANT_WEB_RESEARCH_MERCENARY_STRIP_RE.search(blob))
 
 
 def _contains_income_injection_request(text: str) -> bool:
@@ -792,6 +842,55 @@ def _try_quant_hrp_affirm_followup(
     return (title, task_list, planned, "Quant-Trader")
 
 
+_FINANZ_TOOL_PRESSURE_TASK = (
+    "TAREA (Finanz — evidencia DuckDB, sin atajos narrativos):\n"
+    "1. **read_sql** obligatorio sobre las tablas necesarias (p. ej. finance_worker.deudas, transactions, presupuestos, cuentas) "
+    "para ver el estado **actual**.\n"
+    "2. Si hay altas/bajas/cambios: **insert_deuda** / **insert_transaction** / **insert_presupuesto** / **insert_cuenta** y/o "
+    "**admin_sql** hasta JSON de éxito; corrige SQL ante error.\n"
+    "3. **read_sql** de verificación antes del mensaje final; la respuesta al usuario usa **solo** filas del último read_sql.\n"
+    "**Prohibido:** listar deudas o totales solo desde memoria del chat; **prohibido** «reintentar sin herramientas»."
+)
+
+
+def _finanz_user_demands_tool_evidence_from_db(text_lower: str) -> bool:
+    """Usuario exige tools o niega persistencia (Telegram); forzar cadena SQL en _plan_task."""
+    return bool(
+        re.search(
+            r"\b(usar?\s+(las\s+)?tools|usa(?:r)?\s+las\s+herramientas|no\s+usaste|ninguna\s+tool|ningún\s+tool|"
+            r"ninguna\s+herramienta|insert(?:ar)?\s+(los\s+|la\s+)?(?:datos\s+)?en\s+la\s+(db|base)|persistencia\b|"
+            r"solo\s+(?:lo\s+)?(?:está|estas|guardas)\s+en\s+memoria|solo\s+memoria|"
+            r"\bread_sql\b|\badmin_sql\b|\binsert_deuda\b)\b",
+            text_lower,
+        )
+    )
+
+
+def _sanitize_finanz_manager_plan_title(
+    plan_title: str | None,
+    incoming: str,
+    assigned_worker_id: str | None,
+) -> str:
+    """Evita plan_title tipo «sin herramientas» cuando el usuario exige DuckDB/tools (Planner LLM a veces alucina)."""
+    if (assigned_worker_id or "").strip().lower() != "finanz":
+        return (plan_title or "").strip()
+    title = (plan_title or "").strip()
+    if not title:
+        return title
+    user_tool_pressure = _finanz_user_demands_tool_evidence_from_db((incoming or "").lower())
+    low = title.lower()
+    bad = (
+        "sin herramientas" in low
+        or "without tools" in low
+        or "reintentar sin" in low
+        or re.search(r"\bno\s+tools\b", low) is not None
+        or re.search(r"\bsin\s+tools\b", low) is not None
+    )
+    if not bad:
+        return title
+    return "Consulta y persistencia DuckDB" if user_tool_pressure else "Ejecutar con herramientas DuckDB"
+
+
 def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     """
     Convierte el mensaje del usuario en una tarea explícita para el subagente.
@@ -813,6 +912,10 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     if "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in text or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in text:
         # Directiva no al inicio (p. ej. prefijo invisible): devolver el texto completo tal cual llegó al manager.
         return (incoming or "").strip(), None
+    # Mensaje sólo URL: slugs pueden incluir tokens «estructura», «schema», «tablas» → falsos positivos DB.
+    lone = text.strip()
+    if _LONE_HTTP_URL_ONLY_LINE.match(lone):
+        return lone, None
     # /context --add + foto: VLM antepone «Usuario dice:…»; evitar heurísticas db/tablas (p. ej. nombre+datos).
     if "[VLM_CONTEXT" in text and "Contexto visual adjunto:" in text:
         tctx = text.lower()
@@ -999,6 +1102,8 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
             "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /team, /tasks, /help y a crear objetivos con /goals."
         )
         return task, override
+    if (worker_id or "").strip().lower() == "finanz" and _finanz_user_demands_tool_evidence_from_db(t):
+        return f"{_FINANZ_TOOL_PRESSURE_TASK}\n\n--- Mensaje del usuario ---\n{text}", override
     return text, override
 
 
@@ -1506,12 +1611,22 @@ def build_manager_graph(
             else:
                 plan_title, tasks = _llm_plan(incoming)
 
+            plan_title = _sanitize_finanz_manager_plan_title(plan_title, incoming, assigned)
+
         is_job_add_command = _looks_like_job_add_command(incoming)
         if is_job_add_command and mercenary_spec is not None:
             # /job --add nunca debe salir por mercenario; forzar flujo normal de tracking.
             mercenary_spec = None
         if mercenary_spec is not None and _should_disable_mercenary_for_quant_signal_intent(
             incoming, assigned
+        ):
+            mercenary_spec = None
+        elif mercenary_spec is not None and _should_disable_mercenary_for_quant_lone_https_url(
+            incoming, assigned
+        ):
+            mercenary_spec = None
+        elif mercenary_spec is not None and _should_disable_mercenary_for_quant_external_research(
+            incoming, assigned, tasks, plan_title
         ):
             mercenary_spec = None
 

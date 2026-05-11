@@ -23,6 +23,7 @@
 - **`DUCKCLAW_WORKER_HEURISTIC_FIRST_TOOL`**: por defecto `true` (comportamiento histórico). Si `false`/`0`/`off`, el nodo `agent_node` no fuerza la primera herramienta por heurísticas (`force_schema`, `force_read_sql`, `force_tavily`, `force_reddit`, `force_portfolio`); el modelo usa `tool_choice` automático con las tools enlazadas.
 - **Manifest** (`manifest.yaml`): clave opcional `agent_node.heuristic_first_tool` (bool). Si está definida, **tiene prioridad** sobre la variable de entorno.
 - Se mantienen: directivas de contexto (`SUMMARIZE_*`), respuestas rápidas de capacidades/saludo Job Hunter, y el error explícito si Job Hunter pide búsqueda web sin Tavily configurado.
+- Mensaje efectivamente **sólo un URL** HTTP(S) (una línea): la heurística `inspect_schema` en `workers/factory.py` **no** actúa meramente por tokens como «estructura» u «esquema» que aparezcan en el **path** del artículo.
 - En modo LLM-first se antepone una instrucción breve al contexto enviado al modelo para elegir herramienta según plan y mensaje, sin inventar datos si falta una tool.
 
 ## Seguridad

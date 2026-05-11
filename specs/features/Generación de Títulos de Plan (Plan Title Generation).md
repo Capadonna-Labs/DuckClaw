@@ -62,3 +62,7 @@ El comando `/history` debe ser refactorizado para leer el nuevo campo `plan_titl
 3.  **Planner Logic:** Ajustar el nodo `Planner` para que fuerce la salida JSON con el nuevo esquema.
 4.  **Audit Log:** Actualizar la función `append_task_audit` en `packages/agents/src/duckclaw/agents/activity.py` para incluir `plan_title`.
 5.  **History Command:** Actualizar la query SQL en `on_the_fly_commands.py` para mostrar el `plan_title` en la respuesta de Telegram.
+
+## 7. `_plan_task`: URL suelta vs heurísticas DB
+
+Si el inbound (tras `strip`) es **solo** una línea `http(s)://…`, `manager_graph._plan_task` **devuelve el texto literal** (`planned_task`, sin `TAREA:`). Motivo: muchos sitios llevan slugs tipo `*-estructura-*` que activaban falsos positivos con la regex de intención «esquema / estructura / tablas».

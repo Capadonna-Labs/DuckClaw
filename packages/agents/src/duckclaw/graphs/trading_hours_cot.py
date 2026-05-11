@@ -19,9 +19,9 @@ COT_TZ_NAME = "America/Bogota"
 # Referencia día 08:30–15:00 COT, inclusive por minuto
 _REF_OPEN_MIN = 8 * 60 + 30
 _REF_CLOSE_MIN = 15 * 60
-# Tramo típico MOC PM2 (lun–vie ejemplo): 14:40–14:55 inclusive
+# Tramo típico MOC PM2 (lun–vie ejemplo): 14:40–14:59 inclusive (alineado expire PM2 + ventana gateway ~14:59:30)
 _MOC_SLOT_START_MIN = 14 * 60 + 40
-_MOC_SLOT_END_MIN = 14 * 60 + 55
+_MOC_SLOT_END_MIN = 14 * 60 + 59
 
 
 def minutes_since_midnight_local(dt: datetime) -> int:
@@ -66,7 +66,7 @@ def _suffix_instruction(summary: dict[str, Any]) -> str:
     return (
         "Fuera de ventana mercado referencia (08:30–15:00 COT lun–vie): "
         "no asumas sesión intradía; usa `get_current_time` para hora/fecha cuando haga falta. "
-        "MOC sigue en PM2 cuando toque (~14:40/14:50/14:55 COT ejemplo)."
+        "MOC sigue en PM2 cuando toque (~14:40/14:50/14:59 COT ejemplo)."
     )
 
 
@@ -75,7 +75,7 @@ def format_contex_horario_line(dt_cot: datetime) -> str:
     core = (
         f"tz={COT_TZ_NAME}; local={c['yyyymmdd']} {c['hhmm']}; "
         f"lun_vie={c['weekday_mon_fri']}; mercado_ref_0830_1500={c['in_equity_ref_window']}; "
-        f"moc_pm2_tipico_1440_1455={c['in_moc_typical_window']}"
+        f"moc_pm2_tipico_1440_1459={c['in_moc_typical_window']}"
     )
     return "[CONTEXTO_HORARIO] " + core + ". " + _suffix_instruction(c)
 

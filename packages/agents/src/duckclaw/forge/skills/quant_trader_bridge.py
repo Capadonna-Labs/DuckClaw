@@ -152,11 +152,56 @@ def _quant_ignore_moc_time_gates() -> bool:
     )
 
 
+def _quant_moc_auto_window_strategy_names() -> frozenset[str]:
+    """
+    ``strategy_name`` que usan ventana MOC para auto-exec encadenada (no RTH).
+
+    Env ``DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES`` = CSV case-insensitive.
+    Si la variable no existe → ``{overnight_gap_moc}``. Si existe y está vacía → conjunto vacío
+    (ninguna estrategia MOC-only; todo pasa por RTH).
+    """
+    key = "DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES"
+    if key not in os.environ:
+        return frozenset({"overnight_gap_moc"})
+    raw = (os.environ.get(key) or "").strip()
+    if not raw:
+        return frozenset()
+    return frozenset(x.strip().lower() for x in raw.split(",") if x.strip())
+
+
+def _quant_strategy_uses_moc_auto_window(strategy_name: str) -> bool:
+    s = (strategy_name or "").strip().lower()
+    return s in _quant_moc_auto_window_strategy_names()
+
+
+def _quant_auto_execute_inside_reference_rth() -> tuple[bool, str, dict[str, Any]]:
+    """
+    Lun–vie 08:30–15:00 America/Bogota (misma semántica que ``inside_reference_equity_rth_cot``).
+
+    Usado para auto-exec encadenada cuando ``strategy_name`` no está en
+    ``DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES``.
+
+    Bypass dev/CI: mismos flags que ventana MOC (``DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES`` /
+    ``DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW``).
+    """
+    if _quant_ignore_moc_time_gates():
+        return True, "", {}
+    now = _quant_now_bogota()
+    ok, reason, meta = inside_reference_equity_rth_cot(now)
+    out_meta: dict[str, Any] = {
+        **meta,
+        "auto_exec_gate": "reference_rth_cot",
+        "window": "08:30–15:00 America/Bogota (lun–vie, referencia RTH)",
+    }
+    return ok, reason, out_meta
+
+
 def _quant_block_non_moc_ledger_creation() -> bool:
     """
     Opt-in legado: si es verdadero, `propose_trade_signal` con strategy distinto de
     `moc_hrp_cfd` solo crea filas Ledger dentro de la ventana MOC (comportamiento antiguo).
-    Default: permitir propuesta en cualquier horario lun–vie; la auto-exec sigue acotada a MOC.
+    Default: permitir propuesta en cualquier horario lun–vie; la auto-exec encadenada usa RTH
+    salvo ``strategy_name`` listado en ``DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES``.
     """
     return _env_truthy("DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER")
 
@@ -167,8 +212,9 @@ def _quant_auto_execute_inside_moc_window() -> tuple[bool, str, dict[str, Any]]:
 
     Default 14:40:00–14:59:30 COT (véase duckclaw.forge.skills.moc_execution_window).
 
-    Usado por: cadena auto-exec con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS (y opt-in
-    DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER para bloquear también la creación ledger).
+    Usado por: cadena auto-exec con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS cuando
+    ``strategy_name`` está en ``DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES`` (p. ej. ``overnight_gap_moc``),
+    y opt-in DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER para bloquear también la creación ledger.
 
     Bypass: DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES o DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW=1.
     """
@@ -1340,7 +1386,7 @@ def _propose_trade_signal_impl(
         "ticker": tkr,
         "proposed_weight": guarded,
         "liquid_capital": cap,
-        "hint": f"Senal {signal_id} lista. Requiere /execute_signal {signal_id}",
+        "hint": f"Senal {signal_id} lista. Requiere /execute-signal {signal_id}",
     }
 
     strat = strat_eff
@@ -1358,24 +1404,45 @@ def _propose_trade_signal_impl(
             "reason": "LIVE_SESSION_REQUIRES_ALLOW_LIVE",
             "message": (
                 "Sesión live: define DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE=1 para auto-ejecutar; "
-                "o aprueba con /execute_signal y execute_approved_signal."
+                "o aprueba con /execute-signal y execute_approved_signal."
             ),
         }
         return json.dumps(out, ensure_ascii=False)
 
-    ok_moc, moc_reason, moc_meta = _quant_auto_execute_inside_moc_window()
-    if not ok_moc:
-        msg_parts = [
-            "Auto-ejecución encadenada solo dentro de ventana MOC configurada ",
-            f"({moc_meta.get('window', '')}); fuera usa /execute_signal <uuid>.",
-        ]
-        if moc_reason == "WEEKEND":
-            msg_parts.insert(0, "Fin de semana: ")
+    use_moc_auto = _quant_strategy_uses_moc_auto_window(strat_eff)
+    if use_moc_auto:
+        ok_gate, gate_reason, gate_meta = _quant_auto_execute_inside_moc_window()
+        window_kind = "moc"
+    else:
+        ok_gate, gate_reason, gate_meta = _quant_auto_execute_inside_reference_rth()
+        window_kind = "rth"
+    if not ok_gate:
+        if gate_reason == "WEEKEND":
+            msg = (
+                "Mercado cerrado (fin de semana): auto-ejecución encadenada no aplica. "
+                "Usa /execute-signal <uuid> si procede o espera RTH lun–vie."
+            )
+        elif gate_reason == "OUTSIDE_MOC_WINDOW":
+            msg = (
+                "Auto-ejecución encadenada (estrategia ventana MOC) solo en tramo MOC COT "
+                f"({gate_meta.get('window', '')}); fuera usa /execute-signal <uuid>."
+            )
+        elif gate_reason == "OUTSIDE_REFERENCE_RTH":
+            msg = (
+                "Fuera de horario referencia RTH (lun–vie 08:30–15:00 COT): "
+                "auto-ejecución encadenada omitida; usa /execute-signal <uuid>."
+            )
+        else:
+            msg = (
+                f"Auto-ejecución encadenada omitida ({gate_reason}). "
+                "Usa /execute-signal <uuid>."
+            )
         out["auto_execute"] = {
             "skipped": True,
-            "reason": moc_reason,
-            "message": "".join(msg_parts),
-            **moc_meta,
+            "reason": gate_reason,
+            "message": msg,
+            "auto_exec_window": window_kind,
+            **gate_meta,
         }
         return json.dumps(out, ensure_ascii=False)
 
@@ -1385,7 +1452,7 @@ def _propose_trade_signal_impl(
             "error": "SIGNAL_ROW_TIMEOUT",
             "message": (
                 f"La señal aún no estaba en DuckDB tras {wait_to:.1f}s (db-writer). "
-                "Aprobación manual con /execute_signal sigue disponible."
+                "Aprobación manual con /execute-signal sigue disponible."
             ),
         }
         return json.dumps(out, ensure_ascii=False)
@@ -1443,7 +1510,7 @@ def _execute_approved_signal_impl(
                 "message": (
                     "Este signal_id no está en finance_worker.trade_signals. "
                     "No inventes UUIDs: primero propose_trade_signal (el signal_id sale en el JSON de la tool) "
-                    "o usa el uuid de una señal PENDING listada con read_sql; luego /execute_signal o otra llamada "
+                    "o usa el uuid de una señal PENDING listada con read_sql; luego /execute-signal o otra llamada "
                     "a execute_approved_signal."
                 ),
             },
@@ -1460,7 +1527,7 @@ def _execute_approved_signal_impl(
             {
                 "error": "human_approved != TRUE",
                 "message": (
-                    "Confirma con /execute_signal " + sid + " en Telegram y vuelve a llamar execute_approved_signal."
+                    "Confirma con /execute-signal " + sid + " en Telegram y vuelve a llamar execute_approved_signal."
                 ),
             },
             ensure_ascii=False,
@@ -1920,12 +1987,13 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 "Por defecto crea PENDING_HITL en cualquier horario (lun-vie) para strategy distinto de moc_hrp_cfd; "
                 "opt-in legado DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1 vuelve a bloquear propuesta fuera de ventana MOC "
                 "(env DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW, default 14:40:00-14:59:30 COT) con OUTSIDE_MOC_PREP_WINDOW. "
-                "Con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1, la auto-exec encadenada a execute_approved_signal solo "
-                "dentro de esa ventana (paper; live exige ALLOW_LIVE); fuera, usar /execute_signal manual si aplica. "
-                "moc_hrp_cfd (batch PM2): default PENDING_HITL; auto-exec encadenada solo si DUCKCLAW_MOC_BATCH_AUTO_EXECUTE=1 "
-                "ademas DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1 y misma ventana MOC. "
-                "Bypass dev ventana: DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES. "
-                "Devuelve signal_id (UUID): `/execute_signal <signal_id>` si sigue pendiente."
+                "Con DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1, la auto-exec encadenada usa horario referencia RTH COT "
+                "(lun-vie 08:30-15:00) salvo strategy_name listado en DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES "
+                "(default overnight_gap_moc), que sigue acotado a ventana MOC COT. Live exige ALLOW_LIVE; fuera de ventana, "
+                "/execute-signal manual. moc_hrp_cfd (batch PM2): default PENDING_HITL; auto-exec encadenada solo si "
+                "DUCKCLAW_MOC_BATCH_AUTO_EXECUTE=1 ademas DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1 y ventana MOC. "
+                "Bypass dev calendario: DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES / DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW. "
+                "Devuelve signal_id (UUID): `/execute-signal <signal_id>` si sigue pendiente."
             ),
         )
     )
@@ -1947,8 +2015,8 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
             name="execute_approved_signal",
             description=(
                 "Ejecuta una senal tras HITL usando el mismo signal_id (UUID) que devolvio propose_trade_signal. "
-                "Requiere human_approved o /execute_signal <signal_id> en Telegram "
-                "(o encadenado desde propose si AUTO_EXECUTE+MOC window; batch moc_hrp_cfd + DUCKCLAW_MOC_BATCH_AUTO_EXECUTE). "
+                "Requiere human_approved o /execute-signal <signal_id> en Telegram "
+                "(o encadenado desde propose si AUTO_EXECUTE+RTH/MOC según strategy; batch moc_hrp_cfd + DUCKCLAW_MOC_BATCH_AUTO_EXECUTE). "
                 "El modo paper/live del POST al broker sigue quant_core.trading_sessions (id=active) y debe alinear "
                 "con IBKR_ACCOUNT_MODE; se envia cabecera X-Duckclaw-IBKR-Account-Mode (paper|live). "
                 "La respuesta puede incluir campos del broker (p. ej. ib_order_id, qty); citarlos literalmente; "

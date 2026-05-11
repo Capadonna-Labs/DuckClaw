@@ -79,7 +79,7 @@ DuckClaw incorpora `message` (o `error`) en el texto devuelto a la tool cuando e
 
 ## Contrato HTTP POST `/api/broker/execute` (HITL → broker; Duckclaw `IBKR_EXECUTE_ORDER_URL`)
 
-Tras `/execute_signal`, Finanz (`execute_order`) y Quant Trader (`execute_approved_signal`) hacen **POST** a `IBKR_EXECUTE_ORDER_URL` con JSON **mínimo** `{"signal_id":"<uuid>","paper":true|false}` (default `paper` en el cuerpo si el receptor lo permite), cabecera **`X-Duckclaw-IBKR-Account-Mode: paper|live`** (alineada con el modo efectivo; Finanz siempre `paper`) y cabecera opcional `Authorization: Bearer` (misma clave que portafolio si se reutiliza).
+Tras `/execute-signal`, Finanz (`execute_order`) y Quant Trader (`execute_approved_signal`) hacen **POST** a `IBKR_EXECUTE_ORDER_URL` con JSON **mínimo** `{"signal_id":"<uuid>","paper":true|false}` (default `paper` en el cuerpo si el receptor lo permite), cabecera **`X-Duckclaw-IBKR-Account-Mode: paper|live`** (alineada con el modo efectivo; Finanz siempre `paper`) y cabecera opcional `Authorization: Bearer` (misma clave que portafolio si se reutiliza).
 
 **Payload enriquecido (recomendado):** el gateway puede incluir en el mismo POST los campos que ya leyó de su DuckDB, para que el VPS **no** necesite una copia estática del `.duckdb` solo para resolver la orden.
 

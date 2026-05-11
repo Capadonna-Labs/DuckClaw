@@ -61,6 +61,24 @@ def test_dispatch_trading_session_hyphen_and_underscore_same_handler(
     assert hyphen == under == "fly:'--status'"
 
 
+def test_dispatch_execute_signal_hyphen_matches_underscore(monkeypatch: pytest.MonkeyPatch) -> None:
+    import duckclaw.graphs.on_the_fly_commands as otf
+
+    calls: list[str] = []
+
+    def _stub(db: object, chat_id: object, args: str) -> str:
+        del db, chat_id
+        calls.append(args.strip())
+        return f"hitl:{args!r}"
+
+    monkeypatch.setattr(otf, "execute_quant_execute_signal", _stub)
+    uid = "11111111-1111-1111-1111-111111111111"
+    h = otf._dispatch_fly_command(None, 1, "execute-signal", uid, tenant_id="default")
+    u = otf._dispatch_fly_command(None, 1, "execute_signal", uid, tenant_id="default")
+    assert h == u == f"hitl:{uid!r}"
+    assert calls == [uid, uid]
+
+
 def test_parse_trading_session_cli_paper_tickers() -> None:
     parsed, err = _parse_trading_session_cli("--mode paper --tickers aapl,NVDA,AAPL")
     assert err is None and parsed is not None
@@ -350,11 +368,58 @@ def test_session_participation_ibkr_pct_uses_account_total_value(
         def query(self, sql: str) -> str:
             return json.dumps([])
 
-    rows, uses_n, src = _session_participation_breakdown(D(), "AAA,BBB")
+    rows, uses_n, src, cash = _session_participation_breakdown(D(), "AAA,BBB")
     assert uses_n and src == "ibkr"
     pct = {s: p for s, p, _ in rows}
     assert abs(pct["AAA"] - 8.0) < 1e-9
     assert abs(pct["BBB"] - 2.0) < 1e-9
+    assert cash is not None and cash[0] == "Cash"
+    assert abs(cash[1] - 90.0) < 1e-9 and abs(cash[2] - 900.0) < 1e-9
+
+
+def test_session_participation_ibkr_no_cash_when_session_covers_total(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Si suma |mv| sesión ≈ total_value, no hay rebanada Cash."""
+    import duckclaw.graphs.on_the_fly_commands as otf
+
+    def _fake(parts: list[str]) -> tuple[dict[str, float], str | None, float | None]:
+        m = {p: 0.0 for p in parts}
+        m["SPY"] = 100.0
+        m["NVDA"] = 300.0
+        return m, None, 400.0
+
+    monkeypatch.setattr(otf, "_session_notionals_from_ibkr_for_tickers", _fake)
+
+    class D:
+        def query(self, sql: str) -> str:
+            return json.dumps([])
+
+    rows, uses_n, src, cash = _session_participation_breakdown(D(), "SPY,NVDA")
+    assert uses_n and src == "ibkr"
+    assert cash is None
+
+
+def test_format_session_ticker_weights_ibkr_includes_cash_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckclaw.graphs.on_the_fly_commands as otf
+
+    def _fake(parts: list[str]) -> tuple[dict[str, float], str | None, float | None]:
+        m = {p: 0.0 for p in parts}
+        m["AAA"] = 50.0
+        m["BBB"] = 50.0
+        return m, None, 200.0
+
+    monkeypatch.setattr(otf, "_session_notionals_from_ibkr_for_tickers", _fake)
+
+    class D:
+        def query(self, sql: str) -> str:
+            return json.dumps([])
+
+    out = _format_session_ticker_weights(D(), "AAA,BBB")
+    assert "`Cash`" in out
+    assert "resto cuenta" in out.lower()
 
 
 def test_format_session_ticker_weights_ibkr_fallback_when_db_empty(
@@ -380,6 +445,7 @@ def test_format_session_ticker_weights_ibkr_fallback_when_db_empty(
     assert "ibkr" in out.lower() or "mv" in out.lower()
     assert "25.0" in out or "25,0" in out
     assert "75.0" in out or "75,0" in out
+    assert "Cash" not in out
 
 
 def test_format_session_ticker_weights_nocional_split() -> None:

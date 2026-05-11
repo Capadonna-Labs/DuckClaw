@@ -545,7 +545,7 @@ def _should_disable_mercenary_for_quant_signal_intent(
     low = (incoming or "").strip().lower()
     if not low:
         return False
-    if "/execute_signal" in low:
+    if "/execute-signal" in low or "/execute_signal" in low:
         return True
     signal_markers = (
         "señal",

@@ -205,6 +205,22 @@ def test_execute_signal_wr_requires_admin(db, monkeypatch: pytest.MonkeyPatch) -
         ON CONFLICT (tenant_id, user_id) DO UPDATE SET clearance_level='admin'
         """
     )
+    d.execute("CREATE SCHEMA IF NOT EXISTS finance_worker")
+    d.execute(
+        """
+        CREATE TABLE IF NOT EXISTS finance_worker.trade_signals (
+            signal_id VARCHAR PRIMARY KEY,
+            status VARCHAR
+        )
+        """
+    )
+    d.execute(
+        """
+        INSERT INTO finance_worker.trade_signals (signal_id, status)
+        VALUES ('123e4567-e89b-12d3-a456-426614174000', 'AWAITING_HITL')
+        ON CONFLICT (signal_id) DO UPDATE SET status = EXCLUDED.status
+        """
+    )
 
     monkeypatch.setattr("duckclaw.graphs.graph_server.get_db", lambda: d)
     monkeypatch.setattr("duckclaw.forge.skills.quant_hitl.grant_execute_order", lambda *_a, **_k: None)
@@ -213,7 +229,7 @@ def test_execute_signal_wr_requires_admin(db, monkeypatch: pytest.MonkeyPatch) -
     denied = handle_command(
         d,
         "chat_2",
-        f"/execute_signal {signal_id}",
+        f"/execute-signal {signal_id}",
         requester_id="2",
         tenant_id="wr_-1001",
     )

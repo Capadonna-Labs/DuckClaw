@@ -97,7 +97,7 @@ def _propose_trade_impl(
             "signal_id": sid,
             "ticker": tkr,
             "action": act,
-            "hint": "El usuario debe confirmar con /execute_signal " + sid + " antes de execute_order.",
+            "hint": "El usuario debe confirmar con /execute-signal " + sid + " antes de execute_order.",
         },
         ensure_ascii=False,
     )
@@ -113,7 +113,7 @@ def _execute_order_impl(db: Any, spec: Any, signal_id: str) -> str:
         return json.dumps(
             {
                 "error": (
-                    "Orden bloqueada: confirma primero con /execute_signal " + sid + " en Telegram "
+                    "Orden bloqueada: confirma primero con /execute-signal " + sid + " en Telegram "
                     "(human-in-the-loop)."
                 )
             },
@@ -233,7 +233,7 @@ def register_quant_trade_skills(db: Any, spec: Any, tools: list[Any]) -> None:
             description=(
                 "Registra una señal en quant_core.trade_signals (no ejecuta en bolsa). "
                 "Parámetros: ticker, action BUY|SELL|HOLD, qty, limit_price, stop_loss, confidence_score, strategy_name. "
-                "Tras la propuesta el usuario debe usar /execute_signal <uuid> y luego puedes llamar execute_order."
+                "Tras la propuesta el usuario debe usar /execute-signal <uuid> y luego puedes llamar execute_order."
             ),
         )
     )
@@ -242,7 +242,7 @@ def register_quant_trade_skills(db: Any, spec: Any, tools: list[Any]) -> None:
             _execute,
             name="execute_order",
             description=(
-                "Ejecuta orden en broker SOLO si el usuario confirmó con /execute_signal y el mismo signal_id. "
+                "Ejecuta orden en broker SOLO si el usuario confirmó con /execute-signal y el mismo signal_id. "
                 "Requiere IBKR_ACCOUNT_MODE=paper. Parámetro: signal_id (UUID)."
             ),
         )

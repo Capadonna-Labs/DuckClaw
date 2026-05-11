@@ -537,7 +537,7 @@ def _quant_user_requests_execute_approved_signal(text: str) -> bool:
     low = text.strip().lower()
     if "[system_directive:" in low or "[system_event:" in low:
         return False
-    if "/execute_signal" in low:
+    if "/execute-signal" in low or "/execute_signal" in low:
         return True
     # Mensaje post-HITL del gateway: …ejecute execute_approved_signal (Quant Trader)…
     if "execute_approved_signal" in low:

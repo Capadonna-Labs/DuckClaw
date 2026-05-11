@@ -36,7 +36,7 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 
 4. *Comandos Fly de Operación Determinista*
     /quant_cycle: Orquesta en un solo comando `fetch -> portfolio -> evaluate -> signal`, con salida estructurada por etapas.
-    /execute_signal uuid: Aprobación HITL para ejecutar una señal pendiente.
+    /execute-signal uuid: Aprobación HITL para ejecutar una señal pendiente.
     /cancel_signal uuid: Cancelación de una señal pendiente en ledger.
 
 ---
@@ -47,7 +47,7 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 - Evidencia Única: No se permite invocar propose_trade_signal si no se ha ejecutado exitosamente fetch_market_data o fetch_ib_gateway_ohlcv para el ticker en el turno actual.
 - Ceguera Sensorial: Si la ingesta de velas falla, el agente debe reportar "Ceguera Sensorial" y detenerse. No puede inventar datos ni usar búsquedas web como sustituto de precios OHLCV.
 - Aislamiento de Código: Prohibido ejecutar código en el host. Todo análisis algorítmico debe ir al Sandbox.
-- HITL Obligatorio: Todas las señales requieren aprobación vía Telegram (/execute_signal <uuid>).
+- HITL Obligatorio: Todas las señales requieren aprobación vía Telegram (/execute-signal <uuid>).
 - Paper-Only: Por seguridad, el sistema valida que IBKR_ACCOUNT_MODE sea paper a menos que se configure explícitamente lo contrario.
 
 ---
@@ -74,7 +74,7 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 "Trae las últimas 20 velas de 1h para NVDA".
 
 - Propuesta: Tras verificar los datos, el agente propone una señal:
-"Señal generada: BUY NVDA ... signal_id=abc-123. Para aprobar: /execute_signal abc-123"
+"Señal generada: BUY NVDA ... signal_id=abc-123. Para aprobar: /execute-signal abc-123"
 
 - Ejecución: Una vez aprobada, el agente ejecuta la orden en IBKR y actualiza el portfolio local.
 

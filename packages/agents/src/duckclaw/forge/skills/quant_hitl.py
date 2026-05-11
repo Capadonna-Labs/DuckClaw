@@ -1,5 +1,5 @@
 """
-Human-in-the-loop: grant vía /execute_signal <uuid> para execute_order (Finanz)
+Human-in-the-loop: grant vía /execute-signal <uuid> para execute_order (Finanz)
 y execute_approved_signal (Quant Trader).
 
 Por defecto propose_trade_signal puede crear Ledger fuera de ventana MOC; con

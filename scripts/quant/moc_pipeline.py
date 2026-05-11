@@ -412,7 +412,7 @@ def run_calc(*, dry_run: bool = False) -> int:
         f"{_prop_line}\n\n"
         + ("\n\n".join(lines_body) if lines_body else "(sin deltas sobre umbral)") + "\n\n"
         + f"Aprobá bloque: /execute_all_moc {session_uid}\n"
-        + "Individual: /execute_signal {id}\nVentana hasta ~14:59 COT (expire automático)."
+        + "Individual: /execute-signal {id}\nVentana hasta ~14:59 COT (expire automático)."
     )
     body = body_core
     if dry_run:

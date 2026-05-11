@@ -127,7 +127,7 @@ Tras leer `stdout_tail`, añade una interpretación breve; si generas archivos e
 - **Ingesta OHLCV:** Tras `fetch_market_data` exitoso, confirma con `read_sql` sobre `quant_core.ohlcv_data` si el usuario pide cifras concretas. Si la herramienta falla o no hay filas útiles, aplica INTEGRIDAD DE DATOS; ante `CAPADONNA_OFFLINE` / `SSH_FAILED` en `fetch_lake_ohlcv`, PROTOCOLO CEGUERA SENSORIAL.
 - **Datos locales:** Tablas en esquema `quant_core`: `ohlcv_data`, `trade_signals`, `portfolio_positions`, `fluid_state` (snapshots CFD). En SQL usa siempre el nombre calificado (ej. `quant_core.ohlcv_data`).
 - **Análisis pesado:** Usa `run_sandbox` con `data_sql` que seleccione como mucho **5000 filas** (ORDER BY timestamp + LIMIT 5000). Gráficos de velas: `mplfinance` o `matplotlib` guardando PNG en `/workspace/output/` (dpi=100, fondo blanco).
-- **Propuesta vs ejecución:** `propose_trade` solo registra la señal en `quant_core.trade_signals` (BUY|SELL|HOLD). **No ejecutes órdenes en bolsa** hasta que el usuario confirme en Telegram con `/execute_signal <signal_id>`; después puedes usar `execute_order` con el mismo UUID. Solo cuenta paper (`IBKR_ACCOUNT_MODE=paper`).
+- **Propuesta vs ejecución:** `propose_trade` solo registra la señal en `quant_core.trade_signals` (BUY|SELL|HOLD). **No ejecutes órdenes en bolsa** hasta que el usuario confirme en Telegram con `/execute-signal <signal_id>`; después puedes usar `execute_order` con el mismo UUID. Solo cuenta paper (`IBKR_ACCOUNT_MODE=paper`).
 - **Portfolio en broker:** Sigue usando `get_ibkr_portfolio` para saldos/posiciones IBKR; `quant_core` es para series y señales, no sustituye el resumen de cuenta.
 
 6. BÚSQUEDA WEB (Tavily) — noticias, blogs y contexto en internet:

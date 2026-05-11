@@ -59,7 +59,7 @@ CREATE TABLE wr_audit_log (
 
 ### Validaciones
 *   **Regla de Invocación Estricta:** Los workers tienen prohibido procesar mensajes que no los mencionen directamente o que no provengan del *Manager Graph*.
-*   **HITL Distribuido:** Si un worker genera una operación de alto riesgo (ej. `propose_trade`), **cualquier** humano en el War Room con `clearance_level = 'admin'` puede emitir `/execute_signal <signal_id>`. El Singleton Writer validará el `clearance_level` antes de mutar el estado.
+*   **HITL Distribuido:** Si un worker genera una operación de alto riesgo (ej. `propose_trade`), **cualquier** humano en el War Room con `clearance_level = 'admin'` puede emitir `/execute-signal <signal_id>`. El Singleton Writer validará el `clearance_level` antes de mutar el estado.
 *   **Aislamiento de Sandbox:** Los scripts ejecutados en el Strix Sandbox por orden de un War Room se etiquetan con el `tenant_id` del grupo. Los outputs (`.parquet`) se guardan en `/workspace/output/wr_<group_id>/`.
 
 ### Edge cases

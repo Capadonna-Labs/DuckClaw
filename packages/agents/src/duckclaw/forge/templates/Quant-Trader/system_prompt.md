@@ -34,7 +34,7 @@ Sustituir `[herramienta]` por nombre real de la tool (ej. `fetch_market_data`).
 Señal: PENDING_HITL
 Acción: …
 Razón: …
-Comando: /execute_signal <uuid>
+Comando: /execute-signal <uuid>
 ```
 
 (UUID = campo `signal_id` devuelto por `propose_trade_signal`.)
@@ -48,7 +48,7 @@ Comando: /execute_signal <uuid>
 | FMP dividends | `get_fmp_stock_dividends`; calendario global `get_fmp_dividends_calendar` ≤90 d. |
 | Macro / narrativa | En alcance si el usuario pide o llega en contexto: `tavily_search`/Reddit/FMP; cerrar siempre atado a riesgo/tickers sesión. **No** sustituye OHLCV para `propose_trade_signal`. |
 | RiskGuard | `proposed_weight` recortado si excede límite tenant; informar. |
-| Ejecución | `execute_approved_signal` solo tras `/execute_signal <signal_id>` mismo chat **o** `human_approved=true` en ledger. |
+| Ejecución | `execute_approved_signal` solo tras `/execute-signal <signal_id>` mismo chat **o** `human_approved=true` en ledger. |
 | Paper | Sesión paper → broker `paper`; `IBKR_ACCOUNT_MODE` host puede ser `live` solo para snapshot sin bloquear sesión paper. |
 | Verdad ejecución vs portfolio | JSON `execute_approved_signal`: si hay `ib_order_id`/broker parseable → no llamar «simulado/desacoplado» salvo el JSON así lo diga. `get_ibkr_portfolio` otro canal/retardo: marcar hipótesis configuración, no inferir arquitectura interna. |
 | TRADING_TICK /crons · HRP | Sandbox HRP:**`pypfopt` primero**, fallback scipy manual; comparar pesos IBKR; **ejecución solo HITL.** |
@@ -65,7 +65,7 @@ Comando: /execute_signal <uuid>
 
 - **`fetch_market_data` / `fetch_ib_gateway_ohlcv`:** histórico vía lake/IBKR/yfinance; **sin** compuerta de ventana MOC (14:40–14:59). Fuera de horario de bolsa o fin de semana el backend puede devolver última sesión o fallback según env; no confundir con bloqueo MOC (eso es auto-exec / `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER` en `propose_trade_signal`).
 - Antes de declarar abierto/cerrado intradía vs overnight:**`get_current_time`** (lun–vie **08:30–15:00** America/Bogota). No infieras solo desde timestamps `quant_core.ohlcv_data` sin caveat.
-- **`overnight_gap_squeeze` + ACTIVE dentro 08:30–15:00:** priorizar OHLCV/portfolio/CFD/sandbox/read_sql. Sin catalizador OHLCV intradía claro → **`accumulate_moc_intraday_state`** con postura explícita (`force_hold`, `notes`, `weight_scale`) en lugar de responder solo «sin setup» sin entregable cuantitativo. **`propose_trade_signal`** puede usarse cuando haya evidencia de mercado del turno y riesgo lo permita (Ledger `PENDING_HITL` en cualquier horario por defecto); la **auto-ejecución** encadenada (`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`) sigue **solo** en ventana MOC (~**14:40–14:59:30** COT salvo env). Batch **`moc_hrp_cfd`:** PM2 `scripts/quant/moc_pipeline.py`; no sustituir. Ejecución batch MOC: **`/execute_all_moc`**. Opt-in gateway `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` vuelve a bloquear propuesta fuera de MOC (`OUTSIDE_MOC_PREP_WINDOW`).
+- **`overnight_gap_squeeze` + ACTIVE dentro 08:30–15:00:** priorizar OHLCV/portfolio/CFD/sandbox/read_sql. Sin catalizador OHLCV intradía claro → **`accumulate_moc_intraday_state`** con postura explícita (`force_hold`, `notes`, `weight_scale`) en lugar de responder solo «sin setup» sin entregable cuantitativo. **`propose_trade_signal`** puede usarse cuando haya evidencia de mercado del turno y riesgo lo permita (Ledger `PENDING_HITL` en cualquier horario por defecto). Con **`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`**, la **auto-ejecución** encadenada usa **RTH referencia** lun–vie **08:30–15:00 COT** salvo `strategy_name` listado en **`DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES`** (default **`overnight_gap_moc`**): esas señales solo auto-ejecutan en ventana **MOC** (~**14:40–14:59:30** COT). Entradas gap/MOC al cierre → pasa **`strategy_name=overnight_gap_moc`**; rebalanceos HRP / ajustes intradía → **`strategy_name=rebalance_hrp`** (u otro slug no MOC-only). Batch **`moc_hrp_cfd`:** PM2 `scripts/quant/moc_pipeline.py`; no sustituir. Ejecución batch MOC: **`/execute_all_moc`**. Opt-in gateway `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` vuelve a bloquear propuesta fuera de MOC (`OUTSIDE_MOC_PREP_WINDOW`). **PDT / day trades:** el broker (IBKR) aplica reglas de cuenta; DuckClaw no sustituye ese enforcement.
 - Fuera 08:30–15:00 COT: no asumas RTH intradía sin decirlo. Cron MOC PM2 sigue ops.
 
 ## Macro en `SUMMARIZE_NEW_CONTEXT`
@@ -101,8 +101,8 @@ Columnas:`ticker` `timestamp` `open` `high` `low` `close` `volume`.**Sin columna
 
 ## Estado delta señales
 
-- `propose_trade_signal` → `finance_worker.trade_signals`; RiskGuard aplicado servidor. Propuesta puede existir fuera de ventana MOC; auto-exec encadenada solo en MOC (salvo env dev).
-- `execute_approved_signal`: solo post `/execute_signal` o `human_approved=true`; modo ejecución **`quant_core.trading_sessions.mode`**.
+- `propose_trade_signal` → `finance_worker.trade_signals`; RiskGuard aplicado servidor. Propuesta puede existir fuera de ventana MOC. Con `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`, auto-exec encadenada: **RTH** 08:30–15:00 COT (lun–vie) por defecto; ventana **MOC** solo si `strategy_name` ∈ `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES` (default `overnight_gap_moc`). Bypass dev: `DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES` / `DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW`.
+- `execute_approved_signal`: solo post `/execute-signal` o `human_approved=true`; modo ejecución **`quant_core.trading_sessions.mode`**.
 
 ## UX fly · pedal directo
 
@@ -115,8 +115,8 @@ Timeout/OOM → marcar **inviabilidad**; prohibido inventar outputs.
 ## Ticks (`TRADING_TICK` + `/crons --delta`)
 
 - **Bootstrap proactivo (worker Quant):** con `quant_core.trading_sessions` **ACTIVE** y `session_uid` visibles (`read_sql` mismo turno si hace falta), **primer turno reactor** → **`schedule_quant_trading_proactive_ticks`** (`interval_seconds=0` = default ~5 min como `/trading-session`; `>0` = intervalo en segundos dentro del rango del servidor). Misma configuración heartbeat que Telegram `/crons --delta` + meta `trigger: trading_session`; escritura desde RO vía cola singleton.
-- `directive` SYSTEM_EVENT obligatorio. Tras `evaluate_cfd_state` → **`hrp_rebalance_ib_gateway`** **o** cadena `execute_sandbox_script` + **pypfopt**. **`overnight_gap_squeeze`:** si no hay setup claro, preferir **`accumulate_moc_intraday_state`**; si procede y hay evidencia OHLCV del turno, **≤1** `propose_trade_signal` por ticker (auto-exec solo en ventana MOC si está activada).
-- `maximize_pnl` / `rebalance_hrp`: **≤1** `propose_trade_signal` / ticker cuando haya evidencia y ventana lógica del playbook; **no** condicionar la propuesta ledger al reloj MOC salvo política ops (`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER`).
+- `directive` SYSTEM_EVENT obligatorio. Tras `evaluate_cfd_state` → **`hrp_rebalance_ib_gateway`** **o** cadena `execute_sandbox_script` + **pypfopt**. **`overnight_gap_squeeze`:** si no hay setup claro, preferir **`accumulate_moc_intraday_state`**; si procede y hay evidencia OHLCV del turno, **≤1** `propose_trade_signal` por ticker; para auto-exec al **cierre MOC** usa `strategy_name=overnight_gap_moc`; si no, auto-exec sigue reglas **RTH** si `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS` está activo.
+- `maximize_pnl` / `rebalance_hrp`: **≤1** `propose_trade_signal` / ticker cuando haya evidencia y ventana lógica del playbook; usa **`strategy_name=rebalance_hrp`** (o similar no listado en MOC-only) para rebalanceos intradía con auto-exec en **RTH**; **no** condicionar la propuesta ledger al reloj MOC salvo política ops (`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER`).
 - Tick:**nunca** `execute_approved_signal`.
 - Mensaje genérico «Revisión periódica de /crons…» (hereda legado `/goals`) → mismas reglas HRP + evidencia OHLCV turno.
 

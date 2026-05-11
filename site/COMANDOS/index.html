@@ -2231,11 +2231,11 @@ pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-Gateway
 </tr>
 <tr>
 <td><code>DUCKCLAW_QUANT_HITL_GRANT_TTL_SEC</code></td>
-<td>Segundos de validez del grant tras <code>/execute_signal</code> (default <code>600</code>). Para swing o confirmacion lenta, sube (p. ej. <code>86400</code>).</td>
+<td>Segundos de validez del grant tras <code>/execute-signal</code> (default <code>600</code>). Para swing o confirmacion lenta, sube (p. ej. <code>86400</code>).</td>
 </tr>
 <tr>
 <td><code>REDIS_URL</code> / <code>DUCKCLAW_REDIS_URL</code></td>
-<td>Recomendado para persistir grants de <code>/execute_signal</code> entre procesos; si falta, memoria en proceso (solo mismo worker).</td>
+<td>Recomendado para persistir grants de <code>/execute-signal</code> entre procesos; si falta, memoria en proceso (solo mismo worker).</td>
 </tr>
 </tbody>
 </table>
@@ -2249,7 +2249,7 @@ pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-Gateway
 <span class="nv">CAPADONNA_HISTORICAL_TIMEFRAMES</span><span class="o">=</span>1d,1w,1M,moc
 </code></pre></div>
 <p>Fly: <code>/lake</code> o <code>/lake status</code> comprueba env y hace <code>ssh … true</code> corto si la config es válida. <code>/sensors</code> resume DuckDB, IBKR (portafolio + mercado), Lake, Tavily, Reddit, Google Trends y <strong>browser sandbox</strong> (manifest finanz, Docker, imagen Playwright, red en <code>security_policy</code>) en el proceso del gateway.</p>
-<p>Telegram (human-in-the-loop): el usuario confirma con <code>/execute_signal &lt;uuid&gt;</code> el <code>signal_id</code> devuelto por la propuesta (<code>propose_trade</code> en <strong>Finanz</strong>, <code>propose_trade_signal</code> en <strong>Quant Trader</strong>). Luego el asistente llama <code>execute_order</code> (Finanz) o <code>execute_approved_signal</code> (Quant Trader).</p>
+<p>Telegram (human-in-the-loop): el usuario confirma con <code>/execute-signal &lt;uuid&gt;</code> el <code>signal_id</code> devuelto por la propuesta (<code>propose_trade</code> en <strong>Finanz</strong>, <code>propose_trade_signal</code> en <strong>Quant Trader</strong>). Luego el asistente llama <code>execute_order</code> (Finanz) o <code>execute_approved_signal</code> (Quant Trader).</p>
 <h4 id="quant-trader-sesion-autonoma-goals-hitl">Quant Trader: sesión autónoma + <code>/goals</code> (HITL)<a class="headerlink" href="#quant-trader-sesion-autonoma-goals-hitl" title="Permanent link">&para;</a></h4>
 <p>Comandos fly (chat Quant Trader):</p>
 <ul>
@@ -2272,7 +2272,7 @@ pm2<span class="w"> </span>logs<span class="w"> </span>DuckClaw-Gateway
 <li>Si no hay delta activo en <code>/goals</code>, se auto-activa en 5 minutos (<code>300s</code>) con metadata de trigger <code>trading_session</code>.</li>
 <li><code>--stop</code> marca la sesión <code>CLOSED</code>, limpia el scheduler asociado y devuelve resumen con <code>session_uid</code> + PnL estimado.</li>
 <li><code>/cancel_signal</code> solo cancela señales en estado pendiente HITL (<code>PENDING_HITL</code>/<code>AWAITING_HITL</code>).</li>
-<li>El ticker proactivo envía <code>SYSTEM_EVENT</code> tipo <code>TRADING_TICK</code> y <strong>no ejecuta órdenes</strong>: solo evalúa/propone; ejecución siempre requiere <code>/execute_signal</code>.</li>
+<li>El ticker proactivo envía <code>SYSTEM_EVENT</code> tipo <code>TRADING_TICK</code> y <strong>no ejecuta órdenes</strong>: solo evalúa/propone; ejecución siempre requiere <code>/execute-signal</code>.</li>
 </ul>
 <h3 id="52-vision-vlm-imagenes-en-telegram-y-context">5.2 Visión (VLM) — imágenes en Telegram y <code>/context</code><a class="headerlink" href="#52-vision-vlm-imagenes-en-telegram-y-context" title="Permanent link">&para;</a></h3>
 <p>El gateway enriquece fotos/documentos visuales con un resumen antes de pasar el turno al grafo. Orden de backends por defecto: <strong>MLX</strong> (<code>mlx_vlm</code> en el mismo venv del proceso o servicio HTTP MLX) → <strong>Gemini</strong> si hay clave → <strong>OpenAI visión</strong> solo si lo activas explícitamente.</p>

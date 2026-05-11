@@ -45,7 +45,7 @@ CREATE TABLE finance_worker.trade_signals (
 3. **Cuantificación Aislada:** Genera script de Python (estrategia, cálculo de z-score, reversión a la media) y lo envía a `execute_sandbox_script`.
 4. **Síntesis y Propuesta:** Analiza el `stdout` (JSON) del Sandbox. Si la señal es positiva, invoca `propose_trade_signal`.
 5. **Intercepción RiskGuard:** El nodo determinista (Python) intercepta la propuesta, calcula el valor nominal contra el saldo líquido en DuckDB, y emite el `StateDelta`.
-6. **Pausa HITL:** El worker suspende ejecución y emite webhook a Telegram: *"Señal {signal_id} lista. Requiere `/execute_signal {signal_id}`"*.
+6. **Pausa HITL:** El worker suspende ejecución y emite webhook a Telegram: *"Señal {signal_id} lista. Requiere `/execute-signal {signal_id}`"*.
 7. **Ejecución:** Tras el comando del usuario, el Manager reactiva al worker para invocar `execute_approved_signal`.
 
 ### Contratos (Skills)
@@ -69,5 +69,5 @@ CREATE TABLE finance_worker.trade_signals (
 ### Edge cases
 - **Ceguera Sensorial:** Si falla la ingesta OHLCV necesaria en ese paso, la respuesta al usuario sigue la línea **canónica del template Quant-Trader (Caveman / harness):** `🔴 Ceguera Sensorial:[herramienta] no retornó datos. STOP.` — sin párrafos extra. **Prohibido** usar Tavily (u otras fuentes web) como sustituto de precios u OHLCV. Sustituir `[herramienta]` por el nombre exacto de la tool que falló.
 - **Sandbox OOM / Timeout:** Si el script de backtesting excede memoria o tiempo en OrbStack, el worker reporta el fallo técnico y marca el mandato como `REJECTED` por inviabilidad computacional.
-- **HITL Timeout:** Si el usuario no ejecuta `/execute_signal` en un plazo de 4 horas (configurable por tenant), un cronjob del Singleton Writer marca la señal como `DISCARDED` (Stale Signal) para evitar ejecuciones con datos de mercado caducados.
+- **HITL Timeout:** Si el usuario no ejecuta `/execute-signal` en un plazo de 4 horas (configurable por tenant), un cronjob del Singleton Writer marca la señal como `DISCARDED` (Stale Signal) para evitar ejecuciones con datos de mercado caducados.
 - **Manager Routing Failure:** Si el payload del "A2A Contract" llega malformado, el worker emite un log a `task_audit_log` y solicita retransmisión al Manager sin mutar el ledger.

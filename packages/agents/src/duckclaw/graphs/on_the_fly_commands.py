@@ -47,7 +47,7 @@ from duckclaw.graphs.proactive_review_markers import (
     GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY,
     proactive_review_event_phrase_in_text,
 )
-from duckclaw.graphs.trading_hours_cot import quant_event_horario_line
+from duckclaw.graphs.trading_hours_cot import COT_TZ_NAME, quant_event_horario_line
 from duckclaw.utils.logger import get_obs_logger, log_fly, structured_log_context
 from duckclaw.utils.telegram_markdown_v2 import TELEGRAM_MARKDOWN_V2_SPECIAL
 
@@ -3333,8 +3333,10 @@ def build_goals_proactive_system_event_message(
             "Durante 08:30–15:00 COT lun–vie: recolectar contexto (CFD/OHLCV/portfolio/sandbox/read_sql). "
             "Sin catalizador intradía claro → **`accumulate_moc_intraday_state`** (postura explícita: watchlist, sizing 0/HOLD, régimen) "
             "en lugar de solo «sin setup». **`propose_trade_signal`** puede crearse cuando haya evidencia del turno y riesgo lo permita "
-            "(Ledger `PENDING_HITL` en cualquier horario por defecto); la **auto-ejecución** encadenada solo en ventana MOC "
-            "(default ~14:40–14:59:30 COT; `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW` + `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`). "
+            "(Ledger `PENDING_HITL` en cualquier horario por defecto); la **auto-ejecución** encadenada con "
+            "`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`: **RTH** lun–vie 08:30–15:00 COT salvo `strategy_name` en "
+            "`DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES` (default `overnight_gap_moc` → ventana **MOC** "
+            "~14:40–14:59:30 COT, `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW`). "
             "Opt-in `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` restaura bloqueo fuera de MOC (`OUTSIDE_MOC_PREP_WINDOW`). "
             "Pipeline PM2 `moc_pipeline.py` (moc_hrp_cfd) no lo sustituyes; batch MOC `/execute_all_moc`. "
             "1) OHLCV 1m vía `fetch_market_data`. "
@@ -3401,8 +3403,9 @@ def build_trading_tick_system_event_message(
         "con session_uid+tickers; 3) si outcome=ERROR o all_data_failed, reportar ceguera sensorial; "
         "4) si outcome=MISALIGNED y no hay pending por ticker, `propose_trade_signal` como mucho 1 por ticker "
         "cuando haya evidencia OHLCV del turno y riesgo lo permita (propuesta Ledger permitida fuera de ventana MOC por defecto); "
-        "la **auto-ejecución** encadenada (`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`) solo dentro ventana MOC COT "
-        "(default ~14:40–14:59:30; véase env); fuera de esa ventana no hay cadena auto grant+execute; "
+        "la **auto-ejecución** encadenada (`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`): **RTH** lun–vie 08:30–15:00 COT salvo "
+        "`strategy_name` en `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES` (default overnight_gap_moc → ventana MOC "
+        "~14:40–14:59:30); fuera de la compuerta que aplique no hay cadena auto grant+execute; "
         "opt-in `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` bloquea propuesta fuera de MOC (`OUTSIDE_MOC_PREP_WINDOW`; excepción job `moc_hrp_cfd`); "
         "NO ejecutar en tick; 5) si mode=live agregar warning de capital real; "
         "6) si ALIGNED, no enviar resumen al usuario."
@@ -3414,14 +3417,15 @@ def build_trading_tick_system_event_message(
             "(import pypfopt; pypfopt.hierarchical_portfolio.HRPOpt + risk_models.sample_cov sobre DataFrame de retornos; "
             "optimize() → pesos que suman 1). Solo si pypfopt falla, HRP manual con pandas/scipy. "
             "Comparar vs get_ibkr_portfolio; si desviación relevante y sin HITL pendiente por ticker, máximo 1 "
-            "`propose_trade_signal` de rebalanceo por ticker cuando proceda (Ledger fuera de MOC permitido por defecto; auto-exec solo en ventana MOC si está activada)."
+            "`propose_trade_signal` de rebalanceo por ticker cuando proceda (Ledger fuera de MOC permitido por defecto; "
+            "con auto-exec activo usar `strategy_name=rebalance_hrp` para compuerta **RTH** 08:30–15:00 COT)."
         )
     elif _obj == "overnight_gap_squeeze":
         _directive += (
             " 7) OVERNIGHT GAP SQUEEZE: en 08:30–15:00 COT lun–vie recolectar contexto "
             "(evaluate_cfd_state, fetch_ib_gateway_ohlcv/fetch_market_data, read_sql, get_ibkr_portfolio, sandbox según playbook). "
             "Sin setup claro → `accumulate_moc_intraday_state`; con evidencia y playbook alineado → como mucho 1 `propose_trade_signal` por ticker "
-            "(fuera de ventana MOC permitido por defecto; auto-exec encadenada solo en MOC). "
+            "(fuera de ventana MOC permitido por defecto; auto-exec: RTH salvo `overnight_gap_moc` → MOC). "
             "Señales batch `moc_hrp_cfd` = solo PM2. Opt-in `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER` → `OUTSIDE_MOC_PREP_WINDOW` fuera de MOC."
         )
     event = TradingTickEvent.model_validate(
@@ -4347,7 +4351,7 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ("/setup", "Config key=value"),
         ("/approve", "Aprobar última acción"),
         ("/reject", "Rechazar última acción"),
-        ("/execute_signal <uuid>", "HITL: confirma ejecución (Quant Trader: execute_approved_signal)"),
+        ("/execute-signal <uuid>", "HITL: confirma ejecución (Quant Trader: execute_approved_signal); alias /execute_signal"),
         (
             "/execute_all_moc <session_uid>",
             "HITL Quant: ejecuta todas las señales moc_hrp_cfd pendientes de esa sesión MOC",
@@ -5577,17 +5581,17 @@ def _session_notionals_from_ibkr_for_tickers(
 
 def _session_participation_breakdown(
     db: Any, tickers_csv: str
-) -> tuple[list[tuple[str, float, float]], bool, str]:
+) -> tuple[list[tuple[str, float, float]], bool, str, tuple[str, float, float] | None]:
     """
     Retorna filas ``(símbolo, %, nocional_usd)`` en el orden del CSV de sesión,
     ``True`` si los % vienen de nocional, ``False`` si reparto igual,
-    y ``weight_source`` en ``{"db", "ibkr", "equal"}``.
-    Con ``ibkr``: % = ``|mv| / total_value`` del snapshot (mismo criterio que el resumen de cuenta);
-    con ``db``: % = nocional del ticker / suma nocional en tickers de sesión.
+    ``weight_source`` en ``{"db", "ibkr", "equal"}``,
+    y opcionalmente ``("Cash", %, usd)`` cuando IBKR aporta ``total_value`` y queda
+    remanente ``total_value - sum(|mv| tickers sesión)`` (efectivo + posiciones fuera del CSV).
     """
     parts = [x.strip().upper() for x in (tickers_csv or "").split(",") if x.strip()]
     if not parts:
-        return [], False, "equal"
+        return [], False, "equal", None
     esc = [p.replace("'", "''") for p in parts]
     in_list = ",".join(f"'{t}'" for t in esc)
     notionals: dict[str, float] = {t: 0.0 for t in parts}
@@ -5648,9 +5652,19 @@ def _session_participation_breakdown(
     if uses_n:
         d = pct_denom if pct_denom > 1e-9 else total_n
         out = [(sym, notionals[sym] / d * 100.0, notionals[sym]) for sym in parts]
-        return out, True, weight_source
+        cash_row: tuple[str, float, float] | None = None
+        if (
+            weight_source == "ibkr"
+            and ibkr_pct_denom_src == "ibkr_total_value"
+            and float(d) > 1e-9
+        ):
+            session_mv_sum = sum(notionals[s] for s in parts)
+            rem_usd = max(float(d) - session_mv_sum, 0.0)
+            if rem_usd > 1e-6:
+                cash_row = ("Cash", rem_usd / float(d) * 100.0, rem_usd)
+        return out, True, weight_source, cash_row
     eq = 100.0 / len(parts)
-    return [(sym, eq, 0.0) for sym in parts], False, "equal"
+    return [(sym, eq, 0.0) for sym in parts], False, "equal", None
 
 
 def _format_session_ticker_weights(db: Any, tickers_csv: str, *, max_lines: int = 12) -> str:
@@ -5658,13 +5672,20 @@ def _format_session_ticker_weights(db: Any, tickers_csv: str, *, max_lines: int 
     Desglose ticker → % de nocional (qty * current_price en quant_core.portfolio_positions).
     Sin nocional: mismo % para todos los símbolos de la sesión.
     """
-    breakdown, uses_nocional, weight_src = _session_participation_breakdown(db, tickers_csv)
+    breakdown, uses_nocional, weight_src, cash_row = _session_participation_breakdown(
+        db, tickers_csv
+    )
     if not breakdown:
         return ""
     notes: list[str] = []
     if uses_nocional:
         for sym, pct, noc in breakdown:
             notes.append(f"`{sym}` {pct:.1f}% (${noc:,.2f} noc.)")
+        if cash_row is not None:
+            _cs, _cp, _cn = cash_row
+            notes.append(
+                f"`{_cs}` {_cp:.1f}% (${_cn:,.2f} — resto cuenta vs total_value IBKR)"
+            )
         if weight_src == "ibkr":
             head = "**Participación (% |mv| vs valor total cuenta IBKR, tickers de sesión):**\n"
         else:
@@ -5713,10 +5734,14 @@ def _build_session_participation_pie_b64(db: Any, *, top_n: int = 5) -> str | No
     if str(rows[0].get("status") or "").strip().upper() != "ACTIVE":
         return None
     tickers_csv = str(rows[0].get("tickers") or "").strip()
-    breakdown, uses_nocional, weight_src = _session_participation_breakdown(db, tickers_csv)
+    breakdown, uses_nocional, weight_src, cash_row = _session_participation_breakdown(
+        db, tickers_csv
+    )
     pie_rows = _pie_slices_from_breakdown(breakdown, top_n=top_n)
     if not pie_rows:
         return None
+    if cash_row is not None and cash_row[1] > 1e-4:
+        pie_rows = [*pie_rows, cash_row]
     labels = [s for s, _, _ in pie_rows]
     label_pcts = [p for _, p, _ in pie_rows]
     sizes = [max(n, 1e-12) for _, _, n in pie_rows]
@@ -5754,7 +5779,14 @@ def _build_session_participation_pie_b64(db: Any, *, top_n: int = 5) -> str | No
     )
     if uses_nocional:
         if weight_src == "ibkr":
-            sub = "% = |mv| / total_value cuenta IBKR (snapshot); tickers de sesión"
+            sub = (
+                "% = |mv| / total_value cuenta IBKR (snapshot); tickers de sesión"
+                + (
+                    " · Cash = total − |mv| tickers sesión (efectivo y fuera de lista)"
+                    if cash_row is not None
+                    else ""
+                )
+            )
         else:
             sub = "Fuente: nocional |qty×px| en portfolio_positions"
     else:
@@ -6227,8 +6259,8 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
             cum = [0.0, pnl_total]
     try:
         from datetime import datetime, timezone
-
         from io import BytesIO
+        from zoneinfo import ZoneInfo
 
         import matplotlib
 
@@ -6237,6 +6269,7 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
         import matplotlib.pyplot as plt
     except Exception:
         return None
+    _pnl_chart_tz = ZoneInfo(COT_TZ_NAME)
     _tc_anchor = time.time()
     n = len(cum)
     x_dt: list[datetime]
@@ -6372,8 +6405,11 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
                 arrowprops=_arr,
             )
     ax.set_ylabel("PnL ($)")
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=timezone.utc))
-    ax.set_title(f"Trading Session Tearsheet · {mode} · {uid[:8]}… (UTC)", fontsize=10)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=_pnl_chart_tz))
+    ax.set_title(
+        f"Trading Session Tearsheet · {mode} · {uid[:8]}… (Bogotá, COT)",
+        fontsize=10,
+    )
     ax.grid(True, alpha=0.3)
     ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
     ax.text(
@@ -6390,8 +6426,8 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
     ax_dd.plot(x, drawdowns, color="#dc2626", linewidth=1.6)
     ax_dd.fill_between(x, drawdowns, [0.0 for _ in drawdowns], color="#fecaca", alpha=0.6)
     ax_dd.axhline(0, color="#9ca3af", linewidth=0.8)
-    ax_dd.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=timezone.utc))
-    ax_dd.set_xlabel("Tiempo (UTC)")
+    ax_dd.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=_pnl_chart_tz))
+    ax_dd.set_xlabel("Tiempo (Bogotá, COT)")
     ax_dd.set_ylabel("DD %")
     ax_dd.grid(True, alpha=0.25)
     fig.autofmt_xdate(bottom=0.22, rotation=18)
@@ -6741,7 +6777,7 @@ def execute_quant_cycle(
     if signal_id:
         human_msg.append(f"- signal_id: `{signal_id}`")
     if signal_id and signal_status.upper() in ("PROPOSED", "PENDING_HITL", "PENDING"):
-        human_msg.append(f"- HITL: `/execute_signal {signal_id}`")
+        human_msg.append(f"- HITL: `/execute-signal {signal_id}`")
     return "\n".join(human_msg) + "\n\n```json\n" + json.dumps(out_obj, ensure_ascii=False, indent=2) + "\n```"
 
 
@@ -6800,13 +6836,13 @@ def _execute_signal_verify_ledger(db: Any, sid: str) -> tuple[bool, str]:
 
 
 def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
-    """/execute_signal <uuid>: HITL para Quant Trader (execute_approved_signal)."""
+    """/execute-signal <uuid>: HITL para Quant Trader (execute_approved_signal)."""
     sid = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
     if not re.match(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
         sid,
     ):
-        return "Uso: /execute_signal <signal_id_UUID>"
+        return "Uso: /execute-signal <signal_id_UUID>"
     if _looks_like_hallucinated_placeholder_uuid(sid):
         return (
             "No: ese UUID parece inventado por el modelo (no viene de `propose_trade_signal`). "
@@ -6822,7 +6858,7 @@ def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
         if _is_wr_tenant(tid):
             clearance = _wr_member_clearance(_db, tenant_id=tid, user_id=rid)
             if not (_is_gateway_owner_user(rid) or clearance == "admin"):
-                return "❌ Acceso denegado: /execute_signal en War Room requiere clearance admin."
+                return "❌ Acceso denegado: /execute-signal en War Room requiere clearance admin."
     except Exception:
         pass
     ok_ledger, ledger_msg = _execute_signal_verify_ledger(db, sid)
@@ -7071,7 +7107,7 @@ def _dispatch_fly_command(
         if sub in ("", "status"):
             return execute_lake_status()
         return "Uso: /lake o /lake status"
-    if name == "execute_signal":
+    if name in ("execute_signal", "execute-signal"):
         return execute_quant_execute_signal(db, chat_id, args)
     if name == "execute_all_moc":
         return execute_quant_execute_all_moc(db, chat_id, args)

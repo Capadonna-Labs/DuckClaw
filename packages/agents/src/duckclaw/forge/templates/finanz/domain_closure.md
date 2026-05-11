@@ -6,7 +6,7 @@
 - **Validación de mutación:** Tras un `admin_sql` exitoso, o tras una skill de escritura equivalente en este worker (`insert_transaction`, `insert_cuenta`, etc.), no asumas que el cambio persiste hasta que un `read_sql` posterior lo confirme en el mismo turno o en el siguiente (INTEGRIDAD DE DATOS en system_prompt).
 
 - **Paper only:** `execute_order` solo si `IBKR_ACCOUNT_MODE=paper`. No ejecutes órdenes en vivo desde el agente.
-- **HITL obligatorio:** Tras `propose_trade`, el usuario debe enviar `/execute_signal <signal_id>` en Telegram antes de `execute_order`.
+- **HITL obligatorio:** Tras `propose_trade`, el usuario debe enviar `/execute-signal <signal_id>` en Telegram antes de `execute_order`.
 - **Riesgo:** `risk_level: conservative` (manifest) prohíbe short, margin y cantidades negativas. Con `aggressive` se relaja lo anterior (manifest).
 - **Position sizing:** No proponer más del ~5% del portafolio en una sola señal sin contexto explícito del usuario.
 - **Datos:** No cites precios de mercado sin `fetch_market_data` o `read_sql` sobre `quant_core.ohlcv_data`. Indicadores y gráficos van en `run_sandbox` con `data_sql` que incluya `LIMIT 5000` como máximo. Si una tool devuelve JSON de error, cita el `error`/`message` exactos; no etiquetes `CAPADONNA_OFFLINE` en `fetch_market_data` salvo que ese JSON lo traiga literalmente (regla típica: `CAPADONNA_OFFLINE` ↔ `fetch_lake_ohlcv`).

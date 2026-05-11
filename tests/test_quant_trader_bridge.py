@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from duckclaw.forge.skills.quant_tool_context import (
     note_quant_market_evidence_ticker,
+    reset_quant_market_evidence,
     set_quant_tool_chat_id,
     set_quant_tool_db_path,
     set_quant_tool_tenant_id,
@@ -58,6 +59,8 @@ class _FakeDb:
 
 
 def test_propose_trade_signal_requires_evidence(monkeypatch) -> None:
+    set_quant_tool_chat_id("bridge_requires_evidence")
+    reset_quant_market_evidence()
     db = _FakeDb()
     set_quant_tool_tenant_id("default")
     set_quant_tool_user_id("u1")

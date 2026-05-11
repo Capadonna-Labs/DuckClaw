@@ -482,6 +482,17 @@ def _finanz_user_requests_ohlcv_ingest(text: str) -> bool:
     return bool(re.search(r"\b[A-Z]{1,5}\b", raw))
 
 
+def _quant_trader_vlm_incoming_suggests_market_figure(text: str) -> bool:
+    """
+    True si el turno trae payload VLM con decimal tipo cotización (p. ej. 465.00 en captura Bloomberg).
+    Evidencia pm2: tools usadas=ninguna + Regla de Evidencia Única pese a plan con read_sql.
+    """
+    raw = text or ""
+    if "[VLM_CONTEXT" not in raw and "contexto visual adjunto:" not in raw.lower():
+        return False
+    return bool(re.search(r"(?:\$\s*)?\b\d{1,6}\.\d{2,6}\b", raw))
+
+
 def _duckclaw_env_truthy(name: str) -> bool:
     v = (os.environ.get(name) or "").strip().lower()
     return v in ("1", "true", "yes", "on")
@@ -1286,6 +1297,39 @@ def _most_recent_reddit_url_in_human_messages(messages: list[Any]) -> Optional[s
     return None
 
 
+def _latest_human_index_with_reddit_share_url(messages: list[Any]) -> Optional[int]:
+    """Índice (en `messages`, 0-based) del Human más reciente cuya URL Reddit es /r/…/s/… share."""
+    from langchain_core.messages import HumanMessage
+
+    from duckclaw.integrations.llm_providers import lc_message_content_to_text
+
+    for i in range(len(messages or []) - 1, -1, -1):
+        m = messages[i]
+        if not isinstance(m, HumanMessage):
+            continue
+        txt = lc_message_content_to_text(m)
+        u = _extract_first_reddit_url(txt)
+        if u and _REDDIT_SHARE_PATH_RE.search(u):
+            return i
+    return None
+
+
+def _latest_human_index_with_vlm_visual_markers(messages: list[Any]) -> Optional[int]:
+    """Human más reciente con payload VLM (mismo marcador que el gateway al Multimodal)."""
+    from langchain_core.messages import HumanMessage
+
+    from duckclaw.integrations.llm_providers import lc_message_content_to_text
+
+    for i in range(len(messages or []) - 1, -1, -1):
+        m = messages[i]
+        if not isinstance(m, HumanMessage):
+            continue
+        txt = lc_message_content_to_text(m) or ""
+        if "[VLM_CONTEXT" in txt or "Contexto visual adjunto:" in txt:
+            return i
+    return None
+
+
 def _quant_trader_reddit_history_anchor_intent(incoming: str, messages: list[Any]) -> bool:
     """
     Mensaje corto tipo reintento sin URL en el turno actual, pero el último Human con Reddit
@@ -1298,6 +1342,12 @@ def _quant_trader_reddit_history_anchor_intent(incoming: str, messages: list[Any
         return False
     u = _most_recent_reddit_url_in_human_messages(messages or [])
     if not u or not _REDDIT_SHARE_PATH_RE.search(u):
+        return False
+    # No robar "reintento" genérico tras análisis visual: el share queda en historial pero el
+    # usuario siguió con foto/VLM (evidencia pm2: vuelve a intentar → forced_tool=reddit + megathread).
+    _sh_i = _latest_human_index_with_reddit_share_url(messages or [])
+    _vlm_i = _latest_human_index_with_vlm_visual_markers(messages or [])
+    if _sh_i is not None and _vlm_i is not None and _vlm_i > _sh_i:
         return False
     if not inc:
         return False
@@ -3584,6 +3634,36 @@ def build_worker_graph(
                     or _quant_proceed_like
                 )
             )
+            _quant_vlm_read_sql_evidence = bool(
+                _lid_l == "quant_trader"
+                and has_read_sql
+                and _worker_use_heuristic_first_tool(spec)
+                and not telegram_context_summarize_directive
+                and not summarize_stored_directive
+                and not already_has_tool_result
+                and not _quant_deterministic_cycle
+                and _quant_trader_vlm_incoming_suggests_market_figure(incoming)
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                    or force_reddit
+                    or force_fetch_ib_gateway
+                    or force_fetch_market_data
+                    or force_quant_propose_signal
+                    or force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
+                    or force_plot_docs
+                    or force_run_sandbox
+                    or force_pqrsd_fetch_canonical
+                    or force_execute_approved_signal
+                )
+            )
+            if _quant_vlm_read_sql_evidence:
+                force_read_sql = True
             _last_human_idx = _quant_last_human_index(state.get("messages") or [])
             _has_fetch_since_last_human = _quant_tool_called_since(
                 state.get("messages") or [], _last_human_idx, "fetch_ib_gateway_ohlcv"

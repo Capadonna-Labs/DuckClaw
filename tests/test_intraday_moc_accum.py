@@ -22,7 +22,10 @@ from duckclaw.forge.atoms.moc_intraday_hints import (  # noqa: E402
     apply_intraday_accum_hints_to_allocation,
     merge_intraday_accum_payload,
 )
-from duckclaw.forge.skills.intraday_accum_window import inside_reference_equity_rth_cot  # noqa: E402
+from duckclaw.forge.skills.intraday_accum_window import (  # noqa: E402
+    inside_reference_accumulation_trading_week_cot,
+    inside_reference_equity_rth_cot,
+)
 from duckclaw.forge.skills.quant_tool_context import (  # noqa: E402
     set_quant_tool_db_path,
     set_quant_tool_tenant_id,
@@ -106,6 +109,90 @@ def test_inside_reference_rth_weekday_noon() -> None:
     fri = datetime(2026, 5, 1, 12, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
     ok, _, _ = inside_reference_equity_rth_cot(fri)
     assert ok is True
+
+
+def test_inside_accumulation_weekday_before_rth_open() -> None:
+    """Acumulación MOC: lun–vie permitido antes de 08:30 (p. ej. optimizar pre-apertura)."""
+    mon = datetime(2026, 5, 4, 7, 18, 0, tzinfo=ZoneInfo("America/Bogota"))
+    ok, reason, meta = inside_reference_accumulation_trading_week_cot(mon)
+    assert ok is True
+    assert reason == ""
+    assert meta.get("accum_policy") == "anytime_cot_including_weekend"
+
+
+def test_inside_accumulation_weekend_allowed_by_default() -> None:
+    sat = datetime(2026, 5, 2, 10, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
+    ok, reason, meta = inside_reference_accumulation_trading_week_cot(sat)
+    assert ok is True
+    assert reason == ""
+    assert meta.get("accum_policy") == "anytime_cot_including_weekend"
+
+
+def test_inside_accumulation_weekend_blocked_when_env_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_MOC_ACCUM_BLOCK_WEEKEND", "1")
+    sat = datetime(2026, 5, 2, 10, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
+    ok, reason, _ = inside_reference_accumulation_trading_week_cot(sat)
+    assert ok is False
+    assert reason == "WEEKEND"
+
+
+def test_accumulate_enqueues_saturday_without_ignore_gates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES", raising=False)
+    monkeypatch.delenv("DUCKCLAW_MOC_ACCUM_BLOCK_WEEKEND", raising=False)
+    sat = datetime(2026, 5, 2, 11, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.intraday_accum_window.reference_rth_cot_now",
+        lambda: sat,
+    )
+    db = _FakeDbActive()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    pushed: list[dict] = []
+
+    def _push(p: dict, **__: object) -> bool:
+        pushed.append(dict(p))
+        return True
+
+    monkeypatch.setattr("duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync", _push)
+    raw = _accumulate_moc_intraday_state_impl(
+        db,
+        ticker="QQQ",
+        accumulation_patch={"notes": "weekend tweak"},
+        trading_date="2026-05-02",
+    )
+    out = json.loads(raw)
+    assert out.get("status") == "enqueued"
+    assert pushed and pushed[0].get("delta_type") == "INTRADAY_MOC_ACCUM_UPSERT"
+
+
+def test_accumulate_enqueues_monday_pre_rth_without_ignore_gates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES", raising=False)
+    early = datetime(2026, 5, 4, 7, 18, 0, tzinfo=ZoneInfo("America/Bogota"))
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.intraday_accum_window.reference_rth_cot_now",
+        lambda: early,
+    )
+    db = _FakeDbActive()
+    set_quant_tool_tenant_id("default")
+    set_quant_tool_user_id("u1")
+    set_quant_tool_db_path(db._path)
+    pushed: list[dict] = []
+
+    def _push(p: dict, **__: object) -> bool:
+        pushed.append(dict(p))
+        return True
+
+    monkeypatch.setattr("duckclaw.forge.skills.quant_trader_bridge.push_quant_state_delta_sync", _push)
+    raw = _accumulate_moc_intraday_state_impl(
+        db,
+        ticker="SPY",
+        accumulation_patch={"weight_scale": 0.9},
+        trading_date="2026-05-04",
+    )
+    out = json.loads(raw)
+    assert out.get("status") == "enqueued"
+    assert pushed and pushed[0].get("delta_type") == "INTRADAY_MOC_ACCUM_UPSERT"
 
 
 def test_handler_intraday_accum_upsert_merge(accum_duck: duckdb.DuckDBPyConnection) -> None:

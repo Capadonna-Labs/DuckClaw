@@ -27,6 +27,7 @@ from duckclaw.forge.atoms.state import ManagerAgentState
 from duckclaw.graphs.sandbox import extract_latest_sandbox_figure_base64
 from duckclaw.graphs.subagent_run_id import acquire_subagent_slot, release_subagent_slot
 from duckclaw.utils.langsmith_trace import get_tracing_config
+from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_plan, log_sys, set_log_context
 
 from duckclaw.graphs.agent_resilience import (
@@ -660,9 +661,9 @@ def _prepend_subagent_label_once(reply: str, label: str) -> str:
 
 
 def _is_goals_proactive_system_event(text: str) -> bool:
-    """True si el mensaje es el SYSTEM_EVENT del ticker de /goals --delta (debe ejecutar el worker de la ruta HTTP)."""
+    """True si el mensaje es el SYSTEM_EVENT del ticker de /crons --delta (legado /goals; misma ruta HTTP)."""
     t = (text or "").strip()
-    return t.startswith("[SYSTEM_EVENT:") and "Revisión periódica de /goals" in t
+    return t.startswith("[SYSTEM_EVENT:") and proactive_review_event_phrase_in_text(t)
 
 
 def _is_entry_route_system_event(text: str) -> bool:
@@ -1048,7 +1049,7 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     ):
         task = (
             "TAREA: El usuario quiere saber qué base de datos se está usando. "
-            "Ejecuta get_db_path y responde de forma proactiva: indica la db usada en texto plano (sin comillas ni negrita). En el cierre invita a /team, /tasks, /help y a crear objetivos con /goals (por defecto están vacíos). Usa 1-2 emojis si encaja."
+            "Ejecuta get_db_path y responde de forma proactiva: indica la db usada en texto plano (sin comillas ni negrita). En el cierre invita a /team, /tasks, /help y a crear objetivos con /crons (por defecto están vacíos). Usa 1-2 emojis si encaja."
         )
         return task, override
     # Contenido de una tabla concreta
@@ -1099,7 +1100,7 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     ) or "tablas" in t or "qué tablas" in t or "que tablas" in t:
         task = (
             "TAREA: El usuario quiere ver las tablas de la base de datos. "
-            "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /team, /tasks, /help y a crear objetivos con /goals."
+            "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /team, /tasks, /help y a crear objetivos con /crons."
         )
         return task, override
     if (worker_id or "").strip().lower() == "finanz" and _finanz_user_demands_tool_evidence_from_db(t):

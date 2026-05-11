@@ -42,6 +42,7 @@ def test_quant_proceed_like_variants_match() -> None:
     assert _quant_is_proceed_like("sigue con la ejecución")
     assert _quant_is_proceed_like("adelante")
     assert not _quant_is_proceed_like("[SYSTEM_EVENT: Revisión periódica de /goals]")
+    assert not _quant_is_proceed_like("[SYSTEM_EVENT: Revisión periódica de /crons]")
 
 
 def test_quant_extract_signal_id_reads_uuid() -> None:

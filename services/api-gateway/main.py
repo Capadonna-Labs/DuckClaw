@@ -474,16 +474,16 @@ async def lifespan(app: FastAPI):
                     try:
                         await _run_goals_proactive_tick()
                     except Exception as _loop_exc:  # noqa: BLE001
-                        _gateway_log.warning("embedded goals ticker loop error: %s", _loop_exc)
+                        _gateway_log.warning("embedded crons ticker loop error: %s", _loop_exc)
                     await asyncio.sleep(_poll_s)
 
             app.state.goals_ticker_task = asyncio.create_task(_goals_ticker_loop())
             _gateway_log.info(
-                "embedded goals ticker enabled (poll=%ss, source=services.heartbeat._run_goals_proactive_tick)",
+                "embedded crons ticker enabled (poll=%ss, source=services.heartbeat._run_goals_proactive_tick)",
                 _poll_s,
             )
         except Exception as exc:  # noqa: BLE001
-            _gateway_log.warning("embedded goals ticker no disponible: %s", exc)
+            _gateway_log.warning("embedded crons ticker no disponible: %s", exc)
 
     yield
 
@@ -1811,27 +1811,30 @@ async def _invoke_chat(
             if cmd_reply is not None:
                 chart_sent = False
                 try:
-                    from duckclaw.graphs.on_the_fly_commands import pop_fly_outbound_chart_b64
+                    from duckclaw.graphs.on_the_fly_commands import pop_all_fly_outbound_charts_b64
 
-                    photo_b64 = pop_fly_outbound_chart_b64(session_id)
-                    if photo_b64:
-                        png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
-                        if not png_bytes:
-                            png_bytes = decode_sandbox_figure_base64(photo_b64)
-                        if png_bytes and (dc.channel or "telegram").strip().lower() == "telegram":
-                            token = (dc.outbound_bot_token or "").strip() or _effective_telegram_bot_token()
-                            if token:
-                                loop = asyncio.get_running_loop()
-                                chart_sent = bool(
-                                    await loop.run_in_executor(
-                                        None,
-                                        lambda: send_sandbox_chart_to_telegram_sync(
-                                            bot_token=token,
-                                            chat_id=str(session_id),
-                                            image_bytes=png_bytes,
-                                        ),
-                                    )
-                                )
+                    loop = asyncio.get_running_loop()
+                    token = (
+                        ((dc.outbound_bot_token or "").strip() or _effective_telegram_bot_token()).strip()
+                        if (dc.channel or "telegram").strip().lower() == "telegram"
+                        else ""
+                    )
+                    if token:
+                        for photo_b64 in pop_all_fly_outbound_charts_b64(session_id):
+                            png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
+                            if not png_bytes:
+                                png_bytes = decode_sandbox_figure_base64(photo_b64)
+                            if not png_bytes:
+                                continue
+                            ok = await loop.run_in_executor(
+                                None,
+                                lambda b=png_bytes: send_sandbox_chart_to_telegram_sync(
+                                    bot_token=token,
+                                    chat_id=str(session_id),
+                                    image_bytes=b,
+                                ),
+                            )
+                            chart_sent = chart_sent or bool(ok)
                 except Exception as exc:
                     if _gateway_log.isEnabledFor(logging.DEBUG):
                         _gateway_log.debug("fly chart attach failed: %s", exc)

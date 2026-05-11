@@ -10,11 +10,17 @@ from duckclaw.graphs.on_the_fly_commands import (
     build_goals_proactive_system_event_message,
     _parse_quant_cycle_cli,
     _parse_trading_session_cli,
+    _session_participation_breakdown,
     _session_goal_from_cli,
     _execute_signal_verify_ledger,
     _looks_like_hallucinated_placeholder_uuid,
     _compute_trading_session_pnl_now,
     _dedupe_trading_session_snapshots,
+    _format_session_ticker_weights,
+    _pie_slices_from_breakdown,
+    _PNL_SNAPSHOT_SYNTH_STEP_SEC,
+    _pnl_snapshots_dedupe_epoch,
+    _pnl_snapshots_parse_stored,
     _quant_core_trade_signals_column_names,
     _TRADING_SESSION_PNL_HIST_UID_KEY,
     _TRADING_SESSION_PNL_SNAPSHOTS_KEY,
@@ -23,9 +29,36 @@ from duckclaw.graphs.on_the_fly_commands import (
     _compute_trading_session_pnl_now_with_confidence,
     execute_quant_cycle,
     execute_quant_execute_signal,
+    pop_all_fly_outbound_charts_b64,
     pop_fly_outbound_chart_b64,
     register_fly_outbound_chart_b64,
 )
+
+
+def test_dispatch_trading_session_hyphen_and_underscore_same_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckclaw.graphs.on_the_fly_commands as otf
+
+    def _stub(
+        db: object,
+        chat_id: object,
+        args: str,
+        *,
+        tenant_id: object = None,
+        vault_user_id: object = None,
+    ) -> str:
+        del tenant_id, vault_user_id
+        return f"fly:{args!r}"
+
+    monkeypatch.setattr(otf, "execute_trading_session", _stub)
+    hyphen = otf._dispatch_fly_command(
+        None, 1, "trading-session", "--status", tenant_id="default"
+    )
+    under = otf._dispatch_fly_command(
+        None, 1, "trading_session", "--status", tenant_id="default"
+    )
+    assert hyphen == under == "fly:'--status'"
 
 
 def test_parse_trading_session_cli_paper_tickers() -> None:
@@ -161,6 +194,34 @@ def test_fly_outbound_chart_register_pop() -> None:
     assert pop_fly_outbound_chart_b64(999001) is None
 
 
+def test_fly_outbound_chart_queue_pop_all_preserves_fifo() -> None:
+    sid = "999002fifo"
+    register_fly_outbound_chart_b64(sid, "first")
+    register_fly_outbound_chart_b64(sid, "second")
+    assert pop_all_fly_outbound_charts_b64(sid) == ["first", "second"]
+    assert pop_all_fly_outbound_charts_b64(sid) == []
+    assert pop_fly_outbound_chart_b64(sid) is None
+
+
+def test_pie_slices_from_breakdown_top5_and_otros() -> None:
+    eq = [(f"S{i}", 12.5, 0.0) for i in range(8)]
+    slices = _pie_slices_from_breakdown(eq, top_n=5)
+    assert len(slices) == 6
+    assert slices[-1][0] == "Otros"
+    assert abs(slices[-1][1] - 37.5) < 1e-9
+    assert abs(sum(p for _, p, _ in slices) - 100.0) < 1e-9
+
+
+def test_pie_slices_from_breakdown_top10_and_otros() -> None:
+    p_each = 100.0 / 15.0
+    eq = [(f"T{i}", p_each, 0.0) for i in range(15)]
+    slices = _pie_slices_from_breakdown(eq, top_n=10)
+    assert len(slices) == 11
+    assert slices[-1][0] == "Otros"
+    assert abs(slices[-1][1] - (p_each * 5.0)) < 1e-9
+    assert abs(sum(p for _, p, _ in slices) - 100.0) < 1e-9
+
+
 def test_quant_core_trade_signals_column_names() -> None:
     class D:
         def query(self, sql: str) -> str:
@@ -226,6 +287,115 @@ def test_compute_trading_session_pnl_unreliable_when_ibkr_none(
 def test_dedupe_trading_session_snapshots_consecutive_equal() -> None:
     assert _dedupe_trading_session_snapshots([-217.64, -217.64, -217.64]) == [-217.64]
     assert _dedupe_trading_session_snapshots([100.0, 200.0, 200.0, 300.0]) == [100.0, 200.0, 300.0]
+
+
+def test_pnl_snapshots_parse_v1_synthetic_spacing() -> None:
+    now = 1_700_000_000.0
+    pts = _pnl_snapshots_parse_stored([10.0, 20.0], now=now)
+    assert len(pts) == 2
+    assert abs(pts[0][1] - 10.0) < 1e-9 and abs(pts[1][1] - 20.0) < 1e-9
+    assert abs(pts[1][0] - now) < 1e-9
+    assert abs(pts[0][0] - (now - _PNL_SNAPSHOT_SYNTH_STEP_SEC)) < 1e-9
+
+
+def test_pnl_snapshots_parse_v2_sorts_by_epoch() -> None:
+    raw = [{"epoch": 3.0, "pnl": 1.0}, {"epoch": 1.0, "pnl": 5.0}]
+    pts = _pnl_snapshots_parse_stored(raw, now=0.0)
+    assert pts == [(1.0, 5.0), (3.0, 1.0)]
+
+
+def test_pnl_snapshots_dedupe_epoch_updates_last_timestamp() -> None:
+    pts = _pnl_snapshots_dedupe_epoch(
+        [(1.0, 100.0), (2.0, 100.0), (3.0, 100.00000002), (4.0, 200.0)]
+    )
+    assert len(pts) == 2
+    assert pts[0][0] == 3.0 and abs(pts[0][1] - 100.0) < 1e-5
+    assert pts[1] == (4.0, 200.0)
+
+
+def test_format_session_ticker_weights_equal_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckclaw.graphs.on_the_fly_commands as otf
+
+    def _no_ibkr(parts: list[str]) -> tuple[dict[str, float], str | None, float | None]:
+        return {p: 0.0 for p in parts}, "ibkr_env_missing", None
+
+    monkeypatch.setattr(otf, "_session_notionals_from_ibkr_for_tickers", _no_ibkr)
+
+    class D:
+        def query(self, sql: str) -> str:
+            assert "portfolio_positions" in sql
+            return json.dumps([])
+
+    out = _format_session_ticker_weights(D(), "spy, nvda ")
+    assert "peso igual" in out.lower()
+    assert "`SPY`" in out and "`NVDA`" in out
+
+
+def test_session_participation_ibkr_pct_uses_account_total_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckclaw.graphs.on_the_fly_commands as otf
+
+    def _fake(parts: list[str]) -> tuple[dict[str, float], str | None, float | None]:
+        m = {p: 0.0 for p in parts}
+        m["AAA"] = 80.0
+        m["BBB"] = 20.0
+        return m, None, 1000.0
+
+    monkeypatch.setattr(otf, "_session_notionals_from_ibkr_for_tickers", _fake)
+
+    class D:
+        def query(self, sql: str) -> str:
+            return json.dumps([])
+
+    rows, uses_n, src = _session_participation_breakdown(D(), "AAA,BBB")
+    assert uses_n and src == "ibkr"
+    pct = {s: p for s, p, _ in rows}
+    assert abs(pct["AAA"] - 8.0) < 1e-9
+    assert abs(pct["BBB"] - 2.0) < 1e-9
+
+
+def test_format_session_ticker_weights_ibkr_fallback_when_db_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckclaw.graphs.on_the_fly_commands as otf
+
+    def _fake_ibkr(parts: list[str]) -> tuple[dict[str, float], str | None, float | None]:
+        m = {p: 0.0 for p in parts}
+        if "SPY" in m:
+            m["SPY"] = 100.0
+        if "NVDA" in m:
+            m["NVDA"] = 300.0
+        return m, None, 400.0
+
+    monkeypatch.setattr(otf, "_session_notionals_from_ibkr_for_tickers", _fake_ibkr)
+
+    class D:
+        def query(self, sql: str) -> str:
+            return json.dumps([])
+
+    out = _format_session_ticker_weights(D(), "SPY,NVDA")
+    assert "ibkr" in out.lower() or "mv" in out.lower()
+    assert "25.0" in out or "25,0" in out
+    assert "75.0" in out or "75,0" in out
+
+
+def test_format_session_ticker_weights_nocional_split() -> None:
+    class D:
+        def query(self, sql: str) -> str:
+            return json.dumps(
+                [
+                    {"ticker": "SPY", "qty": 2.0, "current_price": 100.0},
+                    {"ticker": "NVDA", "qty": 1.0, "current_price": 400.0},
+                ]
+            )
+
+    out = _format_session_ticker_weights(D(), "SPY,NVDA")
+    assert "nocional" in out.lower() or "noc." in out
+    assert "33.3" in out or "33,3" in out
+    assert "66.7" in out or "66,6" in out
 
 
 def test_trading_session_snapshots_for_tearsheet_label_empty_on_uid_mismatch(

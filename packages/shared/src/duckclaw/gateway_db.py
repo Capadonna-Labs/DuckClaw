@@ -152,10 +152,11 @@ def get_gateway_db() -> Any:
 
 def iter_goals_ticker_duckdb_paths() -> list[str]:
     """
-    Rutas ``.duckdb`` que escanea el ticker de ``/goals --delta`` (heartbeat / gateway embebido).
+    Rutas ``.duckdb`` que escanea el ticker de ``/crons --delta`` (heartbeat / gateway embebido;
+    claves internas ``goals_*`` en ``agent_config`` sin cambiar).
 
     Debe coincidir con ``services/heartbeat/main.py`` histórico: hub + ``db/private/*/*.duckdb``,
-    o override ``DUCKCLAW_GOALS_TICKER_DB_PATH``. Centralizado para que ``/goals --delta off``
+    o override ``DUCKCLAW_GOALS_TICKER_DB_PATH``. Centralizado para que ``/crons --delta off``
     limpie el schedule en **todos** los archivos donde pudo persistirse (multiplex Telegram).
     """
     raw = (os.getenv("DUCKCLAW_GOALS_TICKER_DB_PATH") or "").strip()
@@ -193,7 +194,7 @@ def iter_goals_ticker_duckdb_paths() -> list[str]:
 
 def iter_goals_delta_clear_duckdb_paths(*, primary_fly_db_path: str) -> list[str]:
     """
-    Rutas a tocar al apagar ``/goals --delta`` desde la conexión ``fly_db`` actual.
+    Rutas a tocar al apagar ``/crons --delta`` desde la conexión ``fly_db`` actual.
 
     El ticker del heartbeat sigue usando ``iter_goals_ticker_duckdb_paths()`` (hub + todo
     ``db/private/*/*.duckdb``) para descubrir schedules. Limpiar el mismo conjunto desde el

@@ -35,6 +35,7 @@ from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_s
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.workers import read_pool
+from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills
 from duckclaw.workers.field_reflection import (
@@ -114,7 +115,7 @@ _READ_SQL_MAX_RESPONSE_CHARS = max(8_000, int(os.environ.get("DUCKCLAW_READ_SQL_
 # run_sandbox puede volcar cientos de KB; sin context_monitor el ToolMessage iría entero al LLM.
 _RUN_SANDBOX_TOOL_LLM_MAX_CHARS = max(4_000, int(os.environ.get("DUCKCLAW_RUN_SANDBOX_TOOL_LLM_MAX_CHARS", "12000")))
 
-# Cache en memoria por chat para comparar PnL entre ticks consecutivos de /goals.
+# Cache en memoria por chat para comparar PnL entre ticks consecutivos de /crons.
 _GOALS_PREV_UNREALIZED_PNL_BY_CHAT: dict[str, float] = {}
 
 
@@ -751,7 +752,7 @@ def _finanz_should_force_ibkr_after_local_cuentas_read(
 _TASK_AWARENESS_PROMPT = """
 Además:
 - Si no recibes una tarea concreta (mensaje vacío o solo saludos), pregunta: "¿Cuál es mi tarea?" y ofrece ejemplos de lo que puedes hacer según tu rol.
-- En tu cierre proactivo invita a usar fly commands: si hablaste de datos o ejecución sugiere /tasks o /team; invita a crear objetivos con /goals (por defecto están vacíos); si de configuración /prompt o /skills; en general /help para ver todos los comandos.
+- En tu cierre proactivo invita a usar fly commands: si hablaste de datos o ejecución sugiere /tasks o /team; invita a crear objetivos con /crons (por defecto están vacíos); si de configuración /prompt o /skills; en general /help para ver todos los comandos.
 """
 
 # LeilaAssistant: canal retail; no mencionar comandos con / a la usuaria (ver soul / system_prompt).
@@ -3025,7 +3026,7 @@ def build_worker_graph(
             summarize_stored_directive = "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
             _is_goals_tick_msg = (
                 str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
-                and "Revisión periódica de /goals" in str(incoming or "")
+                and proactive_review_event_phrase_in_text(str(incoming or ""))
             )
             is_schema = _is_schema_query(incoming)
             is_table_content = _is_table_content_query(incoming)
@@ -3062,7 +3063,7 @@ def build_worker_graph(
                 # TAREA sintética del manager incluye texto tipo "fetch+portfolio+..."; no forzar IBKR.
                 is_portfolio = False
             if (_lid or "").strip().lower() == "quant_trader" and _is_goals_tick_msg:
-                # En ticks /goals no forzar "solo portfolio": primero debe correr el ciclo CFD/HRP.
+                # En ticks /crons no forzar "solo portfolio": primero debe correr el ciclo CFD/HRP.
                 is_portfolio = False
             if (_lid or "").strip().lower() == "quant_trader" and _q_reddit_hist:
                 # Reintento sin re-pegar URL: misma lógica que SUMMARIZE (share en contexto); no adelantar IBKR.
@@ -4064,7 +4065,7 @@ def build_worker_graph(
             tool_calls = getattr(resp, "tool_calls", None) or []
             _is_goals_tick = (
                 str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
-                and "Revisión periódica de /goals" in str(incoming or "")
+                and proactive_review_event_phrase_in_text(str(incoming or ""))
             )
             if force_portfolio and has_ibkr and _is_goals_tick and not tool_calls:
                 _forced_tid = f"call_forced_ibkr_{int(time.time() * 1000)}"
@@ -4189,7 +4190,7 @@ def build_worker_graph(
                         pass  # conservar veredicto del LLM (HRP / alineación)
                     else:
                         _hrp_stub = (
-                            "Revision /goals (proactiva): objetivo de sesion **rebalance_hrp**. "
+                            "Revision /crons (proactiva): objetivo de sesion **rebalance_hrp**. "
                             "Usa en el hilo la salida de `get_ibkr_portfolio` y `execute_sandbox_script` "
                             "(pesos HRP vs cartera); no apliques el resumen automatico de meta «PnL positivo» a este tick."
                         )
@@ -4202,7 +4203,7 @@ def build_worker_graph(
                         pass  # conservar veredicto del LLM (prep / gap / MOC)
                     else:
                         _ov_stub = (
-                            "Revision /goals (proactiva): objetivo de sesion **overnight_gap_squeeze**. "
+                            "Revision /crons (proactiva): objetivo de sesion **overnight_gap_squeeze**. "
                             "Prioriza alineacion prep/MOC y gap squeeze segun el SYSTEM_EVENT; "
                             "no apliques el resumen automatico de meta «PnL positivo» a este tick."
                         )
@@ -4271,7 +4272,7 @@ def build_worker_graph(
                                 else "activar reduccion de riesgo y evitar nuevas señales hasta recuperar PnL>=0."
                             )
                             _fallback_text = (
-                                "Revision /goals (proactiva): "
+                                "Revision /crons (proactiva): "
                                 f"snapshot IBKR OK (valor total=${_total_value or 'N/D'}, posiciones={_positions or 'N/D'}, "
                                 f"PnL no realizado=${_unreal_val:,.2f}). "
                                 f"Meta 'PnL positivo': {_state}. Accion sugerida: {_act}"
@@ -4288,14 +4289,14 @@ def build_worker_graph(
                                 _GOALS_PREV_UNREALIZED_PNL_BY_CHAT[_chat_key] = _unreal_val
                         else:
                             _fallback_text = (
-                                "Revision /goals (proactiva): "
+                                "Revision /crons (proactiva): "
                                 f"snapshot IBKR OK (valor total=${_total_value or 'N/D'}, posiciones={_positions or 'N/D'}). "
                                 "Meta 'PnL positivo': estado parcial por falta de PnL realizado/no realizado en este snapshot. "
                                 "Accion sugerida: extraer PnL por posicion y activar reduccion de riesgo si el agregado pasa a negativo."
                             )
                     elif _portfolio_tool_text:
                         _fallback_text = (
-                            "Revision /goals (proactiva): snapshot IBKR recibido. "
+                            "Revision /crons (proactiva): snapshot IBKR recibido. "
                             "Meta 'PnL positivo': se requiere desglose de PnL realizado/no realizado para validar alineacion. "
                             "Accion sugerida: extraer PnL por posicion y aplicar regla de reduccion de riesgo."
                         )

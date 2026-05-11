@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS main.semantic_memory (
 
 CREATE SCHEMA IF NOT EXISTS quant_core;
 
--- Sesión activa de trading (singleton por bóveda: id = 'active'). Fly: /trading_session
+-- Sesión activa de trading (singleton por bóveda: id = 'active'). Fly: /trading-session
 -- session_goal JSON: objective maximize_pnl|rebalance_hrp, max_drawdown_pct, position_size_pct, signal_threshold, tickers, mode
 CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
   id VARCHAR PRIMARY KEY,

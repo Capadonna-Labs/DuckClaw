@@ -38,24 +38,49 @@ from duckclaw.forge.skills.the_mind_outbound import (
     deal_cards_for_level,
     send_telegram_dm,
 )
+from duckclaw.forge.atoms.cron_wall_schedule import (
+    format_cron_wall_human,
+    parse_cron_wall_tokens,
+)
+from duckclaw.graphs.proactive_review_markers import (
+    GOALS_PROACTIVE_REVIEW_PHRASE_CRONS,
+    GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY,
+    proactive_review_event_phrase_in_text,
+)
 from duckclaw.graphs.trading_hours_cot import quant_event_horario_line
 from duckclaw.utils.logger import get_obs_logger, log_fly, structured_log_context
 from duckclaw.utils.telegram_markdown_v2 import TELEGRAM_MARKDOWN_V2_SPECIAL
 
 _PREFIX = "chat_"
 
-# Revisión proactiva /goals --delta (agent_config)
+
+# Revisión proactiva /crons --delta (agent_config; claves internas goals_* sin cambiar)
 _GOALS_DELTA_SECONDS_KEY = "goals_delta_seconds"
 _GOALS_PROACTIVE_LAST_FIRE_KEY = "goals_proactive_last_fire_epoch"
 _GOALS_PROACTIVE_ANCHOR_KEY = "goals_proactive_schedule_anchor_epoch"
 _GOALS_PROACTIVE_TENANT_KEY = "goals_proactive_tenant_id"
 _GOALS_DELTA_ANCHOR_LEGACY_KEY = "goals_delta_anchor"
 _GOALS_DELTA_META_KEY = "goals_delta_meta"
+_GOALS_CRON_WALL_KEY = "goals_cron_wall"
 GOALS_DELTA_MIN_SECONDS = 60
 GOALS_DELTA_MAX_SECONDS = 7 * 24 * 3600
 
-# Gráfica PNG (base64) para respuestas fly: api-gateway hace pop y sendPhoto
-_FLY_OUTBOUND_CHART_B64: dict[str, str] = {}
+# IDs mostrados en /crons para quitar un schedule con /crons --rm <cron-id>
+CRON_SCHEDULE_ID_DELTA = "delta"
+CRON_SCHEDULE_ID_WALL = "wall"
+
+
+def _normalize_cron_rm_id(token: str) -> Optional[str]:
+    """``delta`` / ``interval`` → intervalo; ``wall`` / ``timestamp`` → reloj."""
+    t = (token or "").strip().lower()
+    if t in (CRON_SCHEDULE_ID_DELTA, "interval"):
+        return CRON_SCHEDULE_ID_DELTA
+    if t in (CRON_SCHEDULE_ID_WALL, "timestamp"):
+        return CRON_SCHEDULE_ID_WALL
+    return None
+
+# Cola FIFO de PNG base64 por chat: api-gateway hace pop_all y sendPhoto en orden (p. ej. PnL + torta).
+_FLY_OUTBOUND_CHART_B64: dict[str, list[str]] = {}
 
 
 def _debug_log_model_config(
@@ -74,11 +99,26 @@ def register_fly_outbound_chart_b64(session_id: Any, b64: str) -> None:
     s = (b64 or "").strip()
     if not s:
         return
-    _FLY_OUTBOUND_CHART_B64[str(session_id).strip()] = s
+    k = str(session_id).strip()
+    _FLY_OUTBOUND_CHART_B64.setdefault(k, []).append(s)
+
+
+def pop_all_fly_outbound_charts_b64(session_id: Any) -> list[str]:
+    """Devuelve y vacía todas las figuras encoladas para este chat (orden FIFO)."""
+    k = str(session_id).strip()
+    return _FLY_OUTBOUND_CHART_B64.pop(k, [])
 
 
 def pop_fly_outbound_chart_b64(session_id: Any) -> str | None:
-    return _FLY_OUTBOUND_CHART_B64.pop(str(session_id).strip(), None)
+    """Compat: saca solo el primer PNG de la cola; preferir pop_all en el gateway."""
+    k = str(session_id).strip()
+    q = _FLY_OUTBOUND_CHART_B64.get(k)
+    if not q:
+        return None
+    first = q.pop(0)
+    if not q:
+        del _FLY_OUTBOUND_CHART_B64[k]
+    return first
 
 
 def parse_goals_delta_arg(fragment: str) -> tuple[Optional[int], Optional[str]]:
@@ -168,7 +208,7 @@ def _goals_proactive_interval_countdown_parts(
     else:
         countdown_part = (
             f" · próximo en hasta ~{format_goals_countdown_human(max(0, int(ds_list)))} "
-            "(aprox.; vuelve a ejecutar /goals --delta para anclar la hora)"
+            "(aprox.; vuelve a ejecutar /crons --delta para anclar la hora)"
         )
     last_bit = ""
     if last_f and last_f > 0:
@@ -184,15 +224,91 @@ def _goals_proactive_interval_countdown_parts(
     return interval_h, countdown_part, last_bit
 
 
-def _goals_proactive_listing_footer(db: Any, chat_id: Any, ds_list: int) -> str:
-    """Pie de /goals cuando hay delta activo: intervalo, cuenta atrás aproximada, último tick."""
-    interval_h, countdown_part, last_bit = _goals_proactive_interval_countdown_parts(
-        db, chat_id, ds_list
-    )
-    return (
-        f"\nRevisión proactiva: cada ~{interval_h}{countdown_part}{last_bit} "
-        "(/goals --delta off para apagar)."
-    )
+def format_platform_cron_summary() -> str:
+    """Resumen de crons de infraestructura (heartbeat / gateway). Sin nombres de variables en el texto principal."""
+    def _int_env(name: str, default: str) -> int:
+        try:
+            return max(1, int((os.getenv(name) or default).strip() or default))
+        except (TypeError, ValueError):
+            return max(1, int(default))
+
+    poll_s = _int_env("GOALS_TICKER_POLL_SECONDS", "45")
+    hb_s = _int_env("HEARTBEAT_INTERVAL_SECONDS", "3600")
+    embed_raw = (os.getenv("DUCKCLAW_EMBED_GOALS_TICKER") or "true").strip().lower()
+    embed_on = embed_raw in ("1", "true", "yes", "on")
+    lines = [
+        "Del bot (infraestructura)",
+        f"· Escaneo de bases para tus revisiones programadas: cada ~{poll_s} s.",
+        f"· Homeostasis global (daemon): cada ~{hb_s} s.",
+    ]
+    if embed_on:
+        lines.append("· El API Gateway puede ejecutar el mismo escaneo embebido (si está activo en esta instalación).")
+    lines.append("(Intervalos ajustables por operador en el host.)")
+    return "\n".join(lines)
+
+
+def _short_session_uid_for_crons(uid: str) -> str:
+    u = (uid or "").strip()
+    if len(u) <= 12:
+        return u if u else "(sin session_uid en meta)"
+    return u[:8] + "…"
+
+
+def _crons_goals_delta_meta_dict(db: Any, chat_id: Any) -> Optional[dict[str, Any]]:
+    raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
+    if not raw:
+        return None
+    try:
+        meta = json.loads(raw)
+    except Exception:
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
+def _crons_goals_delta_listing_section(db: Any, chat_id: Any) -> str:
+    """
+    Bloque único tras «Manager» en el listado /crons: intervalo delta, cuenta atrás, meta sesión Quant.
+    Vacío si no hay intervalo activo ni meta trigger=trading_session.
+    """
+    try:
+        ds_list = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
+    except ValueError:
+        ds_list = 0
+    if ds_list < 0:
+        ds_list = 0
+
+    meta = _crons_goals_delta_meta_dict(db, chat_id)
+    trigger_l = str((meta or {}).get("trigger") or "").strip().lower()
+    meta_trading = trigger_l == "trading_session"
+    uid_full = str((meta or {}).get("session_uid") or "").strip() if meta_trading else ""
+
+    if ds_list <= 0 and not meta_trading:
+        return ""
+
+    title = "Revisión proactiva (TRADING_TICK)" if meta_trading else "Revisión proactiva"
+    lines_body: list[str] = []
+
+    if ds_list > 0:
+        interval_h, countdown_part, last_bit = _goals_proactive_interval_countdown_parts(db, chat_id, ds_list)
+        lines_body.append(
+            f"- Intervalo (cron-id {CRON_SCHEDULE_ID_DELTA}): cada ~{interval_h}{countdown_part}{last_bit} "
+            f"(/crons --delta off o /crons --rm {CRON_SCHEDULE_ID_DELTA})."
+        )
+    else:
+        lines_body.append(
+            "- Intervalo: no activo (goals_delta_seconds=0). Meta indica sesión Quant; "
+            "reactiva con /crons --delta … o la tool schedule_quant_trading_proactive_ticks en Quant-Trader."
+        )
+
+    if meta_trading:
+        uid_disp = _short_session_uid_for_crons(uid_full)
+        lines_body.append(
+            "- Sesión Quant: session_uid="
+            + uid_disp
+            + " · origen: schedule_quant_trading_proactive_ticks o /trading-session (trigger trading_session)."
+        )
+
+    return f"\n\n{title}\n" + "\n".join(lines_body)
 
 
 def chat_id_from_goals_delta_config_key(key: str) -> Optional[str]:
@@ -203,9 +319,153 @@ def chat_id_from_goals_delta_config_key(key: str) -> Optional[str]:
     return key[len(_PREFIX) : -len(suf)] or None
 
 
+def chat_id_from_goals_cron_wall_key(key: str) -> Optional[str]:
+    """Extrae chat_id desde fila agent_config con sufijo _goals_cron_wall."""
+    suf = f"_{_GOALS_CRON_WALL_KEY}"
+    if not key.startswith(_PREFIX) or not key.endswith(suf):
+        return None
+    return key[len(_PREFIX) : -len(suf)] or None
+
+
+def _apply_interval_only_clear(conn: Any, chat_id: Any) -> None:
+    """Quita solo programación por intervalo (--delta); no toca ``goals_cron_wall`` ni last_fire."""
+    set_chat_state(conn, chat_id, _GOALS_DELTA_SECONDS_KEY, "0")
+    set_chat_state(conn, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, "")
+    set_chat_state(conn, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
+    try:
+        raw_m = (get_chat_state(conn, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
+        if not raw_m:
+            return
+        m = json.loads(raw_m)
+        if isinstance(m, dict) and str(m.get("trigger") or "").lower() == "goals_cli":
+            set_chat_state(conn, chat_id, _GOALS_DELTA_META_KEY, "")
+    except Exception:
+        pass
+
+
+def clear_interval_schedule_only(db: Any, chat_id: Any) -> None:
+    """``/crons --delta off``: intervalo y meta goals_cli; conserva horario de reloj y tenant."""
+    _apply_interval_only_clear(db, chat_id)
+
+    primary_resolved = ""
+    try:
+        raw_p = str(getattr(db, "_path", "") or "").strip()
+        if raw_p:
+            primary_resolved = str(Path(raw_p).expanduser().resolve())
+    except Exception:
+        primary_resolved = str(getattr(db, "_path", "") or "").strip()
+
+    from duckclaw import DuckClaw as _DuckClaw
+    from duckclaw.db_write_queue import enqueue_duckdb_write_sync
+    from duckclaw.gateway_db import iter_goals_delta_clear_duckdb_paths
+
+    _upsert_q = (
+        "INSERT INTO agent_config (key, value) VALUES (?, ?) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+    )
+
+    def _enqueue_interval_clear_remote(_db_path: str) -> None:
+        for _sk, _sv in (
+            (_GOALS_DELTA_SECONDS_KEY, "0"),
+            (_GOALS_PROACTIVE_ANCHOR_KEY, ""),
+            (_GOALS_DELTA_ANCHOR_LEGACY_KEY, ""),
+        ):
+            _ck = _chat_key(chat_id, _sk)
+            enqueue_duckdb_write_sync(
+                db_path=str(Path(_db_path).expanduser().resolve()),
+                query=_upsert_q,
+                params=[_ck, str(_sv)[:16384]],
+                user_id=str(chat_id),
+                tenant_id="default",
+            )
+
+    for _p in iter_goals_delta_clear_duckdb_paths(primary_fly_db_path=primary_resolved):
+        _rp = ""
+        try:
+            _rp = str(Path(_p).expanduser().resolve())
+        except OSError:
+            _rp = str(_p)
+        if primary_resolved and _rp == primary_resolved:
+            continue
+        try:
+            with _DuckClaw(_p, read_only=False, engine="python") as _d2:
+                _apply_interval_only_clear(_d2)
+        except Exception:
+            try:
+                _enqueue_interval_clear_remote(_p)
+            except Exception:
+                continue
+
+
+def _goals_cron_wall_listing_note(db: Any, chat_id: Any) -> str:
+    raw = (get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY) or "").strip()
+    if not raw:
+        return ""
+    try:
+        spec = json.loads(raw)
+    except Exception:
+        return ""
+    if not isinstance(spec, dict):
+        return ""
+    return (
+        "\n"
+        + format_cron_wall_human(spec)
+        + f" · cron-id: {CRON_SCHEDULE_ID_WALL} (/crons --rm {CRON_SCHEDULE_ID_WALL})"
+    )
+
+
+def clear_goals_cron_wall_storage(db: Any, chat_id: Any) -> None:
+    """Borra horario de reloj en esta conexión y bóvedas hermanas (misma lógica que clear delta)."""
+    set_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY, "")
+
+    primary_resolved = ""
+    try:
+        raw_p = str(getattr(db, "_path", "") or "").strip()
+        if raw_p:
+            primary_resolved = str(Path(raw_p).expanduser().resolve())
+    except Exception:
+        primary_resolved = str(getattr(db, "_path", "") or "").strip()
+
+    from duckclaw import DuckClaw as _DuckClaw
+    from duckclaw.db_write_queue import enqueue_duckdb_write_sync
+    from duckclaw.gateway_db import iter_goals_delta_clear_duckdb_paths
+
+    _upsert_q = (
+        "INSERT INTO agent_config (key, value) VALUES (?, ?) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+    )
+
+    def _enqueue_wall_clear_remote(_db_path: str) -> None:
+        _ck = _chat_key(chat_id, _GOALS_CRON_WALL_KEY)
+        enqueue_duckdb_write_sync(
+            db_path=str(Path(_db_path).expanduser().resolve()),
+            query=_upsert_q,
+            params=[_ck, ""],
+            user_id=str(chat_id),
+            tenant_id="default",
+        )
+
+    for _p in iter_goals_delta_clear_duckdb_paths(primary_fly_db_path=primary_resolved):
+        _rp = ""
+        try:
+            _rp = str(Path(_p).expanduser().resolve())
+        except OSError:
+            _rp = str(_p)
+        if primary_resolved and _rp == primary_resolved:
+            continue
+        try:
+            with _DuckClaw(_p, read_only=False, engine="python") as _d2:
+                set_chat_state(_d2, chat_id, _GOALS_CRON_WALL_KEY, "")
+        except Exception:
+            try:
+                _enqueue_wall_clear_remote(_p)
+            except Exception:
+                continue
+
+
 def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
     """
-    Apaga el ticker ``/goals --delta`` en el hub y en las bóvedas del **mismo** usuario que
+    Apaga el ticker ``/crons --delta`` en el hub y en las bóvedas del **mismo** usuario que
     ``db._path`` (``.../private/<uid>/*.duckdb``), más el hub vía ``get_gateway_db_path``. El
     heartbeat puede seguir escaneando más archivos para *descubrir* ticks; abrir en RW todas las
     DuckDB del árbol ``private`` al hacer ``off`` competía por bloqueos con db-writer.
@@ -218,6 +478,7 @@ def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
         set_chat_state(conn, chat_id, _GOALS_PROACTIVE_TENANT_KEY, "")
         set_chat_state(conn, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
         set_chat_state(conn, chat_id, _GOALS_DELTA_META_KEY, "")
+        set_chat_state(conn, chat_id, _GOALS_CRON_WALL_KEY, "")
 
     _apply_clear(db)
 
@@ -250,6 +511,7 @@ def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
             (_GOALS_PROACTIVE_TENANT_KEY, ""),
             (_GOALS_DELTA_ANCHOR_LEGACY_KEY, ""),
             (_GOALS_DELTA_META_KEY, ""),
+            (_GOALS_CRON_WALL_KEY, ""),
         ):
             _ck = _chat_key(chat_id, _sk)
             enqueue_duckdb_write_sync(
@@ -3044,7 +3306,7 @@ def set_manager_goals(db: Any, chat_id: Any, goals: list) -> None:
 
 
 def _goal_title(goal: dict, fallback_key: str) -> str:
-    """Título resumen del goal para listar en /goals."""
+    """Título resumen del goal para listar en /crons."""
     t = (goal.get("title") or "").strip()
     if t:
         return t[:80] + ("…" if len((goal.get("title") or "").strip()) > 80 else "")
@@ -3102,7 +3364,7 @@ def build_goals_proactive_system_event_message(
     return (
         "[SYSTEM_EVENT: "
         + _cot_ctx
-        + "Revisión periódica de /goals. Objetivos: "
+        + "Revisión periódica de /crons. Objetivos: "
         f"{summary}.{extra}Evalúa con herramientas si hace falta qué tan alineado está el "
         "contexto actual (portfolio, sesión de trading, etc.) con cumplir cada meta. "
         "Responde al usuario con un breve análisis o propuesta concreta (mensaje útil; "
@@ -3229,7 +3491,7 @@ def execute_goals(
     tenant_id: Any = None,
     vault_user_id: Any = None,
 ) -> str:
-    """/goals [--reset] [--delta …] | /goals <goal>: listar, resetear, programar revisión proactiva o añadir objetivo."""
+    """/crons [--reset] [--delta …] [--timestamp …] [--rm …] | /crons <goal>: listar, programar o quitar schedules, resetear o añadir objetivo. Alias: /goals."""
     _ = vault_user_id
     from duckclaw.forge.homeostasis.surprise import compute_surprise
 
@@ -3244,7 +3506,7 @@ def execute_goals(
     if toks and toks[0] == "--delta":
         if len(toks) < 2:
             return (
-                "Uso: /goals --delta 20min (o 1h, 90s) · /goals --delta off\n"
+                "Uso: /crons --delta 20min (o 1h, 90s) · /crons --delta off\n"
                 "El ticker (heartbeat o embebido en el gateway) escanea el hub y las bóvedas "
                 f"en db/private/*/*.duckdb. Intervalo permitido: {GOALS_DELTA_MIN_SECONDS}s … 7d."
             )
@@ -3258,8 +3520,9 @@ def execute_goals(
         if err:
             return err
         if secs == 0:
-            clear_goals_proactive_schedule(db, chat_id)
-            return "Revisión proactiva desactivada (/goals --delta off)."
+            clear_interval_schedule_only(db, chat_id)
+            return "Intervalo de revisión desactivado (/crons --delta off). Horario de reloj (--timestamp) no se modifica."
+        clear_goals_cron_wall_storage(db, chat_id)
         set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, str(secs))
         set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, tid)
         # Cooldown starts now so the first tick waits ~secs (not the next 45s gateway poll).
@@ -3268,7 +3531,7 @@ def execute_goals(
         _anchor_now = _fire_anchor
         set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, _anchor_now)
         set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, _anchor_now)
-        # Explicit `/goals --delta` is always a lightweight goals review (heartbeat uses
+        # Explicit `/crons --delta` is always a lightweight goals review (heartbeat uses
         # build_goals_proactive_system_event_message). Full TRADING_TICK scheduling stays
         # in `_ensure_trading_session_goals_delta` when a Quant session starts.
         meta_obj: dict[str, Any] = {"trigger": "goals_cli"}
@@ -3281,8 +3544,96 @@ def execute_goals(
         human = format_goals_delta_interval_human(secs)
         return (
             f"Revisión proactiva cada ~{human}. "
-            "El ticker del heartbeat disparará un SYSTEM_EVENT para revisar tus /goals. "
-            "Usa /goals para listar. /goals --delta off para cancelar."
+            "El ticker del heartbeat disparará un SYSTEM_EVENT para revisar tus objetivos (/crons). "
+            "Usa /crons para listar. /crons --delta off para cancelar."
+        )
+
+    if toks and toks[0] == "--timestamp":
+        rest = toks[1:]
+        if not rest:
+            return (
+                "Uso: /crons --timestamp once 2026-05-12T14:45 · "
+                "/crons --timestamp every 14:45 [weekdays|lun mar …] · /crons --timestamp off\n"
+                "Zona: America/Bogota por defecto (env DUCKCLAW_CRONS_WALL_TZ). "
+                "Exclusivo con /crons --delta: al activar uno se desactiva el otro."
+            )
+        if rest[0].lower() == "off":
+            clear_goals_cron_wall_storage(db, chat_id)
+            return "Horario de reloj desactivado (/crons --timestamp off)."
+        spec, terr = parse_cron_wall_tokens(rest)
+        if terr or not spec:
+            return terr or "No se pudo interpretar --timestamp."
+        clear_interval_schedule_only(db, chat_id)
+        set_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY, json.dumps(spec, ensure_ascii=False))
+        set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, tid)
+        mraw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
+        try:
+            if not mraw:
+                set_chat_state(
+                    db,
+                    chat_id,
+                    _GOALS_DELTA_META_KEY,
+                    json.dumps({"trigger": "goals_wall"}, ensure_ascii=False),
+                )
+            else:
+                mobj = json.loads(mraw)
+                if not isinstance(mobj, dict) or str(mobj.get("trigger") or "").lower() != "trading_session":
+                    set_chat_state(
+                        db,
+                        chat_id,
+                        _GOALS_DELTA_META_KEY,
+                        json.dumps({"trigger": "goals_wall"}, ensure_ascii=False),
+                    )
+        except Exception:
+            set_chat_state(
+                db,
+                chat_id,
+                _GOALS_DELTA_META_KEY,
+                json.dumps({"trigger": "goals_wall"}, ensure_ascii=False),
+            )
+        return (
+            f"Programación por reloj guardada. {format_cron_wall_human(spec)} "
+            "Usa /crons para listar. /crons --timestamp off para cancelar."
+        )
+
+    if toks and toks[0] == "--rm":
+        if len(toks) < 2:
+            return (
+                "Uso: /crons --rm delta · /crons --rm wall\n"
+                "Equivale a /crons --delta off (intervalo) o /crons --timestamp off (reloj). "
+                "Los cron-id salen en /crons junto a cada programación (alias: interval, timestamp)."
+            )
+        cid = _normalize_cron_rm_id(toks[1])
+        if cid is None:
+            return (
+                f"Cron-id desconocido `{toks[1]}`. Usa `{CRON_SCHEDULE_ID_DELTA}` (intervalo) o "
+                f"`{CRON_SCHEDULE_ID_WALL}` (horario de reloj); alias: interval, timestamp."
+            )
+        if cid == CRON_SCHEDULE_ID_DELTA:
+            try:
+                ds_rm = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
+            except ValueError:
+                ds_rm = 0
+            if ds_rm <= 0:
+                return (
+                    f"No hay revisión por intervalo activa (cron-id `{CRON_SCHEDULE_ID_DELTA}`). "
+                    "Ejecuta /crons para ver el listado."
+                )
+            clear_interval_schedule_only(db, chat_id)
+            return (
+                "Programación por intervalo eliminada (/crons --rm "
+                f"{CRON_SCHEDULE_ID_DELTA}). Horario de reloj (--timestamp) no se modifica."
+            )
+        raw_wm = (get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY) or "").strip()
+        if not raw_wm:
+            return (
+                f"No hay horario de reloj activo (cron-id `{CRON_SCHEDULE_ID_WALL}`). "
+                "Ejecuta /crons para ver el listado."
+            )
+        clear_goals_cron_wall_storage(db, chat_id)
+        return (
+            f"Horario de reloj eliminado (/crons --rm {CRON_SCHEDULE_ID_WALL}). "
+            "El intervalo (/crons --delta) no se modifica."
         )
 
     do_reset = raw.lower() == "--reset"
@@ -3295,11 +3646,11 @@ def execute_goals(
             if not ok_r:
                 return (
                     "✅ Objetivos reiniciados (aviso: no se limpió riesgo en bóveda: "
-                    f"{det_r}). Crea con /goals <objetivo>."
+                    f"{det_r}). Crea con /crons <objetivo>."
                 )
-        return "✅ Objetivos reiniciados. Crea con /goals <objetivo en lenguaje natural o clave>."
+        return "✅ Objetivos reiniciados. Crea con /crons <objetivo en lenguaje natural o clave>."
 
-    # Añadir: /goals <clave o lenguaje natural>
+    # Añadir: /crons <clave o lenguaje natural>
     if raw and not raw.startswith("--"):
         key_norm = _normalize_belief_key(raw)
         belief = None
@@ -3366,27 +3717,21 @@ def execute_goals(
                 return f"✅ Objetivo añadido (aviso: riesgo no guardado en bóveda: {det_m})"
         return f"✅ Objetivo añadido: {title_display}"
 
-    # Listar (por defecto vacío)
-    try:
-        ds_list = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
-    except ValueError:
-        ds_list = 0
-    if ds_list < 0:
-        ds_list = 0
+    # Listar (por defecto vacío): bloque «Tus crons» + «Del bot (infraestructura)»
+    platform = format_platform_cron_summary()
+    proactive_section = _crons_goals_delta_listing_section(db, chat_id)
+    user_intro = "Tus crons\n\n\U0001f3af Manager"
 
     if not goals:
-        empty = (
-            "\U0001f3af Manager\nNo hay goals. Crea con /goals <objetivo>, ej. /goals disminuir gasto en recreación."
+        user_body = (
+            f"{user_intro}\n"
+            "No hay goals. Crea con /crons <objetivo>, ej. /crons disminuir gasto en recreación."
         )
-        if ds_list > 0:
-            ih, cp, lb = _goals_proactive_interval_countdown_parts(db, chat_id, ds_list)
-            empty += (
-                f"\n(Revisión proactiva cada ~{ih}{cp}{lb}; "
-                "añade objetivos para que el tick tenga metas que revisar.)"
-            )
-        return empty
+        user_body += proactive_section
+        user_body += _goals_cron_wall_listing_note(db, chat_id)
+        return f"{user_body}\n\n{platform}\n\n/crons --reset"
 
-    lines = ["\U0001f3af Manager"]
+    lines = [user_intro]
     try:
         key_to_belief = {b.key.strip(): b for b in (registry.beliefs if registry else [])}
         for g in goals:
@@ -3417,8 +3762,9 @@ def execute_goals(
                 lines.append(f"- {title}")
     except Exception as e:
         return f"Error: {e}."
-    extra_delta = _goals_proactive_listing_footer(db, chat_id, ds_list) if ds_list > 0 else ""
-    return "\n".join(lines) + extra_delta + "\n\n/goals --reset"
+    wall_note = _goals_cron_wall_listing_note(db, chat_id)
+    goals_block = "\n".join(lines) + proactive_section + wall_note
+    return f"{goals_block}\n\n{platform}\n\n/crons --reset"
 
 
 def execute_tasks(db: Any, chat_id: Any) -> str:
@@ -3978,7 +4324,7 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ("/roles", "Ver todos los trabajadores virtuales (templates)"),
         ("/tasks", "Estado actual: BUSY/IDLE, subagente, tarea"),
         ("/history", "Historial de tareas (quién hizo qué)"),
-        ("/goals", "Objetivos de homeostasis"),
+        ("/crons", "Objetivos + --delta / --timestamp; --rm delta|wall para quitar un schedule"),
         ("/prompt <worker_id>", "Ver prompt; --change <texto> para cambiar"),
         ("/model", "Ver o cambiar LLM (provider/model)"),
         ("/models", "Listar modelos disponibles de un provider (ej. gemini)"),
@@ -4008,8 +4354,8 @@ def execute_help(db: Any, chat_id: Any) -> str:
         ),
         ("/cancel_signal <uuid>", "HITL: cancela señal pendiente (PENDING_HITL/AWAITING_HITL)"),
         (
-            "/trading_session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--confirm] [--status] [--stop]",
-            "Quant: sesión activa + session_goal + auto delta de /goals (live requiere --confirm)",
+            "/trading-session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--confirm] [--status] [--stop]",
+            "Quant: sesión activa + session_goal + auto delta de /crons (live requiere --confirm)",
         ),
         (
             "/quant_cycle [--tickers A,B] [--timeframe 1h] [--lookback_days 20] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--execute auto|off]",
@@ -4414,6 +4760,109 @@ _TRADING_SESSION_ROW_ID = "active"
 _QUANT_TRADER_TEMPLATE_ID = "Quant-Trader"
 _TRADING_SESSION_PNL_SNAPSHOTS_KEY = "trading_session_pnl_snapshots_json"
 _TRADING_SESSION_PNL_HIST_UID_KEY = "trading_session_pnl_hist_uid"
+_PNL_SNAPSHOT_SYNTH_STEP_SEC = 60.0
+
+
+def _snap_epoch_from_obj(obj: dict[str, Any]) -> float | None:
+    if not isinstance(obj, dict):
+        return None
+    for k in ("epoch", "t", "ts", "time"):
+        if k in obj and obj[k] is not None:
+            try:
+                return float(obj[k])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _snap_pnl_from_obj(obj: dict[str, Any]) -> float | None:
+    if not isinstance(obj, dict):
+        return None
+    for k in ("pnl", "p", "v"):
+        if k in obj and obj[k] is not None:
+            try:
+                return float(obj[k])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _pnl_snapshots_parse_stored(raw: Any, *, now: float) -> list[tuple[float, float]]:
+    """
+    Acepta v1 lista de floats o v2 [{epoch, pnl}, ...].
+    v1 obtiene timestamps sintéticos hacia atrás desde ``now``.
+    """
+    data = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw) if raw.strip() else []
+        except Exception:
+            return []
+    if not isinstance(data, list) or not data:
+        return []
+    if isinstance(data[0], dict):
+        out: list[tuple[float, float]] = []
+        for it in data:
+            if not isinstance(it, dict):
+                continue
+            ep = _snap_epoch_from_obj(it)
+            pv = _snap_pnl_from_obj(it)
+            if ep is None or pv is None:
+                continue
+            out.append((float(ep), float(pv)))
+        out.sort(key=lambda z: z[0])
+        return out
+    floats: list[float] = []
+    for x in data:
+        try:
+            floats.append(float(x))
+        except (TypeError, ValueError):
+            continue
+    if not floats:
+        return []
+    n = len(floats)
+    return [
+        (float(now) - float(n - 1 - i) * _PNL_SNAPSHOT_SYNTH_STEP_SEC, floats[i])
+        for i in range(n)
+    ]
+
+
+def _pnl_snapshots_dedupe_epoch(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Misma lógica epsilon que la deduplicación por PnL; conserva el último epoch del tramo."""
+    out: list[tuple[float, float]] = []
+    for ep, fx in points or []:
+        if not out:
+            out.append((float(ep), float(fx)))
+            continue
+        prev = out[-1][1]
+        eps = max(1e-4, 1e-6 * max(1.0, abs(fx), abs(prev)))
+        if abs(fx - prev) > eps:
+            out.append((float(ep), float(fx)))
+        else:
+            out[-1] = (float(ep), float(fx))
+    return out
+
+
+def _pnl_snapshots_to_floats(points: list[tuple[float, float]]) -> list[float]:
+    return [float(p) for _, p in points]
+
+
+def _pnl_snapshots_serialize_v2(points: list[tuple[float, float]]) -> str:
+    return json.dumps(
+        [{"epoch": float(ep), "pnl": float(pv)} for ep, pv in points],
+        ensure_ascii=False,
+    )
+
+
+def _snapshot_epoch_points_for_session(db: Any, chat_id: Any, session_uid: str) -> list[tuple[float, float]]:
+    uid = (session_uid or "").strip()
+    if not uid or uid == "n/a":
+        return []
+    hist_uid_s = str(get_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or "").strip()
+    if hist_uid_s != uid:
+        return []
+    raw = get_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
+    return _pnl_snapshots_dedupe_epoch(_pnl_snapshots_parse_stored(raw, now=time.time()))
 
 
 def _dedupe_trading_session_snapshots(snaps: list[Any]) -> list[float]:
@@ -4525,7 +4974,7 @@ class QuantCycleCliArgs(BaseModel):
 
 
 def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArgs], Optional[str]]:
-    """Parsea flags de /trading_session."""
+    """Parsea flags de /trading-session."""
     mode: Optional[str] = None
     tickers_raw: list[str] = []
     confirm = False
@@ -4786,6 +5235,127 @@ def _vault_apply_sql_statements(
                 pass
 
 
+def set_chat_state_via_vault(
+    db: Any,
+    chat_id: Any,
+    key_suffix: str,
+    value: str,
+    *,
+    tenant_id: str = "default",
+) -> tuple[bool, str]:
+    """
+    Persiste ``agent_config`` vía ``_vault_apply_sql_statements`` — funciona con DuckClaw RO (cola db-writer).
+    Fallback a ``set_chat_state`` solo si vault falla (p. ej. redis ausente).
+    """
+    tid = str(tenant_id or "default").strip() or "default"
+    upsert_sql = (
+        "INSERT INTO agent_config (key, value) VALUES (?, ?) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP"
+    )
+    ck = _chat_key(chat_id, key_suffix)[:240]
+    vv = str(value)[:16384]
+    ok, err = _vault_apply_sql_statements(db, [(upsert_sql, [ck, vv])], tenant_id=tid)
+    if ok:
+        return True, ""
+    try:
+        set_chat_state(db, chat_id, key_suffix, vv)
+        return True, ""
+    except Exception as exc:
+        combined = "; ".join(x for x in (err, str(exc)) if x).strip()
+        return False, (combined or "persist_failed")[:500]
+
+
+def schedule_quant_trading_proactive_ticks(
+    db: Any,
+    *,
+    chat_id: Any,
+    tenant_id: str,
+    interval_seconds: int = 0,
+) -> str:
+    """
+    Programa revisión proactiva (TRADING_TICK vía ticker /crons) para Quant con sesión ACTIVE.
+    Persistencia segura desde worker RO vía vault writer. Si ``interval_seconds`` es 0, solo garantiza delta
+    default (si hace falta) y meta ``trading_session`` como ``/trading-session``.
+    """
+    tid = str(tenant_id or "default").strip() or "default"
+    cid = chat_id
+    try:
+        raw = db.query(
+            "SELECT session_uid, status FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception as exc:
+        return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
+    if not rows or not isinstance(rows[0], dict):
+        return json.dumps(
+            {"status": "error", "error": "NO_ACTIVE_ROW", "hint": "Abre sesión con /trading-session o read_sql debe mostrar ACTIVE."},
+            ensure_ascii=False,
+        )
+    row = rows[0]
+    if str(row.get("status") or "").strip().upper() != "ACTIVE":
+        return json.dumps(
+            {"status": "error", "error": "SESSION_NOT_ACTIVE", "status_actual": row.get("status")},
+            ensure_ascii=False,
+        )
+    session_uid = str(row.get("session_uid") or "").strip()
+    if not session_uid:
+        return json.dumps({"status": "error", "error": "MISSING_SESSION_UID"}, ensure_ascii=False)
+
+    if int(interval_seconds) > 0:
+        secs_iv = max(
+            GOALS_DELTA_MIN_SECONDS,
+            min(int(interval_seconds), GOALS_DELTA_MAX_SECONDS),
+        )
+        fire = str(time.time())
+        blob_meta = json.dumps(
+            {"trigger": "trading_session", "session_uid": session_uid},
+            ensure_ascii=False,
+        )
+        for suf, val in (
+            (_GOALS_CRON_WALL_KEY, ""),
+            (_GOALS_DELTA_SECONDS_KEY, str(secs_iv)),
+            (_GOALS_PROACTIVE_LAST_FIRE_KEY, fire),
+            (_GOALS_PROACTIVE_ANCHOR_KEY, fire),
+            (_GOALS_DELTA_ANCHOR_LEGACY_KEY, fire),
+            (_GOALS_PROACTIVE_TENANT_KEY, tid),
+            (_GOALS_DELTA_META_KEY, blob_meta),
+        ):
+            ok_w, er_w = set_chat_state_via_vault(db, cid, suf, val, tenant_id=tid)
+            if not ok_w:
+                return json.dumps({"status": "error", "error": er_w or "persist_failed"}, ensure_ascii=False)
+        _ensure_trading_session_goals_delta(
+            db, chat_id=cid, tenant_id=tid, session_uid=session_uid
+        )
+        human = format_goals_delta_interval_human(secs_iv)
+        return json.dumps(
+            {
+                "status": "ok",
+                "session_uid": session_uid,
+                "interval_seconds": secs_iv,
+                "interval_human": human,
+                "note": "TRADING_TICK / heartbeat: mismo esquema que /crons --delta con trigger trading_session.",
+            },
+            ensure_ascii=False,
+        )
+
+    enabled, secs = _ensure_trading_session_goals_delta(
+        db,
+        chat_id=cid,
+        tenant_id=tid,
+        session_uid=session_uid,
+    )
+    return json.dumps(
+        {
+            "status": "ok",
+            "scheduler_bootstrap_was_needed": enabled,
+            "interval_seconds": secs,
+            "interval_human": format_goals_delta_interval_human(secs),
+            "session_uid": session_uid,
+        },
+        ensure_ascii=False,
+    )
+
+
 def _ensure_trading_session_goals_delta(
     db: Any,
     *,
@@ -4794,6 +5364,7 @@ def _ensure_trading_session_goals_delta(
     session_uid: str,
 ) -> tuple[bool, int]:
     """Activa goals delta por default (5m) si hace falta; siempre enlaza meta al tick de sesión Quant."""
+    tid = str(tenant_id or "default").strip() or "default"
     try:
         current = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
     except ValueError:
@@ -4802,19 +5373,31 @@ def _ensure_trading_session_goals_delta(
     enabled = False
     if current <= 0:
         current = default_secs
-        set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, str(current))
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
         now_s = str(time.time())
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, now_s)
-        set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, now_s)
+        for suf, val in (
+            (_GOALS_DELTA_SECONDS_KEY, str(current)),
+            (_GOALS_PROACTIVE_LAST_FIRE_KEY, ""),
+            (_GOALS_PROACTIVE_ANCHOR_KEY, now_s),
+            (_GOALS_DELTA_ANCHOR_LEGACY_KEY, now_s),
+        ):
+            ok_p, er_p = set_chat_state_via_vault(db, chat_id, suf, val, tenant_id=tid)
+            if not ok_p:
+                return False, current
         enabled = True
-    set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, str(tenant_id or "default"))
-    set_chat_state(
+    ok_t, er_t = set_chat_state_via_vault(
+        db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, tid, tenant_id=tid
+    )
+    if not ok_t:
+        return False, current
+    ok_m, er_m = set_chat_state_via_vault(
         db,
         chat_id,
         _GOALS_DELTA_META_KEY,
         json.dumps({"trigger": "trading_session", "session_uid": session_uid}, ensure_ascii=False),
+        tenant_id=tid,
     )
+    if not ok_m:
+        return False, current
     _sess_obj = ""
     try:
         _raw_s = db.query(
@@ -4851,11 +5434,15 @@ def _ensure_trading_session_goals_delta(
                 "observed_value": None,
                 "title": "Overnight Gap Squeeze (cierre + gap) en cada tick",
             }
-        set_manager_goals(
+        _okg, _erg = set_chat_state_via_vault(
             db,
             chat_id,
-            [_seed_goal],
+            "goals",
+            json.dumps([_seed_goal], ensure_ascii=False),
+            tenant_id=tid,
         )
+        if not _okg:
+            set_manager_goals(db, chat_id, [_seed_goal])
     return enabled, current
 
 
@@ -4865,7 +5452,7 @@ def _close_active_trading_session(
     chat_id: Any,
     tenant_id: str,
 ) -> tuple[bool, str]:
-    """Cierra sesión ACTIVE y limpia scheduler creado por /trading_session."""
+    """Cierra sesión ACTIVE y limpia scheduler creado por /trading-session."""
     session_uid = ""
     try:
         raw = db.query(
@@ -4914,6 +5501,273 @@ def _close_active_trading_session(
     except Exception:
         pass
     return True, f"session_uid={session_uid or 'n/a'} | pnl_estimado={pnl:.2f}"
+
+
+def _session_notionals_from_ibkr_for_tickers(
+    parts: list[str],
+) -> tuple[dict[str, float], str | None, float | None]:
+    """
+    Nocional ``|market_value|`` por símbolo en ``parts``, snapshot IBKR (mismo contrato que
+    ``get_ibkr_portfolio``). Retorna ``(mapa, err, total_cuenta)`` donde ``total_cuenta`` es
+    ``total_value`` / net liq. del payload (para % como en el resumen IBKR); ``None`` si no es usable.
+    """
+    import os
+
+    from duckclaw.forge.skills.ibkr_bridge import _ibkr_resolve_payload_with_optional_alt
+
+    api_url = (os.environ.get("IBKR_PORTFOLIO_API_URL") or "").strip()
+    api_key = (os.environ.get("IBKR_PORTFOLIO_API_KEY") or "").strip()
+    positions_url = (os.environ.get("IBKR_PORTFOLIO_POSITIONS_URL") or "").strip()
+    zero = {p: 0.0 for p in parts}
+    if not api_url or not api_key:
+        return zero, "ibkr_env_missing", None
+
+    try:
+        data, _eff, _cfg = _ibkr_resolve_payload_with_optional_alt(
+            api_url, api_key, positions_url
+        )
+    except Exception as exc:
+        return zero, str(exc)[:200], None
+
+    if not isinstance(data, dict):
+        return zero, "ibkr_payload_invalid", None
+
+    portfolio = data.get("portfolio") or data.get("positions") or []
+    if isinstance(portfolio, dict):
+        portfolio = list(portfolio.values()) if portfolio else []
+
+    tv = data.get("total_value")
+    if tv is None:
+        tv = data.get("net_liquidation") or data.get("equity") or data.get("value") or 0
+    try:
+        total_account_f = float(tv)
+    except (TypeError, ValueError):
+        total_account_f = 0.0
+    if total_account_f <= 0 and isinstance(portfolio, list):
+        for pos in portfolio:
+            if not isinstance(pos, dict):
+                continue
+            mv0 = pos.get("market_value") or pos.get("marketValue") or pos.get("value") or 0
+            try:
+                total_account_f += abs(float(mv0))
+            except (TypeError, ValueError):
+                continue
+
+    total_account: float | None = total_account_f if total_account_f > 1e-9 else None
+
+    seen = {p.upper() for p in parts}
+    notionals: dict[str, float] = {p: 0.0 for p in parts}
+    if not isinstance(portfolio, list):
+        return notionals, None, total_account
+
+    for pos in portfolio:
+        if not isinstance(pos, dict):
+            continue
+        sym = str(pos.get("symbol") or pos.get("ticker") or "").strip().upper()
+        if sym not in seen:
+            continue
+        mv = pos.get("market_value") or pos.get("marketValue") or pos.get("value") or 0
+        try:
+            notionals[sym] += abs(float(mv))
+        except (TypeError, ValueError):
+            continue
+
+    return notionals, None, total_account
+
+
+def _session_participation_breakdown(
+    db: Any, tickers_csv: str
+) -> tuple[list[tuple[str, float, float]], bool, str]:
+    """
+    Retorna filas ``(símbolo, %, nocional_usd)`` en el orden del CSV de sesión,
+    ``True`` si los % vienen de nocional, ``False`` si reparto igual,
+    y ``weight_source`` en ``{"db", "ibkr", "equal"}``.
+    Con ``ibkr``: % = ``|mv| / total_value`` del snapshot (mismo criterio que el resumen de cuenta);
+    con ``db``: % = nocional del ticker / suma nocional en tickers de sesión.
+    """
+    parts = [x.strip().upper() for x in (tickers_csv or "").split(",") if x.strip()]
+    if not parts:
+        return [], False, "equal"
+    esc = [p.replace("'", "''") for p in parts]
+    in_list = ",".join(f"'{t}'" for t in esc)
+    notionals: dict[str, float] = {t: 0.0 for t in parts}
+    seen: set[str] = set(parts)
+    n_db_rows = 0
+    n_rows_dict = 0
+    sample_unknown: list[str] = []
+    query_err: str | None = None
+    try:
+        raw = db.query(
+            f"SELECT ticker, qty, current_price FROM quant_core.portfolio_positions "
+            f"WHERE UPPER(TRIM(ticker)) IN ({in_list})"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        n_db_rows = len(rows or [])
+        for it in rows or []:
+            if not isinstance(it, dict):
+                continue
+            n_rows_dict += 1
+            sym = str(it.get("ticker") or "").strip().upper()
+            if sym not in seen:
+                if len(sample_unknown) < 5 and sym:
+                    sample_unknown.append(sym[:16])
+                continue
+            try:
+                q = float(it.get("qty") or 0.0)
+                px = float(it.get("current_price") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            notionals[sym] = abs(q * px)
+    except Exception as exc:
+        query_err = str(exc)[:200]
+        notionals = {t: 0.0 for t in parts}
+    total_n = sum(notionals.values())
+    uses_n = total_n > 1e-9
+    n_nonzero = sum(1 for v in notionals.values() if v > 1e-9)
+    weight_source = "db" if uses_n else "equal"
+    ibkr_err: str | None = None
+    ibkr_attempted = False
+    pct_denom = total_n
+    ibkr_pct_denom_src: str | None = None
+    if not uses_n:
+        ibkr_attempted = True
+        ibkr_map, ibkr_err, ibkr_acct_total = _session_notionals_from_ibkr_for_tickers(parts)
+        total_ibkr = sum(ibkr_map.values())
+        if total_ibkr > 1e-9:
+            notionals = ibkr_map
+            total_n = total_ibkr
+            uses_n = True
+            weight_source = "ibkr"
+            n_nonzero = sum(1 for v in notionals.values() if v > 1e-9)
+            if ibkr_acct_total is not None and ibkr_acct_total > 1e-9:
+                pct_denom = ibkr_acct_total
+                ibkr_pct_denom_src = "ibkr_total_value"
+            else:
+                pct_denom = total_ibkr
+                ibkr_pct_denom_src = "sum_session_abs_mv_fallback"
+    if uses_n:
+        d = pct_denom if pct_denom > 1e-9 else total_n
+        out = [(sym, notionals[sym] / d * 100.0, notionals[sym]) for sym in parts]
+        return out, True, weight_source
+    eq = 100.0 / len(parts)
+    return [(sym, eq, 0.0) for sym in parts], False, "equal"
+
+
+def _format_session_ticker_weights(db: Any, tickers_csv: str, *, max_lines: int = 12) -> str:
+    """
+    Desglose ticker → % de nocional (qty * current_price en quant_core.portfolio_positions).
+    Sin nocional: mismo % para todos los símbolos de la sesión.
+    """
+    breakdown, uses_nocional, weight_src = _session_participation_breakdown(db, tickers_csv)
+    if not breakdown:
+        return ""
+    notes: list[str] = []
+    if uses_nocional:
+        for sym, pct, noc in breakdown:
+            notes.append(f"`{sym}` {pct:.1f}% (${noc:,.2f} noc.)")
+        if weight_src == "ibkr":
+            head = "**Participación (% |mv| vs valor total cuenta IBKR, tickers de sesión):**\n"
+        else:
+            head = "**Participación (nocional qty×px):**\n"
+    else:
+        for sym, pct, _ in breakdown:
+            notes.append(
+                f"`{sym}` ~{pct:.1f}% (peso igual; sin nocional en portfolio_positions)"
+            )
+        head = "**Participación:**\n"
+    body = "\n".join(f"- {ln}" for ln in notes[:max_lines])
+    if len(notes) > max_lines:
+        body += f"\n- … y {len(notes) - max_lines} más"
+    return head + body
+
+
+def _pie_slices_from_breakdown(
+    breakdown: list[tuple[str, float, float]], *, top_n: int
+) -> list[tuple[str, float, float]]:
+    """Top ``top_n`` por % descendente + ``Otros`` (suma % y suma nocional del resto)."""
+    if not breakdown or top_n < 1:
+        return []
+    ranked = sorted(breakdown, key=lambda t: (-t[1], t[0]))
+    if len(ranked) <= top_n:
+        return [(sym, pct, noc) for sym, pct, noc in ranked]
+    head = ranked[:top_n]
+    rest_pct = sum(p[1] for p in ranked[top_n:])
+    rest_noc = sum(p[2] for p in ranked[top_n:])
+    rows = [(sym, pct, noc) for sym, pct, noc in head]
+    if rest_pct > 1e-4:
+        rows.append(("Otros", rest_pct, max(rest_noc, 1e-12)))
+    return rows
+
+
+def _build_session_participation_pie_b64(db: Any, *, top_n: int = 5) -> str | None:
+    """Torta top_n + rebanada Otros si aplica; misma lógica de pesos que el status."""
+    try:
+        raw = db.query(
+            "SELECT status, tickers FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception:
+        return None
+    if not rows or not isinstance(rows[0], dict):
+        return None
+    if str(rows[0].get("status") or "").strip().upper() != "ACTIVE":
+        return None
+    tickers_csv = str(rows[0].get("tickers") or "").strip()
+    breakdown, uses_nocional, weight_src = _session_participation_breakdown(db, tickers_csv)
+    pie_rows = _pie_slices_from_breakdown(breakdown, top_n=top_n)
+    if not pie_rows:
+        return None
+    labels = [s for s, _, _ in pie_rows]
+    label_pcts = [p for _, p, _ in pie_rows]
+    sizes = [max(n, 1e-12) for _, _, n in pie_rows]
+    try:
+        from io import BytesIO
+
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        return None
+    fig, ax = plt.subplots(figsize=(7.8, 5.0), dpi=110)
+    wedges, _t, autotexts = ax.pie(
+        sizes,
+        labels=None,
+        autopct="%1.1f%%",
+        textprops={"fontsize": 7},
+        wedgeprops={"linewidth": 0.6, "edgecolor": "white"},
+        pctdistance=0.72,
+    )
+    for i, t in enumerate(autotexts):
+        t.set_fontsize(7)
+        if i < len(label_pcts):
+            t.set_text(f"{label_pcts[i]:.1f}%")
+    ax.legend(
+        wedges,
+        labels,
+        title="Ticker",
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        fontsize=7,
+        title_fontsize=8,
+        framealpha=0.92,
+    )
+    if uses_nocional:
+        if weight_src == "ibkr":
+            sub = "% = |mv| / total_value cuenta IBKR (snapshot); tickers de sesión"
+        else:
+            sub = "Fuente: nocional |qty×px| en portfolio_positions"
+    else:
+        sub = (
+            f"Sin filas útiles en portfolio_positions: "
+            f"reparto igual 1/{len(breakdown)} entre tickers de sesión"
+        )
+    ax.set_title(f"Participación sesión · top {top_n}\n{sub}", fontsize=9)
+    fig.tight_layout()
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=100, facecolor="white", edgecolor="none", bbox_inches="tight")
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
@@ -4983,17 +5837,17 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
     pnl_raw, pnl_reliable = _compute_trading_session_pnl_now_with_confidence(db, uid)
     old_last_s = str(get_chat_state(db, chat_id, "trading_session_last_pnl") or "").strip()
     hist_uid_s = str(get_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or "").strip()
+    _now = time.time()
     if hist_uid_s != uid:
-        snapshots: list[float] = []
+        snap_points: list[tuple[float, float]] = []
     else:
         try:
             _raw_hist = get_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
-            snapshots = json.loads(_raw_hist) if _raw_hist.strip() else []
+            snap_points = _pnl_snapshots_parse_stored(_raw_hist, now=_now)
         except Exception:
-            snapshots = []
-    if not isinstance(snapshots, list):
-        snapshots = []
-    snapshots = _dedupe_trading_session_snapshots(snapshots)
+            snap_points = []
+    snap_points = _pnl_snapshots_dedupe_epoch(snap_points)
+    snapshots = _pnl_snapshots_to_floats(snap_points)
     _prev_for_carry: float | None = None
     if snapshots:
         try:
@@ -5020,8 +5874,10 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         except (TypeError, ValueError):
             pass
     if _append_snap:
-        snapshots.append(float(pnl_now))
-    snapshots = [float(x) for x in snapshots[-64:]]
+        snap_points.append((float(_now), float(pnl_now)))
+    snap_points = _pnl_snapshots_dedupe_epoch(snap_points)
+    snap_points = snap_points[-64:]
+    snapshots = _pnl_snapshots_to_floats(snap_points)
     _display_pnl = float(snapshots[-1]) if snapshots else float(pnl_now)
     if prev_val is not None and abs(prev_val) > 1e-12:
         pct_num = (_display_pnl - prev_val) / abs(prev_val) * 100.0
@@ -5033,7 +5889,7 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         "trading_session_pct_change",
         f"{pct_num:.6f}".rstrip("0").rstrip(".") if pct_num is not None else "",
     )
-    set_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY, json.dumps(snapshots))
+    set_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY, _pnl_snapshots_serialize_v2(snap_points))
     set_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY, uid)
     try:
         ds = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
@@ -5072,9 +5928,21 @@ def _read_trading_session_status_summary(db: Any, *, chat_id: Any) -> str:
         if _tearsheet.get("max_drawdown_pct") is not None
         else "N/D"
     )
-    _status_text = (
+    if _anchor_eq > 0:
+        _cap_est = float(_anchor_eq) + float(_display_pnl)
+        _cap_line = (
+            f"Capital disponible (est., anchor_equity + PnL): "
+            f"${_cap_est:,.2f} (anchor ${_anchor_eq:,.2f})\n"
+        )
+    else:
+        _cap_line = "Capital disponible: N/D (sin anchor_equity en sesión)\n"
+    _head_session = (
         f"Sesión activa: `{uid}`\n"
-        f"Mode: `{mode}` | Tickers: `{tickers}`\n"
+        f"Mode: `{mode}`\n"
+        f"{_cap_line}"
+    )
+    _status_text = (
+        f"{_head_session}"
         f"Señales generadas: {total}\n"
         f"- Ejecutadas: {executed}\n"
         f"- Canceladas: {cancelled}\n"
@@ -5190,13 +6058,13 @@ def _trading_session_snapshots_for_tearsheet_label(
         return []
     try:
         _raw = get_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
-        snapshots = json.loads(_raw) if _raw.strip() else []
+        pts = _pnl_snapshots_parse_stored(_raw, now=time.time())
     except Exception:
         return []
-    if not isinstance(snapshots, list) or not snapshots:
+    if not pts:
         return []
     try:
-        return _dedupe_trading_session_snapshots([float(x) for x in snapshots])
+        return _pnl_snapshots_to_floats(_pnl_snapshots_dedupe_epoch(pts))
     except (TypeError, ValueError):
         return []
 
@@ -5319,12 +6187,9 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
                         pass
         except Exception:
             return None
-    # Misma serie "tick" que el tearsheet: si hay snapshots alineados a la sesión,
-    # trazar la curva con ellos. El acumulado por filas EXECUTED + unrealized_pnl
-    # suele divergir de SUM/PnL agregado y de los snapshots (p. ej. PnL actual 0 vs curva ~400).
-    _snap_for_line: list[float] = _trading_session_snapshots_for_tearsheet_label(
-        db, chat_id, session_uid=uid
-    )
+    # Misma serie "tick" que el tearsheet: snapshots con epoch (v2) o v1 parseado.
+    _epoch_pts_chart = _snapshot_epoch_points_for_session(db, chat_id, uid)
+    _snap_for_line: list[float] = _pnl_snapshots_to_floats(_epoch_pts_chart)
     pnl_line_source = "executed"
     cum: list[float] = [0.0]
     if _snap_for_line:
@@ -5343,21 +6208,17 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
         if hist_uid_g == uid.strip():
             try:
                 snap_raw = get_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
-                snap_list = json.loads(snap_raw) if (snap_raw or "").strip() else []
+                pts_fb = _pnl_snapshots_parse_stored(snap_raw, now=time.time())
             except Exception:
-                snap_list = []
-            if isinstance(snap_list, list) and len(snap_list) > 0:
-                snap_clean = _dedupe_trading_session_snapshots(snap_list)
-                if snap_clean:
-                    cum = [0.0]
-                    for it in snap_clean:
-                        try:
-                            cum.append(float(it))
-                        except (TypeError, ValueError):
-                            cum.append(cum[-1])
-                else:
-                    pnl_total = _compute_trading_session_pnl_now(db, uid)
-                    cum = [0.0, pnl_total]
+                pts_fb = []
+            snaps_fb = _pnl_snapshots_to_floats(_pnl_snapshots_dedupe_epoch(pts_fb))
+            if snaps_fb:
+                cum = [0.0]
+                for it in snaps_fb:
+                    try:
+                        cum.append(float(it))
+                    except (TypeError, ValueError):
+                        cum.append(cum[-1])
             else:
                 pnl_total = _compute_trading_session_pnl_now(db, uid)
                 cum = [0.0, pnl_total]
@@ -5365,16 +6226,43 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
             pnl_total = _compute_trading_session_pnl_now(db, uid)
             cum = [0.0, pnl_total]
     try:
+        from datetime import datetime, timezone
+
         from io import BytesIO
 
         import matplotlib
 
         matplotlib.use("Agg")
+        import matplotlib.dates as mdates
         import matplotlib.pyplot as plt
     except Exception:
         return None
+    _tc_anchor = time.time()
     n = len(cum)
-    x = list(range(n))
+    x_dt: list[datetime]
+    if pnl_line_source == "snapshots" and _epoch_pts_chart and len(cum) == len(_epoch_pts_chart) + 1:
+        first_ep = float(_epoch_pts_chart[0][0])
+        x_dt = [
+            datetime.fromtimestamp(first_ep - _PNL_SNAPSHOT_SYNTH_STEP_SEC, tz=timezone.utc)
+        ]
+        x_dt.extend(
+            datetime.fromtimestamp(float(ep), tz=timezone.utc) for ep, _ in _epoch_pts_chart
+        )
+    else:
+        x_dt = [
+            datetime.fromtimestamp(
+                _tc_anchor - _PNL_SNAPSHOT_SYNTH_STEP_SEC * (n - 1 - i), tz=timezone.utc
+            )
+            for i in range(n)
+        ]
+    if len(x_dt) != n:
+        x_dt = [
+            datetime.fromtimestamp(
+                _tc_anchor - _PNL_SNAPSHOT_SYNTH_STEP_SEC * (n - 1 - i), tz=timezone.utc
+            )
+            for i in range(n)
+        ]
+    x = mdates.date2num(x_dt)
     # Tearsheet: misma lista que la curva cuando hay snapshots; si no, derivada de `cum`.
     _snap_for_metrics = _snap_for_line or _trading_session_snapshots_for_tearsheet_label(
         db, chat_id, session_uid=uid
@@ -5418,10 +6306,74 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
         dpi=110,
         gridspec_kw={"height_ratios": [3.0, 1.2]},
     )
+    ax.fill_between(x, cum, 0.0, color="#93c5fd", alpha=0.35, linewidth=0)
     ax.plot(x, cum, color="#2563eb", linewidth=2, marker="o", markersize=2.8, label="PnL acumulado")
     ax.axhline(0, color="#94a3b8", linewidth=0.8)
+    if cum:
+        n_c = len(cum)
+        i_max = max(range(n_c), key=lambda i: cum[i])
+        i_min = min(range(n_c), key=lambda i: cum[i])
+        _ann_bbox = {
+            "boxstyle": "round,pad=0.25",
+            "facecolor": "white",
+            "alpha": 0.82,
+            "edgecolor": "#e5e7eb",
+        }
+        _arr = {"arrowstyle": "-", "color": "#64748b", "lw": 0.55}
+        i_curr = n_c - 1
+        v_curr = float(cum[i_curr])
+        v_max = float(cum[i_max])
+        v_min = float(cum[i_min])
+        eps = max(1e-4, 1e-9 * max(1.0, abs(v_max), abs(v_min), abs(v_curr)))
+        flat = abs(v_max - v_min) <= eps
+        if flat:
+            ax.annotate(
+                f"Actual ${v_curr:,.0f}",
+                xy=(x[i_curr], v_curr),
+                xytext=(10, 12),
+                textcoords="offset points",
+                fontsize=7,
+                color="#111827",
+                bbox=_ann_bbox,
+                arrowprops=_arr,
+            )
+        else:
+            if v_min + eps < v_curr:
+                ax.annotate(
+                    f"Mín ${v_min:,.0f}",
+                    xy=(x[i_min], cum[i_min]),
+                    xytext=(8, -16),
+                    textcoords="offset points",
+                    fontsize=7,
+                    color="#111827",
+                    bbox=_ann_bbox,
+                    arrowprops=_arr,
+                )
+            shown_historical_max = v_max > v_curr + eps
+            if shown_historical_max:
+                ax.annotate(
+                    f"Máx ${v_max:,.0f}",
+                    xy=(x[i_max], cum[i_max]),
+                    xytext=(8, 10),
+                    textcoords="offset points",
+                    fontsize=7,
+                    color="#111827",
+                    bbox=_ann_bbox,
+                    arrowprops=_arr,
+                )
+            ax.annotate(
+                f"Actual ${v_curr:,.0f}",
+                xy=(x[i_curr], cum[i_curr]),
+                xytext=(10, -16 if shown_historical_max else 12),
+                textcoords="offset points",
+                fontsize=7,
+                color="#111827",
+                bbox=_ann_bbox,
+                arrowprops=_arr,
+            )
     ax.set_ylabel("PnL ($)")
-    ax.set_title(f"Trading Session Tearsheet · {mode} · {uid[:8]}…", fontsize=10)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=timezone.utc))
+    ax.set_title(f"Trading Session Tearsheet · {mode} · {uid[:8]}… (UTC)", fontsize=10)
     ax.grid(True, alpha=0.3)
     ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
     ax.text(
@@ -5438,9 +6390,11 @@ def _build_trading_session_pnl_chart_b64(db: Any, *, chat_id: Any) -> str | None
     ax_dd.plot(x, drawdowns, color="#dc2626", linewidth=1.6)
     ax_dd.fill_between(x, drawdowns, [0.0 for _ in drawdowns], color="#fecaca", alpha=0.6)
     ax_dd.axhline(0, color="#9ca3af", linewidth=0.8)
-    ax_dd.set_xlabel("Paso (0 = inicio)")
+    ax_dd.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=timezone.utc))
+    ax_dd.set_xlabel("Tiempo (UTC)")
     ax_dd.set_ylabel("DD %")
     ax_dd.grid(True, alpha=0.25)
+    fig.autofmt_xdate(bottom=0.22, rotation=18)
     fig.tight_layout()
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=100, facecolor="white", edgecolor="none", bbox_inches="tight")
@@ -5457,13 +6411,13 @@ def execute_trading_session(
     tenant_id: Any = None,
     vault_user_id: Any = None,
 ) -> str:
-    """/trading_session --mode paper|live [--tickers A,B] [--objective ...] [--confirm] [--status] [--stop]."""
+    """/trading-session --mode paper|live [--tickers A,B] [--objective ...] [--confirm] [--status] [--stop]."""
     _ = vault_user_id
     parsed, err = _parse_trading_session_cli(args)
     if err or parsed is None:
         return (
             f"Error: {err}\n\n"
-            "Uso: `/trading_session --mode paper|live [--tickers AAPL,NVDA] [--confirm]`\n"
+            "Uso: `/trading-session --mode paper|live [--tickers AAPL,NVDA] [--confirm]`\n"
             "Extras: `--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze` · `--max-drawdown 2` · "
             "`--position-size 5` · `--signal GAS` · `--status` · `--stop`\n"
             "Modo **live** exige añadir **--confirm** en el mismo mensaje (riesgo de capital)."
@@ -5477,6 +6431,12 @@ def execute_trading_session(
             b64c = None
         if b64c:
             register_fly_outbound_chart_b64(chat_id, b64c)
+        try:
+            pie_b64 = _build_session_participation_pie_b64(db)
+        except Exception:
+            pie_b64 = None
+        if pie_b64:
+            register_fly_outbound_chart_b64(chat_id, pie_b64)
         return out
     if parsed.stop:
         ok_close, detail_close = _close_active_trading_session(
@@ -5492,7 +6452,7 @@ def execute_trading_session(
         return (
             "RIESGO DE CAPITAL: modo `live` enruta órdenes al broker real.\n\n"
             "Si aceptas el riesgo, reenvía el comando con **--confirm**:\n"
-            "`/trading_session --mode live --tickers NVDA --confirm`"
+            "`/trading-session --mode live --tickers NVDA --confirm`"
         )
     session_uid = str(uuid.uuid4())
     goal = _session_goal_from_cli(parsed)
@@ -5550,9 +6510,9 @@ ON CONFLICT (id) DO UPDATE SET
         session_uid=session_uid,
     )
     delta_msg = (
-        f"Ticker /goals auto-activado cada ~{format_goals_delta_interval_human(secs)} (trigger=trading_session)."
+        f"Ticker /crons auto-activado cada ~{format_goals_delta_interval_human(secs)} (trigger=trading_session)."
         if enabled
-        else f"Ticker /goals ya activo cada ~{format_goals_delta_interval_human(secs)} (se conserva configuración)."
+        else f"Ticker /crons ya activo cada ~{format_goals_delta_interval_human(secs)} (se conserva configuración)."
     )
     tick_note = f"\nTickers: `{parsed.tickers_csv}`" if parsed.tickers_csv else ""
     sid = _TRADING_SESSION_ROW_ID
@@ -6123,7 +7083,7 @@ def _dispatch_fly_command(
         )
     if name == "cancel_signal":
         return execute_cancel_signal(db, chat_id, args, tenant_id=tenant_id)
-    if name == "trading_session":
+    if name in ("trading-session", "trading_session"):
         return execute_trading_session(
             db,
             chat_id,
@@ -6235,7 +7195,7 @@ def _dispatch_fly_command(
         return execute_models(db, chat_id, args)
     if name == "setup":
         return _execute_setup(db, chat_id, args)
-    if name == "goals":
+    if name in ("crons", "goals"):
         return execute_goals(
             db,
             chat_id,

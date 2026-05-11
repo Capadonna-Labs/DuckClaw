@@ -366,7 +366,9 @@ def quant_trading_session_prompt_block(db: Any) -> str:
         "(default 14:40:00–14:59:30). Para restaurar bloqueo de propuesta fuera de MOC: "
         "`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` → error `OUTSIDE_MOC_PREP_WINDOW`. "
         "Durante lun–vie 08:30–15:00 COT, sesión ACTIVE, opcional hints sin ledger via "
-        "`accumulate_moc_intraday_state` (merge cola hasta MOC calc PM2; no substituye `propose_trade_signal`)."
+        "`accumulate_moc_intraday_state` (merge cola hasta MOC calc PM2; no substituye `propose_trade_signal`). "
+        "Ticks proactivos: tras confirmar ACTIVE, llama **`schedule_quant_trading_proactive_ticks`** "
+        "(interval_seconds=0 o el intervalo pedido; persiste igual que `/crons --delta`, vía cola escritor)."
     )
 
 
@@ -1837,6 +1839,18 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
             execute_now=bool(execute_now),
         )
 
+    def _schedule_quant_trading_proactive_ticks(interval_seconds: int = 0) -> str:
+        from duckclaw.graphs.on_the_fly_commands import schedule_quant_trading_proactive_ticks
+
+        cid = get_quant_tool_chat_id()
+        tid = get_quant_tool_tenant_id() or "default"
+        return schedule_quant_trading_proactive_ticks(
+            db,
+            chat_id=cid,
+            tenant_id=tid,
+            interval_seconds=int(interval_seconds),
+        )
+
     tools.append(
         StructuredTool.from_function(
             _fetch_market_data,
@@ -1961,6 +1975,21 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 "Flujo único para señal Quant: propone (propose_trade_signal) y opcionalmente ejecuta "
                 "(execute_approved_signal) usando el signal_id real del ledger. Reduce orquestación tool-by-tool; "
                 "si execute_now=false devuelve signal_id y estado PENDING_HITL, si true intenta ejecución inmediata."
+            ),
+        )
+    )
+    tools.append(
+        StructuredTool.from_function(
+            _schedule_quant_trading_proactive_ticks,
+            name="schedule_quant_trading_proactive_ticks",
+            description=(
+                "Programa revisión recurrente tipo TRADING_TICK (/crons --delta): escribe las mismas claves "
+                "agent_config que el ticker proactivo (goals_delta_*, meta trigger trading_session). "
+                "Requiere fila quant_core.trading_sessions id=active con status ACTIVE y session_uid "
+                "(verificar con read_sql si el usuario ya abrió sesión). Worker read_only: escritura va por cola "
+                "db-writer. interval_seconds=0: mismo bootstrap ~5min que /trading-session si hace falta; "
+                ">0: intervalo en segundos dentro del rango permitido por el servidor. "
+                "Llamar al arrancar el reactor tras confirmar ACTIVE o cuando el usuario pida un intervalo concreto."
             ),
         )
     )

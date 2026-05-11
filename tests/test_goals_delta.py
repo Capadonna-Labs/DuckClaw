@@ -15,6 +15,11 @@ from duckclaw.graphs.on_the_fly_commands import (
     get_chat_state,
     parse_goals_delta_arg,
 )
+from duckclaw.graphs.proactive_review_markers import (
+    GOALS_PROACTIVE_REVIEW_PHRASE_CRONS,
+    GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY,
+    proactive_review_event_phrase_in_text,
+)
 import services.heartbeat.main as heartbeat
 
 
@@ -82,7 +87,11 @@ def test_build_goals_proactive_system_event_includes_overnight_mission() -> None
     )
     assert "[SYSTEM_EVENT:" in msg
     assert "MISIÓN: OVERNIGHT GAP SQUEEZE" in msg
-    assert "Revisión periódica de /goals" in msg
+    assert GOALS_PROACTIVE_REVIEW_PHRASE_CRONS in msg
+    assert GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY not in msg
+    legacy = msg.replace(GOALS_PROACTIVE_REVIEW_PHRASE_CRONS, GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY)
+    assert proactive_review_event_phrase_in_text(msg)
+    assert proactive_review_event_phrase_in_text(legacy)
 
 
 def test_run_goals_proactive_tick_posts_system_event(tmp_path: Path, monkeypatch: Any) -> None:
@@ -210,7 +219,7 @@ def test_run_goals_proactive_skips_manager_worker(tmp_path: Path, monkeypatch: A
 def test_run_goals_proactive_finds_delta_in_sibling_vault_duckdb(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """Fly /goals escribe en la bóveda (p. ej. quant_traderdb1.duckdb); el ticker debe verla aunque el hub sea otro .duckdb."""
+    """Fly /crons escribe en la bóveda (p. ej. quant_traderdb1.duckdb); el ticker debe verla aunque el hub sea otro .duckdb."""
     import duckdb
 
     priv = tmp_path / "private" / "u1"
@@ -539,7 +548,7 @@ def test_run_goals_proactive_trading_session_empty_manager_goals_still_ticks(
 def test_execute_goals_delta_cli_forces_goals_cli_meta_and_cooldown_now(
     tmp_path: Path,
 ) -> None:
-    """Explicit `/goals --delta` must not inherit trading_session meta (avoids full TRADING_TICK on poll)."""
+    """Explicit `/crons --delta` must not inherit trading_session meta (avoids full TRADING_TICK on poll)."""
     import duckdb
 
     from duckclaw import DuckClaw
@@ -610,7 +619,7 @@ def test_execute_goals_delta_cli_forces_goals_cli_meta_and_cooldown_now(
 def test_clear_goals_delta_off_clears_schedule_on_hub_and_sibling_vault(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """/goals --delta off debe poner goals_delta_seconds=0 en hub y bóveda; si no, el ticker sigue en bucle."""
+    """/crons --delta off debe poner goals_delta_seconds=0 en hub y bóveda; si no, el ticker sigue en bucle."""
     import duckdb
 
     from duckclaw import DuckClaw
@@ -685,3 +694,188 @@ def test_iter_goals_delta_clear_paths_scoped_excludes_other_private_vaults(
     assert str(hub_a.resolve()) in paths
     assert str(quant_a.resolve()) in paths
     assert str(other_b.resolve()) not in paths
+
+
+def test_dispatch_crons_and_goals_alias_same_handler(tmp_path: Path) -> None:
+    """`/_dispatch_fly_command` trata `crons` y `goals` como el mismo handler (execute_goals)."""
+    import duckdb
+
+    from duckclaw import DuckClaw
+    from duckclaw.graphs.on_the_fly_commands import _dispatch_fly_command
+
+    db_path = str(tmp_path / "dispatch_crons_alias.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        """
+        CREATE TABLE agent_config (
+          key VARCHAR PRIMARY KEY,
+          value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?)",
+        ["chat_11_worker_id", "manager", "chat_11_goals", "[]"],
+    )
+    con.close()
+
+    with DuckClaw(db_path, read_only=False) as db:
+        out_crons = _dispatch_fly_command(db, 11, "crons", "", tenant_id="default")
+        out_goals = _dispatch_fly_command(db, 11, "goals", "", tenant_id="default")
+    assert out_crons == out_goals
+    assert out_crons is not None
+    assert "/crons" in (out_crons or "")
+
+
+def test_crons_list_includes_user_and_platform_blocks(tmp_path: Path) -> None:
+    import duckdb
+
+    from duckclaw import DuckClaw
+
+    db_path = str(tmp_path / "crons_list_platform.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        """
+        CREATE TABLE agent_config (
+          key VARCHAR PRIMARY KEY,
+          value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?)",
+        ["chat_7_worker_id", "manager", "chat_7_goals", "[]"],
+    )
+    con.close()
+
+    with DuckClaw(db_path, read_only=False) as db:
+        out = execute_goals(db, 7, "")
+    assert "Tus crons" in (out or "")
+    assert "Del bot (infraestructura)" in (out or "")
+    assert "45" in (out or "") and "3600" in (out or "")
+    assert "/crons --reset" in (out or "")
+
+
+def test_crons_list_platform_summary_respects_env(tmp_path: Path, monkeypatch: Any) -> None:
+    import duckdb
+
+    from duckclaw import DuckClaw
+
+    monkeypatch.setenv("GOALS_TICKER_POLL_SECONDS", "120")
+    monkeypatch.setenv("HEARTBEAT_INTERVAL_SECONDS", "7200")
+    monkeypatch.setenv("DUCKCLAW_EMBED_GOALS_TICKER", "false")
+
+    db_path = str(tmp_path / "crons_list_env.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        """
+        CREATE TABLE agent_config (
+          key VARCHAR PRIMARY KEY,
+          value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?)",
+        ["chat_8_worker_id", "manager", "chat_8_goals", "[]"],
+    )
+    con.close()
+
+    with DuckClaw(db_path, read_only=False) as db:
+        out = execute_goals(db, 8, "")
+    assert "120" in (out or "")
+    assert "7200" in (out or "")
+    assert "API Gateway puede ejecutar" not in (out or "")
+
+
+def test_crons_list_trading_session_meta_note(tmp_path: Path) -> None:
+    import duckdb
+
+    from duckclaw import DuckClaw
+
+    db_path = str(tmp_path / "crons_list_session_meta.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        """
+        CREATE TABLE agent_config (
+          key VARCHAR PRIMARY KEY,
+          value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    meta = json.dumps({"trigger": "trading_session", "session_uid": "uid-test-1"}, ensure_ascii=False)
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?)",
+        ["chat_9_worker_id", "Quant-Trader", "chat_9_goals", "[]", "chat_9_goals_delta_meta", meta],
+    )
+    con.close()
+
+    with DuckClaw(db_path, read_only=False) as db:
+        out = execute_goals(db, 9, "")
+    assert "Revisión proactiva (TRADING_TICK)" in (out or "")
+    assert "goals_delta_seconds=0" in (out or "")
+    assert "session_uid=uid-test-1" in (out or "")
+    assert "schedule_quant_trading_proactive_ticks" in (out or "")
+    assert "/trading-session" in (out or "")
+
+
+def test_crons_list_trading_session_meta_with_delta_300(tmp_path: Path) -> None:
+    """Listado /crons con intervalo 5 min + meta trading_session: intervalo, cron-id delta y UID."""
+    import duckdb
+
+    from duckclaw import DuckClaw
+
+    db_path = str(tmp_path / "crons_list_session_delta300.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        """
+        CREATE TABLE agent_config (
+          key VARCHAR PRIMARY KEY,
+          value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    meta = json.dumps(
+        {"trigger": "trading_session", "session_uid": "qt-sess-a1"},
+        ensure_ascii=False,
+    )
+    long_uid = "11111111-2222-3333-4444-555555555555"
+    meta_long = json.dumps({"trigger": "trading_session", "session_uid": long_uid}, ensure_ascii=False)
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?), "
+        "(?, ?), (?, ?), (?, ?), (?, ?)",
+        [
+            "chat_12_worker_id",
+            "Quant-Trader",
+            "chat_12_goals",
+            "[]",
+            "chat_12_goals_delta_seconds",
+            "300",
+            "chat_12_goals_delta_meta",
+            meta,
+            "chat_13_worker_id",
+            "Quant-Trader",
+            "chat_13_goals",
+            "[]",
+            "chat_13_goals_delta_seconds",
+            "300",
+            "chat_13_goals_delta_meta",
+            meta_long,
+        ],
+    )
+    con.close()
+
+    with DuckClaw(db_path, read_only=False) as db:
+        out12 = execute_goals(db, 12, "")
+        out13 = execute_goals(db, 13, "")
+    assert "Revisión proactiva (TRADING_TICK)" in (out12 or "")
+    assert "5 min" in (out12 or "")
+    assert "cron-id delta" in (out12 or "")
+    assert "session_uid=qt-sess-a1" in (out12 or "")
+    assert "11111111…" in (out13 or "")
+    assert long_uid not in (out13 or "")

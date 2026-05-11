@@ -98,7 +98,7 @@ def _ensure_agent_beliefs(db: Any, schema: str) -> None:
 
 
 def _seed_agent_beliefs(db: Any, spec: WorkerSpec) -> None:
-    """Inserta filas iniciales en agent_beliefs desde homeostasis_config para que /goals y --reset funcionen."""
+    """Inserta filas iniciales en agent_beliefs desde homeostasis_config para que /crons y --reset funcionen."""
     config = getattr(spec, "homeostasis_config", None)
     if not config or not isinstance(config, dict):
         return
@@ -131,7 +131,7 @@ def _seed_agent_beliefs(db: Any, spec: WorkerSpec) -> None:
 
 
 def run_schema(db: Any, spec: WorkerSpec, seed_beliefs: bool = True, apply_template_sql: bool = True) -> None:
-    """Create isolated schema and run schema.sql. seed_beliefs=False evita rellenar agent_beliefs (p. ej. tras /goals --reset)."""
+    """Create isolated schema and run schema.sql. seed_beliefs=False evita rellenar agent_beliefs (p. ej. tras /crons --reset)."""
     schema = spec.schema_name
     # DuckDB: CREATE SCHEMA IF NOT EXISTS name;
     db.execute(f"CREATE SCHEMA IF NOT EXISTS {_safe_ident(schema)}")

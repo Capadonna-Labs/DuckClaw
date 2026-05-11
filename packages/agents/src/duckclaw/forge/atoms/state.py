@@ -59,7 +59,7 @@ class ManagerAgentState(TypedDict, total=False):
     # Token Bot API del webhook que originó el turno (multiplex); heartbeats en hilos no heredan ContextVar.
     outbound_telegram_bot_token: Optional[str]
 
-    # Worker de la ruta HTTP (p. ej. /api/v1/agent/Quant-Trader/chat). Usado para anclar SYSTEM_EVENT de /goals --delta.
+    # Worker de la ruta HTTP (p. ej. /api/v1/agent/Quant-Trader/chat). Usado para anclar SYSTEM_EVENT de /crons --delta.
     entry_worker_id: Optional[str]
 
     # Resiliencia Manager: replan tras fallos recuperables (ver agent_resilience + manager_graph).

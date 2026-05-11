@@ -51,7 +51,7 @@ Comando: /execute_signal <uuid>
 | Ejecución | `execute_approved_signal` solo tras `/execute_signal <signal_id>` mismo chat **o** `human_approved=true` en ledger. |
 | Paper | Sesión paper → broker `paper`; `IBKR_ACCOUNT_MODE` host puede ser `live` solo para snapshot sin bloquear sesión paper. |
 | Verdad ejecución vs portfolio | JSON `execute_approved_signal`: si hay `ib_order_id`/broker parseable → no llamar «simulado/desacoplado» salvo el JSON así lo diga. `get_ibkr_portfolio` otro canal/retardo: marcar hipótesis configuración, no inferir arquitectura interna. |
-| TRADING_TICK /goals · HRP | Sandbox HRP:**`pypfopt` primero**, fallback scipy manual; comparar pesos IBKR; **ejecución solo HITL.** |
+| TRADING_TICK /crons · HRP | Sandbox HRP:**`pypfopt` primero**, fallback scipy manual; comparar pesos IBKR; **ejecución solo HITL.** |
 
 ## Persistencia Singleton Writer · context injection
 
@@ -91,7 +91,7 @@ Columnas:`ticker` `timestamp` `open` `high` `low` `close` `volume`.**Sin columna
 
 ## Telegram · `quant_core.trading_sessions`
 
-`/trading_session --mode paper|live [--tickers …] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze]` — `live` exige **`--confirm` mismo mensaje.** `id=active` fila `mode` `tickers` `status` ACTIVE|PAUSED. Reactor ciclo válido solo `ACTIVE`.
+`/trading-session --mode paper|live [--tickers …] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze]` — `live` exige **`--confirm` mismo mensaje.** `id=active` fila `mode` `tickers` `status` ACTIVE|PAUSED. Reactor ciclo válido solo `ACTIVE`.
 
 | Objective | Obligación modelo |
 |-----------|-------------------|
@@ -112,12 +112,13 @@ Usuario pide ejecutar ciclo cerrado («genera y ejecuta real»…) → responder
 
 Timeout/OOM → marcar **inviabilidad**; prohibido inventar outputs.
 
-## Ticks (`TRADING_TICK` + `/goals --delta`)
+## Ticks (`TRADING_TICK` + `/crons --delta`)
 
+- **Bootstrap proactivo (worker Quant):** con `quant_core.trading_sessions` **ACTIVE** y `session_uid` visibles (`read_sql` mismo turno si hace falta), **primer turno reactor** → **`schedule_quant_trading_proactive_ticks`** (`interval_seconds=0` = default ~5 min como `/trading-session`; `>0` = intervalo en segundos dentro del rango del servidor). Misma configuración heartbeat que Telegram `/crons --delta` + meta `trigger: trading_session`; escritura desde RO vía cola singleton.
 - `directive` SYSTEM_EVENT obligatorio. Tras `evaluate_cfd_state` → **`hrp_rebalance_ib_gateway`** **o** cadena `execute_sandbox_script` + **pypfopt**. **`overnight_gap_squeeze`:** si no hay setup claro, preferir **`accumulate_moc_intraday_state`**; si procede y hay evidencia OHLCV del turno, **≤1** `propose_trade_signal` por ticker (auto-exec solo en ventana MOC si está activada).
 - `maximize_pnl` / `rebalance_hrp`: **≤1** `propose_trade_signal` / ticker cuando haya evidencia y ventana lógica del playbook; **no** condicionar la propuesta ledger al reloj MOC salvo política ops (`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER`).
 - Tick:**nunca** `execute_approved_signal`.
-- Mensaje genérico «Revisión periódica de /goals…» → mismas reglas HRP + evidencia OHLCV turno.
+- Mensaje genérico «Revisión periódica de /crons…» (hereda legado `/goals`) → mismas reglas HRP + evidencia OHLCV turno.
 
 ## Gráficos portfolio (`execute_sandbox_script`)
 

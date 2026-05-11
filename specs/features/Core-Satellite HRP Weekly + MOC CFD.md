@@ -44,7 +44,8 @@ Restricción: **no** ejecutar HRP intradía automáticamente; solo cron dominica
 **Ventana típica MOC en host (lun–vie, COT según cron PM2 ejemplo):**
 
 - Crons de referencia: ~**14:40** calc, ~**14:50** remind, ~**14:59** expire (véase tabla más abajo). La ventana **auto-exec MOC** en gateway default se extiende hasta **14:59:30** COT para capturar cola de cierre; alinear env con ops si el PM2 difiere.
-- En esa franja las señales `strategy_name=moc_hrp_cfd` generadas/expiradas por el pipeline tienen **autoridad**: el tick proactivo de Telegram (`TRADING_TICK` / `/goals`) **no** debe contradictor ellas ni duplicar un segundo flujo propio “MOC” al mismo efecto.
+- En esa franja las señales `strategy_name=moc_hrp_cfd` generadas/expiradas por el pipeline tienen **autoridad**: el tick proactivo de Telegram (`TRADING_TICK` / `/crons`) **no** debe contradictor ellas ni duplicar un segundo flujo propio “MOC” al mismo efecto.
+- **Ticks desde Quant Trader (worker RO):** la tool `schedule_quant_trading_proactive_ticks` encola UPSERT en `agent_config` (mismo esquema que `/crons --delta` con `trigger: trading_session` ligado a `session_uid`). Usar cuando la sesión esté **ACTIVE** (p. ej. tras `read_sql` o mensaje usuario) para no depender solo de comandos Telegram; `interval_seconds=0` aplica bootstrap por defecto como `/trading-session`.
 
 **Ejecución batch tras MOC:** ver sección `/execute_all_moc` más abajo.
 

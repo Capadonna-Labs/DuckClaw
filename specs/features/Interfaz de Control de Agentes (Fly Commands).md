@@ -26,7 +26,7 @@ Exponer comandos de chat que permitan al usuario **mutar el estado del agente en
 
 ### A. `/role [worker_id]`
 
-Cambia el rol (worker template) en caliente. Siempre hay un rol activo; por defecto: `personalizable` (para armar con /prompt, skills y goals).
+Cambia el rol (worker template) en caliente. Siempre hay un rol activo; por defecto: `personalizable` (para armar con /prompt, skills y `/crons`).
 
 | Uso | Comportamiento |
 |-----|----------------|
@@ -126,29 +126,37 @@ El `session_id` identifica la sesión; el `worker_id` y el system prompt se pers
 
 ---
 
-## 7. Comandos /goals y /tasks (Implementados)
+## 7. Comandos `/crons` y `/tasks` (Implementados)
 
-### `/goals [--reset] [--delta …]`
+El nombre de usuario del comando es **`/crons`** (cron jobs + revisión de objetivos homeostasis). Se acepta **`/goals`** como alias silencioso por compatibilidad; la persistencia en DuckDB sigue usando el prefijo interno `goals_*` en `agent_config` (estabilidad; no requiere migración).
+
+### `/crons [--reset] [--delta …] [--timestamp …] [--rm …]`
 
 Consulta creencias del HomeostasisManager (tabla `agent_beliefs` por worker). El registro de claves por defecto para autocompletar objetivos viene del **worker activo** del chat (`/role` / estado del gateway), con fallback al primer template que tenga `homeostasis.yaml`. Con **Quant-Trader** activo, un goal de drawdown máximo se refleja también en `quant_core.trading_risk_constraints` en la bóveda (ver [Quant_Trading_Session_Homeostasis.md](Quant_Trading_Session_Homeostasis.md)).
 
 | Uso | Comportamiento |
 |-----|----------------|
-| `/goals` | Lista beliefs: target, observed, delta, estado (equilibrio/anomalía) |
-| `/goals --reset` | Borra goals del chat y la revisión proactiva (`--delta`); en Quant limpia riesgo en bóveda si aplica |
-| `/goals --delta 20min` | Programa revisión periódica (mín. 60s, máx. 7d). Unidades: `s`, `m`/`min`, `h`. Guarda `goals_delta_seconds`, `goals_proactive_tenant_id`, anclas de schedule y **`goals_delta_meta` con `trigger: goals_cli`** (revisión ligera vía `build_goals_proactive_system_event_message`; no sustituye el TRADING_TICK de sesión). Establece `goals_proactive_last_fire_epoch` al **momento actual** para que el primer tick espere el intervalo completo (no el siguiente poll del gateway ~45s). |
-| `/goals --delta off` | Desactiva el ticker para ese chat en el **hub** (`get_gateway_db_path`) y en todas las `*.duckdb` del **mismo** directorio `db/private/<uid>/` que el `fly_db` actual (mismo usuario multiplex), no en todo el árbol `db/private/*/`; evita bucle hub↔bóveda sin abrir DuckDB de otros usuarios ni competir por bloqueos con db-writer. El heartbeat sigue escaneando el conjunto amplio solo para *descubrir* schedules. |
+| `/crons` | Lista en dos bloques: **Tus crons** — bloque 🎯 Manager (objetivos homeostasis) y, cuando aplica, un subtítulo unificado **`Revisión proactiva`** (o **`Revisión proactiva (TRADING_TICK)`** si `goals_delta_meta.trigger` es `trading_session`) con: intervalo humanizado y **cron-id `delta`** cuando `goals_delta_seconds` > 0 (más cuenta atrás aproximada si hay anclas), mensaje explícito de inconsistencia si hay meta `trading_session` pero intervalo apagado, línea opcional **Sesión Quant** (`session_uid` acortado si es tipo UUID largo; origen `schedule_quant_trading_proactive_ticks` / `/trading-session`); horario de reloj con **cron-id `wall`** en nota aparte si hay `--timestamp` — y **Del bot (infraestructura)** (intervalos del escaneo de DuckDB del ticker, ciclo homeostasis del daemon, y si el gateway embebido puede correr el mismo escaneo). Los números salen de `GOALS_TICKER_POLL_SECONDS`, `HEARTBEAT_INTERVAL_SECONDS` y `DUCKCLAW_EMBED_GOALS_TICKER` en el host. |
+| `/crons --reset` | Borra goals del chat y la revisión proactiva (`--delta`); en Quant limpia riesgo en bóveda si aplica |
+| `/crons --delta 20min` | Programa revisión periódica (mín. 60s, máx. 7d). Unidades: `s`, `m`/`min`, `h`. Guarda `goals_delta_seconds`, `goals_proactive_tenant_id`, anclas de schedule y **`goals_delta_meta` con `trigger: goals_cli`**. **Borra** `goals_cron_wall` si existía (exclusivo con `--timestamp`). Establece `goals_proactive_last_fire_epoch` al **momento actual** para que el primer tick espere el intervalo completo (no el siguiente poll del gateway ~45s). |
+| `/crons --delta off` | Desactiva **solo** la programación por intervalo (`goals_delta_seconds` y anclas relacionadas; meta con `trigger: goals_cli`). **No** borra `goals_cron_wall` ni el horario `--timestamp`. Sincroniza en hub + bóvedas del mismo `db/private/<uid>/` (misma regla multiplex que antes). |
+| `/crons --timestamp once YYYY-MM-DDTHH:MM` | Horario de reloj (zona por defecto `America/Bogota`, override `DUCKCLAW_CRONS_WALL_TZ`): una sola ejecución. Persiste JSON en `agent_config` → `chat_{id}_goals_cron_wall`; pone `goals_delta_meta.trigger = goals_wall` salvo que ya exista `trading_session`. **Exclusivo** con `--delta`: al guardar `--timestamp` se limpia el intervalo (equivalente a apagar solo la parte delta). Tras un tick exitoso, tipo `once` se elimina el JSON del wall. |
+| `/crons --timestamp every HH:MM [weekdays\|lun mar …]` | Repetición diaria o en días concretos (`weekdays` = lun–vie). Misma persistencia y exclusividad que `once`. |
+| `/crons --timestamp off` | Borra **solo** `goals_cron_wall` (local + bóvedas hermanas); no modifica `--delta`. |
+| `/crons --rm delta` | Igual que `/crons --delta off`: quita solo la programación por intervalo. Alias del cron-id: `interval`. No modifica el horario de reloj. |
+| `/crons --rm wall` | Igual que `/crons --timestamp off`: quita solo el horario de reloj. Alias: `timestamp`. No modifica `--delta`. |
 
-**Ticker:** `services/heartbeat/main.py` (`_run_goals_proactive_tick`) escanea cada `GOALS_TICKER_POLL_SECONDS` (default 45s) el DuckDB del hub (`get_gateway_db_path()`) **y** todos los `*.duckdb` bajo `db/private/*/` (misma convención que el multiplex Telegram: los fly commands escriben en la bóveda del usuario, p. ej. `quant_traderdb1.duckdb`, distinta del hub `finanzdb1.duckdb`). Override: `DUCKCLAW_GOALS_TICKER_DB_PATH` fuerza una sola ruta (tests o despliegue especial). Si `worker_id` del chat es `manager` o vacío, no se dispara **salvo** heurística multiplex: tenant `goals_proactive_tenant_id` = `Cuantitativo` → worker efectivo `Quant-Trader`. Tras un POST 2xx al gateway (`/api/v1/agent/{worker_id}/chat` con `is_system_prompt` y `skip_session_lock`), se actualiza `goals_proactive_last_fire_epoch` **en el mismo archivo** donde se encontró el schedule. Sin goals, el ticker limpia el schedule en ese archivo.
+**Ticker:** `services/heartbeat/main.py` (`_run_goals_proactive_tick`) escanea cada `GOALS_TICKER_POLL_SECONDS` (default 45s) el DuckDB del hub (`get_gateway_db_path()`) **y** todos los `*.duckdb` bajo `db/private/*/` (misma convención que el multiplex Telegram: los fly commands escriben en la bóveda del usuario, p. ej. `quant_traderdb1.duckdb`, distinta del hub `finanzdb1.duckdb`). Override: `DUCKCLAW_GOALS_TICKER_DB_PATH` fuerza una sola ruta (tests o despliegue especial). Además lee `chat_%_goals_cron_wall` para disparos por horario de reloj cuando `goals_delta_seconds` es 0 (exclusión con intervalo: no se deben activar ambos). Si `worker_id` del chat es `manager` o vacío, no se dispara **salvo** heurística multiplex: tenant `goals_proactive_tenant_id` = `Cuantitativo` → worker efectivo `Quant-Trader`. Tras un POST 2xx al gateway (`/api/v1/agent/{worker_id}/chat` con `is_system_prompt` y `skip_session_lock`), se actualiza `goals_proactive_last_fire_epoch` **en el mismo archivo** donde se encontró el schedule. Sin goals y sin meta `trading_session` / `goals_wall`, el ticker limpia el schedule en ese archivo. El mensaje sintético visible al modelo incluye «Revisión periódica de `/crons`» (tras despliegue; el código sigue aceptando el texto heredado con `/goals` para eventos en vuelo).
 
 **Multiplex:** el ticker embebido en el API Gateway reutiliza la misma lógica de escaneo; con varios gateways PM2, cada proceso sigue recorriendo las mismas rutas bajo `db/private/` (idempotencia por chat + `last_fire`).
 
 | Clave `agent_config` | Uso |
 |---------------------|-----|
 | `chat_{id}_goals_delta_seconds` | Intervalo en segundos (>0 activo) |
-| `chat_{id}_goals_proactive_tenant_id` | Tenant efectivo al ejecutar `/goals --delta` |
+| `chat_{id}_goals_proactive_tenant_id` | Tenant efectivo al ejecutar `/crons --delta` |
 | `chat_{id}_goals_proactive_last_fire_epoch` | Ultimo tick exitoso (epoch float) |
-| `chat_{id}_goals_proactive_schedule_anchor_epoch` | Momento en que se ejecutó `/goals --delta` (epoch); la UI estima “próximo en” como ancla + intervalo hasta el primer tick |
+| `chat_{id}_goals_proactive_schedule_anchor_epoch` | Momento en que se ejecutó `/crons --delta` (epoch); la UI estima “próximo en” como ancla + intervalo hasta el primer tick |
+| `chat_{id}_goals_cron_wall` | JSON v1: horario de reloj (`once` o `every` + días opcionales); ver paquete `cron_wall_schedule` |
 
 ### `/tasks`
 

@@ -123,7 +123,7 @@ def _dedupe_snapshots(snaps: list[float]) -> list[float]:
 
 
 def _compute_tick_tearsheet_metrics_from_pnl(*, snapshots: list[float], anchor_equity: float) -> dict[str, float | None]:
-    # Espejo de /trading_session --status
+    # Espejo de /trading-session --status
     out: dict[str, float | None] = {
         "sharpe": None,
         "sortino": None,
@@ -192,7 +192,23 @@ def _extract_snapshots_from_config(config_df: pd.DataFrame, active_uid: str) -> 
         snapshots = json.loads(str(snap_rows["value"].values[0]))
         if not isinstance(snapshots, list):
             return [], "fallback"
-        clean = [float(x) for x in snapshots]
+        if snapshots and isinstance(snapshots[0], dict):
+            clean = []
+            for item in snapshots:
+                if isinstance(item, dict):
+                    pv = item.get("pnl", item.get("p"))
+                    if pv is not None:
+                        try:
+                            clean.append(float(pv))
+                        except (TypeError, ValueError):
+                            pass
+                else:
+                    try:
+                        clean.append(float(item))
+                    except (TypeError, ValueError):
+                        pass
+        else:
+            clean = [float(x) for x in snapshots]
         deduped = _dedupe_snapshots(clean)
         return deduped, "snapshot"
     except Exception:
@@ -222,7 +238,7 @@ def build_reconciled_pnl_series(
     snapshots, source = _extract_snapshots_from_config(config_df, session_uid)
     live_equity_f = _safe_float(live_equity)
     live_unrealized_f = _safe_float(live_unrealized)
-    # Espejo de /trading_session --status: PnL actual viene de la lógica de pnl_now
+    # Espejo de /trading-session --status: PnL actual viene de la lógica de pnl_now
     # (normalmente equivalente al unrealized live), no de equity-anchor.
     pnl_live_now = live_unrealized_f
     pnl_equity_delta = (live_equity_f - anchor_equity) if (live_equity_f is not None and anchor_equity > 0) else None
@@ -347,7 +363,7 @@ def main():
     c_pnl, c_risk = st.columns([2, 1])
 
     with c_pnl:
-        st.caption("Serie alineada con `/trading_session --status` (PnL por ticks guardados en agent_config).")
+        st.caption("Serie alineada con `/trading-session --status` (PnL por ticks guardados en agent_config).")
         pnl_fig = build_pnl_curve(pnl_history)
         st.plotly_chart(pnl_fig, use_container_width=True)
 

@@ -68,7 +68,7 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 ## Flujo de Trabajo Típico
 
 - Activación: El usuario inicia una sesión vía Telegram:
-/trading_session --mode paper --tickers NVDA,AAPL.
+/trading-session --mode paper --tickers NVDA,AAPL.
 
 - Monitoreo: El reactor (o el usuario) solicita datos:
 "Trae las últimas 20 velas de 1h para NVDA".

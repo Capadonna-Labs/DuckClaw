@@ -6,7 +6,7 @@ DuckClaw Heartbeat Daemon
 Bucle asíncrono que evalúa homeostasis periódicamente y, cuando detecta anomalías,
 inyecta un pensamiento interno ([SYSTEM_EVENT]) en el API Gateway.
 
-Incluye un ticker de revisión /goals --delta (intervalo corto, independiente del
+Incluye un ticker de revisión /crons --delta (intervalo corto, independiente del
 ciclo largo de homeostasis).
 """
 
@@ -29,12 +29,15 @@ from duckclaw.duckdb_read_compat import duckclaw_open_for_read_scan
 from duckclaw.db_write_queue import enqueue_duckdb_write_sync
 from duckclaw.forge.homeostasis import BeliefRegistry, HomeostasisManager
 from duckclaw.gateway_db import get_gateway_db_path, iter_goals_ticker_duckdb_paths, resolve_env_duckdb_path
+from duckclaw.forge.atoms.cron_wall_schedule import wall_once_expired, wall_schedule_should_fire
 from duckclaw.graphs.on_the_fly_commands import (
+    _GOALS_CRON_WALL_KEY,
+    _GOALS_DELTA_META_KEY,
     _GOALS_PROACTIVE_LAST_FIRE_KEY,
     _GOALS_PROACTIVE_TENANT_KEY,
-    _GOALS_DELTA_META_KEY,
     build_goals_proactive_system_event_message,
     build_trading_tick_system_event_message,
+    chat_id_from_goals_cron_wall_key,
     chat_id_from_goals_delta_config_key,
     get_chat_state,
     get_manager_goals,
@@ -56,7 +59,7 @@ HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "3600")
 GOALS_TICKER_POLL_SECONDS = int(os.getenv("GOALS_TICKER_POLL_SECONDS", "45"))
 GITHUB_MCP_HEALTH_SECONDS = float(os.getenv("DUCKCLAW_GITHUB_MCP_HEALTH_SECONDS", "300"))
 _GITHUB_PAT_401_AUDIT_COOLDOWN_KEY = "duckclaw:heartbeat:github_pat_401_audit_v1"
-# POST a /api/v1/agent/chat para el tick de /goals: turnos Quant (varias tools + sandbox) suelen >120s
+# POST a /api/v1/agent/chat para el tick de /crons: turnos Quant (varias tools + sandbox) suelen >120s
 _GOALS_PROACTIVE_HTTP_TIMEOUT = float(os.environ.get("DUCKCLAW_GOALS_PROACTIVE_HTTP_TIMEOUT", "300"))
 TAILSCALE_AUTH_KEY = os.getenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
 
@@ -256,7 +259,7 @@ async def _evaluate_homeostasis() -> List[Dict[str, Any]]:
 
 
 async def _run_goals_proactive_tick() -> None:
-    """Escanea agent_config y dispara SYSTEM_EVENT de revisión /goals cuando toca."""
+    """Escanea agent_config y dispara SYSTEM_EVENT de revisión /crons cuando toca."""
     now = time.time()
     scan_paths = _goals_ticker_scan_db_paths()
     headers: Dict[str, str] = {}
@@ -287,6 +290,8 @@ async def _run_goals_proactive_tick_one_db(
                 "SELECT key, value FROM agent_config WHERE key LIKE 'chat_%_goals_delta_seconds'"
             )
             rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            raw_w = db_ro.query("SELECT key, value FROM agent_config WHERE key LIKE 'chat_%_goals_cron_wall'")
+            wrows = json.loads(raw_w) if isinstance(raw_w, str) else (raw_w or [])
     except Exception as exc:  # noqa: BLE001
         path_key = str(Path(db_path).expanduser().resolve())
         if _goals_proactive_db_open_error_is_expected(exc):
@@ -313,10 +318,10 @@ async def _run_goals_proactive_tick_one_db(
             logger.warning("goals_proactive: no se pudo leer agent_config (%s): %s", db_path, exc)
         return
 
-    if not rows:
+    if not rows and not (wrows or []):
         return
 
-    for row in rows:
+    for row in rows or []:
         if not isinstance(row, dict):
             continue
         key = str(row.get("key") or "")
@@ -348,7 +353,8 @@ async def _run_goals_proactive_tick_one_db(
             _wid_pre = (worker_id or "").strip()
             _is_qt = _wid_pre == "Quant-Trader" or _wid_pre.lower() in ("quant-trader", "quant_trader")
             _ts_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "trading_session"
-            allow_empty_goals = bool(not goals and _ts_trigger and _is_qt)
+            _gw_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "goals_wall"
+            allow_empty_goals = bool(not goals and ((_ts_trigger and _is_qt) or _gw_trigger))
             if not goals and not allow_empty_goals:
                 logger.info(
                     "goals_proactive: chat=%s sin goals; limpiando delta",
@@ -362,6 +368,7 @@ async def _run_goals_proactive_tick_one_db(
                         ("goals_proactive_tenant_id", ""),
                         ("goals_delta_anchor", ""),
                         ("goals_delta_meta", ""),
+                        ("goals_cron_wall", ""),
                     ):
                         await _enqueue_chat_state_write(
                             db_path=db_path,
@@ -390,7 +397,7 @@ async def _run_goals_proactive_tick_one_db(
             if not tenant_id:
                 logger.warning(
                     "goals_proactive: chat=%s sin goals_proactive_tenant_id; "
-                    "repite /goals --delta tras actualizar",
+                    "repite /crons --delta tras actualizar",
                     chat_id,
                 )
                 continue
@@ -633,6 +640,350 @@ async def _run_goals_proactive_tick_one_db(
         else:
             logger.warning(
                 "goals_proactive: HTTP %s chat=%s body=%s",
+                resp.status_code,
+                chat_id,
+                (resp.text or "")[:200],
+            )
+
+    wall_poll = float(GOALS_TICKER_POLL_SECONDS)
+    for wrow in wrows or []:
+        if not isinstance(wrow, dict):
+            continue
+        wkey = str(wrow.get("key") or "")
+        chat_id_w = chat_id_from_goals_cron_wall_key(wkey)
+        if not chat_id_w:
+            continue
+        wall_raw = str(wrow.get("value") or "").strip()
+        if not wall_raw:
+            continue
+        try:
+            wall_spec: Dict[str, Any] = json.loads(wall_raw)
+        except Exception:
+            continue
+        if not isinstance(wall_spec, dict):
+            continue
+
+        with duckclaw_open_for_read_scan(db_path) as db_chk:
+            try:
+                ds_chk = int(str(get_chat_state(db_chk, chat_id_w, "goals_delta_seconds") or "0").strip() or "0")
+            except ValueError:
+                ds_chk = 0
+        if ds_chk > 0:
+            continue
+
+        if wall_once_expired(wall_spec, now):
+            try:
+                await _enqueue_chat_state_write(
+                    db_path=db_path,
+                    chat_id=chat_id_w,
+                    tenant_id="default",
+                    key=_GOALS_CRON_WALL_KEY,
+                    value="",
+                )
+            except Exception as _wexc:
+                logger.debug("goals_proactive: limpiar wall expirado chat=%s: %s", chat_id_w, _wexc)
+            continue
+
+        with duckclaw_open_for_read_scan(db_path) as db:
+            goals = get_manager_goals(db, chat_id_w)
+            meta_raw_pre = (get_chat_state(db, chat_id_w, _GOALS_DELTA_META_KEY) or "").strip()
+            meta_pre: Dict[str, Any] = {}
+            if meta_raw_pre:
+                try:
+                    _mp = json.loads(meta_raw_pre)
+                    if isinstance(_mp, dict):
+                        meta_pre = _mp
+                except Exception:
+                    meta_pre = {}
+            tenant_id = (get_chat_state(db, chat_id_w, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
+            worker_id = (get_chat_state(db, chat_id_w, "worker_id") or "").strip()
+            if (not worker_id or worker_id.lower() == "manager") and tenant_id.lower() == "cuantitativo":
+                worker_id = "Quant-Trader"
+            _wid_pre = (worker_id or "").strip()
+            _is_qt = _wid_pre == "Quant-Trader" or _wid_pre.lower() in ("quant-trader", "quant_trader")
+            _ts_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "trading_session"
+            _gw_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "goals_wall"
+            allow_empty_goals = bool(not goals and ((_ts_trigger and _is_qt) or _gw_trigger))
+            if not goals and not allow_empty_goals:
+                logger.info("goals_proactive: chat=%s sin goals; limpiando wall", chat_id_w)
+                try:
+                    await _enqueue_chat_state_write(
+                        db_path=db_path,
+                        chat_id=chat_id_w,
+                        tenant_id="default",
+                        key=_GOALS_CRON_WALL_KEY,
+                        value="",
+                    )
+                except Exception as _exc:
+                    logger.warning("goals_proactive: error al limpiar wall chat=%s: %s", chat_id_w, _exc)
+                continue
+
+            if not worker_id or worker_id.lower() == "manager":
+                logger.debug(
+                    "goals_proactive_wall: omitiendo chat=%s (worker_id=%r tenant_id=%r)",
+                    chat_id_w,
+                    worker_id,
+                    tenant_id,
+                )
+                continue
+
+            if not tenant_id:
+                logger.warning(
+                    "goals_proactive_wall: chat=%s sin goals_proactive_tenant_id",
+                    chat_id_w,
+                )
+                continue
+
+            last_raw = (get_chat_state(db, chat_id_w, _GOALS_PROACTIVE_LAST_FIRE_KEY) or "").strip()
+            try:
+                last_fire = float(last_raw) if last_raw else 0.0
+            except ValueError:
+                last_fire = 0.0
+            if not wall_schedule_should_fire(now, wall_spec, last_fire, wall_poll):
+                continue
+            meta_raw = (get_chat_state(db, chat_id_w, _GOALS_DELTA_META_KEY) or "").strip()
+            meta: Dict[str, Any] = {}
+            if meta_raw:
+                try:
+                    maybe_meta = json.loads(meta_raw)
+                    if isinstance(maybe_meta, dict):
+                        meta = maybe_meta
+                except Exception:
+                    meta = {}
+            if str(meta.get("trigger") or "").strip().lower() == "trading_session":
+                session_uid = str(meta.get("session_uid") or "").strip()
+                tickers: list[str] = []
+                mode = "paper"
+                signal_threshold = "GAS"
+                objective = "maximize_pnl"
+                if session_uid:
+                    try:
+                        sess_db_path = (
+                            _resolve_trading_session_vault_path(session_uid, all_scan_paths) or db_path
+                        )
+                        _db_same = str(Path(sess_db_path).resolve()) == str(
+                            Path(getattr(db, "_path", "") or db_path).resolve()
+                        )
+                        if _db_same:
+                            raw_sess = db.query(
+                                "SELECT mode, tickers, session_goal, session_uid, status "
+                                "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+                            )
+                        else:
+                            with DuckClaw(sess_db_path, read_only=True) as sess_conn:
+                                raw_sess = sess_conn.query(
+                                    "SELECT mode, tickers, session_goal, session_uid, status "
+                                    "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+                                )
+                        sess_rows = json.loads(raw_sess) if isinstance(raw_sess, str) else (raw_sess or [])
+                        if sess_rows and isinstance(sess_rows[0], dict):
+                            sess_row = sess_rows[0]
+                            if str(sess_row.get("status") or "").strip().upper() != "ACTIVE":
+                                message = "[SYSTEM_EVENT: No hay sesión activa. Tick cancelado.]"
+                            else:
+                                mode = str(sess_row.get("mode") or "paper").strip().lower() or "paper"
+                                tickers_csv = str(sess_row.get("tickers") or "").strip()
+                                if tickers_csv:
+                                    tickers = [x.strip().upper() for x in tickers_csv.split(",") if x.strip()]
+                                goal_raw = sess_row.get("session_goal")
+                                try:
+                                    gobj = (
+                                        goal_raw
+                                        if isinstance(goal_raw, dict)
+                                        else json.loads(str(goal_raw or "{}"))
+                                    )
+                                except Exception:
+                                    gobj = {}
+                                if isinstance(gobj, dict):
+                                    signal_threshold = str(gobj.get("signal_threshold") or "GAS").strip().upper() or "GAS"
+                                    objective = str(gobj.get("objective") or "maximize_pnl").strip().lower() or "maximize_pnl"
+                                session_uid = str(sess_row.get("session_uid") or session_uid).strip()
+                                message = build_trading_tick_system_event_message(
+                                    session_uid=session_uid,
+                                    tickers=tickers,
+                                    mode=mode,
+                                    signal_threshold=signal_threshold,
+                                    objective=objective,
+                                )
+                        else:
+                            message = "[SYSTEM_EVENT: No hay sesión activa. Tick cancelado.]"
+                    except Exception:
+                        message = "[SYSTEM_EVENT: No se pudo resolver la sesión activa. Tick cancelado.]"
+                else:
+                    message = "[SYSTEM_EVENT: No hay session_uid en goals_delta_meta. Tick cancelado.]"
+            else:
+                trading_obj: str | None = None
+                if _is_qt:
+                    _qpath = _resolve_quant_trader_vault_path(all_scan_paths)
+                    if _qpath:
+                        try:
+                            with DuckClaw(_qpath, read_only=True) as _qdb:
+                                raw_sg = _qdb.query(
+                                    "SELECT session_goal FROM quant_core.trading_sessions "
+                                    "WHERE id = 'active' LIMIT 1"
+                                )
+                            srows = (
+                                json.loads(raw_sg) if isinstance(raw_sg, str) else (raw_sg or [])
+                            )
+                            if srows and isinstance(srows[0], dict):
+                                sgr = srows[0].get("session_goal")
+                                if isinstance(sgr, str):
+                                    sgr = json.loads(sgr)
+                                if isinstance(sgr, dict):
+                                    o = str(sgr.get("objective") or "").strip().lower()
+                                    if o in (
+                                        "maximize_pnl",
+                                        "rebalance_hrp",
+                                        "overnight_gap_squeeze",
+                                    ):
+                                        trading_obj = o
+                        except Exception:
+                            trading_obj = None
+                message = build_goals_proactive_system_event_message(
+                    goals, trading_session_objective=trading_obj
+                )
+
+        chat_id = chat_id_w
+        _wid = (worker_id or "").strip()
+        vault_for_gateway = str(Path(db_path).expanduser().resolve())
+        _qt_vault: str | None = None
+        if _wid == "Quant-Trader" or _wid.lower() in ("quant-trader", "quant_trader"):
+            _qt_vault = _resolve_quant_trader_vault_path(all_scan_paths)
+            if _qt_vault:
+                vault_for_gateway = _qt_vault
+        payload = {
+            "message": message,
+            "chat_id": str(chat_id),
+            "user_id": str(chat_id),
+            "username": "Usuario",
+            "chat_type": "private",
+            "tenant_id": tenant_id,
+            "is_system_prompt": True,
+            "skip_session_lock": True,
+        }
+        if _qt_vault:
+            payload["vault_db_path"] = _qt_vault
+        url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    params={"tenant_id": tenant_id, "deliver_outbound": "1"},
+                    json=payload,
+                    headers=headers,
+                    timeout=_GOALS_PROACTIVE_HTTP_TIMEOUT,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "goals_proactive_wall: error HTTP chat=%s worker=%s: %s",
+                chat_id,
+                worker_id,
+                exc,
+            )
+            continue
+
+        if 200 <= resp.status_code < 300:
+            _resp_text = ""
+            try:
+                _payload = resp.json() if (resp.text or "").strip().startswith("{") else {}
+                if isinstance(_payload, dict):
+                    _resp_text = str(_payload.get("response") or "").strip()
+            except Exception:
+                _resp_text = ""
+            await _enqueue_chat_state_write(
+                db_path=db_path,
+                chat_id=chat_id,
+                tenant_id=tenant_id or "default",
+                key=_GOALS_PROACTIVE_LAST_FIRE_KEY,
+                value=str(now),
+            )
+            if str(wall_spec.get("kind") or "").strip().lower() == "once":
+                try:
+                    await _enqueue_chat_state_write(
+                        db_path=db_path,
+                        chat_id=chat_id,
+                        tenant_id=tenant_id or "default",
+                        key=_GOALS_CRON_WALL_KEY,
+                        value="",
+                    )
+                except Exception as _oce:
+                    logger.debug("goals_proactive_wall: limpiar once chat=%s: %s", chat_id, _oce)
+            try:
+                if _resp_text:
+                    _m_curr = re.search(
+                        r"(?:PnL no realizado=\$|PnL no realizado total \(snapshot\):\s*\$)"
+                        r"([\-0-9,]+(?:\.[0-9]+)?)",
+                        _resp_text,
+                    )
+                    _m_prev = re.search(r"PnL anterior=\$([\-0-9,]+(?:\.[0-9]+)?)", _resp_text)
+                    _m_pct = re.search(r"Cambio vs anterior=([+\-]?[0-9]+(?:\.[0-9]+)?)%", _resp_text)
+                    _curr_txt = _m_curr.group(1).replace(",", "") if _m_curr else ""
+                    _prev_txt = _m_prev.group(1).replace(",", "") if _m_prev else ""
+                    _pct_txt = _m_pct.group(1) if _m_pct else ""
+                    if _curr_txt:
+                        await _enqueue_chat_state_write(
+                            db_path=db_path,
+                            chat_id=chat_id,
+                            tenant_id=tenant_id or "default",
+                            key="trading_session_last_pnl",
+                            value=_curr_txt,
+                        )
+                    await _enqueue_chat_state_write(
+                        db_path=db_path,
+                        chat_id=chat_id,
+                        tenant_id=tenant_id or "default",
+                        key="trading_session_prev_pnl",
+                        value=_prev_txt,
+                    )
+                    await _enqueue_chat_state_write(
+                        db_path=db_path,
+                        chat_id=chat_id,
+                        tenant_id=tenant_id or "default",
+                        key="trading_session_pct_change",
+                        value=_pct_txt,
+                    )
+            except Exception as _exc:
+                logger.debug(
+                    "goals_proactive_wall: persist PnL chat_state chat=%s: %s",
+                    chat_id,
+                    _exc,
+                )
+            try:
+                if '"type":"TRADING_TICK"' in message or '"type": "TRADING_TICK"' in message:
+                    start = message.find("{")
+                    end = message.rfind("}")
+                    payload_ev = json.loads(message[start : end + 1]) if start >= 0 and end > start else {}
+                    if isinstance(payload_ev, dict):
+                        uid = str(payload_ev.get("session_uid") or "").strip()
+                        tickers = payload_ev.get("tickers") if isinstance(payload_ev.get("tickers"), list) else []
+                        await asyncio.to_thread(
+                            enqueue_duckdb_write_sync,
+                            db_path=db_path,
+                            query=(
+                                "INSERT INTO quant_core.session_ticks "
+                                "(id, session_uid, tick_number, tickers_processed, signals_proposed, cfd_summary, outcome) "
+                                "VALUES (gen_random_uuid(), ?, COALESCE((SELECT MAX(tick_number)+1 FROM quant_core.session_ticks WHERE session_uid=?), 1), ?, 0, ?, ?)"
+                            ),
+                            params=[
+                                uid,
+                                uid,
+                                [str(t).strip().upper() for t in tickers if str(t).strip()],
+                                json.dumps({"source": "heartbeat_wall"}, ensure_ascii=False),
+                                "ALIGNED",
+                            ],
+                            user_id=str(chat_id),
+                            tenant_id=str(tenant_id or "default"),
+                        )
+            except Exception:
+                pass
+            logger.info(
+                "goals_proactive_wall: tick OK chat=%s worker=%s",
+                chat_id,
+                worker_id,
+            )
+        else:
+            logger.warning(
+                "goals_proactive_wall: HTTP %s chat=%s body=%s",
                 resp.status_code,
                 chat_id,
                 (resp.text or "")[:200],

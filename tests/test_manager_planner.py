@@ -782,13 +782,20 @@ def test_entry_route_system_event_trading_tick_and_plan_task_bypass() -> None:
     assert _is_entry_route_system_event(tick)
     assert not _is_goals_proactive_system_event(tick)
 
-    goals = (
+    goals_legacy = (
         "[SYSTEM_EVENT: Revisión periódica de /goals. Objetivos: x. "
         "Evalúa con herramientas si hace falta qué tan alineado está el "
         "contexto actual con cumplir cada meta. Responde al usuario.]"
     )
-    assert _is_entry_route_system_event(goals)
-    assert _is_goals_proactive_system_event(goals)
+    goals_crons = (
+        "[SYSTEM_EVENT: Revisión periódica de /crons. Objetivos: x. "
+        "Evalúa con herramientas si hace falta qué tan alineado está el "
+        "contexto actual con cumplir cada meta. Responde al usuario.]"
+    )
+    assert _is_entry_route_system_event(goals_legacy)
+    assert _is_goals_proactive_system_event(goals_legacy)
+    assert _is_entry_route_system_event(goals_crons)
+    assert _is_goals_proactive_system_event(goals_crons)
 
     plain = "cuánto tengo en Nequi"
     assert not _is_entry_route_system_event(plain)

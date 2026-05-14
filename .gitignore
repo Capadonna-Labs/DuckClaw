@@ -66,5 +66,9 @@ dump.rdb
 # Local generated output
 output/
 
+# MCP /  — árbol de integración y shims (mantener local o en repo privado)
+/default/
+
+packages/agents/src/duckclaw/forge/templates//
 
 /Users/workstation/Developer/duckclaw/packages/agents/src/duckclaw/forge/templates/AXIS

@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "LangGraph agents and workers for DuckClaw"
 requires-python = ">=3.9"
 dependencies = [
+    "duckclaw-edge-devices",
     "langgraph>=0.2.0",
     "redis>=5.0.0",
     "duckclaw-core",
@@ -37,3 +38,6 @@ train = [
 package-dir = {"" = "src"}
 # duckclaw.graphs (src/duckclaw/graphs), duckclaw.workers, duckclaw.forge (forge/skills en forge)
 packages = ["duckclaw.graphs", "duckclaw.workers", "duckclaw.forge", "duckclaw.api"]
+
+[tool.uv.sources]
+duckclaw-edge-devices = { path = "../../integrations/edge-devices", editable = true }

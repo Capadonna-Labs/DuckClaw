@@ -38,6 +38,11 @@ _DEFAULT_SCHEMA = (
 _TICK_SEC = 0.5
 
 
+def _fmt_ts_ms(ms: int) -> str:
+    """Marca de tiempo UTC legible desde epoch ms (misma convención que ``timestamp_ms``)."""
+    return pd.Timestamp(int(ms), unit="ms", tz="UTC").strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
 def _row_from_buffer(buf: EdgeTelemetry, schema: list[str]) -> dict[str, Any]:
     device_id = buf.device_id.decode("utf-8", errors="ignore").strip()
     row: dict[str, Any] = {
@@ -166,10 +171,11 @@ def main() -> None:
         return
 
     last = rows[-1]
+    last_ms = int(last.get("timestamp_ms", 0))
     st.subheader("Última muestra")
     st.write(
         f"**device_id:** `{last.get('device_id', '')}` · "
-        f"**timestamp_ms:** `{last.get('timestamp_ms')}` · "
+        f"**t:** `{_fmt_ts_ms(last_ms)}` · "
         f"**status:** `{last.get('status_code')}`"
     )
     mcols = st.columns(min(4, max(1, len(schema))))
@@ -181,14 +187,26 @@ def main() -> None:
     if chart_cols:
         df = pd.DataFrame(rows)
         if "timestamp_ms" in df.columns:
-            df = df.set_index("timestamp_ms")
+            idx = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
+            df = df.assign(_t=idx).set_index("_t").drop(columns=["timestamp_ms"], errors="ignore")
         sub = df[[c for c in chart_cols if c in df.columns]]
         if not sub.empty:
             st.subheader("Series")
+            st.caption("Eje X: tiempo (UTC).")
             st.line_chart(sub, height=320)
 
     with st.expander("Tabla (últimas filas)"):
-        st.dataframe(pd.DataFrame(rows[-min(50, len(rows)) :]), use_container_width=True)
+        tail = pd.DataFrame(rows[-min(50, len(rows)) :])
+        if not tail.empty and "timestamp_ms" in tail.columns:
+            tail = tail.copy()
+            tail.insert(
+                0,
+                "tiempo_utc",
+                pd.to_datetime(tail["timestamp_ms"], unit="ms", utc=True).dt.strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+            )
+        st.dataframe(tail, use_container_width=True)
 
 
 main()

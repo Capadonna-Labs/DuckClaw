@@ -43,6 +43,13 @@ def default_library_candidates() -> list[Path]:
     root = integration_root()
     out.append(root / "native" / "libedgecore.so")
     out.append(root / "native" / "libedgecore.dylib")
+    # ``*.so`` is gitignored; many checkouts keep a prior build next to the old Python tree.
+    try:
+        monorepo_root = root.parents[1]
+        out.append(monorepo_root / "duckclaw" / "libedgecore.so")
+        out.append(monorepo_root / "duckclaw" / "forge" / "skills" / "libedgecore.so")
+    except IndexError:
+        pass
     return out
 
 

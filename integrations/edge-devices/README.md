@@ -1,6 +1,6 @@
 # Edge devices (`libedgecore`)
 
-Integración en un solo sitio: **fuentes C**, bindings **ctypes** y **Streamlit** para telemetría.
+El fichero `libedgecore.so` **no va en git** (suele ignorarse `*.so`). Tras un `git pull`, compila de nuevo o copia un `.so` ya generado a `native/`. El cliente Python también prueba rutas típicas del monorepo (`duckclaw/libedgecore.so`, `duckclaw/forge/skills/libedgecore.so`).
 
 ## Compilar la librería nativa (Linux / VPS)
 

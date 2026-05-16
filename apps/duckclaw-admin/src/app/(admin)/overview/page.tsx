@@ -1,0 +1,108 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { adminService } from '@/services/adminService';
+import type { AdminHealth } from '@/types/admin';
+import { Activity, Bot, Database, Radio } from 'lucide-react';
+import Link from 'next/link';
+
+export default function OverviewPage() {
+  const [health, setHealth] = useState<AdminHealth | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    adminService
+      .health()
+      .then(setHealth)
+      .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
+  }, []);
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <header>
+        <h1 className="text-3xl font-black text-gov-gray-900 dark:text-dark-text tracking-tight">
+          Overview
+        </h1>
+        <p className="text-sm text-gov-gray-500 dark:text-dark-muted mt-1">
+          Estado del gateway, plantillas y servicios
+        </p>
+      </header>
+
+      {error && (
+        <p className="text-sm text-red-600 bg-red-50 dark:bg-red-950/30 p-4 rounded-xl">{error}</p>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCard icon={Bot} label="Workers" value={health?.workers_count ?? '—'} />
+        <MetricCard
+          icon={Radio}
+          label="Redis"
+          value={health?.redis ? 'OK' : health ? 'Off' : '—'}
+        />
+        <MetricCard icon={Database} label="Gateway" value={health?.status ?? '—'} />
+        <MetricCard icon={Activity} label="Plantillas dir" value="forge/templates" small />
+      </div>
+
+      <section className="bg-white dark:bg-dark-surface rounded-3xl border border-gov-gray-100 dark:border-dark-border p-6">
+        <h2 className="text-lg font-bold mb-4">Accesos rápidos</h2>
+        <div className="flex flex-wrap gap-3">
+          <QuickLink href="/templates" label="Plantillas" />
+          <QuickLink href="/projects/new" label="Nuevo proyecto" />
+          <QuickLink href="/telegram" label="Telegram" />
+          <QuickLink href="/traces" label="Traces" />
+        </div>
+      </section>
+
+      {health?.workers && health.workers.length > 0 && (
+        <section className="bg-white dark:bg-dark-surface rounded-3xl border p-6 dark:border-dark-border">
+          <h2 className="text-lg font-bold mb-3">Workers detectados</h2>
+          <ul className="flex flex-wrap gap-2">
+            {health.workers.map((w) => (
+              <li key={w}>
+                <Link
+                  href={`/templates/${w}`}
+                  className="text-xs font-mono px-2 py-1 bg-gov-gray-50 dark:bg-dark-bg rounded-lg hover:bg-gov-blue-50"
+                >
+                  {w}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+  small,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string | number;
+  small?: boolean;
+}) {
+  return (
+    <div className="bg-white dark:bg-dark-surface rounded-2xl border border-gov-gray-100 dark:border-dark-border p-5">
+      <Icon className="text-gov-blue-600 dark:text-dark-cyan mb-2" size={22} />
+      <p className="text-xs text-gov-gray-500 uppercase font-bold tracking-wider">{label}</p>
+      <p className={`font-black text-gov-gray-900 dark:text-dark-text mt-1 ${small ? 'text-sm' : 'text-2xl'}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function QuickLink({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      className="px-4 py-2 bg-gov-blue-700 text-white text-sm font-semibold rounded-xl hover:bg-gov-blue-800"
+    >
+      {label}
+    </Link>
+  );
+}

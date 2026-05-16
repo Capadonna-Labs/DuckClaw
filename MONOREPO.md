@@ -11,6 +11,7 @@ duckclaw/
 ├── services/           ← Procesos desplegables (I/O, colas, escritura)
 ├── packages/           ← Librerías Python/C++ importables por los servicios
 ├── config/             ← [`CONFIG_TEMPLATES.md`](config/CONFIG_TEMPLATES.md) (PM2, MCP; secretos en .env)
+├── apps/               ← duckclaw-admin (Next.js, pnpm)
 ├── tests/              ← Pytest
 └── scripts/            ← ver scripts/SCRIPTS_INDEX.md (doctor, quant, smoke, experimental)
 ```

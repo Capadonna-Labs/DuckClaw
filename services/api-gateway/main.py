@@ -2320,6 +2320,12 @@ except ImportError:
     pass
 
 try:
+    from routers.admin import router as admin_router
+    app.include_router(admin_router)
+except ImportError as _admin_imp_err:
+    _gateway_log.error("Admin router omitido: %s", _admin_imp_err)
+
+try:
     from duckclaw.graphs.novnc_routes import build_novnc_router
 
     app.include_router(

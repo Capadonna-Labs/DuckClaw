@@ -68,3 +68,15 @@ Equipo:
 /context --add Documentacion especifica 
 ```
 
+## Admin UI (pnpm)
+
+```bash
+# Gateway con DUCKCLAW_ADMIN_API_KEY en .env raíz
+pm2 restart DuckClaw-Gateway --update-env
+
+cd apps/duckclaw-admin && pnpm install && pnpm dev
+# o desde raíz: pnpm admin:dev
+```
+
+Variables en `apps/duckclaw-admin/.env.local`: `DUCKCLAW_GATEWAY_URL`, `DUCKCLAW_ADMIN_API_KEY` (misma clave que el gateway).
+

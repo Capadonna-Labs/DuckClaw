@@ -1,17 +1,14 @@
 {
   "name": "duckclaw-repo-root",
   "private": true,
-  "description": "No es el paquete principal del monorepo. npm run build ejecuta el Next.js CRM; también puedes usar crm:*.",
+  "description": "Monorepo DuckClaw. Admin UI: pnpm en apps/duckclaw-admin (admin:*).",
   "scripts": {
     "kanban": "npx -y vibe-kanban --port 3333",
-    "build": "npm run crm:build",
-    "crm:dev": "npm run dev --prefix external/retoPWRSomegahack",
-    "crm:dev:public": "npm run dev --prefix external/retoPWRSomegahack -- --hostname 0.0.0.0 --port 3000",
-    "crm:origin-check": "uv run python scripts/crm_origin_check.py",
-    "crm:clean": "rm -rf external/retoPWRSomegahack/.next",
-    "crm:bootstrap-db": "uv run python scripts/bootstrap_dbs.py",
-    "crm:build": "npm run build --prefix external/retoPWRSomegahack",
-    "crm:install": "npm install --prefix external/retoPWRSomegahack",
-    "crm:lint": "npm run lint --prefix external/retoPWRSomegahack"
+    "admin:dev": "pnpm --dir apps/duckclaw-admin dev",
+    "admin:build": "pnpm --dir apps/duckclaw-admin build",
+    "admin:start": "pnpm --dir apps/duckclaw-admin start",
+    "admin:lint": "pnpm --dir apps/duckclaw-admin lint",
+    "admin:install": "pnpm --dir apps/duckclaw-admin install",
+    "crm:bootstrap-db": "uv run python scripts/bootstrap_dbs.py"
   }
 }

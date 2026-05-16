@@ -5,6 +5,9 @@ id: finanz
 schema_name: finance_worker
 topology: general
 read_only: false
+# RW en el mismo PID: el read-pool efímero abre RO al mismo .duckdb → DuckDB "different configuration"
+# (gateway 2026-05-12: read_sql paralelo falla; admin_sql vía cola sí). Forzar read_sql por sesión única.
+tool_read_pool: false
 risk_level: conservative
 # IBKR + ingesta OHLCV / quant (spec: Quantitative Trading Worker, integrado en Finanz)
 quant:

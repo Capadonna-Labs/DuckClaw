@@ -15,9 +15,7 @@ Dos pipelines operativos desacoplados:
 | `DUCKCLAW_QUANT_SCRIPT_DB` | Ruta DuckDB vault (jobs). |
 | `REDIS_URL` / `DUCKCLAW_REDIS_URL` | Cola singleton (`enqueue_duckdb_write_sync`). |
 | `TZ=America/Bogota` | PM2/cron COT recomendado. |
-| `DUCKCLAW_QUANT_ALERT_CHAT_ID` | Telegram `chat_id` numérico para alertas MOC/HRP vía `N8N_OUTBOUND_WEBHOOK_URL`. **Obligatorio en el entorno del proceso** si quieres recibir el resumen en Telegram (PM2 no hereda automáticamente el `.env` del gateway salvo que lo inyectes en `env` del ecosystem o `pm2 restart … --update-env`). |
-| `N8N_OUTBOUND_WEBHOOK_URL` | Mismo webhook que usa el API Gateway para mensajes salientes a Telegram. Debe estar definido en el **proceso PM2** que ejecuta `moc_pipeline.py` o `hrp_weekly_job.py`. |
-| `N8N_AUTH_KEY` | Opcional; cabecera `X-DuckClaw-Secret` si el flujo n8n la exige. |
+| `DUCKCLAW_QUANT_ALERT_CHAT_ID` | Telegram `chat_id` para alertas MOC/HRP vía `N8N_OUTBOUND_WEBHOOK_URL`. Opcional si no hay n8n. |
 | IBKR/Gateway existentes | `IBKR_GATEWAY_OHLCV_URL`, lake, etc. como en spec Capadonna. |
 | `DUCKCLAW_MOC_MACRO_VSS` | `1` = válvula MOC v2 con régimen PGQ + perfil VSS (véase spec macro). |
 | `DUCKCLAW_MOC_VSS_TIMEOUT_SEC` | Timeout lectura VSS en el job MOC (default `3`). |
@@ -29,8 +27,7 @@ Dos pipelines operativos desacoplados:
 | `DUCKCLAW_QUANT_AUTO_EXECUTE_IGNORE_MOC_WINDOW` | Alias legacy de **`DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES`** (`1` = mismo efecto). |
 | `DUCKCLAW_QUANT_OHLCV_ON_CONTEXT_SUMMARY` | **`1`** (opt-in): en turnos `[SYSTEM_DIRECTIVE: SUMMARIZE_*]` del Quant Trader, si el texto pide ingesta OHLCV explícita (heurística velas/símbolo), se permite forzar `fetch_market_data` / `fetch_ib_gateway_ohlcv` igual que fuera de síntesis. No modifica la ventana MOC de ejecución. Default: desactivado. |
 | `DUCKCLAW_MOC_ACCUM_BLOCK_WEEKEND` | **`1`** = `accumulate_moc_intraday_state` **no** acepta sábado/domingo COT. Default **desactivado** (fin de semana permitido para iterar hints). |
-| `DUCKCLAW_MOC_BATCH_AUTO_EXECUTE` | **`1`** + `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1` + ventana MOC + reglas paper/live: tras `propose_trade_signal` con `strategy_name=moc_hrp_cfd` (p. ej. job PM2), encadena la misma auto-ejecución que `cfd_auto` (grant + `execute_approved_signal`). El script `moc_pipeline.py` **calc** (no `--dry-run`) fuerza ambos a `1` salvo opt-out (véase `DUCKCLAW_MOC_PIPELINE_AUTO_EXECUTE`). |
-| `DUCKCLAW_MOC_PIPELINE_AUTO_EXECUTE` | **`1`** (default si ausente): al inicio de **calc** real, el pipeline exporta `DUCKCLAW_MOC_BATCH_AUTO_EXECUTE=1` y `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1` en el proceso para encadenar auto-exec de `moc_hrp_cfd`. **`0`** / `false` / `off` = no tocar esas variables (comportamiento histórico solo HITL salvo que ya estén en `1` en el entorno PM2). |
+| `DUCKCLAW_MOC_BATCH_AUTO_EXECUTE` | **`1`** + `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1` + ventana MOC + reglas paper/live: tras `propose_trade_signal` con `strategy_name=moc_hrp_cfd` (p. ej. job PM2), encadena la misma auto-ejecución que `cfd_auto` (grant + `execute_approved_signal`). Default **`0`** (solo HITL para batch MOC). |
 
 **Macro PGQ + perfil:** [MOC Macro PGQ VSS.md](./MOC%20Macro%20PGQ%20VSS.md).
 
@@ -78,16 +75,6 @@ Los jobs establecen `bind_quant_market_evidence_chat("__moc__")` / `"__hrp_weekl
 
 Env `MOC_PHASE=calc|remind|expire`.
 
-### PM2 y Telegram outbound (validación)
-
-Los jobs llaman a `send_quant_alert_message` en [`scripts/quant/_job_common.py`](../../scripts/quant/_job_common.py): POST JSON con `chat_id`, `user_id` (igual que `chat_id`, alineado al gateway), `text`, `parse_mode=HTML` hacia `N8N_OUTBOUND_WEBHOOK_URL`.
-
-- Cada proceso PM2 (`DuckClaw-MOC-Calc`, `DuckClaw-MOC-Remind`, `DuckClaw-MOC-Expire`, etc.) debe tener en su **`env`** las mismas variables que usa el gateway para salida: como mínimo **`N8N_OUTBOUND_WEBHOOK_URL`** + **`DUCKCLAW_QUANT_ALERT_CHAT_ID`**. Si falta alguna, el script escribe en **stderr** una línea `[quant_job] outbound skip: …` o `[moc_pipeline] … outbound_configured=no (…)` para diagnosticar sin abrir Telegram.
-- Tras cambiar `.env`, usar `pm2 restart DuckClaw-MOC-Calc --update-env` (y análogos) para que PM2 recargue variables.
-- **Fase calc:** la última línea **stdout** del JSON de resumen incluye `telegram_outbound_ok` (`true`/`false`) cuando no es `--dry-run`, indicando si al menos un POST de alerta respondió 2xx en esa corrida.
-- **Prefijo en el chat:** las alertas llevan primera línea `MOC calc|remind|expire · HH:MM COT` para distinguir qué cron disparó el mensaje.
-- **Siempre que haya outbound configurado** (mismas env que arriba) y **no** sea `--dry-run`: se intenta un mensaje breve en Telegram ante `DUCKCLAW_QUANT_SCRIPT_DB` inválido, `MOC_PHASE` inválido, excepción no capturada en `main()`, y en **remind** cuando hay `session_uid` en store pero 0 señales pendientes (ciclo OK sin HITL).
-
 **Simulación intradía:** `python scripts/quant/moc_pipeline.py --dry-run` (con `MOC_PHASE` y `DUCKCLAW_QUANT_SCRIPT_DB` como en prod). Ejecuta lecturas (vault read-only, IBKR, allocations) e imprime el cuerpo Telegram y JSON resumen; **no** envía Telegram, **no** encola SQL, **no** llama `propose_trade_signal`, **no** escribe `~/.duckclaw_moc_session.json` ni `semantic_memory` MOC.
 
 **Crons** (lun–vie ejemplo, servidor en `America/Bogota`): 14:40 calc, 14:50 remind, 14:59 expire (alineado al cierre de ventana gateway).
@@ -100,7 +87,7 @@ Los jobs llaman a `send_quant_alert_message` en [`scripts/quant/_job_common.py`]
 4. Por ticker: fase CFD = último `quant_core.fluid_state.phase` orden `timestamp DESC LIMIT 1`. Sin historia → **`SOLID`** (válvula 0.4).
 5. Si `DUCKCLAW_MOC_MACRO_VSS=1`: una vez por ciclo — `detect_current_regime`, `get_investor_profile` (timeouts VSS); por ticker — `calculate_target_allocation_v2`. Si no — `calculate_target_allocation` (átomo legacy): válvulas GAS/LIQUID/SOLID/PLASMA.
 5b. **Hints intradía:** leer `quant_core.intraday_moc_accum` para `trading_date` = hoy COT y `session_uid` = fila `quant_core.trading_sessions` `id='active'`. Si hay `payload` por ticker, aplicar `apply_intraday_accum_hints_to_allocation` (mandato HRP sigue siendo **techo**; `weight_scale` acota al cap). Sin fila → mismo cálculo que antes.
-6. `action != HOLD` → `_propose_trade_signal_impl(..., proposed_weight = target_weight*100, strategy_name=moc_hrp_cfd)`. Con `strategy_name=moc_hrp_cfd` la auto-ejecución encadenada aplica si `DUCKCLAW_MOC_BATCH_AUTO_EXECUTE=1` y `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1` y ventana MOC y sesión/mode OK; **calc** del pipeline activa ambos por defecto (`DUCKCLAW_MOC_PIPELINE_AUTO_EXECUTE`, salvo `0`). Si falla la compuerta o live sin `DUCKCLAW_QUANT_AUTO_EXECUTE_ALLOW_LIVE`, queda HITL como antes.
+6. `action != HOLD` → `_propose_trade_signal_impl(..., proposed_weight = target_weight*100, strategy_name=moc_hrp_cfd)`. Con `strategy_name=moc_hrp_cfd` la auto-ejecución encadenada **solo** si `DUCKCLAW_MOC_BATCH_AUTO_EXECUTE=1` y `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1` y ventana MOC y sesión/mode OK; en caso contrario solo HITL (comportamiento histórico).
 
 **Otras estrategias** (`overnight_gap_squeeze`, `cfd_auto`, etc.): por defecto `propose_trade_signal` **puede** crear Ledger fuera del tramo MOC; la cadena automática hasta `execute_approved_signal` con `DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS=1` **sí** exige ventana MOC. Opt-in **`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1`**: bloqueo de propuesta fuera de ventana (`OUTSIDE_MOC_PREP_WINDOW`). Bypass dev: `DUCKCLAW_QUANT_IGNORE_MOC_TIME_GATES`.
 7. Persistir estado del ciclo (`MOC_SESSION_UID` UUID en archivo bajo `$TMPDIR`/`.duckclaw_moc_session` o env para fases siguientes).

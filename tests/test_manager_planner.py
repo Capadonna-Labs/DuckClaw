@@ -909,29 +909,6 @@ def test_quant_hrp_affirm_followup_rejects_unrelated_thread() -> None:
     )
 
 
-def test_quant_hrp_affirm_followup_rejects_confirm_defensive_hold() -> None:
-    """'Confirmo' a 'mantener defensivo / no ejecutar HRP agresivo' no debe disparar rebalance HRP."""
-    from duckclaw.graphs.manager_graph import _try_quant_hrp_affirm_followup
-
-    last_assistant = (
-        "14:46 COT — Ventana MOC abierta. Portfolio actual vs HRP fresco:\n"
-        "| Ticker | Actual | HRP fresco |\n"
-        "| META | short | 18% |\n"
-        "⚠️ HRP fresco es más agresivo. Peso tech (META 18%, MSFT 7%) vs postura DEFENSIVA con VIX 18.\n"
-        "Propongo mantener las 10 señales actuales (defensivas) y no ejecutar HRP agresivo hoy. ¿Confirmas?"
-    )
-    assert (
-        _try_quant_hrp_affirm_followup(
-            "Confirmo",
-            [{"role": "assistant", "content": last_assistant}],
-            "Quant-Trader",
-            "Cuantitativo",
-            ["Quant-Trader"],
-        )
-        is None
-    )
-
-
 def test_plan_task_lone_http_url_skips_estructura_slug_false_positive() -> None:
     from duckclaw.graphs.manager_graph import _plan_task
 

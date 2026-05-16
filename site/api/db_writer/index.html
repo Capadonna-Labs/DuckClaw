@@ -279,6 +279,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../architecture/system_overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../architecture/singleton_writer/" class="md-nav__link">
         
   
@@ -1015,6 +1043,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#duckclaw.gateway_db.iter_goals_delta_clear_duckdb_paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_goals_delta_clear_duckdb_paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duckclaw.gateway_db.iter_goals_ticker_duckdb_paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_goals_ticker_duckdb_paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#duckclaw.gateway_db.raw_gateway_db_path_from_environ" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1595,6 +1645,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#duckclaw.gateway_db.iter_goals_delta_clear_duckdb_paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_goals_delta_clear_duckdb_paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duckclaw.gateway_db.iter_goals_ticker_duckdb_paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_goals_ticker_duckdb_paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#duckclaw.gateway_db.raw_gateway_db_path_from_environ" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1932,7 +2004,8 @@ PQRSD-Assistant, para no heredar el vault dedicado del hub (p. ej. Finanz).</p>
         <p>Ruta absoluta del DuckDB del gateway (hub ACL / whitelist).</p>
 <p>Primera variable no vacía entre <code>DUCKCLAW_WAR_ROOM_ACL_DB_PATH</code>,
 <code>DUCKCLAW_FINANZ_DB_PATH</code>, <code>DUCKCLAW_JOB_HUNTER_DB_PATH</code>,
-<code>DUCKCLAW_SIATA_DB_PATH</code>, <code>DUCKCLAW_PQRSD_ASSISTANT_DB_PATH</code>, luego <code>DUCKDB_PATH</code>; resuelta con
+<code>DUCKCLAW_SIATA_DB_PATH</code>, <code>DUCKCLAW_QUANT_TRADER_DB_PATH</code>,
+<code>DUCKCLAW_PQRSD_ASSISTANT_DB_PATH</code>, <code>DUCKCLAW_AXIS_DB_PATH</code>, luego <code>DUCKDB_PATH</code>; resuelta con
 <code>resolve_env_duckdb_path</code>.</p>
 
 
@@ -1955,6 +2028,54 @@ PQRSD-Assistant, para no heredar el vault dedicado del hub (p. ej. Finanz).</p>
 <p>Si <code>DUCKCLAW_WAR_ROOM_ACL_DB_PATH</code> está definida (p. ej. finanzdb1 mientras el
 grafo del gateway usa jobhunterdb1), las comprobaciones WR leen esa ruta en solo
 lectura. Si no, coincide con <code>get_gateway_db_path()</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="duckclaw.gateway_db.iter_goals_delta_clear_duckdb_paths" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">iter_goals_delta_clear_duckdb_paths</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">primary_fly_db_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></code>
+
+<a href="#duckclaw.gateway_db.iter_goals_delta_clear_duckdb_paths" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Rutas a tocar al apagar <code>/crons --delta</code> desde la conexión <code>fly_db</code> actual.</p>
+<p>El ticker del heartbeat sigue usando <code>iter_goals_ticker_duckdb_paths()</code> (hub + todo
+<code>db/private/*/*.duckdb</code>) para descubrir schedules. Limpiar el mismo conjunto desde el
+gateway abría decenas de archivos y competía por bloqueos con db-writer y otras sesiones.</p>
+<p>Aquí solo se devuelve: hub <code>get_gateway_db_path()</code> + <code>*.duckdb</code> del directorio
+<code>.../private/&lt;uid&gt;/</code> donde vive <code>primary_fly_db_path</code> (mismo criterio que
+<code>parent.parent.name == "private"</code>). Si <code>primary_fly_db_path</code> no encaja en ese patrón,
+se añade al menos el archivo resuelto del primario además del hub.</p>
+<p>Override <code>DUCKCLAW_GOALS_TICKER_DB_PATH</code>: un solo archivo, igual que el ticker.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="duckclaw.gateway_db.iter_goals_ticker_duckdb_paths" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">iter_goals_ticker_duckdb_paths</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></code>
+
+<a href="#duckclaw.gateway_db.iter_goals_ticker_duckdb_paths" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Rutas <code>.duckdb</code> que escanea el ticker de <code>/crons --delta</code> (heartbeat / gateway embebido;
+claves internas <code>goals_*</code> en <code>agent_config</code> sin cambiar).</p>
+<p>Debe coincidir con <code>services/heartbeat/main.py</code> histórico: hub + <code>db/private/*/*.duckdb</code>,
+o override <code>DUCKCLAW_GOALS_TICKER_DB_PATH</code>. Centralizado para que <code>/crons --delta off</code>
+limpie el schedule en <strong>todos</strong> los archivos donde pudo persistirse (multiplex Telegram).</p>
 
 
     </div>

@@ -737,29 +737,11 @@ def _find_hrp_rebalance_affirm_context_assistant_body(history: Any) -> str | Non
     return None
 
 
-def _assistant_proposes_hold_or_skip_aggressive_hrp(low: str) -> bool:
-    """
-    El asistente pide confirmar postura defensiva / no ejecutar HRP agresivo.
-    No debe acoplarse a ``_try_quant_hrp_affirm_followup`` (sí/Confirmo → rebalance).
-    """
-    if "no ejecut" in low and "hrp" in low:
-        return True
-    if "propongo mantener" in low:
-        return True
-    if "mantener las" in low and "defensiv" in low:
-        return True
-    if "sin ejecutar" in low and "hrp" in low:
-        return True
-    return False
-
-
 def _assistant_asks_hrp_rebalance_followup(assistant_text: str) -> bool:
     t = (assistant_text or "").strip()
     if not t:
         return False
     low = t.lower()
-    if _assistant_proposes_hold_or_skip_aggressive_hrp(low):
-        return False
     # Frase típica en español pidiendo señales de compra (no "¿procedo?")
     if "deseas" in low and "genere" in low and any(
         x in low for x in ("señal", "señales", "compra", "rebalance", "hrp", "meta", "spy")
@@ -784,9 +766,8 @@ def _assistant_asks_hrp_rebalance_followup(assistant_text: str) -> bool:
         return True
     if "revisión" in low and "alineación" in low and "hrp" in low and "ibkr" in low:
         return True
-    # Cuidado: "peso" solapa con "Peso tech …" en avisos defensivos (falso positivo con "?" al final).
     if "pypfopt" in low or "pyportfolioopt" in low or "hierarchical risk" in low or (
-        "hrp" in low and any(x in low for x in ("óptim", "optim", "pypfopt"))
+        "hrp" in low and any(x in low for x in ("óptim", "optim", "peso", "pypfopt"))
     ):
         if "?" in t or "procedo" in low or "señal" in low or "rebalance" in low or "deseas" in low:
             return True
@@ -940,6 +921,30 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     # Sin bypass, _plan_task reemplazaba el mensaje por TAREA: listar tablas → worker perdía el plan del manager
     # (ej. IB «Cambios en calificaciones» → inspect_schema; logs 2026-05-11 gateway).
     if "[VLM_CONTEXT" in text and "Contexto visual adjunto:" in text:
+        # region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "adf9d8",
+                            "hypothesisId": "H6",
+                            "location": "manager_graph._plan_task",
+                            "message": "vlm_multimodal_passthrough",
+                            "data": {"worker_id": (worker_id or "").strip(), "text_len": len(text)},
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
         return (incoming or "").strip(), None
     t = text.lower()
     override: Optional[str] = None
@@ -1129,6 +1134,30 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
 
     # Tablas / esquema: mismo criterio que is_db_intent explícito (evitar «tabla» suelta en informes IB/ocr).
     if _explicit_duckdb_schema_request:
+        # region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "adf9d8",
+                            "hypothesisId": "H6",
+                            "location": "manager_graph._plan_task",
+                            "message": "explicit_schema_list_task",
+                            "data": {"worker_id": (worker_id or "").strip()},
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
         task = (
             "TAREA: El usuario quiere ver las tablas de la base de datos. "
             "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /team, /tasks, /help y a crear objetivos con /crons."
@@ -2149,12 +2178,19 @@ def build_manager_graph(
                     exhausted_final = True
         finally:
             _wdb = getattr(worker_graph, "_worker_db", None) if worker_graph is not None else None
-            if _suspend_for_rw_worker and _wdb is not None and _wdb is not db:
+            # DuckDB: un worker RW (p. ej. finanz) no debe dejar el .duckdb abierto en caché cuando el manager
+            # no pasó por suspend RO (hub vs vault distinto en path); si no, db-writer y task_audit_log pierden lock
+            # (evidencia 2026-05-12: IO Error finanzdb1 durante append_task_audit).
+            _worker_rw = _wdb is not None and not bool(getattr(_wdb, "_read_only", False))
+            if _wdb is not None and _wdb is not db and (_suspend_for_rw_worker or _worker_rw):
                 try:
                     _wdb.close()
                 except Exception:
                     pass
-                _worker_graph_cache.pop(worker_cache_key, None)
+                try:
+                    _worker_graph_cache.pop(worker_cache_key, None)
+                except Exception:
+                    pass
             if _suspend_for_rw_worker:
                 try:
                     db.resume_readonly_file_handle()

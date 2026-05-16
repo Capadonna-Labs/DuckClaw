@@ -279,6 +279,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../architecture/system_overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/singleton_writer/" class="md-nav__link">
         
   
@@ -1546,7 +1574,7 @@
 <h3 id="fase-3-generacion-de-artefactos-y-despliegue-the-forge">Fase 3: Generación de Artefactos y Despliegue (The Forge)<a class="headerlink" href="#fase-3-generacion-de-artefactos-y-despliegue-the-forge" title="Permanent link">&para;</a></h3>
 <p>Una vez confirmados los datos, el Wizard "forja" el entorno:
 1.  <strong>Sincronización de Entorno (<code>.env</code>):</strong> Escribe las variables de forma segura.
-    *   <em>Smart Mapping:</em> El wizard sigue escribiendo <strong><code>DUCKCLAW_DB_PATH</code></strong> en <code>.env</code> (convención histórica) y duplica <strong><code>DUCKDB_PATH</code></strong> para que <code>db-writer</code> comparta archivo. La resolución runtime del gateway prioriza multiplex (<code>DUCKCLAW_*_DB_PATH</code>) y <strong><code>DUCKDB_PATH</code></strong> (<code>duckclaw.gateway_db</code>); en PM2 multi-instancia usa <code>config/api_gateways_pm2.json</code> / <code>api_gateways_pm2.json.example</code>.
+    *   <em>Smart Mapping:</em> El wizard sigue escribiendo <strong><code>DUCKCLAW_DB_PATH</code></strong> en <code>.env</code> (convención histórica) y duplica <strong><code>DUCKDB_PATH</code></strong> para que <code>db-writer</code> comparta archivo. La resolución runtime del gateway prioriza multiplex (<code>DUCKCLAW_*_DB_PATH</code>) y <strong><code>DUCKDB_PATH</code></strong> (<code>duckclaw.gateway_db</code>); en PM2 multi-instancia usa <code>config/api_gateways_pm2.json</code> (plantilla <code>config/api_gateways_pm2.json.example</code>).
 2.  <strong>Generación de Configuración PM2/Systemd:</strong> Crea los archivos <code>ecosystem.*.config.cjs</code> o las unidades <code>.service</code> inyectando las rutas absolutas del entorno virtual (<code>.venv/bin/python3</code>) para evitar fallos de <code>PATH</code>.
 3.  <strong>Arranque:</strong> Levanta los microservicios en el orden correcto.</p>
 <h2 id="4-topologia-de-servicios-desplegados">4. Topología de Servicios Desplegados<a class="headerlink" href="#4-topologia-de-servicios-desplegados" title="Permanent link">&para;</a></h2>

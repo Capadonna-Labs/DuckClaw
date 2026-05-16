@@ -12,7 +12,7 @@
       
       
       
-        <link rel="next" href="architecture/singleton_writer/">
+        <link rel="next" href="architecture/system_overview/">
       
       
         
@@ -371,6 +371,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="architecture/system_overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1386,8 +1414,8 @@
 <tbody>
 <tr>
 <td><strong>Architecture</strong></td>
-<td>ACID mutation contracts, memory model, sandbox boundaries</td>
-<td><a href="architecture/singleton_writer/">Singleton Writer</a>, <a href="architecture/tri_cameral_memory/">Tri-Cameral Memory</a>, <a href="architecture/strix_sandbox/">Strix Sandbox</a></td>
+<td>High-level diagram, ACID mutation path, memory, sandbox</td>
+<td><a href="architecture/system_overview/">System overview</a>, <a href="architecture/singleton_writer/">Singleton Writer</a>, <a href="architecture/tri_cameral_memory/">Tri-Cameral Memory</a>, <a href="architecture/strix_sandbox/">Strix Sandbox</a></td>
 </tr>
 <tr>
 <td><strong>Agents</strong></td>
@@ -1413,14 +1441,14 @@
 </table>
 <h2 id="suggested-reading-order">Suggested Reading Order<a class="headerlink" href="#suggested-reading-order" title="Permanent link">&para;</a></h2>
 <ol>
-<li><a href="architecture/singleton_writer/">Architecture</a> — system boundaries and invariants.</li>
+<li><a href="architecture/system_overview/">System overview</a> — one-page diagram and boundaries; then <a href="architecture/singleton_writer/">Singleton Writer</a> for the write path.</li>
 <li><a href="specs/">Specs</a> — before changing services or agents.</li>
 <li><a href="api/api_gateway/">API</a> — HTTP surface + Python reference sections.</li>
 <li><a href="operations/">Operations</a> — deploy, troubleshoot, incidents.</li>
 </ol>
 <h2 id="resumen-es">Resumen (ES)<a class="headerlink" href="#resumen-es" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Arquitectura:</strong> contrato singleton writer, memoria tri-cameral, sandbox Strix.</li>
+<li><strong>Arquitectura:</strong> <a href="architecture/system_overview/">vista general</a>, contrato singleton writer, memoria tri-cameral, sandbox Strix.</li>
 <li><strong>Especificaciones:</strong> ver <a href="specs/">índice de specs</a>; la fuente canónica sigue en <code>specs/features/</code> y <code>specs/core/</code> del repo.</li>
 <li><strong>API:</strong> las páginas bajo <code>API</code> mezclan <strong>visión HTTP</strong> (rutas FastAPI) y <strong>referencia Python</strong> generada con mkdocstrings.</li>
 <li><strong>Operaciones:</strong> <a href="operations/">instalación, comandos y runbooks</a> (principalmente en español); variables VLM y trazas en <a href="COMANDOS/">COMANDOS</a> §5.2–5.3.</li>

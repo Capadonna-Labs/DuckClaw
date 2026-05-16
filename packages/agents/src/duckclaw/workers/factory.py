@@ -22,15 +22,12 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
-from duckclaw.debug_session_log import agent_debug_log
-
 try:
     from langchain_core.runnables import RunnableConfig
 except ImportError:
     RunnableConfig = Any  # type: ignore[misc, assignment]
 
 from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
-from duckclaw.debug_session_log import agent_debug_log
 from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_sync, set_log_context
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 from duckclaw.gateway_db import get_gateway_db_path
@@ -424,6 +421,40 @@ def _is_finanz_debts_query(text: str) -> bool:
     )
 
 
+def _is_finanz_validate_db_intent(text: str) -> bool:
+    """
+    Usuario exige comprobar estado real en DuckDB (evidencia 2026-05-12: modelo responde sin tool_calls
+    o contradice read_sql). Obliga read_sql en el primer turno.
+    """
+    if not text or not text.strip():
+        return False
+    t = text.strip().lower()
+    if "[system_directive:" in t:
+        return False
+    if any(
+        p in t
+        for p in (
+            "no estás usando tools",
+            "no usas tools",
+            "no usa tools",
+            "sin herramientas",
+            "sin tools",
+            "usa read_sql",
+            "usar read_sql",
+            "usa las herramientas",
+            "debes usar tools",
+        )
+    ):
+        return True
+    if re.search(r"\b(valida|verifica|comprueba|confirma)\b", t) and any(
+        k in t for k in ("db", "duckdb", "base de datos", "en la base", "valores en")
+    ):
+        return True
+    if "consulta" in t and any(k in t for k in ("duckdb", "base de datos", "en la db")):
+        return True
+    return False
+
+
 def _is_finanz_budgets_query(text: str) -> bool:
     """Presupuestos en DuckDB local (finance_worker.presupuestos). Obliga read_sql; sin tool el LLM inventa meses/cifras."""
     if not text or not text.strip():
@@ -720,6 +751,35 @@ def _quant_latest_tool_json_since(messages: list[Any], from_idx: int, tool_name:
         except Exception:
             return {}
     return {}
+
+
+def _response_mentions_wall_clock(text: str) -> bool:
+    """True si la respuesta del modelo declara hora/fecha de pared (encabezado Quant, COT, etc.)."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    if "cot" in t or "bogot" in t or "america/bogota" in t:
+        return True
+    if re.search(r"\b\d{1,2}:\d{2}\b", t):
+        return True
+    if re.search(r"quant-trader\s+\d+\s*·", t):
+        return True
+    if "mercado cerrado" in t or "mercado abierto" in t:
+        return True
+    for d in (
+        "lunes",
+        "martes",
+        "miércoles",
+        "miercoles",
+        "jueves",
+        "viernes",
+        "sábado",
+        "sabado",
+        "domingo",
+    ):
+        if d in t:
+            return True
+    return False
 
 
 def _finanz_should_force_ibkr_after_local_cuentas_read(
@@ -1348,6 +1408,34 @@ def _quant_trader_reddit_history_anchor_intent(incoming: str, messages: list[Any
     _sh_i = _latest_human_index_with_reddit_share_url(messages or [])
     _vlm_i = _latest_human_index_with_vlm_visual_markers(messages or [])
     if _sh_i is not None and _vlm_i is not None and _vlm_i > _sh_i:
+        # region agent log
+        try:
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "adf9d8",
+                            "hypothesisId": "H8",
+                            "location": "factory._quant_trader_reddit_history_anchor_intent",
+                            "message": "reddit_hist_anchor_suppressed_recent_vlm",
+                            "data": {
+                                "share_human_idx": _sh_i,
+                                "vlm_human_idx": _vlm_i,
+                                "incoming_head": inc[:120],
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # endregion
         return False
     if not inc:
         return False
@@ -3136,6 +3224,12 @@ def build_worker_graph(
                 and _is_finanz_budgets_query(incoming)
                 and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
             )
+            force_finanz_db_validation = (
+                (_lid or "").strip().lower() == "finanz"
+                and has_read_sql
+                and _is_finanz_validate_db_intent(incoming)
+                and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
+            )
             force_finanz_admin_sql = (
                 (_lid or "").strip().lower() == "finanz"
                 and has_admin_sql
@@ -3154,6 +3248,7 @@ def build_worker_graph(
                 force_finanz_cuentas = False
                 force_finanz_deudas = False
                 force_finanz_presupuestos = False
+                force_finanz_db_validation = False
                 force_finanz_admin_sql = False
             # No forzar herramienta si el último mensaje ya es ToolMessage (ya ejecutamos la tool):
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
@@ -3186,6 +3281,7 @@ def build_worker_graph(
                 or force_finanz_cuentas
                 or force_finanz_deudas
                 or force_finanz_presupuestos
+                or force_finanz_db_validation
             ) and not already_has_tool_result
             force_portfolio_first = is_portfolio and not already_has_tool_result
             force_portfolio_after_local_cuentas = (
@@ -3298,6 +3394,36 @@ def build_worker_graph(
                 )
                 and (not already_has_tool_result or need_share_followup)
             )
+            # region agent log
+            if force_reddit and (_lid or "").strip().lower() == "quant_trader":
+                try:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "adf9d8",
+                                    "hypothesisId": "H3",
+                                    "location": "factory.build_worker_graph.agent_node",
+                                    "message": "force_reddit_true",
+                                    "data": {
+                                        "incoming_head": (incoming or "")[:200],
+                                        "q_reddit_hist": bool(_q_reddit_hist),
+                                        "quant_lone_reddit_only": bool(_quant_lone_reddit_only),
+                                        "has_anchor": bool(_reddit_anchor_u),
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+            # endregion
             # Tras 2× reddit_search_reddit en /s/… el MCP suele seguir sin el hilo correcto; si no cortamos,
             # el LLM re-invoca reddit_search en bucle (evidencia: pm2 logs 13:52, forced_tool=auto).
             _reddit_share_mcp_exhausted = bool(
@@ -3317,6 +3443,7 @@ def build_worker_graph(
                     force_finanz_cuentas
                     or force_finanz_deudas
                     or force_finanz_presupuestos
+                    or force_finanz_db_validation
                 ):
                     force_read_sql = False
                 force_portfolio = False
@@ -3664,6 +3791,30 @@ def build_worker_graph(
             )
             if _quant_vlm_read_sql_evidence:
                 force_read_sql = True
+                # region agent log
+                try:
+                    with open(
+                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
+                        "a",
+                        encoding="utf-8",
+                    ) as _df:
+                        _df.write(
+                            json.dumps(
+                                {
+                                    "sessionId": "adf9d8",
+                                    "hypothesisId": "H9",
+                                    "location": "factory.agent_node",
+                                    "message": "force_read_sql_vlm_market_figure",
+                                    "data": {"incoming_head": (incoming or "")[:160]},
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # endregion
             _last_human_idx = _quant_last_human_index(state.get("messages") or [])
             _has_fetch_since_last_human = _quant_tool_called_since(
                 state.get("messages") or [], _last_human_idx, "fetch_ib_gateway_ohlcv"
@@ -4387,6 +4538,35 @@ def build_worker_graph(
                             resp = resp.model_copy(update={"content": _fallback_text})
                         except Exception:
                             resp = AIMessage(content=_fallback_text)
+            if (
+                not tool_calls
+                and "get_current_time" in tools_by_name
+            ):
+                _lh_idx_gct = _quant_last_human_index(state.get("messages") or [])
+                _msgs_gct = state.get("messages") or []
+                _needs_gct = not _quant_tool_called_since(
+                    _msgs_gct, _lh_idx_gct, "get_current_time"
+                ) and (
+                    (_lid_l == "quant_trader")
+                    or _response_mentions_wall_clock(_resp_content)
+                )
+                if _needs_gct:
+                    _forced_tid_gct = f"call_forced_get_current_time_{int(time.time() * 1000)}"
+                    forced_tc_gct = [
+                        {
+                            "name": "get_current_time",
+                            "args": {},
+                            "id": _forced_tid_gct,
+                            "type": "tool_call",
+                        }
+                    ]
+                    try:
+                        resp = resp.model_copy(
+                            update={"tool_calls": forced_tc_gct, "content": ""}
+                        )
+                    except Exception:
+                        resp = AIMessage(content="", tool_calls=forced_tc_gct)
+                    tool_calls = forced_tc_gct
             out = {**state, "messages": state["messages"] + [resp]}
             if _llm_invoke_exc is not None:
                 from duckclaw.integrations.llm_providers import is_transient_inference_connection_error
@@ -4452,9 +4632,13 @@ def build_worker_graph(
         _hb_tok = (state.get("outbound_telegram_bot_token") or "").strip() or None
 
         _duck_exts = list(getattr(spec, "duckdb_extensions", None) or [])
+        # DuckDB mismo PID: sesión principal RW (read_only=False) + connect RO efímero al mismo archivo →
+        # "different configuration than existing" (pm2 finanz 2026-05-12). Quant-Trader RO sigue pudiendo
+        # desactivar pool vía manifest por contención con db-writer.
         use_ephemeral_parallel = (
             read_pool.read_pool_active_for_worker(spec)
             and read_pool.should_parallelize_ephemeral_tool_calls(tool_calls)
+            and bool(getattr(spec, "read_only", False))
         )
 
         def _schedule_tool_heartbeat(tool_name: str) -> None:

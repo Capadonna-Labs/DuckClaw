@@ -49,6 +49,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Architecture:
+      - System overview: architecture/system_overview.md
       - Singleton Writer: architecture/singleton_writer.md
       - Tri-Cameral Memory: architecture/tri_cameral_memory.md
       - Strix Sandbox: architecture/strix_sandbox.md

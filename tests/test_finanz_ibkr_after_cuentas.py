@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from duckclaw.workers.factory import (
     _finanz_should_force_ibkr_after_local_cuentas_read,
     _is_finanz_local_accounts_query,
+    _is_finanz_validate_db_intent,
 )
 
 
@@ -22,6 +23,18 @@ def test_local_accounts_query_excludes_ibkr() -> None:
 
 def test_local_accounts_query_excludes_portfolio_bolsa() -> None:
     assert not _is_finanz_local_accounts_query("resumen de mis cuentas y acciones en bolsa")
+
+
+def test_validate_db_intent_no_tools_complaint() -> None:
+    assert _is_finanz_validate_db_intent("No estás usando tools, valida los valores en la db")
+
+
+def test_validate_db_intent_explicit_valida() -> None:
+    assert _is_finanz_validate_db_intent("Por favor valida en DuckDB las cuentas")
+
+
+def test_validate_db_intent_excludes_system_directive() -> None:
+    assert not _is_finanz_validate_db_intent("[SYSTEM_DIRECTIVE: x] valida db")
 
 
 def test_force_ibkr_after_read_sql_true() -> None:

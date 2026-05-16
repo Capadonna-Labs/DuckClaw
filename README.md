@@ -15,7 +15,7 @@ uv run mkdocs serve
 uv run mkdocs build --strict
 ```
 
-Start here: [`docs/index.md`](docs/index.md) (published site home when built).
+Start here: [`docs/index.md`](docs/index.md) (published site home when built). **Architecture diagram (Mermaid):** [`docs/architecture/system_overview.md`](docs/architecture/system_overview.md).
 
 ---
 

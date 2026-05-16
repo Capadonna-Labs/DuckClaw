@@ -21,4 +21,4 @@ Consolidated architecture specs live in the repo (not duplicated here to avoid d
 - `specs/core/03_Skills_and_Tooling_Framework.md`
 - `specs/core/04_Cognitive_Agent_Logic.md`
 
-**Related docs:** [Architecture – Singleton Writer](../architecture/singleton_writer.md) · [Architecture – Tri-Cameral Memory](../architecture/tri_cameral_memory.md) · [Operations hub](../operations/index.md)
+**Related docs:** [Architecture — System overview](../architecture/system_overview.md) · [Singleton Writer](../architecture/singleton_writer.md) · [Tri-Cameral Memory](../architecture/tri_cameral_memory.md) · [Operations hub](../operations/index.md)

@@ -29,7 +29,7 @@ uv run mkdocs build --strict
 
 | Area | What you get | Entry |
 |------|----------------|-------|
-| **Architecture** | ACID mutation contracts, memory model, sandbox boundaries | [Singleton Writer](architecture/singleton_writer.md), [Tri-Cameral Memory](architecture/tri_cameral_memory.md), [Strix Sandbox](architecture/strix_sandbox.md) |
+| **Architecture** | High-level diagram, ACID mutation path, memory, sandbox | [System overview](architecture/system_overview.md), [Singleton Writer](architecture/singleton_writer.md), [Tri-Cameral Memory](architecture/tri_cameral_memory.md), [Strix Sandbox](architecture/strix_sandbox.md) |
 | **Agents** | ADF, worker templates, role-specific guides, SFT trace pipeline | [ADF Framework](agents/adf_framework.md), [Finanz](agents/finanz.md), [Quant Trader](agents/quant_trader.md), [SFT & conversation traces](agents/sft_conversation_traces.md) |
 | **Specs** | Curated spec hub + links to canonical files in the repo | [Specs index](specs/index.md) |
 | **API** | **HTTP:** FastAPI routes and behavior (overview in API pages). **Python:** module reference via `mkdocstrings` | [API Gateway](api/api_gateway.md), [DB Writer](api/db_writer.md) |
@@ -37,14 +37,14 @@ uv run mkdocs build --strict
 
 ## Suggested Reading Order
 
-1. [Architecture](architecture/singleton_writer.md) — system boundaries and invariants.
+1. [System overview](architecture/system_overview.md) — one-page diagram and boundaries; then [Singleton Writer](architecture/singleton_writer.md) for the write path.
 2. [Specs](specs/index.md) — before changing services or agents.
 3. [API](api/api_gateway.md) — HTTP surface + Python reference sections.
 4. [Operations](operations/index.md) — deploy, troubleshoot, incidents.
 
 ## Resumen (ES)
 
-- **Arquitectura:** contrato singleton writer, memoria tri-cameral, sandbox Strix.
+- **Arquitectura:** [vista general](architecture/system_overview.md), contrato singleton writer, memoria tri-cameral, sandbox Strix.
 - **Especificaciones:** ver [índice de specs](specs/index.md); la fuente canónica sigue en `specs/features/` y `specs/core/` del repo.
 - **API:** las páginas bajo `API` mezclan **visión HTTP** (rutas FastAPI) y **referencia Python** generada con mkdocstrings.
 - **Operaciones:** [instalación, comandos y runbooks](operations/index.md) (principalmente en español); variables VLM y trazas en [COMANDOS](COMANDOS.md) §5.2–5.3.

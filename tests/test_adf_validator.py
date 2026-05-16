@@ -16,6 +16,7 @@ sys.modules["adf_validator"] = _adf
 _spec.loader.exec_module(_adf)
 REQUIRED_FILES = _adf.REQUIRED_FILES
 AXIS_ADF_AGENT_IDS = _adf.AXIS_ADF_AGENT_IDS
+resolve_axis_adf_path = _adf.resolve_axis_adf_path
 validate_agent = _adf.validate_agent
 validate_all_agents = _adf.validate_all_agents
 
@@ -33,32 +34,21 @@ def test_validate_all_agents_ok() -> None:
     ["coder", "mirror", "radar", "sentinel", "phantom", "maestro"],
 )
 def test_each_axis_agent_has_seven_files(agent_id: str) -> None:
-    adf = (
-        REPO_ROOT
-        / "packages"
-        / "agents"
-        / "src"
-        / "duckclaw"
-        / "forge"
-        / "templates"
-        / agent_id
+    templates_root = (
+        REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "forge" / "templates"
     )
-    assert adf.is_dir()
+    adf = resolve_axis_adf_path(templates_root, agent_id)
+    assert adf is not None and adf.is_dir(), f"falta carpeta ADF para {agent_id}"
     for name in REQUIRED_FILES:
         assert (adf / name).is_file(), f"{agent_id}: falta {name}"
 
 
 def test_validate_agent_slug_matches_manifest() -> None:
-    coder_adf = (
-        REPO_ROOT
-        / "packages"
-        / "agents"
-        / "src"
-        / "duckclaw"
-        / "forge"
-        / "templates"
-        / "coder"
+    templates_root = (
+        REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "forge" / "templates"
     )
-    r = validate_agent(coder_adf)
+    coder_adf = resolve_axis_adf_path(templates_root, "coder")
+    assert coder_adf is not None
+    r = validate_agent(coder_adf, canonical_agent_id="coder")
     assert r.valid
     assert r.agent_id == "coder"

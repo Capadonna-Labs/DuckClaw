@@ -1,0 +1,1 @@
+TAREA: JobHunter completó la misión INCOME_INJECTION. Sintetiza los resultados crudos en un reporte financiero final para el usuario. No devuelvas el bloque crudo completo tal cual: prioriza 3 vacantes accionables, impacto esperado en flujo de caja y próximos pasos concretos.

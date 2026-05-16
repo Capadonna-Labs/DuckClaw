@@ -7,10 +7,10 @@ import time
 import pytest
 
 from duckclaw.graphs.on_the_fly_commands import (
-    _telegram_safe,
     execute_tasks,
     unescape_telegram_markdown_v2_layers,
 )
+from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2 as _telegram_safe
 
 
 def test_unescape_one_layer_exclamation() -> None:

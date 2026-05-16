@@ -19,7 +19,7 @@ Agentes que mantienen "salud" minimizando incertidumbre en su dominio.
 
 Instanciación de trabajadores virtuales por plantilla declarativa.
 
-- **Estructura**: `templates/workers/<worker_id>/` con `manifest.yaml`, `system_prompt.md`, `schema.sql`, `skills/` (módulos Python).
+- **Estructura**: `packages/agents/src/duckclaw/forge/templates/<worker_id>/` con `manifest.yaml`, `system_prompt.md`, `schema.sql`, `skills/` (módulos Python).
 - **WorkerFactory**: entrada `worker_id`, `telegram_chat_id`; lee manifest, ejecuta schema en DuckDB (esquema aislado), carga system_prompt en Planner, inyecta tools de `skills/` en Executor; salida grafo LangGraph compilado con checkpointer.
 - **WorkerCLI**: `duckops hire <worker_id> --name <instance_name>` → valida plantilla, genera `.env.<instance_name>`, actualiza ecosystem.config.cjs, `pm2 start`.
 - **Roster típico**: FinanzWorker (Planner→Executor→SQLValidator→Explainer; insert_transaction, get_monthly_summary, categorize_expense); SupportWorker (RAG_Retriever, solo lectura; search_knowledge_base, get_ticket_status). Aislamiento: un `thread_id` por instancia; auditoría con `worker_role`, `instance` en LangSmith; skills de código dinámico vía SandboxPipeline.

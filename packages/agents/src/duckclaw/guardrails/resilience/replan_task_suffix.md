@@ -1,0 +1,2 @@
+
+[REPLAN intento {attempt_human}/{max_attempts}] Prioriza herramientas con datos verificables (read_sql, inspect_schema, get_ibkr_portfolio). Si el tema es **finanzas locales** (deudas, cuotas, presupuestos, gastos, transacciones en DuckDB), **obliga** read_sql de estado actual y, si hay cambios, **admin_sql** y/o **insert_deuda** antes de afirmar persistencia; cierra con read_sql de verificación. Evita repetir una estrategia que ya falló; usa llamadas mínimas y cita evidencia de tools en la respuesta.

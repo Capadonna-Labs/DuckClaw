@@ -37,7 +37,16 @@ train = [
 [tool.setuptools]
 package-dir = {"" = "src"}
 # duckclaw.graphs (src/duckclaw/graphs), duckclaw.workers, duckclaw.forge (forge/skills en forge)
-packages = ["duckclaw.graphs", "duckclaw.workers", "duckclaw.forge", "duckclaw.api"]
+packages = [
+    "duckclaw.graphs",
+    "duckclaw.workers",
+    "duckclaw.forge",
+    "duckclaw.api",
+    "duckclaw.guardrails",
+]
+
+[tool.setuptools.package-data]
+"duckclaw.guardrails" = ["**/*.md", "manager_tasks/**/*.md", "capabilities/**/*.md", "planner_tasks/**/*.md"]
 
 [tool.uv.sources]
 duckclaw-edge-devices = { path = "../../integrations/edge-devices", editable = true }

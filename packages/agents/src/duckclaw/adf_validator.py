@@ -65,12 +65,29 @@ def _agent_slug_from_adf_path(adf_path: Path) -> str:
     return adf_path.name
 
 
-def validate_agent(adf_path: Path) -> ValidationResult:
+def axis_adf_dir_name(agent_id: str) -> str:
+    """Carpeta en disco: ``AXIS-Coder``, ``AXIS-Maestro``, … (``agent_id`` canónico en minúsculas)."""
+    return f"AXIS-{agent_id[0].upper()}{agent_id[1:]}" if agent_id else agent_id
+
+
+def resolve_axis_adf_path(templates_root: Path, agent_id: str) -> Path | None:
+    """Resuelve ``forge/templates/<agent_id>/`` o ``forge/templates/AXIS-<Name>/``."""
+    direct = templates_root / agent_id
+    if direct.is_dir():
+        return direct
+    axis = templates_root / axis_adf_dir_name(agent_id)
+    if axis.is_dir():
+        return axis
+    return None
+
+
+def validate_agent(adf_path: Path, *, canonical_agent_id: str | None = None) -> ValidationResult:
     """Valida la carpeta ADF de un agente completa."""
     errors: list[str] = []
     warnings: list[str] = []
     hashes: dict[str, str] = {}
     agent_slug = _agent_slug_from_adf_path(adf_path)
+    expected_id = (canonical_agent_id or agent_slug).strip()
 
     for filename in REQUIRED_FILES:
         filepath = adf_path / filename
@@ -83,7 +100,7 @@ def validate_agent(adf_path: Path) -> ValidationResult:
     if errors:
         return ValidationResult(
             valid=False,
-            agent_id=agent_slug,
+            agent_id=expected_id,
             errors=errors,
             warnings=warnings,
             hashes=hashes,
@@ -107,10 +124,10 @@ def validate_agent(adf_path: Path) -> ValidationResult:
                 if field not in manifest:
                     errors.append(f"manifest.yaml: campo faltante '{field}'")
             mid = manifest.get("agent_id")
-            if mid is not None and mid != agent_slug:
+            if mid is not None and mid != expected_id:
                 errors.append(
                     f"manifest.yaml: agent_id '{mid}' "
-                    f"no coincide con carpeta del agente '{agent_slug}'"
+                    f"no coincide con id canónico '{expected_id}' (carpeta '{agent_slug}')"
                 )
     except Exception as e:
         errors.append(f"manifest.yaml: error de parseo — {e}")
@@ -142,14 +159,14 @@ def validate_agent(adf_path: Path) -> ValidationResult:
         lines_with_create = [ln for ln in schema_content.split("\n") if "CREATE TABLE" in ln.upper()]
         for line in lines_with_create:
             lower = line.lower()
-            if agent_slug not in lower and "gold_" not in lower:
-                warnings.append(f"schema.sql: tabla sin prefijo '{agent_slug}_' ni gold_: {line.strip()}")
+            if expected_id not in lower and "gold_" not in lower:
+                warnings.append(f"schema.sql: tabla sin prefijo '{expected_id}_' ni gold_: {line.strip()}")
     except Exception as e:
         errors.append(f"schema.sql: error de lectura — {e}")
 
     return ValidationResult(
         valid=len(errors) == 0,
-        agent_id=agent_slug,
+        agent_id=expected_id,
         errors=errors,
         warnings=warnings,
         hashes=hashes,
@@ -166,9 +183,9 @@ def validate_all_agents(repo_root: Path) -> dict[str, ValidationResult]:
         return results
 
     for agent_id in sorted(AXIS_ADF_AGENT_IDS):
-        adf_path = templates_root / agent_id
-        if adf_path.is_dir():
-            results[agent_id] = validate_agent(adf_path)
+        adf_path = resolve_axis_adf_path(templates_root, agent_id)
+        if adf_path is not None:
+            results[agent_id] = validate_agent(adf_path, canonical_agent_id=agent_id)
 
     return results
 

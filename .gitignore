@@ -54,8 +54,18 @@ ecosystem.*.config.cjs
 # LangGraph dev / Studio local state
 .langgraph_api/
 
-# Agent training conversation traces
+# Agent training conversation traces and local train artifacts
 packages/agents/train/conversation_traces/
+packages/agents/train/gemma4/
+*.safetensors
+
+# MkDocs build output (source of truth: docs/)
+site/
+
+# Runtime / debug logs
+logs/
+.cursor/debug-*.log
+debug_sft.log
 
 .cusorignore
 .cursorrules
@@ -70,5 +80,3 @@ output/
 /default/
 
 packages/agents/src/duckclaw/forge/templates//
-
-/Users/workstation/Developer/duckclaw/packages/agents/src/duckclaw/forge/templates/AXIS

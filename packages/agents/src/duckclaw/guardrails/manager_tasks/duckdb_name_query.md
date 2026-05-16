@@ -1,0 +1,1 @@
+TAREA: El usuario quiere saber qué base de datos se está usando. Ejecuta get_db_path y responde de forma proactiva: indica la db usada en texto plano (sin comillas ni negrita). En el cierre invita a /workers (equipo de agentes), /tasks, /help y /crons; /team solo si hablas de usuarios autorizados humanos. Usa 1-2 emojis si encaja.

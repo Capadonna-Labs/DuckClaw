@@ -1,0 +1,1 @@
+[DIRECTIVA_EVIDENCIA_AUTOEXEC] Para validar auto-ejecución debes usar evidencia real en este turno: 1) `read_sql` sobre finance_worker.trade_signals (conteo/estado/ib_order_id de señales ejecutadas), 2) `get_ibkr_portfolio` para estado real de posiciones/cash. Si falta alguna evidencia, responde explícitamente que no se puede validar todavía y NO infieras resultados.

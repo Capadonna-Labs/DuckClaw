@@ -1,0 +1,1 @@
+[DIRECTIVA_QUANT_PIPELINE_DETERMINISTA] El backend ya ejecutó ingesta/evaluación (fetch -> portfolio -> evaluate_cfd_state). En este turno NO repitas esas tools; usa el contexto de resultados para: 1) proponer señal (propose_trade_signal) con argumentos completos, o 2) interpretar estado y próximos pasos si no procede señal.

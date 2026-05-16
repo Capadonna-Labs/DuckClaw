@@ -6,41 +6,31 @@ Cross-platform (Windows / Linux / macOS) · Multi-tenant vaults · Microservices
 
 ---
 
-## Documentation (MkDocs)
+## Documentación
 
-Human-oriented docs (architecture, operations, API overview, curated specs) live under [`docs/`](docs/).
+| Qué | Dónde |
+|-----|--------|
+| **Specs (normativa)** | [`specs/`](specs/) — leer antes de implementar |
+| **Runbooks** | [`docs/`](docs/) — Markdown en repo, sin HTML |
+| **Mapa del repo** | [`MONOREPO.md`](MONOREPO.md) — `packages/` vs `services/` |
 
-```bash
-uv run mkdocs serve
-uv run mkdocs build --strict
-```
-
-Start here: [`docs/index.md`](docs/index.md) (published site home when built). **Architecture diagram (Mermaid):** [`docs/architecture/system_overview.md`](docs/architecture/system_overview.md).
+Entrada: [`docs/index.md`](docs/index.md) · Diagrama: [`docs/architecture/system_overview.md`](docs/architecture/system_overview.md)
 
 ---
 
 ## Monorepo layout
 
+Ver detalle en [`MONOREPO.md`](MONOREPO.md). Resumen:
+
 ```
 duckclaw/
-├── packages/
-│   ├── core/          # Native layer & bindings (performance-critical paths)
-│   ├── agents/        # LangGraph, workers, forge templates
-│   │   └── train/     # Conversation traces (JSONL), SFT Gemma/MLX pipeline — see train/README.md
-│   ├── shared/        # Shared Python utilities
-│   └── duckops/       # CLI (wizard, serve, etc.)
-├── services/
-│   ├── api-gateway/   # FastAPI ingress
-│   ├── db-writer/     # Singleton writer (Redis → DuckDB)
-│   └── heartbeat/     # Optional proactive / homeostasis daemon
-├── docs/              # MkDocs source (Material theme)
-├── specs/             # Canonical specifications (features + core)
-├── config/            # Gateway, PM2, MCP, etc.
-├── db/                # Local DuckDB vaults (gitignored data)
-├── docker/            # Dockerfiles
-├── tests/             # Pytest suites
-├── mkdocs.yml
-└── pyproject.toml     # Root workspace (uv)
+├── specs/             # SDD — fuente de verdad
+├── docs/              # Runbooks (instalar, PM2, troubleshooting)
+├── services/          # Procesos: api-gateway, db-writer, heartbeat, …
+├── packages/          # Librerías: shared, agents, core, duckops
+├── config/            # PM2, MCP (secretos en .env)
+├── tests/
+└── pyproject.toml     # uv workspace
 ```
 
 ---
@@ -50,7 +40,7 @@ duckclaw/
 - **Singleton DB-Writer**: serializes durable DuckDB writes via Redis queues; keeps ledger-style state consistent.
 - **API Gateway**: FastAPI front door (`services/api-gateway`); agent chat, DB write enqueue, Telegram webhook, VLM image ingest, health.
 - **duckops**: Python CLI (`uv run duckops …`) for wizard-driven setup and local service control.
-- **Training traces (optional)**: successful chat turns can be written to JSONL under `packages/agents/train/conversation_traces/` for SFT datasets (`DUCKCLAW_SAVE_CONVERSATION_TRACES`, etc.). Site docs: [`docs/agents/sft_conversation_traces.md`](docs/agents/sft_conversation_traces.md) (published under **Agents → SFT & conversation traces** when you run MkDocs); repo README: [`packages/agents/train/README.md`](packages/agents/train/README.md).
+- **Training traces (optional)**: JSONL under `packages/agents/train/conversation_traces/` — [`packages/agents/train/README.md`](packages/agents/train/README.md), [`docs/agents/sft_conversation_traces.md`](docs/agents/sft_conversation_traces.md).
 - **CRM**: https://github.com/ManePeqsiCoda/retoPWRSomegahack, https://inputs-rely-speakers-humor.trycloudflare.com/dashboard
 
 ---
@@ -63,7 +53,7 @@ uv run duckops init # interactive wizard
 uv run duckops serve --gateway
 ```
 
-Operational detail (Redis, Telegram, PM2—including `duckops serve --pm2 --gateway`, DB-Writer—`doctor.py`, VLM env vars, trace flags): see [`docs/COMANDOS.md`](docs/COMANDOS.md) (**§8** cheat sheet) and [`docs/Installation.md`](docs/Installation.md). VLM architecture hub: [`docs/specs/vlm_integration.md`](docs/specs/vlm_integration.md).
+Operational detail (Redis, Telegram, PM2—including `duckops serve --pm2 --gateway`, DB-Writer—`doctor.py`, VLM env vars, trace flags): see [`docs/COMANDOS.md`](docs/COMANDOS.md) (**§8** cheat sheet) and [`docs/Installation.md`](docs/Installation.md). VLM spec: `specs/features/VLM INTEGRATION.md`.
 
 ---
 

@@ -14,7 +14,7 @@ _SKILL_DICT_RESERVED_KEYS = frozenset(
 
 
 def _find_templates_root() -> Path:
-    """Project root: packages/agents/templates/workers/."""
+    """Legacy fallback; canónico: ``duckclaw.forge.WORKERS_TEMPLATES_DIR`` (``forge/templates/``)."""
     here = Path(__file__).resolve().parent
     # duckclaw/workers -> packages/agents (4 levels up)
     candidates = [
@@ -31,7 +31,7 @@ def _find_templates_root() -> Path:
 
 
 def get_worker_dir(worker_id: str, templates_root: Optional[Path] = None) -> Path:
-    """Return worker dir: forge/templates/<worker_id>/ or templates_root/templates/workers/<worker_id>/."""
+    """Return worker dir: ``forge/templates/<worker_id>/`` (o legacy ``templates/workers/<id>/``)."""
     if templates_root is not None:
         path = templates_root / "templates" / "workers" / worker_id.strip()
     else:

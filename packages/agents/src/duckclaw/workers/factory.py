@@ -31,6 +31,7 @@ from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
 from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_sync, set_log_context
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.guardrails.loader import load_guardrail
 from duckclaw.workers import read_pool
 from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
@@ -820,28 +821,9 @@ def _finanz_should_force_ibkr_after_local_cuentas_read(
     return True
 
 
-_TASK_AWARENESS_PROMPT = """
-Además:
-- Si no recibes una tarea concreta (mensaje vacío o solo saludos), pregunta: "¿Cuál es mi tarea?" y ofrece ejemplos de lo que puedes hacer según tu rol.
-- En tu cierre proactivo invita fly commands con el comando correcto:
-  - `/team` = **solo** usuarios humanos autorizados y roles (whitelist del tenant). **Nunca** digas que `/team` lista agentes o workers.
-  - `/workers` = equipo de templates/agentes virtuales asignados a este chat.
-  - `/roles` = catálogo completo de templates disponibles en forge.
-  - Ejecución en curso: `/tasks`; objetivos: `/crons`; configuración: `/prompt` o `/skills`; listado: `/help`.
-"""
-
-_AXIS_COORDINATOR_TASK_AWARENESS_PROMPT = """
-Además (coordinador AXIS):
-- Eres MAESTRO: orquestas subagentes (CODER, MIRROR, RADAR, SENTINEL, PHANTOM); no confundas con usuarios humanos.
-- Cierre: si mencionas comandos, usa **`/workers`** para ver el equipo AXIS de este chat; **`/team`** solo para usuarios autorizados (admin/user), nunca para listar agentes.
-- Prohibido: «Usa /team para ver el estado de los agentes» o variantes; la frase correcta es «Usa `/workers` para ver el equipo AXIS».
-"""
-
-# LeilaAssistant: canal retail; no mencionar comandos con / a la usuaria (ver soul / system_prompt).
-_LEILA_TASK_AWARENESS_PROMPT = """
-Además:
-- Si el mensaje es vacío o solo un saludo, responde cálido y pregunta en qué puedes ayudar (ver catálogo, tallas, dejar datos para avisos) usando **solo lenguaje natural**. Nunca cites comandos con `/` ni pidas a la clienta que los escriba.
-"""
+_TASK_AWARENESS_PROMPT = load_guardrail("prompts", "task_awareness_default")
+_AXIS_COORDINATOR_TASK_AWARENESS_PROMPT = load_guardrail("prompts", "task_awareness_axis")
+_LEILA_TASK_AWARENESS_PROMPT = load_guardrail("prompts", "task_awareness_leila")
 
 
 def _escape_attach_path(path: str) -> str:
@@ -1479,21 +1461,8 @@ def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -
     pl = (provider or "").strip().lower()
     raw = str(exc)
     low = raw.lower()
-    mlx_hint = (
-        "No pude completar la inferencia: el motor local (p. ej. MLX) no respondió o se reinició, "
-        "a veces por **falta de memoria GPU**. Revisa `pm2 logs MLX-Inference`.\n\n"
-        "Si el fallo fue tras `/context --summary`, prueba bajar el volcado con la variable "
-        "`DUCKCLAW_SEMANTIC_SUMMARY_MAX_CHARS` (p. ej. 6000) o desactiva la segunda pasada de síntesis "
-        "con `DUCKCLAW_DISABLE_NL_REPLY_SYNTHESIS=1`."
-    )
-    groq_tokens_hint = (
-        "No pude completar la inferencia con **Groq**: el envío supera el límite de tokens de tu plan "
-        "(p. ej. ~12k TPM en tier on_demand). El gateway ya omite herramientas **reddit_*** en rutas "
-        "genéricas con Groq para ahorrar esquema; si sigue fallando, prueba:\n"
-        "- `DUCKCLAW_GROQ_MAX_INPUT_TOKENS` más bajo y/o `DUCKCLAW_GROQ_TOOL_MESSAGE_MAX_CHARS` más bajo\n"
-        "- Acortar el historial del chat o subir tier en console.groq.com\n"
-        "- `DUCKCLAW_DISABLE_NL_REPLY_SYNTHESIS=1` si ocurre tras muchas herramientas."
-    )
+    mlx_hint = load_guardrail("errors", "llm_failure_mlx")
+    groq_tokens_hint = load_guardrail("errors", "llm_failure_groq_tpm")
     is_groq_size_or_tpm = (
         "413" in raw
         or "rate_limit_exceeded" in low
@@ -1503,33 +1472,16 @@ def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -
     )
     if pl == "groq" and is_groq_size_or_tpm:
         return groq_tokens_hint
+    detail = raw[:380] + ("…" if len(raw) > 380 else "")
     if pl == "groq":
-        return (
-            "No pude completar la inferencia con **Groq**. Revisa API key y cuotas. "
-            "Detalle: "
-            + raw[:380]
-            + ("…" if len(raw) > 380 else "")
-        )
+        return load_guardrail("errors", "llm_failure_groq_generic").format(detail=detail)
     if pl == "deepseek":
-        return (
-            "No pude completar la inferencia con **DeepSeek**. Revisa `DEEPSEEK_API_KEY`, red y cuotas; "
-            "el fallo no es el servidor MLX local.\n\n"
-            f"Detalle: {raw[:380]}"
-            + ("…" if len(raw) > 380 else "")
-        )
+        return load_guardrail("errors", "llm_failure_deepseek").format(detail=detail)
     if pl == "openai":
-        return (
-            "No pude completar la inferencia con **OpenAI** (API compatible). Revisa `OPENAI_API_KEY` y red.\n\n"
-            f"Detalle: {raw[:380]}"
-            + ("…" if len(raw) > 380 else "")
-        )
+        return load_guardrail("errors", "llm_failure_openai").format(detail=detail)
     if pl in ("mlx", "iotcorelabs"):
         return mlx_hint
-    return (
-        "No pude completar la inferencia con el proveedor LLM configurado. Detalle: "
-        + raw[:380]
-        + ("…" if len(raw) > 380 else "")
-    )
+    return load_guardrail("errors", "llm_failure_generic").format(detail=detail)
 
 
 def _compact_run_sandbox_tool_content_for_llm(content: str, max_chars: int) -> str:
@@ -4102,40 +4054,11 @@ def build_worker_graph(
             )
             if _pqrsd_inject_datos_first_directive:
                 _msg_list = [
-                    SystemMessage(
-                        content=(
-                            "[DIRECTIVA_TURNO_PQRSD_DATOS_PRIMERO] No invoques `pqrsd_fetch_canonical` "
-                            "en este turno ni des como primer paso un enlace o tutorial largo al portal web. "
-                            "1) Pregunta si autoriza el tratamiento de datos personales para guardar el perfil "
-                            "mínimo de radicación en la bóveda DuckDB de esta sesión "
-                            "(esquema pqrsd_assistant, tabla radicacion_perfil). Si responde que no, no "
-                            "continúes con guardado en bóveda ni insistas. "
-                            "2) Si autoriza, recopila modo (identificada/anónima), documento si aplica, "
-                            "correo y confirmación iguales. "
-                            "3) Con datos completos y consentimiento explícito, persiste en bóveda: "
-                            "`admin_sql` (UPSERT en pqrsd_assistant.radicacion_perfil) + `read_sql` para "
-                            "validar la fila, O `pqrsd_upsert_radicacion_perfil` + `read_sql`. No invoques "
-                            "`pqrsd_run_identificacion_step1` ni `run_browser_sandbox` para el flujo de "
-                            "identificación hasta haber guardado y verificado en DB (salvo que el usuario "
-                            "rechace la bóveda). "
-                            "4) Cuando tengas el relato del caso y datos mínimos (ubicación/fecha si aplican), "
-                            "registra el caso en CRM interno con `pqrsd_registrar_radicacion_crm` "
-                            "(radicado MDE-YYYYMMDD-NNNN en tabla radicacion_crm); prioriza esta herramienta "
-                            "sobre INSERT manual con `admin_sql`. `read_sql`/`admin_sql` están disponibles "
-                            "solo sobre tablas permitidas del manifest. "
-                            "5) Plazos o texto del portal solo si el usuario lo pide o tras perfil/CRM."
-                        )
-                    )
+                    SystemMessage(content=load_guardrail("directives", "pqrsd_datos_primero"))
                 ] + _msg_list
             if not _worker_use_heuristic_first_tool(spec):
                 _msg_list = [
-                    SystemMessage(
-                        content=(
-                            "Elige la herramienta adecuada al plan o tarea en el mensaje del usuario y a los datos "
-                            "disponibles; si necesitas una herramienta que no está en la lista, dilo en texto sin "
-                            "inventar resultados."
-                        )
-                    )
+                    SystemMessage(content=load_guardrail("directives", "tool_choice_generic"))
                 ] + _msg_list
             _quant_autoexec_validation_intent = bool(
                 (_lid or "").strip().lower() == "quant_trader"
@@ -4144,30 +4067,14 @@ def build_worker_graph(
             )
             if _quant_autoexec_validation_intent:
                 _msg_list = [
-                    SystemMessage(
-                        content=(
-                            "[DIRECTIVA_EVIDENCIA_AUTOEXEC] Para validar auto-ejecución debes usar evidencia real en este turno: "
-                            "1) `read_sql` sobre finance_worker.trade_signals (conteo/estado/ib_order_id de señales ejecutadas), "
-                            "2) `get_ibkr_portfolio` para estado real de posiciones/cash. "
-                            "Si falta alguna evidencia, responde explícitamente que no se puede validar todavía y NO infieras resultados."
-                        )
-                    )
+                    SystemMessage(content=load_guardrail("directives", "quant_autoexec"))
                 ] + _msg_list
             if (
                 (_lid or "").strip().lower() == "quant_trader"
                 and telegram_context_summarize_directive
             ):
                 _msg_list = [
-                    SystemMessage(
-                        content=(
-                            "[DIRECTIVA_OHLCV_FUERA_VENTANA_MOC] fetch_market_data y fetch_ib_gateway_ohlcv "
-                            "persisten histórico (lake / IBKR HTTP / yfinance según entorno); **no** están limitados "
-                            "por la ventana MOC (~14:40–14:59 COT). Esa ventana afecta auto-ejecución y, si "
-                            "`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1`, la creación de propuestas ledger; "
-                            "no bloquea ingesta OHLCV. En SUMMARIZE_* con tickers o tema de mercado, puedes llamar "
-                            "ingesta OHLCV en el mismo turno que Reddit/Tavily si necesitas niveles verificables."
-                        )
-                    )
+                    SystemMessage(content=load_guardrail("directives", "quant_ohlcv_moc"))
                 ] + _msg_list
             _qp_ctx = state.get("quant_pipeline_context")
             if (
@@ -4179,30 +4086,12 @@ def build_worker_graph(
             ):
                 _msg_list = [
                     SystemMessage(
-                        content=(
-                            "[DIRECTIVA_QUANT_PIPELINE_DETERMINISTA] El backend ya ejecutó ingesta/evaluación "
-                            "(fetch -> portfolio -> evaluate_cfd_state). En este turno NO repitas esas tools; "
-                            "usa el contexto de resultados para: "
-                            "1) proponer señal (propose_trade_signal) con argumentos completos, o "
-                            "2) interpretar estado y próximos pasos si no procede señal."
-                        )
+                        content=load_guardrail("directives", "quant_pipeline_deterministic")
                     )
                 ] + _msg_list
             if _reddit_share_mcp_exhausted:
                 _msg_list = [
-                    SystemMessage(
-                        content=(
-                            "[DIRECTIVA_REDDIT_SHARE_AGOTADO] Ya hay al menos **dos** resultados de "
-                            "`reddit_search_reddit` para este acortador `/r/…/s/…` y el MCP siguió sin "
-                            "devolver el hilo correcto (p. ej. listados r/all irrelevantes). "
-                            "**No invoques ninguna herramienta cuyo nombre empiece por `reddit_`.** "
-                            "Responde en texto: explica el límite del MCP/acortador, pide la URL canónica "
-                            "`…/comments/<post_id>/…` o documenta `DUCKCLAW_REDDIT_TRUST_SHARE_TRACKING_REDIRECT=1` "
-                            "si el usuario acepta el riesgo de redirect. Si el plan exige contenido del enlace, "
-                            "puedes usar herramientas web permitidas (p. ej. `tavily_search`) **solo** como "
-                            "lectura de la página, sin inventar título/score/subreddit de Reddit."
-                        )
-                    )
+                    SystemMessage(content=load_guardrail("directives", "reddit_share_exhausted"))
                 ] + _msg_list
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             _invoked_llm: Any = llm_with_tools

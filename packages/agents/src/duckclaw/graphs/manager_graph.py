@@ -30,6 +30,7 @@ from duckclaw.utils.langsmith_trace import get_tracing_config
 from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_plan, log_sys, set_log_context
 
+from duckclaw.guardrails.loader import format_guardrail, load_guardrail, load_guardrail_task_list
 from duckclaw.graphs.agent_resilience import (
     classify_exception_for_replan,
     format_exhausted_plan_failure,
@@ -829,29 +830,15 @@ def _try_quant_hrp_affirm_followup(
         return None
     title = "Confirmación rebalanceo HRP (META/SPY)"
     task_list = [
-        "El usuario confirmó (mensaje corto) continuar con el hilo de rebalanceo HRP / señales respecto a la pregunta anterior del asistente.",
-        "Flujo: sesión quant_core; get_ibkr_portfolio; fetch_ib_gateway_ohlcv META/SPY; evaluate_cfd_state; propose_trade_signal con HITL según reglas del worker.",
+        load_guardrail("manager_tasks", "quant_hrp_affirm_task_confirm"),
+        load_guardrail("manager_tasks", "quant_hrp_affirm_task_flow"),
     ]
     # Prefijo con símbolos evita que `_quant_extract_tickers` tome "TAREA" o ejemplos (TSLA, …) como ticker primario.
-    planned = (
-        "(META/SPY) "
-        "TAREA: El usuario acaba de confirmar con un mensaje corto (p. ej. Procede / Sí) que desea **continuar** con el **rebalanceo HRP** "
-        "o la generación de señales descrita en el mensaje anterior del asistente (sesión quant_core.trading_sessions, objetivo **rebalance_hrp**, tickers acordados). "
-        "**Prohibido** en este turno: saludo de «inicio de sesión», listar capacidades genéricas, o iniciar búsqueda de otros activos (tsla, nvda, qqq, iwm, etc.) ajenos a la sesión. "
-        "Ejecuta el flujo operativo de Quant-Trader: datos de sesión y cartera, OHLCV según reglas, `evaluate_cfd_state`, luego `propose_trade_signal` alineado a HRP y políticas de riesgo/HITL."
-    )
+    planned = "(META/SPY) " + load_guardrail("manager_tasks", "quant_hrp_affirm_planned")
     return (title, task_list, planned, "Quant-Trader")
 
 
-_FINANZ_TOOL_PRESSURE_TASK = (
-    "TAREA (Finanz — evidencia DuckDB, sin atajos narrativos):\n"
-    "1. **read_sql** obligatorio sobre las tablas necesarias (p. ej. finance_worker.deudas, transactions, presupuestos, cuentas) "
-    "para ver el estado **actual**.\n"
-    "2. Si hay altas/bajas/cambios: **insert_deuda** / **insert_transaction** / **insert_presupuesto** / **insert_cuenta** y/o "
-    "**admin_sql** hasta JSON de éxito; corrige SQL ante error.\n"
-    "3. **read_sql** de verificación antes del mensaje final; la respuesta al usuario usa **solo** filas del último read_sql.\n"
-    "**Prohibido:** listar deudas o totales solo desde memoria del chat; **prohibido** «reintentar sin herramientas»."
-)
+_FINANZ_TOOL_PRESSURE_TASK = load_guardrail("manager_tasks", "finanz_tool_pressure")
 
 
 def _finanz_user_demands_tool_evidence_from_db(text_lower: str) -> bool:
@@ -964,14 +951,7 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
         )
     )
     if (worker_id or "").strip().lower() == "quant-trader" and _quant_operational_intent_requires_fly_command(text):
-        return (
-            "TAREA: Intención operativa cuant detectada. No hagas tool chaining manual en este turno. "
-            "Responde con una sugerencia explícita de **un solo fly command** listo para ejecutar por el usuario: "
-            "`/quant_cycle --tickers <...> --timeframe 1h --lookback_days 20 --objective rebalance_hrp --execute auto`. "
-            "Incluye parámetros completos inferidos del contexto (tickers, objetivo, ventana) y una línea breve explicando "
-            "que el comando ejecuta pipeline determinista end-to-end (fetch+portfolio+evaluate+signal+ejecución condicional).",
-            None,
-        )
+        return load_guardrail("manager_tasks", "quant_operational_fly_command"), None
     # MVP Leila: saludos cortos → respuesta de tienda (evita tono “agente de investigación”).
     if (worker_id or "").strip() == "LeilaAssistant":
         plain = (incoming or "").strip()
@@ -979,12 +959,7 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
             r"^(hola|hey|hi|hello|buen(as?|os)\s*(días|dias|tardes|noches)?|qué\s+tal|que\s+tal)[\s!?.¡¿]*$",
             plain.lower(),
         ):
-            return (
-                "TAREA: El cliente saluda. Preséntate en 2–3 frases como Leila Store (tienda de ropa): "
-                "tono cálido y directo. Menciona /catalogo para ver productos y /pedido <id> <talla> para pedir. "
-                "No digas que eres un agente de investigación ni listes herramientas genéricas.",
-                None,
-            )
+            return load_guardrail("manager_tasks", "leila_greeting"), None
     # BI Analyst: preguntas meta (qué puedes hacer, quién eres) → el modelo a veces ignora soul.md y copia
     # el tono genérico «Agente de Investigación Activa»; la tarea explícita lo corrige sin depender del historial.
     if (worker_id or "").strip().lower() == "bi-analyst":
@@ -998,64 +973,21 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
             r"para\s+qué\s+estás|para\s+que\s+estás)\b",
             t_plain,
         ):
-            return (
-                "TAREA: El usuario pregunta qué puedes hacer o pide presentarte. "
-                "Responde en español como **analista de datos / BI** sobre la base DuckDB (esquema analítico): "
-                "consultas SQL de solo lectura, get_schema_info, explain_sql, sandbox para gráficos cuando aplique. "
-                "Sé breve y concreto. **Prohibido:** usar la frase «Agente de Investigación Activa», hablar de "
-                "investigación web genérica o presentarte como asistente de investigación abstracto.",
-                None,
-            )
+            return load_guardrail("manager_tasks", "bi_analyst_capabilities_question"), None
     # Job-Hunter: persistencia-only de tracking. Antes que INCOME_INJECTION para no forzar Tavily.
     if _is_job_hunter_worker(worker_id) and "job_opportunity_tracking" in (incoming or "").strip().lower():
         ctx = (incoming or "").strip()
-        return (
-            "TAREA: JOB_OPPORTUNITY_TRACKING. Registra en finance_worker.job_opportunities la vacante o "
-            "postulación del contexto siguiente. **No** uses tavily_search ni run_browser_sandbox salvo que no exista "
-            "ninguna URL ni dato mínimo de oferta en el contexto. Usa read_sql/admin_sql: primero verifica columnas reales "
-            "de finance_worker.job_opportunities y luego INSERT con apply_url (literal del mensaje si existe), title, company, "
-            "location, status='applied' si el usuario indica que ya postuló, si no 'tracking'; applied_at=CURRENT_TIMESTAMP cuando "
-            "aplique a aplicación ya hecha. **No asumas columnas opcionales** (ej. notes) si no existen en el esquema. "
-            "Si INSERT falla por URL duplicada (índice único), lee la fila y haz UPDATE de columnas existentes.\n\n"
-            f"--- Contexto ---\n{ctx[:6000]}",
-            None,
-        )
+        return format_guardrail("manager_tasks", "job_opportunity_tracking", context=ctx[:6000]), None
     # Job-Hunter: comando directo /job --add <url> en chat propio -> registrar/actualizar vacante (sin A2A).
     if _is_job_hunter_worker(worker_id) and _looks_like_job_add_command(incoming or ""):
         ctx = (incoming or "").strip()
-        return (
-            "TAREA: JOB_OPPORTUNITY_TRACKING. Registra en finance_worker.job_opportunities la vacante o "
-            "postulación del contexto siguiente. **No** uses tavily_search ni run_browser_sandbox salvo que no exista "
-            "ninguna URL ni dato mínimo de oferta en el contexto. Usa read_sql/admin_sql: primero verifica columnas reales "
-            "de finance_worker.job_opportunities y luego INSERT con apply_url (literal del mensaje si existe), title, company, "
-            "location, status='applied' si el usuario indica que ya postuló, si no 'tracking'; applied_at=CURRENT_TIMESTAMP cuando "
-            "aplique a aplicación ya hecha. **No asumas columnas opcionales** (ej. notes) si no existen en el esquema. "
-            "Si INSERT falla por URL duplicada (índice único), lee la fila y haz UPDATE de columnas existentes.\n\n"
-            f"--- Contexto ---\n{ctx[:6000]}",
-            None,
-        )
+        return format_guardrail("manager_tasks", "job_opportunity_tracking", context=ctx[:6000]), None
     # Job-Hunter: seguimiento de postulaciones en DuckDB (sin Tavily ni round-trip a Finanz).
     if _is_job_hunter_worker(worker_id) and _job_hunter_user_requests_application_tracking(incoming or ""):
-        return (
-            "TAREA: El usuario pide seguimiento de vacantes/postulaciones **ya registradas** en la base local. "
-            "Ejecuta read_sql sobre finance_worker.job_opportunities (p. ej. ORDER BY COALESCE(applied_at, updated_at) DESC LIMIT 30) "
-            "y responde en español de forma **completa pero concisa**: tabla o lista con title, company, status, apply_url, fechas; "
-            "si no hay filas, dilo y ofrece registrar con la URL de la oferta. "
-            "**Prohibido** tavily_search y run_browser_sandbox en este turno (no es búsqueda de ofertas nuevas).",
-            None,
-        )
+        return load_guardrail("manager_tasks", "job_application_tracking"), None
     # Job-Hunter: evita run_sandbox con URLs inventadas; discovery = tavily_search.
     if _is_job_hunter_worker(worker_id) and job_hunter_user_requests_job_search(incoming):
-        return (
-            "TAREA: Misión A2A INCOME_INJECTION. El usuario pide búsqueda de empleo y/o enlaces para postular. "
-            "Sigue el **Flujo cognitivo** del system prompt: (1) **`tavily_search` SIEMPRE primero** — "
-            "prohibido anticipar fallo del sandbox o negar la búsqueda antes del resultado `tool` de Tavily; "
-            "(2) luego intenta **`run_browser_sandbox`** si aplica; "
-            "(3) si el sandbox falla, ve directo al egress con **datos crudos ya obtenidos de Tavily** (no simules otra discovery). "
-            "**Entrega hasta 3 vacantes accionables** con rol, modalidad, rango (si existe), fit y **enlace literal** verificado. "
-            "Prioriza contratación rápida/freelance y no uses `run_sandbox` solo para listas fijas de portales.",
-            None,
-        )
+        return load_guardrail("manager_tasks", "job_income_injection"), None
     # Intención DB/tablas/nombre → si el rol es personalizable, usar finanz (especialista) si está disponible
     is_db_intent = bool(
         _explicit_duckdb_schema_request
@@ -1073,24 +1005,13 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
         )
     ) or ("partida" in t and ("ultima" in t or "última" in t or "reciente" in t))
     if is_latest_game_intent:
-        task = (
-            "TAREA: El usuario quiere conocer la última partida de The Mind. "
-            "Ejecuta read_sql con una consulta directa sobre the_mind_games para traer solo 1 registro "
-            "(prioriza ORDER BY game_id DESC LIMIT 1, o por created_at si esa columna existe). "
-            "Si la consulta falla por columna inexistente, corrige automáticamente y reintenta sin preguntar. "
-            "Responde con game_id, status, current_level, lives y shurikens."
-        )
-        return task, override
+        return load_guardrail("manager_tasks", "the_mind_latest_game"), override
 
     # Nombre de la db / base de datos
     if re.search(r"\b(nombre\s+de\s+la\s+db|nombre\s+db|cual\s+es\s+el\s+nombre|nombre\s+de\s+la\s+base)\b", t) or (
         "nombre" in t and ("db" in t or "base" in t or "datos" in t)
     ):
-        task = (
-            "TAREA: El usuario quiere saber qué base de datos se está usando. "
-            "Ejecuta get_db_path y responde de forma proactiva: indica la db usada en texto plano (sin comillas ni negrita). En el cierre invita a /workers (equipo de agentes), /tasks, /help y /crons; /team solo si hablas de usuarios autorizados humanos. Usa 1-2 emojis si encaja."
-        )
-        return task, override
+        return load_guardrail("manager_tasks", "duckdb_name_query"), override
     # Contenido de una tabla concreta
     is_table_content_intent = bool(
         re.search(
@@ -1117,20 +1038,11 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
                 table_name = m_registros.group(1)
 
         if table_name:
-            task = (
-                "TAREA: El usuario quiere ver el contenido de una tabla específica. "
-                f"Ejecuta read_sql con SELECT * FROM {table_name} LIMIT 20. "
-                "Si falla por nombre/esquema, corrige al esquema válido sin pedir aclaración innecesaria. "
-                "Explica brevemente las columnas visibles y ofrece profundizar con filtros."
+            return (
+                format_guardrail("manager_tasks", "table_content_named", table_name=table_name),
+                override,
             )
-            return task, override
-
-        task = (
-            "TAREA: El usuario quiere ver el contenido de una tabla específica. "
-            "Ejecuta read_sql con SELECT * FROM <tabla> LIMIT 20 (o una consulta equivalente segura), "
-            "explica brevemente las columnas visibles y ofrece profundizar con filtros."
-        )
-        return task, override
+        return load_guardrail("manager_tasks", "table_content_generic"), override
 
     # Tablas / esquema: mismo criterio que is_db_intent explícito (evitar «tabla» suelta en informes IB/ocr).
     if _explicit_duckdb_schema_request:
@@ -1158,11 +1070,7 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
         except Exception:
             pass
         # endregion
-        task = (
-            "TAREA: El usuario quiere ver las tablas de la base de datos. "
-            "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /workers, /tasks, /help y /crons (/team solo para usuarios humanos autorizados)."
-        )
-        return task, override
+        return load_guardrail("manager_tasks", "list_database_tables"), override
     if (worker_id or "").strip().lower() == "finanz" and _finanz_user_demands_tool_evidence_from_db(t):
         return f"{_FINANZ_TOOL_PRESSURE_TASK}\n\n--- Mensaje del usuario ---\n{text}", override
     return text, override
@@ -1185,27 +1093,14 @@ def _llm_plan(incoming: str) -> tuple[str, list[str]]:
         return "Interacción sin contenido", []
 
     if text.startswith("[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]"):
-        summarize_new_tasks = [
-            "Resumir solo el bloque del usuario en bullets técnicos alineados al worker.",
-            "Si el mensaje trae **[CONTEXT_ANCLA_TIEMPO]**, usarlo literalmente para MOC/pre-cierre: si `dentro_de_ventana_moc=Sí`, "
-            "**no** describir la ventana como «próxima»; si `No`, no digas «dentro» de esa ventana.",
-            "Persistencia: el volcado en main.semantic_memory lo completa async el pipeline Gateway→Redis (duckclaw:state_delta:context)→db-writer. "
-            "No intentes INSERT/UPDATE ni usar execute_sandbox_script para escribir la DuckDB del host; el sandbox no monta ese archivo.",
-            "No ejecutar search_semantic_context, inspect_schema ni read_sql en este turno salvo pedido explícito aparte del usuario "
-            "(la ingesta/embed puede ir en cola; spec Context Injection). "
-            "**Excepción:** si falta CONTEXT_ANCLA y necesitas contrastar sesión abierta/COT mencionando MOC vs prep, llamar **solo** "
-            "`get_current_time`; no otros tools solo por costumbre.",
-        ]
-        return ("Síntesis de contexto (recién inyectado)", summarize_new_tasks)
+        return (
+            load_guardrail("planner_tasks", "summarize_new_context_title"),
+            list(load_guardrail_task_list("planner_tasks", "summarize_new_context_tasks")),
+        )
     if text.startswith("[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]"):
         return (
-            "Síntesis de contexto almacenado",
-            [
-                "Resumir solo el volcado de main.semantic_memory en bullets técnicos.",
-                "Si hay **[CONTEXT_ANCLA_TIEMPO]**, mismo criterio MOC/pre-cierre que SUMMARIZE_NEW_CONTEXT (dentro ≠ «próxima»).",
-                "No listar tablas ni inspeccionar esquema: el texto ya está en el mensaje.",
-                "Igual que SUMMARIZE_NEW_CONTEXT: sin search_semantic_context ni escritura SQL adicional desde tools en este turno.",
-            ],
+            load_guardrail("planner_tasks", "summarize_stored_context_title"),
+            list(load_guardrail_task_list("planner_tasks", "summarize_stored_context_tasks")),
         )
 
     lower = text.lower()
@@ -1463,79 +1358,28 @@ def _capabilities_fast_reply_text(
     pool = [x for x in (delegation_pool or []) if (x or "").strip()]
     if coord and pool:
         lines = "\n".join(f"- {w}" for w in pool)
-        return (
-            f"Soy **MAESTRO** (`{coord}`), coordinador AXIS. Según tu mensaje delego a:\n{lines}\n\n"
-            "Ejemplos: «¿Qué estudiar hoy?» (MAESTRO), «analiza este CVE» (RADAR), "
-            "«revisa mi repo» (CODER), «perfil técnico» (MIRROR).\n\n"
-            "Usa `/workers` para ver el equipo AXIS de este chat. "
-            "`/team` es solo para usuarios autorizados (roles humanos)."
-        )
+        return format_guardrail("capabilities", "axis_coordinator", coord=coord, lines=lines)
     w = (worker_id or "").strip()
     wl = w.lower()
     wl_norm = wl.replace("_", "-")
     if _is_job_hunter_worker(w):
-        return (
-            "Soy **OSINT JobHunter** (empleo / OSINT). Puedo:\n"
-            "• **Discovery:** búsqueda amplia con Tavily (consultas tipo Google Dork; URLs limpias, sin HTML en el chat).\n"
-            "• **Extracción:** navegación pesada en sandbox de navegador (Playwright en contenedor) y resultado en Parquet.\n"
-            "• **Ingesta:** cargar ofertas en DuckDB (`finance_worker.job_opportunities`) con SQL.\n"
-            "• **Resumen:** hasta **3 vacantes** con descripción breve y **enlace verificado** para postular (Tavily + opcional Playwright en sandbox).\n\n"
-            "Ejemplos: «Busca data scientist remoto Colombia y LinkedIn», "
-            "«Ofertas de backend en Lever/Greenhouse, Europa». "
-            "Imagen Docker: `docker build -t duckclaw/browser-env:latest docker/browser-env/`. "
-            "`/sandbox on` para ejecutar código en contenedor."
-        )
+        return load_guardrail("capabilities", "job_hunter")
     if wl == "bi-analyst":
-        return (
-            "Puedo trabajar con tu DuckDB en solo lectura: esquema y tablas, consultas SQL, "
-            "métricas, tendencias y gráficos en sandbox. "
-            "Ejemplo de petición: «¿Cuántas filas tiene la tabla sales?» o «Resume ventas por día». "
-            "Dime qué quieres medir o qué tabla explorar."
-        )
+        return load_guardrail("capabilities", "bi_analyst")
     if wl == "finanz":
-        return (
-            "Soy **Finanz** (finanzas personales + broker). Puedo:\n"
-            "• **Cuentas en DuckDB:** saldos por cuenta (Bancolombia, Nequi, efectivo…), "
-            "resumen con **totales por moneda**, gastos, presupuestos y deudas.\n"
-            "• **IBKR:** consultar saldo y portafolio en vivo con la API del gateway cuando lo pidas "
-            "(o en resúmenes amplios junto a tus cuentas locales).\n"
-            "• **Datos y cambios:** consultas `read_sql`, registro con las tools de finanzas, "
-            "y actualizaciones de saldo vía `admin_sql` (cola db-writer).\n"
-            "• **Mercado / cuant:** OHLCV, CFD y contexto web cuando el manifest lo tenga activo.\n\n"
-            "Ejemplos: «Dame un resumen de mis cuentas», «¿Cuánto tengo en Nequi?», "
-            "«Consulta el saldo de IBKR», «gastos del mes»."
-        )
+        return load_guardrail("capabilities", "finanz")
     if wl == "leilaassistant":
-        return (
-            "Puedo ayudarte con el catálogo, pedidos (/pedido) y dudas sobre productos. "
-            "Prueba /catalogo o escribe qué buscas."
-        )
+        return load_guardrail("capabilities", "leila")
     if wl in ("axis-maestro", "maestro") or wl_norm == "axis-maestro":
         sub = "\n".join(f"- {x}" for x in pool) if pool else (
             "- AXIS-Coder\n- AXIS-Mirror\n- AXIS-Radar\n- AXIS-Sentinel\n- AXIS-Phantom"
         )
-        return (
-            "Soy **MAESTRO** (coordinador AXIS). Delego a especialistas:\n"
-            f"{sub}\n\nDescribe tu objetivo (aprendizaje, código, intel, lab, perfil).\n\n"
-            "Usa `/workers` para ver el equipo AXIS. `/team` = solo usuarios autorizados."
-        )
+        return format_guardrail("capabilities", "axis_maestro", sub=sub)
     if wl_norm == "siata-analyst":
-        return (
-            "Soy **SIATA-Analyst** y trabajo con datos ambientales oficiales para Medellín y el Valle de Aburrá. "
-            "Puedo ayudarte con:\n"
-            "• **Calidad del aire:** PM2.5 (y PM10 cuando esté disponible).\n"
-            "• **Lluvia y pluviómetros:** lectura y tendencias recientes.\n"
-            "• **Niveles de quebradas:** estado reportado y cambios observables.\n"
-            "• **Radar SIATA:** último producto publicado (archivo, hora local/UTC y enlace).\n"
-            "• **Análisis técnico:** consultas con `read_sql` y apoyo en `run_sandbox` cuando se necesite procesar más detalle.\n\n"
-            "Ejemplos: «¿Cuál es el último dato del radar?», "
-            "«¿Cómo está el PM2.5 hoy?», «¿Qué muestran las quebradas ahora?»."
-        )
+        return load_guardrail("capabilities", "siata_analyst")
     if w:
-        return (
-            f"Actúo como asistente ({w}): describe la tarea o el dato que necesitas y la encaminamos."
-        )
-    return "Describe qué necesitas (datos, consulta o objetivo) y te indico los siguientes pasos."
+        return format_guardrail("capabilities", "generic_worker", worker_id=w)
+    return load_guardrail("capabilities", "default_fallback")
 
 
 def _task_summary_for_activity(incoming: str, planned_task: str) -> str:
@@ -2512,7 +2356,7 @@ def build_manager_graph(
             "urgency": "high",
         }
         mission_task, _ = _plan_task(
-            "TAREA: Misión A2A INCOME_INJECTION. El usuario pide búsqueda de empleo y/o enlaces para postular.",
+            load_guardrail("manager_tasks", "job_income_injection"),
             target_worker,
         )
         out: ManagerAgentState = {
@@ -2622,23 +2466,14 @@ def build_manager_graph(
                 f"Resultado (persistencia / SQL): {raw_job_hunter_reply}\n\n"
                 "Confirma al usuario el registro de la vacante o postulación de forma breve."
             )
-            synthesis_task = (
-                "TAREA: JobHunter persistió datos en finance_worker.job_opportunities. "
-                "Responde en 2–5 frases en español: confirmación, estado (tracking/applied) y siguiente paso concreto. "
-                "No pegues bloques SQL crudos."
-            )
+            synthesis_task = load_guardrail("manager_tasks", "job_track_synthesis_finanz")
         else:
             mission_system_message = (
                 f"JobHunter ha completado la misión {mission_name}. "
                 f"Aquí están los resultados crudos: {raw_job_hunter_reply}\n\n"
                 "Sintetiza esto en tu reporte financiero final."
             )
-            synthesis_task = (
-                "TAREA: JobHunter completó la misión INCOME_INJECTION. "
-                "Sintetiza los resultados crudos en un reporte financiero final para el usuario. "
-                "No devuelvas el bloque crudo completo tal cual: prioriza 3 vacantes accionables, "
-                "impacto esperado en flujo de caja y próximos pasos concretos."
-            )
+            synthesis_task = load_guardrail("manager_tasks", "job_income_synthesis_finanz")
 
         out: ManagerAgentState = {
             "assigned_worker_id": next_worker,

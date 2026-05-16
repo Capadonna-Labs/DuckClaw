@@ -48,11 +48,11 @@ class SecurityPolicy(BaseModel):
 
 ## 4. Plantilla de Seguridad por Worker (`security_policy.yaml`)
 
-Cada trabajador virtual en `templates/workers/` debe incluir su política. Si no existe, el `Forge` asume denegación total.
+Cada trabajador virtual en `forge/templates/` debe incluir su política. Si no existe, el `Forge` asume denegación total.
 
 *   **Ejemplo para `bi_analyst`:**
 ```yaml
-# templates/workers/bi_analyst/security_policy.yaml
+# forge/templates/BI-Analyst/security_policy.yaml
 network:
   default: deny
   allow_list:[] # Análisis 100% offline

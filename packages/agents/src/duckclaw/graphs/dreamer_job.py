@@ -17,6 +17,9 @@ from typing import Any
 
 import duckdb
 
+from duckclaw.guardrails.loader import format_guardrail, load_guardrail, load_guardrail_pipe_table
+
+
 def _repo_root() -> Path:
     here = Path(__file__).resolve()
     for d in [here, *here.parents]:
@@ -41,11 +44,7 @@ EXCLUSION_PATTERNS = [
     "DEBUG_DUMP",
 ]
 
-CONSOLIDATION_PROMPT = """Eres un asistente que consolida fragmentos de conversación en memoria semántica.
-Devuelve ÚNICAMENTE un objeto JSON válido (sin fences markdown) con esta forma exacta:
-{"insights":[{"topic":"etiqueta breve","insight":"una oración","confidence":0.0}]}
-Las claves insight usan hechos inferibles del texto; confidence entre 0 y 1.
-"""
+CONSOLIDATION_PROMPT = load_guardrail("system_prompts", "dreamer_consolidation")
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")

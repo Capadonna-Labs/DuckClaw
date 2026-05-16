@@ -14,10 +14,12 @@ from duckclaw.graphs import graph_server
 from duckclaw.graphs.on_the_fly_commands import handle_command
 
 
-def test_team_add_persists_with_ro_get_db_facade(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_team_add_persists_with_ro_get_db_facade(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, owner_user_id: str
+) -> None:
     path = str(tmp_path / "gw_ro_facade.duckdb")
     monkeypatch.setenv("DUCKCLAW_FINANZ_DB_PATH", path)
-    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1726618406")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", owner_user_id)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     fly = DuckClaw(path, read_only=False)
@@ -27,7 +29,7 @@ def test_team_add_persists_with_ro_get_db_facade(monkeypatch: pytest.MonkeyPatch
         fly,
         "chat_ro",
         "/team --add 999 other admin",
-        requester_id="1726618406",
+        requester_id=owner_user_id,
         tenant_id="Finanzas",
     )
     assert reply and "Añadido" in reply
@@ -41,11 +43,13 @@ def test_team_add_persists_with_ro_get_db_facade(monkeypatch: pytest.MonkeyPatch
     fly.close()
 
 
-def test_team_add_name_before_numeric_telegram_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_team_add_name_before_numeric_telegram_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, owner_user_id: str
+) -> None:
     """Orden habitual en Telegram: nombre primero, luego el user_id numérico."""
     path = str(tmp_path / "gw_name_first.duckdb")
     monkeypatch.setenv("DUCKCLAW_FINANZ_DB_PATH", path)
-    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1726618406")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", owner_user_id)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     fly = DuckClaw(path, read_only=False)
@@ -55,7 +59,7 @@ def test_team_add_name_before_numeric_telegram_id(monkeypatch: pytest.MonkeyPatc
         fly,
         "chat_ro",
         "/team --add Rosas 8320614991 user",
-        requester_id="1726618406",
+        requester_id=owner_user_id,
         tenant_id="Finanzas",
     )
     assert reply and "Añadido" in reply

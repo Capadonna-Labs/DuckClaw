@@ -90,14 +90,16 @@ def test_schedule_run_browser_novnc_uses_heartbeat_when_enabled(monkeypatch: pyt
         fake_schedule,
     )
 
+    from env_ids import TELEGRAM_TEST_USER_ID
+
     state = {
         "tenant_id": "PQRS",
-        "chat_id": "1726618406",
-        "user_id": "1726618406",
+        "chat_id": TELEGRAM_TEST_USER_ID,
+        "user_id": TELEGRAM_TEST_USER_ID,
         "subagent_instance_label": "PQRSD-Assistant 1",
         "heartbeat_plan_title": "Plan",
     }
-    sid = "1726618406"
+    sid = TELEGRAM_TEST_USER_ID
     nr.register_session_port(sid, 15555)
     try:
         vnc = (
@@ -163,8 +165,10 @@ def test_schedule_run_browser_novnc_fallback_when_heartbeat_off(monkeypatch: pyt
         lambda **kw: fake_send(**kw) or 1,
     )
 
+    from env_ids import TELEGRAM_TEST_USER_ID
+
     state = {
-        "chat_id": "1726618406",
+        "chat_id": TELEGRAM_TEST_USER_ID,
         "outbound_telegram_bot_token": "",
     }
     fac._send_novnc_pre_dm_fallback(

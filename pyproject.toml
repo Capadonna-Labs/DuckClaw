@@ -53,4 +53,6 @@ dev = [
 [tool.pytest.ini_options]
 markers = [
     "integration: marks tests that require Redis and full pipeline (deselect with '-m \"not integration\"')",
+    "slow: tests that may take several seconds (network, DuckDB extensions)",
+    "requires_docker: needs Docker daemon; optional duckclaw/sandbox:latest for full mercenary smoke",
 ]

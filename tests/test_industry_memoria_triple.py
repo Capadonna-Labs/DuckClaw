@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import json
+
+import pytest
+
+
+@pytest.mark.slow
 def test_apply_industry_business_standard_creates_schemas(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     import duckdb

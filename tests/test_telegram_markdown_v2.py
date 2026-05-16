@@ -1,5 +1,7 @@
 """Escape MarkdownV2 y HTML para Telegram."""
 
+from env_ids import TELEGRAM_TEST_USER_ID
+
 from duckclaw.utils.telegram_markdown_v2 import (
     escape_telegram_html,
     escape_telegram_markdown_v2,
@@ -13,8 +15,10 @@ def test_escape_period_for_markdown_v2() -> None:
 
 
 def test_escape_preserves_tg_user_link() -> None:
-    raw = "[Juan](tg://user?id=1726618406) listo."
-    assert escape_telegram_markdown_v2(raw) == "[Juan](tg://user?id=1726618406) listo\\."
+    raw = f"[Juan](tg://user?id={TELEGRAM_TEST_USER_ID}) listo."
+    assert escape_telegram_markdown_v2(raw) == (
+        f"[Juan](tg://user?id={TELEGRAM_TEST_USER_ID}) listo\\."
+    )
 
 
 def test_empty_string() -> None:
@@ -66,9 +70,9 @@ def test_llm_markdown_double_conversion_escapes_html_entities() -> None:
 
 
 def test_llm_markdown_link_tg_user_mention() -> None:
-    raw = "- [Juan](tg://user?id=1726618406) (1726618406) · rol: admin"
+    raw = f"- [Juan](tg://user?id={TELEGRAM_TEST_USER_ID}) ({TELEGRAM_TEST_USER_ID}) · rol: admin"
     html = llm_markdown_to_telegram_html(raw)
-    assert '<a href="tg://user?id=1726618406">' in html
+    assert f'<a href="tg://user?id={TELEGRAM_TEST_USER_ID}">' in html
     assert "Juan" in html
     assert "[" not in html
     assert "\\" not in html

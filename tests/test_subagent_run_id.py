@@ -48,7 +48,9 @@ def test_same_chat_parallel_one_and_two(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.delenv("DUCKCLAW_REDIS_URL", raising=False)
     tid = f"tenant-{id(monkeypatch)}"
     w = "BI-Analyst"
-    cid = "1726618406"
+    from env_ids import TELEGRAM_TEST_USER_ID
+
+    cid = TELEGRAM_TEST_USER_ID
     ta, na = m.acquire_subagent_slot(tid, w, cid)
     tb, nb = m.acquire_subagent_slot(tid, w, cid)
     assert {na, nb} == {1, 2}

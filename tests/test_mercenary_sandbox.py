@@ -62,6 +62,7 @@ def _duckclaw_sandbox_image_available() -> bool:
         return False
 
 
+@pytest.mark.requires_docker
 @pytest.mark.skipif(
     not _duckclaw_sandbox_image_available(),
     reason="Requiere imagen duckclaw/sandbox:latest (no solo python:3.12-slim)",

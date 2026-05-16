@@ -18,10 +18,14 @@ def test_heartbeat_redis_key_format() -> None:
 
 
 def test_normalize_telegram_chat_id_for_outbound() -> None:
+    from env_ids import TELEGRAM_TEST_USER_ID
     from duckclaw.graphs.chat_heartbeat import normalize_telegram_chat_id_for_outbound
 
-    assert normalize_telegram_chat_id_for_outbound("1726618406") == "1726618406"
-    assert normalize_telegram_chat_id_for_outbound("@Juan (1726618406)") == "1726618406"
+    assert normalize_telegram_chat_id_for_outbound(TELEGRAM_TEST_USER_ID) == TELEGRAM_TEST_USER_ID
+    assert (
+        normalize_telegram_chat_id_for_outbound(f"@Juan ({TELEGRAM_TEST_USER_ID})")
+        == TELEGRAM_TEST_USER_ID
+    )
     assert normalize_telegram_chat_id_for_outbound("-1001234567890") == "-1001234567890"
 
 
@@ -29,7 +33,9 @@ def test_is_chat_heartbeat_enabled_matches_numeric_key_for_display_chat_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
-    store: dict[str, str] = {"duckclaw:heartbeat:chat:1726618406": "on"}
+    from env_ids import TELEGRAM_TEST_USER_ID
+
+    store: dict[str, str] = {f"duckclaw:heartbeat:chat:{TELEGRAM_TEST_USER_ID}": "on"}
 
     class FakeClient:
         def get(self, key: str) -> str | None:
@@ -49,7 +55,7 @@ def test_is_chat_heartbeat_enabled_matches_numeric_key_for_display_chat_id(
 
     from duckclaw.graphs.chat_heartbeat import is_chat_heartbeat_enabled
 
-    assert is_chat_heartbeat_enabled("SIATA", "@Juan (1726618406)") is True
+    assert is_chat_heartbeat_enabled("SIATA", f"@Juan ({TELEGRAM_TEST_USER_ID})") is True
 
 
 def test_format_delegation_heartbeat_message_includes_title_and_tasks() -> None:

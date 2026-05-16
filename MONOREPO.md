@@ -12,7 +12,7 @@ duckclaw/
 ├── packages/           ← Librerías Python/C++ importables por los servicios
 ├── config/             ← Plantillas PM2, MCP (secretos locales en .env, gitignored)
 ├── tests/              ← Pytest
-└── scripts/            ← doctor, quant jobs, bootstrap (sin UI local legacy)
+└── scripts/            ← ver scripts/README.md (doctor, quant, smoke, experimental)
 ```
 
 ## `services/` — procesos (uno por carpeta)

@@ -6,6 +6,8 @@ import re
 
 import pytest
 
+from env_ids import TELEGRAM_TEST_USER_ID
+
 from duckclaw.utils.logger import (
     format_chat_identity_column_for_terminal,
     format_chat_id_for_terminal,
@@ -28,13 +30,13 @@ def test_jhonny_uses_pinned_palette(colors_on) -> None:
     h = format_chat_identity_column_for_terminal("@Someone (7866121890)")
     cj, ch = _ansi_codes(j), _ansi_codes(h)
     assert cj == ch and len(cj) >= 2
-    juan = format_chat_identity_column_for_terminal("@Juan (1726618406)")
+    juan = format_chat_identity_column_for_terminal(f"@Juan ({TELEGRAM_TEST_USER_ID})")
     assert _ansi_codes(juan) != cj
 
 
 def test_juan_and_aleila_not_same_palette_slot(colors_on, monkeypatch) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
-    j = format_chat_identity_column_for_terminal("@Juan (1726618406)")
+    j = format_chat_identity_column_for_terminal(f"@Juan ({TELEGRAM_TEST_USER_ID})")
     a = format_chat_identity_column_for_terminal("@Aleila Camargo (8729050846)")
     assert j != a
     cj, ca = _ansi_codes(j), _ansi_codes(a)

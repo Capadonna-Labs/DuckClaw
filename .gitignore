@@ -62,6 +62,9 @@ packages/agents/train/gemma4/
 # MkDocs build output (source of truth: docs/)
 site/
 
+# DuckDB extension cache (pytest)
+.pytest_duckdb/
+
 # Runtime / debug logs
 logs/
 .cursor/debug-*.log

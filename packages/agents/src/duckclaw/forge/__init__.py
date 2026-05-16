@@ -20,6 +20,7 @@ MANAGER_ROUTER_YAML = TEMPLATES_DIR / "manager_router.yaml"
 # Ruta a plantillas de workers: forge/templates/ (cada subdir con manifest.yaml es un worker)
 # finanz, personalizable, powerseal, research_worker, support, etc.
 WORKERS_TEMPLATES_DIR = TEMPLATES_DIR
+INDUSTRIES_TEMPLATES_DIR = TEMPLATES_DIR / "industries"
 
 __all__ = [
     "AgentAssembler",
@@ -27,5 +28,6 @@ __all__ = [
     "ENTRY_ROUTER_YAML",
     "MANAGER_ROUTER_YAML",
     "WORKERS_TEMPLATES_DIR",
+    "INDUSTRIES_TEMPLATES_DIR",
     "TEMPLATES_DIR",
 ]

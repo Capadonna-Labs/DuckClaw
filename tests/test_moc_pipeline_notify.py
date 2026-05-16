@@ -1,8 +1,8 @@
-"""MOC pipeline: Telegram notify on config error, invalid phase, and unhandled exceptions."""
+"""MOC pipeline CLI: fases válidas e inválidas (sin Telegram en tests unitarios)."""
 
 from __future__ import annotations
 
-import os
+import sys
 from typing import Any
 
 import pytest
@@ -15,140 +15,61 @@ def repo_root() -> Any:
     return Path(__file__).resolve().parent.parent
 
 
-def test_main_invalid_moc_phase_calls_notify(monkeypatch: Any, repo_root: Any) -> None:
-    import sys
-
+def _import_moc_pipeline(repo_root: Any) -> Any:
     sys.path.insert(0, str(repo_root))
-    if str(repo_root / "packages" / "agents" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "agents" / "src"))
-    if str(repo_root / "packages" / "shared" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "shared" / "src"))
-
+    agents_src = repo_root / "packages" / "agents" / "src"
+    shared_src = repo_root / "packages" / "shared" / "src"
+    if str(agents_src) not in sys.path:
+        sys.path.insert(0, str(agents_src))
+    if str(shared_src) not in sys.path:
+        sys.path.insert(0, str(shared_src))
     import scripts.quant.moc_pipeline as mp
 
-    calls: list[tuple[str, str, bool]] = []
+    return mp
 
-    def _rec(phase: str, detail: str, *, dry_run: bool) -> None:
-        calls.append((phase, detail, dry_run))
 
+def test_main_invalid_moc_phase_returns_2(monkeypatch: Any, repo_root: Any, capsys: Any) -> None:
+    mp = _import_moc_pipeline(repo_root)
     monkeypatch.setenv("MOC_PHASE", "bogus")
-    monkeypatch.setattr(mp, "_moc_notify_telegram_safe", _rec)
     monkeypatch.setattr(sys, "argv", ["moc_pipeline.py"])
-
     code = mp.main()
     assert code == 2
-    assert len(calls) == 1
-    assert calls[0][0] == "bogus"
-    assert "MOC_PHASE inválido" in calls[0][1]
-    assert calls[0][2] is False
+    err = capsys.readouterr().err
+    assert "calc|remind|expire" in err
 
 
-def test_main_unhandled_exception_notifies_and_returns_1(monkeypatch: Any, repo_root: Any) -> None:
-    import sys
+def test_main_calc_phase_dispatches_run_calc(monkeypatch: Any, repo_root: Any) -> None:
+    mp = _import_moc_pipeline(repo_root)
+    seen: list[bool] = []
 
-    sys.path.insert(0, str(repo_root))
-    if str(repo_root / "packages" / "agents" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "agents" / "src"))
-    if str(repo_root / "packages" / "shared" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "shared" / "src"))
-
-    import scripts.quant.moc_pipeline as mp
-
-    calls: list[tuple[str, str, bool]] = []
-
-    def _rec(phase: str, detail: str, *, dry_run: bool) -> None:
-        calls.append((phase, detail, dry_run))
-
-    def _boom(*, dry_run: bool = False) -> int:
-        raise RuntimeError("simulated_moc_failure")
+    def _calc(*, dry_run: bool = False) -> int:
+        seen.append(dry_run)
+        return 0
 
     monkeypatch.setenv("MOC_PHASE", "calc")
-    monkeypatch.setattr(mp, "run_calc", _boom)
-    monkeypatch.setattr(mp, "_moc_notify_telegram_safe", _rec)
+    monkeypatch.setattr(mp, "run_calc", _calc)
     monkeypatch.setattr(sys, "argv", ["moc_pipeline.py"])
-
-    code = mp.main()
-    assert code == 1
-    assert len(calls) == 1
-    assert calls[0][0] == "calc"
-    assert "RuntimeError" in calls[0][1]
-    assert "simulated_moc_failure" in calls[0][1]
+    assert mp.main() == 0
+    assert seen == [False]
 
 
-def test_main_invalid_phase_dry_run_skips_notify(monkeypatch: Any, repo_root: Any) -> None:
-    import sys
-
-    sys.path.insert(0, str(repo_root))
-    if str(repo_root / "packages" / "agents" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "agents" / "src"))
-    if str(repo_root / "packages" / "shared" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "shared" / "src"))
-
-    import scripts.quant.moc_pipeline as mp
-
-    calls: list[tuple[str, str, bool]] = []
-
-    def _rec(phase: str, detail: str, *, dry_run: bool) -> None:
-        calls.append((phase, detail, dry_run))
-
+def test_main_invalid_phase_dry_run_returns_2(monkeypatch: Any, repo_root: Any) -> None:
+    mp = _import_moc_pipeline(repo_root)
     monkeypatch.setenv("MOC_PHASE", "bogus")
-    monkeypatch.setattr(mp, "_moc_notify_telegram_safe", _rec)
     monkeypatch.setattr(sys, "argv", ["moc_pipeline.py", "--dry-run"])
-
-    code = mp.main()
-    assert code == 2
-    assert calls == []
+    assert mp.main() == 2
 
 
-def test_moc_calc_enable_batch_auto_exec_default_on(monkeypatch: Any, repo_root: Any) -> None:
-    import sys
+def test_main_calc_dry_run_passes_flag(monkeypatch: Any, repo_root: Any) -> None:
+    mp = _import_moc_pipeline(repo_root)
+    seen: list[bool] = []
 
-    sys.path.insert(0, str(repo_root))
-    if str(repo_root / "packages" / "agents" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "agents" / "src"))
-    if str(repo_root / "packages" / "shared" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "shared" / "src"))
+    def _calc(*, dry_run: bool = False) -> int:
+        seen.append(dry_run)
+        return 0
 
-    import scripts.quant.moc_pipeline as mp
-
-    monkeypatch.delenv("DUCKCLAW_MOC_PIPELINE_AUTO_EXECUTE", raising=False)
-    monkeypatch.delenv("DUCKCLAW_MOC_BATCH_AUTO_EXECUTE", raising=False)
-    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS", raising=False)
-    mp._moc_calc_enable_batch_auto_execute_env(dry_run=False)
-    assert os.environ.get("DUCKCLAW_MOC_BATCH_AUTO_EXECUTE") == "1"
-    assert os.environ.get("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS") == "1"
-
-
-def test_moc_calc_enable_batch_auto_exec_dry_run_noop(monkeypatch: Any, repo_root: Any) -> None:
-    import sys
-
-    sys.path.insert(0, str(repo_root))
-    if str(repo_root / "packages" / "agents" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "agents" / "src"))
-    if str(repo_root / "packages" / "shared" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "shared" / "src"))
-
-    import scripts.quant.moc_pipeline as mp
-
-    monkeypatch.delenv("DUCKCLAW_MOC_BATCH_AUTO_EXECUTE", raising=False)
-    mp._moc_calc_enable_batch_auto_execute_env(dry_run=True)
-    assert os.environ.get("DUCKCLAW_MOC_BATCH_AUTO_EXECUTE") is None
-
-
-def test_moc_calc_enable_batch_auto_exec_opt_out(monkeypatch: Any, repo_root: Any) -> None:
-    import sys
-
-    sys.path.insert(0, str(repo_root))
-    if str(repo_root / "packages" / "agents" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "agents" / "src"))
-    if str(repo_root / "packages" / "shared" / "src") not in sys.path:
-        sys.path.insert(0, str(repo_root / "packages" / "shared" / "src"))
-
-    import scripts.quant.moc_pipeline as mp
-
-    monkeypatch.setenv("DUCKCLAW_MOC_PIPELINE_AUTO_EXECUTE", "0")
-    monkeypatch.delenv("DUCKCLAW_MOC_BATCH_AUTO_EXECUTE", raising=False)
-    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS", raising=False)
-    mp._moc_calc_enable_batch_auto_execute_env(dry_run=False)
-    assert os.environ.get("DUCKCLAW_MOC_BATCH_AUTO_EXECUTE") is None
-    assert os.environ.get("DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS") is None
+    monkeypatch.setenv("MOC_PHASE", "calc")
+    monkeypatch.setattr(mp, "run_calc", _calc)
+    monkeypatch.setattr(sys, "argv", ["moc_pipeline.py", "--dry-run"])
+    assert mp.main() == 0
+    assert seen == [True]

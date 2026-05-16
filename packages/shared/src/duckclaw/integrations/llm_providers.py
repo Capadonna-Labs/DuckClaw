@@ -44,6 +44,9 @@ def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
     """
     if llm is None:
         return ""
+    # unittest.mock.MagicMock: getattr("bound") crea mocks anidados → RecursionError.
+    if type(llm).__name__ in ("MagicMock", "Mock", "AsyncMock", "NonCallableMagicMock"):
+        return ""
     bound = getattr(llm, "bound", None)
     if bound is not None and bound is not llm:
         inner = infer_provider_from_openai_compatible_llm(bound)

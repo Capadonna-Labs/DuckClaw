@@ -245,14 +245,19 @@ def test_agent_workers_list(client: TestClient) -> None:
     assert "finanz" in data["workers"]
 
 
-def test_forget_command_via_api_succeeds(client: TestClient) -> None:
+def test_forget_command_via_api_succeeds(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    owner_user_id: str,
+) -> None:
     """POST /forget with session_id='default' succeeds (fix for API gateway bug)."""
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", owner_user_id)
     r = client.post(
         "/api/v1/agent/finanz/chat",
         json={
             "message": "/forget",
             "chat_id": "default",
-            "user_id": "1726618406",
+            "user_id": owner_user_id,
             "username": "admin",
             "chat_type": "private",
             "history": [],

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AdminRole, AdminUser } from '@/types/admin';
+import { ADMIN_USERS } from '@/config/adminUsers';
 
 interface AuthState {
   usuario: AdminUser | null;
@@ -14,28 +15,21 @@ interface AuthState {
   setReturnTo: (path: string | null) => void;
 }
 
-const HARDCODED: Record<string, { password: string; user: AdminUser }> = {
-  'admin@duckclaw.local': {
-    password: 'DuckAdmin2026!',
-    user: {
-      id: 'admin-001',
-      email: 'admin@duckclaw.local',
-      nombre: 'Administrador DuckClaw',
-      rol: 'admin',
-      initials: 'DC',
+const USER_MAP = Object.fromEntries(
+  ADMIN_USERS.map((u) => [
+    u.email.trim().toLowerCase(),
+    {
+      password: u.password,
+      user: {
+        id: `user-${u.email}`,
+        email: u.email,
+        nombre: u.nombre,
+        rol: u.rol,
+        initials: u.initials,
+      } satisfies AdminUser,
     },
-  },
-  'viewer@duckclaw.local': {
-    password: 'DuckView2026!',
-    user: {
-      id: 'viewer-001',
-      email: 'viewer@duckclaw.local',
-      nombre: 'Observador DuckClaw',
-      rol: 'viewer',
-      initials: 'DV',
-    },
-  },
-};
+  ])
+);
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -50,8 +44,8 @@ export const useAuthStore = create<AuthState>()(
 
       loginWithCredentials: async (email, password) => {
         set({ isLoading: true, loginError: null });
-        const entry = HARDCODED[email.trim().toLowerCase()];
-        await new Promise((r) => setTimeout(r, 200));
+        const entry = USER_MAP[email.trim().toLowerCase()];
+        await new Promise((r) => setTimeout(r, 150));
         if (!entry || entry.password !== password) {
           set({ isLoading: false, loginError: 'Credenciales inválidas' });
           return;
@@ -64,13 +58,15 @@ export const useAuthStore = create<AuthState>()(
         });
       },
 
-      logout: () =>
+      logout: () => {
         set({
           usuario: null,
           isAuthenticated: false,
+          isLoading: false,
           loginError: null,
           returnTo: null,
-        }),
+        });
+      },
     }),
     { name: 'duckclaw-admin-auth' }
   )

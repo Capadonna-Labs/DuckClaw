@@ -28,10 +28,10 @@ export default function DuckDbPage() {
           ))}
         </ul>
       </SettingsSection>
-      <SettingsSection titulo="Variables .env" descripcion="Valores enmascarados">
+      <SettingsSection titulo="Variables .env" descripcion="Valores enmascarados" icono={<Database size={22} />}>
         <dl className="text-sm space-y-2">
           {duckKeys.map(([k, v]) => (
-            <motionEnvRow key={k} k={k} v={v} />
+            <EnvRow key={k} k={k} v={v} />
           ))}
         </dl>
       </SettingsSection>
@@ -39,7 +39,7 @@ export default function DuckDbPage() {
   );
 }
 
-function motionEnvRow({ k, v }: { k: string; v: string }) {
+function EnvRow({ k, v }: { k: string; v: string }) {
   return (
     <div className="flex gap-4">
       <dt className="font-mono text-gov-gray-500 w-48 shrink-0">{k}</dt>

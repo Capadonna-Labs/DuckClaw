@@ -413,6 +413,147 @@ async def admin_chat_history(
     return {"tenant_id": tenant_id, "session_id": session_id, "messages": items}
 
 
+@router.get("/telegram/whitelist", dependencies=[Depends(_require_admin_key)])
+async def get_telegram_whitelist(tenant_id: str = Query("default")) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.graphs.on_the_fly_commands import (
+        _ensure_authorized_users_table,
+        _list_authorized_users,
+    )
+
+    tid = (tenant_id or "default").strip() or "default"
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return {"tenant_id": tid, "users": [], "db_path": gw, "warning": "Gateway DuckDB no encontrada"}
+    db = DuckClaw(gw, read_only=True, engine="python")
+    try:
+        _ensure_authorized_users_table(db)
+        users = _list_authorized_users(db, tenant_id=tid)
+    finally:
+        db.close()
+    return {"tenant_id": tid, "users": users, "db_path": gw}
+
+
+@router.post("/telegram/whitelist", dependencies=[Depends(_require_admin_key)])
+async def post_telegram_whitelist(body: WhitelistBody) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.graphs.on_the_fly_commands import (
+        _ensure_authorized_users_table,
+        _upsert_authorized_user,
+    )
+
+    tid = (body.tenant_id or "default").strip() or "default"
+    uid = (body.user_id or "").strip()
+    if not uid:
+        raise _problem(400, "user_id requerido", "")
+    role = (body.role or "user").strip().lower()
+    if role not in ("admin", "user"):
+        raise _problem(400, "role inválido", role)
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(404, "Gateway DuckDB no encontrada", gw)
+    rw = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        _ensure_authorized_users_table(rw)
+        _upsert_authorized_user(
+            rw,
+            tenant_id=tid,
+            user_id=uid,
+            username=(body.username or "Usuario").strip() or "Usuario",
+            role=role,
+        )
+    finally:
+        rw.close()
+    return {"ok": True, "tenant_id": tid, "user_id": uid, "role": role}
+
+
+@router.delete("/telegram/whitelist", dependencies=[Depends(_require_admin_key)])
+async def delete_telegram_whitelist(
+    tenant_id: str = Query("default"),
+    user_id: str = Query(...),
+) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.graphs.on_the_fly_commands import (
+        _delete_authorized_user,
+        _ensure_authorized_users_table,
+    )
+
+    tid = (tenant_id or "default").strip() or "default"
+    uid = (user_id or "").strip()
+    if not uid:
+        raise _problem(400, "user_id requerido", "")
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(404, "Gateway DuckDB no encontrada", gw)
+    rw = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        _ensure_authorized_users_table(rw)
+        _delete_authorized_user(rw, tenant_id=tid, user_id=uid)
+    finally:
+        rw.close()
+    return {"ok": True, "tenant_id": tid, "user_id": uid}
+
+
+@router.get("/fly-commands", dependencies=[Depends(_require_admin_key)])
+async def list_fly_commands() -> dict[str, Any]:
+    from duckclaw.guardrails.loader import load_guardrail, load_guardrail_pipe_table
+
+    header = load_guardrail("fly_commands", "help_header")
+    entries = [
+        {"cmd": cmd, "description": desc}
+        for cmd, desc in load_guardrail_pipe_table("fly_commands", "help_entries")
+    ]
+    leila = (os.environ.get("DUCKCLAW_LEILA_FLY_COMMANDS") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if leila:
+        entries.extend(
+            {"cmd": cmd, "description": desc}
+            for cmd, desc in load_guardrail_pipe_table("fly_commands", "help_entries_leila")
+        )
+    return {"header": header, "commands": entries, "leila_enabled": leila}
+
+
+@router.delete("/runtime/config", dependencies=[Depends(_require_admin_key)])
+async def delete_runtime_config(
+    vault_path: str = Query(...),
+    chat_id: str = Query("default"),
+    key: str = Query(...),
+) -> dict[str, Any]:
+    import redis.asyncio as aioredis
+
+    abs_path = vault_path
+    if not os.path.isabs(abs_path):
+        abs_path = str(_repo_root() / vault_path.lstrip("/"))
+    key_esc = key.replace("'", "''")[:128]
+    cid_esc = (chat_id or "default").replace("'", "''")
+    sql = (
+        f"DELETE FROM agent_config WHERE chat_id = '{cid_esc}' AND key = '{key_esc}'"
+    )
+    redis_url = (os.environ.get("REDIS_URL") or "redis://localhost:6379/0").strip()
+    r = aioredis.from_url(redis_url, decode_responses=True)
+    try:
+        payload = json.dumps(
+            {
+                "query": sql,
+                "params": [],
+                "user_id": "admin-ui",
+                "db_path": abs_path,
+                "tenant_id": "admin",
+            }
+        )
+        await r.lpush("duckdb_write_queue", payload)
+    finally:
+        await r.aclose()
+    return {"ok": True, "queued": True}
+
+
 @router.post("/projects", dependencies=[Depends(_require_admin_key)])
 async def create_project(body: TemplateCreateBody) -> dict[str, Any]:
     return await create_template(body)

@@ -553,6 +553,9 @@ async def _tailscale_auth_middleware(request: Request, call_next):
     # noVNC: el usuario abre el enlace en el navegador móvil sin X-Tailscale-Auth-Key; el token sustituye auth.
     if path.startswith("/api/v1/sandbox/novnc/"):
         return await call_next(request)
+    # Consola admin (BFF local): autentica con X-Admin-Key, no Tailscale en el browser.
+    if path.startswith("/api/v1/admin/"):
+        return await call_next(request)
     header_key = request.headers.get("X-Tailscale-Auth-Key", "").strip()
     if header_key != auth_key:
         return JSONResponse(

@@ -78,5 +78,7 @@ cd apps/duckclaw-admin && pnpm install && pnpm dev
 # o desde raíz: pnpm admin:dev
 ```
 
-Variables en `apps/duckclaw-admin/.env.local`: `DUCKCLAW_GATEWAY_URL`, `DUCKCLAW_ADMIN_API_KEY` (misma clave que el gateway).
+Variables en `apps/duckclaw-admin/.env.local`: `DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000`, `DUCKCLAW_ADMIN_API_KEY` (misma clave que el gateway).
+
+Servicios requeridos: Redis + DuckClaw-DB-Writer + DuckClaw-Gateway. Ver `apps/duckclaw-admin/README.md`.
 

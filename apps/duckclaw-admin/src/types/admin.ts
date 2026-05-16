@@ -40,3 +40,14 @@ export interface AdminHealth {
   redis: boolean;
   templates_dir: string;
 }
+
+export interface WhitelistUser {
+  user_id: string;
+  username: string;
+  role: string;
+}
+
+export interface FlyCommandEntry {
+  cmd: string;
+  description: string;
+}

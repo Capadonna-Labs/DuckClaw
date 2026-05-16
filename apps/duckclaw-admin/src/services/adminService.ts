@@ -1,8 +1,10 @@
 import type {
   AdminHealth,
   EnvConfigResponse,
+  FlyCommandEntry,
   TemplateDetail,
   TemplateSummary,
+  WhitelistUser,
 } from '@/types/admin';
 
 function roleHeader(): HeadersInit {
@@ -47,10 +49,13 @@ export const adminService = {
   getTemplate: (id: string) => adminFetch<TemplateDetail>(`/templates/${encodeURIComponent(id)}`),
 
   saveTemplateFile: (workerId: string, filePath: string, content: string) =>
-    adminFetch<{ ok: boolean }>(`/templates/${encodeURIComponent(workerId)}/files/${filePath}`, {
-      method: 'PUT',
-      body: JSON.stringify({ content }),
-    }),
+    adminFetch<{ ok: boolean }>(
+      `/templates/${encodeURIComponent(workerId)}/files/${encodeURIComponent(filePath)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ content }),
+      }
+    ),
 
   validateTemplate: (workerId: string) =>
     adminFetch<{ ok: boolean; errors: string[] }>(
@@ -77,6 +82,33 @@ export const adminService = {
 
   getTelegramRoutes: () => adminFetch<{ routes: { bot: string; path: string }[] }>('/telegram/routes'),
 
+  getTelegramWhitelist: (tenantId: string) =>
+    adminFetch<{ tenant_id: string; users: WhitelistUser[]; db_path?: string; warning?: string }>(
+      `/telegram/whitelist?tenant_id=${encodeURIComponent(tenantId)}`
+    ),
+
+  upsertWhitelistUser: (body: {
+    tenant_id: string;
+    user_id: string;
+    username?: string;
+    role: string;
+  }) =>
+    adminFetch<{ ok: boolean }>('/telegram/whitelist', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  deleteWhitelistUser: (tenantId: string, userId: string) =>
+    adminFetch<{ ok: boolean }>(
+      `/telegram/whitelist?tenant_id=${encodeURIComponent(tenantId)}&user_id=${encodeURIComponent(userId)}`,
+      { method: 'DELETE' }
+    ),
+
+  listFlyCommands: () =>
+    adminFetch<{ header: string; commands: FlyCommandEntry[]; leila_enabled: boolean }>(
+      '/fly-commands'
+    ),
+
   listVaults: () => adminFetch<{ vaults: { path: string; scope: string }[] }>('/runtime/vaults'),
 
   getRuntimeConfig: (vaultPath: string, chatId: string) =>
@@ -94,6 +126,12 @@ export const adminService = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+
+  deleteRuntimeConfig: (vaultPath: string, chatId: string, key: string) =>
+    adminFetch<{ ok: boolean }>(
+      `/runtime/config?vault_path=${encodeURIComponent(vaultPath)}&chat_id=${encodeURIComponent(chatId)}&key=${encodeURIComponent(key)}`,
+      { method: 'DELETE' }
+    ),
 
   getChatHistory: (tenantId: string, sessionId: string) =>
     adminFetch<{ messages: unknown[] }>(

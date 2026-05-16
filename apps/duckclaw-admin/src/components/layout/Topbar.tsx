@@ -1,10 +1,10 @@
 'use client';
 
 import { LogOut, Sun, Moon, Menu } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { obtenerIniciales } from '@/lib/utils';
 import { useTheme } from '@/components/shared/ThemeProvider';
-import NotificationBell from './NotificationBell';
 
 interface TopbarProps {
   title: string;
@@ -14,70 +14,73 @@ interface TopbarProps {
 export default function Topbar({ title, onMenuClick }: TopbarProps) {
   const { usuario, logout } = useAuthStore();
   const { theme, toggleTheme } = useTheme();
+  const router = useRouter();
+
+  const handleLogout = () => {
+    logout();
+    router.replace('/login');
+  };
 
   return (
-    <header 
+    <header
       role="banner"
-      className="h-16 bg-white border-b border-gov-gray-100 shadow-sm px-4 md:px-6 flex items-center justify-between shrink-0 transition-colors duration-300 dark:bg-dark-surface dark:border-dark-border"
+      className="h-16 bg-white border-b border-gov-gray-100 shadow-sm px-4 md:px-6 flex items-center justify-between shrink-0 dark:bg-dark-surface dark:border-dark-border"
     >
-      {/* Left Side: Menu Toggle (Mobile) & Section Info */}
-      <div className="flex items-center gap-4">
+      <TopbarLeft title={title} email={usuario?.email} onMenuClick={onMenuClick} />
+      <div className="flex items-center gap-2 md:gap-4">
         <button
-          onClick={onMenuClick}
-          className="lg:hidden p-2 -ml-2 rounded-lg text-gov-gray-500 hover:bg-gov-gray-100 dark:text-dark-muted dark:hover:bg-dark-bg transition-colors"
-          aria-label="Abrir menú"
-        >
-          <Menu size={20} />
-        </button>
-        
-        <div className="flex flex-col">
-          <h2 className="text-lg md:text-xl font-semibold text-gov-gray-900 leading-tight dark:text-dark-text truncate max-w-[150px] md:max-w-none">
-            {title}
-          </h2>
-          <p className="hidden sm:block text-[10px] md:text-xs text-gov-gray-500 dark:text-dark-muted">
-            {usuario?.email ?? 'DuckClaw Admin'}
-          </p>
-        </div>
-      </div>
-
-      {/* Right Side: User Profile & Actions */}
-      <div className="flex items-center gap-2 md:gap-6">
-        {/* Toggle Modo Oscuro */}
-        <button
+          type="button"
           onClick={toggleTheme}
-          className="p-2 rounded-lg text-gov-gray-500 hover:bg-gov-gray-100 dark:text-dark-muted dark:hover:bg-dark-bg transition-colors"
-          title={`Cambiar a modo ${theme === 'light' ? 'oscuro' : 'claro'}`}
+          className="p-2 rounded-lg text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
+          aria-label="Cambiar tema"
         >
           {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
         </button>
-
-        {/* Centro de Notificaciones */}
-        <NotificationBell />
-
-        <div className="flex items-center gap-3 md:pl-6 md:border-l md:border-gov-gray-100 md:dark:border-dark-border">
-          <div className="hidden lg:flex flex-col items-end">
-            <span className="text-sm font-bold text-gov-gray-900 leading-none dark:text-dark-text">
-              {usuario?.nombre}
-            </span>
-            <span className="text-[10px] font-bold text-gov-blue-600 uppercase tracking-tighter mt-1 dark:text-dark-cyan">
-              {usuario?.rol}
-            </span>
+        <div className="hidden sm:flex items-center gap-3 pl-3 border-l dark:border-dark-border">
+          <div className="text-right hidden lg:block">
+            <p className="text-sm font-bold dark:text-dark-text">{usuario?.nombre}</p>
+            <p className="text-[10px] text-gov-gray-500 capitalize">{usuario?.rol}</p>
           </div>
-          
-          <div className="bg-gov-blue-700 text-white rounded-full w-8 h-8 md:w-10 md:h-10 flex items-center justify-center text-xs md:text-sm font-bold shadow-lg shadow-gov-blue-900/20 border-2 border-white dark:border-dark-surface dark:bg-dark-accent">
+          <div className="w-9 h-9 rounded-full bg-gov-blue-700 text-white flex items-center justify-center text-xs font-bold">
             {usuario?.initials ?? obtenerIniciales(usuario?.nombre || '')}
           </div>
         </div>
-
         <button
-          onClick={() => logout()}
-          className="text-gov-gray-500 hover:text-sem-red transition-colors p-2 rounded-lg hover:bg-sem-red-bg group relative dark:text-dark-muted dark:hover:bg-sem-red/10"
-          title="Cerrar sesión"
-          aria-label="Cerrar sesión"
+          type="button"
+          onClick={handleLogout}
+          className="flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
         >
-          <LogOut className="w-[18px] h-[18px] md:w-5 md:h-5" />
+          <LogOut size={18} />
+          <span className="hidden md:inline">Salir</span>
         </button>
       </div>
     </header>
+  );
+}
+
+function TopbarLeft({
+  title,
+  email,
+  onMenuClick,
+}: {
+  title: string;
+  email?: string;
+  onMenuClick?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-4">
+      <button
+        type="button"
+        onClick={onMenuClick}
+        className="lg:hidden p-2 rounded-lg"
+        aria-label="Menú"
+      >
+        <Menu size={20} />
+      </button>
+      <div>
+        <h2 className="text-lg font-semibold dark:text-dark-text">{title}</h2>
+        {email && <p className="text-[10px] text-gov-gray-500 hidden sm:block">{email}</p>}
+      </div>
+    </div>
   );
 }

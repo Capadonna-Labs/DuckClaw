@@ -1110,14 +1110,10 @@ def _sync_tenant_team_if_admin(
 
 
 def _resolve_template_id(available: list, user_input: str) -> Optional[str]:
-    """Resuelve el input del usuario (p. ej. 'themindcrupier') al id canónico del template (p. ej. 'ThemindCrupier'). Case-insensitive."""
-    if not available or not (user_input or "").strip():
-        return None
-    key = (user_input or "").strip().lower()
-    for a in available:
-        if (a or "").strip().lower() == key:
-            return (a or "").strip()
-    return None
+    """Resuelve input (p. ej. maestro) al id canónico de carpeta (p. ej. AXIS-Maestro)."""
+    from duckclaw.workers.template_registry import resolve_template_id
+
+    return resolve_template_id(available, user_input)
 
 
 def execute_team(

@@ -19,13 +19,13 @@ uv run duckops serve --pm2 --gateway             # Ecosystem + DuckClaw-Gateway
 pm2 start config/ecosystem.api.config.cjs --only DuckClaw-Gateway
 pm2 delete DuckClaw-DB-Writer
 pm2 status 
-pm2 flush
+pm2 flush                                        # Limpia la consola
 pm2 logs DuckClaw-Gateway
 pm2 logs BI-Analyst-Gateway                      # Ej. multi-gateway
 pm2 logs JobHunter-Gateway
 pm2 logs DuckClaw-DB-Writer
 pm2 restart DuckClaw-Gateway --update-env        # Tras .env
-pm2 restar all --update-env                      # Reinicia todos los servicios 
+pm2 restart all --update-env                      # Reinicia todos los servicios 
 ```
 
 ## TELEGRAM

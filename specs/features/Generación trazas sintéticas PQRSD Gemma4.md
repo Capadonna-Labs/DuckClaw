@@ -12,4 +12,4 @@ Documentar cómo generar líneas JSONL de entrenamiento **coherentes** con el wo
 
 ## Salida
 
-Archivos bajo `packages/agents/train/conversation_traces/YYYY/MM/DD/traces.jsonl`; pipeline SFT descrito en [`packages/agents/train/README.md`](../../packages/agents/train/README.md).
+Archivos bajo `packages/agents/train/conversation_traces/YYYY/MM/DD/traces.jsonl`; pipeline SFT descrito en [`packages/agents/train/SFT_MLX_PIPELINE.md`](../../packages/agents/train/SFT_MLX_PIPELINE.md).

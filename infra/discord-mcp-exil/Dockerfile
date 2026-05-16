@@ -3,7 +3,7 @@
 FROM python:3.12-slim-bookworm AS base
 RUN pip install --no-cache-dir uv
 WORKDIR /srv
-COPY discord-src/pyproject.toml discord-src/uv.lock discord-src/README.md ./
+COPY discord-src/pyproject.toml discord-src/uv.lock discord-src/DISCORD_MCP_EXIL.md ./
 COPY discord-src/src ./src
 RUN uv sync --frozen --no-dev
 ENV PATH="/srv/.venv/bin:$PATH"

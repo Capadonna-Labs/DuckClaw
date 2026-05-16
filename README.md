@@ -1,4 +1,4 @@
-# DuckClaw
+# DuckClaw (`DUCKCLAW.md`)
 
 **Multi-agent platform** with a zero-trust posture, **DuckDB** as the analytical state store, and a **singleton DB-Writer** path for ACID mutations (Gateway and workers enqueue; `services/db-writer` applies).
 
@@ -40,7 +40,7 @@ duckclaw/
 - **Singleton DB-Writer**: serializes durable DuckDB writes via Redis queues; keeps ledger-style state consistent.
 - **API Gateway**: FastAPI front door (`services/api-gateway`); agent chat, DB write enqueue, Telegram webhook, VLM image ingest, health.
 - **duckops**: Python CLI (`uv run duckops …`) for wizard-driven setup and local service control.
-- **Training traces (optional)**: JSONL under `packages/agents/train/conversation_traces/` — [`packages/agents/train/README.md`](packages/agents/train/README.md), [`docs/agents/sft_conversation_traces.md`](docs/agents/sft_conversation_traces.md).
+- **Training traces (optional)**: JSONL under `packages/agents/train/conversation_traces/` — [`packages/agents/train/SFT_MLX_PIPELINE.md`](packages/agents/train/SFT_MLX_PIPELINE.md), [`docs/agents/sft_conversation_traces.md`](docs/agents/sft_conversation_traces.md).
 - **CRM**: https://github.com/ManePeqsiCoda/retoPWRSomegahack, https://inputs-rely-speakers-humor.trycloudflare.com/dashboard
 
 ---
@@ -128,7 +128,7 @@ docker build -t duckclaw-api -f docker/api/Dockerfile .
 
 ## Spec-driven development
 
-No substantial feature without an approved spec under [`specs/`](specs/). Index and conventions: [`specs/README.md`](specs/README.md).
+No substantial feature without an approved spec under [`specs/`](specs/). Index and conventions: [`specs/SDD_INDEX.md`](specs/SDD_INDEX.md).
 
 ---
 

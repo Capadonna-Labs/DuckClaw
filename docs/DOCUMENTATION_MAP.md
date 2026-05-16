@@ -1,4 +1,4 @@
-# Documentación humana (`docs/`)
+# Mapa de documentación (`docs/DOCUMENTATION_MAP.md`)
 
 **No es MkDocs ni HTML.** Solo Markdown versionado en git.
 

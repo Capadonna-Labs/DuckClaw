@@ -1,4 +1,4 @@
-# Scripts (`scripts/`)
+# Índice de scripts (`scripts/SCRIPTS_INDEX.md`)
 
 Utilidades **puntuales** del monorepo. Runtime de producción: `services/` + `duckops`. Normativa: `specs/`.
 

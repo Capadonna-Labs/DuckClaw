@@ -25,7 +25,7 @@ REQUIRED_FILES = [
     "security_policy.yaml",
     "domain_closure.md",
     "homeostasis.yaml",
-    "README.md",
+    "AGENT_OVERVIEW.md",
 ]
 
 REQUIRED_SYSTEM_PROMPT_SECTIONS = [

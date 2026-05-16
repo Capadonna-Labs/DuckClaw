@@ -22,7 +22,7 @@ En cada carpeta hay exactamente **siete archivos** (contrato ADF):
 | `security_policy.yaml` | `can_do` / `cannot_do`; `data_egress` recomendado |
 | `domain_closure.md` | Límites de dominio y reglas de escalación a otros agentes |
 | `homeostasis.yaml` | Reglas de autogestión / anomalías declarativas |
-| `README.md` | Documentación humana del agente |
+| `AGENT_OVERVIEW.md` | Documentación humana del agente |
 
 ## Validación
 

@@ -1,4 +1,4 @@
-# Especificaciones DuckClaw
+# Índice SDD (`specs/SDD_INDEX.md`)
 
 Las **especificaciones consolidadas** del proyecto son estas cinco:
 

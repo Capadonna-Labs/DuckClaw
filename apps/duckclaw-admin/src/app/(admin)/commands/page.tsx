@@ -6,6 +6,7 @@ import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
 import type { FlyCommandEntry } from '@/types/admin';
 import { Terminal } from 'lucide-react';
+import { clampInput, LIMITS } from '@/lib/validation';
 
 export default function CommandsPage() {
   const [header, setHeader] = useState('');
@@ -57,7 +58,8 @@ export default function CommandsPage() {
         )}
         <input
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => setQ(clampInput(e.target.value, LIMITS.commandSearch))}
+          maxLength={LIMITS.commandSearch}
           placeholder="Buscar comando…"
           className="w-full max-w-md mb-4 px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg text-sm"
         />

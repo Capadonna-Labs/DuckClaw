@@ -49,6 +49,7 @@ export default function OverviewPage() {
           <QuickLink href="/telegram" label="Telegram" />
           <QuickLink href="/commands" label="Fly commands" />
           <QuickLink href="/traces" label="Traces" />
+          <QuickLink href="/audit" label="Auditoría" />
         </div>
       </section>
 

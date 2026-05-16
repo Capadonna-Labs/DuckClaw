@@ -13,11 +13,12 @@ import {
   Radio,
   LogOut,
   Terminal,
+  ClipboardList,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { cn } from '@/lib/utils';
 
-const NAV = [
+const NAV_CORE = [
   { href: '/overview', label: 'Overview', icon: LayoutDashboard },
   { href: '/templates', label: 'Plantillas', icon: Bot },
   { href: '/projects/new', label: 'Nuevo proyecto', icon: FolderPlus },
@@ -26,13 +27,22 @@ const NAV = [
   { href: '/commands', label: 'Fly commands', icon: Terminal },
   { href: '/duckdb', label: 'DuckDB', icon: Database },
   { href: '/traces', label: 'Traces', icon: Activity },
-  { href: '/settings', label: 'Ajustes', icon: Settings },
 ] as const;
+
+const NAV_ADMIN = [{ href: '/audit', label: 'Auditoría', icon: ClipboardList }] as const;
+
+const NAV_FOOTER = [{ href: '/settings', label: 'Ajustes', icon: Settings }] as const;
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { usuario, logout } = useAuthStore();
+
+  const nav = [
+    ...NAV_CORE,
+    ...(usuario?.rol === 'admin' ? NAV_ADMIN : []),
+    ...NAV_FOOTER,
+  ];
 
   const handleLogout = () => {
     logout();
@@ -51,7 +61,7 @@ export default function Sidebar() {
         </div>
       </div>
       <div className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
-        {NAV.map(({ href, label, icon: Icon }) => (
+        {nav.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}

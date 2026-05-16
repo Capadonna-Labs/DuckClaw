@@ -7,13 +7,16 @@ import type {
   WhitelistUser,
 } from '@/types/admin';
 
-function roleHeader(): HeadersInit {
+function sessionHeaders(): HeadersInit {
   if (typeof window === 'undefined') return {};
   try {
     const raw = localStorage.getItem('duckclaw-admin-auth');
     if (!raw) return {};
-    const rol = JSON.parse(raw)?.state?.usuario?.rol;
-    return rol ? { 'x-duckclaw-role': String(rol) } : {};
+    const state = JSON.parse(raw)?.state;
+    const headers: Record<string, string> = {};
+    if (state?.usuario?.rol) headers['x-duckclaw-role'] = String(state.usuario.rol);
+    if (state?.usuario?.email) headers['x-duckclaw-actor'] = String(state.usuario.email);
+    return headers;
   } catch {
     return {};
   }
@@ -24,7 +27,7 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...roleHeader(),
+      ...sessionHeaders(),
       ...(init?.headers ?? {}),
     },
     cache: 'no-store',
@@ -112,7 +115,7 @@ export const adminService = {
   listVaults: () => adminFetch<{ vaults: { path: string; scope: string }[] }>('/runtime/vaults'),
 
   getRuntimeConfig: (vaultPath: string, chatId: string) =>
-    adminFetch<{ rows: { key: string; value: string }[] }>(
+    adminFetch<{ rows: { key: string; value: string; scope?: string; full_key?: string }[]; warning?: string }>(
       `/runtime/config?vault_path=${encodeURIComponent(vaultPath)}&chat_id=${encodeURIComponent(chatId)}`
     ),
 
@@ -137,4 +140,16 @@ export const adminService = {
     adminFetch<{ messages: unknown[] }>(
       `/chats/history?tenant_id=${encodeURIComponent(tenantId)}&session_id=${encodeURIComponent(sessionId)}`
     ),
+
+  getAuditLog: (limit = 100) =>
+    adminFetch<{ entries: AuditEntry[] }>(`/audit?limit=${limit}`),
 };
+
+export interface AuditEntry {
+  ts: string;
+  actor: string;
+  action: string;
+  resource: string;
+  detail: string;
+  meta?: Record<string, unknown>;
+}

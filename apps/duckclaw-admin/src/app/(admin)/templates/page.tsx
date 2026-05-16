@@ -1,23 +1,40 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { adminService } from '@/services/adminService';
 import type { TemplateSummary } from '@/types/admin';
 import EmptyState from '@/components/shared/EmptyState';
+import { useAuthStore } from '@/store/authStore';
 import { Search } from 'lucide-react';
 
 export default function TemplatesPage() {
+  const { usuario } = useAuthStore();
+  const canWrite = usuario?.rol === 'admin';
   const [items, setItems] = useState<TemplateSummary[]>([]);
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     adminService
       .listTemplates()
       .then(setItems)
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
   }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const handleDelete = async (id: string) => {
+    if (!canWrite || !confirm(`¿Eliminar plantilla "${id}"?`)) return;
+    try {
+      await adminService.deleteTemplate(id);
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo eliminar');
+    }
+  };
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -47,7 +64,7 @@ export default function TemplatesPage() {
         </Link>
       </header>
 
-      <motionSearch q={q} setQ={setQ} />
+      <TemplateSearch q={q} setQ={setQ} />
 
       {error && <p className="text-red-600 text-sm">{error}</p>}
 
@@ -57,13 +74,13 @@ export default function TemplatesPage() {
           customMessage={error ?? 'No hay workers o el gateway no responde.'}
         />
       ) : (
-        <TemplatesTable items={filtered} />
+        <TemplatesTable items={filtered} canWrite={canWrite} onDelete={handleDelete} />
       )}
     </div>
   );
 }
 
-function motionSearch({ q, setQ }: { q: string; setQ: (v: string) => void }) {
+function TemplateSearch({ q, setQ }: { q: string; setQ: (v: string) => void }) {
   return (
     <div className="relative max-w-md">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gov-gray-400" size={18} />
@@ -77,7 +94,15 @@ function motionSearch({ q, setQ }: { q: string; setQ: (v: string) => void }) {
   );
 }
 
-function TemplatesTable({ items }: { items: TemplateSummary[] }) {
+function TemplatesTable({
+  items,
+  canWrite,
+  onDelete,
+}: {
+  items: TemplateSummary[];
+  canWrite: boolean;
+  onDelete: (id: string) => void;
+}) {
   return (
     <div className="overflow-hidden rounded-2xl border border-gov-gray-100 dark:border-dark-border bg-white dark:bg-dark-surface">
       <table className="w-full text-sm">
@@ -104,13 +129,22 @@ function TemplatesTable({ items }: { items: TemplateSummary[] }) {
               <td className="px-4 py-3">{t.name ?? '—'}</td>
               <td className="px-4 py-3 font-mono text-xs">{t.schema_name ?? '—'}</td>
               <td className="px-4 py-3">{t.temperature ?? '—'}</td>
-              <td className="px-4 py-3 text-right">
+              <td className="px-4 py-3 text-right space-x-3">
                 <Link
                   href={`/templates/${t.id}`}
                   className="text-gov-blue-700 dark:text-dark-cyan font-semibold hover:underline"
                 >
                   Editar
                 </Link>
+                {canWrite && (
+                  <button
+                    type="button"
+                    onClick={() => onDelete(t.id)}
+                    className="text-red-600 font-semibold hover:underline"
+                  >
+                    Eliminar
+                  </button>
+                )}
               </td>
             </tr>
           ))}

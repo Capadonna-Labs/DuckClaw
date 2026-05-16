@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { adminService } from '@/services/adminService';
@@ -8,7 +8,7 @@ import type { TemplateDetail } from '@/types/admin';
 import { useAuthStore } from '@/store/authStore';
 import { ChevronRight, Save, CheckCircle } from 'lucide-react';
 
-const TABS = ['manifest.yaml', 'system_prompt.md', 'soul.md', 'domain_closure.md'] as const;
+const EDITABLE = /\.(ya?ml|md|sql|txt|json|py)$/i;
 
 export default function TemplateEditorPage() {
   const { workerId } = useParams<{ workerId: string }>();
@@ -21,15 +21,27 @@ export default function TemplateEditorPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const editableFiles = useMemo(() => {
+    if (!detail?.files) return [];
+    return detail.files
+      .map((f) => f.path)
+      .filter((p) => EDITABLE.test(p))
+      .sort();
+  }, [detail]);
+
   const load = useCallback(() => {
     if (!workerId) return;
     adminService
       .getTemplate(workerId)
       .then((d) => {
         setDetail(d);
-        const initial = d.contents['system_prompt.md'] ?? d.contents['manifest.yaml'] ?? '';
-        setTab(d.contents['system_prompt.md'] ? 'system_prompt.md' : 'manifest.yaml');
-        setContent(initial);
+        const preferred =
+          (d.contents['system_prompt.md'] !== undefined && 'system_prompt.md') ||
+          (d.contents['manifest.yaml'] !== undefined && 'manifest.yaml') ||
+          Object.keys(d.contents)[0] ||
+          'manifest.yaml';
+        setTab(preferred);
+        setContent(d.contents[preferred] ?? '');
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
   }, [workerId]);
@@ -48,7 +60,7 @@ export default function TemplateEditorPage() {
     setMsg(null);
     try {
       await adminService.saveTemplateFile(workerId, tab, content);
-      setMsg('Guardado');
+      setMsg('Guardado en disco (canónico)');
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al guardar');
@@ -71,6 +83,9 @@ export default function TemplateEditorPage() {
         </Link>
         <ChevronRight size={14} />
         <span className="font-mono text-gov-gray-900 dark:text-dark-text">{workerId}</span>
+        <span className="text-[10px] uppercase px-2 py-0.5 rounded bg-gov-cyan-100 text-gov-blue-800 dark:bg-dark-bg">
+          canónico (archivo)
+        </span>
       </nav>
 
       <header className="flex flex-wrap items-center justify-between gap-4">
@@ -95,37 +110,42 @@ export default function TemplateEditorPage() {
         </div>
       </header>
 
-      <div className="flex flex-wrap gap-2 border-b dark:border-dark-border pb-2">
-        {TABS.map((f) => (
-          <button
-            key={f}
-            type="button"
-            onClick={() => setTab(f)}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg ${
-              tab === f
-                ? 'bg-gov-blue-700 text-white'
-                : 'bg-gov-gray-100 dark:bg-dark-bg text-gov-gray-600'
-            }`}
-          >
-            {f}
-          </button>
-        ))}
+      <div className="flex flex-col lg:flex-row gap-4">
+        <aside className="lg:w-56 shrink-0 max-h-48 lg:max-h-[520px] overflow-y-auto rounded-xl border dark:border-dark-border p-2 bg-gov-gray-50 dark:bg-dark-bg">
+          <p className="text-[10px] font-bold uppercase text-gov-gray-500 px-2 py-1">Archivos</p>
+          {editableFiles.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setTab(f)}
+              className={`block w-full text-left text-xs font-mono px-2 py-1.5 rounded-lg truncate ${
+                tab === f
+                  ? 'bg-gov-blue-700 text-white'
+                  : 'hover:bg-white dark:hover:bg-dark-surface'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </aside>
+
+        <div className="flex-1 min-w-0 space-y-2">
+          <p className="text-xs font-mono text-gov-gray-500">{tab}</p>
+          {msg && (
+            <p className="text-sm text-green-700 flex items-center gap-1">
+              <CheckCircle size={16} /> {msg}
+            </p>
+          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            readOnly={!canWrite}
+            className="w-full min-h-[420px] font-mono text-sm p-4 rounded-2xl border dark:border-dark-border dark:bg-dark-surface"
+            spellCheck={false}
+          />
+        </div>
       </div>
-
-      {msg && (
-        <p className="text-sm text-green-700 flex items-center gap-1">
-          <CheckCircle size={16} /> {msg}
-        </p>
-      )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        readOnly={!canWrite}
-        className="w-full min-h-[420px] font-mono text-sm p-4 rounded-2xl border dark:border-dark-border dark:bg-dark-surface"
-        spellCheck={false}
-      />
     </div>
   );
 }

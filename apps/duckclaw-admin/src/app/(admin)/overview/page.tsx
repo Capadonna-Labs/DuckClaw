@@ -28,9 +28,7 @@ export default function OverviewPage() {
         </p>
       </header>
 
-      {error && (
-        <p className="text-sm text-red-600 bg-red-50 dark:bg-red-950/30 p-4 rounded-xl">{error}</p>
-      )}
+      {error && <GatewayErrorBanner message={error} />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard icon={Bot} label="Workers" value={health?.workers_count ?? '—'} />
@@ -49,6 +47,7 @@ export default function OverviewPage() {
           <QuickLink href="/templates" label="Plantillas" />
           <QuickLink href="/projects/new" label="Nuevo proyecto" />
           <QuickLink href="/telegram" label="Telegram" />
+          <QuickLink href="/commands" label="Fly commands" />
           <QuickLink href="/traces" label="Traces" />
         </div>
       </section>
@@ -92,6 +91,42 @@ function MetricCard({
       <p className={`font-black text-gov-gray-900 dark:text-dark-text mt-1 ${small ? 'text-sm' : 'text-2xl'}`}>
         {value}
       </p>
+    </div>
+  );
+}
+
+function GatewayErrorBanner({ message }: { message: string }) {
+  const isTailscale = message.includes('Tailscale');
+  const isAdminKey = message.toLowerCase().includes('admin');
+  return (
+    <ErrorBanner>
+      <p className="font-bold text-red-800 dark:text-red-300">No se pudo conectar al API Gateway</p>
+      <p className="text-sm text-red-700 dark:text-red-400 mt-1">{message}</p>
+      <ul className="text-sm text-red-700/90 dark:text-red-400/90 mt-3 list-disc pl-5 space-y-1">
+        <li>Levanta: Redis, DuckClaw-DB-Writer, DuckClaw-Gateway (puerto 8000).</li>
+        <li>
+          <code className="text-xs">apps/duckclaw-admin/.env.local</code>:{' '}
+          <code>DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000</code> (local, no URL Tailscale).
+        </li>
+        <li>
+          Misma <code>DUCKCLAW_ADMIN_API_KEY</code> en .env raíz y en .env.local del admin.
+        </li>
+        {isTailscale && (
+          <li>
+            Rutas <code>/api/v1/admin/*</code> ya no exigen Tailscale; reinicia el gateway tras
+            actualizar.
+          </li>
+        )}
+        {isAdminKey && <li>Revisa que el gateway tenga definida DUCKCLAW_ADMIN_API_KEY.</li>}
+      </ul>
+    </ErrorBanner>
+  );
+}
+
+function ErrorBanner({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 p-4 rounded-xl">
+      {children}
     </div>
   );
 }

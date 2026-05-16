@@ -46,3 +46,26 @@ def test_list_templates(admin_client: TestClient):
     )
     assert r.status_code == 200
     assert "templates" in r.json()
+
+
+def test_fly_commands(admin_client: TestClient):
+    r = admin_client.get(
+        "/api/v1/admin/fly-commands",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert "commands" in data
+    assert isinstance(data["commands"], list)
+    assert any(c.get("cmd") == "/team" for c in data["commands"])
+
+
+def test_telegram_whitelist_get(admin_client: TestClient):
+    r = admin_client.get(
+        "/api/v1/admin/telegram/whitelist?tenant_id=default",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("tenant_id") == "default"
+    assert "users" in data

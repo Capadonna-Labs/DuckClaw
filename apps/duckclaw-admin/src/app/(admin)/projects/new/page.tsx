@@ -69,7 +69,7 @@ export default function NewProjectPage() {
               <strong className="font-mono">{source}</strong>
             </p>
             {error && <p className="text-red-600 text-sm">{error}</p>}
-            <motionWizardActions
+            <WizardActions
               onBack={() => setStep(1)}
               onFinish={finish}
               loading={loading}
@@ -81,7 +81,7 @@ export default function NewProjectPage() {
   );
 }
 
-function motionWizardActions({
+function WizardActions({
   onBack,
   onFinish,
   loading,

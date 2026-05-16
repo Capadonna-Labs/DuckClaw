@@ -1,33 +1,80 @@
 # DuckClaw Admin UI
 
-Consola web (Next.js 14). Spec: `specs/features/platform/DUCKCLAW_ADMIN_UI.md`.
+Consola web (Next.js 14 + **pnpm**). Spec: `specs/features/DuckClaw_Admin_UI.md`.
 
-## Requisitos
+## Qué debes tener levantado
 
-- Node 20+
-- [pnpm](https://pnpm.io) 9+
-- API Gateway en marcha con `DUCKCLAW_ADMIN_API_KEY` en `.env` raíz
+La UI **no** es un servicio aparte de DuckClaw: es un frontend que habla con el **API Gateway** vía BFF.
 
-## Variables (solo en esta carpeta)
+| Proceso | Obligatorio | Rol |
+|---------|-------------|-----|
+| **Redis** | Sí | Cola `duckdb_write_queue`, historial chat |
+| **DuckClaw-DB-Writer** | Sí | Escrituras ACID DuckDB |
+| **DuckClaw-Gateway** | Sí | `/api/v1/admin/*`, agentes, Telegram |
+| **MLX / LLM** | No para admin CRUD | Solo si pruebas chat desde otros clientes |
 
-Crea `apps/duckclaw-admin/.env.local` (no commitear):
+```bash
+# Desde la raíz del monorepo
+uv run duckops serve --pm2 --gateway
+pm2 start config/ecosystem.db-writer.config.cjs
+pm2 restart DuckClaw-Gateway --update-env
+```
+
+Comprueba: `curl -s -H "X-Admin-Key: TU_CLAVE" http://127.0.0.1:8000/api/v1/admin/health`
+
+## Variables
+
+**Raíz `.env`** (gateway):
+
+```env
+DUCKCLAW_ADMIN_API_KEY=tu-clave-secreta
+REDIS_URL=redis://localhost:6379/0
+```
+
+**`apps/duckclaw-admin/.env.local`** (solo servidor Next):
 
 ```env
 DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000
-DUCKCLAW_ADMIN_API_KEY=<misma clave que en .env raíz del monorepo>
+DUCKCLAW_ADMIN_API_KEY=tu-clave-secreta
 ```
 
-El BFF Next lee estas variables en servidor; el navegador nunca ve la admin key.
+Usa **localhost** para desarrollo. Si `DUCKCLAW_TAILSCALE_AUTH_KEY` está en el gateway, las rutas `/api/v1/admin/*` están **exentas** de esa cabecera (auth = `X-Admin-Key`).
 
-## Comandos (pnpm)
+## pnpm
 
 ```bash
-pnpm install          # desde apps/duckclaw-admin
-pnpm dev              # http://localhost:3000
-
-# o desde la raíz del monorepo:
-pnpm admin:dev
-pnpm admin:build
+cd apps/duckclaw-admin
+pnpm install
+pnpm dev
 ```
 
-Login demo: `admin@duckclaw.local` / `DuckAdmin2026!` · viewer solo lectura.
+Desde raíz: `pnpm admin:dev`
+
+## Login (usuarios de prueba)
+
+| Email | Contraseña | Rol |
+|-------|------------|-----|
+| `admin@duckclaw.local` | `DuckAdmin2026!` | admin (CRUD) |
+| `viewer@duckclaw.local` | `DuckView2026!` | viewer (solo lectura) |
+
+Configuración: edita `src/config/adminUsers.ts` y reinicia `pnpm dev`. En la pantalla de login hay un panel **Usuarios de prueba** con botón **Usar** para autocompletar.
+
+## Logout
+
+Botón **Cerrar sesión** en sidebar (pie) y **Salir** en topbar.
+
+## Pantallas
+
+| Ruta | Función |
+|------|---------|
+| `/overview` | Health gateway + workers |
+| `/templates` | CRUD plantillas `forge/templates` |
+| `/projects/new` | Wizard clonar worker |
+| `/runtime` | `agent_config` por vault (cola db-writer) |
+| `/telegram` | Webhooks, token `.env`, whitelist `authorized_users` |
+| `/commands` | Catálogo fly commands (`/help`) |
+| `/duckdb` | Bóvedas y vars DuckDB |
+| `/traces` | Historial Redis por sesión |
+| `/settings` | Perfil, usuarios demo, tema |
+
+**Auth real (JWT/BD):** fase posterior; hoy rol `admin`/`viewer` solo en BFF demo.

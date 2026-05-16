@@ -1,15 +1,31 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
+import { useAuthStore } from '@/store/authStore';
+import { Trash2 } from 'lucide-react';
 
 export default function RuntimePage() {
+  const { usuario } = useAuthStore();
+  const canWrite = usuario?.rol === 'admin';
+
   const [vaults, setVaults] = useState<{ path: string }[]>([]);
   const [vault, setVault] = useState('');
   const [chatId, setChatId] = useState('default');
   const [rows, setRows] = useState<{ key: string; value: string }[]>([]);
   const [newKey, setNewKey] = useState('');
   const [newVal, setNewVal] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    if (!vault) return;
+    setError(null);
+    adminService
+      .getRuntimeConfig(vault, chatId)
+      .then((r) => setRows(r.rows ?? []))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
+  }, [vault, chatId]);
 
   useEffect(() => {
     adminService.listVaults().then((r) => {
@@ -18,30 +34,49 @@ export default function RuntimePage() {
     });
   }, []);
 
-  const load = () => {
-    if (!vault) return;
-    adminService.getRuntimeConfig(vault, chatId).then((r) => setRows(r.rows ?? []));
-  };
-
   useEffect(() => {
     load();
-  }, [vault, chatId]);
+  }, [load]);
 
   const save = async () => {
-    await adminService.putRuntimeConfig({
-      vault_path: vault,
-      chat_id: chatId,
-      key: newKey,
-      value: newVal,
-    });
-    setNewKey('');
-    setNewVal('');
-    load();
+    if (!canWrite || !newKey.trim()) return;
+    setMsg(null);
+    try {
+      await adminService.putRuntimeConfig({
+        vault_path: vault,
+        chat_id: chatId,
+        key: newKey.trim(),
+        value: newVal,
+      });
+      setMsg('Encolado en db-writer (puede tardar unos segundos)');
+      setNewKey('');
+      setNewVal('');
+      setTimeout(load, 800);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error');
+    }
+  };
+
+  const removeKey = async (key: string) => {
+    if (!canWrite || !confirm(`¿Eliminar key "${key}"?`)) return;
+    try {
+      await adminService.deleteRuntimeConfig(vault, chatId, key);
+      setMsg('Eliminación encolada');
+      setTimeout(load, 800);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error');
+    }
   };
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-black dark:text-dark-text">Runtime (agent_config)</h1>
+      <header>
+        <h1 className="text-3xl font-black dark:text-dark-text">Runtime (agent_config)</h1>
+        <p className="text-sm text-gov-gray-500 dark:text-dark-muted mt-1">
+          Overrides por vault y chat_id. Escrituras vía cola Redis → db-writer.
+        </p>
+      </header>
+
       <div className="flex flex-wrap gap-3">
         <select
           value={vault}
@@ -57,38 +92,74 @@ export default function RuntimePage() {
         <input
           value={chatId}
           onChange={(e) => setChatId(e.target.value)}
-          className="px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-surface text-sm"
+          className="px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-surface text-sm font-mono"
           placeholder="chat_id"
         />
+        <button
+          type="button"
+          onClick={load}
+          className="px-3 py-2 border rounded-xl text-sm dark:border-dark-border"
+        >
+          Recargar
+        </button>
       </div>
+
+      {error && <p className="text-red-600 text-sm">{error}</p>}
+      {msg && <p className="text-green-700 text-sm">{msg}</p>}
+
       <table className="w-full text-sm bg-white dark:bg-dark-surface rounded-2xl border dark:border-dark-border overflow-hidden">
         <thead className="bg-gov-gray-50 dark:bg-dark-bg">
           <tr>
             <th className="px-4 py-2 text-left">key</th>
             <th className="px-4 py-2 text-left">value</th>
+            {canWrite && <th className="px-4 py-2 w-12" />}
           </tr>
         </thead>
         <tbody>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={canWrite ? 3 : 2} className="px-4 py-6 text-center text-gov-gray-500">
+                Sin filas para este chat_id
+              </td>
+            </tr>
+          )}
           {rows.map((r) => (
             <tr key={r.key} className="border-t dark:border-dark-border">
               <td className="px-4 py-2 font-mono text-xs">{r.key}</td>
-              <td className="px-4 py-2 font-mono text-xs truncate max-w-xl">{r.value}</td>
+              <td className="px-4 py-2 font-mono text-xs truncate max-w-xl" title={r.value}>
+                {r.value}
+              </td>
+              {canWrite && (
+                <td className="px-4 py-2">
+                  <button
+                    type="button"
+                    onClick={() => removeKey(r.key)}
+                    className="text-red-600"
+                    aria-label="Eliminar"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
       </table>
-      <motionUpsertForm
-        newKey={newKey}
-        setNewKey={setNewKey}
-        newVal={newVal}
-        setNewVal={setNewVal}
-        onSave={save}
-      />
+
+      {canWrite && (
+        <RuntimeUpsertForm
+          newKey={newKey}
+          setNewKey={setNewKey}
+          newVal={newVal}
+          setNewVal={setNewVal}
+          onSave={save}
+        />
+      )}
     </div>
   );
 }
 
-function motionUpsertForm({
+function RuntimeUpsertForm({
   newKey,
   setNewKey,
   newVal,

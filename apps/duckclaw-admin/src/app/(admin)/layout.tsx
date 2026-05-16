@@ -12,6 +12,7 @@ const TITLES: Record<string, string> = {
   '/projects': 'Proyectos',
   '/runtime': 'Runtime',
   '/telegram': 'Telegram',
+  '/commands': 'Fly commands',
   '/duckdb': 'DuckDB',
   '/traces': 'Traces',
   '/settings': 'Ajustes',
@@ -32,15 +33,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      router.push('/login');
+      router.replace('/login');
     }
     setIsSidebarOpen(false);
   }, [isAuthenticated, isLoading, router, pathname]);
 
   if (isLoading || !isAuthenticated) {
-    return (
-      <motionLoading />
-    );
+    return <AdminLoading />;
   }
 
   return (
@@ -50,14 +49,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </div>
       {isSidebarOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden">
-          <div
-            className="fixed inset-0 bg-gov-blue-900/60 backdrop-blur-sm"
-            onClick={() => setIsSidebarOpen(false)}
-          />
-          <motionDrawer />
+          <SidebarOverlay onClose={() => setIsSidebarOpen(false)} />
+          <div className="relative flex w-64 flex-col">
+            <Sidebar />
+          </div>
         </div>
       )}
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden relative">
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Topbar title={titleForPath(pathname)} onMenuClick={() => setIsSidebarOpen(true)} />
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-10">
           <div className="max-w-[1600px] mx-auto">{children}</div>
@@ -67,27 +65,23 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   );
 }
 
-function motionLoading() {
+function AdminLoading() {
   return (
-    <motionLoadingInner />
-  );
-}
-
-function motionLoadingInner() {
-  return (
-    <div className="min-h-screen bg-gov-gray-50 flex flex-col items-center justify-center space-y-4 dark:bg-dark-bg">
-      <Loader2 size={32} className="animate-spin text-gov-blue-700 dark:text-dark-cyan" />
-      <p className="text-xs font-bold text-gov-gray-400 uppercase tracking-widest dark:text-dark-muted">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 dark:bg-dark-bg">
+      <Loader2 size={32} className="animate-spin text-gov-blue-700" />
+      <p className="text-xs font-bold text-gov-gray-400 uppercase tracking-widest">
         Verificando sesión…
       </p>
     </div>
   );
 }
 
-function motionDrawer() {
+function SidebarOverlay({ onClose }: { onClose: () => void }) {
   return (
-    <div className="relative flex w-64 flex-col animate-in slide-in-from-left duration-300">
-      <Sidebar />
-    </div>
+    <div
+      className="fixed inset-0 bg-gov-blue-900/60 backdrop-blur-sm"
+      onClick={onClose}
+      role="presentation"
+    />
   );
 }

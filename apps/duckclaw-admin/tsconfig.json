@@ -22,5 +22,29 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "src/hooks/useTickets.ts",
+    "src/hooks/useTicketDetail.ts",
+    "src/hooks/useEmailSender.ts",
+    "src/hooks/useIAAssistant.ts",
+    "src/hooks/useNotifications.ts",
+    "src/hooks/useAnalytics.ts",
+    "src/services/ticketService.ts",
+    "src/services/emailService.ts",
+    "src/services/aiService.ts",
+    "src/services/iaTemplateService.ts",
+    "src/services/mockData.ts",
+    "src/services/api.ts",
+    "src/lib/crm/**",
+    "src/lib/motherduck.ts",
+    "src/lib/ticketMapper.ts",
+    "src/lib/radicado.ts",
+    "src/lib/urgency.ts",
+    "src/lib/emailTemplates.ts",
+    "src/lib/ia/**",
+    "src/components/layout/NotificationBell.tsx",
+    "src/components/shared/ConfirmModal.tsx",
+    "src/store/filterStore.ts"
+  ]
 }

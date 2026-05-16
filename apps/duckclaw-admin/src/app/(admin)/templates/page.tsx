@@ -6,6 +6,8 @@ import { adminService } from '@/services/adminService';
 import type { TemplateSummary } from '@/types/admin';
 import EmptyState from '@/components/shared/EmptyState';
 import { useAuthStore } from '@/store/authStore';
+import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
+import { clampInput, LIMITS } from '@/lib/validation';
 import { Search } from 'lucide-react';
 
 export default function TemplatesPage() {
@@ -14,6 +16,8 @@ export default function TemplatesPage() {
   const [items, setItems] = useState<TemplateSummary[]>([]);
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<TemplateSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const reload = useCallback(() => {
     adminService
@@ -26,13 +30,18 @@ export default function TemplatesPage() {
     reload();
   }, [reload]);
 
-  const handleDelete = async (id: string) => {
-    if (!canWrite || !confirm(`¿Eliminar plantilla "${id}"?`)) return;
+  const confirmDelete = async () => {
+    if (!pendingDelete || !canWrite) return;
+    setDeleting(true);
+    setError(null);
     try {
-      await adminService.deleteTemplate(id);
+      await adminService.deleteTemplate(pendingDelete.id);
+      setPendingDelete(null);
       reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo eliminar');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -74,8 +83,32 @@ export default function TemplatesPage() {
           customMessage={error ?? 'No hay workers o el gateway no responde.'}
         />
       ) : (
-        <TemplatesTable items={filtered} canWrite={canWrite} onDelete={handleDelete} />
+        <TemplatesTable
+          items={filtered}
+          canWrite={canWrite}
+          onRequestDelete={setPendingDelete}
+        />
       )}
+
+      <ConfirmDangerModal
+        isOpen={!!pendingDelete}
+        title="Eliminar plantilla"
+        description="Se borrará la carpeta completa del worker en disco. Revisa el ID antes de confirmar."
+        confirmLabel="Sí, eliminar plantilla"
+        isLoading={deleting}
+        details={
+          pendingDelete
+            ? [
+                { label: 'Worker ID', value: pendingDelete.id },
+                { label: 'Nombre', value: pendingDelete.name ?? '—' },
+                { label: 'Schema', value: pendingDelete.schema_name ?? '—' },
+                { label: 'Ruta', value: `forge/templates/${pendingDelete.id}/` },
+              ]
+            : []
+        }
+        onCancel={() => !deleting && setPendingDelete(null)}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }
@@ -86,10 +119,14 @@ function TemplateSearch({ q, setQ }: { q: string; setQ: (v: string) => void }) {
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gov-gray-400" size={18} />
       <input
         value={q}
-        onChange={(e) => setQ(e.target.value)}
+        onChange={(e) => setQ(clampInput(e.target.value, LIMITS.searchQuery))}
+        maxLength={LIMITS.searchQuery}
         placeholder="Buscar por id, nombre o schema…"
         className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gov-gray-200 dark:border-dark-border dark:bg-dark-surface"
       />
+      <span className="text-[10px] text-gov-gray-400 mt-1 block">
+        {q.length}/{LIMITS.searchQuery}
+      </span>
     </div>
   );
 }
@@ -97,11 +134,11 @@ function TemplateSearch({ q, setQ }: { q: string; setQ: (v: string) => void }) {
 function TemplatesTable({
   items,
   canWrite,
-  onDelete,
+  onRequestDelete,
 }: {
   items: TemplateSummary[];
   canWrite: boolean;
-  onDelete: (id: string) => void;
+  onRequestDelete: (t: TemplateSummary) => void;
 }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-gov-gray-100 dark:border-dark-border bg-white dark:bg-dark-surface">
@@ -119,11 +156,7 @@ function TemplatesTable({
           {items.map((t, i) => (
             <tr
               key={t.id}
-              className={
-                i % 2 === 0
-                  ? 'border-t border-gov-gray-100 dark:border-dark-border'
-                  : 'border-t border-gov-gray-100 dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/30'
-              }
+              className="border-t border-gov-gray-100 dark:border-dark-border bg-gov-gray-50/30 even:bg-transparent"
             >
               <td className="px-4 py-3 font-mono text-xs">{t.id}</td>
               <td className="px-4 py-3">{t.name ?? '—'}</td>
@@ -139,7 +172,7 @@ function TemplatesTable({
                 {canWrite && (
                   <button
                     type="button"
-                    onClick={() => onDelete(t.id)}
+                    onClick={() => onRequestDelete(t)}
                     className="text-red-600 font-semibold hover:underline"
                   >
                     Eliminar

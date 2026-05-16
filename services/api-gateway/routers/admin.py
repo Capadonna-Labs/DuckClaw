@@ -130,6 +130,84 @@ class WhitelistBody(BaseModel):
     tenant_id: str = ""
 
 
+_AGENT_CONFIG_DDL = """
+CREATE TABLE IF NOT EXISTS agent_config (
+    key VARCHAR PRIMARY KEY,
+    value TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+
+def _audit_log_path() -> Path:
+    p = _repo_root() / ".duckclaw" / "admin-audit.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _admin_audit(
+    action: str,
+    resource: str,
+    detail: str,
+    *,
+    actor: str = "admin-ui",
+    meta: dict[str, Any] | None = None,
+) -> None:
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "actor": (actor or "admin-ui")[:128],
+        "action": action[:64],
+        "resource": resource[:256],
+        "detail": detail[:2000],
+        "meta": meta or {},
+    }
+    try:
+        with _audit_log_path().open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _actor_from_header(x_actor: str | None = Header(None, alias="X-Duckclaw-Actor")) -> str:
+    return (x_actor or "admin-ui").strip()[:128] or "admin-ui"
+
+
+def _chat_config_prefix(chat_id: str) -> str:
+    cid = (chat_id or "default").strip() or "default"
+    try:
+        int(cid)
+        return f"chat_{cid}_"
+    except ValueError:
+        return f"chat_{cid[:64]}_"
+
+
+def _full_agent_config_key(chat_id: str, key: str) -> str:
+    k = (key or "").strip()
+    if k.startswith("chat_"):
+        return k[:256]
+    return f"{_chat_config_prefix(chat_id)}{k}"[:256]
+
+
+def _parse_agent_config_rows(raw: Any, chat_id: str) -> list[dict[str, str]]:
+    rows = raw
+    if isinstance(raw, str):
+        rows = json.loads(raw) if raw.strip().startswith("[") else []
+    if not isinstance(rows, list):
+        return []
+    prefix = _chat_config_prefix(chat_id)
+    out: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        full = str(row.get("key") or "")
+        val = str(row.get("value") or "")
+        if full.startswith(prefix):
+            out.append({"key": full[len(prefix) :], "full_key": full, "value": val, "scope": "chat"})
+        elif not full.startswith("chat_"):
+            out.append({"key": full, "full_key": full, "value": val, "scope": "global"})
+    return out
+
+
 @router.get("/health", dependencies=[Depends(_require_admin_key)])
 async def admin_health(request: Request) -> dict[str, Any]:
     workers: list[str] = []
@@ -199,7 +277,12 @@ async def get_template(worker_id: str, include_content: bool = True) -> dict[str
 
 
 @router.put("/templates/{worker_id}/files/{file_path:path}", dependencies=[Depends(_require_admin_key)])
-async def put_template_file(worker_id: str, file_path: str, body: FileWriteBody) -> dict[str, Any]:
+async def put_template_file(
+    worker_id: str,
+    file_path: str,
+    body: FileWriteBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
     target = _safe_worker_path(worker_id, file_path)
     if not target.parent.is_dir():
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -208,11 +291,15 @@ async def put_template_file(worker_id: str, file_path: str, body: FileWriteBody)
         from duckclaw.workers.manifest import load_manifest
 
         load_manifest(worker_id)
+    _admin_audit("template.file.put", f"templates/{worker_id}", file_path, actor=actor)
     return {"ok": True, "path": file_path}
 
 
 @router.post("/templates", dependencies=[Depends(_require_admin_key)])
-async def create_template(body: TemplateCreateBody) -> dict[str, Any]:
+async def create_template(
+    body: TemplateCreateBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
     wid = re.sub(r"[^a-zA-Z0-9_-]", "", body.id.strip())
     if not wid:
         raise _problem(400, "id inválido", body.id)
@@ -232,11 +319,15 @@ async def create_template(body: TemplateCreateBody) -> dict[str, Any]:
         text = re.sub(r"^id:\s*.+$", f"id: {wid}", text, count=1, flags=re.MULTILINE)
         text = re.sub(r"^name:\s*.+$", f"name: {wid}", text, count=1, flags=re.MULTILINE)
         manifest.write_text(text, encoding="utf-8")
+    _admin_audit("template.create", f"templates/{wid}", body.source_template, actor=actor)
     return {"ok": True, "id": wid}
 
 
 @router.delete("/templates/{worker_id}", dependencies=[Depends(_require_admin_key)])
-async def delete_template(worker_id: str) -> dict[str, Any]:
+async def delete_template(
+    worker_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
     wid = worker_id.strip()
     if wid in _PROTECTED_TEMPLATE_IDS:
         raise _problem(403, "Plantilla protegida", wid)
@@ -244,6 +335,7 @@ async def delete_template(worker_id: str) -> dict[str, Any]:
     if not dest.is_dir():
         raise _problem(404, "Plantilla no encontrada", wid)
     shutil.rmtree(dest)
+    _admin_audit("template.delete", f"templates/{wid}", "rmtree", actor=actor)
     return {"ok": True, "id": wid}
 
 
@@ -288,7 +380,10 @@ async def get_env_config() -> dict[str, Any]:
 
 
 @router.patch("/env", dependencies=[Depends(_require_admin_key)])
-async def patch_env_config(body: EnvPatchBody) -> dict[str, Any]:
+async def patch_env_config(
+    body: EnvPatchBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
     env_path = _env_file()
     if not env_path.is_file():
         raise _problem(404, ".env no encontrado", str(env_path))
@@ -313,6 +408,7 @@ async def patch_env_config(body: EnvPatchBody) -> dict[str, Any]:
             lines.append(line)
         updated.append(k)
     env_path.write_text("".join(lines), encoding="utf-8")
+    _admin_audit("env.patch", ".env", ",".join(updated), actor=actor)
     return {"ok": True, "updated": updated, "backup": str(backup)}
 
 
@@ -355,32 +451,49 @@ async def get_runtime_config(
         abs_path = str(_repo_root() / vault_path.lstrip("/"))
     if not os.path.isfile(abs_path):
         raise _problem(404, "Vault no encontrado", vault_path)
-    db = DuckClaw(abs_path, read_only=True)
+    db = DuckClaw(abs_path, read_only=True, engine="python")
+    warning: str | None = None
     try:
-        cid = (chat_id or "default").replace("'", "''")
-        rows = db.query(
-            f"SELECT key, value FROM agent_config WHERE chat_id = '{cid}' ORDER BY key"
-        )
+        try:
+            db.execute(_AGENT_CONFIG_DDL)
+        except Exception:
+            pass
+        raw = db.query("SELECT key, value FROM agent_config ORDER BY key")
+        rows = _parse_agent_config_rows(raw, chat_id)
     except Exception as exc:
-        raise _problem(400, "Error leyendo agent_config", str(exc)) from exc
-    if isinstance(rows, str):
-        rows = json.loads(rows) if rows.strip().startswith("[") else []
-    return {"vault_path": vault_path, "chat_id": chat_id, "rows": rows}
+        msg = str(exc)
+        if "agent_config" in msg.lower() and "does not exist" in msg.lower():
+            rows = []
+            warning = (
+                "La tabla agent_config no existe en esta bóveda. "
+                "Ejecuta: uv run python scripts/bootstrap_dbs.py"
+            )
+        else:
+            raise _problem(400, "Error leyendo agent_config", msg) from exc
+    finally:
+        db.close()
+    out: dict[str, Any] = {"vault_path": vault_path, "chat_id": chat_id, "rows": rows}
+    if warning:
+        out["warning"] = warning
+    return out
 
 
 @router.put("/runtime/config", dependencies=[Depends(_require_admin_key)])
-async def put_runtime_config(body: RuntimeConfigPutBody) -> dict[str, Any]:
+async def put_runtime_config(
+    body: RuntimeConfigPutBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
     import redis.asyncio as aioredis
 
     abs_path = body.vault_path
     if not os.path.isabs(abs_path):
         abs_path = str(_repo_root() / body.vault_path.lstrip("/"))
-    key_esc = body.key.replace("'", "''")[:128]
+    full_key = _full_agent_config_key(body.chat_id, body.key)
+    key_esc = full_key.replace("'", "''")
     val_esc = body.value.replace("'", "''")[:8000]
-    cid_esc = (body.chat_id or "default").replace("'", "''")
     sql = (
-        f"INSERT INTO agent_config (chat_id, key, value) VALUES ('{cid_esc}', '{key_esc}', '{val_esc}') "
-        f"ON CONFLICT (chat_id, key) DO UPDATE SET value = excluded.value"
+        f"INSERT INTO agent_config (key, value) VALUES ('{key_esc}', '{val_esc}') "
+        f"ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()"
     )
     redis_url = (os.environ.get("REDIS_URL") or "redis://localhost:6379/0").strip()
     r = aioredis.from_url(redis_url, decode_responses=True)
@@ -397,7 +510,14 @@ async def put_runtime_config(body: RuntimeConfigPutBody) -> dict[str, Any]:
         await r.lpush("duckdb_write_queue", payload)
     finally:
         await r.aclose()
-    return {"ok": True, "queued": True}
+    _admin_audit(
+        "runtime.config.put",
+        body.vault_path,
+        full_key,
+        actor=actor,
+        meta={"chat_id": body.chat_id},
+    )
+    return {"ok": True, "queued": True, "full_key": full_key}
 
 
 @router.get("/chats/history", dependencies=[Depends(_require_admin_key)])
@@ -435,8 +555,30 @@ async def get_telegram_whitelist(tenant_id: str = Query("default")) -> dict[str,
     return {"tenant_id": tid, "users": users, "db_path": gw}
 
 
+@router.get("/audit", dependencies=[Depends(_require_admin_key)])
+async def get_admin_audit(limit: int = Query(100, ge=1, le=500)) -> dict[str, Any]:
+    path = _audit_log_path()
+    if not path.is_file():
+        return {"entries": []}
+    lines = path.read_text(encoding="utf-8").splitlines()
+    entries: list[dict[str, Any]] = []
+    for line in lines[-limit:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    entries.reverse()
+    return {"entries": entries}
+
+
 @router.post("/telegram/whitelist", dependencies=[Depends(_require_admin_key)])
-async def post_telegram_whitelist(body: WhitelistBody) -> dict[str, Any]:
+async def post_telegram_whitelist(
+    body: WhitelistBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
     from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
     from duckclaw.graphs.on_the_fly_commands import (
@@ -466,6 +608,13 @@ async def post_telegram_whitelist(body: WhitelistBody) -> dict[str, Any]:
         )
     finally:
         rw.close()
+    _admin_audit(
+        "telegram.whitelist.upsert",
+        f"tenant:{tid}",
+        uid,
+        actor=actor,
+        meta={"role": role},
+    )
     return {"ok": True, "tenant_id": tid, "user_id": uid, "role": role}
 
 
@@ -473,6 +622,7 @@ async def post_telegram_whitelist(body: WhitelistBody) -> dict[str, Any]:
 async def delete_telegram_whitelist(
     tenant_id: str = Query("default"),
     user_id: str = Query(...),
+    actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
@@ -494,6 +644,7 @@ async def delete_telegram_whitelist(
         _delete_authorized_user(rw, tenant_id=tid, user_id=uid)
     finally:
         rw.close()
+    _admin_audit("telegram.whitelist.delete", f"tenant:{tid}", uid, actor=actor)
     return {"ok": True, "tenant_id": tid, "user_id": uid}
 
 
@@ -525,17 +676,16 @@ async def delete_runtime_config(
     vault_path: str = Query(...),
     chat_id: str = Query("default"),
     key: str = Query(...),
+    actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     import redis.asyncio as aioredis
 
     abs_path = vault_path
     if not os.path.isabs(abs_path):
         abs_path = str(_repo_root() / vault_path.lstrip("/"))
-    key_esc = key.replace("'", "''")[:128]
-    cid_esc = (chat_id or "default").replace("'", "''")
-    sql = (
-        f"DELETE FROM agent_config WHERE chat_id = '{cid_esc}' AND key = '{key_esc}'"
-    )
+    full_key = _full_agent_config_key(chat_id, key)
+    key_esc = full_key.replace("'", "''")
+    sql = f"DELETE FROM agent_config WHERE key = '{key_esc}'"
     redis_url = (os.environ.get("REDIS_URL") or "redis://localhost:6379/0").strip()
     r = aioredis.from_url(redis_url, decode_responses=True)
     try:
@@ -551,7 +701,14 @@ async def delete_runtime_config(
         await r.lpush("duckdb_write_queue", payload)
     finally:
         await r.aclose()
-    return {"ok": True, "queued": True}
+    _admin_audit(
+        "runtime.config.delete",
+        vault_path,
+        full_key,
+        actor=actor,
+        meta={"chat_id": chat_id},
+    )
+    return {"ok": True, "queued": True, "full_key": full_key}
 
 
 @router.post("/projects", dependencies=[Depends(_require_admin_key)])

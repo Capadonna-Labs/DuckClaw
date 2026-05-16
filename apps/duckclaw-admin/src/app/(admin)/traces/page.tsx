@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { adminService } from '@/services/adminService';
 import SettingsSection from '@/components/settings/SettingsSection';
 import { Activity } from 'lucide-react';
+import { clampInput, LIMITS } from '@/lib/validation';
 
 export default function TracesPage() {
   const [tenantId, setTenantId] = useState('default');
@@ -32,13 +33,15 @@ export default function TracesPage() {
         <div className="flex flex-wrap gap-2 mb-4">
           <input
             value={tenantId}
-            onChange={(e) => setTenantId(e.target.value)}
+            onChange={(e) => setTenantId(clampInput(e.target.value, LIMITS.tenantId))}
+            maxLength={LIMITS.tenantId}
             className="px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg text-sm"
             placeholder="tenant_id"
           />
           <input
             value={sessionId}
-            onChange={(e) => setSessionId(e.target.value)}
+            onChange={(e) => setSessionId(clampInput(e.target.value, LIMITS.sessionId))}
+            maxLength={LIMITS.sessionId}
             className="flex-1 min-w-[200px] px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg text-sm font-mono"
             placeholder="session_id / chat_id"
           />

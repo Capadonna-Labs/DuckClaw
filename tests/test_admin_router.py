@@ -60,6 +60,15 @@ def test_fly_commands(admin_client: TestClient):
     assert any(c.get("cmd") == "/team" for c in data["commands"])
 
 
+def test_admin_audit_empty(admin_client: TestClient):
+    r = admin_client.get(
+        "/api/v1/admin/audit",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    assert "entries" in r.json()
+
+
 def test_telegram_whitelist_get(admin_client: TestClient):
     r = admin_client.get(
         "/api/v1/admin/telegram/whitelist?tenant_id=default",

@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import { useAuthStore } from '@/store/authStore';
+import {
+  clampInput,
+  LIMITS,
+  validateRuntimeKey,
+  validateRuntimeValue,
+} from '@/lib/validation';
 import { Trash2 } from 'lucide-react';
 
 export default function RuntimePage() {
@@ -12,7 +18,7 @@ export default function RuntimePage() {
   const [vaults, setVaults] = useState<{ path: string }[]>([]);
   const [vault, setVault] = useState('');
   const [chatId, setChatId] = useState('default');
-  const [rows, setRows] = useState<{ key: string; value: string }[]>([]);
+  const [rows, setRows] = useState<{ key: string; value: string; scope?: string }[]>([]);
   const [newKey, setNewKey] = useState('');
   const [newVal, setNewVal] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
@@ -23,7 +29,10 @@ export default function RuntimePage() {
     setError(null);
     adminService
       .getRuntimeConfig(vault, chatId)
-      .then((r) => setRows(r.rows ?? []))
+      .then((r) => {
+        setRows(r.rows ?? []);
+        if (r.warning) setMsg(r.warning);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
   }, [vault, chatId]);
 
@@ -39,7 +48,14 @@ export default function RuntimePage() {
   }, [load]);
 
   const save = async () => {
-    if (!canWrite || !newKey.trim()) return;
+    if (!canWrite) return;
+    const keyErr = validateRuntimeKey(newKey);
+    const valErr = validateRuntimeValue(newVal);
+    if (keyErr || valErr) {
+      setError(keyErr ?? valErr);
+      return;
+    }
+    setError(null);
     setMsg(null);
     try {
       await adminService.putRuntimeConfig({
@@ -110,6 +126,7 @@ export default function RuntimePage() {
       <table className="w-full text-sm bg-white dark:bg-dark-surface rounded-2xl border dark:border-dark-border overflow-hidden">
         <thead className="bg-gov-gray-50 dark:bg-dark-bg">
           <tr>
+            <th className="px-4 py-2 text-left">scope</th>
             <th className="px-4 py-2 text-left">key</th>
             <th className="px-4 py-2 text-left">value</th>
             {canWrite && <th className="px-4 py-2 w-12" />}
@@ -118,13 +135,14 @@ export default function RuntimePage() {
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={canWrite ? 3 : 2} className="px-4 py-6 text-center text-gov-gray-500">
+              <td colSpan={canWrite ? 4 : 3} className="px-4 py-6 text-center text-gov-gray-500">
                 Sin filas para este chat_id
               </td>
             </tr>
           )}
           {rows.map((r) => (
-            <tr key={r.key} className="border-t dark:border-dark-border">
+            <tr key={`${r.scope ?? 'x'}-${r.key}`} className="border-t dark:border-dark-border">
+              <td className="px-4 py-2 text-xs capitalize text-gov-gray-500">{r.scope ?? '—'}</td>
               <td className="px-4 py-2 font-mono text-xs">{r.key}</td>
               <td className="px-4 py-2 font-mono text-xs truncate max-w-xl" title={r.value}>
                 {r.value}
@@ -176,13 +194,15 @@ function RuntimeUpsertForm({
     <div className="flex flex-wrap gap-2 max-w-3xl">
       <input
         value={newKey}
-        onChange={(e) => setNewKey(e.target.value)}
-        placeholder="key"
+        onChange={(e) => setNewKey(clampInput(e.target.value, LIMITS.runtimeKey))}
+        maxLength={LIMITS.runtimeKey}
+        placeholder="key (sufijo; se guarda como chat_{id}_key)"
         className="flex-1 px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-surface font-mono text-sm"
       />
       <input
         value={newVal}
-        onChange={(e) => setNewVal(e.target.value)}
+        onChange={(e) => setNewVal(clampInput(e.target.value, LIMITS.runtimeValue))}
+        maxLength={LIMITS.runtimeValue}
         placeholder="value"
         className="flex-[2] px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-surface font-mono text-sm"
       />

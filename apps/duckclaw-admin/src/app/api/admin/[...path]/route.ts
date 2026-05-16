@@ -25,11 +25,14 @@ async function proxy(req: NextRequest, segments: string[]) {
   }
 
   const role = req.headers.get('x-duckclaw-role') || 'admin';
+  const sub = segments.join('/');
+  if (segments[0] === 'audit' && role !== 'admin') {
+    return NextResponse.json({ detail: 'Auditoría solo para rol admin' }, { status: 403 });
+  }
   if (role === 'viewer' && WRITE_METHODS.has(req.method)) {
     return NextResponse.json({ detail: 'Solo lectura (rol viewer)' }, { status: 403 });
   }
 
-  const sub = segments.join('/');
   const url = new URL(req.url);
   const target = `${base}/api/v1/admin/${sub}${url.search}`;
 
@@ -37,6 +40,8 @@ async function proxy(req: NextRequest, segments: string[]) {
     'X-Admin-Key': key,
     Accept: 'application/json',
   };
+  const actor = req.headers.get('x-duckclaw-actor');
+  if (actor) headers['X-Duckclaw-Actor'] = actor;
   const ct = req.headers.get('content-type');
   if (ct) headers['Content-Type'] = ct;
 

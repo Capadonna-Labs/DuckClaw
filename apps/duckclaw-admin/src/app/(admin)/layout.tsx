@@ -15,6 +15,7 @@ const TITLES: Record<string, string> = {
   '/commands': 'Fly commands',
   '/duckdb': 'DuckDB',
   '/traces': 'Traces',
+  '/audit': 'Auditoría',
   '/settings': 'Ajustes',
 };
 

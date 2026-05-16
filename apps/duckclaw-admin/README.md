@@ -75,6 +75,7 @@ Botón **Cerrar sesión** en sidebar (pie) y **Salir** en topbar.
 | `/commands` | Catálogo fly commands (`/help`) |
 | `/duckdb` | Bóvedas y vars DuckDB |
 | `/traces` | Historial Redis por sesión |
+| `/audit` | Registro de cambios (solo rol **admin**) |
 | `/settings` | Perfil, usuarios demo, tema |
 
 **Auth real (JWT/BD):** fase posterior; hoy rol `admin`/`viewer` solo en BFF demo.

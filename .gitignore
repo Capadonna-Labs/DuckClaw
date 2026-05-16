@@ -26,6 +26,9 @@ cmake_install.cmake
 compile_commands.json
 Makefile
 
+# Admin UI audit (local)
+.duckclaw/
+
 # Local runtime data and secrets
 .env
 .env.*

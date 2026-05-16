@@ -35,6 +35,6 @@ SELECT
 FROM (
   SELECT
     n,
-    CURRENT_TIMESTAMP - ((n * 41) % 43200) * INTERVAL '1 minute' AS ts
+    CAST(CURRENT_TIMESTAMP AS TIMESTAMP) - ((n * 41) % 43200) * INTERVAL '1 minute' AS ts
   FROM generate_series(1, 200) AS t(n)
 ) AS m;

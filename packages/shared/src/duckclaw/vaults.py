@@ -84,6 +84,17 @@ def user_vault_dir(user_id: Any) -> Path:
     return path
 
 
+def ensure_tenant_industry_db(tenant_id: Any) -> Path:
+    """
+    Bóveda DuckDB por tenant para plantillas industry (Memoria Triple).
+    Ruta: ``db/private/{tenant_id}/default.duckdb``.
+    """
+    tid = _safe_user_id(tenant_id)
+    path = user_vault_dir(tid) / "default.duckdb"
+    _touch_duckdb_file(path)
+    return path
+
+
 def vault_file_path(user_id: Any, vault_id: str) -> Path:
     vid = _slug_vault_id(vault_id) or "default"
     return user_vault_dir(user_id) / f"{vid}.duckdb"

@@ -48,12 +48,26 @@ def test_run_mercenary_ephemeral_empty_directive() -> None:
     assert out.get("error_code") == "MERCENARY_INVALID_INPUT"
 
 
+def _duckclaw_sandbox_image_available() -> bool:
+    from duckclaw.graphs.sandbox import _DEFAULT_IMAGE, _docker_available
+
+    if not _docker_available():
+        return False
+    try:
+        from duckclaw.graphs.sandbox import _docker_client
+
+        _docker_client().images.get(_DEFAULT_IMAGE)
+        return True
+    except Exception:
+        return False
+
+
 @pytest.mark.skipif(
-    not __import__("duckclaw.graphs.sandbox", fromlist=["_docker_available"])._docker_available(),
-    reason="Docker daemon no disponible",
+    not _duckclaw_sandbox_image_available(),
+    reason="Requiere imagen duckclaw/sandbox:latest (no solo python:3.12-slim)",
 )
 def test_run_mercenary_ephemeral_smoke_integration() -> None:
-    """Un contenedor efímero; omitir en CI sin Docker."""
+    """Un contenedor efímero con la imagen Strix completa."""
     from duckclaw.graphs.sandbox import run_mercenary_ephemeral
 
     out = run_mercenary_ephemeral("smoke probe", 60, task_id="pytest_merc")

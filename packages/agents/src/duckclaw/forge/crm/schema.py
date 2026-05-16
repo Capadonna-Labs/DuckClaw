@@ -6,6 +6,7 @@ Spec: specs/Sovereign_CRM_Memoria_Bicameral_DuckDB_PGQ.md
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 # Ontología B2B Power Seal
@@ -28,26 +29,47 @@ def _crm_pgq_available(db: Any) -> bool:
     return _CRM_GRAPH_AVAILABLE
 
 
+def _json_sql_type(db: Any) -> str:
+    home = (os.environ.get("DUCKCLAW_TEST_DUCKDB_HOME") or "").strip()
+    if home:
+        esc = home.replace("'", "''")
+        try:
+            db.execute(f"SET home_directory='{esc}'")
+        except Exception:
+            pass
+    for stmt in ("INSTALL json;", "LOAD json;"):
+        try:
+            db.execute(stmt)
+        except Exception:
+            pass
+    try:
+        db.execute("SELECT '{}'::JSON")
+        return "JSON"
+    except Exception:
+        return "VARCHAR"
+
+
 def ensure_crm_graph_schema(db: Any) -> bool:
     """
     Crea/actualiza memory_nodes, memory_edges (con properties opcional) y property graph powerseal_crm.
     Retorna True si PGQ está disponible.
     """
-    db.execute("""
+    json_t = _json_sql_type(db)
+    db.execute(f"""
         CREATE TABLE IF NOT EXISTS memory_nodes (
             node_id VARCHAR PRIMARY KEY,
             label VARCHAR,
-            properties JSON
+            properties {json_t}
         )
     """)
-    db.execute("""
+    db.execute(f"""
         CREATE TABLE IF NOT EXISTS memory_edges (
             edge_id VARCHAR PRIMARY KEY,
             source_id VARCHAR,
             target_id VARCHAR,
             relationship VARCHAR,
             weight DOUBLE DEFAULT 1.0,
-            properties JSON,
+            properties {json_t},
             FOREIGN KEY (source_id) REFERENCES memory_nodes(node_id),
             FOREIGN KEY (target_id) REFERENCES memory_nodes(node_id)
         )
@@ -60,7 +82,7 @@ def ensure_crm_graph_schema(db: Any) -> bool:
         )
         rows = r if isinstance(r, list) else ([] if not r else [r])
         if not rows:
-            db.execute("ALTER TABLE memory_edges ADD COLUMN properties JSON")
+            db.execute(f"ALTER TABLE memory_edges ADD COLUMN properties {json_t}")
     except Exception:
         pass
 

@@ -385,7 +385,8 @@ def test_llm_plan_from_model_parses_response() -> None:
 
     out = _llm_plan_from_model(_Ok(), "¿Qué tienes?", "Instrucciones.")
     assert out is not None
-    title, tasks, merc = out
+    title, tasks, merc, delegate = out
+    assert delegate is None
     assert title == "Consulta catálogo ropa"
     assert len(title.split()) <= 5
     assert tasks == ["Listar productos", "Responder precios"]
@@ -426,7 +427,8 @@ def test_llm_plan_from_model_parses_mercenary_block() -> None:
 
     out = _llm_plan_from_model(_Ok(), "u", "sys")
     assert out is not None
-    title, tasks, merc = out
+    title, tasks, merc, delegate = out
+    assert delegate is None
     assert title == "Aislamiento"
     assert tasks == ["run"]
     assert merc == {"directive": "haz X", "timeout": 120}

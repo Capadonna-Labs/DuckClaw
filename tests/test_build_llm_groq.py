@@ -19,8 +19,10 @@ def test_build_llm_groq_returns_chat_openai(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_build_llm_groq_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("DUCKCLAW_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
     with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
-        build_llm("groq", "llama-3.3-70b-versatile", "")
+        build_llm("groq", "llama-3.3-70b-versatile", "", prefer_env_provider=False)
 
 
 def test_build_llm_groq_ignores_deepseek_base_url_from_env(

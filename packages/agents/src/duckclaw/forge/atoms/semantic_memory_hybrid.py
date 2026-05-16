@@ -3,7 +3,7 @@
 El Gateway suele ejecutarse sin PyTorch ni DUCKCLAW_MLX_EMBEDDINGS_URL; sin esto embed_text=None
 y la VSS “silenciosa”. El fallback permite buscar contenido persisted (READY, PENDING o FAILED).
 
-Spec alineación: specs/features/MOC Macro PGQ VSS.md + Context Injection.
+Spec alineación: specs/features/quant/QUANT_MOC_MACRO_PGQ_VSS.md + specs/features/finanz/FINANZ_CONTEXT_INJECTION_TELEGRAM.md.
 """
 
 from __future__ import annotations

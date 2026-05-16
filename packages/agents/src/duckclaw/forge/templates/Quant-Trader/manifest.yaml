@@ -3,7 +3,7 @@ id: quant_trader
 schema_name: finance_worker
 topology: general
 read_only: true
-# Ephemeral read-pool (duckdb.connect RO en hilos) compite con db-writer RW al mismo .duckdb; ver specs Finanz admin_sql.
+# Ephemeral read-pool (duckdb.connect RO en hilos) compite con db-writer RW al mismo .duckdb; ver specs/features/finanz/FINANZ_ADMIN_SQL_DB_WRITER.md
 tool_read_pool: false
 risk_level: conservative
 quant:

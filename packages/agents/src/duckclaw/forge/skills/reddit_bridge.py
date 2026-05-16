@@ -1,7 +1,7 @@
 """
 Reddit MCP Bridge — stdio hacia mcp-reddit (npm).
 
-Spec: specs/features/Reddit MCP Social Sentiment (QuantClaw).md
+Spec: specs/features/quant/QUANT_REDDIT_MCP_SENTIMENT.md
 Requiere: pip mcp; Node/npx; REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT,
           REDDIT_USERNAME, REDDIT_PASSWORD en el entorno del gateway.
 """

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pipeline MOC Core-Satellite CFD — specs/features/Core-Satellite HRP Weekly + MOC CFD.md
+Pipeline MOC Core-Satellite CFD — specs/features/quant/QUANT_CORE_SATELLITE_HRP_MOC.md
 
 ``MOC_PHASE=calc|remind|expire`` (cron weekday ~14:40 / 14:50 / 14:59 America/Bogota).
 

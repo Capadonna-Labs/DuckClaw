@@ -107,7 +107,7 @@ def _validate_mlx_lm_version_for_gemma4(cfg_path: Path, repo: Path) -> None:
         "Gemma 4 requiere mlx-lm >= 0.31.2 (módulo mlx_lm.models.gemma4).\n"
         f"  Versión actual: {shown}\n"
         "  pip install -U 'mlx-lm>=0.31.2'\n"
-        "Ver specs/features/Formateo de Datasets (SFT & GRPO).md §5.",
+        "Ver specs/features/platform/SFT_DATASET_FORMAT.md §5.",
         fg=typer.colors.RED,
         err=True,
     )

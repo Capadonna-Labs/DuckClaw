@@ -6,7 +6,7 @@ Markdown en el repo; **sin sitio HTML**. Normativa en `specs/`; guías operativa
 
 ```
 duckclaw/
-├── specs/              ← SDD: qué debe hacer el sistema (leer antes de codificar)
+├── specs/              ← SDD: `core/` + `features/<dominio>/` — ver specs/SDD_INDEX.md
 ├── docs/               ← Runbooks: instalar, PM2, troubleshooting (no duplicar specs)
 ├── services/           ← Procesos desplegables (I/O, colas, escritura)
 ├── packages/           ← Librerías Python/C++ importables por los servicios

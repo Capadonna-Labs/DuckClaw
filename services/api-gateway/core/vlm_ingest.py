@@ -1237,7 +1237,7 @@ async def push_vlm_state_delta_redis(
     vlm_summary: str,
     confidence_score: float,
 ) -> None:
-    """LPUSH JSON al estilo StateDelta de specs/features/VLM INTEGRATION.md (cola dedicada, no duckdb_write_queue)."""
+    """LPUSH JSON al estilo StateDelta de specs/features/platform/VLM_INTEGRATION.md (cola dedicada, no duckdb_write_queue)."""
     if redis_client is None:
         return
     key = (os.environ.get("DUCKCLAW_VLM_STATE_DELTA_QUEUE") or "duckclaw:state_delta:vlm").strip()

@@ -1,7 +1,7 @@
 """
 Síntesis LLM de la respuesta visible al usuario (Telegram): evita JSON/SQL/código crudo.
 
-Spec: specs/features/worker-telegram-natural-language-egress.md
+Spec: specs/features/telegram-gateway/TELEGRAM_NL_EGRESS.md
 """
 
 from __future__ import annotations

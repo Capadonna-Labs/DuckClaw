@@ -297,7 +297,7 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 El wizard es el punto de entrada para configurar y desplegar todo el pipeline. Hay dos implementaciones:
 
 - **Legacy (Rich):** `duckops init` → `scripts/duckclaw_setup_wizard.py` — flujo secuencial con Rich; persistente en pasos intermedios.
-- **Sovereign v2.0:** `duckops init` — máquina de estados, lenguaje soberano en UI, borrador hasta *Review & Deploy*; spec dedicada `specs/features/DuckClaw Sovereign Wizard (v2.0).md`.
+- **Sovereign v2.0:** `duckops init` — máquina de estados, lenguaje soberano en UI, borrador hasta *Review & Deploy*; spec dedicada `specs/features/platform/SOVEREIGN_WIZARD_V2.md`.
 
 Sustituye scripts `.sh` por un CLI en Python: mantenible, cross-platform (macOS, Linux, Windows) y con control de datos sensibles (Habeas Data).
 

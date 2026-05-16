@@ -1,7 +1,7 @@
 """
 Paso 1 de radicación PQRSD en el sandbox browser (Playwright generado en atoms).
 
-Spec: specs/features/Asistente PQRSD (Alcaldía Medellín).md
+Spec: specs/features/agents-axis/PQRSD_ASSISTANT_MEDELLIN.md
 """
 
 from __future__ import annotations

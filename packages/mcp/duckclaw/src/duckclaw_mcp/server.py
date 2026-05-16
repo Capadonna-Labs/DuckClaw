@@ -17,7 +17,7 @@ expón el **mismo puerto** donde corre este proceso con Funnel, p. ej.::
     tailscale funnel --bg --yes 8001
 
 La URL pública que muestre ``tailscale funnel status`` + sufijo ``/mcp`` es la que debes
-poner en ``mcp_connections.duckclaw.url``. Ver también ``specs/features/CONFIGURACION_TAILSCALE.md``.
+poner en ``mcp_connections.duckclaw.url``. Ver también ``specs/features/integrations/TAILSCALE_CONFIGURATION.md``.
 Ver documentación Tailscale: ``specs/features/integrations/TAILSCALE_CONFIGURATION.md``.
 """
 
@@ -362,7 +362,7 @@ def build_duckclaw_mcp() -> FastMCP:
             "tailscale_funnel": {
                 "example": f"tailscale funnel --bg --yes {mcp_port}",
                 "mcp_url_shape": "https://<tu-nodo>.ts.net/mcp",
-                "docs": "specs/features/CONFIGURACION_TAILSCALE.md",
+                "docs": "specs/features/integrations/TAILSCALE_CONFIGURATION.md",
             },
         }
         tools_line = ", ".join(payload["mcp_tools"])

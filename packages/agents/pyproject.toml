@@ -29,7 +29,7 @@ dependencies = [
 google-trends = [
     "google-trends-mcp>=1.0.2; python_full_version >= '3.10'",
 ]
-# SFT/LoRA con MLX (Gemma 4 necesita mlx-lm >= 0.31.2 — ver specs/features/Formateo de Datasets)
+# SFT/LoRA con MLX (Gemma 4 necesita mlx-lm >= 0.31.2 — ver specs/features/platform/SFT_DATASET_FORMAT.md)
 train = [
     "mlx-lm>=0.31.2",
 ]

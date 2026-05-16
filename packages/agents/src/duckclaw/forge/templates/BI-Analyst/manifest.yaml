@@ -1,4 +1,4 @@
-# BI Analyst — Template (spec: specs/features/Template — BI Analyst.md)
+# BI Analyst — Template (spec: specs/features/agents-axis/BI_ANALYST_TEMPLATE.md)
 # Runtime: WorkerSpec (id, schema_name, allowed_tables, read_only, skills, llm).
 # Bloque documental (no interpretado por load_manifest hoy):
 #   version: 1.3.0

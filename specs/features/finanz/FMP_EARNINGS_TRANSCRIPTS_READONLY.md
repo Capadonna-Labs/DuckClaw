@@ -89,5 +89,5 @@ No se auto-asigna ejecutión real sin comandos Telegram/HITL ya definidos por sp
 
 ## Código (referencia en repo)
 
-- Tools: [`packages/agents/src/duckclaw/forge/skills/fmp_bridge.py`](../../packages/agents/src/duckclaw/forge/skills/fmp_bridge.py) — `get_fmp_earnings_calendar`, `get_fmp_earnings_transcript`, registradas junto a dividendos en `register_fmp_skill`.
-- Snippet sandbox (sentimiento): [`packages/agents/src/duckclaw/forge/templates/Quant-Trader/snippets/earnings_transcript_sentiment_sandbox.py`](../../packages/agents/src/duckclaw/forge/templates/Quant-Trader/snippets/earnings_transcript_sentiment_sandbox.py).
+- Tools: [`packages/agents/src/duckclaw/forge/skills/fmp_bridge.py`](../../../packages/agents/src/duckclaw/forge/skills/fmp_bridge.py) — `get_fmp_earnings_calendar`, `get_fmp_earnings_transcript`, registradas junto a dividendos en `register_fmp_skill`.
+- Snippet sandbox (sentimiento): [`packages/agents/src/duckclaw/forge/templates/Quant-Trader/snippets/earnings_transcript_sentiment_sandbox.py`](../../../packages/agents/src/duckclaw/forge/templates/Quant-Trader/snippets/earnings_transcript_sentiment_sandbox.py).

@@ -6,7 +6,7 @@ Aislar cada bot de Telegram en **su** proceso API Gateway (PM2): mismos logs, mi
 
 ## Contrato
 
-1. **Un bot** → **un** `setWebhook` → **una** URL HTTPS cuyo destino final es el **puerto** del gateway definido para ese agente (ver [`config/api_gateways_pm2.json`](../../config/api_gateways_pm2.json)).
+1. **Un bot** → **un** `setWebhook` → **una** URL HTTPS cuyo destino final es el **puerto** del gateway definido para ese agente (ver [`config/api_gateways_pm2.json`](../../../config/api_gateways_pm2.json)).
 2. Path del handler: `POST /api/v1/telegram/webhook` (sin sufijos por bot cuando el aislamiento es por puerto/hostname).
 3. `secret_token` en Bot API debe coincidir con `TELEGRAM_WEBHOOK_SECRET` (u otra variable documentada para ese proceso) en el **mismo** proceso PM2 que recibe el POST.
 
@@ -25,7 +25,7 @@ Telegram exige HTTPS. El monorepo no impone un proveedor: cada despliegue debe a
 
 ## Relación con otros modos
 
-- **Multiplex** (`DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`, varios bots, un solo proceso/puerto): [Telegram Webhook Multiplex (multi-bot).md](Telegram%20Webhook%20Multiplex%20(multi-bot).md).
+- **Multiplex** (`DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`, varios bots, un solo proceso/puerto): [TELEGRAM_WEBHOOK_MULTIPLEX.md](TELEGRAM_WEBHOOK_MULTIPLEX.md).
 - Rutas `…/webhook/finanz` y `…/webhook/trabajo`: compatibilidad **legado** cuando un solo funnel recibe todo el tráfico; no sustituyen el modo recomendado si ya tienes N URLs → N puertos.
 
-Operación: [docs/COMANDOS.md](../../docs/COMANDOS.md) § 2.0.
+Operación: [docs/COMANDOS.md](../../../docs/COMANDOS.md) § 2.0.

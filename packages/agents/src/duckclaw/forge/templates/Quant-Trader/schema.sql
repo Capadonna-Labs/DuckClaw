@@ -1,4 +1,4 @@
--- Quant Trader: bóveda dedicada (specs/features/Quant Trader.md, Quantitative Trading Worker.md)
+-- Quant Trader: bóveda dedicada (specs/features/quant/QUANT_TRADER_WORKER.md, QUANTITATIVE_TRADING_WORKER.md)
 -- run_schema ya hace CREATE SCHEMA IF NOT EXISTS finance_worker desde manifest.schema_name
 
 CREATE TABLE IF NOT EXISTS finance_worker.cuentas (
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS quant_core.session_ticks (
   moc_n_orders INTEGER
 );
 
--- Core-Satellite: pesos HRP semanales + MOC CFD (specs/features/Core-Satellite HRP Weekly + MOC CFD.md)
+-- Core-Satellite: pesos HRP semanales + MOC CFD (specs/features/quant/QUANT_CORE_SATELLITE_HRP_MOC.md)
 CREATE TABLE IF NOT EXISTS quant_core.hrp_mandates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ticker VARCHAR(20) NOT NULL,
@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS quant_core.hrp_mandates (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_hrp_mandates_ticker_day
   ON quant_core.hrp_mandates (ticker, date_trunc('day', computed_at));
 
--- Acumulador intradía MOC (hints hasta calc PM2) — specs/features/Core-Satellite HRP Weekly + MOC CFD.md
+-- Acumulador intradía MOC (hints hasta calc PM2) — specs/features/quant/QUANT_CORE_SATELLITE_HRP_MOC.md
 CREATE TABLE IF NOT EXISTS quant_core.intraday_moc_accum (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_uid VARCHAR NOT NULL,
@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS quant_core.fluid_state (
 );
 CREATE INDEX IF NOT EXISTS idx_fluid_state_ticker ON quant_core.fluid_state (ticker);
 
--- MOC macro grafo PGQ + override manual — specs/features/MOC Macro PGQ VSS.md
+-- MOC macro grafo PGQ + override manual — specs/features/quant/QUANT_MOC_MACRO_PGQ_VSS.md
 CREATE TABLE IF NOT EXISTS quant_core.macro_nodes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     node_type VARCHAR(50) NOT NULL,

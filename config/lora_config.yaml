@@ -1,5 +1,5 @@
 # Configuración de SFT para Gemma 4 (DuckClaw) — consumida por `duckops train -c config/lora_config.yaml`
-# Requisito: mlx-lm >= 0.31.2 (Gemma 4: mlx_lm.models.gemma4). Ver specs/features/Formateo de Datasets (SFT & GRPO).md §5
+# Requisito: mlx-lm >= 0.31.2 (Gemma 4: mlx_lm.models.gemma4). Ver specs/features/platform/SFT_DATASET_FORMAT.md §5
 # Claves alineadas con mlx_lm CONFIG_DEFAULTS / argparse (no uses lora_layers/lora_rank sueltos).
 #
 # IMPORTANTE: un id tipo "org/repo" NO usa tu copia en ~/Desktop/models: mlx_lm hace

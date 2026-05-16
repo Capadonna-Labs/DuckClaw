@@ -1,5 +1,5 @@
 """
-Admin API — consola DuckClaw (spec: specs/features/DuckClaw_Admin_UI.md).
+Admin API — consola DuckClaw (spec: specs/features/platform/DUCKCLAW_ADMIN_UI.md).
 
 CRUD plantillas en disco, .env enmascarado, runtime agent_config, whitelist Telegram, historial Redis.
 """

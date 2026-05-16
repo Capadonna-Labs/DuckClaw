@@ -1,7 +1,7 @@
 """
 Ingress Discord Interactions → mismo pipeline `_invoke_chat` que Telegram.
 
-Contrato y env: véase specs/features/Gateway canales agnósticos.md
+Contrato y env: véase specs/features/telegram-gateway/GATEWAY_AGNOSTIC_CHANNELS.md
 Variables: DISCORD_PUBLIC_KEY o DUCKCLAW_DISCORD_PUBLIC_KEY, DUCKCLAW_DISCORD_BOT_TOKEN,
   DUCKCLAW_DISCORD_DEFAULT_WORKER_ID (opcional), DUCKCLAW_CHANNEL_ROUTES, DUCKCLAW_DISCORD_BYPASS_GUARD.
 """

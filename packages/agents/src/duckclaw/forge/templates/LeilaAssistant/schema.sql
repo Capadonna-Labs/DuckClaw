@@ -1,5 +1,5 @@
 -- LeilaAssistant — MVP tienda de ropa (catálogo y pedidos en main.*)
--- Spec: specs/features/Asistente de Leila — MVP Telegram.md
+-- Spec: specs/features/agents-axis/LEILA_ASSISTANT_MVP.md
 CREATE TABLE IF NOT EXISTS main.leila_products (
     id VARCHAR PRIMARY KEY,
     nombre VARCHAR,

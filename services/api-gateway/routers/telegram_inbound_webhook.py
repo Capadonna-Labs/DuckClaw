@@ -3,7 +3,7 @@
 Webhook entrante de Telegram (Bot API Update) → mismo pipeline que /api/v1/agent/.../chat.
 
 Contrato principal (recomendado): POST ``/api/v1/telegram/webhook`` con JSON de Update; un proceso
-PM2 por bot con su propia URL HTTPS al puerto correcto (ver specs ``Telegram Webhook One Gateway One Port``).
+PM2 por bot con su propia URL HTTPS al puerto correcto (ver specs/features/telegram-gateway/TELEGRAM_WEBHOOK_ONE_PORT.md).
 
 **Multiplex por path:** si ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` está en formato compacto
 (``bot:token:/api/v1/telegram/...`` separado por comas), se registran ``POST`` dinámicos por ruta

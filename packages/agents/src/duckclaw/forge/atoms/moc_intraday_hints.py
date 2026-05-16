@@ -2,7 +2,7 @@
 Fusiona hints de quant_core.intraday_moc_accum con la salida de la válvula MOC.
 
 Mandato HRP (`hrp_weight_capped`) sigue siendo techo absoluto sobre `target_weight`.
-Spec: specs/features/Core-Satellite HRP Weekly + MOC CFD.md
+Spec: specs/features/quant/QUANT_CORE_SATELLITE_HRP_MOC.md
 """
 
 from __future__ import annotations

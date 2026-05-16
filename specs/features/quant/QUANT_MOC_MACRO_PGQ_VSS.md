@@ -35,11 +35,11 @@ Mutaciones desde jobs y fly hacia la bóveda: `enqueue_duckdb_write_sync` / `enq
 
 ## Referencias de código
 
-- Pipeline: [`scripts/quant/moc_pipeline.py`](../../scripts/quant/moc_pipeline.py)
-- Válvula v2: [`packages/agents/src/duckclaw/forge/atoms/moc_allocation_v2.py`](../../packages/agents/src/duckclaw/forge/atoms/moc_allocation_v2.py)
-- Régimen: [`packages/agents/src/duckclaw/forge/atoms/macro_regime_detector.py`](../../packages/agents/src/duckclaw/forge/atoms/macro_regime_detector.py)
-- Perfil VSS: [`packages/agents/src/duckclaw/forge/atoms/investor_profile_vss.py`](../../packages/agents/src/duckclaw/forge/atoms/investor_profile_vss.py)
-- DDL template: [`packages/agents/src/duckclaw/forge/templates/Quant-Trader/schema.sql`](../../packages/agents/src/duckclaw/forge/templates/Quant-Trader/schema.sql)
+- Pipeline: [`scripts/quant/moc_pipeline.py`](../../../scripts/quant/moc_pipeline.py)
+- Válvula v2: [`packages/agents/src/duckclaw/forge/atoms/moc_allocation_v2.py`](../../../packages/agents/src/duckclaw/forge/atoms/moc_allocation_v2.py)
+- Régimen: [`packages/agents/src/duckclaw/forge/atoms/macro_regime_detector.py`](../../../packages/agents/src/duckclaw/forge/atoms/macro_regime_detector.py)
+- Perfil VSS: [`packages/agents/src/duckclaw/forge/atoms/investor_profile_vss.py`](../../../packages/agents/src/duckclaw/forge/atoms/investor_profile_vss.py)
+- DDL template: [`packages/agents/src/duckclaw/forge/templates/Quant-Trader/schema.sql`](../../../packages/agents/src/duckclaw/forge/templates/Quant-Trader/schema.sql)
 
 ## Documentación relacionada
 

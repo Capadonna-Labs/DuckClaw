@@ -1,7 +1,7 @@
 """
 Lectura HTTP acotada al portal PQRSD / Alcaldía de Medellín (lista blanca de hosts).
 
-Spec: specs/features/Asistente PQRSD (Alcaldía Medellín).md
+Spec: specs/features/agents-axis/PQRSD_ASSISTANT_MEDELLIN.md
 """
 
 from __future__ import annotations

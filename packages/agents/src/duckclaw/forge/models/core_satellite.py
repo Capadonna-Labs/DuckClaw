@@ -1,4 +1,4 @@
-"""DTOs Core-Satellite HRP / MOC (specs/features/Core-Satellite HRP Weekly + MOC CFD.md)."""
+"""DTOs Core-Satellite HRP / MOC (specs/features/quant/QUANT_CORE_SATELLITE_HRP_MOC.md)."""
 
 from __future__ import annotations
 

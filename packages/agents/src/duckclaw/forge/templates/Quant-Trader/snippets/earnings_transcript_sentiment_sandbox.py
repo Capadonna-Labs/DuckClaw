@@ -1,7 +1,7 @@
 """
 Plantilla — transcript FMP → JSON de sentimiento (execute_sandbox_script).
 
-Specs: specs/features/Integración FMP earnings calendario y transcripts (read-only).md
+Specs: specs/features/finanz/FMP_EARNINGS_TRANSCRIPTS_READONLY.md
 
 Uso:
 - Obtén texto con `get_fmp_earnings_transcript` en el host y pégalo aquí como TRANSCRIPT_TEXT.

@@ -1,5 +1,5 @@
 # Quant-Trader — homeostasis (riesgo de sesión)
-# Spec: specs/features/Quant_Trading_Session_Homeostasis.md
+# Spec: specs/features/quant/QUANT_TRADING_SESSION_HOMEOSTASIS.md
 homeostasis:
   beliefs:
     - key: "hrp_session_rebalance"

@@ -1,7 +1,7 @@
 """
 Ventanas horarias America/Bogota para eventos Quant (SYSTEM_EVENT Telegram).
 
-Specs: specs/features/Core-Satellite HRP Weekly + MOC CFD.md (ventana día + MOC PM2).
+Specs: specs/features/quant/QUANT_CORE_SATELLITE_HRP_MOC.md (ventana día + MOC PM2).
 """
 
 from __future__ import annotations

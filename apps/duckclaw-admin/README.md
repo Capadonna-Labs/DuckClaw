@@ -1,6 +1,6 @@
 # DuckClaw Admin UI
 
-Consola web (Next.js 14). Spec: `specs/features/DuckClaw_Admin_UI.md`.
+Consola web (Next.js 14). Spec: `specs/features/platform/DUCKCLAW_ADMIN_UI.md`.
 
 ## Requisitos
 

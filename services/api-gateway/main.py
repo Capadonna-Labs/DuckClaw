@@ -76,8 +76,9 @@ from duckclaw.debug_session_log import agent_debug_log
 from duckclaw.channels import GatewayDeliveryContext
 
 
-# Cargar .env desde repo root
+# Cargar .env desde repo root (fuente de verdad para secretos; PM2 env_file + override abajo).
 _repo_root = Path(__file__).resolve().parent.parent.parent
+_dotenv_flat: dict[str, str] = {}
 for _base in (_repo_root, Path.cwd()):
     _env = _base / ".env"
     if _env.is_file():
@@ -89,21 +90,16 @@ for _base in (_repo_root, Path.cwd()):
                 if not _ks:
                     continue
                 _vs = _v.strip().strip("'\"")
-                # Esta clave controla hilos en graph_server: debe ganar el .env del repo
-                # aunque el proceso traiga un valor vacío heredado del entorno.
-                if _ks == "DUCKCLAW_CHAT_PARALLEL_INVOCATIONS":
-                    os.environ[_ks] = _vs
-                # Multiplex Telegram por path: PM2 suele volcar una copia antigua en `env`;
-                # si solo usáramos setdefault, editar .env no añadiría bots nuevos hasta resync manual.
-                elif _ks == "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES" and _vs:
-                    os.environ[_ks] = _vs
-                # Tavily: sin clave la tool no se registra o falla en backend; el .env del repo
-                # debe poder fijarla aunque PM2 herede un valor vacío.
-                elif _ks == "TAVILY_API_KEY" and _vs:
-                    os.environ[_ks] = _vs
-                else:
-                    os.environ.setdefault(_ks, _vs)
+                _dotenv_flat[_ks] = _vs
         break
+if _dotenv_flat:
+    from duckclaw.env_secrets import DOTENV_OVERRIDE_KEYS, apply_dotenv_overrides_to_os_environ
+
+    for _ks, _vs in _dotenv_flat.items():
+        if _ks in DOTENV_OVERRIDE_KEYS:
+            continue
+        os.environ.setdefault(_ks, _vs)
+    apply_dotenv_overrides_to_os_environ(_dotenv_flat)
 
 
 def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:

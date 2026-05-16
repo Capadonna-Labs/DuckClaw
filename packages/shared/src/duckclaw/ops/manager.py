@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from duckclaw.dotenv_immutable import merged_root_and_proposed_flat_env
+from duckclaw.env_secrets import strip_secrets_from_env
 from duckclaw.gateway_db import raw_gateway_db_path_from_mapping
 
 
@@ -332,7 +333,16 @@ def _load_merged_gateway_apps(effective_cwd: str) -> list[dict[str, Any]]:
 def _save_merged_gateway_apps(effective_cwd: str, apps: list[dict[str, Any]]) -> None:
     path = _api_gateways_json_path(effective_cwd)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"apps": apps}, indent=2, ensure_ascii=False), encoding="utf-8")
+    sanitized: list[dict[str, Any]] = []
+    for app in apps:
+        if not isinstance(app, dict):
+            continue
+        copy = dict(app)
+        env = copy.get("env")
+        if isinstance(env, dict):
+            copy["env"] = strip_secrets_from_env(_env_dict_for_json(env))
+        sanitized.append(copy)
+    path.write_text(json.dumps({"apps": sanitized}, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _env_dict_for_json(env: dict[str, Any]) -> dict[str, str]:
@@ -505,7 +515,8 @@ def _render_gateway_ecosystem_cjs(
     """Genera ecosystem PM2 con varios gateways (mismo código, distinto nombre/puerto/env)."""
     lines = [
         "/**",
-        " * PM2 — API Gateways DuckClaw (fusionado). Varios procesos en un solo archivo.",
+        " * PM2 — API Gateways DuckClaw (fusionado). Secretos: solo .env (env_file).",
+        " * Regenerar: uv run duckops serve --pm2 --gateway",
         " * pm2 start config/ecosystem.api.config.cjs --only \"NombreGateway\"",
         " */",
         "module.exports = {",
@@ -522,7 +533,7 @@ def _render_gateway_ecosystem_cjs(
         env = app.get("env") or {}
         if not isinstance(env, dict):
             env = {}
-        env = dict(env)
+        env = strip_secrets_from_env(_env_dict_for_json(dict(env)))
         env.setdefault("DUCKCLAW_PM2_PROCESS_NAME", name)
         env_str = json.dumps(env, indent=8, ensure_ascii=False)
         args_cmd = (
@@ -533,6 +544,7 @@ def _render_gateway_ecosystem_cjs(
         lines.append(f"      script: {json.dumps(python_path)},")
         lines.append(f"      args: {json.dumps(args_cmd)},")
         lines.append(f"      cwd: {json.dumps(effective_cwd)},")
+        lines.append("      env_file: \".env\",")
         lines.append("      interpreter: \"none\",")
         lines.append("      autorestart: true,")
         lines.append("      watch: false,")

@@ -1088,7 +1088,7 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     ):
         task = (
             "TAREA: El usuario quiere saber qué base de datos se está usando. "
-            "Ejecuta get_db_path y responde de forma proactiva: indica la db usada en texto plano (sin comillas ni negrita). En el cierre invita a /team, /tasks, /help y a crear objetivos con /crons (por defecto están vacíos). Usa 1-2 emojis si encaja."
+            "Ejecuta get_db_path y responde de forma proactiva: indica la db usada en texto plano (sin comillas ni negrita). En el cierre invita a /workers (equipo de agentes), /tasks, /help y /crons; /team solo si hablas de usuarios autorizados humanos. Usa 1-2 emojis si encaja."
         )
         return task, override
     # Contenido de una tabla concreta
@@ -1160,7 +1160,7 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
         # endregion
         task = (
             "TAREA: El usuario quiere ver las tablas de la base de datos. "
-            "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /team, /tasks, /help y a crear objetivos con /crons."
+            "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /workers, /tasks, /help y /crons (/team solo para usuarios humanos autorizados)."
         )
         return task, override
     if (worker_id or "").strip().lower() == "finanz" and _finanz_user_demands_tool_evidence_from_db(t):
@@ -1466,7 +1466,9 @@ def _capabilities_fast_reply_text(
         return (
             f"Soy **MAESTRO** (`{coord}`), coordinador AXIS. Según tu mensaje delego a:\n{lines}\n\n"
             "Ejemplos: «¿Qué estudiar hoy?» (MAESTRO), «analiza este CVE» (RADAR), "
-            "«revisa mi repo» (CODER), «perfil técnico» (MIRROR)."
+            "«revisa mi repo» (CODER), «perfil técnico» (MIRROR).\n\n"
+            "Usa `/workers` para ver el equipo AXIS de este chat. "
+            "`/team` es solo para usuarios autorizados (roles humanos)."
         )
     w = (worker_id or "").strip()
     wl = w.lower()
@@ -1514,7 +1516,8 @@ def _capabilities_fast_reply_text(
         )
         return (
             "Soy **MAESTRO** (coordinador AXIS). Delego a especialistas:\n"
-            f"{sub}\n\nDescribe tu objetivo (aprendizaje, código, intel, lab, perfil)."
+            f"{sub}\n\nDescribe tu objetivo (aprendizaje, código, intel, lab, perfil).\n\n"
+            "Usa `/workers` para ver el equipo AXIS. `/team` = solo usuarios autorizados."
         )
     if wl_norm == "siata-analyst":
         return (

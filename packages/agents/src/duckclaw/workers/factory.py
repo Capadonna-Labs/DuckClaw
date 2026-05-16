@@ -823,7 +823,18 @@ def _finanz_should_force_ibkr_after_local_cuentas_read(
 _TASK_AWARENESS_PROMPT = """
 Además:
 - Si no recibes una tarea concreta (mensaje vacío o solo saludos), pregunta: "¿Cuál es mi tarea?" y ofrece ejemplos de lo que puedes hacer según tu rol.
-- En tu cierre proactivo invita a usar fly commands: si hablaste de datos o ejecución sugiere /tasks o /team; invita a crear objetivos con /crons (por defecto están vacíos); si de configuración /prompt o /skills; en general /help para ver todos los comandos.
+- En tu cierre proactivo invita fly commands con el comando correcto:
+  - `/team` = **solo** usuarios humanos autorizados y roles (whitelist del tenant). **Nunca** digas que `/team` lista agentes o workers.
+  - `/workers` = equipo de templates/agentes virtuales asignados a este chat.
+  - `/roles` = catálogo completo de templates disponibles en forge.
+  - Ejecución en curso: `/tasks`; objetivos: `/crons`; configuración: `/prompt` o `/skills`; listado: `/help`.
+"""
+
+_AXIS_COORDINATOR_TASK_AWARENESS_PROMPT = """
+Además (coordinador AXIS):
+- Eres MAESTRO: orquestas subagentes (CODER, MIRROR, RADAR, SENTINEL, PHANTOM); no confundas con usuarios humanos.
+- Cierre: si mencionas comandos, usa **`/workers`** para ver el equipo AXIS de este chat; **`/team`** solo para usuarios autorizados (admin/user), nunca para listar agentes.
+- Prohibido: «Usa /team para ver el estado de los agentes» o variantes; la frase correcta es «Usa `/workers` para ver el equipo AXIS».
 """
 
 # LeilaAssistant: canal retail; no mencionar comandos con / a la usuaria (ver soul / system_prompt).
@@ -2297,6 +2308,7 @@ def build_worker_graph(
 
     if llm is None and provider != "none_llm":
         from duckclaw.integrations.llm_providers import build_llm
+
         llm = build_llm(provider, model, base_url)
     elif llm is None:
         llm = None
@@ -2476,11 +2488,23 @@ def build_worker_graph(
     has_homeostasis = bool(getattr(spec, "homeostasis_config", None))
     crm_config = getattr(spec, "crm_config", None) or {}
     crm_enabled = bool(crm_config.get("enabled", False))
-    _task_block = (
-        _LEILA_TASK_AWARENESS_PROMPT.strip()
-        if (getattr(spec, "worker_id", None) or "").strip() == "LeilaAssistant"
-        else _TASK_AWARENESS_PROMPT.strip()
-    )
+    _wid_for_task = (getattr(spec, "worker_id", None) or "").strip()
+    _is_axis_coordinator = _wid_for_task in ("AXIS-Maestro", "maestro")
+    if not _is_axis_coordinator:
+        try:
+            from duckclaw.workers.orchestrator import load_orchestrator_config
+
+            _is_axis_coordinator = load_orchestrator_config(_wid_for_task) is not None
+        except Exception:
+            pass
+    if _wid_for_task == "LeilaAssistant":
+        _task_block = _LEILA_TASK_AWARENESS_PROMPT.strip()
+    elif _is_axis_coordinator:
+        _task_block = (
+            _TASK_AWARENESS_PROMPT.strip() + "\n" + _AXIS_COORDINATOR_TASK_AWARENESS_PROMPT.strip()
+        )
+    else:
+        _task_block = _TASK_AWARENESS_PROMPT.strip()
     _system_prompt_only = (system_prompt or "").strip()
     _task_block_resolved = _task_block
     effective_prompt = _system_prompt_only + "\n\n" + _task_block_resolved

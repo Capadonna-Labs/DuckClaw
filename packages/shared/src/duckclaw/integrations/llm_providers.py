@@ -909,11 +909,12 @@ def build_llm(
     if p == "deepseek":
         try:
             from langchain_openai import ChatOpenAI
+
             return ChatOpenAI(
                 model=m or "deepseek-chat",
                 temperature=0,
                 base_url=url or "https://api.deepseek.com/v1",
-                api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+                api_key=(os.environ.get("DEEPSEEK_API_KEY") or "").strip(),
             )
         except Exception:
             raise RuntimeError("DeepSeek requiere DEEPSEEK_API_KEY.")

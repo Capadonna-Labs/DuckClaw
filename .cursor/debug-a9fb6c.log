@@ -1,0 +1,1 @@
+{"sessionId": "a9fb6c", "hypothesisId": "A", "location": "llm_providers.build_llm:deepseek", "message": "deepseek_client_build", "data": {"provider_resolved": "deepseek", "model": "deepseek-chat", "env_provider": "deepseek", "key_len": 35, "key_suffix": "b08f", "prefer_env_provider": true}, "timestamp": 1778962454596}

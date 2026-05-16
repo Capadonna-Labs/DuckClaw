@@ -6,7 +6,7 @@ Plataforma multi-agente · DuckDB · escritor singleton (`services/db-writer`).
 |------|--------|
 | **Especificaciones (SDD)** | [`../specs/`](../specs/) |
 | **Mapa del monorepo** | [`../MONOREPO.md`](../MONOREPO.md) |
-| **Esta carpeta (`docs/`)** | Runbooks y diagramas — ver [`README.md`](README.md) |
+| **Esta carpeta (`docs/`)** | Runbooks — ver [`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md) |
 
 ## Entradas rápidas
 

@@ -1,4 +1,4 @@
-# Tests
+# Guía pytest (`tests/PYTEST_GUIDE.md`)
 
 ```bash
 uv run pytest tests/ -v -m "not integration"

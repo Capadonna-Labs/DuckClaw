@@ -1,6 +1,6 @@
 # SFT & conversation traces (Gemma / MLX)
 
-**Language:** this page mirrors the operational README under `packages/agents/train/` so it appears in the MkDocs site. Paths below are relative to **`packages/agents`** unless noted.
+**Language:** this page mirrors [`packages/agents/train/SFT_MLX_PIPELINE.md`](../../packages/agents/train/SFT_MLX_PIPELINE.md). Paths below are relative to **`packages/agents`** unless noted.
 
 ## Overview
 

@@ -17,7 +17,7 @@ El validador (`adf_validator.py`) resuelve ambas formas vía `resolve_axis_adf_p
 
 ## Archivos ADF (7 por agente)
 
-`manifest.yaml`, `system_prompt.md`, `schema.sql`, `security_policy.yaml`, `domain_closure.md`, `homeostasis.yaml`, `README.md`
+`manifest.yaml`, `system_prompt.md`, `schema.sql`, `security_policy.yaml`, `domain_closure.md`, `homeostasis.yaml`, `AGENT_OVERVIEW.md`
 
 ## Specs relacionadas
 

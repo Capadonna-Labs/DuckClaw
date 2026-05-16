@@ -10,19 +10,19 @@ duckclaw/
 ├── docs/               ← Runbooks: instalar, PM2, troubleshooting (no duplicar specs)
 ├── services/           ← Procesos desplegables (I/O, colas, escritura)
 ├── packages/           ← Librerías Python/C++ importables por los servicios
-├── config/             ← Plantillas PM2, MCP (secretos locales en .env, gitignored)
+├── config/             ← [`CONFIG_TEMPLATES.md`](config/CONFIG_TEMPLATES.md) (PM2, MCP; secretos en .env)
 ├── tests/              ← Pytest
-└── scripts/            ← ver scripts/README.md (doctor, quant, smoke, experimental)
+└── scripts/            ← ver scripts/SCRIPTS_INDEX.md (doctor, quant, smoke, experimental)
 ```
 
 ## `services/` — procesos (uno por carpeta)
 
-| Servicio | Rol | Escribe DuckDB |
-|----------|-----|----------------|
-| `api-gateway/` | FastAPI, Telegram webhook, chat, encola mutaciones | No (encola) |
-| `db-writer/` | Consumidor Redis → transacciones DuckDB | **Sí (único)** |
-| `heartbeat/` | Proactividad / homeostasis (opcional) | No |
-| `ibkr-ohlcv-api/` | OHLCV HTTP auxiliar | No |
+| Servicio | Doc | Rol | Escribe DuckDB |
+|----------|-----|-----|----------------|
+| `api-gateway/` | [`API_GATEWAY_SERVICE.md`](services/api-gateway/API_GATEWAY_SERVICE.md) | FastAPI, Telegram webhook, chat, encola mutaciones | No (encola) |
+| `db-writer/` | [`DB_WRITER_SERVICE.md`](services/db-writer/DB_WRITER_SERVICE.md) | Consumidor Redis → transacciones DuckDB | **Sí (único)** |
+| `heartbeat/` | [`HEARTBEAT_SERVICE.md`](services/heartbeat/HEARTBEAT_SERVICE.md) | Proactividad / homeostasis (opcional) | No |
+| `ibkr-ohlcv-api/` | — | OHLCV HTTP auxiliar | No |
 
 ## `packages/` — código reutilizable
 
@@ -63,6 +63,7 @@ No debe existir `packages/agents/src/duckclaw/agents/` (resto antiguo); el códi
 
 ## Lectura recomendada
 
-1. [`specs/README.md`](specs/README.md) y `specs/core/`
-2. [`docs/index.md`](docs/index.md) para operación
-3. [`docs/COMANDOS.md`](docs/COMANDOS.md) para PM2 y variables
+1. [`DUCKCLAW.md`](DUCKCLAW.md) — entrada del monorepo
+2. [`specs/SDD_INDEX.md`](specs/SDD_INDEX.md) y `specs/core/`
+3. [`docs/index.md`](docs/index.md) · [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md)
+4. [`docs/COMANDOS.md`](docs/COMANDOS.md) para PM2 y variables

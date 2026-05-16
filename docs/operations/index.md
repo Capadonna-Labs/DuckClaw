@@ -13,7 +13,7 @@ Runbooks en español/inglés mixto. **Normativa:** [`../../specs/`](../../specs/
 | Sandbox Strix | [Strix Sandbox Security](Strix-Sandbox-Security.md) |
 | Heartbeat | [Homeostasis Heartbeat](Homeostasis-Heartbeat.md) |
 | Multi-vault `/vault` | [Multi Vault System](Multi-Vault-System.md) |
-| Trazas SFT | [SFT traces](../agents/sft_conversation_traces.md) · `packages/agents/train/README.md` |
+| Trazas SFT | [SFT traces](../agents/sft_conversation_traces.md) · `packages/agents/train/SFT_MLX_PIPELINE.md` |
 | VLM | `specs/features/VLM INTEGRATION.md` · COMANDOS §5.2 |
 
 ## Principios

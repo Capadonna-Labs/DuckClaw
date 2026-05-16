@@ -1,0 +1,1 @@
+TAREA: El usuario quiere ver el contenido de una tabla específica. Ejecuta read_sql con SELECT * FROM {table_name} LIMIT 20. Si falla por nombre/esquema, corrige al esquema válido sin pedir aclaración innecesaria. Explica brevemente las columnas visibles y ofrece profundizar con filtros.

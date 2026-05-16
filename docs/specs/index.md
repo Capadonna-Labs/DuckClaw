@@ -1,24 +1,35 @@
-# Specs Index
+# Índice de especificaciones
 
-This hub links to **published** spec pages in this documentation site. Canonical, versioned sources remain in the repository under `specs/features/` and `specs/core/` (use your editor or Git to read those files).
+**Canónico:** archivos en [`../../specs/features/`](../../specs/features/) y [`../../specs/core/`](../../specs/core/).
 
-## Published pages (MkDocs)
+Este índice solo enlaza; no copia el contenido de las specs.
 
-| Topic | Site page | Canonical file in repo (reference) |
-|-------|-----------|-------------------------------------|
-| Finanz admin SQL / DB-Writer | [Finanz Admin SQL DB-Writer](finanz_admin_sql_db_writer.md) | `specs/features/Finanz admin_sql db-writer.md` |
-| Context injection (Telegram) | [Context Injection Telegram](context_injection_telegram.md) | `specs/features/Context Injection (Telegram).md` |
-| Telegram webhook multiplex | [Telegram Webhook Multiplex](telegram_webhook_multiplex.md) | `specs/features/Telegram Webhook Multiplex (multi-bot).md` |
-| VLM integration | [VLM Integration](vlm_integration.md) | `specs/features/VLM INTEGRATION.md` |
+## Core (`specs/core/`)
 
-## Core specs (`specs/core/`)
+| Tema | Archivo |
+|------|---------|
+| Flujo de vida del dato | `00_Flujo de Vida del Dato (Wizard).md` |
+| Infraestructura | `01_System_Infrastructure.md` |
+| Memoria analítica | `02_Analytical_Memory_Architecture.md` |
+| Skills y tooling | `03_Skills_and_Tooling_Framework.md` |
+| Lógica cognitiva / workers | `04_Cognitive_Agent_Logic.md` |
 
-Consolidated architecture specs live in the repo (not duplicated here to avoid drift). Typical entry points:
+## Features frecuentes (`specs/features/`)
 
-- `specs/core/00_Flujo de Vida del Dato (Wizard).md`
-- `specs/core/01_System_Infrastructure.md`
-- `specs/core/02_Analytical_Memory_Architecture.md`
-- `specs/core/03_Skills_and_Tooling_Framework.md`
-- `specs/core/04_Cognitive_Agent_Logic.md`
+| Tema | Archivo |
+|------|---------|
+| Finanz + admin_sql + db-writer | `Finanz admin_sql db-writer.md` |
+| Context injection Telegram | `Context Injection (Telegram).md` |
+| Webhook multiplex | `Telegram Webhook Multiplex (multi-bot).md` |
+| VLM | `VLM INTEGRATION.md` |
+| Fly commands | `Interfaz de Control de Agentes (Fly Commands).md` |
+| Guardrails externalizados | `Guardrails_Externalization_Plan.md` |
+| ADF / AXIS | `../05_ADF_AGENT_DEFINITION_FRAMEWORK.md`, `AXIS_Maestro_Orchestrator.md` |
 
-**Related docs:** [Architecture — System overview](../architecture/system_overview.md) · [Singleton Writer](../architecture/singleton_writer.md) · [Tri-Cameral Memory](../architecture/tri_cameral_memory.md) · [Operations hub](../operations/index.md)
+Lista completa: `ls specs/features/` en la raíz del repo.
+
+## Docs relacionados
+
+- [Arquitectura](../architecture/system_overview.md)
+- [Singleton Writer](../architecture/singleton_writer.md)
+- [Operaciones](../operations/index.md)

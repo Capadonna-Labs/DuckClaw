@@ -17,6 +17,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib import request as urllib_request
 
+from duckclaw.guardrails.loader import load_guardrail_kv
 from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
 from duckclaw.integrations.telegram.telegram_agent_token import (
     canonical_manifest_worker_id,
@@ -250,20 +251,11 @@ def format_delegation_heartbeat_message(
 
 def heartbeat_message_for_tool(name: str) -> str:
     n = (name or "").strip()
-    mapping = {
-        "get_schema_info": "🔎 Paso actual: entender columnas y tipos con get_schema_info…",
-        "read_sql": "📊 Paso actual: consultar la base con read_sql (solo lectura)…",
-        "run_sql": "📊 Paso actual: ejecutar SQL con run_sql…",
-        "admin_sql": "📊 Paso actual: escritura SQL con admin_sql…",
-        "run_sandbox": "⚙️ Paso actual: procesar o graficar en el sandbox (run_sandbox)…",
-        "run_browser_sandbox": "🌐 Paso actual: navegación aislada en Strix browser (run_browser_sandbox)…",
-        "get_browser_session_url": "🖥️ Paso actual: enlace noVNC para ver el navegador del sandbox…",
-        "inspect_schema": "🗂️ Paso actual: listar qué hay en la base con inspect_schema…",
-        "scrape_siata_radar_realtime": "📡 Paso actual: último producto del radar (scrape_siata_radar_realtime)…",
-    }
+    mapping = load_guardrail_kv("heartbeat", "tool_steps")
     if n in mapping:
         return mapping[n]
-    return f"🔄 Paso actual: llamo a la herramienta {n}…"
+    default = mapping.get("__default__", "🔄 Paso actual: llamo a la herramienta {tool_name}…")
+    return default.format(tool_name=n)
 
 
 def format_heartbeat_elapsed(elapsed_sec: float | None) -> str:

@@ -14,7 +14,8 @@
 - Admin SQL routing only for mutation intents.
 - Deterministic overrides for sensitive mutation arguments when required.
 
-## Related Specs
+## Specs (canónico en repo)
 
-- [Finanz admin_sql db-writer](../specs/finanz_admin_sql_db_writer.md)
-- [Context Injection (Telegram)](../specs/context_injection_telegram.md)
+- `specs/features/Finanz admin_sql db-writer.md`
+- `specs/features/Context Injection (Telegram).md`
+- Plantilla: `packages/agents/src/duckclaw/forge/templates/finanz/`

@@ -33,6 +33,7 @@ from duckclaw.vaults import (
     vault_scope_id_for_tenant,
 )
 
+from duckclaw.guardrails.loader import format_guardrail, load_guardrail, load_guardrail_pipe_table
 from duckclaw.forge.skills.the_mind_outbound import (
     broadcast_message_to_players,
     deal_cards_for_level,
@@ -1142,9 +1143,7 @@ def execute_team(
         else:
             label = "Equipo: todos los templates"
         lines = "\n".join(f"- {w}" for w in effective)
-        hint = (
-            "Reemplazar: /workers id1 id2 | Añadir: /workers --add id | Quitar: /workers --rm id | Ver todos: /roles"
-        )
+        hint = load_guardrail("fly_commands", "workers_list_hint")
         return f"🦆 {label}\n{lines}\n\n{hint}"
     raw = args.strip()
     # --rm <worker_id>
@@ -1745,11 +1744,7 @@ def execute_roles(db: Any, chat_id: Any) -> str:
     if not all_templates:
         return "No hay templates en forge/templates. Añade al menos uno."
     lines = "\n".join(f"- {w}" for w in all_templates)
-    return (
-        "🦆 Trabajadores virtuales (templates) disponibles:\n\n"
-        f"{lines}\n\n"
-        "El manager solo delegará a los que estén en tu equipo. Para añadirlos: /workers id1 id2 ..."
-    )
+    return format_guardrail("fly_commands", "roles_list_intro", lines=lines)
 
 
 # Worker por defecto: el manager orquesta y delega a los trabajadores en forge/templates
@@ -4305,82 +4300,16 @@ def execute_leila_pedido(
     )
 def execute_leila_ayuda() -> str:
     """/ayuda — comprar en Leila Store (solo gateway Leila)."""
-    return (
-        "Leila Store — cómo comprar\n\n"
-        "• /catalogo — ver productos, tallas y precios\n"
-        "• /pedido id talla — registrar tu pedido (opcional: una nota al final)\n"
-        "• Pregunta por tallas o combinar piezas; si algo es especial, dilo y lo vemos con Leila.\n\n"
-        "Comandos generales del bot: /help"
-    
+    return load_guardrail("fly_commands", "leila_ayuda")
 
 
-    )
 def execute_help(db: Any, chat_id: Any) -> str:
     """/help: lista los fly commands disponibles."""
-    lines = [
-        ("/team", "Whitelist + grants bases compartidas (--shared-*)"),
-        ("/vault", "Bóvedas privadas: ver/listar/crear/cambiar/eliminar"),
-        ("/workers", "Equipo (templates): ver o definir workers para este chat"),
-        ("/roles", "Ver todos los trabajadores virtuales (templates)"),
-        ("/tasks", "Estado actual: BUSY/IDLE, subagente, tarea"),
-        ("/history", "Historial de tareas (quién hizo qué)"),
-        ("/crons", "Objetivos + --delta / --timestamp; --rm delta|wall para quitar un schedule"),
-        ("/prompt <worker_id>", "Ver prompt; --change <texto> para cambiar"),
-        ("/model", "Ver o cambiar LLM (provider/model)"),
-        ("/models", "Listar modelos disponibles de un provider (ej. gemini)"),
-        ("/skills <worker_id>", "Herramientas del template"),
-        ("/forget", "Borrar historial de la conversación"),
-        ("/context", "on|off (historial); en Telegram: --add / --summary (memoria semántica)"),
-        ("/sandbox", "Toggle ejecución de código (true|false) para esta sesión"),
-        ("/sandox", "(Alias) /sandbox para tolerar errores de escritura."),
-        ("/heartbeat", "Activa mensajes en tiempo real mientras el agente trabaja"),
-        ("/audit", "Última auditoría de ejecución"),
-        ("/health", "Estado del servicio"),
-        ("/sensors", "DuckDB, IBKR, Lake, Tavily, Reddit, Trends, browser sandbox"),
-        ("/new_mind", "The Mind: crear partida (alias de /new_game the_mind)"),
-        ("/join <game_id>", "The Mind: unirse a partida"),
-        ("/start_mind [game_id]", "The Mind: iniciar y repartir Nivel 1"),
-        ("/game", "The Mind: listar partidas waiting/playing"),
-        ("/play <n>", "The Mind: jugar carta"),
-        ("/cards", "The Mind: ver tus cartas activas (DM)"),
-        ("/shuriken", "The Mind: votar uso de estrella ninja"),
-        ("/setup", "Config key=value"),
-        ("/approve", "Aprobar última acción"),
-        ("/reject", "Rechazar última acción"),
-        ("/execute-signal <uuid>", "HITL: confirma ejecución (Quant Trader: execute_approved_signal); alias /execute_signal"),
-        (
-            "/execute_all_moc <session_uid>",
-            "HITL Quant: ejecuta todas las señales moc_hrp_cfd pendientes de esa sesión MOC",
-        ),
-        ("/cancel_signal <uuid>", "HITL: cancela señal pendiente (PENDING_HITL/AWAITING_HITL)"),
-        (
-            "/trading-session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--confirm] [--status] [--stop]",
-            "Quant: sesión activa + session_goal + auto delta de /crons (live requiere --confirm)",
-        ),
-        (
-            "/quant_cycle [--tickers A,B] [--timeframe 1h] [--lookback_days 20] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--execute auto|off]",
-            "Quant: pipeline determinista (fetch -> portfolio -> evaluate -> señal) con salida estructurada",
-        ),
-        (
-            "/profile",
-            "Quant: muestra perfil de inversión inferido desde VSS (semantic_memory)",
-        ),
-        (
-            "/macro --update REGIMEN_* [confidence=0.8] [evidence=\"…\"]",
-            "Quant admin: registra régimen macro manual para el pipeline MOC (singleton writer)",
-        ),
-        ("/lake", "Estado del túnel SSH Capadonna (env + prueba rápida)"),
-    ]
+    entries = list(load_guardrail_pipe_table("fly_commands", "help_entries"))
     if _leila_fly_commands_enabled():
-        lines.extend(
-            [
-                ("/catalogo", "Leila: ver catálogo de productos"),
-                ("/pedido id talla", "Leila: registrar pedido"),
-                ("/ayuda", "Leila: cómo comprar"),
-            ]
-        )
-    block = "\n".join(f"- {cmd} — {desc}" for cmd, desc in lines)
-    return f"🦆 Fly commands:\n\n{block}"
+        entries.extend(load_guardrail_pipe_table("fly_commands", "help_entries_leila"))
+    block = "\n".join(f"- {cmd} — {desc}" for cmd, desc in entries)
+    return f"{load_guardrail('fly_commands', 'help_header')}\n{block}"
 
 
 def _fly_reply_preview(s: str, max_len: int = 120) -> str:

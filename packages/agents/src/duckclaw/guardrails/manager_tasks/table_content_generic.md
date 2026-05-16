@@ -1,0 +1,1 @@
+TAREA: El usuario quiere ver el contenido de una tabla específica. Ejecuta read_sql con SELECT * FROM <tabla> LIMIT 20 (o una consulta equivalente segura), explica brevemente las columnas visibles y ofrece profundizar con filtros.

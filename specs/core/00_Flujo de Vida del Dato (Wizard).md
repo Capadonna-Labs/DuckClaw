@@ -151,7 +151,7 @@ O como PM2: `DuckClaw-DB-Writer`.
 | Ruta                                                  | Descripción                                                                  |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `packages/agents/src/duckclaw/workers/loader.py`      | `run_schema(db, spec)` — crea schema, `agent_beliefs`, ejecuta `schema.sql`. |
-| `packages/agents/templates/workers/finanz/schema.sql` | DDL de tablas (cuentas, presupuestos, deudas, transacciones, etc.).          |
+| `packages/agents/src/duckclaw/forge/templates/finanz/schema.sql` | DDL de tablas (cuentas, presupuestos, deudas, transacciones, etc.).          |
 | `scripts/duckclaw_setup_wizard.py`                   | Wizard CLI: crea `db/<nombre>.duckdb` si no existe; gestiona PM2 (Gateway, DB Writer). |
 | `packages/shared/scripts/recreate_gateway_db.py`      | Recrea la DB del Gateway con schema Finanz.                                  |
 | `packages/shared/scripts/apply_finanz_schema.py`      | Aplica tablas Finanz a una `.duckdb` existente.                              |
@@ -162,7 +162,7 @@ O como PM2: `DuckClaw-DB-Writer`.
 1. Al cargar un worker (ej. finanz), `run_schema(db, spec)` en `factory.py`.
 2. `CREATE SCHEMA IF NOT EXISTS <schema_name>`.
 3. `CREATE TABLE IF NOT EXISTS agent_beliefs`.
-4. Ejecución de `templates/workers/<worker>/schema.sql`.
+4. Ejecución de `forge/templates/<worker>/schema.sql`.
 
 **Ruta por defecto:** resolución canónica vía multiplex y `DUCKDB_PATH` (`duckclaw.gateway_db.GATEWAY_DB_ENV_KEYS`). El wizard sigue escribiendo `DUCKCLAW_DB_PATH` + `DUCKDB_PATH` en `.env`; sin ellas suele aplicarse `db/gateway.duckdb` (relativo a la raíz del repo).
 
@@ -285,7 +285,7 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 | **Consumir cola (api-gateway)**           | `services/db-writer/main.py`                                                           |
 | **admin_sql**                           | `packages/agents/src/duckclaw/graphs/tools.py`                                         |
 | **Crear schema**                          | `packages/agents/src/duckclaw/workers/loader.py` (`run_schema`)                        |
-| **Schema Finanz**                         | `packages/agents/templates/workers/finanz/schema.sql`                                  |
+| **Schema Finanz**                         | `packages/agents/src/duckclaw/forge/templates/finanz/schema.sql`                                  |
 | **Ruta DB**                               | `services/db-writer/core/config.py` (`DUCKDB_PATH`)                                   |
 | **Sincronizar VPS**                       | `packages/shared/scripts/sync_telegram_duckdb.sh`                                      |
 | **Tests pipeline**                        | `tests/run_singleton_writer_pipeline.py`                                               |

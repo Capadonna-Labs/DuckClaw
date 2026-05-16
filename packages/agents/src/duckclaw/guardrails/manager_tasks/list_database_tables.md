@@ -1,0 +1,1 @@
+TAREA: El usuario quiere ver las tablas de la base de datos. Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables y responde con la lista de tablas. En el cierre invita a /workers, /tasks, /help y /crons (/team solo para usuarios humanos autorizados).

@@ -12,6 +12,7 @@ import os
 import re
 from typing import Any
 
+from duckclaw.guardrails.loader import format_guardrail
 from duckclaw.integrations.llm_providers import is_transient_inference_connection_error
 
 
@@ -36,13 +37,11 @@ def format_replan_task_suffix(plan_attempt_index: int, max_attempts: int) -> str
     """Directiva añadida al planned_task cuando ``plan_attempt_index > 0`` (antes del invoke actual)."""
     # plan_attempt_index es el índice del intento actual (0-based): en el segundo paso vale 1.
     attempt_human = plan_attempt_index + 1
-    return (
-        f"\n\n[REPLAN intento {attempt_human}/{max_attempts}] "
-        "Prioriza herramientas con datos verificables (read_sql, inspect_schema, get_ibkr_portfolio). "
-        "Si el tema es **finanzas locales** (deudas, cuotas, presupuestos, gastos, transacciones en DuckDB), "
-        "**obliga** read_sql de estado actual y, si hay cambios, **admin_sql** y/o **insert_deuda** "
-        "antes de afirmar persistencia; cierra con read_sql de verificación. "
-        "Evita repetir una estrategia que ya falló; usa llamadas mínimas y cita evidencia de tools en la respuesta."
+    return format_guardrail(
+        "resilience",
+        "replan_task_suffix",
+        attempt_human=str(attempt_human),
+        max_attempts=str(max_attempts),
     )
 
 
@@ -54,12 +53,7 @@ def format_exhausted_plan_failure(reasons: list[str]) -> str:
         if s and s not in unique:
             unique.append(s)
     body = "; ".join(unique) if unique else "varios fallos al ejecutar el plan o la inferencia."
-    return (
-        "No pude completarlo tras varios intentos. Causas registradas: "
-        f"{body}\n\n"
-        "Revisa que el backend de inferencia (p. ej. MLX) esté arriba, la base DuckDB accesible "
-        "y vuelve a intentar con una petición más concreta."
-    )
+    return format_guardrail("resilience", "exhausted_plan_failure", body=body)
 
 
 _INFERENCE_FAIL_PATTERNS = re.compile(

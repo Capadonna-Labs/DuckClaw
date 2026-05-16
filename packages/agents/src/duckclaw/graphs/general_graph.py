@@ -10,6 +10,7 @@ from typing import Any
 _log = logging.getLogger(__name__)
 
 from duckclaw.graphs.tools import read_sql, admin_sql, inspect_schema, manage_memory, get_db_path
+from duckclaw.guardrails.loader import load_guardrail
 
 
 _DB_INTENT_RE = re.compile(
@@ -36,15 +37,7 @@ def _needs_sandbox_tool(incoming: str) -> bool:
     return bool(_SANDBOX_INTENT_RE.search(incoming or ""))
 
 
-_DEFAULT_SYSTEM_PROMPT = (
-    "Eres un asistente útil con acceso a una base de datos DuckDB y a un sandbox de ejecución Python/Bash. "
-    "Cuando uses una herramienta, interpreta el resultado y responde en lenguaje natural claro y conciso. "
-    "Nunca copies el resultado crudo de una herramienta. "
-    "Si hay una lista de tablas, menciónalas de forma legible. "
-    "Si hay datos de una consulta, preséntelos de forma organizada. "
-    "Usa run_sandbox para ejecutar código Python o Bash arbitrario cuando el usuario lo pida. "
-    "Estilo de respuesta: sé conciso y directo; usa como máximo 1 o 2 emojis por mensaje si aportan claridad; evita listas largas sin resumir, encabezados markdown (##) y relleno; responde con lo esencial."
-)
+_DEFAULT_SYSTEM_PROMPT = load_guardrail("system_prompts", "general_default")
 
 _DEFAULT_TOOLS = ["read_sql", "admin_sql", "inspect_schema", "manage_memory", "get_db_path", "run_sandbox"]
 

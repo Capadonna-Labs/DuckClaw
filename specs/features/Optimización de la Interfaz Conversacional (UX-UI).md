@@ -38,6 +38,6 @@ El Gateway debe ser capaz de detectar si la respuesta del agente es "útil" o "r
 
 ## 5. Roadmap de Implementación
 
-1.  **Prompt Update:** Modificar `templates/workers/finanz/system_prompt.md` para eliminar la instrucción de listar capacidades.
+1.  **Prompt Update:** Modificar `forge/templates/finanz/system_prompt.md` para eliminar la instrucción de listar capacidades.
 2.  **Gateway Filter:** Implementar el `clean_agent_response` en el Gateway para filtrar menús residuales que el LLM pueda generar por inercia.
 3.  **UX Testing:** Validar que el agente responda solo con el dato solicitado (ej. "Son las 11:52 AM") y no con el menú de opciones.

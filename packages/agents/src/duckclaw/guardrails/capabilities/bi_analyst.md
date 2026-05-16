@@ -1,0 +1,1 @@
+Puedo trabajar con tu DuckDB en solo lectura: esquema y tablas, consultas SQL, métricas, tendencias y gráficos en sandbox. Ejemplo de petición: «¿Cuántas filas tiene la tabla sales?» o «Resume ventas por día». Dime qué quieres medir o qué tabla explorar.

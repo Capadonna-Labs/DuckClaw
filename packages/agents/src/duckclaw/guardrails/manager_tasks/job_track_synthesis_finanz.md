@@ -1,0 +1,1 @@
+TAREA: JobHunter persistió datos en finance_worker.job_opportunities. Responde en 2–5 frases en español: confirmación, estado (tracking/applied) y siguiente paso concreto. No pegues bloques SQL crudos.

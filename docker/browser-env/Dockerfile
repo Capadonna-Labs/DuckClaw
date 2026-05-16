@@ -1,5 +1,5 @@
 # duckclaw/browser-env — Strix browser sandbox (browser-use, Playwright, Xvfb, noVNC)
-# Specs: specs/features/Strix Browser Sandbox.md, specs/features/OSINT JobHunter (Web-Wide Recruitment Agent).md
+# Specs: specs/features/platform/STRIX_BROWSER_NOVNC.md, specs/features/agents-axis/JOBHUNTER_OSINT.md
 #
 # Build: docker build -t duckclaw/browser-env:latest docker/browser-env/
 # Runtime: STRIX_BROWSER_IMAGE=duckclaw/browser-env:latest (see packages/agents/.../sandbox.py)

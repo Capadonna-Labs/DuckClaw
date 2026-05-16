@@ -21,4 +21,4 @@ Implementación: `services/db-writer/`.
 
 - [Singleton Writer](../architecture/singleton_writer.md)
 - [COMANDOS](../COMANDOS.md) — PM2 y `uv run python services/db-writer/main.py`
-- Spec: `specs/features/Finanz admin_sql db-writer.md`
+- Spec: `specs/features/finanz/FINANZ_ADMIN_SQL_DB_WRITER.md`

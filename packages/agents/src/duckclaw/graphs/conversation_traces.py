@@ -1,7 +1,7 @@
 """
 Trazas de conversaciones en JSONL (datalake versionado).
 
-Formato según specs/features/Formateo de Datasets (SFT & GRPO).md:
+Formato según specs/features/platform/SFT_DATASET_FORMAT.md:
 - "messages": [system, user, assistant] para SFT (ChatML / mlx_lm).
 - session_id, worker_id, timestamp, elapsed_ms, status para auditoría y GRPO (reward_metadata).
 

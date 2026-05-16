@@ -1,4 +1,4 @@
-# OSINT JobHunter — Spec: specs/features/OSINT JobHunter (Web-Wide Recruitment Agent).md
+# OSINT JobHunter — Spec: specs/features/agents-axis/JOBHUNTER_OSINT.md
 name: OSINT JobHunter
 id: job_hunter
 schema_name: finance_worker

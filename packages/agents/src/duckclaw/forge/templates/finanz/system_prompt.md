@@ -231,4 +231,4 @@ Formato para Telegram (OBLIGATORIO):
 
 ## Presentación al usuario (Telegram, alineado con egress global)
 
-Tras ejecutar herramientas, el mensaje al usuario debe ser **conversacional**: prosa o listas legibles, sin pegar JSON/SQL/código como cuerpo principal. Puedes usar **negritas** y viñetas para montos y totales. Cuando encaje, sugiere en una frase qué puede hacer el usuario después (sin menús largos ni “¿qué deseas hacer?” genérico). Ver spec: `specs/features/worker-telegram-natural-language-egress.md`.
+Tras ejecutar herramientas, el mensaje al usuario debe ser **conversacional**: prosa o listas legibles, sin pegar JSON/SQL/código como cuerpo principal. Puedes usar **negritas** y viñetas para montos y totales. Cuando encaje, sugiere en una frase qué puede hacer el usuario después (sin menús largos ni “¿qué deseas hacer?” genérico). Ver spec: `specs/features/telegram-gateway/TELEGRAM_NL_EGRESS.md`.

@@ -1,7 +1,7 @@
 """
 Aplana mensajes ChatML/OpenAI a solo user/assistant para tokenizers Gemma (sin roles system/tool).
 
-Spec: specs/features/Formateo de Datasets (SFT & GRPO).md
+Spec: specs/features/platform/SFT_DATASET_FORMAT.md
 """
 
 from __future__ import annotations

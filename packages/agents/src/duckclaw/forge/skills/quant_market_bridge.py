@@ -3,7 +3,7 @@ Ingesta OHLCV hacia quant_core.ohlcv_data (Finanz + quant habilitado).
 
 Histórico (timeframes configurables): SSH al lake Capadonna — CAPADONNA_SSH_HOST,
 CAPADONNA_REMOTE_OHLC_CMD (plantilla JSON en stdout). Ver specs:
-specs/features/Capadonna Lake OHLC SSH + IBKR Live.md
+specs/features/quant/QUANT_CAPADONNA_OHLC_IBKR.md
 
 Tiempo real / fallback HTTP: IBKR_MARKET_DATA_URL (GET; query ticker, timeframe,
 lookback_days); IBKR_PORTFOLIO_API_KEY o IBKR_MARKET_DATA_API_KEY opcional Bearer.

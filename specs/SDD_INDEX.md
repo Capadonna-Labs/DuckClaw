@@ -1,13 +1,31 @@
 # Índice SDD (`specs/SDD_INDEX.md`)
 
-Las **especificaciones consolidadas** del proyecto son estas cinco:
+## Capa consolidada (`specs/core/`)
+
+Principios transversales — leer antes de cambios grandes:
 
 | Archivo | Contenido |
 |---------|-----------|
-| **00_System_Infrastructure.md** | Monorepo, Tailscale, API Gateway, PM2/Docker, CI/CD, inferencia elástica, resiliencia. |
-| **01_Analytical_Memory_Architecture.md** | Motores híbridos (DuckDB, Redis), PGQ/GraphRAG, Vector RAG, Arrow Zero-Copy, persistencia, CRM bicameral. |
-| **02_Skills_and_Tooling_Framework.md** | Research (Tavily, Browser-Use), Sandbox Strix, GitHub MCP, Context Hub, On-the-Fly CLI, ingesta multimodal. |
-| **03_Cognitive_Agent_Logic.md** | Homeostasis, Worker Factory, Subagent Spawning (Send/SSE), HITL, memory windowing, Fact-Checker, Model-Guard, QuoteEngine, SFT/MLX. |
-| **04_Singleton_Writer_Pipeline.md** | Flujo API Gateway → Redis → DB Writer → DuckDB; tests de pipeline (`tests/run_singleton_writer_pipeline.py`) y comandos de verificación (pytest + Redis Docker). |
+| **00_Flujo de Vida del Dato (Wizard).md** | Onboarding, bóvedas, deploy |
+| **01_System_Infrastructure.md** | Monorepo, Tailscale, API Gateway, PM2/Docker, CI/CD |
+| **02_Analytical_Memory_Architecture.md** | DuckDB, PGQ, VSS, CRM, persistencia |
+| **03_Skills_and_Tooling_Framework.md** | Tavily, Strix, MCP, sandbox, ingesta |
+| **04_Cognitive_Agent_Logic.md** | Workers, homeostasis, HITL, SFT, singleton writer (Gateway → Redis → db-writer) |
 
-Los directorios `layer_*` y `feature/`, así como los archivos sueltos en la raíz de `specs/`, son el **origen** del contenido fusionado; pueden usarse como referencia o detalle histórico. Para trabajo normativo usar siempre **00–04**.
+## Features de producto (`specs/features/`)
+
+Specs **vivas** referenciadas por código y manifests. Organizadas por dominio; índice completo:
+
+→ **[`specs/features/FEATURES_INDEX.md`](features/FEATURES_INDEX.md)**
+
+## Otros
+
+| Ruta | Uso |
+|------|-----|
+| [`05_ADF_AGENT_DEFINITION_FRAMEWORK.md`](05_ADF_AGENT_DEFINITION_FRAMEWORK.md) | Plantillas AXIS (ADF) |
+| [`specs/meta/`](meta/PLAN_FORMAT_STANDARD.md) | Formato obligatorio de planes |
+| [`specs/archive/`](archive/ARCHIVE_INDEX.md) | Migraciones y planes ya ejecutados |
+
+## Runbooks
+
+No duplicar procedimientos en specs: [`docs/operations/`](../docs/operations/index.md) enlaza operación; las specs de feature apuntan al runbook cuando aplica (p. ej. Homeostasis, Multi-Vault).

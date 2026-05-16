@@ -1,7 +1,7 @@
 """
 DDL MVP Leila: ejecuta el schema.sql de la plantilla LeilaAssistant (main.*).
 
-Spec: specs/features/Asistente de Leila — MVP Telegram.md
+Spec: specs/features/agents-axis/LEILA_ASSISTANT_MVP.md
 """
 
 from __future__ import annotations

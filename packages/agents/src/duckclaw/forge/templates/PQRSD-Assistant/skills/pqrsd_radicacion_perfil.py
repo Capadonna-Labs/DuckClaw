@@ -1,7 +1,7 @@
 """
 Persistencia opcional del perfil mínimo para radicar PQRSD en la bóveda DuckDB.
 
-Spec: specs/features/Asistente PQRSD (Alcaldía Medellín).md
+Spec: specs/features/agents-axis/PQRSD_ASSISTANT_MEDELLIN.md
 """
 
 from __future__ import annotations

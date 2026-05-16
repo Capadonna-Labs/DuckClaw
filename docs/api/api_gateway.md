@@ -25,4 +25,4 @@ Implementación: `services/api-gateway/main.py`.
 - [Observabilidad](../operations/Observability-2.1-Identidad.md)
 - [Singleton Writer](../architecture/singleton_writer.md)
 - [COMANDOS](../COMANDOS.md)
-- Spec: `specs/features/Telegram Webhook Multiplex (multi-bot).md`
+- Spec: `specs/features/telegram-gateway/TELEGRAM_WEBHOOK_MULTIPLEX.md`

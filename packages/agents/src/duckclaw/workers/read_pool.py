@@ -1,7 +1,7 @@
 """
 Ephemeral read-only DuckDB connections for parallel worker tool execution.
 
-Spec: specs/features/Concurrent Tool Node (Ephemeral Read-Pool).md
+Spec: specs/features/platform/CONCURRENT_TOOL_READ_POOL.md
 """
 
 from __future__ import annotations

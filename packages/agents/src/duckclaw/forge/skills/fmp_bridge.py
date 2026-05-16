@@ -2,8 +2,8 @@
 FMP Bridge — dividendos, calendario de earnings y transcripts (read-only).
 
 Specs:
-- specs/features/Integración FMP dividendos (read-only).md
-- specs/features/Integración FMP earnings calendario y transcripts (read-only).md
+- specs/features/finanz/FMP_DIVIDENDS_READONLY.md
+- specs/features/finanz/FMP_EARNINGS_TRANSCRIPTS_READONLY.md
 Requiere: FMP_API_KEY. Opcional: FMP_API_BASE (default https://financialmodelingprep.com).
 """
 

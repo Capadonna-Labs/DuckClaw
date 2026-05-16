@@ -156,7 +156,7 @@ def _ensure_authorized_users(con: duckdb.DuckDBPyConnection) -> None:
 
 
 def _ensure_pqrsd_crm_schema(con: duckdb.DuckDBPyConnection) -> None:
-    """CRM Next (GovTech): specs/features/CRM PQRSD persistencia DuckDB.md"""
+    """CRM Next (GovTech): specs/features/finanz/CRM_PQRSD_DUCKDB_PERSISTENCE.md"""
     con.execute("CREATE SCHEMA IF NOT EXISTS pqrsd_crm;")
     con.execute(
         """

@@ -51,7 +51,7 @@ DuckClaw utiliza **Tailscale (WireGuard)** para una red privada E2EE entre Mac M
 ### Topología
 
 - Angular/n8n → FastAPI Gateway → Auth Middleware → Agent Stream / Homeostasis Status / System Health.
-- **Telegram (recomendado):** varios procesos gateway (puertos distintos en PM2); cada bot `setWebhook` a una URL HTTPS que termina en el puerto de *ese* proceso (`POST /api/v1/telegram/webhook`). Detalle: `specs/features/Telegram Webhook One Gateway One Port.md`. Alternativa un solo ingress: multiplex en `specs/features/Telegram Webhook Multiplex (multi-bot).md`.
+- **Telegram (recomendado):** varios procesos gateway (puertos distintos en PM2); cada bot `setWebhook` a una URL HTTPS que termina en el puerto de *ese* proceso (`POST /api/v1/telegram/webhook`). Detalle: `specs/features/telegram-gateway/TELEGRAM_WEBHOOK_ONE_PORT.md`. Alternativa un solo ingress: multiplex en `specs/features/telegram-gateway/TELEGRAM_WEBHOOK_MULTIPLEX.md`.
 
 ### Endpoints (contrato API)
 

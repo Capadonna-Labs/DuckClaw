@@ -16,6 +16,6 @@
 
 ## Specs (canónico en repo)
 
-- `specs/features/Finanz admin_sql db-writer.md`
-- `specs/features/Context Injection (Telegram).md`
+- `specs/features/finanz/FINANZ_ADMIN_SQL_DB_WRITER.md`
+- `specs/features/finanz/FINANZ_CONTEXT_INJECTION_TELEGRAM.md`
 - Plantilla: `packages/agents/src/duckclaw/forge/templates/finanz/`

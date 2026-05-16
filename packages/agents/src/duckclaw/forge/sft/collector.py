@@ -1,7 +1,7 @@
 """
 SFT_DataCollector — trazas de conversación (SUCCESS) → dataset Gemma/MLX (`messages`).
 
-Spec: specs/features/Formateo de Datasets (SFT & GRPO).md
+Spec: specs/features/platform/SFT_DATASET_FORMAT.md
 """
 
 from __future__ import annotations

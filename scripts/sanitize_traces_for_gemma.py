@@ -6,7 +6,7 @@ Escribe un espejo bajo train/gemma4/YYYY/MM/DD/traces.jsonl (clave \"text\"). Pa
 train/gemma4/sft_data_dir/{train,valid,test}.jsonl a partir de ese espejo, ejecuta después:
   uv run python scripts/materialize_sft_data_dir_from_gemma4_sanitized.py
 
-Spec: specs/features/SFT Trace Sanitizer Gemma 4.md
+Spec: specs/features/platform/SFT_TRACE_SANITIZER_GEMMA4.md
 """
 
 from __future__ import annotations

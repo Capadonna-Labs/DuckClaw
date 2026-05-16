@@ -1,7 +1,7 @@
 """
 Modelos de datos MVP: Asistente de Leila (tienda de ropa).
 
-Spec: specs/features/Asistente de Leila — MVP Telegram.md
+Spec: specs/features/agents-axis/LEILA_ASSISTANT_MVP.md
 Plantilla: forge/templates/LeilaAssistant/
 """
 

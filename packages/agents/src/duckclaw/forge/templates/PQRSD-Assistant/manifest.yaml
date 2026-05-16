@@ -1,5 +1,5 @@
 # Asistente PQRSD — Alcaldía de Medellín
-# Spec: specs/features/Asistente PQRSD (Alcaldía Medellín).md
+# Spec: specs/features/agents-axis/PQRSD_ASSISTANT_MEDELLIN.md
 name: Asistente de PQRSD
 id: pqrsd_assistant
 schema_name: pqrsd_assistant

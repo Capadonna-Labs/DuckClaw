@@ -32,7 +32,7 @@ En cada carpeta hay exactamente **siete archivos** (contrato ADF):
 
 ## Referencias
 
-- Plantillas y contenido por agente: [`specs/features/AXIS_TEMPLATES_001.md`](features/AXIS_TEMPLATES_001.md)
+- Plantillas y contenido por agente: [`specs/features/agents-axis/AXIS_TEMPLATES_001.md`](features/agents-axis/AXIS_TEMPLATES_001.md) (índice: [`specs/features/FEATURES_INDEX.md`](features/FEATURES_INDEX.md))
 - Marco conceptual workers/memoria: [`docs/agents/adf_framework.md`](../docs/agents/adf_framework.md)
 
 ## Versión

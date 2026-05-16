@@ -23,7 +23,7 @@ DuckClaw enforces a single mutation path: **`services/db-writer`** is the only c
 ## Related specs
 
 - Published hub: [Specs index](../specs/index.md)
-- Feature pointer: [Finanz Admin SQL DB-Writer](../specs/finanz_admin_sql_db_writer.md)
+- Feature pointer: [Finanz Admin SQL DB-Writer](../../specs/features/finanz/FINANZ_ADMIN_SQL_DB_WRITER.md)
 - Repo canonical (read in Git): `specs/core/01_System_Infrastructure.md` — infrastructure and service boundaries.
 
 ## Related operations

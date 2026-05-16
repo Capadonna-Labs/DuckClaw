@@ -1,5 +1,5 @@
 # duckclaw/sandbox — imagen base para el Strix Sandbox
-# Spec: specs/features/Strix Sandbox & Security Policy Engine (Zero-Trust Execution).md §2
+# Spec: specs/features/platform/STRIX_SANDBOX_SECURITY_POLICY.md §2
 #
 # ML4T: solo diagnostic + event backtest runtime (extras [backtest]), sin ml4t-data —
 # ingestión de mercado sigue en DuckClaw (Gateway / DuckDB).

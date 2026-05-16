@@ -1,5 +1,7 @@
 # Demonio de Proactividad (Homeostasis Heartbeat)
 
+> **Diseño (esta spec)** · **Runbook operativo:** [`docs/operations/Homeostasis-Heartbeat.md`](../../../docs/operations/Homeostasis-Heartbeat.md) — variables, PM2, troubleshooting.
+
 ## 1. Objetivo Arquitectónico
 Desplegar un microservicio independiente (`services/heartbeat`) que se despierte periódicamente, evalúe las métricas de homeostasis en DuckDB y, si detecta una anomalía, inyecte un "Pensamiento Interno" en el API Gateway. El agente procesará este pensamiento y decidirá si debe usar la herramienta de salida (n8n Outbound) para alertar al usuario, respetando los límites de spam en Redis.
 

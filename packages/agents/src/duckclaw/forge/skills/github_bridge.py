@@ -1,7 +1,7 @@
 """
 GitHub MCP Bridge — proceso hijo oficial github-mcp-server (Docker stdio).
 
-Spec: specs/core/03_Skills_and_Tooling_Framework.md, specs/features/GitClaw Worker.md
+Spec: specs/core/03_Skills_and_Tooling_Framework.md, specs/features/agents-axis/GITCLAW_WORKER.md
 Requiere: pip install mcp (stdio cliente), Docker local con imagen pullada.
 
 Verificar imagen (operadores): docker pull ghcr.io/github/github-mcp-server

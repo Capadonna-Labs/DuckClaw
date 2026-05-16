@@ -2,7 +2,7 @@
 
 ## Modo recomendado (fuera de este documento)
 
-Cuando cada bot tiene **su propio** proceso gateway y **su propia** URL HTTPS que termina en el puerto PM2 correcto, **no** hace falta multiplex ni `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`. Ver [Telegram Webhook One Gateway One Port.md](Telegram%20Webhook%20One%20Gateway%20One%20Port.md) y [docs/COMANDOS.md](../../docs/COMANDOS.md) § 2.0.
+Cuando cada bot tiene **su propio** proceso gateway y **su propia** URL HTTPS que termina en el puerto PM2 correcto, **no** hace falta multiplex ni `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`. Ver [TELEGRAM_WEBHOOK_ONE_PORT.md](TELEGRAM_WEBHOOK_ONE_PORT.md) y [docs/COMANDOS.md](../../../docs/COMANDOS.md) § 2.0.
 
 Este documento describe el **Modo B**: varios bots compartiendo **una** URL pública y **un** proceso receptor.
 

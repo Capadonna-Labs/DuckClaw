@@ -1,4 +1,4 @@
-# SIATA Analyst — Valle de Aburrá (spec: specs/features/Trabajador Virtual — SIATA Analyst (Geo-Spatial & Weather).md)
+# SIATA Analyst — Valle de Aburrá (spec: specs/features/agents-axis/SIATA_ANALYST.md)
 # Runtime: WorkerSpec; cognición en soul/system_prompt/domain_closure; sandbox vía security_policy.yaml.
 # API reference: https://siata.gov.co/COMPLEX/Website/Documentation/API_reference/API_Reference.html
 name: SIATA Analyst

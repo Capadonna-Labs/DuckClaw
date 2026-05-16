@@ -1,5 +1,5 @@
 /**
- * Configuración CRM ↔ DuckDB bóveda (spec: specs/features/CRM PQRSD persistencia DuckDB.md).
+ * Configuración CRM ↔ DuckDB bóveda (spec: specs/features/finanz/CRM_PQRSD_DUCKDB_PERSISTENCE.md).
  * Prioridad de ruta alineada con el monorepo DuckClaw (`DUCKCLAW_PQRSD_ASSISTANT_DB_PATH`).
  */
 import path from 'path';

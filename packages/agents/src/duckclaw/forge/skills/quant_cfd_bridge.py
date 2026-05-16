@@ -1,7 +1,7 @@
 """
 Registro del estado CFD (Cyber-Fluid Dynamics) en quant_core.fluid_state.
 
-Spec: specs/features/Cyber-Fluid Dynamics CFD (Finanz).md
+Spec: specs/features/finanz/FINANZ_CFD_CYBER_FLUID.md
 """
 
 from __future__ import annotations

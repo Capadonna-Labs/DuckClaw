@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HRP semanal Core-Satellite — specs/features/Core-Satellite HRP Weekly + MOC CFD.md
+HRP semanal Core-Satellite — specs/features/quant/QUANT_CORE_SATELLITE_HRP_MOC.md
 
 PM2 ej.: TZ=America/Bogota, cron dominical ``0 20 * * 0``.
 Requiere: REDIS_URL, DUCKCLAW_QUANT_SCRIPT_DB, HRP_CORE_SATELLITE_UNIVERSE, capacidad sandbox Docker.

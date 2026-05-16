@@ -1,4 +1,4 @@
-"""Seed idempotente grafo macro MOC — specs/features/MOC Macro PGQ VSS.md."""
+"""Seed idempotente grafo macro MOC — specs/features/quant/QUANT_MOC_MACRO_PGQ_VSS.md."""
 
 from __future__ import annotations
 

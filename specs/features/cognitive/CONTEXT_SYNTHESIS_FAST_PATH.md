@@ -7,7 +7,7 @@ Reducir latencia en turnos provocados por el gateway con directivas:
 - `[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]` (`/context --summary`)
 - `[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]` (resumen tras `/context --add`)
 
-En esos turnos el contenido a sintetizar **ya va en el mensaje**; se evita levantar MCP stdio pesados (GitHub, Google Trends) que añaden cold start. **Reddit** se mantiene registrado cuando el manifest lo declara, porque `/context --add` con URL `/r/.../s/...` debe poder usar la API Reddit (ver *Context Injection (Telegram)*).
+En esos turnos el contenido a sintetizar **ya va en el mensaje**; se evita levantar MCP stdio pesados (GitHub, Google Trends) que añaden cold start. **Reddit** se mantiene registrado cuando el manifest lo declara, porque `/context --add` con URL `/r/.../s/...` debe poder usar la API Reddit (ver [`FINANZ_CONTEXT_INJECTION_TELEGRAM.md`](../finanz/FINANZ_CONTEXT_INJECTION_TELEGRAM.md)).
 
 ## Comportamiento
 

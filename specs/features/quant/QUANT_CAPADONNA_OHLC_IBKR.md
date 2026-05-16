@@ -6,7 +6,7 @@ Ingerir **OHLC histórico** (y series de precio desde **`moc/`** con `timeframe=
 
 **Relación**
 
-- Continúa [Quantitative Trading Worker](Quantitative%20Trading%20Worker.md): destino único `quant_core.ohlcv_data`.
+- Continúa [Quantitative Trading Worker](QUANTITATIVE_TRADING_WORKER.md): destino único `quant_core.ohlcv_data`.
 - La herramienta `fetch_market_data` enruta por `timeframe` y variables de entorno (esta spec).
 - La herramienta **`fetch_lake_ohlcv`** llama siempre al lake vía SSH (misma sesión que `fetch_market_data` en rama lake), devuelve **solo JSON** con barras normalizadas y **no escribe** `quant_core.ohlcv_data`. Úsala cuando se requiera evidencia OHLCV sin persistir; para CFD con DB, tras `fetch_market_data` usar `read_sql` sobre `quant_core.ohlcv_data`.
 
@@ -44,7 +44,7 @@ Ingerir **OHLC histórico** (y series de precio desde **`moc/`** con `timeframe=
 
 ## Contrato HTTP GET `/api/market/ohlcv` (VPS Capadonna :8002 ↔ DuckClaw)
 
-Microservicio alineado con `quant_market_bridge._http_fetch_json`. Implementación de referencia en el monorepo: [services/ibkr-ohlcv-api/main.py](../../services/ibkr-ohlcv-api/main.py) (carga el lake local vía `export_lake_ohlcv.py`; sustituible por barras IBKR en vivo en el mismo path si el VPS lo expone).
+Microservicio alineado con `quant_market_bridge._http_fetch_json`. Implementación de referencia en el monorepo: [services/ibkr-ohlcv-api/main.py](../../../services/ibkr-ohlcv-api/main.py) (carga el lake local vía `export_lake_ohlcv.py`; sustituible por barras IBKR en vivo en el mismo path si el VPS lo expone).
 
 **Request**
 
@@ -90,7 +90,7 @@ Tras `/execute-signal`, Finanz (`execute_order`) y Quant Trader (`execute_approv
 
 Si el POST trae datos válidos para **ambos** modos, el receptor prioriza **acciones** sobre peso. Si faltan los campos enriquecidos, el hook sigue el **fallback** actual: leer `finance_worker.trade_signals` en `IBKR_EXECUTE_ORDER_DB_PATH` (DuckDB local en el VPS).
 
-**Implementación de referencia** en el monorepo: ruta **`POST /api/broker/execute`** en [`services/ibkr-ohlcv-api/ohlcv_market_routes.py`](../../services/ibkr-ohlcv-api/ohlcv_market_routes.py) (mismo proceso/puerto que OHLCV, p. ej. `:8002`).
+**Implementación de referencia** en el monorepo: ruta **`POST /api/broker/execute`** en [`services/ibkr-ohlcv-api/ohlcv_market_routes.py`](../../../services/ibkr-ohlcv-api/ohlcv_market_routes.py) (mismo proceso/puerto que OHLCV, p. ej. `:8002`).
 
 | Comportamiento | Detalle |
 |----------------|---------|
@@ -101,7 +101,7 @@ Si el POST trae datos válidos para **ambos** modos, el receptor prioriza **acci
 
 ### Script de referencia `broker_execute_signal.py`
 
-Implementación en el monorepo: [`scripts/capadonna/broker_execute_signal.py`](../../scripts/capadonna/broker_execute_signal.py). **Prioridad:** (1) parsear `DUCKCLAW_EMBEDDED_EXECUTE_JSON` inyectado por el API (`mode: weight` o `mode: shares`); (2) si no hay plan embebido, leer `finance_worker.trade_signals` en **DuckDB local** (`IBKR_EXECUTE_ORDER_DB_PATH`). Envía orden **MKT** con `ib_async` (misma línea que `ibkr_historical_bars.py`). Modo peso: sizing con `equity * (proposed_weight/100)` y precio snapshot; ENTRY → BUY, EXIT → SELL (cantidad acotada a la posición larga).
+Implementación en el monorepo: [`scripts/capadonna/broker_execute_signal.py`](../../../scripts/capadonna/broker_execute_signal.py). **Prioridad:** (1) parsear `DUCKCLAW_EMBEDDED_EXECUTE_JSON` inyectado por el API (`mode: weight` o `mode: shares`); (2) si no hay plan embebido, leer `finance_worker.trade_signals` en **DuckDB local** (`IBKR_EXECUTE_ORDER_DB_PATH`). Envía orden **MKT** con `ib_async` (misma línea que `ibkr_historical_bars.py`). Modo peso: sizing con `equity * (proposed_weight/100)` y precio snapshot; ENTRY → BUY, EXIT → SELL (cantidad acotada a la posición larga).
 
 | Variable (VPS / hook) | Rol |
 |------------------------|-----|
@@ -144,17 +144,17 @@ scp scripts/capadonna/broker_execute_signal.py capadonna@<tailscale>:~/projects/
 
 ## Fallback IB Gateway (`/api/market/ohlcv` en el VPS)
 
-Cuando el **lake local** (`export_lake_ohlcv.py`) falla (stderr/rc), devuelve JSON vacío o **no hay barras** para el `ticker`/`timeframe`, el router [`ohlcv_market_routes.py`](../../services/ibkr-ohlcv-api/ohlcv_market_routes.py) puede intentar **barras históricas vía IB** con el mismo contrato `data[]` hacia DuckClaw.
+Cuando el **lake local** (`export_lake_ohlcv.py`) falla (stderr/rc), devuelve JSON vacío o **no hay barras** para el `ticker`/`timeframe`, el router [`ohlcv_market_routes.py`](../../../services/ibkr-ohlcv-api/ohlcv_market_routes.py) puede intentar **barras históricas vía IB** con el mismo contrato `data[]` hacia DuckClaw.
 
 | Variable (VPS) | Rol |
 |----------------|-----|
 | `OHLCV_IB_FALLBACK` | Si es `0`, no se llama al fallback IB. Por defecto (vacío) se intenta si el script existe. |
 | `OHLCV_IB_PYTHON` / `OHLCV_IB_SCRIPT` | Rutas absolutas al intérprete y a `ibkr_historical_bars.py` (opcional; por defecto: mismo Python que el lake + `scripts/capadonna/ibkr_historical_bars.py` en `Capadonna-Driller`). |
 | `OHLCV_IB_EXPORT_TIMEOUT` | Segundos para el subproceso IB (default `90`). |
-| `OHLCV_IB_CLIENT_ID` | **Recomendado si ves Error 326** (“client id already in use”): id numérico **distinto** del que use el snapshot de cuenta u otro proceso en el mismo Gateway. El script [`ibkr_historical_bars.py`](../../scripts/capadonna/ibkr_historical_bars.py) prioriza esta variable sobre `IB_CLIENT_ID`. Configúrala en el systemd de `capadonna-observability` (p. ej. drop-in `99-ohlcv-ib-client-id.conf`) o en el entorno del proceso que ejecuta uvicorn :8002. Script de ayuda: [`scripts/capadonna/vps_set_ohlcv_ib_client_id.sh`](../../scripts/capadonna/vps_set_ohlcv_ib_client_id.sh). |
+| `OHLCV_IB_CLIENT_ID` | **Recomendado si ves Error 326** (“client id already in use”): id numérico **distinto** del que use el snapshot de cuenta u otro proceso en el mismo Gateway. El script [`ibkr_historical_bars.py`](../../../scripts/capadonna/ibkr_historical_bars.py) prioriza esta variable sobre `IB_CLIENT_ID`. Configúrala en el systemd de `capadonna-observability` (p. ej. drop-in `99-ohlcv-ib-client-id.conf`) o en el entorno del proceso que ejecuta uvicorn :8002. Script de ayuda: [`scripts/capadonna/vps_set_ohlcv_ib_client_id.sh`](../../../scripts/capadonna/vps_set_ohlcv_ib_client_id.sh). |
 | `IB_HOST` / `IB_PORT` / `IB_CLIENT_ID` | Conexión a TWS/Gateway en **localhost del VPS** (misma convención que `IB_ENV` paper/live → 4002/4001). |
 
-Script de referencia en el monorepo: [`scripts/capadonna/ibkr_historical_bars.py`](../../scripts/capadonna/ibkr_historical_bars.py) — requiere Python 3.10+ y `pip install ib_async` en el venv del proyecto. Contrato stdout: `{"bars":[...]}` con `timestamp`, OHLC, `volume` (como `export_lake_ohlcv`).
+Script de referencia en el monorepo: [`scripts/capadonna/ibkr_historical_bars.py`](../../../scripts/capadonna/ibkr_historical_bars.py) — requiere Python 3.10+ y `pip install ib_async` en el venv del proyecto. Contrato stdout: `{"bars":[...]}` con `timestamp`, OHLC, `volume` (como `export_lake_ohlcv`).
 
 **Límites:** pacing y permisos de mercado de IB; contratos `Stock(ticker,'SMART','USD')` pueden requerir ajuste (exchange) para algunos símbolos. El **snapshot de cuenta** (`get_account_snapshot`) no sustituye este histórico para símbolos arbitrarios.
 

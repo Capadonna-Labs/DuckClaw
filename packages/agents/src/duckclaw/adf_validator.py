@@ -15,7 +15,7 @@ import yaml
 
 # Seis agentes AXIS (ADF); viven bajo forge/templates/<agent_id>/ (FORGE = paquete, no agente).
 AXIS_ADF_AGENT_IDS: frozenset[str] = frozenset(
-    ("coder", "mirror", "radar", "sentinel", "phantom", "maestro")
+    ( "maestro","coder", "mirror", "radar", "sentinel", "phantom")
 )
 
 REQUIRED_FILES = [

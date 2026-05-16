@@ -1265,7 +1265,9 @@ def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
     return None
 
 
-def _coerce_planner_payload(data: Any) -> tuple[str, list[str], dict[str, Any] | None]:
+def _coerce_planner_payload(
+    data: Any,
+) -> tuple[str, list[str], dict[str, Any] | None, str | None]:
     """Valida el dict del LLM; lanza ValueError si no cumple el contrato."""
     if not isinstance(data, dict):
         raise ValueError("planner payload is not an object")
@@ -1298,25 +1300,42 @@ def _coerce_planner_payload(data: Any) -> tuple[str, list[str], dict[str, Any] |
     else:
         raise ValueError("mercenary must be null, omitted, or an object")
 
-    return str(title).strip(), tasks_list, merc_obj
+    delegate_raw = data.get("delegate_worker_id")
+    delegate_id: str | None = None
+    if delegate_raw is not None and str(delegate_raw).strip():
+        delegate_id = str(delegate_raw).strip()
+
+    return str(title).strip(), tasks_list, merc_obj, delegate_id
 
 
 def _llm_plan_from_model(
-    llm: Any, incoming: str, planner_system_prompt: str
-) -> Optional[tuple[str, list[str], dict[str, Any] | None]]:
+    llm: Any,
+    incoming: str,
+    planner_system_prompt: str,
+    *,
+    orchestrator_pool: list[str] | None = None,
+) -> Optional[tuple[str, list[str], dict[str, Any] | None, str | None]]:
     """
-    Invoca el LLM del Manager para obtener {"plan_title", "tasks", "mercenary"?}.
-    Devuelve None si falla el invoke, el parse o el contrato (el caller usa heurística).
+    Invoca el LLM del Manager para obtener plan JSON.
+    Con ``orchestrator_pool``, exige ``delegate_worker_id`` en la respuesta.
     """
     from langchain_core.messages import HumanMessage, SystemMessage
 
     append = (os.environ.get("DUCKCLAW_MANAGER_PLANNER_SYSTEM_APPEND") or "").strip()
     system_chunks = [planner_system_prompt.strip(), append]
-    system_chunks.append(
-        "Responde únicamente con JSON válido (sin markdown). Forma:\n"
-        '{"plan_title": "string", "tasks": ["string", ...], "mercenary": null | '
-        '{"directive": "string", "timeout": entero_1_a_600} }'
-    )
+    if orchestrator_pool:
+        pool_s = ", ".join(orchestrator_pool)
+        system_chunks.append(
+            "Responde únicamente con JSON válido (sin markdown). Forma:\n"
+            '{"plan_title": "string", "tasks": ["string", ...], '
+            f'"delegate_worker_id": "uno de: {pool_s}", "mercenary": null}}'
+        )
+    else:
+        system_chunks.append(
+            "Responde únicamente con JSON válido (sin markdown). Forma:\n"
+            '{"plan_title": "string", "tasks": ["string", ...], "mercenary": null | '
+            '{"directive": "string", "timeout": entero_1_a_600} }'
+        )
     system = "\n\n".join(c for c in system_chunks if c)
     human = f"Mensaje del usuario:\n{(incoming or '').strip()}"
     try:
@@ -1337,7 +1356,7 @@ def _llm_plan_from_model(
         _log.debug("manager planner: no JSON object in model output")
         return None
     try:
-        title, tasks, mercenary_spec = _coerce_planner_payload(data)
+        title, tasks, mercenary_spec, delegate_id = _coerce_planner_payload(data)
     except ValueError as exc:
         _log.debug("manager planner: invalid payload: %s", exc)
         return None
@@ -1347,7 +1366,48 @@ def _llm_plan_from_model(
     if not tasks:
         clip = (incoming or "").strip()[:200]
         tasks = [f"Resolver la solicitud del usuario: {clip}" if clip else "Resolver solicitud del usuario"]
-    return title, tasks, mercenary_spec
+    return title, tasks, mercenary_spec, delegate_id
+
+
+def _load_orchestrator_planner_prompt(coordinator_id: str, templates_root: Any) -> str:
+    from duckclaw.workers.manifest import get_worker_dir
+
+    path = get_worker_dir(coordinator_id, templates_root) / "orchestrator_planner.md"
+    if path.is_file():
+        return path.read_text(encoding="utf-8").strip()
+    return (
+        "Eres el planner del coordinador AXIS. Elige delegate_worker_id de la lista permitida "
+        "y redacta tasks para ese subagente."
+    )
+
+
+def _resolve_orchestrator_delegate(
+    incoming: str,
+    pool: list[str],
+    coordinator_id: str,
+    llm: Any | None,
+    planner_system_prompt: str,
+    templates_root: Any,
+) -> str:
+    from duckclaw.workers.orchestrator import pick_delegate_from_planner, pick_delegate_heuristic
+
+    delegate: str | None = None
+    if llm is not None:
+        orch_prompt = _load_orchestrator_planner_prompt(coordinator_id, templates_root)
+        combined = (planner_system_prompt or "").strip()
+        if combined:
+            combined = f"{combined}\n\n{orch_prompt}"
+        else:
+            combined = orch_prompt
+        parsed = _llm_plan_from_model(
+            llm, incoming, combined, orchestrator_pool=list(pool) + [coordinator_id]
+        )
+        if parsed:
+            _, _, _, delegate_id = parsed
+            delegate = pick_delegate_from_planner(delegate_id, list(pool) + [coordinator_id], templates_root)
+    if not delegate:
+        delegate = pick_delegate_heuristic(incoming, list(pool) + [coordinator_id], coordinator_id=coordinator_id)
+    return delegate or coordinator_id
 
 
 def _manager_greeting_fast_path_ok(incoming: str) -> bool:
@@ -1393,7 +1453,21 @@ def _greeting_fast_reply_text(worker_id: str | None) -> str:
     return "Hola. ¿En qué puedo ayudarte?"
 
 
-def _capabilities_fast_reply_text(worker_id: str | None) -> str:
+def _capabilities_fast_reply_text(
+    worker_id: str | None,
+    *,
+    coordinator_id: str | None = None,
+    delegation_pool: list[str] | None = None,
+) -> str:
+    coord = (coordinator_id or "").strip()
+    pool = [x for x in (delegation_pool or []) if (x or "").strip()]
+    if coord and pool:
+        lines = "\n".join(f"- {w}" for w in pool)
+        return (
+            f"Soy **MAESTRO** (`{coord}`), coordinador AXIS. Según tu mensaje delego a:\n{lines}\n\n"
+            "Ejemplos: «¿Qué estudiar hoy?» (MAESTRO), «analiza este CVE» (RADAR), "
+            "«revisa mi repo» (CODER), «perfil técnico» (MIRROR)."
+        )
     w = (worker_id or "").strip()
     wl = w.lower()
     wl_norm = wl.replace("_", "-")
@@ -1433,6 +1507,14 @@ def _capabilities_fast_reply_text(worker_id: str | None) -> str:
         return (
             "Puedo ayudarte con el catálogo, pedidos (/pedido) y dudas sobre productos. "
             "Prueba /catalogo o escribe qué buscas."
+        )
+    if wl in ("axis-maestro", "maestro") or wl_norm == "axis-maestro":
+        sub = "\n".join(f"- {x}" for x in pool) if pool else (
+            "- AXIS-Coder\n- AXIS-Mirror\n- AXIS-Radar\n- AXIS-Sentinel\n- AXIS-Phantom"
+        )
+        return (
+            "Soy **MAESTRO** (coordinador AXIS). Delego a especialistas:\n"
+            f"{sub}\n\nDescribe tu objetivo (aprendizaje, código, intel, lab, perfil)."
         )
     if wl_norm == "siata-analyst":
         return (
@@ -1533,12 +1615,29 @@ def build_manager_graph(
         # (TRADING_TICK, goals ticker); los mensajes normales quedaban con assigned=available[0]
         # (suele ser finanz) → delegación incorrecta. Si hay ruta HTTP, priorizar siempre ese worker.
         _canon_entry = _resolve_template_id(_all_disk_r, entry_r) if entry_r else None
-        if _canon_entry:
+        coordinator_id: str | None = None
+        delegation_pool: list[str] = []
+        from duckclaw.workers.orchestrator import effective_delegation_pool, load_orchestrator_config
+
+        orch_cfg = load_orchestrator_config(_canon_entry, troot) if _canon_entry else None
+        if orch_cfg:
+            coordinator_id = orch_cfg.coordinator_id
+            delegation_pool = effective_delegation_pool(
+                orch_cfg.orchestrates, available, troot
+            )
+            if coordinator_id not in delegation_pool:
+                delegation_pool = [coordinator_id] + delegation_pool
+            assigned = coordinator_id
+            available = list(delegation_pool)
+        elif _canon_entry:
             if _canon_entry not in available:
                 available = list(available) + [_canon_entry]
             available = [_canon_entry] + [w for w in available if w != _canon_entry]
             assigned = _canon_entry
-        out = {"assigned_worker_id": assigned, "available_templates": available}
+        out: dict[str, Any] = {"assigned_worker_id": assigned, "available_templates": available}
+        if coordinator_id:
+            out["coordinator_worker_id"] = coordinator_id
+            out["delegation_pool"] = delegation_pool
         # Preservar estado para nodos siguientes (por si el grafo hace merge sustituyendo)
         if "incoming" in state:
             out["incoming"] = state["incoming"]
@@ -1579,9 +1678,13 @@ def build_manager_graph(
             worker_id="manager",
             chat_id=format_chat_log_identity(_cid, state.get("username")),
         )
+        coord = (state.get("coordinator_worker_id") or "").strip() or None
+        pool = list(state.get("delegation_pool") or [])
         if _manager_capabilities_fast_path_ok(incoming):
             log_sys(_obs, "Capacidades: respuesta directa (sin plan ni subagente)")
-            reply = _capabilities_fast_reply_text(assigned)
+            reply = _capabilities_fast_reply_text(
+                assigned, coordinator_id=coord, delegation_pool=pool
+            )
             _audit_title = "Capacidades (respuesta directa)"
         else:
             log_sys(_obs, "Saludo: respuesta directa (sin plan ni subagente)")
@@ -1623,6 +1726,10 @@ def build_manager_graph(
             out["username"] = state["username"]
         if "available_templates" in state:
             out["available_templates"] = state["available_templates"]
+        if state.get("coordinator_worker_id"):
+            out["coordinator_worker_id"] = state.get("coordinator_worker_id")
+        if state.get("delegation_pool"):
+            out["delegation_pool"] = state.get("delegation_pool")
         _ot_g = (state.get("outbound_telegram_bot_token") or "").strip()
         if _ot_g:
             out["outbound_telegram_bot_token"] = _ot_g
@@ -1642,6 +1749,8 @@ def build_manager_graph(
         available_plan = state.get("available_templates") or list_workers(troot)
         default_worker = available_plan[0] if available_plan else None
         assigned = (state.get("assigned_worker_id") or default_worker or "").strip() or default_worker
+        coordinator_id = (state.get("coordinator_worker_id") or "").strip() or None
+        delegation_pool = [str(x).strip() for x in (state.get("delegation_pool") or []) if str(x).strip()]
         if not incoming:
             _log.warning("manager plan: incoming vacío en state (keys=%s)", list(state.keys()))
 
@@ -1665,7 +1774,7 @@ def build_manager_graph(
             elif llm is not None and _psp:
                 _parsed = _llm_plan_from_model(llm, incoming, _psp)
                 if _parsed:
-                    plan_title, tasks, mercenary_spec = _parsed
+                    plan_title, tasks, mercenary_spec, _delegate_unused = _parsed
                 else:
                     plan_title, tasks = _llm_plan(incoming)
                     mercenary_spec = None
@@ -1712,6 +1821,25 @@ def build_manager_graph(
         if replan_enabled() and _pa_plan > 0:
             planned_final = (planned_final or "").strip() + format_replan_task_suffix(_pa_plan, _max_plan)
 
+        if coordinator_id and delegation_pool and not _hrp_fast:
+            assigned = _resolve_orchestrator_delegate(
+                incoming,
+                delegation_pool,
+                coordinator_id,
+                llm,
+                (planner_system_prompt or "").strip(),
+                troot,
+            )
+            _coord_prefix = f"[Coordinado por {coordinator_id}] "
+            if not (planned_final or "").strip().startswith(_coord_prefix):
+                planned_final = _coord_prefix + (planned_final or incoming).strip()
+            log_sys(
+                _obs,
+                "AXIS coordinador %s → delegado %s",
+                coordinator_id,
+                assigned,
+            )
+
         # Derivar task_summary a partir del mensaje original / planned_task
         task_summary = _task_summary_for_activity(incoming, planned_final)
 
@@ -1743,7 +1871,12 @@ def build_manager_graph(
         if active_mission:
             out["active_mission"] = active_mission
 
-        if override_worker and override_worker in available_plan:
+        if coordinator_id and delegation_pool:
+            out["coordinator_worker_id"] = coordinator_id
+            out["delegation_pool"] = delegation_pool
+            if assigned:
+                out["assigned_worker_id"] = assigned
+        elif override_worker and override_worker in available_plan:
             out["assigned_worker_id"] = override_worker
         elif assigned not in available_plan and available_plan:
             out["assigned_worker_id"] = available_plan[0]

@@ -62,6 +62,10 @@ class ManagerAgentState(TypedDict, total=False):
     # Worker de la ruta HTTP (p. ej. /api/v1/agent/Quant-Trader/chat). Usado para anclar SYSTEM_EVENT de /crons --delta.
     entry_worker_id: Optional[str]
 
+    # Modo coordinador ADF (p. ej. AXIS-Maestro): MAESTRO planifica delegación a subagentes.
+    coordinator_worker_id: Optional[str]
+    delegation_pool: Optional[List[str]]
+
     # Resiliencia Manager: replan tras fallos recuperables (ver agent_resilience + manager_graph).
     plan_attempt_index: Optional[int]
     plan_max_attempts: Optional[int]

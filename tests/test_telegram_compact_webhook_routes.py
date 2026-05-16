@@ -97,7 +97,7 @@ def test_compact_marco_assistant_binding(
         "marco_assistant:77:tok_marco:/api/v1/telegram/marco_assistant"
     )[0]
     b = compact_route_to_path_binding(r)
-    assert b.worker_id == "research_worker"
+    assert b.worker_id == "AXIS-Maestro"
     assert b.tenant_id == "Marco"
     assert b.forced_vault_db_path == str(adb.resolve())
 

@@ -327,23 +327,27 @@ def test_extract_json_object() -> None:
 def test_coerce_planner_payload() -> None:
     from duckclaw.graphs.manager_graph import _coerce_planner_payload
 
-    t, tasks, merc = _coerce_planner_payload({"plan_title": "Título", "tasks": ["u1", "u2"]})
+    t, tasks, merc, deleg = _coerce_planner_payload({"plan_title": "Título", "tasks": ["u1", "u2"]})
     assert t == "Título"
     assert tasks == ["u1", "u2"]
     assert merc is None
-    t2, tasks2, merc2 = _coerce_planner_payload({"plan_title": "  x  ", "tasks": None})
+    assert deleg is None
+    t2, tasks2, merc2, deleg2 = _coerce_planner_payload({"plan_title": "  x  ", "tasks": None})
     assert t2 == "x"
     assert tasks2 == []
     assert merc2 is None
-    _, _, m3 = _coerce_planner_payload(
+    assert deleg2 is None
+    _, _, m3, d3 = _coerce_planner_payload(
         {
             "plan_title": "M",
             "tasks": ["a"],
             "mercenary": {"directive": "probe", "timeout": 60},
+            "delegate_worker_id": "AXIS-Coder",
         }
     )
     assert m3 == {"directive": "probe", "timeout": 60}
-    _, _, m4 = _coerce_planner_payload(
+    assert d3 == "AXIS-Coder"
+    _, _, m4, _ = _coerce_planner_payload(
         {"plan_title": "M", "tasks": ["a"], "mercenary": {"directive": "x", "timeout": 900}}
     )
     assert m4 == {"directive": "x", "timeout": 600}

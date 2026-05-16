@@ -42,8 +42,8 @@ _BOT_PROFILES: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "jobhunter": ("Job-Hunter", "Trabajo", ("DUCKCLAW_JOB_HUNTER_DB_PATH",)),
     "quanttrader": ("Quant-Trader", "Cuantitativo", ("DUCKCLAW_QUANT_TRADER_DB_PATH",)),
     "pqrsd-assistant": ("PQRSD-Assistant", "PQRS", ("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH",)),
-    # Asistente personal Marco: plantilla ResearchWorker + bóveda vía DUCKCLAW_AXIS_DB_PATH
-    "marco_assistant": ("research_worker", "Marco", ("DUCKCLAW_AXIS_DB_PATH",)),
+    # Asistente personal Marco: coordinador AXIS-Maestro + bóveda vía DUCKCLAW_AXIS_DB_PATH
+    "marco_assistant": ("AXIS-Maestro", "Marco", ("DUCKCLAW_AXIS_DB_PATH",)),
 }
 
 

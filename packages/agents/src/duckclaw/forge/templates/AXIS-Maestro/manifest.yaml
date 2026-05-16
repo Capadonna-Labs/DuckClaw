@@ -1,8 +1,10 @@
+id: AXIS-Maestro
 agent_id: maestro
 display_name: "MAESTRO — Adaptive Tutor"
 version: "1.0.0"
 phase: 6
 status: DEFINED
+topology: axis_orchestrator
 description: "Tutor adaptativo de por vida con visión completa del propietario"
 long_description: |
   MAESTRO orquesta aprendizaje usando FORGE, CODER, MIRROR, SENTINEL y RADAR.
@@ -22,8 +24,17 @@ memory:
   lancedb_collections: ["curriculum", "study_sessions"]
   silver_tables_prefix: "maestro_"
 
+orchestrator:
+  enabled: true
+  orchestrates:
+    - AXIS-Coder
+    - AXIS-Mirror
+    - AXIS-Radar
+    - AXIS-Sentinel
+    - AXIS-Phantom
+
 dependencies:
-  agents: ["mirror", "forge", "coder", "sentinel", "radar"]
+  agents: ["mirror", "forge", "coder", "sentinel", "radar", "phantom"]
   external_apis: []
   capabilities_required:
     - CAP-MAESTRO-001

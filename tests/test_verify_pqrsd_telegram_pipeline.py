@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from env_ids import TELEGRAM_TEST_USER_ID
+
 _REPO = Path(__file__).resolve().parents[1]
 _SPEC = importlib.util.spec_from_file_location(
     "verify_pqrsd_telegram_pipeline",
@@ -19,8 +21,8 @@ vault_user_id_from_db_path = _mod.vault_user_id_from_db_path
 
 
 def test_vault_user_id_from_private_path() -> None:
-    p = Path("/repo/db/private/1726618406/pqrsd-assistantdb1.duckdb")
-    assert vault_user_id_from_db_path(p) == "1726618406"
+    p = Path(f"/repo/db/private/{TELEGRAM_TEST_USER_ID}/pqrsd-assistantdb1.duckdb")
+    assert vault_user_id_from_db_path(p) == TELEGRAM_TEST_USER_ID
 
 
 def test_vault_user_id_requires_private_segment() -> None:

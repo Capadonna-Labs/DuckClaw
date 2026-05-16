@@ -9,10 +9,10 @@ Runbooks en español/inglés mixto. **Normativa:** [`../../specs/`](../../specs/
 | Wizard + topología | [Installation](../Installation.md) |
 | PM2, Redis, Telegram, variables | [COMANDOS](../COMANDOS.md) |
 | Conflictos puerto / DuckDB / PM2 | [Troubleshooting Gateway PM2](../Troubleshooting-Gateway-PM2.md) |
-| Logs, LangSmith, fly commands | [Observability](../Observability-2.1-Identidad.md) |
-| Sandbox Strix | [Strix Sandbox Security](../Strix-Sandbox-Security.md) |
-| Heartbeat | [Homeostasis Heartbeat](../Homeostasis-Heartbeat.md) |
-| Multi-vault `/vault` | [Multi Vault System](../Multi-Vault-System.md) |
+| Logs, LangSmith, fly commands | [Observability](Observability-2.1-Identidad.md) |
+| Sandbox Strix | [Strix Sandbox Security](Strix-Sandbox-Security.md) |
+| Heartbeat | [Homeostasis Heartbeat](Homeostasis-Heartbeat.md) |
+| Multi-vault `/vault` | [Multi Vault System](Multi-Vault-System.md) |
 | Trazas SFT | [SFT traces](../agents/sft_conversation_traces.md) · `packages/agents/train/README.md` |
 | VLM | `specs/features/VLM INTEGRATION.md` · COMANDOS §5.2 |
 

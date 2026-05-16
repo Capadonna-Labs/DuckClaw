@@ -6,6 +6,8 @@ import time
 
 import pytest
 
+from env_ids import TELEGRAM_TEST_USER_ID
+
 from duckclaw.graphs.on_the_fly_commands import (
     execute_tasks,
     unescape_telegram_markdown_v2_layers,
@@ -50,6 +52,6 @@ def test_execute_tasks_shows_worker_without_backslash_before_hyphen(monkeypatch:
         }
 
     monkeypatch.setattr("duckclaw.graphs.activity.get_activity", _fake_get_activity)
-    out = execute_tasks(None, "1726618406")
+    out = execute_tasks(None, TELEGRAM_TEST_USER_ID)
     assert "SIATA\\-Analyst" not in out
     assert "SIATA Analyst" in out or "SIATA" in unescape_telegram_markdown_v2_layers(out)

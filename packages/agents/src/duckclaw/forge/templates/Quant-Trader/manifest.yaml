@@ -44,7 +44,7 @@ skills:
       read_only: true
       npm_package: mcp-reddit
   # GitHub MCP oficial (Docker): solo lectura en este worker (allowlist RW = gitclaw + DUCKCLAW_GITHUB_MCP_READWRITE_WORKERS).
-  # Requiere GITHUB_TOKEN, Docker e imagen ghcr.io/github/github-mcp-server (ver README / scripts/smoke_github_mcp_stdio.py).
+  # Requiere GITHUB_TOKEN, Docker e imagen ghcr.io/github/github-mcp-server (ver scripts/smoke/smoke_github_mcp_stdio.py).
   - github:
       token_env: GITHUB_TOKEN
       hitl_destructive: true

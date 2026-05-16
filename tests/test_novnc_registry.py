@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from env_ids import TELEGRAM_TEST_USER_ID
+
 from duckclaw.graphs.novnc_registry import (
     build_vnc_url,
     get_existing_token_and_port,
@@ -15,7 +17,7 @@ from duckclaw.graphs.novnc_registry import (
 
 
 def test_sanitize_chat_to_session_id() -> None:
-    assert sanitize_chat_to_session_id("1726618406") == "1726618406"
+    assert sanitize_chat_to_session_id(TELEGRAM_TEST_USER_ID) == TELEGRAM_TEST_USER_ID
     assert "@" not in sanitize_chat_to_session_id("user@host")
     assert len(sanitize_chat_to_session_id("x" * 100)) <= 48
 

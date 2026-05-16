@@ -11,6 +11,7 @@ from pathlib import Path
 os.environ.setdefault("DUCKCLAW_TAILSCALE_AUTH_KEY", "test-key-for-tests")
 
 import pytest
+from env_ids import TELEGRAM_TEST_USER_ID
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -97,12 +98,12 @@ def test_resolve_chat_session_id_from_query_string() -> None:
         "method": "POST",
         "path": "/api/v1/agent/chat",
         "headers": [],
-        "query_string": b"session_id=1726618406",
+        "query_string": f"session_id={TELEGRAM_TEST_USER_ID}".encode(),
     }
     req = Request(scope)
     body = ChatRequest.model_validate({"message": "hi"})
     session_id, source = gateway_main._resolve_chat_session_id(body, req)
-    assert session_id == "1726618406"
+    assert session_id == TELEGRAM_TEST_USER_ID
     assert source == "query.session_id"
 
 
@@ -128,8 +129,8 @@ def test_chat_request_aliases_map_to_chat_id() -> None:
     """session_id/thread_id/chatId deben poblar chat_id (misma sesión que /sandbox)."""
     from core.models import ChatRequest
 
-    m1 = ChatRequest.model_validate({"message": "x", "session_id": "1726618406"})
-    assert m1.chat_id == "1726618406"
+    m1 = ChatRequest.model_validate({"message": "x", "session_id": TELEGRAM_TEST_USER_ID})
+    assert m1.chat_id == TELEGRAM_TEST_USER_ID
     m2 = ChatRequest.model_validate({"message": "x", "thread_id": "t1"})
     assert m2.chat_id == "t1"
     m3 = ChatRequest.model_validate({"message": "x", "chatId": "c1"})
@@ -333,13 +334,13 @@ def test_webhook_outbound_chat_reply_sync_posts_json(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(gateway_main._url_request, "urlopen", fake_urlopen)
     gateway_main._webhook_outbound_chat_reply_sync(
-        chat_id="1726618406",
-        user_id="1726618406",
+        chat_id=TELEGRAM_TEST_USER_ID,
+        user_id=TELEGRAM_TEST_USER_ID,
         text="hola",
     )
     assert len(posted) == 1
-    assert posted[0]["chat_id"] == "1726618406"
-    assert posted[0]["user_id"] == "1726618406"
+    assert posted[0]["chat_id"] == TELEGRAM_TEST_USER_ID
+    assert posted[0]["user_id"] == TELEGRAM_TEST_USER_ID
     assert posted[0]["text"] == "hola"
     assert posted[0].get("parse_mode") == "HTML"
 

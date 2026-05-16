@@ -64,7 +64,10 @@ def test_parse_goals_delta_arg_min_clamp() -> None:
 
 
 def test_chat_id_from_goals_delta_config_key() -> None:
-    assert chat_id_from_goals_delta_config_key("chat_1726618406_goals_delta_seconds") == "1726618406"
+    from env_ids import TELEGRAM_TEST_USER_ID
+
+    key = f"chat_{TELEGRAM_TEST_USER_ID}_goals_delta_seconds"
+    assert chat_id_from_goals_delta_config_key(key) == TELEGRAM_TEST_USER_ID
     assert chat_id_from_goals_delta_config_key("chat_foo_bar_goals_delta_seconds") == "foo_bar"
     assert chat_id_from_goals_delta_config_key("wrong") is None
 

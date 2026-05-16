@@ -9,6 +9,8 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from env_ids import TELEGRAM_TEST_USER_ID
+
 _REPO = Path(__file__).resolve().parents[1]
 _DW = _REPO / "services" / "db-writer"
 if str(_DW) not in sys.path:
@@ -38,9 +40,9 @@ def dreamer_db() -> duckdb.DuckDBPyConnection:
 
 def test_semantic_memory_upsert_inserts(dreamer_db: duckdb.DuckDBPyConnection) -> None:
     d = QuantStateDelta(
-        tenant_id="1726618406",
+        tenant_id=TELEGRAM_TEST_USER_ID,
         delta_type="SEMANTIC_MEMORY_UPSERT",
-        user_id="1726618406",
+        user_id=TELEGRAM_TEST_USER_ID,
         target_db_path="/tmp/x.duckdb",
         mutation={
             "table": "main.semantic_memory",
@@ -63,27 +65,28 @@ def test_conversation_compaction_deletes_old(dreamer_db: duckdb.DuckDBPyConnecti
     dreamer_db.execute(
         """
         INSERT INTO telegram_conversation (chat_id, role, content, received_at)
-        VALUES (1726618406, 'user', 'viejo', ?)
+        VALUES (?, 'user', 'viejo', ?)
         """,
-        [old],
+        [int(TELEGRAM_TEST_USER_ID), old],
     )
     dreamer_db.execute(
         """
         INSERT INTO telegram_conversation (chat_id, role, content, received_at)
-        VALUES (1726618406, 'user', 'reciente', CURRENT_TIMESTAMP)
-        """
+        VALUES (?, 'user', 'reciente', CURRENT_TIMESTAMP)
+        """,
+        [int(TELEGRAM_TEST_USER_ID)],
     )
     n_before = dreamer_db.execute("SELECT COUNT(*) FROM telegram_conversation").fetchone()[0]
     assert n_before == 2
 
     d = QuantStateDelta(
-        tenant_id="1726618406",
+        tenant_id=TELEGRAM_TEST_USER_ID,
         delta_type="CONVERSATION_COMPACTION",
-        user_id="1726618406",
+        user_id=TELEGRAM_TEST_USER_ID,
         target_db_path="/tmp/x.duckdb",
         mutation={
             "table": "telegram_conversation",
-            "chat_id": 1726618406,
+            "chat_id": int(TELEGRAM_TEST_USER_ID),
             "days": 7,
         },
     )

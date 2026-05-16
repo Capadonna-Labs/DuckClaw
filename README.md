@@ -92,7 +92,7 @@ method invalid during initialization  method=tools/list
 Eso aparece porque el transporte MCP exige el handshake (**`initialize`**, luego **`notifications/initialized`**) antes de **`tools/list`**. DuckClaw y el siguiente script usan el cliente Python **`mcp`**, que ya hace ese orden al listar herramientas.
 
 ```bash
-uv run python scripts/smoke_github_mcp_stdio.py
+uv run python scripts/smoke/smoke_github_mcp_stdio.py
 ```
 
 No pongas el PAT en la línea de `docker run` (sale en histórico de shell); usa solo `GITHUB_TOKEN` en `.env` o variables de entorno.

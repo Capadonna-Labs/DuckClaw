@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from env_ids import TELEGRAM_TEST_USER_ID
+
 from duckclaw.graphs.on_the_fly_commands import handle_command
 from duckclaw.workers.manifest import WorkerSpec
 from duckclaw.workers import factory as worker_factory
@@ -41,7 +43,7 @@ class _DummyDB:
 
 def test_resolve_active_vault_bootstraps_default(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    vault_id, db_path = resolve_active_vault("1726618406")
+    vault_id, db_path = resolve_active_vault(TELEGRAM_TEST_USER_ID)
     assert vault_id == "default"
     assert db_path.endswith("default.duckdb")
 
@@ -76,7 +78,7 @@ def test_vault_command_flow(tmp_path, monkeypatch):
 def test_scoped_resolve_ignores_finanzdb_on_disk(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID", raising=False)
-    user = "1726618406"
+    user = TELEGRAM_TEST_USER_ID
     private_dir = tmp_path / "db" / "private" / user
     private_dir.mkdir(parents=True, exist_ok=True)
     (private_dir / "finanzdb1.duckdb").write_bytes(b"x" * 200_000)
@@ -88,7 +90,7 @@ def test_scoped_resolve_ignores_finanzdb_on_disk(tmp_path, monkeypatch):
 def test_scoped_initial_vault_from_env(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID", "job_hunter")
-    user = "1726618406"
+    user = TELEGRAM_TEST_USER_ID
     private_dir = tmp_path / "db" / "private" / user
     private_dir.mkdir(parents=True, exist_ok=True)
     (private_dir / "finanzdb1.duckdb").write_bytes(b"x" * 200_000)
@@ -158,7 +160,7 @@ def test_vault_command_scoped_tenant(tmp_path, monkeypatch):
 
 def test_resolve_promotes_existing_non_default_when_default_active(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    user = "1726618406"
+    user = TELEGRAM_TEST_USER_ID
     # Bootstraps default as active
     _ = resolve_active_vault(user)
     # Create a larger real vault file manually (simulate prior data)

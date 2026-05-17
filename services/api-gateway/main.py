@@ -1706,6 +1706,21 @@ async def _invoke_chat(
             _ded_vault = _dedicated_gateway_vault_db_path()
             if _ded_vault:
                 vault_db_path = _ded_vault
+    if not _forced_v and not _payload_vault:
+        _route_wid = (worker_id or "").strip()
+        if _route_wid and not _worker_id_is_pqrsd_assistant(_route_wid):
+            try:
+                from duckclaw.vaults import resolve_template_vault_path
+                from duckclaw.workers.manifest import load_manifest
+
+                _spec_route = load_manifest(_route_wid)
+                _tpl_path = resolve_template_vault_path(
+                    _spec_route.forge_vault_binding, vault_user_id
+                )
+                if _tpl_path:
+                    vault_db_path = _tpl_path
+            except Exception:
+                pass
     history = payload.history or []
     is_system_prompt = bool(payload.is_system_prompt or False)
     shared_db_path = (payload.shared_db_path or "").strip() or None
@@ -1866,6 +1881,7 @@ async def _invoke_chat(
                     tenant_id=tenant_id,
                     vault_user_id=vault_user_id,
                     username=username,
+                    entry_worker_id=worker_id,
                 )
             except Exception as exc:
                 _gateway_log.error("fly command failed chat=%s: %s", format_chat_id_for_terminal(session_id), exc)

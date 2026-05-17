@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import SettingsSection from '@/components/settings/SettingsSection';
 import { PageShell } from '@/components/admin/PageShell';
+import { TelegramWebhookRoutesEditor } from '@/components/telegram/TelegramWebhookRoutesEditor';
 import { useAuthStore } from '@/store/authStore';
 import type { WhitelistUser } from '@/types/admin';
 import { MessageSquare, Users, Trash2, UserPlus } from 'lucide-react';
@@ -12,7 +13,6 @@ export default function TelegramPage() {
   const { usuario } = useAuthStore();
   const canWrite = usuario?.rol === 'admin';
 
-  const [routes, setRoutes] = useState<{ bot: string; path: string }[]>([]);
   const [env, setEnv] = useState<Record<string, string>>({});
   const [tokenKey, setTokenKey] = useState('TELEGRAM_BOT_TOKEN');
   const [tokenVal, setTokenVal] = useState('');
@@ -51,7 +51,6 @@ export default function TelegramPage() {
   }, [tenantId]);
 
   useEffect(() => {
-    adminService.getTelegramRoutes().then((r) => setRoutes(r.routes));
     adminService.getEnv().then((e) => setEnv(e.values));
   }, []);
 
@@ -108,21 +107,6 @@ export default function TelegramPage() {
           Webhooks, tokens y whitelist (misma tabla que <code className="font-mono text-xs">/team</code>)
         </p>
       </header>
-
-      <SettingsSection
-        titulo="Rutas webhook"
-        descripcion="DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES"
-        icono={<MessageSquare size={22} />}
-      >
-        <ul className="space-y-2 text-sm font-mono">
-          {routes.length === 0 && <li className="text-gov-gray-500">Sin rutas configuradas</li>}
-          {routes.map((r) => (
-            <li key={r.bot} className="p-2 bg-gov-gray-50 dark:bg-dark-bg rounded-lg">
-              {r.bot} → {r.path}
-            </li>
-          ))}
-        </ul>
-      </SettingsSection>
 
       <SettingsSection
         titulo="Token bot"
@@ -278,6 +262,8 @@ export default function TelegramPage() {
           )}
         </div>
       </SettingsSection>
+
+      <TelegramWebhookRoutesEditor canWrite={canWrite} />
     </PageShell>
   );
 }

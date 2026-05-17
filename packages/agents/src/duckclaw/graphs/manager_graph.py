@@ -1827,6 +1827,19 @@ def build_manager_graph(
                     available = list(available) + [_c_iw]
         if assigned not in available:
             assigned = available[0] if available else None
+        if assigned:
+            try:
+                from duckclaw.vaults import resolve_template_vault_path
+                from duckclaw.workers.manifest import load_manifest
+
+                _spec_del = load_manifest(assigned)
+                _tpl_vault = resolve_template_vault_path(
+                    _spec_del.forge_vault_binding, user_id
+                )
+                if _tpl_vault:
+                    vault_db_path = _tpl_vault
+            except Exception:
+                pass
         if assigned is None:
             set_idle(chat_id)
             _log.warning("manager: no hay plantillas de worker disponibles en %s", getattr(troot, "__str__", lambda: "")() or "forge/templates")

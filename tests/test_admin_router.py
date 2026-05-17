@@ -226,6 +226,59 @@ def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch:
     assert r.json().get("response") == "ok"
 
 
+def test_template_vault_options_and_put(
+    admin_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
+    import sys
+
+    if str(gw_dir) not in sys.path:
+        sys.path.insert(0, str(gw_dir))
+    import routers.admin as admin_router
+
+    templates_root = tmp_path / "forge" / "templates"
+    wid = "VaultTestWorker"
+    worker_dir = templates_root / wid
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "manifest.yaml").write_text(
+        "name: VaultTest\nid: vault_test\nschema_name: main\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
+    monkeypatch.setattr(admin_router, "_templates_dir", lambda: templates_root)
+    try:
+        from duckclaw.forge import WORKERS_TEMPLATES_DIR as _wtd
+
+        monkeypatch.setattr("duckclaw.forge.WORKERS_TEMPLATES_DIR", templates_root)
+        monkeypatch.setattr("duckclaw.workers.manifest.WORKERS_TEMPLATES_DIR", templates_root, raising=False)
+    except ImportError:
+        pass
+    priv = tmp_path / "db" / "private" / "alice"
+    priv.mkdir(parents=True)
+    (priv / "custom.duckdb").write_bytes(b"x" * 8)
+
+    r = admin_client.get(
+        f"/api/v1/admin/templates/{wid}/vault-options",
+        headers={"X-Admin-Key": "test-admin-key"},
+        params={"vault_user_id": "alice"},
+    )
+    assert r.status_code == 200
+    opts = r.json().get("options") or []
+    assert any(o.get("vault_id") == "custom" for o in opts)
+
+    r2 = admin_client.put(
+        f"/api/v1/admin/templates/{wid}/vault-binding",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={"scope": "private", "vault_id": "custom"},
+    )
+    assert r2.status_code == 200
+    assert r2.json().get("binding", {}).get("vault_id") == "custom"
+
+    manifest_text = (worker_dir / "manifest.yaml").read_text(encoding="utf-8")
+    assert "vault_binding" in manifest_text
+    assert "custom" in manifest_text
+
+
 def test_catalog_topologies(admin_client: TestClient):
     r = admin_client.get(
         "/api/v1/admin/catalog/topologies",
@@ -257,6 +310,48 @@ def test_ops_commands(admin_client: TestClient):
     assert r.status_code == 200
     cmds = r.json().get("commands") or []
     assert any(c.get("id") == "pm2_list" for c in cmds)
+    assert any(c.get("id") == "pm2_start_mcp" for c in cmds)
+
+
+def test_telegram_routes_get_and_put(
+    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES=finanz:tok1:/api/v1/telegram/finanz\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES", "finanz:tok1:/api/v1/telegram/finanz")
+
+    import routers.admin as admin_router
+
+    monkeypatch.setattr(admin_router, "_env_file", lambda: env_file)
+
+    r = admin_client.get(
+        "/api/v1/admin/telegram/routes",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("format") == "compact"
+    assert len(data.get("routes") or []) == 1
+    assert data["routes"][0]["bot"] == "finanz"
+
+    r2 = admin_client.put(
+        "/api/v1/admin/telegram/routes",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={
+            "routes": [
+                {"bot": "finanz", "path": "/api/v1/telegram/finanz"},
+                {"bot": "siata", "path": "/api/v1/telegram/siata", "token": "tok_siata"},
+            ]
+        },
+    )
+    assert r2.status_code == 200
+    assert r2.json().get("route_count") == 2
+    saved = env_file.read_text(encoding="utf-8")
+    assert "siata:tok_siata:/api/v1/telegram/siata" in saved
+    assert "finanz:tok1:/api/v1/telegram/finanz" in saved
 
 
 def test_telegram_whitelist_get(admin_client: TestClient):

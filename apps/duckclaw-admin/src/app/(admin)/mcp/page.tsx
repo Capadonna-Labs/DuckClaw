@@ -1,27 +1,67 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
-import { Cable, Circle } from 'lucide-react';
+import { useAuthStore } from '@/store/authStore';
+import { Cable, Circle, Play, RefreshCw } from 'lucide-react';
+
+type McpLive = Awaited<ReturnType<typeof adminService.getMcpLiveStatus>>;
 
 export default function McpPage() {
-  const [live, setLive] = useState<Awaited<ReturnType<typeof adminService.getMcpLiveStatus>> | null>(
-    null
-  );
+  const { usuario } = useAuthStore();
+  const canRunOps = usuario?.rol === 'admin';
+  const [live, setLive] = useState<McpLive | null>(null);
   const [data, setData] = useState<Awaited<ReturnType<typeof adminService.getMcpCatalog>> | null>(
     null
   );
   const [error, setError] = useState<string | null>(null);
+  const [opsRunning, setOpsRunning] = useState<string | null>(null);
+  const [opsOutput, setOpsOutput] = useState<string | null>(null);
+
+  const refreshLive = useCallback(() => {
+    return adminService.getMcpLiveStatus().then(setLive).catch(() => setLive(null));
+  }, []);
 
   useEffect(() => {
-    adminService.getMcpLiveStatus().then(setLive).catch(() => setLive(null));
+    refreshLive();
     adminService
       .getMcpCatalog()
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
-  }, []);
+  }, [refreshLive]);
+
+  const runMcpOp = async (opId: 'pm2_start_mcp' | 'pm2_restart_mcp' | 'pm2_logs_mcp') => {
+    setOpsRunning(opId);
+    setOpsOutput(null);
+    setError(null);
+    try {
+      const r = await adminService.runOps(opId);
+      const text = [
+        r.ok ? 'OK' : `exit_code: ${r.exit_code}`,
+        r.stdout ? `--- stdout ---\n${r.stdout}` : '',
+        r.stderr ? `--- stderr ---\n${r.stderr}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+      setOpsOutput(text || '(sin salida)');
+      if (opId !== 'pm2_logs_mcp') {
+        for (let i = 0; i < 8; i++) {
+          await new Promise((res) => setTimeout(res, 1500));
+          const status = await adminService.getMcpLiveStatus();
+          setLive(status);
+          if (status.reachable) break;
+        }
+        const catalog = await adminService.getMcpCatalog().catch(() => null);
+        if (catalog) setData(catalog);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error ejecutando operación');
+    } finally {
+      setOpsRunning(null);
+    }
+  };
 
   const isUp = live?.reachable === true;
 
@@ -30,12 +70,26 @@ export default function McpPage() {
       <header>
         <h1 className="text-3xl font-black dark:text-dark-text">MCP</h1>
         <p className="text-sm text-gov-gray-500 mt-1">
-          Servidor streamable HTTP en puerto 8001 (mismo proceso que{' '}
-          <code className="text-xs">uv run python -m duckclaw_mcp</code>)
+          Servidor streamable HTTP en puerto 8001 (PM2: <code className="text-xs">DuckClaw-MCP</code>
+          )
         </p>
       </header>
 
-      <McpLiveBanner live={live} isUp={isUp} />
+      <McpLiveBanner
+        live={live}
+        isUp={isUp}
+        canRunOps={canRunOps}
+        opsRunning={opsRunning}
+        onStart={() => runMcpOp('pm2_start_mcp')}
+        onRestart={() => runMcpOp('pm2_restart_mcp')}
+        onRefresh={refreshLive}
+      />
+
+      {opsOutput && (
+        <pre className="p-4 text-xs font-mono bg-slate-900 text-slate-100 rounded-xl overflow-x-auto max-h-48 whitespace-pre-wrap">
+          {opsOutput}
+        </pre>
+      )}
 
       {data?._gateway_stale && (
         <p className="text-sm text-amber-800 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 p-3 rounded-xl">
@@ -98,35 +152,85 @@ export default function McpPage() {
 function McpLiveBanner({
   live,
   isUp,
+  canRunOps,
+  opsRunning,
+  onStart,
+  onRestart,
+  onRefresh,
 }: {
-  live: Awaited<ReturnType<typeof adminService.getMcpLiveStatus>> | null;
+  live: McpLive | null;
   isUp: boolean;
+  canRunOps: boolean;
+  opsRunning: string | null;
+  onStart: () => void;
+  onRestart: () => void;
+  onRefresh: () => void;
 }) {
+  const busy = opsRunning !== null;
+
   return (
     <div
-      className={`flex items-start gap-3 p-4 rounded-2xl border ${
+      className={`flex flex-col sm:flex-row sm:items-start gap-3 p-4 rounded-2xl border ${
         isUp
           ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-900'
           : 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-900'
       }`}
     >
-      <Circle
-        size={12}
-        className={`mt-1 shrink-0 fill-current ${isUp ? 'text-green-600' : 'text-red-500'}`}
-      />
-      <div className="text-sm space-y-1 min-w-0">
-        <p className="font-bold">{isUp ? 'MCP en línea' : 'MCP no detectado'}</p>
-        {live && (
+      <div className="flex items-start gap-3 flex-1 min-w-0">
+        <Circle
+          size={12}
+          className={`mt-1 shrink-0 fill-current ${isUp ? 'text-green-600' : 'text-red-500'}`}
+        />
+        <div className="text-sm space-y-1 min-w-0">
+          <p className="font-bold">{isUp ? 'MCP en línea' : 'MCP no detectado'}</p>
+          {live && (
+            <>
+              <p className="font-mono text-xs break-all">{live.url}</p>
+              <p className="font-mono text-[10px] text-gov-gray-600 dark:text-dark-muted">
+                {live.command}
+              </p>
+              {!isUp && live.error && (
+                <p className="text-xs text-red-700 dark:text-red-400">{live.error}</p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 shrink-0">
+        {canRunOps && (
           <>
-            <p className="font-mono text-xs break-all">{live.url}</p>
-            <p className="font-mono text-[10px] text-gov-gray-600 dark:text-dark-muted">
-              {live.command}
-            </p>
-            {!isUp && live.error && (
-              <p className="text-xs text-red-700 dark:text-red-400">{live.error}</p>
+            {!isUp && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onStart}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-gov-blue-700 text-white hover:bg-gov-blue-800 disabled:opacity-50"
+              >
+                <Play size={14} />
+                {opsRunning === 'pm2_start_mcp' ? 'Iniciando…' : 'Iniciar MCP (PM2)'}
+              </button>
             )}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onRestart}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg border dark:border-dark-border hover:border-gov-blue-500 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
+              {opsRunning === 'pm2_restart_mcp' ? 'Reiniciando…' : 'Reiniciar MCP'}
+            </button>
           </>
         )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onRefresh()}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg text-gov-gray-600 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50"
+        >
+          <RefreshCw size={14} />
+          Comprobar
+        </button>
       </div>
     </div>
   );
@@ -138,7 +242,7 @@ function McpCmdBlock({
   isUp,
 }: {
   data: NonNullable<Awaited<ReturnType<typeof adminService.getMcpCatalog>>>;
-  live: Awaited<ReturnType<typeof adminService.getMcpLiveStatus>> | null;
+  live: McpLive | null;
   isUp: boolean;
 }) {
   return (
@@ -153,7 +257,13 @@ function McpCmdBlock({
         </p>
       )}
       <p className="text-xs font-sans text-gov-gray-500">
-        Estado UI: {isUp ? 'respondiendo en /' : 'sin respuesta — levanta el comando de arriba'}
+        Estado UI:{' '}
+        {isUp
+          ? 'respondiendo en /'
+          : 'sin respuesta — usa «Iniciar MCP (PM2)» arriba o el comando manual'}
+      </p>
+      <p className="text-xs font-sans text-gov-gray-500">
+        PM2: <code>pm2 start config/ecosystem.mcp.config.cjs</code>
       </p>
     </div>
   );

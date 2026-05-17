@@ -1643,9 +1643,15 @@ def _heartbeat_elapsed_sec(state: dict) -> float | None:
 
 
 def _send_sandbox_heartbeat_telegram(state: dict) -> None:
-    from duckclaw.graphs.chat_heartbeat import format_tool_heartbeat, normalize_telegram_chat_id_for_outbound
+    from duckclaw.graphs.chat_heartbeat import (
+        format_tool_heartbeat,
+        is_admin_ui_chat_session,
+        normalize_telegram_chat_id_for_outbound,
+    )
 
     cid_raw = str(state.get("chat_id") or state.get("session_id") or "").strip()
+    if is_admin_ui_chat_session(cid_raw):
+        return
     cid = normalize_telegram_chat_id_for_outbound(cid_raw) or cid_raw
     uid = str(state.get("user_id") or "").strip() or cid
     if not cid:

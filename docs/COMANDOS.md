@@ -26,7 +26,12 @@ pm2 logs BI-Analyst-Gateway                      # Ej. multi-gateway
 pm2 logs JobHunter-Gateway
 pm2 logs DuckClaw-DB-Writer
 pm2 restart DuckClaw-Gateway --update-env        # Tras .env
-pm2 restart all --update-env                      # Reinicia todos los servicios 
+pm2 restart all --update-env                      # Reinicia todos los servicios
+
+# MCP streamable HTTP (admin → MCP → Iniciar, o manual)
+pm2 start config/ecosystem.mcp.config.cjs
+pm2 restart DuckClaw-MCP --update-env
+pm2 logs DuckClaw-MCP
 ```
 
 ## TELEGRAM

@@ -17,6 +17,25 @@ from core.telegram_compact_webhook_routes import (
     fastapi_relative_path,
     parse_compact_telegram_webhook_routes,
 )
+from duckclaw.integrations.telegram.compact_webhook_routes import (
+    TelegramCompactWebhookRoute,
+    serialize_compact_telegram_webhook_routes,
+)
+
+
+def test_serialize_compact_roundtrip() -> None:
+    routes = [
+        TelegramCompactWebhookRoute(
+            bot_name="finanz",
+            bot_token="8266213716:AAG5xx",
+            webhook_path="/api/v1/telegram/finanz",
+        ),
+    ]
+    raw = serialize_compact_telegram_webhook_routes(routes)
+    again = parse_compact_telegram_webhook_routes(raw)
+    assert len(again) == 1
+    assert again[0].bot_name == "finanz"
+    assert again[0].bot_token == "8266213716:AAG5xx"
 
 
 def test_parse_compact_roundtrip() -> None:

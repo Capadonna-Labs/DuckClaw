@@ -523,3 +523,111 @@ def shared_tenant_dir(tenant_id: Any) -> Path:
     path = db_root() / "shared" / _safe_user_id(tenant_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def normalize_vault_binding(raw: Any) -> dict[str, str] | None:
+    """Valida ``forge_context.vault_binding`` del manifest; None si ausente o inválido."""
+    if not isinstance(raw, dict):
+        return None
+    scope = str(raw.get("scope") or "").strip().lower()
+    if scope == "private":
+        vid = _slug_vault_id(raw.get("vault_id"))
+        if not vid:
+            return None
+        return {"scope": "private", "vault_id": vid}
+    if scope == "shared":
+        path_raw = str(raw.get("path") or "").strip().replace("\\", "/")
+        if not path_raw:
+            return None
+        return {"scope": "shared", "path": path_raw}
+    return None
+
+
+def resolve_template_vault_path(
+    binding: dict[str, str] | None,
+    vault_user_id: Any,
+    *,
+    require_exists: bool = True,
+) -> str | None:
+    """
+    Resuelve ruta absoluta de bóveda según binding de plantilla y usuario del chat.
+    Ver specs/features/platform/TEMPLATE_VAULT_BINDING.md
+    """
+    norm = normalize_vault_binding(binding)
+    if not norm:
+        return None
+    scope = norm["scope"]
+    if scope == "private":
+        uid = _safe_user_id(vault_user_id)
+        path = vault_file_path(uid, norm["vault_id"])
+    else:
+        from duckclaw.gateway_db import resolve_env_duckdb_path
+
+        rel = norm["path"].lstrip("/")
+        if ".." in rel.split("/"):
+            return None
+        shared_root = (db_root() / "shared").resolve()
+        abs_path = Path(resolve_env_duckdb_path(rel))
+        try:
+            abs_path.resolve().relative_to(shared_root)
+        except ValueError:
+            return None
+        path = abs_path
+    if require_exists and not path.is_file():
+        return None
+    return str(path.resolve())
+
+
+def list_vault_options_for_user(
+    vault_user_id: Any,
+    *,
+    limit: int = 100,
+) -> list[dict[str, str]]:
+    """
+    Bóvedas listables para selector admin: privadas del usuario + compartidas globales.
+    """
+    uid = _safe_user_id(vault_user_id)
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    private_dir = user_vault_dir(uid)
+    repo_root = db_root().parent
+    if private_dir.is_dir():
+        for f in sorted(private_dir.glob("*.duckdb")):
+            try:
+                rel_repo = str(f.relative_to(repo_root)).replace("\\", "/")
+            except ValueError:
+                rel_repo = f"db/private/{uid}/{f.name}"
+            key = f"private:{f.stem}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                {
+                    "scope": "private",
+                    "vault_id": f.stem,
+                    "path": rel_repo.replace("\\", "/"),
+                    "label": f.name,
+                }
+            )
+    shared_dir = db_root() / "shared"
+    if shared_dir.is_dir():
+        for f in sorted(shared_dir.rglob("*.duckdb")):
+            try:
+                rel_repo = str(f.relative_to(repo_root)).replace("\\", "/")
+            except ValueError:
+                rel_repo = str(f)
+            key = f"shared:{rel_repo}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                {
+                    "scope": "shared",
+                    "vault_id": "",
+                    "path": rel_repo,
+                    "label": f.name,
+                }
+            )
+            if len(out) >= limit:
+                break
+    return out[:limit]

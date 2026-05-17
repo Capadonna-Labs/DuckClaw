@@ -4,6 +4,8 @@ import type {
   FlyCommandEntry,
   TemplateDetail,
   TemplateSummary,
+  VaultBinding,
+  VaultOption,
   WhitelistUser,
 } from '@/types/admin';
 
@@ -100,6 +102,37 @@ export const adminService = {
       { method: 'POST' }
     ),
 
+  getTemplateVaultOptions: (workerId: string, vaultUserId?: string) => {
+    const q = vaultUserId ? `?vault_user_id=${encodeURIComponent(vaultUserId)}` : '';
+    return adminFetch<{ vault_user_id: string; worker_id: string; options: VaultOption[] }>(
+      `/templates/${encodeURIComponent(workerId)}/vault-options${q}`
+    );
+  },
+
+  getTemplateVaultBinding: (workerId: string, vaultUserId?: string) => {
+    const q = vaultUserId ? `?vault_user_id=${encodeURIComponent(vaultUserId)}` : '';
+    return adminFetch<{
+      worker_id: string;
+      vault_user_id: string;
+      binding: VaultBinding | null;
+      resolved_path: string | null;
+    }>(`/templates/${encodeURIComponent(workerId)}/vault-binding${q}`);
+  },
+
+  putTemplateVaultBinding: (
+    workerId: string,
+    body: { scope: string; vault_id?: string; path?: string }
+  ) =>
+    adminFetch<{
+      ok: boolean;
+      worker_id: string;
+      binding: VaultBinding | null;
+      resolved_path: string | null;
+    }>(`/templates/${encodeURIComponent(workerId)}/vault-binding`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
   createTemplate: (id: string, sourceTemplate?: string) =>
     adminFetch<{ ok: boolean; id: string }>('/templates', {
       method: 'POST',
@@ -132,7 +165,21 @@ export const adminService = {
       body: JSON.stringify({ values }),
     }),
 
-  getTelegramRoutes: () => adminFetch<{ routes: { bot: string; path: string }[] }>('/telegram/routes'),
+  getTelegramRoutes: () =>
+    adminFetch<{
+      format: string;
+      routes: { bot: string; path: string; token_masked?: string }[];
+      known_bots?: string[];
+      parse_error?: string;
+      raw_masked?: string;
+      restart_hint?: string;
+    }>('/telegram/routes'),
+
+  putTelegramRoutes: (routes: { bot: string; path: string; token?: string }[]) =>
+    adminFetch<{ ok: boolean; route_count: number; restart_hint?: string }>('/telegram/routes', {
+      method: 'PUT',
+      body: JSON.stringify({ routes }),
+    }),
 
   getTelegramWhitelist: (tenantId: string) =>
     adminFetch<{

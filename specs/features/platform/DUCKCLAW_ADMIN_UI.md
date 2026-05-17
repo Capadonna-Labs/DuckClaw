@@ -42,6 +42,8 @@ Badge UI: **canónico (archivo)** vs **override (runtime)**.
 - `POST /templates` — body `{ "id", "source_template?" }` — clonar desde industria
 - `DELETE /templates/{id}` — deny-list: `entry_router`, `manager_router`, workers sistema
 - `POST /templates/{id}/validate` — ADF + manifest
+- `GET /templates/{id}/vault-options` — `.duckdb` del usuario + `db/shared/` (ver [TEMPLATE_VAULT_BINDING](TEMPLATE_VAULT_BINDING.md))
+- `GET|PUT /templates/{id}/vault-binding` — `forge_context.vault_binding` en manifest
 
 ### Proyectos
 - `POST /projects` — alias `POST /templates` + opcional apply `schema.sql`

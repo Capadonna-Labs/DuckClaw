@@ -23,6 +23,19 @@ export interface TemplateDetail {
   contents: Record<string, string>;
 }
 
+export interface VaultOption {
+  scope: string;
+  vault_id: string;
+  path: string;
+  label: string;
+}
+
+export interface VaultBinding {
+  scope: string;
+  vault_id?: string;
+  path?: string;
+}
+
 export interface EnvConfigResponse {
   path: string;
   values: Record<string, string>;

@@ -22,6 +22,21 @@ const OPS_COMMANDS_FALLBACK = {
       label: 'Últimas líneas log Gateway',
       argv: ['pm2', 'logs', 'DuckClaw-Gateway', '--lines', '40', '--nostream'],
     },
+    {
+      id: 'pm2_start_mcp',
+      label: 'Iniciar DuckClaw-MCP',
+      argv: ['pm2', 'start', 'config/ecosystem.mcp.config.cjs'],
+    },
+    {
+      id: 'pm2_restart_mcp',
+      label: 'Reiniciar DuckClaw-MCP',
+      argv: ['pm2', 'restart', 'DuckClaw-MCP', '--update-env'],
+    },
+    {
+      id: 'pm2_logs_mcp',
+      label: 'Últimas líneas log MCP',
+      argv: ['pm2', 'logs', 'DuckClaw-MCP', '--lines', '40', '--nostream'],
+    },
     { id: 'doctor', label: 'Diagnóstico local (doctor.py)', argv: ['uv', 'run', 'python', 'scripts/doctor.py'] },
     {
       id: 'bootstrap_dbs',

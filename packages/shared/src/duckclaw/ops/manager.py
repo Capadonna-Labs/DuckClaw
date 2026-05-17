@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from duckclaw.dotenv_immutable import merged_root_and_proposed_flat_env
-from duckclaw.env_secrets import strip_secrets_from_env
+from duckclaw.env_secrets import strip_dotenv_owned_from_env, strip_secrets_from_env
 from duckclaw.gateway_db import raw_gateway_db_path_from_mapping
 
 
@@ -340,7 +340,9 @@ def _save_merged_gateway_apps(effective_cwd: str, apps: list[dict[str, Any]]) ->
         copy = dict(app)
         env = copy.get("env")
         if isinstance(env, dict):
-            copy["env"] = strip_secrets_from_env(_env_dict_for_json(env))
+            copy["env"] = strip_dotenv_owned_from_env(
+                strip_secrets_from_env(_env_dict_for_json(env))
+            )
         sanitized.append(copy)
     path.write_text(json.dumps({"apps": sanitized}, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -513,12 +515,19 @@ def _render_gateway_ecosystem_cjs(
     apps: list[dict[str, Any]],
 ) -> str:
     """Genera ecosystem PM2 con varios gateways (mismo código, distinto nombre/puerto/env)."""
+    _ = python_path  # script relativo a ``root`` (portable entre clones)
     lines = [
         "/**",
-        " * PM2 — API Gateways DuckClaw (fusionado). Secretos: solo .env (env_file).",
+        " * PM2 — API Gateways DuckClaw (generado). Secretos: solo .env (env_file).",
         " * Regenerar: uv run duckops serve --pm2 --gateway",
         " * pm2 start config/ecosystem.api.config.cjs --only \"NombreGateway\"",
         " */",
+        'const path = require("path");',
+        'const fs = require("fs");',
+        'const root = path.resolve(__dirname, "..");',
+        'const python = fs.existsSync(path.join(root, ".venv/bin/python3"))',
+        '  ? path.join(root, ".venv/bin/python3")',
+        '  : path.join(root, ".venv/bin/python");',
         "module.exports = {",
         "  apps: [",
     ]
@@ -533,23 +542,29 @@ def _render_gateway_ecosystem_cjs(
         env = app.get("env") or {}
         if not isinstance(env, dict):
             env = {}
-        env = strip_secrets_from_env(_env_dict_for_json(dict(env)))
+        env = strip_dotenv_owned_from_env(strip_secrets_from_env(_env_dict_for_json(dict(env))))
         env.setdefault("DUCKCLAW_PM2_PROCESS_NAME", name)
-        env_str = json.dumps(env, indent=8, ensure_ascii=False)
+        env.pop("PYTHONPATH", None)
         args_cmd = (
             f"services/api-gateway/uvicorn_pm2.py main:app --host {host} --port {port} --app-dir services/api-gateway"
         )
         lines.append("    {")
         lines.append(f"      name: {json.dumps(name)},")
-        lines.append(f"      script: {json.dumps(python_path)},")
+        lines.append("      script: python,")
         lines.append(f"      args: {json.dumps(args_cmd)},")
-        lines.append(f"      cwd: {json.dumps(effective_cwd)},")
-        lines.append("      env_file: \".env\",")
+        lines.append("      cwd: root,")
+        lines.append('      env_file: path.join(root, ".env"),')
         lines.append("      interpreter: \"none\",")
         lines.append("      autorestart: true,")
         lines.append("      watch: false,")
         lines.append("      max_restarts: 10,")
-        lines.append(f"      env: {env_str},")
+        lines.append("      env: {")
+        lines.append("        PYTHONPATH: root,")
+        for ek, ev in sorted(env.items()):
+            if ek == "PYTHONPATH":
+                continue
+            lines.append(f"        {json.dumps(ek)}: {json.dumps(ev)},")
+        lines.append("      },")
         lines.append("    },")
     lines.append("  ],")
     lines.append("};")

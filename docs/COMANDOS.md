@@ -3,7 +3,6 @@
 ## Arranque
 
 ```bash
-uv run duckops serve --pm2 --gateway
 pm2 start config/ecosystem.db-writer.config.cjs
 pm2 save
 pm2 list
@@ -16,6 +15,8 @@ uv run duckops init                              # Reconfig / instalar
 uv run python scripts/doctor.py                  # Diagnóstico local
 uv run duckops serve --gateway                   # Dev sin PM2
 uv run duckops serve --pm2 --gateway             # Ecosystem + DuckClaw-Gateway
+
+
 pm2 start config/ecosystem.api.config.cjs --only DuckClaw-Gateway
 pm2 delete DuckClaw-DB-Writer
 pm2 status 

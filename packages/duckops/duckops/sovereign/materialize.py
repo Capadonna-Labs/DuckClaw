@@ -18,6 +18,7 @@ from duckops.sovereign.docker_compose import write_compose_override
 from duckops.sovereign.draft import SovereignDraft
 from duckops.sovereign.redis_local import try_start_redis_local
 from duckops.sovereign.strix_policy import patch_security_policy
+from duckops.sovereign.stack_health import ensure_db_writer_pm2
 from duckops.sovereign.telegram_set_webhook import register_telegram_webhook_after_deploy
 
 DEFAULT_SOVEREIGN_VAULT = "db/sovereign_memory.duckdb"
@@ -149,25 +150,18 @@ def patch_api_gateways_pm2_for_draft(
     port = int(draft.gateway_port)
 
     if idx is None:
+        from duckclaw.env_secrets import strip_dotenv_owned_from_env, strip_secrets_from_env  # noqa: PLC0415
+
         dot = _parse_repo_dotenv(repo_root)
-        env: dict[str, str] = dict(dot)
-        env["PYTHONPATH"] = str(repo_root.resolve())
-        env["DUCKCLAW_PM2_PROCESS_NAME"] = app_name
+        env: dict[str, str] = {
+            "PYTHONPATH": str(repo_root.resolve()),
+            "DUCKCLAW_PM2_PROCESS_NAME": app_name,
+        }
         ru = (draft.redis_url or "").strip() or dot.get("REDIS_URL") or dot.get("DUCKCLAW_REDIS_URL") or ""
         if ru:
             env["REDIS_URL"] = ru
             env["DUCKCLAW_REDIS_URL"] = ru
         _pm2_env_set_multiplex_db_paths(env, repo_root, env, primary_abs, primary_rel)
-        env["DUCKCLAW_GATEWAY_TENANT_ID"] = (draft.tenant_id or "default").strip() or "default"
-        env["DUCKCLAW_DEFAULT_WORKER_ID"] = (draft.default_worker_id or "finanz").strip()
-        for k, val in (
-            ("DUCKCLAW_LLM_PROVIDER", draft.llm_provider),
-            ("DUCKCLAW_LLM_MODEL", draft.llm_model),
-            ("DUCKCLAW_LLM_BASE_URL", draft.llm_base_url),
-        ):
-            vs = (val or "").strip()
-            if vs:
-                env[k] = vs
         if attach_rel is not None:
             env["DUCKCLAW_SHARED_DB_PATH"] = str(_resolve_repo_db_path(repo_root, attach_rel))
         elif (draft.duckdb_shared_path or "").strip():
@@ -181,6 +175,7 @@ def patch_api_gateways_pm2_for_draft(
                 )
                 break
 
+        env = strip_dotenv_owned_from_env(strip_secrets_from_env(env))
         apps.append({"name": app_name, "host": "0.0.0.0", "port": port, "env": env})
         console_print(
             f"[green]Nuevo gateway[/] '{app_name}' añadido a config/api_gateways_pm2.json (puerto {port})."
@@ -203,10 +198,20 @@ def patch_api_gateways_pm2_for_draft(
         env.pop("DUCKCLAW_SHARED_DB_PATH", None)
 
     if env_updates:
+        from duckclaw.env_secrets import is_secret_env_key  # noqa: PLC0415
+
         for k, v in env_updates.items():
+            ks = str(k).strip()
             vs = str(v).strip()
-            if vs:
-                env[str(k)] = vs
+            if not ks or not vs or is_secret_env_key(ks):
+                continue
+            env[ks] = vs
+
+    from duckclaw.env_secrets import strip_dotenv_owned_from_env, strip_secrets_from_env  # noqa: PLC0415
+
+    app["env"] = strip_dotenv_owned_from_env(
+        strip_secrets_from_env({str(k): str(v) for k, v in env.items()})
+    )
 
     atomic_write(cfg_path, json.dumps(raw, indent=2) + "\n", encoding="utf-8")
     clear_pm2_gateway_db_cache()
@@ -496,7 +501,7 @@ def load_duckdb_vault_hint_from_repo_env(repo_root: Path) -> str:
         ks = k.strip()
         if ks:
             vals[ks] = v.strip().strip("'\"")
-    for key in _ENV_PRIMARY_DUCKDB_KEYS:
+    for key in ("DUCKCLAW_AXIS_DB_PATH",) + _ENV_PRIMARY_DUCKDB_KEYS:
         hint = _env_duck_path_as_repo_relative(vals.get(key) or "", repo_root)
         if hint:
             return hint
@@ -734,6 +739,7 @@ def save_wizard_config_json(draft: SovereignDraft) -> None:
             "gateway_port": int(draft.gateway_port),
             "gateway_tenant_id": (draft.tenant_id or "default").strip() or "default",
             "default_worker_id": (draft.default_worker_id or "").strip(),
+            "gateway_team_templates": (draft.gateway_team_templates or "").strip(),
             "wizard_creator_telegram_user_id": (draft.wizard_creator_telegram_user_id or "").strip(),
             "wizard_creator_admin_display_name": (draft.wizard_creator_admin_display_name or "").strip(),
             "wizard_extra_admin_telegram_ids": (draft.wizard_extra_admin_telegram_ids or "").strip(),
@@ -762,6 +768,7 @@ def materialize(
 
     _dw = (draft.default_worker_id or "").strip().lower()
     _low = primary_rel.lower()
+    creator_id = (draft.wizard_creator_telegram_user_id or "").strip()
     updates: dict[str, str] = {
         "REDIS_URL": draft.redis_url.strip(),
         "DUCKCLAW_REDIS_URL": draft.redis_url.strip(),
@@ -773,12 +780,21 @@ def materialize(
         "DUCKCLAW_LLM_BASE_URL": draft.llm_base_url.strip(),
         "DUCKCLAW_PM2_PROCESS_NAME": draft.gateway_pm2_name.strip(),
     }
+    if creator_id.isdigit():
+        updates["DUCKCLAW_OWNER_ID"] = creator_id
+    team_raw = (draft.gateway_team_templates or "").strip()
+    if team_raw:
+        updates["DUCKCLAW_GATEWAY_TEAM_TEMPLATES"] = team_raw
     if "job" in _low and "hunter" in _low:
         updates["DUCKCLAW_JOB_HUNTER_DB_PATH"] = primary_rel
     elif "siata" in _low:
         updates["DUCKCLAW_SIATA_DB_PATH"] = primary_rel
     elif "finanz" in _low:
         updates["DUCKCLAW_FINANZ_DB_PATH"] = primary_rel
+    elif "axis" in _low:
+        updates["DUCKCLAW_AXIS_DB_PATH"] = primary_rel
+    if _dw.startswith("axis"):
+        updates["DUCKCLAW_AXIS_DB_PATH"] = primary_rel
     # Gateways no-Finanz con tenant propio: bóveda inicial por slug de worker (p. ej. job_hunter).
     if _dw and _dw != "finanz":
         updates["DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID"] = (draft.default_worker_id or "").strip()
@@ -843,6 +859,13 @@ def materialize(
     patch_security_policy(repo_root, draft.default_worker_id)
 
     patch_api_gateways_pm2_for_draft(repo_root, draft, console_print)
+    try:
+        from duckops.sovereign.pm2_dotenv_sync import rerender_gateway_pm2_ecosystem  # noqa: PLC0415
+
+        rerender_gateway_pm2_ecosystem(repo_root)
+        console_print("[green]PM2[/] api_gateways_pm2.json + ecosystem.api.config.cjs alineados con .env")
+    except Exception as exc:
+        console_print(f"[yellow]PM2 ecosystem:[/] {exc}")
 
     console_print(telegram_webhook_post_deploy_message(draft))
 
@@ -881,9 +904,32 @@ def materialize(
             console_print(
                 f"PM2: {e}. Ejecuta: duckops serve --pm2 --gateway --port {draft.gateway_port}"
             )
+        if exit_code == 0:
+            dw_code = ensure_db_writer_pm2(repo_root, draft, console_print)
+            if dw_code != 0 and exit_code == 0:
+                exit_code = dw_code
 
     register_telegram_webhook_after_deploy(repo_root, draft, console_print)
     return exit_code
+
+
+def _print_post_wizard_next_steps(draft: SovereignDraft, console_print) -> None:
+    """Recordatorios alineados con consola admin y comandos /workers."""
+    owner = (draft.wizard_creator_telegram_user_id or "").strip()
+    lines = [
+        "[bold green]Siguiente[/]",
+        "- Consola admin: cd apps/duckclaw-admin && pnpm dev",
+        "  · Telegram (user id, token), Tailscale, integraciones y agentes",
+        "- Cuando Telegram esté configurado: /workers y /team",
+    ]
+    if owner:
+        lines.append(
+            f"- Playground admin usa tu ID Telegram ({owner}) como dueño (DUCKCLAW_OWNER_ID)."
+        )
+    team = (draft.gateway_team_templates or "").strip()
+    if team:
+        lines.append(f"- Equipo inicial en .env: {team}")
+    console_print("\n".join(lines))
 
 
 def save_draft_json(draft: SovereignDraft) -> Path:

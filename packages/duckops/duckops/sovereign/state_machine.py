@@ -14,10 +14,11 @@ FULL_STEP_ORDER: tuple[WizardStep, ...] = (
     WizardStep.REVIEW_DEPLOY,
 )
 
-# Rápido: reconocimiento + Telegram/túneles + revisión (valores por defecto en borrador).
+# Rápido: stack local (Redis, DuckDB, PM2) + revisión; Telegram/Tailscale en consola admin.
 EXPRESS_STEP_ORDER: tuple[WizardStep, ...] = (
     WizardStep.SOVEREIGNTY_AUDIT,
-    WizardStep.CONNECTIVITY,
+    WizardStep.CORE_SERVICES,
+    WizardStep.ORCHESTRATION,
     WizardStep.REVIEW_DEPLOY,
 )
 

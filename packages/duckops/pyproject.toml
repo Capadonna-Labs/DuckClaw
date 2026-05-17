@@ -13,6 +13,8 @@ dependencies = [
     "pydantic>=2.0",
     "prompt-toolkit>=3.0.0",
     "tqdm>=4.66.0",
+    "httpx>=0.25.0",
+    "textual>=0.47.0",
     "duckclaw-shared",
 ]
 

@@ -26,3 +26,11 @@ app.add_typer(
     name="train",
     help="SFT LoRA (MLX): train_sft o mlx_lm.lora --config; guardrail PM2 opcional.",
 )
+
+
+@app.command("mascot")
+def cmd_mascot() -> None:
+    """Demo Textual: pato mallard animado (IDLE / WALKING / WORKING)."""
+    from duckops.sovereign.duck_mascot import run_mascot_demo
+
+    raise typer.Exit(run_mascot_demo())

@@ -5,11 +5,13 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from prompt_toolkit.key_binding import KeyBindings
+from duckops.sovereign.debug_ndjson import agent_log
 
 NAV_BACK = "__sovereign_back__"
 NAV_QUICK_SAVE = "__sovereign_quick_save__"
 NAV_SERVICE_TEST = "__sovereign_service_test__"
 NAV_AUTOFILL = "__sovereign_autofill__"
+NAV_RESET = "__sovereign_reset__"
 
 
 def build_key_bindings(
@@ -43,4 +45,15 @@ def build_key_bindings(
     def _autofill(event: Any) -> None:
         event.app.exit(result=NAV_AUTOFILL)
 
+    @kb.add("f10")  # reiniciar wizard (prompt_toolkit no expone c-R de forma portable)
+    def _reset(event: Any) -> None:
+        event.app.exit(result=NAV_RESET)
+
+    # #region agent log
+    agent_log(
+        location="keys.py:build_key_bindings",
+        message="key bindings built",
+        hypothesis_id="H2-c-R",
+    )
+    # #endregion
     return kb

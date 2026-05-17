@@ -35,7 +35,7 @@ os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_REPO_ROOT_FOR_DB))
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import redis.asyncio as redis
 
@@ -555,6 +555,11 @@ async def _tailscale_auth_middleware(request: Request, call_next):
         return await call_next(request)
     # Consola admin (BFF local): autentica con X-Admin-Key, no Tailscale en el browser.
     if path.startswith("/api/v1/admin/"):
+        return await call_next(request)
+    # Playground u otras herramientas internas: BFF puede enviar X-Admin-Key en rutas /agent/*.
+    admin_expected = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
+    admin_header = (request.headers.get("X-Admin-Key") or "").strip()
+    if admin_expected and admin_header == admin_expected and path.startswith("/api/v1/agent/"):
         return await call_next(request)
     header_key = request.headers.get("X-Tailscale-Auth-Key", "").strip()
     if header_key != auth_key:
@@ -1404,13 +1409,33 @@ async def agent_chat(
     )
     _deliver_outbound_raw = (http_request.query_params.get("deliver_outbound") or "").strip().lower()
     _deliver_outbound = _deliver_outbound_raw in ("1", "true", "yes", "on")
+    _stream = bool(body.stream) or (
+        (http_request.query_params.get("stream") or "").strip().lower() in ("1", "true", "yes", "on")
+    )
+    _invoke_kw = {
+        "redis_client": redis_client,
+        "telegram_mcp": _tg_mcp,
+    }
+    if _stream:
+        from core.sse_stream import SSE_HEADERS
+
+        return StreamingResponse(
+            _invoke_chat_sse_body(
+                body,
+                worker_id or "finanz",
+                session_id,
+                tenant_id,
+                **_invoke_kw,
+            ),
+            media_type="text/event-stream",
+            headers=dict(SSE_HEADERS),
+        )
     result = await _invoke_chat(
         body,
         worker_id or "finanz",
         session_id=session_id,
         tenant_id=tenant_id,
-        redis_client=redis_client,
-        telegram_mcp=_tg_mcp,
+        **_invoke_kw,
     )
     if _deliver_outbound:
         try:
@@ -1556,6 +1581,49 @@ def _strip_bi_false_chart_delivery_lines(text: str) -> str:
             continue
         kept.append(ln)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
+
+async def _invoke_chat_sse_body(
+    payload: ChatRequest,
+    worker_id: str,
+    session_id: str,
+    tenant_id: str,
+    **invoke_kwargs: Any,
+):
+    """Generador SSE: invoca el grafo y emite tokens progresivos + [DONE]."""
+    from core.sse_stream import emit_chat_reply_sse, sse_error, sse_terminal_done
+
+    try:
+        result = await _invoke_chat(
+            payload,
+            worker_id,
+            session_id,
+            tenant_id,
+            **invoke_kwargs,
+        )
+        reply = ""
+        assigned: str | None = None
+        usage: dict[str, Any] | None = None
+        if isinstance(result, dict):
+            reply = str(result.get("response") or result.get("reply") or "")
+            assigned = result.get("assigned_worker_id")
+            usage = result.get("usage_tokens")
+        else:
+            reply = str(result or "")
+        async for event in emit_chat_reply_sse(
+            reply,
+            assigned_worker_id=assigned,
+            usage_tokens=usage,
+            worker_id=worker_id,
+        ):
+            yield event
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        yield sse_error(detail, status_hint=exc.status_code)
+        yield sse_terminal_done()
+    except Exception as exc:
+        yield sse_error(str(exc))
+        yield sse_terminal_done()
 
 
 async def _invoke_chat(

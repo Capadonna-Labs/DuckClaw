@@ -1,22 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { catalogFallbackResponse } from '@/lib/adminCatalogFallback';
+import { fallbackPlaygroundConfig } from '@/lib/playgroundFallback';
+import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+
+const OPS_COMMANDS_FALLBACK = {
+  commands: [
+    { id: 'pm2_list', label: 'PM2 — listar procesos', argv: ['pm2', 'list'] },
+    { id: 'pm2_status', label: 'PM2 — estado', argv: ['pm2', 'status'] },
+    {
+      id: 'pm2_restart_gateway',
+      label: 'Reiniciar DuckClaw-Gateway',
+      argv: ['pm2', 'restart', 'DuckClaw-Gateway', '--update-env'],
+    },
+    {
+      id: 'pm2_restart_db_writer',
+      label: 'Reiniciar DuckClaw-DB-Writer',
+      argv: ['pm2', 'restart', 'DuckClaw-DB-Writer', '--update-env'],
+    },
+    {
+      id: 'pm2_logs_gateway',
+      label: 'Últimas líneas log Gateway',
+      argv: ['pm2', 'logs', 'DuckClaw-Gateway', '--lines', '40', '--nostream'],
+    },
+    { id: 'doctor', label: 'Diagnóstico local (doctor.py)', argv: ['uv', 'run', 'python', 'scripts/doctor.py'] },
+    {
+      id: 'bootstrap_dbs',
+      label: 'Bootstrap DuckDB',
+      argv: ['uv', 'run', 'python', 'scripts/bootstrap_dbs.py'],
+    },
+  ],
+  _fallback: true,
+  _gateway_stale: true,
+};
 
 const WRITE_METHODS = new Set(['PUT', 'PATCH', 'POST', 'DELETE']);
 
-function gatewayBase(): string | null {
-  const raw =
-    process.env.DUCKCLAW_GATEWAY_URL?.trim() ||
-    process.env.NEXT_PUBLIC_DUCKCLAW_GATEWAY_URL?.trim() ||
-    '';
-  return raw ? raw.replace(/\/$/, '') : null;
-}
-
-function adminKey(): string {
-  return (process.env.DUCKCLAW_ADMIN_API_KEY || '').trim();
-}
-
 async function proxy(req: NextRequest, segments: string[]) {
   const base = gatewayBase();
-  const key = adminKey();
+  const key = adminApiKey();
   if (!base) {
     return NextResponse.json({ detail: 'DUCKCLAW_GATEWAY_URL no configurada' }, { status: 503 });
   }
@@ -29,6 +50,9 @@ async function proxy(req: NextRequest, segments: string[]) {
   if (segments[0] === 'audit' && role !== 'admin') {
     return NextResponse.json({ detail: 'Auditoría solo para rol admin' }, { status: 403 });
   }
+  if (segments[0] === 'ops' && role !== 'admin') {
+    return NextResponse.json({ detail: 'Operaciones solo para rol admin' }, { status: 403 });
+  }
   if (role === 'viewer' && WRITE_METHODS.has(req.method)) {
     return NextResponse.json({ detail: 'Solo lectura (rol viewer)' }, { status: 403 });
   }
@@ -36,10 +60,7 @@ async function proxy(req: NextRequest, segments: string[]) {
   const url = new URL(req.url);
   const target = `${base}/api/v1/admin/${sub}${url.search}`;
 
-  const headers: Record<string, string> = {
-    'X-Admin-Key': key,
-    Accept: 'application/json',
-  };
+  const headers = gatewayProxyHeaders({ 'X-Admin-Key': key });
   const actor = req.headers.get('x-duckclaw-actor');
   if (actor) headers['X-Duckclaw-Actor'] = actor;
   const ct = req.headers.get('content-type');
@@ -52,6 +73,26 @@ async function proxy(req: NextRequest, segments: string[]) {
 
   const res = await fetch(target, init);
   const text = await res.text();
+
+  if (res.status === 404 && req.method === 'GET') {
+    const catalog = catalogFallbackResponse(sub, url.searchParams);
+    if (catalog) {
+      return NextResponse.json(catalog, {
+        headers: { 'X-Duckclaw-Admin-Fallback': 'catalog' },
+      });
+    }
+    if (sub === 'ops/commands') {
+      return NextResponse.json(OPS_COMMANDS_FALLBACK, {
+        headers: { 'X-Duckclaw-Admin-Fallback': 'ops' },
+      });
+    }
+    if (sub === 'playground/config') {
+      return NextResponse.json(fallbackPlaygroundConfig(), {
+        headers: { 'X-Duckclaw-Admin-Fallback': 'playground' },
+      });
+    }
+  }
+
   return new NextResponse(text, {
     status: res.status,
     headers: { 'Content-Type': res.headers.get('content-type') || 'application/json' },

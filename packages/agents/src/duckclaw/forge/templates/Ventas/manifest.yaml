@@ -1,0 +1,17 @@
+id: Ventas
+name: Horacio
+version: 1.0.0
+description: Responder preguntas acerca de productos
+embedding_dimensions: 768
+extensions:
+- name: duckpgq
+  install: INSTALL duckpgq FROM community; LOAD duckpgq;
+- name: vss
+  install: INSTALL vss; LOAD vss;
+skills:
+- unified_memory
+default_workers:
+- finanz
+agent_config_defaults:
+  framework: langgraph
+topology: general

@@ -1,0 +1,16 @@
+# Plantilla base DuckClaw — todo agente nuevo parte de aquí (admin UI).
+name: Agente DuckClaw
+id: default_agent
+schema_name: agent_worker
+topology: general
+read_only: false
+description: >
+  Agente personalizable. Edita system_prompt.md y soul.md desde la consola admin.
+
+llm:
+  required: true
+  temperature: 0.3
+
+skills:
+  - get_current_time
+  - read_sql

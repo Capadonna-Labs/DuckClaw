@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { adminService } from '@/services/adminService';
 import type { TemplateDetail } from '@/types/admin';
 import { useAuthStore } from '@/store/authStore';
@@ -10,8 +10,19 @@ import { ChevronRight, Save, CheckCircle } from 'lucide-react';
 
 const EDITABLE = /\.(ya?ml|md|sql|txt|json|py)$/i;
 
+const PROMPT_FILES = ['system_prompt.md', 'soul.md', 'domain_closure.md', 'WORKER_OVERVIEW.md'];
+
+const TAB_LABELS: Record<string, string> = {
+  'system_prompt.md': 'Instrucciones de comportamiento',
+  'soul.md': 'Tono y personalidad',
+  'domain_closure.md': 'Límites del dominio',
+  'manifest.yaml': 'Configuración (manifest)',
+};
+
 export default function TemplateEditorPage() {
   const { workerId } = useParams<{ workerId: string }>();
+  const searchParams = useSearchParams();
+  const focusFile = searchParams.get('focus');
   const { usuario } = useAuthStore();
   const canWrite = usuario?.rol === 'admin';
 
@@ -21,12 +32,12 @@ export default function TemplateEditorPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const editableFiles = useMemo(() => {
-    if (!detail?.files) return [];
-    return detail.files
-      .map((f) => f.path)
-      .filter((p) => EDITABLE.test(p))
-      .sort();
+  const { promptFiles, otherFiles } = useMemo(() => {
+    if (!detail?.files) return { promptFiles: [] as string[], otherFiles: [] as string[] };
+    const all = detail.files.map((f) => f.path).filter((p) => EDITABLE.test(p));
+    const prompts = PROMPT_FILES.filter((p) => all.includes(p));
+    const rest = all.filter((p) => !PROMPT_FILES.includes(p)).sort();
+    return { promptFiles: prompts, otherFiles: rest };
   }, [detail]);
 
   const load = useCallback(() => {
@@ -36,6 +47,7 @@ export default function TemplateEditorPage() {
       .then((d) => {
         setDetail(d);
         const preferred =
+          (focusFile && d.contents[focusFile] !== undefined && focusFile) ||
           (d.contents['system_prompt.md'] !== undefined && 'system_prompt.md') ||
           (d.contents['manifest.yaml'] !== undefined && 'manifest.yaml') ||
           Object.keys(d.contents)[0] ||
@@ -44,7 +56,7 @@ export default function TemplateEditorPage() {
         setContent(d.contents[preferred] ?? '');
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
-  }, [workerId]);
+  }, [workerId, focusFile]);
 
   useEffect(() => {
     load();
@@ -90,7 +102,13 @@ export default function TemplateEditorPage() {
 
       <header className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-black dark:text-dark-text">{workerId}</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <Link
+            href={`/playground?worker=${encodeURIComponent(workerId)}`}
+            className="px-3 py-2 text-sm border rounded-xl dark:border-dark-border text-gov-blue-700 font-semibold"
+          >
+            Probar en Playground
+          </Link>
           <button
             type="button"
             onClick={validate}
@@ -112,25 +130,21 @@ export default function TemplateEditorPage() {
 
       <div className="flex flex-col lg:flex-row gap-4">
         <aside className="lg:w-56 shrink-0 max-h-48 lg:max-h-[520px] overflow-y-auto rounded-xl border dark:border-dark-border p-2 bg-gov-gray-50 dark:bg-dark-bg">
-          <p className="text-[10px] font-bold uppercase text-gov-gray-500 px-2 py-1">Archivos</p>
-          {editableFiles.map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setTab(f)}
-              className={`block w-full text-left text-xs font-mono px-2 py-1.5 rounded-lg truncate ${
-                tab === f
-                  ? 'bg-gov-blue-700 text-white'
-                  : 'hover:bg-white dark:hover:bg-dark-surface'
-              }`}
-            >
-              {f}
-            </button>
-          ))}
+          <FileGroup
+            title="Comportamiento"
+            files={promptFiles}
+            tab={tab}
+            onSelect={setTab}
+            emptyHint="Sin system_prompt.md — vuelve a crear el agente o añade el archivo aquí."
+          />
+          <FileGroup title="Config y datos" files={otherFiles} tab={tab} onSelect={setTab} />
         </aside>
 
         <div className="flex-1 min-w-0 space-y-2">
-          <p className="text-xs font-mono text-gov-gray-500">{tab}</p>
+          <p className="text-sm font-bold text-gov-gray-700 dark:text-dark-text">
+            {TAB_LABELS[tab] ?? tab}
+          </p>
+          <p className="text-[10px] font-mono text-gov-gray-400">{tab}</p>
           {msg && (
             <p className="text-sm text-green-700 flex items-center gap-1">
               <CheckCircle size={16} /> {msg}
@@ -141,11 +155,48 @@ export default function TemplateEditorPage() {
             value={content}
             onChange={(e) => setContent(e.target.value)}
             readOnly={!canWrite}
-            className="w-full min-h-[420px] font-mono text-sm p-4 rounded-2xl border dark:border-dark-border dark:bg-dark-surface"
+            className="w-full min-h-[420px] font-mono text-sm p-4 rounded-2xl border dark:border-dark-border dark:bg-dark-surface leading-relaxed"
             spellCheck={false}
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+function FileGroup({
+  title,
+  files,
+  tab,
+  onSelect,
+  emptyHint,
+}: {
+  title: string;
+  files: string[];
+  tab: string;
+  onSelect: (f: string) => void;
+  emptyHint?: string;
+}) {
+  return (
+    <div className="mb-3">
+      <p className="text-[10px] font-bold uppercase text-gov-gray-500 px-2 py-1">{title}</p>
+      {files.length === 0 && emptyHint ? (
+        <p className="text-[10px] text-gov-gray-400 px-2 py-1">{emptyHint}</p>
+      ) : null}
+      {files.map((f) => (
+        <button
+          key={f}
+          type="button"
+          onClick={() => onSelect(f)}
+          className={`block w-full text-left text-xs font-mono px-2 py-1.5 rounded-lg truncate ${
+            tab === f
+              ? 'bg-gov-blue-700 text-white'
+              : 'hover:bg-white dark:hover:bg-dark-surface'
+          }`}
+        >
+          {f}
+        </button>
+      ))}
     </div>
   );
 }

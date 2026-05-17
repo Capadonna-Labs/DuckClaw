@@ -8,8 +8,13 @@ import { Loader2 } from 'lucide-react';
 
 const TITLES: Record<string, string> = {
   '/overview': 'Overview',
+  '/kanban': 'Tablero',
   '/templates': 'Plantillas',
+  '/skills': 'Skills',
+  '/mcp': 'MCP',
+  '/ops': 'Operaciones',
   '/projects': 'Proyectos',
+  '/playground': 'Playground',
   '/runtime': 'Runtime',
   '/telegram': 'Telegram',
   '/commands': 'Fly commands',

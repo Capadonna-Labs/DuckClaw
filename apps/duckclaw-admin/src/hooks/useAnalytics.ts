@@ -3,7 +3,9 @@
 import { useMemo } from 'react';
 import { useTickets } from './useTickets';
 import { TipoSolicitud, CanalOrigen } from '@/types';
-import { startOfWeek, subWeeks, isWithinInterval } from 'date-fns';
+import { startOfWeek } from 'date-fns/startOfWeek';
+import { subWeeks } from 'date-fns/subWeeks';
+import { isWithinInterval } from 'date-fns/isWithinInterval';
 
 interface MetricasPrincipales {
   totalTickets: number;

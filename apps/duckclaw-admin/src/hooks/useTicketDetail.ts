@@ -6,8 +6,8 @@ import { enriquecerTicketConUrgencia } from '@/lib/urgency';
 import { TicketConUrgencia, RespuestaEmailPayload, EmailSendResult, TicketEstado } from '@/types';
 import { SECRETARIAS_MOCK } from '@/services/mockData';
 import { useEmailSender } from './useEmailSender';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { format } from 'date-fns/format';
+import { es } from 'date-fns/locale/es';
 
 interface UseTicketDetailReturn {
   ticket: TicketConUrgencia | null;

@@ -2172,6 +2172,24 @@ def build_worker_graph(
         and not open_vault_read_only
     )
     effective_vault_ro = bool(spec.read_only) or bool(open_vault_read_only)
+    try:
+        from duckclaw.debug_session_log import agent_debug_log
+
+        agent_debug_log(
+            "B",
+            "factory.py:build_worker_graph",
+            "open_worker_db_plan",
+            {
+                "worker_id": worker_id,
+                "path_tail": (path or "")[-96:],
+                "effective_vault_ro": effective_vault_ro,
+                "skip_private": skip_private,
+                "reuse_ro": reuse_read_only,
+                "reuse_has_con": getattr(reuse_db, "_con", None) is not None if reuse_db else False,
+            },
+        )
+    except Exception:
+        pass
     if skip_private:
         db = reuse_db
         _log.debug("build_worker_graph: reuse DuckClaw (same file, no shared, skip private ATTACH) path=%s", path)

@@ -1,4 +1,6 @@
-import { addBusinessDays, subBusinessDays, formatISO } from 'date-fns';
+import { addBusinessDays } from 'date-fns/addBusinessDays';
+import { subBusinessDays } from 'date-fns/subBusinessDays';
+import { formatISO } from 'date-fns/formatISO';
 import { 
   Secretaria, 
   Usuario, 

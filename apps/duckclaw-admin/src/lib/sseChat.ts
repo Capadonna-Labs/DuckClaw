@@ -46,14 +46,20 @@ function parseDataLine(data: string): SseChatEvent | null {
 
 /** Lee el cuerpo de una respuesta fetch SSE y emite eventos parseados. */
 export async function* readSseChatStream(
-  body: ReadableStream<Uint8Array> | null
+  body: ReadableStream<Uint8Array> | null,
+  signal?: AbortSignal
 ): AsyncGenerator<SseChatEvent> {
   if (!body) return;
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const onAbort = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal?.addEventListener('abort', onAbort);
   try {
     while (true) {
+      if (signal?.aborted) break;
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -77,6 +83,7 @@ export async function* readSseChatStream(
       }
     }
   } finally {
+    signal?.removeEventListener('abort', onAbort);
     reader.releaseLock();
   }
 }

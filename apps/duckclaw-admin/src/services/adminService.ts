@@ -293,8 +293,17 @@ export const adminService = {
   deleteKanbanCard: (id: string) =>
     adminFetch<{ ok: boolean }>(`/kanban?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
-  getPlaygroundConfig: () =>
-    adminFetch<{
+  getPlaygroundConfig: (params?: {
+    telegram_user_id?: string;
+    tenant_id?: string;
+    chat_id?: string;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.telegram_user_id) q.set('telegram_user_id', params.telegram_user_id);
+    if (params?.tenant_id) q.set('tenant_id', params.tenant_id);
+    if (params?.chat_id) q.set('chat_id', params.chat_id);
+    const qs = q.toString();
+    return adminFetch<{
       llm: { provider: string; model: string; base_url: string };
       catalog: {
         id: string;
@@ -310,14 +319,22 @@ export const adminService = {
       workers: string[];
       env_path: string;
       effective_tenant_id?: string;
+      telegram_user_id?: string;
+      team_chat_id?: string;
+      authorized?: boolean;
+      whitelist_role?: string | null;
+      team_source?: string;
+      team_hint?: string;
       note: string;
-    }>('/playground/config'),
+    }>(`/playground/config${qs ? `?${qs}` : ''}`);
+  },
 
   playgroundChat: (body: {
     worker_id: string;
     message: string;
     chat_id?: string;
     tenant_id?: string;
+    telegram_user_id?: string;
     stream?: boolean;
   }) =>
     adminFetch<{
@@ -338,6 +355,7 @@ export const adminService = {
       message: string;
       chat_id?: string;
       tenant_id?: string;
+      telegram_user_id?: string;
     },
     handlers: {
       onToken: (chunk: string) => void;
@@ -346,7 +364,8 @@ export const adminService = {
         assigned_worker_id?: string;
         usage_tokens?: Record<string, number>;
       }) => void;
-    }
+    },
+    options?: { signal?: AbortSignal }
   ) => {
     const { readSseChatStream } = await import('@/lib/sseChat');
     const res = await fetch('/api/admin/playground/chat', {
@@ -357,6 +376,7 @@ export const adminService = {
       },
       body: JSON.stringify({ ...body, stream: true }),
       cache: 'no-store',
+      signal: options?.signal,
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -367,20 +387,29 @@ export const adminService = {
       throw new Error(detail || `Error ${res.status}`);
     }
     let full = '';
-    for await (const ev of readSseChatStream(res.body)) {
-      if (ev.type === 'token' && ev.content) {
-        full += ev.content;
-        handlers.onToken(ev.content);
-      } else if (ev.type === 'done') {
-        handlers.onDone?.({
-          response: ev.response || full,
-          assigned_worker_id: ev.assigned_worker_id,
-          usage_tokens: ev.usage_tokens,
-        });
-      } else if (ev.type === 'error') {
-        throw new Error(ev.message);
+    try {
+      for await (const ev of readSseChatStream(res.body, options?.signal)) {
+        if (options?.signal?.aborted) break;
+        if (ev.type === 'token' && ev.content) {
+          full += ev.content;
+          handlers.onToken(ev.content);
+        } else if (ev.type === 'done') {
+          handlers.onDone?.({
+            response: ev.response || full,
+            assigned_worker_id: ev.assigned_worker_id,
+            usage_tokens: ev.usage_tokens,
+          });
+        } else if (ev.type === 'error') {
+          throw new Error(ev.message);
+        }
       }
+    } catch (err) {
+      if (options?.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        return full;
+      }
+      throw err;
     }
+    if (options?.signal?.aborted) return full;
     return full;
   },
 };

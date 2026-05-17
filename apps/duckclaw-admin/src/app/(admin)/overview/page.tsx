@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { AdminHealth } from '@/types/admin';
-import { Activity, Bot, Database, Radio } from 'lucide-react';
+import { Bot, Database, Radio } from 'lucide-react';
 import Link from 'next/link';
 import { DiagnosticsPanel } from '@/components/admin/DiagnosticsPanel';
+import { formatGatewayStatus, formatRedisStatus } from '@/lib/healthLabels';
 
 export default function OverviewPage() {
   const [health, setHealth] = useState<AdminHealth | null>(null);
@@ -25,21 +26,16 @@ export default function OverviewPage() {
           Overview
         </h1>
         <p className="text-sm text-gov-gray-500 dark:text-dark-muted mt-1">
-          Estado del gateway, plantillas y servicios
+          Estado del gateway y servicios
         </p>
       </header>
 
       {error && <GatewayErrorBanner message={error} />}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <MetricCard icon={Bot} label="Workers" value={health?.workers_count ?? '—'} />
-        <MetricCard
-          icon={Radio}
-          label="Redis"
-          value={health?.redis ? 'OK' : health ? 'Off' : '—'}
-        />
-        <MetricCard icon={Database} label="Gateway" value={health?.status ?? '—'} />
-        <MetricCard icon={Activity} label="Plantillas dir" value="forge/templates" small />
+        <MetricCard icon={Radio} label="Redis" value={formatRedisStatus(health?.redis)} />
+        <MetricCard icon={Database} label="Gateway" value={formatGatewayStatus(health?.status)} />
       </div>
 
       <DiagnosticsPanel gatewayStale={health != null && health.api_revision !== 2} />
@@ -85,20 +81,16 @@ function MetricCard({
   icon: Icon,
   label,
   value,
-  small,
 }: {
   icon: React.ElementType;
   label: string;
   value: string | number;
-  small?: boolean;
 }) {
   return (
     <div className="bg-white dark:bg-dark-surface rounded-2xl border border-gov-gray-100 dark:border-dark-border p-5">
       <Icon className="text-gov-blue-600 dark:text-dark-cyan mb-2" size={22} />
       <p className="text-xs text-gov-gray-500 uppercase font-bold tracking-wider">{label}</p>
-      <p className={`font-black text-gov-gray-900 dark:text-dark-text mt-1 ${small ? 'text-sm' : 'text-2xl'}`}>
-        {value}
-      </p>
+      <p className="font-black text-2xl text-gov-gray-900 dark:text-dark-text mt-1">{value}</p>
     </div>
   );
 }

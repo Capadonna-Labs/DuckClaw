@@ -1,4 +1,5 @@
-import { differenceInBusinessDays, parseISO } from 'date-fns';
+import { differenceInBusinessDays } from 'date-fns/differenceInBusinessDays';
+import { parseISO } from 'date-fns/parseISO';
 import { NivelUrgencia, TicketConUrgencia, Ticket } from '@/types';
 
 /**

@@ -90,7 +90,46 @@ def test_playground_config(admin_client: TestClient):
     assert "llm" in data
     assert "catalog" in data
     assert "workers" in data
+    assert isinstance(data.get("workers"), list)
+    assert "authorized" in data
+    assert "team_chat_id" in data
     assert data.get("chat_endpoint") == "/api/v1/admin/playground/chat"
+
+
+def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from duckclaw import DuckClaw
+    from duckclaw.workers.factory import list_workers
+
+    all_w = list_workers()
+    if not all_w:
+        pytest.skip("need templates")
+    target = all_w[0]
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "7822026745")
+    gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
+    import sys
+
+    if str(gw_dir) not in sys.path:
+        sys.path.insert(0, str(gw_dir))
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        db_path = str(Path(td) / "pg_team.duckdb")
+        db = DuckClaw(db_path, read_only=False, engine="python")
+        from duckclaw.graphs.on_the_fly_commands import set_team_templates
+
+        set_team_templates(db, "7822026745", [target])
+        db.close()
+        monkeypatch.setenv("DUCKDB_PATH", db_path)
+        r = admin_client.get(
+            "/api/v1/admin/playground/config",
+            headers={"X-Admin-Key": "test-admin-key"},
+            params={"telegram_user_id": "7822026745", "tenant_id": "default"},
+        )
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("authorized") is True
+    assert target in (data.get("workers") or [])
+    assert data.get("team_source") == "chat"
 
 
 def test_playground_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):

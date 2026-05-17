@@ -16,15 +16,9 @@ from duckclaw.gateway_db import (
 
 
 def _clear_multiplex_db_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for k in (
-        "DUCKCLAW_DB_PATH",
-        "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
-        "DUCKCLAW_FINANZ_DB_PATH",
-        "DUCKCLAW_JOB_HUNTER_DB_PATH",
-        "DUCKCLAW_SIATA_DB_PATH",
-        "DUCKDB_PATH",
-    ):
-        monkeypatch.delenv(k, raising=False)
+    from env_isolation import clear_gateway_multiplex_env
+
+    clear_gateway_multiplex_env(monkeypatch)
 
 
 def test_default_pqrsd_assistant_vault_path_uses_canonical_filename(

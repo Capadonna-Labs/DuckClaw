@@ -12,7 +12,7 @@ def test_build_llm_groq_returns_chat_openai(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.delenv("DUCKCLAW_LLM_PROVIDER", raising=False)
     monkeypatch.delenv("DUCKCLAW_LLM_MODEL", raising=False)
     monkeypatch.delenv("DUCKCLAW_LLM_BASE_URL", raising=False)
-    llm = build_llm("groq", "llama-3.3-70b-versatile", "")
+    llm = build_llm("groq", "llama-3.3-70b-versatile", "", prefer_env_provider=False)
     assert llm is not None
     assert getattr(llm, "model_name", None) == "llama-3.3-70b-versatile"
 

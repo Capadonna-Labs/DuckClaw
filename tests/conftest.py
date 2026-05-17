@@ -24,6 +24,13 @@ os.environ.setdefault("DUCKCLAW_TEST_DUCKDB_HOME", str(_pytest_duckdb_home))
 os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:6379/0")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_test_env_from_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    from env_isolation import isolate_test_env_from_dotenv
+
+    isolate_test_env_from_dotenv(monkeypatch)
+
+
 @pytest.fixture
 def owner_user_id() -> str:
     """``DUCKCLAW_OWNER_ID`` / ``DUCKCLAW_ADMIN_CHAT_ID`` desde .env."""

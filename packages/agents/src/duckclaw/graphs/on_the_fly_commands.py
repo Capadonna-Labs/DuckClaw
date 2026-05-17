@@ -1293,6 +1293,36 @@ def execute_vault(
     chat_id: Any | None = None,
 ) -> str:
     user_id = (str(vault_user_id or "").strip() or "default")
+    # #region agent log
+    try:
+        import json as _json
+        import time as _time
+
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
+            "a",
+            encoding="utf-8",
+        ) as _dbg:
+            _dbg.write(
+                _json.dumps(
+                    {
+                        "sessionId": "fd1dbb",
+                        "runId": "post-fix",
+                        "hypothesisId": "A",
+                        "location": "on_the_fly_commands.py:execute_vault",
+                        "message": "vault_dispatch",
+                        "data": {
+                            "entry_worker_id": (entry_worker_id or "")[:32],
+                            "vault_user_id": user_id[:32],
+                        },
+                        "timestamp": int(_time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     vault_scope = vault_scope_id_for_tenant(tenant_id)
     raw = (args or "").strip()
     session_db_path = _session_duckdb_path_for_fly(db) if db is not None else None
@@ -7055,6 +7085,7 @@ def _dispatch_fly_command(
     tenant_id: Any = None,
     vault_user_id: Any = None,
     username: str = "",
+    entry_worker_id: str | None = None,
 ) -> Optional[str]:
     """Ejecuta un comando fly ya parseado (sin contexto de logging)."""
     if name == "sensors":
@@ -7375,6 +7406,7 @@ def handle_command(
             tenant_id=tenant_id,
             vault_user_id=vault_user_id,
             username=username or "",
+            entry_worker_id=entry_worker_id,
         )
         if out is not None:
             log_fly(_fly_log, "/%s -> %s", name, _fly_reply_preview(out))

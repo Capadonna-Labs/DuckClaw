@@ -66,7 +66,17 @@ El Wizard generará los artefactos de configuración dinámicamente:
 *   **Secret Masking:** Los tokens de Telegram y API Keys nunca se muestran en texto plano tras ser ingresados.
 *   **Rollback:** Si la escritura de un archivo de configuración falla, el Wizard restaura el backup `.bak` anterior.
 
-## 7. Ejemplo de Interacción (Pseudo-UI)
+## 7. Shell TUI (v2.1 — estilo Claude Code)
+
+- **Cabecera:** `tui_shell.py` — versión DuckClaw, mascota ASCII (pato con garra), sesión (SO, tenant, modelo), ruta del repo, barra lateral con consejos y actividad reciente.
+- **Progreso:** `StatusLog` — líneas `●` verde (hecho), blanco (en curso), gris (pendiente) por paso de la máquina de estados.
+- **Acento visual:** amarillo pato `#F5C542` y teal `#2DD4BF` (`wizard_theme.py`); no usar naranja estilo Claude.
+- **Tras materializar:** cuadro «Siguientes pasos» (admin `pnpm dev`, `duckops serve --pm2 --gateway`, `duckops init --chat`); opción de abrir chat TUI al terminar.
+- **Chat TUI:** `tui_chat.py` — `POST /api/v1/admin/playground/chat` con `DUCKCLAW_GATEWAY_URL` y `DUCKCLAW_ADMIN_API_KEY`; comandos `/workers`, `/worker <id>`, `/quit`. Entrada: `uv run duckops init --chat`.
+
+Atajos sin cambio: Ctrl+S, Esc/Ctrl+Z atrás, Ctrl+R Redis.
+
+## 8. Ejemplo de Interacción (Pseudo-UI)
 
 ```text
 ── DuckClaw Sovereign Wizard v2.0 ──────────────────────────────────────────

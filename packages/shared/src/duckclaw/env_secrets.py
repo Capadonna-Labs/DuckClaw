@@ -55,9 +55,40 @@ def is_secret_env_key(key: str) -> bool:
     return any(ku.endswith(suf) for suf in _SECRET_SUFFIXES)
 
 
+# Claves que solo deben vivir en `.env` (PM2 usa env_file); no duplicar en JSON/CJS.
+DOTENV_OWNED_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        "DUCKCLAW_GATEWAY_TENANT_ID",
+        "DUCKCLAW_DEFAULT_WORKER_ID",
+        "DUCKCLAW_LLM_PROVIDER",
+        "DUCKCLAW_LLM_MODEL",
+        "DUCKCLAW_LLM_BASE_URL",
+        "LLM_PROVIDER",
+        "LLM_MODEL",
+        "LLM_BASE_URL",
+        "LANGCHAIN_TRACING_V2",
+        "LANGCHAIN_PROJECT",
+        "LANGCHAIN_API_KEY",
+        "DUCKCLAW_SEND_TO_LANGSMITH",
+        "SEND_TO_LANGSMITH",
+        "DUCKCLAW_SAVE_CONVERSATION_TRACES",
+        "DUCKCLAW_CONVERSATION_TRACES_FORMAT",
+        "N8N_OUTBOUND_WEBHOOK_URL",
+        "REDIS_URL",
+        "DUCKCLAW_REDIS_URL",
+        "TELEGRAM_CHAT_ID",
+    }
+)
+
+
 def strip_secrets_from_env(env: dict[str, str]) -> dict[str, str]:
     """Devuelve copia sin claves secretas (para JSON/PM2 persistido)."""
     return {k: v for k, v in env.items() if not is_secret_env_key(k)}
+
+
+def strip_dotenv_owned_from_env(env: dict[str, str]) -> dict[str, str]:
+    """Quita claves que deben leerse solo desde `.env` vía env_file de PM2."""
+    return {k: v for k, v in env.items() if k not in DOTENV_OWNED_ENV_KEYS}
 
 
 def apply_dotenv_overrides_to_os_environ(flat: dict[str, str]) -> None:

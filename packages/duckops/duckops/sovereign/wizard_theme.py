@@ -9,6 +9,23 @@ from __future__ import annotations
 
 from rich.console import Console
 
+# Identidad DuckClaw (TUI Claude-style; no naranja Claude)
+DUCK_ACCENT = "#F5C542"
+DUCK_ACCENT_ALT = "#2DD4BF"
+
+# Mascota mallard (hex: válidos en Rich y Textual; evitar nombres tipo brown/wheat1)
+MASCOT_HEAD = "#2E7D32"
+MASCOT_BEAK = "#E65100"
+MASCOT_BODY_LIGHT = "#D7CCC8"
+MASCOT_BODY_DARK = "#6D4C41"
+MASCOT_LEG = "#FF9800"
+MASCOT_EYE = "#1a1a1a"
+HEADER_BORDER = DUCK_ACCENT
+SIDEBAR_STYLE = "dim"
+STATUS_DONE = "green"
+STATUS_ACTIVE = "bright_white"
+STATUS_PENDING = "dim"
+
 # Pasos y guía: información / navegación
 PANEL_BORDER = "cyan"
 

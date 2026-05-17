@@ -30,6 +30,16 @@ def cmd_init(
         "-C",
         help="Raíz del monorepo DuckClaw (por defecto: cwd o ancestro).",
     ),
+    chat: bool = typer.Option(
+        False,
+        "--chat",
+        help="Abre el chat TUI con agentes (playground admin) sin ejecutar el wizard completo.",
+    ),
+    manual: bool = typer.Option(
+        False,
+        "--manual",
+        help="Wizard completo en CLI (Telegram, Tailscale). Por defecto: rápido + consola admin.",
+    ),
     classic: bool = typer.Option(
         False,
         "--classic",
@@ -48,9 +58,11 @@ def cmd_init(
     repo_path = repo.resolve() if repo is not None else None
 
     if not classic:
-        from duckops.sovereign.runner import run_sovereign_wizard
+        from duckops.sovereign.runner import run_sovereign_chat, run_sovereign_wizard
 
-        raise typer.Exit(run_sovereign_wizard(repo_path))
+        if chat:
+            raise typer.Exit(run_sovereign_chat(repo_path))
+        raise typer.Exit(run_sovereign_wizard(repo_path, manual=manual))
 
     base = repo_path if repo_path is not None else _repo_root()
     wizard_script = base / "scripts" / "duckclaw_setup_wizard.py"

@@ -40,6 +40,11 @@ def parse_dotenv_file(path: Path) -> dict[str, str]:
     return out
 
 
+def root_dotenv_flat_env(repo_root: Path | str) -> dict[str, str]:
+    """Solo ``.env`` raíz (sin overlay del wizard propuesto). Fuente para PM2/ecosystem."""
+    return parse_dotenv_file(Path(repo_root).resolve() / ".env")
+
+
 def merged_root_and_proposed_flat_env(repo_root: Path | str) -> dict[str, str]:
     """
     Fusión para runtime/wizard: ``.env`` de la raíz y luego overlay de

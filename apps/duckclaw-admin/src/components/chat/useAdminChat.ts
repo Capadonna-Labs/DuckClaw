@@ -144,12 +144,11 @@ export function useAdminChat({ chatId, initialWorker = '', enabled = true }: Use
 
     try {
       let assignedSuffix = '';
-      const sessionChatId = config?.team_chat_id || chatId;
       await adminService.playgroundChatStream(
         {
           worker_id: workerId,
           message: text,
-          chat_id: sessionChatId,
+          chat_id: chatId,
           tenant_id: config?.effective_tenant_id ?? 'default',
           telegram_user_id: config?.telegram_user_id,
         },

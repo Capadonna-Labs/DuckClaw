@@ -1268,27 +1268,54 @@ def _format_vault_size_mb(size_bytes: int | float) -> str:
     return f"{mb:.2f} MB"
 
 
+def _template_bound_vault_path(worker_id: str | None, vault_user_id: Any) -> str | None:
+    """Ruta absoluta si la plantilla declara ``forge_context.vault_binding``."""
+    wid = (worker_id or "").strip()
+    if not wid or wid.lower() in ("manager", "default", "entry_router", "manager_router"):
+        return None
+    try:
+        from duckclaw.vaults import resolve_template_vault_path
+        from duckclaw.workers.manifest import load_manifest
+
+        spec = load_manifest(wid)
+        return resolve_template_vault_path(spec.forge_vault_binding, vault_user_id)
+    except Exception:
+        return None
+
+
 def execute_vault(
     args: str,
     *,
     vault_user_id: Any,
     tenant_id: Any = None,
     db: Any | None = None,
+    entry_worker_id: str | None = None,
+    chat_id: Any | None = None,
 ) -> str:
     user_id = (str(vault_user_id or "").strip() or "default")
     vault_scope = vault_scope_id_for_tenant(tenant_id)
     raw = (args or "").strip()
     session_db_path = _session_duckdb_path_for_fly(db) if db is not None else None
-    fixed_db = session_db_path or _dedicated_gateway_db_path_for_vault()
+    template_db: str | None = None
+    template_worker = ""
+    if not session_db_path:
+        wid = (entry_worker_id or "").strip()
+        if not wid and db is not None and chat_id is not None:
+            wid = (get_worker_id_for_chat(db, chat_id) or "").strip()
+        template_db = _template_bound_vault_path(wid, user_id)
+        if template_db:
+            template_worker = wid
+    fixed_db = session_db_path or template_db or _dedicated_gateway_db_path_for_vault()
     if fixed_db:
         from pathlib import Path as _P
 
         fp = _P(fixed_db).expanduser().resolve()
-        label = (
-            _fly_vault_label_for_tenant(tenant_id)
-            if session_db_path
-            else _dedicated_gateway_vault_label()
-        )
+        if session_db_path:
+            label = _fly_vault_label_for_tenant(tenant_id)
+        elif template_db:
+            label = f"plantilla {template_worker}" if template_worker else "plantilla"
+        else:
+            label = _dedicated_gateway_vault_label()
         if not raw:
             size = 0
             try:
@@ -1310,11 +1337,16 @@ def execute_vault(
         if cmd.startswith("--"):
             cmd = cmd[2:]
         if cmd in ("list", "new", "use", "rm"):
-            return (
-                f"En este gateway ({label}) solo aplica la BD anterior. "
+            hint = (
                 "Los comandos /vault list|new|use|rm son del registry multi-bóveda en Finanz; "
                 "aquí no aplican. Usa /vault sin argumentos para ver la ruta."
             )
+            if template_db:
+                hint = (
+                    "La bóveda está fijada en manifest.yaml (forge_context.vault_binding). "
+                    "Cámbiala en Plantillas → Bóveda DuckDB. " + hint
+                )
+            return f"En este contexto ({label}) solo aplica la BD anterior. {hint}"
         return (
             f"Usa /vault sin argumentos para ver la BD de {label}. "
             "Comandos adicionales del registry no aplican en este gateway."
@@ -7091,6 +7123,8 @@ def _dispatch_fly_command(
             vault_user_id=vault_user_id or requester_id or chat_id,
             tenant_id=tenant_id,
             db=db,
+            entry_worker_id=entry_worker_id,
+            chat_id=chat_id,
         )
     if name == "workers":
         return execute_team(
@@ -7309,6 +7343,7 @@ def handle_command(
     tenant_id: Any = None,
     vault_user_id: Any = None,
     username: str = "",
+    entry_worker_id: str | None = None,
 ) -> Optional[str]:
     """
     Middleware: si el mensaje es un comando on-the-fly, ejecuta y retorna la respuesta.

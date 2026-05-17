@@ -136,6 +136,16 @@ def _heartbeat_read_keys(tenant_id: str, chat_id: str) -> list[str]:
     return out
 
 
+def is_admin_ui_chat_session(chat_id: str | None) -> bool:
+    """Sesiones de la consola admin (no DM Telegram): sin egress ni heartbeats a Bot API."""
+    cid = str(chat_id or "").strip()
+    if not cid:
+        return False
+    if cid in ("admin-playground",):
+        return True
+    return cid.startswith("admin-section-") or cid.startswith("admin-ui")
+
+
 def is_chat_heartbeat_enabled(tenant_id: str, chat_id: str) -> bool:
     url = _redis_url()
     if not url:
@@ -465,6 +475,34 @@ def schedule_chat_heartbeat_dm(
     ``routing_worker_id``: id de plantilla (p. ej. ``Quant-Trader``) para resolver token desde
     ``TELEGRAM_*_TOKEN`` o ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` cuando no hay ContextVar.
     """
+    if is_admin_ui_chat_session(chat_id):
+        # #region agent log
+        try:
+            import json as _json
+            import time as _time
+
+            with open(
+                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
+                "a",
+                encoding="utf-8",
+            ) as _df:
+                _df.write(
+                    _json.dumps(
+                        {
+                            "sessionId": "fd1dbb",
+                            "hypothesisId": "A",
+                            "location": "chat_heartbeat.py:schedule_chat_heartbeat_dm",
+                            "message": "heartbeat_skipped_admin_ui",
+                            "data": {"chat_id": str(chat_id or "")[:64]},
+                            "timestamp": int(_time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
+        return
     if not is_chat_heartbeat_enabled(tenant_id, chat_id):
         return
     if not heartbeat_outbound_configured():

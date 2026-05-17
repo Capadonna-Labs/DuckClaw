@@ -1,6 +1,6 @@
 /** Fuente única de rutas del panel admin (Sidebar + Topbar). */
 
-export type NavSection = 'core' | 'admin' | 'footer';
+export type NavSection = 'core' | 'integrations' | 'admin' | 'footer';
 
 export type AdminNavItem = {
   href: string;
@@ -10,7 +10,26 @@ export type AdminNavItem = {
   adminOnly?: boolean;
 };
 
-export const ADMIN_NAV: readonly AdminNavItem[] = [
+export type AdminNavGroup = {
+  id: string;
+  label: string;
+  items: readonly AdminNavItem[];
+};
+
+export type AdminNavEntry =
+  | { type: 'item'; item: AdminNavItem }
+  | { type: 'group'; group: AdminNavGroup };
+
+export const INTEGRATIONS_NAV_GROUP: AdminNavGroup = {
+  id: 'integrations',
+  label: 'Integraciones',
+  items: [
+    { href: '/telegram', label: 'Telegram', section: 'integrations' },
+    { href: '/integrations/edge-devices', label: 'Edge devices', section: 'integrations' },
+  ],
+};
+
+const CORE_AND_ADMIN_NAV: readonly AdminNavItem[] = [
   { href: '/overview', label: 'Overview', section: 'core' },
   { href: '/kanban', label: 'Tablero', section: 'core' },
   { href: '/templates', label: 'Plantillas', section: 'core' },
@@ -19,7 +38,6 @@ export const ADMIN_NAV: readonly AdminNavItem[] = [
   { href: '/projects/new', label: 'Nuevo proyecto', section: 'core' },
   { href: '/playground', label: 'Playground', section: 'core' },
   { href: '/runtime', label: 'Runtime', section: 'core' },
-  { href: '/telegram', label: 'Telegram', section: 'core' },
   { href: '/commands', label: 'Fly commands', section: 'core' },
   { href: '/duckdb', label: 'DuckDB', section: 'core' },
   { href: '/traces', label: 'Traces', section: 'core' },
@@ -28,19 +46,61 @@ export const ADMIN_NAV: readonly AdminNavItem[] = [
   { href: '/settings', label: 'Ajustes', section: 'footer' },
 ] as const;
 
+/** Orden del sidebar: ítems planos + grupo Integraciones en el hueco tras Runtime. */
+export const ADMIN_NAV_STRUCTURE: readonly AdminNavEntry[] = [
+  { type: 'item', item: CORE_AND_ADMIN_NAV[0] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[1] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[2] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[3] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[4] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[5] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[6] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[7] },
+  { type: 'group', group: INTEGRATIONS_NAV_GROUP },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[8] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[9] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[10] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[11] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[12] },
+  { type: 'item', item: CORE_AND_ADMIN_NAV[13] },
+];
+
+/** Lista plana (compat tests / búsquedas). */
+export const ADMIN_NAV: readonly AdminNavItem[] = [
+  ...CORE_AND_ADMIN_NAV.slice(0, 8),
+  ...INTEGRATIONS_NAV_GROUP.items,
+  ...CORE_AND_ADMIN_NAV.slice(8),
+];
+
+function itemVisible(item: AdminNavItem, isAdmin: boolean): boolean {
+  return !item.adminOnly || isAdmin;
+}
+
+export function navEntriesForRole(isAdmin: boolean): AdminNavEntry[] {
+  return ADMIN_NAV_STRUCTURE.flatMap((entry) => {
+    if (entry.type === 'item') {
+      return itemVisible(entry.item, isAdmin) ? [entry] : [];
+    }
+    const items = entry.group.items.filter((i) => itemVisible(i, isAdmin));
+    return items.length > 0 ? [{ type: 'group' as const, group: { ...entry.group, items } }] : [];
+  });
+}
+
 /** Títulos del Topbar; incluye prefijos de rutas anidadas. */
 export const ADMIN_PAGE_TITLES: Record<string, string> = {
   ...Object.fromEntries(ADMIN_NAV.map((item) => [item.href, item.label])),
   '/projects': 'Proyectos',
+  '/integrations': 'Integraciones',
 };
 
 export function titleForAdminPath(pathname: string): string {
-  for (const [prefix, title] of Object.entries(ADMIN_PAGE_TITLES)) {
+  const entries = Object.entries(ADMIN_PAGE_TITLES).sort((a, b) => b[0].length - a[0].length);
+  for (const [prefix, title] of entries) {
     if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return title;
   }
   return 'DuckClaw Admin';
 }
 
 export function navItemsForRole(isAdmin: boolean): AdminNavItem[] {
-  return ADMIN_NAV.filter((item) => !item.adminOnly || isAdmin);
+  return ADMIN_NAV.filter((item) => itemVisible(item, isAdmin));
 }

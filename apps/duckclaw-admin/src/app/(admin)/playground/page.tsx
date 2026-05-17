@@ -96,6 +96,11 @@ export default function PlaygroundPage() {
           variant="full"
           showHeader={false}
           showWorkerLink={false}
+          emptyHint={
+            workerId
+              ? `Escribe un mensaje para hablar con ${workerId}`
+              : 'Escribe un mensaje para hablar con …'
+          }
           className="flex-1 border-0 rounded-none shadow-none"
         />
       </div>

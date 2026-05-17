@@ -165,10 +165,17 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
 
     forge_shared_db_path_env: Optional[str] = None
     forge_apply_schema_to_shared = False
+    forge_vault_binding: Optional[dict] = None
     fc = data.get("forge_context")
     if isinstance(fc, dict):
         forge_shared_db_path_env = (fc.get("shared_db_path_env") or "").strip() or None
         forge_apply_schema_to_shared = bool(fc.get("apply_main_schema_to_shared"))
+        try:
+            from duckclaw.vaults import normalize_vault_binding
+
+            forge_vault_binding = normalize_vault_binding(fc.get("vault_binding"))
+        except Exception:
+            forge_vault_binding = None
 
     duckdb_extensions: list[str] = []
     mem = data.get("memory")
@@ -252,6 +259,7 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         crm_config=crm_config,
         forge_shared_db_path_env=forge_shared_db_path_env,
         forge_apply_schema_to_shared=forge_apply_schema_to_shared,
+        forge_vault_binding=forge_vault_binding,
         context_pruning_config=context_pruning_config,
         duckdb_extensions=duckdb_extensions,
         network_access=network_access,
@@ -316,7 +324,7 @@ class WorkerSpec:
         "topology", "skills_list", "allowed_tables", "read_only", "worker_dir",
         "github_config", "reddit_config", "google_trends_config", "research_config", "tailscale_config", "sft_config",
         "ibkr_config", "openweather_config", "fmp_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config", "crm_config",
-        "forge_shared_db_path_env", "forge_apply_schema_to_shared",
+        "forge_shared_db_path_env", "forge_apply_schema_to_shared", "forge_vault_binding",
         "context_pruning_config",
         "duckdb_extensions",
         "network_access",
@@ -357,6 +365,7 @@ class WorkerSpec:
         crm_config: Optional[dict] = None,
         forge_shared_db_path_env: Optional[str] = None,
         forge_apply_schema_to_shared: bool = False,
+        forge_vault_binding: Optional[dict] = None,
         context_pruning_config: Optional[dict] = None,
         duckdb_extensions: Optional[list] = None,
         network_access: bool = False,
@@ -394,6 +403,7 @@ class WorkerSpec:
         self.crm_config = crm_config
         self.forge_shared_db_path_env = forge_shared_db_path_env
         self.forge_apply_schema_to_shared = forge_apply_schema_to_shared
+        self.forge_vault_binding = forge_vault_binding
         self.context_pruning_config = context_pruning_config
         self.duckdb_extensions = list(duckdb_extensions or [])
         self.network_access = bool(network_access)

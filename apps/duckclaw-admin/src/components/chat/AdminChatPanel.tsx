@@ -123,11 +123,10 @@ export function AdminChatPanel({
       >
         {messages.length === 0 && (
           <p className="text-sm text-gov-gray-400 text-center py-8">
-            {emptyHint ?? (
-              <>
-                Escribe un mensaje para probar <strong>{workerId || '…'}</strong>
-              </>
-            )}
+            {emptyHint ??
+              (workerId
+                ? `Escribe un mensaje para hablar con ${workerId}`
+                : 'Escribe un mensaje para hablar con …')}
           </p>
         )}
         {messages.map((m, i) => {

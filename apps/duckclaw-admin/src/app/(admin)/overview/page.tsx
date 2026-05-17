@@ -6,7 +6,11 @@ import type { AdminHealth } from '@/types/admin';
 import { Bot, Database, Radio } from 'lucide-react';
 import Link from 'next/link';
 import { DiagnosticsPanel } from '@/components/admin/DiagnosticsPanel';
-import { formatGatewayStatus, formatRedisStatus } from '@/lib/healthLabels';
+import {
+  formatGatewayStatus,
+  formatRedisStatus,
+  isGatewayHealthy,
+} from '@/lib/healthLabels';
 
 export default function OverviewPage() {
   const [health, setHealth] = useState<AdminHealth | null>(null);
@@ -34,8 +38,18 @@ export default function OverviewPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <MetricCard icon={Bot} label="Workers" value={health?.workers_count ?? '—'} />
-        <MetricCard icon={Radio} label="Redis" value={formatRedisStatus(health?.redis)} />
-        <MetricCard icon={Database} label="Gateway" value={formatGatewayStatus(health?.status)} />
+        <MetricCard
+          icon={Radio}
+          label="Redis"
+          value={error ? 'Off-line' : formatRedisStatus(health?.redis)}
+          online={error ? false : health != null ? health.redis : undefined}
+        />
+        <MetricCard
+          icon={Database}
+          label="Gateway"
+          value={error ? 'Off-line' : formatGatewayStatus(health?.status)}
+          online={error ? false : health != null ? isGatewayHealthy(health.status) : undefined}
+        />
       </div>
 
       <DiagnosticsPanel gatewayStale={health != null && health.api_revision !== 2} />
@@ -47,6 +61,7 @@ export default function OverviewPage() {
           <QuickLink href="/projects/new" label="Crear agente" />
           <QuickLink href="/templates" label="Plantillas" />
           <QuickLink href="/telegram" label="Telegram" />
+          <QuickLink href="/integrations/edge-devices" label="Edge devices" />
           <QuickLink href="/commands" label="Fly commands" />
           <QuickLink href="/mcp" label="MCP" />
           <QuickLink href="/skills" label="Skills" />
@@ -81,16 +96,28 @@ function MetricCard({
   icon: Icon,
   label,
   value,
+  online,
 }: {
   icon: React.ElementType;
   label: string;
   value: string | number;
+  online?: boolean;
 }) {
   return (
     <div className="bg-white dark:bg-dark-surface rounded-2xl border border-gov-gray-100 dark:border-dark-border p-5">
       <Icon className="text-gov-blue-600 dark:text-dark-cyan mb-2" size={22} />
       <p className="text-xs text-gov-gray-500 uppercase font-bold tracking-wider">{label}</p>
-      <p className="font-black text-2xl text-gov-gray-900 dark:text-dark-text mt-1">{value}</p>
+      <div className="flex items-center gap-2 mt-1">
+        {online !== undefined && (
+          <span
+            className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${
+              online ? 'bg-emerald-500' : 'bg-red-500'
+            }`}
+            aria-hidden
+          />
+        )}
+        <p className="font-black text-2xl text-gov-gray-900 dark:text-dark-text">{value}</p>
+      </div>
     </div>
   );
 }

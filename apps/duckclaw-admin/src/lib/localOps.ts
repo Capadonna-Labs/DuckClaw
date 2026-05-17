@@ -16,6 +16,18 @@ export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = 
     label: 'Últimas líneas log Gateway',
     argv: ['pm2', 'logs', 'DuckClaw-Gateway', '--lines', '40', '--nostream'],
   },
+  pm2_start_mcp: {
+    label: 'Iniciar DuckClaw-MCP',
+    argv: ['pm2', 'start', 'config/ecosystem.mcp.config.cjs'],
+  },
+  pm2_restart_mcp: {
+    label: 'Reiniciar DuckClaw-MCP',
+    argv: ['pm2', 'restart', 'DuckClaw-MCP', '--update-env'],
+  },
+  pm2_logs_mcp: {
+    label: 'Últimas líneas log MCP',
+    argv: ['pm2', 'logs', 'DuckClaw-MCP', '--lines', '40', '--nostream'],
+  },
   doctor: { label: 'Diagnóstico local (doctor.py)', argv: ['uv', 'run', 'python', 'scripts/doctor.py'] },
   bootstrap_dbs: {
     label: 'Bootstrap DuckDB',

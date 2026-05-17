@@ -282,3 +282,33 @@ def test_handle_command_heartbeat_on_requires_redis(
     out = handle_command(_Db(), "1", "/heartbeat on", tenant_id="default")
     assert out is not None
     assert "redis" in (out or "").lower()
+
+
+def test_is_admin_ui_chat_session() -> None:
+    from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+    assert is_admin_ui_chat_session("admin-playground") is True
+    assert is_admin_ui_chat_session("admin-section-root") is True
+    assert is_admin_ui_chat_session("admin-ui") is True
+    assert is_admin_ui_chat_session("1726618406") is False
+
+
+def test_schedule_chat_heartbeat_skips_admin_ui_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    calls: list[tuple] = []
+
+    def _fake_post(*args: object, **kwargs: object) -> None:
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(
+        "duckclaw.graphs.chat_heartbeat._post_outbound_sync",
+        lambda *a, **k: calls.append((a, k)),
+    )
+    from duckclaw.graphs.chat_heartbeat import schedule_chat_heartbeat_dm
+
+    schedule_chat_heartbeat_dm("default", "admin-section-root", "admin-ui", "hola")
+    time.sleep(0.15)
+    assert calls == []

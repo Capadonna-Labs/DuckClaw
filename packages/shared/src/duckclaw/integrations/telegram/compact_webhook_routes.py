@@ -144,6 +144,23 @@ def fastapi_relative_path(webhook_path: str, *, api_prefix: str = "/api/v1/teleg
     return suffix
 
 
+def serialize_compact_telegram_webhook_routes(routes: list[TelegramCompactWebhookRoute]) -> str:
+    """Serializa al formato compacto del .env (coma-separado)."""
+    parts: list[str] = []
+    for route in routes:
+        bot = (route.bot_name or "").strip().lower()
+        token = (route.bot_token or "").strip()
+        path = (route.webhook_path or "").strip()
+        if not bot or not token or not path:
+            raise ValueError("bot_name, bot_token y webhook_path son obligatorios en cada ruta")
+        parts.append(f"{bot}:{token}:{path}")
+    return ",".join(parts)
+
+
+def known_compact_bot_names() -> tuple[str, ...]:
+    return tuple(sorted(_BOT_PROFILES.keys()))
+
+
 def load_path_webhook_bindings_from_env() -> list[TelegramPathWebhookBinding]:
     raw = (os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()
     routes = parse_compact_telegram_webhook_routes(raw)

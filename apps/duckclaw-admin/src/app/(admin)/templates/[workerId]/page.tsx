@@ -7,6 +7,7 @@ import { adminService } from '@/services/adminService';
 import type { TemplateDetail } from '@/types/admin';
 import { useAuthStore } from '@/store/authStore';
 import { ChevronRight, Save, CheckCircle } from 'lucide-react';
+import { TemplateVaultPanel } from '@/components/templates/TemplateVaultPanel';
 
 const EDITABLE = /\.(ya?ml|md|sql|txt|json|py)$/i;
 
@@ -138,6 +139,7 @@ export default function TemplateEditorPage() {
             emptyHint="Sin system_prompt.md — vuelve a crear el agente o añade el archivo aquí."
           />
           <FileGroup title="Config y datos" files={otherFiles} tab={tab} onSelect={setTab} />
+          <TemplateVaultPanel workerId={workerId} canWrite={canWrite} />
         </aside>
 
         <div className="flex-1 min-w-0 space-y-2">

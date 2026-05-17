@@ -45,7 +45,7 @@ jobs:
         run: uv sync
 
       - name: Run tests (unit + smoke)
-        run: uv run pytest tests/ -v -m "not integration" --ignore=tests/run_singleton_writer_pipeline.py
+        run: uv run pytest tests/ -v -m "not integration" --ignore=tests/run_singleton_writer_pipeline.py --ignore=tests/deprecated
 
       - name: Run singleton writer pipeline integration test with logs
         env:

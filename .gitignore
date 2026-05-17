@@ -75,6 +75,9 @@ logs/
 .cursor/debug-*.log
 debug_sft.log
 
+# Tests deprecados (quant-trader, CFD, MOC, IBKR): locales; requieren .env/broker
+tests/deprecated/
+
 .cusorignore
 .cursorrules
 

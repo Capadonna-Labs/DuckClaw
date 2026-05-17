@@ -556,8 +556,12 @@ def test_duck_mascot_frames_and_states() -> None:
     assert duck.current_lines()
 
 
-def test_duck_mascot_inertia_moves_toward_target() -> None:
+def test_duck_mascot_inertia_moves_toward_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    from duckops.sovereign import duck_mascot
     from duckops.sovereign.duck_mascot import DuckMascot, MascotState
+
+    # Sin re-target aleatorio al llegar (15% en update_logic) — el test fija destino explícito.
+    monkeypatch.setattr(duck_mascot.random, "random", lambda: 1.0)
 
     duck = DuckMascot(x=0, y=0)
     duck.target_x, duck.target_y = 3, 2

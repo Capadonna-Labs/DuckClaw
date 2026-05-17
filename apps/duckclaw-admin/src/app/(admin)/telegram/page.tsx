@@ -19,8 +19,10 @@ export default function TelegramPage() {
   const [envMsg, setEnvMsg] = useState<string | null>(null);
 
   const [tenantId, setTenantId] = useState('default');
+  const [effectiveTenant, setEffectiveTenant] = useState<string | null>(null);
   const [users, setUsers] = useState<WhitelistUser[]>([]);
   const [dbPath, setDbPath] = useState('');
+  const [wlHint, setWlHint] = useState<string | null>(null);
   const [wlWarning, setWlWarning] = useState<string | null>(null);
   const [wlError, setWlError] = useState<string | null>(null);
   const [wlMsg, setWlMsg] = useState<string | null>(null);
@@ -36,6 +38,14 @@ export default function TelegramPage() {
         setUsers(r.users ?? []);
         setDbPath(r.db_path ?? '');
         setWlWarning(r.warning ?? null);
+        setWlHint(r.hint ?? null);
+        const eff = r.effective_tenant_id ?? r.tenant_id;
+        if (eff) {
+          setEffectiveTenant(eff);
+          if (tenantId === 'default' && eff !== 'default') {
+            setTenantId(eff);
+          }
+        }
       })
       .catch((e) => setWlError(e instanceof Error ? e.message : 'Error'));
   }, [tenantId]);
@@ -67,7 +77,9 @@ export default function TelegramPage() {
         username: newUsername.trim() || 'Usuario',
         role: newRole,
       });
-      setWlMsg('Usuario guardado en authorized_users');
+      setWlMsg(
+        `Usuario guardado (tenant «${effectiveTenant ?? tenantId}»). Reinicia el gateway solo si cambiaste .env.`
+      );
       setNewUserId('');
       setNewUsername('');
       loadWhitelist();
@@ -176,6 +188,14 @@ export default function TelegramPage() {
           </div>
 
           {wlWarning && <p className="text-amber-700 text-sm">{wlWarning}</p>}
+          {wlHint && <p className="text-amber-800 dark:text-amber-200 text-sm">{wlHint}</p>}
+          {effectiveTenant && effectiveTenant !== 'default' && (
+            <p className="text-xs text-gov-gray-500">
+              Tenant activo del gateway: <strong className="font-mono">{effectiveTenant}</strong>
+              {' '}
+              (user_id = ID numérico de Telegram, no el email de la consola)
+            </p>
+          )}
           {wlError && <p className="text-red-600 text-sm">{wlError}</p>}
           {wlMsg && <p className="text-green-700 text-sm">{wlMsg}</p>}
 

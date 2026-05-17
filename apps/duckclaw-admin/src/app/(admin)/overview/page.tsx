@@ -5,6 +5,7 @@ import { adminService } from '@/services/adminService';
 import type { AdminHealth } from '@/types/admin';
 import { Activity, Bot, Database, Radio } from 'lucide-react';
 import Link from 'next/link';
+import { DiagnosticsPanel } from '@/components/admin/DiagnosticsPanel';
 
 export default function OverviewPage() {
   const [health, setHealth] = useState<AdminHealth | null>(null);
@@ -41,13 +42,19 @@ export default function OverviewPage() {
         <MetricCard icon={Activity} label="Plantillas dir" value="forge/templates" small />
       </div>
 
+      <DiagnosticsPanel gatewayStale={health != null && health.api_revision !== 2} />
+
       <section className="bg-white dark:bg-dark-surface rounded-3xl border border-gov-gray-100 dark:border-dark-border p-6">
         <h2 className="text-lg font-bold mb-4">Accesos rápidos</h2>
         <div className="flex flex-wrap gap-3">
+          <QuickLink href="/kanban" label="Tablero" />
+          <QuickLink href="/projects/new" label="Crear agente" />
           <QuickLink href="/templates" label="Plantillas" />
-          <QuickLink href="/projects/new" label="Nuevo proyecto" />
           <QuickLink href="/telegram" label="Telegram" />
           <QuickLink href="/commands" label="Fly commands" />
+          <QuickLink href="/mcp" label="MCP" />
+          <QuickLink href="/skills" label="Skills" />
+          <QuickLink href="/ops" label="Operaciones" />
           <QuickLink href="/traces" label="Traces" />
           <QuickLink href="/audit" label="Auditoría" />
         </div>

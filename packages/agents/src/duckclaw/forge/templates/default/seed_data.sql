@@ -1,0 +1,1 @@
+-- Sin datos semilla por defecto (añade INSERT aquí si lo necesitas)

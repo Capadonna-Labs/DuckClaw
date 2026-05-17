@@ -7,6 +7,40 @@ import type {
   WhitelistUser,
 } from '@/types/admin';
 
+export interface AuditEntry {
+  ts: string;
+  actor: string;
+  action: string;
+  resource: string;
+  detail: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface SkillCatalogItem {
+  id: string;
+  path: string;
+  scope: string;
+  worker_id?: string;
+}
+
+export interface IndustryOption {
+  id: string;
+  name: string;
+  path: string;
+}
+
+export interface McpToolInfo {
+  name: string;
+  description: string;
+  server: string;
+}
+
+export interface OpsCommand {
+  id: string;
+  label: string;
+  argv: string[];
+}
+
 function sessionHeaders(): HeadersInit {
   if (typeof window === 'undefined') return {};
   try {
@@ -72,6 +106,21 @@ export const adminService = {
       body: JSON.stringify({ id, source_template: sourceTemplate ?? 'industries/business_standard' }),
     }),
 
+  createProject: (body: {
+    id: string;
+    source_template: string;
+    name: string;
+    description: string;
+    skills: string[];
+    topology: string;
+    system_prompt: string;
+    soul?: string;
+  }) =>
+    adminFetch<{ ok: boolean; id: string; path: string }>('/projects', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   deleteTemplate: (id: string) =>
     adminFetch<{ ok: boolean }>(`/templates/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
@@ -86,9 +135,15 @@ export const adminService = {
   getTelegramRoutes: () => adminFetch<{ routes: { bot: string; path: string }[] }>('/telegram/routes'),
 
   getTelegramWhitelist: (tenantId: string) =>
-    adminFetch<{ tenant_id: string; users: WhitelistUser[]; db_path?: string; warning?: string }>(
-      `/telegram/whitelist?tenant_id=${encodeURIComponent(tenantId)}`
-    ),
+    adminFetch<{
+      tenant_id: string;
+      effective_tenant_id?: string;
+      requested_tenant_id?: string;
+      users: WhitelistUser[];
+      db_path?: string;
+      warning?: string;
+      hint?: string;
+    }>(`/telegram/whitelist?tenant_id=${encodeURIComponent(tenantId)}`),
 
   upsertWhitelistUser: (body: {
     tenant_id: string;
@@ -115,7 +170,10 @@ export const adminService = {
   listVaults: () => adminFetch<{ vaults: { path: string; scope: string }[] }>('/runtime/vaults'),
 
   getRuntimeConfig: (vaultPath: string, chatId: string) =>
-    adminFetch<{ rows: { key: string; value: string; scope?: string; full_key?: string }[]; warning?: string }>(
+    adminFetch<{
+      rows: { key: string; value: string; scope?: string }[];
+      warning?: string;
+    }>(
       `/runtime/config?vault_path=${encodeURIComponent(vaultPath)}&chat_id=${encodeURIComponent(chatId)}`
     ),
 
@@ -141,15 +199,188 @@ export const adminService = {
       `/chats/history?tenant_id=${encodeURIComponent(tenantId)}&session_id=${encodeURIComponent(sessionId)}`
     ),
 
-  getAuditLog: (limit = 100) =>
-    adminFetch<{ entries: AuditEntry[] }>(`/audit?limit=${limit}`),
-};
+  getAuditLog: (limit = 100) => adminFetch<{ entries: AuditEntry[] }>(`/audit?limit=${limit}`),
 
-export interface AuditEntry {
-  ts: string;
-  actor: string;
-  action: string;
-  resource: string;
-  detail: string;
-  meta?: Record<string, unknown>;
-}
+  getSkillsCatalog: () =>
+    adminFetch<{ global: SkillCatalogItem[]; template_local: SkillCatalogItem[] }>(
+      '/catalog/skills'
+    ),
+
+  getIndustriesCatalog: () =>
+    adminFetch<{ industries: IndustryOption[]; starters: IndustryOption[] }>(
+      '/catalog/industries'
+    ),
+
+  getSourcePreview: (sourceTemplate: string) =>
+    adminFetch<{
+      source_template: string;
+      name: string;
+      description: string;
+      topology: string;
+      skills: string[];
+      system_prompt?: string;
+      soul?: string;
+    }>(`/catalog/source-preview?source_template=${encodeURIComponent(sourceTemplate)}`),
+
+  getMcpLiveStatus: () =>
+    adminFetch<{
+      reachable: boolean;
+      port: string;
+      url: string;
+      command: string;
+      status_code?: number;
+      service?: string;
+      hint?: string;
+      error?: string;
+    }>('/mcp-status'),
+
+  getTopologiesCatalog: () =>
+    adminFetch<{
+      topologies: { id: string; label: string; description: string }[];
+    }>('/catalog/topologies'),
+
+  getMcpCatalog: () =>
+    adminFetch<{
+      duckclaw_mcp: {
+        command: string;
+        url: string;
+        tools: McpToolInfo[];
+        live?: { reachable: boolean; status_code?: number; error?: string };
+      };
+      stdio_servers: { id: string; enabled: boolean; note: string }[];
+      github_note: string;
+      _gateway_stale?: boolean;
+    }>('/catalog/mcp'),
+
+  listOpsCommands: () => adminFetch<{ commands: OpsCommand[] }>('/ops/commands'),
+
+  runOps: (opId: string) =>
+    adminFetch<{
+      ok: boolean;
+      op_id: string;
+      exit_code: number;
+      stdout: string;
+      stderr: string;
+      executed_via?: 'local' | string;
+    }>('/ops/run', { method: 'POST', body: JSON.stringify({ op_id: opId }) }),
+
+  getKanbanCards: () =>
+    adminFetch<{ cards: import('@/lib/kanbanTypes').KanbanCard[] }>('/kanban'),
+
+  createKanbanCard: (body: {
+    title: string;
+    description?: string;
+    status?: import('@/lib/kanbanTypes').KanbanStatus;
+    worker_id?: string;
+  }) =>
+    adminFetch<{ ok: boolean; card: import('@/lib/kanbanTypes').KanbanCard }>('/kanban', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateKanbanCard: (body: {
+    id: string;
+    title?: string;
+    description?: string;
+    status?: import('@/lib/kanbanTypes').KanbanStatus;
+    worker_id?: string;
+  }) =>
+    adminFetch<{ ok: boolean; card: import('@/lib/kanbanTypes').KanbanCard }>('/kanban', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
+  deleteKanbanCard: (id: string) =>
+    adminFetch<{ ok: boolean }>(`/kanban?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  getPlaygroundConfig: () =>
+    adminFetch<{
+      llm: { provider: string; model: string; base_url: string };
+      catalog: {
+        id: string;
+        label: string;
+        kind: string;
+        env_keys: string[];
+        base_url_example: string;
+        model_example: string;
+        hint: string;
+        active?: boolean;
+        keys_ok?: boolean;
+      }[];
+      workers: string[];
+      env_path: string;
+      effective_tenant_id?: string;
+      note: string;
+    }>('/playground/config'),
+
+  playgroundChat: (body: {
+    worker_id: string;
+    message: string;
+    chat_id?: string;
+    tenant_id?: string;
+    stream?: boolean;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      worker_id: string;
+      response: string;
+      assigned_worker_id?: string;
+      usage_tokens?: Record<string, number>;
+    }>('/playground/chat', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** Chat con SSE: tokens progresivos hasta evento [DONE]. */
+  playgroundChatStream: async (
+    body: {
+      worker_id: string;
+      message: string;
+      chat_id?: string;
+      tenant_id?: string;
+    },
+    handlers: {
+      onToken: (chunk: string) => void;
+      onDone?: (meta: {
+        response: string;
+        assigned_worker_id?: string;
+        usage_tokens?: Record<string, number>;
+      }) => void;
+    }
+  ) => {
+    const { readSseChatStream } = await import('@/lib/sseChat');
+    const res = await fetch('/api/admin/playground/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...sessionHeaders(),
+      },
+      body: JSON.stringify({ ...body, stream: true }),
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const detail =
+        typeof data?.detail === 'string'
+          ? data.detail
+          : data?.detail?.detail ?? data?.title ?? res.statusText;
+      throw new Error(detail || `Error ${res.status}`);
+    }
+    let full = '';
+    for await (const ev of readSseChatStream(res.body)) {
+      if (ev.type === 'token' && ev.content) {
+        full += ev.content;
+        handlers.onToken(ev.content);
+      } else if (ev.type === 'done') {
+        handlers.onDone?.({
+          response: ev.response || full,
+          assigned_worker_id: ev.assigned_worker_id,
+          usage_tokens: ev.usage_tokens,
+        });
+      } else if (ev.type === 'error') {
+        throw new Error(ev.message);
+      }
+    }
+    return full;
+  },
+};

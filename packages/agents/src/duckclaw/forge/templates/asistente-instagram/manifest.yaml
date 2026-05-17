@@ -1,0 +1,12 @@
+name: Asistente instagram
+id: asistente-instagram
+schema_name: support_worker
+topology: general
+read_only: true
+llm:
+  required: true
+  temperature: 0.3
+skills:
+- search_knowledge_base
+- get_ticket_status
+description: Vender por instagram

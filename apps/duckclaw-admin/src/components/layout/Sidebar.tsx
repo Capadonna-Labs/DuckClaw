@@ -14,14 +14,23 @@ import {
   LogOut,
   Terminal,
   ClipboardList,
+  Blocks,
+  Cable,
+  RefreshCw,
+  LayoutGrid,
+  MessageCircle,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { cn } from '@/lib/utils';
 
 const NAV_CORE = [
   { href: '/overview', label: 'Overview', icon: LayoutDashboard },
+  { href: '/kanban', label: 'Tablero', icon: LayoutGrid },
   { href: '/templates', label: 'Plantillas', icon: Bot },
+  { href: '/skills', label: 'Skills', icon: Blocks },
+  { href: '/mcp', label: 'MCP', icon: Cable },
   { href: '/projects/new', label: 'Nuevo proyecto', icon: FolderPlus },
+  { href: '/playground', label: 'Playground', icon: MessageCircle },
   { href: '/runtime', label: 'Runtime', icon: Radio },
   { href: '/telegram', label: 'Telegram', icon: MessageSquare },
   { href: '/commands', label: 'Fly commands', icon: Terminal },
@@ -29,7 +38,10 @@ const NAV_CORE = [
   { href: '/traces', label: 'Traces', icon: Activity },
 ] as const;
 
-const NAV_ADMIN = [{ href: '/audit', label: 'Auditoría', icon: ClipboardList }] as const;
+const NAV_ADMIN = [
+  { href: '/ops', label: 'Operaciones', icon: RefreshCw },
+  { href: '/audit', label: 'Auditoría', icon: ClipboardList },
+] as const;
 
 const NAV_FOOTER = [{ href: '/settings', label: 'Ajustes', icon: Settings }] as const;
 

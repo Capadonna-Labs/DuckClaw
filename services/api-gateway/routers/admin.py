@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -28,6 +29,52 @@ _ENV_ALLOW_EXACT = frozenset({"LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "REDI
 def _repo_root() -> Path:
     raw = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
     return Path(raw) if raw else _REPO_ROOT
+
+
+def _gateway_effective_tenant_id(request_tenant: str | None) -> str:
+    """Misma resolución que ``main._effective_tenant_id`` (p. ej. default → Marco si está en PM2)."""
+    import main as gateway_main
+
+    raw = (request_tenant or "").strip() or "default"
+    return gateway_main._effective_tenant_id(raw)
+
+
+def _list_whitelist_users_merged(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
+    from duckclaw.graphs.on_the_fly_commands import (
+        _dedupe_authorized_users_by_user_id,
+        _list_authorized_users,
+    )
+
+    tid = (tenant_id or "default").strip() or "default"
+    users = _list_authorized_users(db, tenant_id=tid)
+    if tid.lower() != "default":
+        legacy = _list_authorized_users(db, tenant_id="default")
+        if legacy:
+            users = _dedupe_authorized_users_by_user_id(users + legacy)
+    return users
+
+
+async def _invalidate_whitelist_cache(
+    request: Request,
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    from duckclaw.graphs.on_the_fly_commands import _invalidate_whitelist_redis_cache
+
+    _invalidate_whitelist_redis_cache(tenant_id=tenant_id, user_id=user_id)
+    redis_client = getattr(request.app.state, "redis", None)
+    if redis_client is None:
+        return
+    tid = str(tenant_id or "default").strip().lower() or "default"
+    uid = str(user_id or "").strip()
+    if not uid:
+        return
+    key = f"whitelist:{tid}:{uid}"
+    try:
+        await redis_client.delete(key)
+    except Exception:
+        pass
 
 
 def _env_file() -> Path:
@@ -110,6 +157,31 @@ class FileWriteBody(BaseModel):
 class TemplateCreateBody(BaseModel):
     id: str = Field(..., min_length=1, max_length=64)
     source_template: str = Field(default="industries/business_standard")
+
+
+class ProjectCreateBody(BaseModel):
+    id: str = Field(..., min_length=1, max_length=64)
+    source_template: str = Field(
+        default="default",
+        description="Preset de habilidades (support, finanz, etc.). El disco siempre clona desde templates/default.",
+    )
+    name: str = ""
+    description: str = ""
+    skills: list[str] = Field(default_factory=list)
+    topology: str = "general"
+    system_prompt: str = ""
+    soul: str = ""
+
+
+class PlaygroundChatBody(BaseModel):
+    worker_id: str = Field(default="default", max_length=64)
+    message: str = Field(..., min_length=1, max_length=16000)
+    chat_id: str = Field(default="admin-playground", max_length=128)
+    tenant_id: str = Field(default="default", max_length=64)
+    stream: bool = Field(
+        default=False,
+        description="Si true, respuesta text/event-stream (tokens SSE + [DONE]).",
+    )
 
 
 class EnvPatchBody(BaseModel):
@@ -208,6 +280,200 @@ def _parse_agent_config_rows(raw: Any, chat_id: str) -> list[dict[str, str]]:
     return out
 
 
+_LLM_PROVIDER_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": "deepseek",
+        "label": "DeepSeek (API en la nube)",
+        "kind": "api",
+        "env_keys": ["DEEPSEEK_API_KEY"],
+        "base_url_example": "https://api.deepseek.com/v1",
+        "model_example": "deepseek-chat",
+        "hint": "Requiere cuenta DeepSeek y API key en .env",
+    },
+    {
+        "id": "openai",
+        "label": "OpenAI",
+        "kind": "api",
+        "env_keys": ["OPENAI_API_KEY"],
+        "base_url_example": "https://api.openai.com/v1",
+        "model_example": "gpt-4o-mini",
+        "hint": "ChatGPT / API OpenAI oficial",
+    },
+    {
+        "id": "groq",
+        "label": "Groq (API rápida)",
+        "kind": "api",
+        "env_keys": ["GROQ_API_KEY"],
+        "base_url_example": "https://api.groq.com/openai/v1",
+        "model_example": "llama-3.3-70b-versatile",
+        "hint": "Inferencia en la nube con modelos Llama",
+    },
+    {
+        "id": "gemini",
+        "label": "Google Gemini",
+        "kind": "api",
+        "env_keys": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+        "base_url_example": "",
+        "model_example": "gemini-2.0-flash",
+        "hint": "GOOGLE_API_KEY o GEMINI_API_KEY",
+    },
+    {
+        "id": "anthropic",
+        "label": "Anthropic Claude",
+        "kind": "api",
+        "env_keys": ["ANTHROPIC_API_KEY"],
+        "base_url_example": "",
+        "model_example": "claude-3-5-haiku-20241022",
+        "hint": "API Anthropic",
+    },
+    {
+        "id": "ollama",
+        "label": "Ollama (local)",
+        "kind": "local",
+        "env_keys": [],
+        "base_url_example": "http://localhost:11434",
+        "model_example": "llama3.2",
+        "hint": "Instala Ollama y ejecuta: ollama pull llama3.2",
+    },
+    {
+        "id": "mlx",
+        "label": "MLX (Mac local)",
+        "kind": "local",
+        "env_keys": [],
+        "base_url_example": "http://127.0.0.1:8080/v1",
+        "model_example": "gemma / tu modelo MLX",
+        "hint": "pm2 start config/ecosystem.mlx.config.cjs antes del gateway",
+    },
+    {
+        "id": "huggingface",
+        "label": "Hugging Face",
+        "kind": "api",
+        "env_keys": ["HUGGINGFACE_API_KEY", "HF_TOKEN"],
+        "base_url_example": "",
+        "model_example": "mistralai/Mistral-7B-Instruct-v0.3",
+        "hint": "Token HF en .env",
+    },
+]
+
+
+def _resolved_llm_env() -> dict[str, str]:
+    prov = (os.environ.get("DUCKCLAW_LLM_PROVIDER") or os.environ.get("LLM_PROVIDER") or "").strip()
+    model = (os.environ.get("DUCKCLAW_LLM_MODEL") or os.environ.get("LLM_MODEL") or "").strip()
+    base = (os.environ.get("DUCKCLAW_LLM_BASE_URL") or os.environ.get("LLM_BASE_URL") or "").strip()
+    return {"provider": prov, "model": model, "base_url": base}
+
+
+def _llm_keys_configured(env_keys: list[str]) -> bool:
+    for k in env_keys:
+        if (os.environ.get(k) or "").strip():
+            return True
+    return len(env_keys) == 0
+
+
+@router.get("/playground/config", dependencies=[Depends(_require_admin_key)])
+async def playground_config() -> dict[str, Any]:
+    workers: list[str] = []
+    try:
+        from duckclaw.workers.factory import list_workers
+
+        workers = list_workers()
+    except Exception:
+        workers = []
+    llm = _resolved_llm_env()
+    active = llm.get("provider", "")
+    catalog = []
+    for item in _LLM_PROVIDER_CATALOG:
+        row = dict(item)
+        row["active"] = row["id"] == active
+        row["keys_ok"] = _llm_keys_configured(row.get("env_keys") or [])
+        catalog.append(row)
+    eff_tenant = _gateway_effective_tenant_id("default")
+    return {
+        "llm": llm,
+        "catalog": catalog,
+        "workers": workers,
+        "env_path": str(_env_file()),
+        "effective_tenant_id": eff_tenant,
+        "chat_endpoint": "/api/v1/admin/playground/chat",
+        "chat_stream_endpoint": "/api/v1/admin/playground/chat",
+        "chat_stream_hint": "POST con stream=true o Accept: text/event-stream",
+        "note": "El LLM lo define el .env del gateway (PM2). Reinicia DuckClaw-Gateway tras cambiar proveedor.",
+    }
+
+
+@router.post("/playground/chat", dependencies=[Depends(_require_admin_key)])
+async def playground_chat(
+    body: PlaygroundChatBody,
+    request: Request,
+    actor: str = Depends(_actor_from_header),
+):
+    """Chat de prueba desde consola admin (exento Tailscale vía prefijo /admin/)."""
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", body.worker_id.strip()) or "default"
+    msg = body.message.strip()
+    if not msg:
+        raise _problem(400, "message vacío", body.message)
+    chat_id = (body.chat_id or "admin-playground").strip() or "admin-playground"
+    tenant_id = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
+    owner_uid = (
+        (os.environ.get("DUCKCLAW_OWNER_ID") or os.environ.get("DUCKCLAW_ADMIN_CHAT_ID") or "")
+        .strip()
+    )
+    guard_user_id = owner_uid or (actor or "admin-ui")
+
+    from core.models import ChatRequest
+
+    chat = ChatRequest(
+        message=msg,
+        chat_id=chat_id,
+        user_id=guard_user_id,
+        username=actor or guard_user_id,
+        chat_type="private",
+        tenant_id=tenant_id,
+        stream=body.stream,
+    )
+    redis_client = getattr(request.app.state, "redis", None)
+    accept = (request.headers.get("accept") or "").lower()
+    wants_stream = bool(body.stream) or "text/event-stream" in accept
+
+    import main as gateway_main
+
+    if wants_stream:
+        from core.sse_stream import SSE_HEADERS
+
+        return StreamingResponse(
+            gateway_main._invoke_chat_sse_body(
+                chat,
+                wid,
+                chat_id,
+                tenant_id,
+                redis_client=redis_client,
+            ),
+            media_type="text/event-stream",
+            headers=dict(SSE_HEADERS),
+        )
+
+    try:
+        result = await gateway_main._invoke_chat(
+            chat,
+            wid,
+            session_id=chat_id,
+            tenant_id=tenant_id,
+            redis_client=redis_client,
+        )
+    except Exception as exc:
+        raise _problem(500, "Error en playground chat", str(exc)) from exc
+
+    if isinstance(result, dict):
+        return {
+            "ok": True,
+            "worker_id": wid,
+            "response": str(result.get("response") or result.get("reply") or ""),
+            "assigned_worker_id": result.get("assigned_worker_id"),
+            "usage_tokens": result.get("usage_tokens"),
+        }
+    return {"ok": True, "worker_id": wid, "response": str(result or "")}
+
+
 @router.get("/health", dependencies=[Depends(_require_admin_key)])
 async def admin_health(request: Request) -> dict[str, Any]:
     workers: list[str] = []
@@ -231,6 +497,12 @@ async def admin_health(request: Request) -> dict[str, Any]:
         "workers": workers[:20],
         "redis": redis_ok,
         "templates_dir": str(_templates_dir()),
+        "api_revision": 2,
+        "features": {
+            "catalog": True,
+            "ops": True,
+            "projects": True,
+        },
     }
 
 
@@ -295,6 +567,114 @@ async def put_template_file(
     return {"ok": True, "path": file_path}
 
 
+def _read_manifest_skills(template_dir: Path) -> list[str]:
+    manifest = template_dir / "manifest.yaml"
+    if not manifest.is_file():
+        return []
+    try:
+        import yaml
+
+        raw = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+        if not isinstance(raw, dict):
+            return []
+        sk = raw.get("skills") or []
+        if not isinstance(sk, list):
+            return []
+        out: list[str] = []
+        for item in sk:
+            if isinstance(item, str) and item.strip():
+                out.append(item.strip())
+        return out
+    except Exception:
+        return []
+
+
+def _merge_skill_lists(base: list[str], extra: list[str]) -> list[str]:
+    seen: set[str] = set()
+    merged: list[str] = []
+    for s in base + extra:
+        key = s.strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append(key)
+    return merged
+
+
+def _write_worker_prompts(dest: Path, *, system_prompt: str, soul: str) -> None:
+    sp = (system_prompt or "").strip()
+    if sp:
+        (dest / "system_prompt.md").write_text(sp + "\n", encoding="utf-8")
+    sl = (soul or "").strip()
+    if sl:
+        (dest / "soul.md").write_text(sl + "\n", encoding="utf-8")
+
+
+def _create_worker_from_source(
+    *,
+    wid: str,
+    source_template: str,
+    name: str = "",
+    description: str = "",
+    skills: list[str] | None = None,
+    topology: str = "",
+    system_prompt: str = "",
+    soul: str = "",
+) -> Path:
+    dest = _templates_dir() / wid
+    if dest.exists():
+        raise _problem(409, "Plantilla ya existe", wid)
+
+    base_rel = "default"
+    base = _templates_dir() / base_rel
+    if not base.is_dir():
+        base = _templates_dir() / "industries" / "business_standard"
+    if not base.is_dir():
+        raise _problem(404, "Plantilla base default no encontrada", base_rel)
+
+    shutil.copytree(base, dest)
+
+    preset_rel = (source_template or "default").strip().strip("/")
+    preset_dir = _templates_dir() / preset_rel
+    preset_skills: list[str] = []
+    if preset_rel != "default" and preset_dir.is_dir():
+        preset_skills = _read_manifest_skills(preset_dir)
+
+    base_skills = _read_manifest_skills(dest)
+    if skills is not None and len(skills) > 0:
+        final_skills = _merge_skill_lists(base_skills, list(skills))
+    else:
+        final_skills = _merge_skill_lists(base_skills, preset_skills)
+
+    manifest = dest / "manifest.yaml"
+    if manifest.is_file():
+        try:
+            import yaml
+
+            data = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+            if not isinstance(data, dict):
+                data = {}
+            data["id"] = wid
+            data["name"] = (name or wid).strip()
+            if description.strip():
+                data["description"] = description.strip()
+            data["skills"] = final_skills
+            if topology.strip():
+                data["topology"] = topology.strip()
+            manifest.write_text(
+                yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False),
+                encoding="utf-8",
+            )
+        except ImportError:
+            text = manifest.read_text(encoding="utf-8")
+            text = re.sub(r"^id:\s*.+$", f"id: {wid}", text, count=1, flags=re.MULTILINE)
+            text = re.sub(r"^name:\s*.+$", f"name: {name or wid}", text, count=1, flags=re.MULTILINE)
+            manifest.write_text(text, encoding="utf-8")
+
+    _write_worker_prompts(dest, system_prompt=system_prompt, soul=soul)
+    return dest
+
+
 @router.post("/templates", dependencies=[Depends(_require_admin_key)])
 async def create_template(
     body: TemplateCreateBody,
@@ -303,22 +683,7 @@ async def create_template(
     wid = re.sub(r"[^a-zA-Z0-9_-]", "", body.id.strip())
     if not wid:
         raise _problem(400, "id inválido", body.id)
-    dest = _templates_dir() / wid
-    if dest.exists():
-        raise _problem(409, "Plantilla ya existe", wid)
-    src_rel = body.source_template.strip().strip("/")
-    src = _templates_dir() / src_rel
-    if not src.is_dir():
-        src = _templates_dir() / "industries" / "business_standard"
-    if not src.is_dir():
-        raise _problem(404, "Plantilla origen no encontrada", body.source_template)
-    shutil.copytree(src, dest)
-    manifest = dest / "manifest.yaml"
-    if manifest.is_file():
-        text = manifest.read_text(encoding="utf-8")
-        text = re.sub(r"^id:\s*.+$", f"id: {wid}", text, count=1, flags=re.MULTILINE)
-        text = re.sub(r"^name:\s*.+$", f"name: {wid}", text, count=1, flags=re.MULTILINE)
-        manifest.write_text(text, encoding="utf-8")
+    _create_worker_from_source(wid=wid, source_template=body.source_template)
     _admin_audit("template.create", f"templates/{wid}", body.source_template, actor=actor)
     return {"ok": True, "id": wid}
 
@@ -537,22 +902,40 @@ async def admin_chat_history(
 async def get_telegram_whitelist(tenant_id: str = Query("default")) -> dict[str, Any]:
     from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
-    from duckclaw.graphs.on_the_fly_commands import (
-        _ensure_authorized_users_table,
-        _list_authorized_users,
-    )
+    from duckclaw.graphs.on_the_fly_commands import _ensure_authorized_users_table
 
-    tid = (tenant_id or "default").strip() or "default"
+    requested = (tenant_id or "default").strip() or "default"
+    tid = _gateway_effective_tenant_id(requested)
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
-        return {"tenant_id": tid, "users": [], "db_path": gw, "warning": "Gateway DuckDB no encontrada"}
+        return {
+            "tenant_id": tid,
+            "requested_tenant_id": requested,
+            "effective_tenant_id": tid,
+            "users": [],
+            "db_path": gw,
+            "warning": "Gateway DuckDB no encontrada",
+        }
     db = DuckClaw(gw, read_only=True, engine="python")
     try:
         _ensure_authorized_users_table(db)
-        users = _list_authorized_users(db, tenant_id=tid)
+        users = _list_whitelist_users_merged(db, tenant_id=tid)
     finally:
         db.close()
-    return {"tenant_id": tid, "users": users, "db_path": gw}
+    hint = None
+    if requested.lower() == "default" and tid.lower() != "default":
+        hint = (
+            f"El gateway usa tenant «{tid}» (DUCKCLAW_GATEWAY_TENANT_ID o heurística PM2). "
+            "Los usuarios deben estar en este tenant para pasar el Telegram Guard."
+        )
+    return {
+        "tenant_id": tid,
+        "requested_tenant_id": requested,
+        "effective_tenant_id": tid,
+        "users": users,
+        "db_path": gw,
+        "hint": hint,
+    }
 
 
 @router.get("/audit", dependencies=[Depends(_require_admin_key)])
@@ -577,6 +960,7 @@ async def get_admin_audit(limit: int = Query(100, ge=1, le=500)) -> dict[str, An
 @router.post("/telegram/whitelist", dependencies=[Depends(_require_admin_key)])
 async def post_telegram_whitelist(
     body: WhitelistBody,
+    request: Request,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     from duckclaw import DuckClaw
@@ -586,7 +970,8 @@ async def post_telegram_whitelist(
         _upsert_authorized_user,
     )
 
-    tid = (body.tenant_id or "default").strip() or "default"
+    requested = (body.tenant_id or "default").strip() or "default"
+    tid = _gateway_effective_tenant_id(requested)
     uid = (body.user_id or "").strip()
     if not uid:
         raise _problem(400, "user_id requerido", "")
@@ -608,18 +993,28 @@ async def post_telegram_whitelist(
         )
     finally:
         rw.close()
+    await _invalidate_whitelist_cache(request, tenant_id=tid, user_id=uid)
     _admin_audit(
         "telegram.whitelist.upsert",
         f"tenant:{tid}",
         uid,
         actor=actor,
-        meta={"role": role},
+        meta={"role": role, "requested_tenant_id": requested},
     )
-    return {"ok": True, "tenant_id": tid, "user_id": uid, "role": role}
+    return {
+        "ok": True,
+        "tenant_id": tid,
+        "effective_tenant_id": tid,
+        "requested_tenant_id": requested,
+        "user_id": uid,
+        "role": role,
+        "db_path": gw,
+    }
 
 
 @router.delete("/telegram/whitelist", dependencies=[Depends(_require_admin_key)])
 async def delete_telegram_whitelist(
+    request: Request,
     tenant_id: str = Query("default"),
     user_id: str = Query(...),
     actor: str = Depends(_actor_from_header),
@@ -631,7 +1026,8 @@ async def delete_telegram_whitelist(
         _ensure_authorized_users_table,
     )
 
-    tid = (tenant_id or "default").strip() or "default"
+    requested = (tenant_id or "default").strip() or "default"
+    tid = _gateway_effective_tenant_id(requested)
     uid = (user_id or "").strip()
     if not uid:
         raise _problem(400, "user_id requerido", "")
@@ -644,8 +1040,9 @@ async def delete_telegram_whitelist(
         _delete_authorized_user(rw, tenant_id=tid, user_id=uid)
     finally:
         rw.close()
+    await _invalidate_whitelist_cache(request, tenant_id=tid, user_id=uid)
     _admin_audit("telegram.whitelist.delete", f"tenant:{tid}", uid, actor=actor)
-    return {"ok": True, "tenant_id": tid, "user_id": uid}
+    return {"ok": True, "tenant_id": tid, "effective_tenant_id": tid, "user_id": uid}
 
 
 @router.get("/fly-commands", dependencies=[Depends(_require_admin_key)])
@@ -711,6 +1108,340 @@ async def delete_runtime_config(
     return {"ok": True, "queued": True, "full_key": full_key}
 
 
+@router.get("/catalog/skills", dependencies=[Depends(_require_admin_key)])
+async def catalog_skills() -> dict[str, Any]:
+    forge = _repo_root() / "packages" / "agents" / "src" / "duckclaw" / "forge"
+    global_skills: list[dict[str, str]] = []
+    skills_dir = forge / "skills"
+    if skills_dir.is_dir():
+        for py in sorted(skills_dir.glob("*.py")):
+            if py.name.startswith("_"):
+                continue
+            global_skills.append(
+                {
+                    "id": py.stem,
+                    "path": str(py.relative_to(_repo_root())),
+                    "scope": "global",
+                }
+            )
+    template_skills: list[dict[str, str]] = []
+    templates_root = _templates_dir()
+    for worker_dir in sorted(templates_root.iterdir()):
+        if not worker_dir.is_dir() or worker_dir.name.startswith("."):
+            continue
+        local = worker_dir / "skills"
+        if not local.is_dir():
+            continue
+        for py in sorted(local.glob("*.py")):
+            if py.name.startswith("_"):
+                continue
+            template_skills.append(
+                {
+                    "id": py.stem,
+                    "worker_id": worker_dir.name,
+                    "path": str(py.relative_to(_repo_root())),
+                    "scope": "template",
+                }
+            )
+    return {"global": global_skills, "template_local": template_skills}
+
+
+@router.get("/catalog/source-preview", dependencies=[Depends(_require_admin_key)])
+async def catalog_source_preview(source_template: str = Query(...)) -> dict[str, Any]:
+    src_rel = source_template.strip().strip("/")
+    src = _templates_dir() / src_rel
+    if not src.is_dir():
+        raise _problem(404, "Plantilla origen no encontrada", source_template)
+    manifest = src / "manifest.yaml"
+    skills: list[str] = []
+    name = src_rel
+    description = ""
+    topology = "general"
+    if manifest.is_file():
+        try:
+            import yaml
+
+            raw = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+            if isinstance(raw, dict):
+                name = str(raw.get("name") or src_rel)
+                description = str(raw.get("description") or "")
+                topology = str(raw.get("topology") or "general")
+                sk = raw.get("skills") or []
+                if isinstance(sk, list):
+                    skills = [str(s) for s in sk]
+        except Exception:
+            pass
+    system_prompt = ""
+    soul = ""
+    sp_path = src / "system_prompt.md"
+    soul_path = src / "soul.md"
+    if sp_path.is_file():
+        try:
+            system_prompt = sp_path.read_text(encoding="utf-8")
+        except Exception:
+            pass
+    if soul_path.is_file():
+        try:
+            soul = soul_path.read_text(encoding="utf-8")
+        except Exception:
+            pass
+    return {
+        "source_template": src_rel,
+        "name": name,
+        "description": description,
+        "topology": topology,
+        "skills": skills,
+        "system_prompt": system_prompt,
+        "soul": soul,
+    }
+
+
+@router.get("/catalog/industries", dependencies=[Depends(_require_admin_key)])
+async def catalog_industries() -> dict[str, Any]:
+    industries_dir = _templates_dir() / "industries"
+    items: list[dict[str, str]] = []
+    if industries_dir.is_dir():
+        for d in sorted(industries_dir.iterdir()):
+            if d.is_dir() and (d / "manifest.yaml").is_file():
+                rel = f"industries/{d.name}"
+                name = d.name
+                try:
+                    import yaml
+
+                    raw = yaml.safe_load((d / "manifest.yaml").read_text(encoding="utf-8")) or {}
+                    if isinstance(raw, dict):
+                        name = str(raw.get("name") or d.name)
+                except Exception:
+                    pass
+                items.append({"id": rel, "name": name, "path": rel})
+    starters = [
+        {
+            "id": "default",
+            "name": "Asistente en blanco",
+            "path": "default",
+            "subtitle": "Parte de la plantilla default; tú defines el comportamiento.",
+        },
+        {
+            "id": "industries/business_standard",
+            "name": "Asistente de negocio",
+            "path": "industries/business_standard",
+            "subtitle": "Memoria triple y habilidades enterprise.",
+        },
+        {
+            "id": "support",
+            "name": "Atención al cliente",
+            "path": "support",
+            "subtitle": "Responde dudas frecuentes con tono amable.",
+        },
+        {
+            "id": "research_worker",
+            "name": "Investigación y resúmenes",
+            "path": "research_worker",
+            "subtitle": "Busca información y entrega informes claros.",
+        },
+        {
+            "id": "finanz",
+            "name": "Finanzas personales",
+            "path": "finanz",
+            "subtitle": "Presupuesto y conceptos financieros básicos.",
+        },
+    ]
+    return {"industries": items, "starters": starters}
+
+
+@router.get("/catalog/topologies", dependencies=[Depends(_require_admin_key)])
+async def catalog_topologies() -> dict[str, Any]:
+    return {
+        "topologies": [
+            {
+                "id": "general",
+                "label": "General",
+                "description": "Worker autónomo estándar (un agente, un manifest).",
+            },
+            {
+                "id": "axis_orchestrator",
+                "label": "AXIS orquestador",
+                "description": "Coordina sub-workers vía orchestrator.orchestrates (ej. AXIS-Maestro).",
+            },
+        ]
+    }
+
+
+async def _probe_mcp_http(port: str) -> dict[str, Any]:
+    import httpx
+
+    base = f"http://127.0.0.1:{port}"
+    out: dict[str, Any] = {"reachable": False, "url": f"{base}/mcp", "port": port}
+    try:
+        async with httpx.AsyncClient(timeout=2.5) as client:
+            r = await client.get(f"{base}/")
+            out["status_code"] = r.status_code
+            out["reachable"] = r.status_code < 500
+            try:
+                body = r.json()
+                if isinstance(body, dict):
+                    out["service"] = body.get("service")
+                    out["hint"] = body.get("hint")
+            except Exception:
+                pass
+    except Exception as exc:
+        out["error"] = str(exc)
+    return out
+
+
+@router.get("/catalog/mcp", dependencies=[Depends(_require_admin_key)])
+async def catalog_mcp() -> dict[str, Any]:
+    mcp_port = (os.environ.get("DUCKCLAW_MCP_PORT") or "8001").strip()
+    duckclaw_tools = [
+        {
+            "name": "open_meteo_current_weather",
+            "description": "Clima actual por ciudad (Open-Meteo)",
+            "server": "duckclaw_mcp",
+        },
+        {
+            "name": "invoke_manager_graph",
+            "description": "Fly commands / y grafo Manager (Telegram, workers, team)",
+            "server": "duckclaw_mcp",
+        },
+        {
+            "name": "invoke_core_conversation_graph",
+            "description": "Grafo core (/status, /balance)",
+            "server": "duckclaw_mcp",
+        },
+        {
+            "name": "list_graph_tools",
+            "description": "Descubrimiento de capacidades MCP",
+            "server": "duckclaw_mcp",
+        },
+    ]
+    stdio_servers: list[dict[str, Any]] = []
+    cfg_path = _repo_root() / "config" / "mcp_servers.yaml"
+    if cfg_path.is_file():
+        try:
+            import yaml
+
+            raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            servers = raw.get("mcp_servers") or {}
+            if isinstance(servers, dict):
+                for key, val in servers.items():
+                    if isinstance(val, dict):
+                        stdio_servers.append(
+                            {
+                                "id": key,
+                                "enabled": bool(val.get("enabled", True)),
+                                "note": "stdio vía gateway (ver config/mcp_servers.yaml)",
+                            }
+                        )
+        except Exception:
+            pass
+    live = await _probe_mcp_http(mcp_port)
+    return {
+        "duckclaw_mcp": {
+            "command": "uv run python -m duckclaw_mcp --host 0.0.0.0 --port " + mcp_port,
+            "url": f"http://127.0.0.1:{mcp_port}/mcp",
+            "tools": duckclaw_tools,
+            "live": live,
+        },
+        "stdio_servers": stdio_servers,
+        "github_note": "GitHub MCP vía forge/skills/github_bridge.py (Docker)",
+    }
+
+
+_OPS_ALLOWLIST: dict[str, list[str]] = {
+    "pm2_list": ["pm2", "list"],
+    "pm2_status": ["pm2", "status"],
+    "pm2_restart_gateway": ["pm2", "restart", "DuckClaw-Gateway", "--update-env"],
+    "pm2_restart_db_writer": ["pm2", "restart", "DuckClaw-DB-Writer", "--update-env"],
+    "pm2_logs_gateway": ["pm2", "logs", "DuckClaw-Gateway", "--lines", "40", "--nostream"],
+    "doctor": ["uv", "run", "python", "scripts/doctor.py"],
+    "bootstrap_dbs": ["uv", "run", "python", "scripts/bootstrap_dbs.py"],
+}
+
+
+@router.get("/ops/commands", dependencies=[Depends(_require_admin_key)])
+async def list_ops_commands() -> dict[str, Any]:
+    labels = {
+        "pm2_list": "PM2 — listar procesos",
+        "pm2_status": "PM2 — estado",
+        "pm2_restart_gateway": "Reiniciar DuckClaw-Gateway",
+        "pm2_restart_db_writer": "Reiniciar DuckClaw-DB-Writer",
+        "pm2_logs_gateway": "Últimas líneas log Gateway",
+        "doctor": "Diagnóstico local (doctor.py)",
+        "bootstrap_dbs": "Bootstrap DuckDB (tablas agent_config, etc.)",
+    }
+    return {
+        "commands": [
+            {"id": k, "label": labels.get(k, k), "argv": v}
+            for k, v in _OPS_ALLOWLIST.items()
+        ]
+    }
+
+
+class OpsRunBody(BaseModel):
+    op_id: str
+
+
+@router.post("/ops/run", dependencies=[Depends(_require_admin_key)])
+async def run_ops_command(
+    body: OpsRunBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    import asyncio
+    import subprocess
+
+    op_id = (body.op_id or "").strip()
+    argv = _OPS_ALLOWLIST.get(op_id)
+    if not argv:
+        raise _problem(400, "Comando no permitido", op_id)
+
+    def _run() -> dict[str, Any]:
+        proc = subprocess.run(
+            argv,
+            cwd=str(_repo_root()),
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        return {
+            "exit_code": proc.returncode,
+            "stdout": (proc.stdout or "")[-12000:],
+            "stderr": (proc.stderr or "")[-8000:],
+        }
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except subprocess.TimeoutExpired:
+        raise _problem(408, "Timeout ejecutando comando", op_id) from None
+    except Exception as exc:
+        raise _problem(500, "Error ejecutando comando", str(exc)) from exc
+
+    _admin_audit("ops.run", op_id, " ".join(argv), actor=actor, meta=result)
+    return {"ok": result.get("exit_code") == 0, "op_id": op_id, **result}
+
+
 @router.post("/projects", dependencies=[Depends(_require_admin_key)])
-async def create_project(body: TemplateCreateBody) -> dict[str, Any]:
-    return await create_template(body)
+async def create_project(
+    body: ProjectCreateBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", body.id.strip())
+    if not wid:
+        raise _problem(400, "id inválido", body.id)
+    dest = _create_worker_from_source(
+        wid=wid,
+        source_template=body.source_template,
+        name=body.name,
+        description=body.description,
+        skills=body.skills,
+        topology=body.topology,
+        system_prompt=body.system_prompt,
+        soul=body.soul,
+    )
+    _admin_audit(
+        "project.create",
+        f"templates/{wid}",
+        body.source_template,
+        actor=actor,
+        meta={"skills": body.skills, "path": str(dest.relative_to(_repo_root()))},
+    )
+    return {"ok": True, "id": wid, "path": str(dest.relative_to(_repo_root()))}

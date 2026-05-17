@@ -39,6 +39,8 @@ export interface AdminHealth {
   workers: string[];
   redis: boolean;
   templates_dir: string;
+  api_revision?: number;
+  features?: { catalog?: boolean; ops?: boolean; projects?: boolean };
 }
 
 export interface WhitelistUser {

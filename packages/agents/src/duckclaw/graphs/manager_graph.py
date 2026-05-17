@@ -1891,6 +1891,28 @@ def build_manager_graph(
                 and mgr_path
                 and _same_duckdb_file(mgr_path, worker_resolved)
             )
+            try:
+                from duckclaw.debug_session_log import agent_debug_log
+
+                agent_debug_log(
+                    "A",
+                    "manager_graph.py:delegate",
+                    "duckdb_suspend_decision",
+                    {
+                        "assigned": assigned,
+                        "mgr_path_tail": mgr_path[-96:] if mgr_path else "",
+                        "worker_path_tail": worker_resolved[-96:] if worker_resolved else "",
+                        "paths_same": _same_duckdb_file(mgr_path, worker_resolved)
+                        if mgr_path and worker_resolved
+                        else False,
+                        "spec_read_only": bool(spec_inv.read_only),
+                        "needs_rw_vault": _needs_rw_vault,
+                        "will_suspend": _suspend_for_rw_worker,
+                        "mgr_has_con": getattr(db, "_con", None) is not None,
+                    },
+                )
+            except Exception:
+                pass
             # Serializa acceso al .duckdb: dos webhooks concurrentes no deben abrir dos DuckClaw RW.
             _vk = _vault_lock_key(worker_resolved)
             if _vk:
@@ -1905,6 +1927,17 @@ def build_manager_graph(
             db_display = vault_db_path or db_path or "(unknown)"
             if _suspend_for_rw_worker:
                 db.suspend_readonly_file_handle()
+                try:
+                    from duckclaw.debug_session_log import agent_debug_log
+
+                    agent_debug_log(
+                        "A",
+                        "manager_graph.py:delegate",
+                        "after_suspend_ro",
+                        {"mgr_has_con": getattr(db, "_con", None) is not None},
+                    )
+                except Exception:
+                    pass
             if worker_cache_key not in _worker_graph_cache:
                 _worker_graph_cache[worker_cache_key] = _build_worker_graph(
                     assigned,
@@ -2115,6 +2148,18 @@ def build_manager_graph(
             _duckdb_config_clash = (
                 "same database file" in low and "different configuration" in low
             ) or ("duckdb" in low and "read_only" in low)
+            if _duckdb_config_clash:
+                try:
+                    from duckclaw.debug_session_log import agent_debug_log
+
+                    agent_debug_log(
+                        "D",
+                        "manager_graph.py:delegate",
+                        "duckdb_config_clash_error",
+                        {"assigned": assigned, "msg_tail": msg[-240:]},
+                    )
+                except Exception:
+                    pass
             if (
                 not _duckdb_config_clash
                 and any(

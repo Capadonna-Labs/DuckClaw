@@ -4,38 +4,17 @@ import React, { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { Sidebar, Topbar } from '@/components/layout';
-import { Loader2 } from 'lucide-react';
-
-const TITLES: Record<string, string> = {
-  '/overview': 'Overview',
-  '/kanban': 'Tablero',
-  '/templates': 'Plantillas',
-  '/skills': 'Skills',
-  '/mcp': 'MCP',
-  '/ops': 'Operaciones',
-  '/projects': 'Proyectos',
-  '/playground': 'Playground',
-  '/runtime': 'Runtime',
-  '/telegram': 'Telegram',
-  '/commands': 'Fly commands',
-  '/duckdb': 'DuckDB',
-  '/traces': 'Traces',
-  '/audit': 'Auditoría',
-  '/settings': 'Ajustes',
-};
-
-function titleForPath(pathname: string): string {
-  for (const [prefix, title] of Object.entries(TITLES)) {
-    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return title;
-  }
-  return 'DuckClaw Admin';
-}
+import { FloatingAdminChat } from '@/components/chat/FloatingAdminChat';
+import { titleForAdminPath } from '@/config/adminNav';
+import { useLayoutUiStore } from '@/store/layoutUiStore';
+import { Loader2, PanelLeftOpen } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuthStore();
   const router = useRouter();
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
+  const { sidebarOpen, setSidebarOpen } = useLayoutUiStore();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -49,10 +28,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gov-gray-50 dark:bg-dark-bg">
-      <div className="hidden lg:flex lg:shrink-0">
+    <div className="flex h-screen overflow-hidden bg-gov-gray-50 dark:bg-dark-bg relative">
+      <div
+        className={`hidden lg:flex shrink-0 overflow-hidden transition-[width] duration-300 ease-out ${
+          sidebarOpen ? 'w-64' : 'w-0'
+        }`}
+      >
         <Sidebar />
       </div>
+      {!sidebarOpen && (
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(true)}
+          className="hidden lg:flex fixed left-0 top-1/2 -translate-y-1/2 z-30 items-center gap-1 px-2 py-3 rounded-r-2xl bg-gov-blue-900 dark:bg-dark-sidebar border border-l-0 border-gov-blue-700 dark:border-dark-border shadow-md text-xs font-bold text-white hover:bg-gov-blue-800"
+          title="Mostrar menú lateral"
+        >
+          <PanelLeftOpen size={18} />
+        </button>
+      )}
       {isSidebarOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden">
           <SidebarOverlay onClose={() => setIsSidebarOpen(false)} />
@@ -62,10 +55,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       )}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <Topbar title={titleForPath(pathname)} onMenuClick={() => setIsSidebarOpen(true)} />
+        <Topbar title={titleForAdminPath(pathname)} onMenuClick={() => setIsSidebarOpen(true)} />
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-10">
           <div className="max-w-[1600px] mx-auto">{children}</div>
         </main>
+        <FloatingAdminChat />
       </div>
     </div>
   );

@@ -39,6 +39,101 @@ def _gateway_effective_tenant_id(request_tenant: str | None) -> str:
     return gateway_main._effective_tenant_id(raw)
 
 
+def _playground_telegram_user_id(override: str | None = None) -> str:
+    """ID Telegram del operador (mismo que Telegram Guard y /workers en DM)."""
+    return (
+        (override or "").strip()
+        or (os.environ.get("DUCKCLAW_OWNER_ID") or os.environ.get("DUCKCLAW_ADMIN_CHAT_ID") or "")
+        .strip()
+    )
+
+
+def _playground_team_context(
+    *,
+    telegram_user_id: str | None = None,
+    tenant_id: str | None = None,
+    chat_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Equipo efectivo alineado con ``/workers`` (get_effective_team_templates) y whitelist Telegram.
+    En Telegram DM, ``chat_id`` del equipo suele ser el ``user_id`` numérico.
+    """
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+    from duckclaw.graphs.on_the_fly_commands import (
+        _get_authorized_role,
+        _is_gateway_owner_user,
+        get_effective_team_templates,
+        get_team_templates,
+        get_tenant_team_templates,
+    )
+
+    tid = _gateway_effective_tenant_id(tenant_id)
+    tg_uid = _playground_telegram_user_id(telegram_user_id)
+    team_chat_id = (chat_id or tg_uid or "admin-playground").strip() or "admin-playground"
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return {
+            "workers": [],
+            "telegram_user_id": tg_uid,
+            "team_chat_id": team_chat_id,
+            "tenant_id": tid,
+            "authorized": False,
+            "whitelist_role": None,
+            "team_source": "none",
+            "team_hint": "Gateway DuckDB no encontrada",
+        }
+
+    db = GatewayDbEphemeralReadonly(gw)
+    role = ""
+    authorized = False
+    if tg_uid:
+        if _is_gateway_owner_user(tg_uid):
+            authorized = True
+            role = "owner"
+        else:
+            role = _get_authorized_role(db, tenant_id=tid, user_id=tg_uid)
+            authorized = role in ("admin", "user")
+    else:
+        authorized = True
+        role = "admin-ui"
+
+    workers: list[str] = []
+    team_source = "none"
+    team_hint = ""
+    if authorized:
+        workers = list(get_effective_team_templates(db, team_chat_id, tid, None))
+        if get_team_templates(db, team_chat_id):
+            team_source = "chat"
+            team_hint = "Equipo de este chat (/workers en Telegram)"
+        elif get_tenant_team_templates(db, tid):
+            team_source = "tenant"
+            team_hint = f"Equipo del tenant «{tid}»"
+        elif (os.environ.get("DUCKCLAW_GATEWAY_TEAM_TEMPLATES") or "").strip():
+            team_source = "env"
+            team_hint = "Equipo desde DUCKCLAW_GATEWAY_TEAM_TEMPLATES"
+        else:
+            team_source = "all"
+            team_hint = "Sin /workers configurado: todos los templates"
+
+    if tg_uid and not authorized:
+        team_hint = (
+            f"Usuario Telegram {tg_uid} no está en la whitelist del tenant «{tid}». "
+            "Añádelo en Telegram → Whitelist o usa /team en el bot."
+        )
+
+    return {
+        "workers": workers,
+        "telegram_user_id": tg_uid,
+        "team_chat_id": team_chat_id,
+        "tenant_id": tid,
+        "authorized": authorized,
+        "whitelist_role": role or None,
+        "team_source": team_source,
+        "team_hint": team_hint,
+    }
+
+
 def _list_whitelist_users_merged(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
     from duckclaw.graphs.on_the_fly_commands import (
         _dedupe_authorized_users_by_user_id,
@@ -178,6 +273,11 @@ class PlaygroundChatBody(BaseModel):
     message: str = Field(..., min_length=1, max_length=16000)
     chat_id: str = Field(default="admin-playground", max_length=128)
     tenant_id: str = Field(default="default", max_length=64)
+    telegram_user_id: str | None = Field(
+        default=None,
+        max_length=32,
+        description="ID Telegram para whitelist y equipo /workers (default: DUCKCLAW_OWNER_ID)",
+    )
     stream: bool = Field(
         default=False,
         description="Si true, respuesta text/event-stream (tokens SSE + [DONE]).",
@@ -371,14 +471,20 @@ def _llm_keys_configured(env_keys: list[str]) -> bool:
 
 
 @router.get("/playground/config", dependencies=[Depends(_require_admin_key)])
-async def playground_config() -> dict[str, Any]:
-    workers: list[str] = []
-    try:
-        from duckclaw.workers.factory import list_workers
-
-        workers = list_workers()
-    except Exception:
-        workers = []
+async def playground_config(
+    telegram_user_id: str | None = Query(None, description="ID Telegram (default: DUCKCLAW_OWNER_ID)"),
+    tenant_id: str | None = Query(None, description="Tenant para whitelist y equipo"),
+    chat_id: str | None = Query(
+        None,
+        description="Chat id para team_templates (default: mismo que telegram_user_id)",
+    ),
+) -> dict[str, Any]:
+    team_ctx = _playground_team_context(
+        telegram_user_id=telegram_user_id,
+        tenant_id=tenant_id,
+        chat_id=chat_id,
+    )
+    workers: list[str] = team_ctx.get("workers") or []
     llm = _resolved_llm_env()
     active = llm.get("provider", "")
     catalog = []
@@ -387,13 +493,19 @@ async def playground_config() -> dict[str, Any]:
         row["active"] = row["id"] == active
         row["keys_ok"] = _llm_keys_configured(row.get("env_keys") or [])
         catalog.append(row)
-    eff_tenant = _gateway_effective_tenant_id("default")
+    eff_tenant = team_ctx.get("tenant_id") or _gateway_effective_tenant_id("default")
     return {
         "llm": llm,
         "catalog": catalog,
         "workers": workers,
         "env_path": str(_env_file()),
         "effective_tenant_id": eff_tenant,
+        "telegram_user_id": team_ctx.get("telegram_user_id"),
+        "team_chat_id": team_ctx.get("team_chat_id"),
+        "authorized": team_ctx.get("authorized"),
+        "whitelist_role": team_ctx.get("whitelist_role"),
+        "team_source": team_ctx.get("team_source"),
+        "team_hint": team_ctx.get("team_hint"),
         "chat_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_hint": "POST con stream=true o Accept: text/event-stream",
@@ -412,12 +524,33 @@ async def playground_chat(
     msg = body.message.strip()
     if not msg:
         raise _problem(400, "message vacío", body.message)
-    chat_id = (body.chat_id or "admin-playground").strip() or "admin-playground"
     tenant_id = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
-    owner_uid = (
-        (os.environ.get("DUCKCLAW_OWNER_ID") or os.environ.get("DUCKCLAW_ADMIN_CHAT_ID") or "")
-        .strip()
+    team_ctx = _playground_team_context(
+        telegram_user_id=body.telegram_user_id,
+        tenant_id=tenant_id,
+        chat_id=body.chat_id,
     )
+    if not team_ctx.get("authorized"):
+        raise _problem(
+            403,
+            "Usuario Telegram no autorizado para este tenant",
+            str(team_ctx.get("team_hint") or ""),
+        )
+    allowed_workers: list[str] = team_ctx.get("workers") or []
+    if allowed_workers and wid not in allowed_workers:
+        from duckclaw.workers.template_registry import resolve_template_id
+
+        canonical = resolve_template_id(allowed_workers, wid) or wid
+        if canonical not in allowed_workers:
+            raise _problem(
+                403,
+                "Worker fuera del equipo /workers",
+                f"'{wid}' no está en el equipo efectivo: {', '.join(allowed_workers)}",
+            )
+        wid = canonical
+    team_chat_id = str(team_ctx.get("team_chat_id") or "admin-playground").strip() or "admin-playground"
+    chat_id = team_chat_id
+    owner_uid = str(team_ctx.get("telegram_user_id") or "").strip()
     guard_user_id = owner_uid or (actor or "admin-ui")
 
     from core.models import ChatRequest
@@ -436,6 +569,18 @@ async def playground_chat(
     wants_stream = bool(body.stream) or "text/event-stream" in accept
 
     import main as gateway_main
+
+    try:
+        from core.debug_session_log import agent_debug_log
+
+        agent_debug_log(
+            "C",
+            "admin.py:playground_chat",
+            "playground_chat_start",
+            {"worker_id": wid, "tenant_id": tenant_id, "stream": wants_stream},
+        )
+    except Exception:
+        pass
 
     if wants_stream:
         from core.sse_stream import SSE_HEADERS

@@ -19,42 +19,44 @@ import {
   RefreshCw,
   LayoutGrid,
   MessageCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
+import { useLayoutUiStore } from '@/store/layoutUiStore';
+import { PanelToggleButton } from '@/components/layout/PanelToggleButton';
+import { navItemsForRole } from '@/config/adminNav';
 import { cn } from '@/lib/utils';
+import type { LucideIcon } from 'lucide-react';
 
-const NAV_CORE = [
-  { href: '/overview', label: 'Overview', icon: LayoutDashboard },
-  { href: '/kanban', label: 'Tablero', icon: LayoutGrid },
-  { href: '/templates', label: 'Plantillas', icon: Bot },
-  { href: '/skills', label: 'Skills', icon: Blocks },
-  { href: '/mcp', label: 'MCP', icon: Cable },
-  { href: '/projects/new', label: 'Nuevo proyecto', icon: FolderPlus },
-  { href: '/playground', label: 'Playground', icon: MessageCircle },
-  { href: '/runtime', label: 'Runtime', icon: Radio },
-  { href: '/telegram', label: 'Telegram', icon: MessageSquare },
-  { href: '/commands', label: 'Fly commands', icon: Terminal },
-  { href: '/duckdb', label: 'DuckDB', icon: Database },
-  { href: '/traces', label: 'Traces', icon: Activity },
-] as const;
-
-const NAV_ADMIN = [
-  { href: '/ops', label: 'Operaciones', icon: RefreshCw },
-  { href: '/audit', label: 'Auditoría', icon: ClipboardList },
-] as const;
-
-const NAV_FOOTER = [{ href: '/settings', label: 'Ajustes', icon: Settings }] as const;
+const NAV_ICONS: Record<string, LucideIcon> = {
+  '/overview': LayoutDashboard,
+  '/kanban': LayoutGrid,
+  '/templates': Bot,
+  '/skills': Blocks,
+  '/mcp': Cable,
+  '/projects/new': FolderPlus,
+  '/playground': MessageCircle,
+  '/runtime': Radio,
+  '/telegram': MessageSquare,
+  '/commands': Terminal,
+  '/duckdb': Database,
+  '/traces': Activity,
+  '/ops': RefreshCw,
+  '/audit': ClipboardList,
+  '/settings': Settings,
+};
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { usuario, logout } = useAuthStore();
+  const { sidebarOpen, toggleSidebar } = useLayoutUiStore();
 
-  const nav = [
-    ...NAV_CORE,
-    ...(usuario?.rol === 'admin' ? NAV_ADMIN : []),
-    ...NAV_FOOTER,
-  ];
+  const nav = navItemsForRole(usuario?.rol === 'admin').map((item) => ({
+    ...item,
+    icon: NAV_ICONS[item.href] ?? LayoutDashboard,
+  }));
 
   const handleLogout = () => {
     logout();
@@ -66,11 +68,21 @@ export default function Sidebar() {
       className="flex flex-col h-full w-64 bg-gov-blue-900 border-r border-gov-blue-700 shrink-0 dark:bg-dark-sidebar dark:border-dark-border"
       aria-label="Navegación principal"
     >
-      <div className="p-4 md:p-6 border-b border-gov-blue-700 dark:border-dark-border">
+      <div className="p-4 md:p-6 border-b border-gov-blue-700 dark:border-dark-border space-y-3">
         <div className="flex items-center gap-3">
           <BrandIcon />
           <BrandTitles />
         </div>
+        <PanelToggleButton
+          open={sidebarOpen}
+          onToggle={toggleSidebar}
+          openLabel="Ocultar menú"
+          closedLabel="Mostrar menú"
+          openIcon={PanelLeftClose}
+          closedIcon={PanelLeftOpen}
+          title={sidebarOpen ? 'Ocultar menú lateral' : 'Mostrar menú lateral'}
+          className="w-full justify-center border-white/20 text-white/90 hover:bg-white/10 hover:text-white"
+        />
       </div>
       <div className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
         {nav.map(({ href, label, icon: Icon }) => (

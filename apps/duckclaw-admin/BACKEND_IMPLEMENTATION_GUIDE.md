@@ -1,5 +1,7 @@
 # 🚀 Backend Implementation Guide - CRM PQRSD (Medellín Distrito)
 
+> **Legacy (hackathon).** Para DuckClaw Admin y gateway `/api/v1/admin`, usa [README.md](README.md) y [docs/architecture.md](docs/architecture.md). Para CRM PQRSD en DuckDB: [docs/legacy-crm-module.md](docs/legacy-crm-module.md).
+
 Este documento es la **Guía Maestra para el Backend Developer**. Contiene absolutamente todo lo que debes implementar para conectar tu backend (DuckDB, FastAPI, Express, etc.) al actual frontend en Next.js. El frontend ya está preparado con comentarios en los servicios y las integraciones listas para ser reemplazadas.
 
 ---

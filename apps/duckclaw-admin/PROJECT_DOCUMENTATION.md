@@ -1,5 +1,7 @@
 # 📘 CRM PQRSD - Alcaldía de Medellín (Proyecto Piloto OmegaHack 2026)
 
+> **Documento histórico del hackathon.** La consola operativa actual del monorepo es **DuckClaw Admin** — ver [README.md](README.md) y [docs/legacy-crm-module.md](docs/legacy-crm-module.md). Este archivo describe el producto CRM funcionario; las rutas CRM no están montadas en la app admin tras la migración.
+
 ## 📌 1. Descripción General del Proyecto
 **CRM PQRSD** es una plataforma centralizada diseñada para los funcionarios públicos pertenecientes a las diferentes secretarías de la **Alcaldía de Medellín (Distrito de Ciencia, Tecnología e Innovación)**. 
 

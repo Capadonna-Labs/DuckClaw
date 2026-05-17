@@ -1,5 +1,7 @@
 # Especificaciones Técnicas — CRM PQRSD Medellín (GovTech)
 
+> **Legacy (hackathon).** Consola admin actual: [README.md](README.md). Índice de docs: [docs/README.md](docs/README.md).
+
 ## 📌 Visión General
 El **CRM PQRSD Medellín** es una plataforma de grado institucional diseñada para la gestión eficiente y transparente de Peticiones, Quejas, Reclamos, Sugerencias y Denuncias del Distrito de Medellín. El sistema integra Inteligencia Artificial para el análisis de urgencia y generación de respuestas, junto con un robusto módulo de comunicaciones SMTP para garantizar la trazabilidad legal de cada interacción con el ciudadano.
 

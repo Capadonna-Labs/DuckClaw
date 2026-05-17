@@ -132,6 +132,19 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     assert data.get("team_source") == "chat"
 
 
+def _mock_playground_team(*, workers: list[str], authorized: bool = True) -> dict:
+    return {
+        "workers": workers,
+        "authorized": authorized,
+        "team_chat_id": "admin-playground",
+        "telegram_user_id": "test-owner",
+        "tenant_id": "default",
+        "whitelist_role": "owner",
+        "team_source": "chat",
+        "team_hint": "mock",
+    }
+
+
 def test_playground_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
     import sys
@@ -139,10 +152,16 @@ def test_playground_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPat
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
     import main as gateway_main
+    import routers.admin as admin_router
 
     async def _fake_invoke(*_args, **_kwargs):
         return {"response": "respuesta-mock", "usage_tokens": {"total": 1}}
 
+    monkeypatch.setattr(
+        admin_router,
+        "_playground_team_context",
+        lambda **_: _mock_playground_team(workers=["AXIS-Maestro"]),
+    )
     monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
@@ -156,6 +175,29 @@ def test_playground_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPat
     assert data.get("worker_id") == "AXIS-Maestro"
 
 
+def test_playground_chat_rejects_worker_outside_team(
+    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
+    import sys
+
+    if str(gw_dir) not in sys.path:
+        sys.path.insert(0, str(gw_dir))
+    import routers.admin as admin_router
+
+    monkeypatch.setattr(
+        admin_router,
+        "_playground_team_context",
+        lambda **_: _mock_playground_team(workers=["finanz"]),
+    )
+    r = admin_client.post(
+        "/api/v1/admin/playground/chat",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={"worker_id": "AXIS-Maestro", "message": "hola"},
+    )
+    assert r.status_code == 403
+
+
 def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "ts-required")
     gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
@@ -164,10 +206,16 @@ def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch:
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
     import main as gateway_main
+    import routers.admin as admin_router
 
     async def _fake_invoke(*_args, **_kwargs):
         return {"response": "ok"}
 
+    monkeypatch.setattr(
+        admin_router,
+        "_playground_team_context",
+        lambda **_: _mock_playground_team(workers=["default"]),
+    )
     monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
     r = admin_client.post(
         "/api/v1/admin/playground/chat",

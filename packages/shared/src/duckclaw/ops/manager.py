@@ -543,8 +543,8 @@ def _render_gateway_ecosystem_cjs(
         if not isinstance(env, dict):
             env = {}
         env = strip_dotenv_owned_from_env(strip_secrets_from_env(_env_dict_for_json(dict(env))))
+        env = {k: v for k, v in env.items() if k == "DUCKCLAW_PM2_PROCESS_NAME"}
         env.setdefault("DUCKCLAW_PM2_PROCESS_NAME", name)
-        env.pop("PYTHONPATH", None)
         args_cmd = (
             f"services/api-gateway/uvicorn_pm2.py main:app --host {host} --port {port} --app-dir services/api-gateway"
         )
@@ -570,6 +570,39 @@ def _render_gateway_ecosystem_cjs(
     lines.append("};")
     lines.append("")
     return "\n".join(lines)
+
+
+def render_db_writer_ecosystem_cjs() -> str:
+    """Plantilla portable PM2 DB-Writer: secretos y rutas solo en ``.env`` (env_file)."""
+    return """/**
+ * PM2 — DuckClaw DB-Writer. Variables: solo .env (env_file).
+ * Regenerar: duckops init / stack_health.write_db_writer_ecosystem
+ */
+const path = require("path");
+const fs = require("fs");
+const root = path.resolve(__dirname, "..");
+const python = fs.existsSync(path.join(root, ".venv/bin/python3"))
+  ? path.join(root, ".venv/bin/python3")
+  : path.join(root, ".venv/bin/python");
+
+module.exports = {
+  apps: [
+    {
+      name: "DuckClaw-DB-Writer",
+      script: python,
+      args: "main.py",
+      cwd: path.join(root, "services/db-writer"),
+      env_file: path.join(root, ".env"),
+      interpreter: "none",
+      autorestart: true,
+      watch: false,
+      env: {
+        PYTHONPATH: root,
+      },
+    },
+  ],
+};
+"""
 
 
 def pm2_delete_named_app(name: Optional[str]) -> bool:

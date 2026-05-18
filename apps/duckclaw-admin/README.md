@@ -110,7 +110,8 @@ Tras editar usuarios, reinicia `pnpm dev`. En `/login` hay panel **Usuarios de p
 | `/telegram` | Webhooks + whitelist | admin escribe |
 | `/commands` | Catálogo fly commands | todos |
 | `/duckdb` | Bóvedas y variables DuckDB | todos |
-| `/traces` | Historial Redis por sesión | todos |
+| `/train` | Pipeline SFT/GRPO, trazas datalake, historial Redis (debug) | todos |
+| `/traces` | Redirige a `/train` | — |
 | `/audit` | Registro de cambios admin | solo `admin` |
 | `/settings` | Perfil, tema, hints demo | todos |
 

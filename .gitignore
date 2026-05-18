@@ -43,17 +43,10 @@ db/
 strix_runs/
 .security/
 
-# Local PM2 / deployment config (generados por wizard/serve; secretos en .env)
+# Local PM2 / deployment config (secretos en .env; ecosystem *.config.cjs versionados en config/)
 *.bak
 config/api_gateways_pm2.json
 config/dotenv_wizard_proposed.env
-config/ecosystem.config.cjs
-config/ecosystem.config.js
-config/ecosystem.*.config.cjs
-# Raíz legacy (misma política)
-ecosystem.config.cjs
-ecosystem.config.js
-ecosystem.*.config.cjs
 *.service
 
 # LangGraph dev / Studio local state

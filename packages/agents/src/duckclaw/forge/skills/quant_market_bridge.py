@@ -28,7 +28,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
-from duckclaw.debug_session_log import agent_debug_log
 from duckclaw.utils.logger import log_tool_execution_sync
 
 _log = logging.getLogger(__name__)

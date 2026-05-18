@@ -1,46 +1,11 @@
 {
   "apps": [
     {
-      "name": "Finanz-Gateway",
+      "name": "DuckClaw-Gateway",
       "host": "0.0.0.0",
       "port": 8000,
       "env": {
-        "DUCKCLAW_PM2_PROCESS_NAME": "Finanz-Gateway",
-        "DUCKCLAW_REPO_ROOT": "/path/to/duckclaw",
-        "PYTHONPATH": "/path/to/duckclaw",
-        "LANGCHAIN_TRACING_V2": "true",
-        "LANGCHAIN_API_KEY": "<LANGSMITH_OR_LANGCHAIN_API_KEY>",
-        "LANGCHAIN_PROJECT": "Finanz",
-        "DUCKCLAW_LLM_PROVIDER": "deepseek",
-        "DUCKCLAW_LLM_MODEL": "deepseek-chat",
-        "DUCKCLAW_LLM_BASE_URL": "https://api.deepseek.com/",
-        "DUCKCLAW_FINANZ_DB_PATH": "/path/to/duckclaw/db/private/<vault_user_id>/finanzdb1.duckdb",
-        "DEEPSEEK_API_KEY": "<DEEPSEEK_API_KEY>",
-        "DUCKCLAW_REDIS_URL": "redis://localhost:6379/0",
-        "REDIS_URL": "redis://localhost:6379/0",
-        "N8N_OUTBOUND_WEBHOOK_URL": "<opcional mismo webhook outbound>",
-        "N8N_AUTH_KEY": "<opcional cabecera X-DuckClaw-Secret / X-N8N-Auth>"
-      }
-    },
-    {
-      "name": "TheMind-Gateway",
-      "host": "0.0.0.0",
-      "port": 8080,
-      "env": {
-        "DUCKCLAW_PM2_PROCESS_NAME": "TheMind-Gateway",
-        "DUCKCLAW_REPO_ROOT": "/path/to/duckclaw",
-        "PYTHONPATH": "/path/to/duckclaw",
-        "LANGCHAIN_TRACING_V2": "false",
-        "LANGCHAIN_PROJECT": "TheMind",
-        "DUCKCLAW_LLM_PROVIDER": "deepseek",
-        "DUCKCLAW_LLM_MODEL": "deepseek-chat",
-        "DUCKCLAW_LLM_BASE_URL": "https://api.deepseek.com/",
-        "DUCKDB_PATH": "/path/to/duckclaw/db/private/<vault_user_id>/the_mind.duckdb",
-        "DEEPSEEK_API_KEY": "<DEEPSEEK_API_KEY>",
-        "DUCKCLAW_REDIS_URL": "redis://localhost:6379/0",
-        "REDIS_URL": "redis://localhost:6379/0",
-        "N8N_OUTBOUND_WEBHOOK_URL": "<opcional>",
-        "N8N_AUTH_KEY": "<opcional>"
+        "DUCKCLAW_PM2_PROCESS_NAME": "DuckClaw-Gateway"
       }
     }
   ]

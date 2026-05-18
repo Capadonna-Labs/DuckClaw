@@ -12,7 +12,7 @@ from duckclaw.dotenv_immutable import root_dotenv_flat_env
 
 
 def _gateway_port_from_pm2_json(repo_root: Path, app_name: str, *, fallback: int = 8282) -> int:
-    """Puerto solo en ``api_gateways_pm2.json`` (uvicorn ``--port``); no en ``.env``."""
+    """Puerto en ``api_gateways_pm2.json`` (uvicorn ``--port``)."""
     for app in _load_merged_gateway_apps(str(repo_root)):
         if isinstance(app, dict) and (app.get("name") or "").strip() == app_name:
             p = int(app.get("port") or 0)
@@ -21,12 +21,20 @@ def _gateway_port_from_pm2_json(repo_root: Path, app_name: str, *, fallback: int
     return fallback
 
 
-def minimal_gateway_env(repo_root: Path, app_name: str) -> dict[str, str]:
-    """Solo metadatos PM2; secretos y tenant/worker viven en .env."""
-    return {
-        "PYTHONPATH": str(repo_root.resolve()),
-        "DUCKCLAW_PM2_PROCESS_NAME": app_name,
-    }
+def _gateway_port(repo_root: Path, app_name: str, *, fallback: int = 8000) -> int:
+    """Puerto: ``DUCKCLAW_GATEWAY_PORT`` en ``.env``, luego JSON, luego fallback."""
+    dot = root_dotenv_flat_env(repo_root)
+    raw = (dot.get("DUCKCLAW_GATEWAY_PORT") or "").strip()
+    if raw.isdigit():
+        p = int(raw)
+        if p > 0:
+            return p
+    return _gateway_port_from_pm2_json(repo_root, app_name, fallback=fallback)
+
+
+def minimal_gateway_env(_repo_root: Path, app_name: str) -> dict[str, str]:
+    """Solo metadatos PM2; secretos, rutas y puertos viven en .env."""
+    return {"DUCKCLAW_PM2_PROCESS_NAME": app_name}
 
 
 def sync_gateway_pm2_from_dotenv(
@@ -41,7 +49,7 @@ def sync_gateway_pm2_from_dotenv(
     repo_root = repo_root.resolve()
     dot = root_dotenv_flat_env(repo_root)
     name = (dot.get("DUCKCLAW_PM2_PROCESS_NAME") or "DuckClaw-Gateway").strip() or "DuckClaw-Gateway"
-    port = _gateway_port_from_pm2_json(repo_root, name)
+    port = _gateway_port(repo_root, name)
 
     if single_gateway:
         env = strip_dotenv_owned_from_env(strip_secrets_from_env(minimal_gateway_env(repo_root, name)))

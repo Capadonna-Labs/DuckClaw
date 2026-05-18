@@ -95,8 +95,14 @@ Prefijo: `/api/v1/admin`. Errores estilo RFC 7807: `{ "type", "title", "status",
 |--------|------|-------------|
 | GET | `/telegram/routes` | Parseo `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` |
 | GET/POST/DELETE | `/telegram/whitelist` | Usuarios autorizados |
-| GET | `/chats/history` | Historial Redis |
+| GET | `/chats/history` | Historial Redis (debug en UI `/train`) |
 | GET | `/traces/langsmith` | Opcional si `LANGCHAIN_API_KEY` |
+| GET | `/train/status` | Rutas pipeline SFT, stats y trazas recientes |
+| GET | `/train/traces/sample` | Muestra JSONL acotada (`conversation_traces` o `gemma4`) |
+| POST | `/train/pipeline/collect` | `collect_traces_to_sft` |
+| POST | `/train/pipeline/sanitize` | `sanitize_traces_for_gemma.py` |
+| POST | `/train/pipeline/materialize` | `materialize_sft_data_dir_from_gemma4_sanitized.py` |
+| POST | `/train/pipeline/run` | `duckops train` / MLX LoRA |
 | GET | `/health` | Gateway + workers + Redis |
 
 Detalle completo: [spec DUCKCLAW_ADMIN_UI.md](../../../specs/features/platform/DUCKCLAW_ADMIN_UI.md).

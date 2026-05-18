@@ -351,9 +351,9 @@ def test_patch_api_gateways_pm2_json_updates_db_path(tmp_path: Path) -> None:
     msgs: list[str] = []
     patch_api_gateways_pm2_for_draft(root, draft, msgs.append)
     out = json.loads((root / "config" / "api_gateways_pm2.json").read_text(encoding="utf-8"))
-    dbp = out["apps"][0]["env"]["DUCKDB_PATH"]
-    assert str((root / "db/private/x/bi_analyst.duckdb").resolve()) == dbp
-    assert "DUCKCLAW_SHARED_DB_PATH" not in out["apps"][0]["env"]
+    env = out["apps"][0]["env"]
+    assert "DUCKDB_PATH" not in env
+    assert "DUCKCLAW_SHARED_DB_PATH" not in env
 
 
 def test_patch_pm2_preserves_shared_when_draft_has_no_secondary(tmp_path: Path) -> None:
@@ -384,8 +384,8 @@ def test_patch_pm2_preserves_shared_when_draft_has_no_secondary(tmp_path: Path) 
     patch_api_gateways_pm2_for_draft(root, draft, lambda _m: None)
     out = json.loads((root / "config" / "api_gateways_pm2.json").read_text(encoding="utf-8"))
     env = out["apps"][0]["env"]
-    assert env["DUCKCLAW_SHARED_DB_PATH"] == shared_path
-    assert env["DUCKDB_PATH"] == str((root / "db/new_vault.duckdb").resolve())
+    assert "DUCKDB_PATH" not in env
+    assert "DUCKCLAW_SHARED_DB_PATH" not in env
 
 
 def test_patch_api_gateways_pm2_merges_telegram_env_updates(tmp_path: Path) -> None:
@@ -420,7 +420,7 @@ def test_patch_api_gateways_pm2_merges_telegram_env_updates(tmp_path: Path) -> N
     env = out["apps"][0]["env"]
     assert "TELEGRAM_JOB_HUNTER_TOKEN" not in env
     assert env["DUCKCLAW_TELEGRAM_MCP_ENABLED"] == "1"
-    assert env["DUCKDB_PATH"] == str((root / "db/private/jh.duckdb").resolve())
+    assert "DUCKDB_PATH" not in env
 
 
 def test_patch_api_gateways_pm2_new_app_includes_proposed_telegram(tmp_path: Path) -> None:
@@ -451,7 +451,7 @@ def test_patch_api_gateways_pm2_new_app_includes_proposed_telegram(tmp_path: Pat
     env = out["apps"][0]["env"]
     assert "TELEGRAM_JOB_HUNTER_TOKEN" not in env
     assert "DUCKCLAW_DEFAULT_WORKER_ID" not in env
-    assert env["DUCKDB_PATH"] == str((root / "db/private/jh.duckdb").resolve())
+    assert "DUCKDB_PATH" not in env
 
 
 def test_effective_telegram_reads_proposed_when_root_env_empty(tmp_path: Path) -> None:

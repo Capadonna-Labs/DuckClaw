@@ -23,6 +23,10 @@ def owner_user_id_from_env() -> str:
     )
 
 
+DEFAULT_TEST_TELEGRAM_USER_ID = "999000001"
+DEFAULT_TEST_TELEGRAM_USER_ID_ALT = "999000002"
+
+
 def test_telegram_user_id_from_env() -> str:
     custom = (os.environ.get("DUCKCLAW_TEST_TELEGRAM_USER_ID") or "").strip()
     if custom:
@@ -30,7 +34,7 @@ def test_telegram_user_id_from_env() -> str:
     owner = owner_user_id_from_env()
     if owner:
         return owner
-    return "999000001"
+    return DEFAULT_TEST_TELEGRAM_USER_ID
 
 
 TELEGRAM_TEST_USER_ID: str = test_telegram_user_id_from_env()

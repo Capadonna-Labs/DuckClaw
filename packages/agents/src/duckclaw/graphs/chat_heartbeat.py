@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import threading
+from typing import Any
 import time
 from urllib.error import HTTPError, URLError
 from urllib import request as urllib_request
@@ -40,6 +41,10 @@ def normalize_telegram_chat_id_for_outbound(chat_id: str | None) -> str:
     s = str(chat_id or "").strip()
     if not s:
         return ""
+    if s == "admin-playground" or s.startswith(
+        ("admin-section-", "admin-ui", "admin-conv-")
+    ):
+        return s
     if re.fullmatch(r"-?\d+", s):
         return s
     m = re.search(r"\((-?\d+)\)\s*$", s)
@@ -136,14 +141,101 @@ def _heartbeat_read_keys(tenant_id: str, chat_id: str) -> list[str]:
     return out
 
 
+def admin_heartbeat_channel(chat_id: str) -> str:
+    """Canal Redis pub/sub para heartbeats en consola admin (SSE)."""
+    cid = str(chat_id or "").strip() or "unknown"
+    return f"duckclaw:admin-heartbeat:{cid}"
+
+
+def parse_instance_label(label: str | None) -> tuple[str, int]:
+    """
+    Parsea etiqueta de instancia swarm (p. ej. ``finanz 1``, ``BI-Analyst 2``).
+    Devuelve (worker_id, swarm_slot); slot mínimo 1.
+    """
+    raw = (label or "").strip()
+    if not raw:
+        return "", 1
+    m = re.match(r"^(.+?)\s+(\d+)$", raw)
+    if m:
+        return m.group(1).strip(), max(1, int(m.group(2)))
+    return raw, 1
+
+
+def publish_admin_chat_heartbeat(
+    chat_id: str,
+    text: str,
+    *,
+    kind: str = "status",
+    worker_id: str | None = None,
+    swarm_slot: int | None = None,
+    instance_label: str | None = None,
+) -> None:
+    """
+    Publica heartbeat para la UI admin (playground / widget flotante).
+    Fire-and-forget; no lanza al llamante.
+    """
+    url = _redis_url()
+    if not url:
+        return
+    cid = str(chat_id or "").strip()
+    msg = (text or "").strip()
+    if not cid or not msg:
+        return
+    wid = (worker_id or "").strip()
+    slot = swarm_slot
+    if instance_label:
+        parsed_wid, parsed_slot = parse_instance_label(instance_label)
+        if parsed_wid:
+            wid = parsed_wid
+        slot = parsed_slot
+    if slot is None or slot < 1:
+        slot = 1
+    body: dict[str, Any] = {"text": msg, "kind": (kind or "status").strip() or "status"}
+    if wid:
+        body["worker_id"] = wid
+    body["swarm_slot"] = int(slot)
+    payload = json.dumps(body, ensure_ascii=False)
+
+    def _run() -> None:
+        try:
+            import redis as redis_sync  # noqa: PLC0415
+
+            client = redis_sync.Redis.from_url(url, decode_responses=True)
+            client.publish(admin_heartbeat_channel(cid), payload)
+        except Exception as exc:
+            _log.debug("admin chat heartbeat publish failed chat_id=%r: %s", cid, exc)
+
+    threading.Thread(target=_run, name="duckclaw-admin-heartbeat-pub", daemon=True).start()
+
+
+def _admin_heartbeat_kind(text: str, *, log_plan_title: str | None = None) -> str:
+    raw = (text or "").strip()
+    if (
+        "🔄" in raw
+        or "herramienta" in raw.lower()
+        or "Paso actual" in raw
+        or "✅ Terminé" in raw
+    ):
+        return "tool"
+    if (log_plan_title or "").strip():
+        return "plan"
+    if "📖" in raw or "Objetivo:" in raw or "Pasos que voy" in raw:
+        return "plan"
+    return "status"
+
+
 def is_admin_ui_chat_session(chat_id: str | None) -> bool:
-    """Sesiones de la consola admin (no DM Telegram): sin egress ni heartbeats a Bot API."""
+    """Sesiones de la consola admin (SSE); sin egress a Bot API / Telegram."""
     cid = str(chat_id or "").strip()
     if not cid:
         return False
     if cid in ("admin-playground",):
         return True
-    return cid.startswith("admin-section-") or cid.startswith("admin-ui")
+    return (
+        cid.startswith("admin-section-")
+        or cid.startswith("admin-ui")
+        or cid.startswith("admin-conv-")
+    )
 
 
 def is_chat_heartbeat_enabled(tenant_id: str, chat_id: str) -> bool:
@@ -277,7 +369,7 @@ def format_heartbeat_elapsed(elapsed_sec: float | None) -> str:
     except (TypeError, ValueError):
         return ""
     if e < 60:
-        return f"⏱️ {e:.1f}s"
+        return f"⏱️ {e:.2f}s"
     m = int(e // 60)
     s = int(e % 60)
     return f"⏱️ {m}m {s}s"
@@ -303,15 +395,12 @@ def format_tool_heartbeat(
     inicio del turno del subagente (``subagent_turn_started_monotonic``).
     """
     head = (subagent_header or "").strip()
-    plan = _shorten_heartbeat_plan_title((plan_title or "").strip())
     body = (tool_message or "").strip()
     if not body:
         return ""
     segments: list[str] = []
     if head:
         segments.append(head)
-    if plan:
-        segments.append(f"📋 {plan}")
     segments.append(body)
     elapsed_txt = format_heartbeat_elapsed(elapsed_sec)
     if elapsed_txt:
@@ -475,9 +564,23 @@ def schedule_chat_heartbeat_dm(
     ``routing_worker_id``: id de plantilla (p. ej. ``Quant-Trader``) para resolver token desde
     ``TELEGRAM_*_TOKEN`` o ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` cuando no hay ContextVar.
     """
-    if is_admin_ui_chat_session(chat_id):
+    hb_on = is_chat_heartbeat_enabled(tenant_id, chat_id)
+    if not hb_on:
         return
-    if not is_chat_heartbeat_enabled(tenant_id, chat_id):
+    if is_admin_ui_chat_session(chat_id):
+        kind = _admin_heartbeat_kind(text, log_plan_title=log_plan_title)
+        label = (log_worker_id or "").strip()
+        wid, slot = parse_instance_label(label)
+        if not wid and (routing_worker_id or "").strip():
+            wid = (routing_worker_id or "").strip()
+            slot = 1
+        publish_admin_chat_heartbeat(
+            chat_id,
+            text,
+            kind=kind,
+            worker_id=wid or None,
+            swarm_slot=slot,
+        )
         return
     if not heartbeat_outbound_configured():
         return

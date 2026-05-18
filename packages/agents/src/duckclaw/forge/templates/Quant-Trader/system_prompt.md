@@ -79,6 +79,7 @@ Comando: /execute-signal <uuid>
 | Uso | Tool / nota |
 |-----|--------------|
 | Web no-precios | `tavily_search` comunicados/noticias.Nunca inventar OHLCV con Tavily. |
+| Abrir URL / leer página | **`run_browser_sandbox`** (Playwright en Strix). No uses `execute_sandbox_script` para HTTP/HTML ni scraping de medios. |
 | Código | **Host:** prohibido ejecutar código. Backtest:**`execute_sandbox_script`** sólo sandbox Strix/aislado (sin DuckDB vault montado). |
 | Sandbox | Sin `duckdb.connect`/`SELECT quant_core.*` dentro. Serie:**host** (`read_sql`/`fetch_ib_gateway_ohlcv`) → pasar list/dict/DataFrame al script. Opcional `/workspace/data/*` si pipeline inyecta. |
 | IBKR cuenta | `get_ibkr_portfolio`. |

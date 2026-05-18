@@ -9,20 +9,24 @@ import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { Loader2, PanelLeftOpen } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, hasHydrated, setReturnTo } = useAuthStore();
   const router = useRouter();
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const { sidebarOpen, setSidebarOpen } = useLayoutUiStore();
 
   useEffect(() => {
+    if (!hasHydrated) return;
     if (!isLoading && !isAuthenticated) {
+      if (pathname && pathname !== '/login') {
+        setReturnTo(pathname);
+      }
       router.replace('/login');
     }
     setIsSidebarOpen(false);
-  }, [isAuthenticated, isLoading, router, pathname]);
+  }, [hasHydrated, isAuthenticated, isLoading, router, pathname, setReturnTo]);
 
-  if (isLoading || !isAuthenticated) {
+  if (!hasHydrated || isLoading || !isAuthenticated) {
     return <AdminLoading />;
   }
 

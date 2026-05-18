@@ -4,6 +4,57 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 
+const SUBAGENT_INSTANCE_LINE = /^[A-Za-z0-9][A-Za-z0-9_.-]*\s+\d+\s*$/;
+const CAVEMAN_BOLD_HEADER = /^\s*\*\*[A-Za-z0-9][A-Za-z0-9_.-]*(?:\s+\d+)?\s*·[^*]+\*\*\s*$/i;
+const CAVEMAN_PLAIN_HEADER = /^[A-Za-z0-9][A-Za-z0-9_.-]*(?:\s+\d+)?\s*·.*\bCOT\b/i;
+const MARKDOWN_WORKER_HEADING = /^#{1,3}\s+[A-Za-z0-9][A-Za-z0-9_.-]*(?:\s+\d+)?\s*$/;
+const BOLD_WORKER_ONLY = /^\*\*[A-Za-z0-9][A-Za-z0-9_.-]*(?:\s+\d+)?\*\*\s*$/;
+
+function isLeadingWorkerIdentityLine(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  return (
+    SUBAGENT_INSTANCE_LINE.test(t) ||
+    CAVEMAN_BOLD_HEADER.test(t) ||
+    CAVEMAN_PLAIN_HEADER.test(t) ||
+    MARKDOWN_WORKER_HEADING.test(t) ||
+    BOLD_WORKER_ONLY.test(t)
+  );
+}
+
+/**
+ * Manager puede anteponer «Quant-Trader 1» y el modelo Caveman «**Quant-Trader · … COT**».
+ * Deja una sola línea de identidad al inicio (prioriza la que incluye COT).
+ */
+export function dedupeAssistantWorkerHeaders(text: string): string {
+  const raw = (text || '').trim();
+  if (!raw) return raw;
+
+  const lines = raw.split('\n');
+  let i = 0;
+  const identityLines: string[] = [];
+
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) {
+      i += 1;
+      continue;
+    }
+    if (!isLeadingWorkerIdentityLine(lines[i])) break;
+    identityLines.push(lines[i]);
+    i += 1;
+  }
+
+  if (identityLines.length <= 1) return raw;
+
+  const withCot =
+    identityLines.find((line) => /\bCOT\b/i.test(line)) ??
+    identityLines.find((line) => line.includes('·')) ??
+    identityLines[identityLines.length - 1];
+  const rest = lines.slice(i).join('\n').trimStart();
+  return rest ? `${withCot.trim()}\n\n${rest}` : withCot.trim();
+}
+
 /** Separa sufijo «(worker: …)» añadido por el playground tras el streaming. */
 export function splitPlaygroundWorkerSuffix(text: string): { body: string; workerNote: string | null } {
   const m = text.match(/^([\s\S]*)(\s*\(worker:\s*[^)]+\))\s*$/);
@@ -98,14 +149,15 @@ type ChatMarkdownProps = {
  * Seguro por defecto: sin HTML crudo (react-markdown).
  */
 export function ChatMarkdown({ content, className = '' }: ChatMarkdownProps) {
-  const { body, workerNote } = splitPlaygroundWorkerSuffix(content);
+  const { body: rawBody, workerNote } = splitPlaygroundWorkerSuffix(content);
+  const body = dedupeAssistantWorkerHeaders(rawBody);
 
   if (!body.trim() && !workerNote) {
     return null;
   }
 
   return (
-    <div className={`chat-markdown max-w-none break-words ${className}`}>
+    <div className={`chat-markdown min-w-0 max-w-full break-words [overflow-wrap:anywhere] ${className}`}>
       {body.trim() ? (
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
           {body}

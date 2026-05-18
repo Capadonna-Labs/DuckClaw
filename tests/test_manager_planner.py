@@ -113,6 +113,7 @@ def test_debt_plus_liquidity_stress_still_signals_cashflow() -> None:
 def test_strip_leading_subagent_instance_headers() -> None:
     from duckclaw.graphs.manager_graph import (
         _prepend_subagent_label_once,
+        _reply_already_has_worker_header,
         _strip_leading_subagent_instance_headers,
     )
 
@@ -122,6 +123,24 @@ def test_strip_leading_subagent_instance_headers() -> None:
     assert single.startswith("finanz 3\n\n")
     assert "finanz 2" not in single
     assert "Hola cuerpo" in single
+
+
+def test_prepend_subagent_label_skips_caveman_header() -> None:
+    from duckclaw.graphs.manager_graph import (
+        _prepend_subagent_label_once,
+        _reply_already_has_worker_header,
+    )
+
+    caveman = "**Quant-Trader 1 · 2026-05-18 08:44 COT**\n\nMercado lateral."
+    assert _reply_already_has_worker_header(caveman, "Quant-Trader") is True
+    out = _prepend_subagent_label_once(caveman, "Quant-Trader 4")
+    assert out == caveman
+    assert "Quant-Trader 4\n\n" not in out
+
+    caveman_no_slot = "**Quant-Trader · Lun 10:42 COT**\n\nMercado lateral."
+    assert _reply_already_has_worker_header(caveman_no_slot, "Quant-Trader") is True
+    out2 = _prepend_subagent_label_once(caveman_no_slot, "Quant-Trader 1")
+    assert out2 == caveman_no_slot
 
 
 def test_lc_messages_to_chatml_strips_repeated_subagent_headers() -> None:
@@ -944,6 +963,37 @@ def test_should_disable_mercenary_quant_lone_http_url_only() -> None:
     )
     assert not _should_disable_mercenary_for_quant_lone_https_url(article, "finanz")
     assert not _should_disable_mercenary_for_quant_lone_https_url("", "Quant-Trader")
+
+
+def test_should_disable_mercenary_browser_intent_finanz() -> None:
+    from duckclaw.graphs.manager_graph import _should_disable_mercenary_for_browser_intent
+
+    assert _should_disable_mercenary_for_browser_intent(
+        "Usa sandbox para buscar en El Colombiano",
+        ["Abrir elcolombiano.com y extraer titular"],
+        "Noticias Colombia",
+    )
+    assert _should_disable_mercenary_for_browser_intent(
+        "revisa mi portfolio",
+        ["read_sql sobre cuentas"],
+        "Portfolio",
+    ) is False
+
+
+def test_should_disable_mercenary_admin_ui_chat() -> None:
+    from duckclaw.graphs.manager_graph import _should_disable_mercenary_for_admin_ui
+
+    assert _should_disable_mercenary_for_admin_ui("admin-conv-f4123501f9aa488094762fac703a5960")
+    assert _should_disable_mercenary_for_admin_ui("admin-playground")
+    assert not _should_disable_mercenary_for_admin_ui("123456789")
+
+
+def test_strip_mercenary_spec_for_browser_worker_quant() -> None:
+    from duckclaw.graphs.manager_graph import _strip_mercenary_spec_for_browser_worker
+
+    out = {"assigned_worker_id": "Quant-Trader", "mercenary_spec": {"directive": "x", "timeout": 30}}
+    assert _strip_mercenary_spec_for_browser_worker(out) is True
+    assert "mercenary_spec" not in out
 
 
 def test_should_disable_mercenary_quant_external_research_blob() -> None:

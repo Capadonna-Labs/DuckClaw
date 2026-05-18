@@ -8,7 +8,7 @@ risk_level: conservative
 quant:
   enabled: true
 network_access: false
-browser_sandbox: false
+browser_sandbox: true
 allowed_tables:
 - finance_worker.trading_mandates
 - finance_worker.trade_signals

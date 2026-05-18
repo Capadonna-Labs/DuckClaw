@@ -742,6 +742,34 @@ def _execute_sandbox_script_impl(
     db: Any, llm: Any, *, code: str, dependencies: list[str] | None = None
 ) -> str:
     _ = dependencies
+    cid = get_quant_tool_chat_id() or None
+    # region agent log
+    try:
+        import json as _json
+        import time as _time
+
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
+            "a",
+            encoding="utf-8",
+        ) as _f:
+            _f.write(
+                _json.dumps(
+                    {
+                        "sessionId": "fd1dbb",
+                        "timestamp": int(_time.time() * 1000),
+                        "location": "quant_trader_bridge.py:_execute_sandbox_script_impl",
+                        "message": "execute_sandbox_script chat context",
+                        "data": {"chat_id": cid, "worker_id": "Quant-Trader"},
+                        "hypothesisId": "A",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
     result = run_in_sandbox(
         db=db,
         llm=llm,
@@ -751,6 +779,7 @@ def _execute_sandbox_script_impl(
         max_retries=1,
         # Carpeta de plantilla es Quant-Trader/; "quant_trader" no existe → política por defecto sin montajes RO.
         worker_id="Quant-Trader",
+        chat_id=cid,
     )
     payload = {
         "exit_code": int(result.exit_code),

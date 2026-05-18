@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Literal
+from typing import Any, Dict, List, Literal
 
 from pydantic import BaseModel, Field
 
@@ -119,3 +119,57 @@ def security_policy_to_docker_kwargs(policy: SecurityPolicy) -> Dict[str, object
         "volumes": volumes,
         "tmpfs": tmpfs,
     }
+
+
+def resolve_sandbox_network_policy(
+    worker_id: str,
+    chat_network: str | None = None,
+    *,
+    worker_dir: Path | None = None,
+) -> tuple[SecurityPolicy, dict[str, Any]]:
+    """
+    Política efectiva de red: YAML del worker + override opcional por chat.
+
+  chat_network: valor de agent_config ``sandbox_network_enabled`` (true/false/vacío).
+  Si el YAML tiene ``deny``, el override no puede habilitar bridge (Zero-Trust).
+    """
+    base = load_security_policy(worker_id, worker_dir=worker_dir)
+    yaml_default = base.network.default
+    toggle_available = yaml_default == "allow"
+    cn = (chat_network or "").strip().lower()
+    meta: dict[str, Any] = {
+        "yaml_default": yaml_default,
+        "effective": yaml_default,
+        "toggle_available": toggle_available,
+        "chat_override": cn if cn in ("true", "false", "1", "0", "on", "off") else None,
+    }
+    if not toggle_available:
+        return base, meta
+
+    effective = base.model_copy(deep=True)
+    if cn in ("false", "0", "off"):
+        effective.network.default = "deny"
+        meta["effective"] = "deny"
+    elif cn in ("true", "1", "on"):
+        effective.network.default = "allow"
+        meta["effective"] = "allow"
+    return effective, meta
+
+
+def resolve_security_policy_for_chat(
+    worker_id: str,
+    db: Any,
+    chat_id: Any,
+    *,
+    worker_dir: Path | None = None,
+) -> tuple[SecurityPolicy, dict[str, Any]]:
+    """Carga política del worker y aplica ``sandbox_network_enabled`` del chat si procede."""
+    raw = ""
+    if db is not None and chat_id is not None:
+        try:
+            from duckclaw.graphs.on_the_fly_commands import get_chat_state
+
+            raw = get_chat_state(db, chat_id, "sandbox_network_enabled")
+        except Exception:
+            raw = ""
+    return resolve_sandbox_network_policy(worker_id, raw or None, worker_dir=worker_dir)

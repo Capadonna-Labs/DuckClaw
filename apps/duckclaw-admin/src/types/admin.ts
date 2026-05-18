@@ -56,6 +56,22 @@ export interface AdminHealth {
   features?: { catalog?: boolean; ops?: boolean; projects?: boolean };
 }
 
+export interface ConsoleUser {
+  email: string;
+  nombre: string;
+  rol: AdminRole;
+  initials: string;
+  active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SharedDbGrant {
+  user_id: string;
+  resource_key: string;
+  created_at?: string;
+}
+
 export interface WhitelistUser {
   user_id: string;
   username: string;

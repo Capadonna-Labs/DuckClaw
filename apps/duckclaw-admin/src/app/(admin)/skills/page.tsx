@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { adminService, type SkillCatalogItem } from '@/services/adminService';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
-import { Blocks } from 'lucide-react';
+import Link from 'next/link';
+import { Blocks, Cable } from 'lucide-react';
 
 export default function SkillsPage() {
   const [globalSkills, setGlobalSkills] = useState<SkillCatalogItem[]>([]);
@@ -38,10 +39,24 @@ export default function SkillsPage() {
       <header>
         <h1 className="text-3xl font-black dark:text-dark-text">Skills</h1>
         <p className="text-sm text-gov-gray-500 mt-1">
-          Catálogo en <code className="text-xs font-mono">forge/skills/</code> y skills por worker
-          en <code className="text-xs">forge/templates/&lt;id&gt;/skills/</code>
+          Átomos Python propios en <code className="text-xs font-mono">forge/skills/</code> y por
+          plantilla en <code className="text-xs font-mono">forge/templates/&lt;id&gt;/skills/</code>.
+          Para integraciones empaquetadas (GitHub, Telegram, Reddit…), usa{' '}
+          <Link href="/mcp" className="text-gov-blue-700 dark:text-dark-cyan font-semibold hover:underline">
+            MCP
+          </Link>{' '}
+          primero.
         </p>
       </header>
+
+      <div className="flex items-start gap-3 p-4 rounded-2xl border border-sky-200 bg-sky-50 dark:bg-sky-950/25 dark:border-sky-800/60 text-sm">
+        <Cable className="shrink-0 mt-0.5 text-sky-700 dark:text-sky-300" size={20} />
+        <p className="text-sky-950 dark:text-sky-100">
+          <strong>MCP primero:</strong> paquetes y bridges ya integrados (servidor HTTP DuckClaw,
+          stdio en <code className="text-xs font-mono">config/mcp_servers.yaml</code>, catálogo
+          oficial). Esta página es para skills Python custom cuando no hay servidor MCP listo.
+        </p>
+      </div>
 
       {error && <p className="text-red-600 text-sm">{error}</p>}
 

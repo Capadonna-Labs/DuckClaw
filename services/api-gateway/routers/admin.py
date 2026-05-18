@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -113,7 +113,7 @@ def _playground_team_context(
         workers = list(get_effective_team_templates(db, team_lookup_id, tid, None))
         if get_team_templates(db, team_lookup_id):
             team_source = "chat"
-            team_hint = "Equipo de este chat (/workers en Telegram)"
+            team_hint = "Equipo de este chat (/workers)"
         elif get_tenant_team_templates(db, tid):
             team_source = "tenant"
             team_hint = f"Equipo del tenant «{tid}»"
@@ -327,9 +327,21 @@ class ProjectCreateBody(BaseModel):
     soul: str = ""
 
 
+class PlaygroundImageIn(BaseModel):
+    mime_type: str = Field(..., max_length=64)
+    data_base64: str = Field(..., max_length=20_000_000)
+
+
+class PlaygroundModelBody(BaseModel):
+    chat_id: str = Field(..., min_length=1, max_length=128)
+    provider: str = Field(..., min_length=1, max_length=32)
+    model: str | None = Field(default=None, max_length=256)
+    base_url: str | None = Field(default=None, max_length=512)
+
+
 class PlaygroundChatBody(BaseModel):
     worker_id: str = Field(default="default", max_length=64)
-    message: str = Field(..., min_length=1, max_length=16000)
+    message: str = Field(default="", max_length=16000)
     chat_id: str = Field(default="admin-playground", max_length=128)
     tenant_id: str = Field(default="default", max_length=64)
     telegram_user_id: str | None = Field(
@@ -337,14 +349,34 @@ class PlaygroundChatBody(BaseModel):
         max_length=32,
         description="ID Telegram para whitelist y equipo /workers (default: DUCKCLAW_OWNER_ID)",
     )
+    images: list[PlaygroundImageIn] = Field(default_factory=list, max_length=3)
     stream: bool = Field(
         default=False,
         description="Si true, respuesta text/event-stream (tokens SSE + [DONE]).",
     )
 
+    @model_validator(mode="after")
+    def _message_or_images(self) -> "PlaygroundChatBody":
+        if not (self.message or "").strip() and not self.images:
+            raise ValueError("message o images requeridos")
+        return self
+
 
 class EnvPatchBody(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
+
+
+class NovncPrepareBody(BaseModel):
+    chat_id: str | None = Field(default=None, max_length=128)
+    worker_id: str | None = Field(default=None, max_length=64)
+    tenant_id: str | None = Field(default=None, max_length=64)
+
+
+class SandboxNetworkBody(BaseModel):
+    chat_id: str = Field(..., min_length=1, max_length=128)
+    enabled: bool
+    worker_id: str | None = Field(default=None, max_length=64)
+    tenant_id: str | None = Field(default=None, max_length=64)
 
 
 class TelegramRouteInput(BaseModel):
@@ -373,6 +405,34 @@ class WhitelistBody(BaseModel):
     username: str = ""
     role: str = "user"
     tenant_id: str = ""
+
+
+class AdminLoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class ConsoleUserBody(BaseModel):
+    email: str
+    nombre: str = ""
+    rol: str = "viewer"
+    password: str | None = None
+    initials: str = ""
+    active: bool = True
+
+
+class ConsoleUserPatchBody(BaseModel):
+    nombre: str | None = None
+    rol: str | None = None
+    password: str | None = None
+    initials: str | None = None
+    active: bool | None = None
+
+
+class SharedGrantBody(BaseModel):
+    tenant_id: str = "default"
+    user_id: str
+    resource_key: str
 
 
 _AGENT_CONFIG_DDL = """
@@ -536,6 +596,46 @@ def _resolved_llm_env() -> dict[str, str]:
     return {"provider": prov, "model": model, "base_url": base}
 
 
+def _resolved_llm_for_chat(chat_id: str | None) -> dict[str, str]:
+    """LLM efectivo: override agent_config del chat (p. ej. /model) o .env del gateway."""
+    env = _resolved_llm_env()
+    cid = (chat_id or "").strip()
+    if not cid:
+        return {**env, "scope": "env"}
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.graphs.on_the_fly_commands import _effective_llm_triplet_for_chat_ui
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return {**env, "scope": "env"}
+    db = DuckClaw(gw, read_only=True, engine="python")
+    try:
+        provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, cid)
+    except Exception:
+        provider, model, base_url = "", "", ""
+    finally:
+        db.close()
+    has_chat = bool((provider or "").strip())
+    return {
+        "provider": (provider or env["provider"] or "").strip(),
+        "model": (model or env["model"] or "").strip(),
+        "base_url": (base_url or env["base_url"] or "").strip(),
+        "scope": "chat" if has_chat else "env",
+    }
+
+
+def _playground_llm_catalog(active_provider: str) -> list[dict[str, Any]]:
+    active = (active_provider or "").strip().lower()
+    catalog: list[dict[str, Any]] = []
+    for item in _LLM_PROVIDER_CATALOG:
+        row = dict(item)
+        row["active"] = row["id"] == active
+        row["keys_ok"] = _llm_keys_configured(row.get("env_keys") or [])
+        catalog.append(row)
+    return catalog
+
+
 def _llm_keys_configured(env_keys: list[str]) -> bool:
     for k in env_keys:
         if (os.environ.get(k) or "").strip():
@@ -558,18 +658,14 @@ async def playground_config(
         chat_id=chat_id,
     )
     workers: list[str] = team_ctx.get("workers") or []
-    llm = _resolved_llm_env()
-    active = llm.get("provider", "")
-    catalog = []
-    for item in _LLM_PROVIDER_CATALOG:
-        row = dict(item)
-        row["active"] = row["id"] == active
-        row["keys_ok"] = _llm_keys_configured(row.get("env_keys") or [])
-        catalog.append(row)
+    eff_chat = (chat_id or team_ctx.get("team_chat_id") or "admin-playground").strip()
+    llm = _resolved_llm_for_chat(eff_chat)
+    catalog = _playground_llm_catalog(llm.get("provider", ""))
     eff_tenant = team_ctx.get("tenant_id") or _gateway_effective_tenant_id("default")
     return {
         "llm": llm,
         "catalog": catalog,
+        "config_chat_id": eff_chat,
         "workers": workers,
         "env_path": str(_env_file()),
         "effective_tenant_id": eff_tenant,
@@ -582,7 +678,51 @@ async def playground_config(
         "chat_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_hint": "POST con stream=true o Accept: text/event-stream",
-        "note": "El LLM lo define el .env del gateway (PM2). Reinicia DuckClaw-Gateway tras cambiar proveedor.",
+        "note": (
+            "Proveedor por conversación (lista o /model en el chat). "
+            "Sin override, usa .env del gateway (reinicia PM2 tras cambiar .env)."
+        ),
+    }
+
+
+@router.put("/playground/model", dependencies=[Depends(_require_admin_key)])
+async def playground_set_model(body: PlaygroundModelBody) -> dict[str, Any]:
+    """Equivalente a `/model provider=…` para la consola admin (persiste en agent_config del chat)."""
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.graphs.on_the_fly_commands import _PROVIDERS, execute_model
+
+    prov = body.provider.strip().lower()
+    if prov not in _PROVIDERS:
+        raise _problem(
+            400,
+            "Proveedor inválido",
+            f"Válidos: {', '.join(_PROVIDERS)}",
+        )
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_FINANZ_DB_PATH")
+    parts = [f"provider={prov}"]
+    if body.model and body.model.strip():
+        parts.append(f"model={body.model.strip()}")
+    if body.base_url is not None and str(body.base_url).strip():
+        parts.append(f"base_url={body.base_url.strip()}")
+    args = " | ".join(parts)
+    chat_id = body.chat_id.strip()
+    db = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        message = execute_model(db, chat_id, args)
+    except Exception as exc:
+        raise _problem(400, "No se pudo actualizar el modelo", str(exc)) from exc
+    finally:
+        db.close()
+    llm = _resolved_llm_for_chat(chat_id)
+    return {
+        "ok": True,
+        "message": message,
+        "chat_id": chat_id,
+        "llm": llm,
+        "catalog": _playground_llm_catalog(llm.get("provider", "")),
     }
 
 
@@ -594,9 +734,23 @@ async def playground_chat(
 ):
     """Chat de prueba desde consola admin (exento Tailscale vía prefijo /admin/)."""
     wid = re.sub(r"[^a-zA-Z0-9_-]", "", body.worker_id.strip()) or "default"
-    msg = body.message.strip()
+    msg = (body.message or "").strip()
+    if not msg and not body.images:
+        raise _problem(400, "message o images requeridos", "")
+    if body.images:
+        from core.vlm_ingest import enrich_message_with_admin_images
+
+        try:
+            msg = await enrich_message_with_admin_images(
+                msg,
+                [img.model_dump() for img in body.images],
+            )
+        except ValueError as exc:
+            raise _problem(400, str(exc), "images") from exc
+        except Exception as exc:
+            raise _problem(502, "Error procesando imagen (VLM)", str(exc)) from exc
     if not msg:
-        raise _problem(400, "message vacío", body.message)
+        raise _problem(400, "message vacío tras VLM", body.message)
     tenant_id = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
     team_ctx = _playground_team_context(
         telegram_user_id=body.telegram_user_id,
@@ -622,6 +776,13 @@ async def playground_chat(
             )
         wid = canonical
     session_id = (body.chat_id or "admin-playground").strip() or "admin-playground"
+    if body.images:
+        _admin_audit(
+            "playground.chat.images",
+            session_id,
+            f"count={len(body.images)}",
+            actor=actor,
+        )
     owner_uid = str(team_ctx.get("telegram_user_id") or "").strip()
     guard_user_id = owner_uid or (actor or "admin-ui")
 
@@ -1335,6 +1496,421 @@ async def admin_chat_history(
     return {"tenant_id": tenant_id, "session_id": session_id, "messages": items}
 
 
+class AdminConversationCreateBody(BaseModel):
+    title: str | None = None
+    section: str | None = None
+    worker_id: str | None = None
+
+
+class AdminConversationPatchBody(BaseModel):
+    title: str
+
+
+@router.get("/conversations", dependencies=[Depends(_require_admin_key)])
+async def admin_list_conversations(
+    request: Request,
+    tenant_id: str = Query("default"),
+    section: str | None = Query(None),
+    worker: str | None = Query(None),
+    actor: str | None = Query(None),
+    q: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    from core.admin_conversations import list_conversations
+
+    tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
+    redis_client = getattr(request.app.state, "redis", None)
+    items, total = await list_conversations(
+        redis_client,
+        tid,
+        section=section,
+        worker=worker,
+        actor=actor,
+        q=q,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "tenant_id": tid,
+        "conversations": [m.model_dump() for m in items],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.post("/conversations", dependencies=[Depends(_require_admin_key)])
+async def admin_create_conversation(
+    request: Request,
+    body: AdminConversationCreateBody,
+    tenant_id: str = Query("default"),
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_conversations import (
+        AdminConversationMeta,
+        derive_section_from_session_id,
+        new_admin_conversation_session_id,
+        upsert_conversation_meta,
+    )
+
+    tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
+    sid = new_admin_conversation_session_id()
+    sec = (body.section or "").strip() or "other"
+    redis_client = getattr(request.app.state, "redis", None)
+    title = (body.title or "").strip() or f"Conversación {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+    meta = await upsert_conversation_meta(
+        redis_client,
+        tenant_id=tid,
+        session_id=sid,
+        actor=actor,
+        section=sec,
+        last_worker_id=(body.worker_id or "").strip(),
+        title=title,
+        message_count=0,
+    )
+    if meta is None:
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        meta = AdminConversationMeta(
+            session_id=sid,
+            tenant_id=tid,
+            title=title,
+            created_at=now,
+            updated_at=now,
+            actor=actor,
+            section=derive_section_from_session_id(sid, origin_section=sec),
+            last_worker_id=(body.worker_id or "").strip(),
+            workers=[(body.worker_id or "").strip()] if (body.worker_id or "").strip() else [],
+            origin="admin_ui",
+        )
+    return meta.model_dump()
+
+
+@router.get("/conversations/{session_id}", dependencies=[Depends(_require_admin_key)])
+async def admin_get_conversation(
+    request: Request,
+    session_id: str,
+    tenant_id: str = Query("default"),
+) -> dict[str, Any]:
+    from core.admin_conversations import get_conversation_meta
+    from core.chat_history import redis_load_chat_history
+
+    tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
+    sid = (session_id or "").strip()
+    if not sid:
+        raise _problem(400, "session_id vacío", session_id)
+    redis_client = getattr(request.app.state, "redis", None)
+    meta = await get_conversation_meta(redis_client, tid, sid)
+    messages = await redis_load_chat_history(redis_client, tid, sid)
+    if meta is None and not messages:
+        raise _problem(404, "Conversación no encontrada", sid)
+    out: dict[str, Any] = {
+        "tenant_id": tid,
+        "session_id": sid,
+        "messages": messages,
+    }
+    if meta is not None:
+        out.update(meta.model_dump())
+    return out
+
+
+@router.patch("/conversations/{session_id}", dependencies=[Depends(_require_admin_key)])
+async def admin_patch_conversation(
+    request: Request,
+    session_id: str,
+    body: AdminConversationPatchBody,
+    tenant_id: str = Query("default"),
+) -> dict[str, Any]:
+    from core.admin_conversations import patch_conversation_title
+
+    tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
+    sid = (session_id or "").strip()
+    title = (body.title or "").strip()
+    if not sid or not title:
+        raise _problem(400, "session_id y title requeridos", sid)
+    redis_client = getattr(request.app.state, "redis", None)
+    meta = await patch_conversation_title(redis_client, tid, sid, title)
+    if meta is None:
+        raise _problem(404, "Conversación no encontrada", sid)
+    return meta.model_dump()
+
+
+@router.delete("/conversations/{session_id}", dependencies=[Depends(_require_admin_key)])
+async def admin_delete_conversation(
+    request: Request,
+    session_id: str,
+    tenant_id: str = Query("default"),
+) -> dict[str, Any]:
+    from core.admin_conversations import delete_conversation
+
+    tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
+    sid = (session_id or "").strip()
+    if not sid:
+        raise _problem(400, "session_id vacío", session_id)
+    redis_client = getattr(request.app.state, "redis", None)
+    ok = await delete_conversation(redis_client, tid, sid)
+    if not ok:
+        raise _problem(404, "Conversación no encontrada", sid)
+    return {"ok": True, "session_id": sid, "tenant_id": tid}
+
+
+@router.post("/conversations/reindex", dependencies=[Depends(_require_admin_key)])
+async def admin_reindex_conversations(
+    request: Request,
+    tenant_id: str = Query("default"),
+) -> dict[str, Any]:
+    from core.admin_conversations import reindex_admin_conversations
+
+    tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
+    redis_client = getattr(request.app.state, "redis", None)
+    stats = await reindex_admin_conversations(redis_client, tid)
+    return {"tenant_id": tid, **stats}
+
+
+@router.post("/auth/login")
+async def admin_auth_login(body: AdminLoginBody) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_console_users import authenticate_console_user
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(503, "Gateway DuckDB no disponible", gw)
+    db = DuckClaw(gw, read_only=True, engine="python")
+    try:
+        user = authenticate_console_user(db, email=body.email, password=body.password)
+    finally:
+        db.close()
+    if not user:
+        raise _problem(401, "Credenciales inválidas", "login")
+    return {
+        "email": user["email"],
+        "nombre": user["nombre"],
+        "rol": user["rol"],
+        "initials": user.get("initials") or "",
+        "id": user.get("id") or f"user-{user['email']}",
+    }
+
+
+@router.get("/access/overview", dependencies=[Depends(_require_admin_key)])
+async def get_access_overview(tenant_id: str = Query("default")) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_console_users import count_console_users, list_console_users
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.graphs.on_the_fly_commands import _list_authorized_users
+    from duckclaw.shared_db_grants import list_shared_grants_for_tenant
+
+    tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
+    gw = (get_gateway_db_path() or "").strip()
+    console_count = 0
+    telegram_count = 0
+    shared_count = 0
+    if gw and os.path.isfile(gw):
+        db = DuckClaw(gw, read_only=True, engine="python")
+        try:
+            console_count = count_console_users(db)
+            users = _list_authorized_users(db, tenant_id=tid)
+            telegram_count = len(users)
+            shared_count = len(list_shared_grants_for_tenant(db, tenant_id=tid))
+        finally:
+            db.close()
+    return {
+        "tenant_id": tid,
+        "console_users": console_count,
+        "telegram_users": telegram_count,
+        "shared_grants": shared_count,
+        "db_path": gw,
+    }
+
+
+@router.get("/console-users", dependencies=[Depends(_require_admin_key)])
+async def list_admin_console_users() -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_console_users import list_console_users
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return {"users": [], "db_path": gw, "warning": "Gateway DuckDB no encontrada"}
+    db = DuckClaw(gw, read_only=True, engine="python")
+    try:
+        users = list_console_users(db)
+    finally:
+        db.close()
+    return {"users": users, "db_path": gw}
+
+
+@router.post("/console-users", dependencies=[Depends(_require_admin_key)])
+async def create_admin_console_user(
+    body: ConsoleUserBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_console_users import upsert_console_user
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(404, "Gateway DuckDB no encontrada", gw)
+    if not (body.password or "").strip():
+        raise _problem(400, "password requerido", body.email)
+    rw = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        user = upsert_console_user(
+            rw,
+            email=body.email,
+            nombre=body.nombre,
+            rol=body.rol,
+            password=body.password,
+            initials=body.initials,
+            active=body.active,
+        )
+    except ValueError as exc:
+        raise _problem(400, str(exc), body.email) from exc
+    finally:
+        rw.close()
+    _admin_audit("console.user.upsert", body.email, body.rol, actor=actor)
+    return {"ok": True, "user": user, "db_path": gw}
+
+
+@router.patch("/console-users", dependencies=[Depends(_require_admin_key)])
+async def patch_admin_console_user(
+    email: str = Query(...),
+    body: ConsoleUserPatchBody = ...,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_console_users import get_by_email, upsert_console_user
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    em = (email or "").strip()
+    if not em:
+        raise _problem(400, "email requerido", "")
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(404, "Gateway DuckDB no encontrada", gw)
+    rw = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        existing = get_by_email(rw, em)
+        if not existing:
+            raise _problem(404, "Usuario no encontrado", em)
+        user = upsert_console_user(
+            rw,
+            email=em,
+            nombre=body.nombre if body.nombre is not None else str(existing.get("nombre") or ""),
+            rol=body.rol if body.rol is not None else str(existing.get("rol") or "viewer"),
+            password=body.password,
+            initials=body.initials if body.initials is not None else str(existing.get("initials") or ""),
+            active=body.active if body.active is not None else bool(existing.get("active", True)),
+        )
+    except ValueError as exc:
+        raise _problem(400, str(exc), em) from exc
+    finally:
+        rw.close()
+    _admin_audit("console.user.patch", em, body.rol or "", actor=actor)
+    return {"ok": True, "user": user, "db_path": gw}
+
+
+@router.delete("/console-users", dependencies=[Depends(_require_admin_key)])
+async def delete_admin_console_user(
+    email: str = Query(...),
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_console_users import deactivate_console_user
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    em = (email or "").strip()
+    if not em:
+        raise _problem(400, "email requerido", "")
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(404, "Gateway DuckDB no encontrada", gw)
+    rw = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        ok = deactivate_console_user(rw, email=em)
+    finally:
+        rw.close()
+    if not ok:
+        raise _problem(404, "Usuario no encontrado", em)
+    _admin_audit("console.user.deactivate", em, "", actor=actor)
+    return {"ok": True, "email": em, "db_path": gw}
+
+
+@router.get("/access/shared-grants", dependencies=[Depends(_require_admin_key)])
+async def get_shared_grants(tenant_id: str = Query("default")) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.shared_db_grants import list_shared_grants_for_tenant
+
+    tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return {"tenant_id": tid, "grants": [], "db_path": gw, "warning": "Gateway DuckDB no encontrada"}
+    db = DuckClaw(gw, read_only=True, engine="python")
+    try:
+        grants = list_shared_grants_for_tenant(db, tenant_id=tid)
+    finally:
+        db.close()
+    return {"tenant_id": tid, "grants": grants, "db_path": gw}
+
+
+@router.post("/access/shared-grants", dependencies=[Depends(_require_admin_key)])
+async def post_shared_grant(
+    body: SharedGrantBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.shared_db_grants import upsert_shared_grant, validate_resource_key
+
+    tid = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
+    uid = (body.user_id or "").strip()
+    rk = (body.resource_key or "").strip().lower()
+    if not uid:
+        raise _problem(400, "user_id requerido", "")
+    if not validate_resource_key(rk):
+        raise _problem(400, "resource_key inválido", rk)
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(404, "Gateway DuckDB no encontrada", gw)
+    rw = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        upsert_shared_grant(rw, tenant_id=tid, user_id=uid, resource_key=rk)
+    finally:
+        rw.close()
+    _admin_audit("access.shared.grant", f"tenant:{tid}", f"{uid}:{rk}", actor=actor)
+    return {"ok": True, "tenant_id": tid, "user_id": uid, "resource_key": rk, "db_path": gw}
+
+
+@router.delete("/access/shared-grants", dependencies=[Depends(_require_admin_key)])
+async def delete_shared_grant(
+    tenant_id: str = Query("default"),
+    user_id: str = Query(...),
+    resource_key: str = Query(...),
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.shared_db_grants import delete_shared_grant
+
+    tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
+    uid = (user_id or "").strip()
+    rk = (resource_key or "").strip().lower()
+    if not uid or not rk:
+        raise _problem(400, "user_id y resource_key requeridos", "")
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(404, "Gateway DuckDB no encontrada", gw)
+    rw = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        delete_shared_grant(rw, tenant_id=tid, user_id=uid, resource_key=rk)
+    finally:
+        rw.close()
+    _admin_audit("access.shared.revoke", f"tenant:{tid}", f"{uid}:{rk}", actor=actor)
+    return {"ok": True, "tenant_id": tid, "user_id": uid, "resource_key": rk, "db_path": gw}
+
+
 @router.get("/telegram/whitelist", dependencies=[Depends(_require_admin_key)])
 async def get_telegram_whitelist(tenant_id: str = Query("default")) -> dict[str, Any]:
     from duckclaw import DuckClaw
@@ -1763,6 +2339,9 @@ async def catalog_mcp() -> dict[str, Any]:
         except Exception:
             pass
     live = await _probe_mcp_http(mcp_port)
+    from core.mcp_official_catalog import load_official_mcp_reference
+
+    official_reference = load_official_mcp_reference(_repo_root())
     return {
         "duckclaw_mcp": {
             "command": "uv run python -m duckclaw_mcp --host 0.0.0.0 --port " + mcp_port,
@@ -1771,6 +2350,7 @@ async def catalog_mcp() -> dict[str, Any]:
             "live": live,
         },
         "stdio_servers": stdio_servers,
+        "official_reference": official_reference,
         "github_note": "GitHub MCP vía forge/skills/github_bridge.py (Docker)",
     }
 
@@ -1899,6 +2479,533 @@ async def create_project(
         meta={"skills": body.skills, "path": str(dest.relative_to(_repo_root()))},
     )
     return {"ok": True, "id": wid, "path": str(dest.relative_to(_repo_root()))}
+
+
+def _kanban_status_from_audit(status: str, age_seconds: float) -> str:
+    """Map latest task_audit_log row to kanban column id."""
+    st = (status or "").strip().upper()
+    if age_seconds < 30 * 60:
+        return "en_progreso"
+    if st == "SUCCESS":
+        return "completo"
+    return "pendiente"
+
+
+def _resolve_kanban_worker_ids(
+    workers: str | None,
+    tenant_id: str | None,
+) -> list[str]:
+    raw_ids = [re.sub(r"[^a-zA-Z0-9_-]", "", w.strip()) for w in (workers or "").split(",")]
+    worker_ids = [w for w in raw_ids if w]
+    if not worker_ids:
+        team_ctx = _playground_team_context(tenant_id=tenant_id)
+        worker_ids = list(team_ctx.get("workers") or [])
+    return worker_ids
+
+
+def _kanban_audit_states_by_worker(worker_ids: list[str]) -> dict[str, str]:
+    from datetime import datetime, timezone
+
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+
+    states: dict[str, str] = {w: "pendiente" for w in worker_ids}
+    if not worker_ids:
+        return states
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return states
+    db = GatewayDbEphemeralReadonly(gw)
+    now = datetime.now(timezone.utc)
+    in_list = ", ".join("'" + w.replace("'", "''") + "'" for w in worker_ids)
+    try:
+        rows = db.query(
+            f"""
+            SELECT worker_id, status, created_at
+            FROM task_audit_log
+            WHERE worker_id IN ({in_list})
+            ORDER BY created_at DESC
+            """
+        )
+    except Exception:
+        return states
+    seen: set[str] = set()
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        wid = str(row.get("worker_id") or "").strip()
+        if not wid or wid in seen:
+            continue
+        seen.add(wid)
+        created = row.get("created_at")
+        age_seconds = 999999.0
+        if created is not None:
+            try:
+                if hasattr(created, "tzinfo") and created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                age_seconds = max(0.0, (now - created).total_seconds())
+            except Exception:
+                age_seconds = 999999.0
+        states[wid] = _kanban_status_from_audit(str(row.get("status") or ""), age_seconds)
+    return states
+
+
+def _kanban_instance_key(worker_id: str, slot: int) -> str:
+    return f"{worker_id}:{slot}"
+
+
+@router.get("/kanban/worker-states", dependencies=[Depends(_require_admin_key)])
+async def kanban_worker_states(
+    workers: str | None = Query(None, description="Comma-separated worker ids"),
+    tenant_id: str | None = Query(None),
+) -> dict[str, Any]:
+    """
+    Latest task_audit_log status per worker for Tablero sync (/workers team).
+    Incluye claves compuestas ``{worker_id}:1`` (slot base) además de ``{worker_id}``.
+    """
+    worker_ids = _resolve_kanban_worker_ids(workers, tenant_id)
+    if not worker_ids:
+        return {"workers": [], "states": {}}
+    audit = _kanban_audit_states_by_worker(worker_ids)
+    states: dict[str, str] = dict(audit)
+    for wid, st in audit.items():
+        states[_kanban_instance_key(wid, 1)] = st
+    return {"workers": worker_ids, "states": states}
+
+
+@router.get("/kanban/swarm-slots", dependencies=[Depends(_require_admin_key)])
+async def kanban_swarm_slots(
+    workers: str | None = Query(None, description="Comma-separated worker ids"),
+    tenant_id: str | None = Query(None),
+) -> dict[str, Any]:
+    """
+    Instancias swarm activas (Redis) y estados por ``{worker_id}:{slot}`` para el Tablero.
+    """
+    from duckclaw.graphs.subagent_run_id import list_active_swarm_slots
+
+    worker_ids = _resolve_kanban_worker_ids(workers, tenant_id)
+    if not worker_ids:
+        return {"workers": [], "instances": [], "states": {}}
+
+    tid = _gateway_effective_tenant_id(tenant_id)
+    raw_slots = list_active_swarm_slots(tid, worker_ids)
+    audit = _kanban_audit_states_by_worker(worker_ids)
+
+    active_by_worker: dict[str, set[int]] = {w: set() for w in worker_ids}
+    instances: list[dict[str, Any]] = []
+    for row in raw_slots:
+        wid = str(row.get("worker_id") or "").strip()
+        slot = int(row.get("slot") or 0)
+        if not wid or slot < 1:
+            continue
+        active_by_worker.setdefault(wid, set()).add(slot)
+        instances.append(
+            {
+                "worker_id": wid,
+                "slot": slot,
+                "chat_scope": row.get("chat_scope"),
+                "started_at": row.get("started_at"),
+                "active": True,
+            }
+        )
+
+    states: dict[str, str] = {}
+    for wid in worker_ids:
+        key1 = _kanban_instance_key(wid, 1)
+        if 1 in active_by_worker.get(wid, set()):
+            states[key1] = "en_progreso"
+        else:
+            states[key1] = audit.get(wid, "pendiente")
+        for slot in sorted(active_by_worker.get(wid, set())):
+            if slot >= 2:
+                states[_kanban_instance_key(wid, slot)] = "en_progreso"
+
+    return {"workers": worker_ids, "instances": instances, "states": states}
+
+
+def _worker_has_browser_sandbox(worker_id: str) -> bool:
+    from duckclaw.workers.manifest import load_manifest
+
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (worker_id or "").strip())
+    if not wid:
+        return False
+    try:
+        spec = load_manifest(wid)
+        return bool(getattr(spec, "browser_sandbox", False))
+    except Exception:
+        return False
+
+
+def _playground_vault_db_path(
+    team_ctx: dict[str, Any],
+    worker_id: str | None = None,
+) -> str:
+    """Ruta .duckdb del vault del playground (misma lógica que invoke_chat)."""
+    from duckclaw.gateway_db import resolve_env_duckdb_path
+    from duckclaw.vaults import resolve_active_vault, resolve_template_vault_path, vault_scope_id_for_tenant
+    from duckclaw.workers.manifest import load_manifest
+
+    tid = str(team_ctx.get("tenant_id") or "default").strip() or "default"
+    uid = str(team_ctx.get("telegram_user_id") or "").strip()
+    if not uid:
+        raw_chat = str(team_ctx.get("team_chat_id") or "").strip()
+        from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+        if raw_chat and not is_admin_ui_chat_session(raw_chat):
+            uid = raw_chat
+    if not uid:
+        uid = _playground_telegram_user_id(None) or "admin-playground"
+    scope = vault_scope_id_for_tenant(tid)
+    _, vault_path = resolve_active_vault(uid, scope)
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (worker_id or "").strip())
+    if wid:
+        try:
+            spec = load_manifest(wid)
+            tpl = resolve_template_vault_path(spec.forge_vault_binding, uid)
+            if tpl:
+                vault_path = tpl
+        except Exception:
+            pass
+    return resolve_env_duckdb_path(str(vault_path or "").strip())
+
+
+def _open_playground_vault_db(vault_path: str, *, read_only: bool = True) -> Any:
+    from duckclaw import DuckClaw
+
+    abs_path = vault_path
+    if not os.path.isabs(abs_path):
+        abs_path = str(_repo_root() / vault_path.lstrip("/"))
+    if not os.path.isfile(abs_path):
+        raise FileNotFoundError(abs_path)
+    return DuckClaw(abs_path, read_only=read_only, engine="python")
+
+
+def _sandbox_chat_policy_payload(
+    *,
+    chat_id: str,
+    worker_id: str,
+    vault_path: str,
+    tenant_id: str,
+) -> dict[str, Any]:
+    from duckclaw.forge.schema import resolve_sandbox_network_policy
+    from duckclaw.graphs.on_the_fly_commands import get_chat_state
+    from duckclaw.workers.manifest import load_manifest
+
+    db = _open_playground_vault_db(vault_path, read_only=True)
+    try:
+        raw_net = get_chat_state(db, chat_id, "sandbox_network_enabled")
+        raw_sb = get_chat_state(db, chat_id, "sandbox_enabled")
+    finally:
+        db.close()
+
+    _, meta = resolve_sandbox_network_policy(worker_id, raw_net or None)
+    browser_sandbox = False
+    try:
+        browser_sandbox = bool(load_manifest(worker_id).browser_sandbox)
+    except Exception:
+        browser_sandbox = False
+
+    return {
+        "chat_id": chat_id,
+        "worker_id": worker_id,
+        "tenant_id": tenant_id,
+        "vault_path": vault_path,
+        "sandbox_enabled": (raw_sb or "").strip().lower() in ("true", "1", "on", "yes", "si", "sí"),
+        "sandbox_network_enabled": (raw_net or "").strip().lower() or None,
+        "yaml_network_default": meta.get("yaml_default"),
+        "effective_network": meta.get("effective"),
+        "network_toggle_available": bool(meta.get("toggle_available")),
+        "browser_sandbox": browser_sandbox,
+    }
+
+
+@router.get("/sandbox/chat-policy", dependencies=[Depends(_require_admin_key)])
+async def admin_sandbox_chat_policy(
+    chat_id: str = Query(..., min_length=1, max_length=128),
+    worker_id: str | None = Query(None, max_length=64),
+    tenant_id: str | None = Query(None, max_length=64),
+) -> dict[str, Any]:
+    """Estado sandbox + red efectiva para un chat del admin playground."""
+    team_ctx = _playground_team_context(tenant_id=tenant_id, chat_id=chat_id)
+    if not team_ctx.get("authorized"):
+        raise _problem(403, "No autorizado", str(team_ctx.get("team_hint") or ""))
+
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (worker_id or "").strip())
+    if not wid:
+        workers: list[str] = list(team_ctx.get("workers") or [])
+        wid = (workers[0] if workers else "finanz").strip() or "finanz"
+
+    try:
+        vault_path = _playground_vault_db_path(team_ctx, wid)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+
+    return _sandbox_chat_policy_payload(
+        chat_id=chat_id.strip(),
+        worker_id=wid,
+        vault_path=vault_path,
+        tenant_id=str(team_ctx.get("tenant_id") or "default"),
+    )
+
+
+@router.post("/sandbox/network", dependencies=[Depends(_require_admin_key)])
+async def admin_sandbox_network_toggle(body: SandboxNetworkBody) -> dict[str, Any]:
+    """Activa/desactiva internet en sandbox para un chat (respeta security_policy.yaml)."""
+    from duckclaw.forge.schema import resolve_sandbox_network_policy
+    from duckclaw.graphs.on_the_fly_commands import get_chat_state, set_chat_state_via_vault
+    from duckclaw.graphs.sandbox import cleanup_sandbox_session_for_chat
+
+    team_ctx = _playground_team_context(tenant_id=body.tenant_id, chat_id=body.chat_id)
+    if not team_ctx.get("authorized"):
+        raise _problem(403, "No autorizado", str(team_ctx.get("team_hint") or ""))
+
+    chat_raw = body.chat_id.strip()
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (body.worker_id or "").strip())
+    if not wid:
+        workers: list[str] = list(team_ctx.get("workers") or [])
+        wid = (workers[0] if workers else "finanz").strip() or "finanz"
+
+    try:
+        vault_path = _playground_vault_db_path(team_ctx, wid)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+
+    db = _open_playground_vault_db(vault_path, read_only=True)
+    try:
+        raw_prev = get_chat_state(db, chat_raw, "sandbox_network_enabled")
+        _, meta = resolve_sandbox_network_policy(wid, raw_prev or None)
+        if not meta.get("toggle_available"):
+            raise _problem(
+                400,
+                "Worker sin red en política",
+                f"«{wid}» tiene network.default=deny en security_policy.yaml. "
+                "Usa finanz, Job-Hunter o tavily_search.",
+            )
+        tid = str(team_ctx.get("tenant_id") or "default").strip() or "default"
+        val = "true" if body.enabled else "false"
+        ok, err = set_chat_state_via_vault(
+            db, chat_raw, "sandbox_network_enabled", val, tenant_id=tid
+        )
+    finally:
+        db.close()
+
+    if not ok:
+        raise _problem(500, "No se pudo persistir", err or "set_chat_state_via_vault failed")
+
+    cleanup_sandbox_session_for_chat(chat_raw)
+    policy = _sandbox_chat_policy_payload(
+        chat_id=chat_raw,
+        worker_id=wid,
+        vault_path=vault_path,
+        tenant_id=str(team_ctx.get("tenant_id") or "default"),
+    )
+    return {"ok": True, "recreated": True, **policy}
+
+
+@router.get("/sandbox/status", dependencies=[Depends(_require_admin_key)])
+async def admin_sandbox_status() -> dict[str, Any]:
+    """Requisitos Docker/noVNC para la pestaña VNC del admin."""
+    from duckclaw.graphs.sandbox import sandbox_runtime_status
+
+    st = sandbox_runtime_status()
+    ready = bool(st.get("docker_available")) and bool(st.get("publish_novnc"))
+    hints: list[str] = []
+    if not st.get("docker_available"):
+        hints.append("Docker no disponible en el host del gateway.")
+    if not st.get("publish_novnc"):
+        hints.append("Define STRIX_BROWSER_PUBLISH_NOVNC=1 y reinicia DuckClaw-Gateway.")
+    if not st.get("public_url"):
+        hints.append(
+            "Sin DUCKCLAW_PUBLIC_URL: el iframe usará http://127.0.0.1:<puerto> (solo mismo host)."
+        )
+    return {"ready": ready, "hints": hints, **st}
+
+
+@router.get("/sandbox/sessions", dependencies=[Depends(_require_admin_key)])
+async def admin_sandbox_sessions() -> dict[str, Any]:
+    """Contenedores strix_sandbox_* y sesiones noVNC activas."""
+    from duckclaw.graphs.sandbox import list_strix_sandbox_containers
+
+    containers = list_strix_sandbox_containers()
+    return {"containers": containers, "count": len(containers)}
+
+
+@router.post("/sandbox/novnc/prepare", dependencies=[Depends(_require_admin_key)])
+async def admin_sandbox_novnc_prepare(body: NovncPrepareBody) -> dict[str, Any]:
+    """Levanta o reutiliza browser sandbox y devuelve URL noVNC para el admin."""
+    from duckclaw.graphs.novnc_registry import (
+        get_session_expires_at,
+        sanitize_chat_to_session_id,
+        touch,
+    )
+    from duckclaw.graphs.sandbox import ensure_browser_novnc_session, sandbox_runtime_status
+
+    st = sandbox_runtime_status()
+    if not st.get("docker_available"):
+        raise _problem(503, "Docker no disponible", "El gateway no puede contactar Docker.")
+    if not st.get("publish_novnc"):
+        raise _problem(
+            503,
+            "noVNC deshabilitado",
+            "STRIX_BROWSER_PUBLISH_NOVNC no está activo en el proceso del gateway.",
+        )
+
+    team_ctx = _playground_team_context(tenant_id=body.tenant_id)
+    chat_raw = (body.chat_id or team_ctx.get("team_chat_id") or "admin-playground").strip()
+    session_id = sanitize_chat_to_session_id(chat_raw)
+    workers: list[str] = list(team_ctx.get("workers") or [])
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (body.worker_id or "").strip())
+    if not wid:
+        for candidate in workers:
+            if _worker_has_browser_sandbox(candidate):
+                wid = candidate
+                break
+        if not wid:
+            for fallback in ("PQRSD-Assistant", "finanz", "Job-Hunter"):
+                if _worker_has_browser_sandbox(fallback):
+                    wid = fallback
+                    break
+    if not wid:
+        wid = (workers[0] if workers else "default").strip() or "default"
+    if not _worker_has_browser_sandbox(wid):
+        raise _problem(
+            400,
+            "Worker sin browser sandbox",
+            f"El worker '{wid}' no tiene browser_sandbox: true en manifest.yaml.",
+        )
+
+    policy_db = None
+    try:
+        vp = _playground_vault_db_path(team_ctx, wid)
+        policy_db = _open_playground_vault_db(vp, read_only=True)
+    except Exception:
+        policy_db = None
+    try:
+        vnc_url = ensure_browser_novnc_session(
+            wid,
+            session_id,
+            db=policy_db,
+            chat_id=chat_raw,
+        )
+    finally:
+        if policy_db is not None:
+            try:
+                policy_db.close()
+            except Exception:
+                pass
+    if not vnc_url:
+        raise _problem(
+            503,
+            "No se pudo preparar noVNC",
+            "Revisa logs del gateway, imagen duckclaw/browser-env y política del worker.",
+        )
+    import time as _time
+
+    touch(session_id)
+    expires_at = get_session_expires_at(session_id)
+    return {
+        "session_id": session_id,
+        "chat_id": chat_raw,
+        "worker_id": wid,
+        "vnc_url": vnc_url,
+        "expires_at": expires_at,
+        "seconds_remaining": max(0.0, float(expires_at or 0) - _time.time()) if expires_at else None,
+    }
+
+
+class DuckdbQueryBody(BaseModel):
+    query: str = Field(..., min_length=1)
+    vault_path: str | None = None
+
+
+class DuckdbVectorSearchBody(BaseModel):
+    query: str = ""
+    limit: int = Field(default=10, ge=1, le=40)
+    vault_path: str | None = None
+
+
+def _duckdb_readonly_session(vault_path: str | None):
+    from core.admin_duckdb_readonly import connect_readonly, resolve_vault_path
+
+    path = resolve_vault_path(vault_path)
+    con = connect_readonly(path)
+    return con, path
+
+
+@router.get("/duckdb/tables", dependencies=[Depends(_require_admin_key)])
+async def duckdb_list_tables(
+    vault_path: str | None = Query(None, description="Ruta .duckdb; default gateway vault"),
+) -> dict[str, Any]:
+    from core.admin_duckdb_readonly import fetch_table_catalog
+
+    try:
+        con, resolved = _duckdb_readonly_session(vault_path)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    try:
+        catalog = fetch_table_catalog(con)
+        return {"vault_path": resolved, **catalog}
+    finally:
+        con.close()
+
+
+@router.post("/duckdb/query", dependencies=[Depends(_require_admin_key)])
+async def duckdb_run_query(body: DuckdbQueryBody) -> dict[str, Any]:
+    from core.admin_duckdb_readonly import execute_select
+
+    try:
+        con, resolved = _duckdb_readonly_session(body.vault_path)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    try:
+        try:
+            result = execute_select(con, body.query)
+        except ValueError as exc:
+            raise _problem(400, "Consulta no permitida", str(exc)) from exc
+        except Exception as exc:
+            raise _problem(400, "Error SQL", str(exc)) from exc
+        return {"vault_path": resolved, **result}
+    finally:
+        con.close()
+
+
+@router.get("/duckdb/pgq-graph", dependencies=[Depends(_require_admin_key)])
+async def duckdb_pgq_graph(
+    vault_path: str | None = Query(None),
+) -> dict[str, Any]:
+    from core.admin_duckdb_readonly import fetch_pgq_graph
+
+    try:
+        con, resolved = _duckdb_readonly_session(vault_path)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    try:
+        graph = fetch_pgq_graph(con)
+        return {"vault_path": resolved, **graph}
+    finally:
+        con.close()
+
+
+@router.post("/duckdb/vector-search", dependencies=[Depends(_require_admin_key)])
+async def duckdb_vector_search(body: DuckdbVectorSearchBody) -> dict[str, Any]:
+    from core.admin_duckdb_readonly import (
+        SemanticMemoryNotInitializedError,
+        run_vector_search,
+    )
+
+    try:
+        con, resolved = _duckdb_readonly_session(body.vault_path)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    try:
+        try:
+            payload = run_vector_search(con, body.query, body.limit)
+        except SemanticMemoryNotInitializedError as exc:
+            raise _problem(400, "Memoria vectorial no inicializada", str(exc)) from exc
+        except Exception as exc:
+            raise _problem(400, "Error en búsqueda vectorial", str(exc)) from exc
+        return {"vault_path": resolved, **payload}
+    finally:
+        con.close()
 
 
 from routers.admin_train import router as _admin_train_router  # noqa: E402

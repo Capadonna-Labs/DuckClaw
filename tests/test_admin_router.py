@@ -294,6 +294,13 @@ def test_catalog_mcp(admin_client: TestClient):
     assert "duckclaw_mcp" in data
     assert "tools" in data["duckclaw_mcp"]
     assert "live" in data["duckclaw_mcp"]
+    official = data.get("official_reference") or {}
+    servers = official.get("servers") or []
+    assert len(servers) >= 7
+    ids = {s.get("id") for s in servers}
+    assert "memory" in ids
+    assert "git" in ids
+    assert official.get("source_repo", "").startswith("https://github.com/modelcontextprotocol/servers")
 
 
 def test_ops_commands(admin_client: TestClient):
@@ -486,3 +493,390 @@ def test_train_collect(
     assert data["ok"] is True
     assert data["records"] >= 1
     assert out.is_file()
+
+
+def test_playground_team_hint_workers_label(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from duckclaw import DuckClaw
+    from duckclaw.workers.factory import list_workers
+
+    all_w = list_workers()
+    if not all_w:
+        pytest.skip("need templates")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", DEFAULT_TEST_TELEGRAM_USER_ID)
+    gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
+    import sys
+
+    if str(gw_dir) not in sys.path:
+        sys.path.insert(0, str(gw_dir))
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        db_path = str(Path(td) / "pg_hint.duckdb")
+        db = DuckClaw(db_path, read_only=False, engine="python")
+        from duckclaw.graphs.on_the_fly_commands import set_team_templates
+
+        set_team_templates(db, DEFAULT_TEST_TELEGRAM_USER_ID, [all_w[0]])
+        db.close()
+        monkeypatch.setenv("DUCKDB_PATH", db_path)
+        r = admin_client.get(
+            "/api/v1/admin/playground/config",
+            headers={"X-Admin-Key": "test-admin-key"},
+            params={"telegram_user_id": DEFAULT_TEST_TELEGRAM_USER_ID},
+        )
+    assert r.status_code == 200
+    hint = r.json().get("team_hint") or ""
+    assert "Equipo de este chat (/workers)" in hint
+    assert "Telegram" not in hint
+
+
+def test_kanban_worker_states(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from routers.admin import _kanban_status_from_audit
+
+    assert _kanban_status_from_audit("SUCCESS", 900) == "en_progreso"
+    assert _kanban_status_from_audit("SUCCESS", 4000) == "completo"
+    assert _kanban_status_from_audit("FAILED", 4000 * 60) == "pendiente"
+
+    r = admin_client.get(
+        "/api/v1/admin/kanban/worker-states",
+        headers={"X-Admin-Key": "test-admin-key"},
+        params={"workers": "finanz,default"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert "states" in data
+    assert isinstance(data["states"], dict)
+
+
+def test_kanban_swarm_slots(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    import duckclaw.graphs.subagent_run_id as subagent_mod
+
+    def _fake_slots(tid: str, wids: list[str] | None) -> list[dict]:
+        return [
+            {
+                "worker_id": "finanz",
+                "slot": 1,
+                "chat_scope": None,
+                "started_at": 1.0,
+                "active": True,
+            },
+            {
+                "worker_id": "finanz",
+                "slot": 2,
+                "chat_scope": "123",
+                "started_at": 2.0,
+                "active": True,
+            },
+        ]
+
+    monkeypatch.setattr(subagent_mod, "list_active_swarm_slots", _fake_slots)
+
+    r = admin_client.get(
+        "/api/v1/admin/kanban/swarm-slots",
+        headers={"X-Admin-Key": "test-admin-key"},
+        params={"workers": "finanz"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["instances"]
+    assert data["states"]["finanz:1"] == "en_progreso"
+    assert data["states"]["finanz:2"] == "en_progreso"
+
+
+def test_admin_sandbox_status(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from duckclaw.graphs import sandbox as sb
+
+    monkeypatch.setattr(sb, "sandbox_runtime_status", lambda: {
+        "docker_available": True,
+        "publish_novnc": True,
+        "public_url": "https://gw.example",
+        "ttl_s": 600,
+        "browser_image": "duckclaw/browser-env:latest",
+        "compute_image": "duckclaw/sandbox:latest",
+    })
+    r = admin_client.get(
+        "/api/v1/admin/sandbox/status",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ready"] is True
+    assert data["docker_available"] is True
+
+
+def test_admin_sandbox_chat_policy_deny_worker(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from routers import admin as admin_mod
+
+    monkeypatch.setattr(
+        admin_mod,
+        "_playground_team_context",
+        lambda **kwargs: {
+            "authorized": True,
+            "tenant_id": "default",
+            "workers": ["Quant-Trader"],
+            "telegram_user_id": "123",
+            "team_chat_id": "123",
+        },
+    )
+    monkeypatch.setattr(admin_mod, "_playground_vault_db_path", lambda _ctx, _wid: "/tmp/fake.duckdb")
+
+    class _FakeDb:
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(admin_mod, "_open_playground_vault_db", lambda _p, read_only=True: _FakeDb())
+    monkeypatch.setattr(
+        admin_mod,
+        "_sandbox_chat_policy_payload",
+        lambda **kwargs: {
+            "chat_id": kwargs["chat_id"],
+            "worker_id": "Quant-Trader",
+            "sandbox_enabled": False,
+            "sandbox_network_enabled": None,
+            "yaml_network_default": "deny",
+            "effective_network": "deny",
+            "network_toggle_available": False,
+            "browser_sandbox": False,
+        },
+    )
+
+    r = admin_client.get(
+        "/api/v1/admin/sandbox/chat-policy",
+        headers={"X-Admin-Key": "test-admin-key"},
+        params={"chat_id": "admin-section-vnc", "worker_id": "Quant-Trader"},
+    )
+    assert r.status_code == 200
+    assert r.json()["network_toggle_available"] is False
+    assert r.json()["effective_network"] == "deny"
+
+
+def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from routers import admin as admin_mod
+
+    monkeypatch.setattr(
+        admin_mod,
+        "_playground_team_context",
+        lambda **kwargs: {
+            "authorized": True,
+            "tenant_id": "default",
+            "workers": ["finanz"],
+            "telegram_user_id": "123",
+            "team_chat_id": "123",
+        },
+    )
+    monkeypatch.setattr(admin_mod, "_playground_vault_db_path", lambda _ctx, _wid: "/tmp/fake.duckdb")
+
+    class _FakeDb:
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(admin_mod, "_open_playground_vault_db", lambda _p, read_only=True: _FakeDb())
+
+    calls: list[tuple[str, str]] = []
+
+    def _fake_set(db, chat_id, key, val, tenant_id="default"):
+        calls.append((key, val))
+        return True, ""
+
+    def _fake_get(db, chat_id, key):
+        return ""
+
+    monkeypatch.setattr(
+        "duckclaw.forge.schema.resolve_sandbox_network_policy",
+        lambda _wid, _raw: (
+            type("P", (), {"network": type("N", (), {"default": "allow"})()})(),
+            {"toggle_available": True, "yaml_default": "allow", "effective": "allow"},
+        ),
+    )
+    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.set_chat_state_via_vault", _fake_set)
+    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.get_chat_state", _fake_get)
+    monkeypatch.setattr(
+        admin_mod,
+        "_sandbox_chat_policy_payload",
+        lambda **kwargs: {
+            "chat_id": kwargs["chat_id"],
+            "worker_id": "finanz",
+            "effective_network": "allow",
+            "network_toggle_available": True,
+        },
+    )
+    monkeypatch.setattr(
+        "duckclaw.graphs.sandbox.cleanup_sandbox_session_for_chat",
+        lambda _cid: None,
+    )
+
+    r = admin_client.post(
+        "/api/v1/admin/sandbox/network",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={"chat_id": "admin-section-vnc", "enabled": True, "worker_id": "finanz"},
+    )
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert calls and calls[0] == ("sandbox_network_enabled", "true")
+
+
+def test_admin_sandbox_novnc_prepare(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from duckclaw.graphs import sandbox as sb
+    from routers import admin as admin_mod
+
+    monkeypatch.setattr(admin_mod, "_worker_has_browser_sandbox", lambda _w: True)
+    monkeypatch.setattr(
+        sb,
+        "sandbox_runtime_status",
+        lambda: {"docker_available": True, "publish_novnc": True, "public_url": None, "ttl_s": 600},
+    )
+    monkeypatch.setattr(
+        sb,
+        "ensure_browser_novnc_session",
+        lambda wid, sid: f"http://127.0.0.1:6080/vnc.html?autoconnect=1&worker={wid}&sid={sid}",
+    )
+
+    def _touch(_sid: str) -> None:
+        pass
+
+    def _expires(_sid: str) -> float:
+        import time
+
+        return time.time() + 600
+
+    from duckclaw.graphs import novnc_registry as nr
+
+    monkeypatch.setattr(nr, "touch", _touch)
+    monkeypatch.setattr(nr, "get_session_expires_at", _expires)
+
+    r = admin_client.post(
+        "/api/v1/admin/sandbox/novnc/prepare",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={"chat_id": "admin-playground", "worker_id": "finanz"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["vnc_url"]
+    assert data["session_id"]
+    assert data["worker_id"] == "finanz"
+
+
+def test_admin_conversations_crud(admin_client: TestClient):
+    from test_admin_conversations import build_fake_redis
+
+    admin_client.app.state.redis = build_fake_redis()
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@duckclaw.local"}
+    r = admin_client.post(
+        "/api/v1/admin/conversations",
+        headers=headers,
+        params={"tenant_id": "default"},
+        json={"title": "Test conv", "section": "playground", "worker_id": "finanz"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    sid = data.get("session_id")
+    assert sid and sid.startswith("admin-conv-")
+
+    r2 = admin_client.get(
+        f"/api/v1/admin/conversations/{sid}",
+        headers=headers,
+        params={"tenant_id": "default"},
+    )
+    assert r2.status_code == 200
+    assert r2.json().get("title") == "Test conv"
+
+    r3 = admin_client.get(
+        "/api/v1/admin/conversations",
+        headers=headers,
+        params={"tenant_id": "default", "section": "playground", "limit": 20},
+    )
+    assert r3.status_code == 200
+    convs = r3.json().get("conversations") or []
+    assert any(c.get("session_id") == sid for c in convs)
+
+    r4 = admin_client.patch(
+        f"/api/v1/admin/conversations/{sid}",
+        headers=headers,
+        params={"tenant_id": "default"},
+        json={"title": "Renamed"},
+    )
+    assert r4.status_code == 200
+    assert r4.json().get("title") == "Renamed"
+
+    r5 = admin_client.delete(
+        f"/api/v1/admin/conversations/{sid}",
+        headers=headers,
+        params={"tenant_id": "default"},
+    )
+    assert r5.status_code == 200
+    assert r5.json().get("ok") is True
+
+
+def test_admin_auth_login_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import sys
+
+    from duckclaw.admin_console_users import ensure_admin_console_users_table, upsert_console_user
+
+    from duckclaw.gateway_db import GATEWAY_DB_ENV_KEYS
+
+    gw = tmp_path / "gw_access.duckdb"
+    for key in GATEWAY_DB_ENV_KEYS:
+        monkeypatch.setenv(key, str(gw))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
+    con = __import__("duckdb").connect(str(gw))
+    try:
+        class _A:
+            def execute(self, sql: str, params=None):
+                if params is not None:
+                    return con.execute(sql, params)
+                return con.execute(sql)
+
+        adapter = _A()
+        ensure_admin_console_users_table(adapter)
+        upsert_console_user(
+            adapter,
+            email="smoke@test.local",
+            nombre="Smoke",
+            rol="admin",
+            password="pw",
+        )
+    finally:
+        con.close()
+    repo = Path(__file__).resolve().parent.parent
+    gw_dir = repo / "services" / "api-gateway"
+    if str(gw_dir) not in sys.path:
+        sys.path.insert(0, str(gw_dir))
+    from main import app as gateway_app
+
+    client = TestClient(gateway_app)
+    r = client.post(
+        "/api/v1/admin/auth/login",
+        json={"email": "smoke@test.local", "password": "pw"},
+    )
+    assert r.status_code == 200
+    assert r.json().get("rol") == "admin"
+
+
+def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from core import vlm_ingest as vlm
+
+    async def _fake_enrich(message: str, images):
+        return f"{message}\nContexto visual adjunto: smoke"
+
+    monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _fake_enrich)
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1")
+
+    png_b64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    import main as gateway_main
+
+    async def _fake_invoke(*_a, **_k):
+        return {"response": "ok"}
+
+    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+
+    r = admin_client.post(
+        "/api/v1/admin/playground/chat",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={
+            "worker_id": "default",
+            "message": "test",
+            "images": [{"mime_type": "image/png", "data_base64": png_b64}],
+        },
+    )
+    assert r.status_code == 200

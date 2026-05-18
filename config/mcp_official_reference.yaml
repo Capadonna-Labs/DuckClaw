@@ -1,0 +1,48 @@
+# Servidores de referencia activos del README oficial modelcontextprotocol/servers.
+# Actualizar manualmente si cambia el upstream; no scrapear en runtime.
+source_repo: https://github.com/modelcontextprotocol/servers
+source_label: modelcontextprotocol/servers
+registry_url: https://registry.modelcontextprotocol.io/
+servers:
+  - id: everything
+    name: Everything
+    description: Reference / test server with prompts, resources, and tools.
+    runtime: npx
+    install: npx -y @modelcontextprotocol/server-everything
+    repo_path: src/everything
+  - id: fetch
+    name: Fetch
+    description: Web content fetching and conversion for efficient LLM usage.
+    runtime: npx
+    install: npx -y @modelcontextprotocol/server-fetch
+    repo_path: src/fetch
+  - id: filesystem
+    name: Filesystem
+    description: Secure file operations with configurable access controls.
+    runtime: npx
+    install: npx -y @modelcontextprotocol/server-filesystem
+    repo_path: src/filesystem
+  - id: git
+    name: Git
+    description: Tools to read, search, and manipulate Git repositories.
+    runtime: uvx
+    install: uvx mcp-server-git
+    repo_path: src/git
+  - id: memory
+    name: Memory
+    description: Knowledge graph-based persistent memory system.
+    runtime: npx
+    install: npx -y @modelcontextprotocol/server-memory
+    repo_path: src/memory
+  - id: sequential-thinking
+    name: Sequential Thinking
+    description: Dynamic and reflective problem-solving through thought sequences.
+    runtime: npx
+    install: npx -y @modelcontextprotocol/server-sequential-thinking
+    repo_path: src/sequentialthinking
+  - id: time
+    name: Time
+    description: Time and timezone conversion capabilities.
+    runtime: npx
+    install: npx -y @modelcontextprotocol/server-time
+    repo_path: src/time

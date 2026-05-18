@@ -8,6 +8,14 @@ export type SseChatEvent =
       assigned_worker_id?: string;
       usage_tokens?: Record<string, number>;
       worker_id?: string;
+      elapsed_ms?: number;
+    }
+  | {
+      type: 'heartbeat';
+      text: string;
+      kind?: 'plan' | 'tool' | 'status';
+      worker_id?: string;
+      swarm_slot?: number;
     }
   | { type: 'error'; message: string; status?: number }
   | { type: 'terminal' };
@@ -29,6 +37,31 @@ function parseDataLine(data: string): SseChatEvent | null {
         assigned_worker_id: j.assigned_worker_id as string | undefined,
         usage_tokens: j.usage_tokens as Record<string, number> | undefined,
         worker_id: j.worker_id as string | undefined,
+        elapsed_ms:
+          typeof j.elapsed_ms === 'number'
+            ? j.elapsed_ms
+            : j.elapsed_ms != null
+              ? Number(j.elapsed_ms)
+              : undefined,
+      };
+    }
+    if (t === 'heartbeat') {
+      const kindRaw = String(j.kind || 'status');
+      const kind =
+        kindRaw === 'plan' || kindRaw === 'tool' || kindRaw === 'status' ? kindRaw : 'status';
+      const swarmSlotRaw = j.swarm_slot;
+      const swarm_slot =
+        typeof swarmSlotRaw === 'number'
+          ? swarmSlotRaw
+          : swarmSlotRaw != null
+            ? Number(swarmSlotRaw)
+            : undefined;
+      return {
+        type: 'heartbeat',
+        text: String(j.text ?? ''),
+        kind,
+        worker_id: typeof j.worker_id === 'string' ? j.worker_id : undefined,
+        swarm_slot: Number.isFinite(swarm_slot) ? Math.max(1, Math.floor(swarm_slot!)) : undefined,
       };
     }
     if (t === 'error') {

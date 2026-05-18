@@ -1,17 +1,48 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { ChatMsg } from '@/components/chat/types';
+import { useChatImageAttachments } from '@/components/chat/useChatImageAttachments';
+import { useChatScrollAnchor } from '@/components/chat/useChatScrollAnchor';
 
 export type UseAdminChatOptions = {
   chatId: string;
   initialWorker?: string;
   enabled?: boolean;
+  /** Tras cada turno completado (para refrescar inbox). */
+  onConversationActivity?: () => void;
 };
+
+function historyToChatMessages(
+  raw: { role: string; content: string }[] | undefined
+): ChatMsg[] {
+  if (!raw?.length) return [];
+  const out: ChatMsg[] = [];
+  for (const m of raw) {
+    const role = m.role === 'user' ? 'user' : m.role === 'assistant' ? 'assistant' : null;
+    const text = (m.content || '').trim();
+    if (!role || !text) continue;
+    out.push({ role, text });
+  }
+  return out;
+}
 
 function workerStorageKey(chatId: string): string {
   return `duckclaw-admin-worker-${chatId}`;
+}
+
+function revokeMessageImagePreviews(messages: ChatMsg[]): void {
+  for (const m of messages) {
+    if (!m.imagePreviews?.length) continue;
+    for (const img of m.imagePreviews) {
+      try {
+        URL.revokeObjectURL(img.url);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 }
 
 function readStoredWorker(chatId: string): string | null {
@@ -25,7 +56,12 @@ function readStoredWorker(chatId: string): string | null {
 
 export type AdminChatController = ReturnType<typeof useAdminChat>;
 
-export function useAdminChat({ chatId, initialWorker = '', enabled = true }: UseAdminChatOptions) {
+export function useAdminChat({
+  chatId,
+  initialWorker = '',
+  enabled = true,
+  onConversationActivity,
+}: UseAdminChatOptions) {
   const [config, setConfig] = useState<Awaited<ReturnType<typeof adminService.getPlaygroundConfig>> | null>(
     null
   );
@@ -53,12 +89,25 @@ export function useAdminChat({ chatId, initialWorker = '', enabled = true }: Use
   );
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
+  const imageAttachments = useChatImageAttachments();
   const [loading, setLoading] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const [thinkingIdentity, setThinkingIdentity] = useState<{ workerId: string; swarmSlot: number }>({
+    workerId: '',
+    swarmSlot: 1,
+  });
   const [error, setError] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const thinkingStartedAt = useRef<number>(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  useEffect(
+    () => () => {
+      revokeMessageImagePreviews(messagesRef.current);
+    },
+    []
+  );
 
   const finalizeCancelledGeneration = useCallback(() => {
     setMessages((m) => {
@@ -83,7 +132,7 @@ export function useAdminChat({ chatId, initialWorker = '', enabled = true }: Use
   const loadConfig = useCallback(() => {
     if (!enabled) return;
     adminService
-      .getPlaygroundConfig()
+      .getPlaygroundConfig(chatId ? { chat_id: chatId } : undefined)
       .then((c) => {
         setConfig(c);
         if (c.authorized === false) {
@@ -109,24 +158,72 @@ export function useAdminChat({ chatId, initialWorker = '', enabled = true }: Use
   }, [loadConfig]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, loading, thinking]);
+    if (!enabled || !chatId) return;
+    setMessages((prev) => {
+      revokeMessageImagePreviews(prev);
+      return [];
+    });
+    let cancelled = false;
+    const tid = config?.effective_tenant_id;
+    adminService
+      .getConversation(chatId, tid)
+      .then((data) => {
+        if (cancelled) return;
+        setMessages(historyToChatMessages(data.messages));
+        if (data.last_worker_id) {
+          setWorkerId((prev) => {
+            if (prev && config?.workers?.includes(prev)) return prev;
+            if (config?.workers?.includes(data.last_worker_id)) return data.last_worker_id;
+            return prev;
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMessages([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, enabled, config?.effective_tenant_id, config?.workers, setWorkerId]);
+
+  const scrollContentKey = useMemo(() => {
+    const tail = messages
+      .slice(-4)
+      .map((m) => `${m.role}:${m.text?.length ?? 0}:${m.streaming ? 1 : 0}`)
+      .join('|');
+    return `${messages.length}|${tail}|${thinking ? 1 : 0}`;
+  }, [messages, thinking]);
+
+  const { scrollRef, showScrollButton, scrollToBottom, onScroll } = useChatScrollAnchor(
+    scrollContentKey,
+    { resetKey: chatId, loading, thinking }
+  );
 
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || loading || !workerId) return;
+    const payloadImages = imageAttachments.buildPayloadImages();
+    if ((!text && payloadImages.length === 0) || loading || !workerId) return;
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    const userPreviews = imageAttachments.buildUserPreviews();
+    const userLabel = text;
+
     setInput('');
+    imageAttachments.clearImages({ revoke: false });
     setLoading(true);
     thinkingStartedAt.current = Date.now();
+    setThinkingIdentity({ workerId, swarmSlot: 1 });
     setThinking(true);
     setError(null);
     setMessages((m) => [
       ...m,
-      { role: 'user', text },
+      {
+        role: 'user',
+        text: userLabel,
+        imagePreviews: userPreviews.length ? userPreviews : undefined,
+      },
       { role: 'assistant', text: '', streaming: true },
     ]);
 
@@ -142,8 +239,64 @@ export function useAdminChat({ chatId, initialWorker = '', enabled = true }: Use
       });
     };
 
+    const appendHeartbeat = (payload: {
+      text: string;
+      kind?: 'plan' | 'tool' | 'status';
+      worker_id?: string;
+      swarm_slot?: number;
+    }) => {
+      const kind = payload.kind ?? 'status';
+      const hbWorker = (payload.worker_id || workerId || '').trim();
+      const hbSlot =
+        payload.swarm_slot != null && Number.isFinite(payload.swarm_slot)
+          ? Math.max(1, Math.floor(payload.swarm_slot))
+          : 1;
+      if (hbWorker || hbSlot > 1) {
+        setThinkingIdentity((prev) => ({
+          workerId: hbWorker || prev.workerId || workerId,
+          swarmSlot: hbSlot,
+        }));
+      }
+      setMessages((m) => {
+        const streamingIdx = m.findIndex(
+          (x, i) => x.role === 'assistant' && x.streaming && !x.text && i === m.length - 1
+        );
+        const hb: ChatMsg = {
+          role: 'heartbeat',
+          text: payload.text,
+          heartbeatKind: kind,
+          workerId: hbWorker || undefined,
+          swarmSlot: hbSlot,
+        };
+        if (streamingIdx >= 0) {
+          const insertAt = streamingIdx;
+          const prev = insertAt > 0 ? m[insertAt - 1] : null;
+          if (
+            prev?.role === 'heartbeat' &&
+            prev.heartbeatKind === 'tool' &&
+            kind === 'tool'
+          ) {
+            const next = [...m];
+            next[insertAt - 1] = hb;
+            return next;
+          }
+          const next = [...m];
+          next.splice(insertAt, 0, hb);
+          return next;
+        }
+        const last = m[m.length - 1];
+        if (last?.role === 'heartbeat' && last.heartbeatKind === 'tool' && kind === 'tool') {
+          const next = [...m];
+          next[next.length - 1] = hb;
+          return next;
+        }
+        return [...m, hb];
+      });
+    };
+
     try {
       let assignedSuffix = '';
+      let elapsedFooter = '';
       await adminService.playgroundChatStream(
         {
           worker_id: workerId,
@@ -151,12 +304,17 @@ export function useAdminChat({ chatId, initialWorker = '', enabled = true }: Use
           chat_id: chatId,
           tenant_id: config?.effective_tenant_id ?? 'default',
           telegram_user_id: config?.telegram_user_id,
+          images: payloadImages.length ? payloadImages : undefined,
         },
         {
           onToken: appendAssistant,
+          onHeartbeat: appendHeartbeat,
           onDone: (meta) => {
             if (meta.assigned_worker_id && meta.assigned_worker_id !== workerId) {
               assignedSuffix = ` (worker: ${meta.assigned_worker_id})`;
+            }
+            if (meta.elapsed_ms != null && Number.isFinite(meta.elapsed_ms)) {
+              elapsedFooter = `\n\n⏱️ ${(meta.elapsed_ms / 1000).toFixed(2)}s`;
             }
           },
         },
@@ -174,7 +332,7 @@ export function useAdminChat({ chatId, initialWorker = '', enabled = true }: Use
           const base = last.text || '(sin respuesta)';
           next[next.length - 1] = {
             role: 'assistant',
-            text: base + assignedSuffix,
+            text: base + assignedSuffix + elapsedFooter,
             streaming: false,
           };
         }
@@ -200,6 +358,7 @@ export function useAdminChat({ chatId, initialWorker = '', enabled = true }: Use
       }
       setLoading(false);
       setThinking(false);
+      onConversationActivity?.();
     }
   }, [
     chatId,
@@ -207,10 +366,18 @@ export function useAdminChat({ chatId, initialWorker = '', enabled = true }: Use
     finalizeCancelledGeneration,
     input,
     loading,
+    config?.telegram_user_id,
+    onConversationActivity,
     workerId,
+    imageAttachments,
   ]);
 
-  const clearMessages = useCallback(() => setMessages([]), []);
+  const clearMessages = useCallback(() => {
+    setMessages((prev) => {
+      revokeMessageImagePreviews(prev);
+      return [];
+    });
+  }, []);
 
   return {
     config,
@@ -221,11 +388,16 @@ export function useAdminChat({ chatId, initialWorker = '', enabled = true }: Use
     setInput,
     loading,
     thinking,
+    thinkingIdentity,
     thinkingStartedAt,
     error,
     scrollRef,
+    showScrollButton,
+    scrollToBottom,
+    onScroll,
     send,
     cancelGeneration,
     clearMessages,
+    imageAttachments,
   };
 }

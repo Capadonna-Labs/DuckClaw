@@ -43,7 +43,7 @@ export default function AuditPage() {
 
       <SettingsSection
         titulo="Registro de eventos"
-        descripcion="Plantillas, env, runtime, whitelist Telegram"
+        descripcion="Workers, env, runtime, whitelist Telegram"
         icono={<ClipboardList size={22} />}
       >
         <AuditTable entries={entries} />

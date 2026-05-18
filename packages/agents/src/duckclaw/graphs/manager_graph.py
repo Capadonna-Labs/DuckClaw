@@ -507,16 +507,91 @@ def _worker_matches_id(worker_id: str | None, alias: str | None) -> bool:
     return _worker_id_alnum_slug(worker_id) == _worker_id_alnum_slug(alias)
 
 
-def _strip_mercenary_spec_for_pqrsd_assistant(out: dict[str, Any]) -> bool:
+def _strip_mercenary_spec_for_browser_worker(
+    out: dict[str, Any], templates_root: Path | None = None
+) -> bool:
     """
-    PQRSD-Assistant usa Strix ``run_browser_sandbox`` (Playwright), no el nodo mercenario.
+    Workers con ``browser_sandbox`` en manifest usan ``run_browser_sandbox`` (Playwright), no mercenario stub.
     Devuelve True si se eliminó ``mercenary_spec`` del estado del plan.
     """
     wid = (out.get("assigned_worker_id") or "").strip()
-    if not out.get("mercenary_spec") or not _worker_matches_id(wid, "pqrsd_assistant"):
+    if not out.get("mercenary_spec") or not wid:
+        return False
+    try:
+        from duckclaw.workers.manifest import load_manifest
+
+        spec = load_manifest(wid, templates_root)
+        if not getattr(spec, "browser_sandbox", False):
+            return False
+    except Exception:
         return False
     out.pop("mercenary_spec", None)
     return True
+
+
+def _strip_mercenary_spec_for_pqrsd_assistant(out: dict[str, Any]) -> bool:
+    """Compat tests: mismo criterio que workers con browser_sandbox en manifest."""
+    return _strip_mercenary_spec_for_browser_worker(out, None)
+
+
+def _should_disable_mercenary_for_admin_ui(chat_id: str | None) -> bool:
+    """Consola admin / playground: nunca mercenario stub; delegar al worker con Strix browser."""
+    try:
+        from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+        return bool(is_admin_ui_chat_session(chat_id))
+    except Exception:
+        cid = (chat_id or "").strip()
+        return cid.startswith(("admin-conv-", "admin-section-", "admin-ui")) or cid == "admin-playground"
+
+
+_BROWSER_MERCENARY_INTENT_MARKERS = (
+    "run_browser_sandbox",
+    "playwright",
+    "novnc",
+    "no vnc",
+    "browser sandbox",
+    "computer use",
+    "abrir ",
+    "abre ",
+    "navega",
+    "navegar",
+    "página web",
+    "pagina web",
+    "sitio web",
+    "http://",
+    "https://",
+    "sandbox para",
+    "usa sandbox",
+    "usar sandbox",
+    "el colombiano",
+    "elcolombiano",
+)
+
+
+def _should_disable_mercenary_for_browser_intent(
+    incoming: str,
+    tasks: list[str] | None,
+    plan_title: str | None,
+    *,
+    chat_id: str | None = None,
+) -> bool:
+    """
+    Planes de navegación / computer use deben ir al worker (run_browser_sandbox), no al stub mercenario.
+    """
+    if _should_disable_mercenary_for_admin_ui(chat_id):
+        return True
+    blob = " ".join(
+        [
+            incoming or "",
+            plan_title or "",
+            " ".join(str(t) for t in (tasks or []) if t),
+        ]
+    )
+    if not blob.strip():
+        return False
+    low = blob.lower()
+    return any(m in low for m in _BROWSER_MERCENARY_INTENT_MARKERS)
 
 
 _LONE_HTTP_URL_ONLY_LINE = re.compile(
@@ -643,15 +718,63 @@ def _strip_leading_subagent_instance_headers(text: str) -> str:
     return t
 
 
+_CAVEMAN_WORKER_HEADER_RE = re.compile(
+    r"(?:^\s*\*\*(?P<b>[A-Za-z0-9][A-Za-z0-9_.-]*)\s+\d+[^*]*\*\*"
+    r"|^\s*(?P<p>[A-Za-z0-9][A-Za-z0-9_.-]*)\s+\d+(?:\s+·|\s*$))",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _worker_base_from_subagent_label(label: str) -> str:
+    """``Quant-Trader 4`` → ``Quant-Trader``; ``finanz`` sin slot queda igual."""
+    clean = (label or "").strip()
+    if not clean:
+        return ""
+    parts = clean.rsplit(" ", 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        return parts[0].strip()
+    return clean
+
+
+def _reply_already_has_worker_header(reply: str, worker_base: str) -> bool:
+    """
+    True si el worker ya firmó la respuesta (Caveman ``**Worker N · … COT**``,
+    línea plana ``Worker N``, o etiqueta de subagente al inicio).
+    """
+    base = (worker_base or "").strip()
+    if not base:
+        return False
+    text = (reply or "").strip()
+    if not text:
+        return False
+    esc = re.escape(base)
+    if re.search(rf"(?m)^\s*\*\*{esc}\s+\d+[^*]*\*\*", text, re.IGNORECASE):
+        return True
+    if re.search(rf"(?m)^\s*\*\*{esc}[^*]*\bCOT\b[^*]*\*\*", text, re.IGNORECASE):
+        return True
+    if re.search(rf"(?m)^\s*{esc}\s+\d+\b", text, re.IGNORECASE):
+        return True
+    if re.search(rf"(?m)^\s*{esc}\s*·[^\n]*\bCOT\b", text, re.IGNORECASE):
+        return True
+    for m in _CAVEMAN_WORKER_HEADER_RE.finditer(text):
+        found = (m.group("b") or m.group("p") or "").strip()
+        if found.lower() == base.lower():
+            return True
+    return False
+
+
 def _prepend_subagent_label_once(reply: str, label: str) -> str:
     """
     Añade el encabezado del subagente solo si el texto aún no lo trae al inicio.
     Evita respuestas con doble prefijo como:
-    `finanz 1` + `finanz 1`.
+    `finanz 1` + `finanz 1` o Caveman + etiqueta manager.
     """
     clean_reply = _strip_leading_subagent_instance_headers(reply or "")
     clean_label = (label or "").strip()
     if not clean_label or not clean_reply:
+        return clean_reply
+    worker_base = _worker_base_from_subagent_label(clean_label)
+    if _reply_already_has_worker_header(clean_reply, worker_base):
         return clean_reply
     # Tolerar un prefijo markdown básico (`**label**`) además del plano.
     if clean_reply.startswith(clean_label):
@@ -1617,8 +1740,13 @@ def build_manager_graph(
             plan_title = _sanitize_finanz_manager_plan_title(plan_title, incoming, assigned)
 
         is_job_add_command = _looks_like_job_add_command(incoming)
+        _plan_chat_id = (state.get("chat_id") or "").strip() or None
         if is_job_add_command and mercenary_spec is not None:
             # /job --add nunca debe salir por mercenario; forzar flujo normal de tracking.
+            mercenary_spec = None
+        if mercenary_spec is not None and _should_disable_mercenary_for_browser_intent(
+            incoming, tasks, plan_title, chat_id=_plan_chat_id
+        ):
             mercenary_spec = None
         if mercenary_spec is not None and _should_disable_mercenary_for_quant_signal_intent(
             incoming, assigned
@@ -1725,7 +1853,7 @@ def build_manager_graph(
                 if _canon_re not in available_plan:
                     available_plan = list(available_plan) + [_canon_re]
 
-        if _strip_mercenary_spec_for_pqrsd_assistant(out):
+        if _strip_mercenary_spec_for_browser_worker(out, troot):
             mercenary_spec = None
 
         if mercenary_spec is None and _should_disable_mercenary_for_quant_signal_intent(

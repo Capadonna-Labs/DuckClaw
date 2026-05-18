@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { Bot, ChevronRight, Send, X } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, ImagePlus, Send, X } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { ChatBubble, ThinkingBubble } from '@/components/chat/ChatBubble';
+import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import { useAdminChat, type AdminChatController } from '@/components/chat/useAdminChat';
 
 export type AdminChatPanelProps = {
@@ -16,8 +17,20 @@ export type AdminChatPanelProps = {
   emptyHint?: string;
   showHeader?: boolean;
   showWorkerLink?: boolean;
+  /** Sección actual (p. ej. VNC, Tablero) → título «VNC/Asistente». */
+  sectionTitle?: string;
+  /** Título de la conversación activa (inbox). */
+  conversationTitle?: string | null;
+  onRenameConversation?: (title: string) => Promise<void>;
   className?: string;
 };
+
+function chatPanelTitle(sectionTitle?: string): string {
+  const base = 'Asistente';
+  const section = (sectionTitle || '').trim();
+  if (!section || section === 'DuckClaw Admin') return base;
+  return `${section}/${base}`;
+}
 
 export function AdminChatPanel({
   chatId,
@@ -27,6 +40,9 @@ export function AdminChatPanel({
   emptyHint,
   showHeader = true,
   showWorkerLink = true,
+  sectionTitle,
+  conversationTitle,
+  onRenameConversation,
   className = '',
 }: AdminChatPanelProps) {
   const { usuario } = useAuthStore();
@@ -41,16 +57,26 @@ export function AdminChatPanel({
     setInput,
     loading,
     thinking,
+    thinkingIdentity,
     thinkingStartedAt,
     error,
     scrollRef,
+    showScrollButton,
+    scrollToBottom,
+    onScroll,
     send,
     cancelGeneration,
     clearMessages,
+    imageAttachments,
   } = chat;
 
   const isCompact = variant === 'compact';
   const canSend = usuario?.rol === 'admin';
+  const canSubmit =
+    canSend &&
+    workerId &&
+    !loading &&
+    (input.trim().length > 0 || imageAttachments.hasImages);
 
   return (
     <section
@@ -64,11 +90,20 @@ export function AdminChatPanel({
             <Bot size={isCompact ? 18 : 22} className="shrink-0 text-gov-blue-700 dark:text-dark-cyan" />
             <div className="min-w-0">
               <p className={`font-black dark:text-dark-text truncate ${isCompact ? 'text-sm' : 'text-xl'}`}>
-                Asistente
+                {chatPanelTitle(sectionTitle)}
               </p>
-              {!isCompact && (
-                <p className="text-xs text-gov-gray-500">Respuestas en vivo (SSE)</p>
-              )}
+              {!isCompact && onRenameConversation && conversationTitle?.trim() ? (
+                <EditableConversationTitle
+                  value={conversationTitle.trim()}
+                  onSave={onRenameConversation}
+                  compact
+                  className="text-xs text-gov-gray-500"
+                />
+              ) : !isCompact ? (
+                <p className="text-xs text-gov-gray-500 truncate">
+                  {conversationTitle?.trim() || 'Respuestas en vivo (SSE)'}
+                </p>
+              ) : null}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -109,18 +144,22 @@ export function AdminChatPanel({
           }`}
         >
           {config.team_hint}
-          {config.telegram_user_id ? (
-            <span className="block font-mono mt-0.5 opacity-80">TG: {config.telegram_user_id}</span>
+          {conversationTitle?.trim() ? (
+            <span className="block mt-0.5 font-medium truncate" title={conversationTitle.trim()}>
+              {conversationTitle.trim()}
+            </span>
           ) : null}
         </p>
       )}
 
-      <div
-        ref={scrollRef}
-        className={`flex-1 overflow-y-auto p-3 space-y-3 min-h-0 ${
-          isCompact ? 'max-h-[min(50vh,420px)]' : 'min-h-[320px]'
-        }`}
-      >
+      <div className="relative flex-1 min-h-0 flex flex-col">
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className={`flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3 min-h-0 ${
+            isCompact ? 'max-h-[min(50vh,420px)]' : 'min-h-[320px]'
+          }`}
+        >
         {messages.length === 0 && (
           <p className="text-sm text-gov-gray-400 text-center py-8">
             {emptyHint ??
@@ -133,14 +172,73 @@ export function AdminChatPanel({
           const isEmptyStreaming =
             m.role === 'assistant' && m.streaming && !m.text && thinking && i === messages.length - 1;
           if (isEmptyStreaming) {
-            return <ThinkingBubble key={`${i}-thinking`} startedAt={thinkingStartedAt.current} />;
+            return (
+              <ThinkingBubble
+                key={`${i}-thinking`}
+                startedAt={thinkingStartedAt.current}
+                workerId={thinkingIdentity.workerId || workerId}
+                swarmSlot={thinkingIdentity.swarmSlot}
+              />
+            );
           }
           return <ChatBubble key={`${i}-${m.role}`} message={m} />;
         })}
+        </div>
+        {showScrollButton && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom('smooth')}
+            className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface"
+            aria-label="Ir al final de la conversación"
+            title="Ir abajo"
+          >
+            <ChevronDown size={20} aria-hidden />
+          </button>
+        )}
       </div>
 
       <footer className="p-3 border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50 shrink-0">
+        {imageAttachments.pendingImages.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {imageAttachments.pendingImages.map((img) => (
+              <div className="relative" key={img.id}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={img.previewUrl}
+                  alt={img.name}
+                  className="h-14 w-14 object-cover rounded-lg border dark:border-dark-border"
+                />
+                <button
+                  type="button"
+                  onClick={() => imageAttachments.removeImage(img.id)}
+                  className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-600 text-white"
+                  aria-label="Quitar imagen"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex gap-2">
+          <input
+            ref={imageAttachments.fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            className="hidden"
+            onChange={(e) => void imageAttachments.onPickFiles(e.target.files)}
+          />
+          <button
+            type="button"
+            onClick={() => imageAttachments.fileInputRef.current?.click()}
+            disabled={!canSend || loading || imageAttachments.pendingImages.length >= 3}
+            className="px-2 py-2 border rounded-xl dark:border-dark-border disabled:opacity-50 shrink-0"
+            aria-label="Adjuntar imagen"
+            title="Adjuntar imagen"
+          >
+            <ImagePlus size={18} />
+          </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -153,7 +251,7 @@ export function AdminChatPanel({
             rows={isCompact ? 1 : 2}
             placeholder="Mensaje…"
             className="flex-1 px-3 py-2 text-sm border rounded-xl dark:border-dark-border dark:bg-dark-surface resize-none"
-            disabled={loading || !canSend}
+            disabled={!canSend}
           />
           {loading ? (
             <button
@@ -168,14 +266,16 @@ export function AdminChatPanel({
             <button
               type="button"
               onClick={() => void send()}
-              disabled={!input.trim() || !canSend}
+              disabled={!canSubmit}
               className="px-3 py-2 bg-gov-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1 disabled:opacity-50 shrink-0"
             >
               <Send size={16} aria-hidden /> Enviar
             </button>
           )}
         </div>
-        {error && <p className="text-xs text-red-600 mt-1.5">{error}</p>}
+        {(imageAttachments.attachError || error) && (
+          <p className="text-xs text-red-600 mt-1.5">{imageAttachments.attachError || error}</p>
+        )}
       </footer>
     </section>
   );

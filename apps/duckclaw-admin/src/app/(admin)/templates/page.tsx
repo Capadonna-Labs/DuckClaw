@@ -60,7 +60,7 @@ export default function TemplatesPage() {
     <div className="space-y-6">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black text-gov-gray-900 dark:text-dark-text">Plantillas</h1>
+          <h1 className="text-3xl font-black text-gov-gray-900 dark:text-dark-text">Workers</h1>
           <p className="text-sm text-gov-gray-500 dark:text-dark-muted">
             Workers en forge/templates
           </p>

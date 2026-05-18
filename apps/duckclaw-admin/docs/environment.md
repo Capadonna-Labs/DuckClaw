@@ -46,8 +46,27 @@ cp apps/duckclaw-admin/.env.example apps/duckclaw-admin/.env.local
 | Entorno | `DUCKCLAW_GATEWAY_URL` |
 |---------|------------------------|
 | Local | `http://127.0.0.1:8000` o `http://localhost:8000` |
-| Tailscale | URL HTTPS del gateway en la tailnet (misma clave admin) |
+| Tailscale (celular) | **Mantén** `http://127.0.0.1:8000` — el BFF Next corre en el Mac y habla con el gateway en loopback |
 | Docker | Host del contenedor gateway en la red compose |
+
+### Admin en el celular (Tailscale Serve)
+
+El gateway público/Telegram suele ir por Funnel en `:443`. La consola admin va aparte en **`:8443`** (solo tailnet, no sustituye el Funnel).
+
+```bash
+# Terminal 1 — admin (anota el puerto si Next usa 3001)
+pnpm admin:dev
+
+# Terminal 2 — proxy HTTPS tailnet (puerto local del paso anterior)
+DUCKCLAW_ADMIN_PORT=3001 pnpm admin:serve-tailscale
+```
+
+En el iPhone/Android (app Tailscale conectada): `https://<nombre-maquina>.<tailnet>.ts.net:8443/`  
+Ejemplo: `https://mac-mini-de-juan.tailc85db0.ts.net:8443/`
+
+Login demo: `admin@duckclaw.local` / `1234` (ver `src/config/adminUsers.ts`).
+
+Para apagar el proxy admin: `tailscale serve --https=8443 off`
 
 **No** commitear `.env.local`. Está en `.gitignore` de la app.
 

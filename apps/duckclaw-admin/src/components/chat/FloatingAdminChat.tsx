@@ -84,32 +84,15 @@ export function FloatingAdminChat() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="pointer-events-auto flex items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 rounded-full bg-gov-blue-700 text-white font-bold text-sm shadow-lg hover:bg-gov-blue-800 transition-colors max-w-[min(100vw-2rem,280px)]"
+        className="pointer-events-auto flex items-center justify-center size-12 rounded-full bg-gov-blue-700 text-white shadow-lg hover:bg-gov-blue-800 transition-colors"
         aria-expanded={open}
         aria-label={
           open
             ? 'Cerrar asistente'
-            : `Abrir asistente, agente activo ${activeWorkerLabel}`
+            : `Abrir asistente, agente activo ${loading ? '…' : activeWorkerLabel}`
         }
       >
-        {open ? (
-          <>
-            <X size={20} aria-hidden />
-            <span>Cerrar</span>
-          </>
-        ) : (
-          <>
-            <Bot size={20} className="shrink-0" aria-hidden />
-            <span className="flex flex-col items-start min-w-0 leading-tight text-left">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-white/80">
-                Agente
-              </span>
-              <span className="truncate max-w-[180px] text-sm" title={activeWorkerLabel}>
-                {loading ? '…' : activeWorkerLabel}
-              </span>
-            </span>
-          </>
-        )}
+        {open ? <X size={22} aria-hidden /> : <Bot size={22} aria-hidden />}
       </button>
     </div>
   );

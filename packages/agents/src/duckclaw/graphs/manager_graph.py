@@ -952,14 +952,6 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     )
     if (worker_id or "").strip().lower() == "quant-trader" and _quant_operational_intent_requires_fly_command(text):
         return load_guardrail("manager_tasks", "quant_operational_fly_command"), None
-    # MVP Leila: saludos cortos → respuesta de tienda (evita tono “agente de investigación”).
-    if (worker_id or "").strip() == "LeilaAssistant":
-        plain = (incoming or "").strip()
-        if len(plain) <= 24 and re.match(
-            r"^(hola|hey|hi|hello|buen(as?|os)\s*(días|dias|tardes|noches)?|qué\s+tal|que\s+tal)[\s!?.¡¿]*$",
-            plain.lower(),
-        ):
-            return load_guardrail("manager_tasks", "leila_greeting"), None
     # BI Analyst: preguntas meta (qué puedes hacer, quién eres) → el modelo a veces ignora soul.md y copia
     # el tono genérico «Agente de Investigación Activa»; la tarea explícita lo corrige sin depender del historial.
     if (worker_id or "").strip().lower() == "bi-analyst":
@@ -1339,10 +1331,6 @@ def _greeting_fast_reply_text(worker_id: str | None) -> str:
             "Hola. Soy tu analista de BI (DuckDB): consultas de solo lectura, esquema, métricas y gráficos cuando lo pidas. "
             "¿Qué quieres revisar?"
         )
-    if wl == "leilaassistant":
-        return (
-            "Hola. ¿En qué puedo ayudarte? Puedes ver /catalogo o pedir con /pedido."
-        )
     if w:
         return f"Hola. Aquí {w}. ¿En qué puedo ayudarte?"
     return "Hola. ¿En qué puedo ayudarte?"
@@ -1368,8 +1356,6 @@ def _capabilities_fast_reply_text(
         return load_guardrail("capabilities", "bi_analyst")
     if wl == "finanz":
         return load_guardrail("capabilities", "finanz")
-    if wl == "leilaassistant":
-        return load_guardrail("capabilities", "leila")
     if wl in ("axis-maestro", "maestro") or wl_norm == "axis-maestro":
         sub = "\n".join(f"- {x}" for x in pool) if pool else (
             "- AXIS-Coder\n- AXIS-Mirror\n- AXIS-Radar\n- AXIS-Sentinel\n- AXIS-Phantom"

@@ -823,7 +823,6 @@ def _finanz_should_force_ibkr_after_local_cuentas_read(
 
 _TASK_AWARENESS_PROMPT = load_guardrail("prompts", "task_awareness_default")
 _AXIS_COORDINATOR_TASK_AWARENESS_PROMPT = load_guardrail("prompts", "task_awareness_axis")
-_LEILA_TASK_AWARENESS_PROMPT = load_guardrail("prompts", "task_awareness_leila")
 
 
 def _escape_attach_path(path: str) -> str:
@@ -2473,9 +2472,7 @@ def build_worker_graph(
             _is_axis_coordinator = load_orchestrator_config(_wid_for_task) is not None
         except Exception:
             pass
-    if _wid_for_task == "LeilaAssistant":
-        _task_block = _LEILA_TASK_AWARENESS_PROMPT.strip()
-    elif _is_axis_coordinator:
+    if _is_axis_coordinator:
         _task_block = (
             _TASK_AWARENESS_PROMPT.strip() + "\n" + _AXIS_COORDINATOR_TASK_AWARENESS_PROMPT.strip()
         )
@@ -2484,7 +2481,7 @@ def build_worker_graph(
     _system_prompt_only = (system_prompt or "").strip()
     _task_block_resolved = _task_block
     effective_prompt = _system_prompt_only + "\n\n" + _task_block_resolved
-    # Cierre de dominio = última instrucción al modelo (p. ej. LeilaAssistant/domain_closure.md).
+    # Cierre de dominio = última instrucción al modelo (domain_closure.md del worker).
     effective_prompt = append_domain_closure_block(effective_prompt, spec)
     _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
     if _lid == "bi_analyst":
@@ -2564,17 +2561,10 @@ def build_worker_graph(
                 messages.append(AIMessage(content=content))
         needs_task = state.get("homeostasis_hint") == "ask_task" or _is_no_task(incoming)
         if needs_task:
-            if (getattr(spec, "worker_id", None) or "").strip() == "LeilaAssistant":
-                user_content = (
-                    f"[El usuario dijo: '{incoming.strip() or '(vacío)'}'. Es saludo o mensaje muy breve. "
-                    "Responde cordial como Leila Store, pregunta en qué puedes ayudar (catálogo, tallas, avisos) "
-                    "en lenguaje natural. No uses la frase «¿Cuál es mi tarea?» ni comandos con /.]"
-                )
-            else:
-                user_content = (
-                    f"[El usuario dijo: '{incoming.strip() or '(vacío)'}'. No ha indicado una tarea concreta. "
-                    "Pregúntale: ¿Cuál es mi tarea? Y ofrece ejemplos de lo que puedes hacer según tu rol.]"
-                )
+            user_content = (
+                f"[El usuario dijo: '{incoming.strip() or '(vacío)'}'. No ha indicado una tarea concreta. "
+                "Pregúntale: ¿Cuál es mi tarea? Y ofrece ejemplos de lo que puedes hacer según tu rol.]"
+            )
         else:
             user_content = incoming
         messages.append(HumanMessage(content=user_content))

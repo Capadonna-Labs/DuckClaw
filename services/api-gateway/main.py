@@ -779,10 +779,6 @@ async def agent_history(
     tid_src = (tenant_id or "").strip() or (request.headers.get("X-Tenant-Id") or "").strip() or None
     tid = _effective_tenant_id(tid_src)
     hist = await redis_load_chat_history(redis_client, tid, sid)
-    from core.leila_output_guard import is_leila_store_tenant, scrub_leila_history_assistant_messages
-
-    if is_leila_store_tenant(tid):
-        hist = scrub_leila_history_assistant_messages(hist)
     out: dict[str, Any] = {
         "history": hist,
         "worker_id": worker_id,
@@ -1341,8 +1337,7 @@ def _effective_tenant_id(request_tenant: str | None) -> str:
     (misma clave ``duckclaw:gateway:chat_hist:{tenant}:{session}``).
 
     Si solo llega ``default`` u omisión, aplica DUCKCLAW_GATEWAY_TENANT_ID, heurística PM2
-    (Leila-Gateway, BI-Analyst-Gateway) / rutas de DuckDB (leiladb, bi_analyst), y por último
-    ``default``.
+    (BI-Analyst-Gateway, etc.) / rutas de DuckDB, y por último ``default``.
     """
     rt = (request_tenant or "").strip()
     if rt and rt.lower() != "default":
@@ -1352,14 +1347,10 @@ def _effective_tenant_id(request_tenant: str | None) -> str:
     if override:
         return override
     pm2 = (os.getenv("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
-    if pm2 == "Leila-Gateway":
-        return "Leila Store"
     if pm2 == "BI-Analyst-Gateway":
         return "BI-Analyst"
     dbp_src = get_gateway_db_path()
     dbp = str(dbp_src or "").lower()
-    if "leiladb" in dbp:
-        return "Leila Store"
     if "bi_analyst" in dbp:
         return "BI-Analyst"
     if "siatadb" in dbp:
@@ -1740,12 +1731,6 @@ async def _invoke_chat(
     ):
         history_for_model = await redis_load_chat_history(redis_client, tenant_id, session_id)
 
-    if not is_system_prompt:
-        from core.leila_output_guard import is_leila_store_tenant, scrub_leila_history_assistant_messages
-
-        if is_leila_store_tenant(tenant_id):
-            history_for_model = scrub_leila_history_assistant_messages(history_for_model)
-
     # Observabilidad 2.1: fase orquestación HTTP → worker lógico "manager" (no el worker_id de ruta).
     chat_ident = _chat_identity_label(session_id, username)
     set_log_context(tenant_id=tenant_id, worker_id="manager", chat_id=chat_ident)
@@ -1821,7 +1806,7 @@ async def _invoke_chat(
             fly_db = None
             try:
                 from duckclaw import DuckClaw
-                from duckclaw.graphs.on_the_fly_commands import handle_command, prepare_leila_fly_duckdb
+                from duckclaw.graphs.on_the_fly_commands import handle_command
 
                 vpath = (vault_db_path or "").strip()
                 Path(vpath).parent.mkdir(parents=True, exist_ok=True)
@@ -1871,15 +1856,6 @@ async def _invoke_chat(
                 except Exception:
                     _fly_cache_n = -1
                 fly_db = DuckClaw(vpath, read_only=False, engine=_fly_engine)
-                from duckclaw.graphs.graph_server import get_db as _fly_acl_db
-
-                prepare_leila_fly_duckdb(
-                    fly_db,
-                    vpath,
-                    user_id=vault_user_id,
-                    tenant_id=tenant_id,
-                    acl_db=_fly_acl_db(),
-                )
                 cmd_reply = handle_command(
                     fly_db,
                     session_id,
@@ -2070,10 +2046,6 @@ async def _invoke_chat(
     reply_text = _strip_markdown_bold(reply_text or "")
     # Filtro UX: eliminar menús residuales del LLM antes de devolver al cliente
     reply_text = clean_agent_response(reply_text or "")
-    if (effective_worker_id or worker_id or "").strip() == "LeilaAssistant":
-        from core.leila_output_guard import scrub_leila_contact_surface
-
-        reply_text = scrub_leila_contact_surface(reply_text)
     if (effective_worker_id or worker_id or "").strip() == "BI-Analyst":
         reply_text = _beautify_bi_analyst_telegram(reply_text or "")
         reply_text = _strip_bi_false_chart_delivery_lines(reply_text or "")

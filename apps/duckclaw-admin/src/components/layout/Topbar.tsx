@@ -9,11 +9,10 @@ import { obtenerIniciales } from '@/lib/utils';
 import { useTheme } from '@/components/shared/ThemeProvider';
 
 interface TopbarProps {
-  title: string;
   onMenuClick?: () => void;
 }
 
-export default function Topbar({ title, onMenuClick }: TopbarProps) {
+export default function Topbar({ onMenuClick }: TopbarProps) {
   const { usuario, logout } = useAuthStore();
   const { theme, toggleTheme } = useTheme();
   const { sidebarOpen, setSidebarOpen } = useLayoutUiStore();
@@ -30,8 +29,6 @@ export default function Topbar({ title, onMenuClick }: TopbarProps) {
       className="h-16 bg-white border-b border-gov-gray-100 shadow-sm px-4 md:px-6 flex items-center justify-between shrink-0 dark:bg-dark-surface dark:border-dark-border"
     >
       <TopbarLeft
-        title={title}
-        email={usuario?.email}
         onMenuClick={onMenuClick}
         sidebarOpen={sidebarOpen}
         onShowSidebar={() => setSidebarOpen(true)}
@@ -68,20 +65,16 @@ export default function Topbar({ title, onMenuClick }: TopbarProps) {
 }
 
 function TopbarLeft({
-  title,
-  email,
   onMenuClick,
   sidebarOpen,
   onShowSidebar,
 }: {
-  title: string;
-  email?: string;
   onMenuClick?: () => void;
   sidebarOpen: boolean;
   onShowSidebar: () => void;
 }) {
   return (
-    <div className="flex items-center gap-3 flex-wrap">
+    <div className="flex items-center gap-3">
       <button
         type="button"
         onClick={onMenuClick}
@@ -102,10 +95,6 @@ function TopbarLeft({
           className="hidden lg:inline-flex"
         />
       )}
-      <div>
-        <h2 className="text-lg font-semibold dark:text-dark-text">{title}</h2>
-        {email && <p className="text-[10px] text-gov-gray-500 hidden sm:block">{email}</p>}
-      </div>
     </div>
   );
 }

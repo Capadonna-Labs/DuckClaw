@@ -34,7 +34,7 @@ SystemMessage(content=load_guardrail("directives", "reddit_share_exhausted"))
 | Módulo | Tipo | Ejemplos | Prioridad |
 |--------|------|----------|-----------|
 | `workers/factory.py` | prompts, directives, errors | task_awareness, DIRECTIVA_*, llm_failure | **Migrado (fase 1)** |
-| `graphs/manager_graph.py` | `_plan_task` TAREA strings, `_FINANZ_TOOL_PRESSURE_TASK`, capability blurbs | Finanz, Quant HRP, JobHunter, Leila | Alta |
+| `graphs/manager_graph.py` | `_plan_task` TAREA strings, `_FINANZ_TOOL_PRESSURE_TASK`, capability blurbs | Finanz, Quant HRP, JobHunter, PQRSD | Alta |
 | `graphs/on_the_fly_commands.py` | respuestas fly /help | miles de líneas | Media (por comando) |
 | `forge/atoms/validators.py` | FACT_CHECKER_PROMPT | auditoría | Media |
 | `forge/atoms/user_reply_nl_synthesis.py` | frases de sustitución NL | Finanz cuentas | Media |

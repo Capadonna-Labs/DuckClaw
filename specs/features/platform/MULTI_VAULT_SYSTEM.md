@@ -40,8 +40,8 @@ db/
 │       └── trabajo.duckdb
 └── shared/
     ├── {user_id}/              # Compat: mismas rutas que slug de usuario (p. ej. catálogo por chat)
-    │   └── leiladb1.duckdb
-    └── {tenant_id}/            # Datos compartidos del tenant (slug sanitizado; p. ej. leila_store)
+    │   └── catalogo.duckdb
+    └── {tenant_id}/            # Datos compartidos del tenant (slug sanitizado; p. ej. acme_store)
         └── catalogo.duckdb
 ```
 

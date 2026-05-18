@@ -1,10 +1,10 @@
 # Arquitectura Meta-Cognitiva (Propiocepción PGQ & VSS-VFS)
 
 **Objetivo**
-Evolucionar el arnés DuckClaw hacia la autonomía de Nivel 4 dotando a los agentes de **Propiocepción** (conciencia de su propio estado y dependencias vía grafos PGQ) y un **Virtual File System Semántico (VFS)** montado sobre DuckDB VSS. Esto permitirá el Spec-Driven Management (SDM) autónomo y la gestión de catálogos complejos (ej. Asistente de Leila) sin romper el aislamiento del tenant ni la asincronía del Singleton Writer.
+Evolucionar el arnés DuckClaw hacia la autonomía de Nivel 4 dotando a los agentes de **Propiocepción** (conciencia de su propio estado y dependencias vía grafos PGQ) y un **Virtual File System Semántico (VFS)** montado sobre DuckDB VSS. Esto permitirá el Spec-Driven Management (SDM) autónomo y la gestión de catálogos complejos (ej. retail / e-commerce) sin romper el aislamiento del tenant ni la asincronía del Singleton Writer.
 
 **Contexto**
-Actualmente, el estado de LangGraph es plano y la memoria es un log pasivo (`checkpoint_deltas`). Para que el `Manager` orqueste múltiples sub-agentes (ej. `Finanz`, `LeilaSupport`) de forma dinámica, necesita entender la topología de ejecución en tiempo real (quién está bloqueado, qué tarea depende de otra). Además, para que los agentes redacten sus propias specs o busquen productos en un inventario, necesitan interactuar con el espacio vectorial como si fuera un sistema de archivos POSIX (`/catalog/blusas/roja.md`), garantizando el cumplimiento de la Ley 1581 (Habeas Data) al mantener todo encriptado dentro de `db/private/<chat_id>.duckdb`.
+Actualmente, el estado de LangGraph es plano y la memoria es un log pasivo (`checkpoint_deltas`). Para que el `Manager` orqueste múltiples sub-agentes (ej. `Finanz`, `PQRSD-Assistant`) de forma dinámica, necesita entender la topología de ejecución en tiempo real (quién está bloqueado, qué tarea depende de otra). Además, para que los agentes redacten sus propias specs o busquen productos en un inventario, necesitan interactuar con el espacio vectorial como si fuera un sistema de archivos POSIX (`/catalog/blusas/roja.md`), garantizando el cumplimiento de la Ley 1581 (Habeas Data) al mantener todo encriptado dentro de `db/private/<chat_id>.duckdb`.
 
 **Esquema de datos**
 
@@ -42,7 +42,7 @@ EDGE TABLES (
 *2. Tablas Base para el VFS Semántico (VSS):*
 ```sql
 CREATE TABLE IF NOT EXISTS core.vfs_files (
-    file_path VARCHAR PRIMARY KEY, -- ej. '/specs/leila_returns.md'
+    file_path VARCHAR PRIMARY KEY, -- ej. '/specs/tenant_returns.md'
     content TEXT NOT NULL,
     metadata JSON,
     updated_at TIMESTAMP DEFAULT current_timestamp

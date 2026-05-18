@@ -5,7 +5,6 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { Sidebar, Topbar } from '@/components/layout';
 import { FloatingAdminChat } from '@/components/chat/FloatingAdminChat';
-import { titleForAdminPath } from '@/config/adminNav';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { Loader2, PanelLeftOpen } from 'lucide-react';
 
@@ -55,7 +54,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       )}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <Topbar title={titleForAdminPath(pathname)} onMenuClick={() => setIsSidebarOpen(true)} />
+        <Topbar onMenuClick={() => setIsSidebarOpen(true)} />
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-10">
           <div className="max-w-[1600px] mx-auto">{children}</div>
         </main>

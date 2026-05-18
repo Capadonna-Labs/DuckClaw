@@ -235,7 +235,7 @@ export const adminService = {
     ),
 
   listFlyCommands: () =>
-    adminFetch<{ header: string; commands: FlyCommandEntry[]; leila_enabled: boolean }>(
+    adminFetch<{ header: string; commands: FlyCommandEntry[] }>(
       '/fly-commands'
     ),
 

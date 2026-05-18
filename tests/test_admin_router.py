@@ -307,6 +307,18 @@ def test_ops_commands(admin_client: TestClient):
     assert any(c.get("id") == "pm2_start_mcp" for c in cmds)
 
 
+def test_normalize_pm2_gateway_restart_interrupted(admin_client: TestClient):
+    from routers.admin import _normalize_ops_result
+
+    raw = {
+        "exit_code": -2,
+        "stdout": "[PM2] Applying action restartProcessId on app [DuckClaw-Gateway](ids: [ 0 ])\n",
+        "stderr": "",
+    }
+    out = _normalize_ops_result("pm2_restart_gateway", raw)
+    assert out["exit_code"] == 0
+
+
 def test_telegram_routes_get_and_put(
     admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):

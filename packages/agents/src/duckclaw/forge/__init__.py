@@ -10,7 +10,6 @@ Spec: Agent Forge Refactor
 from pathlib import Path
 
 from .assembler import AgentAssembler
-from .leila_schema import ensure_leila_mvp_schema
 
 # Rutas a templates built-in
 FORGE_DIR = Path(__file__).resolve().parent
@@ -24,7 +23,6 @@ INDUSTRIES_TEMPLATES_DIR = TEMPLATES_DIR / "industries"
 
 __all__ = [
     "AgentAssembler",
-    "ensure_leila_mvp_schema",
     "ENTRY_ROUTER_YAML",
     "MANAGER_ROUTER_YAML",
     "WORKERS_TEMPLATES_DIR",

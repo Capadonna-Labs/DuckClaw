@@ -26,7 +26,6 @@ except ImportError:
 import duckdb
 
 from duckclaw.forge.atoms.macro_pgq_seed import ensure_macro_pgq_seed
-from duckclaw.forge.leila_schema import ensure_leila_mvp_schema
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
 from duckclaw.vaults import db_root, ensure_registry
@@ -339,7 +338,6 @@ def bootstrap_file(path: Path, templates_root: Path, extensions: list[str]) -> N
         _ensure_war_room_schema_sql(con)
         _ensure_pqrsd_crm_schema(con)
         _ensure_fly_runtime_tables(con)
-        ensure_leila_mvp_schema(_ExecuteAdapter(con))
         for manifest in sorted(templates_root.glob("*/manifest.yaml")):
             wid = manifest.parent.name
             try:

@@ -1244,7 +1244,6 @@ def _dedicated_gateway_vault_label() -> str:
     matched = (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
     pretty = {
         "TheMind-Gateway": "The Mind",
-        "Leila-Gateway": "Leila",
         "BI-Analyst-Gateway": "BI Analyst",
         "SIATA-Gateway": "SIATA Analyst",
         "Finanz-Gateway": "Finanz",
@@ -4148,198 +4147,9 @@ def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
     return f"System prompt de {worker_id}:\n{preview}\n\nPara cambiar: /prompt {worker_id} --change <texto>"
 
 
-def _leila_fly_commands_enabled() -> bool:
-    """Comandos /catalogo, /pedido, /ayuda del MVP Leila (spec: Asistente de Leila — MVP Telegram)."""
-    if (os.environ.get("DUCKCLAW_LEILA_FLY_COMMANDS") or "").strip().lower() in ("1", "true", "yes", "on"):
-        return True
-    return (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip() == "Leila-Gateway"
-
-
-def _leila_shared_catalog_path() -> str:
-    return (os.environ.get("DUCKCLAW_SHARED_DB_PATH") or "").strip()
-
-
-def prepare_leila_fly_duckdb(
-    db: Any,
-    vault_path: str,
-    *,
-    user_id: Any,
-    tenant_id: Any,
-    acl_db: Any | None = None,
-) -> None:
-    """
-    Si el catálogo vive en DUCKCLAW_SHARED_DB_PATH, ATTACH como `shared` sobre la conexión
-    ya abierta a la bóveda del usuario (misma convención que build_worker_graph).
-    acl_db: DuckDB del gateway (tabla user_shared_db_access); None omite ACL de grants (tests).
-    """
-    if not _leila_fly_commands_enabled():
-        return
-    shared = _leila_shared_catalog_path()
-    if not shared:
-        return
-    uid = (str(user_id or "").strip() or "default")
-    tid = (str(tenant_id or "").strip() or None)
-    if not validate_user_db_path(uid, shared, tenant_id=tid):
-        _obs = get_obs_logger()
-        try:
-            log_fly(_obs, "Leila fly: ruta shared rechazada por validate_user_db_path (user_id=%s)", uid)
-        except Exception:
-            pass
-        return
-    if acl_db is not None:
-        from duckclaw.shared_db_grants import user_may_access_shared_path
-
-        tid_grant = str(tenant_id or "default").strip() or "default"
-        if not user_may_access_shared_path(
-            acl_db, tenant_id=tid_grant, user_id=uid, shared_db_path=shared
-        ):
-            _obs = get_obs_logger()
-            try:
-                log_fly(_obs, "Leila fly: sin grant user_shared_db_access (user_id=%s tenant=%s)", uid, tid_grant)
-            except Exception:
-                pass
-            return
-    from duckclaw.workers.factory import _apply_forge_attaches
-
-    _apply_forge_attaches(
-        db,
-        (vault_path or "").strip(),
-        shared,
-        skip_private_attach=True,
-    )
-    setattr(db, "_leila_shared_catalog_attached", True)
-
-
-def _leila_products_rel(db: Any) -> str:
-    """Tabla calificada tras prepare_leila_fly_duckdb (ATTACH `shared`)."""
-    if getattr(db, "_leila_shared_catalog_attached", False):
-        return "shared.main.leila_products"
-    return "main.leila_products"
-
-
-def _leila_orders_rel(db: Any) -> str:
-    if getattr(db, "_leila_shared_catalog_attached", False):
-        return "shared.main.leila_orders"
-    return "main.leila_orders"
-
-
-def execute_leila_catalogo(db: Any, chat_id: Any) -> str:
-    """/catalogo — productos activos (shared.main o main según DUCKCLAW_SHARED_DB_PATH)."""
-    _ = chat_id
-    rel = _leila_products_rel(db)
-    try:
-        raw = db.query(
-            f"SELECT id, nombre, descripcion, tallas, precio, foto_url "
-            f"FROM {rel} WHERE activo = true ORDER BY nombre"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except Exception as e:
-        return f"No pude leer el catálogo: {e}"
-    if not rows:
-        return "Catálogo vacío por ahora. Vuelve pronto."
-    lines: list[str] = []
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        tid = str(r.get("id") or "").strip()
-        nom = str(r.get("nombre") or "").strip() or "(sin nombre)"
-        precio = r.get("precio")
-        tallas = r.get("tallas") or []
-        if isinstance(tallas, list):
-            ts = ", ".join(str(x) for x in tallas)
-        else:
-            ts = str(tallas)
-        desc = str(r.get("descripcion") or "").strip()
-        if len(desc) > 100:
-            desc = desc[:100] + "..."
-        foto = str(r.get("foto_url") or "").strip()
-        extra = f"\n  {desc}" if desc else ""
-        if foto:
-            extra += f"\n  foto: {foto[:80]}"
-        lines.append(f"• {nom}\n  id: {tid} — precio: {precio}\n  Tallas: {ts}{extra}")
-    body = "\n\n".join(lines)
-    return (
-        f"Leila Store — Catálogo\n\n{body}\n\nPedido: /pedido id_producto talla"
-    
-
-
-    )
-def execute_leila_pedido(
-    db: Any,
-    chat_id: Any,
-    args: str,
-    *,
-    requester_id: Any = None,
-    tenant_id: Any = None,
-    username: str = "",
-) -> str:
-    """/pedido <producto_id> <talla> [nota] — inserta en leila_orders (shared.main si hay catálogo compartido)."""
-    parts = (args or "").strip().split(None, 2)
-    if len(parts) < 2:
-        return "Uso: /pedido id_producto talla [nota opcional]"
-    product_id = parts[0].strip()
-    talla = parts[1].strip()
-    nota = (parts[2].strip() if len(parts) > 2 else "") or ""
-    cid = str(chat_id if chat_id is not None else "").strip() or "unknown"
-
-    def _esc(s: str) -> str:
-        return (s or "").replace("'", "''")[:2000]
-
-    pid_sql = _esc(product_id)
-    talla_sql = _esc(talla)
-    nota_sql = _esc(nota)
-    cid_sql = _esc(cid)
-    prod_rel = _leila_products_rel(db)
-    ord_rel = _leila_orders_rel(db)
-    try:
-        chk = db.query(f"SELECT nombre, activo FROM {prod_rel} WHERE id = '{pid_sql}' LIMIT 1")
-        rows = json.loads(chk) if isinstance(chk, str) else (chk or [])
-        if not rows or not isinstance(rows[0], dict):
-            return f"No encontré el producto {product_id}. Usa /catalogo para ver ids."
-        act = rows[0].get("activo")
-        if act is False:
-            return "Ese producto no está disponible."
-        nombre = str(rows[0].get("nombre") or product_id)
-        db.execute(
-            f"INSERT INTO {ord_rel} (chat_id, producto_id, talla, nota) "
-            f"VALUES ('{cid_sql}', '{pid_sql}', '{talla_sql}', '{nota_sql}')"
-        )
-    except Exception as e:
-        return f"No pude registrar el pedido: {e}"
-
-    user_label = (username or "").strip() or (str(requester_id).strip() if requester_id is not None else cid)
-    admin_txt = f"Nuevo pedido: {nombre} talla {talla} de {user_label}"
-
-    admin_chat = (
-        (os.environ.get("DUCKCLAW_LEILA_ADMIN_CHAT_ID") or os.environ.get("DUCKCLAW_ADMIN_CHAT_ID") or "")
-        .strip()
-    )
-    if admin_chat:
-        tid = str(tenant_id or "default").strip() or "default"
-        send_telegram_dm(
-            admin_chat,
-            f"🛍️ {admin_txt}",
-            username=str(user_label),
-            db=db,
-            tenant_id=tid,
-        )
-
-    return (
-        f"Pedido recibido: {nombre}, talla {talla}. Te contactamos pronto."
-    
-
-
-    )
-def execute_leila_ayuda() -> str:
-    """/ayuda — comprar en Leila Store (solo gateway Leila)."""
-    return load_guardrail("fly_commands", "leila_ayuda")
-
-
 def execute_help(db: Any, chat_id: Any) -> str:
     """/help: lista los fly commands disponibles."""
     entries = list(load_guardrail_pipe_table("fly_commands", "help_entries"))
-    if _leila_fly_commands_enabled():
-        entries.extend(load_guardrail_pipe_table("fly_commands", "help_entries_leila"))
     block = "\n".join(f"- {cmd} — {desc}" for cmd, desc in entries)
     return f"{load_guardrail('fly_commands', 'help_header')}\n{block}"
 
@@ -7099,14 +6909,6 @@ def _dispatch_fly_command(
         return get_wr_context(db, tenant_id, args)
     if name == "broadcast_alert":
         return broadcast_alert(db, tenant_id, requester_id, args)
-    if name == "catalogo" and _leila_fly_commands_enabled():
-        return execute_leila_catalogo(db, chat_id)
-    if name == "pedido" and _leila_fly_commands_enabled():
-        return execute_leila_pedido(
-            db, chat_id, args, requester_id=requester_id, tenant_id=tenant_id, username=username
-        )
-    if name == "ayuda" and _leila_fly_commands_enabled():
-        return execute_leila_ayuda()
     if name == "help":
         return execute_help(db, chat_id)
     if name == "role":

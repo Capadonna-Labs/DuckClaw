@@ -26,7 +26,7 @@ Instalación: `uv sync` en la raíz (Python **3.10+** trae `mcp` y `duckclaw-tel
 **Flujo**
 1. **Ingress (Sin cambios):** Telegram envía el webhook -> Cloudflare Tunnel -> FastAPI (DuckClaw Gateway) -> Redis Queue.
 2. **Inicialización MCP:** Al arrancar el gateway (FastAPI), un `MCPClient` opcional se conecta por `stdio` al proceso **`python -m duckclaw_telegram_mcp`** definido en `config/mcp_servers.yaml` (paquete en `packages/mcp/telegram/`).
-3. **Ejecución (Egress):** Cuando el agente (ej. Leila o BI Analyst) decide responder, LangGraph intercepta la salida y llama a la tool expuesta por el servidor MCP (`telegram_send_message` o `telegram_send_photo`).
+3. **Ejecución (Egress):** Cuando un Worker (ej. PQRSD o BI Analyst) decide responder, LangGraph intercepta la salida y llama a la tool expuesta por el servidor MCP (`telegram_send_message` o `telegram_send_photo`).
 4. **Transmisión:** El servidor MCP recibe la llamada JSON-RPC localmente, formatea el `multipart/form-data` correcto (incluyendo `Content-Type: image/png` para gráficos) y hace el POST a la API de Telegram.
 5. **Confirmación:** El servidor MCP devuelve el `message_id` de Telegram a LangGraph para confirmar la entrega.
 

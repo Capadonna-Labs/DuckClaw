@@ -5,7 +5,7 @@ Implementar un agente científico especializado en datos meteorológicos, calida
 
 ## 2. Perfil de Seguridad (Aislamiento)
 - **Red:** `network_access: true` (A diferencia del BI Analyst, este contenedor sí tiene salida a internet).
-- **Datos Internos:** Acceso de lectura restringido. No necesita ver `leila_orders` a menos que el `Manager` le pase un dataset específico para cruzar variables (ej. Clima vs Ventas).
+- **Datos Internos:** Acceso de lectura restringido. No necesita ver tablas de pedidos de otros tenants a menos que el `Manager` le pase un dataset específico para cruzar variables (ej. Clima vs Ventas).
 - **Mutación:** Estrictamente bloqueada.
 
 ## 3. Fuentes de Datos (SIATA API)

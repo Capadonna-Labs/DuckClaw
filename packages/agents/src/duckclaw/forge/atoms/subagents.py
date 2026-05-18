@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Optional
 
 _LOG = logging.getLogger(__name__)
 _GATEWAY_URL_ENV = "DUCKCLAW_GATEWAY_URL"
-_DEFAULT_GATEWAY_URL = "http://127.0.0.1:8000"
 
 try:
     # LangGraph v0.2+ recomienda importar Send desde langgraph.types
@@ -94,7 +93,9 @@ def build_subtasks_from_todos(state: Dict[str, Any]) -> List[SubTask]:
 
 
 def _gateway_base_url() -> str:
-    return (os.environ.get(_GATEWAY_URL_ENV) or _DEFAULT_GATEWAY_URL).rstrip("/")
+    from duckclaw.runtime_env import resolve_gateway_http_base
+
+    return resolve_gateway_http_base()
 
 
 def _emit_subagent_event_sync(

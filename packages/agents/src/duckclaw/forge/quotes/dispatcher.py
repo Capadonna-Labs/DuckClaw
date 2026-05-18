@@ -106,8 +106,12 @@ def dispatch_quote_to_n8n(
     except Exception:
         pass
 
-    base = base_url or os.environ.get("DUCKCLAW_API_BASE_URL", "http://localhost:8000")
-    base = base.rstrip("/")
+    if base_url:
+        base = base_url.rstrip("/")
+    else:
+        from duckclaw.runtime_env import resolve_api_base_url
+
+        base = resolve_api_base_url()
     pdf_url = f"{base}/api/v1/quotes/download/{quote_id}?token={download_token}"
 
     payload = {

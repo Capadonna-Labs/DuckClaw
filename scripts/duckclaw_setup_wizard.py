@@ -905,7 +905,9 @@ def _edit_gateway_service(
         state.get("db_path") or os.environ.get("DUCKCLAW_DB_PATH", "db/duckclaw.duckdb"),
         repo_root,
     )
-    redis_url = os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL", "redis://localhost:6379/0")
+    from duckclaw.runtime_env import resolve_redis_url
+
+    redis_url = resolve_redis_url()
     save_traces_env = os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES", "true").strip().lower()
     save_traces_current = save_traces_env in ("true", "1", "yes")
     traces_fmt = (os.environ.get("DUCKCLAW_CONVERSATION_TRACES_FORMAT", "sft") or "sft").strip().lower()
@@ -1044,7 +1046,9 @@ def _edit_db_writer_service(console: Console, state: dict[str, Any], repo_root: 
         state.get("db_path") or os.environ.get("DUCKCLAW_DB_PATH", "db/duckclaw.duckdb"),
         repo_root,
     )
-    redis_url = os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL", "redis://localhost:6379/0")
+    from duckclaw.runtime_env import resolve_redis_url
+
+    redis_url = resolve_redis_url()
     new_db = Prompt.ask("DUCKDB_PATH", default=db_path).strip() or db_path
     new_db = _normalize_db_to_db_folder(new_db, repo_root)
     new_redis = Prompt.ask("REDIS_URL", default=redis_url).strip() or redis_url

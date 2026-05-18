@@ -305,7 +305,7 @@ def test_suggest_gateway_port_free(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         return False
 
     monkeypatch.setattr(v, "is_port_in_use", _never_used)
-    assert suggest_gateway_port("127.0.0.1", 8282) == 8282
+    assert suggest_gateway_port("127.0.0.1", 8000) == 8000
 
 
 def test_private_db_dir_writable_tmp(tmp_path: Path) -> None:

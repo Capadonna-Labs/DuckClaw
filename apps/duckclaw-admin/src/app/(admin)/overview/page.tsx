@@ -130,10 +130,11 @@ function GatewayErrorBanner({ message }: { message: string }) {
       <p className="font-bold text-red-800 dark:text-red-300">No se pudo conectar al API Gateway</p>
       <p className="text-sm text-red-700 dark:text-red-400 mt-1">{message}</p>
       <ul className="text-sm text-red-700/90 dark:text-red-400/90 mt-3 list-disc pl-5 space-y-1">
-        <li>Levanta: Redis, DuckClaw-DB-Writer, DuckClaw-Gateway (puerto 8000).</li>
+        <li>Levanta: Redis, DuckClaw-DB-Writer, DuckClaw-Gateway (mismo puerto que en .env).</li>
         <li>
           <code className="text-xs">apps/duckclaw-admin/.env.local</code>:{' '}
-          <code>DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000</code> (local, no URL Tailscale).
+          <code>DUCKCLAW_GATEWAY_URL</code> o <code>DUCKCLAW_GATEWAY_PORT</code> alineados con{' '}
+          <code>DUCKCLAW_GATEWAY_PORT</code> en .env raíz (local, no URL Tailscale).
         </li>
         <li>
           Misma <code>DUCKCLAW_ADMIN_API_KEY</code> en .env raíz y en .env.local del admin.

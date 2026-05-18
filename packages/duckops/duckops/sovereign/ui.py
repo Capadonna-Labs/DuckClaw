@@ -46,6 +46,7 @@ from duckops.sovereign.state_machine import (
     step_order_for_profile,
 )
 from duckops.sovereign.validate import (
+    DEFAULT_GATEWAY_PORT,
     is_port_in_use,
     private_db_dir_writable,
     redis_ping_url,
@@ -107,6 +108,15 @@ def _want_yes(val: str) -> bool:
 
 def _want_no(val: str) -> bool:
     return (val or "").strip().lower() in ("n", "no", "0")
+
+
+def _warn_non_default_gateway_port(console: Console, port: int) -> None:
+    if int(port) != DEFAULT_GATEWAY_PORT:
+        console.print(
+            f"[yellow]Puerto {port} (no {DEFAULT_GATEWAY_PORT}):[/] ajusta "
+            f"[bold]DUCKCLAW_GATEWAY_URL[/] en apps/duckclaw-admin/.env.local "
+            f"a http://127.0.0.1:{port}"
+        )
 
 
 def _friendly_os_name(system: str) -> str:
@@ -521,12 +531,15 @@ def run_wizard_loop(
                     title="Datos y cola",
                 )
                 try:
+                    from duckclaw.runtime_env import resolve_redis_url
+
+                    redis_default = resolve_redis_url(repo_root)
                     draft.redis_url = run_list_picker(
                         "Conexión Redis",
                         [
-                            f"redis://localhost:6379/0  ({'detectado' if ok else 'sin respuesta'})",
+                            f"{redis_default}  ({'detectado' if ok else 'sin respuesta'})",
                         ],
-                        values=["redis://localhost:6379/0"],
+                        values=[redis_default],
                         initial_index=0,
                     )
                 except WizardResetRequested:
@@ -689,6 +702,7 @@ def run_wizard_loop(
                     alt = suggest_gateway_port(host, draft.gateway_port)
                     console.print(f"[yellow]Puerto {draft.gateway_port} ocupado → {alt}[/]")
                     draft.gateway_port = alt
+                    _warn_non_default_gateway_port(console, draft.gateway_port)
                 draft.orchestration = "pm2"
                 duck_rel = (draft.duckdb_vault_path or "").strip()
                 body = (
@@ -727,6 +741,7 @@ def run_wizard_loop(
                 alt = suggest_gateway_port(host, draft.gateway_port)
                 console.print(f"[yellow]Puerto {draft.gateway_port} ocupado; sugerido {alt}[/]")
                 draft.gateway_port = alt
+                _warn_non_default_gateway_port(console, draft.gateway_port)
             tok, val = _ask_until(
                 session,
                 f"Modo pm2|docker [{draft.orchestration}]: ",
@@ -756,6 +771,7 @@ def run_wizard_loop(
             try:
                 if val:
                     draft.gateway_port = int(val)
+                    _warn_non_default_gateway_port(console, draft.gateway_port)
             except ValueError:
                 console.print("[red]Puerto inválido[/]")
                 continue
@@ -797,6 +813,7 @@ def run_wizard_loop(
                     f"usaremos el sugerido {alt} para el servidor web.[/]"
                 )
                 draft.gateway_port = alt
+                _warn_non_default_gateway_port(console, draft.gateway_port)
             while True:
                 tok, val = _ask_until(
                     session,

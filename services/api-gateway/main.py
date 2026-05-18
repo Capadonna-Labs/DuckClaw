@@ -261,7 +261,11 @@ except ImportError:
     class _Settings:
         PROJECT_NAME = "DuckClaw API Gateway"
         VERSION = "0.1.0"
-        REDIS_URL = "redis://localhost:6379/0"
+
+        def __init__(self) -> None:
+            from duckclaw.runtime_env import resolve_redis_url
+
+            self.REDIS_URL = resolve_redis_url()
 
     settings = _Settings()
 
@@ -308,30 +312,31 @@ if _pqrsd_startup:
     )
 
 
-def _uvicorn_listen_port_defaulting_8000() -> int:
+def _uvicorn_listen_port() -> int:
     try:
         for i, x in enumerate(sys.argv):
             if x == "--port" and i + 1 < len(sys.argv):
                 return int(sys.argv[i + 1])
     except (ValueError, IndexError):
         pass
-    return 8000
+    from duckclaw.gateway_port import resolve_gateway_port
+
+    return resolve_gateway_port()
 
 
-def _warn_if_loopback_8000_steals_telegram_funnel() -> None:
+def _warn_if_loopback_gateway_port_steals_telegram_funnel() -> None:
     """
-    Funnel suele hacer proxy a http://127.0.0.1:8000. Si otro proceso (p.ej. discord_mcp con
-    MCP HTTP default) enlaza 127.0.0.1:8000, Telegram recibe 404 del proceso equivocado aunque
-    DuckClaw escuche en *:8000.
+    Funnel suele hacer proxy a ``127.0.0.1:<DUCKCLAW_GATEWAY_PORT>``. Si otro proceso
+    (p.ej. discord_mcp) enlaza ese loopback, Telegram recibe 404 del proceso equivocado.
     """
-    if _uvicorn_listen_port_defaulting_8000() != 8000:
-        return
+    port = _uvicorn_listen_port()
+    loopback = f"127.0.0.1:{port}"
     lsof_bin = shutil.which("lsof")
     if not lsof_bin:
         return
     try:
         proc = subprocess.run(
-            [lsof_bin, "-nP", "-iTCP:8000", "-sTCP:LISTEN"],
+            [lsof_bin, "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
             capture_output=True,
             text=True,
             timeout=3,
@@ -339,24 +344,27 @@ def _warn_if_loopback_8000_steals_telegram_funnel() -> None:
     except Exception:
         return
     out = (proc.stdout or "").strip()
-    if "127.0.0.1:8000" not in out:
+    if loopback not in out:
         return
     low = out.lower()
     condensed = " | ".join(out.splitlines()[:10])
     if "discord_mcp" in low or "-m discord_mcp.main" in low:
         _gateway_log.error(
-            "Conflicto Telegram/Funnel: hay LISTEN en 127.0.0.1:8000 relacionado con discord_mcp; "
-            "las peticiones a 127.0.0.1:8000 no llegarán a este gateway. Ejecuta "
+            "Conflicto Telegram/Funnel: hay LISTEN en %s relacionado con discord_mcp; "
+            "las peticiones a %s no llegarán a este gateway. Ejecuta "
             "`bash scripts/telegram/stop_discord_mcp_port_8000.sh` o arranca MCP con HOST=127.0.0.1 "
             "PORT=8010. lsof (recorte): %s",
+            loopback,
+            loopback,
             condensed,
         )
         return
     listen_hits = [ln for ln in out.splitlines() if "LISTEN" in ln]
     if len(listen_hits) >= 2:
         _gateway_log.warning(
-            "Puerto 8000: múltiples LISTEN; curl/Funnel a 127.0.0.1 pueden no ser DuckClaw. "
+            "Puerto %s: múltiples LISTEN; curl/Funnel a 127.0.0.1 pueden no ser DuckClaw. "
             "lsof (recorte): %s",
+            port,
             condensed,
         )
 
@@ -426,7 +434,7 @@ def _langsmith_auth_log(*, auth_status: str, user_id: str, tenant_id: str) -> No
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _warn_if_loopback_8000_steals_telegram_funnel()
+    _warn_if_loopback_gateway_port_steals_telegram_funnel()
     app.state.redis = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
     app.state.goals_ticker_task = None
     _normalize_local_artifacts_to_db()

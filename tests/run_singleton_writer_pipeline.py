@@ -30,10 +30,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVICES = REPO_ROOT / "services"
 DB_WRITER_DIR = SERVICES / "db-writer"
 API_GATEWAY_DIR = SERVICES / "api-gateway"  # microservicio unificado (spec FLUJO_VIDA_DATO)
-from duckclaw.runtime_env import resolve_agent_chat_url, resolve_redis_url
+from duckclaw.runtime_env import resolve_gateway_http_base, resolve_redis_url
 
-GATEWAY_URL = resolve_agent_chat_url()
-REDIS_URL = resolve_redis_url()
+# Base del gateway (no /api/v1/agent/chat): /health y /api/v1/db/write viven en la raíz.
+GATEWAY_BASE = resolve_gateway_http_base(REPO_ROOT)
+REDIS_URL = resolve_redis_url(REPO_ROOT)
 
 
 # ─── Funciones del pipeline (reutilizadas por tests de integración y unitarios) ─────────────────
@@ -160,7 +161,7 @@ def post_write() -> bool:
     for idx, body in enumerate(bodies, start=1):
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
-            f"{GATEWAY_URL}/api/v1/db/write",
+            f"{GATEWAY_BASE}/api/v1/db/write",
             data=data,
             method="POST",
             headers={"Content-Type": "application/json"},
@@ -327,7 +328,7 @@ def test_full_pipeline_e2e() -> None:
     gateway_proc = start_api_gateway()
     assert gateway_proc is not None
     try:
-        assert wait_health(GATEWAY_URL, timeout=15.0), "Gateway /health did not respond"
+        assert wait_health(GATEWAY_BASE, timeout=15.0), "Gateway /health did not respond"
         assert post_write(), "POST /api/v1/db/write failed"
         time.sleep(3)
     finally:

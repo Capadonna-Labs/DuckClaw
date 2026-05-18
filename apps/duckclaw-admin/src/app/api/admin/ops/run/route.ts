@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listOpsCommands, runOpsLocal } from '@/lib/localOps';
+import { HOST_ONLY_OPS, listOpsCommands, runOpsLocal } from '@/lib/localOps';
 
 const WRITE_METHODS = new Set(['POST']);
 
@@ -36,6 +36,18 @@ export async function POST(req: NextRequest) {
 
   const base = gatewayBase();
   const key = adminKey();
+
+  if (HOST_ONLY_OPS.has(opId)) {
+    try {
+      const result = await runOpsLocal(opId);
+      return NextResponse.json(result, {
+        headers: { 'X-Duckclaw-Ops-Via': 'local-host-only' },
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Error ejecutando comando';
+      return NextResponse.json({ detail: msg }, { status: 400 });
+    }
+  }
 
   if (base && key) {
     try {

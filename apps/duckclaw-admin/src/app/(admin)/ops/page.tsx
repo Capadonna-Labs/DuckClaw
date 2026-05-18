@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { adminService, type OpsCommand } from '@/services/adminService';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
 import { useAuthStore } from '@/store/authStore';
 import { useRouter } from 'next/navigation';
 import { RefreshCw } from 'lucide-react';
+import { Pm2LiveLogsPanel } from '@/components/admin/Pm2LiveLogsPanel';
 
 export default function OpsPage() {
   const { usuario } = useAuthStore();
@@ -34,14 +36,16 @@ export default function OpsPage() {
     setOutput(null);
     try {
       const r = await adminService.runOps(opId);
-      const text = [
-        `exit_code: ${r.exit_code}`,
-        r.stdout ? `--- stdout ---\n${r.stdout}` : '',
-        r.stderr ? `--- stderr ---\n${r.stderr}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-      setOutput(text || '(sin salida)');
+      setOutput(
+        formatOpsOutput({
+          ok: r.ok,
+          exit_code: r.exit_code,
+          stdout: r.stdout,
+          stderr: r.stderr,
+          executed_via: r.executed_via,
+          op_id: opId,
+        })
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error');
     } finally {
@@ -92,6 +96,8 @@ export default function OpsPage() {
             {output}
           </pre>
         )}
+
+        <Pm2LiveLogsPanel />
       </SettingsSection>
     </PageShell>
   );

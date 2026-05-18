@@ -11,7 +11,6 @@ import { clampInput, LIMITS } from '@/lib/validation';
 export default function CommandsPage() {
   const [header, setHeader] = useState('');
   const [commands, setCommands] = useState<FlyCommandEntry[]>([]);
-  const [leila, setLeila] = useState(false);
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -21,7 +20,6 @@ export default function CommandsPage() {
       .then((r) => {
         setHeader(r.header ?? '');
         setCommands(r.commands ?? []);
-        setLeila(r.leila_enabled ?? false);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
   }, []);
@@ -48,7 +46,7 @@ export default function CommandsPage() {
 
       <SettingsSection
         titulo="Referencia"
-        descripcion={leila ? 'Incluye entradas Leila (DUCKCLAW_LEILA_FLY_COMMANDS)' : 'Base estándar'}
+        descripcion="Catálogo estándar de fly commands del gateway"
         icono={<Terminal size={22} />}
       >
         {header && (

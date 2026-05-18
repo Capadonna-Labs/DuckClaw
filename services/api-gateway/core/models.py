@@ -39,7 +39,7 @@ class ChatRequest(BaseModel):
     )
     shared_db_path: str | None = Field(
         None,
-        description="Ruta a .duckdb compartido; solo tiene efecto en workers con forge_context.shared_db_path_env (p. ej. LeilaAssistant).",
+        description="Ruta a .duckdb compartido; solo tiene efecto en workers con forge_context.shared_db_path_env.",
     )
     history: list[Any] = Field(default_factory=list, description="Historial opcional de mensajes")
     stream: bool | None = Field(False, description="Streaming SSE")

@@ -1,5 +1,8 @@
 import { spawn } from 'child_process';
 import { join } from 'path';
+import { HOST_ONLY_OPS, normalizeOpsResult } from '@/lib/formatOpsOutput';
+
+export { HOST_ONLY_OPS };
 
 export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = {
   pm2_list: { label: 'PM2 — listar procesos', argv: ['pm2', 'list'] },
@@ -81,17 +84,26 @@ export function runOpsLocal(opId: string): Promise<{
       proc.kill('SIGTERM');
       reject(new Error('Timeout ejecutando comando (90s)'));
     }, 90_000);
-    proc.on('close', (code) => {
+    proc.on('close', (code, signal) => {
       clearTimeout(timer);
-      const exit_code = code ?? 1;
-      resolve({
-        ok: exit_code === 0,
-        op_id: opId,
-        exit_code,
-        stdout: stdout.slice(-12_000),
-        stderr: stderr.slice(-8_000),
-        executed_via: 'local',
-      });
+      let exit_code = code ?? 1;
+      if (code === null && signal) {
+        const sigNum: Record<string, number> = {
+          SIGINT: 2,
+          SIGTERM: 15,
+          SIGHUP: 1,
+        };
+        exit_code = sigNum[signal] ? -sigNum[signal]! : -1;
+      }
+      resolve(
+        normalizeOpsResult({
+          op_id: opId,
+          exit_code,
+          stdout: stdout.slice(-12_000),
+          stderr: stderr.slice(-8_000),
+          executed_via: 'local',
+        })
+      );
     });
     proc.on('error', (err) => {
       clearTimeout(timer);

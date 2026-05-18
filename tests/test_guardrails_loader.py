@@ -15,7 +15,6 @@ from duckclaw.guardrails.loader import (
 _REQUIRED = [
     ("prompts", "task_awareness_default"),
     ("prompts", "task_awareness_axis"),
-    ("prompts", "task_awareness_leila"),
     ("directives", "pqrsd_datos_primero"),
     ("directives", "tool_choice_generic"),
     ("directives", "quant_autoexec"),
@@ -33,7 +32,6 @@ _REQUIRED = [
     ("manager_tasks", "quant_hrp_affirm_task_confirm"),
     ("manager_tasks", "quant_hrp_affirm_task_flow"),
     ("manager_tasks", "quant_operational_fly_command"),
-    ("manager_tasks", "leila_greeting"),
     ("manager_tasks", "bi_analyst_capabilities_question"),
     ("manager_tasks", "job_opportunity_tracking"),
     ("manager_tasks", "job_application_tracking"),
@@ -49,7 +47,6 @@ _REQUIRED = [
     ("capabilities", "job_hunter"),
     ("capabilities", "bi_analyst"),
     ("capabilities", "finanz"),
-    ("capabilities", "leila"),
     ("capabilities", "axis_maestro"),
     ("capabilities", "siata_analyst"),
     ("capabilities", "generic_worker"),
@@ -65,7 +62,6 @@ _REQUIRED = [
     ("validators", "fact_checker"),
     ("validators", "self_correction"),
     ("fly_commands", "help_header"),
-    ("fly_commands", "leila_ayuda"),
     ("fly_commands", "roles_list_intro"),
     ("fly_commands", "workers_list_hint"),
 ]

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { adminService } from '@/services/adminService';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
@@ -38,14 +39,16 @@ export default function McpPage() {
     setError(null);
     try {
       const r = await adminService.runOps(opId);
-      const text = [
-        r.ok ? 'OK' : `exit_code: ${r.exit_code}`,
-        r.stdout ? `--- stdout ---\n${r.stdout}` : '',
-        r.stderr ? `--- stderr ---\n${r.stderr}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-      setOpsOutput(text || '(sin salida)');
+      setOpsOutput(
+        formatOpsOutput({
+          ok: r.ok,
+          exit_code: r.exit_code,
+          stdout: r.stdout,
+          stderr: r.stderr,
+          executed_via: r.executed_via,
+          op_id: opId,
+        })
+      );
       if (opId !== 'pm2_logs_mcp') {
         for (let i = 0; i < 8; i++) {
           await new Promise((res) => setTimeout(res, 1500));

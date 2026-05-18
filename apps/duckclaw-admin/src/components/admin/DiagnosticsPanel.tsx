@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { adminService, type OpsCommand } from '@/services/adminService';
 import { useAuthStore } from '@/store/authStore';
 import { RefreshCw } from 'lucide-react';
@@ -30,15 +31,15 @@ export function DiagnosticsPanel({ gatewayStale }: { gatewayStale?: boolean }) {
     setOutput(null);
     try {
       const r = await adminService.runOps(opId);
-      const via = r.executed_via === 'local' ? ' (ejecutado en el servidor del admin)' : '';
       setOutput(
-        [
-          `exit_code: ${r.exit_code}${via}`,
-          r.stdout ? `--- stdout ---\n${r.stdout}` : '',
-          r.stderr ? `--- stderr ---\n${r.stderr}` : '',
-        ]
-          .filter(Boolean)
-          .join('\n\n')
+        formatOpsOutput({
+          ok: r.ok,
+          exit_code: r.exit_code,
+          stdout: r.stdout,
+          stderr: r.stderr,
+          executed_via: r.executed_via,
+          op_id: opId,
+        })
       );
       if (opId === 'pm2_restart_gateway' && r.ok) {
         setError(null);
@@ -100,7 +101,7 @@ export function DiagnosticsPanel({ gatewayStale }: { gatewayStale?: boolean }) {
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
       {output && (
-        <pre className="text-xs font-mono bg-slate-900 text-slate-100 p-4 rounded-xl max-h-64 overflow-auto whitespace-pre-wrap">
+        <pre className="text-sm leading-relaxed bg-slate-900 text-slate-100 p-4 rounded-xl max-h-64 overflow-auto whitespace-pre-wrap">
           {output}
         </pre>
       )}

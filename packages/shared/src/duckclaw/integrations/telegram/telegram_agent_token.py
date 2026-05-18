@@ -24,7 +24,6 @@ __all__ = [
 PM2_GATEWAY_APP_TO_WORKER_ID: dict[str, str] = {
     "Finanz-Gateway": "finanz",
     "BI-Analyst-Gateway": "bi_analyst",
-    "Leila-Gateway": "LeilaAssistant",
     "SIATA-Gateway": "siata_analyst",
     "JobHunter-Gateway": "Job-Hunter",
 }
@@ -43,8 +42,6 @@ def canonical_manifest_worker_id(raw: str) -> str:
         return "finanz"
     if low == "siata_analyst":
         return "siata_analyst"
-    if low == "leilaassistant" or s == "LeilaAssistant":
-        return "LeilaAssistant"
     return norm
 
 
@@ -69,7 +66,6 @@ def telegram_agent_token_env_name(worker_id: str) -> str:
 # worker manifest id → nombres de env antiguos (solo lectura).
 _LEGACY_ENV_BY_WORKER: dict[str, tuple[str, ...]] = {
     "bi_analyst": ("TELEGRAM_BOT_TOKEN_BI_ANALYST",),
-    "LeilaAssistant": ("TELEGRAM_BOT_TOKEN_LEILA",),
     "siata_analyst": ("TELEGRAM_BOT_TOKEN_SIATA",),
 }
 

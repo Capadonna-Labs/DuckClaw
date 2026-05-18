@@ -80,6 +80,9 @@ dump.rdb
 # Local generated output
 output/
 
+# Leila Store extraction (local only; not part of duckclaw)
+/Leila/
+
 # MCP /  — árbol de integración y shims (mantener local o en repo privado)
 /default/
 

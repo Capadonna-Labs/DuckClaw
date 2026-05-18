@@ -46,7 +46,6 @@ Equipo:
 - cobranzas
 - research_worker
 - BI-Analyst
-- LeilaAssistant
 - gymbro
 - powerseal
 - PQRSD-Assistant

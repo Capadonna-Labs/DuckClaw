@@ -15,7 +15,7 @@ def load_system_prompt(spec: WorkerSpec) -> str:
     Carga el prompt del worker: si existe `soul.md`, se antepone (voz / políticas);
     luego `system_prompt.md` (herramientas, SQL). Separador `---` entre bloques.
 
-    Nota: `domain_closure.md` (p. ej. LeilaAssistant) no se concatena aquí; el WorkerFactory
+    Nota: `domain_closure.md` no se concatena aquí; el WorkerFactory
     lo añade al **final** del prompt efectivo, después de la conciencia de tarea, para que el
     cierre de dominio sea la última instrucción visible al modelo.
     """

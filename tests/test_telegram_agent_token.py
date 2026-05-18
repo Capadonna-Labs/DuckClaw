@@ -10,7 +10,6 @@ from duckclaw.integrations.telegram import telegram_agent_token as m
 def test_telegram_agent_token_env_name() -> None:
     assert m.telegram_agent_token_env_name("bi_analyst") == "TELEGRAM_BI_ANALYST_TOKEN"
     assert m.telegram_agent_token_env_name("finanz") == "TELEGRAM_FINANZ_TOKEN"
-    assert m.telegram_agent_token_env_name("LeilaAssistant") == "TELEGRAM_LEILAASSISTANT_TOKEN"
 
 
 def test_resolve_prefers_standard_over_legacy(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,6 +5,8 @@
   "scripts": {
     "kanban": "npx -y vibe-kanban --port 3333",
     "admin:dev": "pnpm --dir apps/duckclaw-admin dev",
+    "admin:dev:tailscale": "pnpm --dir apps/duckclaw-admin dev:tailscale",
+    "admin:serve-tailscale": "bash scripts/tailscale_serve_admin.sh",
     "admin:build": "pnpm --dir apps/duckclaw-admin build",
     "admin:start": "pnpm --dir apps/duckclaw-admin start",
     "admin:lint": "pnpm --dir apps/duckclaw-admin lint",

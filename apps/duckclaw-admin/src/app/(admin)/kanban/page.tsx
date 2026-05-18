@@ -68,17 +68,7 @@ export default function KanbanPage() {
         <div>
           <h1 className="text-3xl font-black dark:text-dark-text">Tablero de agentes</h1>
           <p className="text-sm text-gov-gray-500 mt-1 max-w-xl">
-            Organiza la creación de agentes como en un tablero Trello. Inspirado en el flujo{' '}
-            <strong>Plan → Prompt → Review</strong> de{' '}
-            <a
-              href="https://vibekanban.com/"
-              target="_blank"
-              rel="noreferrer"
-              className="text-gov-blue-700 underline"
-            >
-              Vibe Kanban
-            </a>
-            .
+            Coordina las actividades de los agentes.
           </p>
         </div>
         <div className="flex gap-2">

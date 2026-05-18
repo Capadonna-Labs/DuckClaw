@@ -1491,18 +1491,7 @@ async def list_fly_commands() -> dict[str, Any]:
         {"cmd": cmd, "description": desc}
         for cmd, desc in load_guardrail_pipe_table("fly_commands", "help_entries")
     ]
-    leila = (os.environ.get("DUCKCLAW_LEILA_FLY_COMMANDS") or "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    if leila:
-        entries.extend(
-            {"cmd": cmd, "description": desc}
-            for cmd, desc in load_guardrail_pipe_table("fly_commands", "help_entries_leila")
-        )
-    return {"header": header, "commands": entries, "leila_enabled": leila}
+    return {"header": header, "commands": entries}
 
 
 @router.delete("/runtime/config", dependencies=[Depends(_require_admin_key)])
@@ -1826,6 +1815,25 @@ class OpsRunBody(BaseModel):
     op_id: str
 
 
+def _pm2_restart_interrupted(op_id: str, exit_code: int, stdout: str) -> bool:
+    """PM2 reinició el gateway y mató el proceso que ejecutaba el comando (SIGINT → -2)."""
+    if exit_code != -2:
+        return False
+    if "Applying action restartProcessId" not in stdout:
+        return False
+    if op_id == "pm2_restart_gateway":
+        return "DuckClaw-Gateway" in stdout
+    return False
+
+
+def _normalize_ops_result(op_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    exit_code = int(result.get("exit_code") or 1)
+    stdout = str(result.get("stdout") or "")
+    if _pm2_restart_interrupted(op_id, exit_code, stdout):
+        return {**result, "exit_code": 0}
+    return result
+
+
 @router.post("/ops/run", dependencies=[Depends(_require_admin_key)])
 async def run_ops_command(
     body: OpsRunBody,
@@ -1860,6 +1868,7 @@ async def run_ops_command(
     except Exception as exc:
         raise _problem(500, "Error ejecutando comando", str(exc)) from exc
 
+    result = _normalize_ops_result(op_id, result)
     _admin_audit("ops.run", op_id, " ".join(argv), actor=actor, meta=result)
     return {"ok": result.get("exit_code") == 0, "op_id": op_id, **result}
 

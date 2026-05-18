@@ -66,7 +66,6 @@ Estado: **implemented** = hay código/manifest; **partial** = diseño parcial; *
 | [AXIS_MAESTRO_ORCHESTRATOR.md](agents-axis/AXIS_MAESTRO_ORCHESTRATOR.md) | implemented |
 | [PQRSD_ASSISTANT_MEDELLIN.md](agents-axis/PQRSD_ASSISTANT_MEDELLIN.md) | implemented |
 | [PQRSD_SYNTHETIC_TRACES_GEMMA4.md](agents-axis/PQRSD_SYNTHETIC_TRACES_GEMMA4.md) | implemented |
-| [LEILA_ASSISTANT_MVP.md](agents-axis/LEILA_ASSISTANT_MVP.md) | implemented |
 | [BI_ANALYST_TEMPLATE.md](agents-axis/BI_ANALYST_TEMPLATE.md) | implemented |
 | [JOBHUNTER_OSINT.md](agents-axis/JOBHUNTER_OSINT.md) | implemented |
 | [SIATA_ANALYST.md](agents-axis/SIATA_ANALYST.md) | implemented |

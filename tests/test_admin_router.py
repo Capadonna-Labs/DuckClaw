@@ -727,7 +727,7 @@ def test_admin_sandbox_novnc_prepare(admin_client: TestClient, monkeypatch: pyte
     monkeypatch.setattr(
         sb,
         "ensure_browser_novnc_session",
-        lambda wid, sid: f"http://127.0.0.1:6080/vnc.html?autoconnect=1&worker={wid}&sid={sid}",
+        lambda wid, sid, **_: f"http://127.0.0.1:6080/vnc.html?autoconnect=1&worker={wid}&sid={sid}",
     )
 
     def _touch(_sid: str) -> None:
@@ -864,10 +864,16 @@ def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pyt
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     )
     import main as gateway_main
+    import routers.admin as admin_router
 
     async def _fake_invoke(*_a, **_k):
         return {"response": "ok"}
 
+    monkeypatch.setattr(
+        admin_router,
+        "_playground_team_context",
+        lambda **_: _mock_playground_team(workers=["default"]),
+    )
     monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
 
     r = admin_client.post(

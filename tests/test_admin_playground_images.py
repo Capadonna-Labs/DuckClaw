@@ -78,10 +78,17 @@ def test_playground_chat_with_images_mock_vlm(
     monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _fake_enrich)
 
     import main as gateway_main
+    import routers.admin as admin_router
+    from test_admin_router import _mock_playground_team
 
     async def _fake_invoke(*_a, **_k):
         return {"response": "ok", "assigned_worker_id": "default"}
 
+    monkeypatch.setattr(
+        admin_router,
+        "_playground_team_context",
+        lambda **_: _mock_playground_team(workers=["default"]),
+    )
     monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1")
 

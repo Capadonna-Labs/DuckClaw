@@ -40,6 +40,22 @@ def sse_done(
     return sse_data(meta)
 
 
+def sse_heartbeat(
+    text: str,
+    *,
+    kind: str = "status",
+    worker_id: str | None = None,
+    swarm_slot: int | None = None,
+) -> str:
+    meta: dict[str, Any] = {"type": "heartbeat", "text": text, "kind": kind}
+    wid = (worker_id or "").strip()
+    if wid:
+        meta["worker_id"] = wid
+    if swarm_slot is not None:
+        meta["swarm_slot"] = max(1, int(swarm_slot))
+    return sse_data(meta)
+
+
 def sse_error(message: str, *, status_hint: int | None = None) -> str:
     err: dict[str, Any] = {"type": "error", "message": message}
     if status_hint is not None:
@@ -49,6 +65,32 @@ def sse_error(message: str, *, status_hint: int | None = None) -> str:
 
 def sse_terminal_done() -> str:
     return "data: [DONE]\n\n"
+
+
+def friendly_chat_error_message(exc: BaseException) -> str:
+    """Mensaje legible para la UI admin cuando falla inferencia local."""
+    msg = str(exc).strip() or exc.__class__.__name__
+    low = msg.lower()
+    if "connection refused" in low or "errno 61" in low:
+        if "8080" in msg or ":8080" in low:
+            return (
+                f"{msg}\n\n"
+                "MLX texto (puerto 8080) no responde. En PM2 suele faltar «MLX-Inference»; "
+                "solo «MLX-Vision» escucha en 8081. Arranca el servidor mlx_lm en 8080 "
+                "(p. ej. `pm2 start` del ecosystem MLX) o usa `/model provider=deepseek`."
+            )
+        return (
+            f"{msg}\n\n"
+            "No hay servidor de inferencia en la URL configurada. "
+            "Revisa MLX_PORT / OPENAI_API_BASE en .env del gateway o cambia de proveedor con /model."
+        )
+    if "apiconnectionerror" in low or "connecterror" in low:
+        return (
+            f"{msg}\n\n"
+            "Error de conexión al proveedor LLM. Comprueba que el servicio esté en marcha "
+            "o cambia proveedor con `/model`."
+        )
+    return msg
 
 
 SSE_HEADERS = {
@@ -94,10 +136,14 @@ async def emit_chat_reply_sse(
     assigned_worker_id: str | None = None,
     usage_tokens: dict[str, Any] | None = None,
     worker_id: str | None = None,
+    elapsed_ms: int | None = None,
     chunk_chars: int = 12,
     delay_s: float = 0.018,
 ) -> AsyncIterator[str]:
     """Genera eventos SSE token a token y cierre [DONE]."""
+    extra: dict[str, Any] | None = None
+    if elapsed_ms is not None:
+        extra = {"elapsed_ms": int(elapsed_ms)}
     async for piece in stream_text_chunks(reply, chunk_chars=chunk_chars, delay_s=delay_s):
         yield sse_token(piece)
     yield sse_done(
@@ -105,5 +151,6 @@ async def emit_chat_reply_sse(
         assigned_worker_id=assigned_worker_id,
         usage_tokens=usage_tokens,
         worker_id=worker_id,
+        extra=extra,
     )
     yield sse_terminal_done()

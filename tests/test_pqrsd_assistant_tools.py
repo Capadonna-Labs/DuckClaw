@@ -116,8 +116,11 @@ def test_strip_mercenary_spec_for_pqrsd_assistant() -> None:
     assert _strip_mercenary_spec_for_pqrsd_assistant(out) is True
     assert "mercenary_spec" not in out
     out2 = {"assigned_worker_id": "finanz", "mercenary_spec": {"directive": "x", "timeout": 30}}
-    assert _strip_mercenary_spec_for_pqrsd_assistant(out2) is False
-    assert "mercenary_spec" in out2
+    assert _strip_mercenary_spec_for_pqrsd_assistant(out2) is True
+    assert "mercenary_spec" not in out2
+    out3 = {"assigned_worker_id": "Manager", "mercenary_spec": {"directive": "x", "timeout": 30}}
+    assert _strip_mercenary_spec_for_pqrsd_assistant(out3) is False
+    assert "mercenary_spec" in out3
 
 
 def test_pqrsd_tools_registered(tmp_path: Path) -> None:

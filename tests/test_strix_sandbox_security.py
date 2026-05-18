@@ -38,7 +38,7 @@ def test_quant_trader_security_policy_sandbox_ttl() -> None:
         / "Quant-Trader"
     )
     policy = load_security_policy("Quant-Trader", worker_dir=worker_dir)
-    assert policy.network.default == "deny"
+    assert policy.network.default == "allow"
     assert policy.max_execution_time_seconds == 600
 
 
@@ -68,6 +68,9 @@ def test_worker_manifest_browser_sandbox_flag() -> None:
 
     finanz = load_manifest("finanz")
     assert finanz.browser_sandbox is True
+
+    quant = load_manifest("Quant-Trader")
+    assert quant.browser_sandbox is True
 
 
 def test_security_violation_detection_for_ro_and_network_errors() -> None:

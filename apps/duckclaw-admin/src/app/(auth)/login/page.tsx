@@ -3,12 +3,20 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, ShieldCheck, Eye, EyeOff, Mail, Lock, AlertCircle, UserCircle } from 'lucide-react';
-import { useAuthStore } from '@/store/authStore';
+import { adminPostAuthPath, useAuthStore } from '@/store/authStore';
 import { DEV_LOGIN_HINT } from '@/config/adminUsers';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { loginWithCredentials, isAuthenticated, isLoading, loginError } = useAuthStore();
+  const {
+    loginWithCredentials,
+    isAuthenticated,
+    isLoading,
+    loginError,
+    hasHydrated,
+    returnTo,
+    setReturnTo,
+  } = useAuthStore();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,7 +35,11 @@ export default function LoginPage() {
       return;
     }
     await loginWithCredentials(email, password);
-    if (useAuthStore.getState().isAuthenticated) router.replace('/overview');
+    if (useAuthStore.getState().isAuthenticated) {
+      const { returnTo: saved } = useAuthStore.getState();
+      useAuthStore.getState().setReturnTo(null);
+      router.replace(adminPostAuthPath(saved));
+    }
   };
 
   const fillDemo = (demoEmail: string, demoPassword: string) => {

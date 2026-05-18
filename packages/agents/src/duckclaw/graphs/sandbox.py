@@ -27,9 +27,16 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from duckclaw.forge.schema import SecurityPolicy, load_security_policy, security_policy_to_docker_kwargs
+from duckclaw.forge.schema import (
+    SecurityPolicy,
+    load_security_policy,
+    resolve_security_policy_for_chat,
+    security_policy_to_docker_kwargs,
+)
 
 _log = logging.getLogger(__name__)
+
+# endregion
 
 # Cabecera inyectada antes del código del usuario (Strix / run_sandbox).
 # Telegram sendPhoto rechaza PNG con transparencia o procesamiento raro (IMAGE_PROCESS_FAILED):
@@ -219,6 +226,7 @@ class StrixSandboxManager:
         self.memory = memory
         self._containers: dict[str, Any] = {}
         self._session_image: dict[str, str] = {}
+        self._session_network_mode: dict[str, str] = {}
         self._novnc_host_ports: dict[str, int] = {}
 
     def _session_dirs(self, session_id: str) -> tuple[Path, Path]:
@@ -246,21 +254,33 @@ class StrixSandboxManager:
         allow_fb = image_override is None
         resolved_image = _ensure_image(client, desired_image, allow_python_fallback=allow_fb)
 
+        pol = policy or SecurityPolicy()
+        policy_kwargs = security_policy_to_docker_kwargs(pol)
+        desired_nm = str(policy_kwargs.get("network_mode", "none"))
+
         prev_img = self._session_image.get(session_id)
-        if prev_img and prev_img != resolved_image and session_id in self._containers:
+        prev_nm = self._session_network_mode.get(session_id)
+        if session_id in self._containers and (
+            (prev_img and prev_img != resolved_image) or (prev_nm and prev_nm != desired_nm)
+        ):
             try:
                 c_old = self._containers.pop(session_id)
                 c_old.stop(timeout=3)
                 c_old.remove(force=True)
             except Exception:
                 pass
+            self._session_network_mode.pop(session_id, None)
 
-        # Reusar si ya está corriendo y misma imagen
+        # Reusar si ya está corriendo y misma imagen + misma red
         if session_id in self._containers:
             try:
                 container = self._containers[session_id]
                 container.reload()
-                if container.status == "running" and self._session_image.get(session_id) == resolved_image:
+                if (
+                    container.status == "running"
+                    and self._session_image.get(session_id) == resolved_image
+                    and self._session_network_mode.get(session_id) == desired_nm
+                ):
                     return container
             except Exception:
                 pass
@@ -274,9 +294,6 @@ class StrixSandboxManager:
             pass
         except Exception:
             pass
-
-        pol = policy or SecurityPolicy()
-        policy_kwargs = security_policy_to_docker_kwargs(pol)
 
         # El sandbox siempre monta /workspace/data (RO) y /workspace/output (RW).
         # Si la policy intenta montar esos mismos targets, ignoramos esos mounts para evitar
@@ -343,6 +360,7 @@ class StrixSandboxManager:
             )
             raise
         self._session_image[session_id] = resolved_image
+        self._session_network_mode[session_id] = desired_nm
         self._containers[session_id] = container
         return container
 
@@ -515,6 +533,7 @@ class StrixSandboxManager:
             pass
         self._containers.pop(session_id, None)
         self._session_image.pop(session_id, None)
+        self._session_network_mode.pop(session_id, None)
         # Limpiar directorios temporales
         session_dir = _TMP_BASE / session_id
         shutil.rmtree(session_dir, ignore_errors=True)
@@ -533,6 +552,111 @@ def _get_manager() -> StrixSandboxManager:
     if _manager is None:
         _manager = StrixSandboxManager()
     return _manager
+
+
+def sandbox_runtime_status() -> dict[str, Any]:
+    """Flags de entorno y Docker para la consola admin (pestaña VNC)."""
+    pub = str(os.environ.get("STRIX_BROWSER_PUBLISH_NOVNC", "")).strip().lower()
+    return {
+        "docker_available": _docker_available(),
+        "publish_novnc": pub in ("1", "true", "yes", "on"),
+        "public_url": (os.environ.get("DUCKCLAW_PUBLIC_URL") or "").strip() or None,
+        "ttl_s": int(os.environ.get("DUCKCLAW_BROWSER_NOVNC_TTL_S", "600")),
+        "browser_image": _browser_image_name(),
+        "compute_image": _image_name(),
+    }
+
+
+def _container_kind_from_image(image: str) -> str:
+    browser = _browser_image_name().split(":")[0]
+    img = (image or "").strip()
+    if not img:
+        return "compute"
+    if img == _browser_image_name() or browser in img or "browser-env" in img:
+        return "browser"
+    return "compute"
+
+
+def list_strix_sandbox_containers() -> list[dict[str, Any]]:
+    """Contenedores Docker ``strix_sandbox_*`` + enriquecimiento noVNC en memoria."""
+    from duckclaw.graphs import novnc_registry as nr  # noqa: PLC0415
+
+    novnc_by_sid = {r["session_id"]: r for r in nr.list_active_novnc_sessions()}
+    in_proc: dict[str, dict[str, Any]] = {}
+    try:
+        mgr = _get_manager()
+        for sid, container in mgr._containers.items():
+            img = mgr._session_image.get(sid) or ""
+            status = "unknown"
+            try:
+                container.reload()
+                status = str(container.status or "unknown")
+            except Exception:
+                pass
+            in_proc[sid] = {
+                "session_id": sid,
+                "container_name": f"strix_sandbox_{sid}",
+                "status": status,
+                "image": img,
+                "kind": _container_kind_from_image(img),
+                "in_process": True,
+            }
+    except Exception:
+        pass
+
+    rows: dict[str, dict[str, Any]] = dict(in_proc)
+    if _docker_available():
+        try:
+            client = _docker_client()
+            for c in client.containers.list(all=True, filters={"name": "strix_sandbox_"}):
+                name = str(getattr(c, "name", "") or "")
+                if not name.startswith("strix_sandbox_"):
+                    continue
+                sid = name[len("strix_sandbox_") :]
+                if not sid:
+                    continue
+                tags = c.image.tags if c.image else []
+                img = tags[0] if tags else str(getattr(c.image, "id", "") or "")
+                row = rows.get(sid) or {
+                    "session_id": sid,
+                    "container_name": name,
+                    "in_process": False,
+                }
+                row["container_name"] = name
+                row["status"] = str(c.status or "unknown")
+                row["image"] = img or row.get("image") or ""
+                row["kind"] = _container_kind_from_image(row.get("image") or "")
+                rows[sid] = row
+        except Exception:
+            pass
+
+    out: list[dict[str, Any]] = []
+    for sid in sorted(rows.keys()):
+        row = rows[sid]
+        nv = novnc_by_sid.get(sid)
+        row["novnc_active"] = bool(nv)
+        row["seconds_remaining"] = float(nv["seconds_remaining"]) if nv else None
+        row["vnc_url"] = nv.get("vnc_url") if nv else None
+        row["expires_at"] = nv.get("expires_at") if nv else None
+        out.append(row)
+    for sid, nv in novnc_by_sid.items():
+        if sid not in rows:
+            out.append(
+                {
+                    "session_id": sid,
+                    "container_name": f"strix_sandbox_{sid}",
+                    "status": "novnc_only",
+                    "image": "",
+                    "kind": "browser",
+                    "in_process": False,
+                    "novnc_active": True,
+                    "seconds_remaining": float(nv.get("seconds_remaining") or 0),
+                    "vnc_url": nv.get("vnc_url"),
+                    "expires_at": nv.get("expires_at"),
+                }
+            )
+    out.sort(key=lambda r: str(r.get("session_id") or ""))
+    return out
 
 
 def data_inject(db: Any, sql: str, session_id: str) -> str:
@@ -682,6 +806,16 @@ def _default_browser_script_for_open_url(url: str) -> str:
     )
 
 
+def cleanup_sandbox_session_for_chat(chat_id: str) -> None:
+    """Detiene el contenedor Strix asociado a un chat_id (sanitizado como session_id)."""
+    from duckclaw.graphs.novnc_registry import sanitize_chat_to_session_id
+
+    sid = sanitize_chat_to_session_id((chat_id or "").strip())
+    if not sid:
+        return
+    _get_manager().cleanup(sid)
+
+
 def run_in_sandbox(
     db: Any,
     llm: Any,
@@ -695,6 +829,7 @@ def run_in_sandbox(
     worker_id: str = "",
     image_override: str | None = None,
     inject_python_header: bool = True,
+    chat_id: str | None = None,
 ) -> ExecutionResult:
     """Bucle de auto-corrección del spec (sección 5).
 
@@ -715,7 +850,12 @@ def run_in_sandbox(
 
     sid = session_id or uuid.uuid4().hex[:12]
     manager = _get_manager()
-    policy = load_security_policy(worker_id or "default")
+    wid = (worker_id or "default").strip() or "default"
+    policy_meta: dict[str, Any] = {}
+    if chat_id and db is not None:
+        policy, policy_meta = resolve_security_policy_for_chat(wid, db, chat_id)
+    else:
+        policy = load_security_policy(wid)
     secret_env = _load_allowed_secrets(policy)
     timeout_sec = max(1, min(int(policy.max_execution_time_seconds), 600))
 
@@ -1251,7 +1391,13 @@ def _browser_vnc_url_for_session(session_id: str) -> str | None:
         return None
 
 
-def ensure_browser_novnc_session(worker_id: str, session_id: str) -> str | None:
+def ensure_browser_novnc_session(
+    worker_id: str,
+    session_id: str,
+    *,
+    db: Any = None,
+    chat_id: str | None = None,
+) -> str | None:
     """Levanta o reutiliza el contenedor browser y registra noVNC (mismos pasos que ``execute`` antes de ``exec_run``).
 
     Idempotente por ``session_id``: ``run_in_sandbox`` / ``execute`` siguientes reutilizan el contenedor en memoria.
@@ -1264,7 +1410,11 @@ def ensure_browser_novnc_session(worker_id: str, session_id: str) -> str | None:
     if not sid:
         return None
     manager = _get_manager()
-    policy = load_security_policy(wid)
+    policy_meta: dict[str, Any] = {}
+    if chat_id and db is not None:
+        policy, policy_meta = resolve_security_policy_for_chat(wid, db, chat_id)
+    else:
+        policy = load_security_policy(wid)
     secret_env = _load_allowed_secrets(policy)
     img = _browser_image_name()
     data_dir, out_dir = manager._session_dirs(sid)
@@ -1295,8 +1445,10 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
         data_sql: str = "",
         session_id: str = "",
         worker_id: str = "",
+        chat_id: str = "",
     ) -> str:
         sid_eff = (session_id or "").strip() or uuid.uuid4().hex[:12]
+        cid = (chat_id or "").strip() or None
         code_eff = (code or "").strip()
         url_eff = (url or "").strip()
         if not code_eff and url_eff:
@@ -1325,6 +1477,7 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             worker_id=worker_id or "",
             image_override=_browser_image_name(),
             inject_python_header=False,
+            chat_id=cid,
         )
         st, jobs_n, parquet_name = _browser_sandbox_summary(result.stdout or "", result.artifacts or [])
         effective_ok = result.exit_code == 0 and not result.timed_out
@@ -1482,7 +1635,9 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
         data_sql: str = "",
         session_id: str = "",
         worker_id: str = "",
+        chat_id: str = "",
     ) -> str:
+        cid = (chat_id or "").strip() or None
         result = run_in_sandbox(
             db=db,
             llm=llm,
@@ -1492,6 +1647,7 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
             data_sql=data_sql or None,
             original_request=code,
             worker_id=worker_id or "",
+            chat_id=cid,
         )
         out = {
             "exit_code": result.exit_code,

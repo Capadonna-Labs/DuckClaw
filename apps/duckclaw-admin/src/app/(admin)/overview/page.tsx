@@ -59,7 +59,7 @@ export default function OverviewPage() {
         <div className="flex flex-wrap gap-3">
           <QuickLink href="/kanban" label="Tablero" />
           <QuickLink href="/projects/new" label="Crear agente" />
-          <QuickLink href="/templates" label="Plantillas" />
+          <QuickLink href="/templates" label="Workers" />
           <QuickLink href="/telegram" label="Telegram" />
           <QuickLink href="/integrations/edge-devices" label="Edge devices" />
           <QuickLink href="/commands" label="Fly commands" />

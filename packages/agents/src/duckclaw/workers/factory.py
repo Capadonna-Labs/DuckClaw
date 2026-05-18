@@ -2621,14 +2621,16 @@ def build_worker_graph(
         return out
 
     def _sandbox_enabled_for_state(state: dict) -> bool:
-        """Sandbox flag per chat/session (defaults to OFF)."""
+        """Sandbox flag per chat/session (defaults OFF; ON for admin UI si no hay override)."""
+        from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
         from duckclaw.graphs.on_the_fly_commands import get_chat_state
 
         chat_id = state.get("chat_id") or state.get("session_id") or "default"
         raw = get_chat_state(db, chat_id, "sandbox_enabled")
         v = (raw or "").strip().lower()
-        enabled = v in ("true", "1", "on", "sí", "si")
-        return enabled
+        if not v and is_admin_ui_chat_session(str(chat_id)):
+            return True
+        return v in ("true", "1", "on", "sí", "si")
 
     tools_sandbox_off = filter_tools_for_sandbox(tools, enabled=False)
     tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}
@@ -4663,12 +4665,13 @@ def build_worker_graph(
                         ):
                             if not str(invoke_args.get("worker_id") or "").strip():
                                 invoke_args["worker_id"] = worker_id
-                            if name in ("run_browser_sandbox", "pqrsd_run_identificacion_step1"):
-                                _cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
-                                if _cid and not str(invoke_args.get("session_id") or "").strip():
-                                    from duckclaw.graphs.novnc_registry import sanitize_chat_to_session_id
+                            _cid_sb = str(state.get("chat_id") or state.get("session_id") or "").strip()
+                            if _cid_sb and not str(invoke_args.get("chat_id") or "").strip():
+                                invoke_args["chat_id"] = _cid_sb
+                            if _cid_sb and not str(invoke_args.get("session_id") or "").strip():
+                                from duckclaw.graphs.novnc_registry import sanitize_chat_to_session_id
 
-                                    invoke_args["session_id"] = sanitize_chat_to_session_id(_cid)
+                                invoke_args["session_id"] = sanitize_chat_to_session_id(_cid_sb)
                         if name in ("pqrsd_upsert_radicacion_perfil", "pqrsd_registrar_radicacion_crm"):
                             if not isinstance(invoke_args, dict):
                                 invoke_args = {}
@@ -4685,7 +4688,17 @@ def build_worker_graph(
                             from duckclaw.graphs.sandbox import ensure_browser_novnc_session
 
                             _sid = str(invoke_args.get("session_id") or "").strip()
-                            _vnc_pre = ensure_browser_novnc_session(worker_id, _sid) if _sid else None
+                            _cid_sb = str(invoke_args.get("chat_id") or state.get("chat_id") or "").strip()
+                            _vnc_pre = (
+                                ensure_browser_novnc_session(
+                                    worker_id,
+                                    _sid,
+                                    db=db,
+                                    chat_id=_cid_sb or None,
+                                )
+                                if _sid
+                                else None
+                            )
                             _schedule_run_browser_novnc_tool_heartbeat(
                                 state,
                                 routing_worker_id=worker_id,

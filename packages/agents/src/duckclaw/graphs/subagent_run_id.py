@@ -38,7 +38,7 @@ import os
 import threading
 import time
 import uuid
-from typing import Final
+from typing import Any, Final
 
 _log = logging.getLogger(__name__)
 
@@ -79,6 +79,121 @@ def _fallback_bucket_key(tid: str, wid: str, chat_scope: str | None) -> tuple[st
     if chat_scope is None:
         return (tid, wid)
     return (tid, wid, chat_scope)
+
+
+def _parse_active_redis_key(key: str, tenant_id: str) -> tuple[str, str | None] | None:
+    """Devuelve (worker_id, chat_scope) desde clave Redis o None si no coincide."""
+    prefix = f"{_REDIS_ACTIVE_PREFIX}{tenant_id}:"
+    if not key.startswith(prefix):
+        return None
+    rest = key[len(prefix) :]
+    if not rest:
+        return None
+    parts = rest.split(":", 1)
+    wid = parts[0].strip()
+    if not wid:
+        return None
+    chat_scope = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+    return wid, chat_scope
+
+
+def _slots_from_sorted_tokens(
+    tokens: list[tuple[str, float]],
+    worker_id: str,
+    chat_scope: str | None,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for rank, (token, score) in enumerate(tokens):
+        out.append(
+            {
+                "worker_id": worker_id,
+                "slot": rank + 1,
+                "chat_scope": chat_scope,
+                "token": token,
+                "started_at": float(score),
+                "active": True,
+            }
+        )
+    return out
+
+
+def _list_fallback_swarm_slots(
+    tenant_id: str,
+    worker_ids: list[str] | None,
+) -> list[dict[str, Any]]:
+    tid = str(tenant_id or "default").strip() or "default"
+    allow = {w.strip() for w in (worker_ids or []) if w and w.strip()}
+    rows: list[dict[str, Any]] = []
+    with _fallback_lock:
+        for fbk, tok_map in _fallback_active.items():
+            if fbk[0] != tid:
+                continue
+            wid = fbk[1]
+            if allow and wid not in allow:
+                continue
+            chat_scope = fbk[2] if len(fbk) > 2 else None
+            sorted_toks = sorted(tok_map.items(), key=lambda x: x[1])
+            rows.extend(_slots_from_sorted_tokens(sorted_toks, wid, chat_scope))
+    return rows
+
+
+def _dedupe_swarm_slots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Un slot por (worker_id, slot); prefiere fila con chat_scope definido."""
+    best: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in rows:
+        wid = str(row.get("worker_id") or "")
+        slot = int(row.get("slot") or 0)
+        if not wid or slot < 1:
+            continue
+        key = (wid, slot)
+        prev = best.get(key)
+        if prev is None:
+            best[key] = row
+            continue
+        if prev.get("chat_scope") in (None, "") and row.get("chat_scope"):
+            best[key] = row
+    out = list(best.values())
+    out.sort(key=lambda r: (str(r.get("worker_id") or ""), int(r.get("slot") or 0)))
+    return out
+
+
+def list_active_swarm_slots(
+    tenant_id: str,
+    worker_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Lista instancias swarm activas (slots 1..n) por worker desde Redis o fallback memoria.
+    Cada fila: worker_id, slot, chat_scope, token, started_at, active.
+    """
+    tid = str(tenant_id or "default").strip() or "default"
+    allow = [w.strip() for w in (worker_ids or []) if w and w.strip()]
+    rows: list[dict[str, Any]] = []
+    url = _redis_url()
+    if url:
+        try:
+            import redis as redis_sync  # noqa: PLC0415
+
+            client = redis_sync.Redis.from_url(url, decode_responses=True)
+            pattern = f"{_REDIS_ACTIVE_PREFIX}{tid}:*"
+            cursor = 0
+            while True:
+                cursor, keys = client.scan(cursor=cursor, match=pattern, count=100)
+                for key in keys or []:
+                    parsed = _parse_active_redis_key(key, tid)
+                    if not parsed:
+                        continue
+                    wid, chat_scope = parsed
+                    if allow and wid not in allow:
+                        continue
+                    members = client.zrange(key, 0, -1, withscores=True)
+                    rows.extend(_slots_from_sorted_tokens(list(members), wid, chat_scope))
+                if cursor == 0:
+                    break
+            return _dedupe_swarm_slots(rows)
+        except Exception as exc:
+            _log.debug("list_active_swarm_slots: Redis SCAN falló (%s), uso fallback", exc)
+    rows = _list_fallback_swarm_slots(tid, allow or None)
+    return _dedupe_swarm_slots(rows)
 
 
 def acquire_subagent_slot(

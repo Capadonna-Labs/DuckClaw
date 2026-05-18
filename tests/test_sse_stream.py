@@ -10,7 +10,7 @@ _gw = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
 if str(_gw) not in sys.path:
     sys.path.insert(0, str(_gw))
 
-from core.sse_stream import emit_chat_reply_sse, sse_terminal_done, sse_token  # noqa: E402
+from core.sse_stream import emit_chat_reply_sse, sse_done, sse_terminal_done, sse_token  # noqa: E402
 
 
 def test_emit_chat_reply_sse_tokens_and_done():
@@ -37,3 +37,25 @@ def test_sse_token_format():
     line = sse_token("x")
     assert line.startswith("data: ")
     assert line.endswith("\n\n")
+
+
+def test_sse_done_includes_elapsed_ms():
+    line = sse_done(response="ok", extra={"elapsed_ms": 31760})
+    payload = json.loads(line[6:].strip())
+    assert payload["type"] == "done"
+    assert payload["elapsed_ms"] == 31760
+
+
+def test_emit_chat_reply_sse_done_elapsed_ms():
+    async def _run() -> dict[str, object] | None:
+        done_payload: dict[str, object] | None = None
+        async for ev in emit_chat_reply_sse("Hola", delay_s=0, elapsed_ms=1500):
+            if ev.startswith("data: {"):
+                payload = json.loads(ev[6:].strip())
+                if payload.get("type") == "done":
+                    done_payload = payload
+        return done_payload
+
+    payload = asyncio.run(_run())
+    assert payload is not None
+    assert payload.get("elapsed_ms") == 1500

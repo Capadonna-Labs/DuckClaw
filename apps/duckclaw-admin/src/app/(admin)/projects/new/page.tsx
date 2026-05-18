@@ -294,7 +294,7 @@ export default function NewProjectPage() {
             </label>
             {!useDefaultSkills && advancedMode && (
               <p className="text-xs text-gov-gray-500">
-                {selectedSkills.length} capacidades en la plantilla. Edítalas después en Plantillas si
+                {selectedSkills.length} capacidades en la plantilla. Edítalas después en Workers si
                 necesitas afinar.
               </p>
             )}

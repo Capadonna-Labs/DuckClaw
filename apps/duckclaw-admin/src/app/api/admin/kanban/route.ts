@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import type { KanbanCard, KanbanStatus } from '@/lib/kanbanTypes';
+import { syncKanbanCardsWithTeam } from '@/lib/kanbanSync';
 import { repoRoot } from '@/lib/localOps';
 
 const VALID: KanbanStatus[] = ['pendiente', 'en_progreso', 'completo'];
@@ -32,7 +33,15 @@ function newId(): string {
 }
 
 export async function GET() {
-  return NextResponse.json({ cards: loadCards() });
+  let cards = loadCards();
+  try {
+    const synced = await syncKanbanCardsWithTeam(cards);
+    cards = synced.cards;
+    if (synced.changed) saveCards(cards);
+  } catch {
+    /* gateway unreachable: return local cards only */
+  }
+  return NextResponse.json({ cards });
 }
 
 export async function POST(req: NextRequest) {

@@ -1588,24 +1588,82 @@ async def _invoke_chat_sse_body(
     tenant_id: str,
     **invoke_kwargs: Any,
 ):
-    """Generador SSE: invoca el grafo y emite tokens progresivos + [DONE]."""
-    from core.sse_stream import emit_chat_reply_sse, sse_error, sse_terminal_done
+    """Generador SSE: invoca el grafo, heartbeats admin en vivo y tokens + [DONE]."""
+    import asyncio
 
-    try:
-        result = await _invoke_chat(
+    from core.admin_chat_heartbeat import iter_admin_heartbeats
+    from core.sse_stream import (
+        emit_chat_reply_sse,
+        friendly_chat_error_message,
+        sse_error,
+        sse_heartbeat,
+        sse_terminal_done,
+    )
+    from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+    redis_client = invoke_kwargs.get("redis_client")
+    admin_session = is_admin_ui_chat_session(session_id)
+    stop = asyncio.Event()
+    heartbeat_task: asyncio.Task | None = None
+    heartbeat_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+    async def _pump_admin_heartbeats() -> None:
+        try:
+            async for item in iter_admin_heartbeats(redis_client, session_id, stop=stop):
+                await heartbeat_queue.put(item)
+        except asyncio.CancelledError:
+            raise
+
+    if admin_session and redis_client is not None:
+        heartbeat_task = asyncio.create_task(_pump_admin_heartbeats())
+
+    invoke_task = asyncio.create_task(
+        _invoke_chat(
             payload,
             worker_id,
             session_id,
             tenant_id,
             **invoke_kwargs,
         )
+    )
+
+    try:
+        while not invoke_task.done():
+            try:
+                hb = await asyncio.wait_for(heartbeat_queue.get(), timeout=0.2)
+                yield sse_heartbeat(
+                    str(hb.get("text") or ""),
+                    kind=str(hb.get("kind") or "status"),
+                    worker_id=str(hb.get("worker_id") or "") or None,
+                    swarm_slot=hb.get("swarm_slot"),
+                )
+            except asyncio.TimeoutError:
+                continue
+
+        while not heartbeat_queue.empty():
+            hb = heartbeat_queue.get_nowait()
+            yield sse_heartbeat(
+                str(hb.get("text") or ""),
+                kind=str(hb.get("kind") or "status"),
+                worker_id=str(hb.get("worker_id") or "") or None,
+                swarm_slot=hb.get("swarm_slot"),
+            )
+
+        result = await invoke_task
         reply = ""
         assigned: str | None = None
         usage: dict[str, Any] | None = None
+        elapsed_ms: int | None = None
         if isinstance(result, dict):
             reply = str(result.get("response") or result.get("reply") or "")
             assigned = result.get("assigned_worker_id")
             usage = result.get("usage_tokens")
+            raw_elapsed = result.get("elapsed_ms")
+            if raw_elapsed is not None:
+                try:
+                    elapsed_ms = int(raw_elapsed)
+                except (TypeError, ValueError):
+                    elapsed_ms = None
         else:
             reply = str(result or "")
         async for event in emit_chat_reply_sse(
@@ -1613,6 +1671,7 @@ async def _invoke_chat_sse_body(
             assigned_worker_id=assigned,
             usage_tokens=usage,
             worker_id=worker_id,
+            elapsed_ms=elapsed_ms,
         ):
             yield event
     except HTTPException as exc:
@@ -1620,8 +1679,24 @@ async def _invoke_chat_sse_body(
         yield sse_error(detail, status_hint=exc.status_code)
         yield sse_terminal_done()
     except Exception as exc:
-        yield sse_error(str(exc))
+        yield sse_error(friendly_chat_error_message(exc))
         yield sse_terminal_done()
+    finally:
+        stop.set()
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        if not invoke_task.done():
+            invoke_task.cancel()
+            try:
+                await invoke_task
+            except Exception:
+                pass
 
 
 async def _invoke_chat(
@@ -2162,12 +2237,34 @@ async def _invoke_chat(
         u = normalize_history_item({"role": "user", "content": message})
         a = normalize_history_item({"role": "assistant", "content": reply_plain_for_storage})
         if u and a:
+            saved_items = history_for_model + [u, a]
             await redis_save_chat_history(
                 redis_client,
                 tenant_id,
                 session_id,
-                history_for_model + [u, a],
+                saved_items,
             )
+            try:
+                from core.admin_conversations import (
+                    get_conversation_meta,
+                    upsert_conversation_meta,
+                )
+
+                existing_conv = await get_conversation_meta(redis_client, tenant_id, session_id)
+                conv_section = existing_conv.section if existing_conv else None
+                await upsert_conversation_meta(
+                    redis_client,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    actor=(username or "").strip(),
+                    section=conv_section,
+                    last_worker_id=(effective_worker_id or worker_id or "").strip(),
+                    user_message=message,
+                    assistant_message=reply_plain_for_storage or "",
+                    message_count=len(saved_items),
+                )
+            except Exception:
+                pass
     # ``response`` debe ser Markdown/texto plano: el webhook de Telegram y
     # ``_outbound_deliver_chat_text_sync`` aplican ``llm_markdown_to_telegram_html`` una sola vez.
     # Si aquí devolviéramos ``reply_text`` (ya HTML), la segunda pasada escapa ``<a>`` → el usuario ve

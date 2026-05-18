@@ -1,6 +1,13 @@
+# Strix: run_sandbox y run_browser_sandbox comparten policy.
+# default: allow → bridge para Playwright (noticias/URLs) y yfinance en execute_sandbox_script.
 network:
-  default: deny
-  allow_list: []
+  default: allow
+  allow_list:
+    - elcolombiano.com
+    - www.elcolombiano.com
+    - finance.yahoo.com
+    - query1.finance.yahoo.com
+    - query2.finance.yahoo.com
 filesystem:
   readonly_mounts:
     - "${DUCKCLAW_DATA_DIR}:/workspace/repo_db:ro"

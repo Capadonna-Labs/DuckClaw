@@ -786,6 +786,57 @@ async def _call_gemini_vision_multi(
     return _gemini_text_from_response(data if isinstance(data, dict) else {})
 
 
+def _validate_image_bytes(mime_type: str, image_bytes: bytes) -> str:
+    mt = (mime_type or "").strip().lower()
+    if mt not in _ALLOWED_MIME:
+        raise ValueError(f"MIME no permitido: {mt}")
+    if not image_bytes:
+        raise RuntimeError("imagen vacía")
+    limit = _max_image_bytes()
+    if len(image_bytes) > limit:
+        raise RuntimeError(f"imagen demasiado grande ({len(image_bytes)} > {limit})")
+    return mt
+
+
+async def run_vlm_on_image_bytes(
+    *,
+    image_bytes: bytes,
+    mime_type: str,
+    caption: str,
+    media_group_id: str = "",
+) -> dict[str, Any]:
+    """VLM sobre bytes en memoria (admin UI, tests)."""
+    mt = _validate_image_bytes(mime_type, image_bytes)
+    return await _run_vlm_single_from_bytes(
+        image_bytes=image_bytes,
+        mime_type=mt,
+        caption=caption,
+        media_group_id=media_group_id,
+    )
+
+
+async def run_vlm_on_images_batch(
+    *,
+    items: list[tuple[str, bytes]],
+    caption: str,
+    media_group_id: str = "",
+) -> dict[str, Any]:
+    """Hasta 3 imágenes; un solo VLM multimodal."""
+    if not items:
+        raise ValueError("items vacío")
+    if len(items) > 3:
+        items = items[:3]
+    dl: list[tuple[str, bytes]] = []
+    for mime_type, raw in items:
+        mt = _validate_image_bytes(mime_type, raw)
+        dl.append((mt, raw))
+    return await _run_vlm_album_from_bytes(
+        items=dl,
+        caption=caption,
+        media_group_id=media_group_id,
+    )
+
+
 async def process_visual_payload(
     *,
     bot_token: str,
@@ -793,19 +844,36 @@ async def process_visual_payload(
     caption: str,
     mime_type: str,
     media_group_id: str = "",
+    image_bytes: bytes | None = None,
 ) -> dict[str, Any]:
     """
-    Descarga media de Telegram, ejecuta VLM (MLX, Gemini, OpenAI según env) y purga archivo temporal.
+    Descarga media de Telegram (si no hay bytes), ejecuta VLM y purga archivo temporal.
     """
     mt = (mime_type or "").strip().lower()
-    if mt not in _ALLOWED_MIME:
-        raise ValueError(f"MIME no permitido: {mt}")
-    if not (file_id or "").strip():
-        raise ValueError("file_id vacío")
+    if image_bytes is None:
+        if mt not in _ALLOWED_MIME:
+            raise ValueError(f"MIME no permitido: {mt}")
+        if not (file_id or "").strip():
+            raise ValueError("file_id vacío")
+        image_bytes = await _telegram_download_file_bytes(bot_token, file_id)
+    else:
+        mt = _validate_image_bytes(mime_type, image_bytes)
+    return await _run_vlm_single_from_bytes(
+        image_bytes=image_bytes,
+        mime_type=mt,
+        caption=caption,
+        media_group_id=media_group_id,
+    )
 
-    image_bytes = await _telegram_download_file_bytes(bot_token, file_id)
-    if not image_bytes:
-        raise RuntimeError("imagen vacía")
+
+async def _run_vlm_single_from_bytes(
+    *,
+    image_bytes: bytes,
+    mime_type: str,
+    caption: str,
+    media_group_id: str = "",
+) -> dict[str, Any]:
+    mt = (mime_type or "").strip().lower()
     image_hash = hashlib.sha256(image_bytes).hexdigest()
 
     os.makedirs(_tmp_dir(), exist_ok=True)
@@ -1009,10 +1077,43 @@ async def process_visual_album_batch(
     items: list[tuple[str, str]],
     caption: str,
     media_group_id: str = "",
+    items_bytes: list[tuple[str, bytes]] | None = None,
 ) -> dict[str, Any]:
     """
     Hasta 3 imágenes por request (Telegram álbum); un solo VLM con varias image_url.
     """
+    if items_bytes is not None:
+        return await _run_vlm_album_from_bytes(
+            items=items_bytes,
+            caption=caption,
+            media_group_id=media_group_id,
+        )
+    if not items:
+        raise ValueError("items vacío")
+    if len(items) > 3:
+        items = items[:3]
+    dl: list[tuple[str, bytes]] = []
+    for file_id, mime_type in items:
+        mt = (mime_type or "").strip().lower()
+        if mt not in _ALLOWED_MIME:
+            raise ValueError(f"MIME no permitido: {mt}")
+        if not (file_id or "").strip():
+            raise ValueError("file_id vacío")
+        image_bytes = await _telegram_download_file_bytes(bot_token, file_id)
+        dl.append((mt, image_bytes))
+    return await _run_vlm_album_from_bytes(
+        items=dl,
+        caption=caption,
+        media_group_id=media_group_id,
+    )
+
+
+async def _run_vlm_album_from_bytes(
+    *,
+    items: list[tuple[str, bytes]],
+    caption: str,
+    media_group_id: str = "",
+) -> dict[str, Any]:
     if not items:
         raise ValueError("items vacío")
     if len(items) > 3:
@@ -1023,15 +1124,8 @@ async def process_visual_album_batch(
     composite = ""
     os.makedirs(_tmp_dir(), exist_ok=True)
     try:
-        for file_id, mime_type in items:
-            mt = (mime_type or "").strip().lower()
-            if mt not in _ALLOWED_MIME:
-                raise ValueError(f"MIME no permitido: {mt}")
-            if not (file_id or "").strip():
-                raise ValueError("file_id vacío")
-            image_bytes = await _telegram_download_file_bytes(bot_token, file_id)
-            if not image_bytes:
-                raise RuntimeError("imagen vacía")
+        for mime_type, image_bytes in items:
+            mt = _validate_image_bytes(mime_type, image_bytes)
             per_hashes.append(hashlib.sha256(image_bytes).hexdigest())
             dl.append((mt, image_bytes))
             with tempfile.NamedTemporaryFile(
@@ -1217,7 +1311,7 @@ async def process_visual_album_batch(
             "vlm_summary": summary[:4000],
             "confidence_score": float(confidence),
             "media_group_id": (media_group_id or "").strip(),
-            "image_count": len(items),
+            "image_count": len(dl),
         }
     finally:
         for p in tmp_paths:
@@ -1227,6 +1321,70 @@ async def process_visual_album_batch(
         except Exception:
             pass
         _vlm_memory_mitigation()
+
+
+_ADMIN_MAX_IMAGES = 3
+
+
+def decode_admin_image_b64(data_base64: str) -> bytes:
+    raw = (data_base64 or "").strip()
+    if not raw:
+        raise ValueError("data_base64 vacío")
+    if raw.startswith("data:") and "," in raw:
+        raw = raw.split(",", 1)[1]
+    try:
+        return base64.b64decode(raw, validate=True)
+    except Exception as exc:
+        raise ValueError("data_base64 inválido") from exc
+
+
+def format_vlm_enrichment_block(out: dict[str, Any], *, user_caption: str) -> str:
+    cap = (user_caption or "").strip() or "(sin caption)"
+    return (
+        f"Usuario dice: {cap}\n"
+        f"Contexto visual adjunto: {out['vlm_summary']}\n"
+        f"[VLM_CONTEXT image_hash={out.get('image_hash', '')} "
+        f"confidence={out.get('confidence_score', 0.0)}]"
+    ).strip()
+
+
+async def enrich_message_with_admin_images(
+    message: str,
+    images: list[dict[str, Any]] | None,
+) -> str:
+    """
+    Decodifica imágenes admin, ejecuta VLM y concatena bloques al mensaje del playground.
+    """
+    if not images:
+        return (message or "").strip()
+    if len(images) > _ADMIN_MAX_IMAGES:
+        raise ValueError(f"máximo {_ADMIN_MAX_IMAGES} imágenes por mensaje")
+
+    decoded: list[tuple[str, bytes]] = []
+    for img in images:
+        if not isinstance(img, dict):
+            raise ValueError("imagen inválida")
+        mime = str(img.get("mime_type") or img.get("mime") or "").strip().lower()
+        b64 = str(img.get("data_base64") or img.get("base64") or "")
+        decoded.append((mime, decode_admin_image_b64(b64)))
+
+    base = (message or "").strip()
+    caption = base or "Analiza esta imagen."
+
+    if len(decoded) == 1:
+        mt, raw = decoded[0]
+        out = await run_vlm_on_image_bytes(
+            image_bytes=raw,
+            mime_type=mt,
+            caption=caption,
+        )
+        blocks = [format_vlm_enrichment_block(out, user_caption=base)]
+    else:
+        out = await run_vlm_on_images_batch(items=decoded, caption=caption)
+        blocks = [format_vlm_enrichment_block(out, user_caption=base)]
+
+    parts = [p for p in [base, *blocks] if p]
+    return "\n\n".join(parts).strip()
 
 
 async def push_vlm_state_delta_redis(

@@ -72,3 +72,19 @@ def test_different_chats_independent_labels(monkeypatch: pytest.MonkeyPatch) -> 
     assert na == 1 and nb == 1
     m.release_subagent_slot(tid, w, ta, "111")
     m.release_subagent_slot(tid, w, tb, "222")
+
+
+def test_list_active_swarm_slots_two_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("DUCKCLAW_REDIS_URL", raising=False)
+    tid = f"tenant-{id(monkeypatch)}"
+    w = "Quant-Trader"
+    ta, na = m.acquire_subagent_slot(tid, w)
+    tb, nb = m.acquire_subagent_slot(tid, w)
+    assert {na, nb} == {1, 2}
+    slots = m.list_active_swarm_slots(tid, [w])
+    assert len(slots) == 2
+    assert {(s["worker_id"], s["slot"]) for s in slots} == {(w, 1), (w, 2)}
+    m.release_subagent_slot(tid, w, ta)
+    m.release_subagent_slot(tid, w, tb)
+    assert m.list_active_swarm_slots(tid, [w]) == []

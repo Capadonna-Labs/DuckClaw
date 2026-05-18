@@ -188,6 +188,46 @@ def get_existing_token_and_port(session_id: str) -> tuple[str | None, int | None
         return (tok, port) if tok and port else (None, None)
 
 
+def list_active_novnc_sessions(*, include_host_port: bool = False) -> list[dict[str, Any]]:
+    """Sesiones noVNC vigentes para admin/observabilidad."""
+    now = time.time()
+    out: list[dict[str, Any]] = []
+    with _lock:
+        for sid, info in list(_sessions.items()):
+            expires_at = float(info.get("expires_at") or 0)
+            if expires_at <= now:
+                continue
+            tok = str(info.get("token") or "")
+            port = int(info.get("host_port") or 0)
+            if not tok or port <= 0:
+                continue
+            row: dict[str, Any] = {
+                "session_id": sid,
+                "expires_at": expires_at,
+                "seconds_remaining": max(0.0, expires_at - now),
+                "novnc_active": True,
+                "vnc_url": build_vnc_url(tok, port),
+            }
+            if include_host_port:
+                row["host_port"] = port
+            out.append(row)
+    out.sort(key=lambda r: str(r.get("session_id") or ""))
+    return out
+
+
+def get_session_expires_at(session_id: str) -> float | None:
+    """Unix timestamp de expiración si la sesión noVNC sigue registrada."""
+    sid = (session_id or "").strip()
+    with _lock:
+        info = _sessions.get(sid)
+        if not info:
+            return None
+        exp = float(info.get("expires_at") or 0)
+        if exp <= time.time():
+            return None
+        return exp
+
+
 def build_vnc_url(token: str, host_port: int) -> str:
     """URL para abrir noVNC: pública si DUCKCLAW_PUBLIC_URL; si no, localhost directo al puerto."""
     from urllib.parse import quote

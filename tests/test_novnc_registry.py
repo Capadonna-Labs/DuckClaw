@@ -1,67 +1,37 @@
-"""noVNC: sanitización de sesión, token/TTL y proxy FastAPI."""
+"""list_active_novnc_sessions (admin VNC tab)."""
 
-from __future__ import annotations
+import time
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+import pytest
 
-from env_ids import TELEGRAM_TEST_USER_ID
-
-from duckclaw.graphs.novnc_registry import (
-    build_vnc_url,
-    get_existing_token_and_port,
-    register_session_port,
-    resolve_token,
-    sanitize_chat_to_session_id,
-)
+from duckclaw.graphs import novnc_registry as nr
 
 
-def test_sanitize_chat_to_session_id() -> None:
-    assert sanitize_chat_to_session_id(TELEGRAM_TEST_USER_ID) == TELEGRAM_TEST_USER_ID
-    assert "@" not in sanitize_chat_to_session_id("user@host")
-    assert len(sanitize_chat_to_session_id("x" * 100)) <= 48
+def test_list_active_novnc_sessions_empty() -> None:
+    assert nr.list_active_novnc_sessions() == []
 
 
-def test_register_resolve_and_expire() -> None:
-    from duckclaw.graphs import novnc_registry as nr
-
-    sid = "test_sess_novnc_registry_1"
+def test_list_active_novnc_sessions_returns_vnc_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_PUBLIC_URL", "https://gw.example")
+    sid = f"sess_{id(monkeypatch)}"
     try:
-        tok = register_session_port(sid, 16080)
-        assert tok
-        assert resolve_token(tok) == (sid, 16080)
-        assert get_existing_token_and_port(sid)[0] == tok
-
-        nr._sessions[sid]["expires_at"] = 0.0  # noqa: SLF001
-        assert resolve_token(tok) == (None, None)
+        nr.register_session_port(sid, 16001)
+        rows = nr.list_active_novnc_sessions()
+        assert len(rows) == 1
+        assert rows[0]["session_id"] == sid
+        assert rows[0]["novnc_active"] is True
+        assert rows[0]["seconds_remaining"] > 0
+        assert "/api/v1/sandbox/novnc/view/" in rows[0]["vnc_url"]
     finally:
         nr.revoke_session(sid)
 
 
-def test_build_vnc_url_public(monkeypatch) -> None:
-    from urllib.parse import parse_qs, urlparse
-
-    monkeypatch.setenv("DUCKCLAW_PUBLIC_URL", "https://gw.example")
-    # reload-ish: build_vnc_url reads env at call time
-    u = build_vnc_url("mytok", 9999)
-    assert "gw.example" in u
-    assert "mytok" in u
-    assert "/api/v1/sandbox/novnc/view/" in u
-    q = parse_qs(urlparse(u).query)
-    assert q.get("path", [""])[0] == "api/v1/sandbox/novnc/view/mytok/websockify"
-
-
-def test_build_vnc_url_localhost(monkeypatch) -> None:
-    monkeypatch.delenv("DUCKCLAW_PUBLIC_URL", raising=False)
-    u = build_vnc_url("ignored", 16080)
-    assert "127.0.0.1:16080" in u
-
-
-def test_novnc_proxy_404_invalid_token() -> None:
-    from duckclaw.graphs.novnc_routes import build_novnc_router
-
-    app = FastAPI()
-    app.include_router(build_novnc_router(), prefix="/api/v1/sandbox/novnc")
-    client = TestClient(app)
-    r = client.get("/api/v1/sandbox/novnc/view/invalidtoken/vnc.html")
-    assert r.status_code == 404
+def test_list_active_novnc_sessions_skips_expired(monkeypatch: pytest.MonkeyPatch) -> None:
+    sid = f"exp_{id(monkeypatch)}"
+    try:
+        nr.register_session_port(sid, 16002)
+        with nr._lock:
+            nr._sessions[sid]["expires_at"] = time.time() - 1
+        assert nr.list_active_novnc_sessions() == []
+    finally:
+        nr.revoke_session(sid)

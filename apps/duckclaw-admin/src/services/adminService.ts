@@ -6,6 +6,8 @@ import type {
   TemplateSummary,
   VaultBinding,
   VaultOption,
+  ConsoleUser,
+  SharedDbGrant,
   WhitelistUser,
 } from '@/types/admin';
 
@@ -66,6 +68,72 @@ export interface TrainPipelineResult {
   stderr?: string;
   records?: number;
   stats?: Record<string, unknown>;
+}
+
+export interface DuckdbTableCatalog {
+  vault_path: string;
+  schemas: Record<string, string[]>;
+}
+
+export interface DuckdbQueryResult {
+  vault_path: string;
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+  limit_applied?: number;
+}
+
+export interface PgqGraphNode {
+  id: string;
+  label: string;
+  group: string;
+}
+
+export interface PgqGraphLink {
+  source: string;
+  target: string;
+  label: string;
+}
+
+export interface PgqGraphResult {
+  vault_path: string;
+  nodes: PgqGraphNode[];
+  links: PgqGraphLink[];
+  warning?: string;
+}
+
+export interface VectorMemoryHit {
+  id: string;
+  text: string;
+  metadata: {
+    source: string;
+    created_at: string | null;
+    embedding_status: string;
+  };
+  distance: number | null;
+}
+
+export interface VectorSearchResult {
+  vault_path: string;
+  results: VectorMemoryHit[];
+  mode: 'vector' | 'lexical' | 'recent' | 'none' | string;
+  warning?: string | null;
+}
+
+export interface AdminConversation {
+  session_id: string;
+  tenant_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  actor: string;
+  section: string;
+  last_worker_id: string;
+  workers: string[];
+  last_message_preview: string;
+  message_count: number;
+  origin: string;
+  messages?: { role: string; content: string }[];
 }
 
 function sessionHeaders(): HeadersInit {
@@ -234,12 +302,90 @@ export const adminService = {
       { method: 'DELETE' }
     ),
 
+  getAccessOverview: (tenantId: string) =>
+    adminFetch<{
+      tenant_id: string;
+      console_users: number;
+      telegram_users: number;
+      shared_grants: number;
+      db_path?: string;
+    }>(`/access/overview?tenant_id=${encodeURIComponent(tenantId)}`),
+
+  listConsoleUsers: () =>
+    adminFetch<{ users: ConsoleUser[]; db_path?: string; warning?: string }>('/console-users'),
+
+  upsertConsoleUser: (body: {
+    email: string;
+    nombre: string;
+    rol: string;
+    password?: string;
+    initials?: string;
+    active?: boolean;
+  }) =>
+    adminFetch<{ ok: boolean; user: ConsoleUser }>('/console-users', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  patchConsoleUser: (
+    email: string,
+    body: { nombre?: string; rol?: string; password?: string; initials?: string; active?: boolean }
+  ) =>
+    adminFetch<{ ok: boolean; user: ConsoleUser }>(
+      `/console-users?email=${encodeURIComponent(email)}`,
+      { method: 'PATCH', body: JSON.stringify(body) }
+    ),
+
+  deleteConsoleUser: (email: string) =>
+    adminFetch<{ ok: boolean }>(`/console-users?email=${encodeURIComponent(email)}`, {
+      method: 'DELETE',
+    }),
+
+  listSharedGrants: (tenantId: string) =>
+    adminFetch<{ tenant_id: string; grants: SharedDbGrant[]; db_path?: string; warning?: string }>(
+      `/access/shared-grants?tenant_id=${encodeURIComponent(tenantId)}`
+    ),
+
+  grantSharedAccess: (body: { tenant_id: string; user_id: string; resource_key: string }) =>
+    adminFetch<{ ok: boolean }>('/access/shared-grants', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  revokeSharedAccess: (tenantId: string, userId: string, resourceKey: string) =>
+    adminFetch<{ ok: boolean }>(
+      `/access/shared-grants?tenant_id=${encodeURIComponent(tenantId)}&user_id=${encodeURIComponent(userId)}&resource_key=${encodeURIComponent(resourceKey)}`,
+      { method: 'DELETE' }
+    ),
+
   listFlyCommands: () =>
     adminFetch<{ header: string; commands: FlyCommandEntry[] }>(
       '/fly-commands'
     ),
 
   listVaults: () => adminFetch<{ vaults: { path: string; scope: string }[] }>('/runtime/vaults'),
+
+  getDuckdbTables: (vaultPath?: string) => {
+    const q = vaultPath ? `?vault_path=${encodeURIComponent(vaultPath)}` : '';
+    return adminFetch<DuckdbTableCatalog>(`/duckdb/tables${q}`);
+  },
+
+  runDuckdbQuery: (body: { query: string; vault_path?: string }) =>
+    adminFetch<DuckdbQueryResult>('/duckdb/query', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getDuckdbPgqGraph: (vaultPath?: string) => {
+    const q = vaultPath ? `?vault_path=${encodeURIComponent(vaultPath)}` : '';
+    return adminFetch<PgqGraphResult>(`/duckdb/pgq-graph${q}`);
+  },
+
+  searchDuckdbVectorMemory: (body: { query?: string; limit?: number; vault_path?: string }) =>
+    adminFetch<VectorSearchResult>('/duckdb/vector-search', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   getRuntimeConfig: (vaultPath: string, chatId: string) =>
     adminFetch<{
@@ -270,6 +416,74 @@ export const adminService = {
     adminFetch<{ messages: unknown[] }>(
       `/chats/history?tenant_id=${encodeURIComponent(tenantId)}&session_id=${encodeURIComponent(sessionId)}`
     ),
+
+  listConversations: (params?: {
+    tenant_id?: string;
+    section?: string;
+    worker?: string;
+    actor?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.tenant_id) q.set('tenant_id', params.tenant_id);
+    if (params?.section) q.set('section', params.section);
+    if (params?.worker) q.set('worker', params.worker);
+    if (params?.actor) q.set('actor', params.actor);
+    if (params?.q) q.set('q', params.q);
+    if (params?.limit != null) q.set('limit', String(params.limit));
+    if (params?.offset != null) q.set('offset', String(params.offset));
+    const qs = q.toString();
+    return adminFetch<{
+      tenant_id: string;
+      conversations: AdminConversation[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/conversations${qs ? `?${qs}` : ''}`);
+  },
+
+  createConversation: (body: { title?: string; section?: string; worker_id?: string }, tenantId?: string) => {
+    const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+    return adminFetch<AdminConversation>(`/conversations${q}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  getConversation: (sessionId: string, tenantId?: string) => {
+    const q = new URLSearchParams();
+    if (tenantId) q.set('tenant_id', tenantId);
+    const qs = q.toString();
+    return adminFetch<AdminConversation>(
+      `/conversations/${encodeURIComponent(sessionId)}${qs ? `?${qs}` : ''}`
+    );
+  },
+
+  patchConversation: (sessionId: string, title: string, tenantId?: string) => {
+    const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+    return adminFetch<AdminConversation>(`/conversations/${encodeURIComponent(sessionId)}${q}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    });
+  },
+
+  deleteConversation: (sessionId: string, tenantId?: string) => {
+    const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+    return adminFetch<{ ok: boolean; session_id: string }>(
+      `/conversations/${encodeURIComponent(sessionId)}${q}`,
+      { method: 'DELETE' }
+    );
+  },
+
+  reindexConversations: (tenantId?: string) => {
+    const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+    return adminFetch<{ tenant_id: string; indexed: number; scanned: number }>(
+      `/conversations/reindex${q}`,
+      { method: 'POST' }
+    );
+  },
 
   getTrainStatus: () => adminFetch<TrainStatus>('/train/status'),
 
@@ -356,6 +570,19 @@ export const adminService = {
         live?: { reachable: boolean; status_code?: number; error?: string };
       };
       stdio_servers: { id: string; enabled: boolean; note: string }[];
+      official_reference: {
+        source_repo: string;
+        source_label: string;
+        registry_url: string;
+        servers: {
+          id: string;
+          name: string;
+          description: string;
+          runtime: string;
+          install: string;
+          repo_path: string;
+        }[];
+      };
       github_note: string;
       _gateway_stale?: boolean;
     }>('/catalog/mcp'),
@@ -401,6 +628,89 @@ export const adminService = {
   deleteKanbanCard: (id: string) =>
     adminFetch<{ ok: boolean }>(`/kanban?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  getSandboxStatus: () =>
+    adminFetch<{
+      ready: boolean;
+      hints: string[];
+      docker_available: boolean;
+      publish_novnc: boolean;
+      public_url: string | null;
+      ttl_s: number;
+      browser_image: string;
+      compute_image: string;
+    }>('/sandbox/status'),
+
+  getSandboxSessions: () =>
+    adminFetch<{
+      count: number;
+      containers: {
+        session_id: string;
+        container_name: string;
+        status: string;
+        image: string;
+        kind: 'browser' | 'compute' | string;
+        novnc_active?: boolean;
+        seconds_remaining?: number | null;
+        vnc_url?: string | null;
+        in_process?: boolean;
+      }[];
+    }>('/sandbox/sessions'),
+
+  getSandboxChatPolicy: (params: { chatId: string; workerId?: string; tenantId?: string }) => {
+    const q = new URLSearchParams();
+    q.set('chat_id', params.chatId);
+    if (params.workerId) q.set('worker_id', params.workerId);
+    if (params.tenantId) q.set('tenant_id', params.tenantId);
+    return adminFetch<{
+      chat_id: string;
+      worker_id: string;
+      sandbox_enabled: boolean;
+      sandbox_network_enabled: string | null;
+      yaml_network_default: string;
+      effective_network: string;
+      network_toggle_available: boolean;
+      browser_sandbox: boolean;
+    }>(`/sandbox/chat-policy?${q.toString()}`);
+  },
+
+  setSandboxNetwork: (body: {
+    chatId: string;
+    enabled: boolean;
+    workerId?: string;
+    tenantId?: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      recreated: boolean;
+      effective_network: string;
+      network_toggle_available: boolean;
+    }>('/sandbox/network', {
+      method: 'POST',
+      body: JSON.stringify({
+        chat_id: body.chatId,
+        enabled: body.enabled,
+        worker_id: body.workerId,
+        tenant_id: body.tenantId,
+      }),
+    }),
+
+  prepareNovncSession: (body: { chatId?: string; workerId?: string; tenantId?: string }) =>
+    adminFetch<{
+      session_id: string;
+      chat_id: string;
+      worker_id: string;
+      vnc_url: string;
+      expires_at: number | null;
+      seconds_remaining: number | null;
+    }>('/sandbox/novnc/prepare', {
+      method: 'POST',
+      body: JSON.stringify({
+        chat_id: body.chatId,
+        worker_id: body.workerId,
+        tenant_id: body.tenantId,
+      }),
+    }),
+
   getPlaygroundConfig: (params?: {
     telegram_user_id?: string;
     tenant_id?: string;
@@ -412,7 +722,8 @@ export const adminService = {
     if (params?.chat_id) q.set('chat_id', params.chat_id);
     const qs = q.toString();
     return adminFetch<{
-      llm: { provider: string; model: string; base_url: string };
+      llm: { provider: string; model: string; base_url: string; scope?: string };
+      config_chat_id?: string;
       catalog: {
         id: string;
         label: string;
@@ -437,6 +748,29 @@ export const adminService = {
     }>(`/playground/config${qs ? `?${qs}` : ''}`);
   },
 
+  setPlaygroundModel: (body: {
+    chat_id: string;
+    provider: string;
+    model?: string;
+    base_url?: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      message: string;
+      chat_id: string;
+      llm: { provider: string; model: string; base_url: string; scope?: string };
+      catalog: {
+        id: string;
+        label: string;
+        kind: string;
+        active?: boolean;
+        keys_ok?: boolean;
+      }[];
+    }>('/playground/model', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
   playgroundChat: (body: {
     worker_id: string;
     message: string;
@@ -444,6 +778,7 @@ export const adminService = {
     tenant_id?: string;
     telegram_user_id?: string;
     stream?: boolean;
+    images?: { mime_type: string; data_base64: string }[];
   }) =>
     adminFetch<{
       ok: boolean;
@@ -464,13 +799,21 @@ export const adminService = {
       chat_id?: string;
       tenant_id?: string;
       telegram_user_id?: string;
+      images?: { mime_type: string; data_base64: string }[];
     },
     handlers: {
       onToken: (chunk: string) => void;
+      onHeartbeat?: (payload: {
+        text: string;
+        kind?: 'plan' | 'tool' | 'status';
+        worker_id?: string;
+        swarm_slot?: number;
+      }) => void;
       onDone?: (meta: {
         response: string;
         assigned_worker_id?: string;
         usage_tokens?: Record<string, number>;
+        elapsed_ms?: number;
       }) => void;
     },
     options?: { signal?: AbortSignal }
@@ -501,11 +844,19 @@ export const adminService = {
         if (ev.type === 'token' && ev.content) {
           full += ev.content;
           handlers.onToken(ev.content);
+        } else if (ev.type === 'heartbeat' && ev.text) {
+          handlers.onHeartbeat?.({
+            text: ev.text,
+            kind: ev.kind,
+            worker_id: ev.worker_id,
+            swarm_slot: ev.swarm_slot,
+          });
         } else if (ev.type === 'done') {
           handlers.onDone?.({
             response: ev.response || full,
             assigned_worker_id: ev.assigned_worker_id,
             usage_tokens: ev.usage_tokens,
+            elapsed_ms: ev.elapsed_ms,
           });
         } else if (ev.type === 'error') {
           throw new Error(ev.message);

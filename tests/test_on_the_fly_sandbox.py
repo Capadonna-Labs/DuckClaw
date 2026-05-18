@@ -80,6 +80,34 @@ def test_filter_tools_for_sandbox_removes_run_sandbox() -> None:
     ]
 
 
+def test_admin_ui_chat_defaults_sandbox_enabled(tmp_path) -> None:
+    """admin-conv-* sin clave explícita debe exponer run_browser_sandbox (sandbox ON por defecto)."""
+
+    from langchain_core.messages import AIMessage
+
+    class _StubBoundLLM:
+        def __init__(self, tool_names: list[str]) -> None:
+            self._tool_names = tool_names
+
+        def invoke(self, _messages: list[Any]) -> AIMessage:
+            enabled = "run_browser_sandbox" in self._tool_names
+            return AIMessage(content="BROWSER_ON" if enabled else "BROWSER_OFF")
+
+    class _StubLLM:
+        def bind_tools(self, tools: list[Any], **_kwargs: Any) -> _StubBoundLLM:
+            tool_names = [getattr(t, "name", "") for t in tools if getattr(t, "name", "")]
+            return _StubBoundLLM(tool_names)
+
+    db_path = str(tmp_path / "finanz_admin_default_sandbox.duckdb")
+    db = DuckClaw(db_path)
+    chat_admin = "admin-conv-test-default-sandbox"
+    worker_graph = build_worker_graph("finanz", db_path, _StubLLM(), reuse_db=db)
+    res = worker_graph.invoke(
+        {"incoming": "abre una pagina", "history": [], "chat_id": chat_admin}
+    )
+    assert res.get("reply", "").strip() == "BROWSER_ON"
+
+
 def test_worker_sandbox_binding_respects_chat_id(tmp_path) -> None:
     """
     Smoke test unitario:

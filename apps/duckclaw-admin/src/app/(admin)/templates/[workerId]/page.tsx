@@ -1,13 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { adminService } from '@/services/adminService';
 import type { TemplateDetail } from '@/types/admin';
 import { useAuthStore } from '@/store/authStore';
-import { ChevronRight, Save, CheckCircle } from 'lucide-react';
+import { ChevronRight, Save, CheckCircle, Eye, FileCode, Columns2 } from 'lucide-react';
 import { TemplateVaultPanel } from '@/components/templates/TemplateVaultPanel';
+import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
+
+type MarkdownViewMode = 'edit' | 'preview' | 'split';
+
+function isMarkdownPath(path: string): boolean {
+  return /\.md$/i.test(path);
+}
 
 const EDITABLE = /\.(ya?ml|md|sql|txt|json|py)$/i;
 
@@ -30,8 +37,11 @@ export default function TemplateEditorPage() {
   const [detail, setDetail] = useState<TemplateDetail | null>(null);
   const [tab, setTab] = useState<string>('system_prompt.md');
   const [content, setContent] = useState('');
+  const [markdownView, setMarkdownView] = useState<MarkdownViewMode>('edit');
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const markdownFile = isMarkdownPath(tab);
 
   const { promptFiles, otherFiles } = useMemo(() => {
     if (!detail?.files) return { promptFiles: [] as string[], otherFiles: [] as string[] };
@@ -66,6 +76,7 @@ export default function TemplateEditorPage() {
   useEffect(() => {
     if (!detail) return;
     setContent(detail.contents[tab] ?? '');
+    if (!isMarkdownPath(tab)) setMarkdownView('edit');
   }, [tab, detail]);
 
   const save = async () => {
@@ -92,7 +103,7 @@ export default function TemplateEditorPage() {
     <div className="space-y-4">
       <nav className="flex items-center gap-2 text-sm text-gov-gray-500">
         <Link href="/templates" className="hover:text-gov-blue-700">
-          Plantillas
+          Workers
         </Link>
         <ChevronRight size={14} />
         <span className="font-mono text-gov-gray-900 dark:text-dark-text">{workerId}</span>
@@ -153,14 +164,120 @@ export default function TemplateEditorPage() {
             </p>
           )}
           {error && <p className="text-sm text-red-600">{error}</p>}
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
+          {markdownFile && (
+            <MarkdownViewToggle
+              mode={markdownView}
+              canSplit={canWrite}
+              onChange={setMarkdownView}
+            />
+          )}
+          <TemplateFileEditor
+            content={content}
+            onChange={setContent}
             readOnly={!canWrite}
-            className="w-full min-h-[420px] font-mono text-sm p-4 rounded-2xl border dark:border-dark-border dark:bg-dark-surface leading-relaxed"
-            spellCheck={false}
+            markdownFile={markdownFile}
+            viewMode={markdownView}
           />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MarkdownViewToggle({
+  mode,
+  canSplit,
+  onChange,
+}: {
+  mode: MarkdownViewMode;
+  canSplit: boolean;
+  onChange: (m: MarkdownViewMode) => void;
+}) {
+  const btn = (id: MarkdownViewMode, label: string, icon: ReactNode) => (
+    <button
+      type="button"
+      onClick={() => onChange(id)}
+      className={`px-3 py-1.5 text-xs rounded-lg border flex items-center gap-1.5 ${
+        mode === id
+          ? 'bg-gov-blue-700 text-white border-gov-blue-700'
+          : 'dark:border-dark-border hover:bg-gov-gray-50 dark:hover:bg-dark-surface'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+  return (
+    <div className="flex flex-wrap gap-2" role="tablist" aria-label="Vista del archivo Markdown">
+      {btn('edit', 'Markdown', <FileCode size={14} />)}
+      {btn('preview', 'Vista previa', <Eye size={14} />)}
+      {canSplit ? btn('split', 'Dividido', <Columns2 size={14} />) : null}
+    </div>
+  );
+}
+
+const editorTextareaClass =
+  'w-full min-h-[420px] font-mono text-sm p-4 rounded-2xl border dark:border-dark-border dark:bg-dark-surface leading-relaxed';
+
+function TemplateFileEditor({
+  content,
+  onChange,
+  readOnly,
+  markdownFile,
+  viewMode,
+}: {
+  content: string;
+  onChange: (v: string) => void;
+  readOnly: boolean;
+  markdownFile: boolean;
+  viewMode: MarkdownViewMode;
+}) {
+  if (!markdownFile || viewMode === 'edit') {
+    return (
+      <textarea
+        value={content}
+        onChange={(e) => onChange(e.target.value)}
+        readOnly={readOnly}
+        className={editorTextareaClass}
+        spellCheck={false}
+      />
+    );
+  }
+
+  if (viewMode === 'preview') {
+    return (
+      <div
+        className="w-full min-h-[420px] p-4 rounded-2xl border dark:border-dark-border bg-white dark:bg-dark-surface overflow-y-auto"
+        aria-label="Vista previa Markdown"
+      >
+        {content.trim() ? (
+          <ChatMarkdown content={content} className="text-sm" />
+        ) : (
+          <p className="text-sm text-gov-gray-400 italic">Sin contenido</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <textarea
+        value={content}
+        onChange={(e) => onChange(e.target.value)}
+        readOnly={readOnly}
+        className={editorTextareaClass}
+        spellCheck={false}
+        aria-label="Editor Markdown"
+      />
+      <div
+        className="min-h-[420px] p-4 rounded-2xl border dark:border-dark-border bg-gov-gray-50/80 dark:bg-dark-bg overflow-y-auto"
+        aria-label="Vista previa Markdown"
+      >
+        {content.trim() ? (
+          <ChatMarkdown content={content} className="text-sm" />
+        ) : (
+          <p className="text-sm text-gov-gray-400 italic">La vista previa aparecerá aquí</p>
+        )}
       </div>
     </div>
   );

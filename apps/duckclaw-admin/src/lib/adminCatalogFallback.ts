@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { loadOfficialMcpReferenceFromRepo } from '@/lib/mcpOfficialReference';
 
 const MCP_TOOLS = [
   {
@@ -110,6 +111,7 @@ export function fallbackMcpCatalog() {
       tools: [...MCP_TOOLS],
     },
     stdio_servers,
+    official_reference: loadOfficialMcpReferenceFromRepo(),
     github_note: 'GitHub MCP vía forge/skills/github_bridge.py (Docker)',
     _fallback: true as const,
     _gateway_stale: true as const,

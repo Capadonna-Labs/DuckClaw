@@ -108,17 +108,17 @@ def test_format_tool_heartbeat_prefix() -> None:
     assert raw in combined
     with_plan = format_tool_heartbeat("BI-Analyst 1", raw, plan_title="Scatter de ventas")
     assert with_plan.startswith("BI-Analyst 1 — ")
-    assert "📋 Scatter de ventas" in with_plan
+    assert "📋 Scatter de ventas" not in with_plan
     assert raw in with_plan
     with_elapsed = format_tool_heartbeat("W", raw, elapsed_sec=12.345)
-    assert "⏱️ 12.3s" in with_elapsed
+    assert "⏱️ 12.35s" in with_elapsed
 
 
 def test_format_heartbeat_elapsed_minutes() -> None:
     from duckclaw.graphs.chat_heartbeat import format_heartbeat_elapsed
 
     assert format_heartbeat_elapsed(None) == ""
-    assert "2.0s" in format_heartbeat_elapsed(2.0)
+    assert "2.00s" in format_heartbeat_elapsed(2.0)
     assert format_heartbeat_elapsed(125.0) == "⏱️ 2m 5s"
 
 
@@ -286,31 +286,92 @@ def test_handle_command_heartbeat_on_requires_redis(
     assert "redis" in (out or "").lower()
 
 
+def test_admin_heartbeat_kind_tool_before_plan_title() -> None:
+    from duckclaw.graphs.chat_heartbeat import _admin_heartbeat_kind
+
+    tool_text = "Quant-Trader 4 — 🔄 Paso actual: llamo a read_sql…"
+    assert _admin_heartbeat_kind(tool_text, log_plan_title="Resumen macro") == "tool"
+    assert _admin_heartbeat_kind("📖 finanz 1 — Acabo de recibir", log_plan_title="Plan A") == "plan"
+    assert _admin_heartbeat_kind("solo status", log_plan_title=None) == "status"
+
+
 def test_is_admin_ui_chat_session() -> None:
     from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
 
     assert is_admin_ui_chat_session("admin-playground") is True
     assert is_admin_ui_chat_session("admin-section-root") is True
     assert is_admin_ui_chat_session("admin-ui") is True
+    assert is_admin_ui_chat_session("admin-conv-f4123501f9aa488094762fac703a5960") is True
     assert is_admin_ui_chat_session(DEFAULT_TEST_TELEGRAM_USER_ID) is False
 
 
-def test_schedule_chat_heartbeat_skips_admin_ui_session(
+def test_normalize_telegram_chat_id_does_not_strip_admin_conv_uuid() -> None:
+    from duckclaw.graphs.chat_heartbeat import normalize_telegram_chat_id_for_outbound
+
+    cid = "admin-conv-f4123501f9aa488094762fac703a5960"
+    assert normalize_telegram_chat_id_for_outbound(cid) == cid
+
+
+def test_parse_instance_label() -> None:
+    from duckclaw.graphs.chat_heartbeat import parse_instance_label
+
+    assert parse_instance_label("finanz 1") == ("finanz", 1)
+    assert parse_instance_label("BI-Analyst 2") == ("BI-Analyst", 2)
+    assert parse_instance_label("Quant-Trader") == ("Quant-Trader", 1)
+    assert parse_instance_label("") == ("", 1)
+
+
+def test_publish_admin_chat_heartbeat_includes_worker_and_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    payloads: list[str] = []
+
+    class FakeClient:
+        def publish(self, _channel: str, payload: str) -> None:
+            payloads.append(payload)
+
+    class FakeRedis:
+        @staticmethod
+        def from_url(_url: str, **_kwargs: object) -> FakeClient:
+            return FakeClient()
+
+    fake_redis_mod = types.ModuleType("redis")
+    fake_redis_mod.Redis = FakeRedis  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "redis", fake_redis_mod)
+
+    from duckclaw.graphs.chat_heartbeat import publish_admin_chat_heartbeat
+
+    publish_admin_chat_heartbeat("admin-playground", "tool run", kind="tool", instance_label="finanz 2")
+    time.sleep(0.08)
+    assert len(payloads) == 1
+    data = __import__("json").loads(payloads[0])
+    assert data["worker_id"] == "finanz"
+    assert data["swarm_slot"] == 2
+    assert data["kind"] == "tool"
+
+
+def test_schedule_chat_heartbeat_publishes_admin_ui_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
-    calls: list[tuple] = []
-
-    def _fake_post(*args: object, **kwargs: object) -> None:
-        calls.append((args, kwargs))
+    published: list[tuple[str, str, str]] = []
+    telegram_calls: list[tuple] = []
 
     monkeypatch.setattr(
+        "duckclaw.graphs.chat_heartbeat.is_chat_heartbeat_enabled",
+        lambda *_a, **_k: True,
+    )
+    monkeypatch.setattr(
+        "duckclaw.graphs.chat_heartbeat.publish_admin_chat_heartbeat",
+        lambda cid, text, *, kind="status", **_: published.append((cid, text, kind)),
+    )
+    monkeypatch.setattr(
         "duckclaw.graphs.chat_heartbeat._post_outbound_sync",
-        lambda *a, **k: calls.append((a, k)),
+        lambda *a, **k: telegram_calls.append((a, k)),
     )
     from duckclaw.graphs.chat_heartbeat import schedule_chat_heartbeat_dm
 
-    schedule_chat_heartbeat_dm("default", "admin-section-root", "admin-ui", "hola")
-    time.sleep(0.15)
-    assert calls == []
+    schedule_chat_heartbeat_dm("default", "admin-section-root", "admin-ui", "hola plan")
+    time.sleep(0.05)
+    assert published == [("admin-section-root", "hola plan", "status")]
+    assert telegram_calls == []

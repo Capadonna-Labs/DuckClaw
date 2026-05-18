@@ -118,3 +118,16 @@ Para certificar que el Sandbox es seguro, el pipeline de CI/CD (o un test manual
     *   *Resultado esperado:* `Read-only file system` (Bloqueo de escritura en montajes RO).
 3.  **Auditoría en LangSmith:**
     *   Cualquier `exit_code != 0` devuelto por el contenedor debe registrarse en el `task_audit_log` con el flag `SECURITY_VIOLATION_ATTEMPT` si el error corresponde a un `PermissionError` o `NetworkError`, permitiendo auditar si el LLM está siendo víctima de un *Prompt Injection*.
+
+## 7. Override de red por chat (admin / Telegram)
+
+*   **No sustituye** `security_policy.yaml` del worker. Si el YAML tiene `network.default: deny` (p. ej. Quant-Trader), la red del contenedor **permanece** `network_mode: none`; el toggle admin queda deshabilitado.
+*   **Clave** en `agent_config` por chat: `sandbox_network_enabled` (`true` | `false` | vacío).
+    *   Vacío → se usa solo el YAML del worker.
+    *   `false` → fuerza `deny` aunque el worker tenga `allow` (sesiones seguras con finanz).
+    *   `true` → fuerza `allow` solo si el YAML ya permite red.
+*   **Separación de conceptos:**
+    *   `/sandbox on|off` → habilita tools (`run_sandbox`, `run_browser_sandbox`), no cambia Docker `network_mode`.
+    *   `/internet on|off` o toggle en pestaña VNC → afecta `network_mode` (`bridge` vs `none`) en la **próxima** creación de contenedor; al cambiar, se hace `cleanup` de la sesión Strix asociada al `chat_id`.
+*   **Compute vs browser:** `run_sandbox` usa imagen compute; exploración visual web requiere worker con `browser_sandbox: true` y `run_browser_sandbox` + noVNC (ver `STRIX_BROWSER_NOVNC.md`).
+*   **Implementación:** `resolve_sandbox_network_policy()` en `forge/schema.py`; API admin `GET/POST /api/v1/admin/sandbox/chat-policy` y `/sandbox/network`.

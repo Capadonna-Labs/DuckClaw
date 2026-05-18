@@ -58,6 +58,8 @@ _RESOURCE_KEY_RE = re.compile(r"^[a-z0-9_*][a-z0-9_*-]{0,63}$", re.IGNORECASE)
 
 
 def ensure_user_shared_db_access_table(db: Any) -> None:
+    if getattr(db, "_read_only", False):
+        return
     db.execute(_USER_SHARED_DB_ACCESS_DDL)
 
 

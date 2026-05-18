@@ -3167,11 +3167,83 @@ def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
     return f"Uso: /sandbox on|off\nEstado actual: {status}."
 
 
+def execute_internet_toggle(
+    db: Any,
+    chat_id: Any,
+    on_off: str,
+    *,
+    worker_id: str = "",
+    tenant_id: str = "default",
+) -> str:
+    """/internet on|off: red del sandbox Strix por chat (solo si el worker permite red en YAML)."""
+    from duckclaw.forge.schema import resolve_sandbox_network_policy
+
+    v = (on_off or "").strip().lower()
+    wid = (worker_id or "").strip()
+    if not wid:
+        try:
+            team = get_effective_team_templates(db, chat_id, str(tenant_id or "default").strip() or "default", None)
+            wid = (team[0] if team else "").strip()
+        except Exception:
+            wid = ""
+    if not wid:
+        wid = "default"
+
+    _, meta = resolve_sandbox_network_policy(
+        wid, get_chat_state(db, chat_id, "sandbox_network_enabled")
+    )
+    if not meta.get("toggle_available"):
+        return (
+            f"Este worker («{wid}») tiene red sandbox denegada en security_policy.yaml. "
+            "No se puede activar internet desde el chat. Usa tavily_search o un worker con browser_sandbox "
+            "(finanz, Job-Hunter)."
+        )
+
+    def _parse(v_: str) -> bool | None:
+        vv = (v_ or "").strip().lower()
+        if vv in ("on", "1", "true", "sí", "si"):
+            return True
+        if vv in ("off", "0", "false"):
+            return False
+        return None
+
+    parsed = _parse(v)
+    if parsed is True:
+        ok, err = set_chat_state_via_vault(db, chat_id, "sandbox_network_enabled", "true", tenant_id=tenant_id)
+        if not ok:
+            return f"No se pudo guardar: {err}"
+        try:
+            from duckclaw.graphs.sandbox import cleanup_sandbox_session_for_chat
+
+            cleanup_sandbox_session_for_chat(str(chat_id))
+        except Exception:
+            pass
+        return (
+            "Internet en sandbox activado para esta sesión. "
+            "El próximo run_sandbox/run_browser_sandbox usará red bridge."
+        )
+    if parsed is False:
+        ok, err = set_chat_state_via_vault(db, chat_id, "sandbox_network_enabled", "false", tenant_id=tenant_id)
+        if not ok:
+            return f"No se pudo guardar: {err}"
+        try:
+            from duckclaw.graphs.sandbox import cleanup_sandbox_session_for_chat
+
+            cleanup_sandbox_session_for_chat(str(chat_id))
+        except Exception:
+            pass
+        return "Internet en sandbox desactivado (network_mode=none) para esta sesión."
+
+    eff = meta.get("effective") or "deny"
+    return f"Uso: /internet on|off\nRed sandbox efectiva: {eff} (worker {wid})."
+
+
 def execute_heartbeat(db: Any, chat_id: Any, on_off: str, *, tenant_id: Any = None) -> str:
     """/heartbeat on|off — DM proactivos (Bot API nativa o webhook) mientras el agente usa herramientas."""
     from duckclaw.graphs.chat_heartbeat import (
         heartbeat_outbound_configured,
         heartbeat_redis_configured,
+        is_admin_ui_chat_session,
         is_chat_heartbeat_enabled,
         set_chat_heartbeat_enabled,
     )
@@ -3192,16 +3264,14 @@ def execute_heartbeat(db: Any, chat_id: Any, on_off: str, *, tenant_id: Any = No
         ok, err = set_chat_heartbeat_enabled(tid, cid, True)
         if not ok:
             return f"No se pudo activar heartbeat: {err}"
+        if is_admin_ui_chat_session(cid):
+            return "✅ Heartbeat activado. Verás plan y herramientas en este chat mientras trabajo."
         if not heartbeat_outbound_configured():
             return (
                 "Heartbeat activado en Redis, pero falta TELEGRAM_BOT_TOKEN (recomendado) o un webhook "
                 "(DUCKCLAW_HEARTBEAT_WEBHOOK_URL / N8N_OUTBOUND_WEBHOOK_URL); no se enviarán DMs."
-            
             )
-        return (
-            "✅ Heartbeat activado. Te avisaré por DM mientras uso herramientas."
-        
-        )
+        return "✅ Heartbeat activado. Te avisaré por DM mientras uso herramientas."
     if v in ("off", "0", "false"):
         if not is_chat_heartbeat_enabled(tid, cid):
             return "Heartbeat ya estaba desactivado."
@@ -6975,6 +7045,8 @@ def _dispatch_fly_command(
         return execute_context_toggle(db, chat_id, args)
     if name in ("sandbox", "sandox"):
         return execute_sandbox_toggle(db, chat_id, args)
+    if name in ("internet", "red", "network"):
+        return execute_internet_toggle(db, chat_id, args, tenant_id=tenant_id)
     if name == "heartbeat":
         return execute_heartbeat(db, chat_id, args, tenant_id=tenant_id)
     if name == "audit":

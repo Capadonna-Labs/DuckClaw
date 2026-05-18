@@ -27,6 +27,7 @@ import duckdb
 
 from duckclaw.forge.atoms.macro_pgq_seed import ensure_macro_pgq_seed
 from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.admin_console_users import ensure_admin_console_users_table, seed_admin_console_users_if_empty
 from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
 from duckclaw.vaults import db_root, ensure_registry
 from duckclaw.workers.loader import run_schema
@@ -103,11 +104,10 @@ class _ExecuteAdapter:
     def __init__(self, con: duckdb.DuckDBPyConnection) -> None:
         self._con = con
 
-    def execute(self, sql: str, params=None) -> None:
+    def execute(self, sql: str, params=None):
         if params is not None:
-            self._con.execute(sql, params)
-        else:
-            self._con.execute(sql)
+            return self._con.execute(sql, params)
+        return self._con.execute(sql)
 
 
 def _ensure_war_room_schema_sql(con: duckdb.DuckDBPyConnection) -> None:
@@ -335,6 +335,13 @@ def bootstrap_file(path: Path, templates_root: Path, extensions: list[str]) -> N
         _install_extensions(con, extensions)
         _ensure_authorized_users(con)
         ensure_user_shared_db_access_table(_ExecuteAdapter(con))
+        adapter = _ExecuteAdapter(con)
+        ensure_admin_console_users_table(adapter)
+        gp = Path(get_gateway_db_path()).expanduser()
+        if not gp.is_absolute():
+            gp = (_REPO_ROOT / gp).resolve()
+        if path.resolve() == gp.resolve():
+            seed_admin_console_users_if_empty(adapter)
         _ensure_war_room_schema_sql(con)
         _ensure_pqrsd_crm_schema(con)
         _ensure_fly_runtime_tables(con)

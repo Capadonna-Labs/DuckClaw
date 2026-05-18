@@ -201,42 +201,14 @@ def audit_stack(repo_root: Path, draft: SovereignDraft) -> StackHealthReport:
 
 
 def write_db_writer_ecosystem(repo_root: Path, draft: SovereignDraft) -> Path:
-    """Genera config/ecosystem.db-writer.config.cjs portable (lee .env)."""
-    from duckclaw.ops.manager import resolve_repo_pm2_python  # noqa: PLC0415
+    """Genera config/ecosystem.db-writer.config.cjs portable (lee .env vía env_file)."""
+    from duckclaw.ops.manager import render_db_writer_ecosystem_cjs  # noqa: PLC0415
 
+    _ = draft
     config_dir = repo_root / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     path = config_dir / "ecosystem.db-writer.config.cjs"
-    venv_python = resolve_repo_pm2_python(repo_root)
-    db_writer_dir = repo_root / "services" / "db-writer"
-    primary = primary_duckdb_relpath(draft)
-    abs_db = str((repo_root / primary).resolve())
-    redis_url = draft.redis_url.strip() or "redis://localhost:6379/0"
-    content = f"""/**
- * PM2 — DuckClaw DB-Writer (generado por duckops init).
- */
-module.exports = {{
-  apps: [
-    {{
-      name: "{DB_WRITER_PM2_NAME}",
-      script: "{venv_python}",
-      args: "main.py",
-      cwd: "{db_writer_dir}",
-      interpreter: "none",
-      autorestart: true,
-      watch: false,
-      env: {{
-        PYTHONPATH: "{repo_root}",
-        DUCKCLAW_REPO_ROOT: "{repo_root}",
-        REDIS_URL: "{redis_url}",
-        DUCKCLAW_REDIS_URL: "{redis_url}",
-        DUCKDB_PATH: "{abs_db}",
-      }},
-    }},
-  ],
-}};
-"""
-    path.write_text(content, encoding="utf-8")
+    path.write_text(render_db_writer_ecosystem_cjs(), encoding="utf-8")
     return path
 
 

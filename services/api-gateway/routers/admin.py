@@ -646,50 +646,6 @@ async def playground_chat(
 
     delivery_context = GatewayDeliveryContext(channel="http")
 
-    try:
-        from core.debug_session_log import agent_debug_log
-
-        agent_debug_log(
-            "C",
-            "admin.py:playground_chat",
-            "playground_chat_start",
-            {"worker_id": wid, "tenant_id": tenant_id, "stream": wants_stream},
-        )
-    except Exception:
-        pass
-
-    # #region agent log
-    try:
-        import json as _json
-        import time as _time
-
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                _json.dumps(
-                    {
-                        "sessionId": "fd1dbb",
-                        "hypothesisId": "A",
-                        "location": "admin.py:playground_chat",
-                        "message": "playground_invoke",
-                        "data": {
-                            "session_id": session_id,
-                            "team_chat_id": str(team_ctx.get("team_chat_id") or ""),
-                            "delivery_channel": "http",
-                            "wants_stream": wants_stream,
-                        },
-                        "timestamp": int(_time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
-
     if wants_stream:
         from core.sse_stream import SSE_HEADERS
 
@@ -1930,3 +1886,8 @@ async def create_project(
         meta={"skills": body.skills, "path": str(dest.relative_to(_repo_root()))},
     )
     return {"ok": True, "id": wid, "path": str(dest.relative_to(_repo_root()))}
+
+
+from routers.admin_train import router as _admin_train_router  # noqa: E402
+
+router.include_router(_admin_train_router)

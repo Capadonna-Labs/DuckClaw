@@ -72,7 +72,6 @@ from duckclaw.gateway_db import (
     raw_gateway_db_path_from_mapping,
     resolve_env_duckdb_path,
 )
-from duckclaw.debug_session_log import agent_debug_log
 from duckclaw.channels import GatewayDeliveryContext
 
 

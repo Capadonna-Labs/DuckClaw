@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from env_ids import owner_user_id_from_env, test_telegram_user_id_from_env
 
@@ -43,3 +44,16 @@ def owner_user_id() -> str:
 @pytest.fixture
 def test_telegram_user_id() -> str:
     return test_telegram_user_id_from_env()
+
+
+@pytest.fixture
+def admin_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
+    repo = _repo_root
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo))
+    gw_dir = repo / "services" / "api-gateway"
+    if str(gw_dir) not in sys.path:
+        sys.path.insert(0, str(gw_dir))
+    from main import app as gateway_app
+
+    return TestClient(gateway_app)

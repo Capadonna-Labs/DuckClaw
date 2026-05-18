@@ -13,7 +13,7 @@ El **API Gateway** y el **db-writer** leen este archivo.
 | `DUCKDB_PATH` / vars vault | Según despliegue | Hub DuckDB por defecto |
 | `DUCKCLAW_REPO_ROOT` | No | Ruta absoluta al monorepo si el gateway no infiere la raíz |
 | `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` | Para pantalla Telegram | Formato multiplex documentado en specs |
-| `LANGCHAIN_API_KEY` | No | Traces LangSmith en `/traces` |
+| `LANGCHAIN_API_KEY` | No | Traces LangSmith (admin API `/traces/langsmith`) |
 
 Ejemplo mínimo para admin:
 

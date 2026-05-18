@@ -476,32 +476,6 @@ def schedule_chat_heartbeat_dm(
     ``TELEGRAM_*_TOKEN`` o ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` cuando no hay ContextVar.
     """
     if is_admin_ui_chat_session(chat_id):
-        # #region agent log
-        try:
-            import json as _json
-            import time as _time
-
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    _json.dumps(
-                        {
-                            "sessionId": "fd1dbb",
-                            "hypothesisId": "A",
-                            "location": "chat_heartbeat.py:schedule_chat_heartbeat_dm",
-                            "message": "heartbeat_skipped_admin_ui",
-                            "data": {"chat_id": str(chat_id or "")[:64]},
-                            "timestamp": int(_time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         return
     if not is_chat_heartbeat_enabled(tenant_id, chat_id):
         return

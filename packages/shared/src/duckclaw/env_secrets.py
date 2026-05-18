@@ -77,8 +77,39 @@ DOTENV_OWNED_ENV_KEYS: frozenset[str] = frozenset(
         "REDIS_URL",
         "DUCKCLAW_REDIS_URL",
         "TELEGRAM_CHAT_ID",
+        "DUCKDB_PATH",
+        "DUCKCLAW_DB_PATH",
+        "DUCKCLAW_FINANZ_DB_PATH",
+        "DUCKCLAW_REPO_ROOT",
+        "DUCKCLAW_PM2_PYTHON",
+        "DUCKCLAW_MCP_PORT",
+        "DUCKCLAW_GATEWAY_PORT",
+        "MLX_MODEL_PATH",
+        "MLX_MODEL_ID",
+        "MLX_PORT",
+        "MLX_VISION_PORT",
+        "VLM_MLX_PORT",
+        "DUCKCLAW_VLM_MLX_BASE_URL",
+        "PYTHONPATH",
     }
 )
+
+_DOTENV_OWNED_SUFFIXES = ("_DB_PATH",)
+
+
+def is_dotenv_owned_env_key(key: str) -> bool:
+    """True si la clave debe leerse solo desde ``.env`` (PM2 ``env_file``)."""
+    k = (key or "").strip()
+    if not k:
+        return False
+    if k in DOTENV_OWNED_ENV_KEYS:
+        return True
+    ku = k.upper()
+    if ku.endswith(_DOTENV_OWNED_SUFFIXES):
+        return True
+    if ku.startswith("DUCKCLAW_") and ku.endswith("_DB_PATH"):
+        return True
+    return False
 
 
 def strip_secrets_from_env(env: dict[str, str]) -> dict[str, str]:
@@ -88,7 +119,7 @@ def strip_secrets_from_env(env: dict[str, str]) -> dict[str, str]:
 
 def strip_dotenv_owned_from_env(env: dict[str, str]) -> dict[str, str]:
     """Quita claves que deben leerse solo desde `.env` vía env_file de PM2."""
-    return {k: v for k, v in env.items() if k not in DOTENV_OWNED_ENV_KEYS}
+    return {k: v for k, v in env.items() if not is_dotenv_owned_env_key(k)}
 
 
 def apply_dotenv_overrides_to_os_environ(flat: dict[str, str]) -> None:

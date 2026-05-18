@@ -8,6 +8,8 @@ import types
 
 import pytest
 
+from env_ids import DEFAULT_TEST_TELEGRAM_USER_ID
+
 
 def test_heartbeat_redis_key_format() -> None:
     from duckclaw.graphs.chat_heartbeat import heartbeat_chat_alias_key, heartbeat_redis_key
@@ -290,7 +292,7 @@ def test_is_admin_ui_chat_session() -> None:
     assert is_admin_ui_chat_session("admin-playground") is True
     assert is_admin_ui_chat_session("admin-section-root") is True
     assert is_admin_ui_chat_session("admin-ui") is True
-    assert is_admin_ui_chat_session("1726618406") is False
+    assert is_admin_ui_chat_session(DEFAULT_TEST_TELEGRAM_USER_ID) is False
 
 
 def test_schedule_chat_heartbeat_skips_admin_ui_session(

@@ -40,7 +40,7 @@ const CORE_AND_ADMIN_NAV: readonly AdminNavItem[] = [
   { href: '/runtime', label: 'Runtime', section: 'core' },
   { href: '/commands', label: 'Fly commands', section: 'core' },
   { href: '/duckdb', label: 'DuckDB', section: 'core' },
-  { href: '/traces', label: 'Traces', section: 'core' },
+  { href: '/train', label: 'Train', section: 'core' },
   { href: '/ops', label: 'Operaciones', section: 'admin', adminOnly: true },
   { href: '/audit', label: 'Auditoría', section: 'admin', adminOnly: true },
   { href: '/settings', label: 'Ajustes', section: 'footer' },

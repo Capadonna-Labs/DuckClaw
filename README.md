@@ -72,8 +72,6 @@ npx vibe-kanban --port 3333
 
 Acceso: http://localhost:3333
 
-PM2 (opcional): `pm2 start config/ecosystem.vibe-kanban.cjs`
-
 **GitHub MCP en Vibe Kanban:** si la app no admite archivo de proyecto, configura MCP en **Settings → MCP Servers** (documentación en [Connecting MCP Servers](https://www.vibekanban.com/docs/settings-beta/mcp-servers)). Usa la misma imagen Docker oficial `ghcr.io/github/github-mcp-server` con `GITHUB_PERSONAL_ACCESS_TOKEN` y toolsets como `repos,issues,pull_requests` (omitir `projects`).
 
 ### Diagnóstico rápido (Doctor)

@@ -66,7 +66,7 @@ export default function OverviewPage() {
           <QuickLink href="/mcp" label="MCP" />
           <QuickLink href="/skills" label="Skills" />
           <QuickLink href="/ops" label="Operaciones" />
-          <QuickLink href="/traces" label="Traces" />
+          <QuickLink href="/train" label="Train" />
           <QuickLink href="/audit" label="Auditoría" />
         </div>
       </section>

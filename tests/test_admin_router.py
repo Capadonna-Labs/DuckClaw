@@ -1,26 +1,17 @@
 """Tests Admin API router (spec: DuckClaw_Admin_UI)."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-
-@pytest.fixture
-def admin_client(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
-    repo = Path(__file__).resolve().parent.parent
-    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo))
-    import sys
-
-    gw_dir = repo / "services" / "api-gateway"
-    if str(gw_dir) not in sys.path:
-        sys.path.insert(0, str(gw_dir))
-    from main import app as gateway_app
-
-    return TestClient(gateway_app)
+from env_ids import (
+    DEFAULT_TEST_TELEGRAM_USER_ID,
+    DEFAULT_TEST_TELEGRAM_USER_ID_ALT,
+)
 
 
 def test_admin_requires_key(admin_client: TestClient):
@@ -104,7 +95,7 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     if not all_w:
         pytest.skip("need templates")
     target = all_w[0]
-    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "7822026745")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", DEFAULT_TEST_TELEGRAM_USER_ID)
     gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
     import sys
 
@@ -117,13 +108,16 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
         db = DuckClaw(db_path, read_only=False, engine="python")
         from duckclaw.graphs.on_the_fly_commands import set_team_templates
 
-        set_team_templates(db, "7822026745", [target])
+        set_team_templates(db, DEFAULT_TEST_TELEGRAM_USER_ID, [target])
         db.close()
         monkeypatch.setenv("DUCKDB_PATH", db_path)
         r = admin_client.get(
             "/api/v1/admin/playground/config",
             headers={"X-Admin-Key": "test-admin-key"},
-            params={"telegram_user_id": "7822026745", "tenant_id": "default"},
+            params={
+                "telegram_user_id": DEFAULT_TEST_TELEGRAM_USER_ID,
+                "tenant_id": "default",
+            },
         )
     assert r.status_code == 200
     data = r.json()
@@ -371,7 +365,10 @@ def test_telegram_whitelist_resolves_gateway_tenant(
     """default en UI → tenant efectivo del gateway (p. ej. Marco vía DUCKCLAW_GATEWAY_TENANT_ID)."""
     monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "Marco")
     dbf = tmp_path / "hub.duckdb"
-    monkeypatch.setenv("DUCKDB_PATH", str(dbf))
+    monkeypatch.setattr(
+        "duckclaw.gateway_db.get_gateway_db_path",
+        lambda: str(dbf),
+    )
     import duckdb
 
     con = duckdb.connect(str(dbf))
@@ -383,8 +380,9 @@ def test_telegram_whitelist_resolves_gateway_tenant(
             PRIMARY KEY (tenant_id, user_id)
         );
         INSERT INTO main.authorized_users (tenant_id, user_id, username, role)
-        VALUES ('default', '111', 'legacy', 'user');
-        """
+        VALUES ('default', ?, 'legacy', 'user');
+        """,
+        [DEFAULT_TEST_TELEGRAM_USER_ID_ALT],
     )
     con.close()
 
@@ -397,20 +395,82 @@ def test_telegram_whitelist_resolves_gateway_tenant(
     assert data.get("effective_tenant_id") == "Marco"
     assert data.get("tenant_id") == "Marco"
     ids = [u["user_id"] for u in data.get("users") or []]
-    assert "111" in ids
+    assert DEFAULT_TEST_TELEGRAM_USER_ID_ALT in ids
 
     r2 = admin_client.post(
         "/api/v1/admin/telegram/whitelist",
         headers={"X-Admin-Key": "test-admin-key"},
-        json={"tenant_id": "default", "user_id": "7822026745", "username": "Owner", "role": "admin"},
+        json={
+            "tenant_id": "default",
+            "user_id": DEFAULT_TEST_TELEGRAM_USER_ID,
+            "username": "Owner",
+            "role": "admin",
+        },
     )
     assert r2.status_code == 200
     assert r2.json().get("tenant_id") == "Marco"
 
     con = duckdb.connect(str(dbf))
     row = con.execute(
-        "SELECT tenant_id FROM main.authorized_users WHERE user_id='7822026745'"
+        "SELECT tenant_id FROM main.authorized_users WHERE user_id = ?",
+        [DEFAULT_TEST_TELEGRAM_USER_ID],
     ).fetchone()
     con.close()
     assert row is not None
     assert row[0] == "Marco"
+
+
+def test_train_status_requires_key(admin_client: TestClient):
+    assert admin_client.get("/api/v1/admin/train/status").status_code == 401
+
+
+def test_train_status_ok(admin_client: TestClient):
+    r = admin_client.get(
+        "/api/v1/admin/train/status",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert "paths" in data
+    assert "pipeline" in data
+
+
+def test_train_sample_rejects_path_traversal(admin_client: TestClient):
+    r = admin_client.get(
+        "/api/v1/admin/train/traces/sample",
+        headers={"X-Admin-Key": "test-admin-key"},
+        params={"lake": "conversation_traces", "relative_path": "../../.env"},
+    )
+    assert r.status_code == 400
+
+
+def test_train_collect(
+    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    traces = tmp_path / "2026" / "05" / "17"
+    traces.mkdir(parents=True)
+    row = {
+        "status": "SUCCESS",
+        "messages": [
+            {"role": "user", "content": "hola"},
+            {"role": "assistant", "content": "ok"},
+        ],
+    }
+    (traces / "traces.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+    out = tmp_path / "dataset_sft.jsonl"
+    monkeypatch.setenv("DUCKCLAW_CONVERSATION_TRACES_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "duckclaw.forge.sft.collector.DEFAULT_SFT_DATASET_PATH", out
+    )
+    r = admin_client.post(
+        "/api/v1/admin/train/pipeline/collect",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={"require_valid_sql": False},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["records"] >= 1
+    assert out.is_file()

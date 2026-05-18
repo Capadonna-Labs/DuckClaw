@@ -27,11 +27,9 @@ class DbWriteTaskStatus(BaseModel):
 
 
 def redis_url_from_env() -> str:
-    return (
-        os.environ.get("REDIS_URL")
-        or os.environ.get("DUCKCLAW_REDIS_URL")
-        or "redis://localhost:6379/0"
-    ).strip()
+    from duckclaw.runtime_env import resolve_redis_url
+
+    return resolve_redis_url()
 
 
 def task_status_redis_key(task_id: str) -> str:

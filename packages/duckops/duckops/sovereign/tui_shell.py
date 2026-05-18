@@ -236,7 +236,9 @@ class TuiShell:
     @staticmethod
     def print_deploy_next_steps(console: Console, draft: SovereignDraft) -> None:
         """Cuadro final tras materializar."""
-        port = int(getattr(draft, "gateway_port", 8282) or 8282)
+        from duckclaw.gateway_port import DEFAULT_GATEWAY_PORT
+
+        port = int(getattr(draft, "gateway_port", DEFAULT_GATEWAY_PORT) or DEFAULT_GATEWAY_PORT)
         pm2 = (getattr(draft, "gateway_pm2_name", "") or "DuckClaw-Gateway").strip()
         lines = [
             f"[bold {DUCK_ACCENT}]Stack listo[/]",
@@ -245,7 +247,7 @@ class TuiShell:
             "    · Integraciones y Tailscale (mejor UX que el CLI)",
             "    · Agentes / plantillas / playground",
             f"  Gateway PM2: {pm2} · :{port}",
-            "  Chat CLI: uv run duckops init --chat",
+            "  Chat CLI (si no abres la UI): uv run duckops init --chat",
             "  Bot (cuando Telegram esté en admin): /workers · /team",
         ]
         owner = (getattr(draft, "wizard_creator_telegram_user_id", "") or "").strip()

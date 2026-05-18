@@ -79,7 +79,9 @@ def _build_wizard_chrome(layout: ChromeLayout) -> Panel:
         if getattr(draft, "wizard_profile", "express") == "express"
         else "Manual"
     )
-    port = getattr(draft, "gateway_port", 8282)
+    from duckclaw.gateway_port import DEFAULT_GATEWAY_PORT
+
+    port = getattr(draft, "gateway_port", DEFAULT_GATEWAY_PORT)
     worker = (draft.default_worker_id or "—").strip()
 
     info_lines = [

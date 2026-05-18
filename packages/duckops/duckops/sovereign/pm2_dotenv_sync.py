@@ -8,28 +8,8 @@ from typing import Any
 from duckclaw.env_secrets import strip_dotenv_owned_from_env, strip_secrets_from_env
 from duckclaw.ops.manager import _load_merged_gateway_apps, save_gateway_cluster_config
 
-from duckclaw.dotenv_immutable import root_dotenv_flat_env
-
-
-def _gateway_port_from_pm2_json(repo_root: Path, app_name: str, *, fallback: int = 8282) -> int:
-    """Puerto en ``api_gateways_pm2.json`` (uvicorn ``--port``)."""
-    for app in _load_merged_gateway_apps(str(repo_root)):
-        if isinstance(app, dict) and (app.get("name") or "").strip() == app_name:
-            p = int(app.get("port") or 0)
-            if p > 0:
-                return p
-    return fallback
-
-
-def _gateway_port(repo_root: Path, app_name: str, *, fallback: int = 8000) -> int:
-    """Puerto: ``DUCKCLAW_GATEWAY_PORT`` en ``.env``, luego JSON, luego fallback."""
-    dot = root_dotenv_flat_env(repo_root)
-    raw = (dot.get("DUCKCLAW_GATEWAY_PORT") or "").strip()
-    if raw.isdigit():
-        p = int(raw)
-        if p > 0:
-            return p
-    return _gateway_port_from_pm2_json(repo_root, app_name, fallback=fallback)
+from duckclaw.env_config import resolve_gateway_port, root_dotenv_flat_env
+from duckclaw.ops.manager import pm2_start_or_recreate_gateway
 
 
 def minimal_gateway_env(_repo_root: Path, app_name: str) -> dict[str, str]:
@@ -49,7 +29,7 @@ def sync_gateway_pm2_from_dotenv(
     repo_root = repo_root.resolve()
     dot = root_dotenv_flat_env(repo_root)
     name = (dot.get("DUCKCLAW_PM2_PROCESS_NAME") or "DuckClaw-Gateway").strip() or "DuckClaw-Gateway"
-    port = _gateway_port(repo_root, name)
+    port = resolve_gateway_port(repo_root, app_name=name)
 
     if single_gateway:
         env = strip_dotenv_owned_from_env(strip_secrets_from_env(minimal_gateway_env(repo_root, name)))
@@ -94,5 +74,16 @@ def sync_gateway_pm2_from_dotenv(
 
 
 def rerender_gateway_pm2_ecosystem(repo_root: Path) -> None:
-    """Tras materializar: sanea JSON existente y regenera ecosystem.api.config.cjs."""
-    sync_gateway_pm2_from_dotenv(repo_root, single_gateway=True)
+    """Tras materializar: sanea JSON, regenera ecosystem y recrea PM2 si cambió el puerto."""
+    apps = sync_gateway_pm2_from_dotenv(repo_root, single_gateway=True)
+    if not apps:
+        return
+    name = (apps[0].get("name") or "DuckClaw-Gateway").strip() or "DuckClaw-Gateway"
+    port = int(apps[0].get("port") or resolve_gateway_port(repo_root, app_name=name))
+    cfg = repo_root.resolve() / "config" / "ecosystem.api.config.cjs"
+    if cfg.is_file():
+        pm2_start_or_recreate_gateway(
+            config_path=cfg,
+            process_name=name,
+            desired_port=port,
+        )

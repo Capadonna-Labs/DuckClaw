@@ -6,6 +6,8 @@ import os
 import socket
 from pathlib import Path
 
+from duckclaw.gateway_port import DEFAULT_GATEWAY_PORT
+
 
 def is_port_in_use(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -16,7 +18,9 @@ def is_port_in_use(host: str, port: int) -> bool:
             return False
 
 
-def suggest_gateway_port(host: str, start: int = 8282, *, max_tries: int = 50) -> int:
+def suggest_gateway_port(
+    host: str, start: int = DEFAULT_GATEWAY_PORT, *, max_tries: int = 50
+) -> int:
     p = start
     for _ in range(max_tries):
         if not is_port_in_use(host, p):

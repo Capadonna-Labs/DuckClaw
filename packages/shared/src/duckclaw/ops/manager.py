@@ -12,6 +12,7 @@ from typing import Any, Optional
 from duckclaw.dotenv_immutable import merged_root_and_proposed_flat_env
 from duckclaw.env_secrets import strip_dotenv_owned_from_env, strip_secrets_from_env
 from duckclaw.gateway_db import raw_gateway_db_path_from_mapping
+from duckclaw.gateway_port import parse_uvicorn_port_from_pm2_args, resolve_gateway_port
 
 
 _WIZARD_PROPOSED_OVERLAY_EXTRA_KEYS = frozenset(
@@ -466,6 +467,70 @@ def analyze_gateway_cluster_conflicts(effective_cwd: str) -> dict[str, Any]:
     }
 
 
+def _pm2_jlist_processes() -> list[dict[str, Any]]:
+    import subprocess as sp
+
+    try:
+        result = sp.run(["pm2", "jlist"], capture_output=True, text=True, timeout=12)
+        data = json.loads(result.stdout or "[]")
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def pm2_gateway_listening_port(process_name: str) -> int | None:
+    """Puerto en args uvicorn del proceso PM2 (``--port``), si está online."""
+    target = (process_name or "").strip()
+    if not target:
+        return None
+    for item in _pm2_jlist_processes():
+        if not isinstance(item, dict) or (item.get("name") or "").strip() != target:
+            continue
+        env = item.get("pm2_env") or {}
+        if not isinstance(env, dict):
+            return None
+        return parse_uvicorn_port_from_pm2_args(env.get("args"))
+    return None
+
+
+def pm2_start_or_recreate_gateway(
+    *,
+    config_path: Path,
+    process_name: str,
+    desired_port: int,
+) -> None:
+    """
+    ``pm2 restart`` no actualiza ``args`` (p. ej. ``--port``).
+    Si el puerto en ejecución difiere del ecosystem, delete + start.
+    """
+    import subprocess as sp
+
+    name = (process_name or "").strip()
+    if not name:
+        return
+    existing = sp.run(["pm2", "id", name], capture_output=True, text=True)
+    running = existing.returncode == 0 and (existing.stdout or "").strip() not in ("", "[]")
+    if running:
+        live = pm2_gateway_listening_port(name)
+        if live is not None and int(live) != int(desired_port):
+            sp.run(["pm2", "delete", name], capture_output=True, text=True, check=False)
+            print(
+                f"🔄  PM2: {name} recreado (puerto {live} → {desired_port}; "
+                "restart no cambia --port).",
+                flush=True,
+            )
+            running = False
+    if running:
+        sp.run(["pm2", "restart", name, "--update-env"], check=False)
+        print(f"🔄  PM2: {name} reiniciado.", flush=True)
+    else:
+        sp.run(
+            ["pm2", "start", str(config_path), "--only", name],
+            check=False,
+        )
+        print(f"🚀  PM2: {name} iniciado (ecosystem.api.config.cjs).", flush=True)
+
+
 def save_gateway_cluster_config(effective_cwd: str, apps: list[dict[str, Any]]) -> None:
     """
     Persiste la lista fusionada en config/api_gateways_pm2.json y regenera
@@ -538,7 +603,7 @@ def _render_gateway_ecosystem_cjs(
         if not name:
             continue
         host = (app.get("host") or "0.0.0.0").strip()
-        port = int(app.get("port") or 8000)
+        port = int(app.get("port") or resolve_gateway_port(effective_cwd))
         env = app.get("env") or {}
         if not isinstance(env, dict):
             env = {}
@@ -769,16 +834,11 @@ def serve(
                     except Exception as _e:
                         print(f"⚠️  No se pudo crear la BD en {_db_file}: {_e}", flush=True)
 
-            existing = sp.run(["pm2", "id", effective_name], capture_output=True, text=True)
-            if existing.returncode == 0 and existing.stdout.strip() not in ("", "[]"):
-                sp.run(["pm2", "restart", effective_name, "--update-env"], check=False)
-                print(f"🔄  PM2: {effective_name} reiniciado.", flush=True)
-            else:
-                sp.run(
-                    ["pm2", "start", str(config_path), "--only", effective_name],
-                    check=False,
-                )
-                print(f"🚀  PM2: {effective_name} iniciado (solo este proceso).", flush=True)
+            pm2_start_or_recreate_gateway(
+                config_path=config_path,
+                process_name=effective_name,
+                desired_port=gw_port,
+            )
 
             print(f"\n   API →  http://localhost:{gw_port}", flush=True)
             print(f"   Docs → http://localhost:{gw_port}/docs", flush=True)

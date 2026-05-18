@@ -30,8 +30,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVICES = REPO_ROOT / "services"
 DB_WRITER_DIR = SERVICES / "db-writer"
 API_GATEWAY_DIR = SERVICES / "api-gateway"  # microservicio unificado (spec FLUJO_VIDA_DATO)
-GATEWAY_URL = "http://127.0.0.1:8000"
-REDIS_URL = os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL", "redis://localhost:6379/0")
+from duckclaw.runtime_env import resolve_agent_chat_url, resolve_redis_url
+
+GATEWAY_URL = resolve_agent_chat_url()
+REDIS_URL = resolve_redis_url()
 
 
 # ─── Funciones del pipeline (reutilizadas por tests de integración y unitarios) ─────────────────

@@ -68,10 +68,11 @@ def load_gateway_chat_config(
     draft: SovereignDraft | None = None,
 ) -> GatewayChatConfig:
     """Lee URL, clave admin y tenant desde .env / entorno / borrador."""
-    env = _parse_env_file(repo_root / ".env")
-    port = 8282
+    from duckclaw.dotenv_immutable import merged_root_and_proposed_flat_env
+    from duckclaw.gateway_port import gateway_base_url
+
+    env = merged_root_and_proposed_flat_env(repo_root)
     if draft is not None:
-        port = int(getattr(draft, "gateway_port", None) or port)
         tenant = (draft.tenant_id or "default").strip() or "default"
         worker = (draft.default_worker_id or "default").strip() or "default"
         owner = (draft.wizard_creator_telegram_user_id or "").strip()
@@ -79,22 +80,10 @@ def load_gateway_chat_config(
         tenant = "default"
         worker = "default"
         owner = ""
-    try:
-        from duckclaw.ops.manager import _load_merged_gateway_apps  # noqa: PLC0415
-
-        pm2_name = (env.get("DUCKCLAW_PM2_PROCESS_NAME") or "DuckClaw-Gateway").strip()
-        for app in _load_merged_gateway_apps(str(repo_root)):
-            if isinstance(app, dict) and (app.get("name") or "").strip() == pm2_name:
-                p = int(app.get("port") or 0)
-                if p > 0:
-                    port = p
-                break
-    except Exception:
-        pass
     base = (
         os.environ.get("DUCKCLAW_GATEWAY_URL")
         or env.get("DUCKCLAW_GATEWAY_URL")
-        or f"http://127.0.0.1:{port}"
+        or gateway_base_url(repo_root)
     ).rstrip("/")
     admin_key = (
         os.environ.get("DUCKCLAW_ADMIN_API_KEY")
@@ -216,7 +205,9 @@ def run_tui_chat(
     picks = list_worker_picks(repo_root)
     worker_id = cfg.default_worker_id
     port_match = re.search(r":(\d+)$", cfg.base_url)
-    gw_port = int(port_match.group(1)) if port_match else 8282
+    from duckclaw.gateway_port import resolve_gateway_port
+
+    gw_port = int(port_match.group(1)) if port_match else resolve_gateway_port(repo_root)
     shell_draft = _draft_from_dotenv(repo_root, cfg)
     shell_draft = shell_draft.model_copy(
         update={

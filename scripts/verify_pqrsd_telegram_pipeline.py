@@ -82,7 +82,9 @@ def vault_user_id_from_db_path(db_path: Path) -> str:
 
 
 def _gateway_url() -> str:
-    return (os.environ.get("DUCKCLAW_GATEWAY_URL") or "http://127.0.0.1:8000").rstrip("/")
+    from duckclaw.runtime_env import resolve_gateway_http_base
+
+    return resolve_gateway_http_base().rstrip("/")
 
 
 def _crm_base_url() -> str | None:

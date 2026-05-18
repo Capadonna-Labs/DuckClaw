@@ -1,9 +1,5 @@
 # COMANDOS · DuckClaw
 
-## Arranque (stack mínimo)
-
-Variables en `.env` (ver `.env.example`): `REDIS_URL`, `DUCKDB_PATH`, `DUCKCLAW_GATEWAY_PORT`, `DUCKCLAW_MCP_PORT`, `MLX_VISION_PORT`, etc.
-
 ```bash
 pm2 start config/ecosystem.db-writer.config.cjs
 pm2 start config/ecosystem.api.config.cjs --only DuckClaw-Gateway

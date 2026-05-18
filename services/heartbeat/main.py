@@ -50,11 +50,10 @@ logger = logging.getLogger("heartbeat")
 logging.basicConfig(level=logging.INFO)
 
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-GATEWAY_URL = os.getenv(
-    "GATEWAY_URL",
-    "http://localhost:8000/api/v1/agent/chat",
-)
+from duckclaw.env_config import resolve_agent_chat_url, resolve_redis_url
+
+REDIS_URL = resolve_redis_url()
+GATEWAY_URL = resolve_agent_chat_url()
 HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "3600"))
 GOALS_TICKER_POLL_SECONDS = int(os.getenv("GOALS_TICKER_POLL_SECONDS", "45"))
 GITHUB_MCP_HEALTH_SECONDS = float(os.getenv("DUCKCLAW_GITHUB_MCP_HEALTH_SECONDS", "300"))

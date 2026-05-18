@@ -61,6 +61,12 @@ def run_sovereign_wizard(repo_root: Path | None = None, *, manual: bool = False)
     draft = fresh_sovereign_draft(
         worker_id=default_worker_for_fresh([p.worker_id for p in picks]),
     )
+    try:
+        from duckclaw.gateway_port import resolve_gateway_port
+
+        draft.gateway_port = resolve_gateway_port(rr, app_name=draft.gateway_pm2_name)
+    except Exception:
+        pass
     code, shell = run_wizard_loop(rr, console, draft, manual=manual)
     if code == 2:
 
@@ -73,11 +79,33 @@ def run_sovereign_wizard(repo_root: Path | None = None, *, manual: bool = False)
         if mat_code == 0:
             try:
                 ans = console.input(
-                    "\n[bold]¿Abrir chat con agentes en esta terminal?[/] [dim][y/N][/]: "
+                    "\n[bold]¿Desea levantar la interfaz gráfica de configuración?[/] "
+                    "[dim][Y/n][/]: "
                 ).strip().lower()
             except (EOFError, KeyboardInterrupt):
                 ans = ""
-            if ans in ("y", "s", "sí", "si", "yes"):
-                return run_tui_chat(rr, draft, console=console)
+            if ans in ("", "y", "s", "sí", "si", "yes"):
+                try:
+                    from duckclaw.gateway_port import gateway_base_url
+
+                    gw_url = gateway_base_url(rr)
+                except Exception:
+                    from duckclaw.runtime_env import resolve_gateway_http_base
+
+                    gw_url = resolve_gateway_http_base(rr)
+                console.print()
+                console.print(
+                    "[bold green]Consola admin[/] → [link=http://localhost:3000]"
+                    "http://localhost:3000[/link]"
+                )
+                console.print(
+                    "[dim]En otra terminal:[/] cd apps/duckclaw-admin && pnpm dev"
+                )
+                console.print(
+                    f"[dim]Gateway[/] {gw_url} "
+                    "(DUCKCLAW_GATEWAY_URL o DUCKCLAW_GATEWAY_PORT en .env / .env.local)"
+                )
+                return mat_code
+            return run_tui_chat(rr, draft, console=console)
         return mat_code
     return code

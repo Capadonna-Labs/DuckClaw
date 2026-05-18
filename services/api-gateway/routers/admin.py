@@ -1295,7 +1295,9 @@ async def put_runtime_config(
         f"INSERT INTO agent_config (key, value) VALUES ('{key_esc}', '{val_esc}') "
         f"ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()"
     )
-    redis_url = (os.environ.get("REDIS_URL") or "redis://localhost:6379/0").strip()
+    from duckclaw.runtime_env import resolve_redis_url
+
+    redis_url = resolve_redis_url()
     r = aioredis.from_url(redis_url, decode_responses=True)
     try:
         payload = json.dumps(
@@ -1518,7 +1520,9 @@ async def delete_runtime_config(
     full_key = _full_agent_config_key(chat_id, key)
     key_esc = full_key.replace("'", "''")
     sql = f"DELETE FROM agent_config WHERE key = '{key_esc}'"
-    redis_url = (os.environ.get("REDIS_URL") or "redis://localhost:6379/0").strip()
+    from duckclaw.runtime_env import resolve_redis_url
+
+    redis_url = resolve_redis_url()
     r = aioredis.from_url(redis_url, decode_responses=True)
     try:
         payload = json.dumps(

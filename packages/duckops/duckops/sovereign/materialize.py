@@ -186,6 +186,7 @@ def patch_api_gateways_pm2_for_draft(
     if not isinstance(app, dict):
         return
     app.setdefault("host", "0.0.0.0")
+    app["port"] = port
     env = app.get("env")
     if not isinstance(env, dict):
         env = {}
@@ -773,6 +774,11 @@ def materialize(
         "REDIS_URL": draft.redis_url.strip(),
         "DUCKCLAW_REDIS_URL": draft.redis_url.strip(),
         "DUCKDB_PATH": primary_rel,
+        "DUCKCLAW_GATEWAY_PORT": str(int(draft.gateway_port)),
+        "DUCKCLAW_GATEWAY_URL": (
+            f"http://{(os.environ.get('DUCKCLAW_GATEWAY_HOST') or '127.0.0.1').strip()}:"
+            f"{int(draft.gateway_port)}"
+        ),
         "DUCKCLAW_GATEWAY_TENANT_ID": draft.tenant_id.strip(),
         "DUCKCLAW_DEFAULT_WORKER_ID": draft.default_worker_id.strip(),
         "DUCKCLAW_LLM_PROVIDER": draft.llm_provider.strip(),

@@ -6,6 +6,26 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from duckops.sovereign.validate import DEFAULT_GATEWAY_PORT
+
+
+def _default_redis_url() -> str:
+    try:
+        from duckclaw.runtime_env import resolve_redis_url
+
+        return resolve_redis_url()
+    except Exception:
+        return "redis://localhost:6379/0"
+
+
+def _default_gateway_port() -> int:
+    try:
+        from duckclaw.gateway_port import resolve_gateway_port
+
+        return resolve_gateway_port()
+    except Exception:
+        return DEFAULT_GATEWAY_PORT
+
 
 WizardProfile = Literal["express", "full"]
 
@@ -21,7 +41,10 @@ class SovereignDraft(BaseModel):
     is_apple_silicon: bool = False
 
     # Core
-    redis_url: str = Field(default="redis://localhost:6379/0", description="Canal de comunicación")
+    redis_url: str = Field(
+        default_factory=_default_redis_url,
+        description="Canal de comunicación",
+    )
     duckdb_vault_path: str = Field(
         default="db/sovereign_memory.duckdb",
         description="Hub DuckDB (multiplex / DUCKDB_PATH); el wizard lo infiere del .env si hay rutas por agente",
@@ -59,7 +82,7 @@ class SovereignDraft(BaseModel):
 
     # Orchestration
     orchestration: Literal["pm2", "docker"] = "pm2"
-    gateway_port: int = 8282
+    gateway_port: int = Field(default_factory=_default_gateway_port)
     redis_local_managed: bool = False
     generate_docker_compose: bool = True
 

@@ -18,7 +18,12 @@ def _repo_root() -> Path:
 def cmd_serve(
     ctx: typer.Context,
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host para escuchar."),
-    port: int = typer.Option(8000, "--port", "-p", help="Puerto."),
+    port: int | None = typer.Option(
+        None,
+        "--port",
+        "-p",
+        help="Puerto (default: DUCKCLAW_GATEWAY_PORT en .env o api_gateways_pm2.json).",
+    ),
     pm2: bool = typer.Option(False, "--pm2", help="Desplegar como servicio PM2."),
     gateway: bool = typer.Option(False, "--gateway", "-g", help="Usar microservicio services/api-gateway (n8n, Telegram)."),
     name: str = typer.Option(
@@ -46,15 +51,21 @@ def cmd_serve(
     effective_name = name or ("DuckClaw-Gateway" if gateway else "DuckClaw-API")
     repo = _repo_root()
     try:
+        from duckclaw.gateway_port import resolve_gateway_port
         from duckclaw.ops.manager import serve as serve_fn
     except ImportError as e:
         typer.echo(f"[red]No se pudo importar duckclaw.ops: {e}[/]", err=True)
         typer.echo("Instala el monorepo: uv sync")
         raise typer.Exit(1)
 
+    effective_port = (
+        int(port)
+        if port is not None
+        else resolve_gateway_port(repo, app_name=effective_name)
+    )
     code = serve_fn(
         host=host,
-        port=port,
+        port=effective_port,
         reload=reload,
         pm2=pm2,
         name=effective_name,

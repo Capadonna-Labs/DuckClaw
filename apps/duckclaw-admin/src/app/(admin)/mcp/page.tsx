@@ -109,7 +109,7 @@ export default function McpPage() {
         <p className="text-sm text-amber-800 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 p-3 rounded-xl">
           El API Gateway en PM2 no tiene las rutas <code>/catalog/*</code> actualizadas. Catálogo
           servido en modo fallback. Reinicia:{' '}
-          <strong>Operaciones → Reiniciar DuckClaw-Gateway</strong> o{' '}
+          <strong>Overview → Reiniciar DuckClaw-Gateway</strong> o{' '}
           <code className="text-xs">pm2 restart DuckClaw-Gateway --update-env</code>.
         </p>
       )}

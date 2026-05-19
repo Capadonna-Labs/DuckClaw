@@ -16,8 +16,8 @@ from duckclaw.integrations.telegram.outbound_token_context import (
     telegram_bot_token_override,
 )
 from duckclaw.integrations.telegram.telegram_agent_token import (
-    PM2_GATEWAY_APP_TO_WORKER_ID,
     canonical_manifest_worker_id,
+    pm2_app_to_worker_map_from_env,
     resolve_telegram_token_from_flat_env,
     resolve_telegram_token_for_worker_id,
     telegram_agent_token_env_name,
@@ -30,7 +30,7 @@ from duckclaw.integrations.telegram.telegram_webhook_secret_header import (
 )
 
 __all__ = [
-    "PM2_GATEWAY_APP_TO_WORKER_ID",
+    "pm2_app_to_worker_map_from_env",
     "canonical_manifest_worker_id",
     "TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER",
     "TelegramBotApiAsyncClient",

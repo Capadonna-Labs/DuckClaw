@@ -72,7 +72,7 @@ pm2 delete TheMind-Gateway && pm2 start config/ecosystem.api.config.cjs --only T
 
 ## `403` — «Acceso denegado… interactuar con este agente»
 
-No es n8n “caído”: es el **Telegram Guard** (`authorized_users` en DuckDB + caché Redis). El endpoint necesita saber **qué usuario** es:
+No es el webhook de Telegram “caído”: es el **Telegram Guard** (`authorized_users` en DuckDB + caché Redis). El endpoint necesita saber **qué usuario** es:
 
 - Incluye **`user_id`** en el JSON (mismo ID numérico de Telegram que en la whitelist), **o**
 - En chat **privado**, si solo envías `chat_id` / `session_id`, el gateway ahora infiere `user_id` a partir de él (DM: suelen coincidir).

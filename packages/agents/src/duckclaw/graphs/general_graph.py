@@ -195,7 +195,7 @@ def build_general_graph(
         except Exception:
             pass
 
-    # Mensajería proactiva outbound (n8n) — opcional vía tools_spec
+    # Mensajería proactiva outbound — opcional vía tools_spec
     if "send_proactive_message" in tool_names_set:
         try:
             from duckclaw.forge.skills.outbound_messaging import send_proactive_message

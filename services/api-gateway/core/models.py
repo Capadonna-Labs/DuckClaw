@@ -12,12 +12,12 @@ class ChatRequest(BaseModel):
     - chat_id: identifica el grupo o el DM (se usa como thread_id interno).
     - Mismo valor en **todas** las peticiones del hilo (comandos /sandbox y mensajes normales);
       si falta, cae en \"default\" y el estado por chat (p. ej. sandbox) no coincide.
-    - También se aceptan alias JSON: session_id, thread_id, chatId → chat_id (p. ej. n8n).
+    - También se aceptan alias JSON: session_id, thread_id, chatId → chat_id.
     - user_id / username: identifican al remitente dentro del grupo.
     - chat_type: "private", "group", "supergroup", etc.
     """
 
-    # Nota: dejamos `message` por defecto para tolerar payloads parciales desde n8n
+    # Nota: dejamos `message` por defecto para tolerar payloads parciales de integraciones
     # (evita errores 422 si falta el campo).
     message: str = Field("", description="Mensaje del usuario")
     chat_id: str | None = Field(
@@ -71,7 +71,7 @@ class ChatRequest(BaseModel):
     @classmethod
     def _coerce_username_to_str(cls, v: Any) -> str | None:
         """
-        n8n a veces manda `username` como objeto (dict) en vez de string;
+        Algunos clientes mandan `username` como objeto (dict) en vez de string;
         para evitar 422 convertimos a string tomando campos comunes.
         """
         if v is None:

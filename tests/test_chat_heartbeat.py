@@ -208,7 +208,7 @@ def test_is_chat_heartbeat_enabled_finds_gateway_tenant_fallback(
 
 
 def test_heartbeat_outbound_prefers_duckclaw_heartbeat_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("N8N_OUTBOUND_WEBHOOK_URL", "https://example.test/wrong")
+    monkeypatch.setenv("DUCKCLAW_SEND_DM_WEBHOOK_URL", "https://example.test/wrong")
     monkeypatch.setenv("DUCKCLAW_HEARTBEAT_WEBHOOK_URL", "https://example.test/heartbeat-out")
     from duckclaw.graphs.chat_heartbeat import heartbeat_outbound_webhook_url
 
@@ -218,7 +218,7 @@ def test_heartbeat_outbound_prefers_duckclaw_heartbeat_url(monkeypatch: pytest.M
 def test_schedule_chat_heartbeat_runs_post_in_background(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("N8N_OUTBOUND_WEBHOOK_URL", "https://example.test/out")
+    monkeypatch.setenv("DUCKCLAW_HEARTBEAT_WEBHOOK_URL", "https://example.test/out")
     posted: list[tuple[str, str, str]] = []
 
     def fake_post(

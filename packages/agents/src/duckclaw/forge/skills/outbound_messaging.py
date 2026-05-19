@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
-
-import os
-
-import httpx
 from langchain_core.tools import tool
 
 from duckclaw.graphs.on_the_fly_commands import append_task_audit
 from duckclaw.graphs.graph_server import get_db
+from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
+from duckclaw.integrations.telegram.telegram_outbound_sync import send_bot_message_sync
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 
 
@@ -21,30 +18,23 @@ def send_proactive_message(chat_id: str, message: str) -> str:
     if not chat_id or not message:
         return "Uso: send_proactive_message(chat_id, message) con parámetros no vacíos."
 
-    webhook_url = os.getenv("N8N_OUTBOUND_WEBHOOK_URL", "").strip()
-    if not webhook_url:
-        return "N8N_OUTBOUND_WEBHOOK_URL no está configurado."
-
-    headers: dict[str, Any] = {}
-    auth_key = os.getenv("N8N_AUTH_KEY", "").strip()
-    if auth_key:
-        headers["X-DuckClaw-Secret"] = auth_key
+    token = (effective_telegram_bot_token_outbound() or "").strip()
+    if not token:
+        return "TELEGRAM_BOT_TOKEN (o token del bot en .env) no está configurado."
 
     try:
-        httpx.post(
-            webhook_url,
-            json={
-                "chat_id": str(chat_id),
-                "text": llm_markdown_to_telegram_html(message),
-                "parse_mode": "HTML",
-            },
-            headers=headers,
-            timeout=10,
+        ok = send_bot_message_sync(
+            bot_token=token,
+            chat_id=str(chat_id),
+            text=llm_markdown_to_telegram_html(message),
+            parse_mode="HTML",
+            timeout_sec=15.0,
         )
+        if not ok:
+            return "No se pudo entregar el mensaje por Bot API de Telegram."
     except Exception as e:  # noqa: BLE001
         return f"Error al enviar mensaje proactivo: {e}"
 
-    # Auditoría básica en DuckDB
     try:
         db = get_db()
         append_task_audit(
@@ -56,8 +46,6 @@ def send_proactive_message(chat_id: str, message: str) -> str:
             0,
         )
     except Exception:
-        # Auditoría best-effort; no romper la herramienta por esto.
         pass
 
     return "Mensaje enviado exitosamente al usuario."
-

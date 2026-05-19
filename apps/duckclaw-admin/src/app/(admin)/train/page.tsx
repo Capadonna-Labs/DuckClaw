@@ -8,7 +8,7 @@ import {
   type TrainTraceFile,
 } from '@/services/adminService';
 import SettingsSection from '@/components/settings/SettingsSection';
-import { GraduationCap, Database, Play, ChevronDown, ChevronRight } from 'lucide-react';
+import { GraduationCap, Database, Play, MessageSquare } from 'lucide-react';
 import { clampInput, LIMITS } from '@/lib/validation';
 
 function formatBytes(n: number): string {
@@ -96,7 +96,6 @@ export default function TrainPage() {
   const [sanitizeDryRun, setSanitizeDryRun] = useState(false);
   const [useLoraConfig, setUseLoraConfig] = useState(true);
   const [sampleJson, setSampleJson] = useState<string | null>(null);
-  const [redisOpen, setRedisOpen] = useState(false);
   const [tenantId, setTenantId] = useState('default');
   const [sessionId, setSessionId] = useState('');
   const [redisMessages, setRedisMessages] = useState<unknown[]>([]);
@@ -343,22 +342,14 @@ export default function TrainPage() {
         </p>
       </SettingsSection>
 
-      <section className="rounded-3xl border dark:border-dark-border overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setRedisOpen((o) => !o)}
-          className="w-full flex items-center gap-2 px-6 py-4 text-left font-bold dark:text-dark-text bg-white dark:bg-dark-surface"
-        >
-          {redisOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-          Sesión Redis (debug)
-        </button>
-        {redisOpen && (
-          <div>
-            <div className="px-6 pb-6 space-y-3 border-t dark:border-dark-border pt-4">
-              <p className="text-xs text-gov-gray-500">
-                Historial por tenant/session (no es el datalake conversation_traces).
-              </p>
-              <div className="flex flex-wrap gap-2">
+      <SettingsSection
+        titulo="Sesión Redis (debug)"
+        descripcion="Historial por tenant/session (no es conversation_traces)"
+        icono={<MessageSquare size={22} />}
+        defaultOpen={false}
+      >
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2">
                 <input
                   value={tenantId}
                   onChange={(e) => setTenantId(clampInput(e.target.value, LIMITS.tenantId))}
@@ -389,12 +380,10 @@ export default function TrainPage() {
                   >
                     {JSON.stringify(m, null, 2)}
                   </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        )}
-      </section>
+            ))}
+          </ul>
+        </div>
+      </SettingsSection>
     </div>
   );
 }

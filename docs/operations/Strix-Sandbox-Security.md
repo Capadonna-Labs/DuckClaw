@@ -52,7 +52,7 @@ El estado `sandbox_enabled` se guarda por **chat_id** en DuckDB. Si en los logs 
 - `[sandbox-toggle] ... chat_id='1726618406' ...` al activar, pero
 - `[sandbox] ... chat_id='default' ... enabled=False` al ejecutar código,
 
-entonces el cliente (p. ej. n8n) está enviando **otro identificador de sesión** en el POST de chat normal, o **no envía** `chat_id` y el gateway usa `default`.
+entonces el cliente (p. ej. integración HTTP externa) está enviando **otro identificador de sesión** en el POST de chat normal, o **no envía** `chat_id` y el gateway usa `default`.
 
 **Qué hacer:** usar el **mismo** id de hilo en todas las peticiones a `/api/v1/agent/chat` (comandos y mensajes).
 

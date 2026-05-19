@@ -1,6 +1,8 @@
 import { spawn } from 'child_process';
 import { join } from 'path';
-import { HOST_ONLY_OPS, normalizeOpsResult } from '@/lib/formatOpsOutput';
+import { HOST_ONLY_OPS, type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
+import { runStackStartLocal } from '@/lib/stackStart';
+import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
 
 export { HOST_ONLY_OPS };
 
@@ -14,6 +16,22 @@ export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = 
   pm2_restart_db_writer: {
     label: 'Reiniciar DuckClaw-DB-Writer',
     argv: ['pm2', 'restart', 'DuckClaw-DB-Writer', '--update-env'],
+  },
+  pm2_start_db_writer: {
+    label: 'Iniciar DuckClaw-DB-Writer',
+    argv: ['pm2', 'start', 'config/ecosystem.db-writer.config.cjs', '--update-env'],
+  },
+  pm2_start_gateway: {
+    label: 'Iniciar DuckClaw-Gateway',
+    argv: ['pm2', 'start', 'config/ecosystem.api.config.cjs', '--only', 'DuckClaw-Gateway', '--update-env'],
+  },
+  start_stack: {
+    label: 'Iniciar plataforma (PM2 + Telegram)',
+    argv: ['__start_stack__'],
+  },
+  start_telegram_ingress: {
+    label: 'Activar Tailscale (Telegram webhook)',
+    argv: ['__start_telegram_ingress__'],
   },
   pm2_logs_gateway: {
     label: 'Últimas líneas log Gateway',
@@ -54,14 +72,13 @@ export function listOpsCommands() {
   };
 }
 
-export function runOpsLocal(opId: string): Promise<{
-  ok: boolean;
-  op_id: string;
-  exit_code: number;
-  stdout: string;
-  stderr: string;
-  executed_via: 'local';
-}> {
+export function runOpsLocal(opId: string): Promise<NormalizedOpsRunResult> {
+  if (opId === 'start_stack') {
+    return runStackStartLocal();
+  }
+  if (opId === 'start_telegram_ingress') {
+    return runTelegramIngressStartLocal();
+  }
   const entry = OPS_ALLOWLIST[opId];
   if (!entry) {
     return Promise.reject(new Error(`Comando no permitido: ${opId}`));

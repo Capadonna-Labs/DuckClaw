@@ -142,7 +142,7 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
                               });
                             }}
                             className="w-full min-w-[7rem] px-2 py-1.5 font-mono text-xs border rounded-lg dark:border-dark-border dark:bg-dark-bg"
-                            placeholder="finanz"
+                            placeholder="my-bot"
                           />
                         ) : (
                           <span className="font-mono text-xs px-2">{row.bot}</span>
@@ -177,7 +177,7 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
                             value={row.path}
                             onChange={(e) => updateRow(i, { path: e.target.value })}
                             className="w-full min-w-[14rem] px-2 py-1.5 font-mono text-xs border rounded-lg dark:border-dark-border dark:bg-dark-bg"
-                            placeholder="/api/v1/telegram/finanz"
+                            placeholder="/api/v1/telegram/my-bot"
                           />
                         ) : (
                           <span className="font-mono text-xs px-2 break-all">{row.path}</span>

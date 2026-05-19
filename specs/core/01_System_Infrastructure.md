@@ -39,25 +39,25 @@ DuckClaw utiliza **Tailscale (WireGuard)** para una red privada E2EE entre Mac M
 - **Seguridad**: Zero-Trust con ACLs (p. ej. `tag:vps` → `tag:mac-mini:8000`).
 - **Autenticación**: `X-Tailscale-Auth-Key` en endpoints de invocación.
 - **Skill `TailscaleBridge`**: health check (`tailscale status`), resolución de IP privada, proxy con cabeceras de auth.
-- **Protocolo**: n8n (VPS) ↔ DuckClaw (Mac Mini) por IP Tailscale; tráfico no sale a internet pública (Habeas Data).
+- **Protocolo**: Clientes HTTP (VPS / Tailscale) ↔ DuckClaw (Mac Mini) por IP Tailscale; tráfico no sale a internet pública (Habeas Data).
 - **Despliegue**: `tailscale up` en ambos nodos; firewall `ufw allow in on tailscale0`; verificación con `curl http://100.x.y.z:8000/health`.
 
 ---
 
 ## 3. API Gateway (FastAPI)
 
-Único punto de entrada para Angular, n8n y servicios externos.
+Único punto de entrada para Angular, Telegram webhook inbound y servicios externos.
 
 ### Topología
 
-- Angular/n8n → FastAPI Gateway → Auth Middleware → Agent Stream / Homeostasis Status / System Health.
+- Angular / Telegram inbound → FastAPI Gateway → Auth Middleware → Agent Stream / Homeostasis Status / System Health.
 - **Telegram (recomendado):** varios procesos gateway (puertos distintos en PM2); cada bot `setWebhook` a una URL HTTPS que termina en el puerto de *ese* proceso (`POST /api/v1/telegram/webhook`). Detalle: `specs/features/telegram-gateway/TELEGRAM_WEBHOOK_ONE_PORT.md`. Alternativa un solo ingress: multiplex en `specs/features/telegram-gateway/TELEGRAM_WEBHOOK_MULTIPLEX.md`.
 
 ### Endpoints (contrato API)
 
 **Agentes (streaming)**
 
-- `POST /api/v1/agent/{worker_id}/chat`: Body `message`, `session_id`, `history`, `stream` (default true). Respuesta: SSE token a token o JSON `{"response", "session_id"}` (n8n).
+- `POST /api/v1/agent/{worker_id}/chat`: Body `message`, `session_id`, `history`, `stream` (default true). Respuesta: SSE token a token o JSON `{"response", "session_id"}` (clientes HTTP / API Gateway direct).
 - `GET /api/v1/agent/{worker_id}/history`: Historial truncado (K=6).
 - `GET /api/v1/agent/subagents/stream?session_id=...`: SSE de eventos de subagentes (subagents_started, subagents_updated, subagents_finished) para Angular.
 - `POST /api/v1/agent/subagents/event`: Publicación de eventos de subagentes desde backend.
@@ -84,7 +84,7 @@ Integración Angular: EventSource a SSE de chat y subagentes; polling a `/homeos
 
 ## 4. Despliegue y persistencia (PM2 / Docker)
 
-- **Local/Híbrido**: PM2 para `DuckClaw-Brain` (bot), `DuckClaw-Gateway` (API para n8n/Telegram) y `MLX-Inference` (MLX). Config generado por `duckops serve --pm2 --gateway` → `ecosystem.api.config.cjs`.
+- **Local/Híbrido**: PM2 para `DuckClaw-Brain` (bot), `DuckClaw-Gateway` (API para Telegram inbound / clientes HTTP) y `MLX-Inference` (MLX). Config generado por `duckops serve --pm2 --gateway` → `ecosystem.api.config.cjs`.
 - **DuckClaw-Gateway**: Usa `services/api-gateway/main.py` (microservicio unificado: agente, db/write, homeostasis). Requiere variables de entorno para el LLM (`DUCKCLAW_LLM_PROVIDER`, `DUCKCLAW_LLM_MODEL`, `DUCKCLAW_LLM_BASE_URL`; claves según proveedor: `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, **`GROQ_API_KEY`** si `DUCKCLAW_LLM_PROVIDER=groq` con base `https://api.groq.com/openai/v1`, etc.) y para la BD (`DUCKDB_PATH` y multiplex `DUCKCLAW_*_DB_PATH`; el wizard puede seguir escribiendo `DUCKCLAW_DB_PATH` + `DUCKDB_PATH`, normalizada a `db/<nombre>.duckdb`). Si el `.env` solo define `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL`, `build_llm` en `duckclaw.integrations.llm_providers` las refleja en `DUCKCLAW_LLM_*` cuando estas están vacías. El manager carga `.env` de la raíz al generar el config para propagarlas a PM2.
 - **Contenerización**: Docker multi-etapa (`docker/base/`, `docker/api/`) para aislamiento y K8s.
 
@@ -96,7 +96,7 @@ Pipeline unificado: tests → despliegue Mac Mini y VPS.
 
 - **CI**: pytest (`tests/`), mypy, validación SQL (sqlglot) para SQLValidator.
 - **CD Mac Mini**: Self-hosted runner, `git pull`, `uv sync`, `pm2 reload`; health check post-despliegue; rollback automático si falla.
-- **CD VPS**: SSH/rsync, `docker compose`, `systemctl restart n8n` si aplica.
+- **CD VPS**: SSH/rsync, `docker compose`, reinicio de servicios de ingress (tunnel / reverse proxy) si aplica.
 - **Secretos**: GitHub Secrets (VPS_SSH_KEY, TAILSCALE_AUTH_KEY); sin tokens en repo.
 - **Observabilidad**: Notificación Telegram del resultado del despliegue; registro en LangSmith.
 

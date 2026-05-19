@@ -49,11 +49,19 @@ def test_telegram_user_id() -> str:
 @pytest.fixture
 def admin_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES", "")
     repo = _repo_root
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo))
     gw_dir = repo / "services" / "api-gateway"
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
+    for mod in (
+        "main",
+        "routers.telegram_inbound_webhook",
+        "routers.admin",
+        "routers.discord_inbound_webhook",
+    ):
+        sys.modules.pop(mod, None)
     from main import app as gateway_app
 
     return TestClient(gateway_app)

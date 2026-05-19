@@ -80,7 +80,7 @@ Cada intento de acceso debe ser registrado para cumplir con la normativa colombi
 *   **Log de Rechazo:**
     1.  Emitir un log de nivel `WARNING` en PM2: `[SECURITY_ALERT] Unauthorized access attempt: user_id='X' tenant_id='Y'`.
     2.  Registrar en LangSmith con el tag `auth_status: unauthorized_attempt`.
-    3.  (Opcional) n8n: Disparar una alerta al Telegram del administrador si un mismo `user_id` intenta acceder más de 3 veces sin éxito.
+    3.  (Opcional) Outbound nativo: disparar una alerta al Telegram del administrador (Bot API / `send_proactive_message`) si un mismo `user_id` intenta acceder más de 3 veces sin éxito.
 
 ## 6. Guía de pruebas (Smoke)
 
@@ -171,8 +171,8 @@ Verificación:
 ### 6.6. Probar alerta al admin (3 rechazos)
 Si está configurado:
 - `DUCKCLAW_ADMIN_CHAT_ID=1726618406`
-- `N8N_OUTBOUND_WEBHOOK_URL`
-- (opcional) `N8N_AUTH_KEY`
+- `DUCKCLAW_HEARTBEAT_WEBHOOK_URL` (salida proactiva vía API Gateway)
+- (opcional) `DUCKCLAW_OUTBOUND_WEBHOOK_SECRET`
 
 Envía 3 veces seguidas un request **no autorizado** (paso 6.3) con el mismo `tenant_id` y `user_id`.
 

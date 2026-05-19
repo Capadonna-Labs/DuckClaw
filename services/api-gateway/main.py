@@ -59,12 +59,13 @@ from core.models import ChatRequest
 from duckclaw.utils.telegram_markdown_v2 import escape_telegram_html, llm_markdown_to_telegram_html, plain_subchunks_for_telegram_html
 from duckclaw.vaults import resolve_active_vault, validate_user_db_path, vault_scope_id_for_tenant
 from duckclaw.integrations.telegram.telegram_agent_token import (
-    PM2_GATEWAY_APP_TO_WORKER_ID,
     canonical_manifest_worker_id,
+    pm2_app_to_worker_map_from_env,
     resolve_telegram_token_for_worker_id,
     telegram_token_from_pm2_env_dict,
     telegram_worker_ids_match_for_compact_route,
 )
+from duckclaw.forge.team_env import default_tenant_id_from_env, default_worker_id_from_env
 from duckclaw.gateway_db import (
     GATEWAY_DB_ENV_KEYS,
     default_pqrsd_assistant_vault_path,
@@ -181,7 +182,7 @@ def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
         if dbp:
             os.environ["DUCKCLAW_FINANZ_DB_PATH"] = resolve_env_duckdb_path(dbp)
     _matched_app = (matched_name or "").strip()
-    _wid = PM2_GATEWAY_APP_TO_WORKER_ID.get(_matched_app, "")
+    _wid = pm2_app_to_worker_map_from_env().get(_matched_app, "")
     tok = (
         telegram_token_from_pm2_env_dict(env, _wid)
         if _wid
@@ -204,7 +205,7 @@ def _apply_telegram_token_per_gateway_env(*, matched_pm2_app_name: str | None) -
         (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
         or (matched_pm2_app_name or "").strip()
     )
-    wid = PM2_GATEWAY_APP_TO_WORKER_ID.get(proc)
+    wid = pm2_app_to_worker_map_from_env().get(proc)
     if not wid:
         return
     alt = resolve_telegram_token_for_worker_id(wid)
@@ -303,6 +304,23 @@ _gateway_log.info(
     (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip() or "(unset)",
     (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip() or "(unset)",
 )
+try:
+    from core.debug_agent_log import agent_debug_log
+    from duckclaw.integrations.telegram.compact_webhook_routes import load_path_webhook_bindings_from_env
+
+    _compact = load_path_webhook_bindings_from_env()
+    agent_debug_log(
+        location="main.py:startup",
+        message="gateway telegram compact routes loaded",
+        data={
+            "route_count": len(_compact),
+            "gateway_port": (os.environ.get("DUCKCLAW_GATEWAY_PORT") or "").strip(),
+            "webhook_routes_set": bool((os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()),
+        },
+        hypothesis_id="H5",
+    )
+except Exception:
+    pass
 _pqrsd_startup = (os.environ.get("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH") or "").strip()
 if _pqrsd_startup:
     _gateway_log.info(
@@ -751,7 +769,7 @@ async def agent_workers():
         workers = list_workers()
         return {"workers": workers}
     except Exception:
-        return {"workers": ["finanz"]}
+        return {"workers": [default_worker_id_from_env()]}
 
 
 @app.get("/api/v1/agent/{worker_id}/history")
@@ -908,7 +926,7 @@ async def _lookup_wr_clearance(redis_client: Any, db: Any, tenant_id: str, user_
 
 def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
     """
-    Alert opcional al admin: Bot API nativa si hay token; si no, webhook n8n (best-effort).
+    Alert opcional al admin vía Bot API nativa (TELEGRAM_BOT_TOKEN o token del bot activo).
     """
     admin_chat_id = (os.getenv("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
     plain = (
@@ -935,39 +953,10 @@ def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
                 _gateway_log.info("Telegram Guard: alerta admin enviada vía Bot API nativa")
                 return
         except Exception as exc:  # noqa: BLE001
-            _gateway_log.warning("Telegram Guard: falló alerta nativa, se intenta webhook: %s", exc)
-
-    if (os.getenv("DUCKCLAW_TELEGRAM_OUTBOUND_VIA") or "").strip().lower() != "n8n":
-        _gateway_log.warning(
-            "Telegram Guard: alerta admin no usa n8n (DUCKCLAW_TELEGRAM_OUTBOUND_VIA!=n8n)",
-        )
-        return
-
-    webhook_url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
-    auth_key = (os.getenv("N8N_AUTH_KEY") or getattr(settings, "N8N_AUTH_KEY", "") or "").strip()
-    if not webhook_url:
-        _gateway_log.warning(
-            "Telegram Guard: no hay token Bot API ni webhook n8n configurado; alerta no enviada",
-        )
-        return
-    headers: dict[str, Any] = {"Content-Type": "application/json"}
-    if auth_key:
-        headers["X-DuckClaw-Secret"] = auth_key
-    payload = {
-        "chat_id": str(admin_chat_id),
-        "text": escape_telegram_html(plain),
-        "parse_mode": "HTML",
-    }
-    data = json.dumps(payload).encode("utf-8")
-    req = _url_request.Request(webhook_url, data=data, headers=headers, method="POST")
-    try:
-        with _url_request.urlopen(req, timeout=10) as resp:
-            _ = resp.read()
-        _gateway_log.info("Telegram Guard: alerta admin enviada vía webhook")
-    except URLError as exc:
-        _gateway_log.warning("Telegram Guard: error enviando alerta webhook: %s", exc)
-    except Exception as exc:  # noqa: BLE001
-        _gateway_log.warning("Telegram Guard: error enviando alerta webhook (unknown): %s", exc)
+            _gateway_log.warning("Telegram Guard: falló alerta nativa Bot API: %s", exc)
+    _gateway_log.warning(
+        "Telegram Guard: alerta admin no enviada (configure TELEGRAM_BOT_TOKEN o token del bot activo)",
+    )
 
 
 # Telegram sendMessage: máx. 4096 caracteres (https://core.telegram.org/bots/api#sendmessage).
@@ -985,7 +974,7 @@ def _telegram_reply_plain_chunk_size() -> int:
 
 
 def _split_plain_text_for_telegram_reply(text: str, max_chunk: int) -> list[str]:
-    """Parte texto plano; cada parte se escapa aparte para n8n → Telegram (límite 4096)."""
+    """Parte texto plano para envío por Bot API (límite 4096 por mensaje)."""
     if max_chunk < 64:
         max_chunk = 64
     t = text or ""
@@ -1033,60 +1022,6 @@ def _strip_lines_mentioning_workspace_output(text: str) -> str:
     return out if out else text
 
 
-def _webhook_outbound_chat_reply_sync(*, chat_id: str, user_id: str, text: str) -> None:
-    """POST al webhook de salida n8n solo si ``DUCKCLAW_TELEGRAM_OUTBOUND_VIA=n8n`` (legado)."""
-    if (os.getenv("DUCKCLAW_TELEGRAM_OUTBOUND_VIA") or "").strip().lower() != "n8n":
-        return
-    url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
-    if not url:
-        _gateway_log.warning(
-            "outbound webhook n8n: N8N_OUTBOUND_WEBHOOK_URL no está definido; no se reenvía a Telegram.",
-        )
-        return
-    cid = str(chat_id or "").strip()
-    uid = str(user_id or "").strip() or cid
-    raw = (text or "").strip()
-    if not cid or not raw:
-        return
-    auth_key = (os.getenv("N8N_AUTH_KEY") or getattr(settings, "N8N_AUTH_KEY", "") or "").strip()
-    headers: dict[str, Any] = {"Content-Type": "application/json"}
-    if auth_key:
-        headers["X-DuckClaw-Secret"] = auth_key
-
-    chunks = plain_subchunks_for_telegram_html(raw)
-    if not chunks:
-        chunks = [raw]
-
-    for idx, part in enumerate(chunks):
-        prefix = f"[{idx + 1}/{len(chunks)}]\n" if len(chunks) > 1 else ""
-        payload = {
-            "chat_id": cid,
-            "user_id": uid,
-            "text": llm_markdown_to_telegram_html(prefix + part),
-            "parse_mode": "HTML",
-        }
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = _url_request.Request(url, data=data, headers=headers, method="POST")
-        try:
-            with _url_request.urlopen(req, timeout=30) as resp:
-                _ = resp.read()
-        except URLError as exc:
-            _gateway_log.warning(
-                "outbound fallback: error POST parte %s/%s chat_id=%s: %s",
-                idx + 1,
-                len(chunks),
-                cid,
-                exc,
-            )
-        except Exception as exc:  # noqa: BLE001
-            _gateway_log.warning(
-                "outbound fallback: error desconocido parte %s/%s: %s",
-                idx + 1,
-                len(chunks),
-                exc,
-            )
-
-
 def _outbound_deliver_chat_text_sync(
     *,
     chat_id: str,
@@ -1099,10 +1034,7 @@ def _outbound_deliver_chat_text_sync(
     redis_url: str | None = None,
     tenant_id: str = "default",
 ) -> bool:
-    """
-    Entrega texto largo al usuario: MCP (si hay sesión), luego **Bot API nativa**,
-    y solo al final webhook n8n si sigue configurado.
-    """
+    """Entrega texto largo al usuario: MCP (si hay sesión) y luego Bot API nativa."""
     from duckclaw.graphs.chat_heartbeat import normalize_telegram_chat_id_for_outbound
 
     cid_raw = str(chat_id or "").strip()
@@ -1165,19 +1097,16 @@ def _outbound_deliver_chat_text_sync(
         if token:
             token_source = "compact_webhook_routes"
     if not token:
-        _wid = canonical_manifest_worker_id((worker_id or "").strip())
-        _allow_generic = (not _wid) or (_wid.lower() == "finanz")
-        if _allow_generic:
-            token = _effective_telegram_bot_token()
-            if token:
-                token_source = "effective_telegram_bot_token_finanz"
+        token = _effective_telegram_bot_token()
+        if token:
+            token_source = "effective_telegram_bot_token"
         else:
+            _wid = canonical_manifest_worker_id((worker_id or "").strip())
             _gateway_log.warning(
-                "outbound deliver: sin token Bot API para worker_id=%r; no se usa TELEGRAM_BOT_TOKEN "
-                "(evita entregar en el chat del bot Finanz). Defina TELEGRAM_%s_TOKEN o ruta en "
-                "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES.",
+                "outbound deliver: sin token Bot API para worker_id=%r. Defina TELEGRAM_%s_TOKEN, "
+                "TELEGRAM_BOT_TOKEN o entrada en DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES.",
                 worker_id,
-                (_wid or "WORKER").upper(),
+                (_wid or "WORKER").replace("-", "_").upper(),
             )
     if token:
         try:
@@ -1203,17 +1132,16 @@ def _outbound_deliver_chat_text_sync(
                 )
                 return True
             _gateway_log.warning(
-                "outbound deliver: Bot API no envió partes; fallback webhook si existe (chat_id=%s)",
+                "outbound deliver: Bot API no envió partes (chat_id=%s)",
                 format_chat_id_for_terminal(cid),
             )
         except Exception as exc:  # noqa: BLE001
             _gateway_log.warning(
-                "outbound deliver: error Bot API chat_id=%s: %s; fallback webhook si existe",
+                "outbound deliver: error Bot API chat_id=%s: %s",
                 format_chat_id_for_terminal(cid),
                 exc,
             )
 
-    _webhook_outbound_chat_reply_sync(chat_id=cid, user_id=uid, text=raw)
     return False
 
 
@@ -1228,7 +1156,7 @@ def _deliver_outbound_by_channel(
     redis_url: str | None,
     prefer_native_bot_api: bool = False,
 ) -> bool:
-    """Entrega best-effort según canal (Telegram: MCP/n8n/Bot API; Discord: PATCH @original)."""
+    """Entrega best-effort según canal (Telegram: MCP/Bot API; Discord: PATCH @original)."""
     ch = (dc.channel or "telegram").strip().lower()
     if ch == "telegram":
         return _outbound_deliver_chat_text_sync(
@@ -1299,7 +1227,7 @@ async def _authorize_or_reject(
         _langsmith_auth_log(auth_status="authorized", user_id=user_id, tenant_id=tenant_id)
         return
 
-    # PM2 visibility: ruido en logs, pero respuesta silenciosa en Telegram (n8n no debería reenviar un texto).
+    # PM2 visibility: ruido en logs, pero respuesta silenciosa en Telegram.
     _gateway_log.warning(
         "[SECURITY_ALERT] Unauthorized access attempt: user_id=%s tenant_id='%s'",
         format_chat_id_for_terminal(str(user_id or "unknown")),
@@ -1322,6 +1250,14 @@ async def _authorize_or_reject(
         except Exception:
             pass
 
+    from core.debug_agent_log import agent_debug_log
+
+    agent_debug_log(
+        location="main.py:_authorize_or_reject",
+        message="telegram guard rejected user",
+        data={"tenant_id": tenant_id, "user_id": user_id},
+        hypothesis_id="H3",
+    )
     raise HTTPException(
         status_code=403,
         detail="Acceso denegado. No tienes autorización para interactuar con este agente.",
@@ -1336,26 +1272,12 @@ def _effective_tenant_id(request_tenant: str | None) -> str:
     ``default``, ese valor **gana**: debe coincidir con el GET ``/history`` y el POST ``/chat``
     (misma clave ``duckclaw:gateway:chat_hist:{tenant}:{session}``).
 
-    Si solo llega ``default`` u omisión, aplica DUCKCLAW_GATEWAY_TENANT_ID, heurística PM2
-    (BI-Analyst-Gateway, etc.) / rutas de DuckDB, y por último ``default``.
+    Si solo llega ``default`` u omisión, aplica ``DUCKCLAW_GATEWAY_TENANT_ID`` o ``default``.
     """
     rt = (request_tenant or "").strip()
     if rt and rt.lower() != "default":
         return rt
-
-    override = (os.getenv("DUCKCLAW_GATEWAY_TENANT_ID") or "").strip()
-    if override:
-        return override
-    pm2 = (os.getenv("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
-    if pm2 == "BI-Analyst-Gateway":
-        return "BI-Analyst"
-    dbp_src = get_gateway_db_path()
-    dbp = str(dbp_src or "").lower()
-    if "bi_analyst" in dbp:
-        return "BI-Analyst"
-    if "siatadb" in dbp:
-        return "SIATA"
-    return rt or "default"
+    return default_tenant_id_from_env()
 
 
 @app.post("/api/v1/agent/chat")
@@ -1420,7 +1342,7 @@ async def agent_chat(
         return StreamingResponse(
             _invoke_chat_sse_body(
                 body,
-                worker_id or "finanz",
+                worker_id or default_worker_id_from_env(),
                 session_id,
                 tenant_id,
                 **_invoke_kw,
@@ -1430,7 +1352,7 @@ async def agent_chat(
         )
     result = await _invoke_chat(
         body,
-        worker_id or "finanz",
+        worker_id or default_worker_id_from_env(),
         session_id=session_id,
         tenant_id=tenant_id,
         **_invoke_kw,
@@ -1466,7 +1388,7 @@ async def agent_chat(
         except Exception as exc:  # noqa: BLE001
             _gateway_log.warning("agent_chat forced outbound failed: %s", exc)
     # Cliente HTTP puede cerrar antes (timeout ~300s, proxy, etc.): reenvío best-effort
-    # a Telegram por Bot API nativa o webhook n8n.
+    # a Telegram por Bot API nativa o webhook opcional.
     _fb = (os.getenv("DUCKCLAW_CHAT_OUTBOUND_ON_CLIENT_DISCONNECT", "true").strip().lower())
     if _fb in ("1", "true", "yes", ""):
         try:
@@ -1476,7 +1398,7 @@ async def agent_chat(
                     uid_fb = (body.user_id or "").strip() or session_id
                     _gateway_log.info(
                         "outbound fallback: cliente desconectado; entrega async a Telegram "
-                        "(nativo o n8n) chat_id=%s len=%s",
+                        "(nativo o webhook) chat_id=%s len=%s",
                         format_chat_id_for_terminal(session_id),
                         len(resp_text),
                     )
@@ -1716,7 +1638,7 @@ async def _invoke_chat(
     Orquesta la llamada al grafo LangGraph a partir de un ChatRequest.
 
     - session_id: ya resuelto (body + query + headers); debe ser el mismo en todos los POST del hilo.
-    - telegram_multipart_tail_delivery: ``native`` | ``n8n`` | None (inferido por env) para partes 2..N del mensaje.
+    - telegram_multipart_tail_delivery: ignorado (siempre entrega nativa) para partes 2..N del mensaje.
     - delivery_context: si se omite, se reconstruye desde kwargs ``telegram_*`` (compatibilidad).
     """
     if delivery_context is not None:
@@ -1751,7 +1673,7 @@ async def _invoke_chat(
     chat_type = (payload.chat_type or "private").strip().lower() or "private"
     username = (payload.username or "Usuario").strip() or "Usuario"
     user_id = (payload.user_id or "").strip()
-    # Telegram DM: n8n a veces manda solo chat_id; para el Guard, user_id == chat_id.
+    # Telegram DM: algunos clientes mandan solo chat_id; para el Guard, user_id == chat_id.
     if not user_id and chat_type == "private":
         user_id = (session_id or "").strip()
     vault_user_id = user_id or session_id
@@ -2077,7 +1999,7 @@ async def _invoke_chat(
         reply_text = sanitize_worker_reply_text(reply_text or "")
     except Exception:
         pass
-    # Evitar doble escape Telegram: historial/n8n a veces reinyecta texto ya escapado y el modelo lo copia.
+    # Evitar doble escape Telegram: historial a veces reinyecta texto ya escapado y el modelo lo copia.
     try:
         from duckclaw.graphs.on_the_fly_commands import unescape_telegram_markdown_v2_layers
 

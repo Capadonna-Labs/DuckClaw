@@ -82,7 +82,7 @@ def _quant_alert_chat_id() -> str:
 
 def _quant_native_bot_token() -> str:
     """
-    Token Bot API sin n8n: TELEGRAM_BOT_TOKEN, resolución Quant-Trader, o segmento ``quanttrader``
+    Token Bot API: TELEGRAM_BOT_TOKEN, resolución Quant-Trader, o segmento ``quanttrader``
     en ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` (formato ``…:TOKEN:/api/…`` con TOKEN típ. ``A…``).
     """
     t = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
@@ -181,11 +181,11 @@ def enqueue_vault_sql(
 
 
 def quant_outbound_env_ready() -> tuple[bool, str]:
-    """True si hay canal de salida: webhook n8n (opcional) o Bot API nativo (token + chat)."""
+    """True si hay canal de salida: webhook opcional o Bot API nativo (token + chat)."""
     chat = _quant_alert_chat_id()
     if not chat:
         return False, "no_chat_DUCKCLAW_QUANT_ALERT_or_OWNER"
-    webhook = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
+    webhook = (os.getenv("DUCKCLAW_HEARTBEAT_WEBHOOK_URL") or "").strip()
     if httpx and webhook:
         return True, "webhook"
     if _quant_native_bot_token():
@@ -196,16 +196,16 @@ def quant_outbound_env_ready() -> tuple[bool, str]:
 
 
 def log_quant_outbound_readiness(component: str, *, phase: str = "") -> None:
-    """Una línea stderr para validar PM2/cron (webhook n8n y/o Bot API nativo)."""
+    """Una línea stderr para validar PM2/cron (webhook y/o Bot API nativo)."""
     ok, reason = quant_outbound_env_ready()
     ph = f" phase={phase}" if phase else ""
     if ok:
-        mode = "native Bot API" if reason == "native_bot_api" else "n8n webhook"
+        mode = "native Bot API" if reason == "native_bot_api" else "outbound webhook"
         print(f"[{component}]{ph} outbound_configured=yes ({mode})", file=sys.stderr, flush=True)
     else:
         print(
             f"[{component}]{ph} outbound_configured=no ({reason}); "
-            "define N8N_OUTBOUND_WEBHOOK_URL+httpx, o token Bot (TELEGRAM_* / WEBHOOK_ROUTES quanttrader) "
+            "define DUCKCLAW_HEARTBEAT_WEBHOOK_URL+httpx, o token Bot (TELEGRAM_* / WEBHOOK_ROUTES quanttrader) "
             "+ DUCKCLAW_QUANT_ALERT_CHAT_ID o DUCKCLAW_OWNER_ID",
             file=sys.stderr,
             flush=True,
@@ -214,7 +214,7 @@ def log_quant_outbound_readiness(component: str, *, phase: str = "") -> None:
 
 def send_quant_alert_message(text: str) -> bool:
     """
-    Telegram: intenta POST webhook n8n si está configurado; si no hay 2xx o no hay webhook,
+    Telegram: intenta POST webhook si está configurado; si no hay 2xx o no hay webhook,
     envía por **Bot API nativo** (mismo stack que heartbeat) con token resuelto y chat.
     """
     chat = _quant_alert_chat_id()
@@ -226,12 +226,12 @@ def send_quant_alert_message(text: str) -> bool:
         )
         return False
 
-    webhook_url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
+    webhook_url = (os.getenv("DUCKCLAW_HEARTBEAT_WEBHOOK_URL") or "").strip()
     if httpx and webhook_url:
         headers: dict[str, str] = {}
-        auth_key = os.getenv("N8N_AUTH_KEY", "").strip()
-        if auth_key:
-            headers["X-DuckClaw-Secret"] = auth_key
+        secret = (os.getenv("DUCKCLAW_OUTBOUND_WEBHOOK_SECRET") or "").strip()
+        if secret:
+            headers["X-DuckClaw-Secret"] = secret
         body = {
             "chat_id": chat,
             "user_id": chat,

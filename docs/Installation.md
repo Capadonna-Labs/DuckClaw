@@ -41,7 +41,7 @@ Al finalizar el Wizard, el sistema queda orquestado con los siguientes procesos 
 
 | Servicio PM2 | Rol Arquitectónico | Comando Subyacente |
 | :--- | :--- | :--- |
-| **`DuckClaw-Gateway`** | API Unificada (FastAPI). Recibe tráfico de n8n/Angular, encola escrituras y sirve SSE. | `uvicorn main:app --app-dir services/api-gateway` |
+| **`DuckClaw-Gateway`** | API Unificada (FastAPI). Recibe Telegram webhook inbound, clientes HTTP (Angular) y API Gateway direct; encola escrituras y sirve SSE. | `uvicorn main:app --app-dir services/api-gateway` |
 | **`DuckClaw-DB-Writer`** | Consumidor Singleton. Lee de Redis y escribe en DuckDB (cola SQL + **`CONTEXT_INJECTION`** para `/context --add` → `main.semantic_memory`). | `python services/db-writer/main.py` |
 | **`DuckClaw-MLX_Inference`**| (Solo Mac) Servidor MLX local compatible con OpenAI API. | `bash mlx/start_mlx.sh` |
 

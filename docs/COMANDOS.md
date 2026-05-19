@@ -35,6 +35,15 @@ pm2 start config/ecosystem.mlx.config.cjs
 
 ## TELEGRAM
 
+Webhook (`DUCKCLAW_PUBLIC_URL` con `*.ts.net`) requiere **Tailscale activo** y **Funnel** al puerto del gateway:
+
+```bash
+tailscale up                                    # o abrir app Tailscale
+tailscale funnel --bg 8000                      # mismo puerto que DUCKCLAW_GATEWAY_PORT
+uv run python scripts/check_telegram_ingress.py # diagnóstico
+uv run python scripts/register_webhooks.py      # re-registrar tras activar Funnel
+```
+
 ```bash
 /team                         # Verifica usuarios actuales
 /team --add id_telegram admin # Agrega un usuairo con permiso 'admin' 

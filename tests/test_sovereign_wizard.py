@@ -694,8 +694,8 @@ def test_materialize_writes_owner_and_team_env(tmp_path: Path, monkeypatch: pyte
     (root / "config").mkdir()
     d = SovereignDraft(
         wizard_creator_telegram_user_id="123456789",
-        gateway_team_templates="finanz, BI-Analyst",
-        default_worker_id="finanz",
+        gateway_team_templates="Worker-A,Worker-B",
+        default_worker_id="Worker-A",
         redis_url="redis://localhost:6379/0",
         duckdb_vault_path="db/test.duckdb",
         tenant_id="Marco",
@@ -712,4 +712,4 @@ def test_materialize_writes_owner_and_team_env(tmp_path: Path, monkeypatch: pyte
     assert rc == 0
     text = (root / ".env").read_text(encoding="utf-8")
     assert "DUCKCLAW_OWNER_ID=123456789" in text
-    assert "DUCKCLAW_GATEWAY_TEAM_TEMPLATES=finanz, BI-Analyst" in text
+    assert "DUCKCLAW_TEAM_MEMBERS=Worker-A,Worker-B" in text

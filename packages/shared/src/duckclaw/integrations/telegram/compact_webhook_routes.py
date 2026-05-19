@@ -1,14 +1,19 @@
 # packages/shared/src/duckclaw/integrations/telegram/compact_webhook_routes.py
 """
-Rutas multiplex por path (DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES modo compacto).
+Rutas multiplex por path (``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` modo compacto).
 
-Implementación compartida: api-gateway y agentes (p. ej. chat heartbeat) deben resolver
-el mismo token por worker sin duplicar lógica.
+Formato por entrada (coma-separado)::
+
+  bot_name:bot_token:/api/v1/telegram/sufijo:worker_id:tenant_id:vault_env_var
+
+``vault_env_var`` es el **nombre** de una variable en .env cuyo valor es la ruta DuckDB
+(p. ej. ``DUCKCLAW_MY_VAULT_DB_PATH``). Opcional: omitir ``:vault_env_var`` si no forzar bóveda.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 from duckclaw.gateway_db import resolve_env_duckdb_path
@@ -16,11 +21,14 @@ from duckclaw.gateway_db import resolve_env_duckdb_path
 
 @dataclass(frozen=True)
 class TelegramCompactWebhookRoute:
-    """Una entrada literal del .env (compacto)."""
+    """Una entrada del .env (compacto)."""
 
     bot_name: str
     bot_token: str
     webhook_path: str
+    worker_id: str
+    tenant_id: str
+    vault_env_var: str = ""
 
 
 @dataclass(frozen=True)
@@ -33,18 +41,6 @@ class TelegramPathWebhookBinding:
     tenant_id: str
     forced_vault_db_path: str | None
     webhook_path: str
-
-
-# bot_name (minúsculas) → worker_id, tenant_id, variables de entorno para DuckDB
-_BOT_PROFILES: dict[str, tuple[str, str, tuple[str, ...]]] = {
-    "finanz": ("finanz", "Finanzas", ("DUCKCLAW_FINANZ_DB_PATH",)),
-    "siata": ("siata_analyst", "SIATA", ("DUCKCLAW_SIATA_DB_PATH",)),
-    "jobhunter": ("Job-Hunter", "Trabajo", ("DUCKCLAW_JOB_HUNTER_DB_PATH",)),
-    "quanttrader": ("Quant-Trader", "Cuantitativo", ("DUCKCLAW_QUANT_TRADER_DB_PATH",)),
-    "pqrsd-assistant": ("PQRSD-Assistant", "PQRS", ("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH",)),
-    # Asistente personal Marco: coordinador AXIS-Maestro + bóveda vía DUCKCLAW_AXIS_DB_PATH
-    "marco_assistant": ("AXIS-Maestro", "Marco", ("DUCKCLAW_AXIS_DB_PATH",)),
-}
 
 
 def parse_compact_telegram_webhook_routes(raw: str) -> list[TelegramCompactWebhookRoute]:
@@ -71,9 +67,21 @@ def parse_compact_telegram_webhook_routes(raw: str) -> list[TelegramCompactWebho
             raise ValueError(
                 f"DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES compacto: entrada sin ':/api/…': {entry[:80]!r}"
             )
-        path = entry[idx + 1 :].strip()
-        if not path.startswith("/api/"):
-            raise ValueError(f"webhook_path inválido (debe empezar por /api/): {path!r}")
+        path_and_tail = entry[idx + 1 :].strip()
+        tail_m = re.match(
+            r"^(/api/v1/telegram/[^:]+):([^:]+):([^:]+)(?::([^:]+))?$",
+            path_and_tail,
+        )
+        if not tail_m:
+            raise ValueError(
+                f"Formato inválido tras ':/api/': {path_and_tail[:100]!r}. "
+                "Use bot:token:/api/v1/telegram/ruta:worker_id:tenant_id[:VAULT_ENV_VAR]"
+            )
+        path = tail_m.group(1).strip()
+        worker_id = tail_m.group(2).strip()
+        tenant_id = tail_m.group(3).strip()
+        vault_env_var = (tail_m.group(4) or "").strip()
+
         prefix = entry[:idx]
         first = prefix.find(":")
         if first <= 0:
@@ -82,6 +90,11 @@ def parse_compact_telegram_webhook_routes(raw: str) -> list[TelegramCompactWebho
         bot_token = prefix[first + 1 :].strip()
         if not bot_name or not bot_token:
             raise ValueError(f"bot_name o bot_token vacío en: {entry[:80]!r}")
+        if not worker_id or not tenant_id:
+            raise ValueError(
+                f"Falta worker_id:tenant_id en ruta compacta de {bot_name!r}. "
+                "Formato: bot:token:/api/v1/telegram/ruta:worker:tenant[:VAULT_ENV_VAR]"
+            )
 
         if path in seen_paths:
             raise ValueError(f"duplicate webhook_path: {path}")
@@ -94,6 +107,9 @@ def parse_compact_telegram_webhook_routes(raw: str) -> list[TelegramCompactWebho
                 bot_name=bot_name,
                 bot_token=bot_token,
                 webhook_path=path.rstrip("/") or path,
+                worker_id=worker_id,
+                tenant_id=tenant_id,
+                vault_env_var=vault_env_var,
             )
         )
 
@@ -112,19 +128,15 @@ def _resolve_vault_path_from_env(env_names: tuple[str, ...]) -> str | None:
 
 
 def compact_route_to_path_binding(route: TelegramCompactWebhookRoute) -> TelegramPathWebhookBinding:
-    profile = _BOT_PROFILES.get(route.bot_name)
-    if not profile:
-        known = ", ".join(sorted(_BOT_PROFILES))
-        raise ValueError(
-            f"bot_name desconocido {route.bot_name!r}; perfiles soportados: {known}"
-        )
-    worker_id, tenant_id, vault_envs = profile
+    vault_envs: tuple[str, ...] = ()
+    if route.vault_env_var:
+        vault_envs = (route.vault_env_var.strip(),)
     vault = _resolve_vault_path_from_env(vault_envs)
     return TelegramPathWebhookBinding(
         bot_name=route.bot_name,
         bot_token=route.bot_token,
-        worker_id=worker_id,
-        tenant_id=tenant_id,
+        worker_id=route.worker_id,
+        tenant_id=route.tenant_id,
         forced_vault_db_path=vault,
         webhook_path=route.webhook_path,
     )
@@ -151,14 +163,21 @@ def serialize_compact_telegram_webhook_routes(routes: list[TelegramCompactWebhoo
         bot = (route.bot_name or "").strip().lower()
         token = (route.bot_token or "").strip()
         path = (route.webhook_path or "").strip()
-        if not bot or not token or not path:
-            raise ValueError("bot_name, bot_token y webhook_path son obligatorios en cada ruta")
-        parts.append(f"{bot}:{token}:{path}")
+        worker = (route.worker_id or "").strip()
+        tenant = (route.tenant_id or "").strip()
+        vault = (route.vault_env_var or "").strip()
+        if not bot or not token or not path or not worker or not tenant:
+            raise ValueError(
+                "bot_name, bot_token, webhook_path, worker_id y tenant_id son obligatorios en cada ruta"
+            )
+        base = f"{bot}:{token}:{path}:{worker}:{tenant}"
+        parts.append(f"{base}:{vault}" if vault else base)
     return ",".join(parts)
 
 
 def known_compact_bot_names() -> tuple[str, ...]:
-    return tuple(sorted(_BOT_PROFILES.keys()))
+    raw = (os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()
+    return tuple(r.bot_name for r in parse_compact_telegram_webhook_routes(raw))
 
 
 def load_path_webhook_bindings_from_env() -> list[TelegramPathWebhookBinding]:

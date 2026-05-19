@@ -7,15 +7,12 @@ import { adminService } from '@/services/adminService';
 import SettingsSection from '@/components/settings/SettingsSection';
 import { clampInput, LIMITS, validateWorkerId } from '@/lib/validation';
 import { useAuthStore } from '@/store/authStore';
-import {
-  BEGINNER_TEMPLATE_PRESETS,
-  ADVANCED_TEMPLATE_PRESETS,
-  slugFromAgentName,
-  presetForTemplateId,
-} from '@/lib/templatePresets';
-import { FolderPlus, Check, Sparkles } from 'lucide-react';
+import { slugFromAgentName, presetForTemplateId } from '@/lib/templatePresets';
+import { useTemplatePresets } from '@/lib/useTemplatePresets';
+import { FolderPlus, Check, Sparkles, Layers } from 'lucide-react';
+import type { TemplateSummary } from '@/types/admin';
 
-const STEPS = [
+const STEPS_AGENT = [
   'Tu agente',
   'Comportamiento',
   'Tipo de asistente',
@@ -23,6 +20,8 @@ const STEPS = [
   'Herramientas',
   'Listo para crear',
 ] as const;
+
+const STEPS_PROJECT = ['Proyecto', 'Miembros', 'Contexto compartido', 'Listo'] as const;
 
 const DEFAULT_PROMPT_HINT = `Eres un asistente de IA útil y claro.
 
@@ -45,12 +44,23 @@ export default function NewProjectPage() {
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [useDefaultSkills, setUseDefaultSkills] = useState(true);
   const [advancedMode, setAdvancedMode] = useState(false);
+  const [createMode, setCreateMode] = useState<'agent' | 'project'>('agent');
+  const [allTemplates, setAllTemplates] = useState<TemplateSummary[]>([]);
+  const [projectMembers, setProjectMembers] = useState<string[]>([]);
+  const [projectCoordinator, setProjectCoordinator] = useState<string | undefined>();
+  const [projectVault, setProjectVault] = useState<string | undefined>();
+  const [sharedContext, setSharedContext] = useState('');
+  const [applyTenantTeam, setApplyTenantTeam] = useState(true);
+  const [envPresets, setEnvPresets] = useState<
+    Awaited<ReturnType<typeof adminService.listEnvForgeProjectPresets>>
+  >([]);
   const [mcpSummary, setMcpSummary] = useState('');
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const presets = advancedMode ? ADVANCED_TEMPLATE_PRESETS : BEGINNER_TEMPLATE_PRESETS;
+  const { presets, loading: presetsLoading, error: presetsError } = useTemplatePresets(advancedMode);
+  const STEPS = createMode === 'project' ? STEPS_PROJECT : STEPS_AGENT;
 
   useEffect(() => {
     adminService.getSourcePreview('default').then((p) => {
@@ -58,6 +68,8 @@ export default function NewProjectPage() {
       if (!soul && p.soul) setSoul(p.soul);
       setSelectedSkills(p.skills ?? []);
     });
+    adminService.listTemplates().then(setAllTemplates).catch(() => undefined);
+    adminService.listEnvForgeProjectPresets().then(setEnvPresets).catch(() => setEnvPresets([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar
   }, []);
 
@@ -82,7 +94,11 @@ export default function NewProjectPage() {
   const validateStep = (): boolean => {
     if (step === 0) {
       if (!name.trim()) {
-        setFieldError('Escribe un nombre para tu agente (ej. Asistente de ventas).');
+        setFieldError(
+          createMode === 'project'
+            ? 'Escribe un nombre para el proyecto.'
+            : 'Escribe un nombre para tu agente (ej. Asistente de ventas).'
+        );
         return false;
       }
       const wid = id.trim() || slugFromAgentName(name);
@@ -93,7 +109,11 @@ export default function NewProjectPage() {
       }
       if (!id.trim()) setId(wid);
     }
-    if (step === 1) {
+    if (createMode === 'project' && step === 1 && projectMembers.length === 0) {
+      setFieldError('Elige al menos un worker o importa un preset desde .env.');
+      return false;
+    }
+    if (createMode === 'agent' && step === 1) {
       if (systemPrompt.trim().length < 20) {
         setFieldError(
           'Escribe al menos unas líneas de comportamiento (mín. 20 caracteres). Indica cómo debe actuar tu agente.'
@@ -112,12 +132,42 @@ export default function NewProjectPage() {
 
   const back = () => setStep((s) => Math.max(s - 1, 0));
 
+  const importEnvPreset = (presetId: string) => {
+    const preset = envPresets.find((p) => p.id === presetId);
+    if (!preset) return;
+    setProjectMembers(preset.members);
+    setName(preset.display_name);
+    setId(preset.id);
+    setProjectCoordinator(preset.coordinator ?? undefined);
+    setProjectVault(preset.shared_vault_id ?? undefined);
+    if (preset.shared_context) setSharedContext(preset.shared_context);
+  };
+
+  const toggleMember = (workerId: string) => {
+    setProjectMembers((prev) =>
+      prev.includes(workerId) ? prev.filter((x) => x !== workerId) : [...prev, workerId]
+    );
+  };
+
   const finish = async () => {
     if (!canWrite) return;
     setLoading(true);
     setError(null);
     const workerId = id.trim() || slugFromAgentName(name);
     try {
+      if (createMode === 'project') {
+        await adminService.createForgeProject({
+          id: workerId,
+          display_name: name.trim(),
+          members: projectMembers,
+          coordinator: projectCoordinator,
+          shared_vault_id: projectVault,
+          shared_context: sharedContext.trim(),
+          apply_tenant_team: applyTenantTeam,
+        });
+        router.push('/projects');
+        return;
+      }
       await adminService.createProject({
         id: workerId,
         source_template: source,
@@ -146,17 +196,47 @@ export default function NewProjectPage() {
     }
   };
 
-  const preset = presetForTemplateId(source);
+  const preset = presetForTemplateId(source, presets);
 
   return (
     <div className="space-y-6 max-w-3xl">
       <header>
-        <h1 className="text-3xl font-black dark:text-dark-text">Crear un agente de IA</h1>
+        <h1 className="text-3xl font-black dark:text-dark-text">
+          {createMode === 'project' ? 'Crear proyecto' : 'Crear un agente de IA'}
+        </h1>
         <p className="text-sm text-gov-gray-500 mt-1">
-          Sin código. Responde unas preguntas y DuckClaw prepara la configuración por ti.
+          {createMode === 'project'
+            ? 'Agrupa workers existentes y opcionalmente aplica el equipo al tenant.'
+            : 'Sin código. Responde unas preguntas y DuckClaw prepara la configuración por ti.'}
         </p>
-        <Link href="/kanban" className="text-sm text-gov-blue-700 font-semibold mt-2 inline-block">
-          Ver tablero de tareas →
+        <div className="flex flex-wrap gap-2 mt-3">
+          <button
+            type="button"
+            onClick={() => {
+              setCreateMode('agent');
+              setStep(0);
+            }}
+            className={`text-xs px-3 py-1.5 rounded-full font-bold ${
+              createMode === 'agent' ? 'bg-gov-blue-700 text-white' : 'border dark:border-dark-border'
+            }`}
+          >
+            Un agente
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCreateMode('project');
+              setStep(0);
+            }}
+            className={`text-xs px-3 py-1.5 rounded-full font-bold inline-flex items-center gap-1 ${
+              createMode === 'project' ? 'bg-gov-blue-700 text-white' : 'border dark:border-dark-border'
+            }`}
+          >
+            <Layers size={12} /> Proyecto (varios workers)
+          </button>
+        </div>
+        <Link href="/projects" className="text-sm text-gov-blue-700 font-semibold mt-2 inline-block">
+          Ver proyectos →
         </Link>
       </header>
 
@@ -169,15 +249,16 @@ export default function NewProjectPage() {
       >
         {step === 0 && (
           <div className="space-y-4 max-w-lg">
-            <Field label="¿Cómo se llama tu agente?">
+            <Field label={createMode === 'project' ? '¿Cómo se llama tu proyecto?' : '¿Cómo se llama tu agente?'}>
               <input
                 value={name}
                 onChange={(e) => setName(clampInput(e.target.value, 64))}
                 maxLength={64}
                 className={inputCls}
-                placeholder="Ej. Asistente de ventas"
+                placeholder={createMode === 'project' ? 'Ej. Ventas corporativas' : 'Ej. Asistente de ventas'}
               />
             </Field>
+            {createMode === 'agent' && (
             <Field label="¿Qué debe hacer? (opcional)">
               <textarea
                 value={description}
@@ -188,6 +269,7 @@ export default function NewProjectPage() {
                 placeholder="Ej. Responder preguntas de clientes y resumir pedidos del día."
               />
             </Field>
+            )}
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -210,7 +292,76 @@ export default function NewProjectPage() {
           </div>
         )}
 
-        {step === 1 && (
+        {createMode === 'project' && step === 1 && (
+          <div className="space-y-4 max-w-2xl">
+            {envPresets.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs text-gov-gray-500 w-full">Presets en .env:</span>
+                {envPresets.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => importEnvPreset(p.id)}
+                    className="px-3 py-2 text-xs font-bold rounded-xl border-2 border-gov-blue-600"
+                  >
+                    {p.display_name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+              {allTemplates.map((t) => {
+                const on = projectMembers.includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => toggleMember(t.id)}
+                    className={`px-3 py-2 rounded-xl text-xs font-mono border ${
+                      on ? 'bg-gov-blue-700 text-white' : 'dark:border-dark-border'
+                    }`}
+                  >
+                    {on ? '✓ ' : ''}
+                    {t.id}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {createMode === 'project' && step === 2 && (
+          <div className="space-y-4 max-w-2xl">
+            <Field label="Contexto compartido (opcional)">
+              <textarea
+                value={sharedContext}
+                onChange={(e) => setSharedContext(clampInput(e.target.value, 8000))}
+                rows={6}
+                className={inputCls}
+              />
+            </Field>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={applyTenantTeam}
+                onChange={(e) => setApplyTenantTeam(e.target.checked)}
+              />
+              Aplicar equipo al tenant
+            </label>
+          </div>
+        )}
+
+        {createMode === 'project' && step === 3 && (
+          <div className="space-y-4">
+            <dl className="text-sm space-y-3 rounded-xl border dark:border-dark-border p-4">
+              <Row k="Proyecto" v={name} />
+              <Row k="Miembros" v={projectMembers.join(', ') || '—'} />
+            </dl>
+            {error && <p className="text-red-600 text-sm">{error}</p>}
+          </div>
+        )}
+
+        {createMode === 'agent' && step === 1 && (
           <div className="space-y-4 max-w-2xl">
             <p className="text-sm text-gov-gray-500">
               Instrucciones de comportamiento (system_prompt). Base: plantilla{' '}
@@ -245,11 +396,13 @@ export default function NewProjectPage() {
           </div>
         )}
 
-        {step === 2 && (
+        {createMode === 'agent' && step === 2 && (
           <div className="space-y-4">
             <p className="text-sm text-gov-gray-500">
-              Perfil de habilidades extra (todos parten de default en disco).
+              Perfil de habilidades extra (catálogo en vivo desde el gateway).
             </p>
+            {presetsError && <p className="text-amber-700 text-sm">{presetsError}</p>}
+            {presetsLoading && <p className="text-sm text-gov-gray-400">Cargando plantillas…</p>}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {presets.map((p) => (
                 <button
@@ -278,7 +431,7 @@ export default function NewProjectPage() {
           </div>
         )}
 
-        {step === 3 && (
+        {createMode === 'agent' && step === 3 && (
           <div className="space-y-4">
             <p className="text-sm text-gov-gray-500">
               Las <strong>capacidades</strong> son acciones que tu agente puede realizar (buscar datos,
@@ -306,7 +459,7 @@ export default function NewProjectPage() {
           </div>
         )}
 
-        {step === 4 && (
+        {createMode === 'agent' && step === 4 && (
           <div className="space-y-4 max-w-2xl">
             <p className="text-sm text-gov-gray-500">
               Conexiones opcionales con otras herramientas (clima, comandos del bot, etc.). Puedes
@@ -316,7 +469,7 @@ export default function NewProjectPage() {
           </div>
         )}
 
-        {step === 5 && (
+        {createMode === 'agent' && step === 5 && (
           <div className="space-y-4">
             <dl className="text-sm space-y-3 rounded-xl border dark:border-dark-border p-4">
               <Row k="Nombre" v={name} />
@@ -356,11 +509,11 @@ export default function NewProjectPage() {
               disabled={loading || !canWrite}
               className="px-4 py-2 bg-gov-blue-700 text-white rounded-xl text-sm font-bold disabled:opacity-50 flex items-center gap-2"
             >
-              {loading ? 'Creando…' : (
-                <>
-                  <Check size={16} /> Crear mi agente
-                </>
-              )}
+              {loading
+                ? 'Creando…'
+                : createMode === 'project'
+                  ? 'Crear proyecto'
+                  : 'Crear mi agente'}
             </button>
           )}
         </div>

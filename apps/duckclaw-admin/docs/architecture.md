@@ -57,7 +57,7 @@ El BFF añade:
 
 | Entidad | Lectura | Escritura | Validación |
 |---------|---------|-----------|------------|
-| `manifest.yaml`, prompts, `skills/` | Disco `forge/templates/<id>/` | `PUT …/files/{path}` | ADF validator (AXIS) |
+| `manifest.yaml`, prompts, `skills/` | Disco `forge/templates/<id>/` | `PUT …/files/{path}` | ADF validator |
 | `.env` gateway | GET enmascarado | `PATCH /admin/env` + `.env.bak` | Allow-list prefijos |
 | `agent_config` | DuckDB por vault | `PUT /admin/runtime/config` → cola db-writer | Allow-list claves |
 | `authorized_users` | DuckDB | CRUD whitelist Telegram | Telegram Guard spec |

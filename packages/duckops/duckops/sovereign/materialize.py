@@ -790,7 +790,7 @@ def materialize(
         updates["DUCKCLAW_OWNER_ID"] = creator_id
     team_raw = (draft.gateway_team_templates or "").strip()
     if team_raw:
-        updates["DUCKCLAW_GATEWAY_TEAM_TEMPLATES"] = team_raw
+        updates["DUCKCLAW_TEAM_MEMBERS"] = team_raw
     if "job" in _low and "hunter" in _low:
         updates["DUCKCLAW_JOB_HUNTER_DB_PATH"] = primary_rel
     elif "siata" in _low:

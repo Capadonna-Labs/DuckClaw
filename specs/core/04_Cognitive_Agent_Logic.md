@@ -43,7 +43,7 @@ Para peticiones complejas (p. ej. "Cotízame 50 abrazaderas y envía resumen a m
 Transferencia determinista agente ↔ operador; estado en Redis.
 
 - **Estados**: IDLE, BUSY, HANDOFF_REQUESTED, MANUAL_MODE. Clave `session_state:{thread_id}` (status, context_summary, requested_at).
-- **HandoffTrigger** (skill): reason, context_summary → Redis HANDOFF_REQUESTED, webhook n8n, HandoffInterrupt en el grafo. Criterios: RAG miss en 2 turnos, sentimiento de frustración/urgencia, petición explícita ("asesor", "humano", "llamar").
+- **HandoffTrigger** (skill): reason, context_summary → Redis HANDOFF_REQUESTED, outbound proactivo (`send_proactive_message` / Bot API), HandoffInterrupt en el grafo. Criterios: RAG miss en 2 turnos, sentimiento de frustración/urgencia, petición explícita ("asesor", "humano", "llamar").
 - **API**: si MANUAL_MODE → respuesta `{"status": "ignored", "reason": "manual_mode_active"}`; `POST .../thread/{thread_id}/takeover` → MANUAL_MODE; `POST .../thread/{thread_id}/release` → IDLE (inyecta historial humano); `GET .../thread/{thread_id}/status`. author_type AI|HUMAN en auditoría; DataMasker en mensajes humanos antes de inyectar en memoria.
 
 ---
@@ -82,7 +82,7 @@ Gatekeeper entre entrenamiento (SFT) y producción (Hot-Swap).
 Cotizaciones agnósticas al canal de entrega.
 
 - **QuoteEngine**: entrada items (SKU, cantidades), user_id; validación en catálogo, reglas (descuentos, IVA 19%), persistencia en tabla quotes; salida QuoteData (JSON).
-- **DocumentDispatcher**: genera PDF en /tmp/quotes/, empaqueta payload, invoca N8N_QUOTE_WEBHOOK_URL; n8n enruta por Email, WhatsApp, etc. sin cambiar código del agente.
+- **DocumentDispatcher**: genera PDF en /tmp/quotes/, empaqueta payload, invoca salida omnicanal vía API Gateway (`DUCKCLAW_HEARTBEAT_WEBHOOK_URL` / `send_proactive_message`); el gateway enruta por Telegram, Email, WhatsApp, etc. sin cambiar código del agente.
 - **API**: `GET /api/v1/quotes/download/{quote_id}` con token un solo uso o auth; FileResponse PDF; auditoría de descarga.
 
 ---

@@ -1,9 +1,7 @@
 # packages/shared/src/duckclaw/integrations/telegram/telegram_agent_token.py
 """
 Convención .env: ``TELEGRAM_<ID_AGENT>_TOKEN`` donde ``ID_AGENT`` es el ``id`` del worker
-(manifest), en mayúsculas y con guiones como subrayado (p. ej. ``bi_analyst`` → ``TELEGRAM_BI_ANALYST_TOKEN``).
-
-Se mantienen lecturas fallback a los nombres legados (``TELEGRAM_BOT_TOKEN_BI_ANALYST``, etc.).
+(manifest), en mayúsculas y guiones como subrayado (p. ej. ``my-worker`` → ``TELEGRAM_MY_WORKER_TOKEN``).
 """
 
 from __future__ import annotations
@@ -11,7 +9,7 @@ from __future__ import annotations
 import os
 
 __all__ = [
-    "PM2_GATEWAY_APP_TO_WORKER_ID",
+    "pm2_app_to_worker_map_from_env",
     "canonical_manifest_worker_id",
     "resolve_telegram_token_from_flat_env",
     "telegram_agent_token_env_name",
@@ -20,38 +18,41 @@ __all__ = [
     "telegram_worker_ids_match_for_compact_route",
 ]
 
-# Nombre de app PM2 (p. ej. config/api_gateways_pm2.json) → id del worker en Forge.
-PM2_GATEWAY_APP_TO_WORKER_ID: dict[str, str] = {
-    "Finanz-Gateway": "finanz",
-    "BI-Analyst-Gateway": "bi_analyst",
-    "SIATA-Gateway": "siata_analyst",
-    "JobHunter-Gateway": "Job-Hunter",
-}
+
+def pm2_app_to_worker_map_from_env() -> dict[str, str]:
+    """
+    Mapa PM2 app name → worker id desde ``DUCKCLAW_PM2_APP_WORKER_MAP``.
+
+    Formato: ``My-Gateway=worker_a,Otro-Gateway=worker_b``
+    """
+    raw = (os.environ.get("DUCKCLAW_PM2_APP_WORKER_MAP") or "").strip()
+    out: dict[str, str] = {}
+    if not raw:
+        return out
+    for chunk in raw.split(","):
+        part = chunk.strip()
+        if not part or "=" not in part:
+            continue
+        app, _, wid = part.partition("=")
+        app = app.strip()
+        wid = wid.strip()
+        if app and wid:
+            out[app] = wid
+    return out
 
 
 def canonical_manifest_worker_id(raw: str) -> str:
-    """Normaliza nombres tipo ``BI-Analyst`` o ``bi_analyst`` al ``id`` del manifest."""
+    """Normaliza guiones/espacios al id de carpeta (sin alias de producto en código)."""
     s = (raw or "").strip()
     if not s:
         return ""
-    norm = s.replace("-", "_")
-    low = norm.lower()
-    if low == "bi_analyst":
-        return "bi_analyst"
-    if low == "finanz":
-        return "finanz"
-    if low == "siata_analyst":
-        return "siata_analyst"
-    return norm
+    return s.replace("-", "_") if s.islower() else s
 
 
 def telegram_worker_ids_match_for_compact_route(a: str, b: str) -> bool:
-    """
-    True si dos identificadores de worker se refieren al mismo bot en rutas compactas.
-    Unifica ``quant_trader`` (manifest) con ``Quant-Trader`` (carpeta HTTP).
-    """
-    xa = canonical_manifest_worker_id(a).lower().replace("_", "")
-    xb = canonical_manifest_worker_id(b).lower().replace("_", "")
+    """True si dos identificadores se refieren al mismo worker (case / guiones)."""
+    xa = canonical_manifest_worker_id(a).lower().replace("_", "").replace("-", "")
+    xb = canonical_manifest_worker_id(b).lower().replace("_", "").replace("-", "")
     return bool(xa and xa == xb)
 
 
@@ -60,18 +61,12 @@ def telegram_agent_token_env_name(worker_id: str) -> str:
     norm = canonical_manifest_worker_id(worker_id)
     if not norm:
         return ""
-    return f"TELEGRAM_{norm.upper()}_TOKEN"
-
-
-# worker manifest id → nombres de env antiguos (solo lectura).
-_LEGACY_ENV_BY_WORKER: dict[str, tuple[str, ...]] = {
-    "bi_analyst": ("TELEGRAM_BOT_TOKEN_BI_ANALYST",),
-    "siata_analyst": ("TELEGRAM_BOT_TOKEN_SIATA",),
-}
+    safe = norm.replace("-", "_").upper()
+    return f"TELEGRAM_{safe}_TOKEN"
 
 
 def resolve_telegram_token_from_flat_env(env_flat: dict[str, str], worker_id: str) -> str:
-    """Como ``resolve_telegram_token_for_worker_id`` pero leyendo un dict (p. ej. .env parseado)."""
+    """Token Bot API para un worker leyendo un dict plano (p. ej. .env parseado)."""
     flat = {str(k).strip(): str(v).strip() for k, v in env_flat.items() if k}
     wid = canonical_manifest_worker_id(worker_id)
     if not wid:
@@ -81,37 +76,16 @@ def resolve_telegram_token_from_flat_env(env_flat: dict[str, str], worker_id: st
         t = flat.get(primary, "").strip()
         if t:
             return t
-    for leg in _LEGACY_ENV_BY_WORKER.get(wid, ()):
-        t = flat.get(leg, "").strip()
-        if t:
-            return t
-    if wid.lower() == "finanz":
-        return flat.get("TELEGRAM_BOT_TOKEN", "").strip()
-    return ""
+    return flat.get("TELEGRAM_BOT_TOKEN", "").strip()
 
 
 def resolve_telegram_token_for_worker_id(worker_id: str) -> str:
-    """
-    Resuelve token Bot API para un worker por id de plantilla.
-
-    Orden: ``TELEGRAM_<ID>_TOKEN`` → aliases legados por worker → para ``finanz``,
-    ``TELEGRAM_BOT_TOKEN`` si no hubo valor previo.
-    """
+    """Resuelve token: ``TELEGRAM_<ID>_TOKEN`` → ``TELEGRAM_BOT_TOKEN``."""
     return resolve_telegram_token_from_flat_env(dict(os.environ), worker_id)
 
 
 def telegram_token_from_pm2_env_dict(env: dict[str, object], worker_id: str) -> str:
-    """
-    Token definido en el bloque ``env`` de un proceso PM2.
-
-    Orden: ``TELEGRAM_<ID>_TOKEN`` y legados del worker → fallback ``TELEGRAM_BOT_TOKEN``
-    (para Finanz, ``TELEGRAM_FINANZ_TOKEN`` puede omitirse y usa el genérico como en
-    ``resolve_telegram_token_for_worker_id``).
-
-    El token específico del worker va **antes** que ``TELEGRAM_BOT_TOKEN`` para que
-    gateways como JobHunter-Gateway no hereden el bot de Finanz cuando el merge PM2
-    copia el genérico al bloque ``env``.
-    """
+    """Token en el bloque ``env`` de un proceso PM2."""
     if not isinstance(env, dict):
         return ""
     flat = {str(k): str(v).strip() if v is not None else "" for k, v in env.items()}
@@ -120,14 +94,6 @@ def telegram_token_from_pm2_env_dict(env: dict[str, object], worker_id: str) -> 
         std = telegram_agent_token_env_name(wid)
         if std:
             t = flat.get(std, "").strip()
-            if t:
-                return t
-        for leg in _LEGACY_ENV_BY_WORKER.get(wid, ()):
-            t = flat.get(leg, "").strip()
-            if t:
-                return t
-        if wid.lower() == "finanz":
-            t = flat.get("TELEGRAM_BOT_TOKEN", "").strip()
             if t:
                 return t
     return flat.get("TELEGRAM_BOT_TOKEN", "").strip()

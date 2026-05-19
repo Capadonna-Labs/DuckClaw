@@ -73,6 +73,12 @@ export function Pm2LiveLogsPanel() {
 
       if (!res.ok) {
         const msg = await res.text();
+        try {
+          const parsed = JSON.parse(msg) as { detail?: string };
+          if (parsed.detail) throw new Error(parsed.detail);
+        } catch (e) {
+          if (e instanceof Error && e.message !== msg) throw e;
+        }
         throw new Error(msg || `Error ${res.status}`);
       }
       if (!res.body) {

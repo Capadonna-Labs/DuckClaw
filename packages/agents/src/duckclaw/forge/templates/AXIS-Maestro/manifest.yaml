@@ -1,10 +1,12 @@
 id: AXIS-Maestro
 agent_id: maestro
 display_name: MAESTRO — Adaptive Tutor
+# Mismo .duckdb (axis) que sub-agentes en el mismo PID del gateway: sin pool RO paralelo.
+tool_read_pool: false
 version: 1.0.0
 phase: 6
 status: DEFINED
-topology: axis_orchestrator
+topology: orchestrator
 description: Tutor adaptativo de por vida con visión completa del propietario
 long_description: 'MAESTRO orquesta aprendizaje usando FORGE, CODER, MIRROR, SENTINEL
   y RADAR.

@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         detail: e instanceof Error ? e.message : 'Error de red al gateway',
-        hint: '¿Está corriendo DuckClaw-Gateway? Tras actualizar código, reinicia el gateway (Overview → Operaciones).',
+        hint: '¿Está corriendo DuckClaw-Gateway? Tras actualizar código, reinicia el gateway desde Overview.',
       },
       { status: 502 }
     );

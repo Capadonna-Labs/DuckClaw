@@ -42,7 +42,7 @@ orchestrator:
 
 - `agent_id`: alias lógico (`maestro`) para webhooks y `/workers maestro`.
 - `orchestrator.orchestrates`: lista de **carpetas** template (ids canónicos).
-- El equipo efectivo (`/workers`, tenant, `DUCKCLAW_GATEWAY_TEAM_TEMPLATES`) se **intersecta** con `orchestrates`.
+- El equipo efectivo (`/workers`, tenant, `DUCKCLAW_TEAM_MEMBERS`) se **intersecta** con `orchestrates`.
 
 ## Flujo runtime
 

@@ -9,8 +9,22 @@ export type OpsRunResult = {
   op_id?: string;
 };
 
+/** Resultado tras `normalizeOpsResult` — `ok` siempre definido. */
+export type NormalizedOpsRunResult = OpsRunResult & {
+  ok: boolean;
+  op_id: string;
+  stdout: string;
+  stderr: string;
+  executed_via: 'local' | string;
+};
+
 /** Ops que no deben ejecutarse vía gateway (reinician el propio gateway). */
-export const HOST_ONLY_OPS = new Set(['pm2_restart_gateway']);
+export const HOST_ONLY_OPS = new Set([
+  'pm2_restart_gateway',
+  'pm2_start_gateway',
+  'start_stack',
+  'start_telegram_ingress',
+]);
 
 const HIGH_RESTART_WARN = 20;
 const HIGH_RESTART_CRITICAL = 100;
@@ -24,11 +38,26 @@ export function isPm2RestartInterrupted(r: Pick<OpsRunResult, 'exit_code' | 'std
 }
 
 /** PM2 mató el proceso padre al reiniciar el gateway; la acción sí se aplicó. */
-export function normalizeOpsResult(r: OpsRunResult): OpsRunResult {
+export function normalizeOpsResult(r: OpsRunResult): NormalizedOpsRunResult {
   if (isPm2RestartInterrupted(r)) {
-    return { ...r, ok: true, exit_code: 0 };
+    return {
+      ...r,
+      ok: true,
+      exit_code: 0,
+      op_id: r.op_id ?? '',
+      stdout: r.stdout ?? '',
+      stderr: r.stderr ?? '',
+      executed_via: r.executed_via ?? 'local',
+    };
   }
-  return { ...r, ok: r.ok ?? r.exit_code === 0 };
+  return {
+    ...r,
+    ok: r.ok ?? r.exit_code === 0,
+    op_id: r.op_id ?? '',
+    stdout: r.stdout ?? '',
+    stderr: r.stderr ?? '',
+    executed_via: r.executed_via ?? 'local',
+  };
 }
 
 export function formatOpsOutput(r: OpsRunResult): string {
@@ -40,6 +69,12 @@ export function formatOpsOutput(r: OpsRunResult): string {
 
   if (isPm2RestartInterrupted(r)) {
     lines.push('ℹ️ El reinicio se aplicó; la conexión se cortó al reiniciar el gateway (normal).');
+  }
+  if (r.op_id === 'start_stack' && ok) {
+    lines.push('ℹ️ Plataforma lista: PM2 + Tailscale/Telegram. Prueba un mensaje al bot.');
+  }
+  if (r.op_id === 'start_telegram_ingress' && ok) {
+    lines.push('ℹ️ Tailscale Funnel activo. Prueba un mensaje al bot en Telegram.');
   }
 
   if (r.executed_via === 'local') {

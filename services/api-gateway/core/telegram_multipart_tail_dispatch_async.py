@@ -1,37 +1,22 @@
 # services/api-gateway/core/telegram_multipart_tail_dispatch_async.py
-"""Despacho de la cola de texto (partes 2..N) hacia Telegram: Bot API nativa o webhook n8n."""
+"""Despacho de la cola de texto (partes 2..N) hacia Telegram vía Bot API nativa o MCP."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-from functools import partial
 from typing import Any, Callable, Optional
 
 _log = logging.getLogger("duckclaw.gateway.telegram_multipart_tail")
 
 
 def resolve_telegram_multipart_tail_delivery_mode(explicit: str | None) -> str:
-    """
-    ``native`` | ``n8n``. Por defecto **native** (Bot API directa o MCP arriba).
-    Solo n8n si ``DUCKCLAW_TELEGRAM_OUTBOUND_VIA=n8n`` y existe ``N8N_OUTBOUND_WEBHOOK_URL``.
-
-    El legado ``DUCKCLAW_TELEGRAM_NATIVE_SEND=0`` + n8n queda detrás de
-    ``DUCKCLAW_TELEGRAM_LEGACY_N8N_WEBHOOK=1`` para no depender de n8n por defecto.
-    """
-    if explicit in ("native", "n8n"):
-        return explicit
-    n8n_url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
-    via = (os.getenv("DUCKCLAW_TELEGRAM_OUTBOUND_VIA") or "").strip().lower()
-    if via == "n8n" and n8n_url:
-        _log.info("telegram multipart tail: modo n8n (DUCKCLAW_TELEGRAM_OUTBOUND_VIA=n8n)")
-        return "n8n"
-    legacy = os.getenv("DUCKCLAW_TELEGRAM_LEGACY_N8N_WEBHOOK", "").strip().lower() in ("1", "true", "yes")
-    force_webhook = os.getenv("DUCKCLAW_TELEGRAM_NATIVE_SEND", "").strip().lower() in ("0", "false", "no", "off")
-    if legacy and force_webhook and n8n_url:
-        _log.info("telegram multipart tail: modo n8n (legado LEGACY_N8N_WEBHOOK + NATIVE_SEND off)")
-        return "n8n"
+    """Siempre ``native`` (Bot API o MCP en capas superiores)."""
+    if explicit and explicit.strip().lower() not in ("native", ""):
+        _log.warning(
+            "multipart tail: modo %r ignorado; solo se admite entrega nativa",
+            explicit,
+        )
     return "native"
 
 
@@ -42,7 +27,6 @@ async def dispatch_telegram_multipart_tail_async(
     user_id: str,
     telegram_multipart_tail_delivery: str | None,
     effective_telegram_bot_token: Callable[[], str],
-    n8n_outbound_push_sync: Callable[..., None],
     telegram_mcp: Optional[Any] = None,
     redis_client: Optional[Any] = None,
     tenant_id: str = "default",
@@ -50,14 +34,9 @@ async def dispatch_telegram_multipart_tail_async(
     raw = (tail_plain or "").strip()
     if not raw:
         return
-    mode = resolve_telegram_multipart_tail_delivery_mode(telegram_multipart_tail_delivery)
-    if mode == "n8n" and not (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip():
-        mode = "native"
-        _log.warning("multipart tail: modo n8n pero N8N_OUTBOUND_WEBHOOK_URL vacío; usando nativo")
+    _ = resolve_telegram_multipart_tail_delivery_mode(telegram_multipart_tail_delivery)
 
-    # En modo native respetamos el bot/token de la ruta actual; evitar MCP aquí
-    # previene mezclar colas de tail entre bots (ej. SIATA -> Finanz).
-    if telegram_mcp is not None and mode != "native":
+    if telegram_mcp is not None:
         try:
             from duckclaw.forge.skills.telegram_mcp_bridge import send_long_plain_via_mcp_chunks
 
@@ -79,9 +58,9 @@ async def dispatch_telegram_multipart_tail_async(
                 args={"chat_id": str(session_id), "text": "<multipart tail>", "parse_mode": "MarkdownV2"},
                 error="send_long_plain_via_mcp_chunks returned failure",
             )
-            _log.warning("multipart tail: MCP falló; se intenta nativo/n8n chat_id=%s", session_id)
+            _log.warning("multipart tail: MCP falló; se intenta Bot API chat_id=%s", session_id)
         except Exception as exc:  # noqa: BLE001
-            _log.warning("multipart tail: excepción MCP (%s); fallback nativo/n8n", exc)
+            _log.warning("multipart tail: excepción MCP (%s); fallback Bot API", exc)
             try:
                 from core.telegram_mcp_dlq import push_telegram_mcp_dlq
 
@@ -96,25 +75,14 @@ async def dispatch_telegram_multipart_tail_async(
             except Exception:
                 pass
 
-    if mode == "native":
-        token = (effective_telegram_bot_token() or "").strip()
-        if not token:
-            _log.warning("multipart tail nativo: falta TELEGRAM_BOT_TOKEN")
-            return
-        from duckclaw.integrations.telegram import TelegramBotApiAsyncClient
-
-        client = TelegramBotApiAsyncClient(token)
-        await client.send_long_plain_text_as_markdown_v2_chunks(
-            chat_id=session_id,
-            plain_text=raw,
-        )
+    token = (effective_telegram_bot_token() or "").strip()
+    if not token:
+        _log.warning("multipart tail: falta TELEGRAM_BOT_TOKEN (o token del bot en rutas compactas)")
         return
-    await asyncio.get_running_loop().run_in_executor(
-        None,
-        partial(
-            n8n_outbound_push_sync,
-            chat_id=session_id,
-            user_id=(user_id or "").strip() or session_id,
-            text=raw,
-        ),
+    from duckclaw.integrations.telegram import TelegramBotApiAsyncClient
+
+    client = TelegramBotApiAsyncClient(token)
+    await client.send_long_plain_text_as_markdown_v2_chunks(
+        chat_id=session_id,
+        plain_text=raw,
     )

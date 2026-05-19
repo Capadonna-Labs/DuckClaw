@@ -4,7 +4,7 @@ from __future__ import annotations
 SendPrivateMessage skill — enrutamiento cruzado (DM) para juegos tipo The Mind.
 
 Contrato: send_dm(user_id: str, text: str)
-Implementación: hace POST a un webhook de n8n configurado por entorno.
+Implementación: Bot API nativa; webhook opcional vía DUCKCLAW_SEND_DM_WEBHOOK_URL.
 """
 
 import json
@@ -14,55 +14,67 @@ from typing import Any, Optional
 
 def _send_dm_tool(config: Optional[dict] = None) -> Optional[Any]:
     """
-    Crea un StructuredTool para enviar mensajes privados (DM) vía n8n.
+    Crea un StructuredTool para enviar mensajes privados (DM).
 
-    Requiere:
-    - DUCKCLAW_SEND_DM_WEBHOOK_URL: URL del webhook de n8n (p. ej. https://n8n/.../send-dm)
-    - N8N_AUTH_KEY (opcional): cabecera de autenticación si n8n la exige.
+    Requiere TELEGRAM_BOT_TOKEN o token del bot activo; opcionalmente
+    DUCKCLAW_SEND_DM_WEBHOOK_URL + DUCKCLAW_OUTBOUND_WEBHOOK_SECRET.
     """
     cfg = config or {}
     if cfg.get("enabled") is False:
         return None
 
-    url = cfg.get("webhook_url") or os.environ.get("DUCKCLAW_SEND_DM_WEBHOOK_URL", "").strip()
-    if not url:
-        # Sin URL configurada: no registrar la herramienta.
-        return None
+    webhook_url = cfg.get("webhook_url") or os.environ.get("DUCKCLAW_SEND_DM_WEBHOOK_URL", "").strip()
 
     try:
         from langchain_core.tools import StructuredTool
     except Exception:
         return None
 
-    import urllib.request
-
     def _send_dm(user_id: str, text: str) -> str:
+        from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
+        from duckclaw.integrations.telegram.telegram_outbound_sync import send_bot_message_sync
+        from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
+
         user_id_str = (user_id or "").strip()
         if not user_id_str:
             return "Debes indicar user_id para enviar un DM."
-        payload = {"user_id": user_id_str, "text": text or ""}
+        safe = llm_markdown_to_telegram_html(text or "")
+
+        token = (effective_telegram_bot_token_outbound() or "").strip()
+        if token and send_bot_message_sync(
+            bot_token=token,
+            chat_id=user_id_str,
+            text=safe,
+            parse_mode="HTML",
+        ):
+            return "DM enviado por Bot API."
+
+        if not webhook_url:
+            return "Sin TELEGRAM_BOT_TOKEN ni DUCKCLAW_SEND_DM_WEBHOOK_URL; no se envió el DM."
+
+        import urllib.request
+
+        payload = {"user_id": user_id_str, "chat_id": user_id_str, "text": safe, "parse_mode": "HTML"}
         body = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
-        auth_key = os.environ.get("N8N_AUTH_KEY", "").strip()
-        if auth_key:
-            headers["X-N8N-Auth"] = auth_key
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        secret = (os.environ.get("DUCKCLAW_OUTBOUND_WEBHOOK_SECRET") or "").strip()
+        if secret:
+            headers["X-DuckClaw-Secret"] = secret
+        req = urllib.request.Request(webhook_url, data=body, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
-                status = resp.status
-                if status in (200, 201, 202):
-                    return "DM enviado (n8n aceptó la petición)."
-                return f"n8n respondió con status={status} al enviar el DM."
+                if resp.status in (200, 201, 202):
+                    return "DM enviado (webhook)."
+                return f"Webhook respondió status={resp.status}."
         except Exception as e:  # noqa: BLE001
-            return f"No se pudo enviar el DM vía n8n: {e}"
+            return f"No se pudo enviar el DM: {e}"
 
     return StructuredTool.from_function(
         _send_dm,
         name="send_dm",
         description=(
-            "Envía un mensaje privado (DM) a un usuario específico. "
-            "Parámetros: user_id (string), text (contenido del mensaje). "
-            "Usa un webhook de n8n configurado en DUCKCLAW_SEND_DM_WEBHOOK_URL."
+            "Envía un mensaje privado (DM) a un usuario. "
+            "Parámetros: user_id (chat_id de Telegram), text (contenido)."
         ),
     )
 
@@ -71,12 +83,7 @@ def register_send_dm_skill(
     tools_list: list[Any],
     send_dm_config: Optional[dict] = None,
 ) -> None:
-    """
-    Registra la herramienta send_dm en la lista de tools.
-
-    Llamar desde build_general_graph o desde build_worker_graph cuando el manifest/tools
-    incluya 'send_dm'.
-    """
+    """Registra la herramienta send_dm en la lista de tools."""
     if not send_dm_config:
         send_dm_config = {"enabled": True}
     try:
@@ -85,4 +92,3 @@ def register_send_dm_skill(
             tools_list.append(tool)
     except Exception:
         return
-

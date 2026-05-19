@@ -18,7 +18,7 @@ Eliminar el uso de `os.getenv` disperso por el código. Implementar una clase ce
         
         # Security
         SECRET_KEY: str # Obligatorio para firmar JWTs
-        N8N_AUTH_KEY: str # Obligatorio para webhooks internos
+        DUCKCLAW_OUTBOUND_WEBHOOK_SECRET: str # Obligatorio para webhooks internos / salida proactiva
         ALLOWED_ORIGINS: list[str] =["http://localhost:4200"] # CORS
         
         # Rate Limiting
@@ -46,7 +46,7 @@ El Gateway debe implementar un patrón de "Cebolla" (Onion Routing) para la segu
 ### C. Capa 3: Autenticación Dual (Dual Auth Strategy)
 El Gateway debe soportar dos clientes principales con diferentes métodos de autenticación:
 1.  **Frontend (Angular):** Autenticación basada en **JWT** (`Authorization: Bearer <token>`).
-2.  **Orquestador (n8n/Servicios):** Autenticación basada en **API Key estática** (`X-API-Key: <N8N_AUTH_KEY>`).
+2.  **Servicios internos / heartbeat:** Autenticación basada en **API Key estática** (`X-API-Key` o `X-DuckClaw-Secret: <DUCKCLAW_OUTBOUND_WEBHOOK_SECRET>`).
 
 *   **Implementación (FastAPI Dependency):**
     ```python
@@ -57,7 +57,7 @@ El Gateway debe soportar dos clientes principales con diferentes métodos de aut
     jwt_bearer = HTTPBearer(auto_error=False)
 
     async def verify_access(api_key: str = Security(api_key_header), jwt: str = Security(jwt_bearer)):
-        if api_key and api_key == settings.N8N_AUTH_KEY:
+        if api_key and api_key == settings.DUCKCLAW_OUTBOUND_WEBHOOK_SECRET:
             return "service_account"
         if jwt and validate_jwt(jwt.credentials):
             return "user_account"
@@ -65,7 +65,7 @@ El Gateway debe soportar dos clientes principales con diferentes métodos de aut
     ```
 
 ## 4. Estandarización de Respuestas y Errores (RFC 7807)
-Para que n8n y Angular puedan manejar errores de forma predecible, el Gateway debe capturar todas las excepciones y devolver un formato estándar (Problem Details for HTTP APIs).
+Para que clientes HTTP (Angular, integraciones internas) puedan manejar errores de forma predecible, el Gateway debe capturar todas las excepciones y devolver un formato estándar (Problem Details for HTTP APIs).
 
 *   **Formato de Error:**
     ```json
@@ -97,7 +97,7 @@ El Gateway expondrá los siguientes endpoints estabilizados:
 
 | Método | Endpoint | Auth Requerida | Consumidor Principal |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Ninguna | Load Balancers, n8n |
+| `GET` | `/health` | Ninguna | Load Balancers, monitoreo |
 | `POST` | `/api/v1/chat/stream` | JWT / API Key | Angular (SSE) |
-| `POST` | `/api/v1/webhook/n8n` | API Key | n8n (Eventos asíncronos) |
+| `POST` | `/api/v1/telegram/webhook` | Secret token Telegram | Telegram (webhook inbound) |
 | `GET` | `/api/v1/system/status` | JWT (Admin) | Angular (Dashboard) |

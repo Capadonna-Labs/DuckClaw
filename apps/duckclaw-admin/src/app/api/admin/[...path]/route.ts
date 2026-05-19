@@ -18,6 +18,26 @@ const OPS_COMMANDS_FALLBACK = {
       argv: ['pm2', 'restart', 'DuckClaw-DB-Writer', '--update-env'],
     },
     {
+      id: 'start_stack',
+      label: 'Iniciar plataforma (PM2 + Telegram)',
+      argv: ['__start_stack__'],
+    },
+    {
+      id: 'start_telegram_ingress',
+      label: 'Solo Tailscale + webhooks Telegram',
+      argv: ['__start_telegram_ingress__'],
+    },
+    {
+      id: 'pm2_start_db_writer',
+      label: 'Iniciar DuckClaw-DB-Writer',
+      argv: ['pm2', 'start', 'config/ecosystem.db-writer.config.cjs', '--update-env'],
+    },
+    {
+      id: 'pm2_start_gateway',
+      label: 'Iniciar DuckClaw-Gateway',
+      argv: ['pm2', 'start', 'config/ecosystem.api.config.cjs', '--only', 'DuckClaw-Gateway', '--update-env'],
+    },
+    {
       id: 'pm2_logs_gateway',
       label: 'Últimas líneas log Gateway',
       argv: ['pm2', 'logs', 'DuckClaw-Gateway', '--lines', '40', '--nostream'],
@@ -86,8 +106,39 @@ async function proxy(req: NextRequest, segments: string[]) {
     init.body = await req.text();
   }
 
-  const res = await fetch(target, init);
-  const text = await res.text();
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(target, init);
+    text = await res.text();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'fetch failed';
+    if (sub === 'health') {
+      return NextResponse.json(
+        {
+          detail: 'El API Gateway no responde en este equipo.',
+          code: 'gateway_unreachable',
+          gateway_url: base,
+        },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json(
+      { detail: `No se pudo contactar el gateway: ${msg}`, code: 'gateway_unreachable' },
+      { status: 503 }
+    );
+  }
+
+  if (sub === 'health' && (res.status === 502 || res.status === 503 || res.status === 504)) {
+    return NextResponse.json(
+      {
+        detail: 'El API Gateway no está disponible.',
+        code: 'gateway_unreachable',
+        gateway_url: base,
+      },
+      { status: 503 }
+    );
+  }
 
   if (res.status === 404 && req.method === 'GET') {
     const catalog = catalogFallbackResponse(sub, url.searchParams);

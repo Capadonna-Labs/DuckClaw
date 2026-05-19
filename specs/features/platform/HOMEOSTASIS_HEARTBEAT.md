@@ -3,7 +3,7 @@
 > **Diseño (esta spec)** · **Runbook operativo:** [`docs/operations/Homeostasis-Heartbeat.md`](../../../docs/operations/Homeostasis-Heartbeat.md) — variables, PM2, troubleshooting.
 
 ## 1. Objetivo Arquitectónico
-Desplegar un microservicio independiente (`services/heartbeat`) que se despierte periódicamente, evalúe las métricas de homeostasis en DuckDB y, si detecta una anomalía, inyecte un "Pensamiento Interno" en el API Gateway. El agente procesará este pensamiento y decidirá si debe usar la herramienta de salida (n8n Outbound) para alertar al usuario, respetando los límites de spam en Redis.
+Desplegar un microservicio independiente (`services/heartbeat`) que se despierte periódicamente, evalúe las métricas de homeostasis en DuckDB y, si detecta una anomalía, inyecte un "Pensamiento Interno" en el API Gateway. El agente procesará este pensamiento y decidirá si debe usar la herramienta de salida (`send_proactive_message` / Bot API nativa) para alertar al usuario, respetando los límites de spam en Redis.
 
 ## 2. Topología del Flujo Proactivo
 
@@ -14,7 +14,7 @@ graph TD
     C -->|3. Permitido| D[FastAPI Gateway: POST /chat]
     D -->|4. Inyecta Pensamiento| E[LangGraph: Agente]
     E -->|5. Decide Alertar| F[Tool: send_proactive_message]
-    F -->|6. Webhook| G[n8n: Outbound Flow]
+    F -->|6. Outbound| G[API Gateway · Bot API nativa]
     G -->|7. Mensaje| H[Usuario Telegram/WPP]
 ```
 
@@ -83,7 +83,7 @@ if __name__ == "__main__":
 
 ## 4. Especificación de Skill: `send_proactive_message`
 
-El agente necesita una herramienta para "hablar" hacia afuera, ya que este flujo no fue iniciado por un mensaje de Telegram que n8n esté esperando responder síncronamente.
+El agente necesita una herramienta para "hablar" hacia afuera, ya que este flujo no fue iniciado por un mensaje de Telegram en curso (webhook inbound síncrono).
 
 *   **Ubicación:** `packages/agents/src/duckclaw/forge/skills/outbound_messaging.py`
 *   **Contrato:**
@@ -98,13 +98,13 @@ El agente necesita una herramienta para "hablar" hacia afuera, ya que este flujo
         Usa esta herramienta para enviar un mensaje proactivo o una alerta al usuario.
         Solo úsala cuando un [SYSTEM_EVENT] te lo solicite.
         """
-        # Llama al Flujo 2 (Outbound) de n8n que configuramos antes
-        webhook_url = os.getenv("N8N_OUTBOUND_WEBHOOK_URL")
+        # Salida proactiva vía API Gateway (Bot API nativa o webhook outbound interno)
+        webhook_url = os.getenv("DUCKCLAW_HEARTBEAT_WEBHOOK_URL")
         
         response = httpx.post(
             webhook_url,
             json={"chat_id": chat_id, "text": message},
-            headers={"X-DuckClaw-Secret": os.getenv("N8N_AUTH_KEY")}
+            headers={"X-DuckClaw-Secret": os.getenv("DUCKCLAW_OUTBOUND_WEBHOOK_SECRET")}
         )
         
         # Auditoría: Registrar en DuckDB que el agente inició la conversación

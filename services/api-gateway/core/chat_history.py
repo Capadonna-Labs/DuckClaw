@@ -1,5 +1,5 @@
 """
-Historial de chat en Redis para clientes que no envían `history` en el body (p. ej. n8n + Telegram).
+Historial de chat en Redis para clientes que no envían `history` en el body (p. ej. Telegram vía gateway).
 
 Clave: duckclaw:gateway:chat_hist:{tenant_id}:{session_id}
 TTL por defecto: 7 días (604800 s); override con DUCKCLAW_CHAT_HISTORY_TTL_SEC.
@@ -52,7 +52,7 @@ def normalize_history_item(h: Any) -> dict[str, str] | None:
         role = "user"
     if role not in ("user", "assistant"):
         return None
-    # Asistente: quitar capas de escape MarkdownV2 si el cliente guardó la respuesta HTTP tal cual (n8n).
+    # Asistente: quitar capas de escape MarkdownV2 si el cliente guardó la respuesta HTTP tal cual.
     if role == "assistant":
         try:
             from duckclaw.graphs.on_the_fly_commands import unescape_telegram_markdown_v2_layers

@@ -22,6 +22,7 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _EDITABLE_SUFFIXES = frozenset({".yaml", ".yml", ".md", ".sql", ".py", ".txt", ".json"})
 _PROTECTED_TEMPLATE_IDS = frozenset({"entry_router", "manager_router"})
+_CATALOG_STARTER_SKIP = frozenset({"entry_router", "manager_router", "industries"})
 _ENV_ALLOW_PREFIXES = ("TELEGRAM_", "DUCKDB_", "DUCKCLAW_", "LANGCHAIN_", "OPENAI_", "GROQ_", "DEEPSEEK_")
 _ENV_ALLOW_EXACT = frozenset({"LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "REDIS_URL"})
 
@@ -117,9 +118,9 @@ def _playground_team_context(
         elif get_tenant_team_templates(db, tid):
             team_source = "tenant"
             team_hint = f"Equipo del tenant «{tid}»"
-        elif (os.environ.get("DUCKCLAW_GATEWAY_TEAM_TEMPLATES") or "").strip():
+        elif (os.environ.get("DUCKCLAW_TEAM_MEMBERS") or "").strip():
             team_source = "env"
-            team_hint = "Equipo desde DUCKCLAW_GATEWAY_TEAM_TEMPLATES"
+            team_hint = "Equipo desde variables de entorno (DUCKCLAW_TEAM_MEMBERS)"
         else:
             team_source = "all"
             team_hint = "Sin /workers configurado: todos los templates"
@@ -139,6 +140,49 @@ def _playground_team_context(
         "whitelist_role": role or None,
         "team_source": team_source,
         "team_hint": team_hint,
+    }
+
+
+def _playground_workers_payload(raw_workers: list[str]) -> dict[str, Any]:
+    """Normaliza equipo Playground: ids canónicos en disco + etiquetas de manifest."""
+    from duckclaw.workers.manifest import load_manifest
+    from duckclaw.workers.template_registry import list_template_ids, resolve_template_id
+
+    all_ids = list_template_ids()
+    source = raw_workers if raw_workers else all_ids
+    seen: set[str] = set()
+    workers: list[dict[str, str]] = []
+    invalid: list[str] = []
+
+    for raw in source:
+        w = (raw or "").strip()
+        if not w:
+            continue
+        canonical = resolve_template_id(all_ids, w)
+        if not canonical or canonical not in all_ids:
+            invalid.append(w)
+            continue
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        label = canonical
+        try:
+            spec = load_manifest(canonical)
+            label = (getattr(spec, "display_name", None) or spec.name or canonical).strip()
+        except Exception:
+            pass
+        workers.append({"id": canonical, "label": label})
+
+    team_hint_extra = ""
+    if invalid:
+        team_hint_extra = (
+            f" Templates no encontrados en disco (omitidos del selector): {', '.join(invalid)}."
+        )
+
+    return {
+        "workers": workers,
+        "workers_invalid": invalid,
+        "team_hint_extra": team_hint_extra,
     }
 
 
@@ -235,6 +279,110 @@ def _templates_dir() -> Path:
     return WORKERS_TEMPLATES_DIR
 
 
+def _projects_dir() -> Path:
+    from duckclaw.forge import PROJECTS_DIR
+
+    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    return PROJECTS_DIR
+
+
+def _safe_project_slug(slug: str) -> str:
+    s = re.sub(r"[^a-zA-Z0-9_-]", "", (slug or "").strip())
+    if not s:
+        raise _problem(400, "slug inválido", slug or "")
+    return s
+
+
+def _read_project_yaml(path: Path) -> dict[str, Any]:
+    import yaml
+
+    if not path.is_file():
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_project_yaml(path: Path, data: dict[str, Any]) -> None:
+    import yaml
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
+
+
+def _canonicalize_project_members(members: list[str]) -> list[str]:
+    from duckclaw.workers.template_registry import list_template_ids, resolve_template_id
+
+    all_ids = list_template_ids()
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in members:
+        w = str(raw or "").strip()
+        if not w:
+            continue
+        canonical = resolve_template_id(all_ids, w) or w
+        if canonical not in all_ids or canonical in seen:
+            continue
+        seen.add(canonical)
+        out.append(canonical)
+    return out
+
+
+def _list_forge_projects() -> list[dict[str, Any]]:
+    from duckclaw.forge.team_env import load_team_from_env
+
+    root = _projects_dir()
+    by_slug: dict[str, dict[str, Any]] = {}
+    env_row = load_team_from_env()
+    if env_row:
+        env_row = dict(env_row)
+    for env_row in [env_row] if env_row else []:
+        sid = str(env_row.get("slug") or env_row.get("id") or "").strip()
+        if not sid:
+            continue
+        members = _canonicalize_project_members(list(env_row.get("members") or []))
+        if not members:
+            continue
+        by_slug[sid] = {
+            "id": sid,
+            "slug": sid,
+            "display_name": str(env_row.get("display_name") or sid),
+            "coordinator": env_row.get("coordinator"),
+            "members": members,
+            "shared_vault_id": env_row.get("shared_vault_id"),
+            "source": "env",
+            "path": f"forge/projects/{sid}",
+        }
+    if root.is_dir():
+        for d in sorted(root.iterdir()):
+            if not d.is_dir() or d.name.startswith((".", "_")):
+                continue
+            manifest = d / "project.yaml"
+            if not manifest.is_file():
+                continue
+            data = _read_project_yaml(manifest)
+            pid = str(data.get("id") or d.name).strip()
+            members_raw = data.get("members")
+            member_list = (
+                _canonicalize_project_members(members_raw)
+                if isinstance(members_raw, list)
+                else []
+            )
+            by_slug[d.name] = {
+                "id": pid,
+                "slug": d.name,
+                "display_name": str(data.get("display_name") or pid),
+                "coordinator": data.get("coordinator"),
+                "members": member_list,
+                "shared_vault_id": data.get("shared_vault_id"),
+                "source": "disk",
+                "path": str(d.relative_to(_repo_root())),
+            }
+    return sorted(by_slug.values(), key=lambda x: str(x.get("slug") or ""))
+
+
 def _require_admin_key(x_admin_key: str | None = Header(None, alias="X-Admin-Key")) -> None:
     expected = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
     if not expected:
@@ -317,7 +465,7 @@ class ProjectCreateBody(BaseModel):
     id: str = Field(..., min_length=1, max_length=64)
     source_template: str = Field(
         default="default",
-        description="Preset de habilidades (support, finanz, etc.). El disco siempre clona desde templates/default.",
+        description="Preset de habilidades (id de plantilla opcional). El disco siempre clona desde templates/default.",
     )
     name: str = ""
     description: str = ""
@@ -325,6 +473,25 @@ class ProjectCreateBody(BaseModel):
     topology: str = "general"
     system_prompt: str = ""
     soul: str = ""
+
+
+class ForgeProjectCreateBody(BaseModel):
+    id: str = Field(..., min_length=1, max_length=48)
+    display_name: str = Field(default="", max_length=128)
+    members: list[str] = Field(default_factory=list)
+    coordinator: str | None = Field(default=None, max_length=64)
+    shared_vault_id: str | None = Field(default=None, max_length=64)
+    shared_context: str = Field(default="", max_length=32_000)
+    apply_tenant_team: bool = Field(default=False)
+    tenant_id: str = Field(default="default", max_length=64)
+
+
+class ForgeProjectPatchBody(BaseModel):
+    display_name: str | None = Field(default=None, max_length=128)
+    members: list[str] | None = None
+    coordinator: str | None = Field(default=None, max_length=64)
+    shared_vault_id: str | None = Field(default=None, max_length=64)
+    shared_context: str | None = Field(default=None, max_length=32_000)
 
 
 class PlaygroundImageIn(BaseModel):
@@ -382,6 +549,13 @@ class SandboxNetworkBody(BaseModel):
 class TelegramRouteInput(BaseModel):
     bot: str = Field(..., min_length=1, max_length=64)
     path: str = Field(..., min_length=8, max_length=256)
+    worker_id: str = Field(..., min_length=1, max_length=64)
+    tenant_id: str = Field(..., min_length=1, max_length=64)
+    vault_env_var: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Nombre de variable .env con ruta DuckDB (opcional)",
+    )
     token: str | None = Field(
         default=None,
         max_length=512,
@@ -657,16 +831,19 @@ async def playground_config(
         tenant_id=tenant_id,
         chat_id=chat_id,
     )
-    workers: list[str] = team_ctx.get("workers") or []
+    raw_workers: list[str] = team_ctx.get("workers") or []
+    workers_payload = _playground_workers_payload(raw_workers)
     eff_chat = (chat_id or team_ctx.get("team_chat_id") or "admin-playground").strip()
     llm = _resolved_llm_for_chat(eff_chat)
     catalog = _playground_llm_catalog(llm.get("provider", ""))
     eff_tenant = team_ctx.get("tenant_id") or _gateway_effective_tenant_id("default")
+    team_hint = (team_ctx.get("team_hint") or "") + workers_payload.get("team_hint_extra", "")
     return {
         "llm": llm,
         "catalog": catalog,
         "config_chat_id": eff_chat,
-        "workers": workers,
+        "workers": workers_payload["workers"],
+        "workers_invalid": workers_payload["workers_invalid"],
         "env_path": str(_env_file()),
         "effective_tenant_id": eff_tenant,
         "telegram_user_id": team_ctx.get("telegram_user_id"),
@@ -674,7 +851,7 @@ async def playground_config(
         "authorized": team_ctx.get("authorized"),
         "whitelist_role": team_ctx.get("whitelist_role"),
         "team_source": team_ctx.get("team_source"),
-        "team_hint": team_ctx.get("team_hint"),
+        "team_hint": team_hint.strip(),
         "chat_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_hint": "POST con stream=true o Accept: text/event-stream",
@@ -1296,31 +1473,13 @@ async def get_telegram_routes() -> dict[str, Any]:
                     {
                         "bot": r.bot_name,
                         "path": r.webhook_path,
+                        "worker_id": r.worker_id,
+                        "tenant_id": r.tenant_id,
+                        "vault_env_var": r.vault_env_var or "",
                         "token_masked": _mask_secret(r.bot_token),
                     }
                     for r in compact
                 ]
-            else:
-                for part in raw.split(","):
-                    part = part.strip()
-                    if not part:
-                        continue
-                    idx = part.rfind(":/api/")
-                    if idx < 0:
-                        continue
-                    prefix = part[:idx]
-                    path = part[idx + 1 :].strip()
-                    first = prefix.find(":")
-                    if first <= 0:
-                        continue
-                    routes.append(
-                        {
-                            "bot": prefix[:first].strip().lower(),
-                            "path": path,
-                            "token_masked": _mask_secret(prefix[first + 1 :].strip()),
-                        }
-                    )
-                fmt = "legacy" if routes else "empty"
     return {
         "format": fmt,
         "routes": routes,
@@ -1364,11 +1523,23 @@ async def put_telegram_routes(
             token = current_by_bot[bot].bot_token
         else:
             raise _problem(400, "Token requerido", f"Ruta nueva «{bot}» sin token de bot")
-        route = TelegramCompactWebhookRoute(bot_name=bot, bot_token=token, webhook_path=path)
+        worker_id = inp.worker_id.strip()
+        tenant_id = inp.tenant_id.strip()
+        if not worker_id or not tenant_id:
+            raise _problem(400, "worker/tenant requeridos", f"Ruta «{bot}» sin worker_id o tenant_id")
+        vault_env = (inp.vault_env_var or "").strip()
+        route = TelegramCompactWebhookRoute(
+            bot_name=bot,
+            bot_token=token,
+            webhook_path=path,
+            worker_id=worker_id,
+            tenant_id=tenant_id,
+            vault_env_var=vault_env,
+        )
         try:
             compact_route_to_path_binding(route)
         except ValueError as exc:
-            raise _problem(400, "Perfil de bot desconocido", str(exc)) from exc
+            raise _problem(400, "Ruta inválida", str(exc)) from exc
         built.append(route)
 
     try:
@@ -2218,39 +2389,7 @@ async def catalog_industries() -> dict[str, Any]:
                 except Exception:
                     pass
                 items.append({"id": rel, "name": name, "path": rel})
-    starters = [
-        {
-            "id": "default",
-            "name": "Asistente en blanco",
-            "path": "default",
-            "subtitle": "Parte de la plantilla default; tú defines el comportamiento.",
-        },
-        {
-            "id": "industries/business_standard",
-            "name": "Asistente de negocio",
-            "path": "industries/business_standard",
-            "subtitle": "Memoria triple y habilidades enterprise.",
-        },
-        {
-            "id": "support",
-            "name": "Atención al cliente",
-            "path": "support",
-            "subtitle": "Responde dudas frecuentes con tono amable.",
-        },
-        {
-            "id": "research_worker",
-            "name": "Investigación y resúmenes",
-            "path": "research_worker",
-            "subtitle": "Busca información y entrega informes claros.",
-        },
-        {
-            "id": "finanz",
-            "name": "Finanzas personales",
-            "path": "finanz",
-            "subtitle": "Presupuesto y conceptos financieros básicos.",
-        },
-    ]
-    return {"industries": items, "starters": starters}
+    return {"industries": items, "starters": _catalog_starter_items()}
 
 
 @router.get("/catalog/topologies", dependencies=[Depends(_require_admin_key)])
@@ -2263,9 +2402,9 @@ async def catalog_topologies() -> dict[str, Any]:
                 "description": "Worker autónomo estándar (un agente, un manifest).",
             },
             {
-                "id": "axis_orchestrator",
-                "label": "AXIS orquestador",
-                "description": "Coordina sub-workers vía orchestrator.orchestrates (ej. AXIS-Maestro).",
+                "id": "orchestrator",
+                "label": "Orquestador",
+                "description": "Coordina sub-workers vía orchestrator.orchestrates en manifest.yaml.",
             },
         ]
     }
@@ -2360,6 +2499,15 @@ _OPS_ALLOWLIST: dict[str, list[str]] = {
     "pm2_status": ["pm2", "status"],
     "pm2_restart_gateway": ["pm2", "restart", "DuckClaw-Gateway", "--update-env"],
     "pm2_restart_db_writer": ["pm2", "restart", "DuckClaw-DB-Writer", "--update-env"],
+    "pm2_start_db_writer": ["pm2", "start", "config/ecosystem.db-writer.config.cjs", "--update-env"],
+    "pm2_start_gateway": [
+        "pm2",
+        "start",
+        "config/ecosystem.api.config.cjs",
+        "--only",
+        "DuckClaw-Gateway",
+        "--update-env",
+    ],
     "pm2_logs_gateway": ["pm2", "logs", "DuckClaw-Gateway", "--lines", "40", "--nostream"],
     "pm2_start_mcp": ["pm2", "start", "config/ecosystem.mcp.config.cjs"],
     "pm2_restart_mcp": ["pm2", "restart", "DuckClaw-MCP", "--update-env"],
@@ -2376,6 +2524,8 @@ async def list_ops_commands() -> dict[str, Any]:
         "pm2_status": "PM2 — estado",
         "pm2_restart_gateway": "Reiniciar DuckClaw-Gateway",
         "pm2_restart_db_writer": "Reiniciar DuckClaw-DB-Writer",
+        "pm2_start_db_writer": "Iniciar DuckClaw-DB-Writer",
+        "pm2_start_gateway": "Iniciar DuckClaw-Gateway",
         "pm2_logs_gateway": "Últimas líneas log Gateway",
         "pm2_start_mcp": "Iniciar DuckClaw-MCP (ecosystem.mcp.config.cjs)",
         "pm2_restart_mcp": "Reiniciar DuckClaw-MCP",
@@ -2479,6 +2629,191 @@ async def create_project(
         meta={"skills": body.skills, "path": str(dest.relative_to(_repo_root()))},
     )
     return {"ok": True, "id": wid, "path": str(dest.relative_to(_repo_root()))}
+
+
+@router.get("/forge-projects", dependencies=[Depends(_require_admin_key)])
+async def list_forge_projects() -> dict[str, Any]:
+    return {"projects": _list_forge_projects()}
+
+
+@router.get("/forge-projects/env-presets", dependencies=[Depends(_require_admin_key)])
+async def forge_project_env_presets() -> dict[str, Any]:
+    from duckclaw.forge.team_env import load_team_from_env
+
+    presets: list[dict[str, Any]] = []
+    env_row = load_team_from_env()
+    for row in [env_row] if env_row else []:
+        sid = str(row.get("slug") or row.get("id") or "").strip()
+        members = _canonicalize_project_members(list(row.get("members") or []))
+        if not sid or not members:
+            continue
+        ctx = (row.get("shared_context") or "").strip()
+        ctx_file = (row.get("shared_context_file") or "").strip()
+        if not ctx and ctx_file:
+            p = Path(ctx_file)
+            if not p.is_absolute():
+                p = (_repo_root() / ctx_file).resolve()
+            if p.is_file():
+                ctx = p.read_text(encoding="utf-8")
+        presets.append(
+            {
+                "id": sid,
+                "display_name": str(row.get("display_name") or sid),
+                "coordinator": row.get("coordinator"),
+                "members": members,
+                "shared_vault_id": row.get("shared_vault_id"),
+                "shared_context": ctx,
+                "source": "env",
+            }
+        )
+    return {"presets": presets}
+
+
+@router.get("/forge-projects/{slug}", dependencies=[Depends(_require_admin_key)])
+async def get_forge_project(slug: str) -> dict[str, Any]:
+    sid = _safe_project_slug(slug)
+    base = _projects_dir() / sid
+    manifest = base / "project.yaml"
+    if not manifest.is_file():
+        raise _problem(404, "Proyecto no encontrado", sid)
+    data = _read_project_yaml(manifest)
+    shared_path = base / "_shared" / "context.md"
+    shared_context = ""
+    if shared_path.is_file():
+        shared_context = shared_path.read_text(encoding="utf-8")
+    return {
+        "id": str(data.get("id") or sid),
+        "slug": sid,
+        "display_name": str(data.get("display_name") or sid),
+        "coordinator": data.get("coordinator"),
+        "members": data.get("members") if isinstance(data.get("members"), list) else [],
+        "shared_vault_id": data.get("shared_vault_id"),
+        "shared_context": shared_context,
+        "path": str(base.relative_to(_repo_root())),
+    }
+
+
+@router.post("/forge-projects", dependencies=[Depends(_require_admin_key)])
+async def create_forge_project(
+    body: ForgeProjectCreateBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    sid = _safe_project_slug(body.id)
+    base = _projects_dir() / sid
+    if (base / "project.yaml").is_file():
+        raise _problem(409, "Proyecto ya existe", sid)
+
+    members = _canonicalize_project_members(body.members)
+    if not members:
+        raise _problem(400, "Sin miembros válidos", "Añade templates existentes en forge/templates")
+
+    coordinator = (body.coordinator or "").strip() or None
+
+    data: dict[str, Any] = {
+        "id": sid,
+        "display_name": (body.display_name or sid).strip(),
+        "coordinator": coordinator,
+        "members": members,
+        "shared_vault_id": (body.shared_vault_id or "").strip() or None,
+        "shared_context_file": "./_shared/context.md",
+    }
+    _write_project_yaml(base / "project.yaml", data)
+    shared = (body.shared_context or "").strip()
+    if shared:
+        (base / "_shared").mkdir(parents=True, exist_ok=True)
+        (base / "_shared" / "context.md").write_text(shared + "\n", encoding="utf-8")
+
+    if body.apply_tenant_team:
+        from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+        from duckclaw.graphs.on_the_fly_commands import set_tenant_team_templates
+
+        gw = (get_gateway_db_path() or "").strip()
+        if gw and os.path.isfile(gw):
+            db = GatewayDbEphemeralReadonly(gw)
+            tid = _gateway_effective_tenant_id(body.tenant_id)
+            set_tenant_team_templates(db, tid, members)
+
+    _admin_audit("forge_project.create", f"forge/projects/{sid}", sid, actor=actor, meta={"members": members})
+    return {"ok": True, "id": sid, "path": str(base.relative_to(_repo_root())), "members": members}
+
+
+@router.patch("/forge-projects/{slug}", dependencies=[Depends(_require_admin_key)])
+async def patch_forge_project(
+    slug: str,
+    body: ForgeProjectPatchBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    sid = _safe_project_slug(slug)
+    base = _projects_dir() / sid
+    manifest = base / "project.yaml"
+    if not manifest.is_file():
+        raise _problem(404, "Proyecto no encontrado", sid)
+    data = _read_project_yaml(manifest)
+    if body.display_name is not None:
+        data["display_name"] = body.display_name.strip()
+    if body.members is not None:
+        data["members"] = _canonicalize_project_members(body.members)
+    if body.coordinator is not None:
+        data["coordinator"] = body.coordinator.strip() or None
+    if body.shared_vault_id is not None:
+        data["shared_vault_id"] = body.shared_vault_id.strip() or None
+    _write_project_yaml(manifest, data)
+    if body.shared_context is not None:
+        (base / "_shared").mkdir(parents=True, exist_ok=True)
+        (base / "_shared" / "context.md").write_text(
+            (body.shared_context or "").strip() + "\n", encoding="utf-8"
+        )
+    _admin_audit("forge_project.patch", f"forge/projects/{sid}", sid, actor=actor)
+    return {"ok": True, "id": sid}
+
+
+@router.delete("/forge-projects/{slug}", dependencies=[Depends(_require_admin_key)])
+async def delete_forge_project(
+    slug: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    sid = _safe_project_slug(slug)
+    base = _projects_dir() / sid
+    if not base.is_dir():
+        raise _problem(404, "Proyecto no encontrado", sid)
+    shutil.rmtree(base)
+    _admin_audit("forge_project.delete", f"forge/projects/{sid}", sid, actor=actor)
+    return {"ok": True, "id": sid}
+
+
+@router.post("/forge-projects/{slug}/apply-team", dependencies=[Depends(_require_admin_key)])
+async def apply_forge_project_team(
+    slug: str,
+    tenant_id: str = Query("default"),
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    sid = _safe_project_slug(slug)
+    manifest = _projects_dir() / sid / "project.yaml"
+    if not manifest.is_file():
+        raise _problem(404, "Proyecto no encontrado", sid)
+    data = _read_project_yaml(manifest)
+    members_raw = data.get("members")
+    members = _canonicalize_project_members(members_raw if isinstance(members_raw, list) else [])
+    if not members:
+        raise _problem(400, "Proyecto sin miembros", sid)
+
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+    from duckclaw.graphs.on_the_fly_commands import set_tenant_team_templates
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(503, "Gateway DuckDB no encontrada", gw or "")
+    db = GatewayDbEphemeralReadonly(gw)
+    tid = _gateway_effective_tenant_id(tenant_id)
+    set_tenant_team_templates(db, tid, members)
+    _admin_audit(
+        "forge_project.apply_team",
+        f"forge/projects/{sid}",
+        tid,
+        actor=actor,
+        meta={"members": members},
+    )
+    return {"ok": True, "tenant_id": tid, "members": members}
 
 
 def _kanban_status_from_audit(status: str, age_seconds: float) -> str:
@@ -2635,6 +2970,71 @@ def _worker_has_browser_sandbox(worker_id: str) -> bool:
         return False
 
 
+def _iter_template_ids_for_catalog() -> list[str]:
+    from duckclaw.workers.template_registry import list_template_ids
+
+    return list_template_ids()
+
+
+def _manifest_display_fields(template_id: str) -> tuple[str, str]:
+    """Nombre y subtítulo desde manifest.yaml (sin listas fijas en código)."""
+    import yaml
+
+    manifest = _templates_dir() / template_id / "manifest.yaml"
+    name = template_id
+    subtitle = f"Plantilla forge/templates/{template_id}"
+    if not manifest.is_file():
+        return name, subtitle
+    try:
+        raw = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+        if isinstance(raw, dict):
+            name = str(raw.get("name") or raw.get("id") or template_id)
+            desc = raw.get("description") or raw.get("subtitle")
+            if isinstance(desc, str) and desc.strip():
+                subtitle = desc.strip()
+    except Exception:
+        pass
+    return name, subtitle
+
+
+def _catalog_starter_items() -> list[dict[str, str]]:
+    """Starters del wizard: solo plantillas presentes en disco."""
+    starters: list[dict[str, str]] = []
+    for tid in _iter_template_ids_for_catalog():
+        if tid in _CATALOG_STARTER_SKIP:
+            continue
+        name, subtitle = _manifest_display_fields(tid)
+        starters.append({"id": tid, "name": name, "path": tid, "subtitle": subtitle})
+    starters.sort(key=lambda x: (x["id"] != "default", str(x.get("name") or x["id"]).lower()))
+    return starters
+
+
+def _pick_playground_worker(
+    team_ctx: dict[str, Any],
+    worker_id: str | None = None,
+    *,
+    require_browser_sandbox: bool = False,
+) -> str:
+    """Primer worker del equipo, del catálogo en disco, o ``default``."""
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (worker_id or "").strip())
+    if wid:
+        return wid
+    team = [w for w in (team_ctx.get("workers") or []) if isinstance(w, str) and w.strip()]
+    if require_browser_sandbox:
+        for candidate in team:
+            if _worker_has_browser_sandbox(candidate):
+                return candidate
+        for candidate in _iter_template_ids_for_catalog():
+            if _worker_has_browser_sandbox(candidate):
+                return candidate
+    elif team:
+        return team[0].strip()
+    catalog = _iter_template_ids_for_catalog()
+    if "default" in catalog:
+        return "default"
+    return catalog[0] if catalog else "default"
+
+
 def _playground_vault_db_path(
     team_ctx: dict[str, Any],
     worker_id: str | None = None,
@@ -2729,10 +3129,7 @@ async def admin_sandbox_chat_policy(
     if not team_ctx.get("authorized"):
         raise _problem(403, "No autorizado", str(team_ctx.get("team_hint") or ""))
 
-    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (worker_id or "").strip())
-    if not wid:
-        workers: list[str] = list(team_ctx.get("workers") or [])
-        wid = (workers[0] if workers else "finanz").strip() or "finanz"
+    wid = _pick_playground_worker(team_ctx, worker_id)
 
     try:
         vault_path = _playground_vault_db_path(team_ctx, wid)
@@ -2759,10 +3156,7 @@ async def admin_sandbox_network_toggle(body: SandboxNetworkBody) -> dict[str, An
         raise _problem(403, "No autorizado", str(team_ctx.get("team_hint") or ""))
 
     chat_raw = body.chat_id.strip()
-    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (body.worker_id or "").strip())
-    if not wid:
-        workers: list[str] = list(team_ctx.get("workers") or [])
-        wid = (workers[0] if workers else "finanz").strip() or "finanz"
+    wid = _pick_playground_worker(team_ctx, body.worker_id)
 
     try:
         vault_path = _playground_vault_db_path(team_ctx, wid)
@@ -2778,7 +3172,7 @@ async def admin_sandbox_network_toggle(body: SandboxNetworkBody) -> dict[str, An
                 400,
                 "Worker sin red en política",
                 f"«{wid}» tiene network.default=deny en security_policy.yaml. "
-                "Usa finanz, Job-Hunter o tavily_search.",
+                "Elige un worker con red habilitada en su política o ajusta el manifest.",
             )
         tid = str(team_ctx.get("tenant_id") or "default").strip() or "default"
         val = "true" if body.enabled else "false"
@@ -2852,20 +3246,7 @@ async def admin_sandbox_novnc_prepare(body: NovncPrepareBody) -> dict[str, Any]:
     team_ctx = _playground_team_context(tenant_id=body.tenant_id)
     chat_raw = (body.chat_id or team_ctx.get("team_chat_id") or "admin-playground").strip()
     session_id = sanitize_chat_to_session_id(chat_raw)
-    workers: list[str] = list(team_ctx.get("workers") or [])
-    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (body.worker_id or "").strip())
-    if not wid:
-        for candidate in workers:
-            if _worker_has_browser_sandbox(candidate):
-                wid = candidate
-                break
-        if not wid:
-            for fallback in ("PQRSD-Assistant", "finanz", "Job-Hunter"):
-                if _worker_has_browser_sandbox(fallback):
-                    wid = fallback
-                    break
-    if not wid:
-        wid = (workers[0] if workers else "default").strip() or "default"
+    wid = _pick_playground_worker(team_ctx, body.worker_id, require_browser_sandbox=True)
     if not _worker_has_browser_sandbox(wid):
         raise _problem(
             400,

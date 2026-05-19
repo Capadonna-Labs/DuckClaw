@@ -17,7 +17,6 @@ import {
   ClipboardList,
   Blocks,
   Cable,
-  RefreshCw,
   LayoutGrid,
   MessageCircle,
   PanelLeftClose,
@@ -37,6 +36,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/overview': LayoutDashboard,
   '/kanban': LayoutGrid,
   '/templates': Bot,
+  '/projects': FolderPlus,
   '/skills': Blocks,
   '/mcp': Cable,
   '/projects/new': FolderPlus,
@@ -47,7 +47,6 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/commands': Terminal,
   '/duckdb': Database,
   '/train': GraduationCap,
-  '/ops': RefreshCw,
   '/audit': ClipboardList,
   '/settings': Settings,
 };

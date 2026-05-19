@@ -22,7 +22,7 @@ def telegram_reply_plain_chunk_size() -> int:
 
 
 def split_plain_text_for_telegram_reply(text: str, max_chunk: int) -> list[str]:
-    """Parte texto plano; cada parte se escapa aparte para n8n → Telegram (límite 4096)."""
+    """Parte texto plano; cada parte se escapa aparte para Telegram (límite 4096)."""
     if max_chunk < 64:
         max_chunk = 64
     t = text or ""

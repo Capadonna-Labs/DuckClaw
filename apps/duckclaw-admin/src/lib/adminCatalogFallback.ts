@@ -118,6 +118,43 @@ export function fallbackMcpCatalog() {
   };
 }
 
+const CATALOG_STARTER_SKIP = new Set(['entry_router', 'manager_router', 'industries']);
+
+function manifestDisplayFields(templateId: string): { name: string; subtitle: string } {
+  const manifest = join(templatesDir(), templateId, 'manifest.yaml');
+  let name = templateId;
+  let subtitle = `Plantilla forge/templates/${templateId}`;
+  if (!existsSync(manifest)) return { name, subtitle };
+  try {
+    const raw = readFileSync(manifest, 'utf-8');
+    const nameMatch = raw.match(/^name:\s*(.+)$/m);
+    const descMatch = raw.match(/^(?:description|subtitle):\s*(.+)$/m);
+    if (nameMatch) name = nameMatch[1].replace(/^["']|["']$/g, '').trim();
+    if (descMatch) subtitle = descMatch[1].replace(/^["']|["']$/g, '').trim();
+  } catch {
+    /* ignore */
+  }
+  return { name, subtitle };
+}
+
+function catalogStarterItems(): { id: string; name: string; path: string; subtitle: string }[] {
+  const root = templatesDir();
+  if (!existsSync(root)) return [];
+  const starters: { id: string; name: string; path: string; subtitle: string }[] = [];
+  for (const tid of readdirSync(root)) {
+    if (CATALOG_STARTER_SKIP.has(tid)) continue;
+    if (!existsSync(join(root, tid, 'manifest.yaml'))) continue;
+    const { name, subtitle } = manifestDisplayFields(tid);
+    starters.push({ id: tid, name, path: tid, subtitle });
+  }
+  starters.sort((a, b) => {
+    if (a.id === 'default') return -1;
+    if (b.id === 'default') return 1;
+    return a.name.localeCompare(b.name);
+  });
+  return starters;
+}
+
 export function fallbackIndustriesCatalog() {
   const industries: { id: string; name: string; path: string }[] = [];
   const indDir = join(templatesDir(), 'industries');
@@ -128,18 +165,7 @@ export function fallbackIndustriesCatalog() {
       }
     }
   }
-  const starters = [
-    { id: 'default', name: 'Asistente en blanco', path: 'default' },
-    {
-      id: 'industries/business_standard',
-      name: 'Asistente de negocio',
-      path: 'industries/business_standard',
-    },
-    { id: 'support', name: 'Atención al cliente', path: 'support' },
-    { id: 'research_worker', name: 'Investigación y resúmenes', path: 'research_worker' },
-    { id: 'finanz', name: 'Finanzas personales', path: 'finanz' },
-  ];
-  return { industries, starters, _fallback: true as const };
+  return { industries, starters: catalogStarterItems(), _fallback: true as const };
 }
 
 export function fallbackTopologies() {
@@ -152,10 +178,10 @@ export function fallbackTopologies() {
           'Worker autónomo estándar. Un agente, un manifest, skills propias. La mayoría de plantillas usan este modo.',
       },
       {
-        id: 'axis_orchestrator',
-        label: 'AXIS orquestador',
+        id: 'orchestrator',
+        label: 'Orquestador',
         description:
-          'Coordina sub-workers (AXIS-Coder, AXIS-Mirror, etc.) vía orchestrator.orchestrates en manifest.yaml. Ejemplo: AXIS-Maestro.',
+          'Coordina sub-workers vía orchestrator.orchestrates en manifest.yaml del coordinador.',
       },
     ],
     _fallback: true as const,

@@ -103,6 +103,16 @@ def register_compact_telegram_webhooks_if_configured(
         return False
 
     secret = (kv.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    from duckclaw.integrations.telegram.telegram_webhook_secret_header import (
+        telegram_webhook_secret_valid_for_bot_api,
+    )
+
+    if secret and not telegram_webhook_secret_valid_for_bot_api(secret):
+        console_print(
+            "[yellow]TELEGRAM_WEBHOOK_SECRET inválido para Bot API (solo A-Za-z0-9_-). "
+            "setWebhook sin secret_token; renueva el secreto en .env.[/]"
+        )
+        secret = ""
     api_gw = repo_root / "services" / "api-gateway"
     if str(api_gw) not in sys.path:
         sys.path.insert(0, str(api_gw))

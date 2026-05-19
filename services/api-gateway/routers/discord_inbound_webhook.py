@@ -91,7 +91,11 @@ def build_discord_interactions_router(
             )
 
         route_binding = resolve_discord_route(guild_id=guild_id if guild_id else None)
-        default_worker = (os.environ.get("DUCKCLAW_DISCORD_DEFAULT_WORKER_ID") or "finanz").strip()
+        from duckclaw.forge.team_env import default_worker_id_from_env
+
+        default_worker = (
+            os.environ.get("DUCKCLAW_DISCORD_DEFAULT_WORKER_ID") or default_worker_id_from_env()
+        ).strip()
         tenant = route_binding.tenant_id if route_binding else "default"
         worker_id = route_binding.worker_id if route_binding else default_worker
         bot_env = route_binding.bot_token_env if route_binding else "DUCKCLAW_DISCORD_BOT_TOKEN"

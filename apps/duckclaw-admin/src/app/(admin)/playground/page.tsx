@@ -53,9 +53,10 @@ export default function PlaygroundPage() {
         setConfig(c);
         setWorkerId((prev) => {
           if (prev) return prev;
-          if (initialWorker && c.workers?.includes(initialWorker)) return initialWorker;
-          if (c.workers?.includes('default')) return 'default';
-          return c.workers?.[0] ?? '';
+          const ids = (c.workers ?? []).map((w) => (typeof w === 'string' ? w : w.id));
+          if (initialWorker && ids.includes(initialWorker)) return initialWorker;
+          if (ids.includes('default')) return 'default';
+          return ids[0] ?? '';
         });
       })
       .catch(() => undefined);
@@ -120,13 +121,17 @@ export default function PlaygroundPage() {
             <select
               value={workerId}
               onChange={(e) => setWorkerId(e.target.value)}
-              className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[200px]"
+              className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[240px]"
             >
-              {(config?.workers ?? []).map((w) => (
-                <option key={w} value={w}>
-                  {w}
-                </option>
-              ))}
+              {(config?.workers ?? []).map((w) => {
+                const id = typeof w === 'string' ? w : w.id;
+                const label = typeof w === 'string' ? w : w.label;
+                return (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                );
+              })}
             </select>
             <Link
               href={`/templates/${workerId}`}
@@ -136,6 +141,18 @@ export default function PlaygroundPage() {
             </Link>
           </div>
         </header>
+        {config &&
+          (config.team_hint || (config.workers_invalid?.length ?? 0) > 0) && (
+          <p className="mx-4 mb-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 px-3 py-2 rounded-xl">
+            {config.team_hint}
+            {(config.workers_invalid?.length ?? 0) > 0 && (
+              <>
+                {' '}
+                Omitidos del selector: {config.workers_invalid.join(', ')}.
+              </>
+            )}
+          </p>
+        )}
         {conv.bootstrapping || !conv.sessionId ? (
           <p className="flex-1 flex items-center justify-center text-sm text-gov-gray-400 p-8">
             Cargando conversación…

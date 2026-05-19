@@ -281,7 +281,7 @@ def test_catalog_topologies(admin_client: TestClient):
     assert r.status_code == 200
     ids = [t["id"] for t in r.json().get("topologies") or []]
     assert "general" in ids
-    assert "axis_orchestrator" in ids
+    assert "orchestrator" in ids
 
 
 def test_catalog_mcp(admin_client: TestClient):
@@ -330,11 +330,12 @@ def test_telegram_routes_get_and_put(
     admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     env_file = tmp_path / ".env"
+    compact_line = "mybot:tok1:/api/v1/telegram/mybot:Worker-A:TenantA"
     env_file.write_text(
-        "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES=finanz:tok1:/api/v1/telegram/finanz\n",
+        f"DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES={compact_line}\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES", "finanz:tok1:/api/v1/telegram/finanz")
+    monkeypatch.setenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES", compact_line)
 
     import routers.admin as admin_router
 
@@ -348,23 +349,35 @@ def test_telegram_routes_get_and_put(
     data = r.json()
     assert data.get("format") == "compact"
     assert len(data.get("routes") or []) == 1
-    assert data["routes"][0]["bot"] == "finanz"
+    assert data["routes"][0]["bot"] == "mybot"
+    assert data["routes"][0]["worker_id"] == "Worker-A"
 
     r2 = admin_client.put(
         "/api/v1/admin/telegram/routes",
         headers={"X-Admin-Key": "test-admin-key"},
         json={
             "routes": [
-                {"bot": "finanz", "path": "/api/v1/telegram/finanz"},
-                {"bot": "siata", "path": "/api/v1/telegram/siata", "token": "tok_siata"},
+                {
+                    "bot": "mybot",
+                    "path": "/api/v1/telegram/mybot",
+                    "worker_id": "Worker-A",
+                    "tenant_id": "TenantA",
+                },
+                {
+                    "bot": "other",
+                    "path": "/api/v1/telegram/other",
+                    "worker_id": "Worker-B",
+                    "tenant_id": "TenantB",
+                    "token": "tok_other",
+                },
             ]
         },
     )
     assert r2.status_code == 200
     assert r2.json().get("route_count") == 2
     saved = env_file.read_text(encoding="utf-8")
-    assert "siata:tok_siata:/api/v1/telegram/siata" in saved
-    assert "finanz:tok1:/api/v1/telegram/finanz" in saved
+    assert "other:tok_other:/api/v1/telegram/other:Worker-B:TenantB" in saved
+    assert "mybot:tok1:/api/v1/telegram/mybot:Worker-A:TenantA" in saved
 
 
 def test_telegram_whitelist_get(admin_client: TestClient):

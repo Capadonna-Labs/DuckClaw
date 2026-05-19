@@ -15,7 +15,7 @@ Dos pipelines operativos desacoplados:
 | `DUCKCLAW_QUANT_SCRIPT_DB` | Ruta DuckDB vault (jobs). |
 | `REDIS_URL` / `DUCKCLAW_REDIS_URL` | Cola singleton (`enqueue_duckdb_write_sync`). |
 | `TZ=America/Bogota` | PM2/cron COT recomendado. |
-| `DUCKCLAW_QUANT_ALERT_CHAT_ID` | Telegram `chat_id` para alertas MOC/HRP vía `N8N_OUTBOUND_WEBHOOK_URL`. Opcional si no hay n8n. |
+| `DUCKCLAW_QUANT_ALERT_CHAT_ID` | Telegram `chat_id` para alertas MOC/HRP vía salida nativa (`send_proactive_message` / Bot API). Requiere `DUCKCLAW_HEARTBEAT_WEBHOOK_URL` o token del bot en el gateway. |
 | IBKR/Gateway existentes | `IBKR_GATEWAY_OHLCV_URL`, lake, etc. como en spec Capadonna. |
 | `DUCKCLAW_MOC_MACRO_VSS` | `1` = válvula MOC v2 con régimen PGQ + perfil VSS (véase spec macro). |
 | `DUCKCLAW_MOC_VSS_TIMEOUT_SEC` | Timeout lectura VSS en el job MOC (default `3`). |

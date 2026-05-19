@@ -1629,9 +1629,7 @@ def _sandbox_heartbeat_allowed(spec: WorkerSpec) -> bool:
     v = (os.getenv("DUCKCLAW_SANDBOX_HEARTBEAT", "true").strip().lower())
     if v in ("0", "false", "no", "off"):
         return False
-    return bool((os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()) or bool(
-        effective_telegram_bot_token_outbound()
-    )
+    return bool(effective_telegram_bot_token_outbound())
 
 
 def _heartbeat_elapsed_sec(state: dict) -> float | None:
@@ -1682,33 +1680,7 @@ def _send_sandbox_heartbeat_telegram(state: dict) -> None:
                 return
         except Exception as exc:
             _log.debug("sandbox heartbeat nativo falló: %s", exc)
-
-    url = (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
-    if not url:
-        _log.debug("sandbox heartbeat: sin token ni N8N_OUTBOUND_WEBHOOK_URL")
-        return
-    auth = (os.getenv("N8N_AUTH_KEY") or "").strip()
-    headers = {"Content-Type": "application/json"}
-    if auth:
-        headers["X-DuckClaw-Secret"] = auth
-    payload = json.dumps(
-        {
-            "chat_id": cid,
-            "user_id": uid,
-                "text": llm_markdown_to_telegram_html(text),
-            "parse_mode": "HTML",
-        },
-        ensure_ascii=False,
-    ).encode("utf-8")
-    req = _urllib_request.Request(url, data=payload, headers=headers, method="POST")
-    try:
-        with _urllib_request.urlopen(req, timeout=10) as resp:
-            _ = resp.read()
-        _log.info("sandbox heartbeat: webhook OK chat_id=%r", cid)
-    except URLError as exc:
-        _log.debug("sandbox heartbeat webhook failed: %s", exc)
-    except Exception as exc:
-        _log.debug("sandbox heartbeat error: %s", exc)
+    _log.debug("sandbox heartbeat: sin token Bot API para chat_id=%r", cid)
 
 
 def _novnc_pre_dm_always_enabled() -> bool:

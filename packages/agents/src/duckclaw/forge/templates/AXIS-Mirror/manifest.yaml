@@ -1,5 +1,7 @@
+id: AXIS-Mirror
 agent_id: mirror
 display_name: "MIRROR — Living Owner Profile"
+tool_read_pool: false
 version: "1.0.0"
 phase: 3
 status: DEFINED
@@ -50,3 +52,7 @@ changelog:
   - version: "1.0.0"
     date: "2026-05-03"
     changes: "Definición inicial del agente MIRROR"
+forge_context:
+  vault_binding:
+    scope: private
+    vault_id: axis

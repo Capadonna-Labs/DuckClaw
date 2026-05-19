@@ -10,14 +10,7 @@ from typing import Optional
 from duckclaw.workers.manifest import get_worker_dir, load_manifest
 from duckclaw.workers.template_registry import list_template_ids, resolve_template_id_global
 
-# Subagentes AXIS por defecto si el manifest no define orchestrates.
-DEFAULT_AXIS_ORCHESTRATES: tuple[str, ...] = (
-    "AXIS-Coder",
-    "AXIS-Mirror",
-    "AXIS-Radar",
-    "AXIS-Sentinel",
-    "AXIS-Phantom",
-)
+_ORCHESTRATOR_TOPOLOGY_IDS = frozenset({"orchestrator"})
 
 
 @dataclass(frozen=True)
@@ -46,7 +39,7 @@ def load_orchestrator_config(
 ) -> OrchestratorConfig | None:
     """
     Lee ``orchestrator.enabled`` + ``orchestrator.orchestrates`` del manifest.
-    También acepta ``topology: axis_orchestrator`` con ``orchestrates`` en raíz.
+    También acepta ``topology: orchestrator`` con ``orchestrates`` en raíz del manifest.
     """
     wid = (worker_id or "").strip()
     if not wid:
@@ -73,7 +66,7 @@ def load_orchestrator_config(
 
     topology = str(data.get("topology") or "").strip().lower()
     orch_block = data.get("orchestrator")
-    enabled = topology == "axis_orchestrator"
+    enabled = topology in _ORCHESTRATOR_TOPOLOGY_IDS
     raw_list: list | None = None
 
     if isinstance(orch_block, dict):
@@ -89,9 +82,6 @@ def load_orchestrator_config(
         return None
 
     orchestrates = _normalize_orchestrates(raw_list, templates_root)
-    if not orchestrates and canonical.lower().startswith("axis-maestro"):
-        orchestrates = DEFAULT_AXIS_ORCHESTRATES
-
     if not orchestrates:
         return None
 

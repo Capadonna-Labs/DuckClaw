@@ -13,7 +13,6 @@ class Settings(BaseSettings):
     
     # Configuración de Seguridad (valores por defecto para desarrollo/local; en producción definir en .env)
     JWT_SECRET: str = "dev-secret-change-in-production"
-    N8N_AUTH_KEY: str = "dev-n8n-auth-key"
 
     # Username del bot para este gateway (menciones War Room, sin @). Acepta TELEGRAM_BOT_USERNAME o DUCKCLAW_TELEGRAM_BOT_USERNAME en .env.
     TELEGRAM_BOT_USERNAME: str = Field(

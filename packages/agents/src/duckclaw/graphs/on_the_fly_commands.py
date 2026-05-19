@@ -552,7 +552,7 @@ def unescape_telegram_markdown_v2_layers(text: str, max_layers: int = 4) -> str:
     Quita hasta ``max_layers`` capas de escape estilo MarkdownV2 (mismo juego de
     caracteres que ``escape_telegram_markdown_v2``). Sirve para:
 
-    - Historial que reinyecta la respuesta HTTP ya escapada (n8n / cliente).
+    - Historial que reinyecta la respuesta HTTP ya escapada (cliente / gateway).
     - Salidas del modelo que copian ``\\.``, ``\\!``, ``\\*`` del contexto.
 
     Sin esto, el escape MDV2 vuelve a escapar las barras y el texto crece
@@ -1058,6 +1058,25 @@ def set_tenant_team_templates(db: Any, tenant_id: Any, template_ids: list) -> No
     )
 
 
+def _canonicalize_team_template_ids(ids: list, templates_root: Any = None) -> list:
+    """Resuelve alias de manifest y descarta ids sin carpeta en forge/templates."""
+    from duckclaw.workers.template_registry import list_template_ids, resolve_template_id
+
+    all_t = list_template_ids(templates_root)
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in ids or []:
+        w = str(raw or "").strip()
+        if not w:
+            continue
+        canonical = resolve_template_id(all_t, w)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        out.append(canonical)
+    return out
+
+
 def get_effective_team_templates(
     db: Any, chat_id: Any, tenant_id: Any, templates_root: Any = None
 ) -> list:
@@ -1065,19 +1084,19 @@ def get_effective_team_templates(
     Equipo que ve el manager para delegar, en orden:
     1) team_templates del chat
     2) team_templates del tenant (admin vía /workers)
-    3) DUCKCLAW_GATEWAY_TEAM_TEMPLATES (coma-separado, ids canónicos tras resolver)
+    3) DUCKCLAW_TEAM_MEMBERS
     4) todos los templates (list_workers)
     """
     from duckclaw.workers.factory import list_workers
 
     chat_team = get_team_templates(db, chat_id)
     if chat_team:
-        return list(chat_team)
+        return _canonicalize_team_template_ids(chat_team, templates_root)
     tid = str(tenant_id or "default").strip() or "default"
     tenant_team = get_tenant_team_templates(db, tid)
     if tenant_team:
-        return list(tenant_team)
-    env_raw = (os.environ.get("DUCKCLAW_GATEWAY_TEAM_TEMPLATES") or "").strip()
+        return _canonicalize_team_template_ids(tenant_team, templates_root)
+    env_raw = (os.environ.get("DUCKCLAW_TEAM_MEMBERS") or "").strip()
     if env_raw:
         all_t = list_workers(templates_root)
         out: list[str] = []
@@ -1111,7 +1130,7 @@ def _sync_tenant_team_if_admin(
 
 
 def _resolve_template_id(available: list, user_input: str) -> Optional[str]:
-    """Resuelve input (p. ej. maestro) al id canónico de carpeta (p. ej. AXIS-Maestro)."""
+    """Resuelve alias de manifest al id canónico de carpeta en forge/templates."""
     from duckclaw.workers.template_registry import resolve_template_id
 
     return resolve_template_id(available, user_input)
@@ -1138,8 +1157,8 @@ def execute_team(
             label = "Equipo (este chat):"
         elif get_tenant_team_templates(db, tid):
             label = "Equipo del tenant (todos los chats sin override):"
-        elif (os.environ.get("DUCKCLAW_GATEWAY_TEAM_TEMPLATES") or "").strip():
-            label = "Equipo (DUCKCLAW_GATEWAY_TEAM_TEMPLATES):"
+        elif (os.environ.get("DUCKCLAW_TEAM_MEMBERS") or "").strip():
+            label = "Equipo (.env):"
         else:
             label = "Equipo: todos los templates"
         lines = "\n".join(f"- {w}" for w in effective)
@@ -2475,7 +2494,7 @@ def execute_list_mind_games(
             )
         )
         # Importante: evitar Markdown links `[...] (tg://...)` aquí, porque algunos nodos Telegram
-        # (n8n) usan parse_mode Markdown/MarkdownV2 y pueden fallar con entidades TextUrl anidadas.
+        # Algunos nodos usan parse_mode Markdown/MarkdownV2 y pueden fallar con entidades TextUrl anidadas.
         players_labels = [
             _player_label_log(uname, pchat, db=db, tenant_id=tid)
             for pchat, uname in players_rows
@@ -3269,7 +3288,7 @@ def execute_heartbeat(db: Any, chat_id: Any, on_off: str, *, tenant_id: Any = No
         if not heartbeat_outbound_configured():
             return (
                 "Heartbeat activado en Redis, pero falta TELEGRAM_BOT_TOKEN (recomendado) o un webhook "
-                "(DUCKCLAW_HEARTBEAT_WEBHOOK_URL / N8N_OUTBOUND_WEBHOOK_URL); no se enviarán DMs."
+                "(TELEGRAM_BOT_TOKEN o DUCKCLAW_HEARTBEAT_WEBHOOK_URL); no se enviarán DMs."
             )
         return "✅ Heartbeat activado. Te avisaré por DM mientras uso herramientas."
     if v in ("off", "0", "false"):

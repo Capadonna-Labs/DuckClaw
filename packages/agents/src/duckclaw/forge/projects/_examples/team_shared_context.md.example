@@ -1,0 +1,25 @@
+# Contexto compartido del equipo (plantilla)
+
+> Copia a `forge/projects/<tu_slug>/_shared/context.md` (gitignored) o apunta
+> `DUCKCLAW_TEAM_SHARED_CONTEXT_FILE` en tu `.env` local.
+
+## Coordinación
+
+- Un worker **coordinador** recibe el mensaje y puede delegar en sub-workers del equipo.
+- El coordinador declara `orchestrator.enabled` y la lista `orchestrator.orchestrates` en su manifest.
+- El equipo efectivo (variables `DUCKCLAW_TEAM_*`, `/workers` o config en DuckDB) debe ser coherente con esa lista.
+
+## Memoria
+
+- Si varios miembros comparten bóveda, usa el mismo `forge_context.vault_binding` en cada manifest.
+- Evita abrir el mismo `.duckdb` con sesiones RW y RO incompatibles en el mismo proceso gateway.
+
+## Conducta
+
+- Responde en el idioma del usuario salvo indicación contraria.
+- No inventes datos; usa herramientas y la bóveda configurada.
+- Los sub-workers se limitan a su rol; el coordinador integra o reasigna según dominio.
+
+## Miembros
+
+Los ids efectivos son los de `DUCKCLAW_TEAM_MEMBERS` en tu `.env` o los guardados en `project.yaml` al crear el proyecto en admin.

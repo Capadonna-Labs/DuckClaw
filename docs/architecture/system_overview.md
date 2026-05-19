@@ -8,7 +8,7 @@ High-level view of how **ingress**, **agent compute**, **queues**, and **durable
 flowchart TB
   subgraph Ingress["Ingress"]
     TG[Telegram / webhooks]
-    HTTP[HTTP clients · n8n · Angular]
+    HTTP[HTTP clients · Angular · API Gateway direct]
   end
 
   subgraph Gateway["API Gateway — services/api-gateway"]

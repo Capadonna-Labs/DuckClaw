@@ -14,6 +14,17 @@ def telegram_webhook_secret_expected_from_env() -> str:
     return (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
 
 
+def telegram_webhook_secret_valid_for_bot_api(value: str) -> bool:
+    """
+    Bot API ``secret_token`` en setWebhook: 1–256 chars, solo A-Za-z0-9_-.
+    Valores con ``+``, ``/``, ``=`` (p. ej. base64) hacen fallar setWebhook con HTTP 400.
+    """
+    s = (value or "").strip()
+    if not s or len(s) > 256:
+        return False
+    return all(c.isalnum() or c in "_-" for c in s)
+
+
 def is_valid_telegram_webhook_secret_token(header_value: str | None) -> bool:
     """
     True si la cabecera coincide con TELEGRAM_WEBHOOK_SECRET,

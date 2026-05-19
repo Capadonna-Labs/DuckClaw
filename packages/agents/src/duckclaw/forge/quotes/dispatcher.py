@@ -1,5 +1,5 @@
 """
-DocumentDispatcher — Genera PDF, empaqueta payload y dispara webhook n8n.
+DocumentDispatcher — Genera PDF, empaqueta payload y dispara webhook opcional.
 
 Spec: specs/Motor_Cotizacion_Omnicanal_QuoteEngine.md
 """
@@ -65,14 +65,14 @@ def _generate_pdf(quote_data: dict, output_path: Path) -> bool:
         return False
 
 
-def dispatch_quote_to_n8n(
+def dispatch_quote_to_webhook(
     db: Any,
     quote_data: dict,
     base_url: Optional[str] = None,
     delivery_preferences: Optional[str] = None,
 ) -> str:
     """
-    Genera PDF, actualiza quotes con pdf_path y token, dispara webhook n8n.
+    Genera PDF, actualiza quotes con pdf_path y token, dispara webhook opcional.
     Retorna mensaje para el agente.
     """
     if not quote_data or quote_data.get("error"):
@@ -126,7 +126,7 @@ def dispatch_quote_to_n8n(
         "delivery_preferences": delivery_preferences or "",
     }
 
-    webhook = os.environ.get("N8N_QUOTE_WEBHOOK_URL", "").strip()
+    webhook = os.environ.get("DUCKCLAW_QUOTE_WEBHOOK_URL", "").strip()
     if webhook:
         try:
             import urllib.request

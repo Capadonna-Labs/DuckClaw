@@ -1,4 +1,4 @@
-/** Valores reales de `topology` en manifest.yaml (ver duckclaw.workers.orchestrator). */
+/** Valores de `topology` en manifest.yaml (ver duckclaw.workers.orchestrator). */
 export const WORKER_TOPOLOGIES = [
   {
     id: 'general',
@@ -6,9 +6,9 @@ export const WORKER_TOPOLOGIES = [
     hint: 'Agente único; sin delegación a sub-workers.',
   },
   {
-    id: 'axis_orchestrator',
-    label: 'AXIS orquestador',
-    hint: 'Delega en sub-templates AXIS (requiere orchestrates en manifest).',
+    id: 'orchestrator',
+    label: 'Orquestador',
+    hint: 'Delega en sub-workers listados en orchestrator.orchestrates del manifest.',
   },
 ] as const;
 

@@ -53,7 +53,7 @@ Si existe `max_drawdown_pct` en `quant_core.trading_risk_constraints` y la sesi�
 ## Proactividad
 
 - **Fase 1 (implementada)**: en cada turno del grafo Quant, si `status = ACTIVE`, se inyecta un bloque de contexto en el system prompt (tickers, `session_uid`, modo, límite DD si existe) e instrucciones para evaluar mercado y proponer señal cuando elriesgo lo permita.
-- **Fase 2 (parcial)**: `/crons --delta <duración>` programa en `agent_config` (bóveda del usuario) un intervalo; el ticker (`heartbeat` o embebido en el gateway) escanea hub + `db/private/*/*.duckdb` y dispara `[SYSTEM_EVENT]` al worker activo del chat (no `manager`). Ver Fly Commands. Evolución: n8n cron o deduplicación si varios procesos escanean el mismo chat.
+- **Fase 2 (parcial)**: `/crons --delta <duración>` programa en `agent_config` (bóveda del usuario) un intervalo; el ticker (`heartbeat` o embebido en el gateway) escanea hub + `db/private/*/*.duckdb` y dispara `[SYSTEM_EVENT]` al worker activo del chat (no `manager`). Ver Fly Commands. Evolución: cron PM2 dedicado o deduplicación si varios procesos escanean el mismo chat.
 
 ## Verificación
 

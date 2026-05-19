@@ -2,10 +2,10 @@
 # Telegram MCP Integration (Egress Gateway)
 
 **Objetivo**
-Reemplazar la dependencia externa de n8n para el envío de mensajes a Telegram mediante la implementación de un servidor MCP (Model Context Protocol) local. DuckClaw actuará como un *MCP Client*, consumiendo las herramientas de Telegram de forma estandarizada, síncrona y tipada, resolviendo definitivamente los problemas de formato multimedia (imágenes/documentos).
+Consolidar el envío de mensajes a Telegram mediante la **Bot API nativa** y, opcionalmente, un servidor MCP (Model Context Protocol) local. DuckClaw actuará como *MCP Client*, consumiendo herramientas de Telegram de forma estandarizada, síncrona y tipada, resolviendo definitivamente los problemas de formato multimedia (imágenes/documentos).
 
 **Contexto**
-Actualmente, el flujo de salida (Egress) depende de webhooks HTTP hacia n8n, lo que añade latencia de red, fragmenta la lógica de negocio fuera del repositorio y dificulta el manejo de errores (ej. el bug `IMAGE_PROCESS_FAILED` del BI Analyst). Al integrar un `telegram-mcp-server` ejecutado localmente vía `stdio`, LangGraph puede invocar la API de Telegram como una herramienta nativa, manteniendo el control total del ciclo de vida del mensaje y los reintentos dentro del ecosistema Python/MLX.
+El flujo de salida (Egress) debe permanecer en el monorepo: webhooks outbound del API Gateway (`DUCKCLAW_HEARTBEAT_WEBHOOK_URL`, `DUCKCLAW_OUTBOUND_WEBHOOK_SECRET`) o llamadas directas a la Bot API, sin orquestadores externos. Al integrar un `telegram-mcp-server` ejecutado localmente vía `stdio`, LangGraph puede invocar la API de Telegram como herramienta nativa, manteniendo el control total del ciclo de vida del mensaje y los reintentos dentro del ecosistema Python/MLX (p. ej. bug `IMAGE_PROCESS_FAILED` del BI Analyst).
 
 **Esquema de datos (Configuración MCP)**
 El servidor MCP vive en el monorepo en **`packages/mcp/telegram/`** (paquete `duckclaw-telegram-mcp`, módulo `duckclaw_telegram_mcp`). La configuración del arnés está en la raíz del repo: **`config/mcp_servers.yaml`** (no en `packages/core`, que es duckclaw-core).

@@ -48,6 +48,17 @@ def main() -> int:
     public = (os.environ.get("DUCKCLAW_PUBLIC_URL") or "").strip().rstrip("/")
     raw = (os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()
     secret = (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    from duckclaw.integrations.telegram.telegram_webhook_secret_header import (
+        telegram_webhook_secret_valid_for_bot_api,
+    )
+
+    if secret and not telegram_webhook_secret_valid_for_bot_api(secret):
+        print(
+            "warn: TELEGRAM_WEBHOOK_SECRET tiene caracteres no permitidos por Telegram Bot API "
+            "(solo A-Za-z0-9_-). setWebhook se registrará SIN secret_token; corrige .env para producción.",
+            file=sys.stderr,
+        )
+        secret = ""
 
     if not public:
         print("error: DUCKCLAW_PUBLIC_URL vacío", file=sys.stderr)
@@ -94,6 +105,24 @@ def main() -> int:
             print(f"error: {r.bot_name} API: {data}", file=sys.stderr)
             return 1
         print(f"OK  {r.bot_name}  setWebhook  {hook_url}")
+        try:
+            from pathlib import Path
+            import time
+
+            log_path = Path(__file__).resolve().parent.parent / ".cursor" / "debug-77cb49.log"
+            payload = {
+                "sessionId": "77cb49",
+                "timestamp": int(time.time() * 1000),
+                "location": "register_webhooks.py:ok",
+                "message": "setWebhook registered",
+                "data": {"bot_name": r.bot_name, "hook_url": hook_url},
+                "hypothesisId": "H1-fix",
+                "runId": "post-fix",
+            }
+            with log_path.open("a", encoding="utf-8") as lf:
+                lf.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
     return 0
 

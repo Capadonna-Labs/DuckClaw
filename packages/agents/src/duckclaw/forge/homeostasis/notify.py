@@ -1,7 +1,7 @@
 """
-Notificación homeostasis: webhook a n8n para preguntar "¿Qué tarea hacer?".
+Notificación homeostasis: webhook opcional para preguntar "¿Qué tarea hacer?".
 
-Cuando termina una tarea o el timer dispara, envía POST a N8N_HOMEOSTASIS_ASK_TASK_WEBHOOK_URL.
+Cuando termina una tarea o el timer dispara, envía POST a DUCKCLAW_HOMEOSTASIS_ASK_TASK_WEBHOOK_URL.
 Incluye objetivos sugeridos para priorizar (aumentar ventas, disminuir tiempo de respuesta, etc.).
 """
 
@@ -47,11 +47,11 @@ def notify_ask_task(
     suggested_objectives: Optional[List[str]] = None,
 ) -> None:
     """
-    Envía POST al webhook de n8n si N8N_HOMEOSTASIS_ASK_TASK_WEBHOOK_URL está definido.
+    Envía POST si DUCKCLAW_HOMEOSTASIS_ASK_TASK_WEBHOOK_URL está definido.
     Incluye suggested_objectives para que el usuario priorice (ventas, tiempo de respuesta, etc.).
     Fire-and-forget (no bloquea). Logging en caso de error.
     """
-    url = (os.environ.get("N8N_HOMEOSTASIS_ASK_TASK_WEBHOOK_URL") or "").strip()
+    url = (os.environ.get("DUCKCLAW_HOMEOSTASIS_ASK_TASK_WEBHOOK_URL") or "").strip()
     if not url:
         return
 

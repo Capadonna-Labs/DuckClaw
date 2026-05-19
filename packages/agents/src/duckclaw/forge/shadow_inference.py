@@ -6,7 +6,7 @@ Spec: specs/Auditoria_Arquitectura_y_Mejoras_Prioridad_Alta.md
 Comportamiento:
   - 48h tras Hot-Swap: enrutar al modelo nuevo + inferencia en background al anterior
   - Calcular similitud coseno entre embeddings de respuestas
-  - Si divergencia > 15% → alerta n8n + rollback automático
+  - Si divergencia > 15% → alerta webhook + rollback automático
 """
 
 from __future__ import annotations

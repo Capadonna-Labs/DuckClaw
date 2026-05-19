@@ -997,7 +997,7 @@ def _offer_gateway_pm2_if_pm2(console: Console, state: dict[str, Any], repo_root
 
     console.print()
     console.print(Panel(
-        "El API Gateway expone FastAPI (agente, Telegram vía webhook, integración n8n opcional) como "
+        "El API Gateway expone FastAPI (agente, Telegram vía webhook) como "
         "proceso PM2 propio.\n"
         "Ahí defines nombre PM2, puerto, DUCKCLAW_DB_PATH y Redis; varios gateways se fusionan en "
         "config/api_gateways_pm2.json sin borrar otros procesos PM2.",
@@ -2052,7 +2052,7 @@ def _run_section(
 
     if section_id == "conversation_traces":
         console.print(Panel("Trazas de conversaciones", title="Trazas de conversaciones (Gateway/API)", border_style="cyan"))
-        console.print("[dim]Guarda cada turno en train/conversation_traces/YYYY/MM/DD/traces.jsonl cuando se use el API Gateway (n8n, Telegram vía Gateway).[/]")
+        console.print("[dim]Guarda cada turno en train/conversation_traces/YYYY/MM/DD/traces.jsonl cuando se use el API Gateway (Telegram vía Gateway).[/]")
         default_save = state.get("save_conversation_traces", True)
         if isinstance(default_save, str):
             default_save = default_save.lower() in ("true", "1", "yes", "y", "sí", "si")

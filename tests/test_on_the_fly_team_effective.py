@@ -55,7 +55,7 @@ def test_get_effective_env_fallback(monkeypatch, db) -> None:
     if not all_w:
         pytest.skip("need worker templates")
     target = all_w[0]
-    monkeypatch.setenv("DUCKCLAW_GATEWAY_TEAM_TEMPLATES", target)
+    monkeypatch.setenv("DUCKCLAW_TEAM_MEMBERS", target)
     eff = get_effective_team_templates(db, "no_config_chat", "default", None)
     assert eff == [target]
 
@@ -65,7 +65,7 @@ def test_execute_team_list_is_plain_for_telegram_html(db, monkeypatch) -> None:
     all_w = list_workers()
     if not all_w:
         pytest.skip("need worker templates")
-    monkeypatch.setenv("DUCKCLAW_GATEWAY_TEAM_TEMPLATES", "")
+    monkeypatch.delenv("DUCKCLAW_TEAM_MEMBERS", raising=False)
     set_team_templates(db, "c1", [all_w[0]])
     out = execute_team(db, "c1", "", tenant_id="default", requester_id="1")
     assert out is not None

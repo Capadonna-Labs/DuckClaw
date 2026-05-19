@@ -20,6 +20,7 @@ MANAGER_ROUTER_YAML = TEMPLATES_DIR / "manager_router.yaml"
 # finanz, personalizable, powerseal, research_worker, support, etc.
 WORKERS_TEMPLATES_DIR = TEMPLATES_DIR
 INDUSTRIES_TEMPLATES_DIR = TEMPLATES_DIR / "industries"
+PROJECTS_DIR = FORGE_DIR / "projects"
 
 __all__ = [
     "AgentAssembler",
@@ -27,5 +28,6 @@ __all__ = [
     "MANAGER_ROUTER_YAML",
     "WORKERS_TEMPLATES_DIR",
     "INDUSTRIES_TEMPLATES_DIR",
+    "PROJECTS_DIR",
     "TEMPLATES_DIR",
 ]

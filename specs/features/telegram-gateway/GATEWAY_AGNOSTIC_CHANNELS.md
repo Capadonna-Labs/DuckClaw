@@ -43,7 +43,7 @@ Si la variable está vacía, Discord puede resolverse solo con `DUCKCLAW_DISCORD
 
 | Canal | Mecanismo MVP |
 |-------|----------------|
-| Telegram | MCP opcional, Bot API nativa, webhook n8n (lógica existente) |
+| Telegram | MCP opcional, Bot API nativa, Telegram webhook inbound (`POST /api/v1/telegram/webhook`) |
 | Discord | REST Bot API (PATCH follow-up tras defer) |
 | Slack (futuro) | `chat.postMessage` + signing secret |
 | Gmail (futuro) | Cola async / job; no bloquear worker HTTP del gateway |

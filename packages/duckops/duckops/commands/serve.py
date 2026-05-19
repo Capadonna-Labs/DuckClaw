@@ -25,7 +25,7 @@ def cmd_serve(
         help="Puerto (default: DUCKCLAW_GATEWAY_PORT en .env o api_gateways_pm2.json).",
     ),
     pm2: bool = typer.Option(False, "--pm2", help="Desplegar como servicio PM2."),
-    gateway: bool = typer.Option(False, "--gateway", "-g", help="Usar microservicio services/api-gateway (n8n, Telegram)."),
+    gateway: bool = typer.Option(False, "--gateway", "-g", help="Usar microservicio services/api-gateway (Telegram, agentes)."),
     name: str = typer.Option(
         None,
         "--name",

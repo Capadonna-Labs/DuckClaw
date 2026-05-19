@@ -307,38 +307,6 @@ def test_plain_subchunks_for_telegram_budget_splits_when_escape_grows() -> None:
     assert "".join(tiny) == "abcd"
 
 
-def test_webhook_outbound_chat_reply_sync_posts_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    posted: list[dict[str, str]] = []
-    monkeypatch.setenv("DUCKCLAW_TELEGRAM_OUTBOUND_VIA", "n8n")
-    monkeypatch.setenv("N8N_OUTBOUND_WEBHOOK_URL", "https://example.test/webhook")
-
-    class _Resp:
-        def read(self) -> bytes:
-            return b"ok"
-
-        def __enter__(self) -> "_Resp":
-            return self
-
-        def __exit__(self, *args: object) -> bool:
-            return False
-
-    def fake_urlopen(req: object, timeout: int = 30) -> _Resp:
-        posted.append(json.loads(req.data.decode("utf-8")))  # type: ignore[attr-defined]
-        return _Resp()
-
-    monkeypatch.setattr(gateway_main._url_request, "urlopen", fake_urlopen)
-    gateway_main._webhook_outbound_chat_reply_sync(
-        chat_id=TELEGRAM_TEST_USER_ID,
-        user_id=TELEGRAM_TEST_USER_ID,
-        text="hola",
-    )
-    assert len(posted) == 1
-    assert posted[0]["chat_id"] == TELEGRAM_TEST_USER_ID
-    assert posted[0]["user_id"] == TELEGRAM_TEST_USER_ID
-    assert posted[0]["text"] == "hola"
-    assert posted[0].get("parse_mode") == "HTML"
-
-
 def test_pm2_json_lists_gateways_with_explicit_db_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

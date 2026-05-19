@@ -1,6 +1,6 @@
 """
 Heartbeat de observabilidad por chat: flag en Redis + DM proactivo vía **Bot API nativa**
-(``TELEGRAM_BOT_TOKEN``) o webhook ``DUCKCLAW_HEARTBEAT_WEBHOOK_URL`` / ``N8N_OUTBOUND_WEBHOOK_URL``.
+(``TELEGRAM_BOT_TOKEN``) o webhook opcional ``DUCKCLAW_HEARTBEAT_WEBHOOK_URL``.
 
 Fire-and-forget: el envío corre en un hilo daemon; no bloquear el grafo del agente.
 """
@@ -35,7 +35,7 @@ _HEARTBEAT_TTL_SECONDS = 7 * 24 * 3600
 
 def normalize_telegram_chat_id_for_outbound(chat_id: str | None) -> str:
     """
-    n8n a veces manda un etiquetado tipo «@Juan (1726618406)».
+    Algunos clientes mandan un etiquetado tipo «@Juan (1726618406)».
     Telegram sendMessage/sendPhoto exige el id numérico; el webhook outbound debe recibirlo así.
     """
     s = str(chat_id or "").strip()
@@ -89,11 +89,8 @@ def heartbeat_redis_configured() -> bool:
 
 
 def heartbeat_outbound_webhook_url() -> str:
-    """Webhook del nodo «salida proactiva» (p. ej. ruta distinta de /webhook/send-dm del chat principal)."""
-    return (
-        (os.getenv("DUCKCLAW_HEARTBEAT_WEBHOOK_URL") or "").strip()
-        or (os.getenv("N8N_OUTBOUND_WEBHOOK_URL") or "").strip()
-    )
+    """Webhook HTTP opcional de salida proactiva (solo si no hay Bot API)."""
+    return (os.getenv("DUCKCLAW_HEARTBEAT_WEBHOOK_URL") or "").strip()
 
 
 def heartbeat_outbound_configured() -> bool:
@@ -309,7 +306,7 @@ def format_delegation_heartbeat_message(
 ) -> str:
     """
     Primer DM de heartbeat al delegar: storytelling corto + plan (tasks del manager).
-    Texto plano (válido para Telegram vía n8n sin Markdown).
+    Texto plano (válido para Telegram sin Markdown).
 
     ``subagent_header`` (p. ej. ``BI-Analyst 1``) va en la misma línea intro para no
     duplicar encabezados sueltos en el chat.
@@ -495,21 +492,17 @@ def _post_outbound_sync(
         except Exception as exc:
             _log.warning("chat heartbeat: error nativo chat_id=%r: %s; fallback webhook", cid, exc)
 
-    if (os.getenv("DUCKCLAW_TELEGRAM_OUTBOUND_VIA") or "").strip().lower() != "n8n":
-        _log.debug("chat heartbeat: sin fallback n8n (DUCKCLAW_TELEGRAM_OUTBOUND_VIA!=n8n) chat_id=%r", cid)
-        return
-
     url = heartbeat_outbound_webhook_url()
     if not url:
         _log.warning(
-            "chat heartbeat: sin TELEGRAM_BOT_TOKEN ni webhook (DUCKCLAW_HEARTBEAT / N8N_OUTBOUND) chat_id=%r",
+            "chat heartbeat: sin TELEGRAM_BOT_TOKEN ni DUCKCLAW_HEARTBEAT_WEBHOOK_URL chat_id=%r",
             cid,
         )
         return
-    auth = (os.getenv("N8N_AUTH_KEY") or "").strip()
+    secret = (os.getenv("DUCKCLAW_OUTBOUND_WEBHOOK_SECRET") or "").strip()
     headers = {"Content-Type": "application/json"}
-    if auth:
-        headers["X-DuckClaw-Secret"] = auth
+    if secret:
+        headers["X-DuckClaw-Secret"] = secret
     safe = llm_markdown_to_telegram_html(raw)
     payload = json.dumps(
         {"chat_id": cid, "user_id": uid, "text": safe, "parse_mode": "HTML"},
@@ -528,7 +521,7 @@ def _post_outbound_sync(
             pass
         _log.warning(
             "chat heartbeat outbound HTTP %s %s (chat_id=%r). url=%s | "
-            "Si usas n8n: URL debe coincidir con un flujo ACTIVO. response_body=%r",
+            "Comprueba que la URL de webhook esté activa. response_body=%r",
             exc.code,
             exc.reason,
             cid,

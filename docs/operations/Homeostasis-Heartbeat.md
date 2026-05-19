@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-El microservicio `services/heartbeat` se despierta de forma periódica, evalúa las creencias de homeostasis en DuckDB y, cuando detecta una anomalía, inyecta un **SYSTEM_EVENT** en el API Gateway. El agente decide si debe enviar un mensaje proactivo al usuario usando la herramienta `send_proactive_message`, que llama a un flujo outbound de n8n.
+El microservicio `services/heartbeat` se despierta de forma periódica, evalúa las creencias de homeostasis en DuckDB y, cuando detecta una anomalía, inyecta un **SYSTEM_EVENT** en el API Gateway. El agente decide si debe enviar un mensaje proactivo al usuario usando la herramienta `send_proactive_message`, que usa salida nativa (Bot API / webhook outbound del gateway).
 
 ## Flujo de alto nivel
 
@@ -15,8 +15,8 @@ El microservicio `services/heartbeat` se despierta de forma periódica, evalúa 
    - `is_system_prompt`: `true`
 5. El Gateway pasa `is_system_prompt` al grafo (campo `state["is_system_prompt"] = True`).
 6. El agente homeostático (por ejemplo `finanz`) interpreta el evento y, si corresponde, llama a la herramienta `send_proactive_message(chat_id, message)`.
-7. `send_proactive_message` hace `POST` al flujo outbound de n8n (`N8N_OUTBOUND_WEBHOOK_URL`) con `{chat_id, text}` y cabecera `X-DuckClaw-Secret`.
-8. n8n envía el mensaje proactivo al usuario (Telegram/WPP).
+7. `send_proactive_message` hace `POST` al endpoint outbound del gateway (`DUCKCLAW_HEARTBEAT_WEBHOOK_URL`) con `{chat_id, text}` y cabecera `X-DuckClaw-Secret`.
+8. El gateway envía el mensaje proactivo al usuario vía **Bot API nativa** (Telegram).
 
 ## Contrato de anomalías
 
@@ -41,20 +41,19 @@ def send_proactive_message(chat_id: str, message: str) -> str:
     """
 ```
 
-- Envía `POST N8N_OUTBOUND_WEBHOOK_URL` con:
+- Envía `POST DUCKCLAW_HEARTBEAT_WEBHOOK_URL` con:
   - JSON: `{"chat_id": "<id>", "text": "<mensaje>"}`.
-  - Cabecera: `X-DuckClaw-Secret: N8N_AUTH_KEY`.
+  - Cabecera: `X-DuckClaw-Secret: DUCKCLAW_OUTBOUND_WEBHOOK_SECRET`.
 - Registra la acción en DuckDB vía `append_task_audit(..., status="PROACTIVE_MESSAGE_SENT")` (best-effort).
 
-## Configuración de n8n (Outbound)
+## Configuración outbound (API Gateway)
 
-1. Crear un flujo dedicado con trigger `POST /webhook/outbound-proactive` (o el path que definas).
-2. Configurar en `.env`:
-   - `N8N_OUTBOUND_WEBHOOK_URL=https://tu-n8n/webhook/outbound-proactive`
-   - `N8N_AUTH_KEY=un_secreto_compartido`
-3. En el flujo:
-   - Node HTTP Trigger lee `chat_id` y `text` del body.
-   - Nodo Telegram (o WhatsApp) con operación **Send Message** usa esos campos directamente.
+1. Definir en `.env`:
+   - `DUCKCLAW_HEARTBEAT_WEBHOOK_URL` — URL interna del gateway para DMs proactivos (o ruta que delegue a Bot API).
+   - `DUCKCLAW_OUTBOUND_WEBHOOK_SECRET` — secreto compartido para cabecera `X-DuckClaw-Secret`.
+   - `DUCKCLAW_DEFAULT_WORKER_ID` — worker por defecto en eventos `[SYSTEM_EVENT]` sin sesión previa.
+2. El gateway valida el secreto y envía con `TELEGRAM_BOT_TOKEN` (Bot API nativa).
+3. Opcional: `DUCKCLAW_ADMIN_CHAT_ID` para alertas de seguridad y homeostasis.
 
 ## Despliegue con PM2
 
@@ -80,4 +79,3 @@ pm2 logs DuckClaw-Heartbeat
 ```
 
 El wizard `duckops` podrá, en el futuro, gestionar este servicio igual que `DuckClaw-Gateway` y `DuckClaw-DB-Writer`.
-

@@ -168,23 +168,23 @@ O como PM2: `DuckClaw-DB-Writer`.
 
 ---
 
-### 2.7 Integraciones n8n
+### 2.7 Integraciones Telegram y API Gateway direct
 
 
-| Ruta                                          | Descripción                     |
-| --------------------------------------------- | ------------------------------- |
-| `packages/shared/docs/n8n-workflow-review.md` | Configuración del workflow n8n. |
-| `packages/shared/docs/n8n-troubleshooting.md` | Troubleshooting.                |
+| Ruta | Descripción |
+| ---- | ----------- |
+| `specs/features/telegram-gateway/TELEGRAM_WEBHOOK_MULTIPLEX.md` | Webhook inbound multiplex por bot. |
+| `specs/features/telegram-gateway/TELEGRAM_WEBHOOK_ONE_PORT.md` | Un proceso gateway por bot/puerto. |
 
 
-**Flujo n8n:**
+**Flujo Telegram webhook inbound:**
 
-1. Trigger (Telegram, webhook, etc.) recibe el mensaje.
-2. HTTP Request al **API Gateway** (`services/api-gateway/main.py`) en `http://<IP>:8000/api/v1/agent/chat`.
-3. El Gateway procesa la petición (agente, fly commands, grafo LangGraph) — todo en `main.py`.
+1. Telegram envía `POST` al webhook del gateway (`/api/v1/telegram/webhook` o ruta compacta).
+2. El **API Gateway** (`services/api-gateway/main.py`) valida secret, resuelve worker (`DUCKCLAW_DEFAULT_WORKER_ID` o sesión) y procesa en `agent_chat()` / `_invoke_chat()`.
+3. Fly commands, grafo LangGraph y salida vía Bot API nativa — todo en `main.py`.
 4. Para escrituras directas: `POST /api/v1/db/write` → Redis → DB Writer.
-5. Headers: `X-Tailscale-Auth-Key: <DUCKCLAW_TAILSCALE_AUTH_KEY>`.
-6. Responder (Telegram, etc.) envía la respuesta al usuario.
+5. Headers internos opcionales: `X-Tailscale-Auth-Key: <DUCKCLAW_TAILSCALE_AUTH_KEY>` para clientes HTTP en mesh.
+6. Salida proactiva / heartbeat: `DUCKCLAW_HEARTBEAT_WEBHOOK_URL`, `DUCKCLAW_OUTBOUND_WEBHOOK_SECRET`.
 
 Todo el tráfico pasa por el microservicio `services/api-gateway`.
 
@@ -216,12 +216,12 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 
 ## 3. Flujo detallado paso a paso
 
-### 3.1 Mensaje de usuario (Telegram / n8n)
+### 3.1 Mensaje de usuario (Telegram webhook inbound)
 
 1. Usuario envía mensaje en Telegram.
-2. n8n recibe el webhook de Telegram.
-3. n8n hace `POST /api/v1/agent/chat` al DuckClaw-Gateway (Mac Mini :8000).
-4. Middleware valida `X-Tailscale-Auth-Key`.
+2. Telegram hace `POST` al webhook del DuckClaw-Gateway (Mac Mini :8000, vía tunnel HTTPS).
+3. El gateway resuelve sesión (`chat_id`, `user_id`) y worker activo.
+4. Middleware valida secret del bot y, si aplica, `X-Tailscale-Auth-Key` en clientes HTTP mesh.
 
 ### 3.2 Procesamiento en el Gateway
 
@@ -254,7 +254,7 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 
 1. `set_idle(session_id)` en Redis.
 2. `append_task_audit()` en `task_audit_log` (DuckDB).
-3. Respuesta al Gateway → n8n → Telegram.
+3. Respuesta al Gateway → Bot API nativa → Telegram.
 
 ---
 
@@ -268,7 +268,10 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 | `DUCKCLAW_DB_PATH`            | Convención histórica en `.env` (wizard duplica `DUCKDB_PATH` para db-writer).       |
 | `DUCKCLAW_WRITE_QUEUE_URL`    | Redis para la cola de escritura.                    |
 | `DUCKCLAW_REDIS_URL`          | Redis para ActivityManager (`/tasks`).              |
-| `DUCKCLAW_TAILSCALE_AUTH_KEY` | Auth para n8n y clientes.                           |
+| `DUCKCLAW_TAILSCALE_AUTH_KEY` | Auth para clientes HTTP en mesh Tailscale.          |
+| `DUCKCLAW_HEARTBEAT_WEBHOOK_URL` | Salida proactiva / DMs de heartbeat.             |
+| `DUCKCLAW_OUTBOUND_WEBHOOK_SECRET` | Secreto compartido outbound interno.           |
+| `DUCKCLAW_DEFAULT_WORKER_ID` | Worker por defecto si la sesión no tiene `/role`.  |
 | `DUCKCLAW_LLM_PROVIDER`       | Proveedor LLM (deepseek, mlx, etc.).                |
 
 
@@ -320,7 +323,7 @@ Al iniciar, el wizard lista los procesos PM2 detectados. Si el usuario elige "Ge
 
 - **DuckClaw-Gateway**: Regenera `ecosystem.api.config.cjs` vía `duckops serve --pm2 --gateway`. Escribe en `.env` rutas hub (`DUCKCLAW_DB_PATH` + `DUCKDB_PATH` donde el wizard aplica Smart Mapping). El Gateway encola escrituras en Redis y sirve el agente.
 - **DuckClaw-DB-Writer**: Si no existe `config/ecosystem.db-writer.config.cjs` portable, el wizard legado puede generar `ecosystem.db-writer.config.cjs` en la raíz; el repositorio canónico usa `config/ecosystem.db-writer.config.cjs` (lee `.env`: `DUCKCLAW_REPO_ROOT`, `DUCKCLAW_PM2_PYTHON`, `REDIS_URL`, `DUCKDB_PATH`). El consumidor hace BRPOP sobre `duckdb_write_queue` y escribe en DuckDB.
-- **DuckClaw-Brain**: Genera `ecosystem.core.config.cjs` para el bot Telegram (polling directo, sin pasar por n8n).
+- **DuckClaw-Brain**: Genera `ecosystem.core.config.cjs` para el bot Telegram (polling directo, alternativa al webhook inbound).
 
 **Configuración de la base de datos**
 
@@ -338,10 +341,10 @@ En PM2/Gateway, entradas como `[Finanzas:finanz 2]` o `[Finanzas:Job-Hunter 1]` 
 
 1. Usuario ejecuta `duckops init`.
 2. Wizard detecta PM2 y ofrece gestionar DuckClaw-Gateway, DuckClaw-DB-Writer o DuckClaw-Brain.
-3. Si gestiona **Gateway**: regenera config, escribe `.env`, reinicia PM2. El Gateway queda listo para recibir tráfico de n8n.
+3. Si gestiona **Gateway**: regenera config, escribe `.env`, reinicia PM2. El Gateway queda listo para webhook Telegram inbound y clientes HTTP.
 4. Si gestiona **DB Writer**: genera `ecosystem.db-writer.config.cjs`, inicia o reinicia el consumidor. Redis → DuckDB queda operativo.
 5. Si gestiona **Brain** o completa el wizard: configura token, LLM, DB; despliega con PM2/systemd; opcionalmente arranca el bot.
-6. Pipeline operativo: n8n → Gateway → (agente / db/write) → Redis → DB Writer → DuckDB.
+6. Pipeline operativo: Telegram inbound → Gateway → (agente / db/write) → Redis → DB Writer → DuckDB.
 
 ### 6.3 Estructura del CLI duckops
 

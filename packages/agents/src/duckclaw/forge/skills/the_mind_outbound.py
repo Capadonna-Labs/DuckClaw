@@ -1,5 +1,5 @@
 """
-The Mind — outbound Telegram/n8n y reparto de cartas.
+The Mind — outbound Telegram (Bot API / webhook) y reparto de cartas.
 
 Usado por fly commands (`on_the_fly_commands`) y por herramientas LangChain (con `db` inyectada).
 """
@@ -124,13 +124,9 @@ class BroadcastResult:
 
 
 def resolve_telegram_outbound_url() -> str | None:
-    """
-    Misma URL que `send_proactive_message` / homeostasis: N8N_OUTBOUND_WEBHOOK_URL primero.
-
-    Después, overrides opcionales solo si hace falta un endpoint distinto para Telegram/DM.
-    """
+    """Webhook HTTP opcional si no hay Bot API (mismo contrato que heartbeat)."""
     for key in (
-        "N8N_OUTBOUND_WEBHOOK_URL",
+        "DUCKCLAW_HEARTBEAT_WEBHOOK_URL",
         "DUCKCLAW_TELEGRAM_SEND_WEBHOOK_URL",
         "DUCKCLAW_SEND_DM_WEBHOOK_URL",
     ):
@@ -141,22 +137,14 @@ def resolve_telegram_outbound_url() -> str | None:
 
 
 def outbound_request_headers() -> dict[str, str]:
-    """
-    Cabeceras para POST al webhook de salida.
-
-    - N8N_AUTH_KEY → X-N8N-Auth (flujos n8n clásicos).
-    - DUCKCLAW_WEBHOOK_SECRET → X-DuckClaw-Secret (mismo contrato que alertas del gateway).
-    Si solo existe N8N_AUTH_KEY, se envían ambas cabeceras con el mismo valor para máxima compatibilidad.
-    """
+    """Cabeceras para POST al webhook de salida opcional."""
     h: dict[str, str] = {"Content-Type": "application/json"}
-    n8n_auth = (os.environ.get("N8N_AUTH_KEY") or "").strip()
-    duck_secret = (os.environ.get("DUCKCLAW_WEBHOOK_SECRET") or "").strip()
-    if duck_secret:
-        h["X-DuckClaw-Secret"] = duck_secret
-    if n8n_auth:
-        h["X-N8N-Auth"] = n8n_auth
-        if not duck_secret:
-            h["X-DuckClaw-Secret"] = n8n_auth
+    secret = (
+        (os.environ.get("DUCKCLAW_OUTBOUND_WEBHOOK_SECRET") or "").strip()
+        or (os.environ.get("DUCKCLAW_WEBHOOK_SECRET") or "").strip()
+    )
+    if secret:
+        h["X-DuckClaw-Secret"] = secret
     return h
 
 
@@ -168,18 +156,7 @@ def send_telegram_dm(
     db: Any | None = None,
     tenant_id: str | None = None,
 ) -> TelegramDmOutcome:
-    """
-    POST JSON {chat_id, text, user_id} al webhook de n8n / Telegram.
-
-    Incluye `user_id` igual a `chat_id` para flujos que solo lean user_id.
-    """
-    url = resolve_telegram_outbound_url()
-    if not url:
-        _log.warning(
-            "The Mind outbound: sin URL (define N8N_OUTBOUND_WEBHOOK_URL como el resto de "
-            "mensajes salientes, o DUCKCLAW_TELEGRAM_SEND_WEBHOOK_URL / DUCKCLAW_SEND_DM_WEBHOOK_URL)"
-        )
-        return TelegramDmOutcome.skipped_no_url()
+    """Envía DM por Bot API; si falla, webhook opcional."""
     cid = (chat_id or "").strip()
     ident = _pm2_identity_label(cid, username=username, db=db, tenant_id=tenant_id)
     if not cid:
@@ -187,6 +164,28 @@ def send_telegram_dm(
         return TelegramDmOutcome.skipped_no_chat_id()
 
     safe_text = _telegram_safe(text or "")
+    try:
+        from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
+        from duckclaw.integrations.telegram.telegram_outbound_sync import send_bot_message_sync
+
+        token = (effective_telegram_bot_token_outbound() or "").strip()
+        if token and send_bot_message_sync(
+            bot_token=token,
+            chat_id=cid,
+            text=safe_text,
+            parse_mode="HTML",
+        ):
+            return TelegramDmOutcome.success()
+    except Exception as exc:
+        _log.debug("The Mind outbound: Bot API falló: %s", exc)
+
+    url = resolve_telegram_outbound_url()
+    if not url:
+        _log.warning(
+            "The Mind outbound: sin TELEGRAM_BOT_TOKEN ni webhook "
+            "(DUCKCLAW_HEARTBEAT_WEBHOOK_URL / DUCKCLAW_SEND_DM_WEBHOOK_URL)"
+        )
+        return TelegramDmOutcome.skipped_no_url()
     payload = {"chat_id": cid, "user_id": cid, "text": safe_text, "parse_mode": "HTML"}
     try:
         log_fly(

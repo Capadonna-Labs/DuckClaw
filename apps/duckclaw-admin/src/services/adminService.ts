@@ -1,3 +1,4 @@
+import { friendlyGatewayError } from '@/lib/adminErrors';
 import type {
   AdminHealth,
   EnvConfigResponse,
@@ -163,11 +164,15 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const detail =
+    const raw =
       typeof data?.detail === 'string'
         ? data.detail
         : data?.detail?.detail ?? data?.title ?? res.statusText;
-    throw new Error(detail || `Error ${res.status}`);
+    const detail =
+      data?.code === 'gateway_unreachable' || res.status === 503
+        ? friendlyGatewayError(raw || 'gateway_unreachable')
+        : friendlyGatewayError(raw || `Error ${res.status}`);
+    throw new Error(detail);
   }
   return data as T;
 }
@@ -735,7 +740,8 @@ export const adminService = {
         active?: boolean;
         keys_ok?: boolean;
       }[];
-      workers: string[];
+      workers: { id: string; label: string }[];
+      workers_invalid?: string[];
       env_path: string;
       effective_tenant_id?: string;
       telegram_user_id?: string;
@@ -747,6 +753,70 @@ export const adminService = {
       note: string;
     }>(`/playground/config${qs ? `?${qs}` : ''}`);
   },
+
+  listForgeProjects: () =>
+    adminFetch<{
+      projects: {
+        id: string;
+        slug: string;
+        display_name: string;
+        coordinator?: string | null;
+        members: string[];
+        shared_vault_id?: string | null;
+        source?: string;
+        path: string;
+      }[];
+    }>('/forge-projects').then((r) => r.projects),
+
+  getForgeProject: (slug: string) =>
+    adminFetch<{
+      id: string;
+      slug: string;
+      display_name: string;
+      coordinator?: string | null;
+      members: string[];
+      shared_vault_id?: string | null;
+      shared_context?: string;
+      path: string;
+    }>(`/forge-projects/${encodeURIComponent(slug)}`),
+
+  createForgeProject: (body: {
+    id: string;
+    display_name?: string;
+    members?: string[];
+    coordinator?: string;
+    shared_vault_id?: string;
+    shared_context?: string;
+    apply_tenant_team?: boolean;
+    tenant_id?: string;
+  }) =>
+    adminFetch<{ ok: boolean; id: string; path: string; members: string[] }>('/forge-projects', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  applyForgeProjectTeam: (slug: string, tenantId = 'default') =>
+    adminFetch<{ ok: boolean; tenant_id: string; members: string[] }>(
+      `/forge-projects/${encodeURIComponent(slug)}/apply-team?tenant_id=${encodeURIComponent(tenantId)}`,
+      { method: 'POST', body: JSON.stringify({}) }
+    ),
+
+  deleteForgeProject: (slug: string) =>
+    adminFetch<{ ok: boolean; id: string }>(`/forge-projects/${encodeURIComponent(slug)}`, {
+      method: 'DELETE',
+    }),
+
+  listEnvForgeProjectPresets: () =>
+    adminFetch<{
+      presets: {
+        id: string;
+        display_name: string;
+        coordinator?: string | null;
+        members: string[];
+        shared_vault_id?: string | null;
+        shared_context?: string;
+      }[];
+    }>('/forge-projects/env-presets').then((r) => r.presets),
 
   setPlaygroundModel: (body: {
     chat_id: string;

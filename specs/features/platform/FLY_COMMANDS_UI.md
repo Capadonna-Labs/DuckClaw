@@ -4,7 +4,7 @@
 
 Exponer comandos de chat que permitan al usuario **mutar el estado del agente en caliente** (sin reiniciar PM2) y **consultar configuración y capacidades**. Los fly commands se ejecutan **antes** de invocar el grafo LangGraph; si el mensaje empieza por `/`, se parsea, ejecuta y retorna la respuesta directamente.
 
-**Canales soportados:** Telegram (bot directo) y API Gateway (n8n → Telegram). En ambos casos, el usuario puede enviar `/role finanz` o `/skills` y obtener una respuesta inmediata.
+**Canales soportados:** Telegram (Bot API nativa / webhook inbound) y API Gateway direct. En ambos casos, el usuario puede enviar `/role finanz` o `/skills` y obtener una respuesta inmediata.
 
 ---
 
@@ -16,7 +16,7 @@ Exponer comandos de chat que permitan al usuario **mutar el estado del agente en
 | **Telegram bot** | `packages/agents/src/duckclaw/graphs/telegram_bot.py` | Intercepta `/` antes del grafo; llama `handle_command(db, chat_id, text)` |
 | **API Gateway** | `services/api-gateway/main.py` | Intercepta `/` en `_invoke_chat`; llama `handle_command(db, session_id, message)` |
 | **Persistencia** | Tabla `agent_config` en DuckDB | Claves por chat/sesión: `chat_{id}_worker_id`, `chat_{id}_llm_provider`, etc. |
-| **Heartbeat (observabilidad)** | `packages/agents/src/duckclaw/graphs/chat_heartbeat.py` | Flag en Redis `duckclaw:heartbeat:{tenant_id}:{chat_id}` (TTL 7 días); DMs vía `N8N_OUTBOUND_WEBHOOK_URL` en hilo daemon |
+| **Heartbeat (observabilidad)** | `packages/agents/src/duckclaw/graphs/chat_heartbeat.py` | Flag en Redis `duckclaw:heartbeat:{tenant_id}:{chat_id}` (TTL 7 días); DMs vía `DUCKCLAW_HEARTBEAT_WEBHOOK_URL` en hilo daemon |
 
 **Flujo:** Mensaje → ¿Empieza por `/`? → `handle_command()` → Si retorna string, enviar y terminar. Si retorna `None`, invocar el grafo.
 
@@ -50,7 +50,7 @@ Activa o desactiva la inyección de RAG (memoria a largo plazo) en el prompt. `u
 
 ### D2. `/heartbeat [on | off]`
 
-Observabilidad en tiempo real para el usuario: si está **on**, el gateway envía DMs breves al `chat_id` por el webhook de salida (mismo contrato que n8n) al delegar al worker, **antes de cada tool** y justo antes de cerrar la respuesta. Requiere **Redis** (`REDIS_URL` / `DUCKCLAW_REDIS_URL`) y **`N8N_OUTBOUND_WEBHOOK_URL`**. El POST outbound corre en hilo **fire-and-forget** (no bloquea el agente). Persistencia: clave canónica `duckclaw:heartbeat:{tenant_id}:{chat_id}` más alias `duckclaw:heartbeat:chat:{chat_id}` (y lectura de `DUCKCLAW_GATEWAY_TENANT_ID` si aplica) para que el flag coincida entre fly command y worker aunque el `tenant_id` del estado del grafo difiera.
+Observabilidad en tiempo real para el usuario: si está **on**, el gateway envía DMs breves al `chat_id` por salida nativa (Bot API / `DUCKCLAW_HEARTBEAT_WEBHOOK_URL`) al delegar al worker, **antes de cada tool** y justo antes de cerrar la respuesta. Requiere **Redis** (`REDIS_URL` / `DUCKCLAW_REDIS_URL`) y **`DUCKCLAW_HEARTBEAT_WEBHOOK_URL`**. El POST outbound corre en hilo **fire-and-forget** (no bloquea el agente). Persistencia: clave canónica `duckclaw:heartbeat:{tenant_id}:{chat_id}` más alias `duckclaw:heartbeat:chat:{chat_id}` (y lectura de `DUCKCLAW_GATEWAY_TENANT_ID` si aplica) para que el flag coincida entre fly command y worker aunque el `tenant_id` del estado del grafo difiera.
 
 ### E. `/audit`
 
@@ -92,23 +92,23 @@ Formato compatible con Telegram. Sin args: muestra config (llm_provider, llm_mod
 
 ## 4. Formato de Respuesta (Telegram-Safe)
 
-Las respuestas de los fly commands se envían a Telegram (directo o vía n8n). Si el nodo "Responder Telegram" usa `parse_mode=Markdown`, caracteres como `_`, `*`, `` ` ``, `[` pueden provocar "Can't find end of entity".
+Las respuestas de los fly commands se envían a Telegram (Bot API nativa o gateway). Si el envío usa `parse_mode=Markdown`, caracteres como `_`, `*`, `` ` ``, `[` pueden provocar "Can't find end of entity".
 
 **Solución:** La función `_telegram_safe()` escapa esos caracteres en todas las salidas. Se evita Markdown bold (`**`) y se usan guiones `-` en lugar de bullets `•` para listas. Los nombres de skills con underscore (ej. `insert_transaction`) se escapan como `insert\_transaction`.
 
 ---
 
-## 5. API Gateway (n8n)
+## 5. API Gateway direct
 
-Cuando n8n orquesta el flujo Telegram → DuckClaw API Gateway → Responder Telegram:
+Cuando el flujo es Telegram webhook inbound → DuckClaw API Gateway → respuesta al chat:
 
-1. **Endpoint:** `POST /api/v1/agent/chat` (no `/api/v1/agent/finanz/chat`)
-2. **Body:** `{"message": "/role finanz", "session_id": "1726618406"}`
+1. **Endpoint:** `POST /api/v1/agent/chat` (no `/api/v1/agent/finanz/chat`; worker por sesión vía `DUCKCLAW_DEFAULT_WORKER_ID` o `/role`)
+2. **Body:** `{"message": "/role finanz", "session_id": "1726618406", "chat_id": "1726618406"}`
 3. **Respuesta:** `{"response": "✅ Rol cambiado a...", "session_id": "...", "worker_id": "finanz", "elapsed_ms": 0}`
 
-El `session_id` identifica la sesión; el `worker_id` y el system prompt se persisten por sesión en `agent_config`. El endpoint genérico respeta `/role` para cambiar de trabajador virtual por sesión.
+El `session_id` / `chat_id` identifica la sesión; el `worker_id` y el system prompt se persisten por sesión en `agent_config`. El endpoint genérico respeta `/role` para cambiar de trabajador virtual por sesión.
 
-**n8n:** El nodo "Responder Telegram" debe enviar `response` al chat. Si usa `parse_mode=Markdown`, las respuestas ya están escapadas. Si persisten errores, desactivar `parse_mode` para enviar texto plano.
+**Telegram:** El gateway envía `response` al chat vía Bot API. Si usa `parse_mode=Markdown`, las respuestas ya están escapadas (`_telegram_safe`). Si persisten errores, enviar texto plano sin `parse_mode`.
 
 ---
 

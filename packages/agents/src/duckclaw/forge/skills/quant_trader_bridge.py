@@ -422,34 +422,6 @@ def quant_trading_session_prompt_block(db: Any) -> str:
         "Ticks proactivos: tras confirmar ACTIVE, llama **`schedule_quant_trading_proactive_ticks`** "
         "(interval_seconds=0 o el intervalo pedido; persiste igual que `/crons --delta`, vía cola escritor)."
     )
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "adf9d8",
-                        "hypothesisId": "H1",
-                        "location": "quant_trader_bridge.quant_trading_session_prompt_block",
-                        "message": "reactor_prompt_inject",
-                        "data": {
-                            "block_len": len(_out),
-                            "has_rth_cue": "08:30" in _out and "RTH referencia" in _out,
-                            "has_stale_global_moc_only": "sigue solo dentro de ventana MOC" in _out,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     return _out
 
 
@@ -743,33 +715,6 @@ def _execute_sandbox_script_impl(
 ) -> str:
     _ = dependencies
     cid = get_quant_tool_chat_id() or None
-    # region agent log
-    try:
-        import json as _json
-        import time as _time
-
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-            "a",
-            encoding="utf-8",
-        ) as _f:
-            _f.write(
-                _json.dumps(
-                    {
-                        "sessionId": "fd1dbb",
-                        "timestamp": int(_time.time() * 1000),
-                        "location": "quant_trader_bridge.py:_execute_sandbox_script_impl",
-                        "message": "execute_sandbox_script chat context",
-                        "data": {"chat_id": cid, "worker_id": "Quant-Trader"},
-                        "hypothesisId": "A",
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     result = run_in_sandbox(
         db=db,
         llm=llm,
@@ -1486,36 +1431,6 @@ def _propose_trade_signal_impl(
     else:
         ok_gate, gate_reason, gate_meta = _quant_auto_execute_inside_reference_rth()
         window_kind = "rth"
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "adf9d8",
-                        "hypothesisId": "H5",
-                        "location": "quant_trader_bridge._propose_trade_signal_impl:auto_exec_gate",
-                        "message": "auto_exec_window_eval",
-                        "data": {
-                            "strategy_name": strat_eff,
-                            "use_moc_auto_window": bool(use_moc_auto),
-                            "window_kind": window_kind,
-                            "ok_gate": bool(ok_gate),
-                            "gate_reason": gate_reason,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     if not ok_gate:
         if gate_reason == "WEEKEND":
             msg = (

@@ -147,16 +147,6 @@ def reset_comfyui_runtime(base_url: str | None = None) -> dict[str, Any]:
         result["skipped_interrupt"] = True
     if result["errors"]:
         result["ok"] = bool(result["interrupt"] or result["deleted_pending"])
-    _agent_dbg(
-        "H6",
-        "comfyui_bridge:reset_comfyui_runtime",
-        "done",
-        {
-            "interrupt": result["interrupt"],
-            "deleted_pending": result["deleted_pending"],
-            "errors": result["errors"][:3],
-        },
-    )
     return result
 
 
@@ -173,15 +163,8 @@ def cancel_comfy_generation_for_chat(chat_id: str) -> bool:
         base_url = str(rec.get("base_url") or _comfy_base_url()).rstrip("/")
     try:
         interrupt_comfy_runtime(base_url)
-        _agent_dbg("H5", "comfyui_bridge:cancel_comfy_generation_for_chat", "interrupt_ok", {"chat_id": cid})
     except Exception as exc:
         _log.warning("ComfyUI /interrupt failed chat_id=%s: %s", cid, exc)
-        _agent_dbg(
-            "H5",
-            "comfyui_bridge:cancel_comfy_generation_for_chat",
-            "interrupt_failed",
-            {"chat_id": cid, "err": type(exc).__name__},
-        )
     return True
 
 
@@ -202,28 +185,6 @@ def _comfy_timeout_sec() -> float:
         return 420.0
 
 
-def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-    # #region agent log
-    try:
-        line = json.dumps(
-            {
-                "sessionId": "fd1dbb",
-                "hypothesisId": hypothesis_id,
-                "location": location,
-                "message": message,
-                "data": data,
-                "timestamp": int(time.time() * 1000),
-            }
-        )
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-            "a",
-            encoding="utf-8",
-        ) as _f:
-            _f.write(line + "\n")
-    except OSError:
-        pass
-    # #endregion
 
 
 def _default_img2img_denoise() -> float:
@@ -555,12 +516,6 @@ def queue_prompt(workflow: dict[str, Any], client_id: str, base_url: str) -> str
     if not prompt_id:
         node_errors = resp.get("node_errors")
         raise ValueError(f"ComfyUI rechazó el workflow: {node_errors or resp}")
-    _agent_dbg(
-        "H7",
-        "comfyui_bridge:queue_prompt",
-        "queued",
-        {"prompt_id": prompt_id, "base_url": base_url},
-    )
     return prompt_id
 
 
@@ -584,12 +539,6 @@ def _poll_history_until_done(
     while time.monotonic() < deadline:
         _raise_if_comfy_cancelled(chat_id)
         if _history_prompt_finished(prompt_id, base_url):
-            _agent_dbg(
-                "H1",
-                "comfyui_bridge:_poll_history_until_done",
-                "history_ready",
-                {"prompt_id": prompt_id},
-            )
             return
         time.sleep(2.0)
     raise TimeoutError(
@@ -607,19 +556,7 @@ def wait_for_completion(
 ) -> None:
     ws_url = _comfy_ws_url(base_url, client_id)
     deadline = time.monotonic() + timeout_sec
-    _agent_dbg(
-        "H2",
-        "comfyui_bridge:wait_for_completion",
-        "start",
-        {"prompt_id": prompt_id, "timeout_sec": timeout_sec},
-    )
     if _history_prompt_finished(prompt_id, base_url):
-        _agent_dbg(
-            "H3",
-            "comfyui_bridge:wait_for_completion",
-            "already_in_history",
-            {"prompt_id": prompt_id},
-        )
         return
 
     try:
@@ -640,12 +577,6 @@ def wait_for_completion(
             while time.monotonic() < deadline:
                 _raise_if_comfy_cancelled(chat_id)
                 if _history_prompt_finished(prompt_id, base_url):
-                    _agent_dbg(
-                        "H1",
-                        "comfyui_bridge:wait_for_completion",
-                        "history_ready_during_ws",
-                        {"prompt_id": prompt_id},
-                    )
                     return
                 remaining = max(1.0, deadline - time.monotonic())
                 try:
@@ -668,22 +599,9 @@ def wait_for_completion(
                 if str(data.get("prompt_id") or "") != prompt_id:
                     continue
                 if data.get("node") is None:
-                    _agent_dbg(
-                        "H2",
-                        "comfyui_bridge:wait_for_completion",
-                        "ws_executing_done",
-                        {"prompt_id": prompt_id},
-                    )
                     return
     except Exception as exc:
         ws_exc = exc
-        _agent_dbg(
-            "H1",
-            "comfyui_bridge:wait_for_completion",
-            "ws_failed_fallback_poll",
-            {"prompt_id": prompt_id, "err": type(exc).__name__, "msg": str(exc)[:200]},
-        )
-
     if _history_prompt_finished(prompt_id, base_url):
         return
     try:
@@ -822,13 +740,6 @@ def _generate_visual_asset_impl(
             inputs = workflow["3"].get("inputs")
             if isinstance(inputs, dict):
                 inputs["seed"] = random.randint(0, 2**32 - 1)
-
-        _agent_dbg(
-            "H7",
-            "comfyui_bridge:generate_visual_asset_impl",
-            "before_queue",
-            {"base_url": base_url, "chat_id": chat_id, "template": template_name},
-        )
         prompt_id = queue_prompt(workflow, client_id, base_url)
         register_comfy_generation(chat_id, base_url=base_url, prompt_id=prompt_id)
         try:

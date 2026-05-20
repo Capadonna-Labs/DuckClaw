@@ -800,17 +800,7 @@ def _resolved_llm_for_chat(chat_id: str | None) -> dict[str, str]:
         return {**env, "scope": "env"}
     try:
         db = DuckClaw(gw, read_only=True, engine="python")
-    except Exception as exc:
-        # #region agent log
-        from core.debug_agent_log import agent_debug_log
-
-        agent_debug_log(
-            location="admin.py:_resolved_llm_for_chat",
-            message="DuckClaw read_only connect failed",
-            data={"gateway_db": gw, "chat_id": cid, "error": str(exc)[:500]},
-            hypothesis_id="A",
-        )
-        # #endregion
+    except Exception:
         return {**env, "scope": "env", "db_lock_error": True}
     try:
         provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, cid)

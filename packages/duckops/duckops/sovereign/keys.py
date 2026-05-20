@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from prompt_toolkit.key_binding import KeyBindings
-from duckops.sovereign.debug_ndjson import agent_log
 
 NAV_BACK = "__sovereign_back__"
 NAV_QUICK_SAVE = "__sovereign_quick_save__"
@@ -49,11 +48,4 @@ def build_key_bindings(
     def _reset(event: Any) -> None:
         event.app.exit(result=NAV_RESET)
 
-    # #region agent log
-    agent_log(
-        location="keys.py:build_key_bindings",
-        message="key bindings built",
-        hypothesis_id="H2-c-R",
-    )
-    # #endregion
     return kb

@@ -1397,34 +1397,6 @@ def _quant_trader_reddit_history_anchor_intent(incoming: str, messages: list[Any
     _sh_i = _latest_human_index_with_reddit_share_url(messages or [])
     _vlm_i = _latest_human_index_with_vlm_visual_markers(messages or [])
     if _sh_i is not None and _vlm_i is not None and _vlm_i > _sh_i:
-        # region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "adf9d8",
-                            "hypothesisId": "H8",
-                            "location": "factory._quant_trader_reddit_history_anchor_intent",
-                            "message": "reddit_hist_anchor_suppressed_recent_vlm",
-                            "data": {
-                                "share_human_idx": _sh_i,
-                                "vlm_human_idx": _vlm_i,
-                                "incoming_head": inc[:120],
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         return False
     if not inc:
         return False
@@ -1450,6 +1422,24 @@ def _quant_trader_reddit_history_anchor_intent(incoming: str, messages: list[Any
             "misma url",
         )
     )
+
+
+def _quant_visual_tool_succeeded_in_turn(messages: list[Any]) -> bool:
+    """True si generate_visual_asset devolvió ok:true en el turno actual (desde último HumanMessage)."""
+    try:
+        from langchain_core.messages import HumanMessage, ToolMessage
+    except ImportError:
+        HumanMessage = ToolMessage = ()  # type: ignore[assignment, misc]
+    last_u = -1
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if HumanMessage and isinstance(m, HumanMessage):
+            last_u = i
+            break
+    for msg in messages[last_u + 1 :]:
+        if isinstance(msg, ToolMessage) and (getattr(msg, "name", "") or "") == "generate_visual_asset":
+            return '"ok":true' in str(msg.content or "").replace(" ", "")
+    return False
 
 
 def _visual_asset_calls_since_last_human(messages: list[Any]) -> int:
@@ -1511,37 +1501,6 @@ def _quant_visual_prompt_from_incoming(incoming: str) -> str:
     return s[:500]
 
 
-def _agent_dbg_quant_visual(
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    *,
-    hypothesis_id: str = "H",
-) -> None:
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "fd1dbb",
-                        "hypothesisId": hypothesis_id,
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
 
 
 def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -> str:
@@ -2241,24 +2200,6 @@ def build_worker_graph(
         and not open_vault_read_only
     )
     effective_vault_ro = bool(spec.read_only) or bool(open_vault_read_only)
-    try:
-        from duckclaw.debug_session_log import agent_debug_log
-
-        agent_debug_log(
-            "B",
-            "factory.py:build_worker_graph",
-            "open_worker_db_plan",
-            {
-                "worker_id": worker_id,
-                "path_tail": (path or "")[-96:],
-                "effective_vault_ro": effective_vault_ro,
-                "skip_private": skip_private,
-                "reuse_ro": reuse_read_only,
-                "reuse_has_con": getattr(reuse_db, "_con", None) is not None if reuse_db else False,
-            },
-        )
-    except Exception:
-        pass
     if skip_private:
         db = reuse_db
         _log.debug("build_worker_graph: reuse DuckClaw (same file, no shared, skip private ATTACH) path=%s", path)
@@ -2438,21 +2379,6 @@ def build_worker_graph(
 
             register_comfyui_skill(tools, spec.comfyui_config, duckclaw_db=db)
             tools_by_name = {t.name: t for t in tools}
-            _lid_comfy = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
-            if _lid_comfy == "quant_trader":
-                _agent_dbg_quant_visual(
-                    "factory.build_worker_graph:comfyui_register",
-                    "comfyui_tools_after_register",
-                    {
-                        "has_generate_visual": "generate_visual_asset" in tools_by_name,
-                        "has_edit_visual": "edit_visual_asset" in tools_by_name,
-                        "comfyui_enabled": bool(
-                            isinstance(spec.comfyui_config, dict)
-                            and spec.comfyui_config.get("enabled") is not False
-                        ),
-                    },
-                    hypothesis_id="H1",
-                )
         except Exception:
             _log.debug("comfyui skills registration skipped", exc_info=True)
 
@@ -3489,22 +3415,6 @@ def build_worker_graph(
                     or force_tavily
                 )
             )
-            if (_lid or "").strip().lower() == "quant_trader":
-                _agent_dbg_quant_visual(
-                    "factory.build_worker_graph.agent_node",
-                    "force_visual_decision",
-                    {
-                        "force_visual": force_visual,
-                        "visual_calls_this_turn": _visual_calls_this_turn,
-                        "already_has_tool_result": already_has_tool_result,
-                        "visual_tool_already_ok": _visual_tool_already_ok,
-                        "has_generate_visual": has_generate_visual,
-                        "intent": _quant_trader_visual_generation_intent(incoming),
-                        "incoming_head": (incoming or "")[:120],
-                    },
-                    hypothesis_id="H3",
-                )
-
             _visual_tool_failed = bool(
                 (_lid or "").strip().lower() == "quant_trader"
                 and already_has_tool_result
@@ -3526,16 +3436,27 @@ def build_worker_graph(
                         f"{err_msg} Si enviaste otro mensaje mientras generaba, "
                         "espera a que termine ComfyUI (~3 min en Mac) antes de escribir de nuevo."
                     )
-                _agent_dbg_quant_visual(
-                    "factory.build_worker_graph.agent_node",
-                    "visual_tool_failed_fast_exit",
-                    {"err_head": err_msg[:160]},
-                    hypothesis_id="H4",
-                )
                 _fail_ai = AIMessage(content=f"⚠️ {err_msg}")
                 _out_fail = {**state, "messages": state["messages"] + [_fail_ai]}
                 _out_fail.update(_identity_fields(state))
                 return _out_fail
+
+            if (
+                _visual_tool_already_ok
+                and (_lid or "").strip().lower() == "quant_trader"
+                and _quant_trader_visual_generation_intent(incoming)
+            ):
+                caption = "Imagen generada."
+                try:
+                    payload = json.loads(str(last_msg.content or ""))
+                    if isinstance(payload, dict):
+                        caption = str(payload.get("message") or caption).strip() or caption
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                _ok_ai = AIMessage(content=caption)
+                _out_ok = {**state, "messages": state["messages"] + [_ok_ai]}
+                _out_ok.update(_identity_fields(state))
+                return _out_ok
 
             _allow_reddit_force = bool(
                 (_lid or "").strip().lower() == "finanz"
@@ -3565,36 +3486,6 @@ def build_worker_graph(
                 )
                 and (not already_has_tool_result or need_share_followup)
             )
-            # region agent log
-            if force_reddit and (_lid or "").strip().lower() == "quant_trader":
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "adf9d8",
-                                    "hypothesisId": "H3",
-                                    "location": "factory.build_worker_graph.agent_node",
-                                    "message": "force_reddit_true",
-                                    "data": {
-                                        "incoming_head": (incoming or "")[:200],
-                                        "q_reddit_hist": bool(_q_reddit_hist),
-                                        "quant_lone_reddit_only": bool(_quant_lone_reddit_only),
-                                        "has_anchor": bool(_reddit_anchor_u),
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-            # endregion
             # Tras 2× reddit_search_reddit en /s/… el MCP suele seguir sin el hilo correcto; si no cortamos,
             # el LLM re-invoca reddit_search en bucle (evidencia: pm2 logs 13:52, forced_tool=auto).
             _reddit_share_mcp_exhausted = bool(
@@ -3963,30 +3854,6 @@ def build_worker_graph(
             )
             if _quant_vlm_read_sql_evidence:
                 force_read_sql = True
-                # region agent log
-                try:
-                    with open(
-                        "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "adf9d8",
-                                    "hypothesisId": "H9",
-                                    "location": "factory.agent_node",
-                                    "message": "force_read_sql_vlm_market_figure",
-                                    "data": {"incoming_head": (incoming or "")[:160]},
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # endregion
             _last_human_idx = _quant_last_human_index(state.get("messages") or [])
             _has_fetch_since_last_human = _quant_tool_called_since(
                 state.get("messages") or [], _last_human_idx, "fetch_ib_gateway_ohlcv"
@@ -4184,12 +4051,6 @@ def build_worker_graph(
                     "[%s] quant deterministic visual → generate_visual_asset prompt=%r",
                     _wl,
                     _vis_prompt[:120],
-                )
-                _agent_dbg_quant_visual(
-                    "factory.build_worker_graph.agent_node",
-                    "visual_forced_tool_call",
-                    {"prompt_head": _vis_prompt[:120]},
-                    hypothesis_id="H9",
                 )
                 _forced_resp = AIMessage(content="", tool_calls=_forced_tc)
                 _out_vis = {**state, "messages": state["messages"] + [_forced_resp]}
@@ -4966,16 +4827,6 @@ def build_worker_graph(
                             except (json.JSONDecodeError, TypeError):
                                 pass
                         if name in ("generate_visual_asset", "edit_visual_asset"):
-                            if name == "generate_visual_asset" and (_lid or "").strip().lower() == "quant_trader":
-                                _agent_dbg_quant_visual(
-                                    "factory.build_worker_graph.agent_node:tool_result",
-                                    "generate_visual_asset_invoked",
-                                    {
-                                        "ok_preview": (content or "")[:200],
-                                        "result_len": len(content or ""),
-                                    },
-                                    hypothesis_id="H2",
-                                )
                             try:
                                 payload = json.loads(content)
                                 if isinstance(payload, dict) and payload.get("ok"):
@@ -4993,12 +4844,13 @@ def build_worker_graph(
 
                                             _cid = str(state.get("chat_id") or "").strip()
                                             if _cid and is_admin_ui_chat_session(_cid):
+                                                _hb_tid = get_quant_tool_tenant_id()
                                                 publish_admin_chat_heartbeat(
                                                     _cid,
                                                     "Imagen generada (ComfyUI)",
                                                     kind="visual",
                                                     artifact_id=aid,
-                                                    artifact_tenant_id=get_quant_tool_tenant_id(),
+                                                    artifact_tenant_id=_hb_tid,
                                                 )
                                         except Exception:
                                             pass
@@ -5262,7 +5114,21 @@ def build_worker_graph(
                 out_err = {**state, "reply": _ee, "messages": msgs}
                 out_err.update(_identity_fields(state))
                 return out_err
-        reply = _repair_finanz_ibkr_egress(_apply_nl_synthesis(reply or ""))
+        _visual_only_turn = bool(
+            (getattr(spec, "worker_id", "") or "").strip().lower() == "quant_trader"
+            and _quant_visual_tool_succeeded_in_turn(list(msgs) if msgs else [])
+            and (
+                (state.get("sandbox_photo_base64") or "").strip()
+                or (state.get("visual_artifact_id") or "").strip()
+            )
+        )
+        if _visual_only_turn:
+            _short = (reply or "").strip()
+            if not _short or len(_short) > 240:
+                _short = "Imagen generada."
+            reply = _short
+        else:
+            reply = _repair_finanz_ibkr_egress(_apply_nl_synthesis(reply or ""))
         _wid_fin = str(getattr(spec, "worker_id", "") or "")
         reply = finanz_repair_ibkr_tool_live_vs_reply_paper(msgs, reply, worker_id=_wid_fin)
         reply = finanz_strip_ibkr_block_without_tool_in_turn(

@@ -20,30 +20,6 @@ import {
   snippetFromMessage,
 } from '@/lib/chatNotifications';
 
-// #region agent log
-function dbgNotify(
-  hypothesisId: string,
-  message: string,
-  data: Record<string, unknown>
-) {
-  fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': 'fd1dbb',
-    },
-    body: JSON.stringify({
-      sessionId: 'fd1dbb',
-      hypothesisId,
-      location: 'useFloatingChatUnread.ts',
-      message,
-      data,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-}
-// #endregion
-
 export type UseFloatingChatUnreadOptions = {
   sessionId: string | null;
   messages: ChatMsg[];
@@ -184,46 +160,28 @@ export function useFloatingChatUnread({
         typeof document !== 'undefined' ? document.hasFocus() : false;
 
       if (!sessionId || historyLoading) {
-        dbgNotify('C', 'skip: no session or loading history', {
-          sessionId,
-          historyLoading,
-        });
         return;
       }
       if (count <= 0) {
         pendingNotifyRef.current = false;
-        dbgNotify('C', 'skip: unread count 0', { count, assistantIdx });
         return;
       }
 
       if (!shouldNotify) {
         pendingNotifyRef.current = true;
-        dbgNotify('B', 'defer: waiting background or closed panel', {
-          count,
-          visibility,
-          hasFocus,
-          panelClosed: panelOpenRef.current,
-          tabHidden,
-        });
         return;
       }
 
       if (perm === 'default' && !permissionAskedRef.current) {
         pendingNotifyRef.current = true;
-        dbgNotify('A', 'skip: permission default (need user gesture)', { perm });
         return;
       }
       if (perm !== 'granted') {
         pendingNotifyRef.current = false;
-        dbgNotify('A', 'skip: permission not granted', { perm });
         return;
       }
 
       if (assistantIdx < 0 || assistantIdx <= lastNotifiedAssistantIndexRef.current) {
-        dbgNotify('D', 'skip: already notified for this assistant index', {
-          assistantIdx,
-          lastNotified: lastNotifiedAssistantIndexRef.current,
-        });
         return;
       }
 
@@ -242,13 +200,6 @@ export function useFloatingChatUnread({
         },
         { requireBackground: false }
       );
-      dbgNotify('E', shown ? 'notification shown' : 'Notification ctor failed', {
-        shown,
-        count,
-        assistantIdx,
-        visibility,
-        perm,
-      });
       if (shown) {
         lastNotifiedAssistantIndexRef.current = assistantIdx;
         pendingNotifyRef.current = false;
@@ -286,11 +237,6 @@ export function useFloatingChatUnread({
 
     const onHide = () => {
       if (!isDocumentInBackground() && !pendingNotifyRef.current) return;
-      dbgNotify('B', 'visibility/pagehide handler', {
-        hidden: isDocumentInBackground(),
-        pending: pendingNotifyRef.current,
-        visibility: document.visibilityState,
-      });
       void tryShowUnreadNotification(messages, { forceBackground: true });
     };
 

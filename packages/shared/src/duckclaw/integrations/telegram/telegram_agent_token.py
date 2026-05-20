@@ -2,6 +2,8 @@
 """
 Convención .env: ``TELEGRAM_<ID_AGENT>_TOKEN`` donde ``ID_AGENT`` es el ``id`` del worker
 (manifest), en mayúsculas y guiones como subrayado (p. ej. ``my-worker`` → ``TELEGRAM_MY_WORKER_TOKEN``).
+
+Se mantienen lecturas fallback a nombres legados (``TELEGRAM_BOT_TOKEN_BI_ANALYST``, etc.).
 """
 
 from __future__ import annotations
@@ -65,6 +67,13 @@ def telegram_agent_token_env_name(worker_id: str) -> str:
     return f"TELEGRAM_{safe}_TOKEN"
 
 
+_LEGACY_ENV_BY_WORKER: dict[str, tuple[str, ...]] = {
+    "bi_analyst": ("TELEGRAM_BOT_TOKEN_BI_ANALYST",),
+    "LeilaAssistant": ("TELEGRAM_BOT_TOKEN_LEILA",),
+    "siata_analyst": ("TELEGRAM_BOT_TOKEN_SIATA",),
+}
+
+
 def resolve_telegram_token_from_flat_env(env_flat: dict[str, str], worker_id: str) -> str:
     """Token Bot API para un worker leyendo un dict plano (p. ej. .env parseado)."""
     flat = {str(k).strip(): str(v).strip() for k, v in env_flat.items() if k}
@@ -76,16 +85,25 @@ def resolve_telegram_token_from_flat_env(env_flat: dict[str, str], worker_id: st
         t = flat.get(primary, "").strip()
         if t:
             return t
-    return flat.get("TELEGRAM_BOT_TOKEN", "").strip()
+    for leg in _LEGACY_ENV_BY_WORKER.get(wid, ()):
+        t = flat.get(leg, "").strip()
+        if t:
+            return t
+    if wid.lower() == "finanz":
+        return flat.get("TELEGRAM_BOT_TOKEN", "").strip()
+    return ""
 
 
 def resolve_telegram_token_for_worker_id(worker_id: str) -> str:
-    """Resuelve token: ``TELEGRAM_<ID>_TOKEN`` → ``TELEGRAM_BOT_TOKEN``."""
+    """
+    Resuelve token: ``TELEGRAM_<ID>_TOKEN`` → aliases legados por worker → para ``finanz``,
+    ``TELEGRAM_BOT_TOKEN`` si no hubo valor previo.
+    """
     return resolve_telegram_token_from_flat_env(dict(os.environ), worker_id)
 
 
 def telegram_token_from_pm2_env_dict(env: dict[str, object], worker_id: str) -> str:
-    """Token en el bloque ``env`` de un proceso PM2."""
+    """Token en el bloque ``env`` de un proceso PM2 (worker-specific antes que ``TELEGRAM_BOT_TOKEN``)."""
     if not isinstance(env, dict):
         return ""
     flat = {str(k): str(v).strip() if v is not None else "" for k, v in env.items()}
@@ -94,6 +112,10 @@ def telegram_token_from_pm2_env_dict(env: dict[str, object], worker_id: str) -> 
         std = telegram_agent_token_env_name(wid)
         if std:
             t = flat.get(std, "").strip()
+            if t:
+                return t
+        for leg in _LEGACY_ENV_BY_WORKER.get(wid, ()):
+            t = flat.get(leg, "").strip()
             if t:
                 return t
     return flat.get("TELEGRAM_BOT_TOKEN", "").strip()

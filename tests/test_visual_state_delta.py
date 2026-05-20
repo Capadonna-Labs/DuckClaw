@@ -8,8 +8,9 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
 _WRITER = _REPO / "services" / "db-writer"
+# append (no insert(0)): db-writer/main.py colisiona con api-gateway/main.py en tests admin.
 if str(_WRITER) not in sys.path:
-    sys.path.insert(0, str(_WRITER))
+    sys.path.append(str(_WRITER))
 
 from models.visual_state_delta import VisualAssetMutation, VisualStateDelta  # noqa: E402
 

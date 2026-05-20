@@ -849,13 +849,9 @@ def test_admin_auth_login_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         )
     finally:
         con.close()
-    repo = Path(__file__).resolve().parent.parent
-    gw_dir = repo / "services" / "api-gateway"
-    if str(gw_dir) not in sys.path:
-        sys.path.insert(0, str(gw_dir))
-    from main import app as gateway_app
+    from gateway_import import load_gateway_app
 
-    client = TestClient(gateway_app)
+    client = TestClient(load_gateway_app())
     r = client.post(
         "/api/v1/admin/auth/login",
         json={"email": "smoke@test.local", "password": "pw"},

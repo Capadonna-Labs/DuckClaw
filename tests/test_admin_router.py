@@ -14,6 +14,19 @@ from env_ids import (
 )
 
 
+def _playground_worker_ids(data: dict) -> list[str]:
+    """``workers`` en playground/config: ``[{id, label}, ...]`` o legacy ``[str, ...]``."""
+    ids: list[str] = []
+    for w in data.get("workers") or []:
+        if isinstance(w, dict):
+            wid = (w.get("id") or "").strip()
+            if wid:
+                ids.append(wid)
+        elif isinstance(w, str) and w.strip():
+            ids.append(w.strip())
+    return ids
+
+
 def test_admin_requires_key(admin_client: TestClient):
     r = admin_client.get("/api/v1/admin/health")
     assert r.status_code == 401
@@ -111,6 +124,7 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
         set_team_templates(db, DEFAULT_TEST_TELEGRAM_USER_ID, [target])
         db.close()
         monkeypatch.setenv("DUCKDB_PATH", db_path)
+        monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: db_path)
         r = admin_client.get(
             "/api/v1/admin/playground/config",
             headers={"X-Admin-Key": "test-admin-key"},
@@ -122,7 +136,7 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     assert r.status_code == 200
     data = r.json()
     assert data.get("authorized") is True
-    assert target in (data.get("workers") or [])
+    assert target in _playground_worker_ids(data)
     assert data.get("team_source") == "chat"
 
 
@@ -531,6 +545,7 @@ def test_playground_team_hint_workers_label(admin_client: TestClient, monkeypatc
         set_team_templates(db, DEFAULT_TEST_TELEGRAM_USER_ID, [all_w[0]])
         db.close()
         monkeypatch.setenv("DUCKDB_PATH", db_path)
+        monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: db_path)
         r = admin_client.get(
             "/api/v1/admin/playground/config",
             headers={"X-Admin-Key": "test-admin-key"},

@@ -471,7 +471,7 @@ export function useAdminChat({
             role: 'assistant',
             text: base + assignedSuffix + elapsedFooter,
             streaming: false,
-            imagePreviews: assistantPreviews,
+            imagePreviews: assistantPreviews ?? last.imagePreviews,
           };
         }
         let pensandoIdx = -1;

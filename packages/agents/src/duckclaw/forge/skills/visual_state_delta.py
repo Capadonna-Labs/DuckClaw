@@ -5,11 +5,27 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextvars import ContextVar
 from typing import Any
 
 from duckclaw.forge.skills.quant_state_delta import _release_ro_vault_for_remote_writer
 
 _log = logging.getLogger(__name__)
+
+# Hub RO del manager (finanzdb1, etc.) durante delegación visual: libera lock para db-writer.
+_visual_hub_db_for_writer: ContextVar[Any] = ContextVar("duckclaw_visual_hub_db_for_writer", default=None)
+
+
+def set_visual_state_delta_hub_db(db: Any | None) -> None:
+    _visual_hub_db_for_writer.set(db)
+
+
+def get_visual_state_delta_hub_db() -> Any | None:
+    return _visual_hub_db_for_writer.get()
+
+
+def clear_visual_state_delta_hub_db() -> None:
+    _visual_hub_db_for_writer.set(None)
 
 DEFAULT_VISUAL_STATE_DELTA_QUEUE = "duckclaw:state_delta:visual"
 
@@ -19,6 +35,9 @@ def visual_state_delta_queue_key() -> str:
 
 
 def push_visual_state_delta_sync(payload: dict[str, Any], *, duckclaw_db: Any | None = None) -> bool:
+    hub_db = get_visual_state_delta_hub_db()
+    if hub_db is not None:
+        _release_ro_vault_for_remote_writer(payload, hub_db)
     _release_ro_vault_for_remote_writer(payload, duckclaw_db)
 
     url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()

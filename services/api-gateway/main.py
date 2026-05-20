@@ -305,7 +305,6 @@ _gateway_log.info(
     (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip() or "(unset)",
 )
 try:
-    from core.debug_agent_log import agent_debug_log
     from duckclaw.integrations.telegram.compact_webhook_routes import load_path_webhook_bindings_from_env
 
     _compact = load_path_webhook_bindings_from_env()
@@ -315,16 +314,6 @@ try:
             len(_compact),
             ", ".join(b.webhook_path for b in _compact),
         )
-    agent_debug_log(
-        location="main.py:startup",
-        message="gateway telegram compact routes loaded",
-        data={
-            "route_count": len(_compact),
-            "gateway_port": (os.environ.get("DUCKCLAW_GATEWAY_PORT") or "").strip(),
-            "webhook_routes_set": bool((os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()),
-        },
-        hypothesis_id="H5",
-    )
 except ValueError as _compact_exc:
     _gateway_log.error(
         "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES (compacto) inválido al arranque; "
@@ -1279,14 +1268,6 @@ async def _authorize_or_reject(
         except Exception:
             pass
 
-    from core.debug_agent_log import agent_debug_log
-
-    agent_debug_log(
-        location="main.py:_authorize_or_reject",
-        message="telegram guard rejected user",
-        data={"tenant_id": tenant_id, "user_id": user_id},
-        hypothesis_id="H3",
-    )
     raise HTTPException(
         status_code=403,
         detail="Acceso denegado. No tienes autorización para interactuar con este agente.",
@@ -1532,6 +1513,33 @@ def _strip_bi_false_chart_delivery_lines(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
 
 
+def _visual_artifact_id_from_messages(messages: Any) -> str:
+    """Fallback: artifact_id del último generate_visual_asset OK en mensajes del turno."""
+    import json
+
+    try:
+        from langchain_core.messages import ToolMessage
+    except ImportError:
+        return ""
+    if not isinstance(messages, list):
+        return ""
+    for msg in reversed(messages):
+        if not isinstance(msg, ToolMessage):
+            continue
+        if (msg.name or "") not in ("generate_visual_asset", "edit_visual_asset"):
+            continue
+        try:
+            payload = json.loads(str(msg.content or ""))
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            continue
+        aid = str(payload.get("artifact_id") or "").strip()
+        if aid:
+            return aid
+    return ""
+
+
 def _admin_visual_fields_from_invoke_result(
     session_id: str,
     result: dict[str, Any],
@@ -1547,6 +1555,8 @@ def _admin_visual_fields_from_invoke_result(
     if b64:
         out["figure_base64"] = b64
     aid = (result.get("visual_artifact_id") or result.get("artifact_id") or "").strip()
+    if not aid:
+        aid = _visual_artifact_id_from_messages(result.get("messages"))
     if aid:
         out["artifact_id"] = aid
         out["artifact_tenant_id"] = (tenant_id or "default").strip() or "default"

@@ -999,30 +999,6 @@ def _try_visual_generation_fast_plan(
     qt = _pick_quant_trader_worker(available_plan)
     if not qt:
         return None
-    # region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                json.dumps(
-                    {
-                        "sessionId": "fd1dbb",
-                        "hypothesisId": "H8",
-                        "location": "manager_graph._try_visual_generation_fast_plan",
-                        "message": "visual_fast_plan",
-                        "data": {"worker": qt, "incoming_preview": (incoming or "")[:120]},
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except OSError:
-        pass
-    # endregion
     title = "Generar imagen (ComfyUI)"
     task_list = [
         "Usar generate_visual_asset una sola vez con el prompt del usuario.",
@@ -1103,30 +1079,6 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     # Sin bypass, _plan_task reemplazaba el mensaje por TAREA: listar tablas → worker perdía el plan del manager
     # (ej. IB «Cambios en calificaciones» → inspect_schema; logs 2026-05-11 gateway).
     if "[VLM_CONTEXT" in text and "Contexto visual adjunto:" in text:
-        # region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "adf9d8",
-                            "hypothesisId": "H6",
-                            "location": "manager_graph._plan_task",
-                            "message": "vlm_multimodal_passthrough",
-                            "data": {"worker_id": (worker_id or "").strip(), "text_len": len(text)},
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         return (incoming or "").strip(), None
     t = text.lower()
     override: Optional[str] = None
@@ -1223,30 +1175,6 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
 
     # Tablas / esquema: mismo criterio que is_db_intent explícito (evitar «tabla» suelta en informes IB/ocr).
     if _explicit_duckdb_schema_request:
-        # region agent log
-        try:
-            with open(
-                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-adf9d8.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    json.dumps(
-                        {
-                            "sessionId": "adf9d8",
-                            "hypothesisId": "H6",
-                            "location": "manager_graph._plan_task",
-                            "message": "explicit_schema_list_task",
-                            "data": {"worker_id": (worker_id or "").strip()},
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # endregion
         return load_guardrail("manager_tasks", "list_database_tables"), override
     if (worker_id or "").strip().lower() == "finanz" and _finanz_user_demands_tool_evidence_from_db(t):
         return f"{_FINANZ_TOOL_PRESSURE_TASK}\n\n--- Mensaje del usuario ---\n{text}", override
@@ -2059,6 +1987,8 @@ def build_manager_graph(
         worker_graph = None
         worker_cache_key = ""
         _suspend_for_rw_worker = False
+        _suspend_hub_for_visual_delta = False
+        _will_suspend_ro = False
         _vault_lock_obj: threading.Lock | None = None
         pa = int(state.get("plan_attempt_index") or 0)
         max_a = int(state.get("plan_max_attempts") or plan_max_attempts_from_env())
@@ -2100,28 +2030,12 @@ def build_manager_graph(
                 and mgr_path
                 and _same_duckdb_file(mgr_path, worker_resolved)
             )
-            try:
-                from duckclaw.debug_session_log import agent_debug_log
-
-                agent_debug_log(
-                    "A",
-                    "manager_graph.py:delegate",
-                    "duckdb_suspend_decision",
-                    {
-                        "assigned": assigned,
-                        "mgr_path_tail": mgr_path[-96:] if mgr_path else "",
-                        "worker_path_tail": worker_resolved[-96:] if worker_resolved else "",
-                        "paths_same": _same_duckdb_file(mgr_path, worker_resolved)
-                        if mgr_path and worker_resolved
-                        else False,
-                        "spec_read_only": bool(spec_inv.read_only),
-                        "needs_rw_vault": _needs_rw_vault,
-                        "will_suspend": _suspend_for_rw_worker,
-                        "mgr_has_con": getattr(db, "_con", None) is not None,
-                    },
-                )
-            except Exception:
-                pass
+            # VISUAL_ASSET_UPSERT escribe en hub (get_gateway_db_path), no en vault del worker.
+            # El manager mantiene RO al hub durante ComfyUI (~3–4 min); suspender evita lock con db-writer.
+            _suspend_hub_for_visual_delta = bool(
+                getattr(db, "_read_only", False) and _visual_lite_mcp and mgr_path
+            )
+            _will_suspend_ro = _suspend_for_rw_worker or _suspend_hub_for_visual_delta
             # Serializa acceso al .duckdb: dos webhooks concurrentes no deben abrir dos DuckClaw RW.
             _vk = _vault_lock_key(worker_resolved)
             if _vk:
@@ -2134,17 +2048,13 @@ def build_manager_graph(
             raw_sb = get_chat_state(_cfg_db, chat_id, "sandbox_enabled")
             sb_on = (raw_sb or "").strip().lower() in ("true", "1", "on", "sí", "si")
             db_display = vault_db_path or db_path or "(unknown)"
-            if _suspend_for_rw_worker:
+            if _will_suspend_ro:
                 db.suspend_readonly_file_handle()
+            if _visual_lite_mcp:
                 try:
-                    from duckclaw.debug_session_log import agent_debug_log
+                    from duckclaw.forge.skills.visual_state_delta import set_visual_state_delta_hub_db
 
-                    agent_debug_log(
-                        "A",
-                        "manager_graph.py:delegate",
-                        "after_suspend_ro",
-                        {"mgr_has_con": getattr(db, "_con", None) is not None},
-                    )
+                    set_visual_state_delta_hub_db(db)
                 except Exception:
                     pass
             if worker_cache_key not in _worker_graph_cache:
@@ -2276,6 +2186,14 @@ def build_manager_graph(
             _label_reply = f"{assigned} {run_label_n}".strip()
             # CRM (Next.js): el proxy usa chat_id `crm-ticket-*`; no anteponer etiqueta de subagente.
             _crm = str(chat_id or "").strip().lower().startswith("crm-ticket-")
+            if _visual_lite_mcp and isinstance(worker_invoke, dict):
+                _vis_b64 = (worker_invoke.get("sandbox_photo_base64") or "").strip()
+                _vis_aid = (worker_invoke.get("visual_artifact_id") or "").strip()
+                if _vis_b64 or _vis_aid:
+                    _short_vis = (raw_worker_reply or "").strip()
+                    if not _short_vis or len(_short_vis) > 240:
+                        _short_vis = "Imagen generada."
+                    reply = _short_vis
             if not _crm:
                 reply = _prepend_subagent_label_once(reply, _label_reply)
             messages = worker_invoke.get("messages")
@@ -2361,18 +2279,6 @@ def build_manager_graph(
             _duckdb_config_clash = (
                 "same database file" in low and "different configuration" in low
             ) or ("duckdb" in low and "read_only" in low)
-            if _duckdb_config_clash:
-                try:
-                    from duckclaw.debug_session_log import agent_debug_log
-
-                    agent_debug_log(
-                        "D",
-                        "manager_graph.py:delegate",
-                        "duckdb_config_clash_error",
-                        {"assigned": assigned, "msg_tail": msg[-240:]},
-                    )
-                except Exception:
-                    pass
             if (
                 not _duckdb_config_clash
                 and any(
@@ -2429,9 +2335,16 @@ def build_manager_graph(
                     _worker_graph_cache.pop(worker_cache_key, None)
                 except Exception:
                     pass
-            if _suspend_for_rw_worker:
+            if _will_suspend_ro:
                 try:
                     db.resume_readonly_file_handle()
+                except Exception:
+                    pass
+            if _visual_lite_mcp:
+                try:
+                    from duckclaw.forge.skills.visual_state_delta import clear_visual_state_delta_hub_db
+
+                    clear_visual_state_delta_hub_db()
                 except Exception:
                     pass
             if slot_token:

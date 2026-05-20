@@ -8,7 +8,6 @@ from pathlib import Path
 from rich.console import Console
 
 from duckops.sovereign.draft import SovereignDraft
-from duckops.sovereign.debug_ndjson import agent_log
 from duckops.sovereign.materialize import load_draft_json, materialize
 from duckops.sovereign.tui_chat import run_tui_chat
 from duckops.sovereign.tui_shell import TuiShell
@@ -38,13 +37,6 @@ def run_sovereign_chat(repo_root: Path | None = None) -> int:
     except Exception:
         w = 100
     console = Console(width=w)
-    # #region agent log
-    agent_log(
-        location="runner.py:run_sovereign_chat",
-        message="enter chat",
-        hypothesis_id="H1-import",
-    )
-    # #endregion
     saved = load_draft_json()
     draft = saved if saved is not None else SovereignDraft()
     return run_tui_chat(rr, draft, console=console)

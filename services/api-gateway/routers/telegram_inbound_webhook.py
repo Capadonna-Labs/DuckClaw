@@ -926,18 +926,6 @@ def build_telegram_inbound_webhook_router(
             len(str((_em.get("caption") if _em else None) or "")),
             bool(_em and _em.get("reply_to_message")),
         )
-        from core.debug_agent_log import agent_debug_log
-
-        agent_debug_log(
-            location="telegram_inbound_webhook.py:telegram_inbound_early",
-            message="telegram update received at gateway",
-            data={
-                "update_id": update_id,
-                "chat_id": early_chat_id,
-                "path": str(getattr(request.url, "path", "") or ""),
-            },
-            hypothesis_id="H1",
-        )
         redis_client = getattr(request.app.state, "redis", None)
         if update_id is not None and redis_client is not None:
             _fp = telegram_webhook_header_fingerprint(header_secret)
@@ -1093,19 +1081,6 @@ def build_telegram_inbound_webhook_router(
                 bootstrap_mode=bootstrap_mode,
             )
             if not wr_gate.allowed:
-                from core.debug_agent_log import agent_debug_log
-
-                agent_debug_log(
-                    location="telegram_inbound_webhook.py:war_room_gate",
-                    message="telegram dropped no mention",
-                    data={
-                        "decision": wr_gate.decision,
-                        "tenant_id": tenant_id,
-                        "user_id": user_id,
-                        "chat_id": chat_id,
-                    },
-                    hypothesis_id="H4",
-                )
                 _log.info(
                     "war_room_gate decision=%s tenant_id=%s user_id=%s chat_id=%s has_visual=%s text_preview=%s",
                     wr_gate.decision,
@@ -1587,19 +1562,6 @@ def build_telegram_inbound_webhook_router(
 
         async def _invoke_and_reply() -> None:
             try:
-                from core.debug_agent_log import agent_debug_log
-
-                agent_debug_log(
-                    location="telegram_inbound_webhook.py:invoke_agent_chat",
-                    message="telegram invoking agent chat",
-                    data={
-                        "worker_id": worker_id,
-                        "tenant_id": tenant_id,
-                        "user_id": user_id,
-                        "chat_id": chat_id,
-                    },
-                    hypothesis_id="H1",
-                )
                 res = await invoke_agent_chat(
                     payload,
                     worker_id,

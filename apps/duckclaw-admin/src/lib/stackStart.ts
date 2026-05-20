@@ -1,34 +1,7 @@
-import { appendFileSync } from 'fs';
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
 import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
-
-// #region agent log
-function agentLog(
-  hypothesisId: string,
-  location: string,
-  message: string,
-  data: Record<string, unknown>
-) {
-  try {
-    const logPath = join(repoRoot(), '.cursor', 'debug-fd1dbb.log');
-    appendFileSync(
-      logPath,
-      `${JSON.stringify({
-        sessionId: 'fd1dbb',
-        hypothesisId,
-        location,
-        message,
-        data,
-        timestamp: Date.now(),
-      })}\n`
-    );
-  } catch {
-    /* ignore */
-  }
-}
-// #endregion
 
 const SYNC_PM2 = [
   'uv',
@@ -91,9 +64,6 @@ function runArgv(
 export async function runStackStartLocal(): Promise<NormalizedOpsRunResult> {
   const cwd = repoRoot();
   const chunks: string[] = [];
-  // #region agent log
-  agentLog('A', 'stackStart.ts:runStackStartLocal', 'start_stack begin', { cwd });
-  // #endregion
 
   const sync = await runArgv(cwd, SYNC_PM2);
   chunks.push('── Sincronizar PM2 desde .env ──\n', sync.stdout, sync.stderr);
@@ -121,13 +91,6 @@ export async function runStackStartLocal(): Promise<NormalizedOpsRunResult> {
   } catch {
     /* ignore parse */
   }
-  // #region agent log
-  agentLog('A', 'stackStart.ts:lock_check', 'duckdb lock preflight', {
-    blocking_count: blocking.length,
-    blocking: blocking.slice(0, 5),
-    exit_code: lockCheck.exit_code,
-  });
-  // #endregion
   if (blocking.length > 0) {
     const lines = blocking.map(
       (b) => `  PID ${b.pid} (${b.kind}): ${b.db}\n    ${b.command}`
@@ -173,13 +136,6 @@ pm2 list
 `;
   const proc = await runArgv(cwd, ['bash', '-lc', shell], 180_000);
   chunks.push('\n── DuckClaw-DB-Writer + DuckClaw-Gateway ──\n', proc.stdout, proc.stderr);
-  const gatewayMode = /GATEWAY_PM2_MODE=(\w+)/.exec(proc.stdout)?.[1] ?? 'unknown';
-  // #region agent log
-  agentLog('A', 'stackStart.ts:pm2', 'pm2 gateway step done', {
-    gatewayMode,
-    exit_code: proc.exit_code,
-  });
-  // #endregion
 
   if (proc.exit_code !== 0) {
     return normalizeOpsResult({
@@ -193,35 +149,17 @@ pm2 list
 
   const telegram = await runTelegramIngressStartLocal();
   chunks.push('\n── Tailscale + Telegram (webhook) ──\n', telegram.stdout, telegram.stderr);
-  // #region agent log
-  agentLog('B', 'stackStart.ts:telegram', 'telegram ingress done', {
-    exit_code: telegram.exit_code,
-  });
-  // #endregion
 
   const serve = await runArgv(
     cwd,
     ['uv', 'run', 'python', 'scripts/restore_tailscale_admin_serve.py'],
     60_000
   );
-  const adminPort =
-    /ADMIN_SERVE_PORT=(\d+)/.exec(serve.stdout)?.[1] ??
-    process.env.DUCKCLAW_ADMIN_PORT?.trim() ??
-    'unknown';
   chunks.push(
     '\n── Tailscale Serve admin (:8443) ──\n',
     serve.stdout,
     serve.stderr
   );
-  // #region agent log
-  agentLog('C', 'stackStart.ts:serve', 'admin tailscale serve', {
-    adminPort,
-    exit_code: serve.exit_code,
-  });
-  agentLog('B', 'stackStart.ts:funnel', 'post-telegram serve restore', {
-    serveExit: serve.exit_code,
-  });
-  // #endregion
 
   if (serve.exit_code !== 0) {
     chunks.push(

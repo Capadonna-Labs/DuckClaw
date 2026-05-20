@@ -9,13 +9,18 @@ export type SseChatEvent =
       usage_tokens?: Record<string, number>;
       worker_id?: string;
       elapsed_ms?: number;
+      figure_base64?: string;
+      artifact_id?: string;
+      artifact_tenant_id?: string;
     }
   | {
       type: 'heartbeat';
       text: string;
-      kind?: 'plan' | 'tool' | 'status';
+      kind?: 'plan' | 'tool' | 'status' | 'visual';
       worker_id?: string;
       swarm_slot?: number;
+      artifact_id?: string;
+      artifact_tenant_id?: string;
     }
   | { type: 'error'; message: string; status?: number }
   | { type: 'terminal' };
@@ -43,12 +48,22 @@ function parseDataLine(data: string): SseChatEvent | null {
             : j.elapsed_ms != null
               ? Number(j.elapsed_ms)
               : undefined,
+        figure_base64:
+          typeof j.figure_base64 === 'string' ? j.figure_base64 : undefined,
+        artifact_id: typeof j.artifact_id === 'string' ? j.artifact_id : undefined,
+        artifact_tenant_id:
+          typeof j.artifact_tenant_id === 'string' ? j.artifact_tenant_id : undefined,
       };
     }
     if (t === 'heartbeat') {
       const kindRaw = String(j.kind || 'status');
       const kind =
-        kindRaw === 'plan' || kindRaw === 'tool' || kindRaw === 'status' ? kindRaw : 'status';
+        kindRaw === 'plan' ||
+        kindRaw === 'tool' ||
+        kindRaw === 'status' ||
+        kindRaw === 'visual'
+          ? kindRaw
+          : 'status';
       const swarmSlotRaw = j.swarm_slot;
       const swarm_slot =
         typeof swarmSlotRaw === 'number'
@@ -62,6 +77,9 @@ function parseDataLine(data: string): SseChatEvent | null {
         kind,
         worker_id: typeof j.worker_id === 'string' ? j.worker_id : undefined,
         swarm_slot: Number.isFinite(swarm_slot) ? Math.max(1, Math.floor(swarm_slot!)) : undefined,
+        artifact_id: typeof j.artifact_id === 'string' ? j.artifact_id : undefined,
+        artifact_tenant_id:
+          typeof j.artifact_tenant_id === 'string' ? j.artifact_tenant_id : undefined,
       };
     }
     if (t === 'error') {

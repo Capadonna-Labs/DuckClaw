@@ -89,7 +89,9 @@ Ver [`ADMIN_CHAT_IMAGE_ATTACHMENTS.md`](ADMIN_CHAT_IMAGE_ATTACHMENTS.md).
 
 - `POST /playground/chat` — body opcional `images[]` (`mime_type`, `data_base64`); VLM en gateway antes del worker.
 - `PUT /playground/model` — `{ chat_id, provider, model?, base_url? }`; equivalente a `/model provider=…` por conversación (agent_config).
-- `GET /playground/config?chat_id=` — LLM efectivo del chat (override) o .env global.
+- `PUT /playground/vault` — `{ chat_id, tenant_id?, vault_db_path? }`; bóveda DuckDB por conversación (Redis `AdminConversationMeta.vault_db_path`). Vacío quita override.
+- `GET /playground/config?chat_id=` — LLM efectivo del chat (override) o .env global; incluye `vault` (ruta efectiva, scope) y `vault_options`.
+- UI: selector de bóveda en Playground y chat flotante (no en `/templates/[workerId]`).
 
 ### Catálogo MCP y Skills
 

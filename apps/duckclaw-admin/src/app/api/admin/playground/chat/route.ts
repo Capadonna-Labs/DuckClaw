@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+import { adminApiKey, gatewayBase, gatewayLongFetch, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+
+/** ComfyUI (~3–4 min) + cold start worker; margen para MCP omitido en visual_generation */
+export const maxDuration = 600;
+export const dynamic = 'force-dynamic';
+
+const GATEWAY_CHAT_TIMEOUT_MS = 590_000;
 
 /** Proxy al chat admin del gateway (JSON o SSE si stream=true). */
 export async function POST(req: NextRequest) {
@@ -38,13 +44,45 @@ export async function POST(req: NextRequest) {
 
   const target = `${base}/api/v1/admin/playground/chat`;
 
+  // #region agent log
+  const _dbgT0 = Date.now();
+  fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
+    body: JSON.stringify({
+      sessionId: 'fd1dbb',
+      hypothesisId: 'H1',
+      location: 'playground/chat/route.ts:POST',
+      message: 'proxy_fetch_start',
+      data: { wantsStream, timeoutMs: GATEWAY_CHAT_TIMEOUT_MS, maxDuration: 480, undiciBodyTimeout: 0 },
+      timestamp: _dbgT0,
+    }),
+  }).catch(() => {});
+  // #endregion
+
   try {
-    const res = await fetch(target, {
+    const res = await gatewayLongFetch(target, {
       method: 'POST',
       headers,
       body: bodyText,
       cache: 'no-store',
+      signal: AbortSignal.timeout(GATEWAY_CHAT_TIMEOUT_MS),
     });
+
+    // #region agent log
+    fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
+      body: JSON.stringify({
+        sessionId: 'fd1dbb',
+        hypothesisId: 'H1',
+        location: 'playground/chat/route.ts:POST',
+        message: 'proxy_fetch_ok',
+        data: { wantsStream, status: res.status, elapsedMs: Date.now() - _dbgT0 },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
 
     if (wantsStream && res.body) {
       return new NextResponse(res.body, {
@@ -63,12 +101,35 @@ export async function POST(req: NextRequest) {
       headers: { 'Content-Type': res.headers.get('content-type') || 'application/json' },
     });
   } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error de red al gateway';
+    // #region agent log
+    fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
+      body: JSON.stringify({
+        sessionId: 'fd1dbb',
+        hypothesisId: 'H1',
+        location: 'playground/chat/route.ts:POST',
+        message: 'proxy_fetch_error',
+        data: { wantsStream, msg, elapsedMs: Date.now() - _dbgT0 },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    const isTimeout =
+      msg.includes('timeout') ||
+      msg.includes('Timeout') ||
+      msg.includes('terminated') ||
+      msg.includes('aborted');
     return NextResponse.json(
       {
-        detail: e instanceof Error ? e.message : 'Error de red al gateway',
-        hint: '¿Está corriendo DuckClaw-Gateway? Tras actualizar código, reinicia el gateway desde Overview.',
+        detail: isTimeout
+          ? 'El chat superó el tiempo máximo del proxy (generación de imagen puede tardar ~4 min). Reintenta o usa /gen/image.'
+          : msg,
+        hint: '¿Está corriendo DuckClaw-Gateway? Tras actualizar código, reinicia gateway y admin (pnpm dev).',
+        code: isTimeout ? 'proxy_timeout' : 'gateway_unreachable',
       },
-      { status: 502 }
+      { status: isTimeout ? 504 : 502 }
     );
   }
 }

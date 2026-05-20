@@ -138,9 +138,6 @@ def _truncate_read_sql_result_for_llm(raw: str) -> str:
 def _worker_log_label(worker_id: str) -> str:
     """Etiqueta corta solo para texto de log (no sustituye el id real del estado)."""
     w = (worker_id or "").strip()
-    low = w.lower().replace("_", "")
-    if low == "themindcrupier":
-        return "crupier"
     return w or "worker"
 
 
@@ -1455,6 +1452,98 @@ def _quant_trader_reddit_history_anchor_intent(incoming: str, messages: list[Any
     )
 
 
+def _visual_asset_calls_since_last_human(messages: list[Any]) -> int:
+    """Cuántas veces se invocó generate_visual_asset desde el último HumanMessage."""
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    count = 0
+    for msg in reversed(messages or []):
+        if isinstance(msg, HumanMessage):
+            break
+        if isinstance(msg, ToolMessage) and (getattr(msg, "name", "") or "") == "generate_visual_asset":
+            count += 1
+    return count
+
+
+def _quant_trader_visual_generation_intent(incoming: str) -> bool:
+    """Pedido explícito de imagen (txt2img) en Quant-Trader."""
+    s = (incoming or "").strip()
+    if not s or len(s) > 2000:
+        return False
+    low = s.lower()
+    if re.search(
+        r"(?:\b(?:genera|generar|crea|crear|dibuja|dibujar|haz(?:me)?|hacer|pinta|pintar)\b.{0,50}\b(?:imagen(?:es)?|foto(?:s)?|ilustraci[oó]n(?:es)?|caricatura(?:s)?|avatar(?:es)?|picture|image(?:s)?)\b)",
+        low,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:txt2img|text-to-image|stable\s*diffusion|comfyui)\b",
+            low,
+            re.IGNORECASE,
+        )
+    )
+
+
+_GENERIC_VISUAL_TAIL_RE = re.compile(
+    r"^(?:como lo ves|así lo ves|visualmente|de forma visual)\s*\.?$",
+    re.IGNORECASE,
+)
+
+
+def _quant_visual_prompt_from_incoming(incoming: str) -> str:
+    """Extrae el subject visual del mensaje del usuario para ComfyUI."""
+    s = (incoming or "").strip()
+    m = re.search(
+        r"(?:\b(?:genera|generar|crea|crear|dibuja|dibujar|haz(?:me)?|hacer|pinta|pintar)\b"
+        r".{0,60}?\b(?:imagen(?:es)?|foto(?:s)?|ilustraci[oó]n(?:es)?|caricatura(?:s)?|avatar(?:es)?)\b"
+        r"(?:\s+de)?\s+(.+))",
+        s,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if m:
+        tail = m.group(1).strip().rstrip(".")
+        if len(tail) >= 24 and not _GENERIC_VISUAL_TAIL_RE.match(tail):
+            return tail[:500]
+    if re.search(r"contexto\s+macro|macroecon[oó]m", s, re.IGNORECASE):
+        return s[:500]
+    return s[:500]
+
+
+def _agent_dbg_quant_visual(
+    location: str,
+    message: str,
+    data: dict[str, Any],
+    *,
+    hypothesis_id: str = "H",
+) -> None:
+    # region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "fd1dbb",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+
+
 def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -> str:
     """Mensaje Telegram cuando falla invoke del LLM en agent_node (sin culpar a MLX si el proveedor es Groq)."""
     pl = (provider or "").strip().lower()
@@ -1911,7 +2000,7 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
     def _qualify_allowed_tables(query: str, schema_name: str) -> str:
         """
         Prefix allowed table names with schema when unqualified.
-        Example: FROM the_mind_games -> FROM main.the_mind_games
+        Example: FROM my_table -> FROM main.my_table
         """
         if not spec.allowed_tables:
             return query
@@ -2106,7 +2195,7 @@ def build_worker_graph(
     llm_base_url: Optional[str] = None,
     shared_db_path: Optional[str] = None,
     reuse_db: Any | None = None,
-    tool_surface: Literal["full", "context_synthesis"] = "full",
+    tool_surface: Literal["full", "context_synthesis", "visual_generation"] = "full",
     open_vault_read_only: bool = False,
 ) -> Any:
     """
@@ -2125,6 +2214,9 @@ def build_worker_graph(
     omite bridges MCP stdio pesados (GitHub, Google Trends) para reducir cold start.
     **Reddit** sí se registra si el manifest lo declara: URLs ``/r/.../s/...`` en
     ``SUMMARIZE_NEW_CONTEXT`` deben poder usar ``reddit_get_post`` / ``reddit_search_reddit``.
+
+    ``tool_surface=visual_generation``: txt2img en Quant-Trader; omite GitHub, Trends y Reddit
+    (cold start ~2 min) y delega en ``generate_visual_asset`` vía tool call determinista.
 
     ``open_vault_read_only``: para ``SUMMARIZE_NEW_CONTEXT`` / ``SUMMARIZE_STORED_CONTEXT`` el worker no debe
     escribir en la bóveda (spec Context Injection). Abrir RW compite con el **db-writer** cuando éste inserta
@@ -2339,6 +2431,30 @@ def build_worker_graph(
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             pass
+
+    if getattr(spec, "comfyui_config", None) is not None:
+        try:
+            from duckclaw.forge.skills.comfyui_bridge import register_comfyui_skill
+
+            register_comfyui_skill(tools, spec.comfyui_config, duckclaw_db=db)
+            tools_by_name = {t.name: t for t in tools}
+            _lid_comfy = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
+            if _lid_comfy == "quant_trader":
+                _agent_dbg_quant_visual(
+                    "factory.build_worker_graph:comfyui_register",
+                    "comfyui_tools_after_register",
+                    {
+                        "has_generate_visual": "generate_visual_asset" in tools_by_name,
+                        "has_edit_visual": "edit_visual_asset" in tools_by_name,
+                        "comfyui_enabled": bool(
+                            isinstance(spec.comfyui_config, dict)
+                            and spec.comfyui_config.get("enabled") is not False
+                        ),
+                    },
+                    hypothesis_id="H1",
+                )
+        except Exception:
+            _log.debug("comfyui skills registration skipped", exc_info=True)
 
     _qcfg = getattr(spec, "quant_config", None)
     _lid_q = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
@@ -2708,6 +2824,22 @@ def build_worker_graph(
         )
         llm_force_tavily_off = (
             _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_tavily) if has_tavily else None
+        )
+
+        has_generate_visual = "generate_visual_asset" in tools_by_name
+        tool_choice_generate_visual = {
+            "type": "function",
+            "function": {"name": "generate_visual_asset"},
+        }
+        llm_force_generate_visual_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_generate_visual)
+            if has_generate_visual
+            else None
+        )
+        llm_force_generate_visual_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_generate_visual)
+            if "generate_visual_asset" in tools_by_name_sandbox_off
+            else None
         )
 
         has_pqrsd_fetch = "pqrsd_fetch_canonical" in tools_by_name
@@ -3332,6 +3464,79 @@ def build_worker_graph(
             _quant_lone_reddit_only = quant_trader_lone_reddit_url_message(
                 str(_lid or ""), incoming, _reddit_anchor_u
             )
+            _visual_calls_this_turn = _visual_asset_calls_since_last_human(state.get("messages") or [])
+            _visual_tool_already_ok = bool(
+                already_has_tool_result
+                and isinstance(last_msg, ToolMessage)
+                and (last_msg.name or "") == "generate_visual_asset"
+                and '"ok":true' in str(last_msg.content or "").replace(" ", "")
+            )
+            force_visual = bool(
+                (_lid or "").strip().lower() == "quant_trader"
+                and has_generate_visual
+                and _quant_trader_visual_generation_intent(incoming)
+                and not telegram_context_summarize_directive
+                and not summarize_stored_directive
+                and _visual_calls_this_turn == 0
+                and not already_has_tool_result
+                and not _visual_tool_already_ok
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                )
+            )
+            if (_lid or "").strip().lower() == "quant_trader":
+                _agent_dbg_quant_visual(
+                    "factory.build_worker_graph.agent_node",
+                    "force_visual_decision",
+                    {
+                        "force_visual": force_visual,
+                        "visual_calls_this_turn": _visual_calls_this_turn,
+                        "already_has_tool_result": already_has_tool_result,
+                        "visual_tool_already_ok": _visual_tool_already_ok,
+                        "has_generate_visual": has_generate_visual,
+                        "intent": _quant_trader_visual_generation_intent(incoming),
+                        "incoming_head": (incoming or "")[:120],
+                    },
+                    hypothesis_id="H3",
+                )
+
+            _visual_tool_failed = bool(
+                (_lid or "").strip().lower() == "quant_trader"
+                and already_has_tool_result
+                and isinstance(last_msg, ToolMessage)
+                and (last_msg.name or "") == "generate_visual_asset"
+                and '"ok":false' in str(last_msg.content or "").replace(" ", "")
+                and _quant_trader_visual_generation_intent(incoming)
+            )
+            if _visual_tool_failed:
+                err_msg = "No pude generar la imagen."
+                try:
+                    payload = json.loads(str(last_msg.content or ""))
+                    if isinstance(payload, dict) and payload.get("error"):
+                        err_msg = str(payload["error"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                if "cancelad" in err_msg.lower():
+                    err_msg = (
+                        f"{err_msg} Si enviaste otro mensaje mientras generaba, "
+                        "espera a que termine ComfyUI (~3 min en Mac) antes de escribir de nuevo."
+                    )
+                _agent_dbg_quant_visual(
+                    "factory.build_worker_graph.agent_node",
+                    "visual_tool_failed_fast_exit",
+                    {"err_head": err_msg[:160]},
+                    hypothesis_id="H4",
+                )
+                _fail_ai = AIMessage(content=f"⚠️ {err_msg}")
+                _out_fail = {**state, "messages": state["messages"] + [_fail_ai]}
+                _out_fail.update(_identity_fields(state))
+                return _out_fail
+
             _allow_reddit_force = bool(
                 (_lid or "").strip().lower() == "finanz"
                 or (
@@ -3344,6 +3549,8 @@ def build_worker_graph(
                 )
             )
             force_reddit = bool(
+                not force_visual
+                and
                 _allow_reddit_force
                 and has_reddit_tools
                 and _reddit_anchor_u is not None
@@ -3415,6 +3622,7 @@ def build_worker_graph(
                 force_fmp_calendar = False
                 force_tavily = False
                 force_reddit = False
+                force_visual = False
 
             _summarize_reddit_empty_tavily = bool(
                 (_lid or "").strip().lower() == "quant_trader"
@@ -3952,6 +4160,42 @@ def build_worker_graph(
                 _out_forced.update(_identity_fields(state))
                 return _out_forced
 
+            if (
+                force_visual
+                and has_generate_visual
+                and not already_has_tool_result
+                and not _visual_tool_already_ok
+            ):
+                _vis_prompt = _quant_visual_prompt_from_incoming(incoming)
+                _forced_tid = f"call_generate_visual_{int(time.time() * 1000)}"
+                _forced_tc = [
+                    {
+                        "name": "generate_visual_asset",
+                        "args": {
+                            "prompt": _vis_prompt,
+                            "negative_prompt": "",
+                            "aspect_ratio": "1:1",
+                        },
+                        "id": _forced_tid,
+                        "type": "tool_call",
+                    }
+                ]
+                _log.info(
+                    "[%s] quant deterministic visual → generate_visual_asset prompt=%r",
+                    _wl,
+                    _vis_prompt[:120],
+                )
+                _agent_dbg_quant_visual(
+                    "factory.build_worker_graph.agent_node",
+                    "visual_forced_tool_call",
+                    {"prompt_head": _vis_prompt[:120]},
+                    hypothesis_id="H9",
+                )
+                _forced_resp = AIMessage(content="", tool_calls=_forced_tc)
+                _out_vis = {**state, "messages": state["messages"] + [_forced_resp]}
+                _out_vis.update(_identity_fields(state))
+                return _out_vis
+
             llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
             forced_name = (
                 "pqrsd_fetch_canonical"
@@ -3984,6 +4228,9 @@ def build_worker_graph(
                                         "get_fmp_stock_dividends"
                                         if force_fmp
                                         else (
+                                            "generate_visual_asset"
+                                            if force_visual
+                                            else (
                                             "tavily_search"
                                             if force_tavily
                                             else (
@@ -4017,6 +4264,7 @@ def build_worker_graph(
                             )
                         )
                     )
+                )
                 )
                 )
             )
@@ -4081,6 +4329,16 @@ def build_worker_graph(
                 _msg_list = [
                     SystemMessage(content=load_guardrail("directives", "reddit_share_exhausted"))
                 ] + _msg_list
+            if (_lid or "").strip().lower() == "quant_trader" and _visual_tool_already_ok:
+                _msg_list = [
+                    SystemMessage(
+                        content=(
+                            "La imagen ya fue generada con generate_visual_asset en este turno. "
+                            "Responde al usuario con la ruta/artefacto; NO vuelvas a llamar "
+                            "generate_visual_asset ni edit_visual_asset."
+                        )
+                    )
+                ] + _msg_list
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             _invoked_llm: Any = llm_with_tools
             if force_admin_sql:
@@ -4124,6 +4382,9 @@ def build_worker_graph(
             elif force_tavily:
                 _ft = llm_force_tavily_on if sandbox_enabled else llm_force_tavily_off
                 _invoked_llm = _ft or llm_with_tools
+            elif force_visual:
+                _fgv = llm_force_generate_visual_on if sandbox_enabled else llm_force_generate_visual_off
+                _invoked_llm = _fgv or llm_with_tools
             elif force_reddit:
                 _fr = None
                 if _reddit_resolved_comments_url and _incoming_looks_like_reddit_post_url(
@@ -4527,6 +4788,9 @@ def build_worker_graph(
         sandbox_enabled = _sandbox_enabled_for_state(state)
         tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
         sandbox_b64: str | None = state.get("sandbox_photo_base64") if isinstance(state.get("sandbox_photo_base64"), str) else None
+        visual_artifact_id: str | None = (
+            str(state.get("visual_artifact_id") or "").strip() or None
+        )
         _hb_head = (state.get("subagent_instance_label") or "").strip() or None
         _hb_uname = (state.get("username") or "").strip() or None
         _hb_plan = (state.get("heartbeat_plan_title") or "").strip() or None
@@ -4701,6 +4965,66 @@ def build_worker_graph(
                                         sandbox_b64 = fb
                             except (json.JSONDecodeError, TypeError):
                                 pass
+                        if name in ("generate_visual_asset", "edit_visual_asset"):
+                            if name == "generate_visual_asset" and (_lid or "").strip().lower() == "quant_trader":
+                                _agent_dbg_quant_visual(
+                                    "factory.build_worker_graph.agent_node:tool_result",
+                                    "generate_visual_asset_invoked",
+                                    {
+                                        "ok_preview": (content or "")[:200],
+                                        "result_len": len(content or ""),
+                                    },
+                                    hypothesis_id="H2",
+                                )
+                            try:
+                                payload = json.loads(content)
+                                if isinstance(payload, dict) and payload.get("ok"):
+                                    aid = str(payload.get("artifact_id") or "").strip()
+                                    if aid:
+                                        visual_artifact_id = aid
+                                        try:
+                                            from duckclaw.graphs.chat_heartbeat import (
+                                                is_admin_ui_chat_session,
+                                                publish_admin_chat_heartbeat,
+                                            )
+                                            from duckclaw.forge.skills.quant_tool_context import (
+                                                get_quant_tool_tenant_id,
+                                            )
+
+                                            _cid = str(state.get("chat_id") or "").strip()
+                                            if _cid and is_admin_ui_chat_session(_cid):
+                                                publish_admin_chat_heartbeat(
+                                                    _cid,
+                                                    "Imagen generada (ComfyUI)",
+                                                    kind="visual",
+                                                    artifact_id=aid,
+                                                    artifact_tenant_id=get_quant_tool_tenant_id(),
+                                                )
+                                        except Exception:
+                                            pass
+                                    fb = payload.get("figure_base64")
+                                    if isinstance(fb, str) and len(fb) > 32:
+                                        sandbox_b64 = fb
+                                    elif payload.get("artifacts"):
+                                        from duckclaw.forge.skills.comfyui_bridge import (
+                                            read_artifact_image_as_b64,
+                                        )
+                                        from duckclaw.forge.skills.quant_tool_context import (
+                                            get_quant_tool_tenant_id,
+                                        )
+
+                                        arts = payload.get("artifacts")
+                                        if isinstance(arts, list) and arts:
+                                            first = str(arts[0] or "").strip()
+                                            if first:
+                                                b64_art = read_artifact_image_as_b64(
+                                                    first,
+                                                    get_quant_tool_tenant_id(),
+                                                )
+                                                if b64_art:
+                                                    sandbox_b64 = b64_art
+                            except (json.JSONDecodeError, TypeError):
+                                pass
                             if not use_cm:
                                 content = _compact_run_sandbox_tool_content_for_llm(
                                     content, _RUN_SANDBOX_TOOL_LLM_MAX_CHARS
@@ -4747,6 +5071,8 @@ def build_worker_graph(
         out: dict[str, Any] = {**state, "messages": new_msgs, "_tool_round": _tool_round}
         if sandbox_b64:
             out["sandbox_photo_base64"] = sandbox_b64
+        if visual_artifact_id:
+            out["visual_artifact_id"] = visual_artifact_id
         out.update(_identity_fields(state))
         return out
 
@@ -5051,6 +5377,9 @@ def build_worker_graph(
         sb = (state.get("sandbox_photo_base64") or "").strip()
         if sb:
             out["sandbox_photo_base64"] = sb
+        aid = (state.get("visual_artifact_id") or "").strip()
+        if aid:
+            out["visual_artifact_id"] = aid
         out.update(_identity_fields(state))
         return out
 

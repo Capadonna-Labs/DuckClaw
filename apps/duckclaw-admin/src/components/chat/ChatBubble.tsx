@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Loader2 } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
+import { ArtifactImageLightbox } from '@/components/chat/ArtifactImageLightbox';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
-import type { ChatMsg } from '@/components/chat/types';
+import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 
 export function formatChatIdentityPrefix(workerId?: string, swarmSlot = 1): string {
   const slot = Number.isFinite(swarmSlot) && swarmSlot >= 1 ? Math.floor(swarmSlot) : 1;
@@ -47,12 +48,15 @@ export function ChatBubble({ message: m }: { message: ChatMsg }) {
       : m.text;
   const canCopy = Boolean(displayText?.trim()) && !m.streaming;
   const [copied, setCopied] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<ChatImagePreview | null>(null);
   const heartbeatLabel =
     m.heartbeatKind === 'plan'
       ? 'Plan'
       : m.heartbeatKind === 'tool'
         ? 'Herramienta'
-        : 'Progreso';
+        : m.heartbeatKind === 'visual'
+          ? 'Imagen'
+          : 'Progreso';
 
   const copyText = useCallback(async () => {
     if (!displayText?.trim()) return;
@@ -103,19 +107,31 @@ export function ChatBubble({ message: m }: { message: ChatMsg }) {
           {heartbeatLabel}
         </p>
       )}
-      {isUser && m.imagePreviews && m.imagePreviews.length > 0 && (
+      {m.imagePreviews && m.imagePreviews.length > 0 && (
         <div className={`flex flex-wrap gap-2 ${displayText?.trim() ? 'mb-2' : ''}`}>
           {m.imagePreviews.map((img) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <button
               key={img.url}
-              src={img.url}
-              alt={img.name}
-              className="max-h-32 max-w-full rounded-lg border border-white/20 object-contain"
-            />
+              type="button"
+              onClick={() => setLightboxImage(img)}
+              className="block p-0 border-0 bg-transparent cursor-zoom-in rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-gov-blue-500"
+              aria-label={`Ver imagen ampliada: ${img.name || 'imagen'}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={img.url}
+                alt={img.name}
+                className={
+                  isUser
+                    ? 'max-h-32 max-w-full rounded-lg border border-white/20 object-contain'
+                    : 'max-h-64 max-w-full rounded-lg border border-gov-gray-200 dark:border-dark-border object-contain hover:opacity-90 transition-opacity'
+                }
+              />
+            </button>
           ))}
         </div>
       )}
+      <ArtifactImageLightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />
       {isUser || isError || isInterrupted || isHeartbeat ? (
         displayText?.trim() ? (
           <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
@@ -131,6 +147,35 @@ export function ChatBubble({ message: m }: { message: ChatMsg }) {
         </>
       )}
     </div>
+  );
+}
+
+export type ThinkingDotsProps = {
+  /** Tamaño visual: sm (FAB), md (burbuja en panel). */
+  size?: 'sm' | 'md';
+  className?: string;
+};
+
+/** Tres puntos animados (indicador «pensando»). */
+export function ThinkingDots({ size = 'md', className = '' }: ThinkingDotsProps) {
+  const dot =
+    size === 'sm'
+      ? 'size-1.5'
+      : 'size-2';
+  const gap = size === 'sm' ? 'gap-0.5' : 'gap-1';
+  return (
+    <span
+      className={`inline-flex items-center ${gap} ${className}`}
+      aria-hidden
+    >
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className={`${dot} rounded-full bg-current animate-bounce`}
+          style={{ animationDelay: `${i * 0.15}s`, animationDuration: '0.9s' }}
+        />
+      ))}
+    </span>
   );
 }
 
@@ -169,9 +214,11 @@ export function ThinkingBubble({
       aria-live="polite"
       aria-label={`${identityPrefix} Pensando, ${elapsedLabel} segundos`}
     >
-      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center">
-        <span className="absolute inset-0 rounded-full border-2 border-gov-blue-200 dark:border-gov-blue-900" />
-        <Loader2 className="h-6 w-6 animate-spin text-gov-blue-700 dark:text-dark-cyan" aria-hidden />
+      <div
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-gov-blue-200 dark:border-gov-blue-900 text-gov-blue-700 dark:text-dark-cyan"
+        aria-hidden
+      >
+        <ThinkingDots size="md" />
       </div>
       <p className="text-sm font-semibold text-gov-gray-700 dark:text-dark-text tabular-nums">
         <span className="text-gov-blue-800 dark:text-dark-cyan">{identityPrefix}</span>{' '}

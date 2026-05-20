@@ -309,6 +309,12 @@ try:
     from duckclaw.integrations.telegram.compact_webhook_routes import load_path_webhook_bindings_from_env
 
     _compact = load_path_webhook_bindings_from_env()
+    if _compact:
+        _gateway_log.info(
+            "telegram path multiplex: %s ruta(s) cargadas al arranque: %s",
+            len(_compact),
+            ", ".join(b.webhook_path for b in _compact),
+        )
     agent_debug_log(
         location="main.py:startup",
         message="gateway telegram compact routes loaded",
@@ -318,6 +324,12 @@ try:
             "webhook_routes_set": bool((os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()),
         },
         hypothesis_id="H5",
+    )
+except ValueError as _compact_exc:
+    _gateway_log.error(
+        "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES (compacto) inválido al arranque; "
+        "rutas por path no montadas hasta corregir .env: %s",
+        _compact_exc,
     )
 except Exception:
     pass
@@ -505,6 +517,23 @@ async def lifespan(app: FastAPI):
             )
         except Exception as exc:  # noqa: BLE001
             _gateway_log.warning("embedded crons ticker no disponible: %s", exc)
+
+    try:
+        from duckclaw.forge.skills.comfyui_bridge import (
+            clear_all_comfy_generations,
+            reset_comfyui_runtime,
+        )
+
+        stale = clear_all_comfy_generations()
+        reset_result = await asyncio.to_thread(reset_comfyui_runtime)
+        if stale or reset_result.get("interrupt") or reset_result.get("deleted_pending"):
+            _gateway_log.info(
+                "ComfyUI startup hygiene: stale_jobs=%s reset=%s",
+                len(stale),
+                reset_result,
+            )
+    except Exception as exc:  # noqa: BLE001
+        _gateway_log.debug("ComfyUI startup hygiene skipped: %s", exc)
 
     yield
 
@@ -1503,6 +1532,27 @@ def _strip_bi_false_chart_delivery_lines(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
 
 
+def _admin_visual_fields_from_invoke_result(
+    session_id: str,
+    result: dict[str, Any],
+    tenant_id: str,
+) -> dict[str, str]:
+    """Metadatos de imagen para SSE/JSON del playground admin (ComfyUI → artifacts/)."""
+    from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+    if not is_admin_ui_chat_session(session_id):
+        return {}
+    out: dict[str, str] = {}
+    b64 = (result.get("sandbox_photo_base64") or result.get("figure_base64") or "").strip()
+    if b64:
+        out["figure_base64"] = b64
+    aid = (result.get("visual_artifact_id") or result.get("artifact_id") or "").strip()
+    if aid:
+        out["artifact_id"] = aid
+        out["artifact_tenant_id"] = (tenant_id or "default").strip() or "default"
+    return out
+
+
 async def _invoke_chat_sse_body(
     payload: ChatRequest,
     worker_id: str,
@@ -1558,6 +1608,8 @@ async def _invoke_chat_sse_body(
                     kind=str(hb.get("kind") or "status"),
                     worker_id=str(hb.get("worker_id") or "") or None,
                     swarm_slot=hb.get("swarm_slot"),
+                    artifact_id=str(hb.get("artifact_id") or "").strip() or None,
+                    artifact_tenant_id=str(hb.get("artifact_tenant_id") or "").strip() or None,
                 )
             except asyncio.TimeoutError:
                 continue
@@ -1569,6 +1621,8 @@ async def _invoke_chat_sse_body(
                 kind=str(hb.get("kind") or "status"),
                 worker_id=str(hb.get("worker_id") or "") or None,
                 swarm_slot=hb.get("swarm_slot"),
+                artifact_id=str(hb.get("artifact_id") or "").strip() or None,
+                artifact_tenant_id=str(hb.get("artifact_tenant_id") or "").strip() or None,
             )
 
         result = await invoke_task
@@ -1576,6 +1630,7 @@ async def _invoke_chat_sse_body(
         assigned: str | None = None
         usage: dict[str, Any] | None = None
         elapsed_ms: int | None = None
+        sse_extra: dict[str, Any] | None = None
         if isinstance(result, dict):
             reply = str(result.get("response") or result.get("reply") or "")
             assigned = result.get("assigned_worker_id")
@@ -1586,6 +1641,9 @@ async def _invoke_chat_sse_body(
                     elapsed_ms = int(raw_elapsed)
                 except (TypeError, ValueError):
                     elapsed_ms = None
+            admin_visual = _admin_visual_fields_from_invoke_result(session_id, result, tenant_id)
+            if admin_visual:
+                sse_extra = dict(admin_visual)
         else:
             reply = str(result or "")
         async for event in emit_chat_reply_sse(
@@ -1594,6 +1652,7 @@ async def _invoke_chat_sse_body(
             usage_tokens=usage,
             worker_id=worker_id,
             elapsed_ms=elapsed_ms,
+            extra=sse_extra,
         ):
             yield event
     except HTTPException as exc:
@@ -1614,6 +1673,12 @@ async def _invoke_chat_sse_body(
             except Exception:
                 pass
         if not invoke_task.done():
+            try:
+                from duckclaw.forge.skills.comfyui_bridge import cancel_comfy_generation_for_chat
+
+                cancel_comfy_generation_for_chat(session_id)
+            except Exception:
+                pass
             invoke_task.cancel()
             try:
                 await invoke_task
@@ -2211,6 +2276,8 @@ async def _invoke_chat(
         and (result.get("sandbox_photo_base64") or "").strip()
     ):
         out_resp["sandbox_chart_delivered"] = chart_sent
+    if isinstance(result, dict):
+        out_resp.update(_admin_visual_fields_from_invoke_result(session_id, result, tenant_id))
     return out_resp
 
 

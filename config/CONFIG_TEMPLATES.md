@@ -8,6 +8,7 @@
 | `ecosystem.mcp.config.cjs` | PM2 DuckClaw-MCP |
 | `ecosystem.mlx-vision.config.cjs` | PM2 MLX-Vision (VLM) |
 | `ecosystem.mlx.config.cjs` | PM2 MLX-Inference (texto, opcional) |
+| `ecosystem.comfyui.config.cjs` | PM2 ComfyUI (`~/ComfyUI`, puerto 8188) |
 | `mcp_servers.yaml` | Servidores MCP |
 | `langgraph.json` | LangGraph dev |
 | `lora_config.yaml` | LoRA / train |

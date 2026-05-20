@@ -53,10 +53,13 @@ def test_parse_compact_extended_format() -> None:
     assert routes[1].vault_env_var == "DUCKCLAW_OTHER_DB_PATH"
 
 
-def test_parse_rejects_missing_worker_tenant() -> None:
-    raw = "mybot:tok:/api/v1/telegram/mybot"
-    with pytest.raises(ValueError, match="Formato inválido"):
-        parse_compact_telegram_webhook_routes(raw)
+def test_parse_legacy_path_infers_worker_tenant() -> None:
+    raw = "finanz:tok123:/api/v1/telegram/finanz,jobhunter:tok456:/api/v1/telegram/jobhunter"
+    routes = parse_compact_telegram_webhook_routes(raw)
+    assert len(routes) == 2
+    assert routes[0].worker_id == "finanz"
+    assert routes[0].tenant_id == "default"
+    assert routes[1].worker_id == "job_hunter"
 
 
 def test_parse_rejects_duplicate_path() -> None:

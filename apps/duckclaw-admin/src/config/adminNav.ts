@@ -29,6 +29,12 @@ export const INTEGRATIONS_NAV_GROUP: AdminNavGroup = {
   ],
 };
 
+export const GEN_NAV_GROUP: AdminNavGroup = {
+  id: 'gen',
+  label: 'Gen',
+  items: [{ href: '/gen/image', label: 'Image', section: 'core' }],
+};
+
 const CORE_AND_ADMIN_NAV: readonly AdminNavItem[] = [
   { href: '/overview', label: 'Overview', section: 'core' },
   { href: '/kanban', label: 'Tablero', section: 'core' },
@@ -56,6 +62,7 @@ export const ADMIN_NAV_STRUCTURE: readonly AdminNavEntry[] = [
   { type: 'item', item: CORE_AND_ADMIN_NAV[4] },
   { type: 'item', item: CORE_AND_ADMIN_NAV[5] },
   { type: 'item', item: CORE_AND_ADMIN_NAV[6] },
+  { type: 'group', group: GEN_NAV_GROUP },
   { type: 'item', item: CORE_AND_ADMIN_NAV[7] },
   { type: 'group', group: INTEGRATIONS_NAV_GROUP },
   { type: 'item', item: CORE_AND_ADMIN_NAV[8] },
@@ -69,7 +76,9 @@ export const ADMIN_NAV_STRUCTURE: readonly AdminNavEntry[] = [
 
 /** Lista plana (compat tests / búsquedas). */
 export const ADMIN_NAV: readonly AdminNavItem[] = [
-  ...CORE_AND_ADMIN_NAV.slice(0, 8),
+  ...CORE_AND_ADMIN_NAV.slice(0, 7),
+  ...GEN_NAV_GROUP.items,
+  ...CORE_AND_ADMIN_NAV.slice(7, 8),
   ...INTEGRATIONS_NAV_GROUP.items,
   ...CORE_AND_ADMIN_NAV.slice(9),
 ];
@@ -95,6 +104,8 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/projects': 'Proyectos',
   '/projects/new': 'Nuevo proyecto',
   '/integrations': 'Integraciones',
+  '/gen': 'Gen',
+  '/gen/image': 'Image',
   '/admin': 'Administración',
 };
 

@@ -72,6 +72,9 @@ export function formatOpsOutput(r: OpsRunResult): string {
   }
   if (r.op_id === 'start_stack' && ok) {
     lines.push('ℹ️ Plataforma lista: PM2 + Tailscale/Telegram. Prueba un mensaje al bot.');
+    lines.push(
+      'ℹ️ Admin móvil (:8443): si la página se cortó unos segundos, recarga; el proxy Serve se re-aplicó al final.'
+    );
   }
   if (r.op_id === 'start_telegram_ingress' && ok) {
     lines.push('ℹ️ Tailscale Funnel activo. Prueba un mensaje al bot en Telegram.');
@@ -204,15 +207,24 @@ function _formatPm2RestartAction(text: string): string {
   return lines.join('\n');
 }
 
+function _hasAnsiCodes(text: string): boolean {
+  return /\x1b\[[\d;]*m|\x9b[\d;]*m/.test(text);
+}
+
 function _formatPm2Logs(text: string): string {
   const lines = text.split('\n').filter((l) => l.trim());
   if (!lines.length) return '';
+  if (_hasAnsiCodes(text)) {
+    return ['📜 Últimas líneas de log (colores ANSI)', '', ...lines.slice(-40)].join('\n');
+  }
   const out = ['📜 Últimas líneas de log', ''];
   for (const line of lines.slice(-40)) {
     const t = line.trim();
     if (!t) continue;
     if (/error|exception|traceback|fatal/i.test(t)) out.push(`   🔴 ${t}`);
     else if (/warn/i.test(t)) out.push(`   🟡 ${t}`);
+    else if (/info|notice/i.test(t)) out.push(`   🔵 ${t}`);
+    else if (/^\d+\|/.test(t)) out.push(`   🟢 ${t}`);
     else out.push(`   ${t}`);
   }
   return out.join('\n');

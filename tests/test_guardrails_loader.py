@@ -36,7 +36,6 @@ _REQUIRED = [
     ("manager_tasks", "job_opportunity_tracking"),
     ("manager_tasks", "job_application_tracking"),
     ("manager_tasks", "job_income_injection"),
-    ("manager_tasks", "the_mind_latest_game"),
     ("manager_tasks", "duckdb_name_query"),
     ("manager_tasks", "table_content_named"),
     ("manager_tasks", "table_content_generic"),

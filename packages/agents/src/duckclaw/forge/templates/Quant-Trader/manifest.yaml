@@ -7,6 +7,10 @@ tool_read_pool: false
 risk_level: conservative
 quant:
   enabled: true
+comfyui:
+  enabled: true
+  template: comfy_default
+  edit_template: comfy_img2img_edit
 network_access: false
 browser_sandbox: true
 allowed_tables:

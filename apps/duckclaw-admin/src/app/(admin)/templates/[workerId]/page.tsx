@@ -7,7 +7,6 @@ import { adminService } from '@/services/adminService';
 import type { TemplateDetail } from '@/types/admin';
 import { useAuthStore } from '@/store/authStore';
 import { ChevronRight, Save, CheckCircle, Eye, FileCode, Columns2 } from 'lucide-react';
-import { TemplateVaultPanel } from '@/components/templates/TemplateVaultPanel';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 
 type MarkdownViewMode = 'edit' | 'preview' | 'split';
@@ -150,7 +149,10 @@ export default function TemplateEditorPage() {
             emptyHint="Sin system_prompt.md — vuelve a crear el agente o añade el archivo aquí."
           />
           <FileGroup title="Config y datos" files={otherFiles} tab={tab} onSelect={setTab} />
-          <TemplateVaultPanel workerId={workerId} canWrite={canWrite} />
+          <p className="text-[10px] text-gov-gray-500 px-2 py-2 border-t dark:border-dark-border mt-2">
+            La bóveda DuckDB se elige por conversación en Playground o en el chat flotante, no por
+            worker.
+          </p>
         </aside>
 
         <div className="flex-1 min-w-0 space-y-2">

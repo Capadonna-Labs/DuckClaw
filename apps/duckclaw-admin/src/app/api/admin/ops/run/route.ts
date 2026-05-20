@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { HOST_ONLY_OPS, listOpsCommands, runOpsLocal } from '@/lib/localOps';
+import { HOST_ONLY_OPS, isLocalOpId, listOpsCommands, runOpsLocal } from '@/lib/localOps';
 
 const WRITE_METHODS = new Set(['POST']);
 
@@ -66,7 +66,23 @@ export async function POST(req: NextRequest) {
         cache: 'no-store',
       });
 
-      if (res.status !== 404) {
+      const useGateway =
+        res.status !== 404 && !(res.status === 400 && isLocalOpId(opId));
+      // #region agent log
+      fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
+        body: JSON.stringify({
+          sessionId: 'fd1dbb',
+          hypothesisId: 'D',
+          location: 'ops/run/route.ts',
+          message: 'gateway ops/run response',
+          data: { opId, status: res.status, useGateway },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      if (useGateway) {
         const text = await res.text();
         return new NextResponse(text, {
           status: res.status,

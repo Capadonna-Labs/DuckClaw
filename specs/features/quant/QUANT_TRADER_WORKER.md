@@ -4,7 +4,7 @@
 
 
 ### Objetivo
-Orquestar la ejecución táctica cuantitativa y generación de señales de trading bajo un entorno Zero-Trust. El worker **Quant Trader** actúa como ejecutor aislado; puede ofrecer **síntesis macro y de sentimiento** acotada (herramientas web/Reddit/FMP + vínculo a tickers/sesión) sin sustituir OHLCV para propuestas. El backtesting corre en Strix Sandbox; toda orden al broker exige autorización explícita (HITL).
+Orquestar la ejecución táctica cuantitativa y generación de señales de trading bajo un entorno Zero-Trust. El worker **Quant Trader** actúa como ejecutor aislado; puede ofrecer **síntesis macro y de sentimiento** acotada (herramientas web/Reddit/FMP + vínculo a tickers/sesión) sin sustituir OHLCV para propuestas. El backtesting corre en Strix Sandbox; toda orden al broker exige autorización explícita (HITL). Con `COMFYUI_API_URL` y `comfyui.enabled` en el manifest, acepta pedidos explícitos de **generación de imágenes** vía `generate_visual_asset` / `edit_visual_asset` (ComfyUI Visual Bridge).
 
 ### Contexto
 - **Orquestación:** Invocado vía Manager Handoff (UX: "A2A Contract") tras un intent del usuario u otro worker (p. ej. `Finanz`).

@@ -11,6 +11,11 @@ llm:
   required: true
   temperature: 0.3
 
+comfyui:
+  enabled: true
+  template: comfy_default
+  edit_template: comfy_img2img_edit
+
 skills:
   - get_current_time
   - read_sql

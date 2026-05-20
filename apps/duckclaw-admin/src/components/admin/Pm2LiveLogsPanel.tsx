@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnsiLogText } from '@/lib/ansiLog';
 import { PM2_LOGGABLE_APPS } from '@/lib/pm2LogApps';
 import { Radio, Square, Terminal } from 'lucide-react';
 
@@ -29,7 +30,7 @@ export function Pm2LiveLogsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
-  const tailRef = useRef<HTMLPreElement>(null);
+  const tailRef = useRef<HTMLDivElement>(null);
 
   const toggle = (name: string) => {
     setSelected((prev) => {
@@ -201,12 +202,18 @@ export function Pm2LiveLogsPanel() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <pre
+      <div
         ref={tailRef}
-        className="p-4 text-xs font-mono bg-slate-950 text-slate-100 rounded-xl overflow-auto max-h-[min(50vh,420px)] min-h-[200px] whitespace-pre-wrap break-words"
+        className="p-4 bg-slate-950 rounded-xl overflow-auto max-h-[min(50vh,420px)] min-h-[200px]"
       >
-        {logText || (streaming ? 'Esperando líneas…' : 'Pulsa Iniciar stream para ver logs.')}
-      </pre>
+        {logText ? (
+          <AnsiLogText text={logText} />
+        ) : (
+          <span className="text-slate-400 text-xs font-mono">
+            {streaming ? 'Esperando líneas…' : 'Pulsa Iniciar stream para ver logs.'}
+          </span>
+        )}
+      </div>
     </section>
   );
 }

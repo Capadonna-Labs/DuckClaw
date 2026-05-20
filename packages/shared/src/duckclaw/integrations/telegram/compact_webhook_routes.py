@@ -18,6 +18,26 @@ from dataclasses import dataclass
 
 from duckclaw.gateway_db import resolve_env_duckdb_path
 
+# Rutas .env antiguas (bot:token:/api/v1/telegram/sufijo sin :worker:tenant)
+_LEGACY_BOT_DEFAULT_WORKER: dict[str, str] = {
+    "finanz": "finanz",
+    "siata": "siata_analyst",
+    "jobhunter": "job_hunter",
+    "quanttrader": "quant_trader",
+    "pqrsd-assistant": "pqrsd_assistant",
+}
+
+
+def _legacy_default_tenant_id() -> str:
+    return (os.environ.get("DUCKCLAW_TELEGRAM_LEGACY_DEFAULT_TENANT") or "default").strip() or "default"
+
+
+def _infer_legacy_worker_id(bot_name: str) -> str:
+    key = (bot_name or "").strip().lower()
+    if key in _LEGACY_BOT_DEFAULT_WORKER:
+        return _LEGACY_BOT_DEFAULT_WORKER[key]
+    return key.replace("-", "_")
+
 
 @dataclass(frozen=True)
 class TelegramCompactWebhookRoute:
@@ -72,15 +92,25 @@ def parse_compact_telegram_webhook_routes(raw: str) -> list[TelegramCompactWebho
             r"^(/api/v1/telegram/[^:]+):([^:]+):([^:]+)(?::([^:]+))?$",
             path_and_tail,
         )
+        legacy_m = None
         if not tail_m:
+            legacy_m = re.match(r"^(/api/v1/telegram/[^:]+)$", path_and_tail)
+        if not tail_m and not legacy_m:
             raise ValueError(
                 f"Formato inválido tras ':/api/': {path_and_tail[:100]!r}. "
                 "Use bot:token:/api/v1/telegram/ruta:worker_id:tenant_id[:VAULT_ENV_VAR]"
             )
-        path = tail_m.group(1).strip()
-        worker_id = tail_m.group(2).strip()
-        tenant_id = tail_m.group(3).strip()
-        vault_env_var = (tail_m.group(4) or "").strip()
+        if tail_m:
+            path = tail_m.group(1).strip()
+            worker_id = tail_m.group(2).strip()
+            tenant_id = tail_m.group(3).strip()
+            vault_env_var = (tail_m.group(4) or "").strip()
+        else:
+            assert legacy_m is not None
+            path = legacy_m.group(1).strip()
+            worker_id = ""
+            tenant_id = ""
+            vault_env_var = ""
 
         prefix = entry[:idx]
         first = prefix.find(":")
@@ -90,6 +120,10 @@ def parse_compact_telegram_webhook_routes(raw: str) -> list[TelegramCompactWebho
         bot_token = prefix[first + 1 :].strip()
         if not bot_name or not bot_token:
             raise ValueError(f"bot_name o bot_token vacío en: {entry[:80]!r}")
+        if not worker_id:
+            worker_id = _infer_legacy_worker_id(bot_name)
+        if not tenant_id:
+            tenant_id = _legacy_default_tenant_id()
         if not worker_id or not tenant_id:
             raise ValueError(
                 f"Falta worker_id:tenant_id en ruta compacta de {bot_name!r}. "

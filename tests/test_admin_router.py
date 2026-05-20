@@ -899,3 +899,94 @@ def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pyt
         },
     )
     assert r.status_code == 200
+
+
+def test_comfyui_templates(admin_client: TestClient):
+    r = admin_client.get(
+        "/api/v1/admin/comfyui/templates",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert "templates" in data
+    assert isinstance(data["templates"], list)
+    ids = {t["id"] for t in data["templates"]}
+    assert "comfy_default" in ids
+
+
+def test_comfyui_status_unreachable(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("COMFYUI_API_URL", "http://127.0.0.1:59999")
+    r = admin_client.get(
+        "/api/v1/admin/comfyui/status",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("ok") is False
+    assert "error" in data
+
+
+def test_comfyui_generate_mock(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    payload = {
+        "ok": True,
+        "file_path": "/tmp/fake.png",
+        "prompt_id": "pid-1",
+        "message": "ok",
+    }
+
+    def _fake_impl(*_a, **_k):
+        import json
+
+        return json.dumps(payload)
+
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.comfyui_bridge._generate_visual_asset_impl",
+        _fake_impl,
+    )
+
+    r = admin_client.post(
+        "/api/v1/admin/comfyui/generate",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={"prompt": "a red duck", "aspect_ratio": "1:1"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("ok") is True
+    assert data.get("file_path") == "/tmp/fake.png"
+
+
+def test_comfyui_generate_bridge_error_400(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    def _fail(*_a, **_k):
+        import json
+
+        return json.dumps({"ok": False, "error": "No hay checkpoints en ComfyUI."})
+
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.comfyui_bridge._generate_visual_asset_impl",
+        _fail,
+    )
+    r = admin_client.post(
+        "/api/v1/admin/comfyui/generate",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={"prompt": "test"},
+    )
+    assert r.status_code == 400
+    body = r.json()
+    detail = body.get("detail", body)
+    msg = (
+        detail.get("title", "")
+        if isinstance(detail, dict)
+        else str(detail)
+    )
+    assert "checkpoints" in str(msg).lower()
+
+
+def test_ops_commands_include_comfyui(admin_client: TestClient):
+    r = admin_client.get(
+        "/api/v1/admin/ops/commands",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    ids = {c["id"] for c in r.json().get("commands", [])}
+    assert "pm2_start_comfyui" in ids
+    assert "pm2_restart_comfyui" in ids

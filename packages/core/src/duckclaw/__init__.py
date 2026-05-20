@@ -61,6 +61,37 @@ def _duckdb_python_connect_with_retry(db_path: str, *, read_only: bool) -> Any:
                 time.sleep(delay)
             continue
     assert last is not None
+    # #region agent log
+    if _is_duckdb_lock_error(last):
+        try:
+            import json
+            import time
+
+            _log_path = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log"
+            with open(_log_path, "a", encoding="utf-8") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "sessionId": "fd1dbb",
+                            "hypothesisId": "A",
+                            "location": "duckclaw/__init__.py:_duckdb_python_connect_with_retry",
+                            "message": "duckdb lock after retries",
+                            "data": {
+                                "db_path": db_path,
+                                "read_only": read_only,
+                                "attempts": attempts,
+                                "error": str(last)[:500],
+                            },
+                            "timestamp": int(time.time() * 1000),
+                            "runId": "pre-fix",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+    # #endregion
     raise last
 
 

@@ -10,7 +10,7 @@ inyectada vía `make_broadcast_message_tool` / `make_deal_cards_tool`.
 
 from langchain_core.tools import tool
 
-from duckclaw.forge.skills.the_mind_outbound import (
+from duckclaw.deprecated.the_mind.the_mind_outbound import (
     broadcast_message_to_players,
     deal_cards_for_level,
     make_broadcast_message_tool,

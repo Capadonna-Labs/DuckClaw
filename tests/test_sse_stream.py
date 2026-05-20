@@ -46,6 +46,31 @@ def test_sse_done_includes_elapsed_ms():
     assert payload["elapsed_ms"] == 31760
 
 
+def test_emit_chat_reply_sse_done_extra_artifacts():
+    async def _run() -> dict[str, object] | None:
+        done_payload: dict[str, object] | None = None
+        async for ev in emit_chat_reply_sse(
+            "ok",
+            delay_s=0,
+            extra={
+                "artifact_id": "art-1",
+                "artifact_tenant_id": "default",
+                "figure_base64": "abc",
+            },
+        ):
+            if ev.startswith("data: {"):
+                payload = json.loads(ev[6:].strip())
+                if payload.get("type") == "done":
+                    done_payload = payload
+        return done_payload
+
+    payload = asyncio.run(_run())
+    assert payload is not None
+    assert payload.get("artifact_id") == "art-1"
+    assert payload.get("artifact_tenant_id") == "default"
+    assert payload.get("figure_base64") == "abc"
+
+
 def test_emit_chat_reply_sse_done_elapsed_ms():
     async def _run() -> dict[str, object] | None:
         done_payload: dict[str, object] | None = None

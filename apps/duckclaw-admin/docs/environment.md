@@ -61,6 +61,14 @@ pnpm admin:dev
 DUCKCLAW_ADMIN_PORT=3001 pnpm admin:serve-tailscale
 ```
 
+**Importante:** si Next usa **3001** (puerto 3000 ocupado), define `DUCKCLAW_ADMIN_PORT=3001` en `.env.local` o el arranque automático puede apuntar Serve al puerto equivocado.
+
+`tailscale funnel reset` (botón «Iniciar plataforma») **borra** toda la config Serve, incluido `:8443`. El stack vuelve a aplicar Serve al final; si falla, ejecuta:
+
+```bash
+DUCKCLAW_ADMIN_PORT=3001 uv run python scripts/restore_tailscale_admin_serve.py
+```
+
 En el iPhone/Android (app Tailscale conectada): `https://<nombre-maquina>.<tailnet>.ts.net:8443/`  
 Ejemplo: `https://mac-mini-de-juan.tailc85db0.ts.net:8443/`
 

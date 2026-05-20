@@ -5,7 +5,13 @@ import { Bot, ChevronDown, ChevronRight, ImagePlus, Send, X } from 'lucide-react
 import { useAuthStore } from '@/store/authStore';
 import { ChatBubble, ThinkingBubble } from '@/components/chat/ChatBubble';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
-import { useAdminChat, type AdminChatController } from '@/components/chat/useAdminChat';
+import {
+  isThinkingStatusHeartbeat,
+  useAdminChat,
+  type AdminChatController,
+} from '@/components/chat/useAdminChat';
+import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
+import { workerOptionId, workerOptionLabel } from '@/lib/workerOptions';
 
 export type AdminChatPanelProps = {
   chatId: string;
@@ -68,6 +74,9 @@ export function AdminChatPanel({
     cancelGeneration,
     clearMessages,
     imageAttachments,
+    vaultPath,
+    setVaultPath,
+    reloadConfig,
   } = chat;
 
   const isCompact = variant === 'compact';
@@ -106,7 +115,21 @@ export function AdminChatPanel({
               ) : null}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 justify-end">
+            {chatId && (
+              <ConversationVaultSelector
+                chatId={chatId}
+                tenantId={config?.effective_tenant_id}
+                value={vaultPath}
+                effectivePath={config?.vault?.effective_path}
+                scope={config?.vault?.scope}
+                options={config?.vault_options}
+                onChange={setVaultPath}
+                onUpdated={() => reloadConfig()}
+                disabled={config?.authorized === false}
+                compact={isCompact}
+              />
+            )}
             <select
               value={workerId}
               onChange={(e) => {
@@ -117,11 +140,15 @@ export function AdminChatPanel({
               className="text-xs px-2 py-1.5 border rounded-lg dark:border-dark-border dark:bg-dark-bg max-w-[140px] disabled:opacity-50"
               aria-label="Agente"
             >
-              {(config?.workers ?? []).map((w) => (
-                <option key={w} value={w}>
-                  {w}
-                </option>
-              ))}
+              {(config?.workers ?? []).map((w) => {
+                const id = workerOptionId(w);
+                const label = workerOptionLabel(w);
+                return (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                );
+              })}
             </select>
             {showWorkerLink && workerId && (
               <Link
@@ -169,6 +196,16 @@ export function AdminChatPanel({
           </p>
         )}
         {messages.map((m, i) => {
+          const next = messages[i + 1];
+          if (
+            isThinkingStatusHeartbeat(m) &&
+            next?.role === 'assistant' &&
+            next.streaming &&
+            !next.text &&
+            thinking
+          ) {
+            return null;
+          }
           const isEmptyStreaming =
             m.role === 'assistant' && m.streaming && !m.text && thinking && i === messages.length - 1;
           if (isEmptyStreaming) {

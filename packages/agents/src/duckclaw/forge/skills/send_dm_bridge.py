@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-SendPrivateMessage skill — enrutamiento cruzado (DM) para juegos tipo The Mind.
+SendPrivateMessage skill — enrutamiento cruzado (DM) vía Bot API / webhook.
 
 Contrato: send_dm(user_id: str, text: str)
 Implementación: Bot API nativa; webhook opcional vía DUCKCLAW_SEND_DM_WEBHOOK_URL.

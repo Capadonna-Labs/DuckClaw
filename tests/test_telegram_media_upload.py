@@ -39,6 +39,13 @@ def test_sniff_jpeg() -> None:
     assert _sniff_image_meta(b) == ("image/jpeg", CHART_UPLOAD_FILENAME_JPEG)
 
 
+def test_sniff_webp() -> None:
+    from core.telegram_media_upload import CHART_UPLOAD_FILENAME_WEBP
+
+    b = b"RIFF" + b"\x00" * 4 + b"WEBP" + b"\x00" * 20
+    assert _sniff_image_meta(b) == ("image/webp", CHART_UPLOAD_FILENAME_WEBP)
+
+
 def test_send_sandbox_chart_skips_non_image_without_http() -> None:
-    """Bytes que no son PNG/JPEG no deben llamar a la API (retorno temprano)."""
+    """Bytes que no son PNG/JPEG/WebP no deben llamar a la API (retorno temprano)."""
     assert send_sandbox_chart_to_telegram_sync(bot_token="dummy", chat_id="1", image_bytes=b"not-an-image") is False

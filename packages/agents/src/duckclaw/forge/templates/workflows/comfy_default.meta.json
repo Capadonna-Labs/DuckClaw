@@ -1,0 +1,15 @@
+{
+  "checkpoint_loader_node": "4",
+  "default_ckpt_name": "v1-5-pruned-emaonly.safetensors",
+  "positive_clip_nodes": ["6"],
+  "negative_clip_nodes": ["7"],
+  "latent_image_node": "5",
+  "ksampler_node": "3",
+  "aspect_presets": {
+    "1:1": [1024, 1024],
+    "16:9": [1344, 768],
+    "9:16": [768, 1344],
+    "4:3": [1152, 896],
+    "3:4": [896, 1152]
+  }
+}

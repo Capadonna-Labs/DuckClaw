@@ -38,7 +38,7 @@ export function StackBootstrapPanel({ onConnected, compact }: Props) {
         })
       );
       if (r.ok) {
-        await waitForHealth(8, 2000, onConnected);
+        await waitForHealth(15, 2000, onConnected);
       } else {
         setError(
           'Arranque incompleto. Revisa PM2, Tailscale Funnel y setWebhook en la salida.'

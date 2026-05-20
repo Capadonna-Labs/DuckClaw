@@ -166,6 +166,8 @@ def publish_admin_chat_heartbeat(
     worker_id: str | None = None,
     swarm_slot: int | None = None,
     instance_label: str | None = None,
+    artifact_id: str | None = None,
+    artifact_tenant_id: str | None = None,
 ) -> None:
     """
     Publica heartbeat para la UI admin (playground / widget flotante).
@@ -191,6 +193,12 @@ def publish_admin_chat_heartbeat(
     if wid:
         body["worker_id"] = wid
     body["swarm_slot"] = int(slot)
+    aid = (artifact_id or "").strip()
+    if aid:
+        body["artifact_id"] = aid
+    tid = (artifact_tenant_id or "").strip()
+    if tid:
+        body["artifact_tenant_id"] = tid
     payload = json.dumps(body, ensure_ascii=False)
 
     def _run() -> None:

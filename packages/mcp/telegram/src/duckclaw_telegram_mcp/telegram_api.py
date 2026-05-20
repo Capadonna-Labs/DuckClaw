@@ -138,6 +138,9 @@ def _sniff_filename_and_ctype(image_bytes: bytes, default_filename: str) -> tupl
     if len(image_bytes) >= 2 and image_bytes[:2] == b"\xff\xd8":
         base = default_filename.rsplit(".", 1)[0] if "." in default_filename else default_filename
         return f"{base}.jpg", "image/jpeg"
+    if len(image_bytes) >= 12 and image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+        base = default_filename.rsplit(".", 1)[0] if "." in default_filename else default_filename
+        return f"{base}.webp", "image/webp"
     return default_filename, "application/octet-stream"
 
 
@@ -157,7 +160,7 @@ def send_photo_or_document_api(
 
     fname, ctype = _sniff_filename_and_ctype(image_bytes, filename.strip() or "chart.png")
     if ctype == "application/octet-stream":
-        return {"ok": False, "error": "payload no es PNG/JPEG válido"}
+        return {"ok": False, "error": "payload no es PNG/JPEG/WebP válido"}
 
     use_document = len(image_bytes) > _TELEGRAM_SEND_PHOTO_MAX_BYTES
     method = "sendDocument" if use_document else "sendPhoto"

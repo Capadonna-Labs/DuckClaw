@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import { PageShell } from '@/components/admin/PageShell';
 import { ExternalLink, Globe, Monitor, RefreshCw } from 'lucide-react';
+import { workerOptionId, workerOptionIds } from '@/lib/workerOptions';
 
 /** Mismo chat_id que el chat flotante en /vnc (FloatingAdminChat). */
 const POLICY_CHAT_ID = 'admin-section-vnc';
@@ -81,18 +82,20 @@ export default function VncPage() {
       .getPlaygroundConfig()
       .then(async (cfg) => {
         const workers = cfg.workers ?? [];
-        setWorkerOptions(workers);
+        const workerIds = workerOptionIds(workers);
+        setWorkerOptions(workerIds);
         setChatId((prev) => prev || cfg.team_chat_id || '');
         const browserIds = new Set<string>();
         const initialPolicyChat = (cfg.team_chat_id || POLICY_CHAT_ID).trim();
         await Promise.all(
           workers.map(async (w) => {
+            const wid = workerOptionId(w);
             try {
               const pol = await adminService.getSandboxChatPolicy({
                 chatId: initialPolicyChat,
-                workerId: w,
+                workerId: wid,
               });
-              if (pol.browser_sandbox) browserIds.add(w);
+              if (pol.browser_sandbox) browserIds.add(wid);
             } catch {
               /* ignore per-worker policy errors */
             }
@@ -101,8 +104,8 @@ export default function VncPage() {
         setBrowserWorkerIds(browserIds);
         setWorkerId((prev) => {
           if (prev) return prev;
-          const firstBrowser = workers.find((w) => browserIds.has(w));
-          return firstBrowser ?? workers[0] ?? '';
+          const firstBrowser = workerIds.find((wid) => browserIds.has(wid));
+          return firstBrowser ?? workerIds[0] ?? '';
         });
       })
       .catch(() => undefined);

@@ -18,6 +18,7 @@ _log = logging.getLogger("duckclaw.gateway")
 # Nombre explícito en Content-Disposition (Telegram sendPhoto / sendDocument).
 CHART_UPLOAD_FILENAME_PNG = "chart.png"
 CHART_UPLOAD_FILENAME_JPEG = "chart.jpg"
+CHART_UPLOAD_FILENAME_WEBP = "chart.webp"
 CHART_UPLOAD_FILENAME_BIN = "chart.bin"
 
 # No intentar sendPhoto con basura decodificada (evita IMAGE_PROCESS_FAILED y .bin).
@@ -71,6 +72,8 @@ def _sniff_image_meta(image_bytes: bytes) -> tuple[str, str]:
         return "image/png", CHART_UPLOAD_FILENAME_PNG
     if len(image_bytes) >= 2 and image_bytes[:2] == b"\xff\xd8":
         return "image/jpeg", CHART_UPLOAD_FILENAME_JPEG
+    if len(image_bytes) >= 12 and image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+        return "image/webp", CHART_UPLOAD_FILENAME_WEBP
     return "application/octet-stream", CHART_UPLOAD_FILENAME_BIN
 
 
@@ -79,7 +82,7 @@ def is_telegram_ready_image_bytes(image_bytes: bytes) -> bool:
     if not image_bytes or len(image_bytes) < _MIN_IMAGE_BYTES_FOR_TELEGRAM:
         return False
     ctype, _ = _sniff_image_meta(image_bytes)
-    return ctype in ("image/png", "image/jpeg")
+    return ctype in ("image/png", "image/jpeg", "image/webp")
 
 
 def _post_telegram_multipart(

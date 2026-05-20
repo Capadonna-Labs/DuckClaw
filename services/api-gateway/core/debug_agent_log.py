@@ -6,8 +6,8 @@ import json
 import time
 from typing import Any
 
-_DEBUG_LOG_PATH = "/Users/workstation/Developer/duckclaw/.cursor/debug-77cb49.log"
-_SESSION_ID = "77cb49"
+_DEBUG_LOG_PATH = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log"
+_SESSION_ID = "fd1dbb"
 
 
 def agent_debug_log(

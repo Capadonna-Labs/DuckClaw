@@ -16,7 +16,7 @@ Los prefijos estructurados siguen siendo: `[REQ]`, `[PLAN]`, `[TOOL]`, `[RES]`, 
 |------|------------------------|--------|
 | `[REQ]` | `manager` | Entrada HTTP/API; sufijo opcional `(via body)` cuando el mensaje viene del cuerpo JSON. |
 | `[PLAN]` | `manager` | Incluye delegación explícita: `-> tasks: [<assigned_worker_id>]`. |
-| `[SYS]` en subgrafo del worker | Worker asignado (`finanz`, `TheMindCrupier`, …) | Tras delegación, línea breve `Delegación: manager -> <id>`. |
+| `[SYS]` en subgrafo del worker | Worker asignado (`finanz`, `default`, …) | Tras delegación, línea breve `Delegación: manager -> <id>`. |
 | `[RES]` | `assigned_worker_id` efectivo | Tras retorno del grafo (`effective_worker_id`). |
 | `[FLY]` | `gateway` | Comando normalizado `/nombre` + resumen de respuesta (truncado, sin secretos). |
 
@@ -38,7 +38,7 @@ Registrado en `DEFAULT_STRUCTURED_LOGGERS` para formatter/filter 2.0 coherente c
 
 Runs nombrados con **`get_tracing_config`** en `packages/shared/src/duckclaw/utils/langsmith_trace.py`:
 
-- **`run_name`** (columna **Name** en LangSmith): el **worker/template** — p. ej. `Manager` (orquestador), `TheMindCrupier`, `finanz`. El tenant no va en el nombre; sí en tags/metadata.
+- **`run_name`** (columna **Name** en LangSmith): el **worker/template** — p. ej. `Manager` (orquestador), `default`, `finanz`. El tenant no va en el nombre; sí en tags/metadata.
 - **Tags** (sin PII): `tenant:…`, `worker:…`, `env:…`.
 - **Metadata**: `tenant_id`, `chat_id`, `worker_template`, `model_version`, `deployment_id`.
 

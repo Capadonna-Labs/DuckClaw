@@ -18,13 +18,6 @@
 /audit|Última auditoría de ejecución
 /health|Estado del servicio
 /sensors|DuckDB, IBKR, Lake, Tavily, Reddit, Trends, browser sandbox
-/new_mind|The Mind: crear partida (alias de /new_game the_mind)
-/join <game_id>|The Mind: unirse a partida
-/start_mind [game_id]|The Mind: iniciar y repartir Nivel 1
-/game|The Mind: listar partidas waiting/playing
-/play <n>|The Mind: jugar carta
-/cards|The Mind: ver tus cartas activas (DM)
-/shuriken|The Mind: votar uso de estrella ninja
 /setup|Config key=value
 /approve|Aprobar última acción
 /reject|Rechazar última acción

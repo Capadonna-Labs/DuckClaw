@@ -4,12 +4,12 @@ Inserta o actualiza un usuario como admin en main.authorized_users (Telegram Gua
 
 Usa la misma ruta DuckDB que el API Gateway (multiplex / ``get_gateway_db_path``).
 
-Ejemplo (ajusta la variable a tu PM2 / TheMind-Gateway):
-  export DUCKCLAW_FINANZ_DB_PATH="/Users/.../duckclaw/db/private/1726618406/the_mind.duckdb"
+Ejemplo (misma ruta que DuckClaw-Gateway en ``.env``):
+  export DUCKCLAW_FINANZ_DB_PATH="/Users/.../duckclaw/db/private/1726618406/finanzdb1.duckdb"
   uv run python scripts/bootstrap_team_admin.py 1726618406 --username Juan
 
-Si DuckDB devuelve lock (PM2 tiene abierta la misma .duckdb): ``pm2 stop TheMind-Gateway``,
-ejecuta el script, luego ``pm2 start TheMind-Gateway``.
+Si DuckDB devuelve lock (PM2 tiene abierta la misma .duckdb): ``pm2 stop DuckClaw-Gateway``,
+ejecuta el script, luego ``pm2 restart DuckClaw-Gateway --update-env``.
 
 Caché Redis (si usas whitelist cacheada; tenant en minúsculas como el gateway):
   redis-cli DEL "whitelist:default:1726618406"

@@ -1,6 +1,6 @@
 # Template vault binding (Plantillas → DuckDB)
 
-**Objetivo:** Desde la consola admin (`/templates/[workerId]`), elegir qué archivo `.duckdb` usa una plantilla (ej. Quant-Trader), persistido en `manifest.yaml` sin tocar `.env`. El runtime resuelve la ruta por `vault_user_id` del chat.
+**Objetivo:** En runtime, una plantilla puede fijar bóveda vía `manifest.yaml` (`forge_context.vault_binding`). En la **consola admin**, la bóveda activa se elige **por conversación** (Playground / chat flotante → `PUT /playground/vault`), no en la página Workers.
 
 ---
 
@@ -44,11 +44,13 @@ Default `vault_user_id`: `DUCKCLAW_OWNER_ID` o `DUCKCLAW_ADMIN_CHAT_ID`.
 
 | Método | Ruta | Body |
 |--------|------|------|
-| GET | `/templates/{id}/vault-options` | Query `vault_user_id` |
+| PUT | `/playground/vault` | `{ "chat_id", "vault_db_path?" }` — **UI principal** |
+| GET | `/playground/config?chat_id=` | Incluye `vault`, `vault_options` |
+| GET | `/templates/{id}/vault-options` | Query `vault_user_id` (API legacy / automatización) |
 | GET | `/templates/{id}/vault-binding` | — |
-| PUT | `/templates/{id}/vault-binding` | `{ "scope", "vault_id?", "path?" }` |
+| PUT | `/templates/{id}/vault-binding` | `{ "scope", "vault_id?", "path?" }` (manifest; sin UI Workers) |
 
-Escritura: merge en `manifest.yaml` + `load_manifest` + audit.
+Prioridad en playground chat: `vault_db_path` del body → meta conversación → `resolve_template_vault_path` / vault activo.
 
 ---
 

@@ -63,7 +63,7 @@ Equipo:
 - finanz
 - support
 - AXIS
-- TheMindCrupier
+- default
 - gitclaw
 - Job-Hunter
 
@@ -94,3 +94,44 @@ cd apps/duckclaw-admin && pnpm install && pnpm dev
 Variables en `apps/duckclaw-admin/.env.local`: `DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000`, `DUCKCLAW_ADMIN_API_KEY` (misma clave que el gateway). Ver `apps/duckclaw-admin/docs/environment.md`.
 
 Servicios requeridos: Redis + DuckClaw-DB-Writer + DuckClaw-Gateway (+ MLX-Vision si usas VLM). Documentación: `apps/duckclaw-admin/README.md` · `apps/duckclaw-admin/docs/`.
+
+## ComfyUI (generación visual)
+
+**Instalación en esta Mac:** `~/ComfyUI` (repo [Comfy-Org/ComfyUI](https://github.com/Comfy-Org/ComfyUI), venv Python 3.12). UI: http://127.0.0.1:8188
+
+```bash
+# Arrancar con PM2 (recomendado)
+pm2 start config/ecosystem.comfyui.config.cjs --update-env
+pm2 restart ComfyUI --update-env
+pm2 logs ComfyUI
+
+# Manual
+~/ComfyUI/start_comfyui.sh
+```
+
+**Checkpoint:** `v1-5-pruned-emaonly.safetensors` en `~/ComfyUI/models/checkpoints/` (descarga: `hf download runwayml/stable-diffusion-v1-5 v1-5-pruned-emaonly.safetensors --local-dir ~/ComfyUI/models/checkpoints`).
+
+En `.env` raíz:
+
+```bash
+COMFYUI_API_URL=http://127.0.0.1:8188
+COMFYUI_TIMEOUT_SEC=420
+COMFYUI_IMG2IMG_DENOISE=0.55
+# Edición foto+caption en Telegram sin MLX-Vision:
+DUCKCLAW_COMFYUI_INBOUND_EDIT=1
+# Cola StateDelta (opcional; default duckclaw:state_delta:visual)
+# DUCKCLAW_VISUAL_STATE_DELTA_QUEUE=duckclaw:state_delta:visual
+```
+
+Habilitar en el manifest del worker:
+
+```yaml
+comfyui:
+  enabled: true
+  template: comfy_default
+  edit_template: comfy_img2img_edit
+```
+
+**Edición (estilo Gemini, solo ComfyUI):** envía foto + caption con instrucciones (ej. *cambiar fondo, quitar lentes*). El gateway guarda la imagen en `db/private/{tenant}/inbound/` y el agente usa `edit_visual_asset` — **no** carga MLX-Vision en ese flujo.
+
+Reiniciar gateway y db-writer tras cambiar `.env`. Specs: `COMFYUI_VISUAL_BRIDGE.md`, `COMFYUI_IMAGE_EDIT.md`.

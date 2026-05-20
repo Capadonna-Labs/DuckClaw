@@ -961,6 +961,78 @@ def _try_quant_hrp_affirm_followup(
     return (title, task_list, planned, "Quant-Trader")
 
 
+def _manager_visual_generation_intent(incoming: str) -> bool:
+    """Pedido explícito de imagen (txt2img) → delegar a Quant-Trader sin planner MLX."""
+    s = (incoming or "").strip()
+    if not s or len(s) > 2000:
+        return False
+    low = s.lower()
+    if re.search(
+        r"(?:\b(?:genera|generar|crea|crear|dibuja|dibujar|haz(?:me)?|hacer|pinta|pintar)\b.{0,50}\b(?:imagen(?:es)?|foto(?:s)?|ilustraci[oó]n(?:es)?|caricatura(?:s)?|avatar(?:es)?|picture|image(?:s)?)\b)",
+        low,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:txt2img|text-to-image|stable\s*diffusion|comfyui)\b",
+            low,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _pick_quant_trader_worker(available_templates: list[str]) -> Optional[str]:
+    for wid in available_templates or []:
+        if _worker_matches_id(wid, "quant_trader"):
+            return wid
+    return None
+
+
+def _try_visual_generation_fast_plan(
+    incoming: str,
+    available_plan: list[str],
+) -> tuple[str, list[str], str, str] | None:
+    """Evita planner MLX lento en admin/Telegram cuando el usuario pide una imagen."""
+    if not _manager_visual_generation_intent(incoming):
+        return None
+    qt = _pick_quant_trader_worker(available_plan)
+    if not qt:
+        return None
+    # region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                json.dumps(
+                    {
+                        "sessionId": "fd1dbb",
+                        "hypothesisId": "H8",
+                        "location": "manager_graph._try_visual_generation_fast_plan",
+                        "message": "visual_fast_plan",
+                        "data": {"worker": qt, "incoming_preview": (incoming or "")[:120]},
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except OSError:
+        pass
+    # endregion
+    title = "Generar imagen (ComfyUI)"
+    task_list = [
+        "Usar generate_visual_asset una sola vez con el prompt del usuario.",
+        "No repetir la herramienta si ya hubo un ToolMessage OK en este turno.",
+    ]
+    planned = (incoming or "").strip()
+    log_sys(_obs, "Plan rápido imagen → %s (sin planner MLX)", qt)
+    return (title, task_list, planned, qt)
+
+
 _FINANZ_TOOL_PRESSURE_TASK = load_guardrail("manager_tasks", "finanz_tool_pressure")
 
 
@@ -1111,16 +1183,6 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     )
     if is_db_intent and (worker_id or "").strip().lower() == "personalizable":
         override = "finanz"  # invoke_worker lo usará si finanz está en list_workers
-
-    # Última partida / partida más reciente
-    is_latest_game_intent = bool(
-        re.search(
-            r"\b(ultima|última|mas\s+reciente|más\s+reciente)\s+partida\b",
-            t,
-        )
-    ) or ("partida" in t and ("ultima" in t or "última" in t or "reciente" in t))
-    if is_latest_game_intent:
-        return load_guardrail("manager_tasks", "the_mind_latest_game"), override
 
     # Nombre de la db / base de datos
     if re.search(r"\b(nombre\s+de\s+la\s+db|nombre\s+db|cual\s+es\s+el\s+nombre|nombre\s+de\s+la\s+base)\b", t) or (
@@ -1711,6 +1773,7 @@ def build_manager_graph(
             _log.warning("manager plan: incoming vacío en state (keys=%s)", list(state.keys()))
 
         _hrp_fast: tuple[str, list[str], str, str] | None = None
+        _visual_fast: tuple[str, list[str], str, str] | None = None
         if incoming:
             _hrp_fast = _try_quant_hrp_affirm_followup(
                 incoming,
@@ -1719,8 +1782,16 @@ def build_manager_graph(
                 _tid,
                 [str(x) for x in (available_plan or []) if x],
             )
+        if incoming and not _hrp_fast:
+            _visual_fast = _try_visual_generation_fast_plan(
+                incoming,
+                [str(x) for x in (available_plan or []) if x],
+            )
         if _hrp_fast:
             plan_title, tasks, _inject_hrp, _ov_hrp = _hrp_fast
+            mercenary_spec = None
+        elif _visual_fast:
+            plan_title, tasks, _inject_vis, _ov_vis = _visual_fast
             mercenary_spec = None
         else:
             _psp = (planner_system_prompt or "").strip()
@@ -1764,7 +1835,7 @@ def build_manager_graph(
         # Prioridad A2A: en crisis de caja + intención laboral, enrutar a JobHunter si está disponible.
         job_hunter_in_team = _pick_job_hunter_worker(list(available_plan or []))
         cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
-        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _hrp_fast:
+        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _hrp_fast and not _visual_fast:
             assigned = job_hunter_in_team
 
         # Mantener lógica existente de ruteo / planned_task
@@ -1774,6 +1845,12 @@ def build_manager_graph(
             override_worker = _ov_hrp
             planned = _inject_hrp
             planned_final = _inject_hrp
+        elif _visual_fast:
+            if _ov_vis and _ov_vis in (available_plan or []):
+                assigned = _ov_vis
+            override_worker = _ov_vis
+            planned = _inject_vis
+            planned_final = _inject_vis
         else:
             planned, override_worker = _plan_task(incoming, assigned)
             planned_final = planned or incoming
@@ -1782,7 +1859,7 @@ def build_manager_graph(
         if replan_enabled() and _pa_plan > 0:
             planned_final = (planned_final or "").strip() + format_replan_task_suffix(_pa_plan, _max_plan)
 
-        if coordinator_id and delegation_pool and not _hrp_fast:
+        if coordinator_id and delegation_pool and not _hrp_fast and not _visual_fast:
             assigned = _resolve_orchestrator_delegate(
                 incoming,
                 delegation_pool,
@@ -1966,6 +2043,9 @@ def build_manager_graph(
         task_summary = (state.get("task_summary") or "").strip() or _task_summary_for_activity(incoming, planned_task)
         _combined = planned_task or incoming
         _lite_stdio_mcp = _worker_should_use_lite_stdio_mcp_surface(_combined)
+        _visual_lite_mcp = _manager_visual_generation_intent(_combined) and _worker_matches_id(
+            assigned, "quant_trader"
+        )
         _summarize_vault_ro = _incoming_has_context_summary_system_directive(_combined)
         t0 = time.monotonic()
         reply = ""
@@ -1995,7 +2075,9 @@ def build_manager_graph(
                 f"{tenant_id}::{assigned}::{vault_db_path or db_path or ''}::{shared_db_path}"
                 f"::{(llm_provider or '').strip()}::{(llm_model or '').strip()}::{(llm_base_url or '').strip()}"
             )
-            if _lite_stdio_mcp:
+            if _visual_lite_mcp:
+                worker_cache_key = f"{worker_cache_key}::vis_gen"
+            elif _lite_stdio_mcp:
                 worker_cache_key = f"{worker_cache_key}::ctx_syn"
             if _summarize_vault_ro:
                 worker_cache_key = f"{worker_cache_key}::sum_vault_ro"
@@ -2077,7 +2159,11 @@ def build_manager_graph(
                     instance_name=tenant_id,  # Aislar por tenant (Forge/WorkerFactory)
                     shared_db_path=shared_db_path or None,
                     reuse_db=db,
-                    tool_surface="context_synthesis" if _lite_stdio_mcp else "full",
+                    tool_surface=(
+                        "visual_generation"
+                        if _visual_lite_mcp
+                        else ("context_synthesis" if _lite_stdio_mcp else "full")
+                    ),
                     open_vault_read_only=_summarize_vault_ro,
                 )
             worker_graph = _worker_graph_cache[worker_cache_key]
@@ -2380,6 +2466,11 @@ def build_manager_graph(
             b64 = extract_latest_sandbox_figure_base64(messages) or ""
         if b64:
             out["sandbox_photo_base64"] = b64
+        aid = ""
+        if isinstance(worker_invoke, dict):
+            aid = (worker_invoke.get("visual_artifact_id") or "").strip()
+        if aid:
+            out["visual_artifact_id"] = aid
         if "active_mission" in state:
             out["active_mission"] = state.get("active_mission")
         if "handoff_context" in state:

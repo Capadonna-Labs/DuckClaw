@@ -134,8 +134,16 @@ export interface AdminConversation {
   last_message_preview: string;
   message_count: number;
   origin: string;
+  vault_db_path?: string;
   messages?: { role: string; content: string }[];
 }
+
+export type PlaygroundVaultInfo = {
+  effective_path: string;
+  scope: string;
+  override_path?: string | null;
+  default_path?: string | null;
+};
 
 function sessionHeaders(): HeadersInit {
   if (typeof window === 'undefined') return {};
@@ -604,6 +612,75 @@ export const adminService = {
       executed_via?: 'local' | string;
     }>('/ops/run', { method: 'POST', body: JSON.stringify({ op_id: opId }) }),
 
+  getComfyuiStatus: () =>
+    adminFetch<{
+      ok: boolean;
+      url: string;
+      latency_ms?: number;
+      error?: string;
+      system?: Record<string, unknown>;
+      checkpoints?: string[];
+      checkpoints_ready?: boolean;
+    }>('/comfyui/status'),
+
+  listComfyuiTemplates: () =>
+    adminFetch<{
+      templates: { id: string; label: string; aspect_ratios: string[] }[];
+      default: string;
+    }>('/comfyui/templates'),
+
+  generateComfyuiImage: (body: {
+    prompt: string;
+    negative_prompt?: string;
+    aspect_ratio?: string;
+    template?: string;
+    tenant_id?: string;
+  }) =>
+    fetch('/api/admin/comfyui/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...sessionHeaders(),
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    }).then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const raw =
+          typeof data?.detail === 'string'
+            ? data.detail
+            : data?.detail?.detail ?? data?.title ?? res.statusText;
+        throw new Error(friendlyGatewayError(raw || `Error ${res.status}`));
+      }
+      return data as {
+        ok: boolean;
+        file_path?: string;
+        artifact_id?: string;
+        figure_base64?: string;
+        prompt_id?: string;
+        aspect_ratio?: string;
+        message?: string;
+        error?: string;
+      };
+    }),
+
+  /** Carga imagen del vault local vía BFF (cuando figure_base64 no viene por tamaño). */
+  fetchArtifactPreviewBlob: async (tenantId: string, artifactId: string) => {
+    const res = await fetch(
+      `/api/admin/artifacts/${encodeURIComponent(tenantId)}/${encodeURIComponent(artifactId)}`,
+      { headers: sessionHeaders(), cache: 'no-store' }
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const raw =
+        typeof data?.detail === 'string' ? data.detail : `Error ${res.status} al cargar imagen`;
+      throw new Error(raw);
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
+
   getKanbanCards: () =>
     adminFetch<{ cards: import('@/lib/kanbanTypes').KanbanCard[] }>('/kanban'),
 
@@ -750,9 +827,27 @@ export const adminService = {
       whitelist_role?: string | null;
       team_source?: string;
       team_hint?: string;
+      vault?: PlaygroundVaultInfo;
+      vault_options?: { path: string; scope: string; vault_id?: string; label?: string }[];
       note: string;
     }>(`/playground/config${qs ? `?${qs}` : ''}`);
   },
+
+  setPlaygroundVault: (body: {
+    chat_id: string;
+    tenant_id?: string;
+    vault_db_path: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      chat_id: string;
+      tenant_id: string;
+      vault_db_path: string;
+      vault: PlaygroundVaultInfo;
+    }>('/playground/vault', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 
   listForgeProjects: () =>
     adminFetch<{
@@ -847,6 +942,7 @@ export const adminService = {
     chat_id?: string;
     tenant_id?: string;
     telegram_user_id?: string;
+    vault_db_path?: string;
     stream?: boolean;
     images?: { mime_type: string; data_base64: string }[];
   }) =>
@@ -869,21 +965,27 @@ export const adminService = {
       chat_id?: string;
       tenant_id?: string;
       telegram_user_id?: string;
+      vault_db_path?: string;
       images?: { mime_type: string; data_base64: string }[];
     },
     handlers: {
       onToken: (chunk: string) => void;
       onHeartbeat?: (payload: {
         text: string;
-        kind?: 'plan' | 'tool' | 'status';
+        kind?: 'plan' | 'tool' | 'status' | 'visual';
         worker_id?: string;
         swarm_slot?: number;
+        artifact_id?: string;
+        artifact_tenant_id?: string;
       }) => void;
       onDone?: (meta: {
         response: string;
         assigned_worker_id?: string;
         usage_tokens?: Record<string, number>;
         elapsed_ms?: number;
+        figure_base64?: string;
+        artifact_id?: string;
+        artifact_tenant_id?: string;
       }) => void;
     },
     options?: { signal?: AbortSignal }
@@ -920,6 +1022,8 @@ export const adminService = {
             kind: ev.kind,
             worker_id: ev.worker_id,
             swarm_slot: ev.swarm_slot,
+            artifact_id: ev.artifact_id,
+            artifact_tenant_id: ev.artifact_tenant_id,
           });
         } else if (ev.type === 'done') {
           handlers.onDone?.({
@@ -927,6 +1031,9 @@ export const adminService = {
             assigned_worker_id: ev.assigned_worker_id,
             usage_tokens: ev.usage_tokens,
             elapsed_ms: ev.elapsed_ms,
+            figure_base64: ev.figure_base64,
+            artifact_id: ev.artifact_id,
+            artifact_tenant_id: ev.artifact_tenant_id,
           });
         } else if (ev.type === 'error') {
           throw new Error(ev.message);

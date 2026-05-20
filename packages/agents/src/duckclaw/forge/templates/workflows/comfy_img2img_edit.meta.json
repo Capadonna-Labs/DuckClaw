@@ -1,0 +1,8 @@
+{
+  "load_image_node": "10",
+  "vae_encode_node": "11",
+  "ksampler_node": "3",
+  "positive_clip_nodes": ["6"],
+  "negative_clip_nodes": ["7"],
+  "denoise_default": 0.55
+}

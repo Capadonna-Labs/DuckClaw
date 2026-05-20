@@ -24,11 +24,17 @@ import {
   ChevronDown,
   Plug,
   Cpu,
+  Image,
+  Sparkles,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { PanelToggleButton } from '@/components/layout/PanelToggleButton';
-import { navEntriesForRole, type AdminNavGroup, type AdminNavItem } from '@/config/adminNav';
+import {
+  navEntriesForRole,
+  type AdminNavGroup,
+  type AdminNavItem,
+} from '@/config/adminNav';
 import { cn } from '@/lib/utils';
 import type { LucideIcon } from 'lucide-react';
 
@@ -41,6 +47,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/mcp': Cable,
   '/projects/new': FolderPlus,
   '/playground': MessageCircle,
+  '/gen/image': Image,
   '/runtime': Radio,
   '/telegram': MessageSquare,
   '/integrations/edge-devices': Cpu,
@@ -66,11 +73,15 @@ export default function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useLayoutUiStore();
   const entries = navEntriesForRole(usuario?.rol === 'admin');
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
+    gen: pathname.startsWith('/gen'),
     integrations:
       pathname.startsWith('/telegram') || pathname.startsWith('/integrations'),
   }));
 
   useEffect(() => {
+    if (pathname.startsWith('/gen')) {
+      setOpenGroups((prev) => ({ ...prev, gen: true }));
+    }
     if (pathname.startsWith('/telegram') || pathname.startsWith('/integrations')) {
       setOpenGroups((prev) => ({ ...prev, integrations: true }));
     }
@@ -126,7 +137,7 @@ export default function Sidebar() {
                   [entry.group.id]: !prev[entry.group.id],
                 }))
               }
-              groupIcon={Plug}
+              groupIcon={entry.group.id === 'gen' ? Sparkles : Plug}
             />
           );
         })}

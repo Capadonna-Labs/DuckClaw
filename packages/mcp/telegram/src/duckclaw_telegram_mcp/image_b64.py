@@ -1,4 +1,4 @@
-"""Decodificación base64 tolerante → PNG/JPEG válido (alineado con api-gateway)."""
+"""Decodificación base64 tolerante → PNG/JPEG/WebP válido (alineado con api-gateway)."""
 
 from __future__ import annotations
 
@@ -31,5 +31,7 @@ def decode_valid_sandbox_image_bytes(photo_b64: str | bytes) -> bytes:
     if len(raw) >= 8 and raw[:8] == b"\x89PNG\r\n\x1a\n":
         return raw
     if len(raw) >= 2 and raw[:2] == b"\xff\xd8":
+        return raw
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
         return raw
     return b""

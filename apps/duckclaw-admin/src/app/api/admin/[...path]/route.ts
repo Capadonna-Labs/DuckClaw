@@ -57,6 +57,21 @@ const OPS_COMMANDS_FALLBACK = {
       label: 'Últimas líneas log MCP',
       argv: ['pm2', 'logs', 'DuckClaw-MCP', '--lines', '40', '--nostream'],
     },
+    {
+      id: 'pm2_start_comfyui',
+      label: 'Iniciar ComfyUI',
+      argv: ['pm2', 'start', 'config/ecosystem.comfyui.config.cjs', '--update-env'],
+    },
+    {
+      id: 'pm2_restart_comfyui',
+      label: 'Reiniciar ComfyUI',
+      argv: ['pm2', 'restart', 'ComfyUI', '--update-env'],
+    },
+    {
+      id: 'pm2_logs_comfyui',
+      label: 'Últimas líneas log ComfyUI',
+      argv: ['pm2', 'logs', 'ComfyUI', '--lines', '40', '--nostream'],
+    },
     { id: 'doctor', label: 'Diagnóstico local (doctor.py)', argv: ['uv', 'run', 'python', 'scripts/doctor.py'] },
     {
       id: 'bootstrap_dbs',

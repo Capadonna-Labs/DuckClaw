@@ -180,21 +180,6 @@ def build_general_graph(
         except Exception:
             pass
 
-    # The Mind broadcasting / reparto de cartas — opcional vía tools_spec (db = bóveda del grafo)
-    if "broadcast_message" in tool_names_set or "deal_cards" in tool_names_set:
-        try:
-            from duckclaw.forge.skills.the_mind_outbound import (
-                make_broadcast_message_tool,
-                make_deal_cards_tool,
-            )
-
-            if "broadcast_message" in tool_names_set:
-                tools.append(make_broadcast_message_tool(db))
-            if "deal_cards" in tool_names_set:
-                tools.append(make_deal_cards_tool(db))
-        except Exception:
-            pass
-
     # Mensajería proactiva outbound — opcional vía tools_spec
     if "send_proactive_message" in tool_names_set:
         try:

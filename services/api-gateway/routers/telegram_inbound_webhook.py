@@ -40,6 +40,7 @@ from core.context_injection_rbac import user_may_context_inject
 from core.context_injection_vault import resolve_telegram_user_vault_db_path
 from core.context_stored_snapshot import fetch_semantic_memory_snapshot
 from core.models import ChatRequest
+from core.comfyui_inbound import ingest_comfyui_edit_inbound, should_route_comfyui_edit
 from core.vlm_ingest import (
     VlmIngestAllFailed,
     process_visual_album_batch,
@@ -988,12 +989,35 @@ def build_telegram_inbound_webhook_router(
         tenant_id = war_room_tenant_for_chat(chat_type, chat_id, tenant_id)
 
 
-        # DM / chat privado: fotos/álbumes pasan por VLM (no solo War Rooms).
+        # DM / chat privado: foto+caption edición → ComfyUI (sin VLM) o VLM para análisis.
         if has_visual and not is_war_room_tenant(tenant_id):
             token_v = (reply_token or "").strip() or (
                 resolve_effective_telegram_bot_token() or ""
             ).strip()
-            if not token_v:
+            mgid_dm = (visual.get("media_group_id") or "").strip()
+            if should_route_comfyui_edit(
+                has_visual=True,
+                caption=telegram_raw_caption,
+                media_group_id=mgid_dm,
+            ):
+                if not token_v:
+                    _log.warning("telegram inbound: comfy edit en DM sin token de bot")
+                else:
+                    try:
+                        text = await ingest_comfyui_edit_inbound(
+                            bot_token=token_v,
+                            file_id=(visual.get("file_id") or "").strip(),
+                            caption=telegram_raw_caption,
+                            tenant_id=tenant_id,
+                            mime_type=(visual.get("mime_type") or "image/jpeg"),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        _log.warning("comfyui inbound DM failed: %s", exc)
+                        text = (
+                            "[COMFYUI_EDIT_FAILED] No se pudo preparar la foto para edición. "
+                            f"Detalle: {exc}"
+                        )
+            elif not token_v:
                 _log.warning("telegram inbound: imagen en DM sin token de bot")
             else:
                 text, drop_early = await _ingest_telegram_visual_enrich_text(
@@ -1178,7 +1202,39 @@ def build_telegram_inbound_webhook_router(
                         user_id,
                     )
                 mime_type = (visual.get("mime_type") or "").strip().lower()
-                if mime_type and mime_type not in _VISUAL_ALLOWED_MIME:
+                token_v = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
+                mgid_wr = (visual.get("media_group_id") or "").strip()
+                if should_route_comfyui_edit(
+                    has_visual=True,
+                    caption=telegram_raw_caption,
+                    media_group_id=mgid_wr,
+                ):
+                    if token_v:
+                        try:
+                            text = await ingest_comfyui_edit_inbound(
+                                bot_token=token_v,
+                                file_id=(visual.get("file_id") or "").strip(),
+                                caption=telegram_raw_caption,
+                                tenant_id=tenant_id,
+                                mime_type=(mime_type or "image/jpeg"),
+                            )
+                            wr_append_audit(
+                                db,
+                                tenant_id=tenant_id,
+                                sender_id=user_id,
+                                target_agent=None,
+                                event_type="COMFYUI_EDIT_INBOUND",
+                                payload=(telegram_raw_caption or "")[:1000],
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            _log.warning("comfyui inbound WR failed: %s", exc)
+                            text = (
+                                "[COMFYUI_EDIT_FAILED] No se pudo preparar la foto para edición. "
+                                f"Detalle: {exc}"
+                            )
+                    else:
+                        _log.warning("war_room comfy edit sin token de bot")
+                elif mime_type and mime_type not in _VISUAL_ALLOWED_MIME:
                     wr_append_audit(
                         db,
                         tenant_id=tenant_id,
@@ -1188,8 +1244,7 @@ def build_telegram_inbound_webhook_router(
                         payload=(mime_type or "unknown")[:128],
                     )
                     return {"ok": "true"}
-                token_v = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
-                mgid = (visual.get("media_group_id") or "").strip()
+                mgid = mgid_wr
                 if token_v:
                     try:
                         _log.info(

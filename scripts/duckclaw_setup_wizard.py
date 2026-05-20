@@ -597,8 +597,8 @@ def _wizard_resolve_gateway_conflicts(console: Console, repo_root: Path) -> None
             "• [Errno 48] address already in use: mismo puerto en dos gateways en el JSON, "
             "u otro proceso fuera de PM2 usando ese puerto.\n"
             "• DuckDB: dos gateways con la misma ruta → locks / errores de concurrencia.\n"
-            "[dim]Finanz en 8000 y TheMind en 8080: usa [bold]BD distinta[/] por gateway "
-            "(p. ej. finanzdb1.duckdb vs the_mind.duckdb) para evitar locks DuckDB.[/]",
+            "[dim]Un gateway por puerto y una ruta DuckDB dedicada por proceso en "
+            "api_gateways_pm2.json evita locks DuckDB.[/]",
             title="Resolver conflictos — API Gateways (PM2)",
             border_style="cyan",
         )

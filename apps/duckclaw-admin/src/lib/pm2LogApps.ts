@@ -5,6 +5,7 @@ export const PM2_LOGGABLE_APPS = [
   'DuckClaw-DB-Writer',
   'DuckClaw-MCP',
   'MLX-Vision',
+  'ComfyUI',
 ] as const;
 
 export type Pm2LogApp = (typeof PM2_LOGGABLE_APPS)[number];

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AnsiLogText } from '@/lib/ansiLog';
 import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import { StackBootstrapPanel } from '@/components/admin/StackBootstrapPanel';
@@ -115,9 +116,9 @@ export function OverviewOpsPanel({ gatewayStale, onHealthReload }: Props) {
           </p>
         )}
         {output && (
-          <pre className="mt-4 p-4 text-xs font-mono bg-slate-900 text-slate-100 rounded-xl overflow-x-auto max-h-96 whitespace-pre-wrap">
-            {output}
-          </pre>
+          <div className="mt-4 p-4 bg-slate-900 rounded-xl overflow-auto max-h-96">
+            <AnsiLogText text={output} />
+          </div>
         )}
         <div className="mt-6">
           <Pm2LiveLogsPanel />

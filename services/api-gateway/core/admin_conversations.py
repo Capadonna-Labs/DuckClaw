@@ -39,6 +39,7 @@ class AdminConversationMeta(BaseModel):
     last_message_preview: str = ""
     message_count: int = 0
     origin: str = "admin_ui"
+    vault_db_path: str = ""
 
 
 def _now_iso() -> str:
@@ -299,6 +300,31 @@ async def patch_conversation_title(
         return meta
     except Exception as exc:
         _log.warning("admin_conversations: patch %s: %s", session_id, exc)
+        return None
+
+
+async def patch_conversation_vault(
+    redis_client: Any,
+    tenant_id: str,
+    session_id: str,
+    vault_db_path: str | None,
+) -> AdminConversationMeta | None:
+    """Persiste bóveda DuckDB por conversación (admin UI). Vacío = quitar override."""
+    meta = await get_conversation_meta(redis_client, tenant_id, session_id)
+    if meta is None:
+        return None
+    meta.vault_db_path = (vault_db_path or "").strip()
+    meta.updated_at = _now_iso()
+    ttl = _conv_ttl_sec()
+    try:
+        await redis_client.set(
+            _meta_key(tenant_id, session_id),
+            json.dumps(meta.model_dump(), ensure_ascii=False),
+            ex=ttl,
+        )
+        return meta
+    except Exception as exc:
+        _log.warning("admin_conversations: patch vault %s: %s", session_id, exc)
         return None
 
 

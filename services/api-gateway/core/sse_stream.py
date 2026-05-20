@@ -46,6 +46,8 @@ def sse_heartbeat(
     kind: str = "status",
     worker_id: str | None = None,
     swarm_slot: int | None = None,
+    artifact_id: str | None = None,
+    artifact_tenant_id: str | None = None,
 ) -> str:
     meta: dict[str, Any] = {"type": "heartbeat", "text": text, "kind": kind}
     wid = (worker_id or "").strip()
@@ -53,6 +55,12 @@ def sse_heartbeat(
         meta["worker_id"] = wid
     if swarm_slot is not None:
         meta["swarm_slot"] = max(1, int(swarm_slot))
+    aid = (artifact_id or "").strip()
+    if aid:
+        meta["artifact_id"] = aid
+    tid = (artifact_tenant_id or "").strip()
+    if tid:
+        meta["artifact_tenant_id"] = tid
     return sse_data(meta)
 
 
@@ -137,13 +145,16 @@ async def emit_chat_reply_sse(
     usage_tokens: dict[str, Any] | None = None,
     worker_id: str | None = None,
     elapsed_ms: int | None = None,
+    extra: dict[str, Any] | None = None,
     chunk_chars: int = 12,
     delay_s: float = 0.018,
 ) -> AsyncIterator[str]:
     """Genera eventos SSE token a token y cierre [DONE]."""
-    extra: dict[str, Any] | None = None
+    done_extra: dict[str, Any] | None = dict(extra) if extra else None
     if elapsed_ms is not None:
-        extra = {"elapsed_ms": int(elapsed_ms)}
+        if done_extra is None:
+            done_extra = {}
+        done_extra["elapsed_ms"] = int(elapsed_ms)
     async for piece in stream_text_chunks(reply, chunk_chars=chunk_chars, delay_s=delay_s):
         yield sse_token(piece)
     yield sse_done(
@@ -151,6 +162,6 @@ async def emit_chat_reply_sse(
         assigned_worker_id=assigned_worker_id,
         usage_tokens=usage_tokens,
         worker_id=worker_id,
-        extra=extra,
+        extra=done_extra,
     )
     yield sse_terminal_done()

@@ -83,6 +83,9 @@ ADF global: [`specs/05_ADF_AGENT_DEFINITION_FRAMEWORK.md`](../05_ADF_AGENT_DEFIN
 | [DOTENV_SINGLE_SOURCE.md](platform/DOTENV_SINGLE_SOURCE.md) | implemented |
 | [CONCURRENT_TOOL_READ_POOL.md](platform/CONCURRENT_TOOL_READ_POOL.md) | implemented |
 | [VLM_INTEGRATION.md](platform/VLM_INTEGRATION.md) | implemented |
+| [COMFYUI_VISUAL_BRIDGE.md](platform/COMFYUI_VISUAL_BRIDGE.md) | implemented |
+| [ADMIN_COMFYUI_GEN.md](platform/ADMIN_COMFYUI_GEN.md) | implemented |
+| [COMFYUI_IMAGE_EDIT.md](platform/COMFYUI_IMAGE_EDIT.md) | implemented |
 | [STRIX_SANDBOX_SECURITY_POLICY.md](platform/STRIX_SANDBOX_SECURITY_POLICY.md) | implemented |
 | [STRIX_BROWSER_NOVNC.md](platform/STRIX_BROWSER_NOVNC.md) | implemented |
 | [SOVEREIGN_WIZARD_V2.md](platform/SOVEREIGN_WIZARD_V2.md) | implemented |
@@ -94,6 +97,7 @@ ADF global: [`specs/05_ADF_AGENT_DEFINITION_FRAMEWORK.md`](../05_ADF_AGENT_DEFIN
 | [UX_CONVERSATIONAL_OPTIMIZATION.md](platform/UX_CONVERSATIONAL_OPTIMIZATION.md) | partial (ver también `UIUX-PATTERNS.md` en raíz) |
 | [SFT_DATASET_FORMAT.md](platform/SFT_DATASET_FORMAT.md) | implemented |
 | [SFT_TRACE_SANITIZER_GEMMA4.md](platform/SFT_TRACE_SANITIZER_GEMMA4.md) | implemented |
+| [THE_MIND_DEPRECATION.md](platform/THE_MIND_DEPRECATION.md) | deprecated |
 
 ## `cognitive/`
 
@@ -107,9 +111,9 @@ ADF global: [`specs/05_ADF_AGENT_DEFINITION_FRAMEWORK.md`](../05_ADF_AGENT_DEFIN
 | [WAR_ROOMS.md](cognitive/WAR_ROOMS.md) | partial |
 | [TIME_CONTEXT_SKILL.md](cognitive/TIME_CONTEXT_SKILL.md) | implemented |
 
-## `the-mind/`
+## `the-mind/` (deprecated)
 
-Índice: [THE_MIND_INDEX.md](the-mind/THE_MIND_INDEX.md).
+Índice histórico: [THE_MIND_INDEX.md](the-mind/THE_MIND_INDEX.md). Retiro en runtime: [THE_MIND_DEPRECATION.md](platform/THE_MIND_DEPRECATION.md).
 
 ## `integrations/`
 

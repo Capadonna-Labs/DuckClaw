@@ -1,3 +1,23 @@
+import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } from 'undici';
+
+/**
+ * Undici corta el body a los 300s por defecto (UND_ERR_BODY_TIMEOUT).
+ * SSE del playground y generación ComfyUI pueden superar ese tiempo sin cerrar el stream.
+ */
+const LONG_GATEWAY_DISPATCHER = new Agent({
+  bodyTimeout: 0,
+  headersTimeout: 120_000,
+  connectTimeout: 30_000,
+});
+
+/** fetch al gateway sin límite de 300s en el cuerpo de respuesta (SSE / jobs largos). */
+export function gatewayLongFetch(input: string | URL, init?: RequestInit): Promise<Response> {
+  return undiciFetch(input, {
+    ...(init as UndiciRequestInit),
+    dispatcher: LONG_GATEWAY_DISPATCHER,
+  }) as unknown as Promise<Response>;
+}
+
 /** Cabeceras comunes al llamar al API Gateway desde el BFF (servidor Next). */
 export function gatewayBase(): string | null {
   const explicit =

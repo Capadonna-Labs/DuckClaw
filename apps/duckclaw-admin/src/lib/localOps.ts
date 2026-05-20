@@ -49,6 +49,18 @@ export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = 
     label: 'Últimas líneas log MCP',
     argv: ['pm2', 'logs', 'DuckClaw-MCP', '--lines', '40', '--nostream'],
   },
+  pm2_start_comfyui: {
+    label: 'Iniciar ComfyUI',
+    argv: ['pm2', 'start', 'config/ecosystem.comfyui.config.cjs', '--update-env'],
+  },
+  pm2_restart_comfyui: {
+    label: 'Reiniciar ComfyUI',
+    argv: ['pm2', 'restart', 'ComfyUI', '--update-env'],
+  },
+  pm2_logs_comfyui: {
+    label: 'Últimas líneas log ComfyUI',
+    argv: ['pm2', 'logs', 'ComfyUI', '--lines', '40', '--nostream'],
+  },
   doctor: { label: 'Diagnóstico local (doctor.py)', argv: ['uv', 'run', 'python', 'scripts/doctor.py'] },
   bootstrap_dbs: {
     label: 'Bootstrap DuckDB',
@@ -60,6 +72,10 @@ export function repoRoot(): string {
   const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
   if (fromEnv) return fromEnv;
   return join(process.cwd(), '..', '..');
+}
+
+export function isLocalOpId(opId: string): boolean {
+  return opId in OPS_ALLOWLIST;
 }
 
 export function listOpsCommands() {

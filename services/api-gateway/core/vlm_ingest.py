@@ -546,23 +546,9 @@ def _secure_wipe_remove(tmp_path: str) -> None:
 
 
 async def _telegram_download_file_bytes(bot_token: str, file_id: str) -> bytes:
-    api = f"https://api.telegram.org/bot{bot_token}"
-    async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
-        r = await client.get(f"{api}/getFile", params={"file_id": file_id})
-        r.raise_for_status()
-        data = r.json() if r.content else {}
-        if not data.get("ok") or not isinstance(data.get("result"), dict):
-            raise RuntimeError("Telegram getFile failed")
-        file_path = str(data["result"].get("file_path") or "").strip()
-        if not file_path:
-            raise RuntimeError("Telegram file_path vacío")
-        rf = await client.get(f"https://api.telegram.org/file/bot{bot_token}/{file_path}")
-        rf.raise_for_status()
-        data = bytes(rf.content or b"")
-    limit = _max_image_bytes()
-    if len(data) > limit:
-        raise RuntimeError(f"imagen demasiado grande ({len(data)} > {limit})")
-    return data
+    from core.telegram_media_download import download_telegram_file_bytes
+
+    return await download_telegram_file_bytes(bot_token, file_id)
 
 
 async def _call_openai_vision(

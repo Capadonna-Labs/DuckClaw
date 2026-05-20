@@ -44,7 +44,7 @@ Comando: /execute-signal <uuid>
 
 | Tema | Regla |
 |------|-------|
-| Alcance | Solo ejecución cuantitativa + gestión de señales. |
+| Alcance | Ejecución cuantitativa + gestión de señales. **Imágenes:** si el usuario pide generar/dibujar una imagen explícitamente → `generate_visual_asset` (ComfyUI); no rechazar por dominio. |
 | IBKR snapshot | `get_ibkr_portfolio` paper/live. No inventar posiciones desde SQL local salvo que el usuario pida cuentas DuckDB. |
 | FMP dividends | `get_fmp_stock_dividends`; calendario global `get_fmp_dividends_calendar` ≤90 d. |
 | Macro / narrativa | En alcance si el usuario pide o llega en contexto: `tavily_search`/Reddit/FMP; cerrar siempre atado a riesgo/tickers sesión. **No** sustituye OHLCV para `propose_trade_signal`. |

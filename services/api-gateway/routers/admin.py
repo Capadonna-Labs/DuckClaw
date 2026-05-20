@@ -506,6 +506,16 @@ class PlaygroundModelBody(BaseModel):
     base_url: str | None = Field(default=None, max_length=512)
 
 
+class PlaygroundVaultBody(BaseModel):
+    chat_id: str = Field(..., min_length=1, max_length=128)
+    tenant_id: str | None = Field(default=None, max_length=64)
+    vault_db_path: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Ruta .duckdb; vacío quita el override por conversación.",
+    )
+
+
 class PlaygroundChatBody(BaseModel):
     worker_id: str = Field(default="default", max_length=64)
     message: str = Field(default="", max_length=16000)
@@ -515,6 +525,11 @@ class PlaygroundChatBody(BaseModel):
         default=None,
         max_length=32,
         description="ID Telegram para whitelist y equipo /workers (default: DUCKCLAW_OWNER_ID)",
+    )
+    vault_db_path: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Override DuckDB por conversación (prioridad sobre manifest del worker).",
     )
     images: list[PlaygroundImageIn] = Field(default_factory=list, max_length=3)
     stream: bool = Field(
@@ -783,7 +798,20 @@ def _resolved_llm_for_chat(chat_id: str | None) -> dict[str, str]:
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
         return {**env, "scope": "env"}
-    db = DuckClaw(gw, read_only=True, engine="python")
+    try:
+        db = DuckClaw(gw, read_only=True, engine="python")
+    except Exception as exc:
+        # #region agent log
+        from core.debug_agent_log import agent_debug_log
+
+        agent_debug_log(
+            location="admin.py:_resolved_llm_for_chat",
+            message="DuckClaw read_only connect failed",
+            data={"gateway_db": gw, "chat_id": cid, "error": str(exc)[:500]},
+            hypothesis_id="A",
+        )
+        # #endregion
+        return {**env, "scope": "env", "db_lock_error": True}
     try:
         provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, cid)
     except Exception:
@@ -819,6 +847,7 @@ def _llm_keys_configured(env_keys: list[str]) -> bool:
 
 @router.get("/playground/config", dependencies=[Depends(_require_admin_key)])
 async def playground_config(
+    request: Request,
     telegram_user_id: str | None = Query(None, description="ID Telegram (default: DUCKCLAW_OWNER_ID)"),
     tenant_id: str | None = Query(None, description="Tenant para whitelist y equipo"),
     chat_id: str | None = Query(
@@ -838,6 +867,14 @@ async def playground_config(
     catalog = _playground_llm_catalog(llm.get("provider", ""))
     eff_tenant = team_ctx.get("tenant_id") or _gateway_effective_tenant_id("default")
     team_hint = (team_ctx.get("team_hint") or "") + workers_payload.get("team_hint_extra", "")
+    default_wid = _pick_playground_worker(team_ctx, None)
+    vault = await _resolved_vault_for_admin_chat(
+        eff_chat,
+        team_ctx,
+        default_wid,
+        request=request,
+    )
+    vault_options = _playground_vault_options_for_team(team_ctx)
     return {
         "llm": llm,
         "catalog": catalog,
@@ -852,13 +889,70 @@ async def playground_config(
         "whitelist_role": team_ctx.get("whitelist_role"),
         "team_source": team_ctx.get("team_source"),
         "team_hint": team_hint.strip(),
+        "vault": vault,
+        "vault_options": vault_options,
         "chat_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_hint": "POST con stream=true o Accept: text/event-stream",
         "note": (
-            "Proveedor por conversación (lista o /model en el chat). "
-            "Sin override, usa .env del gateway (reinicia PM2 tras cambiar .env)."
+            "Proveedor y bóveda DuckDB por conversación. "
+            "Sin override de bóveda, usa vault activo del usuario o manifest del worker."
         ),
+    }
+
+
+@router.put("/playground/vault", dependencies=[Depends(_require_admin_key)])
+async def playground_set_vault(
+    body: PlaygroundVaultBody,
+    request: Request,
+) -> dict[str, Any]:
+    """Persiste bóveda DuckDB por conversación (admin UI)."""
+    from core.admin_conversations import get_conversation_meta, patch_conversation_vault, upsert_conversation_meta
+
+    chat_id = body.chat_id.strip()
+    tenant_id = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
+    raw_path = (body.vault_db_path or "").strip()
+    if raw_path:
+        from duckclaw.gateway_db import resolve_env_duckdb_path
+
+        abs_path = resolve_env_duckdb_path(raw_path)
+        if not os.path.isabs(abs_path):
+            abs_path = str(_repo_root() / abs_path.lstrip("/"))
+        if not os.path.isfile(abs_path):
+            raise _problem(404, "Vault no encontrado", raw_path)
+        stored = raw_path
+    else:
+        stored = ""
+
+    redis_client = getattr(request.app.state, "redis", None)
+    meta = await get_conversation_meta(redis_client, tenant_id, chat_id)
+    if meta is None:
+        await upsert_conversation_meta(
+            redis_client,
+            tenant_id=tenant_id,
+            session_id=chat_id,
+            title="",
+            message_count=0,
+        )
+    meta = await patch_conversation_vault(redis_client, tenant_id, chat_id, stored or None)
+    team_ctx = _playground_team_context(tenant_id=tenant_id, chat_id=chat_id)
+    wid = _pick_playground_worker(team_ctx, None)
+    vault = await _resolved_vault_for_admin_chat(chat_id, team_ctx, wid, request=request)
+    if stored and (meta is None or vault.get("scope") != "chat"):
+        from duckclaw.gateway_db import resolve_env_duckdb_path
+
+        vault = {
+            "effective_path": resolve_env_duckdb_path(stored),
+            "scope": "chat",
+            "override_path": stored,
+            "default_path": vault.get("default_path"),
+        }
+    return {
+        "ok": True,
+        "chat_id": chat_id,
+        "tenant_id": tenant_id,
+        "vault_db_path": stored,
+        "vault": vault,
     }
 
 
@@ -965,6 +1059,15 @@ async def playground_chat(
 
     from core.models import ChatRequest
 
+    vault_info = await _resolved_vault_for_admin_chat(
+        session_id,
+        team_ctx,
+        wid,
+        body_override=(body.vault_db_path or "").strip() or None,
+        request=request,
+    )
+    vault_path = vault_info.get("effective_path") or ""
+
     chat = ChatRequest(
         message=msg,
         chat_id=session_id,
@@ -973,6 +1076,7 @@ async def playground_chat(
         chat_type="private",
         tenant_id=tenant_id,
         stream=body.stream,
+        vault_db_path=vault_path or None,
     )
     redis_client = getattr(request.app.state, "redis", None)
     accept = (request.headers.get("accept") or "").lower()
@@ -1021,6 +1125,166 @@ async def playground_chat(
             "usage_tokens": result.get("usage_tokens"),
         }
     return {"ok": True, "worker_id": wid, "response": str(result or "")}
+
+
+class ComfyuiGenerateBody(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=4000)
+    negative_prompt: str = Field(default="", max_length=2000)
+    aspect_ratio: str = Field(default="1:1", max_length=16)
+    template: str = Field(default="comfy_default", max_length=64)
+    tenant_id: str | None = Field(default=None, max_length=64)
+
+
+def _list_comfyui_templates() -> list[dict[str, Any]]:
+    workflows_dir = (
+        _repo_root()
+        / "packages"
+        / "agents"
+        / "src"
+        / "duckclaw"
+        / "forge"
+        / "templates"
+        / "workflows"
+    )
+    templates: list[dict[str, Any]] = []
+    if not workflows_dir.is_dir():
+        return templates
+    for path in sorted(workflows_dir.glob("*.json")):
+        if path.name.endswith(".meta.json"):
+            continue
+        stem = path.stem
+        meta_path = workflows_dir / f"{stem}.meta.json"
+        aspect_presets: list[str] = []
+        if meta_path.is_file():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                presets = meta.get("aspect_presets") if isinstance(meta, dict) else None
+                if isinstance(presets, dict):
+                    aspect_presets = sorted(presets.keys())
+            except (OSError, json.JSONDecodeError):
+                pass
+        templates.append(
+            {
+                "id": stem,
+                "label": stem.replace("_", " ").title(),
+                "aspect_ratios": aspect_presets or ["1:1", "16:9", "9:16", "4:3", "3:4"],
+            }
+        )
+    return templates
+
+
+@router.get("/comfyui/status", dependencies=[Depends(_require_admin_key)])
+async def comfyui_status() -> dict[str, Any]:
+    import time
+
+    import httpx
+
+    base = (os.environ.get("COMFYUI_API_URL") or "http://127.0.0.1:8188").strip().rstrip("/")
+    if not base:
+        return {"ok": False, "url": "", "error": "COMFYUI_API_URL no configurada"}
+    url = f"{base}/system_stats"
+    started = time.perf_counter()
+    try:
+        checkpoints: list[str] = []
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            try:
+                oi = await client.get(f"{base}/object_info/CheckpointLoaderSimple")
+                if oi.status_code == 200:
+                    body = oi.json()
+                    node = body.get("CheckpointLoaderSimple") if isinstance(body, dict) else {}
+                    req = node.get("input", {}).get("required", {}) if isinstance(node, dict) else {}
+                    ckpt_cfg = req.get("ckpt_name") if isinstance(req, dict) else None
+                    if isinstance(ckpt_cfg, list) and ckpt_cfg and isinstance(ckpt_cfg[0], list):
+                        checkpoints = [str(x) for x in ckpt_cfg[0] if str(x).strip()]
+            except Exception:
+                checkpoints = []
+        latency_ms = round((time.perf_counter() - started) * 1000, 1)
+        return {
+            "ok": True,
+            "url": base,
+            "latency_ms": latency_ms,
+            "system": data if isinstance(data, dict) else {},
+            "checkpoints": checkpoints,
+            "checkpoints_ready": len(checkpoints) > 0,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "url": base,
+            "error": str(exc)[:500],
+            "checkpoints": [],
+            "checkpoints_ready": False,
+        }
+
+
+@router.get("/comfyui/templates", dependencies=[Depends(_require_admin_key)])
+async def comfyui_templates() -> dict[str, Any]:
+    items = _list_comfyui_templates()
+    return {"templates": items, "default": "comfy_default"}
+
+
+@router.post("/comfyui/generate", dependencies=[Depends(_require_admin_key)])
+async def comfyui_generate(
+    body: ComfyuiGenerateBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    import asyncio
+
+    from duckclaw.forge.skills.comfyui_bridge import _generate_visual_asset_impl
+    from duckclaw.forge.skills.quant_tool_context import (
+        set_quant_tool_tenant_id,
+        set_quant_tool_user_id,
+    )
+
+    tenant_id = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
+    set_quant_tool_tenant_id(tenant_id)
+    set_quant_tool_user_id((actor or "admin-ui").strip() or "admin-ui")
+
+    cfg = {
+        "enabled": True,
+        "template": (body.template or "comfy_default").strip() or "comfy_default",
+    }
+
+    def _run() -> str:
+        return _generate_visual_asset_impl(
+            body.prompt.strip(),
+            negative_prompt=body.negative_prompt or "",
+            aspect_ratio=body.aspect_ratio or "1:1",
+            comfyui_config=cfg,
+        )
+
+    try:
+        raw = await asyncio.to_thread(_run)
+    except TimeoutError as exc:
+        raise _problem(
+            504,
+            f"Timeout generando en ComfyUI ({exc}). Aumenta COMFYUI_TIMEOUT_SEC si usas MPS.",
+            "",
+        ) from exc
+    except Exception as exc:
+        raise _problem(
+            502,
+            f"Error inesperado en bridge ComfyUI: {type(exc).__name__}: {exc}",
+            "",
+        ) from exc
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        raise _problem(502, "Respuesta inválida del bridge ComfyUI", raw[:500]) from None
+    if not isinstance(payload, dict):
+        raise _problem(502, "Respuesta inválida del bridge ComfyUI", "")
+    if not payload.get("ok"):
+        raise _problem(400, str(payload.get("error") or "Error ComfyUI"), "")
+    _admin_audit(
+        "comfyui.generate",
+        tenant_id,
+        f"template={cfg['template']}",
+        actor=actor,
+    )
+    return payload
 
 
 @router.get("/health", dependencies=[Depends(_require_admin_key)])
@@ -2512,6 +2776,9 @@ _OPS_ALLOWLIST: dict[str, list[str]] = {
     "pm2_start_mcp": ["pm2", "start", "config/ecosystem.mcp.config.cjs"],
     "pm2_restart_mcp": ["pm2", "restart", "DuckClaw-MCP", "--update-env"],
     "pm2_logs_mcp": ["pm2", "logs", "DuckClaw-MCP", "--lines", "40", "--nostream"],
+    "pm2_start_comfyui": ["pm2", "start", "config/ecosystem.comfyui.config.cjs", "--update-env"],
+    "pm2_restart_comfyui": ["pm2", "restart", "ComfyUI", "--update-env"],
+    "pm2_logs_comfyui": ["pm2", "logs", "ComfyUI", "--lines", "40", "--nostream"],
     "doctor": ["uv", "run", "python", "scripts/doctor.py"],
     "bootstrap_dbs": ["uv", "run", "python", "scripts/bootstrap_dbs.py"],
 }
@@ -2530,6 +2797,9 @@ async def list_ops_commands() -> dict[str, Any]:
         "pm2_start_mcp": "Iniciar DuckClaw-MCP (ecosystem.mcp.config.cjs)",
         "pm2_restart_mcp": "Reiniciar DuckClaw-MCP",
         "pm2_logs_mcp": "Últimas líneas log MCP",
+        "pm2_start_comfyui": "Iniciar ComfyUI (ecosystem.comfyui.config.cjs)",
+        "pm2_restart_comfyui": "Reiniciar ComfyUI",
+        "pm2_logs_comfyui": "Últimas líneas log ComfyUI",
         "doctor": "Diagnóstico local (doctor.py)",
         "bootstrap_dbs": "Bootstrap DuckDB (tablas agent_config, etc.)",
     }
@@ -2599,6 +2869,16 @@ async def run_ops_command(
         raise _problem(500, "Error ejecutando comando", str(exc)) from exc
 
     result = _normalize_ops_result(op_id, result)
+    if op_id in ("pm2_start_comfyui", "pm2_restart_comfyui") and result.get("exit_code") == 0:
+        import asyncio
+        import time
+
+        from duckclaw.forge.skills.comfyui_bridge import clear_all_comfy_generations, reset_comfyui_runtime
+
+        clear_all_comfy_generations()
+        await asyncio.sleep(6)
+        comfy_reset = await asyncio.to_thread(reset_comfyui_runtime)
+        result["comfyui_reset"] = comfy_reset
     _admin_audit("ops.run", op_id, " ".join(argv), actor=actor, meta=result)
     return {"ok": result.get("exit_code") == 0, "op_id": op_id, **result}
 
@@ -3033,6 +3313,54 @@ def _pick_playground_worker(
     if "default" in catalog:
         return "default"
     return catalog[0] if catalog else "default"
+
+
+def _playground_vault_options_for_team(team_ctx: dict[str, Any]) -> list[dict[str, str]]:
+    from duckclaw.vaults import list_vault_options_for_user
+
+    uid = str(team_ctx.get("telegram_user_id") or "").strip()
+    if not uid:
+        uid = _playground_telegram_user_id(None) or "default"
+    return list_vault_options_for_user(uid)
+
+
+async def _resolved_vault_for_admin_chat(
+    chat_id: str,
+    team_ctx: dict[str, Any],
+    worker_id: str | None,
+    *,
+    body_override: str | None = None,
+    request: Request | None = None,
+) -> dict[str, Any]:
+    """Bóveda efectiva: body > meta conversación > worker/activa."""
+    from duckclaw.gateway_db import resolve_env_duckdb_path
+
+    cid = (chat_id or "").strip()
+    tid = str(team_ctx.get("tenant_id") or "default").strip() or "default"
+    override = (body_override or "").strip()
+    scope = "default"
+    if not override and request is not None:
+        redis_client = getattr(request.app.state, "redis", None)
+        if redis_client is not None and cid:
+            from core.admin_conversations import get_conversation_meta
+
+            meta = await get_conversation_meta(redis_client, tid, cid)
+            if meta is not None and (meta.vault_db_path or "").strip():
+                override = (meta.vault_db_path or "").strip()
+                scope = "chat"
+    elif override:
+        scope = "chat"
+    try:
+        default_path = _playground_vault_db_path(team_ctx, worker_id)
+    except Exception:
+        default_path = ""
+    effective = resolve_env_duckdb_path(override or default_path)
+    return {
+        "effective_path": effective,
+        "scope": scope,
+        "override_path": override or None,
+        "default_path": default_path or None,
+    }
 
 
 def _playground_vault_db_path(

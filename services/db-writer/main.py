@@ -15,6 +15,7 @@ import redis.asyncio as redis
 from context_injection_handler import handle_context_injection_message
 from core.config import settings
 from quant_state_delta_handler import handle_quant_state_delta_message
+from visual_state_delta_handler import handle_visual_state_delta_message
 from duckclaw.db_write_queue import (
     TASK_STATUS_TTL_SEC,
     DbWriteTaskStatus,
@@ -194,14 +195,28 @@ async def _quant_state_delta_loop(redis_client: redis.Redis) -> None:
                 logger.exception("QUANT_STATE_DELTA handler no capturó excepción: %s", exc)
 
 
+async def _visual_state_delta_loop(redis_client: redis.Redis) -> None:
+    q = str(settings.VISUAL_STATE_DELTA_QUEUE_NAME).strip()
+    logger.info("Escuchando cola VISUAL_STATE_DELTA (VISUAL_ASSET_UPSERT): %s", q)
+    while True:
+        result = await redis_client.brpop(q, timeout=0)
+        if result:
+            _, message = result
+            try:
+                await handle_visual_state_delta_message(redis_client, message)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("VISUAL_STATE_DELTA handler no capturó excepción: %s", exc)
+
+
 async def process_queue():
-    """Consume cola SQL, CONTEXT_INJECTION y QUANT_STATE_DELTA en paralelo."""
+    """Consume cola SQL, CONTEXT_INJECTION, QUANT y VISUAL StateDelta en paralelo."""
     redis_client = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
     try:
         await asyncio.gather(
             _sql_queue_loop(redis_client),
             _context_injection_loop(redis_client),
             _quant_state_delta_loop(redis_client),
+            _visual_state_delta_loop(redis_client),
         )
     except asyncio.CancelledError:
         logger.info("Señal de apagado recibida. Cerrando conexiones...")

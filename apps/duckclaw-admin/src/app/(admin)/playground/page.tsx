@@ -17,8 +17,10 @@ import { EditableConversationTitle } from '@/components/chat/EditableConversatio
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { useAdminChat } from '@/components/chat/useAdminChat';
 import { PanelToggleButton } from '@/components/layout/PanelToggleButton';
+import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
 import { LlmProviderCatalog } from '@/components/chat/LlmProviderCatalog';
 import { MarkdownSnippetPanel } from '@/components/chat/MarkdownSnippetPanel';
+import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/workerOptions';
 
 export default function PlaygroundPage() {
   const searchParams = useSearchParams();
@@ -53,7 +55,7 @@ export default function PlaygroundPage() {
         setConfig(c);
         setWorkerId((prev) => {
           if (prev) return prev;
-          const ids = (c.workers ?? []).map((w) => (typeof w === 'string' ? w : w.id));
+          const ids = workerOptionIds(c.workers);
           if (initialWorker && ids.includes(initialWorker)) return initialWorker;
           if (ids.includes('default')) return 'default';
           return ids[0] ?? '';
@@ -124,8 +126,8 @@ export default function PlaygroundPage() {
               className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[240px]"
             >
               {(config?.workers ?? []).map((w) => {
-                const id = typeof w === 'string' ? w : w.id;
-                const label = typeof w === 'string' ? w : w.label;
+                const id = workerOptionId(w);
+                const label = workerOptionLabel(w);
                 return (
                   <option key={id} value={id}>
                     {label}
@@ -221,6 +223,25 @@ export default function PlaygroundPage() {
           </section>
           <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border p-4">
             <h3 className="font-bold text-xs uppercase text-gov-gray-500 mb-2">
+              Bóveda DuckDB (conversación)
+            </h3>
+            {conv.sessionId ? (
+              <ConversationVaultSelector
+                chatId={conv.sessionId}
+                tenantId={config?.effective_tenant_id}
+                value={chat.vaultPath}
+                effectivePath={config?.vault?.effective_path}
+                scope={config?.vault?.scope}
+                options={config?.vault_options}
+                onChange={chat.setVaultPath}
+                onUpdated={loadConfig}
+              />
+            ) : (
+              <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
+            )}
+          </section>
+          <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border p-4">
+            <h3 className="font-bold text-xs uppercase text-gov-gray-500 mb-2">
               Proveedores disponibles
             </h3>
             {conv.sessionId ? (
@@ -271,6 +292,17 @@ function ConfigRowsSection({
         {config?.llm?.scope === 'chat' && (
           <p className="text-[10px] text-gov-blue-700 dark:text-dark-cyan pt-1">
             Override por conversación (equivalente a /model).
+          </p>
+        )}
+        <Row
+          label="Bóveda activa"
+          value={config?.vault?.effective_path || '—'}
+          mono
+          highlight={config?.vault?.scope === 'chat'}
+        />
+        {config?.vault?.scope === 'chat' && (
+          <p className="text-[10px] text-gov-blue-700 dark:text-dark-cyan pt-1">
+            DuckDB fijada para esta conversación (no por worker).
           </p>
         )}
         {activeCatalog && (

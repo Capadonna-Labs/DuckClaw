@@ -1,7 +1,7 @@
 """
 RunnableConfig para LangChain / LangGraph con nombres de run y metadata alineados a Observability 2.1.
 
-- ``run_name``: solo el **worker_key** (ej. ``TheMindCrupier``, ``finanz``, ``manager``) para la columna Name en LangSmith.
+- ``run_name``: solo el **worker_key** (ej. ``default``, ``finanz``, ``manager``) para la columna Name en LangSmith.
   El tenant va en tags/metadata, no en el nombre.
 - Tags sin PII: ``tenant:``, ``worker:``, ``env:``.
 - Metadata: modelo, commit de despliegue, ids técnicos (Habeas Data: evitar datos sensibles en tags).

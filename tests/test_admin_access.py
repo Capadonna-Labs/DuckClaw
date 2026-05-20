@@ -31,17 +31,12 @@ class _Adapter:
 
 @pytest.fixture
 def gateway_admin_client(gateway_db: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    import sys
+    from gateway_import import load_gateway_app
 
     monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
     repo = Path(__file__).resolve().parent.parent
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo))
-    gw_dir = repo / "services" / "api-gateway"
-    if str(gw_dir) not in sys.path:
-        sys.path.insert(0, str(gw_dir))
-    from main import app as gateway_app
-
-    return TestClient(gateway_app)
+    return TestClient(load_gateway_app())
 
 
 @pytest.fixture

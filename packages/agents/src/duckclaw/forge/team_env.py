@@ -74,8 +74,30 @@ def default_worker_id_from_env() -> str:
 
 
 def default_tenant_id_from_env() -> str:
+    """
+    Tenant por defecto del gateway cuando el cliente envía ``default``.
+
+    Orden: env explícito → heurística PM2 (p. ej. BI-Analyst-Gateway) → ruta DuckDB
+    (``bi_analyst``, ``leiladb``, …) → ``default``.
+    """
     for key in ("DUCKCLAW_GATEWAY_TENANT_ID", "DUCKCLAW_TELEGRAM_DEFAULT_TENANT"):
         v = (os.environ.get(key) or "").strip()
         if v:
             return v
+    pm2 = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
+    if pm2 == "Leila-Gateway":
+        return "Leila Store"
+    if pm2 == "BI-Analyst-Gateway":
+        return "BI-Analyst"
+    dbp = (
+        os.environ.get("DUCKDB_PATH")
+        or os.environ.get("DUCKCLAW_DB_PATH")
+        or ""
+    ).lower()
+    if "leiladb" in dbp:
+        return "Leila Store"
+    if "bi_analyst" in dbp:
+        return "BI-Analyst"
+    if "siatadb" in dbp:
+        return "SIATA"
     return "default"

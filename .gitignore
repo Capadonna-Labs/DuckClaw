@@ -30,6 +30,7 @@ Makefile
 .duckclaw/
 
 # Local runtime data and secrets
+/data/
 .env
 .env.*
 !.env.example

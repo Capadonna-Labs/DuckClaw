@@ -27,7 +27,7 @@ def main() -> None:
     app = build_streamable_http_asgi()
     print(
         f"duckclaw-mcp streamable HTTP → http://{args.host}:{args.port}/mcp "
-        "(configure cliente MCP with this URL over HTTPS when using Funnel)",
+        "(configure el cliente MCP con esta URL sobre HTTPS al usar Funnel)",
         flush=True,
     )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

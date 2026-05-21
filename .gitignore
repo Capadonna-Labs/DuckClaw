@@ -80,10 +80,5 @@ dump.rdb
 # Local generated output
 output/
 
-# Leila Store extraction (local only; not part of duckclaw)
+# Leila Store extraction bundle (local only; not part of duckclaw monorepo)
 /Leila/
-
-# MCP /  — árbol de integración y shims (mantener local o en repo privado)
-/default/
-
-packages/agents/src/duckclaw/forge/templates//

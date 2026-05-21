@@ -11,14 +11,13 @@ Servidor MCP (streamable HTTP) que reutiliza los grafos ya operativos en DuckCla
 **Clientes MCP y Tailscale Funnel**
 
 Los hosts MCP esperan una URL absoluta con path MCP, p. ej. ``https://<nodo>.ts.net/mcp``.
-En local: ``http://127.0.0.1:8001/mcp``. Para clientes remotos llegue a tu máquina,
-expón el **mismo puerto** donde corre este proceso con Funnel, p. ej.::
+En local: ``http://127.0.0.1:8001/mcp``. Para exponer este proceso a clientes remotos,
+usa Funnel en el **mismo puerto**, p. ej.::
 
     tailscale funnel --bg --yes 8001
 
 La URL pública que muestre ``tailscale funnel status`` + sufijo ``/mcp`` es la que debes
-poner en ``mcp_connections.duckclaw.url``. Ver también ``specs/features/integrations/TAILSCALE_CONFIGURATION.md``.
-Ver documentación Tailscale: ``specs/features/integrations/TAILSCALE_CONFIGURATION.md``.
+configurar en el cliente. Ver ``specs/features/integrations/TAILSCALE_CONFIGURATION.md``.
 """
 
 from __future__ import annotations

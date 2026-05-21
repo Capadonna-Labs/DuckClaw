@@ -37,5 +37,5 @@ uv run python scripts/smoke/smoke_github_mcp_stdio.py
 ## No versionar
 
 - Secretos → `.env` (ver `.env.example`)
-- ``, `/default/` → integración privada (`.gitignore`)
+- Bundle Leila Store → `/Leila/` (`.gitignore`; extracción a repo propio)
 - Artefactos → `db/`, `logs/`, `packages/agents/train/gemma4/`

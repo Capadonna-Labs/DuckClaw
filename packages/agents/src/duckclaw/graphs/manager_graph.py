@@ -325,6 +325,17 @@ def _worker_should_use_lite_stdio_mcp_surface(text: str) -> bool:
     )
 
 
+def _worker_should_use_url_research_mcp_surface(text: str) -> bool:
+    """
+    Mensaje solo URL (HTTPS): omite GitHub/Trends/Reddit en cold start del grafo worker.
+    Reddit MCP solo si la URL es reddit.com (``incoming_hint`` en build_worker_graph).
+    """
+    inc = (text or "").strip()
+    if not _LONE_HTTP_URL_ONLY_LINE.match(inc):
+        return False
+    return not _manager_visual_generation_intent(inc)
+
+
 def _looks_like_job_add_command(incoming: str) -> bool:
     raw = (incoming or "").strip().lower()
     if not raw:
@@ -1009,6 +1020,60 @@ def _try_visual_generation_fast_plan(
     return (title, task_list, planned, qt)
 
 
+def _try_quant_url_research_fast_plan(
+    incoming: str,
+    available_plan: list[str],
+) -> tuple[str, list[str], str, str] | None:
+    """
+    Mensaje solo URL (HTTPS): evita planner MLX lento (admin con historial largo de imágenes).
+    Telegram suele ser más rápido porque el chat_id tiene pocos turnos; el admin reutiliza el mismo
+    chat_id con decenas de turnos ComfyUI en Redis.
+    """
+    inc = (incoming or "").strip()
+    if not _LONE_HTTP_URL_ONLY_LINE.match(inc):
+        return None
+    if _manager_visual_generation_intent(inc):
+        return None
+    qt = _pick_quant_trader_worker(available_plan)
+    if not qt:
+        return None
+    low = inc.lower()
+    if "reddit.com" in low:
+        title = "Investigar enlace Reddit"
+        task_list = [
+            "Usar reddit_get_post o reddit_search_reddit con el enlace del usuario.",
+            "Sintetizar hallazgos; no inventar contenido del post.",
+        ]
+    elif "mql5.com" in low:
+        title = "Extraer código MQL5 (browser)"
+        task_list = [
+            "Usar run_browser_sandbox primero (PROTOCOLO MQL5, plantilla stealth).",
+            "No usar solo tavily_search sin haber pasado por el sandbox para esta URL.",
+        ]
+    else:
+        title = "Investigar URL"
+        task_list = [
+            "Usar run_browser_sandbox o tavily_search según el dominio.",
+            "Entregar resumen con evidencia de tools del mismo turno.",
+        ]
+    planned = inc
+    log_sys(_obs, "Plan rápido URL → %s (sin planner MLX)", qt)
+    # #region agent log
+    try:
+        from duckclaw.debug_session_log import agent_debug_log
+
+        agent_debug_log(
+            "B",
+            "manager_graph.py:_try_quant_url_research_fast_plan",
+            "url fast plan matched",
+            {"worker": qt, "domain": "reddit" if "reddit.com" in low else ("mql5" if "mql5.com" in low else "other")},
+        )
+    except Exception:
+        pass
+    # #endregion
+    return (title, task_list, planned, qt)
+
+
 _FINANZ_TOOL_PRESSURE_TASK = load_guardrail("manager_tasks", "finanz_tool_pressure")
 
 
@@ -1338,10 +1403,40 @@ def _llm_plan_from_model(
         )
     system = "\n\n".join(c for c in system_chunks if c)
     human = f"Mensaje del usuario:\n{(incoming or '').strip()}"
+    # #region agent log
+    _planner_t0 = time.monotonic()
+    try:
+        from duckclaw.debug_session_log import agent_debug_log
+
+        agent_debug_log(
+            "B",
+            "manager_graph.py:_llm_plan_from_model",
+            "planner MLX invoke start",
+            {"incoming_preview": (incoming or "")[:120]},
+        )
+    except Exception:
+        pass
+    # #endregion
     try:
         resp = llm.invoke([SystemMessage(content=system), HumanMessage(content=human)])
     except Exception as exc:
         _log.debug("manager planner LLM invoke failed: %s", exc)
+        # #region agent log
+        try:
+            from duckclaw.debug_session_log import agent_debug_log
+
+            agent_debug_log(
+                "B",
+                "manager_graph.py:_llm_plan_from_model",
+                "planner MLX invoke failed",
+                {
+                    "err": str(exc)[:200],
+                    "elapsed_ms": int((time.monotonic() - _planner_t0) * 1000),
+                },
+            )
+        except Exception:
+            pass
+        # #endregion
         return None
     content: Any = getattr(resp, "content", None)
     if content is None:
@@ -1366,6 +1461,23 @@ def _llm_plan_from_model(
     if not tasks:
         clip = (incoming or "").strip()[:200]
         tasks = [f"Resolver la solicitud del usuario: {clip}" if clip else "Resolver solicitud del usuario"]
+    # #region agent log
+    try:
+        from duckclaw.debug_session_log import agent_debug_log
+
+        agent_debug_log(
+            "B",
+            "manager_graph.py:_llm_plan_from_model",
+            "planner MLX invoke ok",
+            {
+                "plan_title": (title or "")[:80],
+                "elapsed_ms": int((time.monotonic() - _planner_t0) * 1000),
+                "mercenary": mercenary_spec is not None,
+            },
+        )
+    except Exception:
+        pass
+    # #endregion
     return title, tasks, mercenary_spec, delegate_id
 
 
@@ -1702,6 +1814,7 @@ def build_manager_graph(
 
         _hrp_fast: tuple[str, list[str], str, str] | None = None
         _visual_fast: tuple[str, list[str], str, str] | None = None
+        _url_fast: tuple[str, list[str], str, str] | None = None
         if incoming:
             _hrp_fast = _try_quant_hrp_affirm_followup(
                 incoming,
@@ -1715,11 +1828,19 @@ def build_manager_graph(
                 incoming,
                 [str(x) for x in (available_plan or []) if x],
             )
+        if incoming and not _hrp_fast and not _visual_fast:
+            _url_fast = _try_quant_url_research_fast_plan(
+                incoming,
+                [str(x) for x in (available_plan or []) if x],
+            )
         if _hrp_fast:
             plan_title, tasks, _inject_hrp, _ov_hrp = _hrp_fast
             mercenary_spec = None
         elif _visual_fast:
             plan_title, tasks, _inject_vis, _ov_vis = _visual_fast
+            mercenary_spec = None
+        elif _url_fast:
+            plan_title, tasks, _inject_url, _ov_url = _url_fast
             mercenary_spec = None
         else:
             _psp = (planner_system_prompt or "").strip()
@@ -1763,7 +1884,7 @@ def build_manager_graph(
         # Prioridad A2A: en crisis de caja + intención laboral, enrutar a JobHunter si está disponible.
         job_hunter_in_team = _pick_job_hunter_worker(list(available_plan or []))
         cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
-        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _hrp_fast and not _visual_fast:
+        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _hrp_fast and not _visual_fast and not _url_fast:
             assigned = job_hunter_in_team
 
         # Mantener lógica existente de ruteo / planned_task
@@ -1779,6 +1900,12 @@ def build_manager_graph(
             override_worker = _ov_vis
             planned = _inject_vis
             planned_final = _inject_vis
+        elif _url_fast:
+            if _ov_url and _ov_url in (available_plan or []):
+                assigned = _ov_url
+            override_worker = _ov_url
+            planned = _inject_url
+            planned_final = _inject_url
         else:
             planned, override_worker = _plan_task(incoming, assigned)
             planned_final = planned or incoming
@@ -1787,7 +1914,7 @@ def build_manager_graph(
         if replan_enabled() and _pa_plan > 0:
             planned_final = (planned_final or "").strip() + format_replan_task_suffix(_pa_plan, _max_plan)
 
-        if coordinator_id and delegation_pool and not _hrp_fast and not _visual_fast:
+        if coordinator_id and delegation_pool and not _hrp_fast and not _visual_fast and not _url_fast:
             assigned = _resolve_orchestrator_delegate(
                 incoming,
                 delegation_pool,
@@ -1919,6 +2046,28 @@ def build_manager_graph(
         )
         _assigned_for_log = (out.get("assigned_worker_id") or assigned or "").strip() or "?"
         log_sys(_obs, "Worker elegido para el plan: %s", _assigned_for_log)
+        # #region agent log
+        try:
+            from duckclaw.debug_session_log import agent_debug_log
+
+            agent_debug_log(
+                "A",
+                "manager_graph.py:plan_node",
+                "plan branch resolved",
+                {
+                    "visual_fast": bool(_visual_fast),
+                    "url_fast": bool(_url_fast),
+                    "hrp_fast": bool(_hrp_fast),
+                    "visual_intent_incoming": _manager_visual_generation_intent(incoming),
+                    "lone_https": bool(_LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip())),
+                    "plan_title": (plan_title or "")[:80],
+                    "assigned": _assigned_for_log,
+                    "incoming_preview": (incoming or "")[:120],
+                },
+            )
+        except Exception:
+            pass
+        # #endregion
         return out
 
     def invoke_worker_node(state: ManagerAgentState, config: RunnableConfig) -> ManagerAgentState:
@@ -1971,10 +2120,40 @@ def build_manager_graph(
         task_summary = (state.get("task_summary") or "").strip() or _task_summary_for_activity(incoming, planned_task)
         _combined = planned_task or incoming
         _lite_stdio_mcp = _worker_should_use_lite_stdio_mcp_surface(_combined)
+        _url_research_mcp = _worker_should_use_url_research_mcp_surface(_combined)
         _visual_lite_mcp = _manager_visual_generation_intent(_combined) and _worker_matches_id(
             assigned, "quant_trader"
         )
         _summarize_vault_ro = _incoming_has_context_summary_system_directive(_combined)
+        # #region agent log
+        try:
+            from duckclaw.debug_session_log import agent_debug_log
+
+            _tsurf = (
+                "visual_generation"
+                if _visual_lite_mcp
+                else (
+                    "context_synthesis"
+                    if _lite_stdio_mcp
+                    else ("url_research" if _url_research_mcp else "full")
+                )
+            )
+            agent_debug_log(
+                "A",
+                "manager_graph.py:invoke_worker",
+                "worker invoke config",
+                {
+                    "assigned": (assigned or "")[:40],
+                    "tool_surface": _tsurf,
+                    "visual_lite_mcp": _visual_lite_mcp,
+                    "visual_intent_combined": _manager_visual_generation_intent(_combined),
+                    "incoming_preview": (incoming or "")[:120],
+                    "planned_preview": (planned_task or "")[:120],
+                },
+            )
+        except Exception:
+            pass
+        # #endregion
         t0 = time.monotonic()
         reply = ""
         messages = None
@@ -2009,6 +2188,10 @@ def build_manager_graph(
                 worker_cache_key = f"{worker_cache_key}::vis_gen"
             elif _lite_stdio_mcp:
                 worker_cache_key = f"{worker_cache_key}::ctx_syn"
+            elif _url_research_mcp:
+                low_url = (_combined or "").strip().lower()
+                _url_tag = "reddit" if "reddit.com" in low_url else ("mql5" if "mql5.com" in low_url else "url")
+                worker_cache_key = f"{worker_cache_key}::url_{_url_tag}"
             if _summarize_vault_ro:
                 worker_cache_key = f"{worker_cache_key}::sum_vault_ro"
             from duckclaw.workers.factory import _get_db_path, _same_duckdb_file
@@ -2072,8 +2255,13 @@ def build_manager_graph(
                     tool_surface=(
                         "visual_generation"
                         if _visual_lite_mcp
-                        else ("context_synthesis" if _lite_stdio_mcp else "full")
+                        else (
+                            "context_synthesis"
+                            if _lite_stdio_mcp
+                            else ("url_research" if _url_research_mcp else "full")
+                        )
                     ),
+                    incoming_hint=_combined if _url_research_mcp else None,
                     open_vault_read_only=_summarize_vault_ro,
                 )
             worker_graph = _worker_graph_cache[worker_cache_key]
@@ -2153,28 +2341,31 @@ def build_manager_graph(
             )
             from duckclaw.graphs.chat_heartbeat import (
                 format_delegation_heartbeat_message,
+                is_admin_ui_chat_session,
                 schedule_chat_heartbeat_dm,
             )
 
-            _tasks_for_hb = state.get("tasks")
-            _hb_text = format_delegation_heartbeat_message(
-                state.get("plan_title"),
-                _tasks_for_hb if isinstance(_tasks_for_hb, list) else [],
-                task_summary=task_summary,
-                subagent_header=agent_instance_label or None,
-            )
-            _hb_plan_log = (plan_title or "").strip() or None
-            schedule_chat_heartbeat_dm(
-                str(tenant_id or "default").strip() or "default",
-                str(chat_id or "").strip(),
-                str(user_id or "").strip() or str(chat_id or "").strip(),
-                _hb_text,
-                log_worker_id=agent_instance_label or None,
-                log_username=(state.get("username") or "").strip() or None,
-                log_plan_title=_hb_plan_log,
-                outbound_bot_token=_out_hb_tok,
-                routing_worker_id=str(assigned or "").strip() or None,
-            )
+            _cid_hb = str(chat_id or "").strip()
+            if not is_admin_ui_chat_session(_cid_hb):
+                _tasks_for_hb = state.get("tasks")
+                _hb_text = format_delegation_heartbeat_message(
+                    state.get("plan_title"),
+                    _tasks_for_hb if isinstance(_tasks_for_hb, list) else [],
+                    task_summary=task_summary,
+                    subagent_header=agent_instance_label or None,
+                )
+                _hb_plan_log = (plan_title or "").strip() or None
+                schedule_chat_heartbeat_dm(
+                    str(tenant_id or "default").strip() or "default",
+                    _cid_hb,
+                    str(user_id or "").strip() or _cid_hb,
+                    _hb_text,
+                    log_worker_id=agent_instance_label or None,
+                    log_username=(state.get("username") or "").strip() or None,
+                    log_plan_title=_hb_plan_log,
+                    outbound_bot_token=_out_hb_tok,
+                    routing_worker_id=str(assigned or "").strip() or None,
+                )
             worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
             raw_worker_reply = str(
                 worker_invoke.get("internal_reply")
@@ -2206,6 +2397,24 @@ def build_manager_graph(
                 assigned,
                 _tools_list if _tools_list else "ninguna",
             )
+            # #region agent log
+            try:
+                from duckclaw.debug_session_log import agent_debug_log
+
+                agent_debug_log(
+                    "C",
+                    "manager_graph.py:invoke_worker_out",
+                    "worker invoke done",
+                    {
+                        "assigned": (assigned or "")[:40],
+                        "tools": _tools_list[:12] if _tools_list else [],
+                        "elapsed_ms": int((time.monotonic() - t0) * 1000),
+                        "reply_len": len(reply or ""),
+                    },
+                )
+            except Exception:
+                pass
+            # #endregion
             _w_llm_failed = bool(worker_invoke.get("_duckclaw_worker_llm_invoke_failed"))
             _w_llm_transient = bool(worker_invoke.get("_duckclaw_worker_llm_transient"))
             _soft_would_match = worker_reply_suggests_replan_without_tools(raw_worker_reply)

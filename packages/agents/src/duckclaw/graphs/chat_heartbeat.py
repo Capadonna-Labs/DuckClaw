@@ -158,6 +158,41 @@ def parse_instance_label(label: str | None) -> tuple[str, int]:
     return raw, 1
 
 
+def publish_admin_tool_event(
+    chat_id: str,
+    tool_name: str,
+    phase: str,
+    *,
+    worker_id: str | None = None,
+    detail: str = "",
+) -> None:
+    """
+    Heartbeat admin con fase de herramienta (inicio/fin) para SSE del playground.
+    ``phase``: ``start`` | ``done`` | ``error``.
+    """
+    name = (tool_name or "").strip() or "tool"
+    ph = (phase or "start").strip().lower()
+    if ph == "done":
+        prefix = "✅"
+        label = "listo"
+    elif ph == "error":
+        prefix = "⚠️"
+        label = "error"
+    else:
+        prefix = "🔄"
+        label = "en curso"
+    extra = (detail or "").strip()
+    text = f"{prefix} {name} — {label}"
+    if extra:
+        text = f"{text}: {extra[:240]}"
+    publish_admin_chat_heartbeat(
+        chat_id,
+        text,
+        kind="tool",
+        worker_id=worker_id,
+    )
+
+
 def publish_admin_chat_heartbeat(
     chat_id: str,
     text: str,
@@ -566,8 +601,6 @@ def schedule_chat_heartbeat_dm(
     ``TELEGRAM_*_TOKEN`` o ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` cuando no hay ContextVar.
     """
     hb_on = is_chat_heartbeat_enabled(tenant_id, chat_id)
-    if not hb_on:
-        return
     if is_admin_ui_chat_session(chat_id):
         kind = _admin_heartbeat_kind(text, log_plan_title=log_plan_title)
         label = (log_worker_id or "").strip()
@@ -582,6 +615,9 @@ def schedule_chat_heartbeat_dm(
             worker_id=wid or None,
             swarm_slot=slot,
         )
+        # Admin playground usa solo Redis pub/SSE; nunca Bot API (evita chat_id=34864 y duplicados).
+        return
+    if not hb_on:
         return
     if not heartbeat_outbound_configured():
         return

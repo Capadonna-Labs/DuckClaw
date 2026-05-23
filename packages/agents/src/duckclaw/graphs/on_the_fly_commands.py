@@ -2767,7 +2767,7 @@ def get_effective_system_prompt(db: Any, worker_id: Optional[str] = None) -> str
     return current if current else ""
 
 
-_PROVIDERS = ("mlx", "ollama", "openai", "anthropic", "deepseek", "groq", "gemini")
+_PROVIDERS = ("mlx", "ollama", "openai", "anthropic", "deepseek", "groq", "gemini", "openrouter", "or")
 
 # Modelo por defecto al cambiar provider (evita "Model Not Exist" al pasar de MLX a cloud)
 _DEFAULT_MODEL_BY_PROVIDER = {
@@ -2776,6 +2776,7 @@ _DEFAULT_MODEL_BY_PROVIDER = {
     "anthropic": "claude-3-5-haiku-20241022",
     "groq": "llama-3.3-70b-versatile",
     "gemini": "gemini-2.0-flash",
+    "openrouter": "anthropic/claude-sonnet-4-5",
     "mlx": "",  # usa MLX_MODEL_ID o /v1/models
     "ollama": "llama3.2",
 }
@@ -2784,6 +2785,7 @@ _DEFAULT_MODEL_BY_PROVIDER = {
 _DEFAULT_BASE_URL_BY_PROVIDER = {
     "deepseek": "https://api.deepseek.com/v1",
     "groq": "https://api.groq.com/openai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
     "openai": "",
     "anthropic": "",
     "gemini": "",
@@ -2879,7 +2881,7 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
         model = model or "—"
         u_show = base_url or "—"
         base_url = u_show[:50] + "…" if len(u_show) > 50 else u_show
-        return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model provider=gemini | /model model=Slayer-8B"
+        return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model provider=openrouter | /model provider=or model=google/gemini-2.5-pro | /model model=Slayer-8B"
     for part in args.split("|"):
         part = part.strip()
         if "=" in part:
@@ -2888,19 +2890,22 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
             if k == "provider":
                 if v and v.lower() not in _PROVIDERS:
                     return f"Provider desconocido: {v}. Válidos: {', '.join(_PROVIDERS)}"
-                set_chat_state(db, chat_id, "llm_provider", v)
+                pv = v.lower()
+                if pv in ("or", "router"):
+                    pv = "openrouter"
+                set_chat_state(db, chat_id, "llm_provider", pv)
                 # Al cambiar provider, resetear model al default para evitar "Model Not Exist"
                 # (ej. Slayer-8B-v1.1 no existe en DeepSeak)
-                if v.lower() == "mlx":
+                if pv == "mlx":
                     from duckclaw.integrations.llm_providers import mlx_openai_compatible_base_url
 
                     set_chat_state(db, chat_id, "llm_base_url", mlx_openai_compatible_base_url())
                     mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
                     set_chat_state(db, chat_id, "llm_model", mid)
                 else:
-                    default_model = _DEFAULT_MODEL_BY_PROVIDER.get(v.lower(), "")
+                    default_model = _DEFAULT_MODEL_BY_PROVIDER.get(pv, "")
                     set_chat_state(db, chat_id, "llm_model", default_model)
-                    default_url = _DEFAULT_BASE_URL_BY_PROVIDER.get(v.lower(), "")
+                    default_url = _DEFAULT_BASE_URL_BY_PROVIDER.get(pv, "")
                     if default_url:
                         set_chat_state(db, chat_id, "llm_base_url", default_url)
                     else:
@@ -2911,9 +2916,9 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
                     message="provider_written",
                     data={
                         "chat_id": str(chat_id),
-                        "provider_arg": (v or "").lower(),
-                        "default_model": (_DEFAULT_MODEL_BY_PROVIDER.get((v or "").lower(), "") or "")[:80],
-                        "default_base_url": (_DEFAULT_BASE_URL_BY_PROVIDER.get((v or "").lower(), "") or "")[:120],
+                        "provider_arg": pv,
+                        "default_model": (_DEFAULT_MODEL_BY_PROVIDER.get(pv, "") or "")[:80],
+                        "default_base_url": (_DEFAULT_BASE_URL_BY_PROVIDER.get(pv, "") or "")[:120],
                     },
                 )
             elif k == "model":

@@ -85,7 +85,14 @@ Integración Angular: EventSource a SSE de chat y subagentes; polling a `/homeos
 ## 4. Despliegue y persistencia (PM2 / Docker)
 
 - **Local/Híbrido**: PM2 para `DuckClaw-Brain` (bot), `DuckClaw-Gateway` (API para Telegram inbound / clientes HTTP) y `MLX-Inference` (MLX). Config generado por `duckops serve --pm2 --gateway` → `ecosystem.api.config.cjs`.
-- **DuckClaw-Gateway**: Usa `services/api-gateway/main.py` (microservicio unificado: agente, db/write, homeostasis). Requiere variables de entorno para el LLM (`DUCKCLAW_LLM_PROVIDER`, `DUCKCLAW_LLM_MODEL`, `DUCKCLAW_LLM_BASE_URL`; claves según proveedor: `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, **`GROQ_API_KEY`** si `DUCKCLAW_LLM_PROVIDER=groq` con base `https://api.groq.com/openai/v1`, etc.) y para la BD (`DUCKDB_PATH` y multiplex `DUCKCLAW_*_DB_PATH`; el wizard puede seguir escribiendo `DUCKCLAW_DB_PATH` + `DUCKDB_PATH`, normalizada a `db/<nombre>.duckdb`). Si el `.env` solo define `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL`, `build_llm` en `duckclaw.integrations.llm_providers` las refleja en `DUCKCLAW_LLM_*` cuando estas están vacías. El manager carga `.env` de la raíz al generar el config para propagarlas a PM2.
+- **DuckClaw-Gateway**: Usa `services/api-gateway/main.py` (microservicio unificado: agente, db/write, homeostasis). Requiere variables de entorno para el LLM (`DUCKCLAW_LLM_PROVIDER`, `DUCKCLAW_LLM_MODEL`, `DUCKCLAW_LLM_BASE_URL`; claves según proveedor: `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, **`GROQ_API_KEY`** si `DUCKCLAW_LLM_PROVIDER=groq` con base `https://api.groq.com/openai/v1`, **`OPENROUTER_API_KEY`** si `DUCKCLAW_LLM_PROVIDER=openrouter` con base `https://openrouter.ai/api/v1`, etc.) y para la BD (`DUCKDB_PATH` y multiplex `DUCKCLAW_*_DB_PATH`; el wizard puede seguir escribiendo `DUCKCLAW_DB_PATH` + `DUCKDB_PATH`, normalizada a `db/<nombre>.duckdb`). Si el `.env` solo define `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL`, `build_llm` en `duckclaw.integrations.llm_providers` las refleja en `DUCKCLAW_LLM_*` cuando estas están vacías. El manager carga `.env` de la raíz al generar el config para propagarlas a PM2.
+
+### OpenRouter (proveedor unificado)
+
+- **Env**: `OPENROUTER_API_KEY` (obtener en openrouter.ai/keys). Hot-switch: `/model provider=openrouter` o alias `/model provider=or`.
+- **Modelos**: formato OpenRouter `provider/model-name` (p. ej. `anthropic/claude-sonnet-4-5`, `google/gemini-2.5-pro`) — se pasan **sin transformación** a la API.
+- **App attribution** (obligatorio en todos los requests para rankings públicos): headers `HTTP-Referer`, `X-OpenRouter-Title`, `X-OpenRouter-Categories` vía `default_headers` en `build_openrouter_llm()` (`packages/shared/src/duckclaw/integrations/llm_providers.py`). Sin `HTTP-Referer` no se crea la página de la app en openrouter.ai/apps.
+- **Inactivo sin key**: el gateway arranca con otro proveedor; doctor avisa si falta la key; error claro solo al invocar OpenRouter.
 - **Contenerización**: Docker multi-etapa (`docker/base/`, `docker/api/`) para aislamiento y K8s.
 
 ---

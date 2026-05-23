@@ -28,6 +28,7 @@ const SELECTABLE_PROVIDERS = new Set([
   'deepseek',
   'groq',
   'gemini',
+  'openrouter',
 ]);
 
 export function LlmProviderCatalog({ chatId, catalog, onUpdated, disabled }: Props) {

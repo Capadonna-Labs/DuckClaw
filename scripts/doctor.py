@@ -183,6 +183,43 @@ def check_9_github_mcp() -> str:
     return _warn(f"GitHub MCP: api.github.com/user → HTTP {code}")
 
 
+def check_10_openrouter() -> str:
+    """OpenRouter API key + conectividad (app attribution headers)."""
+    openrouter_key = (os.environ.get("OPENROUTER_API_KEY") or "").strip()
+    if not openrouter_key:
+        return (
+            _warn(
+                "OPENROUTER_API_KEY no configurado. "
+                "OpenRouter disponible pero inactivo. Obtener en: openrouter.ai/keys"
+            )
+        )
+    try:
+        sys.path.insert(0, str(_repo_root() / "packages" / "shared" / "src"))
+        from duckclaw.integrations.llm_providers import OPENROUTER_ATTRIBUTION_HEADERS
+    except Exception as exc:  # noqa: BLE001
+        return _warn(f"OpenRouter: no se importó llm_providers: {exc}")
+    try:
+        import httpx
+
+        resp = httpx.get(
+            "https://openrouter.ai/api/v1/models",
+            headers={
+                "Authorization": f"Bearer {openrouter_key}",
+                **OPENROUTER_ATTRIBUTION_HEADERS,
+            },
+            timeout=5.0,
+        )
+        if resp.status_code == 200:
+            models_count = len(resp.json().get("data", []))
+            return (
+                _ok(f"OpenRouter conectado. Modelos disponibles: {models_count}. "
+                    f"App: openrouter.ai/apps?url=https://github.com/Capadonna-Labs/duckclaw")
+            )
+        return _fail(f"OpenRouter: HTTP {resp.status_code}")
+    except Exception as exc:  # noqa: BLE001
+        return _fail(f"OpenRouter: {exc}")
+
+
 _CHECKS = (
     ("1. Repo", check_1_repo_layout),
     ("2. .env", check_2_env_file),
@@ -193,6 +230,7 @@ _CHECKS = (
     ("7. Docker daemon", check_7_docker_cli),
     ("8. Paquete mcp", check_8_mcp_pkg),
     ("9. GitHub MCP", check_9_github_mcp),
+    ("10. OpenRouter", check_10_openrouter),
 )
 
 

@@ -349,6 +349,28 @@ def test_publish_admin_chat_heartbeat_includes_worker_and_slot(monkeypatch: pyte
     assert data["kind"] == "tool"
 
 
+def test_schedule_chat_heartbeat_publishes_admin_ui_even_when_heartbeat_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Playground admin: SSE de tools no depende de /heartbeat on en Redis."""
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    published: list[tuple[str, str, str]] = []
+
+    monkeypatch.setattr(
+        "duckclaw.graphs.chat_heartbeat.is_chat_heartbeat_enabled",
+        lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(
+        "duckclaw.graphs.chat_heartbeat.publish_admin_chat_heartbeat",
+        lambda cid, text, *, kind="status", **_: published.append((cid, text, kind)),
+    )
+    from duckclaw.graphs.chat_heartbeat import schedule_chat_heartbeat_dm
+
+    schedule_chat_heartbeat_dm("default", "admin-playground", "u", "🔄 tavily_search — en curso")
+    assert len(published) == 1
+    assert published[0][2] == "tool"
+
+
 def test_schedule_chat_heartbeat_publishes_admin_ui_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

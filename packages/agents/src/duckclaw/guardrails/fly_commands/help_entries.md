@@ -7,7 +7,7 @@
 /history|Historial de tareas (quién hizo qué)
 /crons|Objetivos + --delta / --timestamp; --rm delta|wall para quitar un schedule
 /prompt <worker_id>|Ver prompt; --change <texto> para cambiar
-/model|Ver o cambiar LLM (provider/model)
+/model|Ver o cambiar LLM (provider/model; openrouter, or, deepseek, mlx, …)
 /models|Listar modelos disponibles de un provider (ej. gemini)
 /skills <worker_id>|Herramientas del template
 /forget|Borrar historial de la conversación

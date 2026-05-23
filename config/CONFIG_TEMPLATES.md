@@ -9,6 +9,8 @@
 | `ecosystem.mlx-vision.config.cjs` | PM2 MLX-Vision (VLM) |
 | `ecosystem.mlx.config.cjs` | PM2 MLX-Inference (texto, opcional) |
 | `ecosystem.comfyui.config.cjs` | PM2 ComfyUI (`~/ComfyUI`, puerto 8188) |
+| `ecosystem.spawn.config.cjs` | PM2 perfil Spawn (Gateway + Admin, sin DB-Writer) |
+| `.env.spawn.example` | Plantilla `.env` day-zero VM genérica |
 | `mcp_servers.yaml` | Servidores MCP |
 | `langgraph.json` | LangGraph dev |
 | `lora_config.yaml` | LoRA / train |

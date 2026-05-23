@@ -7,7 +7,8 @@ Utilidades **puntuales** del monorepo. Runtime de producción: `services/` + `du
 | Script | Cuándo |
 |--------|--------|
 | [`doctor.py`](doctor.py) | Diagnóstico local (Redis, DuckDB, PAT, MLX) |
-| [`bootstrap_dbs.py`](bootstrap_dbs.py) | Crear/esquemas DB iniciales |
+| [`bootstrap_dbs.py`](bootstrap_dbs.py) | Crear/esquemas DB iniciales (`--core-only` perfil Spawn) |
+| [`deploy/spawn-install.sh`](deploy/spawn-install.sh) | Instalación desatendida VM (Spawn) |
 | [`bootstrap_team_admin.py`](bootstrap_team_admin.py) | Alta admin en whitelist (`user_id` por argumento) |
 | [`register_webhooks.py`](register_webhooks.py) | Registrar webhooks Telegram |
 | [`duckclaw_setup_wizard.py`](duckclaw_setup_wizard.py) | Wizard legacy (preferir `duckops init`) |

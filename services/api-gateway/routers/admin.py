@@ -3397,13 +3397,23 @@ def _playground_vault_db_path(
 
 def _open_playground_vault_db(vault_path: str, *, read_only: bool = True) -> Any:
     from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
+    from duckclaw.spawn_profile import spawn_inline_writes_enabled
 
     abs_path = vault_path
     if not os.path.isabs(abs_path):
         abs_path = str(_repo_root() / vault_path.lstrip("/"))
     if not os.path.isfile(abs_path):
         raise FileNotFoundError(abs_path)
-    return DuckClaw(abs_path, read_only=read_only, engine="python")
+    ro = read_only
+    if read_only and spawn_inline_writes_enabled():
+        try:
+            gw = resolve_env_duckdb_path(get_gateway_db_path())
+            if Path(abs_path).resolve() == Path(gw).resolve():
+                ro = False
+        except OSError:
+            pass
+    return DuckClaw(abs_path, read_only=ro, engine="python")
 
 
 def _sandbox_chat_policy_payload(

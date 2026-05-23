@@ -8,6 +8,7 @@ Ejecutar antes de PM2 (singleton writer + gateways en solo lectura).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -328,6 +329,28 @@ def _install_extensions(con: duckdb.DuckDBPyConnection, extensions: list[str]) -
             pass
 
 
+def bootstrap_core_file(path: Path) -> None:
+    """Perfil genérico Spawn: solo tablas núcleo (spec SPAWN_GENERIC_DEPLOY)."""
+    from duckclaw.bootstrap_core import bootstrap_core_schema
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(path), read_only=False)
+    try:
+        try:
+            con.execute("INSTALL json;")
+            con.execute("LOAD json;")
+        except Exception:
+            pass
+        adapter = _ExecuteAdapter(con)
+        gp = Path(get_gateway_db_path()).expanduser()
+        if not gp.is_absolute():
+            gp = (_REPO_ROOT / gp).resolve()
+        seed_admin = path.resolve() == gp.resolve()
+        bootstrap_core_schema(adapter, seed_admin=seed_admin)
+    finally:
+        con.close()
+
+
 def bootstrap_file(path: Path, templates_root: Path, extensions: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(path), read_only=False)
@@ -376,6 +399,11 @@ def main() -> int:
         help="Procesar únicamente los .duckdb listados como argumentos (sin escanear db/private|shared). Requiere al menos una ruta.",
     )
     parser.add_argument(
+        "--core-only",
+        action="store_true",
+        help="Solo esquema núcleo (Spawn / perfil genérico). Sin quant, pqrsd ni run_schema de templates.",
+    )
+    parser.add_argument(
         "--templates-root",
         type=Path,
         default=None,
@@ -393,24 +421,35 @@ def main() -> int:
             / "forge"
             / "templates"
         )
-    if not templates_root.is_dir():
+    if not args.core_only and not templates_root.is_dir():
         print(f"No existe templates_root: {templates_root}", file=sys.stderr)
         return 1
-    extensions = _collect_extensions(templates_root)
+    extensions = _collect_extensions(templates_root) if templates_root.is_dir() else []
     print("ensure_registry (system.duckdb)...", flush=True)
     ensure_registry()
     if args.only and not args.extra_dbs:
         print("Uso: --only requiere al menos una ruta .duckdb.", file=sys.stderr)
         return 1
-    targets = _iter_duckdb_targets(list(args.extra_dbs), only_explicit=bool(args.only))
+    only_explicit = bool(args.only) or bool(args.core_only)
+    targets = _iter_duckdb_targets(list(args.extra_dbs), only_explicit=only_explicit)
+    if args.core_only and not targets:
+        default_db = os.environ.get("DUCKDB_PATH") or os.environ.get(
+            "DUCKCLAW_DB_PATH", "db/private/default/duckclaw.duckdb"
+        )
+        rp = _resolve_extra_db(default_db)
+        if rp is not None:
+            targets = [rp]
     if not targets:
         print("No hay archivos .duckdb que procesar.", flush=True)
         return 0
     had_error = False
     for p in targets:
-        print(f"Bootstrap: {p}", flush=True)
+        print(f"Bootstrap{' (core-only)' if args.core_only else ''}: {p}", flush=True)
         try:
-            bootstrap_file(p, templates_root, extensions)
+            if args.core_only:
+                bootstrap_core_file(p)
+            else:
+                bootstrap_file(p, templates_root, extensions)
         except Exception as exc:
             had_error = True
             print(f"  [error] {p}: {exc}", file=sys.stderr)

@@ -35,10 +35,24 @@ def visual_state_delta_queue_key() -> str:
 
 
 def push_visual_state_delta_sync(payload: dict[str, Any], *, duckclaw_db: Any | None = None) -> bool:
+    from duckclaw.spawn_inline_delta import apply_visual_state_delta_message_sync
+    from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
     hub_db = get_visual_state_delta_hub_db()
     if hub_db is not None:
         _release_ro_vault_for_remote_writer(payload, hub_db)
     _release_ro_vault_for_remote_writer(payload, duckclaw_db)
+
+    if spawn_inline_writes_enabled():
+        try:
+            msg = json.dumps(payload, ensure_ascii=False)
+            if apply_visual_state_delta_message_sync(msg):
+                return True
+            _log.warning("[visual_state_delta] inline apply falló (spawn profile)")
+            return False
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[visual_state_delta] inline apply error: %s", exc)
+            return False
 
     url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
     if not url:

@@ -286,6 +286,20 @@ export function useAdminChat({
     setThinkingIdentity({ workerId, swarmSlot: 1 });
     setThinking(true);
     setError(null);
+    // #region agent log
+    fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
+      body: JSON.stringify({
+        sessionId: 'fd1dbb',
+        hypothesisId: 'H1',
+        location: 'useAdminChat.ts:send',
+        message: 'admin chat send start',
+        data: { chatId, workerId, hasImages: payloadImages.length > 0 },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     setMessages((m) => [
       ...m,
       {
@@ -500,6 +514,20 @@ export function useAdminChat({
         return;
       }
       const msg = e instanceof Error ? e.message : 'Error';
+      // #region agent log
+      fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
+        body: JSON.stringify({
+          sessionId: 'fd1dbb',
+          hypothesisId: 'H4',
+          location: 'useAdminChat.ts:send',
+          message: 'admin chat send failed',
+          data: { errMsg: msg.slice(0, 200) },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setMessages((m) => {
         const trimmed =
           m.length > 0 && m[m.length - 1]?.role === 'assistant' && m[m.length - 1]?.streaming

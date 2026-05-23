@@ -98,6 +98,7 @@ ADF global: [`specs/05_ADF_AGENT_DEFINITION_FRAMEWORK.md`](../05_ADF_AGENT_DEFIN
 | [SFT_DATASET_FORMAT.md](platform/SFT_DATASET_FORMAT.md) | implemented |
 | [SFT_TRACE_SANITIZER_GEMMA4.md](platform/SFT_TRACE_SANITIZER_GEMMA4.md) | implemented |
 | [THE_MIND_DEPRECATION.md](platform/THE_MIND_DEPRECATION.md) | deprecated |
+| [SPAWN_GENERIC_DEPLOY.md](platform/SPAWN_GENERIC_DEPLOY.md) | implemented |
 
 ## `cognitive/`
 

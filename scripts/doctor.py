@@ -183,6 +183,63 @@ def check_9_github_mcp() -> str:
     return _warn(f"GitHub MCP: api.github.com/user → HTTP {code}")
 
 
+def check_spawn_orphan_queue() -> str | None:
+    """
+    Perfil Spawn: hub RW inline, sin colas huérfanas.
+    Retorna None si no aplica (no es perfil spawn).
+    """
+    try:
+        sys.path.insert(0, str(_repo_root() / "packages" / "shared" / "src"))
+        from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
+        from duckclaw.spawn_profile import is_spawn_profile, spawn_inline_writes_enabled
+    except Exception as exc:  # noqa: BLE001
+        return _warn(f"Spawn: no se importó spawn_profile: {exc}")
+
+    if not is_spawn_profile():
+        return None
+
+    lines: list[str] = []
+    if not spawn_inline_writes_enabled():
+        lines.append("DUCKCLAW_SPAWN_USE_DB_WRITER=1: escrituras vía cola (necesitas PM2 DB-Writer).")
+    else:
+        lines.append("Escrituras inline activas (sin depender de duckdb_write_queue).")
+
+    ro_flags = [
+        k
+        for k, v in os.environ.items()
+        if "READ_ONLY" in k.upper() and str(v).strip().lower() in ("1", "true", "yes", "on")
+    ]
+    if ro_flags:
+        lines.append(f"⚠️ Env fuerza solo lectura: {', '.join(sorted(ro_flags)[:8])}")
+
+    if shutil.which("pm2"):
+        try:
+            proc = subprocess.run(
+                ["pm2", "jlist"],
+                capture_output=True,
+                text=True,
+                timeout=12,
+                check=False,
+            )
+            if proc.returncode == 0 and "DuckClaw-DB-Writer" in (proc.stdout or ""):
+                lines.append(
+                    "PM2 tiene DuckClaw-DB-Writer (opcional; con inline spawn puede duplicar escritores)."
+                )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+    try:
+        gp = resolve_env_duckdb_path(get_gateway_db_path())
+        if Path(gp).is_file():
+            lines.append(f"Hub DuckDB presente → {gp}")
+        else:
+            lines.append(f"⚠️ Hub DuckDB ausente (ejecutar bootstrap_dbs --core-only): {gp}")
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"⚠️ No se resolvió ruta hub: {exc}")
+
+    return _ok("Spawn: " + " ".join(lines))
+
+
 def check_10_openrouter() -> str:
     """OpenRouter API key + conectividad (app attribution headers)."""
     openrouter_key = (os.environ.get("OPENROUTER_API_KEY") or "").strip()
@@ -243,6 +300,12 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             out = _fail(f"{label}: excepción {exc}")
         print(f"{label}: {out}")
+    try:
+        spawn_out = check_spawn_orphan_queue()
+        if spawn_out is not None:
+            print(f"11. Spawn cola huérfana: {spawn_out}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"11. Spawn cola huérfana: {_fail(f'excepción {exc}')}")
     print("\nDoctor finalizado.")
     return 0
 

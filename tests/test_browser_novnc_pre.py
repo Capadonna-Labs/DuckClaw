@@ -40,6 +40,7 @@ def test_ensure_browser_novnc_session_provisions_and_returns_url(monkeypatch: py
     mgr._refresh_browser_novnc.side_effect = _do_refresh
 
     monkeypatch.setattr(sb, "_docker_available", lambda: True)
+    monkeypatch.setattr(sb, "browser_image_available", lambda: True)
     monkeypatch.setattr(sb, "_get_manager", lambda: mgr)
     monkeypatch.setattr(sb, "load_security_policy", lambda _w: MagicMock())
     monkeypatch.setattr(sb, "_load_allowed_secrets", lambda _p: {})

@@ -36,7 +36,10 @@ def test_browser_sandbox_accepts_url_without_code(monkeypatch: object) -> None:
         )
 
     tool = browser_sandbox_tool_factory(None, None)
-    with patch("duckclaw.graphs.sandbox.run_in_sandbox", side_effect=_capture):
+    with (
+        patch("duckclaw.graphs.sandbox.browser_image_available", return_value=True),
+        patch("duckclaw.graphs.sandbox.run_in_sandbox", side_effect=_capture),
+    ):
         raw = tool.invoke({"url": "https://www.medellin.gov.co/es/pqrsd/"})
 
     assert "medellin.gov.co" in captured["code"]
@@ -56,7 +59,10 @@ def test_browser_sandbox_tool_includes_stdout_and_stderr_tails() -> None:
         attempts=1,
     )
     tool = browser_sandbox_tool_factory(None, None)
-    with patch("duckclaw.graphs.sandbox.run_in_sandbox", return_value=fake):
+    with (
+        patch("duckclaw.graphs.sandbox.browser_image_available", return_value=True),
+        patch("duckclaw.graphs.sandbox.run_in_sandbox", return_value=fake),
+    ):
         raw = tool.invoke({"code": "print('x')"})
 
     assert isinstance(raw, str)

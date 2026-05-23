@@ -224,9 +224,12 @@ def _build_manager_graph_for_db(
         and _dp != ":memory:"
         and not getattr(db, "_read_only", False)
     ):
-        _logging.getLogger(__name__).warning(
-            "graph_server: DuckClaw no está en read_only; revisar core y ruta gateway (multiplex)"
-        )
+        from duckclaw.spawn_profile import is_spawn_profile
+
+        if not is_spawn_profile():
+            _logging.getLogger(__name__).warning(
+                "graph_server: DuckClaw no está en read_only; revisar core y ruta gateway (multiplex)"
+            )
 
     return AgentAssembler.from_yaml(MANAGER_ROUTER_YAML).build(
         db=db,
@@ -308,6 +311,18 @@ def _open_duckclaw_readonly_with_retry(db_path: str) -> Any:
     raise last
 
 
+def _is_openrouter_chat_provider(provider: str) -> bool:
+    return (provider or "").strip().lower() in ("openrouter", "or", "router")
+
+
+def _openrouter_gateway_config_error(exc: BaseException) -> RuntimeError:
+    return RuntimeError(
+        "OpenRouter no está configurado en el gateway: añade OPENROUTER_API_KEY "
+        "al .env del repositorio y reinicia DuckClaw-Gateway "
+        "(pm2 restart DuckClaw-Gateway --update-env)."
+    ) from exc
+
+
 def _paths_same_canonical(a: str, b: str) -> bool:
     if not (a or "").strip() or not (b or "").strip():
         return False
@@ -337,12 +352,20 @@ def _invoke_ephemeral_gateway_graph(
     db_path = str(_graph_state["db_path"])
     os.makedirs(str(Path(db_path).parent), exist_ok=True)
     clear_worker_graph_cache()
-    db = _open_duckclaw_readonly_with_retry(db_path)
+    v_p = (vault_db_path or "").strip()
+    from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+    use_spawn_rw = spawn_inline_writes_enabled() and (
+        not v_p or v_p == ":memory:" or _paths_same_canonical(v_p, db_path)
+    )
+    if use_spawn_rw:
+        db = _open_duckclaw_writable_with_retry(db_path)
+    else:
+        db = _open_duckclaw_readonly_with_retry(db_path)
     ovr: dict[str, Any] = {}
     _log = _logging.getLogger(__name__)
     trip: tuple[str, str, str] | None = None
     trip_source = "env_defaults"
-    v_p = (vault_db_path or "").strip()
     try:
         from duckclaw.gateway_db import GatewayDbEphemeralReadonly
         from duckclaw.graphs.on_the_fly_commands import resolve_llm_triplet_for_chat_invocation
@@ -379,6 +402,8 @@ def _invoke_ephemeral_gateway_graph(
                     exc,
                     exc_info=True,
                 )
+                if _is_openrouter_chat_provider(tp) and "OPENROUTER_API_KEY" in str(exc):
+                    raise _openrouter_gateway_config_error(exc)
                 built = None
             if built is not None:
                 ovr = {

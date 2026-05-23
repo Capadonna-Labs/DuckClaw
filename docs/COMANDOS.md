@@ -1,5 +1,71 @@
 # COMANDOS · DuckClaw
 
+## Spawn / VM genérica
+
+Despliegue desatendido en VPS (spec: `specs/features/platform/SPAWN_GENERIC_DEPLOY.md`):
+
+```bash
+# Desde el fork Spawn (tras provisionar VM y clonar repo):
+export OPENROUTER_API_KEY=sk-or-...
+export DUCKCLAW_ADMIN_API_KEY=...
+export DUCKDB_PATH=db/private/default/duckclaw.duckdb
+bash scripts/deploy/spawn-install.sh
+
+# O manualmente en el servidor:
+uv run python scripts/bootstrap_dbs.py --core-only --only db/private/default/duckclaw.duckdb
+pm2 start config/ecosystem.spawn.config.cjs
+pm2 save
+```
+
+Plantilla `.env`: `config/.env.spawn.example`. Perfil mínimo: Gateway `:8000` + Admin `:3000` (sin DB-Writer).
+
+**CLI `spawn` (Mac local):** `SPAWN_CLI_DIR` no instala el comando `spawn`; solo lo usan los scripts `sh/*/*.sh`. Instala el binario o usa el shim:
+
+```bash
+# Opción A — instalador oficial (pone spawn en ~/.local/bin)
+curl -fsSL https://openrouter.ai/labs/spawn/cli/install.sh | bash
+# Asegura PATH: export PATH="$HOME/.local/bin:$PATH"
+
+# Opción B — fork local (~/Desktop/spawn)
+export SPAWN_CLI_DIR="$HOME/Desktop/spawn"   # usar $HOME, no ~/ dentro de la variable
+cd "$SPAWN_CLI_DIR/packages/cli" && bun install && bun run build && bun link
+spawn duckclaw local
+
+# Opción C — sin binario global (mismo efecto que spawn duckclaw local)
+export SPAWN_CLI_DIR="$HOME/Desktop/spawn"
+bash "$SPAWN_CLI_DIR/sh/local/duckclaw.sh"
+```
+
+El binario de `curl …/install.sh` descarga el manifest de **OpenRouterTeam/spawn** (sin agente `duckclaw`). Usa el fork local:
+
+```bash
+export SPAWN_CLI_DIR="$HOME/Desktop/spawn"
+export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
+
+# Cargar API keys desde .env (evita OAuth en localhost:5180)
+set -a && source "$HOME/Desktop/duckclaw/.env" && set +a
+
+# Una vez en el fork: instalar workspaces de Bun (evita Cannot find module '@openrouter/spawn-shared')
+cd "$SPAWN_CLI_DIR" && bun install
+
+# Opción 1 — desde el fork (detecta repo por cwd; SPAWN_CLI_DIR opcional)
+cd "$HOME/Desktop/spawn" && spawn duckclaw local
+
+# Opción 2 — shim (no requiere agente en manifest del binario global)
+bash "$SPAWN_CLI_DIR/sh/local/duckclaw.sh"
+
+# Opción 3 — tras parchear manifest.ts en el fork: rebuild CLI
+# cd "$SPAWN_CLI_DIR/packages/cli" && bun install && bun run build && bun link
+# export SPAWN_CLI_DIR="$HOME/Desktop/spawn"
+# spawn duckclaw local   # desde cualquier cwd
+```
+
+```bash
+spawn duckclaw hetzner   # desde $SPAWN_CLI_DIR o con SPAWN_CLI_DIR + CLI recompilado
+```
+
+---
+
 ```bash
 pm2 start config/ecosystem.db-writer.config.cjs
 pm2 start config/ecosystem.api.config.cjs --only DuckClaw-Gateway

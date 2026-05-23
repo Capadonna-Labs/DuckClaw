@@ -50,6 +50,19 @@ def build_context_injection_delta(
 
 
 async def push_context_injection_delta_redis(redis_client: Any, delta: ContextInjectionStateDelta) -> None:
+    from duckclaw.spawn_inline_delta import apply_context_injection_delta_sync
+    from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+    if spawn_inline_writes_enabled():
+        import asyncio
+
+        ok = await asyncio.to_thread(apply_context_injection_delta_sync, delta)
+        if not ok:
+            _log.error("CONTEXT_INJECTION inline apply falló (spawn profile)")
+            raise RuntimeError("CONTEXT_INJECTION inline apply failed")
+        _log.debug("CONTEXT_INJECTION inline apply ok")
+        return
+
     if redis_client is None:
         return
     key = context_injection_queue_key()

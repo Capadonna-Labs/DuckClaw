@@ -2154,7 +2154,8 @@ def build_worker_graph(
     llm_base_url: Optional[str] = None,
     shared_db_path: Optional[str] = None,
     reuse_db: Any | None = None,
-    tool_surface: Literal["full", "context_synthesis", "visual_generation"] = "full",
+    tool_surface: Literal["full", "context_synthesis", "visual_generation", "url_research"] = "full",
+    incoming_hint: str | None = None,
     open_vault_read_only: bool = False,
 ) -> Any:
     """
@@ -2176,6 +2177,9 @@ def build_worker_graph(
 
     ``tool_surface=visual_generation``: txt2img en Quant-Trader; omite GitHub, Trends y Reddit
     (cold start ~2 min) y delega en ``generate_visual_asset`` vía tool call determinista.
+
+    ``tool_surface=url_research``: mensaje solo URL (admin playground / Quant); omite GitHub y Google Trends.
+    Reddit MCP solo si ``incoming_hint`` contiene ``reddit.com`` (lazy por dominio, no cold start ~3 min).
 
     ``open_vault_read_only``: para ``SUMMARIZE_NEW_CONTEXT`` / ``SUMMARIZE_STORED_CONTEXT`` el worker no debe
     escribir en la bóveda (spec Context Injection). Abrir RW compite con el **db-writer** cuando éste inserta
@@ -2231,33 +2235,82 @@ def build_worker_graph(
 
     system_prompt = load_system_prompt(spec)
     tools = _build_worker_tools(db, spec)
-    if tool_surface == "full":
-        if getattr(spec, "github_config", None):
-            try:
-                from duckclaw.forge.skills.github_bridge import register_github_skill
+    _hint_low = (incoming_hint or "").strip().lower()
+    _register_github = tool_surface == "full"
+    _register_trends = tool_surface == "full"
+    # url_research: Reddit MCP solo si el hint es reddit.com (MQL5 u otras URLs no pagan cold start npx).
+    _register_reddit = tool_surface in ("full", "context_synthesis") or (
+        tool_surface == "url_research" and "reddit.com" in _hint_low
+    )
+    # #region agent log
+    try:
+        from duckclaw.debug_session_log import agent_debug_log
 
-                lw = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
-                register_github_skill(
-                    tools,
-                    spec.github_config,
-                    logical_worker_id=lw,
-                    manifest_worker_slug=str(spec.worker_id or "").strip(),
+        agent_debug_log(
+            "E",
+            "factory.py:build_worker_graph",
+            "MCP registration plan",
+            {
+                "tool_surface": tool_surface,
+                "register_github": _register_github,
+                "register_trends": _register_trends,
+                "register_reddit": _register_reddit,
+                "incoming_hint_preview": (incoming_hint or "")[:120],
+            },
+        )
+    except Exception:
+        pass
+    # #endregion
+    if _register_github and getattr(spec, "github_config", None):
+        _mcp_t0 = time.monotonic()
+        try:
+            from duckclaw.forge.skills.github_bridge import register_github_skill
+
+            lw = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
+            register_github_skill(
+                tools,
+                spec.github_config,
+                logical_worker_id=lw,
+                manifest_worker_slug=str(spec.worker_id or "").strip(),
+            )
+            try:
+                from duckclaw.debug_session_log import agent_debug_log
+
+                agent_debug_log(
+                    "E",
+                    "factory.py:build_worker_graph",
+                    "GitHub MCP registered",
+                    {"elapsed_ms": int((time.monotonic() - _mcp_t0) * 1000)},
                 )
             except Exception:
                 pass
-        if getattr(spec, "google_trends_config", None) is not None:
-            try:
-                from duckclaw.forge.skills.google_trends_bridge import register_google_trends_skill
+        except Exception:
+            pass
+    if _register_trends and getattr(spec, "google_trends_config", None) is not None:
+        try:
+            from duckclaw.forge.skills.google_trends_bridge import register_google_trends_skill
 
-                register_google_trends_skill(tools, spec.google_trends_config)
-            except Exception:
-                pass
-    # Reddit: necesario en SUMMARIZE_NEW_CONTEXT con URL /r/.../s/... (spec Context Injection).
-    if getattr(spec, "reddit_config", None) and tool_surface in ("full", "context_synthesis"):
+            register_google_trends_skill(tools, spec.google_trends_config)
+        except Exception:
+            pass
+    # Reddit: SUMMARIZE_NEW_CONTEXT con URL /r/.../s/...; url_research solo si dominio reddit.com.
+    if _register_reddit and getattr(spec, "reddit_config", None):
+        _mcp_t0 = time.monotonic()
         try:
             from duckclaw.forge.skills.reddit_bridge import register_reddit_skill
 
             register_reddit_skill(tools, spec.reddit_config)
+            try:
+                from duckclaw.debug_session_log import agent_debug_log
+
+                agent_debug_log(
+                    "E",
+                    "factory.py:build_worker_graph",
+                    "reddit MCP registered",
+                    {"elapsed_ms": int((time.monotonic() - _mcp_t0) * 1000)},
+                )
+            except Exception:
+                pass
         except Exception:
             pass
     tools_by_name = {t.name: t for t in tools}
@@ -4027,6 +4080,119 @@ def build_worker_graph(
                 _out_forced.update(_identity_fields(state))
                 return _out_forced
 
+            # #region agent log
+            try:
+                from duckclaw.debug_session_log import agent_debug_log
+
+                agent_debug_log(
+                    "C",
+                    "factory.py:agent_node_forces",
+                    "quant tool force flags",
+                    {
+                        "incoming_preview": (incoming or "")[:120],
+                        "force_visual": force_visual,
+                        "force_reddit": force_reddit,
+                        "force_tavily": force_tavily,
+                        "force_run_sandbox": force_run_sandbox,
+                        "has_run_browser": "run_browser_sandbox" in tools_by_name,
+                        "has_run_sandbox": has_run_sandbox,
+                        "lone_https": bool(_LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip())),
+                        "reddit_anchor": bool(_reddit_anchor_u),
+                    },
+                )
+            except Exception:
+                pass
+            # #endregion
+
+            _has_run_browser = "run_browser_sandbox" in tools_by_name
+            _has_tavily_mql5 = "tavily_search" in tools_by_name
+            _quant_lone_mql5_url = bool(
+                _lid_l == "quant_trader"
+                and _LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip())
+                and "mql5.com" in (incoming or "").lower()
+            )
+            if _quant_lone_mql5_url and not already_has_tool_result and not force_visual:
+                from duckclaw.graphs.sandbox import browser_image_available
+
+                _mql5_url = (incoming or "").strip()
+                _forced_tid_m = f"call_mql5_{int(time.time() * 1000)}"
+                _use_browser = bool(
+                    sandbox_enabled and _has_run_browser and browser_image_available()
+                )
+                if _use_browser:
+                    _tool_name_m = "run_browser_sandbox"
+                    _tool_args_m: dict[str, Any] = {"url": _mql5_url}
+                    _route = "browser"
+                elif _has_tavily_mql5:
+                    _tool_name_m = "tavily_search"
+                    _tool_args_m = {"query": _mql5_url}
+                    _route = "tavily_fallback"
+                else:
+                    _tool_name_m = ""
+                    _tool_args_m = {}
+                    _route = "unavailable"
+                if _tool_name_m:
+                    _forced_tc_m = [
+                        {
+                            "name": _tool_name_m,
+                            "args": _tool_args_m,
+                            "id": _forced_tid_m,
+                            "type": "tool_call",
+                        }
+                    ]
+                    _log.info(
+                        "[%s] quant deterministic mql5 → %s url=%r",
+                        _wl,
+                        _route,
+                        _mql5_url[:120],
+                    )
+                    # #region agent log
+                    try:
+                        from duckclaw.debug_session_log import agent_debug_log
+
+                        agent_debug_log(
+                            "D",
+                            "factory.py:quant_lone_mql5",
+                            f"deterministic {_tool_name_m}",
+                            {
+                                "url_preview": _mql5_url[:120],
+                                "route": _route,
+                                "browser_image_available": browser_image_available(),
+                            },
+                        )
+                    except Exception:
+                        pass
+                    # #endregion
+                    _forced_resp_m = AIMessage(content="", tool_calls=_forced_tc_m)
+                    _out_m = {**state, "messages": state["messages"] + [_forced_resp_m]}
+                    _out_m.update(_identity_fields(state))
+                    return _out_m
+
+            if (
+                _lid_l == "quant_trader"
+                and _LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip())
+                and already_has_tool_result
+                and isinstance(last_msg, ToolMessage)
+                and len(str(last_msg.content or "")) > 80
+            ):
+                _tname = (last_msg.name or "").strip()
+                _tool_body = str(last_msg.content or "").strip()
+                _fast_reply: str | None = None
+                if _tname.startswith("reddit_"):
+                    from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
+
+                    _fast_reply = format_reddit_mcp_reply_if_applicable(_tool_body) or _tool_body
+                elif _tname in ("tavily_search", "run_browser_sandbox") and "mql5.com" in (
+                    (incoming or "").lower()
+                ):
+                    _fast_reply = _tool_body[:3500] + ("…" if len(_tool_body) > 3500 else "")
+                if _fast_reply:
+                    _url_reply = AIMessage(content=_fast_reply)
+                    _log.info("[%s] quant lone-url fast exit after tool=%s", _wl, _tname)
+                    _out_url = {**state, "messages": state["messages"] + [_url_reply]}
+                    _out_url.update(_identity_fields(state))
+                    return _out_url
+
             if (
                 force_visual
                 and has_generate_visual
@@ -4667,10 +4833,41 @@ def build_worker_graph(
             and bool(getattr(spec, "read_only", False))
         )
 
+        def _notify_admin_tool_phase(tool_name: str, phase: str, detail: str = "") -> None:
+            _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+            if not _hcid:
+                return
+            try:
+                from duckclaw.graphs.chat_heartbeat import (
+                    is_admin_ui_chat_session,
+                    publish_admin_tool_event,
+                )
+
+                if not is_admin_ui_chat_session(_hcid):
+                    return
+                publish_admin_tool_event(
+                    _hcid,
+                    tool_name,
+                    phase,
+                    worker_id=(_hb_head or worker_id or "").strip() or None,
+                    detail=detail,
+                )
+            except Exception:
+                pass
+
         def _schedule_tool_heartbeat(tool_name: str) -> None:
             _htid = (state.get("tenant_id") or "default").strip() or "default"
             _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
             _huid = str(state.get("user_id") or "").strip() or _hcid
+            try:
+                from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+                _admin_ui = is_admin_ui_chat_session(_hcid)
+            except Exception:
+                _admin_ui = False
+            if _admin_ui:
+                _notify_admin_tool_phase(tool_name, "start")
+                return
             _elapsed = _heartbeat_elapsed_sec(state)
             schedule_chat_heartbeat_dm(
                 _htid,
@@ -4900,9 +5097,19 @@ def build_worker_graph(
                             len(content),
                             _prev,
                         )
+                        _admin_detail = _prev
+                        if name == "run_browser_sandbox":
+                            try:
+                                _bp = json.loads(content)
+                                if isinstance(_bp, dict) and _bp.get("browser_image_missing"):
+                                    _admin_detail = str(_bp.get("hint") or _admin_detail)[:240]
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                        _notify_admin_tool_phase(name, "done", _admin_detail)
                     except Exception as e:
                         content = f"Error: {e}"
                         _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
+                        _notify_admin_tool_phase(name, "error", str(e)[:240])
                 else:
                     if not sandbox_enabled and name in (
                         "run_sandbox",
@@ -4996,8 +5203,13 @@ def build_worker_graph(
         )
 
         def _notify_final_heartbeat() -> None:
+            from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+            _cid_hb = str(state.get("chat_id") or state.get("session_id") or "").strip()
+            if is_admin_ui_chat_session(_cid_hb):
+                return
             _tid = (state.get("tenant_id") or "default").strip() or "default"
-            _cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+            _cid = _cid_hb
             _uid = str(state.get("user_id") or "").strip() or _cid
             _head = (state.get("subagent_instance_label") or "").strip() or None
             _un = (state.get("username") or "").strip() or None

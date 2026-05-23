@@ -26,6 +26,10 @@ def normalize_telegram_chat_id_for_bot_api(chat_id: str | None) -> str:
     s = str(chat_id or "").strip()
     if not s:
         return ""
+    if s == "admin-playground" or s.startswith(
+        ("admin-section-", "admin-ui", "admin-conv-")
+    ):
+        return s
     if re.fullmatch(r"-?\d+", s):
         return s
     m = re.search(r"\((-?\d+)\)\s*$", s)

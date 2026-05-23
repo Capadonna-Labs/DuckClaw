@@ -130,6 +130,29 @@ def _browser_image_name() -> str:
     return os.environ.get("STRIX_BROWSER_IMAGE", _DEFAULT_BROWSER_IMAGE).strip() or _DEFAULT_BROWSER_IMAGE
 
 
+def browser_image_available() -> bool:
+    """True si Docker responde y la imagen browser está presente localmente (sin pull)."""
+    if not _docker_available():
+        return False
+    want = _browser_image_name()
+    try:
+        client = _docker_client()
+        client.images.get(want)
+        return True
+    except Exception:
+        return False
+
+
+def browser_sandbox_unavailable_message() -> str:
+    """Mensaje operativo cuando falta la imagen browser (404 / no construida)."""
+    img = _browser_image_name()
+    return (
+        f"Browser sandbox no disponible: imagen Docker `{img}` no está en el host. "
+        "Construye: docker build -t duckclaw/browser-env:latest docker/browser-env/ "
+        "(o define STRIX_BROWSER_IMAGE). Mientras tanto se puede usar tavily_search con la URL."
+    )
+
+
 def _debug_log_sandbox_docker_run_failure(
     exc: BaseException,
     *,
@@ -1405,6 +1428,12 @@ def ensure_browser_novnc_session(
     """
     if not _docker_available():
         return None
+    if not browser_image_available():
+        _log.warning(
+            "ensure_browser_novnc_session skipped: browser image missing session_id=%s",
+            (session_id or "").strip(),
+        )
+        return None
     wid = (worker_id or "default").strip() or "default"
     sid = (session_id or "").strip()
     if not sid:
@@ -1463,6 +1492,18 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
                         "run_browser_sandbox: falta `code` (script Playwright) o `url` (página a abrir en el sandbox)."
                     ),
                     "hint": "Pasa `url` con la URL canónica o `code` con el script completo.",
+                },
+                ensure_ascii=False,
+            )
+        if not browser_image_available():
+            return json.dumps(
+                {
+                    "exit_code": 1,
+                    "status": "error",
+                    "stdout_tail": "",
+                    "stderr_tail": browser_sandbox_unavailable_message(),
+                    "hint": browser_sandbox_unavailable_message(),
+                    "browser_image_missing": True,
                 },
                 ensure_ascii=False,
             )

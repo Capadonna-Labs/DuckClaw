@@ -731,6 +731,15 @@ _LLM_PROVIDER_CATALOG: list[dict[str, Any]] = [
         "hint": "Inferencia en la nube con modelos Llama",
     },
     {
+        "id": "openrouter",
+        "label": "OpenRouter (proxy unificado)",
+        "kind": "api",
+        "env_keys": ["OPENROUTER_API_KEY"],
+        "base_url_example": "https://openrouter.ai/api/v1",
+        "model_example": "anthropic/claude-sonnet-4-5",
+        "hint": "Un endpoint para muchos modelos; app attribution en rankings",
+    },
+    {
         "id": "gemini",
         "label": "Google Gemini",
         "kind": "api",

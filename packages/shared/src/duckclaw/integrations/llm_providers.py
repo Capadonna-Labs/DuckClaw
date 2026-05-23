@@ -31,6 +31,63 @@ def _ensure_duckclaw_llm_env_from_legacy_llm_vars() -> None:
             os.environ["DUCKCLAW_LLM_BASE_URL"] = leg
 
 
+# OpenRouter App Attribution — DuckClaw en openrouter.ai/rankings y openrouter.ai/apps
+OPENROUTER_ATTRIBUTION_HEADERS: dict[str, str] = {
+    "HTTP-Referer": "https://github.com/Capadonna-Labs/duckclaw",
+    "X-OpenRouter-Title": "DuckClaw — Sovereign Agent Harness",
+    "X-OpenRouter-Categories": "cloud-agent,cli-agent",
+}
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_MODEL_MAP: dict[str, str | None] = {
+    "default": "anthropic/claude-sonnet-4-5",
+    "fast": "deepseek/deepseek-chat",
+    "reasoning": "anthropic/claude-opus-4-5",
+    "cheap": "deepseek/deepseek-chat",
+    "coding": "anthropic/claude-sonnet-4-5",
+    "local": None,
+}
+_or_attribution_logged = False
+
+_log = logging.getLogger(__name__)
+
+
+def build_openrouter_llm(model: str = "", base_url: str = "") -> Any:
+    """
+    Cliente OpenRouter (LangChain ChatOpenAI) con app attribution headers.
+    Compatible con OpenAI SDK; los headers son obligatorios para rankings públicos.
+    """
+    key = (os.environ.get("OPENROUTER_API_KEY") or "").strip()
+    if not key:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY no configurado. Obtener en openrouter.ai/keys"
+        )
+    try:
+        from langchain_openai import ChatOpenAI
+    except Exception as exc:
+        raise RuntimeError("OpenRouter requiere langchain-openai.") from exc
+
+    resolved_model = (model or "").strip() or str(OPENROUTER_MODEL_MAP["default"] or "")
+    _or_default = OPENROUTER_BASE_URL.rstrip("/")
+    u_low = (base_url or "").strip().lower()
+    if (
+        not u_low
+        or "deepseek" in u_low
+        or "groq.com" in u_low
+        or "127.0.0.1" in u_low
+        or "localhost" in u_low
+    ):
+        or_base = _or_default
+    else:
+        or_base = (base_url or _or_default).rstrip("/")
+    return ChatOpenAI(
+        model=resolved_model,
+        temperature=0,
+        base_url=or_base,
+        api_key=key,
+        default_headers=dict(OPENROUTER_ATTRIBUTION_HEADERS),
+    )
+
+
 def mlx_openai_compatible_base_url() -> str:
     """Base OpenAI-compatible para ``mlx_lm.server`` (``MLX_PORT``, default 8080)."""
     port = (os.environ.get("MLX_PORT") or "8080").strip() or "8080"
@@ -75,6 +132,8 @@ def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
             return "deepseek"
         if "groq.com" in u:
             return "groq"
+        if "openrouter.ai" in u:
+            return "openrouter"
         if "anthropic" in u:
             return "anthropic"
         if "api.openai.com" in u and "azure" not in u:
@@ -235,6 +294,13 @@ def invoke_chat_model_with_transient_retries(
     rate_limit_base_delay = _llm_rate_limit_base_delay_sec_from_env()
     rate_limit_max_sleep = _llm_rate_limit_max_sleep_sec_from_env()
     provider = (infer_provider_from_openai_compatible_llm(llm) or "").strip().lower() or "unknown"
+    global _or_attribution_logged
+    if provider == "openrouter" and not _or_attribution_logged:
+        _log.info(
+            "OpenRouter attribution activa — DuckClaw aparecerá en openrouter.ai/rankings "
+            "con el uso de esta sesión."
+        )
+        _or_attribution_logged = True
     cooldown_until = _PROVIDER_COOLDOWN_UNTIL.get(provider, 0.0)
     now = time.time()
     if cooldown_until > now:
@@ -867,6 +933,9 @@ def build_llm(
         m = m_arg or m_env
         url = url_arg or url_env
 
+    if p in ("or", "router"):
+        p = "openrouter"
+
     if p in ("none_llm", "none", ""):
         return None
 
@@ -957,6 +1026,9 @@ def build_llm(
             return ChatOpenAI(**_kwargs)
         except Exception:
             raise RuntimeError("Groq requiere langchain-openai y GROQ_API_KEY.")
+
+    if p == "openrouter":
+        return build_openrouter_llm(m, url)
 
     if p == "ollama":
         try:

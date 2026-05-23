@@ -742,6 +742,23 @@ async def ainvoke_manager_ephemeral(
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
 
     _ensure_llm_config()
+    # #region agent log
+    try:
+        from duckclaw.debug_session_log import agent_debug_log
+
+        agent_debug_log(
+            "B",
+            "graph_server.py:ainvoke_manager_ephemeral",
+            "manager invoke start",
+            {
+                "chat_id": (chat_id or "")[:64],
+                "entry_worker_id": (entry_worker_id or "")[:40],
+                "message_preview": (message or "")[:120],
+            },
+        )
+    except Exception:
+        pass
+    # #endregion
     graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, chat_id, vault_db_path)
     try:
         return await _ainvoke(

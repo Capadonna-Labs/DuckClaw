@@ -321,6 +321,49 @@ def test_parse_instance_label() -> None:
     assert parse_instance_label("") == ("", 1)
 
 
+def test_publish_admin_tool_event_start_and_done_with_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admin SSE: start al invocar; done con duración ⏱️ (sin volcar SQL en detail)."""
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    payloads: list[str] = []
+
+    class FakeClient:
+        def publish(self, _channel: str, payload: str) -> None:
+            payloads.append(payload)
+
+    class FakeRedis:
+        @staticmethod
+        def from_url(_url: str, **_kwargs: object) -> FakeClient:
+            return FakeClient()
+
+    fake_redis_mod = types.ModuleType("redis")
+    fake_redis_mod.Redis = FakeRedis  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "redis", fake_redis_mod)
+
+    from duckclaw.graphs.chat_heartbeat import publish_admin_tool_event
+
+    publish_admin_tool_event("admin-playground", "read_sql", "start")
+    publish_admin_tool_event(
+        "admin-playground",
+        "read_sql",
+        "done",
+        detail='SELECT 1 {"rows":[{"x":1}]}',
+        elapsed_ms=95.4,
+    )
+    time.sleep(0.08)
+    assert len(payloads) == 2
+    start = __import__("json").loads(payloads[0])
+    done = __import__("json").loads(payloads[1])
+    assert start["text"] == "🔄 Usando: read_sql"
+    assert done["text"] == "🔄 Usando: read_sql"
+    assert start["kind"] == "tool"
+    assert start["tool_name"] == "read_sql"
+    assert start["tool_phase"] == "start"
+    assert done["tool_phase"] == "done"
+    assert done["elapsed_ms"] == 95.4
+
+
 def test_publish_admin_chat_heartbeat_includes_worker_and_slot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     payloads: list[str] = []

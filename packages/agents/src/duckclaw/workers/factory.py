@@ -322,6 +322,22 @@ def _is_no_task(incoming: str) -> bool:
     return bool(_NO_TASK_PATTERN.match(text))
 
 
+_FINANZ_LOCAL_ACCOUNT_NAMES = (
+    "bancolombia",
+    "nequi",
+    "davivienda",
+    "efectivo",
+    "global 66",
+    "global66",
+    "scotiabank",
+    "cívica",
+    "civica",
+    "tarjeta cívica",
+    "tarjeta civica",
+    "nu",
+)
+
+
 def _is_finanz_local_account_write_query(text: str) -> bool:
     """
     True si el usuario pide mutar saldo/cuenta en la DuckDB local (finance_worker).
@@ -352,6 +368,11 @@ def _is_finanz_local_account_write_query(text: str) -> bool:
         return False
     if "saldo" in t or "balance" in t:
         return True
+    # p. ej. «Actualiza el efectivo a 46400 COP» (sin palabra «saldo» ni «cuenta»)
+    if any(name in t for name in _FINANZ_LOCAL_ACCOUNT_NAMES) and (
+        "cop" in t or "peso" in t or re.search(r"\b\d[\d.,]*\b", t)
+    ):
+        return True
     if "cuenta" in t and any(
         k in t
         for k in (
@@ -376,6 +397,17 @@ def _is_finanz_local_account_write_query(text: str) -> bool:
     return False
 
 
+def _finanz_hallucinated_balance_write_reply(incoming: str, content: str) -> bool:
+    """True si el modelo afirmó actualizar saldo sin evidencia de admin_sql en el turno."""
+    if not _is_finanz_local_account_write_query(incoming):
+        return False
+    body = (content or "").strip().lower()
+    if not body:
+        return False
+    markers = ("✅", "actualizad", "actualizado", "quedó en", "quedo en", "nuevo saldo")
+    return any(m in body for m in markers)
+
+
 def _is_finanz_local_accounts_query(text: str) -> bool:
     """Cuentas/saldos en DuckDB local (finance_worker); no mezclar con IBKR ni portfolio de bolsa."""
     if not text or not text.strip():
@@ -391,6 +423,24 @@ def _is_finanz_local_accounts_query(text: str) -> bool:
             t,
         )
     )
+
+
+def _finanz_should_force_current_time(text: str) -> bool:
+    """
+    Finanz: ancla reloj COT al inicio del turno (antes de read_sql / admin_sql).
+    Evita agrupar deudas por mes o marcar vencimientos con fechas del historial del chat.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    low = raw.lower()
+    if "[system_directive:" in low:
+        return False
+    if low.startswith("[system_event:"):
+        return False
+    if re.match(r"^(gracias|muchas\s+gracias|ok\.?|vale\.?|listo\.?|perfecto\.?|entendido\.?)\s*!?$", low):
+        return False
+    return True
 
 
 def _is_finanz_debts_query(text: str) -> bool:
@@ -1526,6 +1576,13 @@ def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -
         return load_guardrail("errors", "llm_failure_deepseek").format(detail=detail)
     if pl == "openai":
         return load_guardrail("errors", "llm_failure_openai").format(detail=detail)
+    if pl == "openrouter" and ("402" in raw or "payment required" in low or "more credits" in low):
+        return (
+            "OpenRouter rechazó la petición (créditos insuficientes o `max_tokens` demasiado alto). "
+            "Opciones: añade créditos en openrouter.ai/settings/credits, usa DeepSeek/Groq en el selector, "
+            "o baja `DUCKCLAW_OPENROUTER_MAX_OUTPUT_TOKENS` (p. ej. 2048). "
+            f"Detalle: {detail}"
+        )
     if pl in ("mlx", "iotcorelabs"):
         return mlx_hint
     return load_guardrail("errors", "llm_failure_generic").format(detail=detail)
@@ -2238,31 +2295,13 @@ def build_worker_graph(
     _hint_low = (incoming_hint or "").strip().lower()
     _register_github = tool_surface == "full"
     _register_trends = tool_surface == "full"
-    # url_research: Reddit MCP solo si el hint es reddit.com (MQL5 u otras URLs no pagan cold start npx).
-    _register_reddit = tool_surface in ("full", "context_synthesis") or (
-        tool_surface == "url_research" and "reddit.com" in _hint_low
+    # Reddit MCP (npx cold start ~2–3 min): solo cuando el turno lo necesita, no en cada full.
+    _register_reddit = bool(getattr(spec, "reddit_config", None)) and (
+        tool_surface == "context_synthesis"
+        or (tool_surface == "url_research" and "reddit.com" in _hint_low)
+        or (tool_surface == "full" and "reddit.com" in _hint_low)
     )
-    # #region agent log
-    try:
-        from duckclaw.debug_session_log import agent_debug_log
-
-        agent_debug_log(
-            "E",
-            "factory.py:build_worker_graph",
-            "MCP registration plan",
-            {
-                "tool_surface": tool_surface,
-                "register_github": _register_github,
-                "register_trends": _register_trends,
-                "register_reddit": _register_reddit,
-                "incoming_hint_preview": (incoming_hint or "")[:120],
-            },
-        )
-    except Exception:
-        pass
-    # #endregion
     if _register_github and getattr(spec, "github_config", None):
-        _mcp_t0 = time.monotonic()
         try:
             from duckclaw.forge.skills.github_bridge import register_github_skill
 
@@ -2273,17 +2312,6 @@ def build_worker_graph(
                 logical_worker_id=lw,
                 manifest_worker_slug=str(spec.worker_id or "").strip(),
             )
-            try:
-                from duckclaw.debug_session_log import agent_debug_log
-
-                agent_debug_log(
-                    "E",
-                    "factory.py:build_worker_graph",
-                    "GitHub MCP registered",
-                    {"elapsed_ms": int((time.monotonic() - _mcp_t0) * 1000)},
-                )
-            except Exception:
-                pass
         except Exception:
             pass
     if _register_trends and getattr(spec, "google_trends_config", None) is not None:
@@ -2295,22 +2323,10 @@ def build_worker_graph(
             pass
     # Reddit: SUMMARIZE_NEW_CONTEXT con URL /r/.../s/...; url_research solo si dominio reddit.com.
     if _register_reddit and getattr(spec, "reddit_config", None):
-        _mcp_t0 = time.monotonic()
         try:
             from duckclaw.forge.skills.reddit_bridge import register_reddit_skill
 
             register_reddit_skill(tools, spec.reddit_config)
-            try:
-                from duckclaw.debug_session_log import agent_debug_log
-
-                agent_debug_log(
-                    "E",
-                    "factory.py:build_worker_graph",
-                    "reddit MCP registered",
-                    {"elapsed_ms": int((time.monotonic() - _mcp_t0) * 1000)},
-                )
-            except Exception:
-                pass
         except Exception:
             pass
     tools_by_name = {t.name: t for t in tools}
@@ -3787,6 +3803,35 @@ def build_worker_graph(
                 out.update(_identity_fields(state))
                 return out
 
+            if (
+                (_lid or "").strip().lower() == "finanz"
+                and "get_current_time" in tools_by_name
+                and _finanz_should_force_current_time(incoming)
+                and not telegram_context_summarize_directive
+                and not already_has_tool_result
+            ):
+                _lh_finanz_gct = _quant_last_human_index(state.get("messages") or [])
+                if not _quant_tool_called_since(
+                    state.get("messages") or [], _lh_finanz_gct, "get_current_time"
+                ):
+                    _forced_tid_finanz_gct = f"call_finanz_get_current_time_{int(time.time() * 1000)}"
+                    _forced_tc_finanz_gct = [
+                        {
+                            "name": "get_current_time",
+                            "args": {},
+                            "id": _forced_tid_finanz_gct,
+                            "type": "tool_call",
+                        }
+                    ]
+                    _log.info("[%s] finanz deterministic → get_current_time", _wl)
+                    _out_finanz_gct = {
+                        **state,
+                        "messages": state["messages"]
+                        + [AIMessage(content="", tool_calls=_forced_tc_finanz_gct)],
+                    }
+                    _out_finanz_gct.update(_identity_fields(state))
+                    return _out_finanz_gct
+
             force_pqrsd_fetch_canonical = bool(
                 _lid_l == "pqrsd_assistant"
                 and has_pqrsd_fetch
@@ -4080,30 +4125,6 @@ def build_worker_graph(
                 _out_forced.update(_identity_fields(state))
                 return _out_forced
 
-            # #region agent log
-            try:
-                from duckclaw.debug_session_log import agent_debug_log
-
-                agent_debug_log(
-                    "C",
-                    "factory.py:agent_node_forces",
-                    "quant tool force flags",
-                    {
-                        "incoming_preview": (incoming or "")[:120],
-                        "force_visual": force_visual,
-                        "force_reddit": force_reddit,
-                        "force_tavily": force_tavily,
-                        "force_run_sandbox": force_run_sandbox,
-                        "has_run_browser": "run_browser_sandbox" in tools_by_name,
-                        "has_run_sandbox": has_run_sandbox,
-                        "lone_https": bool(_LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip())),
-                        "reddit_anchor": bool(_reddit_anchor_u),
-                    },
-                )
-            except Exception:
-                pass
-            # #endregion
-
             _has_run_browser = "run_browser_sandbox" in tools_by_name
             _has_tavily_mql5 = "tavily_search" in tools_by_name
             _quant_lone_mql5_url = bool(
@@ -4146,23 +4167,6 @@ def build_worker_graph(
                         _route,
                         _mql5_url[:120],
                     )
-                    # #region agent log
-                    try:
-                        from duckclaw.debug_session_log import agent_debug_log
-
-                        agent_debug_log(
-                            "D",
-                            "factory.py:quant_lone_mql5",
-                            f"deterministic {_tool_name_m}",
-                            {
-                                "url_preview": _mql5_url[:120],
-                                "route": _route,
-                                "browser_image_available": browser_image_available(),
-                            },
-                        )
-                    except Exception:
-                        pass
-                    # #endregion
                     _forced_resp_m = AIMessage(content="", tool_calls=_forced_tc_m)
                     _out_m = {**state, "messages": state["messages"] + [_forced_resp_m]}
                     _out_m.update(_identity_fields(state))
@@ -4483,6 +4487,21 @@ def build_worker_graph(
                 _pl_fail = failure_provider_label_for_llm_invoke(_invoked_llm, provider)
                 resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=_pl_fail))
             tool_calls = getattr(resp, "tool_calls", None) or []
+            if (
+                (_lid_l == "finanz")
+                and force_finanz_admin_sql
+                and not tool_calls
+                and _llm_invoke_exc is None
+                and not already_has_tool_result
+                and _finanz_hallucinated_balance_write_reply(incoming, str(getattr(resp, "content", "") or ""))
+            ):
+                resp = AIMessage(
+                    content=(
+                        "No ejecuté `admin_sql` en este turno; el saldo en DuckDB **no** cambió. "
+                        "Reintenta el mensaje (p. ej. «Actualiza el saldo de Efectivo a 46400 COP»)."
+                    )
+                )
+                tool_calls = []
             _is_goals_tick = (
                 str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
                 and proactive_review_event_phrase_in_text(str(incoming or ""))
@@ -4737,6 +4756,10 @@ def build_worker_graph(
                     _msgs_gct, _lh_idx_gct, "get_current_time"
                 ) and (
                     (_lid_l == "quant_trader")
+                    or (
+                        (_lid_l == "finanz")
+                        and _finanz_should_force_current_time(incoming)
+                    )
                     or _response_mentions_wall_clock(_resp_content)
                 )
                 if _needs_gct:
@@ -4833,7 +4856,13 @@ def build_worker_graph(
             and bool(getattr(spec, "read_only", False))
         )
 
-        def _notify_admin_tool_phase(tool_name: str, phase: str, detail: str = "") -> None:
+        def _notify_admin_tool_phase(
+            tool_name: str,
+            phase: str,
+            detail: str = "",
+            *,
+            elapsed_ms: float | None = None,
+        ) -> None:
             _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
             if not _hcid:
                 return
@@ -4851,6 +4880,7 @@ def build_worker_graph(
                     phase,
                     worker_id=(_hb_head or worker_id or "").strip() or None,
                     detail=detail,
+                    elapsed_ms=elapsed_ms,
                 )
             except Exception:
                 pass
@@ -4896,6 +4926,7 @@ def build_worker_graph(
                 args = tc.get("args") or {}
                 tid = tc.get("id") or ""
                 _schedule_tool_heartbeat(name)
+                _tool_t0 = time.perf_counter()
                 try:
                     if name == "read_sql":
                         q = str(args.get("query", "")) if isinstance(args, dict) else ""
@@ -4911,6 +4942,19 @@ def build_worker_graph(
                 except Exception as e:
                     content = f"Error: {e}"
                     _log.warning("[%s] ephemeral tool=%s failed: %s", _wl, name, e)
+                    _notify_admin_tool_phase(
+                        name,
+                        "error",
+                        str(e)[:240],
+                        elapsed_ms=(time.perf_counter() - _tool_t0) * 1000,
+                    )
+                else:
+                    _notify_admin_tool_phase(
+                        name,
+                        "done",
+                        "",
+                        elapsed_ms=(time.perf_counter() - _tool_t0) * 1000,
+                    )
                 _log.info(
                     "[%s] tool=%s | ephemeral | result_len=%d | preview=%r",
                     _wl,
@@ -4947,6 +4991,7 @@ def build_worker_graph(
                 tid = tc.get("id") or ""
                 tool = tool_lookup.get(name)
                 if tool:
+                    _tool_t0: float | None = None
                     try:
                         invoke_args: Any = args
                         if isinstance(args, dict):
@@ -5012,6 +5057,7 @@ def build_worker_graph(
                             _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
                             if not is_chat_heartbeat_enabled(_htid, _hcid):
                                 _send_sandbox_heartbeat_telegram(state)
+                        _tool_t0 = time.perf_counter()
                         result = tool.invoke(invoke_args)
                         content = str(result) if result is not None else "OK"
                         if name in ("run_sandbox", "run_browser_sandbox", "pqrsd_run_identificacion_step1"):
@@ -5098,18 +5144,32 @@ def build_worker_graph(
                             _prev,
                         )
                         _admin_detail = _prev
-                        if name == "run_browser_sandbox":
+                        if name in ("read_sql", "admin_sql", "inspect_schema", "get_schema_info"):
+                            _admin_detail = ""
+                        elif name == "run_browser_sandbox":
                             try:
                                 _bp = json.loads(content)
                                 if isinstance(_bp, dict) and _bp.get("browser_image_missing"):
                                     _admin_detail = str(_bp.get("hint") or _admin_detail)[:240]
                             except (json.JSONDecodeError, TypeError):
                                 pass
-                        _notify_admin_tool_phase(name, "done", _admin_detail)
+                        _notify_admin_tool_phase(
+                            name,
+                            "done",
+                            _admin_detail,
+                            elapsed_ms=(time.perf_counter() - _tool_t0) * 1000,
+                        )
                     except Exception as e:
                         content = f"Error: {e}"
                         _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
-                        _notify_admin_tool_phase(name, "error", str(e)[:240])
+                        _notify_admin_tool_phase(
+                            name,
+                            "error",
+                            str(e)[:240],
+                            elapsed_ms=(
+                                (time.perf_counter() - _tool_t0) * 1000 if _tool_t0 is not None else None
+                            ),
+                        )
                 else:
                     if not sandbox_enabled and name in (
                         "run_sandbox",

@@ -6,6 +6,8 @@ export type ChatImagePreview = {
   tenantId?: string;
 };
 
+export type ToolHeartbeatPhase = 'start' | 'running' | 'done' | 'error';
+
 export type ChatMsg = {
   role: 'user' | 'assistant' | 'error' | 'heartbeat';
   text: string;
@@ -16,5 +18,10 @@ export type ChatMsg = {
   workerId?: string;
   /** Instancia swarm 1..n. */
   swarmSlot?: number;
+  /** Heartbeat de tool: nombre estable para fusionar start/done. */
+  toolName?: string;
+  toolPhase?: ToolHeartbeatPhase;
+  toolStartedAt?: number;
+  toolElapsedMs?: number;
   imagePreviews?: ChatImagePreview[];
 };

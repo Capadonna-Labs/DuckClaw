@@ -34,7 +34,7 @@ def _ensure_duckclaw_llm_env_from_legacy_llm_vars() -> None:
 # OpenRouter App Attribution — DuckClaw en openrouter.ai/rankings y openrouter.ai/apps
 OPENROUTER_ATTRIBUTION_HEADERS: dict[str, str] = {
     "HTTP-Referer": "https://github.com/Capadonna-Labs/duckclaw",
-    "X-OpenRouter-Title": "DuckClaw — Sovereign Agent Harness",
+    "X-OpenRouter-Title": "DuckClaw - Sovereign Agent Harness",
     "X-OpenRouter-Categories": "cloud-agent,cli-agent",
 }
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -79,11 +79,18 @@ def build_openrouter_llm(model: str = "", base_url: str = "") -> Any:
         or_base = _or_default
     else:
         or_base = (base_url or _or_default).rstrip("/")
+    # Sin max_tokens explícito, OpenRouter/LangChain pueden pedir ~64k de salida y fallar 402 en free tier.
+    _or_out = (os.environ.get("DUCKCLAW_OPENROUTER_MAX_OUTPUT_TOKENS") or "2048").strip()
+    try:
+        _mt = max(256, min(int(_or_out), 8192))
+    except ValueError:
+        _mt = 2048
     return ChatOpenAI(
         model=resolved_model,
         temperature=0,
         base_url=or_base,
         api_key=key,
+        max_tokens=_mt,
         default_headers=dict(OPENROUTER_ATTRIBUTION_HEADERS),
     )
 

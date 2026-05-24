@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { adminService } from '@/services/adminService';
+import { SELECTABLE_LLM_PROVIDERS } from '@/lib/llmModelPresets';
 
 type CatalogItem = {
   id: string;
@@ -20,24 +21,13 @@ type Props = {
   disabled?: boolean;
 };
 
-const SELECTABLE_PROVIDERS = new Set([
-  'mlx',
-  'ollama',
-  'openai',
-  'anthropic',
-  'deepseek',
-  'groq',
-  'gemini',
-  'openrouter',
-]);
-
 export function LlmProviderCatalog({ chatId, catalog, onUpdated, disabled }: Props) {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const selectProvider = async (providerId: string) => {
     if (!chatId || disabled || pendingId) return;
-    if (!SELECTABLE_PROVIDERS.has(providerId)) return;
+    if (!SELECTABLE_LLM_PROVIDERS.has(providerId)) return;
     const item = catalog.find((c) => c.id === providerId);
     if (item?.kind === 'api' && item.keys_ok === false) {
       setError(`Configura las API keys en .env para ${item.label}`);
@@ -59,7 +49,7 @@ export function LlmProviderCatalog({ chatId, catalog, onUpdated, disabled }: Pro
     <div className="space-y-2">
       <ul className="space-y-2 max-h-48 overflow-y-auto text-xs">
         {catalog.map((p) => {
-          const selectable = SELECTABLE_PROVIDERS.has(p.id);
+          const selectable = SELECTABLE_LLM_PROVIDERS.has(p.id);
           const isPending = pendingId === p.id;
           const blocked = p.kind === 'api' && p.keys_ok === false;
           return (

@@ -21,6 +21,9 @@ export type SseChatEvent =
       swarm_slot?: number;
       artifact_id?: string;
       artifact_tenant_id?: string;
+      tool_name?: string;
+      tool_phase?: 'start' | 'done' | 'error';
+      elapsed_ms?: number;
     }
   | { type: 'error'; message: string; status?: number }
   | { type: 'terminal' };
@@ -71,6 +74,18 @@ function parseDataLine(data: string): SseChatEvent | null {
           : swarmSlotRaw != null
             ? Number(swarmSlotRaw)
             : undefined;
+      const toolPhaseRaw = String(j.tool_phase || '').toLowerCase();
+      const tool_phase =
+        toolPhaseRaw === 'start' || toolPhaseRaw === 'done' || toolPhaseRaw === 'error'
+          ? toolPhaseRaw
+          : undefined;
+      const elapsedRaw = j.elapsed_ms;
+      const elapsed_ms =
+        typeof elapsedRaw === 'number'
+          ? elapsedRaw
+          : elapsedRaw != null
+            ? Number(elapsedRaw)
+            : undefined;
       return {
         type: 'heartbeat',
         text: String(j.text ?? ''),
@@ -80,6 +95,9 @@ function parseDataLine(data: string): SseChatEvent | null {
         artifact_id: typeof j.artifact_id === 'string' ? j.artifact_id : undefined,
         artifact_tenant_id:
           typeof j.artifact_tenant_id === 'string' ? j.artifact_tenant_id : undefined,
+        tool_name: typeof j.tool_name === 'string' ? j.tool_name : undefined,
+        tool_phase,
+        elapsed_ms: Number.isFinite(elapsed_ms) ? elapsed_ms : undefined,
       };
     }
     if (t === 'error') {

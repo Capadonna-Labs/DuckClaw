@@ -48,6 +48,9 @@ def sse_heartbeat(
     swarm_slot: int | None = None,
     artifact_id: str | None = None,
     artifact_tenant_id: str | None = None,
+    tool_name: str | None = None,
+    tool_phase: str | None = None,
+    elapsed_ms: float | None = None,
 ) -> str:
     meta: dict[str, Any] = {"type": "heartbeat", "text": text, "kind": kind}
     wid = (worker_id or "").strip()
@@ -61,6 +64,17 @@ def sse_heartbeat(
     tid = (artifact_tenant_id or "").strip()
     if tid:
         meta["artifact_tenant_id"] = tid
+    tn = (tool_name or "").strip()
+    if tn:
+        meta["tool_name"] = tn
+    tp = (tool_phase or "").strip().lower()
+    if tp in ("start", "done", "error"):
+        meta["tool_phase"] = tp
+    if elapsed_ms is not None:
+        try:
+            meta["elapsed_ms"] = max(0.0, float(elapsed_ms))
+        except (TypeError, ValueError):
+            pass
     return sse_data(meta)
 
 

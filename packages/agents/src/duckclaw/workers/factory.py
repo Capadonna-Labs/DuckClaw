@@ -440,6 +440,11 @@ def _finanz_should_force_current_time(text: str) -> bool:
         return False
     if re.match(r"^(gracias|muchas\s+gracias|ok\.?|vale\.?|listo\.?|perfecto\.?|entendido\.?)\s*!?$", low):
         return False
+    if re.search(
+        r"\b(ejecuta|corre|run|script|c[oó]digo|python|bash|programa|sandbox)\b",
+        low,
+    ):
+        return False
     return True
 
 

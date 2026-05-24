@@ -45,6 +45,18 @@ def parse_admin_heartbeat_payload(raw: str) -> dict[str, Any] | None:
     tid = str(data.get("artifact_tenant_id") or "").strip()
     if tid:
         out["artifact_tenant_id"] = tid
+    tn = str(data.get("tool_name") or "").strip()
+    if tn:
+        out["tool_name"] = tn
+    tp = str(data.get("tool_phase") or "").strip().lower()
+    if tp in ("start", "done", "error"):
+        out["tool_phase"] = tp
+    em = data.get("elapsed_ms")
+    if em is not None:
+        try:
+            out["elapsed_ms"] = max(0.0, float(em))
+        except (TypeError, ValueError):
+            pass
     return out
 
 

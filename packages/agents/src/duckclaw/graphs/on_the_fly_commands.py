@@ -3880,9 +3880,13 @@ def _vault_apply_sql_statements(
 
     released_ro = False
     try:
+        release = getattr(db, "release_file_handle_for_external_writer", None)
         susp = getattr(db, "suspend_readonly_file_handle", None)
         resu = getattr(db, "resume_readonly_file_handle", None)
-        if callable(susp) and callable(resu):
+        if callable(release):
+            release()
+            released_ro = bool(callable(resu))
+        elif callable(susp) and callable(resu):
             susp()
             released_ro = True
         for sql, params in statements:
@@ -3892,7 +3896,7 @@ def _vault_apply_sql_statements(
                 params=list(params or []),
                 user_id=uid,
                 tenant_id=tid,
-            )
+            ),
             st = poll_task_status_sync(write_tid, timeout_sec=30.0)
             if st is None:
                 return False, "timeout esperando db-writer"
@@ -6086,9 +6090,13 @@ def append_task_audit(
             # hasta suspender el handle (mismo patrón que ``admin_sql`` para workers RO).
             released_ro = False
             try:
+                release = getattr(db, "release_file_handle_for_external_writer", None)
                 susp = getattr(db, "suspend_readonly_file_handle", None)
                 resu = getattr(db, "resume_readonly_file_handle", None)
-                if callable(susp) and callable(resu):
+                if callable(release):
+                    release()
+                    released_ro = bool(callable(resu))
+                elif callable(susp) and callable(resu):
                     susp()
                     released_ro = True
                 write_tid = enqueue_duckdb_write_sync(

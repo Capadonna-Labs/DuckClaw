@@ -183,6 +183,28 @@ class DuckClaw:
                 pass
             self._con = None
 
+    def release_file_handle_for_external_writer(self) -> None:
+        """
+        Cierra cualquier handle Python al archivo (RO o RW) para que db-writer u otra
+        conexión con distinta configuración pueda abrir el mismo .duckdb en este PID.
+        """
+        if self._path == ":memory:":
+            return
+        if self._native is not None:
+            self.close()
+            return
+        if self._con is not None:
+            if not self._read_only:
+                try:
+                    self._con.execute("CHECKPOINT")
+                except Exception:
+                    pass
+            try:
+                self._con.close()
+            except Exception:
+                pass
+            self._con = None
+
     def resume_readonly_file_handle(self) -> None:
         """Reabre la conexión RO tras ``suspend_readonly_file_handle``."""
         if self._native is not None or self._path == ":memory:" or not self._read_only:

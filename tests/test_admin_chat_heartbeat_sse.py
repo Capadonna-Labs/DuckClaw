@@ -35,6 +35,30 @@ def test_parse_admin_heartbeat_payload_worker_fields() -> None:
     assert parsed["swarm_slot"] == 3
 
 
+def test_parse_admin_heartbeat_payload_tool_fields() -> None:
+    from core.admin_chat_heartbeat import parse_admin_heartbeat_payload
+
+    parsed = parse_admin_heartbeat_payload(
+        '{"text":"🔄 Usando: read_sql","kind":"tool","tool_name":"read_sql",'
+        '"tool_phase":"done","elapsed_ms":12.3}'
+    )
+    assert parsed is not None
+    assert parsed["tool_name"] == "read_sql"
+    assert parsed["tool_phase"] == "done"
+    assert parsed["elapsed_ms"] == 12.3
+
+
+def test_sse_heartbeat_tool_fields() -> None:
+    raw = sse_heartbeat(
+        "🔄 Usando: read_sql",
+        kind="tool",
+        tool_name="read_sql",
+        tool_phase="start",
+    )
+    assert '"tool_name": "read_sql"' in raw
+    assert '"tool_phase": "start"' in raw
+
+
 def test_friendly_chat_error_mlx_port() -> None:
     msg = friendly_chat_error_message(
         ConnectionError("[Errno 61] Connection refused connecting to http://127.0.0.1:8080/v1")

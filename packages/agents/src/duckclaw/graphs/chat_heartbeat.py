@@ -32,6 +32,11 @@ _log = logging.getLogger(__name__)
 _HEARTBEAT_KEY_PREFIX = "duckclaw:heartbeat:"
 _HEARTBEAT_TTL_SECONDS = 7 * 24 * 3600
 
+# SQL tools: omit query/result preview in admin SSE heartbeats on "done" phase.
+ADMIN_SQL_TOOL_NAMES: frozenset[str] = frozenset(
+    {"read_sql", "admin_sql", "inspect_schema", "get_schema_info"}
+)
+
 
 def normalize_telegram_chat_id_for_outbound(chat_id: str | None) -> str:
     """
@@ -165,31 +170,26 @@ def publish_admin_tool_event(
     *,
     worker_id: str | None = None,
     detail: str = "",
+    elapsed_ms: float | int | None = None,
 ) -> None:
     """
-    Heartbeat admin con fase de herramienta (inicio/fin) para SSE del playground.
-    ``phase``: ``start`` | ``done`` | ``error``.
-    """
-    name = (tool_name or "").strip() or "tool"
+    Heartbeat admin por herramienta (SSE). Un solo bloque por tool en la UI:
+    ``start`` abre cronómetro; ``done``/``error`` actualiza el mismo bloque con ``elapsed_ms``.
+  """
+    _ = detail
     ph = (phase or "start").strip().lower()
-    if ph == "done":
-        prefix = "✅"
-        label = "listo"
-    elif ph == "error":
-        prefix = "⚠️"
-        label = "error"
-    else:
-        prefix = "🔄"
-        label = "en curso"
-    extra = (detail or "").strip()
-    text = f"{prefix} {name} — {label}"
-    if extra:
-        text = f"{text}: {extra[:240]}"
+    if ph not in ("start", "done", "error"):
+        return
+    name = (tool_name or "").strip() or "tool"
+    text = f"🔄 Usando: {name}"
     publish_admin_chat_heartbeat(
         chat_id,
         text,
         kind="tool",
         worker_id=worker_id,
+        tool_name=name,
+        tool_phase=ph,
+        elapsed_ms=elapsed_ms if ph in ("done", "error") else None,
     )
 
 
@@ -203,6 +203,9 @@ def publish_admin_chat_heartbeat(
     instance_label: str | None = None,
     artifact_id: str | None = None,
     artifact_tenant_id: str | None = None,
+    tool_name: str | None = None,
+    tool_phase: str | None = None,
+    elapsed_ms: float | int | None = None,
 ) -> None:
     """
     Publica heartbeat para la UI admin (playground / widget flotante).
@@ -234,6 +237,17 @@ def publish_admin_chat_heartbeat(
     tid = (artifact_tenant_id or "").strip()
     if tid:
         body["artifact_tenant_id"] = tid
+    tn = (tool_name or "").strip()
+    if tn:
+        body["tool_name"] = tn
+    tp = (tool_phase or "").strip().lower()
+    if tp in ("start", "done", "error"):
+        body["tool_phase"] = tp
+    if elapsed_ms is not None:
+        try:
+            body["elapsed_ms"] = max(0.0, float(elapsed_ms))
+        except (TypeError, ValueError):
+            pass
     payload = json.dumps(body, ensure_ascii=False)
 
     def _run() -> None:
@@ -413,6 +427,19 @@ def format_heartbeat_elapsed(elapsed_sec: float | None) -> str:
     m = int(e // 60)
     s = int(e % 60)
     return f"⏱️ {m}m {s}s"
+
+
+def format_tool_duration_ms(elapsed_ms: float | int | None) -> str:
+    """Duración de una tool en admin SSE (p. ej. «⏱️ 95ms» o «⏱️ 48.20s»)."""
+    if elapsed_ms is None:
+        return ""
+    try:
+        ms = max(0.0, float(elapsed_ms))
+    except (TypeError, ValueError):
+        return ""
+    if ms < 1000:
+        return f"⏱️ {ms:.0f}ms"
+    return format_heartbeat_elapsed(ms / 1000.0)
 
 
 def _shorten_heartbeat_plan_title(title: str) -> str:

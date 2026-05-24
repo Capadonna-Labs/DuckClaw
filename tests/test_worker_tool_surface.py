@@ -49,10 +49,10 @@ def test_build_worker_graph_context_synthesis_skips_stdio_mcp_registers(
         m_gt.assert_not_called()
 
 
-def test_build_worker_graph_full_calls_mcp_registers_when_manifest_has_them(
+def test_build_worker_graph_full_skips_reddit_without_reddit_in_hint(
     finanz_db_path: str,
 ) -> None:
-    """Modo full: los registros se intentan (finanz declara reddit / google_trends en manifest)."""
+    """Turnos full sin Reddit (p. ej. admin_sql / cuentas) no deben cargar Reddit MCP."""
     from duckclaw import DuckClaw
     from duckclaw.workers.factory import build_worker_graph
 
@@ -66,7 +66,7 @@ def test_build_worker_graph_full_calls_mcp_registers_when_manifest_has_them(
             return type("R", (), {"content": "ok"})()
 
     with (
-        patch("duckclaw.forge.skills.github_bridge.register_github_skill") as m_gh,
+        patch("duckclaw.forge.skills.github_bridge.register_github_skill"),
         patch("duckclaw.forge.skills.reddit_bridge.register_reddit_skill") as m_rd,
         patch(
             "duckclaw.forge.skills.google_trends_bridge.register_google_trends_skill"
@@ -78,10 +78,37 @@ def test_build_worker_graph_full_calls_mcp_registers_when_manifest_has_them(
             _StubLLM(),
             reuse_db=db,
             tool_surface="full",
+            incoming_hint="Actualiza el saldo de Nequi a 44400 COP",
         )
-        # finanz manifest tiene reddit y google_trends; github solo si está en manifest
-        m_rd.assert_called_once()
+        m_rd.assert_not_called()
         m_gt.assert_called_once()
+
+
+def test_build_worker_graph_full_registers_reddit_when_hint_mentions_reddit(
+    finanz_db_path: str,
+) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.workers.factory import build_worker_graph
+
+    db = DuckClaw(finanz_db_path)
+
+    class _StubLLM:
+        def bind_tools(self, tools: list, **_kwargs):
+            return self
+
+        def invoke(self, *_args, **_kwargs):
+            return type("R", (), {"content": "ok"})()
+
+    with patch("duckclaw.forge.skills.reddit_bridge.register_reddit_skill") as m_rd:
+        build_worker_graph(
+            "finanz",
+            finanz_db_path,
+            _StubLLM(),
+            reuse_db=db,
+            tool_surface="full",
+            incoming_hint="Resume https://www.reddit.com/r/test/s/abc123",
+        )
+        m_rd.assert_called_once()
 
 
 @pytest.fixture

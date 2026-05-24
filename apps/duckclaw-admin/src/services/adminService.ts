@@ -978,6 +978,9 @@ export const adminService = {
         swarm_slot?: number;
         artifact_id?: string;
         artifact_tenant_id?: string;
+        tool_name?: string;
+        tool_phase?: 'start' | 'done' | 'error';
+        elapsed_ms?: number;
       }) => void;
       onDone?: (meta: {
         response: string;
@@ -1010,20 +1013,6 @@ export const adminService = {
           : data?.detail?.detail ?? data?.title ?? res.statusText;
       throw new Error(detail || `Error ${res.status}`);
     }
-    // #region agent log
-    fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
-      body: JSON.stringify({
-        sessionId: 'fd1dbb',
-        hypothesisId: 'H2',
-        location: 'adminService.ts:playgroundChatStream',
-        message: 'sse stream ready',
-        data: { ok: true, hasBody: Boolean(res.body) },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     let full = '';
     try {
       for await (const ev of readSseChatStream(res.body, options?.signal)) {
@@ -1039,6 +1028,9 @@ export const adminService = {
             swarm_slot: ev.swarm_slot,
             artifact_id: ev.artifact_id,
             artifact_tenant_id: ev.artifact_tenant_id,
+            tool_name: ev.tool_name,
+            tool_phase: ev.tool_phase,
+            elapsed_ms: ev.elapsed_ms,
           });
         } else if (ev.type === 'done') {
           handlers.onDone?.({
@@ -1058,23 +1050,6 @@ export const adminService = {
       if (options?.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
         return full;
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
-        body: JSON.stringify({
-          sessionId: 'fd1dbb',
-          hypothesisId: 'H3',
-          location: 'adminService.ts:playgroundChatStream',
-          message: 'sse stream error',
-          data: {
-            errName: err instanceof Error ? err.name : 'unknown',
-            errMsg: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       throw err;
     }
     if (options?.signal?.aborted) return full;

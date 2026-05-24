@@ -27,3 +27,11 @@ def test_finanz_write_query_registro_gasto_not_matched() -> None:
     assert not _is_finanz_local_account_write_query(
         "Registra un gasto de 50000 en restaurante con tarjeta Bancolombia"
     )
+
+
+def test_finanz_write_query_efectivo_without_saldo_word() -> None:
+    assert _is_finanz_local_account_write_query("Actualiza el efectivo a 46400 COP")
+
+
+def test_finanz_write_query_civica_with_saldo() -> None:
+    assert _is_finanz_local_account_write_query("Actualiza el saldo de la cívica a 15750 COP")

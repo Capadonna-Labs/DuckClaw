@@ -1,10 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Pencil, RotateCcw } from 'lucide-react';
 import { ArtifactImageLightbox } from '@/components/chat/ArtifactImageLightbox';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
+import {
+  formatToolDurationMs,
+  parseToolNameFromHeartbeatText,
+} from '@/lib/toolHeartbeat';
 
 export function formatChatIdentityPrefix(workerId?: string, swarmSlot = 1): string {
   const slot = Number.isFinite(swarmSlot) && swarmSlot >= 1 ? Math.floor(swarmSlot) : 1;
@@ -13,6 +17,37 @@ export function formatChatIdentityPrefix(workerId?: string, swarmSlot = 1): stri
 }
 
 /** Quita prefijo duplicado en heartbeat (UI ya muestra worker + tipo). */
+function ToolHeartbeatBody({ message: m }: { message: ChatMsg }) {
+  const toolName =
+    (m.toolName || '').trim() || parseToolNameFromHeartbeatText(m.text || '') || 'tool';
+  const running =
+    m.toolPhase === 'running' ||
+    m.toolPhase === 'start' ||
+    (m.heartbeatKind === 'tool' && m.toolPhase !== 'done' && m.toolPhase !== 'error');
+  const [liveMs, setLiveMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!running) {
+      setLiveMs(m.toolElapsedMs ?? null);
+      return;
+    }
+    const t0 = m.toolStartedAt ?? Date.now();
+    const tick = () => setLiveMs(Math.max(0, Date.now() - t0));
+    tick();
+    const id = window.setInterval(tick, 50);
+    return () => window.clearInterval(id);
+  }, [running, m.toolStartedAt, m.toolElapsedMs, m.toolPhase]);
+
+  const durMs = running ? liveMs : (m.toolElapsedMs ?? liveMs);
+  const dur = formatToolDurationMs(durMs);
+  return (
+    <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+      {`🔄 Usando: ${toolName}`}
+      {dur ? ` · ${dur}` : running ? ' · ⏱️ …' : ''}
+    </span>
+  );
+}
+
 export function stripHeartbeatBodyPrefix(
   text: string,
   workerId?: string,
@@ -37,7 +72,21 @@ export function stripHeartbeatBodyPrefix(
   return body;
 }
 
-export function ChatBubble({ message: m }: { message: ChatMsg }) {
+export function ChatBubble({
+  message: m,
+  onRetry,
+  canRetry = false,
+  onEdit,
+  canEdit = false,
+}: {
+  message: ChatMsg;
+  /** Reenvía el mensaje de usuario asociado a este turno. */
+  onRetry?: () => void;
+  canRetry?: boolean;
+  /** Carga el mensaje de usuario en el input para editar y reenviar. */
+  onEdit?: () => void;
+  canEdit?: boolean;
+}) {
   const isUser = m.role === 'user';
   const isError = m.role === 'error';
   const isHeartbeat = m.role === 'heartbeat';
@@ -47,6 +96,8 @@ export function ChatBubble({ message: m }: { message: ChatMsg }) {
       ? stripHeartbeatBodyPrefix(m.text, m.workerId, m.swarmSlot ?? 1)
       : m.text;
   const canCopy = Boolean(displayText?.trim()) && !m.streaming;
+  const showActions =
+    canCopy || (canRetry && Boolean(onRetry)) || (canEdit && Boolean(onEdit));
   const [copied, setCopied] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<ChatImagePreview | null>(null);
   const heartbeatLabel =
@@ -81,22 +132,60 @@ export function ChatBubble({ message: m }: { message: ChatMsg }) {
               : isInterrupted
                 ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 text-amber-900 dark:text-amber-200'
                 : 'bg-gov-gray-50 dark:bg-dark-bg border dark:border-dark-border'
-      } ${canCopy ? 'pr-9' : ''}`}
+      } ${showActions ? 'pr-[4.25rem]' : ''}`}
     >
-      {canCopy && (
-        <button
-          type="button"
-          onClick={() => void copyText()}
-          className={`absolute top-2 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 rounded-md ${
-            isUser
-              ? 'right-2 text-white/80 hover:bg-white/15'
-              : 'right-2 text-gov-gray-400 hover:bg-gov-gray-200/80 dark:hover:bg-dark-border'
+      {showActions && (
+        <div
+          className={`absolute top-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity ${
+            isUser ? 'right-2' : 'right-2'
           }`}
-          aria-label={copied ? 'Copiado' : 'Copiar mensaje'}
-          title={copied ? 'Copiado' : 'Copiar'}
         >
-          {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
-        </button>
+          {canEdit && onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className={`p-1 rounded-md ${
+                isUser
+                  ? 'text-white/80 hover:bg-white/15'
+                  : 'text-gov-gray-400 hover:bg-gov-gray-200/80 dark:hover:bg-dark-border'
+              }`}
+              aria-label="Editar mensaje"
+              title="Editar"
+            >
+              <Pencil size={14} aria-hidden />
+            </button>
+          )}
+          {canRetry && onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className={`p-1 rounded-md ${
+                isUser
+                  ? 'text-white/80 hover:bg-white/15'
+                  : 'text-gov-gray-400 hover:bg-gov-gray-200/80 dark:hover:bg-dark-border'
+              }`}
+              aria-label="Reintentar mensaje"
+              title="Reintentar"
+            >
+              <RotateCcw size={14} aria-hidden />
+            </button>
+          )}
+          {canCopy && (
+            <button
+              type="button"
+              onClick={() => void copyText()}
+              className={`p-1 rounded-md ${
+                isUser
+                  ? 'text-white/80 hover:bg-white/15'
+                  : 'text-gov-gray-400 hover:bg-gov-gray-200/80 dark:hover:bg-dark-border'
+              }`}
+              aria-label={copied ? 'Copiado' : 'Copiar mensaje'}
+              title={copied ? 'Copiado' : 'Copiar'}
+            >
+              {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
+            </button>
+          )}
+        </div>
       )}
       {isHeartbeat && (
         <p className="text-[10px] font-bold uppercase tracking-wider text-sky-700/90 dark:text-sky-300/90 mb-1">
@@ -132,7 +221,9 @@ export function ChatBubble({ message: m }: { message: ChatMsg }) {
         </div>
       )}
       <ArtifactImageLightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />
-      {isUser || isError || isInterrupted || isHeartbeat ? (
+      {isHeartbeat && m.heartbeatKind === 'tool' ? (
+        <ToolHeartbeatBody message={m} />
+      ) : isUser || isError || isInterrupted || isHeartbeat ? (
         displayText?.trim() ? (
           <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
             {displayText}

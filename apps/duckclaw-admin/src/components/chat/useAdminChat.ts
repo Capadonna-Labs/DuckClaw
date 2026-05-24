@@ -9,6 +9,12 @@ import { requestNotificationPermission } from '@/lib/chatNotifications';
 import { artifactPreviewApiPath } from '@/lib/artifactPreview';
 import { readStoredVaultPath, writeStoredVaultPath } from '@/lib/conversationVaultStorage';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
+import {
+  findToolHeartbeatIndex,
+  mapSseToolPhase,
+  parseToolNameFromHeartbeatText,
+  toolHeartbeatDisplayText,
+} from '@/lib/toolHeartbeat';
 
 export type UseAdminChatOptions = {
   chatId: string;
@@ -42,12 +48,31 @@ function collectEphemeralMessages(messages: ChatMsg[]): ChatMsg[] {
   return messages.filter((m) => m.role === 'heartbeat');
 }
 
+/** True si hay heartbeat de herramienta en el turno actual (entre último user y assistant streaming). */
+export function hasToolHeartbeatInCurrentTurn(messages: ChatMsg[]): boolean {
+  const streamIdx = messages.findIndex(
+    (x, i) => x.role === 'assistant' && x.streaming && i === messages.length - 1
+  );
+  const end = streamIdx >= 0 ? streamIdx : messages.length;
+  for (let i = end - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === 'user') break;
+    if (m.role === 'heartbeat' && m.heartbeatKind === 'tool') return true;
+  }
+  return false;
+}
+
 export function isThinkingStatusHeartbeat(m: ChatMsg | undefined): boolean {
   return (
     m?.role === 'heartbeat' &&
     m.heartbeatKind === 'status' &&
     /^Pensando/i.test((m.text || '').trim())
   );
+}
+
+/** Remove stale "Pensando…" status heartbeats from persisted chat history. */
+export function stripThinkingStatusHeartbeats(messages: ChatMsg[]): ChatMsg[] {
+  return messages.filter((m) => !isThinkingStatusHeartbeat(m));
 }
 
 function workerStorageKey(chatId: string): string {
@@ -131,6 +156,7 @@ export function useAdminChat({
   const [error, setError] = useState<string | null>(null);
   const [vaultPath, setVaultPathState] = useState('');
   const thinkingStartedAt = useRef<number>(0);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
   const messagesRef = useRef(messages);
@@ -151,12 +177,15 @@ export function useAdminChat({
     setMessages((m) => {
       if (m.length === 0) return m;
       const last = m[m.length - 1];
-      if (last?.role !== 'assistant' || !last.streaming) return m;
+      if (last?.role !== 'assistant' || !last.streaming) return stripThinkingStatusHeartbeats(m);
       const base = m.slice(0, -1);
       if (last.text.trim()) {
-        return [...base, { ...last, streaming: false }];
+        return stripThinkingStatusHeartbeats([...base, { ...last, streaming: false }]);
       }
-      return [...base, { role: 'assistant', text: 'Interrumpido', interrupted: true }];
+      return stripThinkingStatusHeartbeats([
+        ...base,
+        { role: 'assistant', text: 'Interrumpido', interrupted: true },
+      ]);
     });
   }, []);
 
@@ -267,52 +296,29 @@ export function useAdminChat({
     { resetKey: chatId, loading, thinking }
   );
 
-  const send = useCallback(async () => {
-    const text = input.trim();
-    const payloadImages = imageAttachments.buildPayloadImages();
-    if ((!text && payloadImages.length === 0) || loading || !workerId) return;
+  const runChatTurn = useCallback(
+    async (text: string, payloadImages: { mime_type: string; data_base64: string }[] = []) => {
+    if (!text && payloadImages.length === 0) return;
     void requestNotificationPermission();
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    const userPreviews = imageAttachments.buildUserPreviews();
+    const userPreviews =
+      payloadImages.length > 0 ? imageAttachments.buildUserPreviews() : undefined;
     const userLabel = text;
 
-    setInput('');
-    imageAttachments.clearImages({ revoke: false });
     setLoading(true);
     thinkingStartedAt.current = Date.now();
     setThinkingIdentity({ workerId, swarmSlot: 1 });
     setThinking(true);
     setError(null);
-    // #region agent log
-    fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
-      body: JSON.stringify({
-        sessionId: 'fd1dbb',
-        hypothesisId: 'H1',
-        location: 'useAdminChat.ts:send',
-        message: 'admin chat send start',
-        data: { chatId, workerId, hasImages: payloadImages.length > 0 },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     setMessages((m) => [
       ...m,
       {
         role: 'user',
         text: userLabel,
-        imagePreviews: userPreviews.length ? userPreviews : undefined,
-      },
-      {
-        role: 'heartbeat',
-        text: 'Pensando…',
-        heartbeatKind: 'status',
-        workerId,
-        swarmSlot: 1,
+        imagePreviews: userPreviews?.length ? userPreviews : undefined,
       },
       { role: 'assistant', text: '', streaming: true },
     ]);
@@ -366,6 +372,9 @@ export function useAdminChat({
       swarm_slot?: number;
       artifact_id?: string;
       artifact_tenant_id?: string;
+      tool_name?: string;
+      tool_phase?: 'start' | 'done' | 'error';
+      elapsed_ms?: number;
     }) => {
       const kind = payload.kind ?? 'status';
       const hbWorker = (payload.worker_id || workerId || '').trim();
@@ -386,10 +395,51 @@ export function useAdminChat({
           'default';
         void attachArtifactToStreamingAssistant(aid, tid);
       }
+      const toolName =
+        (payload.tool_name || '').trim() ||
+        parseToolNameFromHeartbeatText(payload.text) ||
+        undefined;
+      const uiPhase = mapSseToolPhase(payload.tool_phase);
+      const isToolHb = kind === 'tool' && Boolean(toolName);
+      if (kind === 'tool') {
+        setThinking(false);
+      }
       setMessages((m) => {
         const streamingIdx = m.findIndex(
           (x, i) => x.role === 'assistant' && x.streaming && i === m.length - 1
         );
+        const insertAt = streamingIdx >= 0 ? streamingIdx : m.length;
+        const elapsedMs =
+          payload.tool_phase === 'done' || payload.tool_phase === 'error'
+            ? payload.elapsed_ms
+            : undefined;
+
+        if (isToolHb && toolName) {
+          const existingIdx = findToolHeartbeatIndex(m, toolName, insertAt);
+          const startedAt =
+            existingIdx >= 0 ? m[existingIdx].toolStartedAt ?? Date.now() : Date.now();
+          const merged: ChatMsg = {
+            role: 'heartbeat',
+            text: toolHeartbeatDisplayText(toolName, uiPhase, elapsedMs),
+            heartbeatKind: 'tool',
+            workerId: hbWorker || undefined,
+            swarmSlot: hbSlot,
+            toolName,
+            toolPhase: uiPhase ?? 'running',
+            toolStartedAt: startedAt,
+            toolElapsedMs:
+              elapsedMs != null && Number.isFinite(elapsedMs) ? elapsedMs : undefined,
+          };
+          if (existingIdx >= 0) {
+            const next = [...m];
+            next[existingIdx] = merged;
+            return next;
+          }
+          const next = [...m];
+          next.splice(insertAt, 0, merged);
+          return next;
+        }
+
         const hb: ChatMsg = {
           role: 'heartbeat',
           text: payload.text,
@@ -488,25 +538,7 @@ export function useAdminChat({
             imagePreviews: assistantPreviews ?? last.imagePreviews,
           };
         }
-        let pensandoIdx = -1;
-        for (let i = next.length - 2; i >= 0; i -= 1) {
-          if (isThinkingStatusHeartbeat(next[i]) && next[i + 1]?.role === 'assistant') {
-            pensandoIdx = i;
-            break;
-          }
-        }
-        if (pensandoIdx >= 0) {
-          const elapsed =
-            thinkingStartedAt.current > 0
-              ? ((Date.now() - thinkingStartedAt.current) / 1000).toFixed(2)
-              : null;
-          const pensando = next[pensandoIdx];
-          next[pensandoIdx] = {
-            ...pensando,
-            text: elapsed ? `Pensando… (${elapsed}s)` : pensando.text,
-          };
-        }
-        return next;
+        return stripThinkingStatusHeartbeats(next);
       });
     } catch (e) {
       if (abortController.signal.aborted) {
@@ -514,26 +546,12 @@ export function useAdminChat({
         return;
       }
       const msg = e instanceof Error ? e.message : 'Error';
-      // #region agent log
-      fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
-        body: JSON.stringify({
-          sessionId: 'fd1dbb',
-          hypothesisId: 'H4',
-          location: 'useAdminChat.ts:send',
-          message: 'admin chat send failed',
-          data: { errMsg: msg.slice(0, 200) },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setMessages((m) => {
         const trimmed =
           m.length > 0 && m[m.length - 1]?.role === 'assistant' && m[m.length - 1]?.streaming
             ? m.slice(0, -1)
             : m;
-        return [...trimmed, { role: 'error', text: msg }];
+        return stripThinkingStatusHeartbeats([...trimmed, { role: 'error', text: msg }]);
       });
       setError(msg);
     } finally {
@@ -544,18 +562,76 @@ export function useAdminChat({
       setThinking(false);
       onConversationActivity?.();
     }
-  }, [
-    chatId,
-    config?.effective_tenant_id,
-    finalizeCancelledGeneration,
-    input,
-    loading,
-    config?.telegram_user_id,
-    onConversationActivity,
-    workerId,
-    vaultPath,
-    imageAttachments,
-  ]);
+  },
+    [
+      chatId,
+      config?.effective_tenant_id,
+      config?.telegram_user_id,
+      finalizeCancelledGeneration,
+      onConversationActivity,
+      workerId,
+      vaultPath,
+      imageAttachments,
+    ]
+  );
+
+  const send = useCallback(async () => {
+    const text = input.trim();
+    const payloadImages = imageAttachments.buildPayloadImages();
+    if ((!text && payloadImages.length === 0) || loading || !workerId) return;
+    setInput('');
+    imageAttachments.clearImages({ revoke: false });
+    await runChatTurn(text, payloadImages);
+  }, [input, loading, workerId, imageAttachments, runChatTurn]);
+
+  const retryFromMessage = useCallback(
+    async (messageIndex: number) => {
+      if (loading || !workerId) return;
+      const target = messages[messageIndex];
+      if (!target || target.role !== 'user') return;
+      const text = (target.text || '').trim();
+      if (!text) return;
+      abortControllerRef.current?.abort();
+      setMessages((prev) => {
+        const removed = prev.slice(messageIndex);
+        revokeMessageImagePreviews(removed);
+        return prev.slice(0, messageIndex);
+      });
+      setError(null);
+      await runChatTurn(text, []);
+    },
+    [loading, workerId, messages, runChatTurn]
+  );
+
+  /** Carga el mensaje de usuario en el input y recorta el hilo desde ahí (reenvío manual). */
+  const editFromMessage = useCallback(
+    (messageIndex: number) => {
+      if (loading || !workerId) return;
+      const target = messages[messageIndex];
+      if (!target || target.role !== 'user') return;
+      const text = (target.text || '').trim();
+      if (!text) return;
+      abortControllerRef.current?.abort();
+      setLoading(false);
+      setThinking(false);
+      finalizeCancelledGeneration();
+      setMessages((prev) => {
+        const removed = prev.slice(messageIndex);
+        revokeMessageImagePreviews(removed);
+        return prev.slice(0, messageIndex);
+      });
+      setInput(text);
+      setError(null);
+      window.requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        const len = text.length;
+        el.setSelectionRange(len, len);
+      });
+    },
+    [loading, workerId, messages, finalizeCancelledGeneration]
+  );
 
   const clearMessages = useCallback(() => {
     setMessages((prev) => {
@@ -582,6 +658,9 @@ export function useAdminChat({
     scrollToBottom,
     onScroll,
     send,
+    retryFromMessage,
+    editFromMessage,
+    inputRef,
     cancelGeneration,
     clearMessages,
     imageAttachments,

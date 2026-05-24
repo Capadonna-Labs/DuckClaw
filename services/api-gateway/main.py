@@ -1620,6 +1620,9 @@ async def _invoke_chat_sse_body(
                     swarm_slot=hb.get("swarm_slot"),
                     artifact_id=str(hb.get("artifact_id") or "").strip() or None,
                     artifact_tenant_id=str(hb.get("artifact_tenant_id") or "").strip() or None,
+                    tool_name=str(hb.get("tool_name") or "").strip() or None,
+                    tool_phase=str(hb.get("tool_phase") or "").strip().lower() or None,
+                    elapsed_ms=hb.get("elapsed_ms"),
                 )
             except asyncio.TimeoutError:
                 continue
@@ -1633,6 +1636,9 @@ async def _invoke_chat_sse_body(
                 swarm_slot=hb.get("swarm_slot"),
                 artifact_id=str(hb.get("artifact_id") or "").strip() or None,
                 artifact_tenant_id=str(hb.get("artifact_tenant_id") or "").strip() or None,
+                tool_name=str(hb.get("tool_name") or "").strip() or None,
+                tool_phase=str(hb.get("tool_phase") or "").strip().lower() or None,
+                elapsed_ms=hb.get("elapsed_ms"),
             )
 
         result = await invoke_task

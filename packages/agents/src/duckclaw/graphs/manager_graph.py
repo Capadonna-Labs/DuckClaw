@@ -231,6 +231,34 @@ def worker_graph_cache_entry_count() -> int:
     return len(_worker_graph_cache)
 
 
+def _release_worker_db_handle(worker_graph: Any | None, *, cache_key: str = "") -> bool:
+    """
+    Cierra ``_worker_db`` del grafo cacheado y opcionalmente lo saca de la caché.
+
+    Debe llamarse en cuanto termina ``worker_graph.invoke`` si el worker abrió RW en el
+    mismo .duckdb que el manager (finanz + admin_sql): dejar el handle abierto hasta el
+    ``finally`` del nodo bloquea db-writer y provoca «different configuration» al reabrir RO.
+    """
+    global _worker_graph_cache
+    if worker_graph is None:
+        return False
+    wdb = getattr(worker_graph, "_worker_db", None)
+    if wdb is None:
+        return False
+    _path_hint = str(getattr(wdb, "_path", "") or "")[-96:]
+    _ro = bool(getattr(wdb, "_read_only", False))
+    try:
+        wdb.close()
+    except Exception:
+        pass
+    if cache_key:
+        try:
+            _worker_graph_cache.pop(cache_key, None)
+        except Exception:
+            pass
+    return True
+
+
 def clear_worker_graph_cache() -> None:
     """
     Los grafos de worker cierran sobre un DuckClaw concreto; tras cerrar la conexión del manager
@@ -1058,19 +1086,6 @@ def _try_quant_url_research_fast_plan(
         ]
     planned = inc
     log_sys(_obs, "Plan rápido URL → %s (sin planner MLX)", qt)
-    # #region agent log
-    try:
-        from duckclaw.debug_session_log import agent_debug_log
-
-        agent_debug_log(
-            "B",
-            "manager_graph.py:_try_quant_url_research_fast_plan",
-            "url fast plan matched",
-            {"worker": qt, "domain": "reddit" if "reddit.com" in low else ("mql5" if "mql5.com" in low else "other")},
-        )
-    except Exception:
-        pass
-    # #endregion
     return (title, task_list, planned, qt)
 
 
@@ -1403,40 +1418,10 @@ def _llm_plan_from_model(
         )
     system = "\n\n".join(c for c in system_chunks if c)
     human = f"Mensaje del usuario:\n{(incoming or '').strip()}"
-    # #region agent log
-    _planner_t0 = time.monotonic()
-    try:
-        from duckclaw.debug_session_log import agent_debug_log
-
-        agent_debug_log(
-            "B",
-            "manager_graph.py:_llm_plan_from_model",
-            "planner MLX invoke start",
-            {"incoming_preview": (incoming or "")[:120]},
-        )
-    except Exception:
-        pass
-    # #endregion
     try:
         resp = llm.invoke([SystemMessage(content=system), HumanMessage(content=human)])
     except Exception as exc:
         _log.debug("manager planner LLM invoke failed: %s", exc)
-        # #region agent log
-        try:
-            from duckclaw.debug_session_log import agent_debug_log
-
-            agent_debug_log(
-                "B",
-                "manager_graph.py:_llm_plan_from_model",
-                "planner MLX invoke failed",
-                {
-                    "err": str(exc)[:200],
-                    "elapsed_ms": int((time.monotonic() - _planner_t0) * 1000),
-                },
-            )
-        except Exception:
-            pass
-        # #endregion
         return None
     content: Any = getattr(resp, "content", None)
     if content is None:
@@ -1461,23 +1446,6 @@ def _llm_plan_from_model(
     if not tasks:
         clip = (incoming or "").strip()[:200]
         tasks = [f"Resolver la solicitud del usuario: {clip}" if clip else "Resolver solicitud del usuario"]
-    # #region agent log
-    try:
-        from duckclaw.debug_session_log import agent_debug_log
-
-        agent_debug_log(
-            "B",
-            "manager_graph.py:_llm_plan_from_model",
-            "planner MLX invoke ok",
-            {
-                "plan_title": (title or "")[:80],
-                "elapsed_ms": int((time.monotonic() - _planner_t0) * 1000),
-                "mercenary": mercenary_spec is not None,
-            },
-        )
-    except Exception:
-        pass
-    # #endregion
     return title, tasks, mercenary_spec, delegate_id
 
 
@@ -2046,28 +2014,6 @@ def build_manager_graph(
         )
         _assigned_for_log = (out.get("assigned_worker_id") or assigned or "").strip() or "?"
         log_sys(_obs, "Worker elegido para el plan: %s", _assigned_for_log)
-        # #region agent log
-        try:
-            from duckclaw.debug_session_log import agent_debug_log
-
-            agent_debug_log(
-                "A",
-                "manager_graph.py:plan_node",
-                "plan branch resolved",
-                {
-                    "visual_fast": bool(_visual_fast),
-                    "url_fast": bool(_url_fast),
-                    "hrp_fast": bool(_hrp_fast),
-                    "visual_intent_incoming": _manager_visual_generation_intent(incoming),
-                    "lone_https": bool(_LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip())),
-                    "plan_title": (plan_title or "")[:80],
-                    "assigned": _assigned_for_log,
-                    "incoming_preview": (incoming or "")[:120],
-                },
-            )
-        except Exception:
-            pass
-        # #endregion
         return out
 
     def invoke_worker_node(state: ManagerAgentState, config: RunnableConfig) -> ManagerAgentState:
@@ -2125,35 +2071,6 @@ def build_manager_graph(
             assigned, "quant_trader"
         )
         _summarize_vault_ro = _incoming_has_context_summary_system_directive(_combined)
-        # #region agent log
-        try:
-            from duckclaw.debug_session_log import agent_debug_log
-
-            _tsurf = (
-                "visual_generation"
-                if _visual_lite_mcp
-                else (
-                    "context_synthesis"
-                    if _lite_stdio_mcp
-                    else ("url_research" if _url_research_mcp else "full")
-                )
-            )
-            agent_debug_log(
-                "A",
-                "manager_graph.py:invoke_worker",
-                "worker invoke config",
-                {
-                    "assigned": (assigned or "")[:40],
-                    "tool_surface": _tsurf,
-                    "visual_lite_mcp": _visual_lite_mcp,
-                    "visual_intent_combined": _manager_visual_generation_intent(_combined),
-                    "incoming_preview": (incoming or "")[:120],
-                    "planned_preview": (planned_task or "")[:120],
-                },
-            )
-        except Exception:
-            pass
-        # #endregion
         t0 = time.monotonic()
         reply = ""
         messages = None
@@ -2192,6 +2109,14 @@ def build_manager_graph(
                 low_url = (_combined or "").strip().lower()
                 _url_tag = "reddit" if "reddit.com" in low_url else ("mql5" if "mql5.com" in low_url else "url")
                 worker_cache_key = f"{worker_cache_key}::url_{_url_tag}"
+            else:
+                # No mezclar grafos con Reddit MCP (cold start npx) y turnos sin Reddit.
+                low_full = (_combined or "").strip().lower()
+                worker_cache_key = (
+                    f"{worker_cache_key}::mcp_rd"
+                    if "reddit.com" in low_full
+                    else f"{worker_cache_key}::lean_full"
+                )
             if _summarize_vault_ro:
                 worker_cache_key = f"{worker_cache_key}::sum_vault_ro"
             from duckclaw.workers.factory import _get_db_path, _same_duckdb_file
@@ -2261,7 +2186,7 @@ def build_manager_graph(
                             else ("url_research" if _url_research_mcp else "full")
                         )
                     ),
-                    incoming_hint=_combined if _url_research_mcp else None,
+                    incoming_hint=_combined,
                     open_vault_read_only=_summarize_vault_ro,
                 )
             worker_graph = _worker_graph_cache[worker_cache_key]
@@ -2367,6 +2292,11 @@ def build_manager_graph(
                     routing_worker_id=str(assigned or "").strip() or None,
                 )
             worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
+            _wdb_peek = getattr(worker_graph, "_worker_db", None)
+            if _wdb_peek is not None and _wdb_peek is not db:
+                _peek_rw = not bool(getattr(_wdb_peek, "_read_only", False))
+                if _suspend_for_rw_worker or _peek_rw:
+                    _release_worker_db_handle(worker_graph, cache_key=worker_cache_key)
             raw_worker_reply = str(
                 worker_invoke.get("internal_reply")
                 or worker_invoke.get("reply")
@@ -2397,24 +2327,6 @@ def build_manager_graph(
                 assigned,
                 _tools_list if _tools_list else "ninguna",
             )
-            # #region agent log
-            try:
-                from duckclaw.debug_session_log import agent_debug_log
-
-                agent_debug_log(
-                    "C",
-                    "manager_graph.py:invoke_worker_out",
-                    "worker invoke done",
-                    {
-                        "assigned": (assigned or "")[:40],
-                        "tools": _tools_list[:12] if _tools_list else [],
-                        "elapsed_ms": int((time.monotonic() - t0) * 1000),
-                        "reply_len": len(reply or ""),
-                    },
-                )
-            except Exception:
-                pass
-            # #endregion
             _w_llm_failed = bool(worker_invoke.get("_duckclaw_worker_llm_invoke_failed"))
             _w_llm_transient = bool(worker_invoke.get("_duckclaw_worker_llm_transient"))
             _soft_would_match = worker_reply_suggests_replan_without_tools(raw_worker_reply)
@@ -2544,11 +2456,6 @@ def build_manager_graph(
                     _worker_graph_cache.pop(worker_cache_key, None)
                 except Exception:
                     pass
-            if _will_suspend_ro:
-                try:
-                    db.resume_readonly_file_handle()
-                except Exception:
-                    pass
             if _visual_lite_mcp:
                 try:
                     from duckclaw.forge.skills.visual_state_delta import clear_visual_state_delta_hub_db
@@ -2560,7 +2467,13 @@ def build_manager_graph(
                 release_subagent_slot(tenant_id, assigned, slot_token, str(chat_id or ""))
             set_idle(chat_id)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
+            # task_audit vía db-writer: no reabrir RO del manager hasta después del enqueue.
             append_task_audit(db, chat_id, assigned, incoming, status, elapsed_ms, plan_title=plan_title)
+            if _will_suspend_ro:
+                try:
+                    db.resume_readonly_file_handle()
+                except Exception:
+                    pass
             if _vault_lock_obj is not None:
                 try:
                     _vault_lock_obj.release()

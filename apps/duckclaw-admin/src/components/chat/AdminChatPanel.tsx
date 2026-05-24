@@ -6,10 +6,12 @@ import { useAuthStore } from '@/store/authStore';
 import { ChatBubble, ThinkingBubble } from '@/components/chat/ChatBubble';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import {
+  hasToolHeartbeatInCurrentTurn,
   isThinkingStatusHeartbeat,
   useAdminChat,
   type AdminChatController,
 } from '@/components/chat/useAdminChat';
+import { ChatLlmSelectors } from '@/components/chat/ChatLlmSelectors';
 import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
 import { workerOptionId, workerOptionLabel } from '@/lib/workerOptions';
 
@@ -71,6 +73,9 @@ export function AdminChatPanel({
     scrollToBottom,
     onScroll,
     send,
+    retryFromMessage,
+    editFromMessage,
+    inputRef,
     cancelGeneration,
     clearMessages,
     imageAttachments,
@@ -127,6 +132,17 @@ export function AdminChatPanel({
                 onChange={setVaultPath}
                 onUpdated={() => reloadConfig()}
                 disabled={config?.authorized === false}
+                compact={isCompact}
+              />
+            )}
+            {chatId && (config?.catalog?.length ?? 0) > 0 && (
+              <ChatLlmSelectors
+                chatId={chatId}
+                provider={config?.llm?.provider ?? ''}
+                model={config?.llm?.model ?? ''}
+                catalog={config?.catalog ?? []}
+                onUpdated={() => reloadConfig()}
+                disabled={config?.authorized === false || loading}
                 compact={isCompact}
               />
             )}
@@ -208,7 +224,7 @@ export function AdminChatPanel({
           }
           const isEmptyStreaming =
             m.role === 'assistant' && m.streaming && !m.text && thinking && i === messages.length - 1;
-          if (isEmptyStreaming) {
+          if (isEmptyStreaming && !hasToolHeartbeatInCurrentTurn(messages)) {
             return (
               <ThinkingBubble
                 key={`${i}-thinking`}
@@ -218,7 +234,35 @@ export function AdminChatPanel({
               />
             );
           }
-          return <ChatBubble key={`${i}-${m.role}`} message={m} />;
+          const prevUserIdx =
+            m.role === 'assistant' && !m.streaming
+              ? (() => {
+                  for (let j = i - 1; j >= 0; j--) {
+                    if (messages[j]?.role === 'user') return j;
+                  }
+                  return -1;
+                })()
+              : -1;
+          return (
+            <ChatBubble
+              key={`${i}-${m.role}`}
+              message={m}
+              canRetry={
+                !loading &&
+                ((m.role === 'user' && Boolean(m.text?.trim())) ||
+                  (m.role === 'assistant' && prevUserIdx >= 0))
+              }
+              onRetry={
+                m.role === 'user'
+                  ? () => void retryFromMessage(i)
+                  : m.role === 'assistant' && prevUserIdx >= 0
+                    ? () => void retryFromMessage(prevUserIdx)
+                    : undefined
+              }
+              canEdit={!loading && m.role === 'user' && Boolean(m.text?.trim())}
+              onEdit={m.role === 'user' ? () => editFromMessage(i) : undefined}
+            />
+          );
         })}
         </div>
         {showScrollButton && (
@@ -277,6 +321,7 @@ export function AdminChatPanel({
             <ImagePlus size={18} />
           </button>
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {

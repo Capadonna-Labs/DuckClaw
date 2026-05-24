@@ -14,3 +14,5 @@ def test_finanz_should_force_current_time_negative() -> None:
     assert not _finanz_should_force_current_time("gracias")
     assert not _finanz_should_force_current_time("[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]\nfoo")
     assert not _finanz_should_force_current_time("[SYSTEM_EVENT: goals tick]")
+    assert not _finanz_should_force_current_time("Ejecuta el código: print(2+2)")
+    assert not _finanz_should_force_current_time("run python script in sandbox")

@@ -7,6 +7,12 @@ import { useChatImageAttachments } from '@/components/chat/useChatImageAttachmen
 import { useChatScrollAnchor } from '@/components/chat/useChatScrollAnchor';
 import { requestNotificationPermission } from '@/lib/chatNotifications';
 import { artifactPreviewApiPath } from '@/lib/artifactPreview';
+import {
+  clearEphemeralHeartbeats,
+  mergeEphemeralHeartbeats,
+  readEphemeralHeartbeats,
+  writeEphemeralHeartbeats,
+} from '@/lib/chatEphemeralStorage';
 import { readStoredVaultPath, writeStoredVaultPath } from '@/lib/conversationVaultStorage';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
 import {
@@ -44,6 +50,29 @@ function mergeHistoryWithEphemeral(server: ChatMsg[], ephemeral: ChatMsg[]): Cha
   if (!ephemeral.length) return server;
   return [...server, ...ephemeral];
 }
+
+// #region agent log
+function agentDebugLog(payload: {
+  hypothesisId: string;
+  location: string;
+  message: string;
+  data?: Record<string, string | number | boolean>;
+}) {
+  if (typeof window === 'undefined') return;
+  fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': 'fd1dbb',
+    },
+    body: JSON.stringify({
+      ...payload,
+      sessionId: 'fd1dbb',
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+}
+// #endregion
 
 function collectEphemeralMessages(messages: ChatMsg[]): ChatMsg[] {
   return messages.filter((m) => m.role === 'heartbeat');
@@ -264,9 +293,27 @@ export function useAdminChat({
       .then((data) => {
         if (cancelled || loadingRef.current) return;
         const fromServer = historyToChatMessages(data.messages);
+        const storedEphemeral = readEphemeralHeartbeats(chatId);
         setMessages((prev) => {
-          const ephemeral = collectEphemeralMessages(prev);
-          return mergeHistoryWithEphemeral(fromServer, ephemeral);
+          const liveEphemeral = collectEphemeralMessages(prev);
+          const ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
+          const merged = mergeHistoryWithEphemeral(fromServer, ephemeral);
+          // #region agent log
+          agentDebugLog({
+            hypothesisId: 'H1',
+            location: 'useAdminChat.ts:historyLoad',
+            message: 'merged server history with ephemeral',
+            data: {
+              chatId: chatId.slice(0, 24),
+              serverCount: fromServer.length,
+              storedEphemeralCount: storedEphemeral.length,
+              liveEphemeralCount: liveEphemeral.length,
+              mergedEphemeralCount: ephemeral.length,
+              mergedTotal: merged.length,
+            },
+          });
+          // #endregion
+          return merged;
         });
         if (data.last_worker_id) {
           setWorkerId((prev) => {
@@ -283,7 +330,11 @@ export function useAdminChat({
       })
       .catch(() => {
         if (!cancelled && !loadingRef.current) {
-          setMessages((prev) => (collectEphemeralMessages(prev).length ? prev : []));
+          const stored = readEphemeralHeartbeats(chatId);
+          setMessages((prev) => {
+            const merged = mergeEphemeralHeartbeats(stored, collectEphemeralMessages(prev));
+            return merged.length ? merged : [];
+          });
         }
       })
       .finally(() => {
@@ -294,6 +345,22 @@ export function useAdminChat({
       setHistoryLoading(false);
     };
   }, [chatId, enabled, historyTenantId, setWorkerId]);
+
+  useEffect(() => {
+    if (!chatId) return;
+    writeEphemeralHeartbeats(chatId, messages);
+    const hbCount = collectEphemeralMessages(messages).length;
+    if (hbCount > 0) {
+      // #region agent log
+      agentDebugLog({
+        hypothesisId: 'H2',
+        location: 'useAdminChat.ts:persistEphemeral',
+        message: 'sessionStorage write heartbeats',
+        data: { chatId: chatId.slice(0, 24), hbCount },
+      });
+      // #endregion
+    }
+  }, [chatId, messages]);
 
   const scrollContentKey = useMemo(() => {
     const tail = messages
@@ -658,11 +725,12 @@ export function useAdminChat({
   );
 
   const clearMessages = useCallback(() => {
+    clearEphemeralHeartbeats(chatId);
     setMessages((prev) => {
       revokeMessageImagePreviews(prev);
       return [];
     });
-  }, []);
+  }, [chatId]);
 
   return {
     config,

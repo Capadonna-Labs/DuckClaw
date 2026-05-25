@@ -44,6 +44,28 @@ def test_if_applicable_passthrough() -> None:
     assert format_reddit_mcp_reply_if_applicable(plain) == plain
 
 
+def test_formats_single_reddit_get_post_json() -> None:
+    raw = json.dumps(
+        {
+            "id": "1tmsc97",
+            "title": "Suspected Ebola cases in eastern DR Congo pass 900",
+            "score": 1395,
+            "upvote_ratio": 0.98,
+            "num_comments": 69,
+            "permalink": "https://reddit.com/r/worldnews/comments/1tmsc97/suspected_ebola/",
+            "is_self": False,
+        }
+    )
+    out = format_reddit_mcp_json_to_nl(raw)
+    assert out is not None
+    assert "## r/worldnews · 1tmsc97" in out
+    assert "Suspected Ebola" in out
+    assert "Score: 1395" in out
+    assert "98% up" in out
+    assert "Comentarios: 69" in out
+    assert "[Enlace]" in out
+
+
 def test_caps_posts_and_selftext_length() -> None:
     long_body = "x" * 500
     posts = [

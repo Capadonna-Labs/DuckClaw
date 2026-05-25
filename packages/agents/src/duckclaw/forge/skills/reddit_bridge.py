@@ -11,8 +11,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shlex
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, Optional
 
 from duckclaw.forge.skills.mcp_tool_args_schema import mcp_input_schema_to_args_model
@@ -92,6 +95,82 @@ def _reddit_env_ready() -> bool:
     return all(os.environ.get(k, "").strip() for k in _REDDIT_ENV_KEYS)
 
 
+def _reddit_mcp_cache_dir() -> Path:
+    custom = (os.environ.get("DUCKCLAW_REDDIT_MCP_CACHE_DIR") or "").strip()
+    if custom:
+        return Path(custom).resolve()
+    from duckclaw.forge.skills.telegram_mcp_bridge import infer_repo_root
+
+    return infer_repo_root() / ".mcp-cache" / "reddit"
+
+
+def reddit_mcp_prefetch_server_path(npm_package: str = "mcp-reddit") -> Optional[Path]:
+    """Ruta a dist/server.js si existe prefetch en .mcp-cache/reddit."""
+    pkg = (npm_package or "mcp-reddit").strip() or "mcp-reddit"
+    server = _reddit_mcp_cache_dir() / "node_modules" / pkg / "dist" / "server.js"
+    return server if server.is_file() else None
+
+
+def reddit_mcp_using_prefetch(npm_package: str = "mcp-reddit") -> bool:
+    return reddit_mcp_prefetch_server_path(npm_package) is not None
+
+
+def reddit_mcp_server_params(npm_package: str = "mcp-reddit") -> Any:
+    """
+    Stdio hacia mcp-reddit sin npx cuando hay prefetch o binario global.
+
+    Prioridad: DUCKCLAW_REDDIT_MCP_COMMAND → node + .mcp-cache → which(mcp-reddit) → npx.
+    """
+    from mcp.client.stdio import StdioServerParameters
+
+    env = os.environ.copy()
+    custom_cmd = (os.environ.get("DUCKCLAW_REDDIT_MCP_COMMAND") or "").strip()
+    if custom_cmd:
+        args_raw = (os.environ.get("DUCKCLAW_REDDIT_MCP_ARGS") or "").strip()
+        args = shlex.split(args_raw) if args_raw else []
+        return StdioServerParameters(command=custom_cmd, args=args, env=env)
+
+    cached = reddit_mcp_prefetch_server_path(npm_package)
+    if cached is not None:
+        node = (os.environ.get("DUCKCLAW_REDDIT_MCP_NODE") or shutil.which("node") or "node").strip()
+        return StdioServerParameters(command=node, args=[str(cached)], env=env)
+
+    global_bin = shutil.which("mcp-reddit")
+    if global_bin:
+        return StdioServerParameters(command=global_bin, args=[], env=env)
+
+    pkg = (npm_package or "mcp-reddit").strip() or "mcp-reddit"
+    return StdioServerParameters(
+        command="npx",
+        args=["--quiet", "-y", pkg],
+        env=env,
+    )
+
+
+def warm_reddit_mcp_pool(*, npm_package: str = "mcp-reddit") -> None:
+    """
+    Pre-calienta el pool MCP de Reddit (npx cold start). Seguro en hilo de fondo del gateway.
+    """
+    if not _mcp_available() or not _reddit_env_ready():
+        return
+    try:
+        from duckclaw.forge.skills.reddit_mcp_pool import reddit_mcp_list_tools
+
+        server_params = reddit_mcp_server_params(npm_package)
+        warm_timeout = float(
+            os.environ.get("DUCKCLAW_REDDIT_MCP_WARM_TIMEOUT_S", "90") or "90"
+        )
+        t0 = time.perf_counter()
+        tools_specs = reddit_mcp_list_tools(server_params, timeout=warm_timeout)
+        _log.info(
+            "reddit MCP warm: list_tools (%d) en %.2fs",
+            len(tools_specs),
+            time.perf_counter() - t0,
+        )
+    except Exception as exc:
+        _log.warning("reddit MCP warm: %s", exc)
+
+
 async def connect_reddit_mcp(
     *,
     read_only: bool = True,
@@ -110,31 +189,39 @@ async def connect_reddit_mcp(
         )
         return []
 
+    server_params = reddit_mcp_server_params(npm_package)
+    t_connect = time.perf_counter()
     try:
-        from mcp.client.stdio import StdioServerParameters
-    except ImportError:
-        return []
+        from duckclaw.forge.skills.reddit_mcp_pool import (
+            reddit_mcp_list_tools,
+            reddit_mcp_pool_session_ready,
+        )
 
-    pkg = (npm_package or "mcp-reddit").strip() or "mcp-reddit"
-    env = os.environ.copy()
-
-    server_params = StdioServerParameters(
-        command="npx",
-        args=["--quiet", "-y", pkg],
-        env=env,
-    )
-    try:
-        from duckclaw.forge.skills.reddit_mcp_pool import reddit_mcp_list_tools
-
-        t0 = time.perf_counter()
-        tools_specs = await asyncio.to_thread(reddit_mcp_list_tools, server_params)
+        if reddit_mcp_pool_session_ready(server_params):
+            list_timeout = float(
+                os.environ.get("DUCKCLAW_REDDIT_MCP_LIST_TOOLS_TIMEOUT_S", "60") or "60"
+            )
+        elif reddit_mcp_using_prefetch(npm_package):
+            list_timeout = float(
+                os.environ.get("DUCKCLAW_REDDIT_MCP_REGISTER_TIMEOUT_S", "45") or "45"
+            )
+        else:
+            list_timeout = float(
+                os.environ.get("DUCKCLAW_REDDIT_MCP_REGISTER_TIMEOUT_S", "12") or "12"
+            )
+        tools_specs = await asyncio.to_thread(
+            reddit_mcp_list_tools, server_params, timeout=list_timeout
+        )
+        elapsed = time.perf_counter() - t_connect
         _log.info(
             "reddit MCP: list_tools (%d) en %.2fs (pool reutilizable)",
             len(tools_specs),
-            time.perf_counter() - t0,
+            elapsed,
         )
     except Exception as exc:
-        _log.warning("reddit MCP: no se pudo iniciar npx %s: %s", pkg, exc)
+        elapsed = time.perf_counter() - t_connect
+        cmd = getattr(server_params, "command", None) or "?"
+        _log.warning("reddit MCP: no se pudo iniciar %s: %s", cmd, exc)
         return []
     from langchain_core.tools import StructuredTool
 

@@ -96,6 +96,42 @@ def _score_label(score: Any) -> str:
     return "—"
 
 
+_REDDIT_PERMALINK_SUB = re.compile(r"/r/([\w.+-]+)/comments/", re.IGNORECASE)
+
+
+def _subreddit_from_post_dict(data: dict[str, Any]) -> str:
+    permalink = str(data.get("permalink") or data.get("url") or "")
+    m = _REDDIT_PERMALINK_SUB.search(permalink)
+    if m:
+        return m.group(1)
+    sub = str(data.get("subreddit") or "").strip()
+    return sub or "reddit"
+
+
+def _format_single_reddit_post_markdown(data: dict[str, Any]) -> str | None:
+    """JSON de ``reddit_get_post`` (un post, sin clave ``posts``)."""
+    title = str(data.get("title") or "").strip()
+    post_id = str(data.get("id") or data.get("post_id") or "").strip()
+    if not title or not post_id:
+        return None
+    sub = _subreddit_from_post_dict(data)
+    score_s = _score_label(data.get("score"))
+    lines: list[str] = [f"## r/{sub} · {post_id}", "", f"- **{title}**", f"- Score: {score_s}"]
+    ratio = data.get("upvote_ratio")
+    if isinstance(ratio, (int, float)) and ratio > 0:
+        lines[-1] += f" · {int(round(float(ratio) * 100))}% up"
+    ncom = data.get("num_comments")
+    if isinstance(ncom, (int, float)):
+        lines.append(f"- Comentarios: {int(ncom)}")
+    link = _normalize_reddit_url(str(data.get("permalink") or data.get("url") or ""))
+    if link:
+        lines.append(f"- [Enlace]({link})")
+    st = str(data.get("selftext") or "").strip()
+    if st and data.get("is_self"):
+        lines.append(f"- *Extracto:* {_truncate_one_line(st, _SELFTEXT_LLM_MAX_CHARS)}")
+    return "\n".join(lines).strip()
+
+
 def _truncate_one_line(text: str, max_chars: int) -> str:
     t = text.replace("\n", " ").strip()
     if len(t) <= max_chars:
@@ -113,6 +149,11 @@ def format_reddit_mcp_json_to_nl(
     data = _extract_json_dict(reply)
     if not data:
         return None
+
+    if "title" in data and ("id" in data or "post_id" in data) and "posts" not in data:
+        single = _format_single_reddit_post_markdown(data)
+        if single:
+            return single
 
     if data.get("success") is False:
         err = data.get("error")

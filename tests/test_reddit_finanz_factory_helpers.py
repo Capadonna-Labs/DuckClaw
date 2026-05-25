@@ -1,5 +1,6 @@
 """Helpers de Reddit / Groq en factory (URLs, intención follow-up, bind sin reddit_*)."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from duckclaw.workers.factory import (
     _extract_first_reddit_url,
+    _fetch_reddit_post_via_public_json,
     _finanz_followup_reddit_read_intent,
     _quant_trader_vlm_incoming_suggests_market_figure,
     _groq_tools_without_reddit_for_bind,
@@ -204,6 +206,57 @@ def test_quant_lone_reddit_url_message_for_share_link() -> None:
         anchor,
     )
     assert not quant_trader_lone_reddit_url_message("finanz", anchor, anchor)
+
+
+def test_quant_reddit_history_anchor_vuelve_a_intentar() -> None:
+    share = "https://www.reddit.com/r/worldnews/s/GSxMO27P59"
+    msgs = [
+        HumanMessage(content=share),
+        HumanMessage(content="Vuelve a intentar"),
+    ]
+    assert _quant_trader_reddit_history_anchor_intent("Vuelve a intentar", msgs)
+
+
+def test_fetch_reddit_post_via_public_json_parses_listing() -> None:
+    comments_url = "https://www.reddit.com/r/worldnews/comments/abc123/title/"
+    reddit_payload = [
+        {
+            "data": {
+                "children": [
+                    {
+                        "data": {
+                            "title": "Test headline",
+                            "selftext": "Body text",
+                            "score": 42,
+                            "permalink": "/r/worldnews/comments/abc123/title/",
+                            "is_self": True,
+                            "url": "https://www.reddit.com/r/worldnews/comments/abc123/title/",
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps(reddit_payload).encode("utf-8")
+    mock_cm = MagicMock()
+    mock_cm.__enter__.return_value = mock_resp
+    mock_cm.__exit__.return_value = False
+
+    with patch("duckclaw.workers.factory._urllib_request.urlopen", return_value=mock_cm):
+        out = _fetch_reddit_post_via_public_json(comments_url)
+
+    assert out is not None
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["subreddit"] == "worldnews"
+    assert len(parsed["posts"]) == 1
+    assert parsed["posts"][0]["title"] == "Test headline"
+    assert parsed["posts"][0]["id"] == "abc123"
+
+
+def test_fetch_reddit_post_via_public_json_returns_none_on_bad_url() -> None:
+    assert _fetch_reddit_post_via_public_json("https://example.com") is None
 
 
 def test_groq_tools_without_reddit_for_bind_filters_prefix() -> None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from typing import Any, Optional
@@ -29,6 +30,7 @@ def _params_key(server_params: Any) -> tuple[str, tuple[str, ...]]:
 class _RedditMcpPool:
     def __init__(self) -> None:
         self._thread_lock = threading.Lock()
+        self._connect_lock: Optional[asyncio.Lock] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._ready = threading.Event()
@@ -79,6 +81,11 @@ class _RedditMcpPool:
             self._stdio_cm = None
         self._params_key = None
 
+    def _connect_lock_for_loop(self) -> asyncio.Lock:
+        if self._connect_lock is None:
+            self._connect_lock = asyncio.Lock()
+        return self._connect_lock
+
     async def _ensure_connected_async(self, server_params: Any) -> Any:
         from mcp import ClientSession
         from mcp.client.stdio import stdio_client
@@ -93,21 +100,31 @@ class _RedditMcpPool:
             self._last_used = now
             return self._session
 
-        await self._disconnect_async()
-        t0 = time.perf_counter()
-        self._stdio_cm = stdio_client(server_params)
-        read_stream, write_stream = await self._stdio_cm.__aenter__()
-        self._session_cm = ClientSession(read_stream, write_stream)
-        self._session = await self._session_cm.__aenter__()
-        await self._session.initialize()
-        self._params_key = key
-        self._last_used = time.monotonic()
-        _log.info(
-            "reddit MCP pool: sesión stdio lista en %.2fs (cmd=%s)",
-            time.perf_counter() - t0,
-            key[0],
-        )
-        return self._session
+        async with self._connect_lock_for_loop():
+            now = time.monotonic()
+            if (
+                self._session is not None
+                and self._params_key == key
+                and (now - self._last_used) < _IDLE_TTL_S
+            ):
+                self._last_used = now
+                return self._session
+
+            await self._disconnect_async()
+            t0 = time.perf_counter()
+            self._stdio_cm = stdio_client(server_params)
+            read_stream, write_stream = await self._stdio_cm.__aenter__()
+            self._session_cm = ClientSession(read_stream, write_stream)
+            self._session = await self._session_cm.__aenter__()
+            await self._session.initialize()
+            self._params_key = key
+            self._last_used = time.monotonic()
+            _log.info(
+                "reddit MCP pool: sesión stdio lista en %.2fs (cmd=%s)",
+                time.perf_counter() - t0,
+                key[0],
+            )
+            return self._session
 
     async def _list_tools_async(self, server_params: Any) -> list[Any]:
         session = await self._ensure_connected_async(server_params)
@@ -150,8 +167,20 @@ class _RedditMcpPool:
         finally:
             self._last_used = time.monotonic()
 
-    def list_tools(self, server_params: Any) -> list[Any]:
-        return self._run_coro(self._list_tools_async(server_params))
+    def list_tools(self, server_params: Any, *, timeout: float | None = None) -> list[Any]:
+        effective = timeout
+        if effective is None:
+            effective = float(
+                os.environ.get("DUCKCLAW_REDDIT_MCP_LIST_TOOLS_TIMEOUT_S", "180") or "180"
+            )
+        return self._run_coro(self._list_tools_async(server_params), timeout=effective)
+
+    def session_ready(self, server_params: Any) -> bool:
+        key = _params_key(server_params)
+        with self._thread_lock:
+            if self._session is None or self._params_key != key:
+                return False
+            return (time.monotonic() - self._last_used) < _IDLE_TTL_S
 
     def call_tool(
         self,
@@ -165,8 +194,12 @@ class _RedditMcpPool:
 _POOL = _RedditMcpPool()
 
 
-def reddit_mcp_list_tools(server_params: Any) -> list[Any]:
-    return _POOL.list_tools(server_params)
+def reddit_mcp_list_tools(server_params: Any, *, timeout: float | None = None) -> list[Any]:
+    return _POOL.list_tools(server_params, timeout=timeout)
+
+
+def reddit_mcp_pool_session_ready(server_params: Any) -> bool:
+    return _POOL.session_ready(server_params)
 
 
 def reddit_mcp_call_tool(

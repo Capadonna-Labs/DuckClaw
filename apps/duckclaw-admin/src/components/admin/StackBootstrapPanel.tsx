@@ -90,7 +90,7 @@ export function StackBootstrapPanel({ onConnected, compact }: Props) {
           className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
         >
           <Play size={16} />
-          {running ? 'Iniciando plataforma…' : 'Iniciar plataforma (PM2 + Telegram)'}
+          {running ? 'Iniciando plataforma…' : 'Iniciar plataforma'}
         </button>
         <button
           type="button"

@@ -19,7 +19,7 @@ const OPS_COMMANDS_FALLBACK = {
     },
     {
       id: 'start_stack',
-      label: 'Iniciar plataforma (PM2 + Telegram)',
+      label: 'Iniciar plataforma',
       argv: ['__start_stack__'],
     },
     {

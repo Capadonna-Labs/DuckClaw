@@ -1995,6 +1995,67 @@ def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
     return f"Uso: /sandbox on|off\nEstado actual: {status}."
 
 
+def _parse_ibkr_toggle_args(args: str) -> tuple[Optional[bool], Optional[str], Optional[str]]:
+    """
+    ``/ibkr on --mode paper|live`` | ``/ibkr off``.
+    Retorna (on|off|None, mode|None, error|None).
+    """
+    tokens = (args or "").strip().split()
+    if not tokens:
+        return None, None, None
+    head = tokens[0].strip().lower()
+    on_off: Optional[bool]
+    if head in ("on", "1", "true", "sí", "si"):
+        on_off = True
+    elif head in ("off", "0", "false"):
+        on_off = False
+    else:
+        return None, None, "Uso: /ibkr on --mode paper|live | /ibkr off"
+    mode: Optional[str] = None
+    i = 1
+    while i < len(tokens):
+        if tokens[i] == "--mode" and i + 1 < len(tokens):
+            mode = tokens[i + 1].strip().lower()
+            i += 2
+            continue
+        i += 1
+    if on_off is True:
+        if mode not in ("paper", "live"):
+            return True, None, "Con /ibkr on debes indicar --mode paper o --mode live."
+    return on_off, mode, None
+
+
+def execute_ibkr_toggle(db: Any, chat_id: Any, args: str) -> str:
+    """/ibkr on --mode paper|live | /ibkr off: portfolio IBKR por sesión (Finanz)."""
+    on_off, mode, err = _parse_ibkr_toggle_args(args)
+    if err:
+        return err
+    if on_off is True:
+        set_chat_state(db, chat_id, "ibkr_enabled", "true")
+        set_chat_state(db, chat_id, "ibkr_portfolio_mode", str(mode or "paper"))
+        label = "paper" if mode == "paper" else "live"
+        return (
+            f"IBKR portfolio activado para esta sesión (modo {label}). "
+            "Finanz puede usar get_ibkr_portfolio en este chat."
+        )
+    if on_off is False:
+        set_chat_state(db, chat_id, "ibkr_enabled", "false")
+        return "IBKR portfolio desactivado para esta sesión. Finanz no llamará get_ibkr_portfolio hasta /ibkr on."
+    enabled = (get_chat_state(db, chat_id, "ibkr_enabled") or "").strip().lower() in (
+        "true",
+        "1",
+        "on",
+        "sí",
+        "si",
+    )
+    cur_mode = (get_chat_state(db, chat_id, "ibkr_portfolio_mode") or "—").strip() or "—"
+    status = f"on ({cur_mode})" if enabled else "off"
+    return (
+        "Uso: /ibkr on --mode paper|live | /ibkr off\n"
+        f"Estado actual: {status}."
+    )
+
+
 def execute_internet_toggle(
     db: Any,
     chat_id: Any,
@@ -5848,6 +5909,8 @@ def _dispatch_fly_command(
         return execute_context_toggle(db, chat_id, args)
     if name in ("sandbox", "sandox"):
         return execute_sandbox_toggle(db, chat_id, args)
+    if name == "ibkr":
+        return execute_ibkr_toggle(db, chat_id, args)
     if name in ("internet", "red", "network"):
         return execute_internet_toggle(db, chat_id, args, tenant_id=tenant_id)
     if name == "heartbeat":

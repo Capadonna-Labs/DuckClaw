@@ -26,7 +26,7 @@ export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = 
     argv: ['pm2', 'start', 'config/ecosystem.api.config.cjs', '--only', 'DuckClaw-Gateway', '--update-env'],
   },
   start_stack: {
-    label: 'Iniciar plataforma (PM2 + Telegram)',
+    label: 'Iniciar plataforma',
     argv: ['__start_stack__'],
   },
   start_telegram_ingress: {

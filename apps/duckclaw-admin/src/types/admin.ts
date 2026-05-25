@@ -82,3 +82,20 @@ export interface FlyCommandEntry {
   cmd: string;
   description: string;
 }
+
+export interface OverviewActivityRow {
+  worker_id: string;
+  success_count: number;
+  failed_count: number;
+}
+
+export interface OverviewLatencyRow {
+  hour: string;
+  avg_latency: number;
+}
+
+export interface OverviewMetrics {
+  activity: OverviewActivityRow[];
+  latency: OverviewLatencyRow[];
+  db_path?: string;
+}

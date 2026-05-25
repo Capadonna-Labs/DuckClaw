@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
@@ -123,9 +124,15 @@ async def connect_reddit_mcp(
         env=env,
     )
     try:
-        from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_list_tools
+        from duckclaw.forge.skills.reddit_mcp_pool import reddit_mcp_list_tools
 
-        tools_specs = await mcp_stdio_list_tools(server_params)
+        t0 = time.perf_counter()
+        tools_specs = await asyncio.to_thread(reddit_mcp_list_tools, server_params)
+        _log.info(
+            "reddit MCP: list_tools (%d) en %.2fs (pool reutilizable)",
+            len(tools_specs),
+            time.perf_counter() - t0,
+        )
     except Exception as exc:
         _log.warning("reddit MCP: no se pudo iniciar npx %s: %s", pkg, exc)
         return []
@@ -157,7 +164,7 @@ async def connect_reddit_mcp(
 
 
 def _mcp_tool_to_structured(server_params: Any, tool_spec: Any, name: str) -> Optional[Any]:
-    from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_call_tool
+    from duckclaw.forge.skills.reddit_mcp_pool import reddit_mcp_call_tool
     from langchain_core.tools import StructuredTool
 
     raw_schema = getattr(tool_spec, "inputSchema", None) or getattr(tool_spec, "input_schema", None)
@@ -169,7 +176,7 @@ def _mcp_tool_to_structured(server_params: Any, tool_spec: Any, name: str) -> Op
     def _sync_call(**kwargs: Any) -> str:
         validated = args_model(**kwargs)
         payload = validated.model_dump(exclude_none=True)
-        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, payload))
+        return reddit_mcp_call_tool(server_params, name, payload)
 
     desc = getattr(tool_spec, "description", None) or f"Reddit MCP: {name}"
     return StructuredTool.from_function(

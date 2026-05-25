@@ -1328,23 +1328,49 @@ def _resolve_reddit_share_url_to_comments_url(url: str, *, timeout: float = 12.0
     if not raw or not _REDDIT_SHARE_PATH_RE.search(raw):
         return None
     ua = (os.environ.get("REDDIT_USER_AGENT") or "duckclaw:share-resolve/0.1 (by duckclaw)").strip()
+    t0 = time.perf_counter()
     try:
         req = _urllib_request.Request(raw, headers={"User-Agent": ua, "Accept": "text/html"})
         with _urllib_request.urlopen(req, timeout=timeout) as resp:
             raw_final = resp.geturl()
         if not isinstance(raw_final, str):
+            _log.info(
+                "reddit share resolve: sin URL final en %.2fs url=%r",
+                time.perf_counter() - t0,
+                raw[:80],
+            )
             return None
         if not _reddit_trust_share_tracking_redirect() and _reddit_comments_url_has_share_tracking(
             raw_final
         ):
+            _log.info(
+                "reddit share resolve: redirect con tracking rechazado en %.2fs → reddit_search",
+                time.perf_counter() - t0,
+            )
             return None
         final = raw_final.split("#")[0].split("?")[0].rstrip("/")
         if not _REDDIT_COMMENTS_IN_URL_RE.search(final):
+            _log.info(
+                "reddit share resolve: sin /comments/ en %.2fs final=%r",
+                time.perf_counter() - t0,
+                raw_final[:96],
+            )
             return None
         if not final.lower().startswith("http"):
             final = f"https://{final}"
+        _log.info(
+            "reddit share resolve: ok en %.2fs → %r",
+            time.perf_counter() - t0,
+            final[:96],
+        )
         return final
-    except Exception:
+    except Exception as exc:
+        _log.info(
+            "reddit share resolve: falló en %.2fs url=%r err=%s",
+            time.perf_counter() - t0,
+            raw[:80],
+            exc,
+        )
         return None
 
 
@@ -1865,16 +1891,21 @@ def _schedule_run_browser_novnc_tool_heartbeat(
     from duckclaw.graphs.chat_heartbeat import (
         format_tool_heartbeat,
         heartbeat_message_for_tool,
+        is_admin_ui_chat_session,
         is_chat_heartbeat_enabled,
         schedule_chat_heartbeat_dm,
     )
+
+    _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+    if is_admin_ui_chat_session(_hcid):
+        # Admin SSE: publish_admin_tool_event (vía _schedule_tool_heartbeat) ya cubre start/done.
+        return
 
     _hb_head = (state.get("subagent_instance_label") or "").strip() or None
     _hb_uname = (state.get("username") or "").strip() or None
     _hb_plan = (state.get("heartbeat_plan_title") or "").strip() or None
     _hb_tok = (state.get("outbound_telegram_bot_token") or "").strip() or None
     _htid = (state.get("tenant_id") or "default").strip() or "default"
-    _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
     _huid = str(state.get("user_id") or "").strip() or _hcid
 
     _ns = (novnc_session_id or "").strip()
@@ -2167,6 +2198,13 @@ def filter_tools_for_sandbox(tools: list[Any], enabled: bool) -> list[Any]:
         return list(tools)
     deny = {"run_sandbox", "run_browser_sandbox", "get_browser_session_url", "pqrsd_run_identificacion_step1"}
     return [t for t in tools if getattr(t, "name", "") not in deny]
+
+
+def filter_tools_for_ibkr(tools: list[Any], enabled: bool) -> list[Any]:
+    """Si IBKR está OFF para el chat, elimina ``get_ibkr_portfolio`` del bind al LLM."""
+    if enabled:
+        return list(tools)
+    return [t for t in tools if getattr(t, "name", "") != "get_ibkr_portfolio"]
 
 
 class WorkerFactory:
@@ -2720,6 +2758,18 @@ def build_worker_graph(
             return True
         return v in ("true", "1", "on", "sí", "si")
 
+    def _ibkr_enabled_for_state(state: dict) -> bool:
+        """IBKR portfolio por chat (``/ibkr on``). Finanz: default OFF; Quant: default ON."""
+        from duckclaw.graphs.on_the_fly_commands import get_chat_state
+
+        chat_id = state.get("chat_id") or state.get("session_id") or "default"
+        raw = (get_chat_state(db, chat_id, "ibkr_enabled") or "").strip().lower()
+        if raw in ("true", "1", "on", "sí", "si"):
+            return True
+        if raw in ("false", "0", "off"):
+            return False
+        return (_lid or "").strip().lower() == "quant_trader"
+
     tools_sandbox_off = filter_tools_for_sandbox(tools, enabled=False)
     tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}
 
@@ -2728,6 +2778,8 @@ def build_worker_graph(
     _tools_sandbox_off_bind = (
         _groq_tools_without_reddit_for_bind(tools_sandbox_off) if _groq_bind else tools_sandbox_off
     )
+    _tools_ibkr_off_bind = filter_tools_for_ibkr(_tools_for_llm_bind, enabled=False)
+    _tools_sandbox_ibkr_off_bind = filter_tools_for_ibkr(_tools_sandbox_off_bind, enabled=False)
     if _groq_bind:
         _log.info(
             "Groq: bind genérico sin reddit_* (%d tools; forzados Reddit/otros usan set acorde).",
@@ -2753,6 +2805,8 @@ def build_worker_graph(
         # Groq (~12k TPM): rutas genéricas sin reddit_* (ver _tools_for_llm_bind); Reddit forzado usa `tools` completo.
         llm_with_tools_on = _bind_tools(llm, _tools_for_llm_bind)
         llm_with_tools_off = _bind_tools(llm, _tools_sandbox_off_bind)
+        llm_with_tools_ibkr_off = _bind_tools(llm, _tools_ibkr_off_bind)
+        llm_with_tools_sandbox_ibkr_off = _bind_tools(llm, _tools_sandbox_ibkr_off_bind)
 
         has_ibkr = "get_ibkr_portfolio" in tools_by_name
         has_fmp_stock = "get_fmp_stock_dividends" in tools_by_name
@@ -3222,6 +3276,7 @@ def build_worker_graph(
             _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"
             _log_chat = format_chat_log_identity(str(_chat_ctx).strip() or "default", state.get("username"))
             set_log_context(tenant_id=_tenant_ctx, worker_id=worker_id, chat_id=_log_chat)
+            ibkr_session_on = has_ibkr and _ibkr_enabled_for_state(state)
             _ev_msgs = state.get("messages") or []
             _ev_last = _ev_msgs[-1] if _ev_msgs else None
             if _lid == "quant_trader":
@@ -3288,7 +3343,9 @@ def build_worker_graph(
                 (_lid or "").strip().lower() == "quant_trader"
                 and _quant_trader_reddit_history_anchor_intent(incoming, _ev_msgs)
             )
-            is_portfolio = has_ibkr and (_is_portfolio_kw or _is_portfolio_quant_retry or _is_exec_bug_probe)
+            is_portfolio = ibkr_session_on and (
+                _is_portfolio_kw or _is_portfolio_quant_retry or _is_exec_bug_probe
+            )
             if (_lid or "").strip().lower() == "quant_trader" and _wants_new_signal:
                 # En comandos operativos de nueva señal no forzar `get_ibkr_portfolio` first.
                 # Con Groq esto puede inducir tool_use_failed al mezclar tool_call + texto.
@@ -3385,7 +3442,7 @@ def build_worker_graph(
                 and _finanz_should_force_ibkr_after_local_cuentas_read(
                     state.get("messages"),
                     logical_worker_id=str(_lid or ""),
-                    has_ibkr=bool(has_ibkr),
+                    has_ibkr=bool(ibkr_session_on),
                 )
             )
             force_portfolio = force_portfolio_first or force_portfolio_after_local_cuentas
@@ -4065,7 +4122,12 @@ def build_worker_graph(
                 }
                 _out_forced.update(_identity_fields(state))
                 return _out_forced
-            if _quant_can_force_pipeline_step and _has_fetch_since_last_human and not _has_portfolio_since_last_human and has_ibkr:
+            if (
+                _quant_can_force_pipeline_step
+                and _has_fetch_since_last_human
+                and not _has_portfolio_since_last_human
+                and ibkr_session_on
+            ):
                 _forced_tid = f"call_quant_pipeline_portfolio_{int(time.time() * 1000)}"
                 _forced_tc = [{"name": "get_ibkr_portfolio", "args": {}, "id": _forced_tid, "type": "tool_call"}]
                 _log.info("[%s] quant deterministic stage=portfolio", _wl)
@@ -4232,7 +4294,12 @@ def build_worker_graph(
                 _out_vis.update(_identity_fields(state))
                 return _out_vis
 
-            llm_with_tools = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
+            if sandbox_enabled:
+                llm_with_tools = llm_with_tools_on if ibkr_session_on else llm_with_tools_ibkr_off
+            else:
+                llm_with_tools = (
+                    llm_with_tools_off if ibkr_session_on else llm_with_tools_sandbox_ibkr_off
+                )
             forced_name = (
                 "pqrsd_fetch_canonical"
                 if force_pqrsd_fetch_canonical
@@ -4511,7 +4578,7 @@ def build_worker_graph(
                 str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
                 and proactive_review_event_phrase_in_text(str(incoming or ""))
             )
-            if force_portfolio and has_ibkr and _is_goals_tick and not tool_calls:
+            if force_portfolio and ibkr_session_on and _is_goals_tick and not tool_calls:
                 _forced_tid = f"call_forced_ibkr_{int(time.time() * 1000)}"
                 forced_tc = [{"name": "get_ibkr_portfolio", "args": {}, "id": _forced_tid, "type": "tool_call"}]
                 try:
@@ -4841,7 +4908,10 @@ def build_worker_graph(
         _tool_round = int(state.get("_tool_round") or 0) + 1
         new_msgs = list(messages)
         sandbox_enabled = _sandbox_enabled_for_state(state)
+        ibkr_session_on = has_ibkr and _ibkr_enabled_for_state(state)
         tool_lookup = tools_by_name if sandbox_enabled else tools_by_name_sandbox_off
+        if not ibkr_session_on:
+            tool_lookup = {k: v for k, v in tool_lookup.items() if k != "get_ibkr_portfolio"}
         sandbox_b64: str | None = state.get("sandbox_photo_base64") if isinstance(state.get("sandbox_photo_base64"), str) else None
         visual_artifact_id: str | None = (
             str(state.get("visual_artifact_id") or "").strip() or None
@@ -5049,8 +5119,7 @@ def build_worker_graph(
                                 vnc_url=_vnc_pre,
                                 novnc_session_id=_sid or "",
                             )
-                        else:
-                            _schedule_tool_heartbeat(name)
+                        _schedule_tool_heartbeat(name)
                         if (
                             name == "run_sandbox"
                             and _lid == "bi_analyst"

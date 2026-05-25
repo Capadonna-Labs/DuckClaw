@@ -2,6 +2,20 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AdminRole, AdminUser } from '@/types/admin';
 
+/** RFC 7807 / FastAPI: detail puede ser string o { title, detail, status }. */
+function parseLoginErrorPayload(data: unknown): string {
+  if (!data || typeof data !== 'object') return 'Credenciales inválidas';
+  const root = data as Record<string, unknown>;
+  if (typeof root.detail === 'string') return root.detail;
+  if (root.detail && typeof root.detail === 'object') {
+    const inner = root.detail as Record<string, unknown>;
+    if (typeof inner.title === 'string') return inner.title;
+    if (typeof inner.detail === 'string') return inner.detail;
+  }
+  if (typeof root.title === 'string') return root.title;
+  return 'Credenciales inválidas';
+}
+
 interface AuthState {
   usuario: AdminUser | null;
   isAuthenticated: boolean;
@@ -40,11 +54,7 @@ export const useAuthStore = create<AuthState>()(
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            const detail =
-              typeof data?.detail === 'string'
-                ? data.detail
-                : data?.detail?.detail ?? data?.title ?? 'Credenciales inválidas';
-            set({ isLoading: false, loginError: detail });
+            set({ isLoading: false, loginError: parseLoginErrorPayload(data) });
             return;
           }
           const user: AdminUser = {

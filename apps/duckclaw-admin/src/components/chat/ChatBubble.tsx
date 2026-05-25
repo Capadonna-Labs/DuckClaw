@@ -120,6 +120,16 @@ export function ChatBubble({
     }
   }, [displayText]);
 
+  const isEmptyAssistantShell =
+    !isUser &&
+    !isError &&
+    !isHeartbeat &&
+    !isInterrupted &&
+    m.streaming &&
+    !(displayText || '').trim() &&
+    !(m.imagePreviews?.length);
+  if (isEmptyAssistantShell) return null;
+
   return (
     <div
       className={`group relative max-w-[90%] min-w-0 rounded-2xl px-4 py-3 text-sm overflow-hidden ${

@@ -76,6 +76,7 @@ Ver [`ADMIN_ACCESS_MANAGEMENT.md`](ADMIN_ACCESS_MANAGEMENT.md).
 |--------|------|
 | `POST` | `/auth/login` |
 | `GET` | `/access/overview` |
+| `GET` | `/overview/metrics` — actividad por worker (7d) y latencia horaria (24h) desde `task_audit_log` |
 | `GET/POST/PATCH/DELETE` | `/console-users` |
 | `GET/POST/DELETE` | `/access/shared-grants` |
 
@@ -163,7 +164,7 @@ Errores: JSON `{ "type", "title", "status", "detail" }` (RFC 7807 style).
 | Ruta | Función |
 |------|---------|
 | `/login` | Account Registration pattern |
-| `/overview` | Status + Activity Stream |
+| `/overview` | Status, gráficos 7d/24h (`task_audit_log`), fly commands, plataforma |
 | `/templates` | Lista + Table Filter |
 | `/templates/[workerId]` | Module Tabs editor |
 | `/projects/new` | Wizard |
@@ -189,5 +190,5 @@ Errores: JSON `{ "type", "title", "status", "detail" }` (RFC 7807 style).
 1. Login demo admin puede listar y editar `system_prompt.md` de un worker y ver validación.
 2. Viewer no puede PUT/DELETE (403 en BFF).
 3. PATCH env persiste en `.env` con backup; valor completo de token no aparece en GET.
-4. Overview muestra health del gateway.
+4. Overview muestra health del gateway y gráficos de actividad (7d) y latencia (24h) desde `GET /overview/metrics`.
 5. Crear proyecto desde wizard clona `business_standard`.

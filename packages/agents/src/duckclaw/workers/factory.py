@@ -1374,6 +1374,58 @@ def _resolve_reddit_share_url_to_comments_url(url: str, *, timeout: float = 12.0
         return None
 
 
+def _fetch_reddit_post_via_public_json(comments_url: str, *, timeout: float = 15.0) -> Optional[str]:
+    """
+    Obtiene un post vía API pública .json de Reddit (sin MCP).
+    Devuelve JSON compacto compatible con format_reddit_mcp_reply_if_applicable.
+    """
+    sub, pid = _subreddit_and_post_id_from_reddit_comments_url(comments_url)
+    if not sub or not pid:
+        return None
+    ua = (os.environ.get("REDDIT_USER_AGENT") or "duckclaw:public-json/0.1 (by duckclaw)").strip()
+    api_url = f"https://www.reddit.com/r/{sub}/comments/{pid}/.json?raw_json=1"
+    try:
+        req = _urllib_request.Request(
+            api_url,
+            headers={"User-Agent": ua, "Accept": "application/json"},
+        )
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+        data = json.loads(body)
+        if not isinstance(data, list) or not data:
+            return None
+        listing = data[0] if isinstance(data[0], dict) else {}
+        children = (listing.get("data") or {}).get("children") or []
+        if not children or not isinstance(children[0], dict):
+            return None
+        post_data = children[0].get("data") or {}
+        if not isinstance(post_data, dict):
+            return None
+        payload = {
+            "success": True,
+            "subreddit": sub,
+            "posts": [
+                {
+                    "id": pid,
+                    "title": post_data.get("title") or "",
+                    "score": post_data.get("score"),
+                    "permalink": post_data.get("permalink") or "",
+                    "selftext": post_data.get("selftext") or "",
+                    "is_self": bool(post_data.get("is_self")),
+                    "url": post_data.get("url") or "",
+                }
+            ],
+        }
+        return json.dumps(payload, ensure_ascii=False)
+    except Exception as exc:
+        _log.info(
+            "reddit public json fetch failed url=%r err=%s",
+            (comments_url or "")[:80],
+            exc,
+        )
+        return None
+
+
 def _extract_first_reddit_url(text: str) -> Optional[str]:
     if not text or not str(text).strip():
         return None
@@ -4192,6 +4244,48 @@ def build_worker_graph(
                 _out_forced.update(_identity_fields(state))
                 return _out_forced
 
+            _reddit_comments_for_http: Optional[str] = None
+            if _reddit_resolved_comments_url:
+                _reddit_comments_for_http = _reddit_resolved_comments_url
+            elif _reddit_anchor_u and _REDDIT_COMMENTS_IN_URL_RE.search(_reddit_anchor_u):
+                _reddit_comments_for_http = _reddit_anchor_u.split("#")[0].split("?")[0].rstrip("/")
+            _quant_reddit_http_fast = bool(
+                (_lid_l == "quant_trader" or (_lid or "").strip().lower() == "quant_trader")
+                and (_quant_lone_reddit_only or _q_reddit_hist)
+                and not has_reddit_tools
+                and _reddit_comments_for_http
+                and not already_has_tool_result
+                and not force_visual
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                )
+            )
+            if _quant_reddit_http_fast:
+                _raw_reddit_json = _fetch_reddit_post_via_public_json(_reddit_comments_for_http)
+                if _raw_reddit_json:
+                    from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
+
+                    _http_fast = format_reddit_mcp_reply_if_applicable(_raw_reddit_json) or _raw_reddit_json
+                    _http_ai = AIMessage(content=_http_fast)
+                    _log.info(
+                        "[%s] quant reddit HTTP fast path (no reddit_* tools) lone=%s hist=%s",
+                        _wl,
+                        _quant_lone_reddit_only,
+                        _q_reddit_hist,
+                    )
+                    _out_http = {
+                        **state,
+                        "messages": state["messages"] + [_http_ai],
+                        "reddit_http_fast_path": True,
+                    }
+                    _out_http.update(_identity_fields(state))
+                    return _out_http
+
             _has_run_browser = "run_browser_sandbox" in tools_by_name
             _has_tavily_mql5 = "tavily_search" in tools_by_name
             _quant_lone_mql5_url = bool(
@@ -4260,7 +4354,11 @@ def build_worker_graph(
                 if _fast_reply:
                     _url_reply = AIMessage(content=_fast_reply)
                     _log.info("[%s] quant lone-url fast exit after tool=%s", _wl, _tname)
-                    _out_url = {**state, "messages": state["messages"] + [_url_reply]}
+                    _out_url = {
+                        **state,
+                        "messages": state["messages"] + [_url_reply],
+                        "reddit_mcp_lone_url_fast_path": _tname.startswith("reddit_"),
+                    }
                     _out_url.update(_identity_fields(state))
                     return _out_url
 
@@ -5474,7 +5572,23 @@ def build_worker_graph(
                 _short = "Imagen generada."
             reply = _short
         else:
-            reply = _repair_finanz_ibkr_egress(_apply_nl_synthesis(reply or ""))
+            if state.get("reddit_http_fast_path") or state.get("reddit_mcp_lone_url_fast_path"):
+                from duckclaw.forge.atoms.user_reply_nl_synthesis import (
+                    _deterministic_reddit_compact_listing_summary,
+                    _body_looks_like_reddit_compact_listing_markdown,
+                )
+
+                _rc = format_reddit_mcp_reply_if_applicable((reply or "").strip()) or (reply or "").strip()
+                if _body_looks_like_reddit_compact_listing_markdown(_rc):
+                    _det = _deterministic_reddit_compact_listing_summary(_rc)
+                    if _det:
+                        reply = _det
+                    else:
+                        reply = _rc
+                else:
+                    reply = _rc
+            else:
+                reply = _repair_finanz_ibkr_egress(_apply_nl_synthesis(reply or ""))
         _wid_fin = str(getattr(spec, "worker_id", "") or "")
         reply = finanz_repair_ibkr_tool_live_vs_reply_paper(msgs, reply, worker_id=_wid_fin)
         reply = finanz_strip_ibkr_block_without_tool_in_turn(

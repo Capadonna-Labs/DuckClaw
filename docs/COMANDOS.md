@@ -201,3 +201,27 @@ comfyui:
 **Edición (estilo Gemini, solo ComfyUI):** envía foto + caption con instrucciones (ej. *cambiar fondo, quitar lentes*). El gateway guarda la imagen en `db/private/{tenant}/inbound/` y el agente usa `edit_visual_asset` — **no** carga MLX-Vision en ese flujo.
 
 Reiniciar gateway y db-writer tras cambiar `.env`. Specs: `COMFYUI_VISUAL_BRIDGE.md`, `COMFYUI_IMAGE_EDIT.md`.
+
+## Reddit MCP (Quant-Trader / Finanz)
+
+Precarga `mcp-reddit` en disco local (~3 s de arranque vs 2–5 min con `npx` en cada cold start):
+
+```bash
+bash scripts/prefetch_mcp_reddit.sh
+pm2 restart DuckClaw-Gateway --update-env
+```
+
+Variables OAuth en `.env` (proceso gateway): `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`, `REDDIT_USERNAME`, `REDDIT_PASSWORD`.
+
+Logs esperados al arrancar: `Reddit MCP: usando cache local (.mcp-cache/reddit)` y `reddit MCP warm: list_tools (N) en <10s`.
+
+Sin prefetch el gateway avisa: `sin prefetch local (npx puede tardar 2–5 min)`.
+
+Override manual del binario:
+
+```bash
+export DUCKCLAW_REDDIT_MCP_COMMAND=node
+export DUCKCLAW_REDDIT_MCP_ARGS="/ruta/a/mcp-reddit/dist/server.js"
+```
+
+Spec: `specs/features/quant/QUANT_REDDIT_MCP_SENTIMENT.md`.

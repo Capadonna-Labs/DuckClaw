@@ -64,6 +64,9 @@ site/
 # DuckDB extension cache (pytest)
 .pytest_duckdb/
 
+# MCP npm prefetch (scripts/prefetch_mcp_reddit.sh)
+.mcp-cache/
+
 # Runtime / debug logs
 logs/
 .cursor/debug-*.log

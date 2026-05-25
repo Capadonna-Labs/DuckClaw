@@ -481,6 +481,35 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         _gateway_log.warning("Telegram MCP: no se pudo iniciar (se usa Bot API directa): %s", exc)
 
+    try:
+        from duckclaw.forge.skills.reddit_bridge import (
+            _reddit_env_ready,
+            reddit_mcp_using_prefetch,
+            warm_reddit_mcp_pool,
+        )
+
+        if _reddit_env_ready():
+            if not reddit_mcp_using_prefetch():
+                _gateway_log.warning(
+                    "Reddit MCP: sin prefetch local (npx puede tardar 2–5 min). "
+                    "Ejecuta: bash scripts/prefetch_mcp_reddit.sh"
+                )
+            else:
+                _gateway_log.info("Reddit MCP: usando cache local (.mcp-cache/reddit)")
+            import threading
+
+            def _warm_reddit_mcp() -> None:
+                warm_reddit_mcp_pool()
+
+            threading.Thread(
+                target=_warm_reddit_mcp,
+                name="reddit-mcp-warm",
+                daemon=True,
+            ).start()
+            _gateway_log.info("Reddit MCP: warm iniciado en background")
+    except Exception as exc:  # noqa: BLE001
+        _gateway_log.warning("Reddit MCP: warm no iniciado: %s", exc)
+
     _embed_goals_ticker = (
         os.environ.get("DUCKCLAW_EMBED_GOALS_TICKER", "true").strip().lower()
         in ("1", "true", "yes", "on")

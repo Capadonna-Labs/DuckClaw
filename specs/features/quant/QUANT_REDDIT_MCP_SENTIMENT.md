@@ -45,7 +45,10 @@ Herramientas **mutadoras** del paquete (posts, comentarios, borrado, subida de i
 Recomendación operativa: cuenta Reddit **dedicada** (no la personal principal); rotar secretos si se filtran; no commitear valores en YAML ni en el repo.
 
 **Requisitos de runtime**  
-- Node.js y `npx` en el `PATH` del proceso que ejecuta el gateway (p. ej. PM2), análogo a `@modelcontextprotocol/server-github`.  
+- Node.js en el `PATH` del gateway (PM2). **Prefetch recomendado:** `bash scripts/prefetch_mcp_reddit.sh` instala `mcp-reddit@1.1.8` en `{repo}/.mcp-cache/reddit/`; `reddit_bridge.reddit_mcp_server_params()` arranca con `node …/dist/server.js` (~3 s) en lugar de `npx -y mcp-reddit` (2–5 min por descarga npm).  
+- Fallback: `npx --quiet -y mcp-reddit` si no hay cache ni `mcp-reddit` global.  
+- Warm en lifespan del gateway (`warm_reddit_mcp_pool`, hilo daemon). Pool stdio serializa conexiones (`reddit_mcp_pool._connect_lock`).  
+- Timeouts: `DUCKCLAW_REDDIT_MCP_WARM_TIMEOUT_S` (default 90), `DUCKCLAW_REDDIT_MCP_REGISTER_TIMEOUT_S` (12 sin cache, 45 con prefetch), `DUCKCLAW_REDDIT_MCP_LIST_TOOLS_TIMEOUT_S` (60 con sesión pool lista).  
 - Paquete Python `mcp` ya declarado en el workspace de agentes.
 
 **Configuración en manifest (worker)**  

@@ -332,6 +332,55 @@ def _paths_same_canonical(a: str, b: str) -> bool:
         return (a or "").strip() == (b or "").strip()
 
 
+def _resolve_llm_triplet_for_graph_invoke(
+    hub_db: Any,
+    chat_id: str | None,
+    vault_db_path: str | None,
+    *,
+    same_file: bool,
+    log: Any | None = None,
+) -> tuple[tuple[str, str, str] | None, str]:
+    """
+    Resuelve provider/model/base_url para un turno.
+
+    Cuando hub y vault son archivos distintos, el override del **hub** gana (admin
+    playground / PUT /playground/model escribe ahí). El vault solo se usa si el hub
+    no tiene llm_* para ese chat_id.
+    """
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly
+    from duckclaw.graphs.on_the_fly_commands import resolve_llm_triplet_for_chat_invocation
+
+    cid = (chat_id or "").strip() or None
+    hub_trip = resolve_llm_triplet_for_chat_invocation(hub_db, cid) if cid else None
+
+    if same_file:
+        source = "same_file_as_hub" if hub_trip else "same_file_no_chat_override"
+        return hub_trip, source
+
+    vault_trip: tuple[str, str, str] | None = None
+    v_p = (vault_db_path or "").strip()
+    if v_p and v_p != ":memory:":
+        try:
+            vault_trip = resolve_llm_triplet_for_chat_invocation(
+                GatewayDbEphemeralReadonly(v_p), cid
+            )
+        except Exception as exc:
+            if log is not None:
+                log.warning(
+                    "graph_server: resolve_llm_triplet vault read failed chat_id=%s vault_suffix=%s err=%s",
+                    cid,
+                    v_p[-96:] if len(v_p) > 96 else v_p,
+                    exc,
+                )
+
+    if hub_trip:
+        source = "hub_over_vault" if vault_trip else "hub_only"
+        return hub_trip, source
+    if vault_trip:
+        return vault_trip, "vault_separate"
+    return None, "env_defaults"
+
+
 def _invoke_ephemeral_gateway_graph(
     chat_id: str | None = None,
     vault_db_path: str | None = None,
@@ -341,9 +390,8 @@ def _invoke_ephemeral_gateway_graph(
     El caller debe ``db.close()`` y llamar ``clear_worker_graph_cache()`` en ``finally``.
 
     Si ``chat_id`` tiene llm_* en agent_config (p. ej. /model), el LLM del grafo sigue esa
-    tripleta en lugar del cache global basado solo en env. Con ``vault_db_path``, la tripleta
-    se resuelve primero en el vault del tenant (Telegram multiplex) y solo si no hay override
-    se usa el hub.
+    tripleta en lugar del cache global basado solo en env. Con ``vault_db_path`` distinto
+    del hub, gana el override del hub (consola admin); el vault solo si el hub no tiene llm_*.
     """
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
     from duckclaw.integrations.llm_providers import build_llm
@@ -367,30 +415,14 @@ def _invoke_ephemeral_gateway_graph(
     trip: tuple[str, str, str] | None = None
     trip_source = "env_defaults"
     try:
-        from duckclaw.gateway_db import GatewayDbEphemeralReadonly
-        from duckclaw.graphs.on_the_fly_commands import resolve_llm_triplet_for_chat_invocation
-
         same_file = bool(v_p and v_p != ":memory:" and _paths_same_canonical(v_p, db_path))
-        if same_file:
-            trip = resolve_llm_triplet_for_chat_invocation(db, chat_id)
-            trip_source = "same_file_as_hub" if trip else "same_file_no_chat_override"
-        elif v_p and v_p != ":memory:":
-            try:
-                trip = resolve_llm_triplet_for_chat_invocation(GatewayDbEphemeralReadonly(v_p), chat_id)
-                trip_source = "vault_separate" if trip else "vault_separate_no_override"
-            except Exception as exc:
-                _log.warning(
-                    "graph_server: resolve_llm_triplet vault read failed chat_id=%s vault_suffix=%s err=%s",
-                    chat_id,
-                    v_p[-96:] if len(v_p) > 96 else v_p,
-                    exc,
-                )
-                trip = None
-                trip_source = "vault_read_error"
-        if trip is None and not same_file:
-            trip = resolve_llm_triplet_for_chat_invocation(db, chat_id)
-            if trip is not None:
-                trip_source = "hub_only"
+        trip, trip_source = _resolve_llm_triplet_for_graph_invoke(
+            db,
+            chat_id,
+            v_p or None,
+            same_file=same_file,
+            log=_log,
+        )
         if trip is not None:
             tp, tm, tu = trip
             try:

@@ -249,6 +249,8 @@ def publish_admin_chat_heartbeat(
         except (TypeError, ValueError):
             pass
     payload = json.dumps(body, ensure_ascii=False)
+    # Tool phases must publish in order (fast tools otherwise emit done before start).
+    sync_tool_phase = bool(tn and tp in ("start", "done", "error"))
 
     def _run() -> None:
         try:
@@ -259,7 +261,10 @@ def publish_admin_chat_heartbeat(
         except Exception as exc:
             _log.debug("admin chat heartbeat publish failed chat_id=%r: %s", cid, exc)
 
-    threading.Thread(target=_run, name="duckclaw-admin-heartbeat-pub", daemon=True).start()
+    if sync_tool_phase:
+        _run()
+    else:
+        threading.Thread(target=_run, name="duckclaw-admin-heartbeat-pub", daemon=True).start()
 
 
 def _admin_heartbeat_kind(text: str, *, log_plan_title: str | None = None) -> str:

@@ -45,7 +45,6 @@ const CORE_AND_ADMIN_NAV: readonly AdminNavItem[] = [
   { href: '/playground', label: 'Playground', section: 'core' },
   { href: '/vnc', label: 'VNC', section: 'core', adminOnly: true },
   { href: '/runtime', label: 'Runtime', section: 'core' },
-  { href: '/commands', label: 'Fly commands', section: 'core' },
   { href: '/duckdb', label: 'DuckDB', section: 'core' },
   { href: '/train', label: 'Train', section: 'core' },
   { href: '/admin/access', label: 'Acceso', section: 'admin', adminOnly: true },
@@ -71,7 +70,6 @@ export const ADMIN_NAV_STRUCTURE: readonly AdminNavEntry[] = [
   { type: 'item', item: CORE_AND_ADMIN_NAV[11] },
   { type: 'item', item: CORE_AND_ADMIN_NAV[12] },
   { type: 'item', item: CORE_AND_ADMIN_NAV[13] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[14] },
 ];
 
 /** Lista plana (compat tests / búsquedas). */
@@ -101,6 +99,7 @@ export function navEntriesForRole(isAdmin: boolean): AdminNavEntry[] {
 export const ADMIN_PAGE_TITLES: Record<string, string> = {
   ...Object.fromEntries(ADMIN_NAV.map((item) => [item.href, item.label])),
   '/ops': 'Overview',
+  '/commands': 'Overview',
   '/projects': 'Proyectos',
   '/projects/new': 'Nuevo proyecto',
   '/integrations': 'Integraciones',

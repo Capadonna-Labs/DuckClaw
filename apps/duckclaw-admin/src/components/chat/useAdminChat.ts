@@ -10,6 +10,7 @@ import { artifactPreviewApiPath } from '@/lib/artifactPreview';
 import { readStoredVaultPath, writeStoredVaultPath } from '@/lib/conversationVaultStorage';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
 import {
+  finalizeRunningToolHeartbeats,
   findToolHeartbeatIndex,
   mapSseToolPhase,
   parseToolNameFromHeartbeatText,
@@ -60,6 +61,17 @@ export function hasToolHeartbeatInCurrentTurn(messages: ChatMsg[]): boolean {
     if (m.role === 'heartbeat' && m.heartbeatKind === 'tool') return true;
   }
   return false;
+}
+
+/** No renderizar burbuja assistant vacía mientras hay tool heartbeats (ThinkingBubble solo sin tools). */
+export function shouldSkipEmptyStreamingAssistant(
+  message: ChatMsg,
+  messages: ChatMsg[]
+): boolean {
+  if (message.role !== 'assistant' || !message.streaming) return false;
+  if ((message.text || '').trim()) return false;
+  if (message.imagePreviews?.length) return false;
+  return hasToolHeartbeatInCurrentTurn(messages);
 }
 
 export function isThinkingStatusHeartbeat(m: ChatMsg | undefined): boolean {
@@ -395,12 +407,17 @@ export function useAdminChat({
           'default';
         void attachArtifactToStreamingAssistant(aid, tid);
       }
-      const toolName =
+      let toolName =
         (payload.tool_name || '').trim() ||
         parseToolNameFromHeartbeatText(payload.text) ||
         undefined;
+      let effectiveKind = kind;
+      if (effectiveKind === 'tool' && !toolName) {
+        // Heartbeat legacy (p. ej. noVNC) sin tool_name: no crear bloque "Usando: tool".
+        effectiveKind = 'status';
+      }
       const uiPhase = mapSseToolPhase(payload.tool_phase);
-      const isToolHb = kind === 'tool' && Boolean(toolName);
+      const isToolHb = effectiveKind === 'tool' && Boolean(toolName);
       if (kind === 'tool') {
         setThinking(false);
       }
@@ -416,8 +433,15 @@ export function useAdminChat({
 
         if (isToolHb && toolName) {
           const existingIdx = findToolHeartbeatIndex(m, toolName, insertAt);
-          const startedAt =
-            existingIdx >= 0 ? m[existingIdx].toolStartedAt ?? Date.now() : Date.now();
+          const existing = existingIdx >= 0 ? m[existingIdx] : null;
+          const existingPhase = existing?.toolPhase;
+          if (
+            payload.tool_phase === 'start' &&
+            (existingPhase === 'done' || existingPhase === 'error')
+          ) {
+            return m;
+          }
+          const startedAt = existing?.toolStartedAt ?? Date.now();
           const merged: ChatMsg = {
             role: 'heartbeat',
             text: toolHeartbeatDisplayText(toolName, uiPhase, elapsedMs),
@@ -443,7 +467,7 @@ export function useAdminChat({
         const hb: ChatMsg = {
           role: 'heartbeat',
           text: payload.text,
-          heartbeatKind: kind,
+          heartbeatKind: effectiveKind,
           workerId: hbWorker || undefined,
           swarmSlot: hbSlot,
         };
@@ -538,7 +562,7 @@ export function useAdminChat({
             imagePreviews: assistantPreviews ?? last.imagePreviews,
           };
         }
-        return stripThinkingStatusHeartbeats(next);
+        return finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next));
       });
     } catch (e) {
       if (abortController.signal.aborted) {

@@ -23,7 +23,12 @@ function sessionHeaders(): HeadersInit {
   }
 }
 
-export function Pm2LiveLogsPanel() {
+type Props = {
+  /** Sin cabecera ni borde exterior (p. ej. dentro de SettingsSection). */
+  embedded?: boolean;
+};
+
+export function Pm2LiveLogsPanel({ embedded = false }: Props) {
   const [selected, setSelected] = useState<string[]>(['DuckClaw-Gateway']);
   const [streaming, setStreaming] = useState(false);
   const [logText, setLogText] = useState('');
@@ -124,18 +129,8 @@ export function Pm2LiveLogsPanel() {
 
   useEffect(() => () => stop(), [stop]);
 
-  return (
-    <section className="mt-8 space-y-4 border-t dark:border-dark-border pt-8">
-      <div className="flex items-center gap-2">
-        <Terminal size={22} className="text-gov-blue-700" />
-        <div>
-          <h2 className="text-lg font-bold">PM2 logs en vivo</h2>
-          <p className="text-sm text-gov-gray-500">
-            Elige hasta 2 servicios y sigue la salida como en consola (solo en este Mac).
-          </p>
-        </div>
-      </div>
-
+  const body = (
+    <>
       <div className="flex flex-wrap gap-2">
         {PM2_LOGGABLE_APPS.map((name) => {
           const on = selected.includes(name);
@@ -214,6 +209,25 @@ export function Pm2LiveLogsPanel() {
           </span>
         )}
       </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="space-y-4">{body}</div>;
+  }
+
+  return (
+    <section className="mt-8 space-y-4 border-t dark:border-dark-border pt-8">
+      <div className="flex items-center gap-2">
+        <Terminal size={22} className="text-gov-blue-700" />
+        <div>
+          <h2 className="text-lg font-bold">PM2 logs en vivo</h2>
+          <p className="text-sm text-gov-gray-500">
+            Elige hasta 2 servicios y sigue la salida como en consola (solo en este Mac).
+          </p>
+        </div>
+      </div>
+      {body}
     </section>
   );
 }

@@ -48,6 +48,10 @@ Borra el historial de conversación del chat/sesión. En Telegram: `telegram_con
 
 Activa o desactiva la inyección de RAG (memoria a largo plazo) en el prompt. `use_rag=false` reduce el historial a 3 turnos.
 
+### D1b. `/ibkr on --mode paper|live` | `/ibkr off`
+
+Habilita o deshabilita la skill **`get_ibkr_portfolio`** por sesión (Finanz). Con `on`, **`--mode paper` o `--mode live` es obligatorio**. Persistencia: `ibkr_enabled`, `ibkr_portfolio_mode` en `agent_config`. Default Finanz: tool oculta hasta `/ibkr on`.
+
 ### D2. `/heartbeat [on | off]`
 
 Observabilidad en tiempo real para el usuario: si está **on**, el gateway envía DMs breves al `chat_id` por salida nativa (Bot API / `DUCKCLAW_HEARTBEAT_WEBHOOK_URL`) al delegar al worker, **antes de cada tool** y justo antes de cerrar la respuesta. Requiere **Redis** (`REDIS_URL` / `DUCKCLAW_REDIS_URL`) y **`DUCKCLAW_HEARTBEAT_WEBHOOK_URL`**. El POST outbound corre en hilo **fire-and-forget** (no bloquea el agente). Persistencia: clave canónica `duckclaw:heartbeat:{tenant_id}:{chat_id}` más alias `duckclaw:heartbeat:chat:{chat_id}` (y lectura de `DUCKCLAW_GATEWAY_TENANT_ID` si aplica) para que el flag coincida entre fly command y worker aunque el `tenant_id` del estado del grafo difiera.

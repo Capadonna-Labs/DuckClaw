@@ -14,6 +14,7 @@
 /context|on|off (historial); en Telegram: --add / --summary (memoria semántica)
 /sandbox|Toggle ejecución de código (true|false) para esta sesión
 /sandox|(Alias) /sandbox para tolerar errores de escritura.
+/ibkr|Portfolio IBKR por chat: on --mode paper|live (obligatorio) | off
 /heartbeat|Activa mensajes en tiempo real mientras el agente trabaja
 /audit|Última auditoría de ejecución
 /health|Estado del servicio

@@ -6,6 +6,7 @@ CRUD plantillas en disco, .env enmascarado, runtime agent_config, whitelist Tele
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -955,11 +956,18 @@ async def playground_set_vault(
     }
 
 
+def _duckdb_paths_same(a: str, b: str) -> bool:
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return (a or "").strip() == (b or "").strip()
+
+
 @router.put("/playground/model", dependencies=[Depends(_require_admin_key)])
-async def playground_set_model(body: PlaygroundModelBody) -> dict[str, Any]:
+async def playground_set_model(body: PlaygroundModelBody, request: Request) -> dict[str, Any]:
     """Equivalente a `/model provider=…` para la consola admin (persiste en agent_config del chat)."""
     from duckclaw import DuckClaw
-    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
     from duckclaw.graphs.on_the_fly_commands import _PROVIDERS, execute_model
 
     prov = body.provider.strip().lower()
@@ -986,6 +994,32 @@ async def playground_set_model(body: PlaygroundModelBody) -> dict[str, Any]:
         raise _problem(400, "No se pudo actualizar el modelo", str(exc)) from exc
     finally:
         db.close()
+
+    # Espejo en bóveda separada (Quant-Trader, etc.) para que llm_* no quede stale en openrouter.
+    hub_abs = resolve_env_duckdb_path(gw)
+    team_ctx = _playground_team_context(chat_id=chat_id)
+    wid = _pick_playground_worker(team_ctx, None)
+    vault_info = await _resolved_vault_for_admin_chat(chat_id, team_ctx, wid, request=request)
+    vault_path = resolve_env_duckdb_path(str(vault_info.get("effective_path") or "").strip())
+    if (
+        vault_path
+        and os.path.isfile(vault_path)
+        and not _duckdb_paths_same(vault_path, hub_abs)
+    ):
+        vault_db = DuckClaw(vault_path, read_only=False, engine="python")
+        try:
+            execute_model(vault_db, chat_id, args)
+        except Exception as exc:
+            _log = logging.getLogger(__name__)
+            _log.warning(
+                "playground_set_model: vault mirror failed chat_id=%s vault=%s err=%s",
+                chat_id,
+                vault_path[-96:] if len(vault_path) > 96 else vault_path,
+                exc,
+            )
+        finally:
+            vault_db.close()
+
     llm = _resolved_llm_for_chat(chat_id)
     return {
         "ok": True,
@@ -1316,6 +1350,92 @@ async def admin_health(request: Request) -> dict[str, Any]:
             "projects": True,
         },
     }
+
+
+def _gateway_db_query_rows(db: Any, sql: str) -> list[dict[str, Any]]:
+    """Parse JSON rows from GatewayDbEphemeralReadonly.query."""
+    try:
+        raw = db.query(sql)
+    except Exception:
+        return []
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    elif isinstance(raw, list):
+        parsed = raw
+    else:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [r for r in parsed if isinstance(r, dict)]
+
+
+@router.get("/overview/metrics", dependencies=[Depends(_require_admin_key)])
+async def admin_overview_metrics() -> dict[str, Any]:
+    """Agregados analíticos desde main.task_audit_log (actividad 7d, latencia 24h)."""
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(503, "Gateway DuckDB no disponible", gw or "missing")
+
+    db = GatewayDbEphemeralReadonly(gw)
+    activity_sql = """
+        SELECT worker_id,
+               COUNT(*) FILTER (WHERE upper(status) = 'SUCCESS') AS success_count,
+               COUNT(*) FILTER (WHERE upper(status) = 'FAILED') AS failed_count
+        FROM main.task_audit_log
+        WHERE created_at >= now() - INTERVAL '7 days'
+          AND worker_id IS NOT NULL AND trim(worker_id) != ''
+        GROUP BY worker_id
+        ORDER BY worker_id
+    """
+    latency_sql = """
+        SELECT strftime(created_at, '%H:00') AS hour,
+               round(avg(duration_ms)) AS avg_latency
+        FROM main.task_audit_log
+        WHERE created_at >= now() - INTERVAL '24 hours'
+        GROUP BY hour
+        ORDER BY cast(left(hour, 2) AS INTEGER)
+    """
+    activity_rows = _gateway_db_query_rows(db, activity_sql)
+    latency_rows = _gateway_db_query_rows(db, latency_sql)
+
+    activity: list[dict[str, Any]] = []
+    for row in activity_rows:
+        wid = str(row.get("worker_id") or "").strip()
+        if not wid:
+            continue
+        try:
+            success_count = int(row.get("success_count") or 0)
+        except (TypeError, ValueError):
+            success_count = 0
+        try:
+            failed_count = int(row.get("failed_count") or 0)
+        except (TypeError, ValueError):
+            failed_count = 0
+        activity.append(
+            {
+                "worker_id": wid,
+                "success_count": success_count,
+                "failed_count": failed_count,
+            }
+        )
+
+    latency: list[dict[str, Any]] = []
+    for row in latency_rows:
+        hour = str(row.get("hour") or "").strip()
+        if not hour:
+            continue
+        try:
+            avg_latency = int(row.get("avg_latency") or 0)
+        except (TypeError, ValueError):
+            avg_latency = 0
+        latency.append({"hour": hour, "avg_latency": avg_latency})
+
+    return {"activity": activity, "latency": latency, "db_path": gw}
 
 
 @router.get("/templates", dependencies=[Depends(_require_admin_key)])
@@ -2104,19 +2224,23 @@ async def admin_reindex_conversations(
 @router.post("/auth/login")
 async def admin_auth_login(body: AdminLoginBody) -> dict[str, Any]:
     from duckclaw import DuckClaw
-    from duckclaw.admin_console_users import authenticate_console_user
+    from duckclaw.admin_console_users import (
+        authenticate_console_user,
+        seed_admin_console_users_if_empty,
+    )
     from duckclaw.gateway_db import get_gateway_db_path
 
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
         raise _problem(503, "Gateway DuckDB no disponible", gw)
-    db = DuckClaw(gw, read_only=True, engine="python")
+    db = DuckClaw(gw, read_only=False, engine="python")
     try:
+        seed_admin_console_users_if_empty(db)
         user = authenticate_console_user(db, email=body.email, password=body.password)
     finally:
         db.close()
     if not user:
-        raise _problem(401, "Credenciales inválidas", "login")
+        raise _problem(401, "Credenciales inválidas", body.email or "unknown")
     return {
         "email": user["email"],
         "nombre": user["nombre"],

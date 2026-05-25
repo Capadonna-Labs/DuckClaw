@@ -69,6 +69,34 @@ def test_novnc_pre_dm_always_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     assert fac._novnc_pre_dm_always_enabled() is True
 
 
+def test_schedule_run_browser_novnc_skips_admin_ui_sse(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Admin playground no debe emitir heartbeat legacy sin tool_name (evita «Usando: tool»)."""
+    from duckclaw.workers import factory as fac
+
+    calls: list[str] = []
+
+    def fake_schedule(_tid: str, _cid: str, _uid: str, text: str, **_kw: object) -> None:
+        calls.append(text)
+
+    monkeypatch.setattr(
+        "duckclaw.graphs.chat_heartbeat.schedule_chat_heartbeat_dm",
+        fake_schedule,
+    )
+    state = {
+        "tenant_id": "default",
+        "chat_id": "admin-conv-test-novnc",
+        "user_id": "admin@duckclaw.local",
+        "subagent_instance_label": "Quant-Trader 1",
+    }
+    fac._schedule_run_browser_novnc_tool_heartbeat(
+        state,
+        routing_worker_id="Quant-Trader",
+        vnc_url="https://example/vnc",
+        novnc_session_id="admin_conv_test",
+    )
+    assert calls == []
+
+
 def test_schedule_run_browser_novnc_uses_heartbeat_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     from duckclaw.graphs import novnc_registry as nr
     from duckclaw.workers import factory as fac

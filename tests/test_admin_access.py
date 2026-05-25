@@ -95,6 +95,32 @@ def test_seed_idempotent(gateway_db: Path) -> None:
         con.close()
 
 
+def test_admin_login_seeds_default_when_table_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from duckclaw.gateway_db import GATEWAY_DB_ENV_KEYS
+    from gateway_import import load_gateway_app
+
+    p = tmp_path / "empty_gateway.duckdb"
+    for key in GATEWAY_DB_ENV_KEYS:
+        monkeypatch.setenv(key, str(p))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(Path(__file__).resolve().parent.parent))
+    con = duckdb.connect(str(p))
+    try:
+        ensure_admin_console_users_table(_Adapter(con))
+    finally:
+        con.close()
+
+    client = TestClient(load_gateway_app())
+    r = client.post(
+        "/api/v1/admin/auth/login",
+        json={"email": "admin@duckclaw.local", "password": "1234"},
+    )
+    assert r.status_code == 200
+    assert r.json()["email"] == "admin@duckclaw.local"
+
+
 def test_admin_login_ok(gateway_admin_client: TestClient, gateway_db: Path) -> None:
     r = gateway_admin_client.post(
         "/api/v1/admin/auth/login",

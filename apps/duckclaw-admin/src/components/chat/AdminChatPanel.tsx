@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { Bot, ChevronDown, ChevronRight, ImagePlus, Send, X } from 'lucide-react';
+import { Bot, Brain, ChevronDown, ChevronRight, ImagePlus, Send, X } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { ChatBubble, ThinkingBubble } from '@/components/chat/ChatBubble';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import {
   hasToolHeartbeatInCurrentTurn,
   isThinkingStatusHeartbeat,
+  shouldSkipEmptyStreamingAssistant,
   useAdminChat,
   type AdminChatController,
 } from '@/components/chat/useAdminChat';
@@ -77,7 +78,6 @@ export function AdminChatPanel({
     editFromMessage,
     inputRef,
     cancelGeneration,
-    clearMessages,
     imageAttachments,
     vaultPath,
     setVaultPath,
@@ -99,82 +99,140 @@ export function AdminChatPanel({
       } ${className}`}
     >
       {showHeader && (
-        <header className="flex flex-wrap items-center justify-between gap-2 p-3 border-b dark:border-dark-border shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <Bot size={isCompact ? 18 : 22} className="shrink-0 text-gov-blue-700 dark:text-dark-cyan" />
-            <div className="min-w-0">
-              <p className={`font-black dark:text-dark-text truncate ${isCompact ? 'text-sm' : 'text-xl'}`}>
-                {chatPanelTitle(sectionTitle)}
-              </p>
-              {!isCompact && onRenameConversation && conversationTitle?.trim() ? (
-                <EditableConversationTitle
-                  value={conversationTitle.trim()}
-                  onSave={onRenameConversation}
+        <header
+          className={`border-b dark:border-dark-border shrink-0 ${
+            isCompact ? 'p-3 space-y-2' : 'flex flex-wrap items-center justify-between gap-2 p-3'
+          }`}
+        >
+          {isCompact ? (
+            <div className="flex flex-col items-start gap-2 w-full">
+              {chatId && (
+                <ConversationVaultSelector
+                  chatId={chatId}
+                  tenantId={config?.effective_tenant_id}
+                  value={vaultPath}
+                  effectivePath={config?.vault?.effective_path}
+                  scope={config?.vault?.scope}
+                  options={config?.vault_options}
+                  onChange={setVaultPath}
+                  onUpdated={() => reloadConfig()}
+                  disabled={config?.authorized === false}
                   compact
-                  className="text-xs text-gov-gray-500"
                 />
-              ) : !isCompact ? (
-                <p className="text-xs text-gov-gray-500 truncate">
-                  {conversationTitle?.trim() || 'Respuestas en vivo (SSE)'}
-                </p>
-              ) : null}
+              )}
+              {chatId && (config?.catalog?.length ?? 0) > 0 && (
+                <label className="flex flex-wrap items-center gap-2 text-[10px] w-full">
+                  <Brain size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
+                  <span className="text-gov-gray-500 dark:text-dark-muted shrink-0">Modelo</span>
+                  <ChatLlmSelectors
+                    chatId={chatId}
+                    provider={config?.llm?.provider ?? ''}
+                    model={config?.llm?.model ?? ''}
+                    catalog={config?.catalog ?? []}
+                    onUpdated={() => reloadConfig()}
+                    disabled={config?.authorized === false || loading}
+                    compact
+                  />
+                </label>
+              )}
+              <label className="flex items-center gap-2 text-[10px] w-full">
+                <Bot size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
+                <span className="text-gov-gray-500 dark:text-dark-muted shrink-0">Worker</span>
+                <select
+                  value={workerId}
+                  onChange={(e) => setWorkerId(e.target.value)}
+                  disabled={!config?.workers?.length || config?.authorized === false}
+                  className="text-[10px] px-1.5 py-1 border rounded-md dark:border-dark-border dark:bg-dark-bg max-w-[180px] disabled:opacity-50"
+                  aria-label="Worker"
+                >
+                  {(config?.workers ?? []).map((w) => {
+                    const id = workerOptionId(w);
+                    const label = workerOptionLabel(w);
+                    return (
+                      <option key={id} value={id}>
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 justify-end">
-            {chatId && (
-              <ConversationVaultSelector
-                chatId={chatId}
-                tenantId={config?.effective_tenant_id}
-                value={vaultPath}
-                effectivePath={config?.vault?.effective_path}
-                scope={config?.vault?.scope}
-                options={config?.vault_options}
-                onChange={setVaultPath}
-                onUpdated={() => reloadConfig()}
-                disabled={config?.authorized === false}
-                compact={isCompact}
-              />
-            )}
-            {chatId && (config?.catalog?.length ?? 0) > 0 && (
-              <ChatLlmSelectors
-                chatId={chatId}
-                provider={config?.llm?.provider ?? ''}
-                model={config?.llm?.model ?? ''}
-                catalog={config?.catalog ?? []}
-                onUpdated={() => reloadConfig()}
-                disabled={config?.authorized === false || loading}
-                compact={isCompact}
-              />
-            )}
-            <select
-              value={workerId}
-              onChange={(e) => {
-                setWorkerId(e.target.value);
-                clearMessages();
-              }}
-              disabled={!config?.workers?.length || config?.authorized === false}
-              className="text-xs px-2 py-1.5 border rounded-lg dark:border-dark-border dark:bg-dark-bg max-w-[140px] disabled:opacity-50"
-              aria-label="Agente"
-            >
-              {(config?.workers ?? []).map((w) => {
-                const id = workerOptionId(w);
-                const label = workerOptionLabel(w);
-                return (
-                  <option key={id} value={id}>
-                    {label}
-                  </option>
-                );
-              })}
-            </select>
-            {showWorkerLink && workerId && (
-              <Link
-                href={`/templates/${workerId}`}
-                className="text-[10px] text-gov-blue-700 font-semibold flex items-center gap-0.5 shrink-0"
-              >
-                Editar <ChevronRight size={10} />
-              </Link>
-            )}
-          </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 min-w-0">
+                <Bot size={22} className="shrink-0 text-gov-blue-700 dark:text-dark-cyan" />
+                <div className="min-w-0">
+                  <p className="font-black dark:text-dark-text truncate text-xl">
+                    {chatPanelTitle(sectionTitle)}
+                  </p>
+                  {onRenameConversation && conversationTitle?.trim() ? (
+                    <EditableConversationTitle
+                      value={conversationTitle.trim()}
+                      onSave={onRenameConversation}
+                      compact
+                      className="text-xs text-gov-gray-500"
+                    />
+                  ) : (
+                    <p className="text-xs text-gov-gray-500 truncate">
+                      {conversationTitle?.trim() || 'Respuestas en vivo (SSE)'}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 justify-end">
+                {chatId && (
+                  <ConversationVaultSelector
+                    chatId={chatId}
+                    tenantId={config?.effective_tenant_id}
+                    value={vaultPath}
+                    effectivePath={config?.vault?.effective_path}
+                    scope={config?.vault?.scope}
+                    options={config?.vault_options}
+                    onChange={setVaultPath}
+                    onUpdated={() => reloadConfig()}
+                    disabled={config?.authorized === false}
+                    compact={false}
+                  />
+                )}
+                {chatId && (config?.catalog?.length ?? 0) > 0 && (
+                  <ChatLlmSelectors
+                    chatId={chatId}
+                    provider={config?.llm?.provider ?? ''}
+                    model={config?.llm?.model ?? ''}
+                    catalog={config?.catalog ?? []}
+                    onUpdated={() => reloadConfig()}
+                    disabled={config?.authorized === false || loading}
+                    compact={false}
+                  />
+                )}
+                <select
+                  value={workerId}
+                  onChange={(e) => setWorkerId(e.target.value)}
+                  disabled={!config?.workers?.length || config?.authorized === false}
+                  className="text-xs px-2 py-1.5 border rounded-lg dark:border-dark-border dark:bg-dark-bg max-w-[140px] disabled:opacity-50"
+                  aria-label="Agente"
+                >
+                  {(config?.workers ?? []).map((w) => {
+                    const id = workerOptionId(w);
+                    const label = workerOptionLabel(w);
+                    return (
+                      <option key={id} value={id}>
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
+                {showWorkerLink && workerId && (
+                  <Link
+                    href={`/templates/${workerId}`}
+                    className="text-[10px] text-gov-blue-700 font-semibold flex items-center gap-0.5 shrink-0"
+                  >
+                    Editar <ChevronRight size={10} />
+                  </Link>
+                )}
+              </div>
+            </>
+          )}
         </header>
       )}
 
@@ -233,6 +291,9 @@ export function AdminChatPanel({
                 swarmSlot={thinkingIdentity.swarmSlot}
               />
             );
+          }
+          if (shouldSkipEmptyStreamingAssistant(m, messages)) {
+            return null;
           }
           const prevUserIdx =
             m.role === 'assistant' && !m.streaming

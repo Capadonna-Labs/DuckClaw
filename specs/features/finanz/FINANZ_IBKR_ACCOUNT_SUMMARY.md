@@ -36,6 +36,18 @@ Texto operativo: mismas viñetas en `system_prompt.md` (sección gastos/cuentas 
 
 Cuando `read_sql` sobre `finance_worker.deudas` devuelve JSON de filas y el worker es **finanz**, `packages/agents/src/duckclaw/workers/read_pool.py` puede envolver la salida en `{ "deudas_filas": [...], "_totales_resumen_cop": { ... } }` si detecta fila agregada TC Bancolombia / Mac Mini con cuotas mensuales duplicadas. El modelo debe usar `total_recomendado_resumen_cop` como total único en COP (ver `system_prompt.md`).
 
+## Fly command `/ibkr` (por chat)
+
+| Comando | Efecto |
+|---------|--------|
+| `/ibkr on --mode paper` | Habilita `get_ibkr_portfolio` en este chat; peticiones con cabecera **paper** y salida con cifras paper. |
+| `/ibkr on --mode live` | Igual con cabecera **live** (cuenta real). **`--mode` es obligatorio** en `on`. |
+| `/ibkr off` | Quita la tool del bind al LLM hasta nuevo `on`. |
+
+Persistencia: `agent_config` → `chat_{id}_ibkr_enabled`, `chat_{id}_ibkr_portfolio_mode` (mismo patrón que `/sandbox`). **Default Finanz: OFF** (el modelo no ve la tool hasta activarla). Quant-Trader: default ON salvo `off` explícito.
+
+Implementación: `on_the_fly_commands.execute_ibkr_toggle`, `factory.filter_tools_for_ibkr`, variante Finanz en `ibkr_bridge._get_ibkr_portfolio_finanz_impl`.
+
 ## Finanz: IBKR solo **live** y aviso sesión Quant **paper**
 
 En el worker **finanz** (manifest `id: finanz`), la herramienta `get_ibkr_portfolio` se sustituye en `packages/agents/src/duckclaw/workers/factory.py` por la variante `replace_get_ibkr_portfolio_with_finanz_live_variant` (`ibkr_bridge.py`):

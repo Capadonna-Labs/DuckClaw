@@ -9,6 +9,7 @@ import type {
   VaultBinding,
   VaultOption,
   ConsoleUser,
+  OverviewMetrics,
   SharedDbGrant,
   WhitelistUser,
 } from '@/types/admin';
@@ -188,6 +189,8 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const adminService = {
   health: () => adminFetch<AdminHealth>('/health'),
+
+  getOverviewMetrics: () => adminFetch<OverviewMetrics>('/overview/metrics'),
 
   listTemplates: () =>
     adminFetch<{ templates: TemplateSummary[] }>('/templates').then((r) => r.templates),

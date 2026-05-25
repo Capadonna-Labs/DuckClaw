@@ -5,8 +5,12 @@ import type { ChatMsg, ToolHeartbeatPhase } from '@/components/chat/types';
 export type { ToolHeartbeatPhase };
 
 export function parseToolNameFromHeartbeatText(text: string): string | null {
-  const m = (text || '').match(/^🔄\s*Usando:\s*(.+?)(?:\s*·|$)/u);
-  return m ? m[1].trim() : null;
+  const raw = (text || '').trim();
+  if (!raw) return null;
+  const using = raw.match(/🔄\s*Usando:\s*(.+?)(?:\s*·|$)/u);
+  if (using) return using[1].trim();
+  const legacy = raw.match(/herramienta\s+([A-Za-z0-9_.-]+)/iu);
+  return legacy ? legacy[1].trim() : null;
 }
 
 export function formatToolDurationMs(ms: number | null | undefined): string {
@@ -43,6 +47,40 @@ export function mapSseToolPhase(
 }
 
 /** Índice del último heartbeat de la misma herramienta antes de ``beforeIndex``. */
+export function isToolHeartbeatRunning(m: ChatMsg): boolean {
+  if (m.role !== 'heartbeat' || m.heartbeatKind !== 'tool') return false;
+  const phase = m.toolPhase;
+  return (
+    phase === 'running' ||
+    phase === 'start' ||
+    (phase !== 'done' && phase !== 'error')
+  );
+}
+
+/** Cierra cronómetros de herramienta que quedaron en curso (p. ej. done SSE antes que start). */
+export function finalizeRunningToolHeartbeats(messages: ChatMsg[]): ChatMsg[] {
+  const now = Date.now();
+  let changed = false;
+  const next = messages.map((msg) => {
+    if (!isToolHeartbeatRunning(msg)) return msg;
+    changed = true;
+    const elapsed =
+      msg.toolElapsedMs ??
+      (msg.toolStartedAt != null ? Math.max(0, now - msg.toolStartedAt) : undefined);
+    return {
+      ...msg,
+      toolPhase: 'done' as const,
+      toolElapsedMs: elapsed,
+      text: toolHeartbeatDisplayText(
+        (msg.toolName || parseToolNameFromHeartbeatText(msg.text || '') || 'tool').trim(),
+        'done',
+        elapsed
+      ),
+    };
+  });
+  return changed ? next : messages;
+}
+
 export function findToolHeartbeatIndex(
   messages: ChatMsg[],
   toolName: string,
@@ -54,8 +92,9 @@ export function findToolHeartbeatIndex(
   for (let i = end - 1; i >= 0; i--) {
     const x = messages[i];
     if (x.role !== 'heartbeat' || x.heartbeatKind !== 'tool') continue;
-    const name = (x.toolName || parseToolNameFromHeartbeatText(x.text || '')).trim();
-    if (name === needle) return i;
+    const name = (x.toolName || parseToolNameFromHeartbeatText(x.text || '') || '').trim();
+    if (!name || name !== needle) continue;
+    return i;
   }
   return -1;
 }

@@ -9,7 +9,6 @@ import {
   KANBAN_WORKER_FILTER_KEY,
   isSwarmAutoSyncCard,
 } from '@/lib/kanbanTypes';
-import { fetchKanbanTeamWorkers } from '@/lib/kanbanSync';
 import { useAuthStore } from '@/store/authStore';
 import { PageShell } from '@/components/admin/PageShell';
 import { Plus, RefreshCw, GripVertical } from 'lucide-react';
@@ -32,6 +31,11 @@ function cardMatchesWorkerFilter(card: KanbanCard, filter: string): boolean {
   return false;
 }
 
+async function fetchTeamWorkerIds(): Promise<string[]> {
+  const config = await adminService.getPlaygroundConfig();
+  return (config.workers ?? []).map((worker) => worker.id).filter(Boolean);
+}
+
 export default function KanbanPage() {
   const { usuario } = useAuthStore();
   const canWrite = usuario?.rol === 'admin';
@@ -43,7 +47,7 @@ export default function KanbanPage() {
 
   useEffect(() => {
     setWorkerFilter(readWorkerFilter());
-    fetchKanbanTeamWorkers().then(setTeamWorkers).catch(() => setTeamWorkers([]));
+    fetchTeamWorkerIds().then(setTeamWorkers).catch(() => setTeamWorkers([]));
   }, []);
 
   const onWorkerFilterChange = (value: string) => {
@@ -82,7 +86,7 @@ export default function KanbanPage() {
     const fromCards = cards
       .map((c) => c.worker_id)
       .filter((w): w is string => Boolean(w));
-    return [...new Set([...fromTeam, ...fromCards])].sort();
+    return Array.from(new Set([...fromTeam, ...fromCards])).sort();
   }, [teamWorkers, cards]);
 
   const moveCard = async (id: string, status: KanbanStatus) => {

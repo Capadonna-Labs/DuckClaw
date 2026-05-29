@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
-import type { ConsoleUser } from '@/types/admin';
+import type { AdminRole, ConsoleUser } from '@/types/admin';
 import { KeyRound, UserPlus, Trash2 } from 'lucide-react';
 
 export function ConsoleUsersPanel() {
@@ -13,7 +13,7 @@ export function ConsoleUsersPanel() {
 
   const [email, setEmail] = useState('');
   const [nombre, setNombre] = useState('');
-  const [rol, setRol] = useState<'admin' | 'viewer'>('viewer');
+  const [rol, setRol] = useState<AdminRole>('user');
   const [password, setPassword] = useState('');
   const [initials, setInitials] = useState('');
 
@@ -146,10 +146,10 @@ export function ConsoleUsersPanel() {
           />
           <select
             value={rol}
-            onChange={(e) => setRol(e.target.value as 'admin' | 'viewer')}
+            onChange={(e) => setRol(e.target.value as AdminRole)}
             className="px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-surface text-sm"
           >
-            <option value="viewer">viewer</option>
+            <option value="user">user</option>
             <option value="admin">admin</option>
           </select>
           <input

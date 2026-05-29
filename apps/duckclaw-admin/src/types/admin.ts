@@ -1,4 +1,4 @@
-export type AdminRole = 'admin' | 'viewer';
+export type AdminRole = 'admin' | 'user' | 'viewer';
 
 export interface AdminUser {
   id: string;
@@ -11,6 +11,8 @@ export interface AdminUser {
 export interface TemplateSummary {
   id: string;
   name?: string;
+  description?: string;
+  description_source?: string;
   schema_name?: string;
   temperature?: number;
   topology?: string;

@@ -3,6 +3,7 @@
 # Inferencia Elástica: specs/Inferencia_Elastica_(Hardware-Aware).md
 name: ResearchWorker
 id: research_worker
+description: Investiga, consulta fuentes externas y organiza hallazgos con trazabilidad para responder con contexto.
 schema_name: research_worker
 topology: general
 read_only: false

@@ -3,7 +3,7 @@ display_name: "SENTINEL — Red Team Companion"
 version: "1.0.0"
 phase: 5
 status: DEFINED
-description: "Colega senior de ciberseguridad ofensiva contextualizado al nivel del propietario"
+description: "Agente AXIS de ciberseguridad ofensiva controlada: analiza CVEs, escenarios MITRE y reportes sin ejecutar ataques reales."
 long_description: |
   SENTINEL calibra técnicas de ataque, CVEs y reportes al perfil inferido
   por MIRROR y al intel ingestado por RADAR. No ejecuta ataques reales.

@@ -1,5 +1,6 @@
 name: QuantTraderWorker
 id: quant_trader
+description: Analiza mercados, señales cuantitativas, OHLCV y riesgo paper/HITL con herramientas financieras y trazabilidad de datos.
 schema_name: finance_worker
 topology: general
 read_only: true

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AdminRole, AdminUser } from '@/types/admin';
+import { normalizeAdminRole } from '@/lib/roles';
 
 /** RFC 7807 / FastAPI: detail puede ser string o { title, detail, status }. */
 function parseLoginErrorPayload(data: unknown): string {
@@ -61,7 +62,7 @@ export const useAuthStore = create<AuthState>()(
             id: String(data.id ?? `user-${data.email}`),
             email: String(data.email),
             nombre: String(data.nombre ?? data.email),
-            rol: (data.rol === 'admin' ? 'admin' : 'viewer') as AdminRole,
+            rol: normalizeAdminRole(data.rol) as AdminRole,
             initials: String(data.initials ?? data.email.slice(0, 2).toUpperCase()),
           };
           set({
@@ -108,5 +109,5 @@ export function adminPostAuthPath(returnTo: string | null | undefined): string {
 }
 
 export function authHeadersForBff(rol: AdminRole | undefined): HeadersInit {
-  return { 'x-duckclaw-role': rol ?? 'viewer' };
+  return { 'x-duckclaw-role': normalizeAdminRole(rol) };
 }

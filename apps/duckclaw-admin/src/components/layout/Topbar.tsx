@@ -6,6 +6,7 @@ import { PanelToggleButton } from '@/components/layout/PanelToggleButton';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { obtenerIniciales } from '@/lib/utils';
+import { roleDisplayName } from '@/lib/roles';
 import { useTheme } from '@/components/shared/ThemeProvider';
 
 interface TopbarProps {
@@ -45,7 +46,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
         <div className="hidden sm:flex items-center gap-3 pl-3 border-l dark:border-dark-border">
           <div className="text-right hidden lg:block">
             <p className="text-sm font-bold dark:text-dark-text">{usuario?.nombre}</p>
-            <p className="text-[10px] text-gov-gray-500 capitalize">{usuario?.rol}</p>
+            <p className="text-[10px] text-gov-gray-500 capitalize">{roleDisplayName(usuario?.rol)}</p>
           </div>
           <div className="w-9 h-9 rounded-full bg-gov-blue-700 text-white flex items-center justify-center text-xs font-bold">
             {usuario?.initials ?? obtenerIniciales(usuario?.nombre || '')}

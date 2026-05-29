@@ -1,5 +1,6 @@
 import type { KanbanCard, KanbanStatus } from '@/lib/kanbanTypes';
 import {
+  coerceKanbanWorkerId,
   isSwarmAutoSyncCard,
   kanbanInstanceKey,
   swarmCardTitle,
@@ -32,8 +33,11 @@ async function fetchPlaygroundWorkers(): Promise<string[]> {
     cache: 'no-store',
   });
   if (!res.ok) return [];
-  const data = (await res.json()) as { workers?: string[] };
-  return Array.isArray(data.workers) ? data.workers.filter(Boolean) : [];
+  const data = (await res.json()) as { workers?: unknown[] };
+  if (!Array.isArray(data.workers)) return [];
+  return data.workers
+    .map(coerceKanbanWorkerId)
+    .filter((workerId): workerId is string => Boolean(workerId));
 }
 
 async function fetchSwarmSlots(workers: string[]): Promise<{
@@ -67,14 +71,26 @@ async function fetchSwarmSlots(workers: string[]): Promise<{
 }
 
 function migrateLegacyCard(card: KanbanCard, now: string): KanbanCard {
-  if (!card.worker_id || card.swarm_slot != null) return card;
+  const workerId = coerceKanbanWorkerId(card.worker_id);
+  if (workerId && card.worker_id !== workerId) {
+    const slot = card.swarm_slot ?? 1;
+    return {
+      ...card,
+      title: isSwarmAutoSyncCard(card) ? swarmCardTitle(workerId, slot) : card.title,
+      worker_id: workerId,
+      instance_key: isSwarmAutoSyncCard(card) ? kanbanInstanceKey(workerId, slot) : card.instance_key,
+      updated_at: now,
+    };
+  }
+  if (!workerId || card.swarm_slot != null) return card;
   if (!card.tags.includes(AUTO_SYNC_TAG)) return card;
-  if (card.title !== card.worker_id) return card;
+  if (card.title !== workerId) return card;
   return {
     ...card,
-    title: swarmCardTitle(card.worker_id, 1),
+    title: swarmCardTitle(workerId, 1),
+    worker_id: workerId,
     swarm_slot: 1,
-    instance_key: kanbanInstanceKey(card.worker_id, 1),
+    instance_key: kanbanInstanceKey(workerId, 1),
     tags: [...new Set([...card.tags, SWARM_TAG])],
     updated_at: now,
   };

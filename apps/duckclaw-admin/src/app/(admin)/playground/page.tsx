@@ -88,7 +88,7 @@ export default function PlaygroundPage() {
   const activeCatalog = config?.catalog?.find((c) => c.active);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-8rem)] relative">
+    <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-8rem)] lg:h-[calc(100vh-8rem)] lg:min-h-0 lg:overflow-hidden relative">
       {conv.sessionId && (
         <ConversationInbox
           tenantId={config?.effective_tenant_id}
@@ -97,11 +97,11 @@ export default function PlaygroundPage() {
           refreshToken={conv.refreshToken}
           onSelect={(id, meta) => conv.selectConversation(id, meta?.title)}
           onTitleRenamed={(_id, title) => conv.syncConversationTitle(title)}
-          className="hidden md:flex rounded-3xl border dark:border-dark-border overflow-hidden bg-white dark:bg-dark-surface"
+          className="hidden md:flex lg:h-full lg:max-h-full rounded-3xl border dark:border-dark-border overflow-hidden bg-white dark:bg-dark-surface"
         />
       )}
 
-      <div className="flex-1 flex flex-col min-w-0 min-h-[calc(100vh-8rem)] bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 min-h-[calc(100vh-8rem)] lg:min-h-0 lg:h-full bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
         <header className="flex flex-wrap items-center justify-between gap-3 p-4 border-b dark:border-dark-border">
           <div>
             <h1 className="text-xl font-black dark:text-dark-text flex items-center gap-2">
@@ -150,7 +150,7 @@ export default function PlaygroundPage() {
             {(config.workers_invalid?.length ?? 0) > 0 && (
               <>
                 {' '}
-                Omitidos del selector: {config.workers_invalid.join(', ')}.
+                Omitidos del selector: {(config.workers_invalid ?? []).join(', ')}.
               </>
             )}
           </p>
@@ -175,7 +175,7 @@ export default function PlaygroundPage() {
                 ? `Escribe un mensaje para hablar con ${workerId}`
                 : 'Escribe un mensaje para hablar con …'
             }
-            className="flex-1 border-0 rounded-none shadow-none"
+            className="flex-1 lg:h-full min-h-0 border-0 rounded-none shadow-none"
           />
         )}
       </div>
@@ -192,15 +192,15 @@ export default function PlaygroundPage() {
       )}
 
       <aside
-        className={`shrink-0 overflow-hidden transition-[width,opacity] duration-300 ease-out ${
+        className={`shrink-0 min-h-0 overflow-hidden transition-[width,opacity] duration-300 ease-out ${
           panelOpen
-            ? 'w-full lg:w-80 opacity-100'
+            ? 'w-full lg:w-80 lg:h-full opacity-100'
             : 'w-0 max-w-0 opacity-0 pointer-events-none lg:hidden'
         }`}
         aria-hidden={!panelOpen}
       >
-        <div className="w-full lg:w-80 space-y-4">
-          <div className="flex items-center justify-between gap-2 sticky top-0 z-10 py-1">
+        <div className="w-full lg:w-80 h-full min-h-0 flex flex-col">
+          <div className="flex items-center justify-between gap-2 shrink-0 pb-2">
             <span className="text-xs font-bold uppercase text-gov-gray-500 tracking-wide">
               Configuración
             </span>
@@ -214,62 +214,64 @@ export default function PlaygroundPage() {
               title={panelOpen ? 'Ocultar panel de configuración' : 'Mostrar panel de configuración'}
             />
           </div>
-          <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border p-4 space-y-3">
-            <h2 className="font-bold text-sm flex items-center gap-2">
-              <Settings2 size={18} /> Run settings
-            </h2>
-            <p className="text-[10px] text-gov-gray-500">{config?.note}</p>
-            <ConfigRowsSection config={config} activeCatalog={activeCatalog} />
-          </section>
-          <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border p-4">
-            <h3 className="font-bold text-xs uppercase text-gov-gray-500 mb-2">
-              Bóveda DuckDB (conversación)
-            </h3>
-            {conv.sessionId ? (
-              <ConversationVaultSelector
-                chatId={conv.sessionId}
-                tenantId={config?.effective_tenant_id}
-                value={chat.vaultPath}
-                effectivePath={config?.vault?.effective_path}
-                scope={config?.vault?.scope}
-                options={config?.vault_options}
-                onChange={chat.setVaultPath}
-                onUpdated={loadConfig}
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-4">
+            <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border p-4 space-y-3">
+              <h2 className="font-bold text-sm flex items-center gap-2">
+                <Settings2 size={18} /> Run settings
+              </h2>
+              <p className="text-[10px] text-gov-gray-500">{config?.note}</p>
+              <ConfigRowsSection config={config} activeCatalog={activeCatalog} />
+            </section>
+            <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border p-4">
+              <h3 className="font-bold text-xs uppercase text-gov-gray-500 mb-2">
+                Bóveda DuckDB (conversación)
+              </h3>
+              {conv.sessionId ? (
+                <ConversationVaultSelector
+                  chatId={conv.sessionId}
+                  tenantId={config?.effective_tenant_id}
+                  value={chat.vaultPath}
+                  effectivePath={config?.vault?.effective_path}
+                  scope={config?.vault?.scope}
+                  options={config?.vault_options}
+                  onChange={chat.setVaultPath}
+                  onUpdated={loadConfig}
+                />
+              ) : (
+                <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
+              )}
+            </section>
+            <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border p-4">
+              <h3 className="font-bold text-xs uppercase text-gov-gray-500 mb-2">
+                Proveedores disponibles
+              </h3>
+              {conv.sessionId ? (
+                <LlmProviderCatalog
+                  chatId={conv.sessionId}
+                  catalog={config?.catalog ?? []}
+                  onUpdated={loadConfig}
+                />
+              ) : (
+                <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
+              )}
+            </section>
+            <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border p-4">
+              <h3 className="font-bold text-xs uppercase text-gov-gray-500 mb-2">
+                Instrucciones del agente
+              </h3>
+              <MarkdownSnippetPanel
+                content={systemPreview}
+                emptyLabel="Sin system_prompt.md"
+                maxHeightClass="max-h-48"
               />
-            ) : (
-              <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
-            )}
-          </section>
-          <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border p-4">
-            <h3 className="font-bold text-xs uppercase text-gov-gray-500 mb-2">
-              Proveedores disponibles
-            </h3>
-            {conv.sessionId ? (
-              <LlmProviderCatalog
-                chatId={conv.sessionId}
-                catalog={config?.catalog ?? []}
-                onUpdated={loadConfig}
-              />
-            ) : (
-              <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
-            )}
-          </section>
-          <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border p-4">
-            <h3 className="font-bold text-xs uppercase text-gov-gray-500 mb-2">
-              Instrucciones del agente
-            </h3>
-            <MarkdownSnippetPanel
-              content={systemPreview}
-              emptyLabel="Sin system_prompt.md"
-              maxHeightClass="max-h-48"
-            />
-            <Link
-              href={`/templates/${workerId}?focus=system_prompt.md`}
-              className="text-xs text-gov-blue-700 font-semibold mt-2 inline-block"
-            >
-              Editar comportamiento →
-            </Link>
-          </section>
+              <Link
+                href={`/templates/${workerId}?focus=system_prompt.md`}
+                className="text-xs text-gov-blue-700 font-semibold mt-2 inline-block"
+              >
+                Editar comportamiento →
+              </Link>
+            </section>
+          </div>
         </div>
       </aside>
     </div>

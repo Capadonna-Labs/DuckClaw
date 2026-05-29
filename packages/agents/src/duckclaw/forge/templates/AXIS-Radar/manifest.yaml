@@ -3,7 +3,7 @@ display_name: "RADAR — External Intelligence"
 version: "1.0.0"
 phase: 4
 status: DEFINED
-description: "Monitoreo de inteligencia técnica externa 24/7"
+description: "Agente AXIS de inteligencia externa: monitorea CVEs, noticias, papers y señales técnicas relevantes."
 
 llm_config:
   sensitivity: BOTH

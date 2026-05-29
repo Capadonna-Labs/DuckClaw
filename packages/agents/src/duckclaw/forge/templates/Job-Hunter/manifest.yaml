@@ -1,6 +1,7 @@
 # OSINT JobHunter — Spec: specs/features/agents-axis/JOBHUNTER_OSINT.md
 name: OSINT JobHunter
 id: job_hunter
+description: Investiga oportunidades laborales con OSINT, memoria semántica y seguimiento de oportunidades en DuckDB.
 schema_name: finance_worker
 topology: general
 read_only: false

@@ -144,8 +144,10 @@ def upsert_console_user(
     em = _normalize_email(email)
     if not em:
         raise ValueError("email requerido")
-    role = (rol or "viewer").strip().lower()
-    if role not in ("admin", "viewer"):
+    role = (rol or "user").strip().lower()
+    if role == "viewer":
+        role = "user"
+    if role not in ("admin", "user"):
         raise ValueError("rol inválido")
     existing = get_by_email(db, em)
     pwd_hash = hash_password(password) if password else None
@@ -212,6 +214,13 @@ def default_seed_users() -> list[dict[str, str]]:
             "rol": "admin",
             "password": password,
             "initials": "DC",
+        },
+        {
+            "email": "user@duckclaw.local",
+            "nombre": "Usuario DuckClaw",
+            "rol": "user",
+            "password": "1234",
+            "initials": "UD",
         }
     ]
 
@@ -227,7 +236,7 @@ def seed_admin_console_users_if_empty(db: Any, users: list[dict[str, str]] | Non
             db,
             email=u["email"],
             nombre=u.get("nombre") or u["email"],
-            rol=u.get("rol") or "viewer",
+            rol=u.get("rol") or "user",
             password=u.get("password") or "",
             initials=u.get("initials") or "",
             active=True,

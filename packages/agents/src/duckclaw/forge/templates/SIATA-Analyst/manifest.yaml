@@ -3,6 +3,7 @@
 # API reference: https://siata.gov.co/COMPLEX/Website/Documentation/API_reference/API_Reference.html
 name: SIATA Analyst
 id: siata_analyst
+description: Consulta datos SIATA, radar meteorológico, clima y contexto externo para análisis ambiental del Valle de Aburrá.
 schema_name: main
 topology: general
 read_only: true

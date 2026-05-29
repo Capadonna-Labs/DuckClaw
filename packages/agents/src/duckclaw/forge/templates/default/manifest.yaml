@@ -5,7 +5,8 @@ schema_name: agent_worker
 topology: general
 read_only: false
 description: >
-  Agente personalizable. Edita system_prompt.md y soul.md desde la consola admin.
+  Agente base para conversaciones generales y creación rápida de asistentes personalizados desde la consola.
+  Sirve como punto de partida para ajustar instrucciones, tono y herramientas.
 
 llm:
   required: true

@@ -2,6 +2,7 @@
 # Topología: Interpreter -> RAG_Retriever -> Validator -> Explainer (read-only)
 name: SupportWorker
 id: support
+description: Atiende consultas de soporte con RAG, búsqueda en base de conocimiento y revisión de estado de tickets.
 schema_name: support_worker
 topology: general
 read_only: true

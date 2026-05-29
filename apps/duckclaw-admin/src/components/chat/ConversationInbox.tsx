@@ -131,7 +131,7 @@ export function ConversationInbox({
 
   return (
     <aside
-      className={`flex flex-col border-r dark:border-dark-border bg-gov-gray-50/80 dark:bg-dark-bg/80 shrink-0 ${
+      className={`flex flex-col min-h-0 border-r dark:border-dark-border bg-gov-gray-50/80 dark:bg-dark-bg/80 shrink-0 ${
         isCompact ? 'w-full h-full min-h-0' : 'w-[280px] min-w-[240px]'
       } ${className}`}
     >

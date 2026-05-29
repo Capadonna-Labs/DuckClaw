@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { catalogFallbackResponse } from '@/lib/adminCatalogFallback';
 import { fallbackPlaygroundConfig } from '@/lib/playgroundFallback';
 import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+import { normalizeAdminRole } from '@/lib/roles';
 
 const OPS_COMMANDS_FALLBACK = {
   commands: [
@@ -85,6 +86,13 @@ const OPS_COMMANDS_FALLBACK = {
 
 const WRITE_METHODS = new Set(['PUT', 'PATCH', 'POST', 'DELETE']);
 
+function userWriteAllowed(sub: string, method: string): boolean {
+  if (method === 'POST' && sub === 'projects') return true;
+  if (sub.startsWith('playground/')) return true;
+  if (sub.startsWith('conversations')) return true;
+  return false;
+}
+
 async function proxy(req: NextRequest, segments: string[]) {
   const base = gatewayBase();
   const key = adminApiKey();
@@ -95,7 +103,7 @@ async function proxy(req: NextRequest, segments: string[]) {
     return NextResponse.json({ detail: 'DUCKCLAW_ADMIN_API_KEY no configurada' }, { status: 503 });
   }
 
-  const role = req.headers.get('x-duckclaw-role') || 'admin';
+  const role = normalizeAdminRole(req.headers.get('x-duckclaw-role') || 'admin');
   const sub = segments.join('/');
   if (segments[0] === 'audit' && role !== 'admin') {
     return NextResponse.json({ detail: 'Auditoría solo para rol admin' }, { status: 403 });
@@ -103,8 +111,8 @@ async function proxy(req: NextRequest, segments: string[]) {
   if (segments[0] === 'ops' && role !== 'admin') {
     return NextResponse.json({ detail: 'Operaciones solo para rol admin' }, { status: 403 });
   }
-  if (role === 'viewer' && WRITE_METHODS.has(req.method)) {
-    return NextResponse.json({ detail: 'Solo lectura (rol viewer)' }, { status: 403 });
+  if (role === 'user' && WRITE_METHODS.has(req.method) && !userWriteAllowed(sub, req.method)) {
+    return NextResponse.json({ detail: 'Operación reservada para admin' }, { status: 403 });
   }
 
   const url = new URL(req.url);

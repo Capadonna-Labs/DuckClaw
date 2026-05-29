@@ -1,11 +1,15 @@
 /** Fuente única de rutas del panel admin (Sidebar + Topbar). */
+import type { AdminRole } from '@/types/admin';
+import { isAdminRole } from '@/lib/roles';
 
 export type NavSection = 'core' | 'integrations' | 'admin' | 'footer';
+export type NavAudience = 'all' | 'user' | 'admin';
 
 export type AdminNavItem = {
   href: string;
   label: string;
   section: NavSection;
+  audience?: NavAudience;
   /** Solo visible si usuario.rol === 'admin' */
   adminOnly?: boolean;
 };
@@ -13,6 +17,7 @@ export type AdminNavItem = {
 export type AdminNavGroup = {
   id: string;
   label: string;
+  hint?: string;
   items: readonly AdminNavItem[];
 };
 
@@ -20,88 +25,141 @@ export type AdminNavEntry =
   | { type: 'item'; item: AdminNavItem }
   | { type: 'group'; group: AdminNavGroup };
 
-export const INTEGRATIONS_NAV_GROUP: AdminNavGroup = {
-  id: 'integrations',
-  label: 'Integraciones',
+export const USER_WORKSPACE_NAV_GROUP: AdminNavGroup = {
+  id: 'user-workspace',
+  label: 'Tu espacio',
+  hint: 'Crea, conversa y retoma trabajo',
   items: [
-    { href: '/telegram', label: 'Telegram', section: 'integrations' },
-    { href: '/integrations/edge-devices', label: 'Edge devices', section: 'integrations' },
+    { href: '/overview', label: 'Inicio', section: 'core', audience: 'user' },
+    { href: '/playground', label: 'Chat', section: 'core', audience: 'user' },
+    { href: '/templates', label: 'Mis agentes', section: 'core', audience: 'user' },
+    { href: '/projects/new', label: 'Crear agente', section: 'core', audience: 'user' },
+    { href: '/kanban', label: 'Tablero', section: 'core', audience: 'user' },
+    { href: '/settings', label: 'Ajustes', section: 'footer', audience: 'user' },
   ],
 };
 
-export const GEN_NAV_GROUP: AdminNavGroup = {
-  id: 'gen',
-  label: 'Gen',
-  items: [{ href: '/gen/image', label: 'Image', section: 'core' }],
+export const OPERATION_NAV_GROUP: AdminNavGroup = {
+  id: 'operation',
+  label: 'Operación',
+  hint: 'Estado, chat y tablero diario',
+  items: [
+    { href: '/overview', label: 'Overview', section: 'core', audience: 'admin' },
+    { href: '/playground', label: 'Playground', section: 'core', audience: 'admin' },
+    { href: '/kanban', label: 'Tablero', section: 'core', audience: 'admin' },
+    { href: '/audit', label: 'Auditoría', section: 'admin', audience: 'admin', adminOnly: true },
+  ],
 };
 
-const CORE_AND_ADMIN_NAV: readonly AdminNavItem[] = [
-  { href: '/overview', label: 'Overview', section: 'core' },
-  { href: '/kanban', label: 'Tablero', section: 'core' },
-  { href: '/templates', label: 'Workers', section: 'core' },
-  { href: '/projects', label: 'Proyectos', section: 'core' },
-  { href: '/mcp', label: 'MCP', section: 'core' },
-  { href: '/skills', label: 'Skills', section: 'core' },
-  { href: '/playground', label: 'Playground', section: 'core' },
-  { href: '/vnc', label: 'VNC', section: 'core', adminOnly: true },
-  { href: '/runtime', label: 'Runtime', section: 'core' },
-  { href: '/duckdb', label: 'DuckDB', section: 'core' },
-  { href: '/train', label: 'Train', section: 'core' },
-  { href: '/admin/access', label: 'Acceso', section: 'admin', adminOnly: true },
-  { href: '/audit', label: 'Auditoría', section: 'admin', adminOnly: true },
-  { href: '/settings', label: 'Ajustes', section: 'footer' },
-] as const;
+export const BUILD_NAV_GROUP: AdminNavGroup = {
+  id: 'build',
+  label: 'Agentes',
+  hint: 'Agentes, proyectos y capacidades',
+  items: [
+    { href: '/templates', label: 'Workers', section: 'core', audience: 'admin' },
+    { href: '/projects', label: 'Proyectos', section: 'core', audience: 'admin' },
+    { href: '/skills', label: 'Skills', section: 'core', audience: 'admin' },
+    { href: '/mcp', label: 'MCP', section: 'core', audience: 'admin' },
+    { href: '/gen/image', label: 'Gen Image', section: 'core', audience: 'admin' },
+  ],
+};
 
-/** Orden del sidebar: ítems planos + grupo Integraciones en el hueco tras Runtime. */
+export const DATA_NAV_GROUP: AdminNavGroup = {
+  id: 'data',
+  label: 'Datos',
+  hint: 'Memoria y configuración avanzada',
+  items: [
+    { href: '/duckdb', label: 'DuckDB', section: 'core', audience: 'admin' },
+    { href: '/runtime', label: 'Runtime overrides', section: 'core', audience: 'admin' },
+  ],
+};
+
+export const INTEGRATIONS_NAV_GROUP: AdminNavGroup = {
+  id: 'integrations',
+  label: 'Integraciones',
+  hint: 'Canales y dispositivos conectados',
+  items: [
+    { href: '/telegram', label: 'Telegram', section: 'integrations', audience: 'admin' },
+    { href: '/integrations/edge-devices', label: 'Edge devices', section: 'integrations', audience: 'admin' },
+  ],
+};
+
+export const SECURITY_NAV_GROUP: AdminNavGroup = {
+  id: 'security',
+  label: 'Seguridad',
+  hint: 'Usuarios, roles y permisos',
+  items: [
+    { href: '/admin/access', label: 'Usuarios y roles', section: 'admin', audience: 'admin', adminOnly: true },
+  ],
+};
+
+export const SYSTEM_NAV_GROUP: AdminNavGroup = {
+  id: 'system',
+  label: 'Sistema avanzado',
+  hint: 'Diagnóstico y operación técnica',
+  items: [
+    { href: '/settings', label: 'Settings', section: 'footer', audience: 'admin' },
+    { href: '/train', label: 'Train', section: 'core', audience: 'admin' },
+    { href: '/vnc', label: 'VNC', section: 'core', audience: 'admin', adminOnly: true },
+  ],
+};
+
+/** Orden del sidebar para usuarios que crean y usan agentes. */
+export const USER_NAV_STRUCTURE: readonly AdminNavEntry[] = [
+  { type: 'group', group: USER_WORKSPACE_NAV_GROUP },
+];
+
+/** Orden del sidebar admin: grupos semánticos para reducir carga cognitiva. */
 export const ADMIN_NAV_STRUCTURE: readonly AdminNavEntry[] = [
-  { type: 'item', item: CORE_AND_ADMIN_NAV[0] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[1] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[2] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[3] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[4] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[5] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[6] },
-  { type: 'group', group: GEN_NAV_GROUP },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[7] },
+  { type: 'group', group: OPERATION_NAV_GROUP },
+  { type: 'group', group: BUILD_NAV_GROUP },
+  { type: 'group', group: DATA_NAV_GROUP },
   { type: 'group', group: INTEGRATIONS_NAV_GROUP },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[8] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[9] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[10] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[11] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[12] },
-  { type: 'item', item: CORE_AND_ADMIN_NAV[13] },
+  { type: 'group', group: SECURITY_NAV_GROUP },
+  { type: 'group', group: SYSTEM_NAV_GROUP },
 ];
 
 /** Lista plana (compat tests / búsquedas). */
 export const ADMIN_NAV: readonly AdminNavItem[] = [
-  ...CORE_AND_ADMIN_NAV.slice(0, 7),
-  ...GEN_NAV_GROUP.items,
-  ...CORE_AND_ADMIN_NAV.slice(7, 8),
+  ...USER_WORKSPACE_NAV_GROUP.items,
+  ...OPERATION_NAV_GROUP.items,
+  ...BUILD_NAV_GROUP.items,
+  ...DATA_NAV_GROUP.items,
   ...INTEGRATIONS_NAV_GROUP.items,
-  ...CORE_AND_ADMIN_NAV.slice(9),
+  ...SECURITY_NAV_GROUP.items,
+  ...SYSTEM_NAV_GROUP.items,
 ];
 
-function itemVisible(item: AdminNavItem, isAdmin: boolean): boolean {
-  return !item.adminOnly || isAdmin;
+function itemVisible(item: AdminNavItem, role: AdminRole | undefined): boolean {
+  const isAdmin = isAdminRole(role);
+  if (item.adminOnly && !isAdmin) return false;
+  if (item.audience === 'admin') return isAdmin;
+  if (item.audience === 'user') return !isAdmin;
+  return true;
 }
 
-export function navEntriesForRole(isAdmin: boolean): AdminNavEntry[] {
-  return ADMIN_NAV_STRUCTURE.flatMap((entry) => {
+export function navEntriesForRole(role: AdminRole | undefined): AdminNavEntry[] {
+  const structure = isAdminRole(role) ? ADMIN_NAV_STRUCTURE : USER_NAV_STRUCTURE;
+  return structure.flatMap((entry) => {
     if (entry.type === 'item') {
-      return itemVisible(entry.item, isAdmin) ? [entry] : [];
+      return itemVisible(entry.item, role) ? [entry] : [];
     }
-    const items = entry.group.items.filter((i) => itemVisible(i, isAdmin));
+    const items = entry.group.items.filter((i) => itemVisible(i, role));
     return items.length > 0 ? [{ type: 'group' as const, group: { ...entry.group, items } }] : [];
   });
 }
 
 /** Títulos del Topbar; incluye prefijos de rutas anidadas. */
 export const ADMIN_PAGE_TITLES: Record<string, string> = {
-  ...Object.fromEntries(ADMIN_NAV.map((item) => [item.href, item.label])),
+  ...Object.fromEntries(ADMIN_NAV_STRUCTURE.flatMap((entry) =>
+    entry.type === 'item'
+      ? [[entry.item.href, entry.item.label]]
+      : entry.group.items.map((item) => [item.href, item.label])
+  )),
   '/ops': 'Overview',
   '/commands': 'Overview',
   '/projects': 'Proyectos',
-  '/projects/new': 'Nuevo proyecto',
+  '/projects/new': 'Crear agente',
   '/integrations': 'Integraciones',
   '/gen': 'Gen',
   '/gen/image': 'Image',
@@ -116,6 +174,6 @@ export function titleForAdminPath(pathname: string): string {
   return 'DuckClaw Admin';
 }
 
-export function navItemsForRole(isAdmin: boolean): AdminNavItem[] {
-  return ADMIN_NAV.filter((item) => itemVisible(item, isAdmin));
+export function navItemsForRole(role: AdminRole | undefined): AdminNavItem[] {
+  return ADMIN_NAV.filter((item) => itemVisible(item, role));
 }

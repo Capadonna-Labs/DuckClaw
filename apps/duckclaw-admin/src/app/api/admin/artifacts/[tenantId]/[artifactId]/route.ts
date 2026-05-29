@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readTenantArtifact } from '@/lib/artifactPreviewServer';
+import { normalizeAdminRole } from '@/lib/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,9 +9,12 @@ export async function GET(
   req: NextRequest,
   ctx: { params: { tenantId: string; artifactId: string } }
 ) {
-  const role = req.headers.get('x-duckclaw-role') || '';
-  if (role && role !== 'admin') {
-    return NextResponse.json({ detail: 'Solo admin' }, { status: 403 });
+  const rawRole = req.headers.get('x-duckclaw-role');
+  if (rawRole) {
+    const role = normalizeAdminRole(rawRole);
+    if (role !== 'admin' && role !== 'user') {
+      return NextResponse.json({ detail: 'Rol inválido' }, { status: 403 });
+    }
   }
 
   const { tenantId, artifactId } = ctx.params;

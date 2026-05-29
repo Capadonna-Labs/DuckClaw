@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminApiKey, gatewayBase, gatewayLongFetch, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+import { normalizeAdminRole } from '@/lib/roles';
 
 /** ComfyUI (~3–4 min) + cold start worker; margen para MCP omitido en visual_generation */
 export const maxDuration = 600;
@@ -9,9 +10,9 @@ const GATEWAY_CHAT_TIMEOUT_MS = 590_000;
 
 /** Proxy al chat admin del gateway (JSON o SSE si stream=true). */
 export async function POST(req: NextRequest) {
-  const role = req.headers.get('x-duckclaw-role') || 'admin';
-  if (role !== 'admin') {
-    return NextResponse.json({ detail: 'Solo admin' }, { status: 403 });
+  const role = normalizeAdminRole(req.headers.get('x-duckclaw-role') || 'admin');
+  if (role !== 'admin' && role !== 'user') {
+    return NextResponse.json({ detail: 'Rol inválido' }, { status: 403 });
   }
 
   const base = gatewayBase();

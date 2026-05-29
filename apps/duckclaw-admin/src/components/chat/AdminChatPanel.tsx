@@ -94,7 +94,7 @@ export function AdminChatPanel({
 
   return (
     <section
-      className={`flex flex-col min-w-0 bg-white dark:bg-dark-surface border dark:border-dark-border overflow-hidden ${
+      className={`flex flex-col min-w-0 min-h-0 bg-white dark:bg-dark-surface border dark:border-dark-border overflow-hidden ${
         isCompact ? 'rounded-2xl shadow-xl h-full' : 'flex-1 rounded-3xl shadow-sm'
       } ${className}`}
     >

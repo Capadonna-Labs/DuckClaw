@@ -1,5 +1,6 @@
 name: FinanzWorker
 id: finanz
+description: Gestiona finanzas personales, cuentas, deudas, presupuestos y análisis cuantitativo con evidencia de DuckDB, IBKR y herramientas autorizadas.
 schema_name: finance_worker
 topology: general
 read_only: false

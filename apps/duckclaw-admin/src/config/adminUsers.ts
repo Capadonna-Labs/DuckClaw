@@ -16,6 +16,13 @@ export const ADMIN_USERS: AdminUserConfig[] = [
     nombre: 'Administrador DuckClaw',
     rol: 'admin',
     initials: 'DC',
+  },
+  {
+    email: 'user@duckclaw.local',
+    password: '1234',
+    nombre: 'Usuario DuckClaw',
+    rol: 'user',
+    initials: 'UD',
   }
 ];
 

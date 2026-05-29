@@ -2,6 +2,7 @@
 # Spec: specs/features/agents-axis/PQRSD_ASSISTANT_MEDELLIN.md
 name: Asistente de PQRSD
 id: pqrsd_assistant
+description: Orienta trámites PQRSD de Medellín, registra perfil/radicado interno y consulta fuentes oficiales con navegación acotada.
 schema_name: pqrsd_assistant
 topology: general
 read_only: false

@@ -1,0 +1,11 @@
+name: Manager
+id: manager
+description: Orquestador principal que planifica tareas, decide cuándo delegar a workers especializados y controla rutas de ejecución segura.
+schema_name: manager_worker
+topology: orchestrator
+read_only: false
+llm:
+  required: true
+  temperature: 0.2
+skills:
+  - deploy_mercenary

@@ -25,6 +25,20 @@ export const KANBAN_COLUMNS: { id: KanbanStatus; title: string; hint: string }[]
 
 export const KANBAN_WORKER_FILTER_KEY = 'duckclaw-kanban-worker-filter';
 
+export function coerceKanbanWorkerId(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  for (const key of ['id', 'worker_id', 'label']) {
+    const candidate = record[key];
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return null;
+}
+
 export function kanbanInstanceKey(workerId: string, slot: number): string {
   return `${workerId}:${slot}`;
 }

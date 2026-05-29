@@ -7,6 +7,7 @@ import type { KanbanCard, KanbanStatus } from '@/lib/kanbanTypes';
 import {
   KANBAN_COLUMNS,
   KANBAN_WORKER_FILTER_KEY,
+  coerceKanbanWorkerId,
   isSwarmAutoSyncCard,
 } from '@/lib/kanbanTypes';
 import { useAuthStore } from '@/store/authStore';
@@ -19,15 +20,15 @@ function readWorkerFilter(): string {
 }
 
 function sortSwarmCards(a: KanbanCard, b: KanbanCard): number {
-  const wa = a.worker_id ?? '';
-  const wb = b.worker_id ?? '';
+  const wa = coerceKanbanWorkerId(a.worker_id) ?? '';
+  const wb = coerceKanbanWorkerId(b.worker_id) ?? '';
   if (wa !== wb) return wa.localeCompare(wb);
   return (a.swarm_slot ?? 99) - (b.swarm_slot ?? 99);
 }
 
 function cardMatchesWorkerFilter(card: KanbanCard, filter: string): boolean {
   if (!filter) return true;
-  if (isSwarmAutoSyncCard(card)) return card.worker_id === filter;
+  if (isSwarmAutoSyncCard(card)) return coerceKanbanWorkerId(card.worker_id) === filter;
   return false;
 }
 
@@ -85,7 +86,8 @@ export default function KanbanPage() {
     const fromTeam = teamWorkers.length > 0 ? teamWorkers : [];
     const fromCards = cards
       .map((c) => c.worker_id)
-      .filter((w): w is string => Boolean(w));
+      .map(coerceKanbanWorkerId)
+      .filter((workerId): workerId is string => Boolean(workerId));
     return Array.from(new Set([...fromTeam, ...fromCards])).sort();
   }, [teamWorkers, cards]);
 

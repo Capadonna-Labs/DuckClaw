@@ -9,7 +9,8 @@ import { clampInput, LIMITS, validateWorkerId } from '@/lib/validation';
 import { useAuthStore } from '@/store/authStore';
 import { slugFromAgentName, presetForTemplateId } from '@/lib/templatePresets';
 import { useTemplatePresets } from '@/lib/useTemplatePresets';
-import { FolderPlus, Check, Sparkles, Layers } from 'lucide-react';
+import { canCreateAgents, isAdminRole } from '@/lib/roles';
+import { FolderPlus, Sparkles, Layers } from 'lucide-react';
 import type { TemplateSummary } from '@/types/admin';
 
 const STEPS_AGENT = [
@@ -32,7 +33,8 @@ const DEFAULT_PROMPT_HINT = `Eres un asistente de IA útil y claro.
 export default function NewProjectPage() {
   const router = useRouter();
   const { usuario } = useAuthStore();
-  const canWrite = usuario?.rol === 'admin';
+  const isAdmin = isAdminRole(usuario?.rol);
+  const canWrite = canCreateAgents(usuario?.rol);
 
   const [step, setStep] = useState(0);
   const [name, setName] = useState('');
@@ -90,6 +92,13 @@ export default function NewProjectPage() {
       if (slug) setId(slug);
     }
   }, [name, advancedMode]);
+
+  useEffect(() => {
+    if (!isAdmin && createMode === 'project') {
+      setCreateMode('agent');
+      setStep(0);
+    }
+  }, [createMode, isAdmin]);
 
   const validateStep = (): boolean => {
     if (step === 0) {
@@ -156,6 +165,10 @@ export default function NewProjectPage() {
     const workerId = id.trim() || slugFromAgentName(name);
     try {
       if (createMode === 'project') {
+        if (!isAdmin) {
+          setError('Solo admin puede crear proyectos multi-worker.');
+          return;
+        }
         await adminService.createForgeProject({
           id: workerId,
           display_name: name.trim(),
@@ -202,7 +215,7 @@ export default function NewProjectPage() {
     <div className="space-y-6 max-w-3xl">
       <header>
         <h1 className="text-3xl font-black dark:text-dark-text">
-          {createMode === 'project' ? 'Crear proyecto' : 'Crear un agente de IA'}
+          {createMode === 'project' ? 'Crear proyecto' : 'Crear agente'}
         </h1>
         <p className="text-sm text-gov-gray-500 mt-1">
           {createMode === 'project'
@@ -222,22 +235,26 @@ export default function NewProjectPage() {
           >
             Un agente
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCreateMode('project');
-              setStep(0);
-            }}
-            className={`text-xs px-3 py-1.5 rounded-full font-bold inline-flex items-center gap-1 ${
-              createMode === 'project' ? 'bg-gov-blue-700 text-white' : 'border dark:border-dark-border'
-            }`}
-          >
-            <Layers size={12} /> Proyecto (varios workers)
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setCreateMode('project');
+                setStep(0);
+              }}
+              className={`text-xs px-3 py-1.5 rounded-full font-bold inline-flex items-center gap-1 ${
+                createMode === 'project' ? 'bg-gov-blue-700 text-white' : 'border dark:border-dark-border'
+              }`}
+            >
+              <Layers size={12} /> Proyecto (varios workers)
+            </button>
+          )}
         </div>
-        <Link href="/projects" className="text-sm text-gov-blue-700 font-semibold mt-2 inline-block">
-          Ver proyectos →
-        </Link>
+        {isAdmin && (
+          <Link href="/projects" className="text-sm text-gov-blue-700 font-semibold mt-2 inline-block">
+            Ver proyectos →
+          </Link>
+        )}
       </header>
 
       <WizardStepper current={step} labels={STEPS} />
@@ -479,9 +496,7 @@ export default function NewProjectPage() {
               <Row k="Capacidades" v={useDefaultSkills ? 'Recomendadas' : 'Personalizadas'} />
             </dl>
             {error && <p className="text-red-600 text-sm">{error}</p>}
-            {!canWrite && (
-              <p className="text-amber-700 text-sm">Tu rol no permite crear agentes. Pide acceso admin.</p>
-            )}
+            {!canWrite && <p className="text-amber-700 text-sm">Tu rol no permite crear agentes.</p>}
           </div>
         )}
 

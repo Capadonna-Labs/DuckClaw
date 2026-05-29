@@ -1,21 +1,23 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { AdminHealth, OverviewMetrics } from '@/types/admin';
-import { Bot, Database } from 'lucide-react';
+import { Bot, Database, MessageCircle, PlusCircle, Users } from 'lucide-react';
 import { OverviewOpsPanel } from '@/components/admin/OverviewOpsPanel';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import { formatGatewayStatus, isGatewayHealthy } from '@/lib/healthLabels';
 import { useAuthStore } from '@/store/authStore';
+import { isAdminRole } from '@/lib/roles';
 
 const ActivityChart = dynamic(() => import('@/components/dashboard/ActivityChart'), { ssr: false });
 const LatencyChart = dynamic(() => import('@/components/dashboard/LatencyChart'), { ssr: false });
 
 export default function OverviewPage() {
   const { usuario } = useAuthStore();
-  const isAdmin = usuario?.rol === 'admin';
+  const isAdmin = isAdminRole(usuario?.rol);
   const [health, setHealth] = useState<AdminHealth | null>(null);
   const [metrics, setMetrics] = useState<OverviewMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,14 +63,18 @@ export default function OverviewPage() {
     <div className="space-y-8 animate-in fade-in duration-500">
       <header>
         <h1 className="text-3xl font-black text-gov-gray-900 dark:text-dark-text tracking-tight">
-          Overview
+          {isAdmin ? 'Overview' : 'Inicio'}
         </h1>
         <p className="text-sm text-gov-gray-500 dark:text-dark-muted mt-1">
-          Estado del gateway, arranque de plataforma y comandos fly
+          {isAdmin
+            ? 'Estado del gateway, arranque de plataforma y comandos fly'
+            : 'Crea agentes, conversa con default y retoma tus tareas recientes.'}
         </p>
       </header>
 
       {error && <GatewayErrorBanner message={error} />}
+
+      {!isAdmin && <UserHomeActions />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <MetricCard icon={Bot} label="Workers" value={health?.workers_count ?? '—'} />
@@ -105,6 +111,63 @@ export default function OverviewPage() {
         />
       )}
     </div>
+  );
+}
+
+function UserHomeActions() {
+  return (
+    <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <HomeAction
+        href="/playground"
+        icon={MessageCircle}
+        title="Hablar con default"
+        description="Abre el chat y empieza con el agente base."
+        primary
+      />
+      <HomeAction
+        href="/projects/new"
+        icon={PlusCircle}
+        title="Crear agente"
+        description="Wizard guiado sin tocar infraestructura."
+      />
+      <HomeAction
+        href="/templates"
+        icon={Users}
+        title="Mis agentes"
+        description="Revisa agentes propios y compartidos."
+      />
+    </section>
+  );
+}
+
+function HomeAction({
+  href,
+  icon: Icon,
+  title,
+  description,
+  primary,
+}: {
+  href: string;
+  icon: React.ElementType;
+  title: string;
+  description: string;
+  primary?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`rounded-2xl border p-5 transition-colors ${
+        primary
+          ? 'bg-gov-blue-700 text-white border-gov-blue-700 hover:bg-gov-blue-800'
+          : 'bg-white dark:bg-dark-surface border-gov-gray-100 dark:border-dark-border hover:border-gov-blue-300'
+      }`}
+    >
+      <Icon size={22} className={primary ? 'text-white' : 'text-gov-blue-700 dark:text-dark-cyan'} />
+      <p className="font-black mt-3">{title}</p>
+      <p className={`text-sm mt-1 ${primary ? 'text-white/80' : 'text-gov-gray-500 dark:text-dark-muted'}`}>
+        {description}
+      </p>
+    </Link>
   );
 }
 

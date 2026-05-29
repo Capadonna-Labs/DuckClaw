@@ -8,6 +8,7 @@
 #   observability.trace_namespace: "{tenant}:bi_analyst"
 name: BI Analyst
 id: bi_analyst
+description: Analiza datos operativos y métricas de negocio con consultas SQL explicables, validación de esquema y contexto controlado.
 schema_name: analytics_core
 topology: general
 read_only: true

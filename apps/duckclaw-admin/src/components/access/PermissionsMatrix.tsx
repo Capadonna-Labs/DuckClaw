@@ -1,11 +1,12 @@
 'use client';
 
 const ROWS = [
-  { capability: 'Login consola', admin: true, viewer: true },
-  { capability: 'Lectura (templates, DuckDB, historial)', admin: true, viewer: true },
-  { capability: 'Escritura (env, workers, runtime)', admin: true, viewer: false },
-  { capability: 'Gestión usuarios / grants', admin: true, viewer: false },
-  { capability: 'Ops / auditoría', admin: true, viewer: false },
+  { capability: 'Login consola', admin: true, user: true },
+  { capability: 'Usar chat y agente default', admin: true, user: true },
+  { capability: 'Crear agentes desde plantillas', admin: true, user: true },
+  { capability: 'Runtime, DuckDB y ajustes avanzados', admin: true, user: false },
+  { capability: 'Gestión usuarios / grants', admin: true, user: false },
+  { capability: 'Ops / auditoría', admin: true, user: false },
 ];
 
 export function PermissionsMatrix() {
@@ -17,7 +18,7 @@ export function PermissionsMatrix() {
           <tr className="text-left text-gov-gray-500">
             <th className="pb-2">Capacidad</th>
             <th className="pb-2 w-12">admin</th>
-            <th className="pb-2 w-12">viewer</th>
+            <th className="pb-2 w-12">user</th>
           </tr>
         </thead>
         <tbody>
@@ -25,7 +26,7 @@ export function PermissionsMatrix() {
             <tr key={r.capability} className="border-t dark:border-dark-border">
               <td className="py-2 pr-2">{r.capability}</td>
               <td className="py-2">{r.admin ? '✓' : '—'}</td>
-              <td className="py-2">{r.viewer ? '✓' : '—'}</td>
+              <td className="py-2">{r.user ? '✓' : '—'}</td>
             </tr>
           ))}
         </tbody>

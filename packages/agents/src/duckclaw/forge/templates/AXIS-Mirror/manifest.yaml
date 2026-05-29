@@ -5,7 +5,7 @@ tool_read_pool: false
 version: "1.0.0"
 phase: 3
 status: DEFINED
-description: "Modelo vivo del perfil técnico del propietario, inferido desde Bronze"
+description: "Agente AXIS interno que construye un perfil técnico vivo desde memoria Bronze/Silver para personalizar respuestas."
 long_description: |
   MIRROR no interactúa directamente con el propietario. Es un proceso
   interno que lee Bronze y Silver, infiere el perfil técnico del propietario

@@ -7,7 +7,7 @@ version: 1.0.0
 phase: 6
 status: DEFINED
 topology: orchestrator
-description: Tutor adaptativo de por vida con visión completa del propietario
+description: Orquestador AXIS que coordina aprendizaje, memoria y subagentes para proponer el siguiente paso útil.
 long_description: 'MAESTRO orquesta aprendizaje usando FORGE, CODER, MIRROR, SENTINEL
   y RADAR.
 

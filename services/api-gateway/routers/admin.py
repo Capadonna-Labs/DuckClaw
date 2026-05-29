@@ -447,6 +447,56 @@ def _list_template_files(worker_dir: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _clean_template_card_text(value: str, *, limit: int = 180) -> str:
+    text = re.sub(r"```.*?```", " ", value, flags=re.DOTALL)
+    text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"[*_`>|-]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _first_useful_markdown_block(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", raw) if b.strip()]
+    for block in blocks:
+        if block.startswith("#"):
+            continue
+        cleaned = _clean_template_card_text(block)
+        if len(cleaned) >= 40:
+            return cleaned
+    return ""
+
+
+def _template_card_description(template_dir: Path) -> tuple[str, str]:
+    manifest = template_dir / "manifest.yaml"
+    if manifest.is_file():
+        try:
+            import yaml
+
+            raw = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+        except Exception:
+            raw = {}
+        if isinstance(raw, dict):
+            for key in ("description", "summary", "purpose", "long_description"):
+                value = raw.get(key)
+                if isinstance(value, str) and value.strip():
+                    return _clean_template_card_text(value), f"manifest.{key}"
+
+    for filename, source in (("soul.md", "soul.md"), ("domain_closure.md", "domain_closure.md")):
+        text = _first_useful_markdown_block(template_dir / filename)
+        if text:
+            return text, source
+
+    return "Sin descripción pública. Añade `description` al manifest o un resumen en `soul.md`.", "missing"
+
+
 class FileWriteBody(BaseModel):
     content: str = ""
 
@@ -605,7 +655,7 @@ class AdminLoginBody(BaseModel):
 class ConsoleUserBody(BaseModel):
     email: str
     nombre: str = ""
-    rol: str = "viewer"
+    rol: str = "user"
     password: str | None = None
     initials: str = ""
     active: bool = True
@@ -1445,7 +1495,13 @@ async def list_templates() -> dict[str, Any]:
 
     items: list[dict[str, Any]] = []
     for wid in list_workers():
-        meta: dict[str, Any] = {"id": wid}
+        template_dir = _templates_dir() / wid
+        description, description_source = _template_card_description(template_dir)
+        meta: dict[str, Any] = {
+            "id": wid,
+            "description": description,
+            "description_source": description_source,
+        }
         try:
             spec = load_manifest(wid)
             meta.update(
@@ -2356,7 +2412,7 @@ async def patch_admin_console_user(
             rw,
             email=em,
             nombre=body.nombre if body.nombre is not None else str(existing.get("nombre") or ""),
-            rol=body.rol if body.rol is not None else str(existing.get("rol") or "viewer"),
+            rol=body.rol if body.rol is not None else str(existing.get("rol") or "user"),
             password=body.password,
             initials=body.initials if body.initials is not None else str(existing.get("initials") or ""),
             active=body.active if body.active is not None else bool(existing.get("active", True)),

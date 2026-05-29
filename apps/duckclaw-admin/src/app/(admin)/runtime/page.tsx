@@ -87,11 +87,23 @@ export default function RuntimePage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl font-black dark:text-dark-text">Runtime (agent_config)</h1>
+        <p className="text-xs font-black uppercase tracking-[0.18em] text-gov-blue-700 dark:text-dark-cyan">
+          Admin avanzado
+        </p>
+        <h1 className="text-3xl font-black dark:text-dark-text mt-1">Runtime overrides</h1>
         <p className="text-sm text-gov-gray-500 dark:text-dark-muted mt-1">
-          Overrides por vault y chat_id. Escrituras vía cola Redis → db-writer.
+          Sobrescribe configuración por bóveda y conversación. Úsalo solo para soporte,
+          debugging o migraciones controladas.
         </p>
       </header>
+
+      <section className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+        <p className="font-bold">Cambios sensibles</p>
+        <p className="mt-1">
+          Las escrituras se encolan vía Redis y las aplica `db-writer`. Verifica `vault`,
+          `chat_id` y key antes de guardar.
+        </p>
+      </section>
 
       <div className="flex flex-wrap gap-3">
         <select

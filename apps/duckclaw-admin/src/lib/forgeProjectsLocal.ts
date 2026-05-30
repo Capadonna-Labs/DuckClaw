@@ -132,7 +132,7 @@ export function listForgeProjectsLocal(): ForgeProjectRow[] {
   const envRow = loadTeamFromEnv();
   if (envRow) bySlug.set(envRow.slug, envRow);
   for (const row of disk) bySlug.set(row.slug, row);
-  return [...bySlug.values()].sort((a, b) => a.slug.localeCompare(b.slug));
+  return Array.from(bySlug.values()).sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
 export function createForgeProjectLocal(body: {

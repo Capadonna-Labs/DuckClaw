@@ -39,7 +39,14 @@ export function writeLastRead(sessionId: string, messageIndex: number): void {
 /** Índice del último mensaje que cuenta como "visto" al abrir el panel. */
 export function markReadMessageIndex(messages: ChatMsg[]): number {
   if (messages.length === 0) return -1;
-  return messages.length - 1;
+  let idx = messages.length - 1;
+  const last = messages[idx];
+  // No marcar la burbuja assistant en streaming: al completar debe contar como no leída
+  // si el usuario cerró el panel mientras el agente respondía.
+  if (last?.role === 'assistant' && last.streaming) {
+    idx -= 1;
+  }
+  return idx;
 }
 
 /** Mensajes assistant completados después del watermark. */

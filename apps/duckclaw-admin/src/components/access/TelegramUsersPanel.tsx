@@ -12,7 +12,6 @@ type Props = {
 
 export function TelegramUsersPanel({ tenantId, onTenantIdChange }: Props) {
   const [users, setUsers] = useState<WhitelistUser[]>([]);
-  const [dbPath, setDbPath] = useState('');
   const [effectiveTenant, setEffectiveTenant] = useState<string | null>(null);
   const [wlHint, setWlHint] = useState<string | null>(null);
   const [wlWarning, setWlWarning] = useState<string | null>(null);
@@ -28,7 +27,6 @@ export function TelegramUsersPanel({ tenantId, onTenantIdChange }: Props) {
       .getTelegramWhitelist(tenantId)
       .then((r) => {
         setUsers(r.users ?? []);
-        setDbPath(r.db_path ?? '');
         setWlWarning(r.warning ?? null);
         setWlHint(r.hint ?? null);
         const eff = r.effective_tenant_id ?? r.tenant_id;
@@ -80,7 +78,6 @@ export function TelegramUsersPanel({ tenantId, onTenantIdChange }: Props) {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-gov-gray-500 font-mono">{dbPath || 'hub gateway'}</p>
       <div className="flex flex-wrap gap-2">
         <input
           value={tenantId}

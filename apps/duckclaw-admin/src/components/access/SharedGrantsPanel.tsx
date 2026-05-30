@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { SharedDbGrant } from '@/types/admin';
-import { Database, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 
 type Props = {
   tenantId: string;
@@ -11,7 +11,6 @@ type Props = {
 
 export function SharedGrantsPanel({ tenantId }: Props) {
   const [grants, setGrants] = useState<SharedDbGrant[]>([]);
-  const [dbPath, setDbPath] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [userId, setUserId] = useState('');
@@ -22,7 +21,6 @@ export function SharedGrantsPanel({ tenantId }: Props) {
       .listSharedGrants(tenantId)
       .then((r) => {
         setGrants(r.grants ?? []);
-        setDbPath(r.db_path ?? '');
         setError(r.warning ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
@@ -63,10 +61,6 @@ export function SharedGrantsPanel({ tenantId }: Props) {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-gov-gray-500">
-        <Database size={14} className="inline mr-1" />
-        <span className="font-mono">{dbPath || 'user_shared_db_access'}</span>
-      </p>
       {error && <p className="text-red-600 text-sm">{error}</p>}
       {msg && <p className="text-green-700 text-sm">{msg}</p>}
 

@@ -2,17 +2,25 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { adminService } from '@/services/adminService';
-import type { ChatMsg } from '@/components/chat/types';
+import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
+import {
+  historyToChatMessages,
+  preserveImagePreviewsFromPrevious,
+  userPreviewsFromPayload,
+} from '@/lib/chatMessageImages';
 import { useChatImageAttachments } from '@/components/chat/useChatImageAttachments';
 import { useChatScrollAnchor } from '@/components/chat/useChatScrollAnchor';
 import { requestNotificationPermission } from '@/lib/chatNotifications';
 import { artifactPreviewApiPath } from '@/lib/artifactPreview';
 import {
   clearEphemeralHeartbeats,
+  clearLegacyEphemeralHeartbeats,
+  filterEphemeralForWorker,
   mergeEphemeralHeartbeats,
   readEphemeralHeartbeats,
   writeEphemeralHeartbeats,
 } from '@/lib/chatEphemeralStorage';
+import { workerMatches } from '@/lib/workerOptions';
 import { readStoredVaultPath, writeStoredVaultPath } from '@/lib/conversationVaultStorage';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
 import {
@@ -31,18 +39,20 @@ export type UseAdminChatOptions = {
   onConversationActivity?: () => void;
 };
 
-function historyToChatMessages(
-  raw: { role: string; content: string }[] | undefined
-): ChatMsg[] {
-  if (!raw?.length) return [];
-  const out: ChatMsg[] = [];
-  for (const m of raw) {
-    const role = m.role === 'user' ? 'user' : m.role === 'assistant' ? 'assistant' : null;
-    const text = (m.content || '').trim();
-    if (!role || !text) continue;
-    out.push({ role, text });
-  }
-  return out;
+function artifactImagePreview(
+  tenantId: string,
+  artifactId: string
+): ChatImagePreview[] {
+  const tid = (tenantId || 'default').trim() || 'default';
+  const aid = artifactId.trim();
+  return [
+    {
+      url: artifactPreviewApiPath(tid, aid),
+      name: `${aid}.png`,
+      artifactId: aid,
+      tenantId: tid,
+    },
+  ];
 }
 
 /** Heartbeats/plan/tool no están en Redis; conservarlos si recargamos historial en vivo. */
@@ -124,6 +134,7 @@ function revokeMessageImagePreviews(messages: ChatMsg[]): void {
   for (const m of messages) {
     if (!m.imagePreviews?.length) continue;
     for (const img of m.imagePreviews) {
+      if (!img.url.startsWith('blob:')) continue;
       try {
         URL.revokeObjectURL(img.url);
       } catch {
@@ -175,6 +186,24 @@ export function useAdminChat({
     },
     [chatId]
   );
+
+  const prevWorkerIdRef = useRef(workerId);
+  useEffect(() => {
+    const prev = prevWorkerIdRef.current;
+    if (prev && workerId && prev !== workerId) {
+      clearEphemeralHeartbeats(chatId, prev);
+      clearLegacyEphemeralHeartbeats(chatId);
+      setMessages((msgs) =>
+        msgs.filter(
+          (m) =>
+            m.role !== 'heartbeat' ||
+            !m.workerId ||
+            workerMatches(m.workerId, workerId)
+        )
+      );
+    }
+    prevWorkerIdRef.current = workerId;
+  }, [chatId, workerId]);
 
   const setVaultPath = useCallback(
     (next: string) => {
@@ -292,12 +321,17 @@ export function useAdminChat({
       .getConversation(chatId, historyTenantId)
       .then((data) => {
         if (cancelled || loadingRef.current) return;
-        const fromServer = historyToChatMessages(data.messages);
-        const storedEphemeral = readEphemeralHeartbeats(chatId);
+        const fromServer = historyToChatMessages(data.messages, historyTenantId);
+        const activeWorker = workerId || initialWorker || '';
+        const storedEphemeral = readEphemeralHeartbeats(chatId, activeWorker);
         setMessages((prev) => {
-          const liveEphemeral = collectEphemeralMessages(prev);
+          const liveEphemeral = filterEphemeralForWorker(
+            collectEphemeralMessages(prev),
+            activeWorker
+          );
           const ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
-          const merged = mergeHistoryWithEphemeral(fromServer, ephemeral);
+          const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
+          const merged = mergeHistoryWithEphemeral(withImages, ephemeral);
           // #region agent log
           agentDebugLog({
             hypothesisId: 'H1',
@@ -330,9 +364,14 @@ export function useAdminChat({
       })
       .catch(() => {
         if (!cancelled && !loadingRef.current) {
-          const stored = readEphemeralHeartbeats(chatId);
+          const activeWorker = workerId || initialWorker || '';
+          const stored = readEphemeralHeartbeats(chatId, activeWorker);
           setMessages((prev) => {
-            const merged = mergeEphemeralHeartbeats(stored, collectEphemeralMessages(prev));
+            const live = filterEphemeralForWorker(
+              collectEphemeralMessages(prev),
+              activeWorker
+            );
+            const merged = mergeEphemeralHeartbeats(stored, live);
             return merged.length ? merged : [];
           });
         }
@@ -344,11 +383,11 @@ export function useAdminChat({
       cancelled = true;
       setHistoryLoading(false);
     };
-  }, [chatId, enabled, historyTenantId, setWorkerId]);
+  }, [chatId, enabled, historyTenantId, workerId, initialWorker, setWorkerId]);
 
   useEffect(() => {
     if (!chatId) return;
-    writeEphemeralHeartbeats(chatId, messages);
+    writeEphemeralHeartbeats(chatId, workerId, messages);
     const hbCount = collectEphemeralMessages(messages).length;
     if (hbCount > 0) {
       // #region agent log
@@ -360,7 +399,7 @@ export function useAdminChat({
       });
       // #endregion
     }
-  }, [chatId, messages]);
+  }, [chatId, workerId, messages]);
 
   const scrollContentKey = useMemo(() => {
     const tail = messages
@@ -376,7 +415,11 @@ export function useAdminChat({
   );
 
   const runChatTurn = useCallback(
-    async (text: string, payloadImages: { mime_type: string; data_base64: string }[] = []) => {
+    async (
+      text: string,
+      payloadImages: { mime_type: string; data_base64: string }[] = [],
+      userPreviewImages: ChatImagePreview[] = []
+    ) => {
     if (!text && payloadImages.length === 0) return;
     void requestNotificationPermission();
     abortControllerRef.current?.abort();
@@ -384,7 +427,11 @@ export function useAdminChat({
     abortControllerRef.current = abortController;
 
     const userPreviews =
-      payloadImages.length > 0 ? imageAttachments.buildUserPreviews() : undefined;
+      userPreviewImages.length > 0
+        ? userPreviewImages
+        : payloadImages.length > 0
+          ? userPreviewsFromPayload(payloadImages)
+          : undefined;
     const userLabel = text;
 
     setLoading(true);
@@ -414,24 +461,11 @@ export function useAdminChat({
       });
     };
 
-    const attachArtifactToStreamingAssistant = async (
+    const attachArtifactToStreamingAssistant = (
       artifactId: string,
       tenantId: string
     ) => {
-      let previews: ChatMsg['imagePreviews'];
-      const previewMeta = {
-        name: `${artifactId}.png`,
-        artifactId,
-        tenantId,
-      };
-      try {
-        const blobUrl = await adminService.fetchArtifactPreviewBlob(tenantId, artifactId);
-        previews = [{ url: blobUrl, ...previewMeta }];
-      } catch {
-        previews = [
-          { url: artifactPreviewApiPath(tenantId, artifactId), ...previewMeta },
-        ];
-      }
+      const previews = artifactImagePreview(tenantId, artifactId);
       setThinking(false);
       setMessages((m) => {
         const idx = m.findIndex(
@@ -474,7 +508,7 @@ export function useAdminChat({
           'default';
         void attachArtifactToStreamingAssistant(aid, tid);
       }
-      let toolName =
+      const toolName =
         (payload.tool_name || '').trim() ||
         parseToolNameFromHeartbeatText(payload.text) ||
         undefined;
@@ -550,11 +584,11 @@ export function useAdminChat({
     try {
       let assignedSuffix = '';
       let elapsedFooter = '';
-      let doneVisual: {
+      const streamVisual: {
         figure_base64?: string;
         artifact_id?: string;
         artifact_tenant_id?: string;
-      } | null = null;
+      } = {};
       await adminService.playgroundChatStream(
         {
           worker_id: workerId,
@@ -576,11 +610,9 @@ export function useAdminChat({
               elapsedFooter = `\n\n⏱️ ${(meta.elapsed_ms / 1000).toFixed(2)}s`;
             }
             if (meta.figure_base64 || meta.artifact_id) {
-              doneVisual = {
-                figure_base64: meta.figure_base64,
-                artifact_id: meta.artifact_id,
-                artifact_tenant_id: meta.artifact_tenant_id,
-              };
+              streamVisual.figure_base64 = meta.figure_base64;
+              streamVisual.artifact_id = meta.artifact_id;
+              streamVisual.artifact_tenant_id = meta.artifact_tenant_id;
             }
           },
         },
@@ -591,30 +623,15 @@ export function useAdminChat({
         return;
       }
       const tenantForArtifact =
-        (doneVisual?.artifact_tenant_id || config?.effective_tenant_id || 'default').trim() ||
+        (streamVisual.artifact_tenant_id || config?.effective_tenant_id || 'default').trim() ||
         'default';
       let assistantPreviews: ChatMsg['imagePreviews'] | undefined;
-      if (doneVisual?.figure_base64?.trim()) {
-        const raw = doneVisual.figure_base64.trim();
+      if (streamVisual.figure_base64?.trim()) {
+        const raw = streamVisual.figure_base64.trim();
         const src = raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`;
         assistantPreviews = [{ url: src, name: 'imagen-generada.png' }];
-      } else if (doneVisual?.artifact_id) {
-        const aid = doneVisual.artifact_id;
-        const previewMeta = {
-          name: `${aid}.png`,
-          artifactId: aid,
-          tenantId: tenantForArtifact,
-        };
-        try {
-          const blobUrl = await adminService.fetchArtifactPreviewBlob(
-            tenantForArtifact,
-            aid
-          );
-          assistantPreviews = [{ url: blobUrl, ...previewMeta }];
-        } catch {
-          const apiPath = artifactPreviewApiPath(tenantForArtifact, aid);
-          assistantPreviews = [{ url: apiPath, ...previewMeta }];
-        }
+      } else if (streamVisual.artifact_id) {
+        assistantPreviews = artifactImagePreview(tenantForArtifact, streamVisual.artifact_id);
       }
       setMessages((m) => {
         if (m.length === 0) return m;
@@ -668,11 +685,13 @@ export function useAdminChat({
 
   const send = useCallback(async () => {
     const text = input.trim();
+    const names = imageAttachments.pendingImages.map((p) => p.name);
     const payloadImages = imageAttachments.buildPayloadImages();
     if ((!text && payloadImages.length === 0) || loading || !workerId) return;
+    const userPreviewImages = userPreviewsFromPayload(payloadImages, names);
     setInput('');
-    imageAttachments.clearImages({ revoke: false });
-    await runChatTurn(text, payloadImages);
+    imageAttachments.clearImages({ revoke: true });
+    await runChatTurn(text, payloadImages, userPreviewImages);
   }, [input, loading, workerId, imageAttachments, runChatTurn]);
 
   const retryFromMessage = useCallback(
@@ -725,12 +744,13 @@ export function useAdminChat({
   );
 
   const clearMessages = useCallback(() => {
-    clearEphemeralHeartbeats(chatId);
+    clearEphemeralHeartbeats(chatId, workerId);
+    clearLegacyEphemeralHeartbeats(chatId);
     setMessages((prev) => {
       revokeMessageImagePreviews(prev);
       return [];
     });
-  }, [chatId]);
+  }, [chatId, workerId]);
 
   return {
     config,

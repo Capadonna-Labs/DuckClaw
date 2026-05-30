@@ -13,7 +13,18 @@ const messages: ChatMsg[] = [
   { role: 'assistant', text: 'en curso', streaming: true },
 ];
 
-assert.equal(markReadMessageIndex(messages), 3);
+assert.equal(markReadMessageIndex(messages), 2);
+assert.equal(countUnreadAssistantMessages(messages, 2), 0);
+assert.equal(
+  countUnreadAssistantMessages(
+    [
+      ...messages.slice(0, 3),
+      { role: 'assistant', text: 'terminada' },
+    ],
+    2
+  ),
+  1
+);
 assert.equal(countUnreadAssistantMessages(messages, 0), 2);
 assert.equal(countUnreadAssistantMessages(messages, 2), 0);
 assert.equal(countUnreadAssistantMessages(messages, 3), 0);

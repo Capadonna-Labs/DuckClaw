@@ -53,13 +53,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="fixed inset-0 z-50 flex lg:hidden">
           <SidebarOverlay onClose={() => setIsSidebarOpen(false)} />
           <div className="relative flex w-64 flex-col">
-            <Sidebar />
+            <Sidebar onMobileClose={() => setIsSidebarOpen(false)} />
           </div>
         </div>
       )}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Topbar onMenuClick={() => setIsSidebarOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-10">
+        <main id="admin-main-scroll" className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-10">
           <div className="max-w-[1600px] mx-auto">{children}</div>
         </main>
         <FloatingAdminChat />

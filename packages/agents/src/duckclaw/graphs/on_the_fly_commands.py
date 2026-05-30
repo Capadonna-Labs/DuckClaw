@@ -2025,22 +2025,46 @@ def _parse_ibkr_toggle_args(args: str) -> tuple[Optional[bool], Optional[str], O
     return on_off, mode, None
 
 
-def execute_ibkr_toggle(db: Any, chat_id: Any, args: str) -> str:
-    """/ibkr on --mode paper|live | /ibkr off: portfolio IBKR por sesión (Finanz)."""
+def _ibkr_worker_slug(entry_worker_id: str | None) -> str:
+    return re.sub(r"[^a-z0-9]", "", (entry_worker_id or "").strip().lower())
+
+
+def _ibkr_worker_label(entry_worker_id: str | None = None) -> str:
+    """Etiqueta humana del worker activo para mensajes /ibkr."""
+    slug = _ibkr_worker_slug(entry_worker_id)
+    if slug in ("finanz", "finanzworker"):
+        return "Finanz"
+    if slug in ("quanttrader", "quanttraderworker"):
+        return "Quant-Trader"
+    return "este agente"
+
+
+def execute_ibkr_toggle(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    entry_worker_id: str | None = None,
+) -> str:
+    """/ibkr on --mode paper|live | /ibkr off: portfolio IBKR por sesión."""
     on_off, mode, err = _parse_ibkr_toggle_args(args)
     if err:
         return err
+    agent = _ibkr_worker_label(entry_worker_id)
     if on_off is True:
         set_chat_state(db, chat_id, "ibkr_enabled", "true")
         set_chat_state(db, chat_id, "ibkr_portfolio_mode", str(mode or "paper"))
         label = "paper" if mode == "paper" else "live"
         return (
             f"IBKR portfolio activado para esta sesión (modo {label}). "
-            "Finanz puede usar get_ibkr_portfolio en este chat."
+            f"{agent} puede usar get_ibkr_portfolio en este chat."
         )
     if on_off is False:
         set_chat_state(db, chat_id, "ibkr_enabled", "false")
-        return "IBKR portfolio desactivado para esta sesión. Finanz no llamará get_ibkr_portfolio hasta /ibkr on."
+        return (
+            f"IBKR portfolio desactivado para esta sesión. "
+            f"{agent} no llamará get_ibkr_portfolio hasta /ibkr on."
+        )
     enabled = (get_chat_state(db, chat_id, "ibkr_enabled") or "").strip().lower() in (
         "true",
         "1",
@@ -5910,7 +5934,7 @@ def _dispatch_fly_command(
     if name in ("sandbox", "sandox"):
         return execute_sandbox_toggle(db, chat_id, args)
     if name == "ibkr":
-        return execute_ibkr_toggle(db, chat_id, args)
+        return execute_ibkr_toggle(db, chat_id, args, entry_worker_id=entry_worker_id)
     if name in ("internet", "red", "network"):
         return execute_internet_toggle(db, chat_id, args, tenant_id=tenant_id)
     if name == "heartbeat":

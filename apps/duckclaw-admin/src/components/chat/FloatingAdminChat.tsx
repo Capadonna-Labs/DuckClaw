@@ -458,9 +458,9 @@ export function FloatingAdminChat() {
         ) : (
           <Bot size={22} aria-hidden />
         )}
-        {!open && !loading && unreadCount > 0 && (
+        {!open && unreadCount > 0 && (
           <span
-            className="absolute -top-0.5 -right-0.5 flex min-w-[1.125rem] h-[1.125rem] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none text-white shadow ring-2 ring-white dark:ring-dark-bg"
+            className="absolute -top-0.5 -right-0.5 z-10 flex min-w-[1.125rem] h-[1.125rem] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none text-white shadow ring-2 ring-white dark:ring-dark-bg"
             aria-label={badgeLabel}
           >
             {badgeText}

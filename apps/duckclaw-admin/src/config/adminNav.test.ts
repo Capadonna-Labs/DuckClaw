@@ -28,4 +28,13 @@ assert.equal(adminLabels.includes('Runtime overrides'), true);
 assert.equal(adminLabels.includes('Usuarios y roles'), true);
 assert.equal(adminLabels.includes('Inicio'), false);
 
+const buildGroup = navEntriesForRole('admin').find(
+  (e) => e.type === 'group' && e.group.id === 'build'
+);
+assert.ok(buildGroup?.type === 'group');
+const buildLabels = buildGroup.group.items.map((i) => i.label);
+const mcpIdx = buildLabels.indexOf('MCP');
+const skillsIdx = buildLabels.indexOf('Skills');
+assert.ok(mcpIdx >= 0 && skillsIdx >= 0 && mcpIdx < skillsIdx, 'MCP debe ir antes que Skills');
+
 console.log('adminNav.test.ts: ok');

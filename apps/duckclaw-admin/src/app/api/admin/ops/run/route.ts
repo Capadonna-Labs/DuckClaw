@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HOST_ONLY_OPS, isLocalOpId, listOpsCommands, runOpsLocal } from '@/lib/localOps';
 
-const WRITE_METHODS = new Set(['POST']);
-
 function gatewayBase(): string | null {
   const raw =
     process.env.DUCKCLAW_GATEWAY_URL?.trim() ||

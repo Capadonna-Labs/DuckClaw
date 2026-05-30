@@ -7,7 +7,6 @@ import { KeyRound, UserPlus, Trash2 } from 'lucide-react';
 
 export function ConsoleUsersPanel() {
   const [users, setUsers] = useState<ConsoleUser[]>([]);
-  const [dbPath, setDbPath] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -22,7 +21,6 @@ export function ConsoleUsersPanel() {
       .listConsoleUsers()
       .then((r) => {
         setUsers(r.users ?? []);
-        setDbPath(r.db_path ?? '');
         setError(r.warning ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
@@ -79,7 +77,6 @@ export function ConsoleUsersPanel() {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-gov-gray-500 font-mono">{dbPath || 'hub gateway'}</p>
       {error && <p className="text-red-600 text-sm">{error}</p>}
       {msg && <p className="text-green-700 text-sm">{msg}</p>}
 

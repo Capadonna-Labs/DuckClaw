@@ -207,3 +207,8 @@ def test_access_overview(gateway_admin_client: TestClient, gateway_db: Path) -> 
     assert r.status_code == 200
     data = r.json()
     assert data["console_users"] >= 1
+    assert "db_path" in data
+    assert "db_exists" in data
+    assert data["persistence_tables"]["console"] == "main.admin_console_users"
+    assert data["persistence_tables"]["telegram"] == "main.authorized_users"
+    assert data["persistence_tables"]["shared"] == "main.user_shared_db_access"

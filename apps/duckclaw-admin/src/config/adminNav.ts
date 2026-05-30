@@ -58,8 +58,8 @@ export const BUILD_NAV_GROUP: AdminNavGroup = {
   items: [
     { href: '/templates', label: 'Workers', section: 'core', audience: 'admin' },
     { href: '/projects', label: 'Proyectos', section: 'core', audience: 'admin' },
-    { href: '/skills', label: 'Skills', section: 'core', audience: 'admin' },
     { href: '/mcp', label: 'MCP', section: 'core', audience: 'admin' },
+    { href: '/skills', label: 'Skills', section: 'core', audience: 'admin' },
     { href: '/gen/image', label: 'Gen Image', section: 'core', audience: 'admin' },
   ],
 };
@@ -140,13 +140,18 @@ function itemVisible(item: AdminNavItem, role: AdminRole | undefined): boolean {
 
 export function navEntriesForRole(role: AdminRole | undefined): AdminNavEntry[] {
   const structure = isAdminRole(role) ? ADMIN_NAV_STRUCTURE : USER_NAV_STRUCTURE;
-  return structure.flatMap((entry) => {
+  const out: AdminNavEntry[] = [];
+  for (const entry of structure) {
     if (entry.type === 'item') {
-      return itemVisible(entry.item, role) ? [entry] : [];
+      if (itemVisible(entry.item, role)) out.push(entry);
+      continue;
     }
     const items = entry.group.items.filter((i) => itemVisible(i, role));
-    return items.length > 0 ? [{ type: 'group' as const, group: { ...entry.group, items } }] : [];
-  });
+    if (items.length > 0) {
+      out.push({ type: 'group', group: { ...entry.group, items } });
+    }
+  }
+  return out;
 }
 
 /** Títulos del Topbar; incluye prefijos de rutas anidadas. */

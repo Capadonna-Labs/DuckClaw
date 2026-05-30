@@ -17,3 +17,22 @@ export function workersInclude(workers: WorkerOption[] | undefined, id: string):
   if (!id) return false;
   return workerOptionIds(workers).includes(id);
 }
+
+/** Clave canónica para emparejar workers (finanz, Quant-Trader, QuantTraderWorker, …). */
+export function normalizeWorkerKey(id: string): string {
+  const slug = id.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!slug) return '';
+  if (slug === 'finanz' || slug === 'finanzworker') return 'finanz';
+  if (slug === 'quanttrader' || slug === 'quanttraderworker') {
+    return 'quant-trader';
+  }
+  return slug;
+}
+
+/** True si ambos ids refieren al mismo worker (aliases incluidos). */
+export function workerMatches(a: string, b: string): boolean {
+  const ka = normalizeWorkerKey(a);
+  const kb = normalizeWorkerKey(b);
+  if (!ka || !kb) return true;
+  return ka === kb;
+}

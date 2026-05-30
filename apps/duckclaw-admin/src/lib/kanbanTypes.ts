@@ -12,6 +12,8 @@ export interface KanbanCard {
   instance_key?: string;
   /** Ámbito chat Redis cuando el slot lo expone. */
   chat_scope?: string;
+  /** Tarea en curso (plan_title o query_prefix desde task_audit_log). */
+  current_task?: string;
   tags: string[];
   created_at: string;
   updated_at: string;
@@ -24,6 +26,7 @@ export const KANBAN_COLUMNS: { id: KanbanStatus; title: string; hint: string }[]
 ];
 
 export const KANBAN_WORKER_FILTER_KEY = 'duckclaw-kanban-worker-filter';
+export const KANBAN_CONVERSATION_FILTER_KEY = 'duckclaw-kanban-conversation-filter';
 
 export function coerceKanbanWorkerId(value: unknown): string | null {
   if (typeof value === 'string') {

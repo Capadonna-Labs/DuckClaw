@@ -7,9 +7,9 @@ export type { ToolHeartbeatPhase };
 export function parseToolNameFromHeartbeatText(text: string): string | null {
   const raw = (text || '').trim();
   if (!raw) return null;
-  const using = raw.match(/🔄\s*Usando:\s*(.+?)(?:\s*·|$)/u);
+  const using = raw.match(/🔄\s*Usando:\s*(.+?)(?:\s*·|$)/);
   if (using) return using[1].trim();
-  const legacy = raw.match(/herramienta\s+([A-Za-z0-9_.-]+)/iu);
+  const legacy = raw.match(/herramienta\s+([A-Za-z0-9_.-]+)/i);
   return legacy ? legacy[1].trim() : null;
 }
 

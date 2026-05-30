@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 
 from duckclaw.utils.formatters import (
     REDDIT_MCP_LLM_MAX_POSTS,
+    build_reddit_llm_context_block,
     format_reddit_mcp_json_to_nl,
     format_reddit_mcp_reply_if_applicable,
     sanitize_reddit_tool_messages_for_llm,
@@ -44,6 +45,42 @@ def test_if_applicable_passthrough() -> None:
     assert format_reddit_mcp_reply_if_applicable(plain) == plain
 
 
+def test_single_post_includes_full_selftext_body() -> None:
+    long_body = "analysis " * 80
+    raw = json.dumps(
+        {
+            "id": "abc",
+            "title": "Isaac Lab?",
+            "subreddit": "reinforcementlearning",
+            "score": 7,
+            "permalink": "/r/reinforcementlearning/comments/abc/x/",
+            "is_self": True,
+            "selftext": long_body,
+        }
+    )
+    out = format_reddit_mcp_json_to_nl(raw)
+    assert out is not None
+    assert "**Cuerpo del post:**" in out
+    assert long_body.strip()[:200] in out
+
+
+def test_build_reddit_llm_context_block_wraps_post() -> None:
+    raw = json.dumps(
+        {
+            "id": "1",
+            "title": "T",
+            "subreddit": "test",
+            "score": 1,
+            "permalink": "/r/test/comments/1/x/",
+            "is_self": False,
+        }
+    )
+    block = build_reddit_llm_context_block(raw)
+    assert "[REDDIT_POST_CONTEXT]" in block
+    assert "T" in block
+    assert "contexto factual" in block
+
+
 def test_formats_single_reddit_get_post_json() -> None:
     raw = json.dumps(
         {
@@ -66,7 +103,8 @@ def test_formats_single_reddit_get_post_json() -> None:
     assert "[Enlace]" in out
 
 
-def test_caps_posts_and_selftext_length() -> None:
+def test_caps_posts_and_selftext_length(monkeypatch) -> None:
+    monkeypatch.setenv("REDDIT_SELFTEXT_CONTEXT_MAX_CHARS", "200")
     long_body = "x" * 500
     posts = [
         {

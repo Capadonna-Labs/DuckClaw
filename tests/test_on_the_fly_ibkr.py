@@ -55,6 +55,24 @@ def test_ibkr_off(db) -> None:
     assert get_chat_state(db, chat_id, "ibkr_enabled") == "false"
 
 
+def test_ibkr_off_quant_trader_label(db) -> None:
+    chat_id = "test_ibkr_off_quant"
+    set_chat_state(db, chat_id, "ibkr_enabled", "true")
+
+    reply = execute_ibkr_toggle(
+        db, chat_id, "off", entry_worker_id="QuantTraderWorker"
+    )
+    assert "Quant-Trader" in reply
+    assert "Finanz" not in reply
+
+
+def test_ibkr_on_finanz_label(db) -> None:
+    chat_id = "test_ibkr_on_finanz"
+    reply = execute_ibkr_toggle(db, chat_id, "on --mode paper", entry_worker_id="finanz")
+    assert "Finanz" in reply
+    assert "Quant-Trader" not in reply
+
+
 def test_handle_command_processes_ibkr(db) -> None:
     chat_id = "test_ibkr_handle"
     reply = handle_command(db, chat_id, "/ibkr on --mode paper")

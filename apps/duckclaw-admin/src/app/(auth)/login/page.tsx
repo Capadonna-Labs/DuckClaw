@@ -13,9 +13,6 @@ export default function LoginPage() {
     isAuthenticated,
     isLoading,
     loginError,
-    hasHydrated,
-    returnTo,
-    setReturnTo,
   } = useAuthStore();
 
   const [email, setEmail] = useState('');

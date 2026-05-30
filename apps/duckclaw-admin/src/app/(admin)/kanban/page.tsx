@@ -6,6 +6,7 @@ import { adminService } from '@/services/adminService';
 import type { KanbanCard, KanbanStatus } from '@/lib/kanbanTypes';
 import {
   KANBAN_COLUMNS,
+  KANBAN_CONVERSATION_FILTER_KEY,
   KANBAN_WORKER_FILTER_KEY,
   coerceKanbanWorkerId,
   isSwarmAutoSyncCard,
@@ -17,6 +18,11 @@ import { Plus, RefreshCw, GripVertical } from 'lucide-react';
 function readWorkerFilter(): string {
   if (typeof window === 'undefined') return '';
   return sessionStorage.getItem(KANBAN_WORKER_FILTER_KEY) || '';
+}
+
+function readConversationFilter(): string {
+  if (typeof window === 'undefined') return '';
+  return sessionStorage.getItem(KANBAN_CONVERSATION_FILTER_KEY) || '';
 }
 
 function sortSwarmCards(a: KanbanCard, b: KanbanCard): number {
@@ -32,6 +38,18 @@ function cardMatchesWorkerFilter(card: KanbanCard, filter: string): boolean {
   return false;
 }
 
+function cardMatchesConversationFilter(card: KanbanCard, filter: string): boolean {
+  if (!filter) return true;
+  const scope = (card.chat_scope || '').trim();
+  if (!scope) return filter === '__none__';
+  return scope === filter;
+}
+
+function shortConversationLabel(scope: string): string {
+  if (scope.length <= 28) return scope;
+  return `${scope.slice(0, 12)}…${scope.slice(-10)}`;
+}
+
 async function fetchTeamWorkerIds(): Promise<string[]> {
   const config = await adminService.getPlaygroundConfig();
   return (config.workers ?? []).map((worker) => worker.id).filter(Boolean);
@@ -43,11 +61,13 @@ export default function KanbanPage() {
   const [cards, setCards] = useState<KanbanCard[]>([]);
   const [teamWorkers, setTeamWorkers] = useState<string[]>([]);
   const [workerFilter, setWorkerFilter] = useState('');
+  const [conversationFilter, setConversationFilter] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setWorkerFilter(readWorkerFilter());
+    setConversationFilter(readConversationFilter());
     fetchTeamWorkerIds().then(setTeamWorkers).catch(() => setTeamWorkers([]));
   }, []);
 
@@ -56,6 +76,14 @@ export default function KanbanPage() {
     if (typeof window !== 'undefined') {
       if (value) sessionStorage.setItem(KANBAN_WORKER_FILTER_KEY, value);
       else sessionStorage.removeItem(KANBAN_WORKER_FILTER_KEY);
+    }
+  };
+
+  const onConversationFilterChange = (value: string) => {
+    setConversationFilter(value);
+    if (typeof window !== 'undefined') {
+      if (value) sessionStorage.setItem(KANBAN_CONVERSATION_FILTER_KEY, value);
+      else sessionStorage.removeItem(KANBAN_CONVERSATION_FILTER_KEY);
     }
   };
 
@@ -78,9 +106,11 @@ export default function KanbanPage() {
   }, [load]);
 
   const filteredCards = useMemo(() => {
-    const list = cards.filter((c) => cardMatchesWorkerFilter(c, workerFilter));
+    const list = cards
+      .filter((c) => cardMatchesWorkerFilter(c, workerFilter))
+      .filter((c) => cardMatchesConversationFilter(c, conversationFilter));
     return [...list].sort(sortSwarmCards);
-  }, [cards, workerFilter]);
+  }, [cards, workerFilter, conversationFilter]);
 
   const workerOptions = useMemo(() => {
     const fromTeam = teamWorkers.length > 0 ? teamWorkers : [];
@@ -90,6 +120,15 @@ export default function KanbanPage() {
       .filter((workerId): workerId is string => Boolean(workerId));
     return Array.from(new Set([...fromTeam, ...fromCards])).sort();
   }, [teamWorkers, cards]);
+
+  const conversationOptions = useMemo(() => {
+    const scopes = cards
+      .map((c) => (c.chat_scope || '').trim())
+      .filter(Boolean);
+    return Array.from(new Set(scopes)).sort();
+  }, [cards]);
+
+  const isFiltered = Boolean(workerFilter || conversationFilter);
 
   const moveCard = async (id: string, status: KanbanStatus) => {
     if (!canWrite) return;
@@ -145,6 +184,22 @@ export default function KanbanPage() {
               ))}
             </select>
           </label>
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-gov-gray-500 whitespace-nowrap">Conversación</span>
+            <select
+              value={conversationFilter}
+              onChange={(e) => onConversationFilterChange(e.target.value)}
+              className="px-2 py-2 text-sm border rounded-xl dark:border-dark-border bg-white dark:bg-dark-surface min-w-[10rem]"
+            >
+              <option value="">Todas</option>
+              <option value="__none__">Sin chat activo</option>
+              {conversationOptions.map((scope) => (
+                <option key={scope} value={scope}>
+                  {shortConversationLabel(scope)}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             onClick={load}
@@ -184,8 +239,8 @@ export default function KanbanPage() {
               column={col}
               cards={visible}
               totalCount={allInCol.length}
-              filtered={Boolean(workerFilter)}
-              filterLabel={workerFilter}
+              filtered={isFiltered}
+              filterLabel={workerFilter || conversationFilter}
               canWrite={canWrite}
               onMove={moveCard}
             />
@@ -272,6 +327,11 @@ function KanbanCardView({
               </span>
             )}
           </div>
+          {card.current_task && (
+            <p className="text-xs text-gov-blue-800 dark:text-dark-cyan mt-1 line-clamp-2 font-medium">
+              {card.current_task}
+            </p>
+          )}
           {card.chat_scope && (
             <p className="text-[10px] font-mono text-gov-gray-400 mt-0.5 truncate" title={card.chat_scope}>
               chat: {card.chat_scope.length > 24 ? `${card.chat_scope.slice(0, 24)}…` : card.chat_scope}
@@ -279,6 +339,14 @@ function KanbanCardView({
           )}
           {card.description && (
             <p className="text-xs text-gov-gray-500 mt-1 line-clamp-2">{card.description}</p>
+          )}
+          {card.worker_id && card.chat_scope && (
+            <Link
+              href={`/playground?worker=${encodeURIComponent(card.worker_id)}`}
+              className="text-[10px] font-mono text-gov-blue-700 mt-1 inline-block mr-3"
+            >
+              Abrir chat →
+            </Link>
           )}
           {card.worker_id && (
             <Link

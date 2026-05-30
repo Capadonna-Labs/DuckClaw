@@ -16,6 +16,20 @@ interface SwarmInstance {
   chat_scope?: string | null;
 }
 
+interface WorkerTaskInfo {
+  plan_title?: string;
+  query_prefix?: string;
+}
+
+function formatCurrentTask(task: WorkerTaskInfo | undefined): string | undefined {
+  if (!task) return undefined;
+  const title = (task.plan_title || '').trim();
+  if (title) return title;
+  const query = (task.query_prefix || '').trim();
+  if (query) return query.length > 120 ? `${query.slice(0, 117)}…` : query;
+  return undefined;
+}
+
 function newCardId(): string {
   return `card_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -43,21 +57,23 @@ async function fetchPlaygroundWorkers(): Promise<string[]> {
 async function fetchSwarmSlots(workers: string[]): Promise<{
   instances: SwarmInstance[];
   states: Record<string, KanbanStatus>;
+  tasks: Record<string, WorkerTaskInfo>;
 }> {
   const base = gatewayBase();
   const key = adminApiKey();
   if (!base || !key || workers.length === 0) {
-    return { instances: [], states: {} };
+    return { instances: [], states: {}, tasks: {} };
   }
   const q = new URLSearchParams({ workers: workers.join(',') });
   const res = await fetch(`${base}/api/v1/admin/kanban/swarm-slots?${q}`, {
     headers: gatewayProxyHeaders({ 'X-Admin-Key': key }),
     cache: 'no-store',
   });
-  if (!res.ok) return { instances: [], states: {} };
+  if (!res.ok) return { instances: [], states: {}, tasks: {} };
   const data = (await res.json()) as {
     instances?: SwarmInstance[];
     states?: Record<string, string>;
+    tasks?: Record<string, WorkerTaskInfo>;
   };
   const valid: KanbanStatus[] = ['pendiente', 'en_progreso', 'completo'];
   const states: Record<string, KanbanStatus> = {};
@@ -67,6 +83,7 @@ async function fetchSwarmSlots(workers: string[]): Promise<{
   return {
     instances: Array.isArray(data.instances) ? data.instances : [],
     states,
+    tasks: data.tasks ?? {},
   };
 }
 
@@ -91,7 +108,7 @@ function migrateLegacyCard(card: KanbanCard, now: string): KanbanCard {
     worker_id: workerId,
     swarm_slot: 1,
     instance_key: kanbanInstanceKey(workerId, 1),
-    tags: [...new Set([...card.tags, SWARM_TAG])],
+    tags: Array.from(new Set([...card.tags, SWARM_TAG])),
     updated_at: now,
   };
 }
@@ -102,6 +119,7 @@ function upsertSwarmCard(
   slot: number,
   status: KanbanStatus,
   chatScope: string | undefined,
+  currentTask: string | undefined,
   now: string,
 ): { cards: KanbanCard[]; changed: boolean } {
   const instanceKey = kanbanInstanceKey(workerId, slot);
@@ -136,6 +154,7 @@ function upsertSwarmCard(
       swarm_slot: slot,
       instance_key: instanceKey,
       chat_scope: chatScope,
+      current_task: currentTask,
       tags: [AUTO_SYNC_TAG, SWARM_TAG],
       created_at: now,
       updated_at: now,
@@ -152,7 +171,8 @@ function upsertSwarmCard(
     swarm_slot: slot,
     instance_key: instanceKey,
     chat_scope: chatScope ?? cur.chat_scope,
-    tags: [...new Set([...cur.tags, AUTO_SYNC_TAG, SWARM_TAG])],
+    current_task: currentTask ?? cur.current_task,
+    tags: Array.from(new Set([...cur.tags, AUTO_SYNC_TAG, SWARM_TAG])),
     updated_at: now,
   };
   if (
@@ -160,7 +180,8 @@ function upsertSwarmCard(
     cur.status !== patch.status ||
     cur.swarm_slot !== patch.swarm_slot ||
     cur.instance_key !== patch.instance_key ||
-    cur.chat_scope !== patch.chat_scope
+    cur.chat_scope !== patch.chat_scope ||
+    cur.current_task !== patch.current_task
   ) {
     next[idx] = patch;
     changed = true;
@@ -176,7 +197,7 @@ export async function syncKanbanCardsWithTeam(cards: KanbanCard[]): Promise<{
   const workers = await fetchPlaygroundWorkers();
   if (workers.length === 0) return { cards, changed: false };
 
-  const { instances, states } = await fetchSwarmSlots(workers);
+  const { instances, states, tasks } = await fetchSwarmSlots(workers);
   const now = new Date().toISOString();
   let changed = false;
   let next = cards.map((c) => {
@@ -184,6 +205,8 @@ export async function syncKanbanCardsWithTeam(cards: KanbanCard[]): Promise<{
     if (migrated !== c) changed = true;
     return migrated;
   });
+
+  const taskForWorker = (workerId: string) => formatCurrentTask(tasks[workerId]);
 
   const activeKeys = new Set<string>();
   for (const inst of instances) {
@@ -202,6 +225,7 @@ export async function syncKanbanCardsWithTeam(cards: KanbanCard[]): Promise<{
       1,
       status,
       chat1 != null ? String(chat1) : undefined,
+      taskForWorker(workerId),
       now,
     );
     next = r.cards;
@@ -219,6 +243,7 @@ export async function syncKanbanCardsWithTeam(cards: KanbanCard[]): Promise<{
       slot,
       status,
       inst.chat_scope != null ? String(inst.chat_scope) : undefined,
+      taskForWorker(inst.worker_id),
       now,
     );
     next = r.cards;

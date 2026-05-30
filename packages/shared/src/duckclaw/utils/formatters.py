@@ -51,7 +51,24 @@ def _reddit_mcp_llm_max_posts_from_env() -> int:
 # Límite de posts en el Markdown enviado al modelo (además del truncado por post).
 REDDIT_MCP_LLM_MAX_POSTS = _reddit_mcp_llm_max_posts_from_env()
 _TITLE_MAX_CHARS = 140
-_SELFTEXT_LLM_MAX_CHARS = 200
+
+
+def _reddit_selftext_max_chars() -> int:
+    raw = (os.environ.get("REDDIT_SELFTEXT_CONTEXT_MAX_CHARS") or "").strip()
+    if raw.isdigit():
+        return max(200, min(12000, int(raw)))
+    return 3500
+
+
+def _reddit_selftext_for_llm(text: str) -> str:
+    """Cuerpo del post para contexto del modelo (no solo viñeta corta)."""
+    t = (text or "").replace("\r\n", "\n").strip()
+    if not t:
+        return ""
+    cap = _reddit_selftext_max_chars()
+    if len(t) <= cap:
+        return t
+    return t[: cap - 1] + "…"
 
 
 def _strip_leading_worker_label(s: str) -> str:
@@ -128,7 +145,9 @@ def _format_single_reddit_post_markdown(data: dict[str, Any]) -> str | None:
         lines.append(f"- [Enlace]({link})")
     st = str(data.get("selftext") or "").strip()
     if st and data.get("is_self"):
-        lines.append(f"- *Extracto:* {_truncate_one_line(st, _SELFTEXT_LLM_MAX_CHARS)}")
+        body = _reddit_selftext_for_llm(st)
+        if body:
+            lines.extend(["", "**Cuerpo del post:**", body])
     return "\n".join(lines).strip()
 
 
@@ -197,7 +216,7 @@ def format_reddit_mcp_json_to_nl(
         lines.append(bullet)
         st = str(p.get("selftext") or "").strip()
         if st and p.get("is_self"):
-            excerpt = _truncate_one_line(st, _SELFTEXT_LLM_MAX_CHARS)
+            excerpt = _truncate_one_line(st, min(400, _reddit_selftext_max_chars()))
             lines.append(f"  *Extracto:* {excerpt}")
         lines.append("")
 
@@ -210,6 +229,23 @@ def format_reddit_mcp_reply_if_applicable(reply: str) -> str:
         return reply
     out = format_reddit_mcp_json_to_nl(reply)
     return out if out is not None else reply
+
+
+def build_reddit_llm_context_block(raw_tool_or_json: str) -> str:
+    """
+    Bloque para inyectar en el turno del LLM: metadatos + cuerpo del post, no solo tarjeta visual.
+    """
+    body = format_reddit_mcp_reply_if_applicable((raw_tool_or_json or "").strip()) or (
+        raw_tool_or_json or ""
+    ).strip()
+    if not body:
+        return ""
+    return (
+        "[REDDIT_POST_CONTEXT] Usa la información siguiente como contexto factual para "
+        "responder al usuario (resumen, análisis, respuesta a su pregunta). "
+        "No te limites a repetir el markdown de la tarjeta.\n\n"
+        f"{body}"
+    )
 
 
 def sanitize_reddit_tool_messages_for_llm(messages: list[Any]) -> list[Any]:

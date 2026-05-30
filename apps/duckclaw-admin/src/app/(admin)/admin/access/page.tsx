@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
@@ -9,6 +8,7 @@ import { ConsoleUsersPanel } from '@/components/access/ConsoleUsersPanel';
 import { TelegramUsersPanel } from '@/components/access/TelegramUsersPanel';
 import { SharedGrantsPanel } from '@/components/access/SharedGrantsPanel';
 import { PermissionsMatrix } from '@/components/access/PermissionsMatrix';
+import { AccessPersistenceInfo } from '@/components/access/AccessPersistenceInfo';
 import { useAuthStore } from '@/store/authStore';
 import { adminService } from '@/services/adminService';
 import { Shield, Users } from 'lucide-react';
@@ -30,6 +30,8 @@ export default function AccessPage() {
     console_users: number;
     telegram_users: number;
     shared_grants: number;
+    db_path?: string;
+    db_exists?: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -44,6 +46,8 @@ export default function AccessPage() {
           console_users: r.console_users,
           telegram_users: r.telegram_users,
           shared_grants: r.shared_grants,
+          db_path: r.db_path,
+          db_exists: r.db_exists,
         })
       )
       .catch(() => setOverview(null));
@@ -70,6 +74,13 @@ export default function AccessPage() {
         </div>
         <PermissionsMatrix />
       </header>
+
+      <AccessPersistenceInfo
+        dbPath={overview?.db_path}
+        dbExists={overview?.db_exists}
+        activeTab={tab}
+        tenantId={tenantId}
+      />
 
       <div className="flex flex-wrap gap-2 border-b dark:border-dark-border pb-2">
         {TABS.map((t) => (
@@ -99,7 +110,7 @@ export default function AccessPage() {
       {tab === 'console' && (
         <SettingsSection
           titulo="Usuarios consola"
-          descripcion="Login duckclaw-admin · PBKDF2 en hub gateway"
+          descripcion="main.admin_console_users · PBKDF2"
           icono={<Shield size={22} />}
         >
           <ConsoleUsersPanel />

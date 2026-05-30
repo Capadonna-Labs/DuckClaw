@@ -2334,6 +2334,12 @@ async def get_access_overview(tenant_id: str = Query("default")) -> dict[str, An
         "telegram_users": telegram_count,
         "shared_grants": shared_count,
         "db_path": gw,
+        "db_exists": bool(gw and os.path.isfile(gw)),
+        "persistence_tables": {
+            "console": "main.admin_console_users",
+            "telegram": "main.authorized_users",
+            "shared": "main.user_shared_db_access",
+        },
     }
 
 
@@ -3343,6 +3349,49 @@ def _kanban_audit_states_by_worker(worker_ids: list[str]) -> dict[str, str]:
     return states
 
 
+def _kanban_latest_tasks_by_worker(worker_ids: list[str]) -> dict[str, dict[str, str]]:
+    """Última fila de task_audit_log por worker (plan_title / query_prefix para Tablero)."""
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+
+    tasks: dict[str, dict[str, str]] = {}
+    if not worker_ids:
+        return tasks
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return tasks
+    db = GatewayDbEphemeralReadonly(gw)
+    in_list = ", ".join("'" + w.replace("'", "''") + "'" for w in worker_ids)
+    try:
+        rows = db.query(
+            f"""
+            SELECT worker_id, query_prefix, plan_title
+            FROM task_audit_log
+            WHERE worker_id IN ({in_list})
+            ORDER BY created_at DESC
+            """
+        )
+    except Exception:
+        return tasks
+    seen: set[str] = set()
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        wid = str(row.get("worker_id") or "").strip()
+        if not wid or wid in seen:
+            continue
+        seen.add(wid)
+        entry: dict[str, str] = {}
+        plan = str(row.get("plan_title") or "").strip()
+        query = str(row.get("query_prefix") or "").strip()
+        if plan:
+            entry["plan_title"] = plan
+        if query:
+            entry["query_prefix"] = query
+        if entry:
+            tasks[wid] = entry
+    return tasks
+
+
 def _kanban_instance_key(worker_id: str, slot: int) -> str:
     return f"{worker_id}:{slot}"
 
@@ -3383,6 +3432,7 @@ async def kanban_swarm_slots(
     tid = _gateway_effective_tenant_id(tenant_id)
     raw_slots = list_active_swarm_slots(tid, worker_ids)
     audit = _kanban_audit_states_by_worker(worker_ids)
+    tasks = _kanban_latest_tasks_by_worker(worker_ids)
 
     active_by_worker: dict[str, set[int]] = {w: set() for w in worker_ids}
     instances: list[dict[str, Any]] = []
@@ -3413,7 +3463,7 @@ async def kanban_swarm_slots(
             if slot >= 2:
                 states[_kanban_instance_key(wid, slot)] = "en_progreso"
 
-    return {"workers": worker_ids, "instances": instances, "states": states}
+    return {"workers": worker_ids, "instances": instances, "states": states, "tasks": tasks}
 
 
 def _worker_has_browser_sandbox(worker_id: str) -> bool:

@@ -1,5 +1,4 @@
 import { friendlyGatewayError } from '@/lib/adminErrors';
-import { readSseChatStream } from '@/lib/sseChat';
 import type {
   AdminHealth,
   EnvConfigResponse,
@@ -326,6 +325,12 @@ export const adminService = {
       telegram_users: number;
       shared_grants: number;
       db_path?: string;
+      db_exists?: boolean;
+      persistence_tables?: {
+        console: string;
+        telegram: string;
+        shared: string;
+      };
     }>(`/access/overview?tenant_id=${encodeURIComponent(tenantId)}`),
 
   listConsoleUsers: () =>

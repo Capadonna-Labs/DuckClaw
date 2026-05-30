@@ -18,14 +18,14 @@ export function colorizePlainLogLine(line: string): { className: string; text: s
   if (/warn|warning/i.test(t)) {
     return { className: 'text-amber-300', text: line };
   }
+  if (/^\d+\|/.test(t) || /\[PM2\]/i.test(t)) {
+    return { className: 'text-emerald-300', text: line };
+  }
   if (/info|notice/i.test(t)) {
     return { className: 'text-sky-300', text: line };
   }
   if (/debug|verbose/i.test(t)) {
     return { className: 'text-slate-400', text: line };
-  }
-  if (/^\d+\|/.test(t) || /\[PM2\]/i.test(t)) {
-    return { className: 'text-emerald-300', text: line };
   }
   return { className: 'text-slate-200', text: line };
 }

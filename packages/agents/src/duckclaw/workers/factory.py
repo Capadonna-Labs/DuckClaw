@@ -4265,26 +4265,19 @@ def build_worker_graph(
                     or force_tavily
                 )
             )
+            _reddit_http_prefetch_ctx: Optional[str] = None
             if _quant_reddit_http_fast:
                 _raw_reddit_json = _fetch_reddit_post_via_public_json(_reddit_comments_for_http)
                 if _raw_reddit_json:
-                    from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
+                    from duckclaw.utils.formatters import build_reddit_llm_context_block
 
-                    _http_fast = format_reddit_mcp_reply_if_applicable(_raw_reddit_json) or _raw_reddit_json
-                    _http_ai = AIMessage(content=_http_fast)
+                    _reddit_http_prefetch_ctx = build_reddit_llm_context_block(_raw_reddit_json)
                     _log.info(
-                        "[%s] quant reddit HTTP fast path (no reddit_* tools) lone=%s hist=%s",
+                        "[%s] quant reddit HTTP prefetch → LLM context (no reddit_* tools) lone=%s hist=%s",
                         _wl,
                         _quant_lone_reddit_only,
                         _q_reddit_hist,
                     )
-                    _out_http = {
-                        **state,
-                        "messages": state["messages"] + [_http_ai],
-                        "reddit_http_fast_path": True,
-                    }
-                    _out_http.update(_identity_fields(state))
-                    return _out_http
 
             _has_run_browser = "run_browser_sandbox" in tools_by_name
             _has_tavily_mql5 = "tavily_search" in tools_by_name
@@ -4344,9 +4337,8 @@ def build_worker_graph(
                 _tool_body = str(last_msg.content or "").strip()
                 _fast_reply: str | None = None
                 if _tname.startswith("reddit_"):
-                    from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
-
-                    _fast_reply = format_reddit_mcp_reply_if_applicable(_tool_body) or _tool_body
+                    # Reddit: segunda pasada del LLM con ToolMessage en historial (no solo tarjeta).
+                    pass
                 elif _tname in ("tavily_search", "run_browser_sandbox") and "mql5.com" in (
                     (incoming or "").lower()
                 ):
@@ -4357,7 +4349,6 @@ def build_worker_graph(
                     _out_url = {
                         **state,
                         "messages": state["messages"] + [_url_reply],
-                        "reddit_mcp_lone_url_fast_path": _tname.startswith("reddit_"),
                     }
                     _out_url.update(_identity_fields(state))
                     return _out_url
@@ -4540,6 +4531,20 @@ def build_worker_graph(
                         )
                     )
                 ] + _msg_list
+            _reddit_ctx_block: Optional[str] = None
+            if _reddit_http_prefetch_ctx and not already_has_tool_result:
+                _reddit_ctx_block = _reddit_http_prefetch_ctx
+            if not _reddit_ctx_block:
+                for _rm in reversed(_msg_list):
+                    if isinstance(_rm, ToolMessage) and str(getattr(_rm, "name", "") or "").startswith(
+                        "reddit_"
+                    ):
+                        from duckclaw.utils.formatters import build_reddit_llm_context_block
+
+                        _reddit_ctx_block = build_reddit_llm_context_block(str(_rm.content or ""))
+                        break
+            if _reddit_ctx_block:
+                _msg_list = [SystemMessage(content=_reddit_ctx_block)] + _msg_list
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             _invoked_llm: Any = llm_with_tools
             if force_admin_sql:
@@ -5572,23 +5577,7 @@ def build_worker_graph(
                 _short = "Imagen generada."
             reply = _short
         else:
-            if state.get("reddit_http_fast_path") or state.get("reddit_mcp_lone_url_fast_path"):
-                from duckclaw.forge.atoms.user_reply_nl_synthesis import (
-                    _deterministic_reddit_compact_listing_summary,
-                    _body_looks_like_reddit_compact_listing_markdown,
-                )
-
-                _rc = format_reddit_mcp_reply_if_applicable((reply or "").strip()) or (reply or "").strip()
-                if _body_looks_like_reddit_compact_listing_markdown(_rc):
-                    _det = _deterministic_reddit_compact_listing_summary(_rc)
-                    if _det:
-                        reply = _det
-                    else:
-                        reply = _rc
-                else:
-                    reply = _rc
-            else:
-                reply = _repair_finanz_ibkr_egress(_apply_nl_synthesis(reply or ""))
+            reply = _repair_finanz_ibkr_egress(_apply_nl_synthesis(reply or ""))
         _wid_fin = str(getattr(spec, "worker_id", "") or "")
         reply = finanz_repair_ibkr_tool_live_vs_reply_paper(msgs, reply, worker_id=_wid_fin)
         reply = finanz_strip_ibkr_block_without_tool_in_turn(

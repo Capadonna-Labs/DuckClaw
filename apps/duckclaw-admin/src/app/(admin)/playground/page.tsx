@@ -20,12 +20,15 @@ import { PanelToggleButton } from '@/components/layout/PanelToggleButton';
 import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
 import { LlmProviderCatalog } from '@/components/chat/LlmProviderCatalog';
 import { MarkdownSnippetPanel } from '@/components/chat/MarkdownSnippetPanel';
+import { ScrollFabPair } from '@/components/shared/ScrollFabPair';
+import { useScrollFabPair } from '@/components/shared/useScrollFabPair';
 import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/workerOptions';
 
 export default function PlaygroundPage() {
   const searchParams = useSearchParams();
   const initialWorker = searchParams.get('worker') || '';
   const [panelOpen, setPanelOpen] = useState(true);
+  const [mainScrollEl, setMainScrollEl] = useState<HTMLElement | null>(null);
   const [systemPreview, setSystemPreview] = useState('');
   const [config, setConfig] = useState<Awaited<ReturnType<typeof adminService.getPlaygroundConfig>> | null>(
     null
@@ -87,8 +90,20 @@ export default function PlaygroundPage() {
 
   const activeCatalog = config?.catalog?.find((c) => c.active);
 
+  useEffect(() => {
+    setMainScrollEl(document.getElementById('admin-main-scroll'));
+  }, []);
+
+  const pageScroll = useScrollFabPair(mainScrollEl);
+
   return (
     <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-8rem)] lg:h-[calc(100vh-8rem)] lg:min-h-0 lg:overflow-hidden relative">
+      <ScrollFabPair
+        showScrollTop={pageScroll.showScrollTop}
+        showScrollBottom={pageScroll.showScrollBottom}
+        onScrollTop={() => pageScroll.scrollToTop('smooth')}
+        onScrollBottom={() => pageScroll.scrollToBottom('smooth')}
+      />
       {conv.sessionId && (
         <ConversationInbox
           tenantId={config?.effective_tenant_id}

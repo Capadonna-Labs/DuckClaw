@@ -91,11 +91,25 @@ function groupHasActive(pathname: string, group: AdminNavGroup): boolean {
   return group.items.some((item) => isNavActive(pathname, item.href));
 }
 
-export default function Sidebar() {
+type SidebarProps = {
+  /** Cierra el drawer móvil (overlay). En desktop no se pasa. */
+  onMobileClose?: () => void;
+};
+
+export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname();
   const router = useRouter();
   const { usuario, logout } = useAuthStore();
   const { sidebarOpen, toggleSidebar } = useLayoutUiStore();
+  const isMobileDrawer = Boolean(onMobileClose);
+
+  const handleMenuToggle = () => {
+    if (onMobileClose) {
+      onMobileClose();
+      return;
+    }
+    toggleSidebar();
+  };
   const entries = useMemo(
     () => navEntriesForRole(usuario?.rol),
     [usuario?.rol]
@@ -137,13 +151,13 @@ export default function Sidebar() {
           </p>
         </div>
         <PanelToggleButton
-          open={sidebarOpen}
-          onToggle={toggleSidebar}
+          open={isMobileDrawer ? true : sidebarOpen}
+          onToggle={handleMenuToggle}
           openLabel="Ocultar menú"
           closedLabel="Mostrar menú"
           openIcon={PanelLeftClose}
           closedIcon={PanelLeftOpen}
-          title={sidebarOpen ? 'Ocultar menú lateral' : 'Mostrar menú lateral'}
+          title={isMobileDrawer || sidebarOpen ? 'Ocultar menú lateral' : 'Mostrar menú lateral'}
           className="w-full justify-center border-white/20 text-white/90 hover:bg-white/10 hover:text-white"
         />
       </div>
@@ -172,6 +186,7 @@ export default function Sidebar() {
                 }))
               }
               groupIcon={GROUP_ICONS[entry.group.id] ?? Sparkles}
+              onNavigate={onMobileClose}
             />
           );
         })}
@@ -198,15 +213,18 @@ function NavLink({
   item,
   pathname,
   icon: Icon,
+  onNavigate,
 }: {
   item: AdminNavItem;
   pathname: string;
   icon: LucideIcon;
+  onNavigate?: () => void;
 }) {
   const active = isNavActive(pathname, item.href);
   return (
     <Link
       href={item.href}
+      onClick={() => onNavigate?.()}
       className={cn(
         'flex items-center gap-3 px-4 py-2.5 text-sm font-medium rounded-lg transition-colors',
         active
@@ -226,12 +244,14 @@ function NavGroup({
   open,
   onToggle,
   groupIcon: GroupIcon,
+  onNavigate,
 }: {
   group: AdminNavGroup;
   pathname: string;
   open: boolean;
   onToggle: () => void;
   groupIcon: LucideIcon;
+  onNavigate?: () => void;
 }) {
   const active = groupHasActive(pathname, group);
 
@@ -267,6 +287,7 @@ function NavGroup({
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={() => onNavigate?.()}
                 className={cn(
                   'flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-xl transition-colors',
                   childActive

@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { mergeEphemeralHeartbeats } from './chatEphemeralStorage';
+import {
+  filterEphemeralForWorker,
+  mergeEphemeralHeartbeats,
+} from './chatEphemeralStorage';
+import { workerMatches } from './workerOptions';
 import type { ChatMsg } from '@/components/chat/types';
 
 const toolA: ChatMsg = {
@@ -30,5 +34,21 @@ assert.equal(
   mergeEphemeralHeartbeats([toolA], [toolA, toolB])[0]?.toolPhase,
   'done'
 );
+
+assert.ok(workerMatches('QuantTraderWorker', 'quant-trader'));
+assert.ok(workerMatches('finanz', 'FinanzWorker'));
+
+const finanzHb: ChatMsg = {
+  ...toolA,
+  workerId: 'finanz',
+  toolName: 'list_categories',
+};
+const quantHb: ChatMsg = {
+  ...toolB,
+  workerId: 'QuantTraderWorker',
+};
+const filtered = filterEphemeralForWorker([finanzHb, quantHb], 'QuantTraderWorker');
+assert.equal(filtered.length, 1);
+assert.equal(filtered[0]?.toolName, 'fetch_market_data');
 
 console.log('chatEphemeralStorage.test.ts: ok');

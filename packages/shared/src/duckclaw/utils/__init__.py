@@ -6,6 +6,7 @@ from duckclaw.utils.langsmith_trace import (
     run_name_for_langsmith,
 )
 from duckclaw.utils.formatters import (
+    build_reddit_llm_context_block,
     format_reddit_mcp_json_to_nl,
     format_reddit_mcp_reply_if_applicable,
     sanitize_reddit_tool_messages_for_llm,
@@ -30,6 +31,7 @@ from duckclaw.utils.logger import (
 )
 
 __all__ = [
+    "build_reddit_llm_context_block",
     "format_reddit_mcp_json_to_nl",
     "format_reddit_mcp_reply_if_applicable",
     "sanitize_reddit_tool_messages_for_llm",

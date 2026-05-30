@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { TemplatePreset } from '@/lib/templatePresets';
 
-function emojiFor(_id: string): string {
+function emojiFor(_id?: string): string {
+  void _id;
   return '📦';
 }
 

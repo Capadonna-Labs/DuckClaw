@@ -107,7 +107,11 @@ export function useFloatingChatUnread({
       const stored = readLastRead(sessionId);
       if (stored) {
         lastReadRef.current = stored.messageIndex;
-      } else if (!historyLoading && messages.length > 0) {
+      } else if (
+        isChatPanelActivelyViewed(panelOpen) &&
+        !historyLoading &&
+        messages.length > 0
+      ) {
         const idx = markReadMessageIndex(messages);
         lastReadRef.current = idx;
         writeLastRead(sessionId, idx);
@@ -154,10 +158,6 @@ export function useFloatingChatUnread({
         opts?.panelClosed ?? !panelOpenRef.current;
       const tabHidden = opts?.forceBackground ?? shouldNotifyInBackground();
       const shouldNotify = tabHidden || panelClosed;
-      const visibility =
-        typeof document !== 'undefined' ? document.visibilityState : 'unknown';
-      const hasFocus =
-        typeof document !== 'undefined' ? document.hasFocus() : false;
 
       if (!sessionId || historyLoading) {
         return;

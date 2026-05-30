@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   createForgeProjectLocal,
   listForgeProjectsLocal,
-  loadEnvForgePresets,
 } from '@/lib/forgeProjectsLocal';
 import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
 

@@ -1,3 +1,6 @@
 # Capadonna :8002 — GET /api/market/ohlcv (contr DuckClaw quant_market_bridge)
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
+duckdb>=1.0.0
+pytz>=2024.1
+pyarrow>=15.0.0

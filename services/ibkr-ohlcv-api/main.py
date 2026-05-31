@@ -12,12 +12,14 @@ import os
 
 from fastapi import FastAPI
 from ohlcv_market_routes import router as ohlcv_router
+from portfolio_routes import router as portfolio_router
 
 app = FastAPI(
     title="IBKR OHLCV API",
-    version="1.0.0",
+    version="1.1.0",
 )
 app.include_router(ohlcv_router)
+app.include_router(portfolio_router)
 
 
 @app.get("/health")

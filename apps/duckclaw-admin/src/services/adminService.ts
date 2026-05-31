@@ -255,6 +255,30 @@ export const adminService = {
       body: JSON.stringify(body),
     }),
 
+  createUserAgent: (body: {
+    worker_id: string;
+    display_name: string;
+    source_template_id?: string;
+    system_prompt?: string;
+    description?: string;
+    skills?: string[];
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      agent: {
+        tenant_id: string;
+        owner_email: string;
+        worker_id: string;
+        display_name: string;
+        source_template_id: string;
+        manifest_path: string;
+        active: boolean;
+      };
+    }>('/user-agents', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   deleteTemplate: (id: string) =>
     adminFetch<{ ok: boolean }>(`/templates/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 

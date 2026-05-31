@@ -47,11 +47,23 @@ export async function proxyAuthToGateway(
   };
   if (cookie) headers.cookie = cookie;
 
-  const upstream = await fetch(`${base}/api/v1/admin/auth/${path}`, {
-    ...init,
-    headers,
-    cache: 'no-store',
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${base}/api/v1/admin/auth/${path}`, {
+      ...init,
+      headers,
+      cache: 'no-store',
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'fetch failed';
+    return NextResponse.json(
+      {
+        detail: `No se pudo contactar el gateway: ${detail}`,
+        code: 'gateway_unreachable',
+      },
+      { status: 503 }
+    );
+  }
 
   const text = await upstream.text();
   const res = new NextResponse(text, {

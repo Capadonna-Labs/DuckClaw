@@ -266,6 +266,29 @@ def _merge_user_agent_workers(
     return {**workers_payload, "workers": merged, "user_agents": agents}
 
 
+def _playground_workers_payload_for_actor(actor: str) -> dict[str, Any]:
+    workers: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for worker in _visible_template_workers_for_actor(actor):
+        wid = str(worker.get("id") or worker.get("worker_id") or "").strip()
+        if not wid or wid in seen:
+            continue
+        seen.add(wid)
+        workers.append({"id": wid, "label": str(worker.get("name") or worker.get("display_name") or wid)})
+    return {"workers": workers, "workers_invalid": [], "team_hint_extra": ""}
+
+
+def _merge_catalog_workers_for_actor(workers_payload: dict[str, Any], actor: str) -> dict[str, Any]:
+    existing = {str(w.get("id") or "") for w in workers_payload.get("workers") or []}
+    merged = list(workers_payload.get("workers") or [])
+    for worker in _playground_workers_payload_for_actor(actor).get("workers") or []:
+        wid = str(worker.get("id") or "").strip()
+        if wid and wid not in existing:
+            merged.append(worker)
+            existing.add(wid)
+    return {**workers_payload, "workers": merged}
+
+
 def _list_whitelist_users_merged(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
     from duckclaw.graphs.on_the_fly_commands import (
         _dedupe_authorized_users_by_user_id,
@@ -1013,7 +1036,14 @@ async def playground_config(
         chat_id=chat_id,
     )
     raw_workers: list[str] = team_ctx.get("workers") or []
-    workers_payload = _playground_workers_payload(raw_workers)
+    team_source = str(team_ctx.get("team_source") or "")
+    should_use_team_workers = bool(raw_workers) and team_source in {"chat", "tenant"}
+    workers_payload = (
+        _playground_workers_payload(raw_workers)
+        if should_use_team_workers
+        else _playground_workers_payload_for_actor(actor)
+    )
+    workers_payload = _merge_catalog_workers_for_actor(workers_payload, actor)
     workers_payload = _merge_user_agent_workers(
         workers_payload,
         team_ctx.get("console_profile") if isinstance(team_ctx.get("console_profile"), dict) else None,
@@ -1225,7 +1255,18 @@ async def playground_chat(
             "Usuario Telegram no autorizado para este tenant",
             str(team_ctx.get("team_hint") or ""),
         )
-    allowed_workers: list[str] = team_ctx.get("workers") or []
+    team_source = str(team_ctx.get("team_source") or "")
+    catalog_workers = [
+        str(w.get("id") or "").strip()
+        for w in _playground_workers_payload_for_actor(actor).get("workers") or []
+        if str(w.get("id") or "").strip()
+    ]
+    allowed_workers: list[str] = list(catalog_workers)
+    if team_source in {"chat", "tenant"}:
+        for raw_worker in team_ctx.get("workers") or []:
+            worker_id = str(raw_worker or "").strip()
+            if worker_id and worker_id not in allowed_workers:
+                allowed_workers.append(worker_id)
     if allowed_workers and wid not in allowed_workers:
         from duckclaw.workers.template_registry import resolve_template_id
 
@@ -1645,38 +1686,75 @@ async def admin_overview_metrics() -> dict[str, Any]:
     return {"activity": activity, "latency": latency, "db_path": gw}
 
 
+def _visible_template_workers_for_actor(actor: str) -> list[dict[str, str]]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import list_visible_workers_for_actor
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return [{"id": "default", "name": "Default"}]
+    db = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        return list_visible_workers_for_actor(db, actor_email=actor)
+    finally:
+        db.close()
+
+
+def _ensure_template_visible(worker_id: str, actor: str) -> None:
+    visible = {
+        str(w.get("id") or w.get("worker_id") or "").strip()
+        for w in _visible_template_workers_for_actor(actor)
+    }
+    if worker_id.strip() not in visible:
+        raise _problem(404, "Plantilla no encontrada", worker_id)
+
+
 @router.get("/templates", dependencies=[Depends(_require_admin_key)])
-async def list_templates() -> dict[str, Any]:
-    from duckclaw.workers.factory import list_workers
+async def list_templates(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
     from duckclaw.workers.manifest import load_manifest
 
     items: list[dict[str, Any]] = []
-    for wid in list_workers():
+    for worker in _visible_template_workers_for_actor(actor):
+        wid = str(worker.get("id") or worker.get("worker_id") or "").strip()
+        if not wid:
+            continue
         template_dir = _templates_dir() / wid
-        description, description_source = _template_card_description(template_dir)
+        description, description_source = (
+            _template_card_description(template_dir) if template_dir.is_dir() else ("", "catalog")
+        )
         meta: dict[str, Any] = {
             "id": wid,
             "description": description,
             "description_source": description_source,
+            "source": worker.get("source") or ("template" if template_dir.is_dir() else "catalog"),
         }
+        if worker.get("name"):
+            meta["name"] = worker["name"]
         try:
             spec = load_manifest(wid)
             meta.update(
                 {
-                    "name": spec.name,
+                    "name": meta.get("name") or spec.name,
                     "schema_name": spec.schema_name,
                     "temperature": spec.temperature,
                     "topology": spec.topology,
                 }
             )
         except Exception as exc:
-            meta["load_error"] = str(exc)
+            if template_dir.is_dir():
+                meta["load_error"] = str(exc)
         items.append(meta)
     return {"templates": items}
 
 
 @router.get("/templates/{worker_id}", dependencies=[Depends(_require_admin_key)])
-async def get_template(worker_id: str, include_content: bool = True) -> dict[str, Any]:
+async def get_template(
+    worker_id: str,
+    include_content: bool = True,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    _ensure_template_visible(worker_id, actor)
     base = _templates_dir() / worker_id.strip()
     if not base.is_dir():
         raise _problem(404, "Plantilla no encontrada", worker_id)

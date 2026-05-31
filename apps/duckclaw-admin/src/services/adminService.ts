@@ -1,4 +1,5 @@
 import { friendlyGatewayError } from '@/lib/adminErrors';
+import { mutationHeaders } from '@/lib/csrfClient';
 import type {
   AdminHealth,
   EnvConfigResponse,
@@ -146,27 +147,18 @@ export type PlaygroundVaultInfo = {
   default_path?: string | null;
 };
 
-function sessionHeaders(): HeadersInit {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem('duckclaw-admin-auth');
-    if (!raw) return {};
-    const state = JSON.parse(raw)?.state;
-    const headers: Record<string, string> = {};
-    if (state?.usuario?.rol) headers['x-duckclaw-role'] = String(state.usuario.rol);
-    if (state?.usuario?.email) headers['x-duckclaw-actor'] = String(state.usuario.email);
-    return headers;
-  } catch {
-    return {};
-  }
+function sessionHeaders(method = 'GET'): HeadersInit {
+  return mutationHeaders(method);
 }
 
 async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = init?.method || 'GET';
   const res = await fetch(`/api/admin${path}`, {
     ...init,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...sessionHeaders(),
+      ...sessionHeaders(method),
       ...(init?.headers ?? {}),
     },
     cache: 'no-store',
@@ -649,8 +641,9 @@ export const adminService = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...sessionHeaders(),
+        ...sessionHeaders('POST'),
       },
+      credentials: 'include',
       body: JSON.stringify(body),
       cache: 'no-store',
     }).then(async (res) => {
@@ -678,7 +671,7 @@ export const adminService = {
   fetchArtifactPreviewBlob: async (tenantId: string, artifactId: string) => {
     const res = await fetch(
       `/api/admin/artifacts/${encodeURIComponent(tenantId)}/${encodeURIComponent(artifactId)}`,
-      { headers: sessionHeaders(), cache: 'no-store' }
+      { headers: sessionHeaders('GET'), credentials: 'include', cache: 'no-store' }
     );
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -1007,8 +1000,9 @@ export const adminService = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...sessionHeaders(),
+        ...sessionHeaders('POST'),
       },
+      credentials: 'include',
       body: JSON.stringify({ ...body, stream: true }),
       cache: 'no-store',
       signal: options?.signal,

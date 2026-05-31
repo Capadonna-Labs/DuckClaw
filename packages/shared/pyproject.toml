@@ -14,6 +14,7 @@ dependencies = [
     "langchain-core>=0.3.0",
     "langchain-openai>=0.3.35",
     "langchain-google-genai>=2.1.12",
+    "argon2-cffi>=23.1.0",
 ]
 
 [tool.setuptools.packages.find]

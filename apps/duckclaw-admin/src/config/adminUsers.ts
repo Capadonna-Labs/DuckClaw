@@ -1,33 +1,10 @@
-import type { AdminRole } from '@/types/admin';
+/**
+ * Dev login hints — never embed credentials in source.
+ * Seed users: DUCKCLAW_ADMIN_EMAIL / DUCKCLAW_ADMIN_PASSWORD in .env.local
+ */
 
-/** Usuarios de la consola admin. Edita aquí o sustituye por SSO en producción. */
-export type AdminUserConfig = {
-  email: string;
-  password: string;
-  nombre: string;
-  rol: AdminRole;
-  initials: string;
-};
+export const DEV_LOGIN_HINT_ENABLED =
+  process.env.NODE_ENV === 'development' && process.env.SHOW_DEV_HINT === 'true';
 
-export const ADMIN_USERS: AdminUserConfig[] = [
-  {
-    email: 'admin@duckclaw.local',
-    password: '1234',
-    nombre: 'Administrador DuckClaw',
-    rol: 'admin',
-    initials: 'DC',
-  },
-  {
-    email: 'user@duckclaw.local',
-    password: '1234',
-    nombre: 'Usuario DuckClaw',
-    rol: 'user',
-    initials: 'UD',
-  }
-];
-
-export const DEV_LOGIN_HINT = ADMIN_USERS.map((u) => ({
-  email: u.email,
-  rol: u.rol,
-  passwordHint: u.rol === 'admin' ? '1234' : '1234',
-}));
+/** Optional email hint for dev UI (never password). */
+export const DEV_HINT_EMAIL = (process.env.NEXT_PUBLIC_DEV_HINT_EMAIL || '').trim();

@@ -29,11 +29,12 @@ El BFF ya reenvía cualquier subruta: no hace falta nuevo `route.ts` si el path 
 
 ## Roles y permisos en UI
 
-- Usuarios: `src/config/adminUsers.ts`
-- Store: `src/store/authStore.ts` (persiste en `localStorage` como `duckclaw-admin-auth`)
-- El BFF lee `x-duckclaw-role` del header que pone `adminService.sessionHeaders()`
+- Sesión: cookie HttpOnly `session` + `csrf_token` (ver [`specs/features/platform/ADMIN_CONSOLE_AUTH.md`](../../../specs/features/platform/ADMIN_CONSOLE_AUTH.md))
+- Store: `src/store/authStore.ts` — estado en memoria; hidrata vía `/api/admin/auth/me`
+- BFF deriva el rol desde la sesión en gateway (no confía en headers del cliente)
+- Mutaciones: `adminService` envía `X-CSRF-Token` desde la cookie `csrf_token`
 
-Para probar solo lectura, añade un usuario con `rol: 'viewer'`.
+Para probar solo lectura, crea un usuario con `rol: 'user'` en `/admin/access`.
 
 ## Estilos y UX
 

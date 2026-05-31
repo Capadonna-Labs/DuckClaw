@@ -39,19 +39,22 @@ flowchart LR
 El BFF añade:
 
 - `X-Admin-Key` desde `process.env` (nunca expuesta al cliente).
-- `x-duckclaw-role` y `x-duckclaw-actor` desde `localStorage` (`duckclaw-admin-auth`).
-- Bloqueo **403** si `role === viewer` y el método es PUT/PATCH/POST/DELETE.
-- Bloqueo **403** en `/audit` si el rol no es `admin`.
+- Rol y actor derivados de sesión (`/api/admin/auth/me` → gateway), no headers del cliente.
+- Validación **CSRF** (`X-CSRF-Token`) en mutaciones.
+- Bloqueo **403** si rol `user` y método de escritura no permitido.
+- Bloqueo **403** en `/audit` y `/ops` si el rol no es `admin`.
 
-## Autenticación (v1 — demo)
+## Autenticación
+
+Ver spec canónica: [`specs/features/platform/ADMIN_CONSOLE_AUTH.md`](../../../specs/features/platform/ADMIN_CONSOLE_AUTH.md).
 
 | Capa | Mecanismo |
 |------|-----------|
-| UI | `src/store/authStore.ts` + `src/config/adminUsers.ts` |
-| BFF | Confía en headers `x-duckclaw-role` enviados por el cliente |
-| Gateway | `X-Admin-Key` únicamente |
+| UI | `authStore.ts` + `AuthProvider` (hydrate `/auth/me`) |
+| BFF | Cookies `session` + `csrf_token`; proxy auth; RBAC server-side |
+| Gateway | Argon2id/PBKDF2, Redis sessions, rate-limit login |
 
-**Limitación conocida:** un usuario malicioso podría falsificar el rol en headers si llamara al BFF sin pasar por la UI. Esto es aceptable solo en desarrollo local. Producción requiere sesión firmada en servidor (JWT/cookie httpOnly) — ver spec.
+Sesión: cookie HttpOnly `session` + Redis `sess:{id}`. Sin credenciales en `localStorage`.
 
 ## Matriz fuente de verdad
 

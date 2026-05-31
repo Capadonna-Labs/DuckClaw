@@ -8,19 +8,10 @@ import { Radio, Square, Terminal } from 'lucide-react';
 const MAX_LINES = 6_000;
 const MAX_SELECTED = 2;
 
-function sessionHeaders(): HeadersInit {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem('duckclaw-admin-auth');
-    if (!raw) return {};
-    const state = JSON.parse(raw)?.state;
-    const headers: Record<string, string> = {};
-    if (state?.usuario?.rol) headers['x-duckclaw-role'] = String(state.usuario.rol);
-    if (state?.usuario?.email) headers['x-duckclaw-actor'] = String(state.usuario.email);
-    return headers;
-  } catch {
-    return {};
-  }
+import { mutationHeaders } from '@/lib/csrfClient';
+
+function sessionHeaders(method = 'GET'): HeadersInit {
+  return mutationHeaders(method);
 }
 
 type Props = {
@@ -72,7 +63,8 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
 
     try {
       const res = await fetch(url, {
-        headers: sessionHeaders(),
+        headers: sessionHeaders('GET'),
+        credentials: 'include',
         signal: ac.signal,
         cache: 'no-store',
       });

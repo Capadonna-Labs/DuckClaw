@@ -1,6 +1,9 @@
 """Tests Admin Access API (console users, login, shared grants)."""
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -8,10 +11,12 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
+from duckclaw.admin_auth_crypto import calculate_login_delay, verify_and_migrate
 from duckclaw.admin_console_users import (
     authenticate_console_user,
+    ensure_admin_auth_columns,
     ensure_admin_console_users_table,
-    hash_password,
+    get_by_email,
     seed_admin_console_users_if_empty,
     upsert_console_user,
     verify_password,
@@ -29,45 +34,90 @@ class _Adapter:
         return self._con.execute(sql)
 
 
-@pytest.fixture
-def gateway_admin_client(gateway_db: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    from gateway_import import load_gateway_app
+def _pbkdf2_hash(plain: str, *, iterations: int = 260_000) -> str:
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", plain.encode("utf-8"), salt, iterations)
+    return (
+        f"pbkdf2_sha256${iterations}$"
+        f"{base64.b64encode(salt).decode()}${base64.b64encode(digest).decode()}"
+    )
 
-    monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
-    repo = Path(__file__).resolve().parent.parent
-    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo))
-    return TestClient(load_gateway_app())
 
-
-@pytest.fixture
-def gateway_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    from duckclaw.gateway_db import GATEWAY_DB_ENV_KEYS
-
-    p = tmp_path / "gateway.duckdb"
-    for key in GATEWAY_DB_ENV_KEYS:
-        monkeypatch.setenv(key, str(p))
-    con = duckdb.connect(str(p))
+def test_argon2_password_authenticates(gateway_db: Path) -> None:
+    con = duckdb.connect(str(gateway_db))
     try:
         adapter = _Adapter(con)
-        ensure_admin_console_users_table(adapter)
-        ensure_user_shared_db_access_table(adapter)
         upsert_console_user(
             adapter,
-            email="admin@test.local",
-            nombre="Admin Test",
+            email="argon@test.local",
+            nombre="Argon",
             rol="admin",
-            password="secret123",
-            initials="AT",
+            password="hunter2!!",
+            initials="AR",
         )
+        ok = authenticate_console_user(adapter, email="argon@test.local", password="hunter2!!")
+        assert ok is not None
+        row = get_by_email(adapter, "argon@test.local")
+        assert row is not None
+        assert str(row.get("hash_algo") or "") == "argon2id"
     finally:
         con.close()
-    return p
 
 
-def test_password_hash_roundtrip() -> None:
-    h = hash_password("hunter2")
-    assert verify_password("hunter2", h)
-    assert not verify_password("wrong", h)
+def test_pbkdf2_verify_password_legacy() -> None:
+    stored = _pbkdf2_hash("hunter2")
+    assert verify_password("hunter2", stored)
+    assert not verify_password("wrongpass", stored)
+
+
+def test_verify_and_migrate_pbkdf2_to_argon2(gateway_db: Path) -> None:
+    con = duckdb.connect(str(gateway_db))
+    try:
+        adapter = _Adapter(con)
+        stored = _pbkdf2_hash("migrateme1")
+        adapter.execute(
+            """
+            INSERT INTO main.admin_console_users
+              (email, nombre, rol, password_hash, hash_algo, initials, active)
+            VALUES ('migrate@test.local', 'Migrate', 'admin', ?, 'pbkdf2_sha256', 'MG', true)
+            """,
+            [stored],
+        )
+        row = get_by_email(adapter, "migrate@test.local")
+        assert row is not None
+
+        updates: list[tuple[str, str, dict]] = []
+
+        def capture(email: str, pwd_hash: str, algo: str, params: dict) -> None:
+            updates.append((algo, pwd_hash, params))
+            adapter.execute(
+                "UPDATE main.admin_console_users SET password_hash=?, hash_algo=?, hash_params=?::JSON WHERE email=?",
+                [pwd_hash, algo, json.dumps(params), email],
+            )
+
+        assert verify_and_migrate("migrate@test.local", "migrateme1", row, capture)
+        assert updates
+        assert updates[0][0] == "argon2id"
+    finally:
+        con.close()
+
+
+def test_calculate_login_delay_edges() -> None:
+    assert calculate_login_delay(0) == 0
+    assert calculate_login_delay(4) == 0
+    assert calculate_login_delay(5) == 1
+    assert calculate_login_delay(6) == 2
+    assert calculate_login_delay(20) == 3600
+
+
+def test_admin_auth_columns_idempotent(gateway_db: Path) -> None:
+    con = duckdb.connect(str(gateway_db))
+    try:
+        adapter = _Adapter(con)
+        ensure_admin_auth_columns(adapter)
+        ensure_admin_auth_columns(adapter)
+    finally:
+        con.close()
 
 
 def test_authenticate_console_user(gateway_db: Path) -> None:
@@ -96,7 +146,7 @@ def test_seed_idempotent(gateway_db: Path) -> None:
 
 
 def test_admin_login_seeds_default_when_table_empty(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_redis
 ) -> None:
     from duckclaw.gateway_db import GATEWAY_DB_ENV_KEYS
     from gateway_import import load_gateway_app
@@ -105,6 +155,7 @@ def test_admin_login_seeds_default_when_table_empty(
     for key in GATEWAY_DB_ENV_KEYS:
         monkeypatch.setenv(key, str(p))
     monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setenv("DUCKCLAW_ADMIN_PASSWORD", "seedpass1")
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(Path(__file__).resolve().parent.parent))
     con = duckdb.connect(str(p))
     try:
@@ -113,12 +164,13 @@ def test_admin_login_seeds_default_when_table_empty(
         con.close()
 
     client = TestClient(load_gateway_app())
+    client.app.state.redis = session_redis
     r = client.post(
         "/api/v1/admin/auth/login",
-        json={"email": "admin@duckclaw.local", "password": "1234"},
+        json={"email": "admin@duckclaw.local", "password": "seedpass1"},
     )
     assert r.status_code == 200
-    assert r.json()["email"] == "admin@duckclaw.local"
+    assert r.json()["user"]["email"] == "admin@duckclaw.local"
 
 
 def test_admin_login_ok(gateway_admin_client: TestClient, gateway_db: Path) -> None:
@@ -128,14 +180,15 @@ def test_admin_login_ok(gateway_admin_client: TestClient, gateway_db: Path) -> N
     )
     assert r.status_code == 200
     data = r.json()
-    assert data["email"] == "admin@test.local"
-    assert data["rol"] == "admin"
+    assert data["user"]["email"] == "admin@test.local"
+    assert data["user"]["rol"] == "admin"
+    assert "session" in r.cookies
 
 
 def test_admin_login_fail(gateway_admin_client: TestClient, gateway_db: Path) -> None:
     r = gateway_admin_client.post(
         "/api/v1/admin/auth/login",
-        json={"email": "admin@test.local", "password": "bad"},
+        json={"email": "admin@test.local", "password": "wrongpass1"},
     )
     assert r.status_code == 401
 

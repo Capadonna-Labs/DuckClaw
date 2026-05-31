@@ -144,6 +144,55 @@ def _playground_team_context(
     }
 
 
+def _console_profile_for_actor(actor: str | None) -> dict[str, Any] | None:
+    email = (actor or "").strip().lower()
+    if not email or "@" not in email:
+        return None
+    from duckclaw import DuckClaw
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return None
+    db = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        return ensure_profile_for_user(db, email=email)
+    finally:
+        db.close()
+
+
+def _playground_team_context_for_actor(
+    *,
+    actor: str | None,
+    telegram_user_id: str | None = None,
+    tenant_id: str | None = None,
+    chat_id: str | None = None,
+) -> dict[str, Any]:
+    profile = _console_profile_for_actor(actor)
+    if not profile:
+        return _playground_team_context(
+            telegram_user_id=telegram_user_id,
+            tenant_id=tenant_id,
+            chat_id=chat_id,
+        )
+    team_ctx = _playground_team_context(
+        telegram_user_id=None,
+        tenant_id=str(profile.get("tenant_id") or "default"),
+        chat_id=chat_id,
+    )
+    team_ctx.update(
+        {
+            "tenant_id": profile.get("tenant_id") or team_ctx.get("tenant_id"),
+            "telegram_user_id": profile.get("telegram_user_id") or "",
+            "authorized": True,
+            "whitelist_role": "console",
+            "console_profile": profile,
+        }
+    )
+    return team_ctx
+
+
 def _playground_workers_payload(raw_workers: list[str]) -> dict[str, Any]:
     """Normaliza equipo Playground: ids canónicos en disco + etiquetas de manifest."""
     from duckclaw.workers.manifest import load_manifest
@@ -185,6 +234,36 @@ def _playground_workers_payload(raw_workers: list[str]) -> dict[str, Any]:
         "workers_invalid": invalid,
         "team_hint_extra": team_hint_extra,
     }
+
+
+def _merge_user_agent_workers(
+    workers_payload: dict[str, Any],
+    profile: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not profile:
+        return workers_payload
+    from duckclaw import DuckClaw
+    from duckclaw.admin_user_agents import list_user_agents
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return workers_payload
+    db = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        agents = list_user_agents(db, str(profile.get("email") or ""))
+    finally:
+        db.close()
+
+    existing = {str(w.get("id") or "") for w in workers_payload.get("workers") or []}
+    merged = list(workers_payload.get("workers") or [])
+    for agent in agents:
+        wid = str(agent.get("worker_id") or "").strip()
+        if not wid or wid in existing:
+            continue
+        merged.append({"id": wid, "label": str(agent.get("display_name") or wid)})
+        existing.add(wid)
+    return {**workers_payload, "workers": merged, "user_agents": agents}
 
 
 def _list_whitelist_users_merged(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
@@ -595,6 +674,15 @@ class PlaygroundChatBody(BaseModel):
         return self
 
 
+class UserAgentCreateBody(BaseModel):
+    worker_id: str = Field(..., min_length=1, max_length=64)
+    display_name: str = Field(..., min_length=1, max_length=256)
+    source_template_id: str = Field(default="default", max_length=64)
+    system_prompt: str = Field(default="", max_length=16_000)
+    description: str = Field(default="", max_length=2_000)
+    skills: list[str] = Field(default_factory=list, max_length=32)
+
+
 class EnvPatchBody(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
 
@@ -910,6 +998,7 @@ def _llm_keys_configured(env_keys: list[str]) -> bool:
 @router.get("/playground/config", dependencies=[Depends(_require_admin_key)])
 async def playground_config(
     request: Request,
+    actor: str = Depends(_actor_from_header),
     telegram_user_id: str | None = Query(None, description="ID Telegram (default: DUCKCLAW_OWNER_ID)"),
     tenant_id: str | None = Query(None, description="Tenant para whitelist y equipo"),
     chat_id: str | None = Query(
@@ -917,13 +1006,18 @@ async def playground_config(
         description="Chat id para team_templates (default: mismo que telegram_user_id)",
     ),
 ) -> dict[str, Any]:
-    team_ctx = _playground_team_context(
+    team_ctx = _playground_team_context_for_actor(
+        actor=actor,
         telegram_user_id=telegram_user_id,
         tenant_id=tenant_id,
         chat_id=chat_id,
     )
     raw_workers: list[str] = team_ctx.get("workers") or []
     workers_payload = _playground_workers_payload(raw_workers)
+    workers_payload = _merge_user_agent_workers(
+        workers_payload,
+        team_ctx.get("console_profile") if isinstance(team_ctx.get("console_profile"), dict) else None,
+    )
     eff_chat = (chat_id or team_ctx.get("team_chat_id") or "admin-playground").strip()
     llm = _resolved_llm_for_chat(eff_chat)
     catalog = _playground_llm_catalog(llm.get("provider", ""))
@@ -951,6 +1045,7 @@ async def playground_config(
         "whitelist_role": team_ctx.get("whitelist_role"),
         "team_source": team_ctx.get("team_source"),
         "team_hint": team_hint.strip(),
+        "profile": team_ctx.get("console_profile") or None,
         "vault": vault,
         "vault_options": vault_options,
         "chat_endpoint": "/api/v1/admin/playground/chat",
@@ -1118,7 +1213,8 @@ async def playground_chat(
     if not msg:
         raise _problem(400, "message vacío tras VLM", body.message)
     tenant_id = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
-    team_ctx = _playground_team_context(
+    team_ctx = _playground_team_context_for_actor(
+        actor=actor,
         telegram_user_id=body.telegram_user_id,
         tenant_id=tenant_id,
         chat_id=body.chat_id,
@@ -1220,6 +1316,55 @@ async def playground_chat(
             "usage_tokens": result.get("usage_tokens"),
         }
     return {"ok": True, "worker_id": wid, "response": str(result or "")}
+
+
+@router.get("/user-agents", dependencies=[Depends(_require_admin_key)])
+async def list_admin_user_agents(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_user_agents import list_user_agents
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(503, "Gateway DuckDB no disponible", "gateway_db")
+    db = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        agents = list_user_agents(db, actor)
+    finally:
+        db.close()
+    return {"agents": agents}
+
+
+@router.post("/user-agents", dependencies=[Depends(_require_admin_key)])
+async def create_admin_user_agent(
+    body: UserAgentCreateBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_user_agents import create_runtime_agent
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(503, "Gateway DuckDB no disponible", "gateway_db")
+    db = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        agent = create_runtime_agent(
+            db,
+            owner_email=actor,
+            worker_id=body.worker_id,
+            display_name=body.display_name,
+            source_template_id=body.source_template_id,
+            system_prompt=body.system_prompt,
+            description=body.description,
+            skills=body.skills,
+        )
+    except ValueError as exc:
+        raise _problem(400, str(exc), body.worker_id) from exc
+    finally:
+        db.close()
+    _admin_audit("user_agent.create", agent["worker_id"], agent["manifest_path"], actor=actor)
+    return {"ok": True, "agent": agent}
 
 
 class ComfyuiGenerateBody(BaseModel):
@@ -2323,6 +2468,10 @@ async def admin_auth_login(body: AdminLoginBody, request: Request, response: Res
     try:
         seed_admin_console_users_if_empty(db)
         user = authenticate_console_user(db, email=body.email, password=body.password)
+        if user:
+            from duckclaw.admin_user_profiles import ensure_profile_for_user
+
+            user["profile"] = ensure_profile_for_user(db, email=str(user.get("email") or body.email))
         if not user:
             record_login_failure(db, body.email)
             if redis_client is not None:
@@ -2350,6 +2499,7 @@ def session_user_payload(user: dict[str, Any]) -> dict[str, Any]:
         "nombre": user.get("nombre"),
         "rol": user.get("rol"),
         "initials": user.get("initials") or "",
+        "profile": user.get("profile") or {},
     }
 
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readTenantArtifact } from '@/lib/artifactPreviewServer';
-import { normalizeAdminRole } from '@/lib/roles';
+import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,13 +9,8 @@ export async function GET(
   req: NextRequest,
   ctx: { params: { tenantId: string; artifactId: string } }
 ) {
-  const rawRole = req.headers.get('x-duckclaw-role');
-  if (rawRole) {
-    const role = normalizeAdminRole(rawRole);
-    if (role !== 'admin' && role !== 'user') {
-      return NextResponse.json({ detail: 'Rol inválido' }, { status: 403 });
-    }
-  }
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin', 'user'] });
+  if (!auth.ok) return auth.response;
 
   const { tenantId, artifactId } = ctx.params;
   const file = await readTenantArtifact(tenantId, artifactId);

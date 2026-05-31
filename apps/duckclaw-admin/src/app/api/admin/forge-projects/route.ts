@@ -4,23 +4,24 @@ import {
   listForgeProjectsLocal,
 } from '@/lib/forgeProjectsLocal';
 import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function isAdmin(req: NextRequest): boolean {
-  return (req.headers.get('x-duckclaw-role') || 'admin') === 'admin';
-}
-
-async function proxyToGateway(req: NextRequest, subpath: string, init?: RequestInit) {
+async function proxyToGateway(
+  req: NextRequest,
+  subpath: string,
+  actor: string,
+  init?: RequestInit
+) {
   const base = gatewayBase();
   const key = adminApiKey();
   if (!base || !key) return null;
   const url = new URL(req.url);
   const target = `${base}/api/v1/admin/forge-projects${subpath}${url.search}`;
   const headers = gatewayProxyHeaders({ 'X-Admin-Key': key });
-  const actor = req.headers.get('x-duckclaw-actor');
-  if (actor) headers['X-Duckclaw-Actor'] = actor;
+  headers['X-Duckclaw-Actor'] = actor;
   const ct = req.headers.get('content-type');
   if (ct) headers['Content-Type'] = ct;
   try {
@@ -37,10 +38,10 @@ async function proxyToGateway(req: NextRequest, subpath: string, init?: RequestI
 }
 
 export async function GET(req: NextRequest) {
-  if (!isAdmin(req)) {
-    return NextResponse.json({ detail: 'Solo admin' }, { status: 403 });
-  }
-  const proxied = await proxyToGateway(req, '');
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
+  if (!auth.ok) return auth.response;
+
+  const proxied = await proxyToGateway(req, '', auth.actor);
   if (proxied) return proxied;
   return NextResponse.json({
     projects: listForgeProjectsLocal(),
@@ -49,12 +50,13 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!isAdmin(req)) {
-    return NextResponse.json({ detail: 'Solo admin' }, { status: 403 });
-  }
-  const proxied = await proxyToGateway(req, '', {
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
+  if (!auth.ok) return auth.response;
+
+  const bodyText = await req.text();
+  const proxied = await proxyToGateway(req, '', auth.actor, {
     method: 'POST',
-    body: await req.text(),
+    body: bodyText,
   });
   if (proxied) return proxied;
 
@@ -67,7 +69,7 @@ export async function POST(req: NextRequest) {
     shared_context?: string;
   };
   try {
-    body = await req.json();
+    body = JSON.parse(bodyText || '{}');
   } catch {
     return NextResponse.json({ detail: 'JSON inválido' }, { status: 400 });
   }

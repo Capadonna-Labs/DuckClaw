@@ -10,6 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 from duckclaw.admin_console_users import ensure_admin_console_users_table, seed_admin_console_users_if_empty
+from duckclaw.admin_user_agents import ensure_admin_user_agents_table
+from duckclaw.admin_user_profiles import ensure_admin_user_profiles_table
 from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
 
 _CORE_SEMANTIC_MEMORY_DDL = """
@@ -71,6 +73,8 @@ def bootstrap_core_schema(con: Any, *, seed_admin: bool = True) -> None:
     )
     ensure_user_shared_db_access_table(con)
     ensure_admin_console_users_table(con)
+    ensure_admin_user_profiles_table(con)
+    ensure_admin_user_agents_table(con)
     if seed_admin:
         seed_admin_console_users_if_empty(con)
     con.execute(

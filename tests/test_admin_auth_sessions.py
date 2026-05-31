@@ -19,6 +19,8 @@ def test_login_sets_cookies_and_user_payload(gateway_admin_client: TestClient) -
     assert "user" in data
     assert data["user"]["email"] == "admin@test.local"
     assert data["user"]["rol"] == "admin"
+    assert data["user"]["profile"]["tenant_id"].startswith("user-admin-")
+    assert data["user"]["profile"]["default_worker_id"] == "default"
     assert "session" in r.cookies
     assert "csrf_token" in r.cookies
 
@@ -39,6 +41,7 @@ def test_me_refreshes_session_ttl(
     me = gateway_admin_client.get("/api/v1/admin/auth/me", cookies={"session": session_id})
     assert me.status_code == 200
     assert me.json()["user"]["email"] == "admin@test.local"
+    assert me.json()["user"]["profile"]["tenant_id"].startswith("user-admin-")
 
     ttl_after = asyncio.run(session_redis.ttl(key))
     assert ttl_after > ttl_before

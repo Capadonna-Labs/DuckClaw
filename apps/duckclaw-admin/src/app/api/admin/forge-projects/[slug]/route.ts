@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteForgeProjectLocal } from '@/lib/forgeProjectsLocal';
 import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type Ctx = { params: { slug: string } };
 
-async function proxy(req: NextRequest, slug: string, init?: RequestInit) {
+async function proxy(slug: string, actor: string, init?: RequestInit) {
   const base = gatewayBase();
   const key = adminApiKey();
   if (!base || !key) return null;
   const target = `${base}/api/v1/admin/forge-projects/${encodeURIComponent(slug)}`;
   const headers = gatewayProxyHeaders({ 'X-Admin-Key': key });
+  headers['X-Duckclaw-Actor'] = actor;
   try {
     const res = await fetch(target, { ...init, headers, cache: 'no-store' });
     if (res.status === 404) return null;
@@ -27,11 +29,11 @@ async function proxy(req: NextRequest, slug: string, init?: RequestInit) {
 }
 
 export async function DELETE(req: NextRequest, ctx: Ctx) {
-  if ((req.headers.get('x-duckclaw-role') || 'admin') !== 'admin') {
-    return NextResponse.json({ detail: 'Solo admin' }, { status: 403 });
-  }
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
+  if (!auth.ok) return auth.response;
+
   const slug = ctx.params.slug;
-  const proxied = await proxy(req, slug, { method: 'DELETE' });
+  const proxied = await proxy(slug, auth.actor, { method: 'DELETE' });
   if (proxied) return proxied;
   try {
     deleteForgeProjectLocal(slug);

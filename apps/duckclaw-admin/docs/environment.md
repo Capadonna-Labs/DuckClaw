@@ -80,7 +80,7 @@ DUCKCLAW_ADMIN_PORT=3001 uv run python scripts/restore_tailscale_admin_serve.py
 En el iPhone/Android (app Tailscale conectada): `https://<nombre-maquina>.<tailnet>.ts.net:8443/`  
 Ejemplo: `https://mac-mini-de-juan.tailc85db0.ts.net:8443/`
 
-Login demo: `admin@duckclaw.local` / `1234` (ver `src/config/adminUsers.ts`).
+Login: credenciales en hub DuckDB (`DUCKCLAW_ADMIN_EMAIL` / `DUCKCLAW_ADMIN_PASSWORD` en `.env` raíz). Ver [`specs/features/platform/ADMIN_CONSOLE_AUTH.md`](../../../specs/features/platform/ADMIN_CONSOLE_AUTH.md).
 
 Para apagar el proxy admin: `tailscale serve --https=8443 off`
 

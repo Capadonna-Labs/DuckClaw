@@ -14,9 +14,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -650,6 +650,18 @@ class WhitelistBody(BaseModel):
 class AdminLoginBody(BaseModel):
     email: str
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return (v or "").strip().lower()
+
+    @field_validator("password")
+    @classmethod
+    def password_length(cls, v: str) -> str:
+        if len(v) < 8 or len(v) > 128:
+            raise ValueError("invalid password length")
+        return v
 
 
 class ConsoleUserBody(BaseModel):
@@ -2278,32 +2290,96 @@ async def admin_reindex_conversations(
 
 
 @router.post("/auth/login")
-async def admin_auth_login(body: AdminLoginBody) -> dict[str, Any]:
+async def admin_auth_login(body: AdminLoginBody, request: Request, response: Response) -> dict[str, Any]:
+    from core.admin_auth import (
+        apply_login_delay,
+        check_ip_rate_limit,
+        clear_email_failures,
+        client_ip,
+        create_session,
+        record_email_failure,
+        set_auth_cookies,
+    )
     from duckclaw import DuckClaw
     from duckclaw.admin_console_users import (
         authenticate_console_user,
+        record_login_failure,
         seed_admin_console_users_if_empty,
     )
     from duckclaw.gateway_db import get_gateway_db_path
 
+    redis_client = getattr(request.app.state, "redis", None)
+    ip = client_ip(request)
+    if redis_client is not None:
+        await check_ip_rate_limit(redis_client, ip)
+        await apply_login_delay(redis_client, body.email)
+
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
         raise _problem(503, "Gateway DuckDB no disponible", gw)
+
     db = DuckClaw(gw, read_only=False, engine="python")
+    user: dict[str, Any] | None = None
     try:
         seed_admin_console_users_if_empty(db)
         user = authenticate_console_user(db, email=body.email, password=body.password)
+        if not user:
+            record_login_failure(db, body.email)
+            if redis_client is not None:
+                await record_email_failure(redis_client, body.email)
     finally:
         db.close()
+
     if not user:
-        raise _problem(401, "Credenciales inválidas", body.email or "unknown")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if redis_client is None:
+        raise _problem(503, "Redis no disponible para sesiones", "redis")
+
+    await clear_email_failures(redis_client, body.email)
+    session_id, csrf_token = await create_session(redis_client, user=user)
+    set_auth_cookies(response, session_id, csrf_token)
+    logging.getLogger(__name__).info("login_success email=%s ip=%s", body.email, ip)
+    return {"user": session_user_payload(user)}
+
+
+def session_user_payload(user: dict[str, Any]) -> dict[str, Any]:
     return {
-        "email": user["email"],
-        "nombre": user["nombre"],
-        "rol": user["rol"],
+        "id": user.get("id") or f"user-{user.get('email')}",
+        "email": user.get("email"),
+        "nombre": user.get("nombre"),
+        "rol": user.get("rol"),
         "initials": user.get("initials") or "",
-        "id": user.get("id") or f"user-{user['email']}",
     }
+
+
+@router.get("/auth/me")
+async def admin_auth_me(request: Request) -> dict[str, Any]:
+    from core.admin_auth import SESSION_COOKIE, load_session, refresh_session, session_user_public
+
+    redis_client = getattr(request.app.state, "redis", None)
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if not redis_client or not session_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    session = await load_session(redis_client, session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired")
+
+    session = await refresh_session(redis_client, session_id, session)
+    return {"user": session_user_public(session)}
+
+
+@router.post("/auth/logout")
+async def admin_auth_logout(request: Request, response: Response) -> dict[str, Any]:
+    from core.admin_auth import SESSION_COOKIE, clear_auth_cookies, destroy_session
+
+    redis_client = getattr(request.app.state, "redis", None)
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if redis_client and session_id:
+        await destroy_session(redis_client, session_id)
+    clear_auth_cookies(response)
+    return {"ok": True}
 
 
 @router.get("/access/overview", dependencies=[Depends(_require_admin_key)])

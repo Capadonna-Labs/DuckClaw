@@ -1,10 +1,12 @@
 # Admin UI — Gestión de acceso (usuarios, roles, permisos)
 
+> Autenticación y sesiones: ver [`ADMIN_CONSOLE_AUTH.md`](ADMIN_CONSOLE_AUTH.md).
+
 ## Objetivo
 
 Vista unificada en la consola web para administrar:
 
-1. **Usuarios consola** (login duckclaw-admin): roles `admin` | `viewer`
+1. **Usuarios consola** (login duckclaw-admin): roles `admin` | `user` (alias histórico `viewer`)
 2. **Usuarios Telegram** (`authorized_users`): roles `admin` | `user`
 3. **Permisos sobre bases DuckDB compartidas** (`user_shared_db_access`)
 
@@ -25,9 +27,13 @@ CREATE TABLE IF NOT EXISTS main.admin_console_users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Migración auth (002): hash_algo, hash_params JSON, failed_login_count, last_failed_at
 ```
 
-**Hash de contraseña:** PBKDF2-HMAC-SHA256 (stdlib). Formato almacenado:
+**Hash de contraseña:** Argon2id (nuevo) o PBKDF2-HMAC-SHA256 legacy. Ver [`ADMIN_CONSOLE_AUTH.md`](ADMIN_CONSOLE_AUTH.md).
+
+Formato PBKDF2 legacy:
 
 `pbkdf2_sha256$<iterations>$<salt_b64>$<hash_b64>`
 
@@ -41,8 +47,8 @@ Ver [`TELEGRAM_AUTH_WHITELIST.md`](../telegram-gateway/TELEGRAM_AUTH_WHITELIST.m
 
 ## Matriz de capacidades (consola web)
 
-| Capacidad | admin | viewer |
-|-----------|-------|--------|
+| Capacidad | admin | user |
+|-----------|-------|------|
 | Login | sí | sí |
 | Lectura general (templates, duckdb, historial, playground) | sí | sí |
 | Escritura env / workers / runtime | sí | no |
@@ -53,7 +59,9 @@ Ver [`TELEGRAM_AUTH_WHITELIST.md`](../telegram-gateway/TELEGRAM_AUTH_WHITELIST.m
 
 | Método | Ruta | Auth |
 |--------|------|------|
-| `POST` | `/auth/login` | Sin `X-Admin-Key` (público para BFF login) |
+| `POST` | `/auth/login` | Público (rate-limited) |
+| `GET` | `/auth/me` | Cookie session |
+| `POST` | `/auth/logout` | Cookie session |
 | `GET` | `/access/overview` | `X-Admin-Key` |
 | `GET/POST/PATCH/DELETE` | `/console-users` | `X-Admin-Key` + escritura solo vía BFF con rol admin |
 | `GET` | `/access/shared-grants` | `X-Admin-Key` |
@@ -64,7 +72,7 @@ Endpoints legacy `/telegram/whitelist` se mantienen; la UI unificada puede usar 
 
 ## Bootstrap
 
-`scripts/bootstrap_dbs.py` crea `admin_console_users` y, si la tabla está vacía, inserta el usuario seed desde `ADMIN_USERS` (o variables `DUCKCLAW_ADMIN_EMAIL` / `DUCKCLAW_ADMIN_PASSWORD`).
+`scripts/bootstrap_dbs.py` crea `admin_console_users` y, si la tabla está vacía, inserta seed desde variables `DUCKCLAW_ADMIN_EMAIL` / `DUCKCLAW_ADMIN_PASSWORD` (ver [`ADMIN_CONSOLE_AUTH.md`](ADMIN_CONSOLE_AUTH.md)).
 
 ## Frontend
 

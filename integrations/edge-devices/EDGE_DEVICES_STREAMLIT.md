@@ -19,6 +19,18 @@ Opcional: exportar la ruta absoluta del `.so`:
 export DUCKCLAW_EDGE_LIB_PATH="$PWD/libedgecore.so"
 ```
 
+## Enlace entre dos edge devices (DEL)
+
+Ver [SPEC.MD](SPEC.MD). Ejemplo entre dos portátiles:
+
+```bash
+# Portátil A
+uv run python -m duckclaw_edge_devices.link --device-id LAPTOP-A --listen 0.0.0.0:9870 --stream
+
+# Portátil B
+uv run python -m duckclaw_edge_devices.link --device-id LAPTOP-B --connect 192.168.1.10:9870 --stream
+```
+
 ## Dashboard Streamlit
 
 Instalar dependencias del subproyecto y arrancar la UI:

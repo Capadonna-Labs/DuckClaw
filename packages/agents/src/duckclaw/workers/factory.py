@@ -19,34 +19,6 @@ from urllib.parse import parse_qs, urlparse
 
 _log = logging.getLogger(__name__)
 
-
-def _agent_debug_log(location: str, message: str, data: dict, hypothesis_id: str) -> None:
-    # #region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-            "a",
-            encoding="utf-8",
-        ) as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "fd1dbb",
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000),
-                        "hypothesisId": hypothesis_id,
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
-
-
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -1117,12 +1089,6 @@ def _quant_vlm_post_tools_synthesis(
 ) -> bool:
     """Cualquier tool sustantiva (≠ get_current_time) → síntesis en prosa por defecto, no JSON crudo."""
     if not already_has_tool_result:
-        _agent_debug_log(
-            "factory.py:_quant_vlm_post_tools_synthesis",
-            "synthesis_gate",
-            {"result": False, "reason": "no_tool_result"},
-            "A",
-        )
         return False
     from langchain_core.messages import ToolMessage
 
@@ -1132,54 +1098,16 @@ def _quant_vlm_post_tools_synthesis(
         if isinstance(m, ToolMessage)
     ]
     if not tools_since:
-        _agent_debug_log(
-            "factory.py:_quant_vlm_post_tools_synthesis",
-            "synthesis_gate",
-            {"result": False, "reason": "no_tools_since"},
-            "A",
-        )
         return False
     substantive = [t for t in tools_since if t != "get_current_time"]
     if substantive:
-        _agent_debug_log(
-            "factory.py:_quant_vlm_post_tools_synthesis",
-            "synthesis_gate",
-            {"result": True, "reason": "substantive_tools", "tools_since": tools_since},
-            "A",
-        )
         return True
     has_vlm = _incoming_has_vlm_context(incoming)
     has_lone_url = _incoming_is_lone_http_url(incoming)
     if not (has_vlm or has_lone_url):
-        _agent_debug_log(
-            "factory.py:_quant_vlm_post_tools_synthesis",
-            "synthesis_gate",
-            {
-                "result": False,
-                "reason": "gct_only_no_vlm_no_url",
-                "tools_since": tools_since,
-                "has_vlm": has_vlm,
-                "has_lone_url": has_lone_url,
-                "incoming_preview": (incoming or "")[:120],
-            },
-            "A",
-        )
         return False
     if has_lone_url and not has_vlm:
-        result = any(t in _QUANT_EGRESS_SYNTHESIS_TOOLS for t in tools_since)
-        _agent_debug_log(
-            "factory.py:_quant_vlm_post_tools_synthesis",
-            "synthesis_gate",
-            {"result": result, "reason": "lone_url_branch", "tools_since": tools_since},
-            "A",
-        )
-        return result
-    _agent_debug_log(
-        "factory.py:_quant_vlm_post_tools_synthesis",
-        "synthesis_gate",
-        {"result": True, "reason": "vlm_context", "tools_since": tools_since},
-        "A",
-    )
+        return any(t in _QUANT_EGRESS_SYNTHESIS_TOOLS for t in tools_since)
     return True
 
 
@@ -1370,38 +1298,11 @@ def _deterministic_market_worker_tool_summary(
             continue
         if tn == "read_sql":
             rows = _parse_read_sql_tool_rows(tc)
-            branch_taken = "fallback_preview"
             if rows:
                 prose = _format_finanz_deudas_rows_prose(rows)
                 if prose:
                     summaries.append(prose)
-                    branch_taken = "deudas_or_cuentas_prose"
-                    _agent_debug_log(
-                        "factory.py:_deterministic_market_worker_tool_summary",
-                        "read_sql_deterministic_format",
-                        {
-                            "parse_ok": True,
-                            "row_count": len(rows),
-                            "keys_sample": sorted(rows[0].keys())[:8] if rows else [],
-                            "branch_taken": branch_taken,
-                        },
-                        "E",
-                    )
                     continue
-                branch_taken = "parse_ok_no_prose_match"
-            else:
-                branch_taken = "parse_failed"
-            _agent_debug_log(
-                "factory.py:_deterministic_market_worker_tool_summary",
-                "read_sql_deterministic_format",
-                {
-                    "parse_ok": rows is not None,
-                    "row_count": len(rows) if rows else 0,
-                    "keys_sample": sorted(rows[0].keys())[:8] if rows else [],
-                    "branch_taken": branch_taken,
-                },
-                "E",
-            )
         preview = tc.split("\n", 1)[0].strip()[:120]
         if preview:
             summaries.append(f"{tn}: {preview}")
@@ -1465,15 +1366,7 @@ def _repair_quant_vlm_tool_egress_reply(
     _lid = str(getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", "") or "")
 
     def _deterministic_fallback() -> str:
-        det = _deterministic_market_worker_tool_summary(messages, _lh, _lid, incoming)
-        if det:
-            _agent_debug_log(
-                "factory.py:egress:deterministic_fallback",
-                "deterministic_fallback_used",
-                {"worker": _lid, "summary_preview": det[:160]},
-                "D",
-            )
-        return det
+        return _deterministic_market_worker_tool_summary(messages, _lh, _lid, incoming)
 
     if skip_llm_synthesis:
         det = _deterministic_fallback()
@@ -3067,25 +2960,6 @@ def build_worker_graph(
         and not open_vault_read_only
     )
     effective_vault_ro = bool(spec.read_only) or bool(open_vault_read_only)
-    # #region agent log
-    _agent_debug_log(
-        "factory.py:build_worker_graph:open_db",
-        "worker_db_open_plan",
-        {
-            "worker_id": worker_id,
-            "skip_private": skip_private,
-            "effective_vault_ro": effective_vault_ro,
-            "reuse_read_only": reuse_read_only,
-            "path_tail": str(path or "")[-96:],
-            "reuse_path_tail": reuse_path[-96:] if reuse_path else "",
-            "same_file": _same_duckdb_file(reuse_path, path) if reuse_path and path else False,
-            "shared_resolved": bool((shared_resolved or "").strip()),
-            "open_vault_read_only": bool(open_vault_read_only),
-            "db_id": id(reuse_db) if skip_private and reuse_db is not None else None,
-        },
-        "D",
-    )
-    # #endregion
     if skip_private:
         db = reuse_db
         _log.debug("build_worker_graph: reuse DuckClaw (same file, no shared, skip private ATTACH) path=%s", path)
@@ -3099,20 +2973,6 @@ def build_worker_graph(
             else "auto"
         )
         db = DuckClaw(path, read_only=effective_vault_ro, engine=_engine)
-        # #region agent log
-        _agent_debug_log(
-            "factory.py:build_worker_graph:opened",
-            "worker_db_opened",
-            {
-                "worker_id": worker_id,
-                "read_only": effective_vault_ro,
-                "engine": _engine,
-                "path_tail": str(getattr(db, "_path", "") or path or "")[-96:],
-                "db_id": id(db),
-            },
-            "D",
-        )
-        # #endregion
     # La conexión DuckClaw ya es al archivo de la bóveda; ATTACH del mismo path como `private`
     # abre otra vista del mismo archivo y en DuckDB suele disparar «different configuration».
     db_open_path = str(getattr(db, "_path", "") or path or "").strip()
@@ -4274,23 +4134,6 @@ def build_worker_graph(
                     and not already_has_tool_result
                 )
             )
-            # #region agent log
-            _agent_debug_log(
-                "factory.py:agent_node:force_flags",
-                "force_tool_decision",
-                {
-                    "runId": "hallucination-debug-1",
-                    "worker": str(_lid or ""),
-                    "already_has_tool_result": bool(already_has_tool_result),
-                    "incoming_preview": str(incoming or "")[:180],
-                    "is_schema": bool(is_schema),
-                    "is_table_content": bool(is_table_content),
-                    "force_read_sql": bool(force_read_sql),
-                    "force_admin_sql": bool(force_admin_sql),
-                },
-                "H1",
-            )
-            # #endregion
             force_portfolio_first = is_portfolio and not already_has_tool_result
             force_portfolio_after_local_cuentas = (
                 not telegram_context_summarize_directive
@@ -4639,6 +4482,47 @@ def build_worker_graph(
                 force_quant_goals_evaluate_cfd = True
 
             _incoming_l = (incoming or "").lower()
+            _quant_explicit_evaluate_request = bool(
+                _lid_l == WORKER_QUANT_TRADER
+                and has_evaluate_cfd_state
+                and (
+                    "evaluate_cfd_state" in _incoming_l
+                    or (
+                        re.search(r"\b(eval(úa|ua|uar|uacion|uación)|evaluat(e|ion))\b", _incoming_l)
+                        and re.search(r"\bcfd\b", _incoming_l)
+                    )
+                )
+            )
+            if (
+                _quant_explicit_evaluate_request
+                and not telegram_context_summarize_directive
+                and not already_has_tool_result
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                    or force_reddit
+                    or force_fetch_ib_gateway
+                    or force_fetch_market_data
+                    or force_quant_propose_signal
+                    or force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
+                )
+            ):
+                force_quant_goals_evaluate_cfd = True
+
+            _quant_explicit_backtest_sandbox_request = bool(
+                _lid_l == WORKER_QUANT_TRADER
+                and (
+                    "backtest" in _incoming_l
+                    or "backtesting" in _incoming_l
+                    or "retrotest" in _incoming_l
+                    or "sandbox" in _incoming_l
+                )
+            )
             _is_graph_request = any(
                 k in _incoming_l
                 for k in (
@@ -4689,10 +4573,17 @@ def build_worker_graph(
                 )
                 and not already_has_tool_result
             )
-            force_run_sandbox = bool(
-                _plot_capable_worker
+            _quant_explicit_sandbox_first_tool = bool(
+                _lid_l == WORKER_QUANT_TRADER
                 and has_run_sandbox
-                and _is_graph_request
+                and _quant_explicit_backtest_sandbox_request
+            )
+            force_run_sandbox = bool(
+                has_run_sandbox
+                and (
+                    (_plot_capable_worker and _is_graph_request)
+                    or _quant_explicit_sandbox_first_tool
+                )
                 and not telegram_context_summarize_directive
                 and not (
                     force_schema
@@ -5482,26 +5373,6 @@ def build_worker_graph(
                 _pl_fail = failure_provider_label_for_llm_invoke(_invoked_llm, provider)
                 resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=_pl_fail))
             tool_calls = getattr(resp, "tool_calls", None) or []
-            # #region agent log
-            _agent_debug_log(
-                "factory.py:agent_node:llm_output",
-                "llm_tool_output",
-                {
-                    "runId": "hallucination-debug-1",
-                    "worker": str(_lid or ""),
-                    "invoked_with_force_read_sql": bool(force_read_sql),
-                    "invoked_with_force_admin_sql": bool(force_admin_sql),
-                    "llm_invoke_failed": bool(_llm_invoke_exc is not None),
-                    "tool_calls_count": len(tool_calls),
-                    "tool_call_names": [
-                        str((tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")) or "")
-                        for tc in tool_calls
-                    ][:6],
-                    "resp_preview": str(getattr(resp, "content", "") or "")[:180],
-                },
-                "H2",
-            )
-            # #endregion
             if (
                 (_lid_l == WORKER_FINANZ)
                 and force_finanz_admin_sql
@@ -5649,21 +5520,6 @@ def build_worker_graph(
                 and is_market_worker(_lid)
                 and _inline_repair_gate
                 and (not _resp_content or _json_echo)
-            )
-            _agent_debug_log(
-                "factory.py:agent_node:inline_synthesis",
-                "inline_synthesis_decision",
-                {
-                    "worker": _wl,
-                    "quant_vlm_post_tools": _quant_vlm_post_tools,
-                    "json_echo": _json_echo,
-                    "gct_lone_url_skip": _gct_lone_url_skip,
-                    "inline_repair_gate": _inline_repair_gate,
-                    "inline_will_synth": _inline_will_synth,
-                    "resp_preview": (_resp_content or "")[:160],
-                    "tool_calls_empty": not tool_calls,
-                },
-                "B",
             )
             _market_inline_synth_attempted = False
             if (
@@ -6277,19 +6133,6 @@ def build_worker_graph(
                         )
                     except Exception as e:
                         content = f"Error: {e}"
-                        # #region agent log
-                        _agent_debug_log(
-                            "factory.py:tools_node:invoke",
-                            "tool_exec_error",
-                            {
-                                "runId": "hallucination-debug-1",
-                                "worker": str(worker_id or ""),
-                                "tool_name": name,
-                                "error_preview": str(e)[:200],
-                            },
-                            "H3",
-                        )
-                        # #endregion
                         _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
                         _notify_admin_tool_phase(
                             name,
@@ -6299,20 +6142,6 @@ def build_worker_graph(
                                 (time.perf_counter() - _tool_t0) * 1000 if _tool_t0 is not None else None
                             ),
                         )
-                    else:
-                        # #region agent log
-                        _agent_debug_log(
-                            "factory.py:tools_node:invoke",
-                            "tool_exec_success",
-                            {
-                                "runId": "hallucination-debug-1",
-                                "worker": str(worker_id or ""),
-                                "tool_name": name,
-                                "result_preview": str(content or "")[:180],
-                            },
-                            "H4",
-                        )
-                        # #endregion
                 else:
                     if name == "get_ibkr_portfolio" and has_ibkr and not ibkr_session_on:
                         content = _ibkr_disabled_chat_hint()
@@ -6325,21 +6154,6 @@ def build_worker_graph(
                         content = "Sandbox deshabilitado en esta sesión. Actívalo con /sandbox on."
                     else:
                         content = f"Herramienta desconocida: {name}"
-                    # #region agent log
-                    _agent_debug_log(
-                        "factory.py:tools_node:invoke",
-                        "tool_missing_in_lookup",
-                        {
-                            "runId": "hallucination-debug-1",
-                            "worker": str(worker_id or ""),
-                            "tool_name": name,
-                            "sandbox_enabled": bool(sandbox_enabled),
-                            "ibkr_session_on": bool(ibkr_session_on),
-                            "available_tools_count": len(tool_lookup),
-                        },
-                        "H5",
-                    )
-                    # #endregion
                     _log.warning(
                         "[%s] unknown/unavailable tool: %s (sandbox_enabled=%s)",
                         _wl,
@@ -6563,31 +6377,12 @@ def build_worker_graph(
         else:
             _spec_lid = _spec_logical_worker_id(spec)
             _lh_repair = _quant_last_human_index(list(msgs) if msgs else [])
-            _vlm_tools_ran = _quant_vlm_post_tools_synthesis(
-                list(msgs) if msgs else [],
-                _inc_for_ctx,
-                last_human_idx=_lh_repair,
-                already_has_tool_result=True,
-            )
-            _egress_json_echo = _reply_is_quant_tool_json_echo(reply or "")
             _egress_needs_repair = _market_worker_needs_egress_repair(
                 list(msgs) if msgs else [],
                 _inc_for_ctx,
                 reply or "",
                 last_human_idx=_lh_repair,
                 worker_id=_spec_lid,
-            )
-            _agent_debug_log(
-                "factory.py:egress:repair_check",
-                "egress_repair_decision",
-                {
-                    "worker": _spec_lid,
-                    "vlm_tools_ran": _vlm_tools_ran,
-                    "egress_needs_repair": _egress_needs_repair,
-                    "json_echo": _egress_json_echo,
-                    "reply_preview": (reply or "")[:160],
-                },
-                "C",
             )
             if _egress_needs_repair:
                 _inline_synth_done = bool(state.get("market_inline_synthesis_attempted"))
@@ -6606,12 +6401,6 @@ def build_worker_graph(
                     )
                     if _det_egress and not _reply_is_quant_tool_json_echo(_det_egress):
                         reply = _det_egress
-                _agent_debug_log(
-                    "factory.py:egress:repair_check",
-                    "egress_repair_done",
-                    {"reply_preview": (reply or "")[:160], "still_json_echo": _reply_is_quant_tool_json_echo(reply or "")},
-                    "C",
-                )
             reply = _repair_finanz_ibkr_egress(_apply_nl_synthesis(reply or ""))
         _wid_fin = str(getattr(spec, "worker_id", "") or "")
         reply = finanz_repair_ibkr_tool_live_vs_reply_paper(msgs, reply, worker_id=_wid_fin)

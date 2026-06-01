@@ -628,25 +628,6 @@ export function useAdminChat({
               streamVisual.artifact_id = meta.artifact_id;
               streamVisual.artifact_tenant_id = meta.artifact_tenant_id;
             }
-            // #region agent log
-            fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
-              body: JSON.stringify({
-                sessionId: 'fd1dbb',
-                location: 'useAdminChat.ts:onDone',
-                message: 'stream_visual_meta',
-                data: {
-                  has_figure_b64: Boolean(meta.figure_base64?.trim()),
-                  fly_charts_count: meta.fly_charts_b64?.length ?? 0,
-                  fly_artifact_ids: meta.fly_chart_artifact_ids ?? [],
-                  artifact_id: meta.artifact_id ?? null,
-                },
-                timestamp: Date.now(),
-                hypothesisId: 'C',
-              }),
-            }).catch(() => {});
-            // #endregion
           },
         },
         { signal: abortController.signal }

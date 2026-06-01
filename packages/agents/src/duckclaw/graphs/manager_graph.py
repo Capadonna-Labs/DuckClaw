@@ -1031,6 +1031,21 @@ def _quant_operational_intent_requires_fly_command(incoming: str) -> bool:
     t = (incoming or "").strip().lower()
     if not t:
         return False
+    # Pedidos de evaluación explícita o ejecución de herramientas concretas deben ir a tools,
+    # no transformarse en sugerencia de fly command.
+    if any(
+        k in t
+        for k in (
+            "evaluate_cfd_state",
+            "usa el sandbox",
+            "use sandbox",
+            "run_sandbox",
+            "inspect_schema",
+            "read_sql",
+            "admin_sql",
+        )
+    ):
+        return False
     # Backtests / simulación histórica (sandbox, ML4T, etc.) no son instrucciones de fly `quant_cycle`.
     if any(
         k in t
@@ -1053,8 +1068,6 @@ def _quant_operational_intent_requires_fly_command(incoming: str) -> bool:
     if "señal real" in t or "senal real" in t:
         return True
     if "genera una señal" in t or "genera una senal" in t:
-        return True
-    if "ejecút" in t or "ejecut" in t:
         return True
     return False
 
@@ -2239,7 +2252,7 @@ def build_manager_graph(
                 )
             if _summarize_vault_ro:
                 worker_cache_key = f"{worker_cache_key}::sum_vault_ro"
-            from duckclaw.workers.factory import _agent_debug_log, _get_db_path, _same_duckdb_file
+            from duckclaw.workers.factory import _get_db_path, _same_duckdb_file
             from duckclaw.workers.manifest import load_manifest
 
             spec_inv = load_manifest(assigned, troot)
@@ -2248,7 +2261,6 @@ def build_manager_graph(
                 assigned, tenant_id, (vault_db_path or db_path or None)
             ).strip()
             _mgr_read_only = bool(getattr(db, "_read_only", False))
-            mgr_con_is_none = getattr(db, "_con", None) is None and getattr(db, "_native", None) is None
             # Misma resolución que build_worker_graph; vault_db_path crudo puede diverger del path real.
             _needs_rw_vault = (not bool(spec_inv.read_only)) and (not bool(_summarize_vault_ro))
             _hub_same_as_worker = bool(
@@ -2285,29 +2297,6 @@ def build_manager_graph(
                 _spawn_inline_writes = bool(spawn_inline_writes_enabled())
             except Exception:
                 pass
-            cache_hit = worker_cache_key in _worker_graph_cache
-            # #region agent log
-            _agent_debug_log(
-                "manager_graph.py:invoke_worker_node:pre_suspend",
-                "worker_db_paths",
-                {
-                    "assigned": assigned,
-                    "mgr_path_tail": mgr_path[-96:] if mgr_path else "",
-                    "worker_resolved_tail": worker_resolved[-96:] if worker_resolved else "",
-                    "hub_same_as_worker": _hub_same_as_worker,
-                    "mgr_read_only": _mgr_read_only,
-                    "needs_rw_vault": _needs_rw_vault,
-                    "suspend_for_rw_worker": _suspend_for_rw_worker,
-                    "will_suspend_ro": _will_suspend_ro,
-                    "will_skip_private": _will_skip_private,
-                    "mgr_con_is_none": mgr_con_is_none,
-                    "cache_hit": cache_hit,
-                    "spawn_inline_writes": _spawn_inline_writes,
-                    "summarize_vault_ro": bool(_summarize_vault_ro),
-                },
-                "A",
-            )
-            # #endregion
             # Serializa acceso al .duckdb: dos webhooks concurrentes no deben abrir dos DuckClaw RW.
             _vk = _vault_lock_key(worker_resolved)
             if _vk:
@@ -2322,18 +2311,6 @@ def build_manager_graph(
             db_display = vault_db_path or db_path or "(unknown)"
             if _will_suspend_ro:
                 db.suspend_readonly_file_handle()
-                # #region agent log
-                _agent_debug_log(
-                    "manager_graph.py:invoke_worker_node:post_suspend",
-                    "manager_handle_after_suspend",
-                    {
-                        "assigned": assigned,
-                        "mgr_con_is_none": getattr(db, "_con", None) is None
-                        and getattr(db, "_native", None) is None,
-                    },
-                    "A",
-                )
-                # #endregion
             if _visual_lite_mcp:
                 try:
                     from duckclaw.forge.skills.visual_state_delta import set_visual_state_delta_hub_db
@@ -2342,18 +2319,6 @@ def build_manager_graph(
                 except Exception:
                     pass
             if worker_cache_key not in _worker_graph_cache:
-                # #region agent log
-                _agent_debug_log(
-                    "manager_graph.py:invoke_worker_node:pre_build_worker_graph",
-                    "build_worker_graph_call",
-                    {
-                        "assigned": assigned,
-                        "reuse_db_same_object": True,
-                        "vault_arg_tail": str(vault_db_path or db_path or "")[-96:],
-                    },
-                    "B",
-                )
-                # #endregion
                 _worker_graph_cache[worker_cache_key] = _build_worker_graph(
                     assigned,
                     vault_db_path or db_path,
@@ -2665,29 +2630,6 @@ def build_manager_graph(
             # no pasó por suspend RO (hub vs vault distinto en path); si no, db-writer y task_audit_log pierden lock
             # (evidencia 2026-05-12: IO Error finanzdb1 durante append_task_audit).
             _worker_rw = _wdb is not None and not bool(getattr(_wdb, "_read_only", False))
-            _wdb_same_as_mgr = _wdb is not None and _wdb is db
-            # #region agent log
-            try:
-                from duckclaw.workers.factory import _agent_debug_log as _mgr_dbg
-
-                _mgr_dbg(
-                    "manager_graph.py:invoke_worker_node:finally",
-                    "worker_db_cleanup",
-                    {
-                        "assigned": assigned,
-                        "wdb_is_none": _wdb is None,
-                        "wdb_same_as_mgr": _wdb_same_as_mgr,
-                        "worker_rw": _worker_rw,
-                        "suspend_for_rw_worker": _suspend_for_rw_worker,
-                        "will_suspend_ro": _will_suspend_ro,
-                        "mgr_con_is_none_before_close": getattr(db, "_con", None) is None
-                        and getattr(db, "_native", None) is None,
-                    },
-                    "C",
-                )
-            except Exception:
-                pass
-            # #endregion
             if _wdb is not None and _wdb is not db and (_suspend_for_rw_worker or _worker_rw):
                 try:
                     _wdb.close()

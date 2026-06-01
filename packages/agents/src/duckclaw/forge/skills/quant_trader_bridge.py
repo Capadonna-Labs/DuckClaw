@@ -737,36 +737,6 @@ def _execute_sandbox_script_impl(
         # El manager extrae la imagen desde artifacts (ruta local) y la envía por Telegram.
     if int(result.exit_code) != 0:
         payload["error"] = "SANDBOX_EXECUTION_FAILED"
-    # #region agent log
-    try:
-        import time as _t
-
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-            "a",
-            encoding="utf-8",
-        ) as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "fd1dbb",
-                        "location": "quant_trader_bridge.py:_execute_sandbox_script_impl",
-                        "message": "sandbox_result",
-                        "data": {
-                            "exit_code": int(result.exit_code),
-                            "stderr_preview": (result.stderr or "")[:300],
-                            "stdout_preview": (result.stdout or "")[:120],
-                        },
-                        "timestamp": int(_t.time() * 1000),
-                        "hypothesisId": "D",
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     return json.dumps(payload, ensure_ascii=False)
 
 

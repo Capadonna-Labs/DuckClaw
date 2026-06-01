@@ -23,6 +23,7 @@ Specs **vivas** referenciadas por código y manifests. Organizadas por dominio; 
 | Ruta | Uso |
 |------|-----|
 | [`05_ADF_AGENT_DEFINITION_FRAMEWORK.md`](05_ADF_AGENT_DEFINITION_FRAMEWORK.md) | Plantillas AXIS (ADF) |
+| [`features/platform/AGENTS_SHARED_PACKAGE_REORG.md`](features/platform/AGENTS_SHARED_PACKAGE_REORG.md) | Límites de paquetes shared/agents y mapa de imports |
 | [`specs/meta/`](meta/PLAN_FORMAT_STANDARD.md) | Formato obligatorio de planes |
 | [`specs/archive/`](archive/ARCHIVE_INDEX.md) | Migraciones y planes ya ejecutados |
 

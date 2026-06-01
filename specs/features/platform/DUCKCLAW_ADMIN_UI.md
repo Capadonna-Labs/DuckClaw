@@ -1,5 +1,7 @@
 # DuckClaw Admin UI (Consola de configuración)
 
+**Estado:** legacy parcial. La UI sigue vigente, pero los contratos de identidad, catálogo DB-first de workers, contextos y proyectos canónicos viven en [`ADMIN_IDENTITY_RBAC_ERD.md`](ADMIN_IDENTITY_RBAC_ERD.md). Este documento queda como índice de navegación y contrato de pantallas hasta su reescritura completa.
+
 **Objetivo:** Consola web en `apps/duckclaw-admin` para CRUD de Telegram, DuckDB, plantillas de agentes, prompts, runtime (`agent_config`), proyectos y observabilidad (historial/traces), reutilizando el shell Next.js en `apps/duckclaw-admin` (pnpm).
 
 **Patrones UX:** Ver `UIUX-PATTERNS.md` y sección 8 de `.cursorrules`.
@@ -22,7 +24,8 @@ Browser → Next.js BFF (/api/admin/*) → API Gateway (/api/v1/admin/*) → dis
 
 | Entidad | Lectura | Escritura | Validación |
 |---------|---------|-----------|------------|
-| `manifest.yaml`, `system_prompt.md`, `soul.md`, `skills/` | `forge/templates/<id>/` | `PUT .../files/{path}` | `load_manifest`, `adf_validator` (AXIS) |
+| Worker `default` | `forge/templates/default/` | no mutable desde catálogo usuario | `load_manifest` |
+| Workers custom | DuckDB catálogo `admin_workers*` | `POST /templates/import`, `PUT .../files/{path}`, context CRUD | snapshots versionados DB-first |
 | `.env` (Telegram, DuckDB, LLM) | `.env` enmascarado | `PATCH /admin/env` atómico + `.env.bak` | Dotenv spec |
 | `agent_config` | DuckDB por vault | `PUT /admin/runtime/config` vía db-writer | Allow-list claves |
 | `authorized_users` | DuckDB | CRUD `/admin/telegram/whitelist` | Telegram Guard spec |
@@ -37,16 +40,21 @@ Badge UI: **canónico (archivo)** vs **override (runtime)**.
 
 ### Plantillas
 - `GET /templates` — lista workers + metadata manifest
-- `GET /templates/{id}` — árbol de archivos + contenidos editables
-- `PUT /templates/{id}/files/{path}` — body `{ "content": "..." }`; path allow-list relativo al worker
-- `POST /templates` — body `{ "id", "source_template?" }` — clonar desde industria
-- `DELETE /templates/{id}` — deny-list: `entry_router`, `manager_router`, workers sistema
+- `GET /templates/{id}` — árbol de archivos + contenidos editables; para catálogo DB-first lee el snapshot activo
+- `PUT /templates/{id}/files/{path}` — body `{ "content": "..." }`; para catálogo DB-first crea nueva versión sin tocar carpetas físicas
+- `POST /templates/import` — importa workers existentes a catálogo DB-first sin borrar carpetas
+- `DELETE /templates/{id}` — soft delete en catálogo DB-first; deny-list para `default` y workers sistema
+- `POST /templates/{id}/contexts` — añade contexto markdown DB-first
+- `PATCH /templates/{id}/contexts/reorder` — reordena contextos
+- `DELETE /templates/{id}/contexts/{context_id}` — desactiva contexto
 - `POST /templates/{id}/validate` — ADF + manifest
-- `GET /templates/{id}/vault-options` — `.duckdb` del usuario + `db/shared/` (ver [TEMPLATE_VAULT_BINDING](TEMPLATE_VAULT_BINDING.md))
-- `GET|PUT /templates/{id}/vault-binding` — `forge_context.vault_binding` en manifest
 
 ### Proyectos
-- `POST /projects` — alias `POST /templates` + opcional apply `schema.sql`
+- `GET /workspace/projects` — proyectos DB-first visibles para el actor autenticado
+- `POST /workspace/projects` — crea proyecto DB-first
+- `GET /workspace/projects/{project_id}/agents` — agentes asignados al proyecto
+- `POST /workspace/projects/{project_id}/agents` — asigna agente existente al proyecto
+- `DELETE /workspace/projects/{project_id}/agents/{worker_id}` — quita relación proyecto-agente
 
 ### Entorno
 - `GET /env` — claves permitidas enmascaradas

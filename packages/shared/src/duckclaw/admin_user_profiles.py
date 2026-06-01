@@ -10,7 +10,7 @@ import json
 import re
 from typing import Any
 
-from duckclaw.shared_db_grants import _query_all_dicts, _sql_lit
+from duckclaw.storage.shared_db_grants import _query_all_dicts, _sql_lit
 
 _DEFAULT_WORKER_ID = "default"
 

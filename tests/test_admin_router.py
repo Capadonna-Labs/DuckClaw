@@ -834,7 +834,7 @@ def test_admin_conversations_crud(admin_client: TestClient):
     assert r5.json().get("ok") is True
 
 
-def test_admin_auth_login_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_admin_auth_login_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_redis):
     import sys
 
     from duckclaw.admin_console_users import ensure_admin_console_users_table, upsert_console_user
@@ -860,19 +860,20 @@ def test_admin_auth_login_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
             email="smoke@test.local",
             nombre="Smoke",
             rol="admin",
-            password="pw",
+            password="secret123",
         )
     finally:
         con.close()
     from gateway_import import load_gateway_app
 
     client = TestClient(load_gateway_app())
+    client.app.state.redis = session_redis
     r = client.post(
         "/api/v1/admin/auth/login",
-        json={"email": "smoke@test.local", "password": "pw"},
+        json={"email": "smoke@test.local", "password": "secret123"},
     )
     assert r.status_code == 200
-    assert r.json().get("rol") == "admin"
+    assert r.json().get("user", {}).get("rol") == "admin"
 
 
 def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):

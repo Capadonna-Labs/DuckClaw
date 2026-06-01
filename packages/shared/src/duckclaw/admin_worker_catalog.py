@@ -317,6 +317,27 @@ def list_visible_workers_for_actor(db: Any, *, actor_email: str) -> list[dict[st
     return workers
 
 
+def deactivate_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id: str) -> dict[str, str] | None:
+    """Soft-delete a catalog worker visible to actor. Does not touch template folders."""
+    ensure_admin_worker_catalog_schema(db)
+    actor = (actor_email or "").strip().lower()
+    if "@" not in actor:
+        return None
+    profile = ensure_profile_for_user(db, email=actor)
+    wid = sanitize_catalog_worker_id(worker_id)
+    worker = get_worker_by_tenant_worker_id(db, tenant_id=profile["tenant_id"], worker_id=wid)
+    if not worker or worker["owner_email"] != profile["email"]:
+        return None
+    db.execute(
+        f"""
+        UPDATE main.admin_worker_catalog
+        SET active = false, status = 'inactive', updated_at = CURRENT_TIMESTAMP
+        WHERE worker_uid = '{_sql_lit(worker["worker_uid"], 64)}'
+        """
+    )
+    return worker
+
+
 def add_worker_version(
     db: Any,
     *,
@@ -395,6 +416,205 @@ def list_worker_contexts(db: Any, *, worker_uid: str) -> list[dict[str, str]]:
         for row in rows
         if isinstance(row, dict)
     ]
+
+
+def get_latest_worker_version(db: Any, *, worker_uid: str) -> dict[str, Any] | None:
+    ensure_admin_worker_catalog_schema(db)
+    row = _first_row(
+        db,
+        "SELECT worker_uid, version, manifest_snapshot_json, files_snapshot_json, created_by, "
+        "change_note, created_at "
+        "FROM main.admin_worker_versions "
+        f"WHERE worker_uid = '{_sql_lit(worker_uid, 64)}' "
+        "ORDER BY version DESC LIMIT 1",
+    )
+    if not row:
+        return None
+    out = dict(row)
+    for key in ("manifest_snapshot_json", "files_snapshot_json"):
+        raw = str(out.get(key) or "{}")
+        try:
+            out[key.replace("_json", "")] = json.loads(raw)
+        except json.JSONDecodeError:
+            out[key.replace("_json", "")] = {}
+    return out
+
+
+def get_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id: str) -> dict[str, str] | None:
+    ensure_admin_worker_catalog_schema(db)
+    actor = (actor_email or "").strip().lower()
+    if "@" not in actor:
+        return None
+    profile = ensure_profile_for_user(db, email=actor)
+    wid = sanitize_catalog_worker_id(worker_id)
+    worker = get_worker_by_tenant_worker_id(db, tenant_id=profile["tenant_id"], worker_id=wid)
+    if worker and worker["active"] == "True" and worker["owner_email"] == profile["email"]:
+        return worker
+    return None
+
+
+def _update_context_content(db: Any, *, worker_uid: str, title: str, content_md: str) -> bool:
+    rows = _query_all_dicts(
+        db,
+        "SELECT context_id FROM main.admin_worker_contexts "
+        f"WHERE worker_uid = '{_sql_lit(worker_uid, 64)}' "
+        f"AND title = '{_sql_lit(title, 256)}' AND active = true LIMIT 1",
+    )
+    if not rows:
+        return False
+    context_id = str(rows[0].get("context_id") or "")
+    if not context_id:
+        return False
+    db.execute(
+        f"""
+        UPDATE main.admin_worker_contexts
+        SET content_md = '{_sql_lit(content_md, 65535)}',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE context_id = '{_sql_lit(context_id, 64)}'
+        """
+    )
+    return True
+
+
+def update_catalog_worker_file(
+    db: Any,
+    *,
+    worker_uid: str,
+    file_path: str,
+    content: str,
+    actor_email: str,
+) -> dict[str, Any]:
+    """Update a DB-backed worker file snapshot, syncing markdown contexts when applicable."""
+    ensure_admin_worker_catalog_schema(db)
+    rel = (file_path or "").strip().replace("\\", "/").lstrip("/")
+    if not rel or ".." in rel.split("/"):
+        raise ValueError("file_path inválido")
+    latest = get_latest_worker_version(db, worker_uid=worker_uid)
+    manifest_snapshot = dict((latest or {}).get("manifest_snapshot") or {})
+    files_snapshot = dict((latest or {}).get("files_snapshot") or {})
+    files_snapshot[rel] = content
+
+    context_synced = False
+    if rel.lower().endswith(".md"):
+        context_synced = _update_context_content(
+            db,
+            worker_uid=worker_uid,
+            title=rel,
+            content_md=content,
+        )
+        if not context_synced:
+            add_worker_context(db, worker_uid=worker_uid, title=rel, content_md=content, sort_order=100)
+            context_synced = True
+
+    version = add_worker_version(
+        db,
+        worker_uid=worker_uid,
+        created_by=actor_email,
+        manifest_snapshot=manifest_snapshot,
+        files_snapshot=files_snapshot,
+        change_note=f"Actualización DB-first de {rel}",
+    )
+    return {
+        "worker_uid": worker_uid,
+        "path": rel,
+        "version": version["version"],
+        "context_synced": context_synced,
+    }
+
+
+def add_catalog_worker_context(
+    db: Any,
+    *,
+    worker_uid: str,
+    title: str,
+    content_md: str,
+    sort_order: int,
+    actor_email: str,
+) -> dict[str, Any]:
+    clean_title = (title or "").strip().replace("\\", "/").lstrip("/")
+    if not clean_title or ".." in clean_title.split("/") or not clean_title.lower().endswith(".md"):
+        raise ValueError("title debe ser un archivo .md válido")
+    context = add_worker_context(
+        db,
+        worker_uid=worker_uid,
+        title=clean_title,
+        content_md=content_md,
+        sort_order=sort_order,
+    )
+    latest = get_latest_worker_version(db, worker_uid=worker_uid)
+    manifest_snapshot = dict((latest or {}).get("manifest_snapshot") or {})
+    files_snapshot = dict((latest or {}).get("files_snapshot") or {})
+    files_snapshot[clean_title] = content_md
+    version = add_worker_version(
+        db,
+        worker_uid=worker_uid,
+        created_by=actor_email,
+        manifest_snapshot=manifest_snapshot,
+        files_snapshot=files_snapshot,
+        change_note=f"Nuevo contexto DB-first {clean_title}",
+    )
+    return {"context": context, "version": version["version"]}
+
+
+def reorder_worker_contexts(db: Any, *, worker_uid: str, items: list[dict[str, Any]]) -> int:
+    ensure_admin_worker_catalog_schema(db)
+    updated = 0
+    for item in items:
+        context_id = str(item.get("context_id") or "").strip()
+        if not context_id:
+            continue
+        sort_order = int(item.get("sort_order") or 0)
+        db.execute(
+            f"""
+            UPDATE main.admin_worker_contexts
+            SET sort_order = {sort_order}, updated_at = CURRENT_TIMESTAMP
+            WHERE worker_uid = '{_sql_lit(worker_uid, 64)}'
+              AND context_id = '{_sql_lit(context_id, 64)}'
+              AND active = true
+            """
+        )
+        updated += 1
+    return updated
+
+
+def deactivate_worker_context(
+    db: Any,
+    *,
+    worker_uid: str,
+    context_id: str,
+    actor_email: str,
+) -> dict[str, Any] | None:
+    ensure_admin_worker_catalog_schema(db)
+    row = _first_row(
+        db,
+        "SELECT context_id, title FROM main.admin_worker_contexts "
+        f"WHERE worker_uid = '{_sql_lit(worker_uid, 64)}' "
+        f"AND context_id = '{_sql_lit(context_id, 64)}' AND active = true LIMIT 1",
+    )
+    if not row:
+        return None
+    title = str(row.get("title") or "")
+    db.execute(
+        f"""
+        UPDATE main.admin_worker_contexts
+        SET active = false, updated_at = CURRENT_TIMESTAMP
+        WHERE worker_uid = '{_sql_lit(worker_uid, 64)}'
+          AND context_id = '{_sql_lit(context_id, 64)}'
+        """
+    )
+    latest = get_latest_worker_version(db, worker_uid=worker_uid)
+    manifest_snapshot = dict((latest or {}).get("manifest_snapshot") or {})
+    files_snapshot = dict((latest or {}).get("files_snapshot") or {})
+    files_snapshot.pop(title, None)
+    version = add_worker_version(
+        db,
+        worker_uid=worker_uid,
+        created_by=actor_email,
+        manifest_snapshot=manifest_snapshot,
+        files_snapshot=files_snapshot,
+        change_note=f"Contexto desactivado {title}",
+    )
+    return {"context_id": context_id, "title": title, "version": version["version"]}
 
 
 def register_skill(

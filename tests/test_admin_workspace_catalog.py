@@ -355,6 +355,48 @@ def test_playground_config_uses_db_first_visible_workers_not_all_filesystem_temp
     assert "AXIS-Mirror" not in workers
 
 
+def test_playground_config_for_console_actor_does_not_mix_legacy_team_ids_with_catalog(
+    gateway_admin_client,
+) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.admin_worker_catalog import create_worker
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.graphs.on_the_fly_commands import set_tenant_team_templates
+
+    db = DuckClaw(get_gateway_db_path(), read_only=False, engine="python")
+    try:
+        profile = ensure_profile_for_user(db, email="admin@test.local")
+        set_tenant_team_templates(db, profile["tenant_id"], ["AXIS-Maestro", "AXIS-Radar"])
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="axis-maestro",
+            display_name="MAESTRO",
+        )
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="axis-radar",
+            display_name="RADAR",
+        )
+    finally:
+        db.close()
+
+    response = gateway_admin_client.get(
+        "/api/v1/admin/playground/config",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
+    )
+
+    assert response.status_code == 200
+    ids = [item["id"] for item in response.json()["workers"]]
+    assert "axis-maestro" in ids
+    assert "axis-radar" in ids
+    assert "AXIS-Maestro" not in ids
+    assert "AXIS-Radar" not in ids
+    assert len(ids) == len(set(ids))
+
+
 def test_playground_chat_rejects_unassigned_filesystem_worker_before_execution(
     gateway_admin_client,
 ) -> None:

@@ -11,7 +11,7 @@ import { clampInput, LIMITS } from '@/lib/validation';
 import { isAdminRole } from '@/lib/roles';
 import { paginateItems } from '@/lib/pagination';
 import { agentDescription, agentMetadata } from '@/lib/agentCards';
-import { Bot, ChevronLeft, ChevronRight, Search, Trash2 } from 'lucide-react';
+import { Bot, ChevronLeft, ChevronRight, Search, Trash2, Upload } from 'lucide-react';
 
 const AGENTS_PAGE_SIZE = 5;
 
@@ -24,6 +24,10 @@ export default function TemplatesPage() {
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<TemplateSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [includePrefixes, setIncludePrefixes] = useState('');
+  const [includeTemplates, setIncludeTemplates] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
   const [page, setPage] = useState(1);
 
   const reload = useCallback(() => {
@@ -49,6 +53,39 @@ export default function TemplatesPage() {
       setError(e instanceof Error ? e.message : 'No se pudo eliminar');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const importTemplates = async () => {
+    if (!canWrite) return;
+    const prefixes = includePrefixes
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const templateIds = includeTemplates
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (prefixes.length === 0 && templateIds.length === 0) {
+      setError('Indica al menos un prefijo o un nombre exacto de template.');
+      return;
+    }
+    setImporting(true);
+    setError(null);
+    setImportMsg(null);
+    try {
+      const result = await adminService.importTemplatesToCatalog({
+        include_prefixes: prefixes,
+        include_template_ids: templateIds,
+      });
+      setImportMsg(
+        `Importados ${result.imported.length}; existentes ${result.skipped_existing.length}. Las carpetas no se modifican.`
+      );
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo importar');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -85,7 +122,7 @@ export default function TemplatesPage() {
           </h1>
           <p className="text-sm text-gov-gray-500 dark:text-dark-muted">
             {isAdmin
-              ? 'Workers en forge/templates'
+              ? 'Catálogo DB-first: default global, agentes propios y asignados.'
               : 'Agentes disponibles para conversar, usar como base o revisar.'}
           </p>
         </div>
@@ -96,6 +133,18 @@ export default function TemplatesPage() {
           {isAdmin ? 'Nuevo proyecto' : 'Crear agente'}
         </Link>
       </header>
+
+      {canWrite && (
+        <CatalogImportPanel
+          includePrefixes={includePrefixes}
+          includeTemplates={includeTemplates}
+          importing={importing}
+          importMsg={importMsg}
+          onPrefixesChange={setIncludePrefixes}
+          onTemplatesChange={setIncludeTemplates}
+          onImport={importTemplates}
+        />
+      )}
 
       <TemplateSearch q={q} setQ={setQ} />
 
@@ -121,17 +170,17 @@ export default function TemplatesPage() {
 
       <ConfirmDangerModal
         isOpen={!!pendingDelete}
-        title="Eliminar plantilla"
-        description="Se borrará la carpeta completa del worker en disco. Revisa el ID antes de confirmar."
-        confirmLabel="Sí, eliminar plantilla"
+        title="Desactivar del catálogo"
+        description="Oculta este worker del catálogo DB-first para tu tenant. No borra carpetas de templates ni archivos en disco."
+        confirmLabel="Sí, desactivar del catálogo"
         isLoading={deleting}
         details={
           pendingDelete
             ? [
                 { label: 'Worker ID', value: pendingDelete.id },
                 { label: 'Nombre', value: pendingDelete.name ?? '—' },
-                { label: 'Schema', value: pendingDelete.schema_name ?? '—' },
-                { label: 'Ruta', value: `forge/templates/${pendingDelete.id}/` },
+                { label: 'Origen', value: pendingDelete.source ?? 'catalog' },
+                { label: 'Visibilidad', value: pendingDelete.visibility ?? 'private' },
               ]
             : []
         }
@@ -139,6 +188,77 @@ export default function TemplatesPage() {
         onConfirm={confirmDelete}
       />
     </div>
+  );
+}
+
+function CatalogImportPanel({
+  includePrefixes,
+  includeTemplates,
+  importing,
+  importMsg,
+  onPrefixesChange,
+  onTemplatesChange,
+  onImport,
+}: {
+  includePrefixes: string;
+  includeTemplates: string;
+  importing: boolean;
+  importMsg: string | null;
+  onPrefixesChange: (value: string) => void;
+  onTemplatesChange: (value: string) => void;
+  onImport: () => void;
+}) {
+  return (
+    <section className="rounded-3xl border border-gov-blue-100 bg-white p-4 shadow-sm dark:border-dark-border dark:bg-dark-surface">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-1">
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-gov-blue-700 dark:text-dark-cyan">
+            Importar templates
+          </p>
+          <h2 className="text-xl font-black text-gov-gray-900 dark:text-dark-text">
+            Copia lógica hacia DuckDB
+          </h2>
+          <p className="max-w-2xl text-sm text-gov-gray-500 dark:text-dark-muted">
+            Selecciona carpetas por prefijo o nombre exacto. La importación crea workers privados,
+            contextos y capabilities en el catálogo; no modifica las carpetas originales.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onImport}
+          disabled={importing}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Upload size={16} />
+          {importing ? 'Importando…' : 'Importar al catálogo'}
+        </button>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <label className="space-y-1 text-xs font-bold text-gov-gray-600 dark:text-dark-muted">
+          Prefijos separados por coma
+          <input
+            value={includePrefixes}
+            onChange={(e) => onPrefixesChange(clampInput(e.target.value, LIMITS.searchQuery))}
+            placeholder="Ej: AXIS-, Legal-, Finance-"
+            className="w-full rounded-xl border border-gov-gray-200 px-3 py-2 text-sm font-normal dark:border-dark-border dark:bg-dark-bg"
+          />
+        </label>
+        <label className="space-y-1 text-xs font-bold text-gov-gray-600 dark:text-dark-muted">
+          Nombres exactos separados por coma
+          <input
+            value={includeTemplates}
+            onChange={(e) => onTemplatesChange(clampInput(e.target.value, LIMITS.searchQuery))}
+            placeholder="Ej: My-Agent, Research-Agent"
+            className="w-full rounded-xl border border-gov-gray-200 px-3 py-2 text-sm font-normal dark:border-dark-border dark:bg-dark-bg"
+          />
+        </label>
+      </div>
+      {importMsg && (
+        <p className="mt-3 rounded-xl bg-green-50 px-3 py-2 text-sm font-bold text-green-700 dark:bg-green-950/30 dark:text-green-300">
+          {importMsg}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -283,7 +403,7 @@ function AgentCard({
             className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30"
           >
             <Trash2 size={14} />
-            Eliminar
+            Desactivar
           </button>
         )}
       </div>

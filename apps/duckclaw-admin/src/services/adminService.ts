@@ -75,11 +75,18 @@ export interface TrainPipelineResult {
 
 export interface DuckdbTableCatalog {
   vault_path: string;
+  vault_user_id?: string;
+  actor_email?: string;
+  tenant_id?: string;
+  table_count?: number;
   schemas: Record<string, string[]>;
 }
 
 export interface DuckdbQueryResult {
   vault_path: string;
+  vault_user_id?: string;
+  actor_email?: string;
+  tenant_id?: string;
   columns: string[];
   rows: unknown[][];
   row_count: number;
@@ -197,11 +204,53 @@ export const adminService = {
       }
     ),
 
+  createTemplateContext: (workerId: string, body: { title: string; content_md: string; sort_order?: number }) =>
+    adminFetch<{ ok: boolean; context: { context_id: string; title: string }; version: number }>(
+      `/templates/${encodeURIComponent(workerId)}/contexts`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    ),
+
+  reorderTemplateContexts: (
+    workerId: string,
+    items: { context_id: string; sort_order: number }[]
+  ) =>
+    adminFetch<{ ok: boolean; updated: number }>(
+      `/templates/${encodeURIComponent(workerId)}/contexts/reorder`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ items }),
+      }
+    ),
+
+  deleteTemplateContext: (workerId: string, contextId: string) =>
+    adminFetch<{ ok: boolean }>(
+      `/templates/${encodeURIComponent(workerId)}/contexts/${encodeURIComponent(contextId)}`,
+      { method: 'DELETE' }
+    ),
+
   validateTemplate: (workerId: string) =>
     adminFetch<{ ok: boolean; errors: string[] }>(
       `/templates/${encodeURIComponent(workerId)}/validate`,
       { method: 'POST' }
     ),
+
+  importTemplatesToCatalog: (body: {
+    templates_root?: string;
+    include_prefixes?: string[];
+    include_template_ids?: string[];
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      imported: { worker_id: string; worker_uid: string; template_dir: string }[];
+      skipped_existing: string[];
+      skipped: string[];
+    }>('/templates/import', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   getTemplateVaultOptions: (workerId: string, vaultUserId?: string) => {
     const q = vaultUserId ? `?vault_user_id=${encodeURIComponent(vaultUserId)}` : '';

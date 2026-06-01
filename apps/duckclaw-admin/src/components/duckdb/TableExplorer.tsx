@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-table';
 import { ChevronDown, ChevronRight, Database, Loader2, Play, Table2 } from 'lucide-react';
 import { adminService } from '@/services/adminService';
+import type { DuckdbTableCatalog } from '@/services/adminService';
 
 type Props = {
   vaultPath: string;
@@ -28,14 +29,16 @@ export function TableExplorer({ vaultPath }: Props) {
   const [loading, setLoading] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [catalogMeta, setCatalogMeta] = useState<DuckdbTableCatalog | null>(null);
 
   const loadCatalog = useCallback(async () => {
-    if (!vaultPath) return;
     setCatalogLoading(true);
     setError(null);
     try {
-      const data = await adminService.getDuckdbTables(vaultPath);
+      const data = await adminService.getDuckdbTables(vaultPath || undefined);
       setSchemas(data.schemas || {});
+      setCatalogMeta(data);
+      setOpenSchemas(new Set(Object.keys(data.schemas || {})));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error cargando tablas');
     } finally {
@@ -45,12 +48,15 @@ export function TableExplorer({ vaultPath }: Props) {
 
   const runQuery = useCallback(
     async (query: string) => {
-      if (!vaultPath || !query.trim()) return;
+      if (!query.trim()) return;
       setLoading(true);
       setError(null);
       setSql(query);
       try {
-        const data = await adminService.runDuckdbQuery({ query, vault_path: vaultPath });
+        const data = await adminService.runDuckdbQuery({
+          query,
+          vault_path: vaultPath || undefined,
+        });
         setColumns(data.columns);
         setRows(data.rows);
       } catch (e) {
@@ -99,6 +105,13 @@ export function TableExplorer({ vaultPath }: Props) {
 
   return (
     <div className="flex flex-col gap-3 h-[calc(100vh-220px)] min-h-[420px]">
+      <div className="grid gap-2 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-xs text-slate-300 md:grid-cols-4">
+        <SessionMetric label="BD de sesión" value={shortPath(catalogMeta?.vault_path || vaultPath)} />
+        <SessionMetric label="Usuario vault" value={catalogMeta?.vault_user_id || '—'} />
+        <SessionMetric label="Tenant" value={catalogMeta?.tenant_id || '—'} />
+        <SessionMetric label="Tablas visibles" value={String(catalogMeta?.table_count ?? countTables(schemas))} />
+      </div>
+
       <div className="flex gap-2">
         <input
           value={sql}
@@ -112,7 +125,7 @@ export function TableExplorer({ vaultPath }: Props) {
         <button
           type="button"
           onClick={() => void runQuery(sql)}
-          disabled={loading || !vaultPath}
+          disabled={loading}
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gov-blue-700 text-white text-sm font-bold disabled:opacity-50"
         >
           {loading ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
@@ -213,6 +226,29 @@ export function TableExplorer({ vaultPath }: Props) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function countTables(schemas: Record<string, string[]>): number {
+  return Object.values(schemas).reduce((acc, tables) => acc + tables.length, 0);
+}
+
+function shortPath(path: string): string {
+  if (!path) return '—';
+  const marker = '/db/';
+  const idx = path.indexOf(marker);
+  if (idx >= 0) return path.slice(idx + 1);
+  return path;
+}
+
+function SessionMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="truncate font-mono text-slate-100" title={value}>
+        {value}
+      </p>
     </div>
   );
 }

@@ -136,7 +136,9 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     assert r.status_code == 200
     data = r.json()
     assert data.get("authorized") is True
-    assert target in _playground_worker_ids(data)
+    from duckclaw.workers.worker_ids import normalize_worker_id
+
+    assert normalize_worker_id(target) in _playground_worker_ids(data)
     assert data.get("team_source") == "chat"
 
 

@@ -119,7 +119,7 @@ export default function ProjectsPage() {
             </p>
             <h2 className="mt-1 text-xl font-black dark:text-dark-text">Proyectos con agentes asignados</h2>
             <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-              Elige qué agentes pertenecen a cada proyecto; la asignación se persiste en admin_project_agents.
+              Elige qué agentes pertenecen a cada proyecto; la asignación se persiste en la base de datos.
             </p>
           </div>
           {canWrite && (

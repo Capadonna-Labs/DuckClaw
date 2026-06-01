@@ -59,6 +59,14 @@ def _executable_statements(sql: str) -> list[str]:
     return out
 
 
+def _first_sql_code_line(statement: str) -> str:
+    for line in statement.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("--"):
+            return stripped.upper()
+    return ""
+
+
 def apply_industry_to_db(db: Any, industry_id: str, *, run_seed: bool = True) -> None:
     """
     Ejecuta schema.sql y opcionalmente seed_data.sql de la plantilla.
@@ -77,7 +85,8 @@ def apply_industry_to_db(db: Any, industry_id: str, *, run_seed: bool = True) ->
             db.execute(stmt)
         except Exception as e:
             st_upper = stmt.upper().strip()
-            if st_upper.startswith("INSTALL ") or st_upper.startswith("LOAD "):
+            first_code = _first_sql_code_line(stmt)
+            if first_code.startswith("INSTALL ") or first_code.startswith("LOAD "):
                 _log.warning("Industry schema: extensión omitida o fallida (%s): %s", stmt[:80], e)
                 continue
             if "HNSW" in st_upper or "USING HNSW" in st_upper:

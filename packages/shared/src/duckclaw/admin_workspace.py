@@ -147,14 +147,25 @@ def list_projects_for_actor(db: Any, *, actor_email: str) -> list[dict[str, str]
     rows = _query_all_dicts(
         db,
         "SELECT DISTINCT p.project_id, p.tenant_id, p.owner_email, p.name, p.description, "
-        "p.status, p.visibility, p.created_at, p.updated_at "
+        "p.status, p.visibility, p.created_at, p.updated_at, "
+        "COALESCE(a.agent_count, 0) AS agent_count "
         "FROM main.admin_projects p "
         "LEFT JOIN main.admin_project_members m ON m.project_id = p.project_id "
+        "LEFT JOIN ("
+        "  SELECT project_id, COUNT(*) AS agent_count "
+        "  FROM main.admin_project_agents WHERE active = true GROUP BY project_id"
+        ") a ON a.project_id = p.project_id "
         f"WHERE p.active = true AND (p.owner_email = '{_sql_lit(email, 256)}' "
         f"OR m.email = '{_sql_lit(email, 256)}') "
         "ORDER BY p.updated_at DESC, p.created_at DESC, p.name",
     )
-    return [_project_row(dict(row)) for row in rows if isinstance(row, dict)]
+    projects: list[dict[str, str]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            project = _project_row(dict(row))
+            project["agent_count"] = int(row.get("agent_count") or 0)
+            projects.append(project)
+    return projects
 
 
 def attach_agent_to_project(
@@ -182,6 +193,17 @@ def attach_agent_to_project(
         f"AND worker_uid = '{_sql_lit(worker_uid, 64)}'",
     )
     if existing:
+        db.execute(
+            f"""
+            UPDATE main.admin_project_agents
+            SET active = true,
+                role = '{_sql_lit(role, 64)}',
+                sort_order = {int(sort_order)},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE project_id = '{_sql_lit(project_id, 64)}'
+              AND worker_uid = '{_sql_lit(worker_uid, 64)}'
+            """
+        )
         return
     db.execute(
         f"""
@@ -218,3 +240,46 @@ def list_project_agents(
         if isinstance(row, dict):
             out.append({key: str(row.get(key) or "") for key in row.keys()})
     return out
+
+
+def list_projects_with_agents_for_actor(db: Any, *, actor_email: str) -> list[dict[str, Any]]:
+    projects = list_projects_for_actor(db, actor_email=actor_email)
+    return [
+        {
+            **project,
+            "agents": list_project_agents(
+                db,
+                project_id=str(project.get("project_id") or ""),
+                actor_email=actor_email,
+            ),
+        }
+        for project in projects
+    ]
+
+
+def detach_agent_from_project(
+    db: Any,
+    *,
+    project_id: str,
+    worker_uid: str,
+    actor_email: str,
+) -> bool:
+    ensure_admin_workspace_schema(db)
+    if not _actor_has_project_access(db, project_id=project_id, actor_email=actor_email):
+        return False
+    db.execute(
+        f"""
+        UPDATE main.admin_project_agents
+        SET active = false, updated_at = CURRENT_TIMESTAMP
+        WHERE project_id = '{_sql_lit(project_id, 64)}'
+          AND worker_uid = '{_sql_lit(worker_uid, 64)}'
+          AND active = true
+        """
+    )
+    remaining = _query_all_dicts(
+        db,
+        "SELECT worker_uid FROM main.admin_project_agents "
+        f"WHERE project_id = '{_sql_lit(project_id, 64)}' "
+        f"AND worker_uid = '{_sql_lit(worker_uid, 64)}' AND active = true LIMIT 1",
+    )
+    return not bool(remaining)

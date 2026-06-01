@@ -644,6 +644,18 @@ class ProjectCreateBody(BaseModel):
     soul: str = ""
 
 
+class WorkspaceProjectCreateBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=256)
+    description: str = Field(default="", max_length=4096)
+    visibility: str = Field(default="private", max_length=32)
+
+
+class WorkspaceProjectAgentBody(BaseModel):
+    worker_id: str = Field(..., min_length=1, max_length=64)
+    role: str = Field(default="member", max_length=64)
+    sort_order: int = Field(default=0, ge=0, le=10_000)
+
+
 class ForgeProjectCreateBody(BaseModel):
     id: str = Field(..., min_length=1, max_length=48)
     display_name: str = Field(default="", max_length=128)
@@ -687,6 +699,7 @@ class PlaygroundVaultBody(BaseModel):
 
 class PlaygroundChatBody(BaseModel):
     worker_id: str = Field(default="default", max_length=64)
+    project_id: str | None = Field(default=None, max_length=64)
     message: str = Field(default="", max_length=16000)
     chat_id: str = Field(default="admin-playground", max_length=128)
     tenant_id: str = Field(default="default", max_length=64)
@@ -1081,6 +1094,7 @@ async def playground_config(
         request=request,
     )
     vault_options = _playground_vault_options_for_team(team_ctx)
+    projects = _workspace_projects_payload_for_actor(actor)
     return {
         "llm": llm,
         "catalog": catalog,
@@ -1096,6 +1110,7 @@ async def playground_config(
         "team_source": team_ctx.get("team_source"),
         "team_hint": team_hint.strip(),
         "profile": team_ctx.get("console_profile") or None,
+        "projects": projects,
         "vault": vault,
         "vault_options": vault_options,
         "chat_endpoint": "/api/v1/admin/playground/chat",
@@ -1298,6 +1313,20 @@ async def playground_chat(
                 f"'{wid}' no está en el equipo efectivo: {', '.join(allowed_workers)}",
             )
         wid = canonical
+    project_id = (body.project_id or "").strip()
+    project_scope: dict[str, Any] | None = None
+    if project_id:
+        project_workers, project_scope = _project_worker_scope_for_actor(actor=actor, project_id=project_id)
+        if not project_workers:
+            raise _problem(404, "Proyecto sin agentes visibles para el actor", project_id)
+        if wid == "default" and "default" not in project_workers:
+            wid = project_workers[0]
+        if wid not in project_workers:
+            raise _problem(
+                403,
+                "Worker fuera del proyecto",
+                f"'{wid}' no está asignado a {project_id}: {', '.join(project_workers)}",
+            )
     session_id = (body.chat_id or "admin-playground").strip() or "admin-playground"
     if body.images:
         _admin_audit(
@@ -1372,11 +1401,12 @@ async def playground_chat(
         return {
             "ok": True,
             "worker_id": wid,
+            "project_id": project_id or None,
             "response": str(result.get("response") or result.get("reply") or ""),
             "assigned_worker_id": result.get("assigned_worker_id"),
             "usage_tokens": result.get("usage_tokens"),
         }
-    return {"ok": True, "worker_id": wid, "response": str(result or "")}
+    return {"ok": True, "worker_id": wid, "project_id": project_id or None, "response": str(result or "")}
 
 
 @router.get("/user-agents", dependencies=[Depends(_require_admin_key)])
@@ -3654,6 +3684,151 @@ async def run_ops_command(
         result["comfyui_reset"] = comfy_reset
     _admin_audit("ops.run", op_id, " ".join(argv), actor=actor, meta=result)
     return {"ok": result.get("exit_code") == 0, "op_id": op_id, **result}
+
+
+def _workspace_gateway_db() -> Any:
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(503, "Gateway DuckDB no disponible", gw or "gateway_db")
+    return DuckClaw(gw, read_only=False, engine="python")
+
+
+def _workspace_projects_payload_for_actor(actor: str) -> list[dict[str, Any]]:
+    from duckclaw.admin_workspace import list_projects_with_agents_for_actor
+
+    db = _workspace_gateway_db()
+    try:
+        return list_projects_with_agents_for_actor(db, actor_email=actor)
+    finally:
+        db.close()
+
+
+def _project_worker_scope_for_actor(*, actor: str, project_id: str) -> tuple[list[str], dict[str, Any]]:
+    clean_project_id = (project_id or "").strip()
+    if not clean_project_id:
+        return [], {}
+    for project in _workspace_projects_payload_for_actor(actor):
+        if str(project.get("project_id") or "") != clean_project_id:
+            continue
+        workers = [
+            str(agent.get("worker_id") or "").strip()
+            for agent in project.get("agents") or []
+            if str(agent.get("worker_id") or "").strip()
+        ]
+        return workers, project
+    return [], {}
+
+
+@router.get("/workspace/projects", dependencies=[Depends(_require_admin_key)])
+async def list_workspace_projects(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
+    from duckclaw.admin_workspace import list_projects_for_actor
+
+    db = _workspace_gateway_db()
+    try:
+        projects = list_projects_for_actor(db, actor_email=actor)
+    finally:
+        db.close()
+    return {"projects": projects}
+
+
+@router.post("/workspace/projects", dependencies=[Depends(_require_admin_key)])
+async def create_workspace_project(
+    body: WorkspaceProjectCreateBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw.admin_workspace import create_project as create_workspace_project_record
+
+    db = _workspace_gateway_db()
+    try:
+        project = create_workspace_project_record(
+            db,
+            owner_email=actor,
+            name=body.name,
+            description=body.description,
+            visibility=body.visibility,
+        )
+    finally:
+        db.close()
+    _admin_audit("workspace.project.create", project["project_id"], project["name"], actor=actor)
+    return {"ok": True, "project": project}
+
+
+@router.get("/workspace/projects/{project_id}/agents", dependencies=[Depends(_require_admin_key)])
+async def list_workspace_project_agents(
+    project_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw.admin_workspace import list_project_agents
+
+    db = _workspace_gateway_db()
+    try:
+        agents = list_project_agents(db, project_id=project_id, actor_email=actor)
+    finally:
+        db.close()
+    return {"project_id": project_id, "agents": agents}
+
+
+@router.post("/workspace/projects/{project_id}/agents", dependencies=[Depends(_require_admin_key)])
+async def assign_workspace_project_agent(
+    project_id: str,
+    body: WorkspaceProjectAgentBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw.admin_worker_catalog import get_visible_worker_for_actor
+    from duckclaw.admin_workspace import attach_agent_to_project, list_project_agents, list_projects_for_actor
+
+    db = _workspace_gateway_db()
+    try:
+        visible_projects = {p["project_id"] for p in list_projects_for_actor(db, actor_email=actor)}
+        if project_id not in visible_projects:
+            raise _problem(404, "Proyecto no visible para el actor", project_id)
+        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=body.worker_id)
+        if not worker:
+            raise _problem(404, "Worker de catálogo no visible para el actor", body.worker_id)
+        attach_agent_to_project(
+            db,
+            project_id=project_id,
+            worker_uid=worker["worker_uid"],
+            role=body.role,
+            sort_order=body.sort_order,
+        )
+        agents = list_project_agents(db, project_id=project_id, actor_email=actor)
+    finally:
+        db.close()
+    agent = next((item for item in agents if item.get("worker_uid") == worker["worker_uid"]), None)
+    _admin_audit("workspace.project.agent.assign", project_id, body.worker_id, actor=actor)
+    return {"ok": True, "project_id": project_id, "agent": agent or worker}
+
+
+@router.delete("/workspace/projects/{project_id}/agents/{worker_id}", dependencies=[Depends(_require_admin_key)])
+async def remove_workspace_project_agent(
+    project_id: str,
+    worker_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw.admin_worker_catalog import get_visible_worker_for_actor
+    from duckclaw.admin_workspace import detach_agent_from_project
+
+    db = _workspace_gateway_db()
+    try:
+        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=worker_id)
+        if not worker:
+            raise _problem(404, "Worker de catálogo no visible para el actor", worker_id)
+        ok = detach_agent_from_project(
+            db,
+            project_id=project_id,
+            worker_uid=worker["worker_uid"],
+            actor_email=actor,
+        )
+    finally:
+        db.close()
+    if not ok:
+        raise _problem(404, "Relación proyecto-worker no encontrada", f"{project_id}/{worker_id}")
+    _admin_audit("workspace.project.agent.remove", project_id, worker_id, actor=actor)
+    return {"ok": True, "project_id": project_id, "worker_id": worker_id}
 
 
 @router.post("/projects", dependencies=[Depends(_require_admin_key)])

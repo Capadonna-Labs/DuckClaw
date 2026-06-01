@@ -147,6 +147,10 @@ def gateway_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             password="secret123",
             initials="AT",
         )
+        import importlib
+
+        importlib.import_module("scripts.migrations.003_admin_user_workspaces").apply_migration(con)
+        importlib.import_module("scripts.migrations.004_admin_workspace_catalog").apply_migration(con)
     finally:
         con.close()
     return p

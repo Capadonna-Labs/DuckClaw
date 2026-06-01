@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Canonical CLI: duckops ingress serve-admin
 # Expone la consola admin (Next.js) en la tailnet vía Tailscale Serve (HTTPS :8443).
 # No toca el Funnel del gateway (:443 → :8000). Requiere Tailscale conectado.
 #

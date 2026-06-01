@@ -167,6 +167,7 @@ def test_admin_login_seeds_default_when_table_empty(
     for key in GATEWAY_DB_ENV_KEYS:
         monkeypatch.setenv(key, str(p))
     monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "admin@duckclaw.local")
     monkeypatch.setenv("DUCKCLAW_ADMIN_PASSWORD", "seedpass1")
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(Path(__file__).resolve().parent.parent))
     con = duckdb.connect(str(p))

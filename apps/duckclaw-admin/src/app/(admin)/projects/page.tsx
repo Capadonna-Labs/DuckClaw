@@ -115,11 +115,11 @@ export default function ProjectsPage() {
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gov-blue-700 dark:text-dark-cyan">
-              Proyectos
+              Catálogo DB-first
             </p>
             <h2 className="mt-1 text-xl font-black dark:text-dark-text">Proyectos con agentes asignados</h2>
             <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-              Elige qué agentes pertenecen a cada proyecto.
+              Elige qué agentes pertenecen a cada proyecto; la asignación se persiste en admin_project_agents.
             </p>
           </div>
           {canWrite && (

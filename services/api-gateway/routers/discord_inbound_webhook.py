@@ -127,15 +127,18 @@ def build_discord_interactions_router(
             os.getenv("DUCKCLAW_DISCORD_BYPASS_GUARD", "").strip().lower() in ("1", "true", "yes", "on")
         )
 
-        dc = GatewayDeliveryContext(
-            channel="discord",
-            outbound_bot_token=bot_token,
-            discord_application_id=app_id,
-            discord_interaction_token=interaction_token,
-            discord_guild_id=guild_id or None,
-            discord_channel_id=channel_id or None,
-            telegram_forced_vault_db_path=forced_vault_path,
-            extra={"discord_bypass_guard": bypass},
+        delivery_kwargs = {
+            "outbound_bot_token": bot_token,
+            "discord_application_id": app_id,
+            "discord_interaction_token": interaction_token,
+            "discord_guild_id": guild_id or None,
+            "discord_channel_id": channel_id or None,
+            "telegram_forced_vault_db_path": forced_vault_path,
+        }
+        dc = (
+            GatewayDeliveryContext.trusted_channel_route(channel="discord", **delivery_kwargs)
+            if bypass
+            else GatewayDeliveryContext(channel="discord", **delivery_kwargs)
         )
 
         async def _run_agent() -> None:

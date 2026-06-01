@@ -6,9 +6,10 @@ import {
   parseToolNameFromHeartbeatText,
 } from './toolHeartbeat';
 
-assert.equal(parseToolNameFromHeartbeatText('🔄 Usando: read_sql · ⏱️ 3ms'), 'read_sql');
+assert.equal(parseToolNameFromHeartbeatText('Usando: read_sql · 3ms'), 'read_sql');
+assert.equal(parseToolNameFromHeartbeatText('\u{1F504} Usando: read_sql · \u23F1\uFE0F 3ms'), 'read_sql');
 assert.equal(
-  parseToolNameFromHeartbeatText('🔄 Paso actual: llamo a la herramienta run_browser_sandbox…'),
+  parseToolNameFromHeartbeatText('\u{1F504} Paso actual: llamo a la herramienta run_browser_sandbox…'),
   'run_browser_sandbox'
 );
 assert.equal(parseToolNameFromHeartbeatText(''), null);

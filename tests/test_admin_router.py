@@ -84,6 +84,149 @@ def test_catalog_skills(admin_client: TestClient):
     assert "template_local" in data
 
 
+def test_catalog_skills_does_not_expose_filesystem_skills_without_db_rows(
+    gateway_admin_client: TestClient,
+) -> None:
+    response = gateway_admin_client.get(
+        "/api/v1/admin/catalog/skills",
+        headers={
+            "X-Admin-Key": "test-admin-key",
+            "X-Duckclaw-Actor": "admin@test.local",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["global"] == []
+    assert data["template_local"] == []
+
+
+def test_catalog_skills_global_are_scoped_to_authenticated_db_skills(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+) -> None:
+    import duckdb
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.admin_worker_catalog import register_skill
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        class _A:
+            def execute(self, sql: str, params=None):
+                if params is not None:
+                    return con.execute(sql, params)
+                return con.execute(sql)
+
+        adapter = _A()
+        profile = ensure_profile_for_user(adapter, email="admin@test.local")
+        register_skill(
+            adapter,
+            name="my_db_skill",
+            skill_type="python",
+            implementation_ref="db://skills/my_db_skill.py",
+            owner_email=profile["email"],
+            tenant_id=profile["tenant_id"],
+        )
+    finally:
+        con.close()
+
+    response = gateway_admin_client.get(
+        "/api/v1/admin/catalog/skills",
+        headers={
+            "X-Admin-Key": "test-admin-key",
+            "X-Duckclaw-Actor": "admin@test.local",
+        },
+    )
+    assert response.status_code == 200
+    global_skills = response.json().get("global") or []
+    assert global_skills == [
+        {
+            "id": "my_db_skill",
+            "path": "db://skills/my_db_skill.py",
+            "scope": "catalog",
+        }
+    ]
+
+
+def test_create_catalog_skill_for_authenticated_actor(
+    gateway_admin_client: TestClient,
+) -> None:
+    response = gateway_admin_client.post(
+        "/api/v1/admin/catalog/skills",
+        headers={
+            "X-Admin-Key": "test-admin-key",
+            "X-Duckclaw-Actor": "admin@test.local",
+        },
+        json={
+            "name": "customer_lookup",
+            "description": "Consulta datos de clientes desde una API controlada.",
+            "skill_type": "python",
+            "implementation_ref": "db://skills/customer_lookup.py",
+        },
+    )
+    assert response.status_code == 200
+    created = response.json()["skill"]
+    assert created["id"] == "customer_lookup"
+    assert created["path"] == "db://skills/customer_lookup.py"
+    assert created["scope"] == "catalog"
+
+    listed = gateway_admin_client.get(
+        "/api/v1/admin/catalog/skills",
+        headers={
+            "X-Admin-Key": "test-admin-key",
+            "X-Duckclaw-Actor": "admin@test.local",
+        },
+    )
+    assert listed.status_code == 200
+    assert created in listed.json()["global"]
+
+
+def test_catalog_skills_local_are_scoped_to_authenticated_catalog_workers(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+) -> None:
+    import duckdb
+    from duckclaw.admin_worker_catalog import add_worker_version, create_worker
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        class _A:
+            def execute(self, sql: str, params=None):
+                if params is not None:
+                    return con.execute(sql, params)
+                return con.execute(sql)
+
+        adapter = _A()
+        worker = create_worker(
+            adapter,
+            owner_email="admin@test.local",
+            worker_id="custom-bi",
+            display_name="Custom BI",
+        )
+        add_worker_version(
+            adapter,
+            worker_uid=worker["worker_uid"],
+            created_by="admin@test.local",
+            files_snapshot={
+                "skills/my_private_skill.py": "def build_tools(): return []",
+                "system_prompt.md": "# prompt",
+            },
+        )
+    finally:
+        con.close()
+
+    response = gateway_admin_client.get(
+        "/api/v1/admin/catalog/skills",
+        headers={
+            "X-Admin-Key": "test-admin-key",
+            "X-Duckclaw-Actor": "admin@test.local",
+        },
+    )
+    assert response.status_code == 200
+    local = response.json().get("template_local") or []
+    assert any(item["worker_id"] == "custom-bi" and item["id"] == "my_private_skill" for item in local)
+    assert not any(item.get("worker_id") == "BI-Analyst" for item in local)
+
+
 def test_playground_config(admin_client: TestClient):
     r = admin_client.get(
         "/api/v1/admin/playground/config",
@@ -234,6 +377,39 @@ def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch:
     )
     assert r.status_code == 200
     assert r.json().get("response") == "ok"
+
+
+def test_invoke_chat_admin_console_delivery_bypasses_telegram_guard(monkeypatch: pytest.MonkeyPatch):
+    gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
+    import sys
+
+    if str(gw_dir) not in sys.path:
+        sys.path.insert(0, str(gw_dir))
+    import main as gateway_main
+    from core.models import ChatRequest
+    from duckclaw.channels import GatewayDeliveryContext
+
+    async def _fail_if_called(**_kwargs):
+        raise AssertionError("Telegram Guard should not run for authenticated admin console delivery")
+
+    monkeypatch.setattr(gateway_main, "_authorize_or_reject", _fail_if_called)
+
+    result = __import__("asyncio").run(
+        gateway_main._invoke_chat(
+            ChatRequest(
+                message="",
+                chat_id="admin-conv-test",
+                user_id="console@example.test",
+                username="console@example.test",
+                chat_type="private",
+            ),
+            "default",
+            "admin-conv-test",
+            "user-console-tenant",
+            delivery_context=GatewayDeliveryContext.trusted_admin_console(),
+        )
+    )
+    assert "No recibí ningún mensaje" in result["response"]
 
 
 def test_template_vault_options_and_put(

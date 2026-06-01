@@ -47,7 +47,7 @@ def test_telegram_user_id() -> str:
 
 
 @pytest.fixture
-def admin_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def admin_client(gateway_db: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     from gateway_import import load_gateway_app
 
     monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")

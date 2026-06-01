@@ -52,3 +52,20 @@ def cmd_deploy(
     if "Error" in msg or "not implemented" in msg.lower():
         raise typer.Exit(1)
     typer.secho("Despliegue completado.", fg=typer.colors.GREEN)
+
+
+@app.command("spawn-install", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def spawn_install(
+    ctx: typer.Context,
+    dry_run: bool = typer.Option(False, "--dry-run", help="Muestra el comando sin ejecutarlo."),
+) -> None:
+    """Ejecuta el instalador Spawn VM conservado como shell de bajo nivel."""
+    import subprocess
+
+    script = _repo_root() / "scripts" / "deploy" / "spawn-install.sh"
+    argv = ["bash", str(script), *list(ctx.args)]
+    if dry_run:
+        typer.echo("dry-run: " + " ".join(argv))
+        return
+    proc = subprocess.run(argv, cwd=_repo_root(), text=True, check=False)
+    raise typer.Exit(proc.returncode)

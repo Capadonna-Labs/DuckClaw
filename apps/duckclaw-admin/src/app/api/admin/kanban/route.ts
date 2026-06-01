@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { KanbanCard, KanbanStatus } from '@/lib/kanbanTypes';
 import { syncKanbanCardsWithTeam } from '@/lib/kanbanSync';
 import { repoRoot } from '@/lib/localOps';
+import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 const VALID: KanbanStatus[] = ['pendiente', 'en_progreso', 'completo'];
 
@@ -32,7 +33,10 @@ function newId(): string {
   return `card_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin', 'user'] });
+  if (!auth.ok) return auth.response;
+
   let cards = loadCards();
   try {
     const synced = await syncKanbanCardsWithTeam(cards);
@@ -45,10 +49,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const role = req.headers.get('x-duckclaw-role') || 'admin';
-  if (role !== 'admin') {
-    return NextResponse.json({ detail: 'Solo admin' }, { status: 403 });
-  }
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
+  if (!auth.ok) return auth.response;
+
   const body = await req.json().catch(() => ({}));
   const title = String(body.title || 'Nuevo agente').trim().slice(0, 120);
   const description = String(body.description || '').trim().slice(0, 2000);
@@ -71,10 +74,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const role = req.headers.get('x-duckclaw-role') || 'admin';
-  if (role !== 'admin') {
-    return NextResponse.json({ detail: 'Solo admin' }, { status: 403 });
-  }
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
+  if (!auth.ok) return auth.response;
+
   const body = await req.json().catch(() => ({}));
   const id = String(body.id || '').trim();
   if (!id) return NextResponse.json({ detail: 'id requerido' }, { status: 400 });
@@ -95,10 +97,9 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const role = req.headers.get('x-duckclaw-role') || 'admin';
-  if (role !== 'admin') {
-    return NextResponse.json({ detail: 'Solo admin' }, { status: 403 });
-  }
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
+  if (!auth.ok) return auth.response;
+
   const url = new URL(req.url);
   const id = url.searchParams.get('id')?.trim();
   if (!id) return NextResponse.json({ detail: 'id requerido' }, { status: 400 });

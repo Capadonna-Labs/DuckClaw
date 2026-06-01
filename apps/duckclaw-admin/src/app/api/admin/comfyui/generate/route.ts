@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminApiKey, gatewayBase, gatewayLongFetch, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 export const maxDuration = 480;
 export const dynamic = 'force-dynamic';
 
 /** Proxy generación ComfyUI (puede tardar varios minutos). */
 export async function POST(req: NextRequest) {
-  const role = req.headers.get('x-duckclaw-role') || 'admin';
-  if (role !== 'admin') {
-    return NextResponse.json({ detail: 'Solo admin' }, { status: 403 });
-  }
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
+  if (!auth.ok) return auth.response;
 
   const base = gatewayBase();
   const key = adminApiKey();
@@ -20,13 +19,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: 'DUCKCLAW_ADMIN_API_KEY no configurada' }, { status: 503 });
   }
 
-  const actor = req.headers.get('x-duckclaw-actor');
   const bodyText = await req.text();
   const headers = gatewayProxyHeaders({
     'Content-Type': 'application/json',
     'X-Admin-Key': key,
   });
-  if (actor) headers['X-Duckclaw-Actor'] = actor;
+  headers['X-Duckclaw-Actor'] = auth.actor;
 
   const target = `${base}/api/v1/admin/comfyui/generate`;
 

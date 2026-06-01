@@ -105,7 +105,7 @@ def user_may_access_shared_path(
     3) Si hay filas: debe existir comodín '*' o un resource_key cuya ruta
        resuelta coincida con shared_db_path (mismo path canónico).
     """
-    from duckclaw.vaults import validate_user_db_path
+    from duckclaw.storage.vaults import validate_user_db_path
 
     tid = str(tenant_id or "").strip() or "default"
     uid = str(user_id or "").strip() or "default"
@@ -156,7 +156,7 @@ def validate_resource_key(resource_key: str) -> bool:
 
 def path_is_under_shared_tree(db_path: str) -> bool:
     """True si la ruta cae bajo db/shared/ (árbol de bases compartidas)."""
-    from duckclaw.vaults import db_root
+    from duckclaw.storage.vaults import db_root
 
     try:
         p = Path(db_path).expanduser().resolve()

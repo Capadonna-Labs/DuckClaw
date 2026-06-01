@@ -122,6 +122,7 @@ async def create_session(redis: Any, *, user: dict[str, Any]) -> tuple[str, str]
         "nombre": user.get("nombre"),
         "rol": user.get("rol"),
         "initials": user.get("initials") or "",
+        "profile": user.get("profile") or {},
         "created_at": now,
         "last_activity": now,
         "csrf_token": csrf_token,
@@ -164,4 +165,5 @@ def session_user_public(session: dict[str, Any]) -> dict[str, Any]:
         "nombre": session.get("nombre"),
         "rol": session.get("rol"),
         "initials": session.get("initials") or "",
+        "profile": session.get("profile") or {},
     }

@@ -1,5 +1,7 @@
 # Forge Projects — agrupación lógica
 
+**Estado:** legacy filesystem. El modelo canónico para proyectos operativos es DB-first (`admin_projects`, `admin_project_agents`) y está documentado en [`ADMIN_IDENTITY_RBAC_ERD.md`](ADMIN_IDENTITY_RBAC_ERD.md). Esta spec se conserva sólo para compatibilidad con carpetas locales `forge/projects/` y variables `DUCKCLAW_TEAM_*`.
+
 ## Objetivo
 
 Agrupar workers y contexto compartido sin datos del operador en el repositorio.
@@ -16,7 +18,7 @@ Agrupar workers y contexto compartido sin datos del operador en el repositorio.
 | `DUCKCLAW_TEAM_SHARED_CONTEXT_FILE` | Ruta a markdown local |
 | `DUCKCLAW_TEAM_SHARED_CONTEXT` | Texto inline (alternativa) |
 
-**Runtime:** el gateway **no** depende de `project.yaml` en disco; solo de env + DuckDB (`/workers`, tenant). Las carpetas bajo `forge/projects/` son metadata local opcional para la consola admin.
+**Runtime:** el gateway **no** debe depender de `project.yaml` en disco. El flujo nuevo usa proyectos DB-first en DuckDB; las carpetas bajo `forge/projects/` son metadata local opcional o import material para migraciones.
 
 ## Disco (gitignored)
 
@@ -24,7 +26,9 @@ Agrupar workers y contexto compartido sin datos del operador en el repositorio.
 
 ## API admin
 
-Ver rutas `/api/v1/admin/forge-projects*` y BFF `/api/admin/forge-projects*`.
+Legacy: rutas `/api/v1/admin/forge-projects*` y BFF `/api/admin/forge-projects*`.
+
+Nuevo contrato: `/api/v1/admin/workspace/projects*`, con asignación relacional de agentes sin duplicar datos del worker.
 
 ## Ejemplo de contexto compartido
 

@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { catalogFallbackResponse } from '@/lib/adminCatalogFallback';
 import { fallbackPlaygroundConfig } from '@/lib/playgroundFallback';
 import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
-import { normalizeAdminRole } from '@/lib/roles';
-import { validateCsrf, resolveSessionUser } from '@/lib/authProxy';
+import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 const OPS_COMMANDS_FALLBACK = {
   commands: [
@@ -107,16 +106,12 @@ async function proxy(req: NextRequest, segments: string[]) {
   const sub = segments.join('/');
   const isHealth = sub === 'health';
 
-  if (WRITE_METHODS.has(req.method) && !isHealth && !validateCsrf(req)) {
-    return NextResponse.json({ detail: 'CSRF token inválido o ausente' }, { status: 403 });
+  const auth = isHealth ? null : await requireAdminRouteAuth(req);
+  if (auth && !auth.ok) {
+    return auth.response;
   }
 
-  const sessionUser = isHealth ? null : await resolveSessionUser(req);
-  if (!isHealth && !sessionUser) {
-    return NextResponse.json({ detail: 'No autenticado' }, { status: 401 });
-  }
-
-  const role = normalizeAdminRole(sessionUser?.rol || 'admin');
+  const role = auth?.role || 'admin';
   if (segments[0] === 'audit' && role !== 'admin') {
     return NextResponse.json({ detail: 'Auditoría solo para rol admin' }, { status: 403 });
   }
@@ -131,7 +126,7 @@ async function proxy(req: NextRequest, segments: string[]) {
   const target = `${base}/api/v1/admin/${sub}${url.search}`;
 
   const headers = gatewayProxyHeaders({ 'X-Admin-Key': key });
-  const actor = sessionUser?.email || req.headers.get('x-duckclaw-actor');
+  const actor = auth?.actor;
   if (actor) headers['X-Duckclaw-Actor'] = actor;
   const ct = req.headers.get('content-type');
   if (ct) headers['Content-Type'] = ct;

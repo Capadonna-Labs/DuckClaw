@@ -75,11 +75,18 @@ export interface TrainPipelineResult {
 
 export interface DuckdbTableCatalog {
   vault_path: string;
+  vault_user_id?: string;
+  actor_email?: string;
+  tenant_id?: string;
+  table_count?: number;
   schemas: Record<string, string[]>;
 }
 
 export interface DuckdbQueryResult {
   vault_path: string;
+  vault_user_id?: string;
+  actor_email?: string;
+  tenant_id?: string;
   columns: string[];
   rows: unknown[][];
   row_count: number;
@@ -197,11 +204,53 @@ export const adminService = {
       }
     ),
 
+  createTemplateContext: (workerId: string, body: { title: string; content_md: string; sort_order?: number }) =>
+    adminFetch<{ ok: boolean; context: { context_id: string; title: string }; version: number }>(
+      `/templates/${encodeURIComponent(workerId)}/contexts`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    ),
+
+  reorderTemplateContexts: (
+    workerId: string,
+    items: { context_id: string; sort_order: number }[]
+  ) =>
+    adminFetch<{ ok: boolean; updated: number }>(
+      `/templates/${encodeURIComponent(workerId)}/contexts/reorder`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ items }),
+      }
+    ),
+
+  deleteTemplateContext: (workerId: string, contextId: string) =>
+    adminFetch<{ ok: boolean }>(
+      `/templates/${encodeURIComponent(workerId)}/contexts/${encodeURIComponent(contextId)}`,
+      { method: 'DELETE' }
+    ),
+
   validateTemplate: (workerId: string) =>
     adminFetch<{ ok: boolean; errors: string[] }>(
       `/templates/${encodeURIComponent(workerId)}/validate`,
       { method: 'POST' }
     ),
+
+  importTemplatesToCatalog: (body: {
+    templates_root?: string;
+    include_prefixes?: string[];
+    include_template_ids?: string[];
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      imported: { worker_id: string; worker_uid: string; template_dir: string }[];
+      skipped_existing: string[];
+      skipped: string[];
+    }>('/templates/import', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   getTemplateVaultOptions: (workerId: string, vaultUserId?: string) => {
     const q = vaultUserId ? `?vault_user_id=${encodeURIComponent(vaultUserId)}` : '';
@@ -251,6 +300,30 @@ export const adminService = {
     soul?: string;
   }) =>
     adminFetch<{ ok: boolean; id: string; path: string }>('/projects', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  createUserAgent: (body: {
+    worker_id: string;
+    display_name: string;
+    source_template_id?: string;
+    system_prompt?: string;
+    description?: string;
+    skills?: string[];
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      agent: {
+        tenant_id: string;
+        owner_email: string;
+        worker_id: string;
+        display_name: string;
+        source_template_id: string;
+        manifest_path: string;
+        active: boolean;
+      };
+    }>('/user-agents', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -820,6 +893,19 @@ export const adminService = {
         keys_ok?: boolean;
       }[];
       workers: { id: string; label: string }[];
+      projects?: {
+        project_id: string;
+        name: string;
+        description: string;
+        agent_count?: number;
+        agents: {
+          worker_uid: string;
+          worker_id: string;
+          display_name: string;
+          role: string;
+          sort_order: string;
+        }[];
+      }[];
       workers_invalid?: string[];
       env_path: string;
       effective_tenant_id?: string;
@@ -903,6 +989,68 @@ export const adminService = {
       method: 'DELETE',
     }),
 
+  listWorkspaceProjects: () =>
+    adminFetch<{
+      projects: {
+        project_id: string;
+        tenant_id: string;
+        owner_email: string;
+        name: string;
+        description: string;
+        status: string;
+        visibility: string;
+        agent_count?: number;
+      }[];
+    }>('/workspace/projects').then((r) => r.projects),
+
+  createWorkspaceProject: (body: { name: string; description?: string; visibility?: string }) =>
+    adminFetch<{
+      ok: boolean;
+      project: {
+        project_id: string;
+        tenant_id: string;
+        owner_email: string;
+        name: string;
+        description: string;
+        status: string;
+        visibility: string;
+      };
+    }>('/workspace/projects', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  listWorkspaceProjectAgents: (projectId: string) =>
+    adminFetch<{
+      project_id: string;
+      agents: {
+        project_id: string;
+        worker_uid: string;
+        worker_id: string;
+        display_name: string;
+        role: string;
+        sort_order: string;
+      }[];
+    }>(`/workspace/projects/${encodeURIComponent(projectId)}/agents`).then((r) => r.agents),
+
+  assignWorkspaceProjectAgent: (
+    projectId: string,
+    body: { worker_id: string; role?: string; sort_order?: number }
+  ) =>
+    adminFetch<{ ok: boolean; project_id: string; agent: { worker_id: string; role: string } }>(
+      `/workspace/projects/${encodeURIComponent(projectId)}/agents`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    ),
+
+  removeWorkspaceProjectAgent: (projectId: string, workerId: string) =>
+    adminFetch<{ ok: boolean; project_id: string; worker_id: string }>(
+      `/workspace/projects/${encodeURIComponent(projectId)}/agents/${encodeURIComponent(workerId)}`,
+      { method: 'DELETE' }
+    ),
+
   listEnvForgeProjectPresets: () =>
     adminFetch<{
       presets: {
@@ -940,6 +1088,7 @@ export const adminService = {
 
   playgroundChat: (body: {
     worker_id: string;
+    project_id?: string;
     message: string;
     chat_id?: string;
     tenant_id?: string;
@@ -963,6 +1112,7 @@ export const adminService = {
   playgroundChatStream: async (
     body: {
       worker_id: string;
+      project_id?: string;
       message: string;
       chat_id?: string;
       tenant_id?: string;

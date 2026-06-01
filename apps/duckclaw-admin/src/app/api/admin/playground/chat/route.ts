@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminApiKey, gatewayBase, gatewayLongFetch, gatewayProxyHeaders } from '@/lib/gatewayProxy';
-import { normalizeAdminRole } from '@/lib/roles';
+import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 /** ComfyUI (~3–4 min) + cold start worker; margen para MCP omitido en visual_generation */
 export const maxDuration = 600;
@@ -10,10 +10,8 @@ const GATEWAY_CHAT_TIMEOUT_MS = 590_000;
 
 /** Proxy al chat admin del gateway (JSON o SSE si stream=true). */
 export async function POST(req: NextRequest) {
-  const role = normalizeAdminRole(req.headers.get('x-duckclaw-role') || 'admin');
-  if (role !== 'admin' && role !== 'user') {
-    return NextResponse.json({ detail: 'Rol inválido' }, { status: 403 });
-  }
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin', 'user'] });
+  if (!auth.ok) return auth.response;
 
   const base = gatewayBase();
   const key = adminApiKey();
@@ -24,7 +22,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: 'DUCKCLAW_ADMIN_API_KEY no configurada' }, { status: 503 });
   }
 
-  const actor = req.headers.get('x-duckclaw-actor');
   const bodyText = await req.text();
   let wantsStream = false;
   try {
@@ -41,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (wantsStream) {
     headers.Accept = 'text/event-stream';
   }
-  if (actor) headers['X-Duckclaw-Actor'] = actor;
+  headers['X-Duckclaw-Actor'] = auth.actor;
 
   const target = `${base}/api/v1/admin/playground/chat`;
 

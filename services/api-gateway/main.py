@@ -2048,35 +2048,6 @@ async def _invoke_chat(
                     )
                     admin_ui = is_admin_ui_chat_session(session_id)
                     fly_charts = pop_all_fly_outbound_charts_b64(session_id)
-                    # #region agent log
-                    try:
-                        with open(
-                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-                            "a",
-                            encoding="utf-8",
-                        ) as _dbg_f:
-                            _dbg_f.write(
-                                json.dumps(
-                                    {
-                                        "sessionId": "fd1dbb",
-                                        "location": "main.py:fly_cmd_return",
-                                        "message": "fly_outbound_charts",
-                                        "data": {
-                                            "session_id": session_id,
-                                            "admin_ui": admin_ui,
-                                            "charts_popped": len(fly_charts),
-                                            "has_telegram_token": bool(token),
-                                        },
-                                        "timestamp": int(time.time() * 1000),
-                                        "hypothesisId": "B",
-                                    },
-                                    ensure_ascii=False,
-                                )
-                                + "\n"
-                            )
-                    except Exception:
-                        pass
-                    # #endregion
                     if token:
                         for photo_b64 in fly_charts:
                             png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
@@ -2101,35 +2072,6 @@ async def _invoke_chat(
                         # Inline b64 solo si no hay artifacts (fallback UI legacy)
                         if not artifact_ids:
                             fly_resp["figure_base64"] = fly_charts[0]
-                        # #region agent log
-                        try:
-                            with open(
-                                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-                                "a",
-                                encoding="utf-8",
-                            ) as _dbg_f:
-                                _dbg_f.write(
-                                    json.dumps(
-                                        {
-                                            "sessionId": "fd1dbb",
-                                            "location": "main.py:fly_cmd_return",
-                                            "message": "admin_figure_attached",
-                                            "data": {
-                                                "session_id": session_id,
-                                                "figure_len": len(fly_charts[0]),
-                                                "chart_count": len(fly_charts),
-                                                "artifact_ids": artifact_ids,
-                                            },
-                                            "timestamp": int(time.time() * 1000),
-                                            "hypothesisId": "B",
-                                        },
-                                        ensure_ascii=False,
-                                    )
-                                    + "\n"
-                                )
-                        except Exception:
-                            pass
-                        # #endregion
                 except Exception as exc:
                     if _gateway_log.isEnabledFor(logging.DEBUG):
                         _gateway_log.debug("fly chart attach failed: %s", exc)

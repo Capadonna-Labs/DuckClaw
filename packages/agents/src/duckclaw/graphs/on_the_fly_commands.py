@@ -79,33 +79,6 @@ def _normalize_cron_rm_id(token: str) -> Optional[str]:
 _FLY_OUTBOUND_CHART_B64: dict[str, list[str]] = {}
 
 
-def _agent_debug_log(location: str, message: str, data: dict[str, Any], hypothesis_id: str) -> None:
-    # #region agent log
-    try:
-        with open(
-            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
-            "a",
-            encoding="utf-8",
-        ) as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "fd1dbb",
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000),
-                        "hypothesisId": hypothesis_id,
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
-
-
 def _debug_log_model_config(
     *,
     hypothesis_id: str,
@@ -5247,32 +5220,18 @@ def execute_trading_session(
     tid = str(tenant_id or "default").strip() or "default"
     if parsed.status:
         out = _read_trading_session_status_summary(db, chat_id=chat_id)
-        registered = 0
         try:
             b64c = _build_trading_session_pnl_chart_b64(db, chat_id=chat_id)
         except Exception:
             b64c = None
         if b64c:
             register_fly_outbound_chart_b64(chat_id, b64c)
-            registered += 1
         try:
             pie_b64 = _build_session_participation_pie_b64(db)
         except Exception:
             pie_b64 = None
         if pie_b64:
             register_fly_outbound_chart_b64(chat_id, pie_b64)
-            registered += 1
-        _agent_debug_log(
-            "on_the_fly_commands.py:execute_trading_session:status",
-            "trading_session_status_charts",
-            {
-                "chat_id": str(chat_id),
-                "pnl_b64_len": len(b64c) if b64c else 0,
-                "pie_b64_len": len(pie_b64) if pie_b64 else 0,
-                "registered_count": registered,
-            },
-            "A",
-        )
         return out
     if parsed.stop:
         ok_close, detail_close = _close_active_trading_session(

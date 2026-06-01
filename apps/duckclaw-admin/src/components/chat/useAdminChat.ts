@@ -25,7 +25,8 @@ import { readStoredVaultPath, writeStoredVaultPath } from '@/lib/conversationVau
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
 import {
   finalizeRunningToolHeartbeats,
-  findToolHeartbeatIndex,
+  createToolInvocationId,
+  findRunningToolHeartbeatIndex,
   mapSseToolPhase,
   parseToolNameFromHeartbeatText,
   toolHeartbeatDisplayText,
@@ -61,29 +62,6 @@ function mergeHistoryWithEphemeral(server: ChatMsg[], ephemeral: ChatMsg[]): Cha
   if (!ephemeral.length) return server;
   return [...server, ...ephemeral];
 }
-
-// #region agent log
-function agentDebugLog(payload: {
-  hypothesisId: string;
-  location: string;
-  message: string;
-  data?: Record<string, string | number | boolean>;
-}) {
-  if (typeof window === 'undefined') return;
-  fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': 'fd1dbb',
-    },
-    body: JSON.stringify({
-      ...payload,
-      sessionId: 'fd1dbb',
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-}
-// #endregion
 
 function collectEphemeralMessages(messages: ChatMsg[]): ChatMsg[] {
   return messages.filter((m) => m.role === 'heartbeat');
@@ -173,7 +151,10 @@ export function useAdminChat({
   });
 
   const setWorkerId = useCallback(
-    (next: string | ((prev: string) => string)) => {
+    (
+      next: string | ((prev: string) => string),
+      opts?: { persist?: boolean }
+    ) => {
       setWorkerIdState((prev) => {
         const value = typeof next === 'function' ? next(prev) : next;
         if (typeof window !== 'undefined') {
@@ -183,10 +164,20 @@ export function useAdminChat({
             /* ignore quota */
           }
         }
+        if (opts?.persist && chatId && value.trim()) {
+          const tid = (config?.effective_tenant_id || 'default').trim() || 'default';
+          void adminService
+            .setPlaygroundWorker({
+              chat_id: chatId,
+              tenant_id: tid,
+              worker_id: value.trim(),
+            })
+            .catch(() => undefined);
+        }
         return value;
       });
     },
-    [chatId]
+    [chatId, config?.effective_tenant_id]
   );
 
   const prevWorkerIdRef = useRef(workerId);
@@ -308,6 +299,14 @@ export function useAdminChat({
     loadConfig();
   }, [loadConfig]);
 
+  useEffect(() => {
+    if (!chatId) {
+      setWorkerId('');
+      return;
+    }
+    setWorkerId(initialWorker || readStoredWorker(chatId) || '');
+  }, [chatId, initialWorker, setWorkerId]);
+
   const historyTenantId = (config?.effective_tenant_id || 'default').trim() || 'default';
 
   useEffect(() => {
@@ -334,29 +333,15 @@ export function useAdminChat({
           const ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
           const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
           const merged = mergeHistoryWithEphemeral(withImages, ephemeral);
-          // #region agent log
-          agentDebugLog({
-            hypothesisId: 'H1',
-            location: 'useAdminChat.ts:historyLoad',
-            message: 'merged server history with ephemeral',
-            data: {
-              chatId: chatId.slice(0, 24),
-              serverCount: fromServer.length,
-              storedEphemeralCount: storedEphemeral.length,
-              liveEphemeralCount: liveEphemeral.length,
-              mergedEphemeralCount: ephemeral.length,
-              mergedTotal: merged.length,
-            },
-          });
-          // #endregion
           return merged;
         });
-        if (data.last_worker_id) {
-          setWorkerId((prev) => {
-            if (prev && workersInclude(config?.workers, prev)) return prev;
-            if (workersInclude(config?.workers, data.last_worker_id)) return data.last_worker_id;
-            return prev;
-          });
+        const convWorker = (
+          data.preferred_worker_id ||
+          data.last_worker_id ||
+          ''
+        ).trim();
+        if (convWorker && workersInclude(config?.workers, convWorker)) {
+          setWorkerId(convWorker);
         }
         const convVault = (data.vault_db_path || '').trim();
         if (convVault) {
@@ -390,17 +375,6 @@ export function useAdminChat({
   useEffect(() => {
     if (!chatId) return;
     writeEphemeralHeartbeats(chatId, workerId, messages);
-    const hbCount = collectEphemeralMessages(messages).length;
-    if (hbCount > 0) {
-      // #region agent log
-      agentDebugLog({
-        hypothesisId: 'H2',
-        location: 'useAdminChat.ts:persistEphemeral',
-        message: 'sessionStorage write heartbeats',
-        data: { chatId: chatId.slice(0, 24), hbCount },
-      });
-      // #endregion
-    }
   }, [chatId, workerId, messages]);
 
   const scrollContentKey = useMemo(() => {
@@ -535,31 +509,59 @@ export function useAdminChat({
             : undefined;
 
         if (isToolHb && toolName) {
-          const existingIdx = findToolHeartbeatIndex(m, toolName, insertAt);
-          const existing = existingIdx >= 0 ? m[existingIdx] : null;
-          const existingPhase = existing?.toolPhase;
-          if (
-            payload.tool_phase === 'start' &&
-            (existingPhase === 'done' || existingPhase === 'error')
-          ) {
-            return m;
+          const isStart = payload.tool_phase === 'start' || uiPhase === 'running';
+          const runningIdx = findRunningToolHeartbeatIndex(m, toolName, insertAt);
+          const running = runningIdx >= 0 ? m[runningIdx] : null;
+
+          if (isStart) {
+            if (running) {
+              const merged: ChatMsg = {
+                ...running,
+                text: toolHeartbeatDisplayText(toolName, 'running', undefined),
+                toolPhase: 'running',
+                workerId: hbWorker || running.workerId,
+                swarmSlot: hbSlot,
+              };
+              const next = [...m];
+              next[runningIdx] = merged;
+              return next;
+            }
+            const startedAt = Date.now();
+            const merged: ChatMsg = {
+              role: 'heartbeat',
+              text: toolHeartbeatDisplayText(toolName, 'running', undefined),
+              heartbeatKind: 'tool',
+              workerId: hbWorker || undefined,
+              swarmSlot: hbSlot,
+              toolName,
+              toolInvocationId: createToolInvocationId(toolName),
+              toolPhase: 'running',
+              toolStartedAt: startedAt,
+            };
+            const next = [...m];
+            next.splice(insertAt, 0, merged);
+            return next;
           }
+
+          const targetIdx = runningIdx;
+          const existing = targetIdx >= 0 ? m[targetIdx] : null;
           const startedAt = existing?.toolStartedAt ?? Date.now();
           const merged: ChatMsg = {
             role: 'heartbeat',
             text: toolHeartbeatDisplayText(toolName, uiPhase, elapsedMs),
             heartbeatKind: 'tool',
-            workerId: hbWorker || undefined,
+            workerId: hbWorker || existing?.workerId,
             swarmSlot: hbSlot,
             toolName,
-            toolPhase: uiPhase ?? 'running',
+            toolInvocationId: existing?.toolInvocationId ?? createToolInvocationId(toolName),
+            toolPhase: uiPhase ?? 'done',
             toolStartedAt: startedAt,
             toolElapsedMs:
               elapsedMs != null && Number.isFinite(elapsedMs) ? elapsedMs : undefined,
           };
-          if (existingIdx >= 0) {
+          if (targetIdx >= 0) {
             const next = [...m];
-            next[existingIdx] = merged;
+            next[targetIdx] = merged;
             return next;
           }
           const next = [...m];
@@ -588,6 +590,8 @@ export function useAdminChat({
       let elapsedFooter = '';
       const streamVisual: {
         figure_base64?: string;
+        fly_charts_b64?: string[];
+        fly_chart_artifact_ids?: string[];
         artifact_id?: string;
         artifact_tenant_id?: string;
       } = {};
@@ -612,11 +616,37 @@ export function useAdminChat({
             if (meta.elapsed_ms != null && Number.isFinite(meta.elapsed_ms)) {
               elapsedFooter = `\n\n⏱️ ${(meta.elapsed_ms / 1000).toFixed(2)}s`;
             }
-            if (meta.figure_base64 || meta.artifact_id) {
+            if (
+              meta.figure_base64 ||
+              meta.fly_charts_b64?.length ||
+              meta.fly_chart_artifact_ids?.length ||
+              meta.artifact_id
+            ) {
               streamVisual.figure_base64 = meta.figure_base64;
+              streamVisual.fly_charts_b64 = meta.fly_charts_b64;
+              streamVisual.fly_chart_artifact_ids = meta.fly_chart_artifact_ids;
               streamVisual.artifact_id = meta.artifact_id;
               streamVisual.artifact_tenant_id = meta.artifact_tenant_id;
             }
+            // #region agent log
+            fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fd1dbb' },
+              body: JSON.stringify({
+                sessionId: 'fd1dbb',
+                location: 'useAdminChat.ts:onDone',
+                message: 'stream_visual_meta',
+                data: {
+                  has_figure_b64: Boolean(meta.figure_base64?.trim()),
+                  fly_charts_count: meta.fly_charts_b64?.length ?? 0,
+                  fly_artifact_ids: meta.fly_chart_artifact_ids ?? [],
+                  artifact_id: meta.artifact_id ?? null,
+                },
+                timestamp: Date.now(),
+                hypothesisId: 'C',
+              }),
+            }).catch(() => {});
+            // #endregion
           },
         },
         { signal: abortController.signal }
@@ -629,7 +659,25 @@ export function useAdminChat({
         (streamVisual.artifact_tenant_id || config?.effective_tenant_id || 'default').trim() ||
         'default';
       let assistantPreviews: ChatMsg['imagePreviews'] | undefined;
-      if (streamVisual.figure_base64?.trim()) {
+      const chartNames = ['trading-pnl.png', 'participation-pie.png'];
+      const artifactIdsFromFly = (streamVisual.fly_chart_artifact_ids ?? []).filter((id) =>
+        id?.trim()
+      );
+      const chartsFromFly = (streamVisual.fly_charts_b64 ?? []).filter((b) => b?.trim());
+      if (artifactIdsFromFly.length > 0) {
+        assistantPreviews = artifactIdsFromFly.flatMap((aid, i) =>
+          artifactImagePreview(tenantForArtifact, aid).map((p) => ({
+            ...p,
+            name: chartNames[i] ?? p.name,
+          }))
+        );
+      } else if (chartsFromFly.length > 0) {
+        assistantPreviews = chartsFromFly.map((b64, i) => {
+          const raw = b64.trim();
+          const src = raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`;
+          return { url: src, name: chartNames[i] ?? `chart-${i + 1}.png` };
+        });
+      } else if (streamVisual.figure_base64?.trim()) {
         const raw = streamVisual.figure_base64.trim();
         const src = raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`;
         assistantPreviews = [{ url: src, name: 'imagen-generada.png' }];

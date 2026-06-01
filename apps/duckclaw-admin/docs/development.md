@@ -16,7 +16,7 @@ pnpm dev
 
 Desde raíz: `pnpm admin:dev`.
 
-Abre http://localhost:3000 → redirige a `/overview` si hay sesión, si no a `/login`.
+Abre http://localhost:3001 → redirige a `/overview` si hay sesión, si no a `/login`.
 
 ## Añadir una pantalla admin
 

@@ -139,6 +139,7 @@ export interface AdminConversation {
   actor: string;
   section: string;
   last_worker_id: string;
+  preferred_worker_id?: string;
   workers: string[];
   last_message_preview: string;
   message_count: number;
@@ -188,7 +189,15 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export const adminService = {
   health: () => adminFetch<AdminHealth>('/health'),
 
-  getOverviewMetrics: () => adminFetch<OverviewMetrics>('/overview/metrics'),
+  getOverviewMetrics: (params?: OverviewMetricsParams) => {
+    const qs = new URLSearchParams();
+    if (params?.usage_days != null) qs.set('usage_days', String(params.usage_days));
+    if (params?.usage_group_by) qs.set('usage_group_by', params.usage_group_by);
+    if (params?.worker_id) qs.set('worker_id', params.worker_id);
+    if (params?.session_id) qs.set('session_id', params.session_id);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return adminFetch<OverviewMetrics>(`/overview/metrics${suffix}`);
+  },
 
   listTemplates: () =>
     adminFetch<{ templates: TemplateSummary[] }>('/templates').then((r) => r.templates),
@@ -917,9 +926,27 @@ export const adminService = {
       team_hint?: string;
       vault?: PlaygroundVaultInfo;
       vault_options?: { path: string; scope: string; vault_id?: string; label?: string }[];
+      selected_worker_id?: string;
       note: string;
     }>(`/playground/config${qs ? `?${qs}` : ''}`);
   },
+
+  setPlaygroundWorker: (body: {
+    chat_id: string;
+    tenant_id?: string;
+    worker_id: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      chat_id: string;
+      tenant_id: string;
+      worker_id: string;
+      selected_worker_id: string;
+      effective_worker_id: string;
+    }>('/playground/worker', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 
   setPlaygroundVault: (body: {
     chat_id: string;
@@ -1139,6 +1166,8 @@ export const adminService = {
         usage_tokens?: Record<string, number>;
         elapsed_ms?: number;
         figure_base64?: string;
+        fly_charts_b64?: string[];
+        fly_chart_artifact_ids?: string[];
         artifact_id?: string;
         artifact_tenant_id?: string;
       }) => void;
@@ -1191,6 +1220,8 @@ export const adminService = {
             usage_tokens: ev.usage_tokens,
             elapsed_ms: ev.elapsed_ms,
             figure_base64: ev.figure_base64,
+            fly_charts_b64: ev.fly_charts_b64,
+            fly_chart_artifact_ids: ev.fly_chart_artifact_ids,
             artifact_id: ev.artifact_id,
             artifact_tenant_id: ev.artifact_tenant_id,
           });

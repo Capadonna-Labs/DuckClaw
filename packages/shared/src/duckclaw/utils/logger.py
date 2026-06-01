@@ -354,9 +354,25 @@ def log_tool_execution_async(func: Optional[F] = None, *, name: Optional[str] = 
     return decorator
 
 
+def _usage_dict_from_ai_message(m: Any) -> dict[str, int] | None:
+    meta = getattr(m, "usage_metadata", None) or {}
+    if not meta:
+        rmeta = getattr(m, "response_metadata", None) or {}
+        if isinstance(rmeta, dict):
+            meta = rmeta.get("token_usage") or rmeta.get("usage") or {}
+    if not isinstance(meta, dict) or not meta:
+        return None
+    inp = int(meta.get("input_tokens") or meta.get("prompt_tokens") or 0)
+    out = int(meta.get("output_tokens") or meta.get("completion_tokens") or 0)
+    tot = int(meta.get("total_tokens") or (inp + out) or 0)
+    if tot <= 0 and inp <= 0 and out <= 0:
+        return None
+    return {"input_tokens": inp, "output_tokens": out, "total_tokens": tot}
+
+
 def extract_usage_from_messages(messages: Optional[list[Any]]) -> Optional[dict[str, int]]:
     """
-    Último AIMessage con usage_metadata (LangChain).
+    Suma usage_metadata de todos los AIMessage del turno (LangChain / OpenRouter).
     Retorna dict con input_tokens, output_tokens, total_tokens o None.
     """
     if not messages:
@@ -365,16 +381,20 @@ def extract_usage_from_messages(messages: Optional[list[Any]]) -> Optional[dict[
         from langchain_core.messages import AIMessage
     except Exception:
         AIMessage = None  # type: ignore[assignment,misc]
-    for m in reversed(messages):
+    total_in = 0
+    total_out = 0
+    total_all = 0
+    found = False
+    for m in messages:
         if AIMessage is not None and isinstance(m, AIMessage):
-            meta = getattr(m, "usage_metadata", None) or {}
-            if not meta:
-                rmeta = getattr(m, "response_metadata", None) or {}
-                if isinstance(rmeta, dict):
-                    meta = rmeta.get("token_usage") or rmeta.get("usage") or {}
-            if isinstance(meta, dict) and meta:
-                inp = int(meta.get("input_tokens") or meta.get("prompt_tokens") or 0)
-                out = int(meta.get("output_tokens") or meta.get("completion_tokens") or 0)
-                tot = int(meta.get("total_tokens") or (inp + out) or 0)
-                return {"input_tokens": inp, "output_tokens": out, "total_tokens": tot}
-    return None
+            u = _usage_dict_from_ai_message(m)
+            if u:
+                found = True
+                total_in += u["input_tokens"]
+                total_out += u["output_tokens"]
+                total_all += u["total_tokens"]
+    if not found:
+        return None
+    if total_all <= 0:
+        total_all = total_in + total_out
+    return {"input_tokens": total_in, "output_tokens": total_out, "total_tokens": total_all}

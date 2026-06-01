@@ -34,6 +34,18 @@ def test_extract_usage_from_messages_empty() -> None:
     assert extract_usage_from_messages([]) is None
 
 
+def test_extract_usage_from_messages_sums_all_ai_messages() -> None:
+    from duckclaw.utils.logger import extract_usage_from_messages
+    from langchain_core.messages import AIMessage
+
+    msgs = [
+        AIMessage(content="a", usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}),
+        AIMessage(content="b", usage_metadata={"input_tokens": 200, "output_tokens": 20, "total_tokens": 220}),
+    ]
+    got = extract_usage_from_messages(msgs)
+    assert got == {"input_tokens": 300, "output_tokens": 30, "total_tokens": 330}
+
+
 def test_log_tool_execution_sync_timing() -> None:
     from duckclaw.utils.logger import log_tool_execution_sync
 

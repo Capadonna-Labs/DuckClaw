@@ -554,6 +554,15 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         _gateway_log.debug("ComfyUI startup hygiene skipped: %s", exc)
 
+    try:
+        from duckclaw.graphs.graph_server import get_db
+        from duckclaw.llm_usage_log import ensure_llm_usage_log_table
+
+        ensure_llm_usage_log_table(get_db())
+        _gateway_log.info("llm_usage_log: tabla asegurada en gateway DuckDB")
+    except Exception as exc:  # noqa: BLE001
+        _gateway_log.warning("llm_usage_log: no se pudo asegurar tabla al arranque: %s", exc)
+
     yield
 
     _gt = getattr(app.state, "goals_ticker_task", None)
@@ -1570,26 +1579,63 @@ def _visual_artifact_id_from_messages(messages: Any) -> str:
     return ""
 
 
+def _persist_admin_fly_charts(tenant_id: str, fly_charts_b64: list[str]) -> list[str]:
+    """Escribe PNG de fly commands en db/private/{tenant}/artifacts/ (evita SSE gigante)."""
+    from duckclaw.forge.skills.comfyui_bridge import tenant_artifacts_dir
+
+    tid = (tenant_id or "default").strip() or "default"
+    art_dir = tenant_artifacts_dir(tid)
+    ids: list[str] = []
+    for photo_b64 in fly_charts_b64:
+        png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
+        if not png_bytes:
+            png_bytes = decode_sandbox_figure_base64(photo_b64)
+        if not png_bytes:
+            continue
+        aid = str(uuid.uuid4())
+        (art_dir / f"{aid}.png").write_bytes(png_bytes)
+        ids.append(aid)
+    return ids
+
+
 def _admin_visual_fields_from_invoke_result(
     session_id: str,
     result: dict[str, Any],
     tenant_id: str,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Metadatos de imagen para SSE/JSON del playground admin (ComfyUI → artifacts/)."""
     from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
 
     if not is_admin_ui_chat_session(session_id):
         return {}
-    out: dict[str, str] = {}
+    out: dict[str, Any] = {}
+    tid = (tenant_id or "default").strip() or "default"
+    fly_artifact_ids_raw = result.get("fly_chart_artifact_ids")
+    fly_artifact_ids: list[str] = []
+    if isinstance(fly_artifact_ids_raw, list):
+        fly_artifact_ids = [str(x).strip() for x in fly_artifact_ids_raw if str(x).strip()]
+    if fly_artifact_ids:
+        out["fly_chart_artifact_ids"] = fly_artifact_ids
+        out["artifact_tenant_id"] = tid
+        if not (result.get("visual_artifact_id") or result.get("artifact_id") or "").strip():
+            out["artifact_id"] = fly_artifact_ids[0]
+    fly_charts_raw = result.get("fly_charts_b64")
+    fly_charts: list[str] = []
+    if isinstance(fly_charts_raw, list):
+        fly_charts = [str(c).strip() for c in fly_charts_raw if str(c).strip()]
     b64 = (result.get("sandbox_photo_base64") or result.get("figure_base64") or "").strip()
+    if not b64 and fly_charts:
+        b64 = fly_charts[0]
     if b64:
         out["figure_base64"] = b64
+    if fly_charts:
+        out["fly_charts_b64"] = fly_charts
     aid = (result.get("visual_artifact_id") or result.get("artifact_id") or "").strip()
     if not aid:
         aid = _visual_artifact_id_from_messages(result.get("messages"))
     if aid:
         out["artifact_id"] = aid
-        out["artifact_tenant_id"] = (tenant_id or "default").strip() or "default"
+        out["artifact_tenant_id"] = tid
     return out
 
 
@@ -1984,7 +2030,14 @@ async def _invoke_chat(
                         pass
             if cmd_reply is not None:
                 chart_sent = False
+                fly_resp: dict[str, Any] = {
+                    "response": cmd_reply,
+                    "session_id": session_id,
+                    "worker_id": worker_id,
+                    "elapsed_ms": 0,
+                }
                 try:
+                    from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
                     from duckclaw.graphs.on_the_fly_commands import pop_all_fly_outbound_charts_b64
 
                     loop = asyncio.get_running_loop()
@@ -1993,8 +2046,39 @@ async def _invoke_chat(
                         if (dc.channel or "telegram").strip().lower() == "telegram"
                         else ""
                     )
+                    admin_ui = is_admin_ui_chat_session(session_id)
+                    fly_charts = pop_all_fly_outbound_charts_b64(session_id)
+                    # #region agent log
+                    try:
+                        with open(
+                            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
+                            "a",
+                            encoding="utf-8",
+                        ) as _dbg_f:
+                            _dbg_f.write(
+                                json.dumps(
+                                    {
+                                        "sessionId": "fd1dbb",
+                                        "location": "main.py:fly_cmd_return",
+                                        "message": "fly_outbound_charts",
+                                        "data": {
+                                            "session_id": session_id,
+                                            "admin_ui": admin_ui,
+                                            "charts_popped": len(fly_charts),
+                                            "has_telegram_token": bool(token),
+                                        },
+                                        "timestamp": int(time.time() * 1000),
+                                        "hypothesisId": "B",
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                    except Exception:
+                        pass
+                    # #endregion
                     if token:
-                        for photo_b64 in pop_all_fly_outbound_charts_b64(session_id):
+                        for photo_b64 in fly_charts:
                             png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
                             if not png_bytes:
                                 png_bytes = decode_sandbox_figure_base64(photo_b64)
@@ -2009,6 +2093,43 @@ async def _invoke_chat(
                                 ),
                             )
                             chart_sent = chart_sent or bool(ok)
+                    if admin_ui and fly_charts:
+                        fly_resp["fly_charts_b64"] = fly_charts
+                        artifact_ids = _persist_admin_fly_charts(tenant_id, fly_charts)
+                        if artifact_ids:
+                            fly_resp["fly_chart_artifact_ids"] = artifact_ids
+                        # Inline b64 solo si no hay artifacts (fallback UI legacy)
+                        if not artifact_ids:
+                            fly_resp["figure_base64"] = fly_charts[0]
+                        # #region agent log
+                        try:
+                            with open(
+                                "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
+                                "a",
+                                encoding="utf-8",
+                            ) as _dbg_f:
+                                _dbg_f.write(
+                                    json.dumps(
+                                        {
+                                            "sessionId": "fd1dbb",
+                                            "location": "main.py:fly_cmd_return",
+                                            "message": "admin_figure_attached",
+                                            "data": {
+                                                "session_id": session_id,
+                                                "figure_len": len(fly_charts[0]),
+                                                "chart_count": len(fly_charts),
+                                                "artifact_ids": artifact_ids,
+                                            },
+                                            "timestamp": int(time.time() * 1000),
+                                            "hypothesisId": "B",
+                                        },
+                                        ensure_ascii=False,
+                                    )
+                                    + "\n"
+                                )
+                        except Exception:
+                            pass
+                        # #endregion
                 except Exception as exc:
                     if _gateway_log.isEnabledFor(logging.DEBUG):
                         _gateway_log.debug("fly chart attach failed: %s", exc)
@@ -2018,12 +2139,7 @@ async def _invoke_chat(
                         format_chat_id_for_terminal(session_id),
                         _truncate_log(cmd_reply),
                     )
-                return {
-                    "response": cmd_reply,
-                    "session_id": session_id,
-                    "worker_id": worker_id,
-                    "elapsed_ms": 0,
-                }
+                return fly_resp
 
         try:
             from duckclaw.graphs.graph_server import _ensure_llm_config
@@ -2138,6 +2254,20 @@ async def _invoke_chat(
             f" | 🪙 Tokens: {usage.get('total_tokens', 0)} "
             f"[P:{usage.get('input_tokens', 0)}, C:{usage.get('output_tokens', 0)}]"
         )
+        try:
+            from duckclaw.llm_usage_log import append_llm_usage_log
+            from duckclaw.graphs.graph_server import get_db
+
+            append_llm_usage_log(
+                get_db(),
+                tenant_id=tenant_id,
+                session_id=session_id,
+                worker_id=effective_worker_id or worker_id,
+                usage=usage,
+                model=(result.get("model") if isinstance(result, dict) else None),
+            )
+        except Exception:
+            pass
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     log_res(
         _obs_log,

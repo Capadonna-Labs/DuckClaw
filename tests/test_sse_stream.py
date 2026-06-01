@@ -71,6 +71,29 @@ def test_emit_chat_reply_sse_done_extra_artifacts():
     assert payload.get("figure_base64") == "abc"
 
 
+def test_emit_chat_reply_sse_done_fly_charts_b64():
+    async def _run() -> dict[str, object] | None:
+        done_payload: dict[str, object] | None = None
+        async for ev in emit_chat_reply_sse(
+            "status",
+            delay_s=0,
+            extra={
+                "figure_base64": "pnl",
+                "fly_charts_b64": ["pnl", "pie"],
+            },
+        ):
+            if ev.startswith("data: {"):
+                payload = json.loads(ev[6:].strip())
+                if payload.get("type") == "done":
+                    done_payload = payload
+        return done_payload
+
+    payload = asyncio.run(_run())
+    assert payload is not None
+    assert payload.get("figure_base64") == "pnl"
+    assert payload.get("fly_charts_b64") == ["pnl", "pie"]
+
+
 def test_emit_chat_reply_sse_done_elapsed_ms():
     async def _run() -> dict[str, object] | None:
         done_payload: dict[str, object] | None = None

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from duckclaw.workers.worker_ids import WORKER_FINANZ, WORKER_QUANT_TRADER
 from duckclaw.workers.factory import (
     _extract_first_reddit_url,
     _fetch_reddit_post_via_public_json,
@@ -76,6 +77,11 @@ def test_quant_trader_vlm_incoming_market_figure_detection() -> None:
     assert not _quant_trader_vlm_incoming_suggests_market_figure(
         "Contexto visual adjunto: sin decimal tipo cotización"
     )
+    treasury = (
+        "Contexto visual adjunto: Bloomberg. Tesoros al alza en toda la curva.\n"
+        "[VLM_CONTEXT image_hash=abc confidence=0.85]"
+    )
+    assert not _quant_trader_vlm_incoming_suggests_market_figure(treasury)
 
 
 def test_quant_trader_reddit_anchor_suppressed_when_vlm_turn_is_newer() -> None:
@@ -196,16 +202,16 @@ def test_reddit_share_search_query_for_attempt_progression() -> None:
 def test_quant_lone_reddit_url_message_for_share_link() -> None:
     anchor = "https://www.reddit.com/r/USNEWS/s/h3kvg1pisI"
     assert quant_trader_lone_reddit_url_message(
-        "quant_trader",
+        WORKER_QUANT_TRADER,
         anchor,
         anchor,
     )
     assert not quant_trader_lone_reddit_url_message(
-        "quant_trader",
+        WORKER_QUANT_TRADER,
         f"Mira este post\n{anchor}",
         anchor,
     )
-    assert not quant_trader_lone_reddit_url_message("finanz", anchor, anchor)
+    assert not quant_trader_lone_reddit_url_message(WORKER_FINANZ, anchor, anchor)
 
 
 def test_quant_reddit_history_anchor_vuelve_a_intentar() -> None:

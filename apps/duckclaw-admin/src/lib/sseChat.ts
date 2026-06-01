@@ -10,6 +10,8 @@ export type SseChatEvent =
       worker_id?: string;
       elapsed_ms?: number;
       figure_base64?: string;
+      fly_charts_b64?: string[];
+      fly_chart_artifact_ids?: string[];
       artifact_id?: string;
       artifact_tenant_id?: string;
     }
@@ -53,6 +55,14 @@ function parseDataLine(data: string): SseChatEvent | null {
               : undefined,
         figure_base64:
           typeof j.figure_base64 === 'string' ? j.figure_base64 : undefined,
+        fly_charts_b64: Array.isArray(j.fly_charts_b64)
+          ? j.fly_charts_b64.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+          : undefined,
+        fly_chart_artifact_ids: Array.isArray(j.fly_chart_artifact_ids)
+          ? j.fly_chart_artifact_ids.filter(
+              (v): v is string => typeof v === 'string' && v.trim().length > 0
+            )
+          : undefined,
         artifact_id: typeof j.artifact_id === 'string' ? j.artifact_id : undefined,
         artifact_tenant_id:
           typeof j.artifact_tenant_id === 'string' ? j.artifact_tenant_id : undefined,

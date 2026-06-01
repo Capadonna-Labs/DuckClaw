@@ -117,30 +117,6 @@ export function FloatingAdminChat() {
   const { workerId, loading, messages, historyLoading, scrollToBottom } = chat;
   const activeWorkerLabel = workerId || '…';
 
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7542/ingest/7eef0e1d-8424-45c4-8303-d7cb22712741', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': 'fd1dbb',
-      },
-      body: JSON.stringify({
-        sessionId: 'fd1dbb',
-        hypothesisId: 'H2',
-        location: 'FloatingAdminChat.tsx:open',
-        message: 'panel open state',
-        data: {
-          open,
-          sessionId: (conv.sessionId ?? '').slice(0, 24),
-          messageCount: messages.length,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }, [open, conv.sessionId, messages.length]);
-  // #endregion
-
   const openPanel = useCallback(() => setOpen(true), []);
 
   const {

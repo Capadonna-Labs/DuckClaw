@@ -18,12 +18,13 @@ from duckclaw.workers.field_reflection import (
     tool_content_indicates_error,
 )
 from duckclaw.workers.manifest import WorkerSpec
+from duckclaw.workers.worker_ids import WORKER_FINANZ, WORKER_QUANT_TRADER
 
 
 def _finanz_spec() -> WorkerSpec:
     return WorkerSpec(
-        worker_id="finanz",
-        logical_worker_id="finanz",
+        worker_id=WORKER_FINANZ,
+        logical_worker_id=WORKER_FINANZ,
         name="Finanz",
         schema_name="finance_worker",
         llm_required=None,

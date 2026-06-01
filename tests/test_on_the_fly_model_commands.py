@@ -20,7 +20,7 @@ def test_execute_model_or_alias_normalizes_to_openrouter() -> None:
     assert "Modelo actualizado" in out
     current = execute_model(db, "chat1", "")
     assert "provider: openrouter" in current
-    assert "model: anthropic/claude-sonnet-4-5" in current
+    assert "model: deepseek/deepseek-v4-flash" in current
 
 
 def test_execute_models_gemini_lists_models(monkeypatch) -> None:

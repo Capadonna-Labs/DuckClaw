@@ -247,6 +247,10 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
     else:
         egress_natural_language_synthesis = bool(_enl)
 
+    tool_orchestration_config: Optional[dict] = None
+    if isinstance(data.get("tool_orchestration"), dict):
+        tool_orchestration_config = data["tool_orchestration"]
+
     return WorkerSpec(
         worker_id=worker_id,
         logical_worker_id=logical_worker_id,
@@ -286,6 +290,7 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
         field_reflection_config=field_reflection_config,
         agent_node_heuristic_first_tool=agent_node_heuristic_first_tool,
         egress_natural_language_synthesis=egress_natural_language_synthesis,
+        tool_orchestration_config=tool_orchestration_config,
     )
 
 
@@ -351,6 +356,7 @@ class WorkerSpec:
         "field_reflection_config",
         "agent_node_heuristic_first_tool",
         "egress_natural_language_synthesis",
+        "tool_orchestration_config",
     )
 
     def __init__(
@@ -393,6 +399,7 @@ class WorkerSpec:
         field_reflection_config: Optional[dict] = None,
         agent_node_heuristic_first_tool: bool | None = None,
         egress_natural_language_synthesis: bool = True,
+        tool_orchestration_config: Optional[dict] = None,
     ):
         self.worker_id = worker_id
         self.logical_worker_id = logical_worker_id
@@ -432,3 +439,4 @@ class WorkerSpec:
         self.field_reflection_config = field_reflection_config
         self.agent_node_heuristic_first_tool = agent_node_heuristic_first_tool
         self.egress_natural_language_synthesis = bool(egress_natural_language_synthesis)
+        self.tool_orchestration_config = tool_orchestration_config

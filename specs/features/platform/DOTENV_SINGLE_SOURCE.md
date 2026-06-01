@@ -8,7 +8,7 @@
 ## Runtime
 
 1. PM2: `env_file: ".env"` en cada app del ecosystem API.
-2. Gateway (`services/api-gateway/main.py`): tras cargar `.env`, `DOTENV_OVERRIDE_KEYS` **sustituyen** env heredado de PM2 (evita drift de claves viejas).
+2. Gateway (`services/api-gateway/main.py`): tras cargar `.env`, `DOTENV_OVERRIDE_KEYS` **sustituyen** env heredado de PM2 (evita drift de claves viejas y URLs IBKR/Capadonna).
 
 ## Regenerar ecosystem (sin secretos)
 

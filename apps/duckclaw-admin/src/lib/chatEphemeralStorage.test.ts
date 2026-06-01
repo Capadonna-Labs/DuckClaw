@@ -22,7 +22,17 @@ const toolB: ChatMsg = {
   toolPhase: 'done',
 };
 
+const toolB2: ChatMsg = {
+  role: 'heartbeat',
+  text: '🔄 Usando: fetch_market_data',
+  heartbeatKind: 'tool',
+  toolName: 'fetch_market_data',
+  toolInvocationId: 'fetch_market_data-2',
+  toolPhase: 'done',
+};
+
 assert.equal(mergeEphemeralHeartbeats([toolA], [toolB]).length, 2);
+assert.equal(mergeEphemeralHeartbeats([toolA], [toolB, toolB2]).length, 3);
 assert.equal(
   mergeEphemeralHeartbeats(
     [{ ...toolA, toolPhase: 'running' }],

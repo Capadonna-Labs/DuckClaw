@@ -45,9 +45,24 @@ def client_ip(request: Request) -> str:
     return "unknown"
 
 
-def set_auth_cookies(response: Response, session_id: str, csrf_token: str) -> None:
+def cookie_secure(request: Request | None = None) -> bool:
+    if is_production_env():
+        return True
+    raw = (os.environ.get("COOKIE_SECURE") or "").strip().lower()
+    if raw in ("1", "true", "yes"):
+        return True
+    if request is not None:
+        forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+        if forwarded == "https":
+            return True
+        if request.url.scheme == "https":
+            return True
+    return False
+
+
+def set_auth_cookies(response: Response, session_id: str, csrf_token: str, *, request: Request | None = None) -> None:
     ttl = session_ttl_seconds()
-    secure = is_production_env()
+    secure = cookie_secure(request)
     domain = cookie_domain()
     common: dict[str, Any] = {
         "max_age": ttl,

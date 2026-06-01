@@ -2861,7 +2861,7 @@ _DEFAULT_MODEL_BY_PROVIDER = {
     "anthropic": "claude-3-5-haiku-20241022",
     "groq": "llama-3.3-70b-versatile",
     "gemini": "gemini-2.0-flash",
-    "openrouter": "anthropic/claude-sonnet-4-5",
+    "openrouter": "deepseek/deepseek-v4-flash",
     "mlx": "",  # usa MLX_MODEL_ID o /v1/models
     "ollama": "llama3.2",
 }

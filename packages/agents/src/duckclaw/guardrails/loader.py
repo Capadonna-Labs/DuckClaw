@@ -9,6 +9,19 @@ GUARDRAILS_ROOT = Path(__file__).resolve().parent
 
 
 @lru_cache(maxsize=256)
+def load_worker_guardrail(worker_dir: Path | str, relative_path: str) -> str:
+    """Lee guardrail relativo al directorio del template (workers externos)."""
+    base = Path(worker_dir)
+    rel = (relative_path or "").strip().lstrip("/")
+    path = (base / rel).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"worker guardrail not found: {path}")
+    if base.resolve() not in path.parents and path != base.resolve():
+        raise FileNotFoundError(f"worker guardrail outside worker_dir: {path}")
+    return path.read_text(encoding="utf-8").strip()
+
+
+@lru_cache(maxsize=256)
 def load_guardrail(*parts: str) -> str:
     """Lee ``guardrails/<parts>.md`` (UTF-8). ``parts`` sin extensión."""
     path = GUARDRAILS_ROOT.joinpath(*parts).with_suffix(".md")

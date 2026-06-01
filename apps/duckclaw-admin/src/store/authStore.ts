@@ -16,13 +16,12 @@ function parseLoginError(status: number, data: unknown): string {
 interface AuthState {
   usuario: AdminUser | null;
   isAuthenticated: boolean;
-  isLoading: boolean;
+  isSubmitting: boolean;
   loginError: string | null;
   returnTo: string | null;
   hasHydrated: boolean;
 
   setUser: (user: AdminUser | null) => void;
-  setLoading: (value: boolean) => void;
   loginWithCredentials: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   setReturnTo: (path: string | null) => void;
@@ -32,7 +31,7 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => ({
   usuario: null,
   isAuthenticated: false,
-  isLoading: true,
+  isSubmitting: false,
   loginError: null,
   returnTo: null,
   hasHydrated: false,
@@ -43,14 +42,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isAuthenticated: Boolean(user),
     }),
 
-  setLoading: (value) => set({ isLoading: value }),
-
   setReturnTo: (path) => set({ returnTo: path }),
 
   setHasHydrated: (value) => set({ hasHydrated: value }),
 
   loginWithCredentials: async (email, password) => {
-    set({ isLoading: true, loginError: null });
+    set({ isSubmitting: true, loginError: null });
     try {
       const res = await fetch('/api/admin/auth/login', {
         method: 'POST',
@@ -61,7 +58,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        set({ isLoading: false, loginError: parseLoginError(res.status, data) });
+        set({ isSubmitting: false, loginError: parseLoginError(res.status, data) });
         return;
       }
       const raw = (data.user ?? data) as Record<string, unknown>;
@@ -75,11 +72,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({
         usuario: user,
         isAuthenticated: true,
-        isLoading: false,
+        isSubmitting: false,
         loginError: null,
       });
     } catch {
-      set({ isLoading: false, loginError: 'No se pudo conectar con el servidor' });
+      set({ isSubmitting: false, loginError: 'No se pudo conectar con el servidor' });
     }
   },
 
@@ -96,7 +93,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({
       usuario: null,
       isAuthenticated: false,
-      isLoading: false,
+      isSubmitting: false,
       loginError: null,
       returnTo: get().returnTo,
     });

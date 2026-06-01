@@ -91,11 +91,13 @@ export function ChatBubble({
   const isError = m.role === 'error';
   const isHeartbeat = m.role === 'heartbeat';
   const isInterrupted = Boolean(m.interrupted);
+  const isUserCommand =
+    isUser && Boolean((m.text || '').trim()) && (m.text || '').trim().startsWith('/');
   const displayText =
     isHeartbeat && m.text
       ? stripHeartbeatBodyPrefix(m.text, m.workerId, m.swarmSlot ?? 1)
       : m.text;
-  const canCopy = Boolean(displayText?.trim()) && !m.streaming;
+  const canCopy = isUserCommand && !m.streaming;
   const showActions =
     canCopy || (canRetry && Boolean(onRetry)) || (canEdit && Boolean(onEdit));
   const [copied, setCopied] = useState(false);

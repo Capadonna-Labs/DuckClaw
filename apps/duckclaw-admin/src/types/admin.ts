@@ -111,7 +111,54 @@ export interface OverviewLatencyRow {
   avg_latency: number;
 }
 
+export type UsageGroupBy = 'worker' | 'day' | 'session';
+
+export interface OverviewUsageSummary {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+export interface OverviewUsageSeriesRow {
+  label: string;
+  worker_id?: string | null;
+  session_id?: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+export interface OverviewUsageSessionOption {
+  session_id: string;
+  worker_id?: string | null;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+export interface OverviewUsage {
+  summary: OverviewUsageSummary;
+  series: OverviewUsageSeriesRow[];
+  filters: {
+    days: number;
+    group_by: UsageGroupBy;
+    worker_id?: string | null;
+    session_id?: string | null;
+  };
+  workers: string[];
+  sessions: OverviewUsageSessionOption[];
+}
+
+export interface OverviewMetricsParams {
+  usage_days?: number;
+  usage_group_by?: UsageGroupBy;
+  worker_id?: string;
+  session_id?: string;
+}
+
 export interface OverviewMetrics {
+  usage?: OverviewUsage;
   activity: OverviewActivityRow[];
   latency: OverviewLatencyRow[];
   db_path?: string;

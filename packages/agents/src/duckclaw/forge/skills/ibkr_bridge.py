@@ -152,6 +152,27 @@ def _finanz_env_assumed_snapshot_mode() -> Optional[Literal["paper", "live"]]:
     return None
 
 
+def _ibkr_url_host_hint(url: str) -> str:
+    try:
+        from urllib.parse import urlparse
+
+        p = urlparse(url)
+        if p.hostname:
+            port = p.port or (443 if p.scheme == "https" else 80)
+            return f"{p.hostname}:{port}"
+    except Exception:
+        pass
+    return (url or "")[:80]
+
+
+def _ibkr_connection_timeout_message(api_url: str) -> str:
+    host = _ibkr_url_host_hint(api_url)
+    return (
+        f"Error de conexión: Timeout al conectar con el servicio IBKR en `{host}`. "
+        "Verifica Tailscale (VPS online) y que `IBKR_PORTFOLIO_API_URL` apunte al host activo."
+    )
+
+
 def _ibkr_fetch_portfolio_payload(
     api_url: str,
     api_key: str,
@@ -164,7 +185,8 @@ def _ibkr_fetch_portfolio_payload(
 
     def _get(url: str) -> Any:
         req = urllib.request.Request(url, headers=headers, method="GET")
-        with urllib.request.urlopen(req, timeout=15.0) as resp:
+        timeout_s = float(os.environ.get("IBKR_HTTP_TIMEOUT_SEC") or "15")
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             return json.loads(resp.read().decode("utf-8", errors="replace"))
 
     data = _get(api_url)
@@ -676,7 +698,7 @@ def _get_ibkr_portfolio_finanz_impl(finanz_db_path: str) -> str:
     except URLError as e:
         _log.warning("[ibkr/finanz] URLError: %s", e.reason)
         if "timed out" in str(e.reason).lower() or "timeout" in str(e.reason).lower():
-            return "Error de conexión: Timeout al conectar con el servidor de IBKR. Intenta más tarde." + notice_err
+            return _ibkr_connection_timeout_message(api_url) + notice_err
         return (
             "Error de conexión: El Gateway de IBKR está desconectado en este momento. "
             "No puedo acceder a los datos de tu portafolio de inversiones."
@@ -685,7 +707,7 @@ def _get_ibkr_portfolio_finanz_impl(finanz_db_path: str) -> str:
     except (TimeoutError, OSError) as e:
         _log.warning("[ibkr/finanz] Timeout/OSError: %s", e)
         if "timed out" in str(e).lower() or "timeout" in type(e).__name__.lower():
-            return "Error de conexión: Timeout al conectar con el servidor de IBKR. Intenta más tarde." + notice_err
+            return _ibkr_connection_timeout_message(api_url) + notice_err
         return (
             "Error de conexión: El Gateway de IBKR está desconectado en este momento. "
             "No puedo acceder a los datos de tu portafolio de inversiones."
@@ -771,12 +793,12 @@ def _get_ibkr_portfolio_impl() -> str:
     except URLError as e:
         _log.warning("[ibkr] URLError: %s", e.reason)
         if "timed out" in str(e.reason).lower() or "timeout" in str(e.reason).lower():
-            return "Error de conexión: Timeout al conectar con el servidor de IBKR. Intenta más tarde."
+            return _ibkr_connection_timeout_message(api_url)
         return "Error de conexión: El Gateway de IBKR está desconectado en este momento. No puedo acceder a los datos de tu portafolio de inversiones."
     except (TimeoutError, OSError) as e:
         _log.warning("[ibkr] Timeout/OSError: %s", e)
         if "timed out" in str(e).lower() or "timeout" in type(e).__name__.lower():
-            return "Error de conexión: Timeout al conectar con el servidor de IBKR. Intenta más tarde."
+            return _ibkr_connection_timeout_message(api_url)
         return "Error de conexión: El Gateway de IBKR está desconectado en este momento. No puedo acceder a los datos de tu portafolio de inversiones."
     except json.JSONDecodeError as e:
         _log.warning("[ibkr] JSON decode error: %s", e)

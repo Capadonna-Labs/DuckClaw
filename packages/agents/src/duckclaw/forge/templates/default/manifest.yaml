@@ -20,3 +20,10 @@ comfyui:
 skills:
   - get_current_time
   - read_sql
+
+# tool_orchestration: (opcional) ver specs/features/platform/WORKER_TOOL_ORCHESTRATION.md
+# tool_orchestration:
+#   intents:
+#     example_intent:
+#       patterns: ['(?i)ejemplo']
+#       force_first_tool: read_sql

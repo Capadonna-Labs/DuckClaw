@@ -34,6 +34,22 @@ export function useActiveConversation(tenantId: string | undefined, section: str
     setConversationTitle(title ?? null);
   }, [tenantId]);
 
+  const createConversation = useCallback(async () => {
+    const tid = tenantId || 'default';
+    const created = await adminService.createConversation({ section }, tid);
+    selectConversation(created.session_id, created.title);
+    bumpRefresh();
+    return created;
+  }, [tenantId, section, selectConversation, bumpRefresh]);
+
+  const selectConversationById = useCallback(async (id: string) => {
+    const tid = tenantId || 'default';
+    const meta = await adminService.getConversation(id, tid);
+    selectConversation(meta.session_id, meta.title);
+    bumpRefresh();
+    return meta;
+  }, [tenantId, selectConversation, bumpRefresh]);
+
   useEffect(() => {
     let cancelled = false;
     const tid = tenantId || 'default';
@@ -83,6 +99,8 @@ export function useActiveConversation(tenantId: string | undefined, section: str
     sessionId,
     conversationTitle,
     selectConversation,
+    createConversation,
+    selectConversationById,
     syncConversationTitle,
     renameConversation,
     refreshToken,

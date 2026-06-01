@@ -31,6 +31,7 @@ export type AdminChatPanelProps = {
   /** Título de la conversación activa (inbox). */
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
+  headerActions?: React.ReactNode;
   className?: string;
 };
 
@@ -52,6 +53,7 @@ export function AdminChatPanel({
   sectionTitle,
   conversationTitle,
   onRenameConversation,
+  headerActions,
   className = '',
 }: AdminChatPanelProps) {
   const { usuario } = useAuthStore();
@@ -106,6 +108,17 @@ export function AdminChatPanel({
         >
           {isCompact ? (
             <div className="flex flex-col items-start gap-2 w-full">
+              <div className="flex items-center justify-between gap-2 w-full">
+                <div className="min-w-0">
+                  <p className="text-sm font-black dark:text-dark-text truncate">
+                    {chatPanelTitle(sectionTitle)}
+                  </p>
+                  <p className="text-[10px] text-gov-gray-500 truncate">
+                    {conversationTitle?.trim() || 'Respuestas en vivo'}
+                  </p>
+                </div>
+                {headerActions}
+              </div>
               {chatId && (
                 <ConversationVaultSelector
                   chatId={chatId}

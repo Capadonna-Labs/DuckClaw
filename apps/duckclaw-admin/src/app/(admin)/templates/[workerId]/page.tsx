@@ -6,7 +6,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { adminService } from '@/services/adminService';
 import type { TemplateDetail } from '@/types/admin';
 import { useAuthStore } from '@/store/authStore';
-import { ChevronRight, Save, CheckCircle, Eye, FileCode, Columns2 } from 'lucide-react';
+import { ChevronRight, Save, CheckCircle, Eye, FileCode, Columns2, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 
 type MarkdownViewMode = 'edit' | 'preview' | 'split';
@@ -39,15 +39,26 @@ export default function TemplateEditorPage() {
   const [markdownView, setMarkdownView] = useState<MarkdownViewMode>('edit');
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [newContextTitle, setNewContextTitle] = useState('');
 
   const markdownFile = isMarkdownPath(tab);
+  const isCatalogWorker = detail?.source === 'catalog' || detail?.read_only === true;
+  const canEditFiles = canWrite;
 
-  const { promptFiles, otherFiles } = useMemo(() => {
-    if (!detail?.files) return { promptFiles: [] as string[], otherFiles: [] as string[] };
+  const { promptFiles, contextFiles, otherFiles } = useMemo(() => {
+    if (!detail?.files) {
+      return { promptFiles: [] as string[], contextFiles: [] as string[], otherFiles: [] as string[] };
+    }
     const all = detail.files.map((f) => f.path).filter((p) => EDITABLE.test(p));
+    const contexts = [...(detail.contexts ?? [])]
+      .sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
+      .map((ctx) => ctx.title)
+      .filter((path) => all.includes(path));
+    const contextSet = new Set(contexts);
     const prompts = PROMPT_FILES.filter((p) => all.includes(p));
-    const rest = all.filter((p) => !PROMPT_FILES.includes(p)).sort();
-    return { promptFiles: prompts, otherFiles: rest };
+    const promptSet = new Set(prompts);
+    const rest = all.filter((p) => !promptSet.has(p) && !contextSet.has(p)).sort();
+    return { promptFiles: prompts, contextFiles: contexts, otherFiles: rest };
   }, [detail]);
 
   const load = useCallback(() => {
@@ -79,11 +90,11 @@ export default function TemplateEditorPage() {
   }, [tab, detail]);
 
   const save = async () => {
-    if (!workerId || !canWrite) return;
+    if (!workerId || !canEditFiles) return;
     setMsg(null);
     try {
       await adminService.saveTemplateFile(workerId, tab, content);
-      setMsg('Guardado en disco (canónico)');
+      setMsg(isCatalogWorker ? 'Guardado en DuckDB (catálogo)' : 'Guardado en disco (canónico)');
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al guardar');
@@ -91,9 +102,70 @@ export default function TemplateEditorPage() {
   };
 
   const validate = async () => {
+    if (isCatalogWorker) {
+      setMsg('Worker leído desde catálogo DB; la validación de manifest en disco no aplica todavía.');
+      return;
+    }
     if (!workerId) return;
     const r = await adminService.validateTemplate(workerId);
     setMsg(r.ok ? 'Validación OK' : r.errors.join('; '));
+  };
+
+  const createContext = async () => {
+    if (!workerId || !isCatalogWorker || !newContextTitle.trim()) return;
+    setMsg(null);
+    setError(null);
+    try {
+      const title = newContextTitle.trim().endsWith('.md')
+        ? newContextTitle.trim()
+        : `${newContextTitle.trim()}.md`;
+      await adminService.createTemplateContext(workerId, {
+        title,
+        content_md: `# ${title.replace(/\\.md$/i, '')}\n\n`,
+        sort_order: (detail?.contexts?.length ?? 0) * 10 + 100,
+      });
+      setNewContextTitle('');
+      setTab(title);
+      setMsg('Contexto creado en DuckDB');
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error creando contexto');
+    }
+  };
+
+  const deleteCurrentContext = async () => {
+    if (!workerId || !isCatalogWorker || !tab) return;
+    const ctx = detail?.contexts?.find((item) => item.title === tab);
+    if (!ctx) return;
+    setMsg(null);
+    setError(null);
+    try {
+      await adminService.deleteTemplateContext(workerId, ctx.context_id);
+      setMsg('Contexto desactivado en DuckDB');
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error eliminando contexto');
+    }
+  };
+
+  const moveCurrentContext = async (direction: -1 | 1) => {
+    if (!workerId || !isCatalogWorker || !detail?.contexts?.length) return;
+    const ordered = [...detail.contexts].sort((a, b) => Number(a.sort_order) - Number(b.sort_order));
+    const idx = ordered.findIndex((item) => item.title === tab);
+    const swapIdx = idx + direction;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= ordered.length) return;
+    const current = ordered[idx];
+    const other = ordered[swapIdx];
+    try {
+      await adminService.reorderTemplateContexts(workerId, [
+        { context_id: current.context_id, sort_order: Number(other.sort_order) },
+        { context_id: other.context_id, sort_order: Number(current.sort_order) },
+      ]);
+      setMsg('Orden actualizado en DuckDB');
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error reordenando contexto');
+    }
   };
 
   if (!workerId) return null;
@@ -107,12 +179,22 @@ export default function TemplateEditorPage() {
         <ChevronRight size={14} />
         <span className="font-mono text-gov-gray-900 dark:text-dark-text">{workerId}</span>
         <span className="text-[10px] uppercase px-2 py-0.5 rounded bg-gov-cyan-100 text-gov-blue-800 dark:bg-dark-bg">
-          canónico (archivo)
+          {isCatalogWorker ? 'catálogo DB' : 'canónico (archivo)'}
         </span>
       </nav>
 
       <header className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-black dark:text-dark-text">{workerId}</h1>
+        <div>
+          <h1 className="text-2xl font-black dark:text-dark-text">
+            {detail?.display_name || workerId}
+          </h1>
+          {isCatalogWorker && (
+            <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
+              Snapshot importado desde DuckDB. Los cambios se versionan en el catálogo y no modifican
+              carpetas de templates.
+            </p>
+          )}
+        </div>
         <div className="flex gap-2 flex-wrap">
           <Link
             href={`/playground?worker=${encodeURIComponent(workerId)}`}
@@ -127,7 +209,7 @@ export default function TemplateEditorPage() {
           >
             Validar
           </button>
-          {canWrite && (
+          {canEditFiles && (
             <button
               type="button"
               onClick={save}
@@ -141,6 +223,17 @@ export default function TemplateEditorPage() {
 
       <div className="flex flex-col lg:flex-row gap-4">
         <aside className="lg:w-56 shrink-0 max-h-48 lg:max-h-[520px] overflow-y-auto rounded-xl border dark:border-dark-border p-2 bg-gov-gray-50 dark:bg-dark-bg">
+          {isCatalogWorker && canWrite && (
+            <CatalogContextTools
+              title={newContextTitle}
+              onTitleChange={setNewContextTitle}
+              onCreate={createContext}
+              onMoveUp={() => moveCurrentContext(-1)}
+              onMoveDown={() => moveCurrentContext(1)}
+              onDelete={deleteCurrentContext}
+              canDelete={!!detail?.contexts?.some((item) => item.title === tab)}
+            />
+          )}
           <FileGroup
             title="Comportamiento"
             files={promptFiles}
@@ -148,6 +241,15 @@ export default function TemplateEditorPage() {
             onSelect={setTab}
             emptyHint="Sin system_prompt.md — vuelve a crear el agente o añade el archivo aquí."
           />
+          {isCatalogWorker && (
+            <FileGroup
+              title="Contextos DB"
+              files={contextFiles}
+              tab={tab}
+              onSelect={setTab}
+              emptyHint="Sin contextos Markdown asociados todavía."
+            />
+          )}
           <FileGroup title="Config y datos" files={otherFiles} tab={tab} onSelect={setTab} />
           <p className="text-[10px] text-gov-gray-500 px-2 py-2 border-t dark:border-dark-border mt-2">
             La bóveda DuckDB se elige por conversación en Playground o en el chat flotante, no por
@@ -176,11 +278,66 @@ export default function TemplateEditorPage() {
           <TemplateFileEditor
             content={content}
             onChange={setContent}
-            readOnly={!canWrite}
+            readOnly={!canEditFiles}
             markdownFile={markdownFile}
             viewMode={markdownView}
           />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CatalogContextTools({
+  title,
+  canDelete,
+  onTitleChange,
+  onCreate,
+  onMoveUp,
+  onMoveDown,
+  onDelete,
+}: {
+  title: string;
+  canDelete: boolean;
+  onTitleChange: (v: string) => void;
+  onCreate: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="mb-3 rounded-xl border border-gov-blue-100 bg-white p-2 dark:border-dark-border dark:bg-dark-surface">
+      <p className="px-1 text-[10px] font-black uppercase text-gov-blue-700 dark:text-dark-cyan">
+        Contextos DB
+      </p>
+      <input
+        value={title}
+        onChange={(e) => onTitleChange(e.target.value)}
+        placeholder="nuevo_contexto.md"
+        className="mt-2 w-full rounded-lg border px-2 py-1.5 text-[11px] dark:border-dark-border dark:bg-dark-bg"
+      />
+      <button
+        type="button"
+        onClick={onCreate}
+        className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg bg-gov-blue-700 px-2 py-1.5 text-[11px] font-black text-white"
+      >
+        <Plus size={12} /> Añadir contexto
+      </button>
+      <div className="mt-2 grid grid-cols-3 gap-1">
+        <button type="button" onClick={onMoveUp} className="rounded-lg border px-2 py-1 text-[10px] dark:border-dark-border">
+          <ArrowUp size={12} className="mx-auto" />
+        </button>
+        <button type="button" onClick={onMoveDown} className="rounded-lg border px-2 py-1 text-[10px] dark:border-dark-border">
+          <ArrowDown size={12} className="mx-auto" />
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={!canDelete}
+          className="rounded-lg border px-2 py-1 text-[10px] text-red-600 disabled:opacity-40 dark:border-dark-border"
+        >
+          <Trash2 size={12} className="mx-auto" />
+        </button>
       </div>
     </div>
   );

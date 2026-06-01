@@ -181,15 +181,13 @@ export default function NewProjectPage() {
         router.push('/projects');
         return;
       }
-      await adminService.createProject({
-        id: workerId,
-        source_template: source,
-        name: name.trim(),
+      await adminService.createUserAgent({
+        worker_id: workerId,
+        display_name: name.trim(),
+        source_template_id: source,
         description: description.trim(),
         skills: selectedSkills,
-        topology: 'general',
-        system_prompt: systemPrompt.trim(),
-        soul: soul.trim(),
+        system_prompt: [systemPrompt.trim(), soul.trim()].filter(Boolean).join('\n\n'),
       });
       try {
         await adminService.createKanbanCard({
@@ -201,7 +199,7 @@ export default function NewProjectPage() {
       } catch {
         /* tablero opcional */
       }
-      router.push(`/templates/${workerId}?focus=system_prompt.md`);
+      router.push(`/playground?worker=${encodeURIComponent(workerId)}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error');
     } finally {

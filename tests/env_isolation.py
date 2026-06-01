@@ -27,7 +27,10 @@ _LLM_PROVIDER_ENV_KEYS: tuple[str, ...] = (
 
 _MISC_ENV_KEYS: tuple[str, ...] = (
     "DUCKCLAW_GATEWAY_TENANT_ID",
+    "DUCKCLAW_PM2_PROCESS_NAME",
+    "DUCKCLAW_PM2_MATCHED_APP_NAME",
     "DUCKCLAW_REDDIT_TRUST_SHARE_TRACKING_REDIRECT",
+    "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES",
     "DUCKCLAW_DB_PATH",
 )
 
@@ -42,6 +45,7 @@ def clear_gateway_multiplex_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def isolate_test_env_from_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fixture autouse: cada test empieza sin rutas MLX/DB del .env del host."""
+    monkeypatch.setenv("DUCKCLAW_DISABLE_DOTENV", "1")
     clear_gateway_multiplex_env(monkeypatch)
     for key in _MLX_ENV_KEYS + _VLM_ENV_KEYS + _LLM_PROVIDER_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)

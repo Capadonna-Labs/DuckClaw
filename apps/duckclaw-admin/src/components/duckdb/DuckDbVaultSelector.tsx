@@ -9,15 +9,23 @@ type Props = {
   onChange: (path: string) => void;
 };
 
+type VaultOption = {
+  path: string;
+  scope: string;
+  active?: boolean;
+};
+
 export function DuckDbVaultSelector({ value, onChange }: Props) {
-  const [vaults, setVaults] = useState<{ path: string; scope: string }[]>([]);
+  const [vaults, setVaults] = useState<VaultOption[]>([]);
 
   useEffect(() => {
     adminService.listVaults().then((r) => setVaults(r.vaults));
   }, []);
 
   useEffect(() => {
-    if (!value && vaults[0]?.path) onChange(vaults[0].path);
+    if (!value && vaults.length > 0) {
+      onChange(vaults.find((v) => v.active)?.path || vaults[0].path);
+    }
   }, [vaults, value, onChange]);
 
   return (
@@ -32,7 +40,7 @@ export function DuckDbVaultSelector({ value, onChange }: Props) {
         {vaults.length === 0 && <option value="">(sin bóvedas)</option>}
         {vaults.map((v) => (
           <option key={v.path} value={v.path}>
-            [{v.scope}] {v.path}
+            [{v.scope}{v.active ? ' activa' : ''}] {v.path}
           </option>
         ))}
       </select>

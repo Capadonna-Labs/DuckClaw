@@ -11,7 +11,7 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
-from duckclaw.admin_auth_crypto import calculate_login_delay, verify_and_migrate
+from duckclaw.admin_auth_crypto import calculate_login_delay, hash_password_argon2, verify_and_migrate
 from duckclaw.admin_console_users import (
     authenticate_console_user,
     ensure_admin_auth_columns,
@@ -62,6 +62,18 @@ def test_argon2_password_authenticates(gateway_db: Path) -> None:
         assert str(row.get("hash_algo") or "") == "argon2id"
     finally:
         con.close()
+
+
+def test_argon2_uses_unique_salt_for_same_password() -> None:
+    first_hash, first_algo, first_params = hash_password_argon2("same-password-123")
+    second_hash, second_algo, second_params = hash_password_argon2("same-password-123")
+
+    assert first_algo == "argon2id"
+    assert second_algo == "argon2id"
+    assert first_params == second_params
+    assert first_hash != second_hash
+    assert first_hash.startswith("$argon2id$")
+    assert second_hash.startswith("$argon2id$")
 
 
 def test_pbkdf2_verify_password_legacy() -> None:

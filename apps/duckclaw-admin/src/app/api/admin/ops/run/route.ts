@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HOST_ONLY_OPS, isLocalOpId, listOpsCommands, runOpsLocal } from '@/lib/localOps';
+import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 function gatewayBase(): string | null {
   const raw =
@@ -15,10 +16,8 @@ function adminKey(): string {
 
 /** Ejecuta ops en el host del admin cuando el gateway aún no expone POST /ops/run. */
 export async function POST(req: NextRequest) {
-  const role = req.headers.get('x-duckclaw-role') || 'admin';
-  if (role !== 'admin') {
-    return NextResponse.json({ detail: 'Operaciones solo para rol admin' }, { status: 403 });
-  }
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
+  if (!auth.ok) return auth.response;
 
   let body: { op_id?: string };
   try {
@@ -54,8 +53,7 @@ export async function POST(req: NextRequest) {
         Accept: 'application/json',
         'Content-Type': 'application/json',
       };
-      const actor = req.headers.get('x-duckclaw-actor');
-      if (actor) headers['X-Duckclaw-Actor'] = actor;
+      headers['X-Duckclaw-Actor'] = auth.actor;
 
       const res = await fetch(`${base}/api/v1/admin/ops/run`, {
         method: 'POST',
@@ -92,6 +90,9 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
+  if (!auth.ok) return auth.response;
+
   return NextResponse.json(listOpsCommands());
 }

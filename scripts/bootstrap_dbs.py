@@ -20,7 +20,8 @@ if str(_REPO_ROOT) not in sys.path:
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(_REPO_ROOT / ".env")
+    if os.environ.get("DUCKCLAW_DISABLE_DOTENV") != "1":
+        load_dotenv(_REPO_ROOT / ".env")
 except ImportError:
     pass
 
@@ -47,8 +48,6 @@ def _resolve_extra_db(raw: str) -> Optional[Path]:
     else:
         p = p.resolve()
     if p.suffix.lower() != ".duckdb":
-        return None
-    if not p.exists() and not p.parent.is_dir():
         return None
     return p
 

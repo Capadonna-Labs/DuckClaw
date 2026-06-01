@@ -21,7 +21,7 @@ mcp_servers:
 
 Instalación: `uv sync` en la raíz (Python **3.10+** trae `mcp` y `duckclaw-telegram-mcp`). Gateway: `DUCKCLAW_TELEGRAM_MCP_ENABLED=1` y `TELEGRAM_BOT_TOKEN`; ver `docs/COMANDOS.md`.
 
-* **Wizard (`duckops init` → `scripts/duckclaw_setup_wizard.py`):** al completar la configuración con canal Telegram, al guardar/salir del flujo del API Gateway, o al editar el Brain (PM2/systemd) con canal Telegram, el asistente escribe por defecto `DUCKCLAW_TELEGRAM_MCP_ENABLED=1` y pone `enabled: true` bajo `mcp_servers.telegram` en `config/mcp_servers.yaml` (primer integrador MCP del stack; otros se podrán añadir con la misma convención). Reiniciar el gateway para aplicar.
+* **Wizard (`duckops init`):** al completar la configuración con canal Telegram, al guardar/salir del flujo del API Gateway, o al editar el Brain (PM2/systemd) con canal Telegram, el asistente escribe por defecto `DUCKCLAW_TELEGRAM_MCP_ENABLED=1` y pone `enabled: true` bajo `mcp_servers.telegram` en `config/mcp_servers.yaml` (primer integrador MCP del stack; otros se podrán añadir con la misma convención). `scripts/duckclaw_setup_wizard.py` queda como compatibilidad legacy. Reiniciar el gateway para aplicar.
 
 **Flujo**
 1. **Ingress (Sin cambios):** Telegram envía el webhook -> Cloudflare Tunnel -> FastAPI (DuckClaw Gateway) -> Redis Queue.

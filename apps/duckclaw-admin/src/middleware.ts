@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
+  const isDev = process.env.NODE_ENV !== 'production';
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let binary = '';
   for (let i = 0; i < bytes.length; i += 1) {
@@ -11,7 +12,9 @@ export function middleware(request: NextRequest) {
 
   const csp = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'`,
+    isDev
+      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+      : `script-src 'self' 'nonce-${nonce}'`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",

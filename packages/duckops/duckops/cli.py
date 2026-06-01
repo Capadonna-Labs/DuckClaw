@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from duckops.commands import audit, deploy, init, serve, train
+from duckops.commands import audit, comfyui, db, deploy, ingress, init, mcp, serve, train
 
 app = typer.Typer(
     name="duckops",
@@ -20,6 +20,10 @@ app.add_typer(
 )
 app.add_typer(serve.app, name="serve", help="Arranca el API Gateway o servidor LangGraph.")
 app.add_typer(deploy.app, name="deploy", help="Despliega DuckClaw como servicio (PM2, systemd, etc.).")
+app.add_typer(ingress.app, name="ingress", help="Admin/Tailscale/Telegram ingress.")
+app.add_typer(mcp.app, name="mcp", help="Operaciones MCP locales.")
+app.add_typer(comfyui.app, name="comfyui", help="Operaciones del runtime ComfyUI.")
+app.add_typer(db.app, name="db", help="Mantenimiento DuckDB/admin.")
 app.add_typer(audit.app, name="audit", help="Auditoría Habeas Data (config, enmascaramiento).")
 app.add_typer(
     train.app,

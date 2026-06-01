@@ -36,7 +36,7 @@ Plantilla: [`config/.env.spawn.example`](../../../config/.env.spawn.example).
 1. **Preflight:** SWAP 2GB si RAM &lt; 4GB.
 2. **OS deps:** `build-essential`, `git`, `curl`, `python3-venv`, `redis-server`, Node 20, PM2 global, `uv`.
 3. **Python:** `uv sync` en la raíz del monorepo.
-4. **Bootstrap:** `uv run python scripts/bootstrap_dbs.py --core-only --only <DUCKDB_PATH>` (síncrono, antes de PM2).
+4. **Bootstrap:** `uv run duckops db bootstrap --core-only --only <DUCKDB_PATH>` (síncrono, antes de PM2; wrapper compatible: `scripts/bootstrap_dbs.py`).
 5. **Admin UI:** `pnpm install` + `pnpm build` en `apps/duckclaw-admin`; `.env.local` con gateway URL y admin key.
 6. **PM2:** `config/ecosystem.spawn.config.cjs` → Gateway `:8000`, Admin `:3000`.
 
@@ -109,6 +109,6 @@ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/
 ## Referencias código
 
 - [`packages/shared/src/duckclaw/bootstrap_core.py`](../../../packages/shared/src/duckclaw/bootstrap_core.py)
-- [`scripts/bootstrap_dbs.py`](../../../scripts/bootstrap_dbs.py) (`--core-only`)
+- `uv run duckops db bootstrap` / [`scripts/bootstrap_dbs.py`](../../../scripts/bootstrap_dbs.py) (`--core-only`)
 - [`scripts/deploy/spawn-install.sh`](../../../scripts/deploy/spawn-install.sh)
 - [`config/ecosystem.spawn.config.cjs`](../../../config/ecosystem.spawn.config.cjs)

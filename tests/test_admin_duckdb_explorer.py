@@ -84,6 +84,64 @@ def test_duckdb_tables(admin_client: TestClient, explorer_db: Path) -> None:
     assert "sample" in data["schemas"]["finance_worker"]
 
 
+def test_duckdb_tables_default_to_authenticated_actor_vault(
+    gateway_admin_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    user_dir = repo_root / "db" / "private" / "owner123"
+    user_dir.mkdir(parents=True)
+    user_db = user_dir / "axis.duckdb"
+    con = duckdb.connect(str(user_db))
+    con.execute("CREATE SCHEMA actor_schema")
+    con.execute("CREATE TABLE actor_schema.visible_table (id INTEGER)")
+    con.close()
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+
+    response = gateway_admin_client.get(
+        "/api/v1/admin/duckdb/tables",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["vault_user_id"] == "owner123"
+    assert data["vault_path"].endswith("db/private/owner123/axis.duckdb")
+    assert data["schemas"]["actor_schema"] == ["visible_table"]
+
+
+def test_runtime_vaults_are_scoped_to_authenticated_actor(
+    gateway_admin_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    owner_dir = repo_root / "db" / "private" / "owner123"
+    other_dir = repo_root / "db" / "private" / "other456"
+    owner_dir.mkdir(parents=True)
+    other_dir.mkdir(parents=True)
+    duckdb.connect(str(owner_dir / "axis.duckdb")).close()
+    duckdb.connect(str(other_dir / "hidden.duckdb")).close()
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+
+    response = gateway_admin_client.get(
+        "/api/v1/admin/runtime/vaults",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    paths = [item["path"] for item in data["vaults"]]
+    assert data["vault_user_id"] == "owner123"
+    assert any(path.endswith("db/private/owner123/axis.duckdb") for path in paths)
+    assert not any("other456" in path for path in paths)
+
+
 def test_duckdb_query_select(admin_client: TestClient, explorer_db: Path) -> None:
     r = admin_client.post(
         "/api/v1/admin/duckdb/query",

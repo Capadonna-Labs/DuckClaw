@@ -15,7 +15,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from duckclaw.shared_db_grants import _query_all_dicts, _sql_lit
+from duckclaw.storage.shared_db_grants import _query_all_dicts, _sql_lit
 
 _ADMIN_CONSOLE_USERS_DDL = """
 CREATE TABLE IF NOT EXISTS main.admin_console_users (
@@ -57,14 +57,14 @@ def ensure_admin_console_users_table(db: Any) -> None:
 
 def hash_password(plain: str) -> str:
     """New passwords: Argon2id."""
-    from duckclaw.admin_auth_crypto import hash_password_argon2
+    from duckclaw.control_plane.admin_auth_crypto import hash_password_argon2
 
     hashed, _, _ = hash_password_argon2(plain)
     return hashed
 
 
 def hash_password_with_meta(plain: str) -> tuple[str, str, dict[str, int]]:
-    from duckclaw.admin_auth_crypto import hash_password_argon2
+    from duckclaw.control_plane.admin_auth_crypto import hash_password_argon2
 
     return hash_password_argon2(plain)
 
@@ -191,7 +191,7 @@ def clear_login_failures(db: Any, email: str) -> None:
 
 
 def authenticate_console_user(db: Any, *, email: str, password: str) -> Optional[dict[str, Any]]:
-    from duckclaw.admin_auth_crypto import verify_and_migrate
+    from duckclaw.control_plane.admin_auth_crypto import verify_and_migrate
 
     row = get_by_email(db, email)
     if not row or not row.get("active", True):

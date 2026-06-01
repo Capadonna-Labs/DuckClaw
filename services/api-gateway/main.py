@@ -79,19 +79,20 @@ from duckclaw.channels import GatewayDeliveryContext
 # Cargar .env desde repo root (fuente de verdad para secretos; PM2 env_file + override abajo).
 _repo_root = Path(__file__).resolve().parent.parent.parent
 _dotenv_flat: dict[str, str] = {}
-for _base in (_repo_root, Path.cwd()):
-    _env = _base / ".env"
-    if _env.is_file():
-        for _line in _env.read_text(encoding="utf-8").splitlines():
-            _line = _line.strip()
-            if _line and not _line.startswith("#") and "=" in _line:
-                _k, _, _v = _line.partition("=")
-                _ks = _k.strip()
-                if not _ks:
-                    continue
-                _vs = _v.strip().strip("'\"")
-                _dotenv_flat[_ks] = _vs
-        break
+if os.environ.get("DUCKCLAW_DISABLE_DOTENV") != "1":
+    for _base in (_repo_root, Path.cwd()):
+        _env = _base / ".env"
+        if _env.is_file():
+            for _line in _env.read_text(encoding="utf-8").splitlines():
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _, _v = _line.partition("=")
+                    _ks = _k.strip()
+                    if not _ks:
+                        continue
+                    _vs = _v.strip().strip("'\"")
+                    _dotenv_flat[_ks] = _vs
+            break
 if _dotenv_flat:
     from duckclaw.env_secrets import DOTENV_OVERRIDE_KEYS, apply_dotenv_overrides_to_os_environ
 

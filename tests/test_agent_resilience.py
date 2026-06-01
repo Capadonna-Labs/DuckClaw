@@ -9,7 +9,7 @@ from duckclaw.graphs import agent_resilience as ar
 
 def test_plan_max_attempts_from_env_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DUCKCLAW_AGENT_MAX_PLAN_ATTEMPTS", raising=False)
-    assert ar.plan_max_attempts_from_env() == 3
+    assert ar.plan_max_attempts_from_env() == 4
 
 
 def test_plan_max_attempts_clamped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,4 +77,4 @@ def test_replan_strategy(monkeypatch: pytest.MonkeyPatch, strategy: str, expecte
 
 def test_plan_max_attempts_invalid_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DUCKCLAW_AGENT_MAX_PLAN_ATTEMPTS", "not-a-number")
-    assert ar.plan_max_attempts_from_env() == 3
+    assert ar.plan_max_attempts_from_env() == 4

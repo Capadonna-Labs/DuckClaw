@@ -8,8 +8,8 @@
     "pnpm": ">=9"
   },
   "scripts": {
-    "dev": "next dev",
-    "dev:tailscale": "next dev -H 0.0.0.0",
+    "dev": "next dev -p 3001",
+    "dev:tailscale": "next dev -H 0.0.0.0 -p 3001",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

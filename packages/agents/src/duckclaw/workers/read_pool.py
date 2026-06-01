@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from duckclaw.workers.manifest import WorkerSpec
+from duckclaw.workers.worker_ids import is_finanz, is_siata_analyst
 
 _log = logging.getLogger(__name__)
 
@@ -68,8 +69,8 @@ def _finanz_deudas_mac_mini_installment_ids_to_exclude(rows: list[dict[str, str]
 
 def _maybe_wrap_finanz_deudas_read_sql(spec: WorkerSpec, query: str, raw: str) -> str:
     """Anexa totales deduplicados cuando read_sql devuelve filas de finance_worker.deudas."""
-    wid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
-    if wid != "finanz":
+    wid = getattr(spec, "logical_worker_id", None) or spec.worker_id
+    if not is_finanz(wid):
         return raw
     qlow = query.lower()
     if "deudas" not in qlow:
@@ -218,7 +219,7 @@ def validate_worker_read_sql(spec: WorkerSpec, query: str) -> Optional[str]:
                 )
             }
         )
-    if _lid == "siata_analyst" and re.search(r"read_json(_auto)?\s*\(", q, re.IGNORECASE):
+    if is_siata_analyst(_lid) and re.search(r"read_json(_auto)?\s*\(", q, re.IGNORECASE):
         if "LIMIT" not in upper and not re.search(r"\bCOUNT\s*\(", upper):
             return json.dumps(
                 {

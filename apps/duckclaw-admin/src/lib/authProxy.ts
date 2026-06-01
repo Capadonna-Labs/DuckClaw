@@ -18,7 +18,11 @@ export function forwardCookieHeader(req: NextRequest): string | undefined {
   return req.headers.get('cookie') ?? undefined;
 }
 
-export function applyUpstreamSetCookies(res: NextResponse, upstream: Response): void {
+export function applyUpstreamSetCookies(
+  res: NextResponse,
+  upstream: Response,
+  opts?: { forceSecure?: boolean }
+): void {
   const anyHeaders = upstream.headers as Headers & { getSetCookie?: () => string[] };
   const cookies =
     typeof anyHeaders.getSetCookie === 'function'
@@ -26,8 +30,12 @@ export function applyUpstreamSetCookies(res: NextResponse, upstream: Response): 
       : upstream.headers.get('set-cookie')
         ? [upstream.headers.get('set-cookie')!]
         : [];
-  for (const c of cookies) {
-    if (c) res.headers.append('set-cookie', c);
+  for (let c of cookies) {
+    if (!c) continue;
+    if (opts?.forceSecure && !/;\s*Secure/i.test(c)) {
+      c = `${c}; Secure`;
+    }
+    res.headers.append('set-cookie', c);
   }
 }
 
@@ -70,7 +78,10 @@ export async function proxyAuthToGateway(
     status: upstream.status,
     headers: { 'Content-Type': upstream.headers.get('content-type') || 'application/json' },
   });
-  applyUpstreamSetCookies(res, upstream);
+  const forceSecure =
+    req.nextUrl.protocol === 'https:' ||
+    req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() === 'https';
+  applyUpstreamSetCookies(res, upstream, { forceSecure });
   return res;
 }
 

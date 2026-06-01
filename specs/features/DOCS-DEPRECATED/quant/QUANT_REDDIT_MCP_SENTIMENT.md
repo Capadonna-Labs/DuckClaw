@@ -49,6 +49,7 @@ Recomendación operativa: cuenta Reddit **dedicada** (no la personal principal);
 - Fallback: `npx --quiet -y mcp-reddit` si no hay cache ni `mcp-reddit` global.  
 - Warm en lifespan del gateway (`warm_reddit_mcp_pool`, hilo daemon). Pool stdio serializa conexiones (`reddit_mcp_pool._connect_lock`).  
 - Timeouts: `DUCKCLAW_REDDIT_MCP_WARM_TIMEOUT_S` (default 90), `DUCKCLAW_REDDIT_MCP_REGISTER_TIMEOUT_S` (12 sin cache, 45 con prefetch), `DUCKCLAW_REDDIT_MCP_LIST_TOOLS_TIMEOUT_S` (60 con sesión pool lista).  
+- **Pausa operativa:** `DUCKCLAW_REDDIT_PAUSED=1` omite `force_reddit` y devuelve mensaje corto en URLs Reddit (útil ante OAuth/API 403 sin tocar credenciales).  
 - Paquete Python `mcp` ya declarado en el workspace de agentes.
 
 **Configuración en manifest (worker)**  

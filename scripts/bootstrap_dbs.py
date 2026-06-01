@@ -208,6 +208,22 @@ def _ensure_fly_runtime_tables(con: duckdb.DuckDBPyConnection) -> None:
         );
         """
     )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS llm_usage_log (
+            id VARCHAR PRIMARY KEY,
+            tenant_id VARCHAR NOT NULL,
+            session_id VARCHAR,
+            worker_id VARCHAR,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            total_tokens INTEGER NOT NULL DEFAULT 0,
+            cost_usd DOUBLE NOT NULL DEFAULT 0,
+            model VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
     con.execute("CREATE SCHEMA IF NOT EXISTS quant_core;")
     con.execute(
         """

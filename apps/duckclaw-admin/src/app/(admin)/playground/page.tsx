@@ -44,6 +44,12 @@ export default function PlaygroundPage() {
   const [workerId, setWorkerId] = useState(initialWorker);
   const [projectId, setProjectId] = useState(initialProject);
 
+  const conv = useActiveConversation(config?.effective_tenant_id, 'playground');
+  const {
+    bootstrapping: conversationBootstrapping,
+    createConversation,
+    selectConversationById,
+  } = conv;
   const activeProject = useMemo(
     () => (config?.projects ?? []).find((project) => project.project_id === projectId),
     [config?.projects, projectId]
@@ -59,13 +65,6 @@ export default function PlaygroundPage() {
         : (config?.workers ?? []),
     [activeProject, config?.workers, projectWorkerIds]
   );
-
-  const conv = useActiveConversation(config?.effective_tenant_id, 'playground');
-  const {
-    bootstrapping: conversationBootstrapping,
-    createConversation,
-    selectConversationById,
-  } = conv;
   const chat = useAdminChat({
     chatId: conv.sessionId ?? '',
     initialWorker: workerId,
@@ -131,19 +130,20 @@ export default function PlaygroundPage() {
       )
       .then((c) => {
         setConfig(c);
-        setWorkerId((prev) => {
-          if (prev) return prev;
-          const project = (c.projects ?? []).find((item) => item.project_id === initialProject);
-          const ids = project?.agents?.length
-            ? project.agents.map((agent) => agent.worker_id).filter(Boolean)
-            : workerOptionIds(c.workers);
-          if (initialWorker && ids.includes(initialWorker)) return initialWorker;
-          if (ids.includes('default')) return 'default';
-          return ids[0] ?? '';
-        });
+        const fromServer = (c.selected_worker_id || '').trim();
+        const ids = workerOptionIds(c.workers);
+        if (fromServer && ids.includes(fromServer)) {
+          setWorkerId(fromServer);
+        } else if (initialWorker && ids.includes(initialWorker)) {
+          setWorkerId(initialWorker);
+        } else if (ids.includes('default')) {
+          setWorkerId('default');
+        } else {
+          setWorkerId(ids[0] ?? '');
+        }
       })
       .catch(() => undefined);
-  }, [initialWorker, initialProject, conv.sessionId]);
+  }, [initialWorker, conv.sessionId]);
 
   useEffect(() => {
     loadConfig();
@@ -154,12 +154,6 @@ export default function PlaygroundPage() {
       chat.setWorkerId(workerId);
     }
   }, [workerId, chat]);
-
-  useEffect(() => {
-    if (!activeProject) return;
-    if (workerId && projectWorkerIds.includes(workerId)) return;
-    setWorkerId(projectWorkerIds[0] ?? '');
-  }, [activeProject, projectWorkerIds, workerId]);
 
   useEffect(() => {
     if (!workerId) return;
@@ -218,16 +212,19 @@ export default function PlaygroundPage() {
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {(config?.projects?.length ?? 0) > 0 && (
               <>
-                <label className="text-xs font-bold text-gov-gray-500">Proyecto</label>
+                <label className="text-xs font-bold text-gov-gray-500">Proyecto activo</label>
                 <select
                   value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}
-                  className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[240px]"
+                  onChange={(e) => {
+                    setProjectId(e.target.value);
+                    setWorkerId('');
+                  }}
+                  className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[200px]"
                 >
-                  <option value="">Sin proyecto</option>
-                  {(config?.projects ?? []).map((project) => (
-                    <option key={project.project_id} value={project.project_id}>
-                      {project.name} ({project.agents.length})
+                  <option value="">Todos los agentes</option>
+                  {(config?.projects ?? []).map((p) => (
+                    <option key={p.project_id} value={p.project_id}>
+                      {p.name}
                     </option>
                   ))}
                 </select>
@@ -236,7 +233,21 @@ export default function PlaygroundPage() {
             <label className="text-xs font-bold text-gov-gray-500">Agente</label>
             <select
               value={workerId}
-              onChange={(e) => setWorkerId(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setWorkerId(next);
+                const chatId = conv.sessionId;
+                if (chatId && next.trim()) {
+                  const tid = (config?.effective_tenant_id || 'default').trim() || 'default';
+                  void adminService
+                    .setPlaygroundWorker({
+                      chat_id: chatId,
+                      tenant_id: tid,
+                      worker_id: next.trim(),
+                    })
+                    .catch(() => undefined);
+                }
+              }}
               className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[240px]"
             >
               {selectableWorkers.map((w) => {
@@ -273,7 +284,7 @@ export default function PlaygroundPage() {
           </p>
         ) : (
           <AdminChatPanel
-            key={`${conv.sessionId}-${projectId}-${workerId}`}
+            key={`${conv.sessionId}-${workerId}`}
             chatId={conv.sessionId}
             chat={chat}
             initialWorker={workerId}
@@ -394,7 +405,6 @@ export default function PlaygroundPage() {
     </div>
   );
 }
-
 function formatConversationTime(iso: string): string {
   if (!iso) return '';
   const t = Date.parse(iso);
@@ -408,7 +418,6 @@ function formatConversationTime(iso: string): string {
   if (days < 7) return `hace ${days}d`;
   return new Date(t).toLocaleDateString();
 }
-
 function uniqueConversationsBySession(conversations: AdminConversation[]): AdminConversation[] {
   const seen = new Set<string>();
   return conversations.filter((conversation) => {
@@ -724,4 +733,3 @@ function ChatCommandsPanel() {
     </div>
   );
 }
-

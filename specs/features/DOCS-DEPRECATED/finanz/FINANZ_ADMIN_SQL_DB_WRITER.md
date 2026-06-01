@@ -6,7 +6,7 @@ El worker **finanz** debe poder cumplir peticiones como «actualizar el saldo de
 
 ## Comportamiento
 
-1. **Heurística de primera herramienta** (`packages/agents/src/duckclaw/workers/factory.py`): si el mensaje del usuario, en contexto finanz, parece una **escritura de saldo/cuenta local** (verbos de mutación + saldo/balance o cuenta + entidad bancaria local), el primer turno del agente fuerza **`tool_choice=admin_sql`** (igual que ya se fuerza `read_sql` para «resumen de cuentas»).
+1. **Orquestación declarativa** (`forge/templates/finanz/manifest.yaml` → bloque `tool_orchestration`, spec [WORKER_TOOL_ORCHESTRATION.md](../platform/WORKER_TOOL_ORCHESTRATION.md)): intents `ledger_write` / `ledger_read`, cadenas `get_current_time` → `read_sql`, confirmaciones cortas y replan si falta `admin_sql`. El motor genérico vive en `tool_orchestration.py`; las heurísticas legacy `is_finanz()` en `factory.py` quedan como fallback solo si el manifest no define el bloque.
 2. **Prompt** (`forge/templates/finanz/system_prompt.md`): documenta `admin_sql` para `UPDATE`/`INSERT` sobre filas existentes y prohíbe afirmar bloqueo de escritura sin error real de herramienta.
 3. **Allow-list**: sin cambios; sigue `manifest.yaml` → `allowed_tables` y validación en `_admin_sql_worker`.
 

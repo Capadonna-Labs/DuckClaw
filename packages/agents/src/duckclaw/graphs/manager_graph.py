@@ -284,9 +284,18 @@ def _agent_config_db_for_vault(hub_db: Any, vault_db_path: str | None) -> Any:
     Lee claves por chat (team_templates, sandbox_enabled, llm_*) desde el vault del tenant
     cuando existe; si no, desde el hub ``hub_db``. Evita mezclar equipo Finanz/Job-Hunter del
     hub multiplex con bots SIATA u otros que comparten chat_id pero usan otro .duckdb.
+
+    Si vault y hub son el mismo archivo, reutilizar ``hub_db``: ``GatewayDbEphemeralReadonly``
+    abre RO efímero y choca con el handle RW del manager en perfil Spawn (mismo PID).
     """
     vp = (vault_db_path or "").strip()
     if vp and vp != ":memory:":
+        hub_path = str(getattr(hub_db, "_path", "") or "").strip()
+        if hub_path:
+            from duckclaw.workers.factory import _same_duckdb_file
+
+            if _same_duckdb_file(hub_path, vp):
+                return hub_db
         from duckclaw.gateway_db import GatewayDbEphemeralReadonly
 
         return GatewayDbEphemeralReadonly(vp)
@@ -900,6 +909,86 @@ def _find_hrp_rebalance_affirm_context_assistant_body(history: Any) -> str | Non
     return None
 
 
+def _manager_extract_tickers(text: str) -> list[str]:
+    """Extrae tickers US de texto assistant/planned (evita import circular con factory)."""
+    raw = str(text or "")
+    if not raw:
+        return []
+    banned = {
+        "SYSTEM",
+        "EVENT",
+        "GOALS",
+        "HITL",
+        "IBKR",
+        "UUID",
+        "JSON",
+        "SQL",
+        "HRP",
+        "CFD",
+        "PNL",
+        "LIVE",
+        "PAPER",
+        "PARA",
+        "LUEGO",
+        "CON",
+        "DEL",
+        "LAS",
+        "LOS",
+        "QUE",
+        "UNA",
+        "UNO",
+        "POR",
+        "AND",
+        "THE",
+        "FOR",
+        "TO",
+        "Y",
+        "O",
+        "TAREA",
+        "TASK",
+    }
+    out: list[str] = []
+    seen: set[str] = set()
+    for tk in re.findall(r"\b[A-Z]{1,5}\b", raw):
+        tk = tk.upper()
+        if tk in banned:
+            continue
+        if tk not in seen:
+            out.append(tk)
+            seen.add(tk)
+    return out
+
+
+def _manager_hrp_ticker_label(hrp_body: str) -> str:
+    tickers = _manager_extract_tickers(hrp_body)
+    if len(tickers) >= 2:
+        return f"({tickers[0]}/{tickers[1]})"
+    if len(tickers) == 1:
+        return f"({tickers[0]})"
+    return "(HRP)"
+
+
+def _assistant_asks_generic_confirmation(assistant_text: str) -> bool:
+    """Asistente pide confirmación genérica (¿procedo?, ¿deseas?, ¿quieres?, etc.)."""
+    t = (assistant_text or "").strip()
+    if not t:
+        return False
+    if "?" not in t and "¿" not in t:
+        return False
+    low = t.lower()
+    # Solo verbos de cierre típicos en español; omitir «autoriz*» (p. ej. TSLA/QQQ) para no bloquear scan HRP.
+    return any(
+        k in low
+        for k in (
+            "procedo",
+            "proceda",
+            "proceder",
+            "deseas",
+            "quieres",
+        )
+    )
+
+
 def _assistant_asks_hrp_rebalance_followup(assistant_text: str) -> bool:
     t = (assistant_text or "").strip()
     if not t:
@@ -942,6 +1031,21 @@ def _quant_operational_intent_requires_fly_command(incoming: str) -> bool:
     t = (incoming or "").strip().lower()
     if not t:
         return False
+    # Pedidos de evaluación explícita o ejecución de herramientas concretas deben ir a tools,
+    # no transformarse en sugerencia de fly command.
+    if any(
+        k in t
+        for k in (
+            "evaluate_cfd_state",
+            "usa el sandbox",
+            "use sandbox",
+            "run_sandbox",
+            "inspect_schema",
+            "read_sql",
+            "admin_sql",
+        )
+    ):
+        return False
     # Backtests / simulación histórica (sandbox, ML4T, etc.) no son instrucciones de fly `quant_cycle`.
     if any(
         k in t
@@ -965,8 +1069,6 @@ def _quant_operational_intent_requires_fly_command(incoming: str) -> bool:
         return True
     if "genera una señal" in t or "genera una senal" in t:
         return True
-    if "ejecút" in t or "ejecut" in t:
-        return True
     return False
 
 
@@ -987,16 +1089,23 @@ def _try_quant_hrp_affirm_followup(
     if w != "Quant-Trader" and _tid != "cuantitativo":
         return None
     _bodies = _iter_assistant_bodies_newest_first(history)
-    last_a = _find_hrp_rebalance_affirm_context_assistant_body(history)
+    newest = _bodies[0] if _bodies else None
+    if newest and _assistant_asks_hrp_rebalance_followup(newest):
+        last_a = newest
+    elif newest and _assistant_asks_generic_confirmation(newest):
+        return None
+    else:
+        last_a = _find_hrp_rebalance_affirm_context_assistant_body(history)
     if not last_a:
         return None
-    title = "Confirmación rebalanceo HRP (META/SPY)"
+    _ticker_label = _manager_hrp_ticker_label(last_a)
+    title = f"Confirmación rebalanceo HRP {_ticker_label}"
     task_list = [
         load_guardrail("manager_tasks", "quant_hrp_affirm_task_confirm"),
         load_guardrail("manager_tasks", "quant_hrp_affirm_task_flow"),
     ]
     # Prefijo con símbolos evita que `_quant_extract_tickers` tome "TAREA" o ejemplos (TSLA, …) como ticker primario.
-    planned = "(META/SPY) " + load_guardrail("manager_tasks", "quant_hrp_affirm_planned")
+    planned = f"{_ticker_label} " + load_guardrail("manager_tasks", "quant_hrp_affirm_planned")
     return (title, task_list, planned, "Quant-Trader")
 
 
@@ -1781,9 +1890,24 @@ def build_manager_graph(
             _log.warning("manager plan: incoming vacío en state (keys=%s)", list(state.keys()))
 
         _hrp_fast: tuple[str, list[str], str, str] | None = None
+        _orch_affirm: tuple[str, list[str], str, str] | None = None
         _visual_fast: tuple[str, list[str], str, str] | None = None
         _url_fast: tuple[str, list[str], str, str] | None = None
         if incoming:
+            try:
+                from duckclaw.workers.manifest import load_manifest
+                from duckclaw.workers.tool_orchestration import try_manifest_affirm_followup
+
+                _spec_affirm = load_manifest(assigned, troot)
+                _orch_affirm = try_manifest_affirm_followup(
+                    incoming,
+                    state.get("history"),
+                    assigned,
+                    _spec_affirm,
+                )
+            except Exception:
+                _orch_affirm = None
+        if incoming and not _orch_affirm:
             _hrp_fast = _try_quant_hrp_affirm_followup(
                 incoming,
                 state.get("history"),
@@ -1791,17 +1915,20 @@ def build_manager_graph(
                 _tid,
                 [str(x) for x in (available_plan or []) if x],
             )
-        if incoming and not _hrp_fast:
+        if incoming and not _orch_affirm and not _hrp_fast:
             _visual_fast = _try_visual_generation_fast_plan(
                 incoming,
                 [str(x) for x in (available_plan or []) if x],
             )
-        if incoming and not _hrp_fast and not _visual_fast:
+        if incoming and not _orch_affirm and not _hrp_fast and not _visual_fast:
             _url_fast = _try_quant_url_research_fast_plan(
                 incoming,
                 [str(x) for x in (available_plan or []) if x],
             )
-        if _hrp_fast:
+        if _orch_affirm:
+            plan_title, tasks, _inject_orch, _ov_orch = _orch_affirm
+            mercenary_spec = None
+        elif _hrp_fast:
             plan_title, tasks, _inject_hrp, _ov_hrp = _hrp_fast
             mercenary_spec = None
         elif _visual_fast:
@@ -1852,11 +1979,17 @@ def build_manager_graph(
         # Prioridad A2A: en crisis de caja + intención laboral, enrutar a JobHunter si está disponible.
         job_hunter_in_team = _pick_job_hunter_worker(list(available_plan or []))
         cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
-        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _hrp_fast and not _visual_fast and not _url_fast:
+        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _orch_affirm and not _hrp_fast and not _visual_fast and not _url_fast:
             assigned = job_hunter_in_team
 
         # Mantener lógica existente de ruteo / planned_task
-        if _hrp_fast:
+        if _orch_affirm:
+            if _ov_orch and _ov_orch in (available_plan or []):
+                assigned = _ov_orch
+            override_worker = _ov_orch
+            planned = _inject_orch
+            planned_final = _inject_orch
+        elif _hrp_fast:
             if _ov_hrp and _ov_hrp in (available_plan or []):
                 assigned = _ov_hrp
             override_worker = _ov_hrp
@@ -1882,7 +2015,7 @@ def build_manager_graph(
         if replan_enabled() and _pa_plan > 0:
             planned_final = (planned_final or "").strip() + format_replan_task_suffix(_pa_plan, _max_plan)
 
-        if coordinator_id and delegation_pool and not _hrp_fast and not _visual_fast and not _url_fast:
+        if coordinator_id and delegation_pool and not _orch_affirm and not _hrp_fast and not _visual_fast and not _url_fast:
             assigned = _resolve_orchestrator_delegate(
                 incoming,
                 delegation_pool,
@@ -2127,23 +2260,43 @@ def build_manager_graph(
             worker_resolved = _get_db_path(
                 assigned, tenant_id, (vault_db_path or db_path or None)
             ).strip()
+            _mgr_read_only = bool(getattr(db, "_read_only", False))
             # Misma resolución que build_worker_graph; vault_db_path crudo puede diverger del path real.
             _needs_rw_vault = (not bool(spec_inv.read_only)) and (not bool(_summarize_vault_ro))
+            _hub_same_as_worker = bool(
+                worker_resolved and mgr_path and _same_duckdb_file(mgr_path, worker_resolved)
+            )
+            _shared_resolved_inv = ""
+            try:
+                from duckclaw.workers.factory import _resolve_shared_db_path
+
+                _shared_resolved_inv = (_resolve_shared_db_path(spec_inv, shared_db_path or None) or "").strip()
+            except Exception:
+                pass
+            _will_skip_private = bool(
+                not _mgr_read_only
+                and _hub_same_as_worker
+                and not _shared_resolved_inv
+                and not _summarize_vault_ro
+            )
             # DuckDB: no RO+RW simultáneo al mismo archivo. Suspender el RO del manager antes
             # de abrir el worker RW; leer sandbox/chat_state antes (sin worker RW abierto).
             _suspend_for_rw_worker = bool(
-                getattr(db, "_read_only", False)
-                and _needs_rw_vault
-                and worker_resolved
-                and mgr_path
-                and _same_duckdb_file(mgr_path, worker_resolved)
+                _mgr_read_only and _needs_rw_vault and _hub_same_as_worker
             )
             # VISUAL_ASSET_UPSERT escribe en hub (get_gateway_db_path), no en vault del worker.
             # El manager mantiene RO al hub durante ComfyUI (~3–4 min); suspender evita lock con db-writer.
             _suspend_hub_for_visual_delta = bool(
-                getattr(db, "_read_only", False) and _visual_lite_mcp and mgr_path
+                _mgr_read_only and _visual_lite_mcp and mgr_path
             )
             _will_suspend_ro = _suspend_for_rw_worker or _suspend_hub_for_visual_delta
+            _spawn_inline_writes = False
+            try:
+                from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+                _spawn_inline_writes = bool(spawn_inline_writes_enabled())
+            except Exception:
+                pass
             # Serializa acceso al .duckdb: dos webhooks concurrentes no deben abrir dos DuckClaw RW.
             _vk = _vault_lock_key(worker_resolved)
             if _vk:
@@ -2379,20 +2532,50 @@ def build_manager_graph(
                             )
                         else:
                             exhausted_final = True
-                elif not _tools_list and _soft_would_match:
-                    _rsoft = "inferencia: respuesta sin tools con indicios de fallo de backend"
-                    reasons_acc = merge_failure_reasons(reasons_acc, _rsoft)
-                    if pa + 1 < max_a:
-                        replan_after = True
-                        next_plan_attempt = pa + 1
-                        log_sys(
-                            _obs,
-                            "manager replan: señal débil (sin tools) -> intento %s/%s",
-                            pa + 2,
-                            max_a,
+                else:
+                    try:
+                        from duckclaw.workers.tool_orchestration import (
+                            parse_tool_orchestration,
+                            replan_rule_triggered,
                         )
-                    else:
-                        exhausted_final = True
+
+                        _orch_replan = parse_tool_orchestration(spec_inv)
+                        if _orch_replan:
+                            _orch_trig, _orch_reason = replan_rule_triggered(
+                                _orch_replan,
+                                _combined,
+                                _tools_list,
+                            )
+                            if _orch_trig:
+                                reasons_acc = merge_failure_reasons(reasons_acc, _orch_reason)
+                                if pa + 1 < max_a:
+                                    replan_after = True
+                                    next_plan_attempt = pa + 1
+                                    log_sys(
+                                        _obs,
+                                        "manager replan: tool_orchestration -> intento %s/%s (%s)",
+                                        pa + 2,
+                                        max_a,
+                                        _orch_reason,
+                                    )
+                                else:
+                                    exhausted_final = True
+                    except Exception:
+                        pass
+                    if not replan_after and not _tools_list and _soft_would_match:
+                        _rsoft = "inferencia: respuesta sin tools con indicios de fallo de backend"
+                        reasons_acc = merge_failure_reasons(reasons_acc, _rsoft)
+                        if pa + 1 < max_a:
+                            replan_after = True
+                            next_plan_attempt = pa + 1
+                            log_sys(
+                                _obs,
+                                "manager replan: señal débil (sin tools) -> intento %s/%s",
+                                pa + 2,
+                                max_a,
+                            )
+                        else:
+                            exhausted_final = True
         except Exception as e:
             msg = str(e)[:2048]
             low = msg.lower()

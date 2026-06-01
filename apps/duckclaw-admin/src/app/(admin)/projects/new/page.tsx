@@ -430,7 +430,7 @@ export default function NewProjectPage() {
                       : 'border-gov-gray-100 dark:border-dark-border hover:border-gov-blue-300'
                   }`}
                 >
-                  <span className="text-2xl">{p.emoji}</span>
+                  {p.emoji && <span className="text-2xl">{p.emoji}</span>}
                   <p className="font-bold text-sm mt-2 flex items-center gap-2">
                     {p.title}
                     {p.recommended && (

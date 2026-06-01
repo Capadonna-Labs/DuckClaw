@@ -8,7 +8,7 @@ import type { ChatMsg } from '@/components/chat/types';
 
 const toolA: ChatMsg = {
   role: 'heartbeat',
-  text: '🔄 Usando: read_sql',
+  text: 'Usando: read_sql',
   heartbeatKind: 'tool',
   toolName: 'read_sql',
   toolPhase: 'done',
@@ -16,7 +16,7 @@ const toolA: ChatMsg = {
 
 const toolB: ChatMsg = {
   role: 'heartbeat',
-  text: '🔄 Usando: fetch_market_data',
+  text: 'Usando: fetch_market_data',
   heartbeatKind: 'tool',
   toolName: 'fetch_market_data',
   toolPhase: 'done',

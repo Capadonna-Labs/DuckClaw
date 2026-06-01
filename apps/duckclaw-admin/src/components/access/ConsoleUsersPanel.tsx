@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { AdminRole, ConsoleUser } from '@/types/admin';
 import { KeyRound, UserPlus, Trash2 } from 'lucide-react';
+import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
 
 export function ConsoleUsersPanel() {
   const [users, setUsers] = useState<ConsoleUser[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [pendingDeactivate, setPendingDeactivate] = useState<ConsoleUser | null>(null);
 
   const [email, setEmail] = useState('');
   const [nombre, setNombre] = useState('');
@@ -64,11 +66,12 @@ export function ConsoleUsersPanel() {
     }
   };
 
-  const deactivate = async (userEmail: string) => {
-    if (!confirm(`¿Desactivar ${userEmail}?`)) return;
+  const deactivate = async () => {
+    if (!pendingDeactivate) return;
     try {
-      await adminService.deleteConsoleUser(userEmail);
+      await adminService.deleteConsoleUser(pendingDeactivate.email);
       setMsg('Usuario desactivado');
+      setPendingDeactivate(null);
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error');
@@ -110,7 +113,7 @@ export function ConsoleUsersPanel() {
                   {u.active && (
                     <button
                       type="button"
-                      onClick={() => deactivate(u.email)}
+                    onClick={() => setPendingDeactivate(u)}
                       className="text-red-600"
                       aria-label="Desactivar"
                     >
@@ -171,6 +174,22 @@ export function ConsoleUsersPanel() {
           </button>
         </div>
       </div>
+      <ConfirmDangerModal
+        isOpen={Boolean(pendingDeactivate)}
+        title="Desactivar usuario"
+        description="El usuario no podrá volver a ingresar a la consola hasta que se reactive."
+        confirmLabel="Desactivar"
+        details={
+          pendingDeactivate
+            ? [
+                { label: 'Email', value: pendingDeactivate.email },
+                { label: 'Rol', value: pendingDeactivate.rol },
+              ]
+            : []
+        }
+        onCancel={() => setPendingDeactivate(null)}
+        onConfirm={() => void deactivate()}
+      />
     </div>
   );
 }

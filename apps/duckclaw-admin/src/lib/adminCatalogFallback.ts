@@ -38,48 +38,13 @@ function templatesDir(): string {
   );
 }
 
-function forgeDir(): string {
-  return join(repoRoot(), 'packages/agents/src/duckclaw/forge');
-}
-
 export function fallbackSkillsCatalog() {
-  const global: { id: string; path: string; scope: string }[] = [];
-  const skillsDir = join(forgeDir(), 'skills');
-  if (existsSync(skillsDir)) {
-    for (const name of readdirSync(skillsDir)) {
-      if (name.endsWith('.py') && !name.startsWith('_')) {
-        global.push({
-          id: name.replace(/\.py$/, ''),
-          path: `packages/agents/src/duckclaw/forge/skills/${name}`,
-          scope: 'global',
-        });
-      }
-    }
-  }
-  const template_local: {
-    id: string;
-    path: string;
-    scope: string;
-    worker_id: string;
-  }[] = [];
-  const root = templatesDir();
-  if (existsSync(root)) {
-    for (const worker of readdirSync(root)) {
-      const local = join(root, worker, 'skills');
-      if (!existsSync(local)) continue;
-      for (const name of readdirSync(local)) {
-        if (name.endsWith('.py') && !name.startsWith('_')) {
-          template_local.push({
-            id: name.replace(/\.py$/, ''),
-            worker_id: worker,
-            path: `packages/agents/src/duckclaw/forge/templates/${worker}/skills/${name}`,
-            scope: 'template',
-          });
-        }
-      }
-    }
-  }
-  return { global, template_local, _fallback: true as const };
+  return {
+    global: [],
+    template_local: [],
+    _fallback: true as const,
+    warning: 'El catálogo de skills requiere Gateway DB-first activo.',
+  };
 }
 
 export function fallbackMcpCatalog() {

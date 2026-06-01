@@ -1848,10 +1848,9 @@ async def _invoke_chat(
     # y antes de invocar cualquier lógica LangGraph.
     owner_user_id = (os.getenv("DUCKCLAW_OWNER_ID") or os.getenv("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
     is_owner = bool(owner_user_id and user_id and str(user_id).strip() == str(owner_user_id).strip())
-    _discord_guard_bypass = (
-        dc.channel == "discord" and bool(dc.extra.get("discord_bypass_guard"))
-    )
-    if not is_system_prompt and not _discord_guard_bypass:
+    auth_policy = (dc.auth_policy or "telegram_guard").strip()
+    guard_required = auth_policy not in {"trusted_admin_console", "trusted_channel_route"}
+    if not is_system_prompt and guard_required:
         await _authorize_or_reject(
             tenant_id=tenant_id,
             user_id=user_id,

@@ -630,10 +630,14 @@ def register_skill(
 ) -> dict[str, str]:
     ensure_admin_worker_catalog_schema(db)
     skill_name = (name or "").strip()
+    owner = (owner_email or "").strip().lower()
+    tenant = (tenant_id or "global").strip()
     existing = _first_row(
         db,
         f"SELECT skill_id, name, skill_type, implementation_ref FROM main.admin_skills "
-        f"WHERE name = '{_sql_lit(skill_name, 128)}' LIMIT 1",
+        f"WHERE name = '{_sql_lit(skill_name, 128)}' "
+        f"AND owner_email = '{_sql_lit(owner, 256)}' "
+        f"AND tenant_id = '{_sql_lit(tenant, 128)}' LIMIT 1",
     )
     if existing:
         return {key: str(existing.get(key) or "") for key in ("skill_id", "name", "skill_type", "implementation_ref")}
@@ -648,8 +652,8 @@ def register_skill(
           '{_sql_lit(description, 1024)}',
           '{_sql_lit(skill_type, 64)}',
           '{_sql_lit(implementation_ref, 512)}',
-          '{_sql_lit(owner_email, 256)}',
-          '{_sql_lit(tenant_id, 128)}',
+          '{_sql_lit(owner, 256)}',
+          '{_sql_lit(tenant, 128)}',
           '{_sql_lit(visibility, 32)}'
         )
         """

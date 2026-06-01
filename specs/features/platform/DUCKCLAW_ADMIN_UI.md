@@ -108,7 +108,8 @@ Ver [`ADMIN_MCP_OFFICIAL_CATALOG.md`](ADMIN_MCP_OFFICIAL_CATALOG.md).
 
 - Navegación: **MCP** antes que **Skills** en sidebar.
 - `GET /catalog/mcp` — incluye `official_reference` (servidores de referencia [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers)).
-- `GET /catalog/skills` — bridges en `forge/skills/` y skills por plantilla.
+- `GET /catalog/skills` — skills DB-first visibles para el actor autenticado; no escanea carpetas físicas.
+- `POST /catalog/skills` — crea metadata de skill del usuario autenticado en `admin_skills` (`name`, `description`, `skill_type`, `implementation_ref`, `visibility`). La asociación a workers se gestiona por relación DB-first, no por carpetas.
 
 ### Observabilidad
 - `GET /chats/history?tenant_id=&session_id=`

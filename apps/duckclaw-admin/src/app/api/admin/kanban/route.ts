@@ -8,14 +8,23 @@ import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 const VALID: KanbanStatus[] = ['pendiente', 'en_progreso', 'completo'];
 
-function storePath(): string {
-  const dir = join(repoRoot(), '.duckclaw');
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, 'admin-kanban.json');
+export function kanbanStoreActorKey(actor: string): string {
+  const safe = (actor || 'anonymous')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `admin-kanban-${safe || 'anonymous'}`;
 }
 
-function loadCards(): KanbanCard[] {
-  const path = storePath();
+function storePath(actor: string): string {
+  const dir = join(repoRoot(), '.duckclaw');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return join(dir, `${kanbanStoreActorKey(actor)}.json`);
+}
+
+function loadCards(actor: string): KanbanCard[] {
+  const path = storePath(actor);
   if (!existsSync(path)) return [];
   try {
     const raw = JSON.parse(readFileSync(path, 'utf-8'));
@@ -25,8 +34,8 @@ function loadCards(): KanbanCard[] {
   }
 }
 
-function saveCards(cards: KanbanCard[]) {
-  writeFileSync(storePath(), JSON.stringify({ cards }, null, 2), 'utf-8');
+function saveCards(actor: string, cards: KanbanCard[]) {
+  writeFileSync(storePath(actor), JSON.stringify({ cards }, null, 2), 'utf-8');
 }
 
 function newId(): string {
@@ -37,11 +46,11 @@ export async function GET(req: NextRequest) {
   const auth = await requireAdminRouteAuth(req, { roles: ['admin', 'user'] });
   if (!auth.ok) return auth.response;
 
-  let cards = loadCards();
+  let cards = loadCards(auth.actor);
   try {
-    const synced = await syncKanbanCardsWithTeam(cards);
+    const synced = await syncKanbanCardsWithTeam(cards, auth.actor);
     cards = synced.cards;
-    if (synced.changed) saveCards(cards);
+    if (synced.changed) saveCards(auth.actor, cards);
   } catch {
     /* gateway unreachable: return local cards only */
   }
@@ -67,9 +76,9 @@ export async function POST(req: NextRequest) {
     created_at: now,
     updated_at: now,
   };
-  const cards = loadCards();
+  const cards = loadCards(auth.actor);
   cards.unshift(card);
-  saveCards(cards);
+  saveCards(auth.actor, cards);
   return NextResponse.json({ ok: true, card });
 }
 
@@ -81,7 +90,7 @@ export async function PATCH(req: NextRequest) {
   const id = String(body.id || '').trim();
   if (!id) return NextResponse.json({ detail: 'id requerido' }, { status: 400 });
 
-  const cards = loadCards();
+  const cards = loadCards(auth.actor);
   const idx = cards.findIndex((c) => c.id === id);
   if (idx < 0) return NextResponse.json({ detail: 'Tarjeta no encontrada' }, { status: 404 });
 
@@ -92,7 +101,7 @@ export async function PATCH(req: NextRequest) {
   if (body.worker_id != null) cur.worker_id = String(body.worker_id) || undefined;
   cur.updated_at = new Date().toISOString();
   cards[idx] = cur;
-  saveCards(cards);
+  saveCards(auth.actor, cards);
   return NextResponse.json({ ok: true, card: cur });
 }
 
@@ -103,7 +112,7 @@ export async function DELETE(req: NextRequest) {
   const url = new URL(req.url);
   const id = url.searchParams.get('id')?.trim();
   if (!id) return NextResponse.json({ detail: 'id requerido' }, { status: 400 });
-  const cards = loadCards().filter((c) => c.id !== id);
-  saveCards(cards);
+  const cards = loadCards(auth.actor).filter((c) => c.id !== id);
+  saveCards(auth.actor, cards);
   return NextResponse.json({ ok: true });
 }

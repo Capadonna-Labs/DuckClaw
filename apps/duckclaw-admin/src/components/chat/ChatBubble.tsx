@@ -42,8 +42,8 @@ function ToolHeartbeatBody({ message: m }: { message: ChatMsg }) {
   const dur = formatToolDurationMs(durMs);
   return (
     <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-      {`🔄 Usando: ${toolName}`}
-      {dur ? ` · ${dur}` : running ? ' · ⏱️ …' : ''}
+      {`Usando: ${toolName}`}
+      {dur ? ` · ${dur}` : running ? ' · en curso' : ''}
     </span>
   );
 }

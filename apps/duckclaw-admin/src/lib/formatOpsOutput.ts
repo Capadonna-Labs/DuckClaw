@@ -65,25 +65,25 @@ export function formatOpsOutput(r: OpsRunResult): string {
   const ok = normalized.ok ?? normalized.exit_code === 0;
   const lines: string[] = [];
 
-  lines.push(ok ? '✅ Completado correctamente' : `❌ ${_exitSummary(normalized.exit_code, r.op_id)}`);
+  lines.push(ok ? 'Completado correctamente' : _exitSummary(normalized.exit_code, r.op_id));
 
   if (isPm2RestartInterrupted(r)) {
-    lines.push('ℹ️ El reinicio se aplicó; la conexión se cortó al reiniciar el gateway (normal).');
+    lines.push('El reinicio se aplicó; la conexión se cortó al reiniciar el gateway (normal).');
   }
   if (r.op_id === 'start_stack' && ok) {
-    lines.push('ℹ️ Plataforma lista: PM2 + Tailscale/Telegram. Prueba un mensaje al bot.');
+    lines.push('Plataforma lista: PM2 + Tailscale/Telegram. Prueba un mensaje al bot.');
     lines.push(
-      'ℹ️ Admin móvil (:8443): si la página se cortó unos segundos, recarga; el proxy Serve se re-aplicó al final.'
+      'Admin móvil (:8443): si la página se cortó unos segundos, recarga; el proxy Serve se re-aplicó al final.'
     );
   }
   if (r.op_id === 'start_telegram_ingress' && ok) {
-    lines.push('ℹ️ Tailscale Funnel activo. Prueba un mensaje al bot en Telegram.');
+    lines.push('Tailscale Funnel activo. Prueba un mensaje al bot en Telegram.');
   }
 
   if (r.executed_via === 'local') {
-    lines.push('🖥️ Ejecutado en este equipo (consola del admin)');
+    lines.push('Ejecutado en este equipo (consola del admin)');
   } else if (r.executed_via) {
-    lines.push(`🌐 Ejecutado vía: ${r.executed_via}`);
+    lines.push(`Ejecutado vía: ${r.executed_via}`);
   }
 
   const stdoutBlock = _formatStdout(r.stdout ?? '', r.op_id);
@@ -148,18 +148,18 @@ function _parsePm2ListTable(text: string): Pm2Row[] {
   return rows;
 }
 
-function _statusEmoji(status: string): string {
-  if (status === 'online') return '🟢';
-  if (status === 'stopped') return '⏹️';
-  if (status === 'errored' || status === 'error') return '🔴';
-  if (status === 'launching' || status === 'stopping') return '🟡';
-  return '⚪';
+function _statusLabel(status: string): string {
+  if (status === 'online') return 'online';
+  if (status === 'stopped') return 'stopped';
+  if (status === 'errored' || status === 'error') return 'error';
+  if (status === 'launching' || status === 'stopping') return 'pending';
+  return 'unknown';
 }
 
 function _restartLabel(count: number): string {
-  const base = `🔄 Reinicios: ${count}`;
-  if (count >= HIGH_RESTART_CRITICAL) return `${base} 🚨 (muy alto — revisar logs)`;
-  if (count >= HIGH_RESTART_WARN) return `${base} ⚠️ (alto)`;
+  const base = `Reinicios: ${count}`;
+  if (count >= HIGH_RESTART_CRITICAL) return `${base} (muy alto; revisar logs)`;
+  if (count >= HIGH_RESTART_WARN) return `${base} (alto)`;
   return base;
 }
 
@@ -167,11 +167,11 @@ function _formatPm2ListTable(text: string): string {
   const rows = _parsePm2ListTable(text);
   if (!rows.length) return '';
 
-  const lines = ['📋 Procesos PM2', ''];
+  const lines = ['Procesos PM2', ''];
   for (const row of rows) {
-    lines.push(`${_statusEmoji(row.status)} ${row.name}  ·  ${row.status}`);
-    lines.push(`   ⏱ Uptime: ${row.uptime}  ·  ${_restartLabel(row.restarts)}`);
-    lines.push(`   💾 Mem: ${row.memory}  ·  ⚡ CPU: ${row.cpu}  ·  🆔 PID: ${row.pid}`);
+    lines.push(`${row.name}  ·  ${_statusLabel(row.status)}`);
+    lines.push(`   Uptime: ${row.uptime}  ·  ${_restartLabel(row.restarts)}`);
+    lines.push(`   Mem: ${row.memory}  ·  CPU: ${row.cpu}  ·  PID: ${row.pid}`);
     lines.push('');
   }
   return lines.join('\n').trimEnd();
@@ -197,12 +197,12 @@ function _formatPm2RestartAction(text: string): string {
   const listBlock = _formatPm2ListTable(text);
 
   const lines = [
-    '📤 Detalle',
-    `   🔄 Acción: ${actionLabel}`,
-    `   📦 Proceso: ${app}`,
-    `   🆔 ID en PM2: ${id}`,
+    'Detalle',
+    `   Acción: ${actionLabel}`,
+    `   Proceso: ${app}`,
+    `   ID en PM2: ${id}`,
   ];
-  if (launched) lines.push('   ✅ Proceso relanzado');
+  if (launched) lines.push('   Proceso relanzado');
   if (listBlock) lines.push('', listBlock);
   return lines.join('\n');
 }
@@ -215,16 +215,16 @@ function _formatPm2Logs(text: string): string {
   const lines = text.split('\n').filter((l) => l.trim());
   if (!lines.length) return '';
   if (_hasAnsiCodes(text)) {
-    return ['📜 Últimas líneas de log (colores ANSI)', '', ...lines.slice(-40)].join('\n');
+    return ['Últimas líneas de log (colores ANSI)', '', ...lines.slice(-40)].join('\n');
   }
-  const out = ['📜 Últimas líneas de log', ''];
+  const out = ['Últimas líneas de log', ''];
   for (const line of lines.slice(-40)) {
     const t = line.trim();
     if (!t) continue;
-    if (/error|exception|traceback|fatal/i.test(t)) out.push(`   🔴 ${t}`);
-    else if (/warn/i.test(t)) out.push(`   🟡 ${t}`);
-    else if (/info|notice/i.test(t)) out.push(`   🔵 ${t}`);
-    else if (/^\d+\|/.test(t)) out.push(`   🟢 ${t}`);
+    if (/error|exception|traceback|fatal/i.test(t)) out.push(`   ERROR ${t}`);
+    else if (/warn/i.test(t)) out.push(`   WARN ${t}`);
+    else if (/info|notice/i.test(t)) out.push(`   INFO ${t}`);
+    else if (/^\d+\|/.test(t)) out.push(`   ${t}`);
     else out.push(`   ${t}`);
   }
   return out.join('\n');
@@ -243,7 +243,7 @@ function _formatStdout(stdout: string, opId?: string): string {
   if (restartBlock) return restartBlock;
 
   if (/\[PM2\]\s+Process\s+\w+\s+launched/i.test(text)) {
-    return `🚀 ${_pm2Lines(text)}`;
+    return _pm2Lines(text);
   }
 
   if (opId?.startsWith('pm2_logs') || /^\d+\|/.test(text)) {
@@ -254,14 +254,14 @@ function _formatStdout(stdout: string, opId?: string): string {
   if (text.includes('[PM2]')) {
     const mixed = _formatPm2ListTable(text);
     if (mixed) return mixed;
-    return `📤 ${_pm2Lines(text)}`;
+    return _pm2Lines(text);
   }
 
   if (/doctor|DuckClaw|bootstrap|OK|healthy/i.test(text)) {
-    return `🩺 Diagnóstico\n\n${text}`;
+    return `Diagnóstico\n\n${text}`;
   }
 
-  return `📤 Salida\n\n${text}`;
+  return `Salida\n\n${text}`;
 }
 
 function _pm2Lines(text: string): string {
@@ -271,7 +271,7 @@ function _pm2Lines(text: string): string {
       const t = line.trim();
       if (!t) return '';
       const pm2 = t.match(/\[PM2\]\s*(.+)/i);
-      if (pm2) return `   ℹ️ ${pm2[1]}`;
+      if (pm2) return `   ${pm2[1]}`;
       return `   ${t}`;
     })
     .filter(Boolean)
@@ -281,5 +281,5 @@ function _pm2Lines(text: string): string {
 function _formatStderr(stderr: string): string {
   const text = stderr.trim();
   if (!text) return '';
-  return `⚠️ Advertencias / errores\n\n${text}`;
+  return `Advertencias / errores\n\n${text}`;
 }

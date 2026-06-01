@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { TemplatePreset } from '@/lib/templatePresets';
 
-function emojiFor(_id?: string): string {
+function iconLabelFor(_id?: string): string {
   void _id;
-  return '📦';
+  return '';
 }
 
 function buildPresetsFromCatalog(
@@ -25,7 +25,7 @@ function buildPresetsFromCatalog(
       id: key,
       title,
       subtitle,
-      emoji: emojiFor(key),
+      emoji: iconLabelFor(key),
       recommended,
     });
   };
@@ -77,7 +77,7 @@ export function useTemplatePresets(advancedMode: boolean) {
               id: t.id,
               title: t.name ?? t.id,
               subtitle: `Worker ${t.id}`,
-              emoji: emojiFor(t.id),
+              emoji: iconLabelFor(t.id),
             }));
           setPresets([...base, ...extra]);
         } else {

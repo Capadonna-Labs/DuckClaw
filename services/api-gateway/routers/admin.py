@@ -144,6 +144,47 @@ def _playground_team_context(
     }
 
 
+def _merge_playground_catalog_and_team_workers(
+    catalog_workers: list[dict[str, str]],
+    team_ctx: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Catálogo DB-first + equipo legacy (/workers, tenant, env) para el selector del playground."""
+    from duckclaw.workers.template_registry import resolve_template_id_global
+    from duckclaw.workers.worker_ids import normalize_worker_id
+
+    merged = list(catalog_workers)
+    seen = {str(w.get("id") or "").strip() for w in merged if w.get("id")}
+    for raw in team_ctx.get("workers") or []:
+        label = str(raw or "").strip()
+        if not label:
+            continue
+        rid = resolve_template_id_global(label) or label
+        norm = normalize_worker_id(rid)
+        if norm and norm not in seen:
+            merged.append({"id": norm, "label": label})
+            seen.add(norm)
+    return merged
+
+
+def _playground_worker_allowed_in_team(team_ctx: dict[str, Any], worker_id: str) -> bool:
+    from duckclaw.workers.template_registry import resolve_template_id_global
+    from duckclaw.workers.worker_ids import normalize_worker_id
+
+    wid = normalize_worker_id(worker_id)
+    if not wid or wid == "default":
+        return True
+    if (team_ctx.get("team_source") or "") == "all":
+        return True
+    aliases: set[str] = set()
+    for raw in team_ctx.get("workers") or []:
+        label = str(raw or "").strip()
+        if not label:
+            continue
+        aliases.add(normalize_worker_id(label))
+        aliases.add(normalize_worker_id(resolve_template_id_global(label) or label))
+    return wid in aliases
+
+
 def _playground_workers_payload(raw_workers: list[str]) -> dict[str, Any]:
     """Normaliza equipo Playground: ids canónicos en disco + etiquetas de manifest."""
     from duckclaw.workers.manifest import load_manifest
@@ -578,6 +619,7 @@ class PlaygroundChatBody(BaseModel):
     message: str = Field(default="", max_length=16000)
     chat_id: str = Field(default="admin-playground", max_length=128)
     tenant_id: str = Field(default="default", max_length=64)
+    project_id: str | None = Field(default=None, max_length=64)
     telegram_user_id: str | None = Field(
         default=None,
         max_length=32,
@@ -922,18 +964,45 @@ async def playground_config(
         None,
         description="Chat id para team_templates (default: mismo que telegram_user_id)",
     ),
+    actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
+    from core.admin_identity import (
+        list_projects_with_agents_for_actor,
+        open_gateway_db,
+        playground_workers_for_actor,
+    )
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+
+    profile: dict[str, Any] = {
+        "email": actor,
+        "tenant_id": _gateway_effective_tenant_id("default"),
+        "telegram_user_id": "",
+    }
+    workers_list: list[dict[str, str]] = [{"id": "default", "label": "Default"}]
+    projects: list[dict[str, Any]] = []
+    try:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            workers_list = playground_workers_for_actor(db, actor_email=actor)
+            projects = list_projects_with_agents_for_actor(db, actor_email=actor)
+    except FileNotFoundError:
+        pass
     team_ctx = _playground_team_context(
-        telegram_user_id=telegram_user_id,
-        tenant_id=tenant_id,
+        telegram_user_id=profile.get("telegram_user_id") or telegram_user_id,
+        tenant_id=profile.get("tenant_id"),
         chat_id=chat_id,
     )
-    raw_workers: list[str] = team_ctx.get("workers") or []
-    workers_payload = _playground_workers_payload(raw_workers)
+    console_actor = (request.headers.get("x-duckclaw-actor") or "").strip()
+    if console_actor and console_actor.lower() not in ("admin-ui", ""):
+        team_ctx["authorized"] = True
+        if not team_ctx.get("whitelist_role"):
+            team_ctx["whitelist_role"] = "admin-console"
+    workers_list = _merge_playground_catalog_and_team_workers(workers_list, team_ctx)
+    workers_payload = {"workers": workers_list, "workers_invalid": [], "team_hint_extra": ""}
     eff_chat = (chat_id or team_ctx.get("team_chat_id") or "admin-playground").strip()
     llm = _resolved_llm_for_chat(eff_chat)
     catalog = _playground_llm_catalog(llm.get("provider", ""))
-    eff_tenant = team_ctx.get("tenant_id") or _gateway_effective_tenant_id("default")
+    eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")
     team_hint = (team_ctx.get("team_hint") or "") + workers_payload.get("team_hint_extra", "")
     selected_worker_id = ""
     redis_client = getattr(request.app.state, "redis", None)
@@ -961,8 +1030,9 @@ async def playground_config(
         "workers_invalid": workers_payload["workers_invalid"],
         "env_path": str(_env_file()),
         "effective_tenant_id": eff_tenant,
-        "telegram_user_id": team_ctx.get("telegram_user_id"),
+        "telegram_user_id": (profile.get("telegram_user_id") or team_ctx.get("telegram_user_id") or ""),
         "team_chat_id": team_ctx.get("team_chat_id"),
+        "projects": projects,
         "authorized": team_ctx.get("authorized"),
         "whitelist_role": team_ctx.get("whitelist_role"),
         "team_source": team_ctx.get("team_source"),
@@ -984,12 +1054,21 @@ async def playground_config(
 async def playground_set_vault(
     body: PlaygroundVaultBody,
     request: Request,
+    actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     """Persiste bóveda DuckDB por conversación (admin UI)."""
     from core.admin_conversations import get_conversation_meta, patch_conversation_vault, upsert_conversation_meta
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
 
     chat_id = body.chat_id.strip()
     tenant_id = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
+    try:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            tenant_id = str(profile.get("tenant_id") or "").strip() or tenant_id
+    except FileNotFoundError:
+        pass
     raw_path = (body.vault_db_path or "").strip()
     if raw_path:
         from duckclaw.gateway_db import resolve_env_duckdb_path
@@ -1158,7 +1237,37 @@ async def playground_chat(
     actor: str = Depends(_actor_from_header),
 ):
     """Chat de prueba desde consola admin (exento Tailscale vía prefijo /admin/)."""
+    from core.admin_identity import (
+        open_gateway_db,
+        resolve_playground_worker_for_project,
+        worker_allowed_for_actor,
+    )
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+
+    project_id = (body.project_id or "").strip()
     wid = re.sub(r"[^a-zA-Z0-9_-]", "", body.worker_id.strip()) or "default"
+    profile: dict[str, Any] = {
+        "email": actor,
+        "tenant_id": _gateway_effective_tenant_id("default"),
+        "telegram_user_id": "",
+    }
+    catalog_allowed = False
+    try:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            if worker_allowed_for_actor(db, actor_email=actor, worker_id=wid):
+                catalog_allowed = True
+                try:
+                    wid, project_id = resolve_playground_worker_for_project(
+                        db,
+                        actor_email=actor,
+                        project_id=project_id,
+                        worker_id=wid,
+                    )
+                except PermissionError as exc:
+                    raise _problem(403, str(exc), wid) from exc
+    except FileNotFoundError:
+        pass
     msg = (body.message or "").strip()
     if not msg and not body.images:
         raise _problem(400, "message o images requeridos", "")
@@ -1176,30 +1285,19 @@ async def playground_chat(
             raise _problem(502, "Error procesando imagen (VLM)", str(exc)) from exc
     if not msg:
         raise _problem(400, "message vacío tras VLM", body.message)
-    tenant_id = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
+    eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")
     team_ctx = _playground_team_context(
-        telegram_user_id=body.telegram_user_id,
-        tenant_id=tenant_id,
+        telegram_user_id=profile.get("telegram_user_id") or body.telegram_user_id,
+        tenant_id=eff_tenant,
         chat_id=body.chat_id,
     )
-    if not team_ctx.get("authorized"):
-        raise _problem(
-            403,
-            "Usuario Telegram no autorizado para este tenant",
-            str(team_ctx.get("team_hint") or ""),
-        )
-    allowed_workers: list[str] = team_ctx.get("workers") or []
-    if allowed_workers and wid not in allowed_workers:
-        from duckclaw.workers.template_registry import resolve_template_id
-
-        canonical = resolve_template_id(allowed_workers, wid) or wid
-        if canonical not in allowed_workers:
-            raise _problem(
-                403,
-                "Worker fuera del equipo /workers",
-                f"'{wid}' no está en el equipo efectivo: {', '.join(allowed_workers)}",
-            )
-        wid = canonical
+    console_actor = (request.headers.get("x-duckclaw-actor") or "").strip()
+    db_first_console = bool(console_actor and console_actor.lower() not in ("admin-ui", ""))
+    if not catalog_allowed:
+        if db_first_console:
+            raise _problem(403, "Worker no asignado al catálogo del actor", wid)
+        if not _playground_worker_allowed_in_team(team_ctx, wid):
+            raise _problem(403, "Worker no asignado al catálogo del actor", wid)
     session_id = (body.chat_id or "admin-playground").strip() or "admin-playground"
     if body.images:
         _admin_audit(
@@ -1228,7 +1326,7 @@ async def playground_chat(
         user_id=guard_user_id,
         username=actor or guard_user_id,
         chat_type="private",
-        tenant_id=tenant_id,
+        tenant_id=eff_tenant,
         stream=body.stream,
         vault_db_path=vault_path or None,
     )
@@ -1250,7 +1348,7 @@ async def playground_chat(
                 chat,
                 wid,
                 session_id,
-                tenant_id,
+                eff_tenant,
                 redis_client=redis_client,
                 delivery_context=delivery_context,
             ),
@@ -1263,7 +1361,7 @@ async def playground_chat(
             chat,
             wid,
             session_id=session_id,
-            tenant_id=tenant_id,
+            tenant_id=eff_tenant,
             redis_client=redis_client,
             delivery_context=delivery_context,
         )
@@ -1272,11 +1370,12 @@ async def playground_chat(
 
     if isinstance(result, dict):
         visual = gateway_main._admin_visual_fields_from_invoke_result(
-            session_id, result, tenant_id
+            session_id, result, eff_tenant
         )
         payload: dict[str, Any] = {
             "ok": True,
             "worker_id": wid,
+            "project_id": project_id or None,
             "response": str(result.get("response") or result.get("reply") or ""),
             "assigned_worker_id": result.get("assigned_worker_id"),
             "usage_tokens": result.get("usage_tokens"),
@@ -1765,51 +1864,29 @@ async def admin_overview_metrics(
 
 
 @router.get("/templates", dependencies=[Depends(_require_admin_key)])
-async def list_templates() -> dict[str, Any]:
-    from duckclaw.workers.factory import list_workers
-    from duckclaw.workers.manifest import load_manifest
+async def list_templates(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
+    from core.admin_identity import list_templates_payload, open_gateway_db
 
-    items: list[dict[str, Any]] = []
-    for wid in list_workers():
-        template_dir = _templates_dir() / wid
-        description, description_source = _template_card_description(template_dir)
-        meta: dict[str, Any] = {
-            "id": wid,
-            "description": description,
-            "description_source": description_source,
-        }
-        try:
-            spec = load_manifest(wid)
-            meta.update(
-                {
-                    "name": spec.name,
-                    "schema_name": spec.schema_name,
-                    "temperature": spec.temperature,
-                    "topology": spec.topology,
-                }
-            )
-        except Exception as exc:
-            meta["load_error"] = str(exc)
-        items.append(meta)
+    with open_gateway_db(read_only=True) as db:
+        items = list_templates_payload(db, actor_email=actor)
     return {"templates": items}
 
 
 @router.get("/templates/{worker_id}", dependencies=[Depends(_require_admin_key)])
-async def get_template(worker_id: str, include_content: bool = True) -> dict[str, Any]:
-    base = _templates_dir() / worker_id.strip()
-    if not base.is_dir():
-        raise _problem(404, "Plantilla no encontrada", worker_id)
-    files = _list_template_files(base)
-    contents: dict[str, str] = {}
-    if include_content:
-        for f in files:
-            path = f["path"]
-            if path.endswith((".yaml", ".yml", ".md", ".sql", ".txt", ".json")):
-                try:
-                    contents[path] = (base / path).read_text(encoding="utf-8")
-                except Exception:
-                    contents[path] = ""
-    return {"id": worker_id, "files": files, "contents": contents}
+async def get_template(
+    worker_id: str,
+    include_content: bool = True,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import catalog_template_detail, open_gateway_db
+
+    with open_gateway_db(read_only=True) as db:
+        detail = catalog_template_detail(db, actor_email=actor, worker_id=worker_id)
+    if detail is None:
+        raise _problem(404, "Plantilla no encontrada o no asignada al catálogo", worker_id)
+    if not include_content:
+        detail = {**detail, "contents": {}}
+    return detail
 
 
 @router.put("/templates/{worker_id}/files/{file_path:path}", dependencies=[Depends(_require_admin_key)])
@@ -1819,16 +1896,25 @@ async def put_template_file(
     body: FileWriteBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    target = _safe_worker_path(worker_id, file_path)
-    if not target.parent.is_dir():
-        target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(body.content, encoding="utf-8")
-    if target.name in ("manifest.yaml", "manifest.yml"):
-        from duckclaw.workers.manifest import load_manifest
+    from core.admin_identity import is_catalog_managed_worker, open_gateway_db
+    from duckclaw.admin_worker_catalog import get_visible_worker_for_actor, update_catalog_worker_file
 
-        load_manifest(worker_id)
+    wid = worker_id.strip()
+    if wid in _PROTECTED_TEMPLATE_IDS or wid == "default":
+        raise _problem(403, "Plantilla protegida", wid)
+    with open_gateway_db(read_only=False) as db:
+        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+        if not is_catalog_managed_worker(worker):
+            raise _problem(404, "Worker no visible en catálogo DB-first", wid)
+        result = update_catalog_worker_file(
+            db,
+            worker_uid=worker["worker_uid"],
+            file_path=file_path,
+            content=body.content,
+            actor_email=actor,
+        )
     _admin_audit("template.file.put", f"templates/{worker_id}", file_path, actor=actor)
-    return {"ok": True, "path": file_path}
+    return {"ok": True, "path": file_path, "source": "catalog", **result}
 
 
 def _default_vault_user_id(vault_user_id: str | None = None) -> str:
@@ -2093,15 +2179,19 @@ async def delete_template(
     worker_id: str,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
+    from core.admin_identity import is_catalog_managed_worker, open_gateway_db
+    from duckclaw.admin_worker_catalog import deactivate_visible_worker_for_actor, get_visible_worker_for_actor
+
     wid = worker_id.strip()
     if wid in _PROTECTED_TEMPLATE_IDS:
         raise _problem(403, "Plantilla protegida", wid)
-    dest = _templates_dir() / wid
-    if not dest.is_dir():
-        raise _problem(404, "Plantilla no encontrada", wid)
-    shutil.rmtree(dest)
-    _admin_audit("template.delete", f"templates/{wid}", "rmtree", actor=actor)
-    return {"ok": True, "id": wid}
+    with open_gateway_db(read_only=False) as db:
+        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+        if is_catalog_managed_worker(worker):
+            deactivate_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+            _admin_audit("template.delete", f"templates/{wid}", "catalog_deactivate", actor=actor)
+            return {"ok": True, "id": wid, "action": "deactivated"}
+    raise _problem(404, "Plantilla no encontrada en catálogo", wid)
 
 
 @router.post("/templates/{worker_id}/validate", dependencies=[Depends(_require_admin_key)])
@@ -2277,10 +2367,12 @@ async def put_telegram_routes(
 @router.get("/runtime/vaults", dependencies=[Depends(_require_admin_key)])
 async def list_vaults(
     vault_user_id: str | None = Query(None, description="Filtra private/ al usuario; shared siempre"),
+    actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
+    from core.admin_identity import vault_user_id_for_actor
     from duckclaw.vaults import list_vault_options_for_user
 
-    uid = _default_vault_user_id(vault_user_id)
+    uid = (vault_user_id or "").strip() or vault_user_id_for_actor(actor)
     options = list_vault_options_for_user(uid)
     vaults = [{"path": o["path"], "scope": o["scope"], "vault_id": o.get("vault_id") or ""} for o in options]
     return {"vaults": vaults, "vault_user_id": uid}
@@ -2589,6 +2681,8 @@ async def admin_auth_login(body: AdminLoginBody, request: Request, response: Res
     if not gw or not os.path.isfile(gw):
         raise _problem(503, "Gateway DuckDB no disponible", gw)
 
+    from core.admin_identity import attach_profile_to_console_user, console_user_public
+
     db = DuckClaw(gw, read_only=False, engine="python")
     user: dict[str, Any] | None = None
     try:
@@ -2598,6 +2692,8 @@ async def admin_auth_login(body: AdminLoginBody, request: Request, response: Res
             record_login_failure(db, body.email)
             if redis_client is not None:
                 await record_email_failure(redis_client, body.email)
+        else:
+            user = attach_profile_to_console_user(db, user)
     finally:
         db.close()
 
@@ -2606,22 +2702,11 @@ async def admin_auth_login(body: AdminLoginBody, request: Request, response: Res
 
     if redis_client is None:
         raise _problem(503, "Redis no disponible para sesiones", "redis")
-
     await clear_email_failures(redis_client, body.email)
     session_id, csrf_token = await create_session(redis_client, user=user)
     set_auth_cookies(response, session_id, csrf_token, request=request)
     logging.getLogger(__name__).info("login_success email=%s ip=%s", body.email, ip)
-    return {"user": session_user_payload(user)}
-
-
-def session_user_payload(user: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": user.get("id") or f"user-{user.get('email')}",
-        "email": user.get("email"),
-        "nombre": user.get("nombre"),
-        "rol": user.get("rol"),
-        "initials": user.get("initials") or "",
-    }
+    return {"user": console_user_public(user)}
 
 
 @router.get("/auth/me")
@@ -2638,6 +2723,13 @@ async def admin_auth_me(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Session expired")
 
     session = await refresh_session(redis_client, session_id, session)
+    if not (session.get("profile") or {}).get("tenant_id"):
+        from core.admin_identity import attach_profile_to_console_user, open_gateway_db
+
+        email = str(session.get("email") or "").strip()
+        if email:
+            with open_gateway_db(read_only=True) as db:
+                session = attach_profile_to_console_user(db, dict(session))
     return {"user": session_user_public(session)}
 
 
@@ -4218,27 +4310,45 @@ class DuckdbVectorSearchBody(BaseModel):
     vault_path: str | None = None
 
 
-def _duckdb_readonly_session(vault_path: str | None):
+def _duckdb_readonly_session(vault_path: str | None, *, actor: str | None = None):
     from core.admin_duckdb_readonly import connect_readonly, resolve_vault_path
+    from core.admin_identity import (
+        resolve_actor_default_vault_path,
+        validate_vault_path_for_actor,
+        vault_user_id_for_actor,
+    )
 
-    path = resolve_vault_path(vault_path)
+    vault_uid = ""
+    raw_vp = (vault_path or "").strip()
+    if raw_vp:
+        path = resolve_vault_path(raw_vp)
+        if actor:
+            vault_uid = vault_user_id_for_actor(actor)
+    elif actor:
+        path, vault_uid = resolve_actor_default_vault_path(actor)
+    else:
+        path = resolve_vault_path(vault_path)
     con = connect_readonly(path)
-    return con, path
+    return con, path, vault_uid
 
 
 @router.get("/duckdb/tables", dependencies=[Depends(_require_admin_key)])
 async def duckdb_list_tables(
     vault_path: str | None = Query(None, description="Ruta .duckdb; default gateway vault"),
+    actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_duckdb_readonly import fetch_table_catalog
 
     try:
-        con, resolved = _duckdb_readonly_session(vault_path)
-    except FileNotFoundError as exc:
+        con, resolved, vault_uid = _duckdb_readonly_session(vault_path, actor=actor)
+    except (FileNotFoundError, PermissionError) as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     try:
         catalog = fetch_table_catalog(con)
-        return {"vault_path": resolved, **catalog}
+        out = {"vault_path": resolved, **catalog}
+        if vault_uid:
+            out["vault_user_id"] = vault_uid
+        return out
     finally:
         con.close()
 
@@ -4248,7 +4358,7 @@ async def duckdb_run_query(body: DuckdbQueryBody) -> dict[str, Any]:
     from core.admin_duckdb_readonly import execute_select
 
     try:
-        con, resolved = _duckdb_readonly_session(body.vault_path)
+        con, resolved, _vault_uid = _duckdb_readonly_session(body.vault_path)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     try:
@@ -4270,7 +4380,7 @@ async def duckdb_pgq_graph(
     from core.admin_duckdb_readonly import fetch_pgq_graph
 
     try:
-        con, resolved = _duckdb_readonly_session(vault_path)
+        con, resolved, _vault_uid = _duckdb_readonly_session(vault_path)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     try:
@@ -4288,7 +4398,7 @@ async def duckdb_vector_search(body: DuckdbVectorSearchBody) -> dict[str, Any]:
     )
 
     try:
-        con, resolved = _duckdb_readonly_session(body.vault_path)
+        con, resolved, _vault_uid = _duckdb_readonly_session(body.vault_path)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     try:
@@ -4303,6 +4413,8 @@ async def duckdb_vector_search(body: DuckdbVectorSearchBody) -> dict[str, Any]:
         con.close()
 
 
+from routers.admin_db_first import router as _admin_db_first_router  # noqa: E402
 from routers.admin_train import router as _admin_train_router  # noqa: E402
 
+router.include_router(_admin_db_first_router)
 router.include_router(_admin_train_router)

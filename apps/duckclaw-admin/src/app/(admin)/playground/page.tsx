@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { adminService } from '@/services/adminService';
@@ -34,11 +34,22 @@ export default function PlaygroundPage() {
     null
   );
   const [workerId, setWorkerId] = useState(initialWorker);
+  const [projectId, setProjectId] = useState('');
 
   const conv = useActiveConversation(config?.effective_tenant_id, 'playground');
+  const selectableWorkers = useMemo(() => {
+    const all = config?.workers ?? [];
+    if (!projectId.trim()) return all;
+    const project = (config?.projects ?? []).find((p) => p.project_id === projectId);
+    if (!project?.agents?.length) return all;
+    const allowed = new Set(project.agents.map((a) => a.worker_id));
+    return all.filter((w) => allowed.has(workerOptionId(w)));
+  }, [config, projectId]);
+
   const chat = useAdminChat({
     chatId: conv.sessionId ?? '',
     initialWorker: workerId,
+    projectId,
     enabled: Boolean(conv.sessionId),
     onConversationActivity: conv.bumpRefresh,
   });
@@ -138,6 +149,26 @@ export default function PlaygroundPage() {
             )}
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
+            {(config?.projects?.length ?? 0) > 0 && (
+              <>
+                <label className="text-xs font-bold text-gov-gray-500">Proyecto activo</label>
+                <select
+                  value={projectId}
+                  onChange={(e) => {
+                    setProjectId(e.target.value);
+                    setWorkerId('');
+                  }}
+                  className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[200px]"
+                >
+                  <option value="">Todos los agentes</option>
+                  {(config?.projects ?? []).map((p) => (
+                    <option key={p.project_id} value={p.project_id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             <label className="text-xs font-bold text-gov-gray-500">Agente</label>
             <select
               value={workerId}
@@ -158,7 +189,7 @@ export default function PlaygroundPage() {
               }}
               className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[240px]"
             >
-              {(config?.workers ?? []).map((w) => {
+              {selectableWorkers.map((w) => {
                 const id = workerOptionId(w);
                 const label = workerOptionLabel(w);
                 return (

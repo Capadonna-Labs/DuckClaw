@@ -91,6 +91,16 @@ def ensure_profile_for_user(
     tenant_id = tenant_id_for_email(em)
     channels_json = json.dumps(channels or {}, ensure_ascii=False)
     worker_id = (default_worker_id or _DEFAULT_WORKER_ID).strip() or _DEFAULT_WORKER_ID
+    if getattr(db, "_read_only", False):
+        return {
+            "email": em,
+            "tenant_id": tenant_id,
+            "telegram_user_id": (telegram_user_id or "").strip(),
+            "channels_json": channels_json,
+            "default_worker_id": worker_id,
+            "created_at": "",
+            "updated_at": "",
+        }
     db.execute(
         f"""
         INSERT INTO main.admin_user_profiles

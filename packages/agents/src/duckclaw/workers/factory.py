@@ -5559,8 +5559,10 @@ def build_worker_graph(
                     )
                 )
                 try:
+                    # Síntesis en prosa: sin bind_tools (evita re-forzar run_sandbox cuando el
+                    # follow-up SystemMessage queda como último mensaje del batch).
                     resp = invoke_chat_model_with_transient_retries(
-                        _invoked_llm, list(_groq_msgs) + [_follow_sys]
+                        llm, list(_groq_msgs) + [_follow_sys]
                     )
                     try:
                         from duckclaw.integrations.llm_providers import lc_message_content_to_text

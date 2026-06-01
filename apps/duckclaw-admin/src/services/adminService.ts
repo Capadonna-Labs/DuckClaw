@@ -30,6 +30,14 @@ export interface SkillCatalogItem {
   worker_id?: string;
 }
 
+export interface CreateSkillInput {
+  name: string;
+  description?: string;
+  skill_type?: string;
+  implementation_ref: string;
+  visibility?: 'private' | 'public';
+}
+
 export interface IndustryOption {
   id: string;
   name: string;
@@ -80,6 +88,21 @@ export interface DuckdbTableCatalog {
   tenant_id?: string;
   table_count?: number;
   schemas: Record<string, string[]>;
+}
+
+export interface DuckdbLegacySchema {
+  schema: string;
+  table_count: number;
+  tables: string[];
+}
+
+export interface DuckdbLegacySchemasResponse {
+  vault_path: string;
+  vault_user_id?: string;
+  actor_email?: string;
+  tenant_id?: string;
+  schemas: DuckdbLegacySchema[];
+  confirm: string;
 }
 
 export interface DuckdbQueryResult {
@@ -466,6 +489,17 @@ export const adminService = {
     return adminFetch<DuckdbTableCatalog>(`/duckdb/tables${q}`);
   },
 
+  listDuckdbLegacySchemas: (vaultPath?: string) => {
+    const q = vaultPath ? `?vault_path=${encodeURIComponent(vaultPath)}` : '';
+    return adminFetch<DuckdbLegacySchemasResponse>(`/duckdb/legacy-schemas${q}`);
+  },
+
+  dropDuckdbLegacySchemas: (body: { schemas: string[]; vault_path?: string; confirm: string }) =>
+    adminFetch<{ ok: boolean; dropped: string[]; vault_path: string }>('/duckdb/legacy-schemas/drop', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   runDuckdbQuery: (body: { query: string; vault_path?: string }) =>
     adminFetch<DuckdbQueryResult>('/duckdb/query', {
       method: 'POST',
@@ -623,6 +657,12 @@ export const adminService = {
     adminFetch<{ global: SkillCatalogItem[]; template_local: SkillCatalogItem[] }>(
       '/catalog/skills'
     ),
+
+  createSkill: (body: CreateSkillInput) =>
+    adminFetch<{ ok: boolean; skill: SkillCatalogItem }>('/catalog/skills', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   getIndustriesCatalog: () =>
     adminFetch<{ industries: IndustryOption[]; starters: IndustryOption[] }>(

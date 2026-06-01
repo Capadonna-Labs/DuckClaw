@@ -113,6 +113,91 @@ def test_duckdb_tables_default_to_authenticated_actor_vault(
     assert data["schemas"]["actor_schema"] == ["visible_table"]
 
 
+def test_duckdb_tables_show_legacy_domain_schemas_until_explicit_cleanup(
+    gateway_admin_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    user_dir = repo_root / "db" / "private" / "owner123"
+    user_dir.mkdir(parents=True)
+    user_db = user_dir / "axis.duckdb"
+    con = duckdb.connect(str(user_db))
+    con.execute("CREATE SCHEMA actor_schema")
+    con.execute("CREATE TABLE actor_schema.visible_table (id INTEGER)")
+    for schema in ("pqrsd_crm", "quant_core", "war_room_core"):
+        con.execute(f"CREATE SCHEMA {schema}")
+        con.execute(f"CREATE TABLE {schema}.legacy_table (id INTEGER)")
+    con.close()
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+
+    response = gateway_admin_client.get(
+        "/api/v1/admin/duckdb/tables",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"},
+    )
+
+    assert response.status_code == 200
+    schemas = response.json()["schemas"]
+    assert schemas["actor_schema"] == ["visible_table"]
+    assert schemas["pqrsd_crm"] == ["legacy_table"]
+    assert schemas["quant_core"] == ["legacy_table"]
+    assert schemas["war_room_core"] == ["legacy_table"]
+
+
+def test_duckdb_legacy_schema_cleanup_requires_confirmation_and_drops_schema(
+    gateway_admin_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    user_dir = repo_root / "db" / "private" / "owner123"
+    user_dir.mkdir(parents=True)
+    user_db = user_dir / "axis.duckdb"
+    con = duckdb.connect(str(user_db))
+    con.execute("CREATE SCHEMA quant_core")
+    con.execute("CREATE TABLE quant_core.legacy_table (id INTEGER)")
+    con.close()
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+
+    listed = gateway_admin_client.get(
+        "/api/v1/admin/duckdb/legacy-schemas",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"},
+    )
+    assert listed.status_code == 200
+    assert "quant_core" in [item["schema"] for item in listed.json()["schemas"]]
+
+    rejected = gateway_admin_client.post(
+        "/api/v1/admin/duckdb/legacy-schemas/drop",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"},
+        json={"schemas": ["quant_core"], "confirm": "wrong"},
+    )
+    assert rejected.status_code == 400
+
+    response = gateway_admin_client.post(
+        "/api/v1/admin/duckdb/legacy-schemas/drop",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"},
+        json={"schemas": ["quant_core"], "confirm": "DROP_LEGACY_SCHEMAS"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["dropped"] == ["quant_core"]
+    con = duckdb.connect(str(user_db), read_only=True)
+    try:
+        remaining = {
+            row[0]
+            for row in con.execute(
+                "SELECT schema_name FROM information_schema.schemata"
+            ).fetchall()
+        }
+    finally:
+        con.close()
+    assert "quant_core" not in remaining
+
+
 def test_runtime_vaults_are_scoped_to_authenticated_actor(
     gateway_admin_client: TestClient,
     tmp_path: Path,

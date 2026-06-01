@@ -28,10 +28,11 @@ export function useActiveConversation(tenantId: string | undefined, section: str
   );
 
   const selectConversation = useCallback((id: string, title?: string) => {
-    writeActiveConversationId(id);
+    const tid = tenantId || 'default';
+    writeActiveConversationId(id, tid);
     setSessionId(id);
     setConversationTitle(title ?? null);
-  }, []);
+  }, [tenantId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,19 +40,19 @@ export function useActiveConversation(tenantId: string | undefined, section: str
 
     async function bootstrap() {
       setBootstrapping(true);
-      const stored = readActiveConversationId();
+      const stored = readActiveConversationId(tid);
       if (stored) {
-        if (!cancelled) {
-          setSessionId(stored);
-          try {
-            const meta = await adminService.getConversation(stored, tid);
-            if (!cancelled) setConversationTitle(meta.title || null);
-          } catch {
-            /* ignore */
+        try {
+          const meta = await adminService.getConversation(stored, tid);
+          if (!cancelled) {
+            setSessionId(stored);
+            setConversationTitle(meta.title || null);
+            setBootstrapping(false);
           }
-          setBootstrapping(false);
+          return;
+        } catch {
+          writeActiveConversationId(null, tid);
         }
-        return;
       }
       try {
         const listed = await adminService.listConversations({ tenant_id: tid, limit: 1 });

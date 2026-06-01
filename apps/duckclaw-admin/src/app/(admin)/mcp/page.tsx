@@ -7,8 +7,7 @@ import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
 import { useAuthStore } from '@/store/authStore';
 import Link from 'next/link';
-import { Blocks, Cable, Circle, Library, Play, RefreshCw } from 'lucide-react';
-import { OfficialMcpReferenceTable } from '@/components/mcp/OfficialMcpReferenceTable';
+import { Blocks, Cable, Circle, Play, RefreshCw } from 'lucide-react';
 
 type McpLive = Awaited<ReturnType<typeof adminService.getMcpLiveStatus>>;
 
@@ -75,9 +74,9 @@ export default function McpPage() {
       <header>
         <h1 className="text-3xl font-black dark:text-dark-text">MCP</h1>
         <p className="text-sm text-gov-gray-500 mt-1 max-w-3xl">
-          Integraciones empaquetadas vía MCP (recomendado): Telegram, GitHub Docker, Reddit, servidores
-          stdio en <code className="text-xs font-mono">config/mcp_servers.yaml</code> y catálogo oficial
-          abajo. Para átomos Python propios en{' '}
+          Integraciones MCP del entorno DuckClaw. El catálogo visible de usuario debe venir de la base
+          de datos del actor autenticado; esta vista solo muestra el runtime local y servidores ya
+          configurados. Para átomos Python propios en{' '}
           <code className="text-xs font-mono">forge/skills/</code>, usa{' '}
           <Link href="/skills" className="text-gov-blue-700 dark:text-dark-cyan font-semibold hover:underline">
             Skills
@@ -142,16 +141,6 @@ export default function McpPage() {
             </table>
           </SettingsSection>
 
-          {data.official_reference && (
-            <SettingsSection
-              titulo="Servidores de referencia (oficial)"
-              descripcion="modelcontextprotocol/servers — implementaciones de referencia del steering group"
-              icono={<Library size={22} />}
-            >
-              <OfficialMcpReferenceTable reference={data.official_reference} />
-            </SettingsSection>
-          )}
-
           <SettingsSection titulo="Servidores stdio (config)" icono={<Cable size={22} />}>
             <ul className="text-sm space-y-2">
               {data.stdio_servers.map((s) => (
@@ -169,28 +158,6 @@ export default function McpPage() {
           </SettingsSection>
 
           <div className="flex flex-wrap items-center gap-3 text-sm pt-2">
-            {data.official_reference && (
-              <>
-                <a
-                  href={data.official_reference.source_repo}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-gov-blue-700 dark:text-dark-cyan font-semibold hover:underline"
-                >
-                  Explorar más en GitHub
-                </a>
-                <span className="text-gov-gray-300 dark:text-dark-border">·</span>
-                <a
-                  href={data.official_reference.registry_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-gov-blue-700 dark:text-dark-cyan font-semibold hover:underline"
-                >
-                  MCP Registry
-                </a>
-                <span className="text-gov-gray-300 dark:text-dark-border">·</span>
-              </>
-            )}
             <Link
               href="/skills"
               className="inline-flex items-center gap-1 text-gov-gray-600 dark:text-dark-muted font-semibold hover:text-gov-blue-700 dark:hover:text-dark-cyan"

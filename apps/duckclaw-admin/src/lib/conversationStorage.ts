@@ -2,23 +2,33 @@
 
 const ACTIVE_CONV_KEY = 'duckclaw-admin-active-conv';
 
-export function readActiveConversationId(): string | null {
+function activeConversationKey(tenantId?: string): string {
+  const tid = (tenantId || '').trim();
+  return tid ? `${ACTIVE_CONV_KEY}:${tid}` : ACTIVE_CONV_KEY;
+}
+
+export function readActiveConversationId(tenantId?: string): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    const v = localStorage.getItem(ACTIVE_CONV_KEY);
+    const v = localStorage.getItem(activeConversationKey(tenantId));
+    if (v?.trim()) return v.trim();
+    if (tenantId) {
+      return localStorage.getItem(ACTIVE_CONV_KEY)?.trim() || null;
+    }
     return v?.trim() || null;
   } catch {
     return null;
   }
 }
 
-export function writeActiveConversationId(sessionId: string | null): void {
+export function writeActiveConversationId(sessionId: string | null, tenantId?: string): void {
   if (typeof window === 'undefined') return;
   try {
+    const key = activeConversationKey(tenantId);
     if (sessionId?.trim()) {
-      localStorage.setItem(ACTIVE_CONV_KEY, sessionId.trim());
+      localStorage.setItem(key, sessionId.trim());
     } else {
-      localStorage.removeItem(ACTIVE_CONV_KEY);
+      localStorage.removeItem(key);
     }
   } catch {
     /* ignore quota */

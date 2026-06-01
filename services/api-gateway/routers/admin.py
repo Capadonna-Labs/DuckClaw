@@ -1,8 +1,3 @@
-"""
-Admin API — consola DuckClaw (spec: specs/features/platform/DUCKCLAW_ADMIN_UI.md).
-
-CRUD plantillas en disco, .env enmascarado, runtime agent_config, whitelist Telegram, historial Redis.
-"""
 from __future__ import annotations
 
 import json
@@ -26,11 +21,27 @@ _PROTECTED_TEMPLATE_IDS = frozenset({"entry_router", "manager_router"})
 _CATALOG_STARTER_SKIP = frozenset({"entry_router", "manager_router", "industries"})
 _ENV_ALLOW_PREFIXES = ("TELEGRAM_", "DUCKDB_", "DUCKCLAW_", "LANGCHAIN_", "OPENAI_", "GROQ_", "DEEPSEEK_")
 _ENV_ALLOW_EXACT = frozenset({"LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "REDIS_URL"})
+_DUCKDB_EXPLORER_LEGACY_SCHEMAS = frozenset({"pqrsd_crm", "quant_core", "war_room_core"})
+_DROP_LEGACY_SCHEMAS_CONFIRM = "DROP_LEGACY_SCHEMAS"
 
 
 def _repo_root() -> Path:
     raw = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
     return Path(raw) if raw else _REPO_ROOT
+
+
+def _duckdb_explorer_legacy_schema_names() -> set[str]:
+    """Schemas legacy conocidos; extendible por env para otros devs/repos."""
+    raw = os.environ.get("DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS", "")
+    configured = {item.strip().lower() for item in raw.split(",") if item.strip()}
+    return set(_DUCKDB_EXPLORER_LEGACY_SCHEMAS) | configured
+
+
+def _quote_duckdb_ident(value: str) -> str:
+    ident = (value or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ident):
+        raise ValueError(f"Identificador inválido: {value}")
+    return '"' + ident.replace('"', '""') + '"'
 
 
 def _gateway_effective_tenant_id(request_tenant: str | None) -> str:
@@ -1338,7 +1349,7 @@ async def playground_chat(
 
     from duckclaw.channels import GatewayDeliveryContext
 
-    delivery_context = GatewayDeliveryContext(channel="http")
+    delivery_context = GatewayDeliveryContext.trusted_admin_console()
 
     if wants_stream:
         from core.sse_stream import SSE_HEADERS
@@ -3171,42 +3182,139 @@ async def delete_runtime_config(
     return {"ok": True, "queued": True, "full_key": full_key}
 
 
+class CatalogSkillCreateBody(BaseModel):
+    name: str = Field(..., min_length=2, max_length=128)
+    description: str = Field(default="", max_length=1024)
+    skill_type: str = Field(default="python", max_length=64)
+    implementation_ref: str = Field(..., min_length=3, max_length=512)
+    visibility: str = Field(default="private", max_length=32)
+
+    @field_validator("name")
+    @classmethod
+    def _valid_skill_name(cls, value: str) -> str:
+        name = (value or "").strip()
+        if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.-]{1,127}", name):
+            raise ValueError("name debe iniciar con letra y usar letras, números, _, . o -")
+        return name
+
+    @field_validator("visibility")
+    @classmethod
+    def _valid_visibility(cls, value: str) -> str:
+        visibility = (value or "private").strip().lower()
+        if visibility not in {"private", "public"}:
+            raise ValueError("visibility debe ser private o public")
+        return visibility
+
+
 @router.get("/catalog/skills", dependencies=[Depends(_require_admin_key)])
-async def catalog_skills() -> dict[str, Any]:
-    forge = _repo_root() / "packages" / "agents" / "src" / "duckclaw" / "forge"
+async def catalog_skills(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
     global_skills: list[dict[str, str]] = []
-    skills_dir = forge / "skills"
-    if skills_dir.is_dir():
-        for py in sorted(skills_dir.glob("*.py")):
-            if py.name.startswith("_"):
-                continue
-            global_skills.append(
-                {
-                    "id": py.stem,
-                    "path": str(py.relative_to(_repo_root())),
-                    "scope": "global",
-                }
-            )
     template_skills: list[dict[str, str]] = []
-    templates_root = _templates_dir()
-    for worker_dir in sorted(templates_root.iterdir()):
-        if not worker_dir.is_dir() or worker_dir.name.startswith("."):
-            continue
-        local = worker_dir / "skills"
-        if not local.is_dir():
-            continue
-        for py in sorted(local.glob("*.py")):
-            if py.name.startswith("_"):
-                continue
-            template_skills.append(
-                {
-                    "id": py.stem,
-                    "worker_id": worker_dir.name,
-                    "path": str(py.relative_to(_repo_root())),
-                    "scope": "template",
-                }
+    actor_email = (actor or "").strip().lower()
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if actor_email and "@" in actor_email and gw and os.path.isfile(gw):
+        from duckclaw import DuckClaw
+        from duckclaw.admin_user_profiles import ensure_profile_for_user
+        from duckclaw.admin_worker_catalog import (
+            ensure_admin_worker_catalog_schema,
+            get_latest_worker_version,
+            list_visible_workers_for_actor,
+        )
+
+        db = DuckClaw(gw, read_only=False, engine="python")
+        try:
+            ensure_admin_worker_catalog_schema(db)
+            profile = ensure_profile_for_user(db, email=actor_email)
+            skill_rows = db.execute(
+                """
+                SELECT name, implementation_ref
+                FROM main.admin_skills
+                WHERE active = true
+                  AND tenant_id = ?
+                  AND (owner_email = ? OR visibility = 'public')
+                ORDER BY name
+                """,
+                [profile["tenant_id"], profile["email"]],
             )
+            global_skills = [
+                {
+                    "id": str(name or ""),
+                    "path": str(implementation_ref or ""),
+                    "scope": "catalog",
+                }
+                for name, implementation_ref in skill_rows
+                if str(name or "").strip()
+            ]
+            workers = list_visible_workers_for_actor(db, actor_email=actor_email)
+            for worker in workers:
+                worker_uid = str(worker.get("worker_uid") or "").strip()
+                worker_id = str(worker.get("worker_id") or worker.get("id") or "").strip()
+                if not worker_uid or worker_id == "default":
+                    continue
+                latest = get_latest_worker_version(db, worker_uid=worker_uid) or {}
+                files = latest.get("files_snapshot") if isinstance(latest, dict) else {}
+                if not isinstance(files, dict):
+                    continue
+                for rel in sorted(str(path).replace("\\", "/").lstrip("/") for path in files):
+                    if not rel.startswith("skills/") or not rel.endswith(".py"):
+                        continue
+                    name = Path(rel).name
+                    if name.startswith("_"):
+                        continue
+                    template_skills.append(
+                        {
+                            "id": Path(name).stem,
+                            "worker_id": worker_id,
+                            "path": f"db://admin_worker_catalog/{worker_uid}/{rel}",
+                            "scope": "catalog",
+                        }
+                    )
+        finally:
+            db.close()
     return {"global": global_skills, "template_local": template_skills}
+
+
+@router.post("/catalog/skills", dependencies=[Depends(_require_admin_key)])
+async def create_catalog_skill(
+    body: CatalogSkillCreateBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    actor_email = (actor or "").strip().lower()
+    if "@" not in actor_email:
+        raise _problem(401, "Actor autenticado requerido", actor or "")
+    from duckclaw import DuckClaw
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema, register_skill
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(503, "Gateway DuckDB no disponible", "gateway_db")
+    db = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        ensure_admin_worker_catalog_schema(db)
+        profile = ensure_profile_for_user(db, email=actor_email)
+        skill = register_skill(
+            db,
+            name=body.name,
+            skill_type=body.skill_type,
+            implementation_ref=body.implementation_ref,
+            description=body.description,
+            owner_email=profile["email"],
+            tenant_id=profile["tenant_id"],
+            visibility=body.visibility,
+        )
+    finally:
+        db.close()
+    dto = {
+        "id": skill["name"],
+        "path": skill["implementation_ref"],
+        "scope": "catalog",
+    }
+    _admin_audit("catalog.skill.create", dto["id"], dto["path"], actor=actor)
+    return {"ok": True, "skill": dto}
 
 
 @router.get("/catalog/source-preview", dependencies=[Depends(_require_admin_key)])
@@ -4310,6 +4418,21 @@ class DuckdbVectorSearchBody(BaseModel):
     vault_path: str | None = None
 
 
+class DuckdbLegacySchemaDropBody(BaseModel):
+    schemas: list[str] = Field(default_factory=list)
+    vault_path: str | None = None
+    confirm: str = ""
+
+
+def _duckdb_actor_scope(actor: str | None, vault_uid: str) -> dict[str, str]:
+    actor_email = (actor or "admin-ui").strip().lower() or "admin-ui"
+    return {
+        "actor_email": actor_email,
+        "vault_user_id": vault_uid,
+        "tenant_id": _gateway_effective_tenant_id("default"),
+    }
+
+
 def _duckdb_readonly_session(vault_path: str | None, *, actor: str | None = None):
     from core.admin_duckdb_readonly import connect_readonly, resolve_vault_path
     from core.admin_identity import (
@@ -4321,15 +4444,45 @@ def _duckdb_readonly_session(vault_path: str | None, *, actor: str | None = None
     vault_uid = ""
     raw_vp = (vault_path or "").strip()
     if raw_vp:
-        path = resolve_vault_path(raw_vp)
-        if actor:
+        if actor and actor != "admin-ui":
+            path = validate_vault_path_for_actor(actor, raw_vp)
             vault_uid = vault_user_id_for_actor(actor)
+        else:
+            path = resolve_vault_path(raw_vp)
+            vault_uid = _default_vault_user_id()
     elif actor:
         path, vault_uid = resolve_actor_default_vault_path(actor)
     else:
         path = resolve_vault_path(vault_path)
+        vault_uid = _default_vault_user_id()
     con = connect_readonly(path)
-    return con, path, vault_uid
+    return con, path, _duckdb_actor_scope(actor, vault_uid)
+
+
+def _duckdb_writable_session(vault_path: str | None, *, actor: str):
+    from core.admin_duckdb_readonly import resolve_vault_path
+    from core.admin_identity import (
+        resolve_actor_default_vault_path,
+        validate_vault_path_for_actor,
+        vault_user_id_for_actor,
+    )
+    import duckdb
+
+    raw_vp = (vault_path or "").strip()
+    if raw_vp:
+        if actor and actor != "admin-ui":
+            path = validate_vault_path_for_actor(actor, raw_vp)
+            vault_uid = vault_user_id_for_actor(actor)
+        else:
+            path = resolve_vault_path(raw_vp)
+            vault_uid = _default_vault_user_id()
+    elif actor:
+        path, vault_uid = resolve_actor_default_vault_path(actor)
+    else:
+        path = resolve_vault_path(vault_path)
+        vault_uid = _default_vault_user_id()
+    scope = _duckdb_actor_scope(actor, vault_uid)
+    return duckdb.connect(path, read_only=False), path, scope
 
 
 @router.get("/duckdb/tables", dependencies=[Depends(_require_admin_key)])
@@ -4340,15 +4493,23 @@ async def duckdb_list_tables(
     from core.admin_duckdb_readonly import fetch_table_catalog
 
     try:
-        con, resolved, vault_uid = _duckdb_readonly_session(vault_path, actor=actor)
-    except (FileNotFoundError, PermissionError) as exc:
+        con, resolved, scope = _duckdb_readonly_session(vault_path, actor=actor)
+    except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
     try:
         catalog = fetch_table_catalog(con)
-        out = {"vault_path": resolved, **catalog}
-        if vault_uid:
-            out["vault_user_id"] = vault_uid
-        return out
+        schemas = catalog.get("schemas") or {}
+        table_count = sum(len(tables) for tables in schemas.values() if isinstance(tables, list))
+        return {
+            "vault_path": resolved,
+            "vault_user_id": scope["vault_user_id"],
+            "actor_email": scope["actor_email"],
+            "tenant_id": scope["tenant_id"],
+            "table_count": table_count,
+            **catalog,
+        }
     finally:
         con.close()
 
@@ -4369,6 +4530,101 @@ async def duckdb_run_query(body: DuckdbQueryBody) -> dict[str, Any]:
         except Exception as exc:
             raise _problem(400, "Error SQL", str(exc)) from exc
         return {"vault_path": resolved, **result}
+    finally:
+        con.close()
+
+
+@router.get("/duckdb/legacy-schemas", dependencies=[Depends(_require_admin_key)])
+async def duckdb_legacy_schemas(
+    vault_path: str | None = Query(None),
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_duckdb_readonly import fetch_table_catalog
+
+    try:
+        con, resolved, scope = _duckdb_readonly_session(vault_path, actor=actor)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    try:
+        catalog = fetch_table_catalog(con)
+        schemas = catalog.get("schemas") or {}
+        candidates = _duckdb_explorer_legacy_schema_names()
+        out = [
+            {
+                "schema": str(schema),
+                "table_count": len(tables) if isinstance(tables, list) else 0,
+                "tables": list(tables) if isinstance(tables, list) else [],
+            }
+            for schema, tables in sorted(schemas.items())
+            if str(schema).lower() in candidates
+        ]
+        return {
+            "vault_path": resolved,
+            "vault_user_id": scope["vault_user_id"],
+            "actor_email": scope["actor_email"],
+            "tenant_id": scope["tenant_id"],
+            "schemas": out,
+            "confirm": _DROP_LEGACY_SCHEMAS_CONFIRM,
+        }
+    finally:
+        con.close()
+
+
+@router.post("/duckdb/legacy-schemas/drop", dependencies=[Depends(_require_admin_key)])
+async def duckdb_drop_legacy_schemas(
+    body: DuckdbLegacySchemaDropBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    if body.confirm != _DROP_LEGACY_SCHEMAS_CONFIRM:
+        raise _problem(400, "Confirmación requerida", _DROP_LEGACY_SCHEMAS_CONFIRM)
+    candidates = _duckdb_explorer_legacy_schema_names()
+    requested = []
+    for raw in body.schemas:
+        schema = (raw or "").strip().lower()
+        if not schema:
+            continue
+        if schema not in candidates:
+            raise _problem(400, "Schema no permitido para cleanup legacy", schema)
+        requested.append(schema)
+    requested = sorted(set(requested))
+    if not requested:
+        raise _problem(400, "schemas requerido", "Selecciona al menos un schema legacy")
+
+    try:
+        con, resolved, scope = _duckdb_writable_session(body.vault_path, actor=actor)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    dropped: list[str] = []
+    try:
+        existing = {
+            str(row[0]).lower()
+            for row in con.execute(
+                "SELECT schema_name FROM information_schema.schemata"
+            ).fetchall()
+        }
+        for schema in requested:
+            if schema not in existing:
+                continue
+            con.execute(f"DROP SCHEMA {_quote_duckdb_ident(schema)} CASCADE")
+            dropped.append(schema)
+        _admin_audit(
+            "duckdb.legacy_schema.drop",
+            resolved,
+            ",".join(dropped),
+            actor=actor,
+            meta={"tenant_id": scope["tenant_id"], "schemas": dropped},
+        )
+        return {
+            "ok": True,
+            "vault_path": resolved,
+            "vault_user_id": scope["vault_user_id"],
+            "tenant_id": scope["tenant_id"],
+            "dropped": dropped,
+        }
     finally:
         con.close()
 

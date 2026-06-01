@@ -38,12 +38,14 @@ export async function fetchKanbanTeamWorkers(): Promise<string[]> {
   return fetchPlaygroundWorkers();
 }
 
-async function fetchPlaygroundWorkers(): Promise<string[]> {
+async function fetchPlaygroundWorkers(actor?: string): Promise<string[]> {
   const base = gatewayBase();
   const key = adminApiKey();
   if (!base || !key) return [];
+  const headers = gatewayProxyHeaders({ 'X-Admin-Key': key });
+  if (actor?.trim()) headers['X-Duckclaw-Actor'] = actor.trim();
   const res = await fetch(`${base}/api/v1/admin/playground/config`, {
-    headers: gatewayProxyHeaders({ 'X-Admin-Key': key }),
+    headers,
     cache: 'no-store',
   });
   if (!res.ok) return [];
@@ -54,7 +56,7 @@ async function fetchPlaygroundWorkers(): Promise<string[]> {
     .filter((workerId): workerId is string => Boolean(workerId));
 }
 
-async function fetchSwarmSlots(workers: string[]): Promise<{
+async function fetchSwarmSlots(workers: string[], actor?: string): Promise<{
   instances: SwarmInstance[];
   states: Record<string, KanbanStatus>;
   tasks: Record<string, WorkerTaskInfo>;
@@ -65,8 +67,10 @@ async function fetchSwarmSlots(workers: string[]): Promise<{
     return { instances: [], states: {}, tasks: {} };
   }
   const q = new URLSearchParams({ workers: workers.join(',') });
+  const headers = gatewayProxyHeaders({ 'X-Admin-Key': key });
+  if (actor?.trim()) headers['X-Duckclaw-Actor'] = actor.trim();
   const res = await fetch(`${base}/api/v1/admin/kanban/swarm-slots?${q}`, {
-    headers: gatewayProxyHeaders({ 'X-Admin-Key': key }),
+    headers,
     cache: 'no-store',
   });
   if (!res.ok) return { instances: [], states: {}, tasks: {} };
@@ -190,14 +194,14 @@ function upsertSwarmCard(
 }
 
 /** Merge /workers team + swarm slots into local kanban cards. */
-export async function syncKanbanCardsWithTeam(cards: KanbanCard[]): Promise<{
+export async function syncKanbanCardsWithTeam(cards: KanbanCard[], actor?: string): Promise<{
   cards: KanbanCard[];
   changed: boolean;
 }> {
-  const workers = await fetchPlaygroundWorkers();
+  const workers = await fetchPlaygroundWorkers(actor);
   if (workers.length === 0) return { cards, changed: false };
 
-  const { instances, states, tasks } = await fetchSwarmSlots(workers);
+  const { instances, states, tasks } = await fetchSwarmSlots(workers, actor);
   const now = new Date().toISOString();
   let changed = false;
   let next = cards.map((c) => {

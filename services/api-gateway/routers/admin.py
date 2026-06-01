@@ -614,6 +614,22 @@ class TemplateCreateBody(BaseModel):
     source_template: str = Field(default="industries/business_standard")
 
 
+class TemplateImportBody(BaseModel):
+    templates_root: str | None = Field(default=None, max_length=1024)
+    include_prefixes: list[str] = Field(default_factory=list)
+    include_template_ids: list[str] = Field(default_factory=list)
+
+
+class TemplateContextCreateBody(BaseModel):
+    title: str = Field(..., min_length=1, max_length=256)
+    content_md: str = Field(default="", max_length=65_535)
+    sort_order: int = Field(default=100, ge=0, le=10_000)
+
+
+class TemplateContextReorderBody(BaseModel):
+    items: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
 class ProjectCreateBody(BaseModel):
     id: str = Field(..., min_length=1, max_length=64)
     source_template: str = Field(
@@ -1037,7 +1053,8 @@ async def playground_config(
     )
     raw_workers: list[str] = team_ctx.get("workers") or []
     team_source = str(team_ctx.get("team_source") or "")
-    should_use_team_workers = bool(raw_workers) and team_source in {"chat", "tenant"}
+    console_profile = team_ctx.get("console_profile") if isinstance(team_ctx.get("console_profile"), dict) else None
+    should_use_team_workers = bool(raw_workers) and team_source in {"chat", "tenant"} and not console_profile
     workers_payload = (
         _playground_workers_payload(raw_workers)
         if should_use_team_workers
@@ -1046,14 +1063,17 @@ async def playground_config(
     workers_payload = _merge_catalog_workers_for_actor(workers_payload, actor)
     workers_payload = _merge_user_agent_workers(
         workers_payload,
-        team_ctx.get("console_profile") if isinstance(team_ctx.get("console_profile"), dict) else None,
+        console_profile,
     )
     eff_chat = (chat_id or team_ctx.get("team_chat_id") or "admin-playground").strip()
     llm = _resolved_llm_for_chat(eff_chat)
     catalog = _playground_llm_catalog(llm.get("provider", ""))
     eff_tenant = team_ctx.get("tenant_id") or _gateway_effective_tenant_id("default")
     team_hint = (team_ctx.get("team_hint") or "") + workers_payload.get("team_hint_extra", "")
-    default_wid = _pick_playground_worker(team_ctx, None)
+    default_wid = (
+        str((workers_payload.get("workers") or [{}])[0].get("id") or "").strip()
+        or _pick_playground_worker(team_ctx, None)
+    )
     vault = await _resolved_vault_for_admin_chat(
         eff_chat,
         team_ctx,
@@ -1710,6 +1730,96 @@ def _ensure_template_visible(worker_id: str, actor: str) -> None:
         raise _problem(404, "Plantilla no encontrada", worker_id)
 
 
+def _catalog_template_detail(worker_id: str, actor: str, *, include_content: bool = True) -> dict[str, Any] | None:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import (
+        get_latest_worker_version,
+        get_visible_worker_for_actor,
+        list_worker_contexts,
+    )
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return None
+    db = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=worker_id)
+        if not worker:
+            return None
+        version = get_latest_worker_version(db, worker_uid=worker["worker_uid"])
+        contexts = list_worker_contexts(db, worker_uid=worker["worker_uid"])
+    finally:
+        db.close()
+
+    files_snapshot = dict((version or {}).get("files_snapshot") or {})
+    contents: dict[str, str] = {str(path): str(text) for path, text in files_snapshot.items()}
+    for ctx in contexts:
+        title = str(ctx.get("title") or "").strip()
+        if title and title not in contents:
+            contents[title] = str(ctx.get("content_md") or "")
+    files = [{"path": path, "size": len(text.encode("utf-8"))} for path, text in sorted(contents.items())]
+    return {
+        "id": worker["worker_id"],
+        "worker_uid": worker["worker_uid"],
+        "source": "catalog",
+        "read_only": True,
+        "display_name": worker["display_name"],
+        "files": files,
+        "contents": contents if include_content else {},
+        "contexts": contexts,
+        "version": (version or {}).get("version"),
+    }
+
+
+def _save_catalog_template_file(
+    worker_id: str,
+    actor: str,
+    *,
+    file_path: str,
+    content: str,
+) -> dict[str, Any] | None:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import get_visible_worker_for_actor, update_catalog_worker_file
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        return None
+    db = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=worker_id)
+        if not worker:
+            return None
+        update = update_catalog_worker_file(
+            db,
+            worker_uid=worker["worker_uid"],
+            file_path=file_path,
+            content=content,
+            actor_email=actor,
+        )
+    finally:
+        db.close()
+    _admin_audit("template.catalog_file.put", f"catalog/{worker_id}/{file_path}", "db-first", actor=actor)
+    return {"ok": True, "source": "catalog", "worker_id": worker_id, **update}
+
+
+def _catalog_worker_for_write(worker_id: str, actor: str) -> tuple[Any, dict[str, str]]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import get_visible_worker_for_actor
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(503, "Gateway DuckDB no disponible", gw)
+    db = DuckClaw(gw, read_only=False, engine="python")
+    worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=worker_id)
+    if not worker:
+        db.close()
+        raise _problem(404, "Worker de catálogo no encontrado", worker_id)
+    return db, worker
+
+
 @router.get("/templates", dependencies=[Depends(_require_admin_key)])
 async def list_templates(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
     from duckclaw.workers.manifest import load_manifest
@@ -1748,6 +1858,39 @@ async def list_templates(actor: str = Depends(_actor_from_header)) -> dict[str, 
     return {"templates": items}
 
 
+@router.post("/templates/import", dependencies=[Depends(_require_admin_key)])
+async def import_templates_to_catalog(
+    body: TemplateImportBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_template_import import import_templates_to_catalog as import_templates
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise _problem(503, "Gateway DuckDB no disponible", gw)
+    templates_root = (body.templates_root or "").strip() or str(_templates_dir())
+    db = DuckClaw(gw, read_only=False, engine="python")
+    try:
+        result = import_templates(
+            db,
+            owner_email=actor,
+            templates_root=templates_root,
+            include_prefixes=tuple(p.strip() for p in body.include_prefixes if p.strip()),
+            include_template_ids=tuple(t.strip() for t in body.include_template_ids if t.strip()),
+        )
+    finally:
+        db.close()
+    _admin_audit(
+        "template.import",
+        "catalog",
+        f"imported={len(result.get('imported') or [])} skipped={len(result.get('skipped_existing') or [])}",
+        actor=actor,
+    )
+    return {"ok": True, **result}
+
+
 @router.get("/templates/{worker_id}", dependencies=[Depends(_require_admin_key)])
 async def get_template(
     worker_id: str,
@@ -1755,6 +1898,9 @@ async def get_template(
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     _ensure_template_visible(worker_id, actor)
+    catalog_detail = _catalog_template_detail(worker_id, actor, include_content=include_content)
+    if catalog_detail:
+        return catalog_detail
     base = _templates_dir() / worker_id.strip()
     if not base.is_dir():
         raise _problem(404, "Plantilla no encontrada", worker_id)
@@ -1768,7 +1914,75 @@ async def get_template(
                     contents[path] = (base / path).read_text(encoding="utf-8")
                 except Exception:
                     contents[path] = ""
-    return {"id": worker_id, "files": files, "contents": contents}
+    return {"id": worker_id, "source": "filesystem", "read_only": False, "files": files, "contents": contents}
+
+
+@router.post("/templates/{worker_id}/contexts", dependencies=[Depends(_require_admin_key)])
+async def create_template_context(
+    worker_id: str,
+    body: TemplateContextCreateBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw.admin_worker_catalog import add_catalog_worker_context
+
+    _ensure_template_visible(worker_id, actor)
+    db, worker = _catalog_worker_for_write(worker_id, actor)
+    try:
+        result = add_catalog_worker_context(
+            db,
+            worker_uid=worker["worker_uid"],
+            title=body.title,
+            content_md=body.content_md,
+            sort_order=body.sort_order,
+            actor_email=actor,
+        )
+    finally:
+        db.close()
+    _admin_audit("template.context.create", f"catalog/{worker_id}/{body.title}", "db-first", actor=actor)
+    return {"ok": True, "source": "catalog", **result}
+
+
+@router.patch("/templates/{worker_id}/contexts/reorder", dependencies=[Depends(_require_admin_key)])
+async def reorder_template_contexts(
+    worker_id: str,
+    body: TemplateContextReorderBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw.admin_worker_catalog import reorder_worker_contexts
+
+    _ensure_template_visible(worker_id, actor)
+    db, worker = _catalog_worker_for_write(worker_id, actor)
+    try:
+        updated = reorder_worker_contexts(db, worker_uid=worker["worker_uid"], items=body.items)
+    finally:
+        db.close()
+    _admin_audit("template.context.reorder", f"catalog/{worker_id}", str(updated), actor=actor)
+    return {"ok": True, "source": "catalog", "updated": updated}
+
+
+@router.delete("/templates/{worker_id}/contexts/{context_id}", dependencies=[Depends(_require_admin_key)])
+async def delete_template_context(
+    worker_id: str,
+    context_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw.admin_worker_catalog import deactivate_worker_context
+
+    _ensure_template_visible(worker_id, actor)
+    db, worker = _catalog_worker_for_write(worker_id, actor)
+    try:
+        result = deactivate_worker_context(
+            db,
+            worker_uid=worker["worker_uid"],
+            context_id=context_id,
+            actor_email=actor,
+        )
+    finally:
+        db.close()
+    if not result:
+        raise _problem(404, "Contexto no encontrado", context_id)
+    _admin_audit("template.context.delete", f"catalog/{worker_id}/{context_id}", "soft-delete", actor=actor)
+    return {"ok": True, "source": "catalog", **result}
 
 
 @router.put("/templates/{worker_id}/files/{file_path:path}", dependencies=[Depends(_require_admin_key)])
@@ -1778,6 +1992,15 @@ async def put_template_file(
     body: FileWriteBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
+    _ensure_template_visible(worker_id, actor)
+    catalog_update = _save_catalog_template_file(
+        worker_id,
+        actor,
+        file_path=file_path,
+        content=body.content,
+    )
+    if catalog_update:
+        return catalog_update
     target = _safe_worker_path(worker_id, file_path)
     if not target.parent.is_dir():
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -1792,6 +2015,41 @@ async def put_template_file(
 
 def _default_vault_user_id(vault_user_id: str | None = None) -> str:
     return _playground_telegram_user_id(vault_user_id) or "default"
+
+
+def _duckdb_actor_scope(actor: str) -> dict[str, str]:
+    """Resolve the authenticated console actor to the vault namespace it may inspect."""
+    actor_email = (actor or "").strip().lower()
+    legacy_uid = _default_vault_user_id()
+    if not actor_email or actor_email == "admin-ui":
+        return {"actor_email": actor_email or "admin-ui", "vault_user_id": legacy_uid, "tenant_id": "default"}
+
+    admin_email = (os.environ.get("DUCKCLAW_ADMIN_EMAIL") or "").strip().lower()
+    if admin_email and actor_email == admin_email and legacy_uid != "default":
+        return {"actor_email": actor_email, "vault_user_id": legacy_uid, "tenant_id": legacy_uid}
+
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if gw and os.path.isfile(gw):
+        import duckdb
+        from duckclaw.admin_user_profiles import ensure_admin_user_profiles_table, ensure_profile_for_user
+
+        con = duckdb.connect(gw, read_only=False)
+        try:
+            ensure_admin_user_profiles_table(con)
+            profile = ensure_profile_for_user(con, email=actor_email)
+        finally:
+            con.close()
+        telegram_user_id = str(profile.get("telegram_user_id") or "").strip()
+        tenant_id = str(profile.get("tenant_id") or "").strip()
+        return {
+            "actor_email": actor_email,
+            "vault_user_id": telegram_user_id or tenant_id or actor_email,
+            "tenant_id": tenant_id or actor_email,
+        }
+
+    return {"actor_email": actor_email, "vault_user_id": actor_email, "tenant_id": actor_email}
 
 
 def _manifest_file_for_worker(worker_id: str) -> Path:
@@ -2052,15 +2310,24 @@ async def delete_template(
     worker_id: str,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import deactivate_visible_worker_for_actor
+    from duckclaw.gateway_db import get_gateway_db_path
+
     wid = worker_id.strip()
     if wid in _PROTECTED_TEMPLATE_IDS:
         raise _problem(403, "Plantilla protegida", wid)
-    dest = _templates_dir() / wid
-    if not dest.is_dir():
-        raise _problem(404, "Plantilla no encontrada", wid)
-    shutil.rmtree(dest)
-    _admin_audit("template.delete", f"templates/{wid}", "rmtree", actor=actor)
-    return {"ok": True, "id": wid}
+    gw = (get_gateway_db_path() or "").strip()
+    if gw and os.path.isfile(gw):
+        db = DuckClaw(gw, read_only=False, engine="python")
+        try:
+            deactivated = deactivate_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+        finally:
+            db.close()
+        if deactivated:
+            _admin_audit("template.deactivate", f"catalog/{wid}", "soft-delete", actor=actor)
+            return {"ok": True, "id": wid, "action": "deactivated"}
+    raise _problem(404, "Plantilla no encontrada en catálogo", wid)
 
 
 @router.post("/templates/{worker_id}/validate", dependencies=[Depends(_require_admin_key)])
@@ -2236,13 +2503,30 @@ async def put_telegram_routes(
 @router.get("/runtime/vaults", dependencies=[Depends(_require_admin_key)])
 async def list_vaults(
     vault_user_id: str | None = Query(None, description="Filtra private/ al usuario; shared siempre"),
+    actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    from duckclaw.vaults import list_vault_options_for_user
+    from duckclaw.vaults import list_vault_options_for_user, resolve_active_vault
 
-    uid = _default_vault_user_id(vault_user_id)
+    scope = _duckdb_actor_scope(actor)
+    uid = _default_vault_user_id(vault_user_id) if vault_user_id else scope["vault_user_id"]
     options = list_vault_options_for_user(uid)
-    vaults = [{"path": o["path"], "scope": o["scope"], "vault_id": o.get("vault_id") or ""} for o in options]
-    return {"vaults": vaults, "vault_user_id": uid}
+    _, active_path = resolve_active_vault(uid)
+    vaults = [
+        {
+            "path": o["path"],
+            "scope": o["scope"],
+            "vault_id": o.get("vault_id") or "",
+            "active": _duckdb_paths_same(o["path"], active_path),
+        }
+        for o in options
+    ]
+    return {
+        "vaults": vaults,
+        "vault_user_id": uid,
+        "actor_email": scope["actor_email"],
+        "tenant_id": scope["tenant_id"],
+        "active_vault_path": active_path,
+    }
 
 
 @router.get("/runtime/config", dependencies=[Depends(_require_admin_key)])
@@ -4175,39 +4459,67 @@ class DuckdbVectorSearchBody(BaseModel):
     vault_path: str | None = None
 
 
-def _duckdb_readonly_session(vault_path: str | None):
+def _duckdb_readonly_session(vault_path: str | None, *, actor: str):
     from core.admin_duckdb_readonly import connect_readonly, resolve_vault_path
+    from duckclaw.vaults import resolve_active_vault, validate_user_db_path
 
-    path = resolve_vault_path(vault_path)
+    scope = _duckdb_actor_scope(actor)
+    if (vault_path or "").strip():
+        path = resolve_vault_path(vault_path)
+    else:
+        _, path = resolve_active_vault(scope["vault_user_id"])
+    if actor != "admin-ui" and not validate_user_db_path(
+        scope["vault_user_id"],
+        path,
+        tenant_id=scope["tenant_id"],
+    ):
+        raise PermissionError(f"Vault fuera del perfil autenticado: {path}")
     con = connect_readonly(path)
-    return con, path
+    return con, path, scope
 
 
 @router.get("/duckdb/tables", dependencies=[Depends(_require_admin_key)])
 async def duckdb_list_tables(
     vault_path: str | None = Query(None, description="Ruta .duckdb; default gateway vault"),
+    actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_duckdb_readonly import fetch_table_catalog
 
     try:
-        con, resolved = _duckdb_readonly_session(vault_path)
+        con, resolved, scope = _duckdb_readonly_session(vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
     try:
         catalog = fetch_table_catalog(con)
-        return {"vault_path": resolved, **catalog}
+        schemas = catalog.get("schemas") or {}
+        table_count = sum(len(tables) for tables in schemas.values() if isinstance(tables, list))
+        return {
+            "vault_path": resolved,
+            "vault_user_id": scope["vault_user_id"],
+            "actor_email": scope["actor_email"],
+            "tenant_id": scope["tenant_id"],
+            "table_count": table_count,
+            **catalog,
+        }
     finally:
         con.close()
 
 
 @router.post("/duckdb/query", dependencies=[Depends(_require_admin_key)])
-async def duckdb_run_query(body: DuckdbQueryBody) -> dict[str, Any]:
+async def duckdb_run_query(
+    body: DuckdbQueryBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
     from core.admin_duckdb_readonly import execute_select
 
     try:
-        con, resolved = _duckdb_readonly_session(body.vault_path)
+        con, resolved, scope = _duckdb_readonly_session(body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
     try:
         try:
             result = execute_select(con, body.query)
@@ -4215,7 +4527,13 @@ async def duckdb_run_query(body: DuckdbQueryBody) -> dict[str, Any]:
             raise _problem(400, "Consulta no permitida", str(exc)) from exc
         except Exception as exc:
             raise _problem(400, "Error SQL", str(exc)) from exc
-        return {"vault_path": resolved, **result}
+        return {
+            "vault_path": resolved,
+            "vault_user_id": scope["vault_user_id"],
+            "actor_email": scope["actor_email"],
+            "tenant_id": scope["tenant_id"],
+            **result,
+        }
     finally:
         con.close()
 
@@ -4223,31 +4541,39 @@ async def duckdb_run_query(body: DuckdbQueryBody) -> dict[str, Any]:
 @router.get("/duckdb/pgq-graph", dependencies=[Depends(_require_admin_key)])
 async def duckdb_pgq_graph(
     vault_path: str | None = Query(None),
+    actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_duckdb_readonly import fetch_pgq_graph
 
     try:
-        con, resolved = _duckdb_readonly_session(vault_path)
+        con, resolved, scope = _duckdb_readonly_session(vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
     try:
         graph = fetch_pgq_graph(con)
-        return {"vault_path": resolved, **graph}
+        return {"vault_path": resolved, "vault_user_id": scope["vault_user_id"], **graph}
     finally:
         con.close()
 
 
 @router.post("/duckdb/vector-search", dependencies=[Depends(_require_admin_key)])
-async def duckdb_vector_search(body: DuckdbVectorSearchBody) -> dict[str, Any]:
+async def duckdb_vector_search(
+    body: DuckdbVectorSearchBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
     from core.admin_duckdb_readonly import (
         SemanticMemoryNotInitializedError,
         run_vector_search,
     )
 
     try:
-        con, resolved = _duckdb_readonly_session(body.vault_path)
+        con, resolved, scope = _duckdb_readonly_session(body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
     try:
         try:
             payload = run_vector_search(con, body.query, body.limit)
@@ -4255,7 +4581,7 @@ async def duckdb_vector_search(body: DuckdbVectorSearchBody) -> dict[str, Any]:
             raise _problem(400, "Memoria vectorial no inicializada", str(exc)) from exc
         except Exception as exc:
             raise _problem(400, "Error en búsqueda vectorial", str(exc)) from exc
-        return {"vault_path": resolved, **payload}
+        return {"vault_path": resolved, "vault_user_id": scope["vault_user_id"], **payload}
     finally:
         con.close()
 

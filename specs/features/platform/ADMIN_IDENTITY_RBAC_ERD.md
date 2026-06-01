@@ -95,6 +95,25 @@ Reglas:
 - Templates de otros devs quedan intactos y ocultos salvo import explícito.
 - La autorización se resuelve por sesión, tenant, owner/asignación y catálogo DB, no por existencia de una carpeta.
 
+Contrato Admin UI/API:
+
+- `GET /api/v1/admin/templates` lista `default` + workers visibles desde `admin_worker_catalog`.
+- `POST /api/v1/admin/templates/import` importa templates al catálogo por `include_prefixes` o `include_template_ids`.
+- `GET /api/v1/admin/templates/{worker_id}` lee snapshots de workers DB-first desde `admin_worker_versions` y contextos activos desde `admin_worker_contexts`.
+- `PUT /api/v1/admin/templates/{worker_id}/files/{file_path}` actualiza el snapshot DuckDB y sincroniza contextos `.md` sin escribir sobre carpetas físicas.
+- `POST /api/v1/admin/templates/{worker_id}/contexts` crea un contexto `.md` activo para el worker visible del actor y lo agrega al último snapshot versionado.
+- `PATCH /api/v1/admin/templates/{worker_id}/contexts/reorder` actualiza `sort_order` en `admin_worker_contexts` para controlar el orden de carga del contexto.
+- `DELETE /api/v1/admin/templates/{worker_id}/contexts/{context_id}` desactiva lógicamente el contexto y lo remueve del snapshot vigente. No elimina archivos en disco.
+- `DELETE /api/v1/admin/templates/{worker_id}` desactiva el registro del catálogo para el tenant/owner actual. No ejecuta `rmtree` ni toca carpetas del repo.
+- La pantalla Admin `Workers` expone la importación genérica y muestra la acción como "desactivar del catálogo" para evitar ambigüedad operativa.
+
+Contrato DuckDB Explorer:
+
+- `GET /api/v1/admin/runtime/vaults` resuelve bóvedas desde el actor autenticado. El orden de resolución es: perfil `telegram_user_id`, admin principal (`DUCKCLAW_ADMIN_EMAIL` → `DUCKCLAW_OWNER_ID`) o `tenant_id` del perfil.
+- `GET /api/v1/admin/duckdb/tables`, `POST /duckdb/query`, `GET /duckdb/pgq-graph` y `POST /duckdb/vector-search` usan la bóveda activa del actor cuando no se envía `vault_path`.
+- Si se envía `vault_path`, el Gateway valida que pertenezca al namespace del actor (`db/private/<vault_user_id>` o shared autorizado) antes de abrirlo en modo `read_only=True`.
+- La UI DuckDB debe mostrar `vault_user_id`, `tenant_id`, ruta efectiva y número de tablas visibles para evitar confundir la BD del usuario con el hub global.
+
 ## Modelo Entidad-Relación
 
 ```mermaid

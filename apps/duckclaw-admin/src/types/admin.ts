@@ -10,9 +10,13 @@ export interface AdminUser {
 
 export interface TemplateSummary {
   id: string;
+  worker_uid?: string;
   name?: string;
   description?: string;
   description_source?: string;
+  source?: string;
+  visibility?: string;
+  source_template_id?: string;
   schema_name?: string;
   temperature?: number;
   topology?: string;
@@ -21,8 +25,19 @@ export interface TemplateSummary {
 
 export interface TemplateDetail {
   id: string;
+  source?: 'catalog' | 'filesystem' | string;
+  read_only?: boolean;
+  display_name?: string;
+  worker_uid?: string;
+  version?: number;
   files: { path: string; size: number }[];
   contents: Record<string, string>;
+  contexts?: {
+    context_id: string;
+    title: string;
+    content_md: string;
+    sort_order: string;
+  }[];
 }
 
 export interface VaultOption {

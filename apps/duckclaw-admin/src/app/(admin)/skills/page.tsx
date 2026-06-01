@@ -4,8 +4,7 @@ import { type FormEvent, useEffect, useState } from 'react';
 import { adminService, type SkillCatalogItem } from '@/services/adminService';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
-import Link from 'next/link';
-import { Blocks, Cable, Plus } from 'lucide-react';
+import { Blocks, Plus } from 'lucide-react';
 
 const EMPTY_SKILL_FORM = {
   name: '',
@@ -78,12 +77,7 @@ export default function SkillsPage() {
         <div>
           <h1 className="text-3xl font-black dark:text-dark-text">Skills</h1>
           <p className="text-sm text-gov-gray-500 mt-1">
-            Átomos Python globales compartidos y skills locales de tus workers DB-first.
-            Para integraciones empaquetadas (GitHub, Telegram, Reddit…), usa{' '}
-            <Link href="/mcp" className="text-gov-blue-700 dark:text-dark-cyan font-semibold hover:underline">
-              MCP
-            </Link>{' '}
-            primero.
+            Crea y administra capacidades reutilizables para tus agentes.
           </p>
         </div>
         <button
@@ -102,9 +96,9 @@ export default function SkillsPage() {
           className="grid gap-4 rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface lg:grid-cols-2"
         >
           <div className="lg:col-span-2">
-            <h2 className="text-lg font-black dark:text-dark-text">Crear skill DB-first</h2>
+            <h2 className="text-lg font-black dark:text-dark-text">Crear skill</h2>
             <p className="text-sm text-gov-gray-500">
-              Esta metadata queda asociada a tu usuario autenticado. No se registra en carpetas compartidas.
+              Quedará disponible para tus agentes.
             </p>
           </div>
           <label className="space-y-1 text-sm font-semibold">
@@ -172,15 +166,6 @@ export default function SkillsPage() {
         </form>
       )}
 
-      <div className="flex items-start gap-3 p-4 rounded-2xl border border-sky-200 bg-sky-50 dark:bg-sky-950/25 dark:border-sky-800/60 text-sm">
-        <Cable className="shrink-0 mt-0.5 text-sky-700 dark:text-sky-300" size={20} />
-        <p className="text-sky-950 dark:text-sky-100">
-          <strong>MCP primero:</strong> paquetes y bridges ya integrados (servidor HTTP DuckClaw,
-          stdio en <code className="text-xs font-mono">config/mcp_servers.yaml</code>, catálogo
-          oficial). Esta página es para skills Python custom cuando no hay servidor MCP listo.
-        </p>
-      </div>
-
       {error && <p className="text-red-600 text-sm">{error}</p>}
 
       <input
@@ -193,7 +178,7 @@ export default function SkillsPage() {
 
       <SettingsSection
         titulo="Mis skills globales"
-        descripcion="Skills DB-first reutilizables entre mis workers"
+        descripcion="Capacidades reutilizables entre mis agentes"
         icono={<Blocks size={22} />}
       >
         <SkillTable items={filter(globalSkills)} />
@@ -201,7 +186,7 @@ export default function SkillsPage() {
 
       <SettingsSection
         titulo="Skills locales de mis agentes"
-        descripcion="Python específico de workers visibles en tu catálogo DB-first"
+        descripcion="Capacidades específicas de cada agente"
         icono={<Blocks size={22} />}
       >
         <SkillTable items={filter(localSkills)} showWorker />

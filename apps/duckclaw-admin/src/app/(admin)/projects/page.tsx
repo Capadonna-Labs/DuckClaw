@@ -56,7 +56,7 @@ export default function ProjectsPage() {
       setNewProjectDescription('');
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo crear el proyecto DB-first');
+      setError(e instanceof Error ? e.message : 'No se pudo crear el proyecto');
     }
   };
 
@@ -96,8 +96,7 @@ export default function ProjectsPage() {
             <FolderKanban size={28} /> Proyectos
           </h1>
           <p className="text-sm text-gov-gray-500 dark:text-dark-muted mt-1">
-            Agrupaciones DB-first del usuario autenticado. Los proyectos referencian agentes sin duplicar
-            manifests ni contextos.
+            Organiza tus agentes por proyecto.
           </p>
         </div>
         {canWrite && (
@@ -116,12 +115,11 @@ export default function ProjectsPage() {
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gov-blue-700 dark:text-dark-cyan">
-              Catálogo DB-first
+              Proyectos
             </p>
             <h2 className="mt-1 text-xl font-black dark:text-dark-text">Proyectos con agentes asignados</h2>
             <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-              Relación normalizada <code className="text-xs">admin_project_agents</code>: el proyecto referencia
-              workers del catálogo sin duplicar manifests ni contextos.
+              Elige qué agentes pertenecen a cada proyecto.
             </p>
           </div>
           {canWrite && (
@@ -153,7 +151,7 @@ export default function ProjectsPage() {
 
         {workspaceProjects.length === 0 ? (
           <p className="mt-4 rounded-xl bg-gov-gray-50 px-4 py-3 text-sm text-gov-gray-500 dark:bg-dark-bg dark:text-dark-muted">
-            Aún no hay proyectos DB-first para tu usuario autenticado.
+            Aún no hay proyectos para tu usuario.
           </p>
         ) : (
           <div className="mt-5 grid gap-4">

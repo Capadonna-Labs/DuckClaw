@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 
-/** Fly Commands centralizados en Overview. */
+/** Comandos del chat centralizados en Playground. */
 export default function CommandsPage() {
-  redirect('/overview');
+  redirect('/playground');
 }

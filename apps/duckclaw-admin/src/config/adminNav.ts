@@ -34,33 +34,38 @@ export const USER_WORKSPACE_NAV_GROUP: AdminNavGroup = {
     { href: '/playground', label: 'Chat', section: 'core', audience: 'user' },
     { href: '/templates', label: 'Mis agentes', section: 'core', audience: 'user' },
     { href: '/projects/new', label: 'Crear agente', section: 'core', audience: 'user' },
-    { href: '/kanban', label: 'Tablero', section: 'core', audience: 'user' },
     { href: '/settings', label: 'Ajustes', section: 'footer', audience: 'user' },
   ],
 };
 
 export const OPERATION_NAV_GROUP: AdminNavGroup = {
   id: 'operation',
-  label: 'Operación',
-  hint: 'Estado, chat y tablero diario',
+  label: 'Inicio',
   items: [
-    { href: '/overview', label: 'Overview', section: 'core', audience: 'admin' },
-    { href: '/playground', label: 'Playground', section: 'core', audience: 'admin' },
-    { href: '/kanban', label: 'Tablero', section: 'core', audience: 'admin' },
-    { href: '/audit', label: 'Auditoría', section: 'admin', audience: 'admin', adminOnly: true },
+    { href: '/overview', label: 'Inicio', section: 'core', audience: 'admin' },
+  ],
+};
+
+export const PLAYGROUND_NAV_GROUP: AdminNavGroup = {
+  id: 'playground',
+  label: 'Playground',
+  items: [
+    { href: '/playground', label: 'Chat', section: 'core', audience: 'admin' },
   ],
 };
 
 export const BUILD_NAV_GROUP: AdminNavGroup = {
   id: 'build',
   label: 'Agentes',
-  hint: 'Agentes, proyectos y capacidades',
   items: [
-    { href: '/templates', label: 'Workers', section: 'core', audience: 'admin' },
+    { href: '/templates', label: 'Agentes', section: 'core', audience: 'admin' },
     { href: '/projects', label: 'Proyectos', section: 'core', audience: 'admin' },
-    { href: '/mcp', label: 'MCP', section: 'core', audience: 'admin' },
     { href: '/skills', label: 'Skills', section: 'core', audience: 'admin' },
-    { href: '/gen/image', label: 'Gen Image', section: 'core', audience: 'admin' },
+    { href: '/mcp', label: 'MCP', section: 'core', audience: 'admin' },
+    { href: '/integrations', label: 'Integraciones', section: 'integrations', audience: 'admin' },
+    { href: '/gen/image', label: 'Imágenes', section: 'core', audience: 'admin' },
+    { href: '/train', label: 'Train', section: 'core', audience: 'admin' },
+    { href: '/vnc', label: 'VNC', section: 'core', audience: 'admin', adminOnly: true },
   ],
 };
 
@@ -87,9 +92,10 @@ export const INTEGRATIONS_NAV_GROUP: AdminNavGroup = {
 export const SECURITY_NAV_GROUP: AdminNavGroup = {
   id: 'security',
   label: 'Seguridad',
-  hint: 'Usuarios, roles y permisos',
   items: [
     { href: '/admin/access', label: 'Usuarios y roles', section: 'admin', audience: 'admin', adminOnly: true },
+    { href: '/audit', label: 'Auditoría', section: 'admin', audience: 'admin', adminOnly: true },
+    { href: '/settings', label: 'Settings', section: 'footer', audience: 'admin' },
   ],
 };
 
@@ -97,11 +103,7 @@ export const SYSTEM_NAV_GROUP: AdminNavGroup = {
   id: 'system',
   label: 'Sistema avanzado',
   hint: 'Diagnóstico y operación técnica',
-  items: [
-    { href: '/settings', label: 'Settings', section: 'footer', audience: 'admin' },
-    { href: '/train', label: 'Train', section: 'core', audience: 'admin' },
-    { href: '/vnc', label: 'VNC', section: 'core', audience: 'admin', adminOnly: true },
-  ],
+  items: [],
 };
 
 /** Orden del sidebar para usuarios que crean y usan agentes. */
@@ -112,17 +114,16 @@ export const USER_NAV_STRUCTURE: readonly AdminNavEntry[] = [
 /** Orden del sidebar admin: grupos semánticos para reducir carga cognitiva. */
 export const ADMIN_NAV_STRUCTURE: readonly AdminNavEntry[] = [
   { type: 'group', group: OPERATION_NAV_GROUP },
+  { type: 'group', group: PLAYGROUND_NAV_GROUP },
   { type: 'group', group: BUILD_NAV_GROUP },
-  { type: 'group', group: DATA_NAV_GROUP },
-  { type: 'group', group: INTEGRATIONS_NAV_GROUP },
   { type: 'group', group: SECURITY_NAV_GROUP },
-  { type: 'group', group: SYSTEM_NAV_GROUP },
 ];
 
 /** Lista plana (compat tests / búsquedas). */
 export const ADMIN_NAV: readonly AdminNavItem[] = [
   ...USER_WORKSPACE_NAV_GROUP.items,
   ...OPERATION_NAV_GROUP.items,
+  ...PLAYGROUND_NAV_GROUP.items,
   ...BUILD_NAV_GROUP.items,
   ...DATA_NAV_GROUP.items,
   ...INTEGRATIONS_NAV_GROUP.items,
@@ -163,11 +164,15 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   )),
   '/ops': 'Overview',
   '/commands': 'Overview',
+  '/overview': 'Inicio',
+  '/playground': 'Playground',
   '/projects': 'Proyectos',
   '/projects/new': 'Crear agente',
   '/integrations': 'Integraciones',
   '/gen': 'Gen',
   '/gen/image': 'Image',
+  '/telegram': 'Telegram',
+  '/integrations/edge-devices': 'Edge devices',
   '/admin': 'Administración',
 };
 

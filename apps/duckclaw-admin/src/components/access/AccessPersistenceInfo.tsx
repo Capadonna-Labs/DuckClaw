@@ -14,20 +14,20 @@ const TABLE_ROWS: {
   {
     id: 'console',
     label: 'Usuarios consola',
-    table: 'main.admin_console_users',
-    roleField: 'rol (admin | user)',
+    table: 'Acceso a la consola',
+    roleField: 'Admin o usuario',
   },
   {
     id: 'telegram',
-    label: 'Whitelist Telegram',
-    table: 'main.authorized_users',
-    roleField: 'role (admin | user)',
+    label: 'Usuarios Telegram',
+    table: 'Acceso al bot',
+    roleField: 'Admin o usuario',
   },
   {
     id: 'shared',
     label: 'Permisos bases compartidas',
-    table: 'main.user_shared_db_access',
-    roleField: 'resource_key',
+    table: 'Bases compartidas',
+    roleField: 'Permiso asignado',
   },
 ];
 
@@ -66,7 +66,7 @@ export function AccessPersistenceInfo({ dbPath, dbExists, activeTab, tenantId }:
               Hub Gateway DuckDB
             </p>
             <p className="text-xs text-gov-gray-600 dark:text-dark-muted">
-              Fuente de verdad para login consola, whitelist Telegram y ACL compartidas
+              Acceso a consola, Telegram y bases compartidas
             </p>
           </div>
         </div>
@@ -103,7 +103,7 @@ export function AccessPersistenceInfo({ dbPath, dbExists, activeTab, tenantId }:
           <thead className="bg-white/70 dark:bg-dark-bg text-left">
             <tr>
               <th className="px-3 py-2 font-semibold text-gov-gray-500">Ámbito</th>
-              <th className="px-3 py-2 font-semibold text-gov-gray-500">Tabla</th>
+              <th className="px-3 py-2 font-semibold text-gov-gray-500">Uso</th>
               <th className="px-3 py-2 font-semibold text-gov-gray-500 hidden sm:table-cell">
                 Roles / permisos
               </th>
@@ -127,7 +127,7 @@ export function AccessPersistenceInfo({ dbPath, dbExists, activeTab, tenantId }:
                     {row.id === 'telegram' && tenantId ? (
                       <>
                         {row.roleField}
-                        <span className="block text-[10px] mt-0.5">tenant_id = {tenantId}</span>
+                        <span className="block text-[10px] mt-0.5">Tenant: {tenantId}</span>
                       </>
                     ) : (
                       row.roleField

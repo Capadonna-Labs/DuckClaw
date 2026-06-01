@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard,
@@ -12,14 +12,11 @@ import {
   GraduationCap,
   FolderPlus,
   Radio,
-  LogOut,
   ClipboardList,
   Blocks,
   Cable,
   LayoutGrid,
   MessageCircle,
-  PanelLeftClose,
-  PanelLeftOpen,
   ChevronDown,
   Cpu,
   Image,
@@ -31,15 +28,12 @@ import {
   UserCircle,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
-import { useLayoutUiStore } from '@/store/layoutUiStore';
-import { PanelToggleButton } from '@/components/layout/PanelToggleButton';
 import {
   navEntriesForRole,
   type AdminNavGroup,
   type AdminNavItem,
 } from '@/config/adminNav';
 import { cn } from '@/lib/utils';
-import { consoleRoleLabel, roleDisplayName } from '@/lib/roles';
 import type { LucideIcon } from 'lucide-react';
 
 const NAV_ICONS: Record<string, LucideIcon> = {
@@ -51,6 +45,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/mcp': Cable,
   '/projects/new': FolderPlus,
   '/playground': MessageCircle,
+  '/integrations': Cable,
   '/gen/image': Image,
   '/runtime': Radio,
   '/telegram': MessageSquare,
@@ -66,6 +61,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
 const GROUP_ICONS: Record<string, LucideIcon> = {
   'user-workspace': UserCircle,
   operation: LayoutDashboard,
+  playground: MessageCircle,
   build: Hammer,
   data: ServerCog,
   integrations: Cable,
@@ -73,22 +69,20 @@ const GROUP_ICONS: Record<string, LucideIcon> = {
   system: Settings,
 };
 
-const DEFAULT_OPEN_GROUPS: Record<string, boolean> = {
-  'user-workspace': true,
-  operation: true,
-  build: true,
-  data: true,
-  integrations: true,
-  security: true,
-  system: false,
-};
-
 function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 function groupHasActive(pathname: string, group: AdminNavGroup): boolean {
-  return group.items.some((item) => isNavActive(pathname, item.href));
+  if (group.id === 'playground') {
+    return pathname.startsWith('/playground') || pathname === '/kanban';
+  }
+  return group.items.some((item) => {
+    if (item.href === '/integrations') {
+      return pathname === '/telegram' || pathname.startsWith('/integrations');
+    }
+    return isNavActive(pathname, item.href);
+  });
 }
 
 type SidebarProps = {
@@ -98,39 +92,21 @@ type SidebarProps = {
 
 export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname();
-  const router = useRouter();
-  const { usuario, logout } = useAuthStore();
-  const { sidebarOpen, toggleSidebar } = useLayoutUiStore();
-  const isMobileDrawer = Boolean(onMobileClose);
-
-  const handleMenuToggle = () => {
-    if (onMobileClose) {
-      onMobileClose();
-      return;
-    }
-    toggleSidebar();
-  };
+  const { usuario } = useAuthStore();
   const entries = useMemo(
     () => navEntriesForRole(usuario?.rol),
     [usuario?.rol]
   );
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(DEFAULT_OPEN_GROUPS);
+  const [openGroupId, setOpenGroupId] = useState<string | null>('operation');
 
   useEffect(() => {
     const activeGroup = entries.find(
       (entry) => entry.type === 'group' && groupHasActive(pathname, entry.group)
     );
     if (activeGroup?.type === 'group') {
-      setOpenGroups((prev) =>
-        prev[activeGroup.group.id] ? prev : { ...prev, [activeGroup.group.id]: true }
-      );
+      setOpenGroupId(activeGroup.group.id);
     }
   }, [entries, pathname]);
-
-  const handleLogout = () => {
-    logout();
-    router.replace('/login');
-  };
 
   return (
     <nav
@@ -142,24 +118,6 @@ export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
           <BrandIcon />
           <BrandTitles />
         </div>
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
-          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gov-cyan-300">
-            {consoleRoleLabel(usuario?.rol)}
-          </p>
-          <p className="text-[10px] text-gov-gray-400">
-            Rol activo: <span className="capitalize text-white/85">{roleDisplayName(usuario?.rol)}</span>
-          </p>
-        </div>
-        <PanelToggleButton
-          open={isMobileDrawer ? true : sidebarOpen}
-          onToggle={handleMenuToggle}
-          openLabel="Ocultar menú"
-          closedLabel="Mostrar menú"
-          openIcon={PanelLeftClose}
-          closedIcon={PanelLeftOpen}
-          title={isMobileDrawer || sidebarOpen ? 'Ocultar menú lateral' : 'Mostrar menú lateral'}
-          className="w-full justify-center border-white/20 text-white/90 hover:bg-white/10 hover:text-white"
-        />
       </div>
       <div className="flex-1 min-h-0 px-3 py-3 space-y-3 overflow-y-auto">
         {entries.map((entry) => {
@@ -178,12 +136,9 @@ export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
               key={entry.group.id}
               group={entry.group}
               pathname={pathname}
-              open={openGroups[entry.group.id] ?? false}
+              open={openGroupId === entry.group.id}
               onToggle={() =>
-                setOpenGroups((prev) => ({
-                  ...prev,
-                  [entry.group.id]: !prev[entry.group.id],
-                }))
+                setOpenGroupId((current) => (current === entry.group.id ? null : entry.group.id))
               }
               groupIcon={GROUP_ICONS[entry.group.id] ?? Sparkles}
               onNavigate={onMobileClose}
@@ -191,20 +146,6 @@ export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
           );
         })}
       </div>
-      <footer className="p-4 border-t border-gov-blue-700 dark:border-dark-border space-y-3">
-        <div className="px-2">
-          <p className="text-gov-cyan-400 text-xs font-semibold truncate">{usuario?.email}</p>
-          <p className="text-gov-gray-500 text-[10px] capitalize">rol: {roleDisplayName(usuario?.rol)}</p>
-        </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white/90 bg-gov-blue-800 hover:bg-red-700 rounded-lg transition-colors"
-        >
-          <LogOut size={18} />
-          Cerrar sesión
-        </button>
-      </footer>
     </nav>
   );
 }
@@ -256,7 +197,7 @@ function NavGroup({
   const active = groupHasActive(pathname, group);
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-2">
+    <section className="space-y-1">
       <button
         type="button"
         onClick={onToggle}
@@ -275,14 +216,33 @@ function NavGroup({
           className={cn('shrink-0 transition-transform', open && 'rotate-180')}
         />
       </button>
-      {group.hint && open && (
-        <p className="px-2 pb-1 text-[10px] leading-snug text-gov-gray-400">{group.hint}</p>
-      )}
       {open && (
         <div className="space-y-0.5">
           {group.items.map((item) => {
             const Icon = NAV_ICONS[item.href] ?? LayoutDashboard;
             const childActive = isNavActive(pathname, item.href);
+            if (item.href === '/playground') {
+              return (
+                <PlaygroundNavSelector
+                  key={item.href}
+                  item={item}
+                  icon={Icon}
+                  active={childActive || pathname === '/kanban'}
+                  onNavigate={onNavigate}
+                />
+              );
+            }
+            if (item.href === '/integrations') {
+              return (
+                <IntegrationsNavSelector
+                  key={item.href}
+                  item={item}
+                  icon={Icon}
+                  active={pathname === '/telegram' || pathname.startsWith('/integrations')}
+                  onNavigate={onNavigate}
+                />
+              );
+            }
             return (
               <Link
                 key={item.href}
@@ -303,6 +263,125 @@ function NavGroup({
         </div>
       )}
     </section>
+  );
+}
+
+function IntegrationsNavSelector({
+  item,
+  icon: Icon,
+  active,
+  onNavigate,
+}: {
+  item: AdminNavItem;
+  icon: LucideIcon;
+  active: boolean;
+  onNavigate?: () => void;
+}) {
+  const [open, setOpen] = useState(active);
+
+  useEffect(() => {
+    if (active) setOpen(true);
+  }, [active]);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className={cn(
+          'w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-xl transition-colors',
+          active
+            ? 'bg-white text-gov-blue-900 shadow-sm dark:bg-dark-surface dark:text-dark-text'
+            : 'text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white'
+        )}
+      >
+        <Icon size={18} />
+        <span className="flex-1 text-left">{item.label}</span>
+        <ChevronDown size={14} className={cn('shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="ml-7 mt-1 space-y-0.5 border-l border-white/10 pl-3">
+          <Link
+            href="/telegram"
+            onClick={() => onNavigate?.()}
+            className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
+          >
+            Telegram
+          </Link>
+          <Link
+            href="/integrations/edge-devices"
+            onClick={() => onNavigate?.()}
+            className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
+          >
+            Edge devices
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlaygroundNavSelector({
+  item,
+  icon: Icon,
+  active,
+  onNavigate,
+}: {
+  item: AdminNavItem;
+  icon: LucideIcon;
+  active: boolean;
+  onNavigate?: () => void;
+}) {
+  const [open, setOpen] = useState(active);
+
+  useEffect(() => {
+    if (active) setOpen(true);
+  }, [active]);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className={cn(
+          'w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-xl transition-colors',
+          active
+            ? 'bg-white text-gov-blue-900 shadow-sm dark:bg-dark-surface dark:text-dark-text'
+            : 'text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white'
+        )}
+      >
+        <Icon size={18} />
+        <span className="flex-1 text-left">{item.label}</span>
+        <ChevronDown size={14} className={cn('shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="ml-7 mt-1 space-y-0.5 border-l border-white/10 pl-3">
+          <Link
+            href="/playground?view=history"
+            onClick={() => onNavigate?.()}
+            className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
+          >
+            Historial
+          </Link>
+          <Link
+            href="/kanban"
+            onClick={() => onNavigate?.()}
+            className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
+          >
+            Tablero
+          </Link>
+          <Link
+            href="/playground?new=1"
+            onClick={() => onNavigate?.()}
+            className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
+          >
+            Nueva conversación
+          </Link>
+        </div>
+      )}
+    </div>
   );
 }
 

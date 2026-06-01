@@ -40,7 +40,7 @@ export default function TelegramPage() {
 
       <SettingsSection
         titulo="Token bot"
-        descripcion="Progressive disclosure — valor nuevo"
+        descripcion="Configura el token del bot de Telegram"
         icono={<MessageSquare size={22} />}
       >
         <div className="space-y-3 max-w-lg">
@@ -81,7 +81,7 @@ export default function TelegramPage() {
 
       <SettingsSection
         titulo="Usuarios autorizados"
-        descripcion="Whitelist Telegram Guard (main.authorized_users)"
+        descripcion="Usuarios que pueden usar el bot"
         icono={<Users size={22} />}
       >
         <p className="text-sm text-gov-gray-600 dark:text-dark-muted">

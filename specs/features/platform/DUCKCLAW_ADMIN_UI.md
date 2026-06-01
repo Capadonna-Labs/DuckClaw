@@ -138,10 +138,33 @@ Bandeja única por `tenant_id` para retomar hilos del Playground y del chat flot
 | `DELETE` | `/conversations/{session_id}` |
 | `POST` | `/conversations/reindex?tenant_id=` — SCAN historial admin y registrar en índice |
 
-UI: `ConversationInbox` en Playground (panel lateral) y burbuja flotante (drawer); `localStorage` `duckclaw-admin-active-conv` para conversación activa.
+UI: historial como vista principal en `/playground?view=history` y burbuja flotante (drawer); `localStorage` `duckclaw-admin-active-conv` para conversación activa.
+La burbuja flotante abre un panel grande fijo, sin control de redimensionar ni persistencia de ancho/alto. Sus acciones (`Conversaciones`, `Abrir Playground completo`, `Cerrar`) viven dentro del header del chat, junto a la configuración de bóveda/modelo/agente.
+
+### Navegación Playground (selector tipo consola)
+
+El shell admin usa un único botón hamburguesa en el `Topbar` para mostrar u ocultar el menú izquierdo en desktop y abrir el drawer en móvil. El botón textual `Ocultar menú` no debe renderizar dentro del encabezado del `Sidebar`.
+
+En el `Sidebar`, la entrada `Playground` se comporta como selector expandible dentro del grupo de operación. Al abrirse muestra:
+
+- `Historial`: navega a `/playground?view=history` y muestra una vista principal con conversaciones listadas. Cada conversación navega a `/playground?conversation={session_id}`.
+- `Tablero`: navega a `/kanban`; no aparece como opción plana dentro de `Operación`.
+- `Nueva conversación`: navega a `/playground?new=1`; la página crea un hilo nuevo, lo marca activo y refresca el inbox.
+
+La página `/playground` no renderiza un panel lateral `ConversationInbox`; el área de contenido queda reservada para el chat y su panel de configuración.
+El panel derecho de Playground se organiza como `Estado actual` compacto (modelo, DuckDB y agente) más acordeones de una sola apertura: `Comandos`, `Cambiar bóveda`, `Cambiar modelo` e `Instrucciones`. No renderiza la tarjeta `Run settings`, no muestra `Base URL` por defecto y evita duplicar la misma bóveda/modelo en varias tarjetas abiertas.
+El control para ocultar/mostrar este panel es un único botón flotante superior icon-only en la misma posición para ambos estados; mantiene `aria-label`/`title`, pero no muestra texto como `Ocultar panel`.
+La guía de comandos del chat vive en Playground como panel colapsable `Comandos`, dentro del panel de configuración. Muestra comandos frecuentes (`/team`, `/vault`, `/model`, `/workers`) y permite `Ver todos`. Overview no renderiza `Fly Commands`; `/commands` redirige a `/playground`.
+El aviso técnico `Equipo de este chat (/workers)` y el enlace `Variables globales (.env)` no se muestran en el panel Playground.
+Las rutas `Auditoría` y `Settings` pertenecen al grupo `Seguridad`. Las rutas `Train` y `VNC` pertenecen al grupo `Agentes`. `Integraciones` se muestra como selector dentro de `Agentes` con `Telegram` y `Edge devices`; no se muestra como grupo separado. El grupo `Sistema avanzado` no se muestra en el sidebar.
+El sidebar admin queda reducido a cuatro grupos visibles: `Inicio`, `Playground`, `Agentes` y `Seguridad`. Solo un grupo se mantiene abierto a la vez, sin hints descriptivos ni tarjetas con borde por grupo. `DuckDB` y `Runtime overrides` no aparecen en la navegación principal.
 
 ### Health (admin)
 - `GET /health` — gateway + workers count + flags Redis
+
+### Overview: operaciones y logs
+
+Overview integra `Operaciones` y `PM2 logs en vivo` en un único panel `Operaciones y logs`. El panel reúne arranque de plataforma, comprobación de conexión, acciones PM2 permitidas y logs en vivo para que las acciones y su salida se vean en el mismo contexto.
 
 ### Tablero (Kanban) y agent swarms
 - `GET /kanban/worker-states?workers=` — último `task_audit_log` por worker; claves `worker_id` y `{worker_id}:1`.

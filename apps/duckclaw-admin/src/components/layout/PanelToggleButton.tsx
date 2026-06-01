@@ -11,6 +11,7 @@ type PanelToggleButtonProps = {
   openIcon: LucideIcon;
   closedIcon: LucideIcon;
   title?: string;
+  iconOnly?: boolean;
   className?: string;
 };
 
@@ -23,6 +24,7 @@ export function PanelToggleButton({
   openIcon: OpenIcon,
   closedIcon: ClosedIcon,
   title,
+  iconOnly,
   className,
 }: PanelToggleButtonProps) {
   const Icon = open ? OpenIcon : ClosedIcon;
@@ -32,17 +34,19 @@ export function PanelToggleButton({
     <button
       type="button"
       onClick={onToggle}
+      aria-label={label}
       title={title ?? label}
       className={cn(
-        'inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border',
-        'border-gov-gray-200 dark:border-dark-border',
+        'inline-flex items-center rounded-lg text-xs font-semibold',
+        iconOnly ? 'justify-center p-2' : 'gap-1.5 px-3 py-2 rounded-xl border',
+        !iconOnly && 'border-gov-gray-200 dark:border-dark-border',
         'text-gov-gray-600 dark:text-dark-muted',
         'hover:bg-gov-gray-50 dark:hover:bg-dark-bg transition-colors',
         className
       )}
     >
       <Icon size={16} aria-hidden />
-      {label}
+      {!iconOnly && label}
     </button>
   );
 }

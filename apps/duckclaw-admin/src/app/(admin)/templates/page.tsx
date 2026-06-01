@@ -122,7 +122,7 @@ export default function TemplatesPage() {
           </h1>
           <p className="text-sm text-gov-gray-500 dark:text-dark-muted">
             {isAdmin
-              ? 'Catálogo DB-first: default global, agentes propios y asignados.'
+              ? 'Agentes disponibles para usar, editar o asignar.'
               : 'Agentes disponibles para conversar, usar como base o revisar.'}
           </p>
         </div>
@@ -305,9 +305,6 @@ function AgentsGrid({
         <div>
           <p className="text-sm font-black text-gov-gray-900 dark:text-dark-text">
             {totalItems} {totalItems === 1 ? 'agente' : 'agentes'} disponibles
-          </p>
-          <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
-            Mostrando máximo {AGENTS_PAGE_SIZE} por página para revisar sin saturar la vista.
           </p>
         </div>
         <PaginationControls

@@ -110,7 +110,7 @@ export default function AccessPage() {
       {tab === 'console' && (
         <SettingsSection
           titulo="Usuarios consola"
-          descripcion="main.admin_console_users · PBKDF2"
+          descripcion="Personas que pueden entrar a la consola"
           icono={<Shield size={22} />}
         >
           <ConsoleUsersPanel />
@@ -119,8 +119,8 @@ export default function AccessPage() {
 
       {tab === 'telegram' && (
         <SettingsSection
-          titulo="Whitelist Telegram Guard"
-          descripcion="main.authorized_users — tokens en /telegram"
+          titulo="Usuarios Telegram"
+          descripcion="Personas autorizadas para usar el bot"
           icono={<Users size={22} />}
         >
           <TelegramUsersPanel tenantId={tenantId} onTenantIdChange={setTenantId} />
@@ -130,7 +130,7 @@ export default function AccessPage() {
       {tab === 'shared' && (
         <SettingsSection
           titulo="Bases compartidas"
-          descripcion="ACL user_shared_db_access por tenant"
+          descripcion="Permisos de acceso por tenant"
           icono={<Users size={22} />}
         >
           <SharedGrantsPanel tenantId={tenantId} />

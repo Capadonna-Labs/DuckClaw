@@ -34,6 +34,7 @@ import {
 export type UseAdminChatOptions = {
   chatId: string;
   initialWorker?: string;
+  projectId?: string;
   enabled?: boolean;
   /** Tras cada turno completado (para refrescar inbox). */
   onConversationActivity?: () => void;
@@ -158,6 +159,7 @@ export type AdminChatController = ReturnType<typeof useAdminChat>;
 export function useAdminChat({
   chatId,
   initialWorker = '',
+  projectId = '',
   enabled = true,
   onConversationActivity,
 }: UseAdminChatOptions) {
@@ -592,6 +594,7 @@ export function useAdminChat({
       await adminService.playgroundChatStream(
         {
           worker_id: workerId,
+          project_id: projectId || undefined,
           message: text,
           chat_id: chatId,
           tenant_id: config?.effective_tenant_id ?? 'default',
@@ -678,6 +681,7 @@ export function useAdminChat({
       finalizeCancelledGeneration,
       onConversationActivity,
       workerId,
+      projectId,
       vaultPath,
       imageAttachments,
     ]

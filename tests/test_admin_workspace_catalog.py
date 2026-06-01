@@ -209,6 +209,68 @@ def test_projects_attach_agents_and_list_only_actor_workspace(gateway_db: Path) 
     assert alice_agents[0]["role"] == "coder"
 
 
+def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
+    gateway_admin_client,
+    gateway_db: Path,
+) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker
+
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    db = DuckClaw(str(gateway_db), read_only=False, engine="python")
+    try:
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="axis-radar",
+            display_name="AXIS Radar",
+        )
+    finally:
+        db.close()
+
+    created = gateway_admin_client.post(
+        "/api/v1/admin/workspace/projects",
+        headers=headers,
+        json={"name": "Operación AXIS", "description": "Proyecto DB-first"},
+    )
+    assert created.status_code == 200
+    project = created.json()["project"]
+    project_id = project["project_id"]
+
+    assigned = gateway_admin_client.post(
+        f"/api/v1/admin/workspace/projects/{project_id}/agents",
+        headers=headers,
+        json={"worker_id": "axis-radar", "role": "coordinator", "sort_order": 10},
+    )
+    assert assigned.status_code == 200
+    assert assigned.json()["agent"]["worker_id"] == "axis-radar"
+    assert assigned.json()["agent"]["role"] == "coordinator"
+
+    listed = gateway_admin_client.get(
+        f"/api/v1/admin/workspace/projects/{project_id}/agents",
+        headers=headers,
+    )
+    assert listed.status_code == 200
+    assert [agent["worker_id"] for agent in listed.json()["agents"]] == ["axis-radar"]
+
+    projects = gateway_admin_client.get("/api/v1/admin/workspace/projects", headers=headers)
+    assert projects.status_code == 200
+    visible = {item["project_id"]: item for item in projects.json()["projects"]}
+    assert visible[project_id]["agent_count"] == 1
+
+    removed = gateway_admin_client.delete(
+        f"/api/v1/admin/workspace/projects/{project_id}/agents/axis-radar",
+        headers=headers,
+    )
+    assert removed.status_code == 200
+
+    listed_after = gateway_admin_client.get(
+        f"/api/v1/admin/workspace/projects/{project_id}/agents",
+        headers=headers,
+    )
+    assert listed_after.json()["agents"] == []
+
+
 def test_resource_events_record_cross_cutting_audit_without_owning_permissions(gateway_db: Path) -> None:
     from duckclaw.admin_resources import (
         list_resource_events,
@@ -407,3 +469,81 @@ def test_playground_chat_rejects_unassigned_filesystem_worker_before_execution(
     )
 
     assert response.status_code == 403
+
+
+def test_playground_config_and_chat_support_db_first_project_scope(
+    gateway_admin_client,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker
+    from duckclaw.admin_workspace import attach_agent_to_project, create_project
+    import main as gateway_main
+
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    db = DuckClaw(str(gateway_db), read_only=False, engine="python")
+    try:
+        radar = create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="axis-radar",
+            display_name="AXIS Radar",
+        )
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="axis-sentinel",
+            display_name="AXIS Sentinel",
+        )
+        project = create_project(
+            db,
+            owner_email="admin@test.local",
+            name="Operación AXIS",
+            description="Scope para Playground",
+        )
+        attach_agent_to_project(
+            db,
+            project_id=project["project_id"],
+            worker_uid=radar["worker_uid"],
+            role="coordinator",
+        )
+    finally:
+        db.close()
+
+    config = gateway_admin_client.get("/api/v1/admin/playground/config", headers=headers)
+    assert config.status_code == 200
+    projects = {item["project_id"]: item for item in config.json()["projects"]}
+    assert projects[project["project_id"]]["name"] == "Operación AXIS"
+    assert [agent["worker_id"] for agent in projects[project["project_id"]]["agents"]] == ["axis-radar"]
+
+    async def _fake_invoke(_chat, worker_id, **_kwargs):
+        return {"response": f"ok:{worker_id}", "assigned_worker_id": worker_id}
+
+    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+
+    chat = gateway_admin_client.post(
+        "/api/v1/admin/playground/chat",
+        headers=headers,
+        json={
+            "project_id": project["project_id"],
+            "worker_id": "axis-radar",
+            "message": "hola",
+            "chat_id": "project-playground",
+        },
+    )
+    assert chat.status_code == 200
+    assert chat.json()["project_id"] == project["project_id"]
+    assert chat.json()["worker_id"] == "axis-radar"
+
+    rejected = gateway_admin_client.post(
+        "/api/v1/admin/playground/chat",
+        headers=headers,
+        json={
+            "project_id": project["project_id"],
+            "worker_id": "axis-sentinel",
+            "message": "hola",
+            "chat_id": "project-playground",
+        },
+    )
+    assert rejected.status_code == 403

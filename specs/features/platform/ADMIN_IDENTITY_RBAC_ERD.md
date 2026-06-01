@@ -107,6 +107,23 @@ Contrato Admin UI/API:
 - `DELETE /api/v1/admin/templates/{worker_id}` desactiva el registro del catálogo para el tenant/owner actual. No ejecuta `rmtree` ni toca carpetas del repo.
 - La pantalla Admin `Workers` expone la importación genérica y muestra la acción como "desactivar del catálogo" para evitar ambigüedad operativa.
 
+Contrato Proyectos DB-first:
+
+- `GET /api/v1/admin/workspace/projects` lista proyectos visibles para el actor autenticado, incluyendo `agent_count` calculado desde `admin_project_agents`.
+- `POST /api/v1/admin/workspace/projects` crea un proyecto en `admin_projects` para el tenant/perfil del actor, sin crear carpetas en `forge/projects`.
+- `GET /api/v1/admin/workspace/projects/{project_id}/agents` lista los workers activos asignados al proyecto desde `admin_project_agents`.
+- `POST /api/v1/admin/workspace/projects/{project_id}/agents` asigna un worker visible del catálogo al proyecto por `worker_id`; la relación persiste `worker_uid`, `role` y `sort_order`.
+- `DELETE /api/v1/admin/workspace/projects/{project_id}/agents/{worker_id}` desactiva lógicamente la relación proyecto-worker. No borra el worker, sus versiones, contextos ni carpetas de templates.
+- La pantalla Admin `Proyectos` separa proyectos DB-first de proyectos legacy en disco para evitar mezclar control plane relacional con metadata local.
+
+Contrato Playground con proyecto:
+
+- `GET /api/v1/admin/playground/config` incluye `projects[]` con proyectos visibles para el actor y sus `agents[]` activos desde `admin_project_agents`.
+- `POST /api/v1/admin/playground/chat` acepta `project_id` opcional. Si viene, el Gateway valida que el proyecto sea visible para el actor y que `worker_id` pertenezca a ese proyecto.
+- Si `project_id` viene y `worker_id=default` no está asignado al proyecto, el Gateway usa el primer agente activo del proyecto como worker efectivo.
+- Si `worker_id` no pertenece al proyecto, el Gateway devuelve `403` antes de invocar runtime/LLM.
+- La pantalla Admin `Playground` muestra selector de proyecto y filtra el selector de agentes al conjunto `admin_project_agents` del proyecto activo.
+
 Contrato DuckDB Explorer:
 
 - `GET /api/v1/admin/runtime/vaults` resuelve bóvedas desde el actor autenticado. El orden de resolución es: perfil `telegram_user_id`, admin principal (`DUCKCLAW_ADMIN_EMAIL` → `DUCKCLAW_OWNER_ID`) o `tenant_id` del perfil.
@@ -225,8 +242,17 @@ erDiagram
     string tenant_id
     string owner_email
     string name
+    string description
     string status
     string visibility
+  }
+
+  ADMIN_PROJECT_AGENTS {
+    string project_id PK
+    string worker_uid PK
+    string role
+    int sort_order
+    boolean active
   }
 
   AUTHORIZED_USERS {

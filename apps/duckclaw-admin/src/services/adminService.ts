@@ -893,6 +893,19 @@ export const adminService = {
         keys_ok?: boolean;
       }[];
       workers: { id: string; label: string }[];
+      projects?: {
+        project_id: string;
+        name: string;
+        description: string;
+        agent_count?: number;
+        agents: {
+          worker_uid: string;
+          worker_id: string;
+          display_name: string;
+          role: string;
+          sort_order: string;
+        }[];
+      }[];
       workers_invalid?: string[];
       env_path: string;
       effective_tenant_id?: string;
@@ -976,6 +989,68 @@ export const adminService = {
       method: 'DELETE',
     }),
 
+  listWorkspaceProjects: () =>
+    adminFetch<{
+      projects: {
+        project_id: string;
+        tenant_id: string;
+        owner_email: string;
+        name: string;
+        description: string;
+        status: string;
+        visibility: string;
+        agent_count?: number;
+      }[];
+    }>('/workspace/projects').then((r) => r.projects),
+
+  createWorkspaceProject: (body: { name: string; description?: string; visibility?: string }) =>
+    adminFetch<{
+      ok: boolean;
+      project: {
+        project_id: string;
+        tenant_id: string;
+        owner_email: string;
+        name: string;
+        description: string;
+        status: string;
+        visibility: string;
+      };
+    }>('/workspace/projects', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  listWorkspaceProjectAgents: (projectId: string) =>
+    adminFetch<{
+      project_id: string;
+      agents: {
+        project_id: string;
+        worker_uid: string;
+        worker_id: string;
+        display_name: string;
+        role: string;
+        sort_order: string;
+      }[];
+    }>(`/workspace/projects/${encodeURIComponent(projectId)}/agents`).then((r) => r.agents),
+
+  assignWorkspaceProjectAgent: (
+    projectId: string,
+    body: { worker_id: string; role?: string; sort_order?: number }
+  ) =>
+    adminFetch<{ ok: boolean; project_id: string; agent: { worker_id: string; role: string } }>(
+      `/workspace/projects/${encodeURIComponent(projectId)}/agents`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    ),
+
+  removeWorkspaceProjectAgent: (projectId: string, workerId: string) =>
+    adminFetch<{ ok: boolean; project_id: string; worker_id: string }>(
+      `/workspace/projects/${encodeURIComponent(projectId)}/agents/${encodeURIComponent(workerId)}`,
+      { method: 'DELETE' }
+    ),
+
   listEnvForgeProjectPresets: () =>
     adminFetch<{
       presets: {
@@ -1013,6 +1088,7 @@ export const adminService = {
 
   playgroundChat: (body: {
     worker_id: string;
+    project_id?: string;
     message: string;
     chat_id?: string;
     tenant_id?: string;
@@ -1036,6 +1112,7 @@ export const adminService = {
   playgroundChatStream: async (
     body: {
       worker_id: string;
+      project_id?: string;
       message: string;
       chat_id?: string;
       tenant_id?: string;

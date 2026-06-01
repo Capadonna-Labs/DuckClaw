@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { adminService } from '@/services/adminService';
@@ -27,6 +27,7 @@ import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/worker
 export default function PlaygroundPage() {
   const searchParams = useSearchParams();
   const initialWorker = searchParams.get('worker') || '';
+  const initialProject = searchParams.get('project') || '';
   const [panelOpen, setPanelOpen] = useState(true);
   const [mainScrollEl, setMainScrollEl] = useState<HTMLElement | null>(null);
   const [systemPreview, setSystemPreview] = useState('');
@@ -34,11 +35,29 @@ export default function PlaygroundPage() {
     null
   );
   const [workerId, setWorkerId] = useState(initialWorker);
+  const [projectId, setProjectId] = useState(initialProject);
+
+  const activeProject = useMemo(
+    () => (config?.projects ?? []).find((project) => project.project_id === projectId),
+    [config?.projects, projectId]
+  );
+  const projectWorkerIds = useMemo(
+    () => activeProject?.agents.map((agent) => agent.worker_id).filter(Boolean) ?? [],
+    [activeProject]
+  );
+  const selectableWorkers = useMemo(
+    () =>
+      activeProject
+        ? (config?.workers ?? []).filter((worker) => projectWorkerIds.includes(workerOptionId(worker)))
+        : (config?.workers ?? []),
+    [activeProject, config?.workers, projectWorkerIds]
+  );
 
   const conv = useActiveConversation(config?.effective_tenant_id, 'playground');
   const chat = useAdminChat({
     chatId: conv.sessionId ?? '',
     initialWorker: workerId,
+    projectId,
     enabled: Boolean(conv.sessionId),
     onConversationActivity: conv.bumpRefresh,
   });
@@ -58,14 +77,17 @@ export default function PlaygroundPage() {
         setConfig(c);
         setWorkerId((prev) => {
           if (prev) return prev;
-          const ids = workerOptionIds(c.workers);
+          const project = (c.projects ?? []).find((item) => item.project_id === initialProject);
+          const ids = project?.agents?.length
+            ? project.agents.map((agent) => agent.worker_id).filter(Boolean)
+            : workerOptionIds(c.workers);
           if (initialWorker && ids.includes(initialWorker)) return initialWorker;
           if (ids.includes('default')) return 'default';
           return ids[0] ?? '';
         });
       })
       .catch(() => undefined);
-  }, [initialWorker, conv.sessionId]);
+  }, [initialWorker, initialProject, conv.sessionId]);
 
   useEffect(() => {
     loadConfig();
@@ -76,6 +98,12 @@ export default function PlaygroundPage() {
       chat.setWorkerId(workerId);
     }
   }, [workerId, chat]);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    if (workerId && projectWorkerIds.includes(workerId)) return;
+    setWorkerId(projectWorkerIds[0] ?? '');
+  }, [activeProject, projectWorkerIds, workerId]);
 
   useEffect(() => {
     if (!workerId) return;
@@ -134,13 +162,30 @@ export default function PlaygroundPage() {
             )}
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
+            {(config?.projects?.length ?? 0) > 0 && (
+              <>
+                <label className="text-xs font-bold text-gov-gray-500">Proyecto</label>
+                <select
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                  className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[240px]"
+                >
+                  <option value="">Sin proyecto</option>
+                  {(config?.projects ?? []).map((project) => (
+                    <option key={project.project_id} value={project.project_id}>
+                      {project.name} ({project.agents.length})
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             <label className="text-xs font-bold text-gov-gray-500">Agente</label>
             <select
               value={workerId}
               onChange={(e) => setWorkerId(e.target.value)}
               className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[240px]"
             >
-              {(config?.workers ?? []).map((w) => {
+              {selectableWorkers.map((w) => {
                 const id = workerOptionId(w);
                 const label = workerOptionLabel(w);
                 return (
@@ -170,13 +215,19 @@ export default function PlaygroundPage() {
             )}
           </p>
         )}
+        {activeProject && (
+          <p className="mx-4 mb-2 text-xs text-gov-blue-800 dark:text-dark-cyan bg-gov-cyan-50 dark:bg-dark-bg border border-gov-cyan-200 dark:border-dark-border px-3 py-2 rounded-xl">
+            Proyecto activo: <strong>{activeProject.name}</strong>. El selector de agentes queda limitado a
+            `admin_project_agents` para este proyecto.
+          </p>
+        )}
         {conv.bootstrapping || !conv.sessionId ? (
           <p className="flex-1 flex items-center justify-center text-sm text-gov-gray-400 p-8">
             Cargando conversación…
           </p>
         ) : (
           <AdminChatPanel
-            key={`${conv.sessionId}-${workerId}`}
+            key={`${conv.sessionId}-${projectId}-${workerId}`}
             chatId={conv.sessionId}
             chat={chat}
             initialWorker={workerId}

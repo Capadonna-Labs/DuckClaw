@@ -37,6 +37,14 @@ DOTENV_OVERRIDE_KEYS: frozenset[str] = frozenset(
         "DUCKCLAW_LLM_PROVIDER",
         "DUCKCLAW_LLM_MODEL",
         "DUCKCLAW_LLM_BASE_URL",
+        # Infra IBKR/Capadonna: evita drift si PM2 no se reinició con --update-env.
+        "IBKR_PORTFOLIO_API_URL",
+        "IBKR_PORTFOLIO_POSITIONS_URL",
+        "IBKR_MARKET_DATA_URL",
+        "IBKR_EXECUTE_ORDER_URL",
+        "IBKR_GATEWAY_OHLCV_URL",
+        "CAPADONNA_SSH_HOST",
+        "IBKR_ACCOUNT_MODE",
     }
 )
 

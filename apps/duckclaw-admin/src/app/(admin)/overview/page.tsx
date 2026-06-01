@@ -14,6 +14,7 @@ import { isAdminRole } from '@/lib/roles';
 
 const ActivityChart = dynamic(() => import('@/components/dashboard/ActivityChart'), { ssr: false });
 const LatencyChart = dynamic(() => import('@/components/dashboard/LatencyChart'), { ssr: false });
+const TokenUsageChart = dynamic(() => import('@/components/dashboard/TokenUsageChart'), { ssr: false });
 
 export default function OverviewPage() {
   const { usuario } = useAuthStore();
@@ -93,6 +94,9 @@ export default function OverviewPage() {
               <p className="text-amber-800 dark:text-amber-300">{metricsError}</p>
             </section>
           )}
+          <ChartCard title="Uso LLM — tokens y costo (USD)">
+            <TokenUsageChart initial={metrics?.usage} />
+          </ChartCard>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <ChartCard title="Pulso de Ejecución (7d)">
               <ActivityChart data={metrics?.activity ?? []} />

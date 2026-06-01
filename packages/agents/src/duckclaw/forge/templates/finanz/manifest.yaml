@@ -69,3 +69,44 @@ forge_context:
   vault_binding:
     scope: private
     vault_id: finanzdb1
+
+tool_orchestration:
+  clock_anchor:
+    tool: get_current_time
+    before_intents: [ledger_read, ledger_write, ledger_move]
+  intents:
+    ledger_read:
+      patterns:
+        - '(?i)resumen\s+(de\s+)?(mis\s+)?deudas'
+        - '(?i)mis\s+deudas'
+      force_first_tool: read_sql
+    ledger_write:
+      patterns:
+        - '(?i)\b(agrega|registra|paga|aplica|modifica|actualiza)\b'
+      force_first_tool: admin_sql
+    ledger_move:
+      patterns:
+        - '(?i)pasa(r)?\s+la\s+deuda|de\s+mayo\s+a\s+junio'
+      force_first_tool: admin_sql
+  tool_chains:
+    - after_tools: [get_current_time]
+      when_intent: ledger_read
+      force_next: read_sql
+    - after_tools: [get_current_time]
+      when_intent: [ledger_read, ledger_write]
+      force_next: read_sql
+  affirm_followup:
+    short_affirm_patterns:
+      - '(?i)^\s*(procede|sí|ok|aplica\s+los\s+ajustes|vuelve\s+a\s+intentar)\s*\.?$'
+    pending_action_patterns:
+      - 'acciones que voy'
+      - 'voy a realizar'
+      - 'admin_sql'
+      - 'aumentaré'
+      - 'registraré'
+    planned_task_guardrail: guardrails/ledger_affirm_planned.md
+  replan:
+    rules:
+      - when_intent: ledger_write
+        require_tool: admin_sql
+        unless_tools: [admin_sql]

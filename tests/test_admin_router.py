@@ -834,9 +834,9 @@ def test_admin_conversations_crud(admin_client: TestClient):
     assert r5.json().get("ok") is True
 
 
-def test_admin_auth_login_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_redis):
-    import sys
-
+def test_admin_auth_login_smoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_redis
+):
     from duckclaw.admin_console_users import ensure_admin_console_users_table, upsert_console_user
 
     from duckclaw.gateway_db import GATEWAY_DB_ENV_KEYS
@@ -845,6 +845,7 @@ def test_admin_auth_login_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     for key in GATEWAY_DB_ENV_KEYS:
         monkeypatch.setenv(key, str(gw))
     monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(Path(__file__).resolve().parent.parent))
     con = __import__("duckdb").connect(str(gw))
     try:
         class _A:
@@ -860,7 +861,7 @@ def test_admin_auth_login_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
             email="smoke@test.local",
             nombre="Smoke",
             rol="admin",
-            password="secret123",
+            password="smokepass1",
         )
     finally:
         con.close()
@@ -870,10 +871,13 @@ def test_admin_auth_login_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     client.app.state.redis = session_redis
     r = client.post(
         "/api/v1/admin/auth/login",
-        json={"email": "smoke@test.local", "password": "secret123"},
+        json={"email": "smoke@test.local", "password": "smokepass1"},
     )
     assert r.status_code == 200
-    assert r.json().get("user", {}).get("rol") == "admin"
+    data = r.json()
+    assert data["user"]["rol"] == "admin"
+    assert data["user"]["email"] == "smoke@test.local"
+    assert "session" in r.cookies
 
 
 def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):

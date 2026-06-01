@@ -70,13 +70,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
       });
 
       if (!res.ok) {
-        const msg = await res.text();
-        try {
-          const parsed = JSON.parse(msg) as { detail?: string };
-          if (parsed.detail) throw new Error(parsed.detail);
-        } catch (e) {
-          if (e instanceof Error && e.message !== msg) throw e;
-        }
+        const msg = (await res.text()).trim();
         throw new Error(msg || `Error ${res.status}`);
       }
       if (!res.body) {

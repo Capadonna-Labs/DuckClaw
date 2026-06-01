@@ -1099,8 +1099,10 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "pandas", specifier = ">=2.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "streamlit", specifier = ">=1.33.0" },
 ]
+provides-extras = ["dev"]
 
 [[package]]
 name = "duckclaw-mcp"

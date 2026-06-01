@@ -16,3 +16,10 @@ def test_finanz_should_force_current_time_negative() -> None:
     assert not _finanz_should_force_current_time("[SYSTEM_EVENT: goals tick]")
     assert not _finanz_should_force_current_time("Ejecuta el código: print(2+2)")
     assert not _finanz_should_force_current_time("run python script in sandbox")
+    assert not _finanz_should_force_current_time(
+        "Usuario dice: (sin caption)\n"
+        "Contexto visual adjunto: Bloomberg. Tesoros al alza en toda la curva.\n"
+        "[VLM_CONTEXT image_hash=abc confidence=0.85]"
+    )
+    assert not _finanz_should_force_current_time("https://www.reddit.com/r/stocks/s/abc")
+    assert not _finanz_should_force_current_time("Que es el memorial day?")

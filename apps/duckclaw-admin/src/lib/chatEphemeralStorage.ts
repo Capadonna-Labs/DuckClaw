@@ -1,6 +1,7 @@
 /** Heartbeats/plan/tool SSE: no están en Redis; persistencia por chat+worker en sessionStorage. */
 
 import type { ChatMsg } from '@/components/chat/types';
+import { toolHeartbeatInvocationKey } from '@/lib/toolHeartbeat';
 import { workerMatches } from '@/lib/workerOptions';
 
 const KEY_PREFIX = 'duckclaw-admin-chat-ephemeral-';
@@ -30,20 +31,23 @@ export function filterEphemeralForWorker(messages: ChatMsg[], workerId: string):
   );
 }
 
-/** Dedupe por toolName (último gana) + mensajes no-tool al final. */
+/** Dedupe por invocación de tool (start/done del mismo id); conserva varias del mismo toolName. */
 export function mergeEphemeralHeartbeats(a: ChatMsg[], b: ChatMsg[]): ChatMsg[] {
   const combined = [...a, ...b].filter(isEphemeralMessage);
   if (!combined.length) return [];
-  const toolByName = new Map<string, ChatMsg>();
+  const byInvocation = new Map<string, ChatMsg>();
+  const orderedKeys: string[] = [];
   const other: ChatMsg[] = [];
   for (const m of combined) {
     if (m.heartbeatKind === 'tool' && m.toolName) {
-      toolByName.set(m.toolName, m);
+      const key = toolHeartbeatInvocationKey(m) || `${m.toolName}@${orderedKeys.length}`;
+      if (!byInvocation.has(key)) orderedKeys.push(key);
+      byInvocation.set(key, m);
     } else {
       other.push(m);
     }
   }
-  return [...other, ...Array.from(toolByName.values())];
+  return [...other, ...orderedKeys.map((k) => byInvocation.get(k)!).filter(Boolean)];
 }
 
 export function readEphemeralHeartbeats(chatId: string, workerId = ''): ChatMsg[] {

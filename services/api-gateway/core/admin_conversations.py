@@ -40,6 +40,7 @@ class AdminConversationMeta(BaseModel):
     message_count: int = 0
     origin: str = "admin_ui"
     vault_db_path: str = ""
+    preferred_worker_id: str = ""
 
 
 def _now_iso() -> str:
@@ -325,6 +326,34 @@ async def patch_conversation_vault(
         return meta
     except Exception as exc:
         _log.warning("admin_conversations: patch vault %s: %s", session_id, exc)
+        return None
+
+
+async def patch_conversation_worker(
+    redis_client: Any,
+    tenant_id: str,
+    session_id: str,
+    worker_id: str | None,
+) -> AdminConversationMeta | None:
+    """Persiste worker preferido por conversación (admin UI). Vacío = quitar override."""
+    meta = await get_conversation_meta(redis_client, tenant_id, session_id)
+    if meta is None:
+        return None
+    wid = (worker_id or "").strip()
+    meta.preferred_worker_id = wid
+    if wid and wid not in meta.workers:
+        meta.workers = [*meta.workers, wid]
+    meta.updated_at = _now_iso()
+    ttl = _conv_ttl_sec()
+    try:
+        await redis_client.set(
+            _meta_key(tenant_id, session_id),
+            json.dumps(meta.model_dump(), ensure_ascii=False),
+            ex=ttl,
+        )
+        return meta
+    except Exception as exc:
+        _log.warning("admin_conversations: patch worker %s: %s", session_id, exc)
         return None
 
 

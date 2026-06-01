@@ -20,6 +20,8 @@ export type ChatMsg = {
   swarmSlot?: number;
   /** Heartbeat de tool: nombre estable para fusionar start/done. */
   toolName?: string;
+  /** Identidad única por invocación (p. ej. varios fetch_market_data en el mismo turno). */
+  toolInvocationId?: string;
   toolPhase?: ToolHeartbeatPhase;
   toolStartedAt?: number;
   toolElapsedMs?: number;

@@ -2,7 +2,7 @@
 Resiliencia de planificación en el grafo Manager: reintentos con replan y mensaje final agotado.
 
 Variables de entorno:
-- ``DUCKCLAW_AGENT_MAX_PLAN_ATTEMPTS``: intentos de plan → invoke worker (default 3, rango 1–10).
+- ``DUCKCLAW_AGENT_MAX_PLAN_ATTEMPTS``: intentos de plan → invoke worker (default 4, rango 1–10).
 - ``DUCKCLAW_AGENT_REPLAN_STRATEGY``: cualquier valor salvo ``off``/``false``/``0``/``no`` deja el replan activo (p. ej. ``hybrid``, ``on``). ``off`` lo desactiva.
 """
 
@@ -17,12 +17,12 @@ from duckclaw.integrations.llm_providers import is_transient_inference_connectio
 
 
 def plan_max_attempts_from_env() -> int:
-    raw = (os.environ.get("DUCKCLAW_AGENT_MAX_PLAN_ATTEMPTS") or "3").strip()
+    raw = (os.environ.get("DUCKCLAW_AGENT_MAX_PLAN_ATTEMPTS") or "4").strip()
     try:
         n = int(raw)
         return max(1, min(n, 10))
     except ValueError:
-        return 3
+        return 4
 
 
 def replan_strategy_from_env() -> str:
@@ -133,6 +133,9 @@ def resilience_escalation_wants_read_sql(incoming: str, plan_attempt_index: int)
         "presupuesto",
         "gasto",
         "transacc",
+        "ajuste",
+        "aplica",
+        "procede",
     )
     return any(k in low for k in keys)
 

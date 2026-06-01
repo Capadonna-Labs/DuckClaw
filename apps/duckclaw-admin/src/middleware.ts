@@ -1,20 +1,18 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+const isDev = process.env.NODE_ENV === 'development';
+
 export function middleware(request: NextRequest) {
-  const isDev = process.env.NODE_ENV !== 'production';
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]!);
-  }
-  const nonce = btoa(binary);
+  // Next.js App Router injects inline bootstrap scripts; strict nonce-only CSP
+  // blocks hydration (dead buttons, no fetch). Nonce wiring needs layout integration.
+  const scriptSrc = isDev
+    ? "script-src 'self' 'unsafe-eval' 'unsafe-inline'"
+    : "script-src 'self' 'unsafe-inline'";
 
   const csp = [
     "default-src 'self'",
-    isDev
-      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-      : `script-src 'self' 'nonce-${nonce}'`,
+    scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
@@ -22,12 +20,7 @@ export function middleware(request: NextRequest) {
     "frame-ancestors 'none'",
   ].join('; ');
 
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('x-nonce', nonce);
-
-  const response = NextResponse.next({
-    request: { headers: requestHeaders },
-  });
+  const response = NextResponse.next();
   response.headers.set('Content-Security-Policy', csp);
   return response;
 }

@@ -140,7 +140,7 @@ export function AdminChatPanel({
                 <span className="text-gov-gray-500 dark:text-dark-muted shrink-0">Worker</span>
                 <select
                   value={workerId}
-                  onChange={(e) => setWorkerId(e.target.value)}
+                  onChange={(e) => setWorkerId(e.target.value, { persist: true })}
                   disabled={!config?.workers?.length || config?.authorized === false}
                   className="text-[10px] px-1.5 py-1 border rounded-md dark:border-dark-border dark:bg-dark-bg max-w-[180px] disabled:opacity-50"
                   aria-label="Worker"
@@ -207,7 +207,7 @@ export function AdminChatPanel({
                 )}
                 <select
                   value={workerId}
-                  onChange={(e) => setWorkerId(e.target.value)}
+                  onChange={(e) => setWorkerId(e.target.value, { persist: true })}
                   disabled={!config?.workers?.length || config?.authorized === false}
                   className="text-xs px-2 py-1.5 border rounded-lg dark:border-dark-border dark:bg-dark-bg max-w-[140px] disabled:opacity-50"
                   aria-label="Agente"
@@ -306,7 +306,11 @@ export function AdminChatPanel({
               : -1;
           return (
             <ChatBubble
-              key={`${i}-${m.role}`}
+              key={
+                m.toolInvocationId
+                  ? `${i}-${m.role}-${m.toolInvocationId}`
+                  : `${i}-${m.role}`
+              }
               message={m}
               canRetry={
                 !loading &&

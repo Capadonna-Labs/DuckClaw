@@ -167,6 +167,33 @@ def test_admin_conversation_meta_roundtrip():
         tenant_id="default",
         title="Test",
         workers=["finanz"],
+        preferred_worker_id="finanz",
     )
     data = json.loads(m.model_dump_json())
-    assert AdminConversationMeta.model_validate(data).title == "Test"
+    restored = AdminConversationMeta.model_validate(data)
+    assert restored.title == "Test"
+    assert restored.preferred_worker_id == "finanz"
+
+
+async def _test_patch_conversation_worker_impl():
+    from core.admin_conversations import patch_conversation_worker
+
+    redis = build_fake_redis()
+    sid = new_admin_conversation_session_id()
+    await upsert_conversation_meta(
+        redis,
+        tenant_id="default",
+        session_id=sid,
+        last_worker_id="default",
+        title="Worker test",
+    )
+    meta = await patch_conversation_worker(redis, "default", sid, "finanz")
+    assert meta is not None
+    assert meta.preferred_worker_id == "finanz"
+    assert "finanz" in meta.workers
+
+
+def test_patch_conversation_worker():
+    import asyncio
+
+    asyncio.run(_test_patch_conversation_worker_impl())

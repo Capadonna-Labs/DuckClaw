@@ -3,7 +3,13 @@
 import { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { adminService } from '@/services/adminService';
-import { modelOptionsForProvider, SELECTABLE_LLM_PROVIDERS } from '@/lib/llmModelPresets';
+import {
+  modelOptionsForProvider,
+  modelLabelForOption,
+  isOpenRouterProvider,
+  SELECTABLE_LLM_PROVIDERS,
+} from '@/lib/llmModelPresets';
+import { SearchableModelSelect } from '@/components/chat/SearchableModelSelect';
 
 type CatalogItem = {
   id: string;
@@ -48,10 +54,17 @@ export function ChatLlmSelectors({
       modelOptionsForProvider(activeProvider, catalogItem?.model_example, model),
     [activeProvider, catalogItem?.model_example, model]
   );
-  const displayModel =
-    model.trim() && modelOptions.includes(model.trim())
-      ? model.trim()
-      : modelOptions[0] ?? model.trim();
+  const currentModel = model.trim() || modelOptions[0] || '';
+  const openRouter = isOpenRouterProvider(activeProvider);
+
+  const searchableOptions = useMemo(
+    () =>
+      modelOptions.map((m) => ({
+        value: m,
+        label: modelLabelForOption(activeProvider, m),
+      })),
+    [modelOptions, activeProvider]
+  );
 
   const applyModel = async (next: { provider?: string; model?: string }) => {
     if (!chatId || disabled || pending) return;
@@ -79,8 +92,8 @@ export function ChatLlmSelectors({
   };
 
   const selectCls = compact
-    ? 'text-[10px] px-1.5 py-1 border rounded-md dark:border-dark-border dark:bg-dark-bg max-w-[96px] disabled:opacity-50'
-    : 'text-xs px-2 py-1.5 border rounded-lg dark:border-dark-border dark:bg-dark-bg max-w-[130px] disabled:opacity-50';
+    ? 'text-[10px] px-1.5 py-1 border rounded-md dark:border-dark-border dark:bg-dark-bg max-w-[120px] disabled:opacity-50'
+    : 'text-xs px-2 py-1.5 border rounded-lg dark:border-dark-border dark:bg-dark-bg max-w-[160px] disabled:opacity-50';
 
   if (!chatId || selectableCatalog.length === 0) return null;
 
@@ -110,23 +123,38 @@ export function ChatLlmSelectors({
         Modelo LLM
       </label>
       <div className="relative flex items-center">
-        <select
-          id={`llm-model-${chatId}`}
-          value={displayModel}
-          disabled={disabled || Boolean(pending) || !activeProvider}
-          onChange={(e) => void applyModel({ model: e.target.value })}
-          className={selectCls}
-          aria-label="Modelo LLM"
-        >
-          {modelOptions.length === 0 && (
-            <option value={displayModel}>{displayModel || '—'}</option>
-          )}
-          {modelOptions.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
+        {openRouter ? (
+          <SearchableModelSelect
+            id={`llm-model-${chatId}`}
+            value={currentModel}
+            options={searchableOptions}
+            onChange={(v) => void applyModel({ model: v })}
+            disabled={disabled || Boolean(pending) || !activeProvider}
+            compact={compact}
+            allowCustom
+            placeholder="Modelo OpenRouter"
+            searchPlaceholder="Buscar modelo…"
+            aria-label="Modelo OpenRouter"
+          />
+        ) : (
+          <select
+            id={`llm-model-${chatId}`}
+            value={currentModel}
+            disabled={disabled || Boolean(pending) || !activeProvider}
+            onChange={(e) => void applyModel({ model: e.target.value })}
+            className={selectCls}
+            aria-label="Modelo LLM"
+          >
+            {modelOptions.length === 0 && (
+              <option value={currentModel}>{currentModel || '—'}</option>
+            )}
+            {modelOptions.map((m) => (
+              <option key={m} value={m}>
+                {modelLabelForOption(activeProvider, m)}
+              </option>
+            ))}
+          </select>
+        )}
         {pending && (
           <Loader2
             size={12}

@@ -18,6 +18,35 @@ from urllib import request as _urllib_request
 from urllib.parse import parse_qs, urlparse
 
 _log = logging.getLogger(__name__)
+
+
+def _agent_debug_log(location: str, message: str, data: dict, hypothesis_id: str) -> None:
+    # #region agent log
+    try:
+        with open(
+            "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log",
+            "a",
+            encoding="utf-8",
+        ) as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "fd1dbb",
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                        "hypothesisId": hypothesis_id,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+
+
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -46,6 +75,19 @@ from duckclaw.workers.field_reflection import (
     persist_field_lesson,
 )
 
+from duckclaw.workers.worker_ids import (
+    MARKET_WORKERS,
+    PLOT_CAPABLE_WORKERS,
+    WORKER_FINANZ,
+    WORKER_PQRSD_ASSISTANT,
+    WORKER_QUANT_TRADER,
+    is_finanz,
+    is_market_worker,
+    is_pqrsd_assistant,
+    is_quant_trader,
+    normalize_worker_id,
+)
+
 _NO_TASK_PATTERN = re.compile(
     r"^(hola|hi|hey|buenos?\s*d[ií]as?|buenas?\s*tardes?|buenas?\s*noches?|"
     r"qu[eé]\s*tal|qu[eé]\s*hay|saludos?|hello|ciao|adios?|chao)\s*[!.]?$",
@@ -61,7 +103,7 @@ def quant_trader_lone_reddit_url_message(logical_worker_id: str, incoming: str, 
     Quant pegó sólo una URL de Reddit sin directiva SUMMARIZE_*: permite force_reddit
     (evita respuesta texto sin reddit_*).
     """
-    if (logical_worker_id or "").strip().lower() != "quant_trader":
+    if not is_quant_trader(logical_worker_id):
         return False
     if not reddit_anchor_url:
         return False
@@ -428,7 +470,7 @@ def _is_finanz_local_accounts_query(text: str) -> bool:
 def _finanz_should_force_current_time(text: str) -> bool:
     """
     Finanz: ancla reloj COT al inicio del turno (antes de read_sql / admin_sql).
-    Evita agrupar deudas por mes o marcar vencimientos con fechas del historial del chat.
+    Solo turnos de ledger (deudas, cuentas, presupuestos, vencimientos); no VLM/URLs/noticias.
     """
     raw = (text or "").strip()
     if not raw:
@@ -445,7 +487,28 @@ def _finanz_should_force_current_time(text: str) -> bool:
         low,
     ):
         return False
-    return True
+    if "[vlm_context" in low or "contexto visual adjunto:" in low:
+        return False
+    if re.search(r"https?://", low) or "reddit.com" in low:
+        return False
+    if _is_finanz_debts_query(raw):
+        return True
+    if _is_finanz_local_accounts_query(raw):
+        return True
+    if _is_finanz_budgets_query(raw):
+        return True
+    if re.search(
+        r"\b("
+        r"pasar\s+(la\s+)?deuda|"
+        r"mover\s+(la\s+)?(deuda|cuota)|"
+        r"de\s+mayo\s+a\s+junio|"
+        r"vencimient|"
+        r"cuota\s+(de|del)"
+        r")\b",
+        low,
+    ):
+        return True
+    return False
 
 
 def _is_finanz_debts_query(text: str) -> bool:
@@ -570,11 +633,13 @@ def _quant_trader_vlm_incoming_suggests_market_figure(text: str) -> bool:
     """
     True si el turno trae payload VLM con decimal tipo cotización (p. ej. 465.00 en captura Bloomberg).
     Evidencia pm2: tools usadas=ninguna + Regla de Evidencia Única pese a plan con read_sql.
+    Excluye metadatos [VLM_CONTEXT … confidence=0.85] para no forzar read_sql en noticias sin precio.
     """
     raw = text or ""
     if "[VLM_CONTEXT" not in raw and "contexto visual adjunto:" not in raw.lower():
         return False
-    return bool(re.search(r"(?:\$\s*)?\b\d{1,6}\.\d{2,6}\b", raw))
+    body = re.sub(r"\[VLM_CONTEXT[^\]]*\]", "", raw, flags=re.IGNORECASE)
+    return bool(re.search(r"(?:\$\s*)?\b\d{1,6}\.\d{2,6}\b", body))
 
 
 def _duckclaw_env_truthy(name: str) -> bool:
@@ -591,7 +656,7 @@ def _quant_summarize_allows_forced_ohlcv_fetch(incoming: str, worker_lid: str) -
     """SUMMARIZE_* no bloquea fetch_market_data si Quant + env + heurística OHLCV del usuario."""
     if not _quant_ohlcv_context_summary_forced_fetch_enabled():
         return False
-    if (worker_lid or "").strip().lower() != "quant_trader":
+    if not is_quant_trader(worker_lid):
         return False
     return _finanz_user_requests_ohlcv_ingest(incoming)
 
@@ -770,6 +835,53 @@ def _quant_extract_tickers(text: str) -> list[str]:
     return out
 
 
+def _quant_trader_should_force_current_time(text: str) -> bool:
+    """
+    Quant: ancla reloj COT post-LLM solo en turnos operativos (señales, portfolio, intradía).
+    No VLM/URLs/noticias puras; el encabezado con HH:MM se cubre vía _response_mentions_wall_clock.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    low = raw.lower()
+    if "[system_directive:" in low:
+        return False
+    if low.startswith("[system_event:"):
+        return False
+    if re.match(r"^(gracias|muchas\s+gracias|ok\.?|vale\.?|listo\.?|perfecto\.?|entendido\.?)\s*!?$", low):
+        return False
+    if "[vlm_context" in low or "contexto visual adjunto:" in low:
+        return False
+    if re.search(r"https?://", low) or "reddit.com" in low:
+        return False
+    if _quant_user_requests_new_trade_signal(raw):
+        return True
+    if _quant_user_requests_execute_approved_signal(raw):
+        return True
+    if _quant_user_requests_autoexec_validation(raw):
+        return True
+    if _quant_is_proceed_like(raw):
+        return True
+    if re.search(
+        r"\b(portfolio|ibkr|posiciones|get_ibkr_portfolio|cuenta\s+paper|cuenta\s+live)\b",
+        low,
+    ):
+        return True
+    if re.search(
+        r"\b(apertura|intrad[ií]a|moc|overnight|gap[\s-]?down|gap[\s-]?up|precio\s+intrad[ií]a)\b",
+        low,
+    ):
+        return True
+    if _finanz_user_requests_ohlcv_ingest(raw):
+        return True
+    if _quant_extract_tickers(raw) and re.search(
+        r"\b(precio|cierre|snapshot|ohlcv|cotizaci[oó]n|velas?)\b",
+        low,
+    ):
+        return True
+    return False
+
+
 def _quant_last_human_index(messages: list[Any]) -> int:
     from langchain_core.messages import HumanMessage
 
@@ -806,8 +918,597 @@ def _quant_latest_tool_json_since(messages: list[Any], from_idx: int, tool_name:
     return {}
 
 
+def _incoming_has_vlm_context(text: str) -> bool:
+    low = (text or "").lower()
+    return "[vlm_context" in low or "contexto visual adjunto:" in low
+
+
+def _spec_logical_worker_id(spec: Any) -> str:
+    return (getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", "") or "").strip()
+
+
+def _quant_gct_only_vlm_turn(
+    messages: list[Any],
+    incoming: str,
+    *,
+    last_human_idx: int,
+    already_has_tool_result: bool,
+) -> bool:
+    if not _incoming_has_vlm_context(incoming):
+        return False
+    if not already_has_tool_result:
+        return False
+    if not _quant_tool_called_since(messages, last_human_idx, "get_current_time"):
+        return False
+    from langchain_core.messages import ToolMessage
+
+    tools_since = [
+        str(getattr(m, "name", "") or "")
+        for m in messages[max(0, last_human_idx + 1) :]
+        if isinstance(m, ToolMessage)
+    ]
+    return bool(tools_since) and all(t == "get_current_time" for t in tools_since)
+
+
+def _parse_get_current_time_json(text: str) -> dict[str, Any] | None:
+    raw = (text or "").strip()
+    if not raw.startswith("{"):
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if not {"iso_8601", "day_of_week", "date", "time"}.issubset(set(data.keys())):
+        return None
+    return data
+
+
+def _reply_is_get_current_time_json_only(text: str) -> bool:
+    return _parse_get_current_time_json(text or "") is not None
+
+
+def _reply_is_fetch_market_data_json_only(text: str) -> bool:
+    raw = (text or "").strip()
+    if not raw.startswith("{"):
+        return False
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    return data.get("status") == "ok" and isinstance(data.get("ticker"), str)
+
+
+def _strip_tool_label_prefix(text: str) -> str:
+    """Quita prefijos tipo ``read_sql:`` que el LLM a veces pega antes del JSON crudo."""
+    raw = (text or "").strip()
+    m = re.match(r"^[a-z][a-z0-9_]*:\s*", raw, re.IGNORECASE)
+    if m:
+        return raw[m.end() :].strip()
+    return raw
+
+
+def _looks_like_finanz_ledger_json_rows(data: list[Any]) -> bool:
+    if not data or not isinstance(data[0], dict):
+        return False
+    keys = set(data[0].keys())
+    if "timestamp" in keys and "close" in keys:
+        return True
+    if {"id", "amount"} <= keys or {"description", "creditor"} <= keys:
+        return True
+    if {"balance", "currency"} <= keys or {"name", "balance"} <= keys:
+        return True
+    return False
+
+
+def _reply_is_read_sql_json_only(text: str) -> bool:
+    """True when egress is a raw read_sql JSON array (OHLCV o ledger Finanz), not prose."""
+    raw = _strip_tool_label_prefix(text or "")
+    if not raw.startswith("["):
+        return False
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(data, list) or not data:
+        return False
+    return _looks_like_finanz_ledger_json_rows(data)
+
+
+def _reply_is_tool_label_json_echo(text: str) -> bool:
+    """Eco ``tool_name: [{...`` sin síntesis (común en Finanz tras read_sql)."""
+    raw = (text or "").strip()
+    return bool(re.match(r"^[a-z][a-z0-9_]*:\s*[\[{]", raw, re.IGNORECASE))
+
+
+def _reply_is_quant_tool_json_echo(text: str) -> bool:
+    return (
+        _reply_is_get_current_time_json_only(text)
+        or _reply_is_fetch_market_data_json_only(text)
+        or _reply_is_read_sql_json_only(text)
+        or _reply_is_tool_label_json_echo(text)
+    )
+
+
+def _market_worker_egress_brand(worker_id: str | None) -> str:
+    lid = normalize_worker_id(worker_id)
+    if lid == WORKER_FINANZ:
+        return "Finanz"
+    if lid == WORKER_QUANT_TRADER:
+        return "Quant-Trader"
+    return (worker_id or "Worker").strip() or "Worker"
+
+
+_QUANT_EGRESS_SYNTHESIS_TOOLS = frozenset(
+    {
+        "tavily_search",
+        "run_browser_sandbox",
+        "reddit_get_post",
+        "fetch_market_data",
+        "read_sql",
+        "get_ibkr_portfolio",
+        "inspect_macro_pgq",
+        "inspect_schema",
+    }
+)
+
+
+def _incoming_is_lone_http_url(text: str) -> bool:
+    return bool(_LONE_HTTP_URL_ONLY_LINE.match((text or "").strip()))
+
+
+def _incoming_is_portfolio_query(text: str) -> bool:
+    """Consulta de portfolio IBKR (no cuentas bancarias locales Finanz)."""
+    if not text or not text.strip():
+        return False
+    t = text.strip().lower()
+    if any(k in t for k in ("transacciones", "gastos", "compras", "presupuesto")):
+        return False
+    if any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas")):
+        return False
+    if any(k in t for k in ("cuenta de ", "cuenta bancolombia", "bancolombia", "en bancolombia", "saldo en mi cuenta")):
+        return False
+    if any(k in t for k in ("portfolio total", "en total", "resumen de todo", "cuánto tengo en total", "cuanto tengo en total")):
+        return False
+    if _is_finanz_local_accounts_query(text):
+        return False
+    kw = (
+        "portfolio",
+        "portafolio",
+        "cuanto dinero",
+        "cuánto dinero",
+        "saldo ibkr",
+        "dinero en bolsa",
+        "resumen de mi portfolio",
+        "en ibkr",
+        "ibkr",
+        "interactive brokers",
+    )
+    if any(k in t for k in kw):
+        return True
+    return bool(re.search(r"\bacciones\b", t))
+
+
+def _user_explicitly_requests_ibkr_portfolio(text: str) -> bool:
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+    if re.search(r"\bget_ibkr_portfolio\b", low):
+        return True
+    return bool(re.search(r"\b(usa|usar|ejecuta|llama)\s+(ibkr|get_ibkr_portfolio)\b", low))
+
+
+def _ibkr_disabled_chat_hint() -> str:
+    return (
+        "IBKR está desactivado en este chat (`/ibkr off`). "
+        "Para snapshot del VPS, envía `/ibkr on --mode paper` o `/ibkr on --mode live` y repite la consulta."
+    )
+
+
+def _quant_vlm_post_tools_synthesis(
+    messages: list[Any] | None,
+    incoming: str,
+    *,
+    last_human_idx: int,
+    already_has_tool_result: bool,
+) -> bool:
+    """Cualquier tool sustantiva (≠ get_current_time) → síntesis en prosa por defecto, no JSON crudo."""
+    if not already_has_tool_result:
+        _agent_debug_log(
+            "factory.py:_quant_vlm_post_tools_synthesis",
+            "synthesis_gate",
+            {"result": False, "reason": "no_tool_result"},
+            "A",
+        )
+        return False
+    from langchain_core.messages import ToolMessage
+
+    tools_since = [
+        str(getattr(m, "name", "") or "")
+        for m in (messages or [])[max(0, last_human_idx + 1) :]
+        if isinstance(m, ToolMessage)
+    ]
+    if not tools_since:
+        _agent_debug_log(
+            "factory.py:_quant_vlm_post_tools_synthesis",
+            "synthesis_gate",
+            {"result": False, "reason": "no_tools_since"},
+            "A",
+        )
+        return False
+    substantive = [t for t in tools_since if t != "get_current_time"]
+    if substantive:
+        _agent_debug_log(
+            "factory.py:_quant_vlm_post_tools_synthesis",
+            "synthesis_gate",
+            {"result": True, "reason": "substantive_tools", "tools_since": tools_since},
+            "A",
+        )
+        return True
+    has_vlm = _incoming_has_vlm_context(incoming)
+    has_lone_url = _incoming_is_lone_http_url(incoming)
+    if not (has_vlm or has_lone_url):
+        _agent_debug_log(
+            "factory.py:_quant_vlm_post_tools_synthesis",
+            "synthesis_gate",
+            {
+                "result": False,
+                "reason": "gct_only_no_vlm_no_url",
+                "tools_since": tools_since,
+                "has_vlm": has_vlm,
+                "has_lone_url": has_lone_url,
+                "incoming_preview": (incoming or "")[:120],
+            },
+            "A",
+        )
+        return False
+    if has_lone_url and not has_vlm:
+        result = any(t in _QUANT_EGRESS_SYNTHESIS_TOOLS for t in tools_since)
+        _agent_debug_log(
+            "factory.py:_quant_vlm_post_tools_synthesis",
+            "synthesis_gate",
+            {"result": result, "reason": "lone_url_branch", "tools_since": tools_since},
+            "A",
+        )
+        return result
+    _agent_debug_log(
+        "factory.py:_quant_vlm_post_tools_synthesis",
+        "synthesis_gate",
+        {"result": True, "reason": "vlm_context", "tools_since": tools_since},
+        "A",
+    )
+    return True
+
+
+def _market_worker_gct_only_lone_url_no_repair(
+    incoming: str,
+    messages: list[Any] | None,
+    *,
+    last_human_idx: int,
+) -> bool:
+    """Lone URL + solo get_current_time: no síntesis ni egress repair (Infobae sin fetch)."""
+    if not _incoming_is_lone_http_url(incoming) or _incoming_has_vlm_context(incoming):
+        return False
+    from langchain_core.messages import ToolMessage
+
+    tools_since = [
+        str(getattr(m, "name", "") or "")
+        for m in (messages or [])[max(0, last_human_idx + 1) :]
+        if isinstance(m, ToolMessage)
+    ]
+    return tools_since == ["get_current_time"]
+
+
+def _market_worker_needs_egress_repair(
+    messages: list[Any] | None,
+    incoming: str,
+    reply: str,
+    *,
+    last_human_idx: int,
+    worker_id: str | None,
+) -> bool:
+    """Finanz/Quant: reparar vacío o eco JSON; excepto lone URL + solo get_current_time."""
+    if not is_market_worker(worker_id or ""):
+        return False
+    if _market_worker_gct_only_lone_url_no_repair(
+        incoming, messages, last_human_idx=last_human_idx
+    ):
+        return False
+    if _reply_is_quant_tool_json_echo(reply or ""):
+        return True
+    if not (reply or "").strip():
+        from langchain_core.messages import ToolMessage
+
+        tools_since = [
+            str(getattr(m, "name", "") or "")
+            for m in (messages or [])[max(0, last_human_idx + 1) :]
+            if isinstance(m, ToolMessage)
+        ]
+        return bool(tools_since)
+    return False
+
+
+def _parse_read_sql_tool_rows(raw: str) -> list[dict] | None:
+    """Parse read_sql ToolMessage: JSON array, ``deudas_filas`` wrapper, or truncated ``preview``."""
+    stripped = _strip_tool_label_prefix(raw or "")
+    if not stripped:
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if isinstance(parsed, list):
+        rows = [r for r in parsed if isinstance(r, dict)]
+        return rows or None
+    if isinstance(parsed, dict):
+        filas = parsed.get("deudas_filas")
+        if isinstance(filas, list):
+            rows = [r for r in filas if isinstance(r, dict)]
+            return rows or None
+        preview = parsed.get("preview")
+        if isinstance(preview, str) and preview.strip():
+            return _parse_read_sql_tool_rows(preview)
+    return None
+
+
+def _format_finanz_deudas_rows_prose(rows: list[dict]) -> str | None:
+    """NL summary for Finanz read_sql deudas or cuentas rows."""
+    if not rows or not isinstance(rows[0], dict):
+        return None
+    keys = set(rows[0].keys())
+    if {"description", "creditor", "amount"} <= keys or {"id", "amount"} <= keys:
+        lines: list[str] = []
+        total = 0.0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                amt = float(row.get("amount") or 0)
+            except (TypeError, ValueError):
+                amt = 0.0
+            total += amt
+            desc = str(row.get("description") or row.get("id") or "?").strip()
+            cred = str(row.get("creditor") or "").strip()
+            due = str(row.get("due_date") or "")[:10]
+            chunk = f"- {desc}: ${amt:,.0f}"
+            if cred:
+                chunk += f" ({cred})"
+            if due:
+                chunk += f", vence {due}"
+            lines.append(chunk)
+        if lines:
+            return (
+                f"Deudas ({len(lines)} filas), total ${total:,.0f} COP:\n" + "\n".join(lines)
+            )
+        return None
+    if {"balance", "currency"} <= keys or {"name", "balance"} <= keys:
+        lines = []
+        totals: dict[str, float] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                bal = float(row.get("balance") or 0)
+            except (TypeError, ValueError):
+                bal = 0.0
+            cur = str(row.get("currency") or "COP").strip() or "COP"
+            totals[cur] = totals.get(cur, 0.0) + bal
+            nm = str(row.get("name") or row.get("id") or "?").strip()
+            lines.append(f"- {nm}: ${bal:,.0f} {cur}")
+        if lines:
+            sub = ", ".join(f"${v:,.0f} {k}" for k, v in sorted(totals.items()))
+            return f"Cuentas ({len(lines)}):\n" + "\n".join(lines) + f"\nTotal: {sub}"
+    return None
+
+
+def _deterministic_market_worker_tool_summary(
+    messages: list[Any],
+    last_human_idx: int,
+    worker_id: str,
+    incoming: str,
+) -> str:
+    """Resumen NL breve a partir de ToolMessages, sin LLM (fallback cuando la síntesis falla)."""
+    from langchain_core.messages import ToolMessage
+
+    _ = incoming  # reservado para futuros filtros por intención
+    brand = _market_worker_egress_brand(worker_id)
+    gct_data = _quant_latest_tool_json_since(messages, last_human_idx, "get_current_time") or {}
+    hdr = ""
+    if gct_data:
+        day = str(gct_data.get("day_of_week") or gct_data.get("date") or "").strip()
+        tm = str(gct_data.get("time") or "")[:5]
+        hdr = f"{brand} · {day} {tm} COT".strip()
+
+    summaries: list[str] = []
+    for m in messages[max(0, last_human_idx + 1) :]:
+        if not isinstance(m, ToolMessage):
+            continue
+        tn = str(getattr(m, "name", "") or "")
+        tc = str(getattr(m, "content", "") or "").strip()
+        if not tc or tn == "get_current_time":
+            continue
+        if tn in ("fetch_ib_gateway_ohlcv", "fetch_market_data", "fetch_lake_ohlcv"):
+            try:
+                d = json.loads(tc)
+            except (json.JSONDecodeError, TypeError):
+                d = None
+            if isinstance(d, dict):
+                if d.get("error"):
+                    tkr = str(d.get("ticker") or "?")
+                    err = str(d.get("message") or d.get("error") or "error")
+                    summaries.append(f"{tkr}: {err}")
+                elif d.get("status") == "ok":
+                    tkr = str(d.get("ticker") or "?")
+                    rows = d.get("rows_upserted") or d.get("bar_count") or d.get("bars_received")
+                    tf = str(d.get("timeframe") or "").strip()
+                    lc = d.get("last_close")
+                    chunk = tkr
+                    if tf:
+                        chunk += f" ({tf})"
+                    if rows is not None:
+                        chunk += f": {rows} velas"
+                    if lc is not None:
+                        try:
+                            chunk += f", último cierre ${float(lc):,.2f}"
+                        except (TypeError, ValueError):
+                            pass
+                    summaries.append(chunk)
+                continue
+        if tn == "get_ibkr_portfolio":
+            m_total = re.search(r"Valor total:\s*\$([0-9,]+(?:\.[0-9]+)?)", tc)
+            m_pos = re.search(r"Posiciones:\s*([0-9]+)", tc)
+            if m_total:
+                chunk = f"Portfolio IBKR ${m_total.group(1)}"
+                if m_pos:
+                    chunk += f", {m_pos.group(1)} posiciones"
+                summaries.append(chunk)
+            else:
+                summaries.append("Portfolio IBKR consultado.")
+            continue
+        if tn == "read_sql":
+            rows = _parse_read_sql_tool_rows(tc)
+            branch_taken = "fallback_preview"
+            if rows:
+                prose = _format_finanz_deudas_rows_prose(rows)
+                if prose:
+                    summaries.append(prose)
+                    branch_taken = "deudas_or_cuentas_prose"
+                    _agent_debug_log(
+                        "factory.py:_deterministic_market_worker_tool_summary",
+                        "read_sql_deterministic_format",
+                        {
+                            "parse_ok": True,
+                            "row_count": len(rows),
+                            "keys_sample": sorted(rows[0].keys())[:8] if rows else [],
+                            "branch_taken": branch_taken,
+                        },
+                        "E",
+                    )
+                    continue
+                branch_taken = "parse_ok_no_prose_match"
+            else:
+                branch_taken = "parse_failed"
+            _agent_debug_log(
+                "factory.py:_deterministic_market_worker_tool_summary",
+                "read_sql_deterministic_format",
+                {
+                    "parse_ok": rows is not None,
+                    "row_count": len(rows) if rows else 0,
+                    "keys_sample": sorted(rows[0].keys())[:8] if rows else [],
+                    "branch_taken": branch_taken,
+                },
+                "E",
+            )
+        preview = tc.split("\n", 1)[0].strip()[:120]
+        if preview:
+            summaries.append(f"{tn}: {preview}")
+
+    if not summaries:
+        return ""
+    body = ". ".join(summaries)
+    if not body.endswith("."):
+        body += "."
+    if hdr:
+        return f"{hdr}\n\n{body}"
+    return body
+
+
+def _repair_quant_vlm_tool_egress_reply(
+    llm: Any,
+    spec: Any,
+    incoming: str,
+    reply: str,
+    messages: list[Any],
+    *,
+    skip_llm_synthesis: bool = False,
+) -> str:
+    """Síntesis de respaldo cuando Quant devuelve vacío o JSON crudo tras VLM + tools."""
+    from duckclaw.forge.atoms.user_reply_nl_synthesis import synthesize_user_visible_reply
+    from langchain_core.messages import ToolMessage
+
+    lh = _quant_last_human_index(messages)
+    tool_parts: list[str] = []
+    gct_data = _parse_get_current_time_json(reply) or {}
+    for m in messages[max(0, lh + 1) :]:
+        if isinstance(m, ToolMessage):
+            tn = str(getattr(m, "name", "") or "")
+            tc = str(getattr(m, "content", "") or "").strip()
+            if tc:
+                tool_parts.append(f"### {tn}\n{tc}")
+            if tn == "get_current_time" and not gct_data:
+                gct_data = _quant_latest_tool_json_since(messages, lh, "get_current_time") or {}
+
+    hdr = ""
+    if gct_data:
+        day = str(gct_data.get("day_of_week") or gct_data.get("date") or "").strip()
+        tm = str(gct_data.get("time") or "")[:5]
+        brand = _market_worker_egress_brand(
+            str(getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", "") or "")
+        )
+        hdr = f"{brand} · {day} {tm} COT".strip()
+
+    evidence_parts: list[str] = []
+    if hdr:
+        evidence_parts.append(hdr)
+    if tool_parts:
+        evidence_parts.append("Resultados de herramientas:\n" + "\n\n".join(tool_parts))
+    if (reply or "").strip() and _reply_is_quant_tool_json_echo(reply):
+        evidence_parts.append(f"Respuesta cruda rechazada:\n{reply.strip()}")
+    evidence_parts.append(f"Contexto del usuario:\n{(incoming or '').strip()}")
+    evidence = "\n\n".join(evidence_parts)
+
+    wid = str(getattr(spec, "worker_id", "") or "").strip() or WORKER_QUANT_TRADER
+    _lh = _quant_last_human_index(messages)
+    _lid = str(getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", "") or "")
+
+    def _deterministic_fallback() -> str:
+        det = _deterministic_market_worker_tool_summary(messages, _lh, _lid, incoming)
+        if det:
+            _agent_debug_log(
+                "factory.py:egress:deterministic_fallback",
+                "deterministic_fallback_used",
+                {"worker": _lid, "summary_preview": det[:160]},
+                "D",
+            )
+        return det
+
+    if skip_llm_synthesis:
+        det = _deterministic_fallback()
+        return det if det else reply
+    if llm is None:
+        det = _deterministic_fallback()
+        return det if det else reply
+    syn = synthesize_user_visible_reply(
+        llm,
+        user_ask=(incoming or "").strip(),
+        raw_evidence=evidence,
+        worker_id=wid,
+    )
+    syn_st = (syn or "").strip()
+    if syn_st and not _reply_is_quant_tool_json_echo(syn_st):
+        return syn_st
+    det = _deterministic_fallback()
+    return det if det else reply
+
+
+def _repair_quant_gct_json_echo_reply(
+    llm: Any,
+    spec: Any,
+    incoming: str,
+    reply: str,
+    messages: list[Any],
+) -> str:
+    """Compat: delega en síntesis VLM+tools (get_current_time es un caso)."""
+    return _repair_quant_vlm_tool_egress_reply(llm, spec, incoming, reply, messages)
+
+
 def _response_mentions_wall_clock(text: str) -> bool:
     """True si la respuesta del modelo declara hora/fecha de pared (encabezado Quant, COT, etc.)."""
+    if _reply_is_get_current_time_json_only(text):
+        return False
     t = (text or "").strip().lower()
     if not t:
         return False
@@ -847,7 +1548,7 @@ def _finanz_should_force_ibkr_after_local_cuentas_read(
     """
     from langchain_core.messages import HumanMessage, ToolMessage
 
-    if not has_ibkr or (logical_worker_id or "").strip().lower() != "finanz":
+    if not has_ibkr or not is_finanz(logical_worker_id):
         return False
     msgs = messages or []
     if not msgs:
@@ -1000,7 +1701,7 @@ def _get_db_path(worker_id: str, instance_name: Optional[str], base_path: Option
     # respetarla tal cual y no reescribir a workers_<instance>.duckdb.
     if base_path and p.suffix.lower() == ".duckdb":
         p.parent.mkdir(parents=True, exist_ok=True)
-        return str(p)
+        return str(p.expanduser().resolve())
     if not p.suffix or p.suffix.lower() != ".duckdb":
         p = p / "workers.duckdb"
     # Optionally isolate per instance: db/workers_<instance>.duckdb
@@ -1238,6 +1939,16 @@ def _reddit_trust_share_tracking_redirect() -> bool:
     Override: ``DUCKCLAW_REDDIT_TRUST_SHARE_TRACKING_REDIRECT=1``.
     """
     return (os.environ.get("DUCKCLAW_REDDIT_TRUST_SHARE_TRACKING_REDIRECT") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _reddit_tools_paused() -> bool:
+    """Opt-in: omitir invocaciones reddit_* (p. ej. API 403 / OAuth roto). ``DUCKCLAW_REDDIT_PAUSED=1``."""
+    return (os.environ.get("DUCKCLAW_REDDIT_PAUSED") or "").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -2015,7 +2726,7 @@ def _schedule_run_browser_novnc_tool_heartbeat(
 def _sync_finanz_lake_beliefs(db: Any, spec: WorkerSpec) -> None:
     """Actualiza observed_value de creencias lake_* según env (Capadonna SSH)."""
     _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
-    if _lid != "finanz":
+    if not is_finanz(_lid):
         return
     _qcfg = getattr(spec, "quant_config", None)
     if not isinstance(_qcfg, dict) or not _qcfg.get("enabled"):
@@ -2356,6 +3067,25 @@ def build_worker_graph(
         and not open_vault_read_only
     )
     effective_vault_ro = bool(spec.read_only) or bool(open_vault_read_only)
+    # #region agent log
+    _agent_debug_log(
+        "factory.py:build_worker_graph:open_db",
+        "worker_db_open_plan",
+        {
+            "worker_id": worker_id,
+            "skip_private": skip_private,
+            "effective_vault_ro": effective_vault_ro,
+            "reuse_read_only": reuse_read_only,
+            "path_tail": str(path or "")[-96:],
+            "reuse_path_tail": reuse_path[-96:] if reuse_path else "",
+            "same_file": _same_duckdb_file(reuse_path, path) if reuse_path and path else False,
+            "shared_resolved": bool((shared_resolved or "").strip()),
+            "open_vault_read_only": bool(open_vault_read_only),
+            "db_id": id(reuse_db) if skip_private and reuse_db is not None else None,
+        },
+        "D",
+    )
+    # #endregion
     if skip_private:
         db = reuse_db
         _log.debug("build_worker_graph: reuse DuckClaw (same file, no shared, skip private ATTACH) path=%s", path)
@@ -2369,6 +3099,20 @@ def build_worker_graph(
             else "auto"
         )
         db = DuckClaw(path, read_only=effective_vault_ro, engine=_engine)
+        # #region agent log
+        _agent_debug_log(
+            "factory.py:build_worker_graph:opened",
+            "worker_db_opened",
+            {
+                "worker_id": worker_id,
+                "read_only": effective_vault_ro,
+                "engine": _engine,
+                "path_tail": str(getattr(db, "_path", "") or path or "")[-96:],
+                "db_id": id(db),
+            },
+            "D",
+        )
+        # #endregion
     # La conexión DuckClaw ya es al archivo de la bóveda; ATTACH del mismo path como `private`
     # abre otra vista del mismo archivo y en DuckDB suele disparar «different configuration».
     db_open_path = str(getattr(db, "_path", "") or path or "").strip()
@@ -2522,7 +3266,7 @@ def build_worker_graph(
 
             register_ibkr_skill(tools, spec.ibkr_config)
             _lid_ibkr = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
-            if _lid_ibkr == "finanz":
+            if is_finanz(_lid_ibkr):
                 replace_get_ibkr_portfolio_with_finanz_live_variant(tools, str(path))
             tools_by_name = {t.name: t for t in tools}
         except Exception:
@@ -2548,7 +3292,7 @@ def build_worker_graph(
 
     _qcfg = getattr(spec, "quant_config", None)
     _lid_q = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
-    if isinstance(_qcfg, dict) and _qcfg.get("enabled") and _lid_q == "finanz":
+    if isinstance(_qcfg, dict) and _qcfg.get("enabled") and is_finanz(_lid_q):
         try:
             from duckclaw.forge.skills.quant_market_bridge import register_quant_market_skill
             from duckclaw.forge.skills.quant_trade_bridge import register_quant_trade_skills
@@ -2562,7 +3306,7 @@ def build_worker_graph(
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             _log.debug("quant skills registration skipped", exc_info=True)
-    elif isinstance(_qcfg, dict) and _qcfg.get("enabled") and _lid_q == "quant_trader" and llm is not None:
+    elif isinstance(_qcfg, dict) and _qcfg.get("enabled") and is_quant_trader(_lid_q) and llm is not None:
         try:
             from duckclaw.forge.skills.quant_trader_bridge import register_quant_trader_skills
 
@@ -2700,7 +3444,7 @@ def build_worker_graph(
             incoming = str(incoming or "").strip()
         if _bi_prompt_base is not None:
             prompt = _compose_bi_system_prompt(_bi_prompt_base, (state.get("analytical_summary") or "").strip())
-        elif _lid == "finanz" and finanz_field_reflection_enabled(spec):
+        elif is_finanz(_lid) and finanz_field_reflection_enabled(spec):
             fe = format_field_experience_block(incoming, db, spec.schema_name, top_n=5)
             if fe:
                 prompt = append_domain_closure_block(
@@ -2720,7 +3464,7 @@ def build_worker_graph(
                     prompt = prompt + "\n\n<lead_context>\n" + lead_ctx + "\n</lead_context>"
             except Exception:
                 pass
-        if _lid == "quant_trader":
+        if is_quant_trader(_lid):
             try:
                 from duckclaw.forge.skills.quant_trader_bridge import quant_trading_session_prompt_block
 
@@ -2820,7 +3564,7 @@ def build_worker_graph(
             return True
         if raw in ("false", "0", "off"):
             return False
-        return (_lid or "").strip().lower() == "quant_trader"
+        return is_quant_trader(_lid)
 
     tools_sandbox_off = filter_tools_for_sandbox(tools, enabled=False)
     tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}
@@ -3187,44 +3931,6 @@ def build_worker_graph(
             b = re.sub(r"[^a-z0-9]", "", (getattr(spec, "logical_worker_id", None) or "").lower())
             return a == "jobhunter" or b == "jobhunter"
 
-        def _is_portfolio_query(text: str) -> bool:
-            if not text or not text.strip():
-                return False
-            t = text.strip().lower()
-            # Excluir: gastos/transacciones locales (evitar que "acciones" en "transacciones" dispare IBKR)
-            if any(k in t for k in ("transacciones", "gastos", "compras", "presupuesto")):
-                return False
-            # Excluir: tablas DuckDB, esquema o estructura de base de datos
-            if any(k in t for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas")):
-                return False
-            # Excluir: cuenta bancaria concreta (Bancolombia, etc.) -> debe usar read_sql/admin_sql sobre .duckdb
-            if any(k in t for k in ("cuenta de ", "cuenta bancolombia", "bancolombia", "en bancolombia", "saldo en mi cuenta")):
-                return False
-            # "Portfolio total" / "cuánto tengo en total" -> no forzar solo IBKR; el agente debe usar get_ibkr_portfolio + read_sql (cuentas en .duckdb)
-            if any(k in t for k in ("portfolio total", "en total", "resumen de todo", "cuánto tengo en total", "cuanto tengo en total")):
-                return False
-            # Cuentas locales en .duckdb (resumen de mis cuentas, etc.) — nunca forzar IBKR por subcadena "mis cuentas"
-            if _is_finanz_local_accounts_query(text):
-                return False
-            # "acciones" como palabra completa (no subcadena de "transacciones")
-            # "ibkr", "en ibkr" -> consultas explícitas al broker
-            # No incluir "mis cuentas" / "estado de mis cuentas" (ambiguo con cuentas bancarias locales).
-            kw = (
-                "portfolio",
-                "portafolio",
-                "cuanto dinero",
-                "cuánto dinero",
-                "saldo ibkr",
-                "dinero en bolsa",
-                "resumen de mi portfolio",
-                "en ibkr",
-                "ibkr",
-                "interactive brokers",
-            )
-            if any(k in t for k in kw):
-                return True
-            return bool(re.search(r"\bacciones\b", t))
-
         def _quant_retry_or_probe_needs_ibkr_portfolio(messages: list, text: str) -> bool:
             """Quant-Trader: probes/reintentos cortos sobre cuenta paper/IBKR o retry tras mensaje previo del agente sobre broker."""
             t = (text or "").strip().lower()
@@ -3331,7 +4037,7 @@ def build_worker_graph(
             ibkr_session_on = has_ibkr and _ibkr_enabled_for_state(state)
             _ev_msgs = state.get("messages") or []
             _ev_last = _ev_msgs[-1] if _ev_msgs else None
-            if _lid == "quant_trader":
+            if is_quant_trader(_lid):
                 from duckclaw.forge.skills.quant_tool_context import (
                     bind_quant_market_evidence_chat,
                     reset_quant_market_evidence,
@@ -3372,71 +4078,73 @@ def build_worker_graph(
             is_schema = _is_schema_query(incoming)
             is_table_content = _is_table_content_query(incoming)
             is_latest_game = _is_latest_game_query(incoming)
-            _is_portfolio_kw = _is_portfolio_query(incoming)
+            _is_portfolio_kw = _incoming_is_portfolio_query(incoming) or _user_explicitly_requests_ibkr_portfolio(
+                incoming
+            )
             _is_portfolio_quant_retry = (
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and _quant_retry_or_probe_needs_ibkr_portfolio(_ev_msgs, incoming)
             )
             _wants_new_signal = bool(
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and _quant_user_requests_new_trade_signal(incoming)
             )
             _is_quant_operational_directive = bool(
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and str(incoming or "").strip().lower().startswith(
                     "tarea: intención operativa cuant detectada".lower()
                 )
             )
             _is_exec_bug_probe = (
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and _quant_execution_bug_probe_needs_ibkr_portfolio(incoming)
             )
             _q_reddit_hist = (
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and _quant_trader_reddit_history_anchor_intent(incoming, _ev_msgs)
             )
             is_portfolio = ibkr_session_on and (
                 _is_portfolio_kw or _is_portfolio_quant_retry or _is_exec_bug_probe
             )
-            if (_lid or "").strip().lower() == "quant_trader" and _wants_new_signal:
+            if is_quant_trader(_lid) and _wants_new_signal:
                 # En comandos operativos de nueva señal no forzar `get_ibkr_portfolio` first.
                 # Con Groq esto puede inducir tool_use_failed al mezclar tool_call + texto.
                 is_portfolio = False
-            if (_lid or "").strip().lower() == "quant_trader" and _is_quant_operational_directive:
+            if is_quant_trader(_lid) and _is_quant_operational_directive:
                 # TAREA sintética del manager incluye texto tipo "fetch+portfolio+..."; no forzar IBKR.
                 is_portfolio = False
-            if (_lid or "").strip().lower() == "quant_trader" and _is_goals_tick_msg:
+            if is_quant_trader(_lid) and _is_goals_tick_msg:
                 # En ticks /crons no forzar "solo portfolio": primero debe correr el ciclo CFD/HRP.
                 is_portfolio = False
-            if (_lid or "").strip().lower() == "quant_trader" and _q_reddit_hist:
+            if is_quant_trader(_lid) and _q_reddit_hist:
                 # Reintento sin re-pegar URL: misma lógica que SUMMARIZE (share en contexto); no adelantar IBKR.
                 is_portfolio = False
             force_finanz_cuentas = (
-                (_lid or "").strip().lower() == "finanz"
+                is_finanz(_lid)
                 and has_read_sql
                 and _is_finanz_local_accounts_query(incoming)
                 and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
             )
             force_finanz_deudas = (
-                (_lid or "").strip().lower() == "finanz"
+                is_finanz(_lid)
                 and has_read_sql
                 and _is_finanz_debts_query(incoming)
                 and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
             )
             force_finanz_presupuestos = (
-                (_lid or "").strip().lower() == "finanz"
+                is_finanz(_lid)
                 and has_read_sql
                 and _is_finanz_budgets_query(incoming)
                 and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
             )
             force_finanz_db_validation = (
-                (_lid or "").strip().lower() == "finanz"
+                is_finanz(_lid)
                 and has_read_sql
                 and _is_finanz_validate_db_intent(incoming)
                 and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
             )
             force_finanz_admin_sql = (
-                (_lid or "").strip().lower() == "finanz"
+                is_finanz(_lid)
                 and has_admin_sql
                 and _is_finanz_local_account_write_query(incoming)
                 and "[SYSTEM_DIRECTIVE:" not in (incoming or "")
@@ -3460,6 +4168,75 @@ def build_worker_graph(
             last_msg = (state.get("messages") or [])[-1] if state.get("messages") else None
             already_has_tool_result = last_msg is not None and isinstance(last_msg, ToolMessage)
 
+            _orch = None
+            _orch_forced: str | None = None
+            try:
+                from duckclaw.workers.tool_orchestration import (
+                    parse_tool_orchestration,
+                    resolve_forced_tool,
+                )
+
+                _orch = parse_tool_orchestration(spec)
+                if _orch and not telegram_context_summarize_directive:
+                    _orch_forced = resolve_forced_tool(
+                        _orch,
+                        incoming,
+                        state.get("messages") or [],
+                        tools_by_name,
+                    )
+            except Exception:
+                _orch = None
+                _orch_forced = None
+
+            if _orch:
+                force_finanz_cuentas = False
+                force_finanz_deudas = False
+                force_finanz_presupuestos = False
+                force_finanz_db_validation = False
+                force_finanz_admin_sql = False
+
+            if (
+                _orch_forced == "get_current_time"
+                and "get_current_time" in tools_by_name
+                and not telegram_context_summarize_directive
+            ):
+                _lh_orch_gct = _quant_last_human_index(state.get("messages") or [])
+                if not _quant_tool_called_since(
+                    state.get("messages") or [], _lh_orch_gct, "get_current_time"
+                ):
+                    _forced_tid_orch_gct = f"call_orch_get_current_time_{int(time.time() * 1000)}"
+                    _forced_tc_orch_gct = [
+                        {
+                            "name": "get_current_time",
+                            "args": {},
+                            "id": _forced_tid_orch_gct,
+                            "type": "tool_call",
+                        }
+                    ]
+                    _log.info("[%s] tool_orchestration → get_current_time", _wl)
+                    _out_orch_gct = {
+                        **state,
+                        "messages": state["messages"]
+                        + [AIMessage(content="", tool_calls=_forced_tc_orch_gct)],
+                    }
+                    _out_orch_gct.update(_identity_fields(state))
+                    return _out_orch_gct
+
+            if (
+                is_quant_trader(_lid)
+                and has_ibkr
+                and not ibkr_session_on
+                and not already_has_tool_result
+                and (
+                    _is_portfolio_kw
+                    or _user_explicitly_requests_ibkr_portfolio(incoming)
+                )
+            ):
+                _ibkr_off = AIMessage(content=_ibkr_disabled_chat_hint())
+                _out_ibkr = {**state, "messages": state["messages"] + [_ibkr_off]}
+                _out_ibkr.update(_identity_fields(state))
+                return _out_ibkr
+
             if _spec_is_job_hunter() and not has_tavily and not already_has_tool_result:
                 try:
                     from duckclaw.graphs.manager_graph import job_hunter_user_requests_job_search as _jh_wants_search
@@ -3479,15 +4256,41 @@ def build_worker_graph(
                     pass
 
             force_schema = is_schema and not already_has_tool_result
-            force_admin_sql = force_finanz_admin_sql and not already_has_tool_result
-            force_read_sql = (
-                is_table_content
-                or is_latest_game
-                or force_finanz_cuentas
-                or force_finanz_deudas
-                or force_finanz_presupuestos
-                or force_finanz_db_validation
-            ) and not already_has_tool_result
+            force_admin_sql = bool(
+                _orch_forced == "admin_sql"
+                or (force_finanz_admin_sql and not already_has_tool_result)
+            )
+            force_read_sql = bool(
+                _orch_forced == "read_sql"
+                or (
+                    (
+                        is_table_content
+                        or is_latest_game
+                        or force_finanz_cuentas
+                        or force_finanz_deudas
+                        or force_finanz_presupuestos
+                        or force_finanz_db_validation
+                    )
+                    and not already_has_tool_result
+                )
+            )
+            # #region agent log
+            _agent_debug_log(
+                "factory.py:agent_node:force_flags",
+                "force_tool_decision",
+                {
+                    "runId": "hallucination-debug-1",
+                    "worker": str(_lid or ""),
+                    "already_has_tool_result": bool(already_has_tool_result),
+                    "incoming_preview": str(incoming or "")[:180],
+                    "is_schema": bool(is_schema),
+                    "is_table_content": bool(is_table_content),
+                    "force_read_sql": bool(force_read_sql),
+                    "force_admin_sql": bool(force_admin_sql),
+                },
+                "H1",
+            )
+            # #endregion
             force_portfolio_first = is_portfolio and not already_has_tool_result
             force_portfolio_after_local_cuentas = (
                 not telegram_context_summarize_directive
@@ -3540,9 +4343,9 @@ def build_worker_graph(
             _reddit_anchor_u: Optional[str] = None
             if _incoming_has_reddit_url(incoming):
                 _reddit_anchor_u = _first_reddit_url_in_text(incoming)
-            elif (_lid or "").strip().lower() == "finanz" and _finanz_followup_reddit_read_intent(incoming):
+            elif is_finanz(_lid) and _finanz_followup_reddit_read_intent(incoming):
                 _reddit_anchor_u = _most_recent_reddit_url_in_human_messages(state.get("messages") or [])
-            elif (_lid or "").strip().lower() == "quant_trader" and _q_reddit_hist:
+            elif is_quant_trader(_lid) and _q_reddit_hist:
                 _reddit_anchor_u = _most_recent_reddit_url_in_human_messages(state.get("messages") or [])
             incoming_for_reddit = incoming
             if _reddit_anchor_u and (_reddit_anchor_u not in (incoming or "")):
@@ -3573,6 +4376,21 @@ def build_worker_graph(
             _quant_lone_reddit_only = quant_trader_lone_reddit_url_message(
                 str(_lid or ""), incoming, _reddit_anchor_u
             )
+            if (
+                _reddit_tools_paused()
+                and _reddit_anchor_u
+                and (_quant_lone_reddit_only or _incoming_has_reddit_url(incoming))
+                and not already_has_tool_result
+            ):
+                _paused_ai = AIMessage(
+                    content=(
+                        "🔴 Reddit pausado (`DUCKCLAW_REDDIT_PAUSED=1`). "
+                        "No se invocaron herramientas reddit_* en este turno."
+                    )
+                )
+                _out_rp = {**state, "messages": state["messages"] + [_paused_ai]}
+                _out_rp.update(_identity_fields(state))
+                return _out_rp
             _visual_calls_this_turn = _visual_asset_calls_since_last_human(state.get("messages") or [])
             _visual_tool_already_ok = bool(
                 already_has_tool_result
@@ -3581,7 +4399,7 @@ def build_worker_graph(
                 and '"ok":true' in str(last_msg.content or "").replace(" ", "")
             )
             force_visual = bool(
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and has_generate_visual
                 and _quant_trader_visual_generation_intent(incoming)
                 and not telegram_context_summarize_directive
@@ -3599,7 +4417,7 @@ def build_worker_graph(
                 )
             )
             _visual_tool_failed = bool(
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and already_has_tool_result
                 and isinstance(last_msg, ToolMessage)
                 and (last_msg.name or "") == "generate_visual_asset"
@@ -3626,7 +4444,7 @@ def build_worker_graph(
 
             if (
                 _visual_tool_already_ok
-                and (_lid or "").strip().lower() == "quant_trader"
+                and is_quant_trader(_lid)
                 and _quant_trader_visual_generation_intent(incoming)
             ):
                 caption = "Imagen generada."
@@ -3642,9 +4460,9 @@ def build_worker_graph(
                 return _out_ok
 
             _allow_reddit_force = bool(
-                (_lid or "").strip().lower() == "finanz"
+                is_finanz(_lid)
                 or (
-                    (_lid or "").strip().lower() == "quant_trader"
+                    is_quant_trader(_lid)
                     and (
                         telegram_context_summarize_directive
                         or _quant_lone_reddit_only
@@ -3654,6 +4472,7 @@ def build_worker_graph(
             )
             force_reddit = bool(
                 not force_visual
+                and not _reddit_tools_paused()
                 and
                 _allow_reddit_force
                 and has_reddit_tools
@@ -3699,7 +4518,7 @@ def build_worker_graph(
                 force_visual = False
 
             _summarize_reddit_empty_tavily = bool(
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and telegram_context_summarize_directive
                 and has_tavily
                 and _incoming_has_reddit_url(incoming)
@@ -3717,7 +4536,7 @@ def build_worker_graph(
             # Quant Trader: si hay URL dedicada al GET /api/market/ibkr/historical, forzar esa tool en lugar
             # de fetch_market_data (evita lake+HTTP genérico cuando el usuario configuró solo IB Gateway).
             force_fetch_ib_gateway = bool(
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and has_fetch_ib_gateway
                 and bool(_ibgw_url)
                 and _finanz_user_requests_ohlcv_ingest(incoming)
@@ -3735,7 +4554,7 @@ def build_worker_graph(
             if not _worker_use_heuristic_first_tool(spec):
                 force_fetch_ib_gateway = False
             force_fetch_market_data = bool(
-                _lid_l in ("finanz", "quant_trader")
+                _lid_l in MARKET_WORKERS
                 and has_fetch_market
                 and _finanz_user_requests_ohlcv_ingest(incoming)
                 and not force_fetch_ib_gateway
@@ -3758,7 +4577,7 @@ def build_worker_graph(
             force_quant_signal_fetch_md = False
             force_quant_goals_evaluate_cfd = False
             if (
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and _quant_user_requests_new_trade_signal(incoming)
                 and not _quant_user_requests_execute_approved_signal(incoming)
                 and _worker_use_heuristic_first_tool(spec)
@@ -3796,7 +4615,7 @@ def build_worker_graph(
                     elif has_fetch_market:
                         force_quant_signal_fetch_md = True
             if (
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and _is_goals_tick_msg
                 and has_evaluate_cfd_state
                 and _worker_use_heuristic_first_tool(spec)
@@ -3850,7 +4669,7 @@ def build_worker_graph(
                     "doc plotly",
                 )
             )
-            _plot_capable_worker = (_lid or "").strip().lower() in ("siata_analyst", "finanz")
+            _plot_capable_worker = normalize_worker_id(_lid) in PLOT_CAPABLE_WORKERS
             force_plot_docs = bool(
                 has_tavily
                 and _plot_capable_worker
@@ -3901,7 +4720,7 @@ def build_worker_graph(
                 _pa_esc = int(state.get("plan_attempt_index") or 0)
                 if (
                     _pa_esc >= 1
-                    and (_lid or "").strip().lower() == "finanz"
+                    and is_finanz(_lid)
                     and has_read_sql
                     and not telegram_context_summarize_directive
                     and not already_has_tool_result
@@ -3918,7 +4737,8 @@ def build_worker_graph(
                 return out
 
             if (
-                (_lid or "").strip().lower() == "finanz"
+                not _orch
+                and is_finanz(_lid)
                 and "get_current_time" in tools_by_name
                 and _finanz_should_force_current_time(incoming)
                 and not telegram_context_summarize_directive
@@ -3947,7 +4767,7 @@ def build_worker_graph(
                     return _out_finanz_gct
 
             force_pqrsd_fetch_canonical = bool(
-                _lid_l == "pqrsd_assistant"
+                _lid_l == WORKER_PQRSD_ASSISTANT
                 and has_pqrsd_fetch
                 and _worker_use_heuristic_first_tool(spec)
                 and _pqrsd_substantive_forced_fetch(
@@ -3969,7 +4789,7 @@ def build_worker_graph(
                 _pqrsd_skipped_forced_fetch = True
 
             force_execute_approved_signal = bool(
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and has_execute_approved_signal
                 and _quant_user_requests_execute_approved_signal(incoming)
                 and _worker_use_heuristic_first_tool(spec)
@@ -3997,7 +4817,7 @@ def build_worker_graph(
                 force_execute_approved_signal = False
 
             force_quant_autoexec_validation_read_sql = bool(
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and has_read_sql
                 and _quant_user_requests_autoexec_validation(incoming)
                 and _worker_use_heuristic_first_tool(spec)
@@ -4025,9 +4845,9 @@ def build_worker_graph(
             if force_quant_autoexec_validation_read_sql:
                 force_read_sql = True
 
-            _quant_proceed_like = bool(_lid_l == "quant_trader" and _quant_is_proceed_like(incoming))
+            _quant_proceed_like = bool(_lid_l == WORKER_QUANT_TRADER and _quant_is_proceed_like(incoming))
             _quant_deterministic_cycle = bool(
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and _worker_use_heuristic_first_tool(spec)
                 and not telegram_context_summarize_directive
                 and (
@@ -4037,7 +4857,7 @@ def build_worker_graph(
                 )
             )
             _quant_vlm_read_sql_evidence = bool(
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and has_read_sql
                 and _worker_use_heuristic_first_tool(spec)
                 and not telegram_context_summarize_directive
@@ -4117,7 +4937,7 @@ def build_worker_graph(
             if _m_rm:
                 _regime_macro_pgq = str(_m_rm.group(1) or "").strip().upper()
             if (
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and has_inspect_macro_pgq
                 and _quant_user_requests_inspect_macro_pgq(incoming)
                 and _worker_use_heuristic_first_tool(spec)
@@ -4217,7 +5037,7 @@ def build_worker_graph(
                 _out_forced.update(_identity_fields(state))
                 return _out_forced
             if (
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and _quant_user_requests_execute_approved_signal(incoming)
                 and has_execute_approved_signal
                 and _quant_signal_id
@@ -4250,7 +5070,7 @@ def build_worker_graph(
             elif _reddit_anchor_u and _REDDIT_COMMENTS_IN_URL_RE.search(_reddit_anchor_u):
                 _reddit_comments_for_http = _reddit_anchor_u.split("#")[0].split("?")[0].rstrip("/")
             _quant_reddit_http_fast = bool(
-                (_lid_l == "quant_trader" or (_lid or "").strip().lower() == "quant_trader")
+                (_lid_l == WORKER_QUANT_TRADER or is_quant_trader(_lid))
                 and (_quant_lone_reddit_only or _q_reddit_hist)
                 and not has_reddit_tools
                 and _reddit_comments_for_http
@@ -4282,7 +5102,7 @@ def build_worker_graph(
             _has_run_browser = "run_browser_sandbox" in tools_by_name
             _has_tavily_mql5 = "tavily_search" in tools_by_name
             _quant_lone_mql5_url = bool(
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and _LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip())
                 and "mql5.com" in (incoming or "").lower()
             )
@@ -4327,7 +5147,7 @@ def build_worker_graph(
                     return _out_m
 
             if (
-                _lid_l == "quant_trader"
+                _lid_l == WORKER_QUANT_TRADER
                 and _LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip())
                 and already_has_tool_result
                 and isinstance(last_msg, ToolMessage)
@@ -4476,7 +5296,7 @@ def build_worker_graph(
 
             _msg_list = sanitize_reddit_tool_messages_for_llm(list(state["messages"]))
             _pqrsd_inject_datos_first_directive = bool(
-                (_lid or "").strip().lower() == "pqrsd_assistant"
+                is_pqrsd_assistant(_lid)
                 and not already_has_tool_result
                 and _pqrsd_datos_first_over_forced_fetch(incoming)
             )
@@ -4489,7 +5309,7 @@ def build_worker_graph(
                     SystemMessage(content=load_guardrail("directives", "tool_choice_generic"))
                 ] + _msg_list
             _quant_autoexec_validation_intent = bool(
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and _quant_user_requests_autoexec_validation(incoming)
                 and not telegram_context_summarize_directive
             )
@@ -4498,7 +5318,7 @@ def build_worker_graph(
                     SystemMessage(content=load_guardrail("directives", "quant_autoexec"))
                 ] + _msg_list
             if (
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and telegram_context_summarize_directive
             ):
                 _msg_list = [
@@ -4506,7 +5326,7 @@ def build_worker_graph(
                 ] + _msg_list
             _qp_ctx = state.get("quant_pipeline_context")
             if (
-                (_lid or "").strip().lower() == "quant_trader"
+                is_quant_trader(_lid)
                 and isinstance(_qp_ctx, dict)
                 and _quant_deterministic_cycle
                 and _has_fetch_since_last_human
@@ -4521,7 +5341,7 @@ def build_worker_graph(
                 _msg_list = [
                     SystemMessage(content=load_guardrail("directives", "reddit_share_exhausted"))
                 ] + _msg_list
-            if (_lid or "").strip().lower() == "quant_trader" and _visual_tool_already_ok:
+            if is_quant_trader(_lid) and _visual_tool_already_ok:
                 _msg_list = [
                     SystemMessage(
                         content=(
@@ -4637,7 +5457,7 @@ def build_worker_graph(
                 resp = invoke_chat_model_with_transient_retries(_invoked_llm, _groq_msgs)
                 _lid_lower_for_reddit_patch = (_lid or "").strip().lower()
                 if (
-                    _lid_lower_for_reddit_patch in ("finanz", "quant_trader")
+                    normalize_worker_id(_lid_lower_for_reddit_patch) in MARKET_WORKERS
                     and resp is not None
                     and getattr(resp, "tool_calls", None)
                 ):
@@ -4662,8 +5482,28 @@ def build_worker_graph(
                 _pl_fail = failure_provider_label_for_llm_invoke(_invoked_llm, provider)
                 resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=_pl_fail))
             tool_calls = getattr(resp, "tool_calls", None) or []
+            # #region agent log
+            _agent_debug_log(
+                "factory.py:agent_node:llm_output",
+                "llm_tool_output",
+                {
+                    "runId": "hallucination-debug-1",
+                    "worker": str(_lid or ""),
+                    "invoked_with_force_read_sql": bool(force_read_sql),
+                    "invoked_with_force_admin_sql": bool(force_admin_sql),
+                    "llm_invoke_failed": bool(_llm_invoke_exc is not None),
+                    "tool_calls_count": len(tool_calls),
+                    "tool_call_names": [
+                        str((tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")) or "")
+                        for tc in tool_calls
+                    ][:6],
+                    "resp_preview": str(getattr(resp, "content", "") or "")[:180],
+                },
+                "H2",
+            )
+            # #endregion
             if (
-                (_lid_l == "finanz")
+                (_lid_l == WORKER_FINANZ)
                 and force_finanz_admin_sql
                 and not tool_calls
                 and _llm_invoke_exc is None
@@ -4690,7 +5530,7 @@ def build_worker_graph(
                     resp = AIMessage(content=str(getattr(resp, "content", "") or ""), tool_calls=forced_tc)
                 tool_calls = getattr(resp, "tool_calls", None) or forced_tc
             _is_quant_forced_without_tools = (
-                (_lid_l == "quant_trader")
+                (_lid_l == WORKER_QUANT_TRADER)
                 and not tool_calls
                 and (
                     force_quant_signal_fetch_ib
@@ -4734,7 +5574,7 @@ def build_worker_graph(
                     except Exception:
                         resp = AIMessage(content=str(getattr(resp, "content", "") or ""), tool_calls=forced_tc)
                     tool_calls = getattr(resp, "tool_calls", None) or forced_tc
-            if (_lid_l == "quant_trader") and force_quant_propose_signal and not tool_calls:
+            if (_lid_l == WORKER_QUANT_TRADER) and force_quant_propose_signal and not tool_calls:
                 _fallback_tool_name = (
                     "run_quant_signal_cycle"
                     if ("run_quant_signal_cycle" in tools_by_name)
@@ -4780,7 +5620,101 @@ def build_worker_graph(
                     else:
                         _tc_names.append(getattr(tc, "name", None))
                 _log.info("[%s] LLM tool_calls=%s", _wl, _tc_names)
-            _resp_content = str(getattr(resp, "content", "") or "").strip()
+            _resp_content = ""
+            try:
+                from duckclaw.integrations.llm_providers import lc_message_content_to_text
+
+                _resp_content = (lc_message_content_to_text(resp) or "").strip()
+            except Exception:
+                _resp_content = str(getattr(resp, "content", "") or "").strip()
+            _lh_gct_fix = _quant_last_human_index(state.get("messages") or [])
+            _quant_vlm_post_tools = _quant_vlm_post_tools_synthesis(
+                state.get("messages") or [],
+                incoming,
+                last_human_idx=_lh_gct_fix,
+                already_has_tool_result=already_has_tool_result,
+            )
+            _json_echo = _reply_is_quant_tool_json_echo(_resp_content)
+            _gct_lone_url_skip = _market_worker_gct_only_lone_url_no_repair(
+                incoming,
+                state.get("messages") or [],
+                last_human_idx=_lh_gct_fix,
+            )
+            _inline_repair_gate = _quant_vlm_post_tools or (
+                _json_echo and not _gct_lone_url_skip
+            )
+            _inline_will_synth = bool(
+                not tool_calls
+                and _llm_invoke_exc is None
+                and is_market_worker(_lid)
+                and _inline_repair_gate
+                and (not _resp_content or _json_echo)
+            )
+            _agent_debug_log(
+                "factory.py:agent_node:inline_synthesis",
+                "inline_synthesis_decision",
+                {
+                    "worker": _wl,
+                    "quant_vlm_post_tools": _quant_vlm_post_tools,
+                    "json_echo": _json_echo,
+                    "gct_lone_url_skip": _gct_lone_url_skip,
+                    "inline_repair_gate": _inline_repair_gate,
+                    "inline_will_synth": _inline_will_synth,
+                    "resp_preview": (_resp_content or "")[:160],
+                    "tool_calls_empty": not tool_calls,
+                },
+                "B",
+            )
+            _market_inline_synth_attempted = False
+            if (
+                not tool_calls
+                and _llm_invoke_exc is None
+                and is_market_worker(_lid)
+                and _inline_repair_gate
+                and (
+                    not _resp_content
+                    or _reply_is_quant_tool_json_echo(_resp_content)
+                )
+            ):
+                _market_inline_synth_attempted = True
+                _gct_data = (
+                    _parse_get_current_time_json(_resp_content)
+                    or _quant_latest_tool_json_since(
+                        state.get("messages") or [], _lh_gct_fix, "get_current_time"
+                    )
+                    or {}
+                )
+                _day = str(_gct_data.get("day_of_week") or "")
+                _tm = str(_gct_data.get("time") or "")[:5]
+                _clock_hint = f"{_day} {_tm} COT".strip() if (_day or _tm) else ""
+                _brand = _market_worker_egress_brand(_lid)
+                _tools_ran = [
+                    str(getattr(m, "name", "") or "")
+                    for m in (state.get("messages") or [])[max(0, _lh_gct_fix + 1) :]
+                    if isinstance(m, ToolMessage)
+                ]
+                _tools_hint = ", ".join(dict.fromkeys(_tools_ran)) if _tools_ran else "herramientas"
+                _follow_sys = SystemMessage(
+                    content=(
+                        f"Ya ejecutaste {_tools_hint} en este turno. "
+                        + (f"Encabezado {_brand} con {_clock_hint}. " if _clock_hint else "")
+                        + "Redacta el análisis macro/financiero completo en español integrando el contexto visual "
+                        "y los resultados de herramientas. PROHIBIDO pegar JSON crudo de herramientas."
+                    )
+                )
+                try:
+                    resp = invoke_chat_model_with_transient_retries(
+                        _invoked_llm, list(_groq_msgs) + [_follow_sys]
+                    )
+                    try:
+                        from duckclaw.integrations.llm_providers import lc_message_content_to_text
+
+                        _resp_content = (lc_message_content_to_text(resp) or "").strip()
+                    except Exception:
+                        _resp_content = str(getattr(resp, "content", "") or "").strip()
+                    tool_calls = getattr(resp, "tool_calls", None) or []
+                except Exception as exc:
+                    _log.warning("[%s] quant vlm post-tools synthesis retry failed: %s", _wl, exc)
             if _is_goals_tick and not tool_calls:
                 # Ticks proactivos con sesión rebalance_hrp / overnight_gap_squeeze (o ya hubo sandbox en el hilo): no sustituir
                 # la respuesta del modelo por el resumen genérico de «PnL positivo».
@@ -4930,9 +5864,12 @@ def build_worker_graph(
                 _needs_gct = not _quant_tool_called_since(
                     _msgs_gct, _lh_idx_gct, "get_current_time"
                 ) and (
-                    (_lid_l == "quant_trader")
+                    (
+                        is_quant_trader(_lid)
+                        and _quant_trader_should_force_current_time(incoming)
+                    )
                     or (
-                        (_lid_l == "finanz")
+                        (_lid_l == WORKER_FINANZ)
                         and _finanz_should_force_current_time(incoming)
                     )
                     or _response_mentions_wall_clock(_resp_content)
@@ -4955,6 +5892,8 @@ def build_worker_graph(
                         resp = AIMessage(content="", tool_calls=forced_tc_gct)
                     tool_calls = forced_tc_gct
             out = {**state, "messages": state["messages"] + [resp]}
+            if _market_inline_synth_attempted:
+                out["market_inline_synthesis_attempted"] = True
             if _llm_invoke_exc is not None:
                 from duckclaw.integrations.llm_providers import is_transient_inference_connection_error
 
@@ -5338,6 +6277,19 @@ def build_worker_graph(
                         )
                     except Exception as e:
                         content = f"Error: {e}"
+                        # #region agent log
+                        _agent_debug_log(
+                            "factory.py:tools_node:invoke",
+                            "tool_exec_error",
+                            {
+                                "runId": "hallucination-debug-1",
+                                "worker": str(worker_id or ""),
+                                "tool_name": name,
+                                "error_preview": str(e)[:200],
+                            },
+                            "H3",
+                        )
+                        # #endregion
                         _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
                         _notify_admin_tool_phase(
                             name,
@@ -5347,8 +6299,24 @@ def build_worker_graph(
                                 (time.perf_counter() - _tool_t0) * 1000 if _tool_t0 is not None else None
                             ),
                         )
+                    else:
+                        # #region agent log
+                        _agent_debug_log(
+                            "factory.py:tools_node:invoke",
+                            "tool_exec_success",
+                            {
+                                "runId": "hallucination-debug-1",
+                                "worker": str(worker_id or ""),
+                                "tool_name": name,
+                                "result_preview": str(content or "")[:180],
+                            },
+                            "H4",
+                        )
+                        # #endregion
                 else:
-                    if not sandbox_enabled and name in (
+                    if name == "get_ibkr_portfolio" and has_ibkr and not ibkr_session_on:
+                        content = _ibkr_disabled_chat_hint()
+                    elif not sandbox_enabled and name in (
                         "run_sandbox",
                         "run_browser_sandbox",
                         "get_browser_session_url",
@@ -5357,6 +6325,21 @@ def build_worker_graph(
                         content = "Sandbox deshabilitado en esta sesión. Actívalo con /sandbox on."
                     else:
                         content = f"Herramienta desconocida: {name}"
+                    # #region agent log
+                    _agent_debug_log(
+                        "factory.py:tools_node:invoke",
+                        "tool_missing_in_lookup",
+                        {
+                            "runId": "hallucination-debug-1",
+                            "worker": str(worker_id or ""),
+                            "tool_name": name,
+                            "sandbox_enabled": bool(sandbox_enabled),
+                            "ibkr_session_on": bool(ibkr_session_on),
+                            "available_tools_count": len(tool_lookup),
+                        },
+                        "H5",
+                    )
+                    # #endregion
                     _log.warning(
                         "[%s] unknown/unavailable tool: %s (sandbox_enabled=%s)",
                         _wl,
@@ -5438,6 +6421,7 @@ def build_worker_graph(
             sanitize_worker_reply_phase1,
             sanitize_worker_reply_text,
         )
+        from langchain_core.messages import ToolMessage
 
         def _notify_final_heartbeat() -> None:
             from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
@@ -5478,7 +6462,7 @@ def build_worker_graph(
         reply = replace_bare_wrong_summarize_stored_echo(reply, incoming=_inc_for_ctx)
         reply = replace_bare_summarize_image_on_vlm_gateway_down(reply, incoming=_inc_for_ctx)
         reply = repair_summarize_new_context_egress(reply, incoming=_inc_for_ctx)
-        if (getattr(spec, "worker_id", "") or "").strip().lower() == "finanz":
+        if is_finanz(getattr(spec, "worker_id", "")):
             from duckclaw.forge.skills.quant_market_bridge import (
                 finanz_reconcile_reply_with_fetch_market_tool,
             )
@@ -5564,7 +6548,7 @@ def build_worker_graph(
                 out_err.update(_identity_fields(state))
                 return out_err
         _visual_only_turn = bool(
-            (getattr(spec, "worker_id", "") or "").strip().lower() == "quant_trader"
+            is_quant_trader(_spec_logical_worker_id(spec))
             and _quant_visual_tool_succeeded_in_turn(list(msgs) if msgs else [])
             and (
                 (state.get("sandbox_photo_base64") or "").strip()
@@ -5577,6 +6561,57 @@ def build_worker_graph(
                 _short = "Imagen generada."
             reply = _short
         else:
+            _spec_lid = _spec_logical_worker_id(spec)
+            _lh_repair = _quant_last_human_index(list(msgs) if msgs else [])
+            _vlm_tools_ran = _quant_vlm_post_tools_synthesis(
+                list(msgs) if msgs else [],
+                _inc_for_ctx,
+                last_human_idx=_lh_repair,
+                already_has_tool_result=True,
+            )
+            _egress_json_echo = _reply_is_quant_tool_json_echo(reply or "")
+            _egress_needs_repair = _market_worker_needs_egress_repair(
+                list(msgs) if msgs else [],
+                _inc_for_ctx,
+                reply or "",
+                last_human_idx=_lh_repair,
+                worker_id=_spec_lid,
+            )
+            _agent_debug_log(
+                "factory.py:egress:repair_check",
+                "egress_repair_decision",
+                {
+                    "worker": _spec_lid,
+                    "vlm_tools_ran": _vlm_tools_ran,
+                    "egress_needs_repair": _egress_needs_repair,
+                    "json_echo": _egress_json_echo,
+                    "reply_preview": (reply or "")[:160],
+                },
+                "C",
+            )
+            if _egress_needs_repair:
+                _inline_synth_done = bool(state.get("market_inline_synthesis_attempted"))
+                _skip_llm_synth = _inline_synth_done and bool((reply or "").strip())
+                reply = _repair_quant_vlm_tool_egress_reply(
+                    llm,
+                    spec,
+                    _inc_for_ctx,
+                    reply or "",
+                    msgs,
+                    skip_llm_synthesis=_skip_llm_synth,
+                )
+                if _reply_is_quant_tool_json_echo(reply or ""):
+                    _det_egress = _deterministic_market_worker_tool_summary(
+                        list(msgs), _lh_repair, _spec_lid, _inc_for_ctx
+                    )
+                    if _det_egress and not _reply_is_quant_tool_json_echo(_det_egress):
+                        reply = _det_egress
+                _agent_debug_log(
+                    "factory.py:egress:repair_check",
+                    "egress_repair_done",
+                    {"reply_preview": (reply or "")[:160], "still_json_echo": _reply_is_quant_tool_json_echo(reply or "")},
+                    "C",
+                )
             reply = _repair_finanz_ibkr_egress(_apply_nl_synthesis(reply or ""))
         _wid_fin = str(getattr(spec, "worker_id", "") or "")
         reply = finanz_repair_ibkr_tool_live_vs_reply_paper(msgs, reply, worker_id=_wid_fin)
@@ -5671,14 +6706,21 @@ def build_worker_graph(
             pass
         reply = sanitize_worker_reply_text(reply or "")
         if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) and msgs:
-            from langchain_core.messages import ToolMessage
-
-            for _m in reversed(msgs):
-                if isinstance(_m, ToolMessage):
-                    _fallback = sanitize_worker_reply_text(format_tool_reply(_m.content))
-                    if _fallback:
-                        reply = _fallback
-                        break
+            _spec_lid_fb = _spec_logical_worker_id(spec)
+            _lh_fb = _quant_last_human_index(list(msgs))
+            if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")):
+                _det = _deterministic_market_worker_tool_summary(
+                    list(msgs), _lh_fb, _spec_lid_fb, _inc_for_ctx
+                )
+                if _det:
+                    reply = sanitize_worker_reply_text(_det)
+                else:
+                    for _m in reversed(msgs):
+                        if isinstance(_m, ToolMessage):
+                            _fallback = sanitize_worker_reply_text(format_tool_reply(_m.content))
+                            if _fallback:
+                                reply = _fallback
+                                break
         try:
             from duckclaw.graphs.conversation_traces import sync_final_assistant_egress_in_langchain_messages
 

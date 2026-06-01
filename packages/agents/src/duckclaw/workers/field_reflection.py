@@ -7,11 +7,13 @@ import json
 import re
 from typing import Any, Optional
 
+from duckclaw.workers.worker_ids import is_finanz
+
 
 def finanz_field_reflection_enabled(spec: Any) -> bool:
     """True solo para worker lógico finanz y si manifest no desactiva field_reflection."""
-    lid = (getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", None) or "").strip().lower()
-    if lid != "finanz":
+    lid = getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", None)
+    if not is_finanz(lid):
         return False
     cfg = getattr(spec, "field_reflection_config", None) or {}
     return bool(cfg.get("enabled", True))

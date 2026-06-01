@@ -934,6 +934,33 @@ def test_quant_hrp_affirm_followup_rejects_unrelated_thread() -> None:
     )
 
 
+def test_quant_hrp_affirm_followup_rejects_fort_knox_gld_generic_proceed() -> None:
+    """Fort Knox/GLD con confirmación genérica (¿Quieres…?) no debe activar fast-path HRP META/SPY."""
+    from duckclaw.graphs.manager_graph import _try_quant_hrp_affirm_followup
+
+    fort_knox = (
+        "### Fort Knox audit → GLD implicación\n"
+        "GLD cierre 29-may | $417.12 | Posición GLD 14.44% de cartera.\n"
+        "¿Quieres `accumulate_moc_intraday_state` para lunes con bias GLD alcista?"
+    )
+    older_hrp = (
+        "**Revisión HRP**\n- objetivo `rebalance_hrp`\n"
+        "¿Deseas que genere señales de compra para META y SPY para el rebalanceo?"
+    )
+    got = _try_quant_hrp_affirm_followup(
+        "Procede",
+        [
+            {"role": "assistant", "content": older_hrp},
+            {"role": "user", "content": "ok"},
+            {"role": "assistant", "content": fort_knox},
+        ],
+        "Quant-Trader",
+        "Cuantitativo",
+        ["Quant-Trader"],
+    )
+    assert got is None
+
+
 def test_plan_task_lone_http_url_skips_estructura_slug_false_positive() -> None:
     from duckclaw.graphs.manager_graph import _plan_task
 

@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from duckclaw.admin_user_profiles import ensure_profile_for_user
-from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema, get_worker_by_uid
-from duckclaw.shared_db_grants import _query_all_dicts, _sql_lit
+from duckclaw.control_plane.admin_user_profiles import ensure_profile_for_user
+from duckclaw.control_plane.admin_worker_catalog import ensure_admin_worker_catalog_schema, get_worker_by_uid
+from duckclaw.storage.shared_db_grants import _query_all_dicts, _sql_lit
 
 _ADMIN_PROJECTS_DDL = """
 CREATE TABLE IF NOT EXISTS main.admin_projects (

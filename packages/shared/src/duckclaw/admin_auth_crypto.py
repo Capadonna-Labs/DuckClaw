@@ -10,7 +10,7 @@ import json
 import os
 from typing import Any, Callable
 
-from duckclaw.admin_console_users import verify_password
+from duckclaw.control_plane.admin_console_users import verify_password
 
 ARGON2_TIME = int(os.environ.get("ARGON2_TIME", "2"))
 ARGON2_MEMORY_KB = int(os.environ.get("ARGON2_MEMORY_KB", "65536"))

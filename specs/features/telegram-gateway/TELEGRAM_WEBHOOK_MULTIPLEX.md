@@ -39,4 +39,4 @@ Alternativa sin cabeceras por bot: `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` como lista
 
 (el token puede contener `:`; el path se detecta con regex bajo `/api/v1/telegram/`). El gateway registra un `POST` por path e inyecta `request.state.duckclaw_telegram_path_binding`. No hay perfiles hardcodeados en el repo: worker, tenant y bóveda vienen de cada entrada en `.env`.
 
-Registro: `python scripts/register_webhooks.py` lee `DUCKCLAW_PUBLIC_URL` + la variable compacta y llama `setWebhook` por bot. Si la variable empieza por `[`, se interpreta como Modo B JSON y no se registran rutas compactas.
+Registro: `uv run duckops ingress telegram-register-webhooks` lee `DUCKCLAW_PUBLIC_URL` + la variable compacta y llama `setWebhook` por bot. Wrapper compatible: `uv run python scripts/register_webhooks.py`. Si la variable empieza por `[`, se interpreta como Modo B JSON y no se registran rutas compactas.

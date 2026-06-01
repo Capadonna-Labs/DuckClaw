@@ -34,18 +34,12 @@ train = [
     "mlx-lm>=0.31.2",
 ]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-# duckclaw.graphs (src/duckclaw/graphs), duckclaw.workers, duckclaw.forge (forge/skills en forge)
-packages = [
-    "duckclaw.graphs",
-    "duckclaw.workers",
-    "duckclaw.forge",
-    "duckclaw.api",
-    "duckclaw.guardrails",
-    "duckclaw.deprecated",
-    "duckclaw.deprecated.the_mind",
-]
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["duckclaw*"]
 
 [tool.setuptools.package-data]
 "duckclaw.guardrails" = ["**/*.md", "manager_tasks/**/*.md", "capabilities/**/*.md", "planner_tasks/**/*.md"]

@@ -21,6 +21,20 @@ def test_gateway_delivery_context_legacy_telegram() -> None:
     assert dc.channel == "telegram"
     assert dc.outbound_bot_token == "abc"
     assert dc.telegram_multipart_tail_delivery == "native"
+    assert dc.auth_policy == "telegram_guard"
+
+
+def test_gateway_delivery_context_can_mark_trusted_admin_console() -> None:
+    dc = GatewayDeliveryContext.trusted_admin_console()
+    assert dc.channel == "http"
+    assert dc.auth_policy == "trusted_admin_console"
+
+
+def test_gateway_delivery_context_can_mark_trusted_channel_route() -> None:
+    dc = GatewayDeliveryContext.trusted_channel_route(channel="discord", outbound_bot_token="bot")
+    assert dc.channel == "discord"
+    assert dc.outbound_bot_token == "bot"
+    assert dc.auth_policy == "trusted_channel_route"
 
 
 def test_telegram_session_id_without_urn(monkeypatch) -> None:

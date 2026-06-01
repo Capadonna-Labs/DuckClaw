@@ -610,7 +610,7 @@ export function useAdminChat({
               assignedSuffix = ` (worker: ${meta.assigned_worker_id})`;
             }
             if (meta.elapsed_ms != null && Number.isFinite(meta.elapsed_ms)) {
-              elapsedFooter = `\n\n⏱️ ${(meta.elapsed_ms / 1000).toFixed(2)}s`;
+              elapsedFooter = `\n\nTiempo: ${(meta.elapsed_ms / 1000).toFixed(2)}s`;
             }
             if (meta.figure_base64 || meta.artifact_id) {
               streamVisual.figure_base64 = meta.figure_base64;

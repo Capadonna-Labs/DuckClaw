@@ -13,6 +13,7 @@ import type { DuckdbTableCatalog } from '@/services/adminService';
 
 type Props = {
   vaultPath: string;
+  refreshKey?: number;
 };
 
 function quoteIdent(schema: string, table: string): string {
@@ -20,7 +21,7 @@ function quoteIdent(schema: string, table: string): string {
   return `${q(schema)}.${q(table)}`;
 }
 
-export function TableExplorer({ vaultPath }: Props) {
+export function TableExplorer({ vaultPath, refreshKey = 0 }: Props) {
   const [schemas, setSchemas] = useState<Record<string, string[]>>({});
   const [openSchemas, setOpenSchemas] = useState<Set<string>>(new Set(['main']));
   const [sql, setSql] = useState('');
@@ -72,7 +73,7 @@ export function TableExplorer({ vaultPath }: Props) {
 
   useEffect(() => {
     void loadCatalog();
-  }, [loadCatalog]);
+  }, [loadCatalog, refreshKey]);
 
   const tableColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(() => {
     return columns.map((col) => ({

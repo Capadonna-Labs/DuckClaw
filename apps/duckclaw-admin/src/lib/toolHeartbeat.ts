@@ -7,8 +7,10 @@ export type { ToolHeartbeatPhase };
 export function parseToolNameFromHeartbeatText(text: string): string | null {
   const raw = (text || '').trim();
   if (!raw) return null;
-  const using = raw.match(/🔄\s*Usando:\s*(.+?)(?:\s*·|$)/);
+  const using = raw.match(/\u{1F504}\s*Usando:\s*(.+?)(?:\s*·|$)/u);
   if (using) return using[1].trim();
+  const plain = raw.match(/Usando:\s*(.+?)(?:\s*·|$)/);
+  if (plain) return plain[1].trim();
   const legacy = raw.match(/herramienta\s+([A-Za-z0-9_.-]+)/i);
   return legacy ? legacy[1].trim() : null;
 }
@@ -16,12 +18,12 @@ export function parseToolNameFromHeartbeatText(text: string): string | null {
 export function formatToolDurationMs(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms)) return '';
   const n = Math.max(0, ms);
-  if (n < 1000) return `⏱️ ${Math.round(n)}ms`;
+  if (n < 1000) return `${Math.round(n)}ms`;
   const sec = n / 1000;
-  if (sec < 60) return `⏱️ ${sec.toFixed(2)}s`;
+  if (sec < 60) return `${sec.toFixed(2)}s`;
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
-  return `⏱️ ${m}m ${s}s`;
+  return `${m}m ${s}s`;
 }
 
 export function toolHeartbeatDisplayText(
@@ -30,7 +32,7 @@ export function toolHeartbeatDisplayText(
   elapsedMs: number | null | undefined
 ): string {
   const name = (toolName || 'tool').trim();
-  const base = `🔄 Usando: ${name}`;
+  const base = `Usando: ${name}`;
   if (phase === 'error') {
     const dur = formatToolDurationMs(elapsedMs);
     return dur ? `${base} · error · ${dur}` : `${base} · error`;

@@ -10,7 +10,7 @@ import type { ChatMsg } from './types';
 const messages: ChatMsg[] = [
   { role: 'user', text: 'hola' },
   { role: 'heartbeat', text: 'Pensando…', heartbeatKind: 'status' },
-  { role: 'heartbeat', text: '🔄 read_sql — en curso', heartbeatKind: 'tool', toolName: 'read_sql' },
+  { role: 'heartbeat', text: 'read_sql — en curso', heartbeatKind: 'tool', toolName: 'read_sql' },
   { role: 'assistant', text: '', streaming: true },
 ];
 

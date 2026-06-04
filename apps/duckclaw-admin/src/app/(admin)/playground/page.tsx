@@ -13,9 +13,9 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Terminal,
+  X,
 } from 'lucide-react';
 import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
-import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { useAdminChat } from '@/components/chat/useAdminChat';
 import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
@@ -34,7 +34,7 @@ export default function PlaygroundPage() {
   const searchParams = useSearchParams();
   const initialWorker = searchParams.get('worker') || '';
   const initialProject = searchParams.get('project') || '';
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [mainScrollEl, setMainScrollEl] = useState<HTMLElement | null>(null);
   const [systemPreview, setSystemPreview] = useState('');
   const [openConfigSection, setOpenConfigSection] = useState<PlaygroundConfigSection>('commands');
@@ -166,12 +166,43 @@ export default function PlaygroundPage() {
       .catch(() => setSystemPreview(''));
   }, [workerId]);
 
+  const isHistoryView = searchParams.get('view') === 'history';
+
   useEffect(() => {
     setMainScrollEl(document.getElementById('admin-main-scroll'));
   }, []);
 
+  useEffect(() => {
+    const main = document.getElementById('admin-main-scroll');
+    if (!main || typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 1023px)');
+    const apply = () => {
+      if (mq.matches && !isHistoryView) {
+        main.classList.add('!overflow-hidden');
+      } else {
+        main.classList.remove('!overflow-hidden');
+      }
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => {
+      mq.removeEventListener('change', apply);
+      main.classList.remove('!overflow-hidden');
+    };
+  }, [isHistoryView]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const apply = () => {
+      if (mq.matches) setPanelOpen(true);
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+
   const pageScroll = useScrollFabPair(mainScrollEl);
-  const isHistoryView = searchParams.get('view') === 'history';
   const activeVaultPath = chat.vaultPath || config?.vault?.effective_path || '';
   const activeVaultScope = chat.vaultPath ? 'chat' : config?.vault?.scope;
   const toggleConfigSection = useCallback((section: Exclude<PlaygroundConfigSection, null>) => {
@@ -179,8 +210,93 @@ export default function PlaygroundPage() {
   }, []);
   const panelToggleTitle = panelOpen ? 'Ocultar panel de configuración' : 'Mostrar panel de configuración';
 
+  const configPanelBody = (
+    <>
+      <CurrentConfigSummary
+        config={config}
+        activeVaultPath={activeVaultPath}
+        activeVaultScope={activeVaultScope}
+        workerLabel={workerId || '—'}
+      />
+      <ConfigAccordionSection
+        title="Comandos"
+        description="Comandos del chat"
+        open={openConfigSection === 'commands'}
+        onToggle={() => toggleConfigSection('commands')}
+      >
+        <ChatCommandsPanel />
+      </ConfigAccordionSection>
+      <ConfigAccordionSection
+        title="Cambiar bóveda"
+        description="DuckDB de esta conversación"
+        open={openConfigSection === 'vault'}
+        onToggle={() => toggleConfigSection('vault')}
+      >
+        {conv.sessionId ? (
+          <ConversationVaultSelector
+            chatId={conv.sessionId}
+            tenantId={config?.effective_tenant_id}
+            value={chat.vaultPath}
+            effectivePath={activeVaultPath}
+            scope={activeVaultScope}
+            options={config?.vault_options}
+            onChange={chat.setVaultPath}
+            onUpdated={loadConfig}
+          />
+        ) : (
+          <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
+        )}
+      </ConfigAccordionSection>
+      <ConfigAccordionSection
+        title="Cambiar modelo"
+        description="Proveedor y modelo LLM"
+        open={openConfigSection === 'model'}
+        onToggle={() => toggleConfigSection('model')}
+      >
+        {conv.sessionId ? (
+          <LlmProviderCatalog
+            chatId={conv.sessionId}
+            catalog={config?.catalog ?? []}
+            onUpdated={loadConfig}
+          />
+        ) : (
+          <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
+        )}
+      </ConfigAccordionSection>
+      <ConfigAccordionSection
+        title="Instrucciones"
+        description="Comportamiento del agente"
+        open={openConfigSection === 'instructions'}
+        onToggle={() => toggleConfigSection('instructions')}
+      >
+        <MarkdownSnippetPanel
+          content={systemPreview}
+          emptyLabel="Sin system_prompt.md"
+          maxHeightClass="max-h-48"
+        />
+        <Link
+          href={`/templates/${workerId}?focus=system_prompt.md`}
+          className="text-xs text-gov-blue-700 font-semibold mt-2 inline-block"
+        >
+          Editar comportamiento →
+        </Link>
+      </ConfigAccordionSection>
+    </>
+  );
+
+  const conversationPickerProps = conv.sessionId
+    ? {
+        tenantId: config?.effective_tenant_id,
+        section: 'playground' as const,
+        activeSessionId: conv.sessionId,
+        refreshToken: conv.refreshToken,
+        onSelect: (id: string, meta?: AdminConversation) => conv.selectConversation(id, meta?.title),
+        onCreateNew: () => void createConversation(),
+      }
+    : null;
+
   return (
-    <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-8rem)] lg:h-[calc(100vh-8rem)] lg:min-h-0 lg:overflow-hidden relative">
+    <div className="flex flex-col lg:flex-row gap-4 min-h-0 max-lg:h-[calc(100dvh-4rem)] max-lg:overflow-hidden lg:h-[calc(100vh-8rem)] lg:min-h-0 lg:overflow-hidden relative -mx-4 px-4 md:mx-0 md:px-0">
       <ScrollFabPair
         showScrollTop={pageScroll.showScrollTop}
         showScrollBottom={pageScroll.showScrollBottom}
@@ -192,22 +308,27 @@ export default function PlaygroundPage() {
         <PlaygroundHistoryView tenantId={config?.effective_tenant_id} />
       ) : (
         <>
-      <div className="flex-1 flex flex-col min-w-0 min-h-[calc(100vh-8rem)] lg:min-h-0 lg:h-full bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
-        <header className="flex flex-wrap items-center justify-between gap-3 p-4 border-b dark:border-dark-border">
-          <div>
-            <h1 className="text-xl font-black dark:text-dark-text flex items-center gap-2">
-              <Bot size={22} /> Playground
-            </h1>
-            {conv.conversationTitle?.trim() ? (
-              <EditableConversationTitle
-                value={conv.conversationTitle.trim()}
-                onSave={conv.renameConversation}
-                compact
-                className="text-xs text-gov-gray-500 mt-0.5"
-              />
-            ) : (
-              <p className="text-xs text-gov-gray-500 mt-0.5">Respuestas en vivo (SSE)</p>
-            )}
+      <div className="flex-1 flex flex-col min-w-0 h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] lg:h-full lg:max-h-none bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
+        <header className="flex flex-col gap-3 p-3 sm:p-4 border-b dark:border-dark-border shrink-0">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-xl font-black dark:text-dark-text flex items-center gap-2">
+                <Bot size={22} /> Playground
+              </h1>
+              <p className="text-xs text-gov-gray-500 mt-0.5">
+                Respuestas en vivo (SSE) · pestaña Conversación para cambiar de hilo
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPanelOpen((open) => !open)}
+              className="lg:hidden shrink-0 flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border dark:border-dark-border bg-gov-gray-50 dark:bg-dark-bg text-gov-blue-800"
+              aria-expanded={panelOpen}
+              aria-label={panelToggleTitle}
+            >
+              <Settings2 size={16} aria-hidden />
+              Config
+            </button>
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {(config?.projects?.length ?? 0) > 0 && (
@@ -293,6 +414,17 @@ export default function PlaygroundPage() {
             showWorkerLink={false}
             conversationTitle={conv.conversationTitle}
             onRenameConversation={conv.renameConversation}
+            conversationManage={
+              conversationPickerProps
+                ? {
+                    tenantId: conversationPickerProps.tenantId,
+                    section: conversationPickerProps.section,
+                    refreshToken: conversationPickerProps.refreshToken,
+                    onSelect: conversationPickerProps.onSelect,
+                    onCreateNew: conversationPickerProps.onCreateNew,
+                  }
+                : undefined
+            }
             emptyHint={
               workerId
                 ? `Escribe un mensaje para hablar con ${workerId}`
@@ -313,91 +445,52 @@ export default function PlaygroundPage() {
         {panelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
       </button>
 
+      {panelOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-40 flex"
+          role="dialog"
+          aria-label="Configuración del Playground"
+        >
+          <button
+            type="button"
+            className="flex-1 bg-gov-blue-900/50 backdrop-blur-sm"
+            aria-label="Cerrar configuración"
+            onClick={() => setPanelOpen(false)}
+          />
+          <aside className="relative w-full max-w-sm h-full min-h-0 flex flex-col bg-white dark:bg-dark-surface border-l dark:border-dark-border shadow-xl">
+            <div className="flex items-center justify-between gap-2 shrink-0 p-4 border-b dark:border-dark-border">
+              <span className="text-xs font-bold uppercase text-gov-gray-500 tracking-wide">
+                Configuración
+              </span>
+              <button
+                type="button"
+                onClick={() => setPanelOpen(false)}
+                className="p-2 rounded-lg text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
+                aria-label="Cerrar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3 overscroll-contain">
+              {configPanelBody}
+            </div>
+          </aside>
+        </div>
+      )}
+
       <aside
-        className={`shrink-0 min-h-0 overflow-hidden transition-[width,opacity] duration-300 ease-out ${
-          panelOpen
-            ? 'w-full lg:w-80 lg:h-full opacity-100'
-            : 'w-0 max-w-0 opacity-0 pointer-events-none lg:hidden'
+        className={`hidden lg:flex shrink-0 min-h-0 overflow-hidden transition-[width,opacity] duration-300 ease-out ${
+          panelOpen ? 'w-80 h-full opacity-100' : 'w-0 max-w-0 opacity-0 pointer-events-none'
         }`}
         aria-hidden={!panelOpen}
       >
-        <div className="w-full lg:w-80 h-full min-h-0 flex flex-col">
+        <div className="w-80 h-full min-h-0 flex flex-col">
           <div className="flex items-center justify-between gap-2 shrink-0 pb-2">
             <span className="text-xs font-bold uppercase text-gov-gray-500 tracking-wide">
               Configuración
             </span>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-3">
-            <CurrentConfigSummary
-                config={config}
-                activeVaultPath={activeVaultPath}
-                activeVaultScope={activeVaultScope}
-                workerLabel={workerId || '—'}
-            />
-            <ConfigAccordionSection
-              title="Comandos"
-              description="Comandos del chat"
-              open={openConfigSection === 'commands'}
-              onToggle={() => toggleConfigSection('commands')}
-            >
-              <ChatCommandsPanel />
-            </ConfigAccordionSection>
-            <ConfigAccordionSection
-              title="Cambiar bóveda"
-              description="DuckDB de esta conversación"
-              open={openConfigSection === 'vault'}
-              onToggle={() => toggleConfigSection('vault')}
-            >
-              {conv.sessionId ? (
-                <ConversationVaultSelector
-                  chatId={conv.sessionId}
-                  tenantId={config?.effective_tenant_id}
-                  value={chat.vaultPath}
-                  effectivePath={activeVaultPath}
-                  scope={activeVaultScope}
-                  options={config?.vault_options}
-                  onChange={chat.setVaultPath}
-                  onUpdated={loadConfig}
-                />
-              ) : (
-                <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
-              )}
-            </ConfigAccordionSection>
-            <ConfigAccordionSection
-              title="Cambiar modelo"
-              description="Proveedor y modelo LLM"
-              open={openConfigSection === 'model'}
-              onToggle={() => toggleConfigSection('model')}
-            >
-              {conv.sessionId ? (
-                <LlmProviderCatalog
-                  chatId={conv.sessionId}
-                  catalog={config?.catalog ?? []}
-                  onUpdated={loadConfig}
-                />
-              ) : (
-                <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
-              )}
-            </ConfigAccordionSection>
-            <ConfigAccordionSection
-              title="Instrucciones"
-              description="Comportamiento del agente"
-              open={openConfigSection === 'instructions'}
-              onToggle={() => toggleConfigSection('instructions')}
-            >
-              <MarkdownSnippetPanel
-                content={systemPreview}
-                emptyLabel="Sin system_prompt.md"
-                maxHeightClass="max-h-48"
-              />
-              <Link
-                href={`/templates/${workerId}?focus=system_prompt.md`}
-                className="text-xs text-gov-blue-700 font-semibold mt-2 inline-block"
-              >
-                Editar comportamiento →
-              </Link>
-            </ConfigAccordionSection>
-          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-3">{configPanelBody}</div>
         </div>
       </aside>
         </>

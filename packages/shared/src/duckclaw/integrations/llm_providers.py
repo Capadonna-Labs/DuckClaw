@@ -690,6 +690,7 @@ def _strip_duckdb_internal_crash_reply(text: str) -> str:
 def sanitize_worker_reply_text(text: str) -> str:
     """Limpia respuestas assistant para Telegram/trazas: basura HTTP + EOT + encabezados ``### tool``."""
     s = sanitize_worker_reply_phase1(text or "")
+    s = strip_dsml_tool_markup(s)
     s = strip_gemma_mlx_channel_leak(s)
     s = _strip_gemma_pseudo_xml_date_time(s)
     s = _strip_tool_section_header_lines(s)
@@ -751,6 +752,53 @@ def coerce_json_tool_invoke(reply: str) -> tuple[str, dict[str, Any]] | None:
     return (name, params)
 
 
+_DSML_PIPE = r"[｜|]"
+_DSML_INVOKE_RE = re.compile(
+    rf"<\s*{_DSML_PIPE}\s*DSML\s*{_DSML_PIPE}\s*invoke\s+name=[\"']([^\"']+)[\"']\s*>(.*?)</\s*{_DSML_PIPE}\s*DSML\s*{_DSML_PIPE}\s*invoke\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+_DSML_PARAM_RE = re.compile(
+    rf"<\s*{_DSML_PIPE}\s*DSML\s*{_DSML_PIPE}\s*parameter\s+name=[\"']([^\"']+)[\"'][^>]*>(.*?)</\s*{_DSML_PIPE}\s*DSML\s*{_DSML_PIPE}\s*parameter\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+_DSML_TOOL_CALLS_BLOCK_RE = re.compile(
+    rf"<\s*{_DSML_PIPE}\s*DSML\s*{_DSML_PIPE}\s*tool_calls\s*>[\s\S]*?</\s*{_DSML_PIPE}\s*DSML\s*{_DSML_PIPE}\s*tool_calls\s*>",
+    re.IGNORECASE,
+)
+
+
+def reply_contains_dsml_tool_markup(text: str) -> bool:
+    """True si el modelo emitió invocaciones DSML en ``content`` (p. ej. DeepSeek vía OpenRouter)."""
+    s = (text or "")
+    if "dsml" not in s.lower():
+        return False
+    return "invoke" in s.lower() or "tool_calls" in s.lower()
+
+
+def extract_dsml_tool_invokes(text: str) -> list[tuple[str, dict[str, Any]]]:
+    """Parsea ``<｜DSML｜invoke name=\"tool\">`` embebido en texto assistant."""
+    raw = (text or "").strip()
+    if not reply_contains_dsml_tool_markup(raw):
+        return []
+    out: list[tuple[str, dict[str, Any]]] = []
+    for name, body in _DSML_INVOKE_RE.findall(raw):
+        params: dict[str, Any] = {}
+        for pname, pval in _DSML_PARAM_RE.findall(body):
+            params[pname.strip()] = (pval or "").strip()
+        out.append((name.strip(), params))
+    return out
+
+
+def strip_dsml_tool_markup(text: str) -> str:
+    """Quita bloques DSML tool_calls que llegaron al usuario por error de egress."""
+    s = text or ""
+    if "dsml" not in s.lower():
+        return s
+    s = _DSML_TOOL_CALLS_BLOCK_RE.sub("", s)
+    s = _DSML_INVOKE_RE.sub("", s)
+    return re.sub(r"\n{3,}", "\n\n", s).strip()
+
+
 def extract_embedded_json_tool_invokes(text: str) -> list[tuple[str, dict[str, Any]]]:
     """
     Una o más invocaciones tool serializadas en texto (p. ej. MLX sin ``tool_calls``).
@@ -791,6 +839,14 @@ def extract_embedded_json_tool_invokes(text: str) -> list[tuple[str, dict[str, A
         else:
             break
     return out
+
+
+def extract_embedded_tool_invokes(text: str) -> list[tuple[str, dict[str, Any]]]:
+    """JSON embebido (MLX) o markup DSML (DeepSeek) → lista de invocaciones."""
+    json_inv = extract_embedded_json_tool_invokes(text)
+    if json_inv:
+        return json_inv
+    return extract_dsml_tool_invokes(text)
 
 
 def lc_message_content_to_text(message: Any) -> str:

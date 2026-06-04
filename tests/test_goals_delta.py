@@ -83,6 +83,74 @@ def test_format_goals_countdown_human() -> None:
     assert "min" in format_goals_countdown_human(125)
 
 
+def test_run_goals_proactive_skips_when_aligned_on_misalignment(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    import duckdb
+
+    db_path = str(tmp_path / "aligned.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        """
+        CREATE TABLE agent_config (
+          key VARCHAR PRIMARY KEY,
+          value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    goals = [
+        {
+            "belief_key": "k",
+            "target_value": 100.0,
+            "threshold": 50.0,
+            "observed_value": 100.0,
+            "title": "Meta alineada",
+        }
+    ]
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)",
+        [
+            "chat_50_goals_delta_seconds",
+            "60",
+            "chat_50_goals",
+            json.dumps(goals),
+            "chat_50_worker_id",
+            "Quant-Trader",
+            "chat_50_goals_proactive_tenant_id",
+            "Cuantitativo",
+            "chat_50_goals_delta_meta",
+            json.dumps({"trigger": "goals_cli", "mode": "on_misalignment", "jitter_ratio": 0}),
+        ],
+    )
+    con.close()
+
+    posts: list[dict[str, Any]] = []
+
+    class Resp:
+        status_code = 200
+        text = "ok"
+
+    class DummyClient:
+        async def __aenter__(self) -> DummyClient:
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+        async def post(self, *a: Any, **kw: Any) -> Resp:
+            posts.append(kw)
+            return Resp()
+
+    monkeypatch.setenv("DUCKCLAW_GOALS_TICKER_DB_PATH", db_path)
+    _patch_heartbeat_sync_duckdb_write(monkeypatch)
+    monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
+
+    asyncio.run(heartbeat._run_goals_proactive_tick())
+
+    assert len(posts) == 0
+
+
 def test_build_goals_proactive_system_event_includes_overnight_mission() -> None:
     msg = build_goals_proactive_system_event_message(
         [{"belief_key": "overnight_squeeze", "title": "Overnight Gap Squeeze (cierre + gap)"}],
@@ -356,6 +424,7 @@ def test_run_goals_proactive_cuantitativo_tenant_defaults_quant_worker(
             return Resp()
 
     monkeypatch.setenv("DUCKCLAW_GOALS_TICKER_DB_PATH", db_path)
+    _patch_heartbeat_sync_duckdb_write(monkeypatch)
     monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
 
     asyncio.run(heartbeat._run_goals_proactive_tick())
@@ -442,6 +511,7 @@ def test_run_goals_proactive_trading_session_event_payload(
             return Resp()
 
     monkeypatch.setenv("DUCKCLAW_GOALS_TICKER_DB_PATH", db_path)
+    _patch_heartbeat_sync_duckdb_write(monkeypatch)
     monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
 
     asyncio.run(heartbeat._run_goals_proactive_tick())
@@ -531,6 +601,7 @@ def test_run_goals_proactive_trading_session_empty_manager_goals_still_ticks(
             return Resp()
 
     monkeypatch.setenv("DUCKCLAW_GOALS_TICKER_DB_PATH", db_path)
+    _patch_heartbeat_sync_duckdb_write(monkeypatch)
     monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
 
     asyncio.run(heartbeat._run_goals_proactive_tick())

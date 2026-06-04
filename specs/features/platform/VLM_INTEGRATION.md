@@ -71,7 +71,7 @@ El usuario envía capturas de pantalla de mercados (ej. Google Finance, VIX) o f
 *   `verify_visual_claim(symbol: str, claimed_value: float) -> dict`: Skill determinista para Finanz que cruza el valor extraído por el VLM con el valor real del mercado (IBKR/Lake Capadonna).
 
 ### Validaciones
-*   **Regla de Evidencia Única (Enforced):** El *Validator Node* de Finanz rechazará cualquier `propose_trade` o cálculo de riesgo que cite el valor "24.55" si no existe un tool call exitoso a una fuente de datos autorizada en el mismo turno. La imagen es una hipótesis; el tool call es la evidencia.
+*   **Regla de Evidencia Única (Enforced):** El *Validator Node* de Finanz rechazará cualquier `propose_trade` o cálculo de riesgo que cite el valor "24.55" si no existe un tool call exitoso a una fuente de datos autorizada en el mismo turno. La imagen es una hipótesis; el tool call es la evidencia. Si el borrador del agente viola la regla en `set_reply`, el grafo del worker **reintenta un ciclo** (`set_reply → agent → tools`) con `read_sql`/`fetch_market_data` forzado (máx. `DUCKCLAW_VISUAL_EVIDENCE_MAX_RETRIES`, default 1) antes de escalar al usuario.
 *   **Protección de Memoria (Mac mini):** El proceso de MLX-VLM debe correr en un subproceso con límite de memoria estricto. Si el KV Cache del LLM principal (texto) y el VLM compiten por la memoria unificada y exceden el 85% de la RAM, el VLM hace *fail-fast* hacia la API remota.
 *   **Purga de Archivos:** Toda imagen descargada se elimina criptográficamente (`os.remove` + sobrescritura si es disco físico) inmediatamente después de la inferencia. No se guardan imágenes en DuckDB, solo el `image_hash` y el `vlm_summary`.
 

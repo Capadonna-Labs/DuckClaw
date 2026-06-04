@@ -92,14 +92,16 @@ export function ChatLlmSelectors({
   };
 
   const selectCls = compact
-    ? 'text-[10px] px-1.5 py-1 border rounded-md dark:border-dark-border dark:bg-dark-bg max-w-[120px] disabled:opacity-50'
+    ? 'text-[10px] px-1.5 py-1 border rounded-md dark:border-dark-border dark:bg-dark-bg w-full max-w-full min-w-0 disabled:opacity-50'
     : 'text-xs px-2 py-1.5 border rounded-lg dark:border-dark-border dark:bg-dark-bg max-w-[160px] disabled:opacity-50';
 
   if (!chatId || selectableCatalog.length === 0) return null;
 
   return (
     <div
-      className={`flex flex-wrap items-center gap-1.5 ${compact ? '' : 'gap-2'}`}
+      className={`min-w-0 ${
+        compact ? 'flex flex-col items-stretch gap-1.5 w-full max-w-full' : 'flex flex-wrap items-center gap-2'
+      }`}
       title="Proveedor y modelo de esta conversación"
     >
       <label className="sr-only" htmlFor={`llm-provider-${chatId}`}>
@@ -122,7 +124,7 @@ export function ChatLlmSelectors({
       <label className="sr-only" htmlFor={`llm-model-${chatId}`}>
         Modelo LLM
       </label>
-      <div className="relative flex items-center">
+      <div className={`relative flex items-center min-w-0 ${compact ? 'w-full' : ''}`}>
         {openRouter ? (
           <SearchableModelSelect
             id={`llm-model-${chatId}`}
@@ -132,6 +134,7 @@ export function ChatLlmSelectors({
             disabled={disabled || Boolean(pending) || !activeProvider}
             compact={compact}
             allowCustom
+            className={compact ? 'w-full max-w-full' : undefined}
             placeholder="Modelo OpenRouter"
             searchPlaceholder="Buscar modelo…"
             aria-label="Modelo OpenRouter"

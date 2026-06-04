@@ -186,6 +186,35 @@ def test_schema_heuristic_true_for_explicit_table_question() -> None:
     assert incoming_is_schema_query_heuristic("qué tablas hay en duckdb")
 
 
+def test_schema_heuristic_false_for_manager_list_tables_guardrail() -> None:
+    from duckclaw.workers.factory import incoming_is_manager_planned_guardrail_task
+
+    tarea = (
+        "TAREA: El usuario quiere ver las tablas de la base de datos. "
+        "Ejecuta read_sql con SHOW TABLES o SELECT desde information_schema.tables."
+    )
+    assert incoming_is_manager_planned_guardrail_task(tarea)
+    assert not incoming_is_schema_query_heuristic(tarea)
+
+
+def test_schema_heuristic_false_for_tech_bulletin_with_duckdb_and_distant_tablas() -> None:
+    """Boletín largo: «datos» + DuckDB al inicio y «tablas» en otra viñeta (Halodoc) no es pedido de esquema."""
+    from duckclaw.graphs.manager_graph import _plan_task
+    from duckclaw.workers.factory import explicit_duckdb_schema_request
+
+    msg = (
+        "- Puedes montar una app de datos en vivo combinando datos abiertos, DuckDB, Astro y hosting estático.\n"
+        "- Halodoc creó un framework de data profiling que centraliza calidad de datos y relaciones entre "
+        "tablas sobre Redshift/Athena."
+    )
+    assert not explicit_duckdb_schema_request(msg)
+    assert not incoming_is_schema_query_heuristic(msg)
+    task, override = _plan_task(msg, "Quant-Trader")
+    assert override is None
+    assert not task.strip().lower().startswith("tarea:")
+    assert "duckdb" in task.lower()
+
+
 def test_reddit_share_shortlink_fallback_query_not_raw_url() -> None:
     u = "https://www.reddit.com/r/USNEWS/s/h3kvg1pisI"
     assert reddit_share_shortlink_fallback_query(u) == "r/USNEWS shortlink h3kvg1pisI"

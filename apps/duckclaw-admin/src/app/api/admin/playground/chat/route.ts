@@ -42,13 +42,21 @@ export async function POST(req: NextRequest) {
 
   const target = `${base}/api/v1/admin/playground/chat`;
 
+  const timeoutSignal = AbortSignal.timeout(GATEWAY_CHAT_TIMEOUT_MS);
+  const upstreamSignal =
+    typeof AbortSignal.any === 'function'
+      ? AbortSignal.any([req.signal, timeoutSignal])
+      : req.signal.aborted
+        ? req.signal
+        : timeoutSignal;
+
   try {
     const res = await gatewayLongFetch(target, {
       method: 'POST',
       headers,
       body: bodyText,
       cache: 'no-store',
-      signal: AbortSignal.timeout(GATEWAY_CHAT_TIMEOUT_MS),
+      signal: upstreamSignal,
     });
 
     if (wantsStream && res.body) {

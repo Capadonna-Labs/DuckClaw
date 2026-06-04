@@ -66,7 +66,7 @@ export function ConversationVaultSelector({
 
   return (
     <div className={`space-y-1 ${compact ? '' : 'min-w-0'}`}>
-      <label className={`flex items-center gap-2 ${labelCls}`}>
+      <label className={`flex flex-wrap items-center gap-2 ${labelCls}`}>
         <Database
           size={compact ? 14 : 16}
           className="text-gov-blue-600 dark:text-dark-cyan shrink-0"
@@ -77,7 +77,9 @@ export function ConversationVaultSelector({
           disabled={disabled || pending || !options.length}
           onChange={(e) => void persist(e.target.value)}
           className={`flex-1 min-w-0 border rounded-lg dark:border-dark-border dark:bg-dark-bg font-mono ${
-            compact ? 'text-[10px] px-1.5 py-1 max-w-[180px]' : 'text-xs px-2 py-1.5 max-w-[240px]'
+            compact
+              ? 'text-[10px] px-1.5 py-2 min-h-[40px] max-w-full sm:max-w-[180px]'
+              : 'text-xs px-2 py-2 min-h-[44px] max-w-full sm:max-w-[240px]'
           }`}
           aria-label="Bóveda DuckDB de la conversación"
         >

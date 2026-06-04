@@ -101,8 +101,8 @@ const markdownComponents: Components = {
     </a>
   ),
   table: ({ children }) => (
-    <div className="my-3 overflow-x-auto rounded-xl border border-gov-gray-200 dark:border-dark-border">
-      <table className="w-full min-w-[240px] text-xs border-collapse">{children}</table>
+    <div className="my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-gov-gray-200 dark:border-dark-border [-webkit-overflow-scrolling:touch]">
+      <table className="w-max min-w-full text-xs border-collapse">{children}</table>
     </div>
   ),
   thead: ({ children }) => (

@@ -12,10 +12,29 @@ IB Gateway (Docker): paper **:4002** · API DuckClaw: **:8002**
 cd C:\Users\DELL\Desktop\duckclaw
 $env:SSH_TARGET = "root@192.0.2.10"
 $env:IBKR_API_KEY = "REDACTED_KEY"
-bash scripts/capadonna/vps_deploy_ibkr_ohlcv_hetzner.sh
+bash scripts/SCRIPTS-DEPRECATED/capadonna/vps_deploy_ibkr_ohlcv_hetzner.sh
 ```
 
 Si no tienes `bash` en PATH, usa Git Bash o WSL para el script. Alternativa: copia manual + pasos del §3.
+
+### Parche execute + equity (Quant Trader HITL)
+
+Tras actualizar el repo en tu Mac, sube solo el hook y `ohlcv_market_routes.py` (fix `account_equity_usd` / NetLiquidation):
+
+```bash
+cd ~/Desktop/duckclaw   # ajusta ruta
+bash scripts/SCRIPTS-DEPRECATED/capadonna/vps_patch_execute_equity_hetzner.sh
+bash scripts/SCRIPTS-DEPRECATED/capadonna/verify_execute_hook_vps.sh
+```
+
+En `.env` del gateway (Mac):
+
+```bash
+IBKR_PORTFOLIO_API_URL=http://192.0.2.10:8002/api/portfolio/summary
+IBKR_EXECUTE_ORDER_URL=http://192.0.2.10:8002/api/broker/execute
+```
+
+Luego `pm2 restart DuckClaw-Gateway`.
 
 ---
 

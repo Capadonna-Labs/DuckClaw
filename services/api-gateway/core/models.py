@@ -56,6 +56,10 @@ class ChatRequest(BaseModel):
         description="Solo uso interno (p. ej. goals_proactive): forzar la bóveda .duckdb del worker; evita que "
         "dedicated_gateway_db sustituya al vault del usuario cuando el tick no pasa por webhook multiplex.",
     )
+    notify_channel: str | None = Field(
+        None,
+        description="Canal de entrega proactiva /crons: admin, telegram o both.",
+    )
 
     @field_validator("chat_id", mode="before")
     @classmethod

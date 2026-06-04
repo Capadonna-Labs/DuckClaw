@@ -12,6 +12,54 @@ from typing import Any, Dict, List, Optional
 from langchain_core.tools import StructuredTool
 
 
+def register_goals_alignment_skill(
+    tools_list: List[Any],
+    db: Any,
+) -> None:
+    """Registra assess_crons_alignment (objetivos /crons vs contexto observable)."""
+    try:
+        from duckclaw.forge.homeostasis.goals_alignment import assess_goals_alignment
+        from duckclaw.forge.skills.goals_tool_context import (
+            get_goals_tool_chat_id,
+            get_goals_tool_db_path,
+            get_goals_tool_worker_id,
+        )
+
+        def assess_crons_alignment() -> str:
+            """Mide desalineación entre /crons y el contexto observable; devuelve JSON."""
+            cid = get_goals_tool_chat_id()
+            if not cid:
+                return json.dumps(
+                    {"aligned": True, "error": "chat_id no disponible en este turno"},
+                    ensure_ascii=False,
+                )
+            path = get_goals_tool_db_path()
+            worker = get_goals_tool_worker_id()
+            use_db = db
+            if path and str(getattr(db, "_path", "") or "") != path:
+                try:
+                    from duckclaw_core import DuckClaw
+
+                    use_db = DuckClaw(path, read_only=True)
+                except Exception:
+                    use_db = db
+            report = assess_goals_alignment(use_db, cid, worker_id=worker)
+            return report.to_json()
+
+        tool = StructuredTool.from_function(
+            assess_crons_alignment,
+            name="assess_crons_alignment",
+            description=(
+                "Evalúa alineación entre objetivos /crons del chat y datos observables "
+                "(PnL, drawdown, etc.). Devuelve JSON con aligned, items y desvíos. "
+                "Úsala cuando el usuario pregunte por metas, riesgo o en revisiones proactivas."
+            ),
+        )
+        tools_list.append(tool)
+    except Exception:
+        pass
+
+
 def register_homeostasis_skill(
     tools_list: List[Any],
     spec: Any,
@@ -49,5 +97,6 @@ def register_homeostasis_skill(
             ),
         )
         tools_list.append(tool)
+        register_goals_alignment_skill(tools_list, db)
     except Exception:
-        pass
+        register_goals_alignment_skill(tools_list, db)

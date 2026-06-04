@@ -31,6 +31,7 @@ from duckclaw.graphs.proactive_review_markers import proactive_review_event_phra
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_plan, log_sys, set_log_context
 
 from duckclaw.guardrails.loader import format_guardrail, load_guardrail, load_guardrail_task_list
+from duckclaw.workers.factory import explicit_duckdb_schema_request
 from duckclaw.graphs.agent_resilience import (
     classify_exception_for_replan,
     format_exhausted_plan_failure,
@@ -373,6 +374,73 @@ def _worker_should_use_url_research_mcp_surface(text: str) -> bool:
     return not _manager_visual_generation_intent(inc)
 
 
+_NON_LABOR_OFERTA_RE = re.compile(
+    r"shock\s+de\s+oferta|oferta\s+y\s+demanda|oferta\s+petrol|oferta\s+energ",
+    re.IGNORECASE,
+)
+_LABOR_OFERTA_RE = re.compile(
+    r"\boferta(s)?\s+(de\s+)?(empleo|trabajo|laboral)\b|\bofertas?\s+laborales?\b",
+    re.IGNORECASE,
+)
+
+
+def _text_has_word_boundary(term: str, text: str) -> bool:
+    if not term or not text:
+        return False
+    return bool(re.search(rf"\b{re.escape(term)}\b", text, flags=re.IGNORECASE))
+
+
+def _job_labor_terms_in_text(t: str) -> bool:
+    """Términos de mercado laboral; «oferta» sola (p. ej. shock de oferta) no cuenta."""
+    if not t:
+        return False
+    single_word = (
+        "trabajo",
+        "empleo",
+        "vacante",
+        "vacantes",
+        "linkedin",
+        "greenhouse",
+        "lever",
+        "postular",
+        "aplicar",
+        "hiring",
+        "headhunter",
+    )
+    if any(_text_has_word_boundary(w, t) for w in single_word):
+        return True
+    for phrase in ("data scientist", "científico de datos", "ciencia de datos"):
+        if phrase in t:
+            return True
+    if _LABOR_OFERTA_RE.search(t):
+        return True
+    return False
+
+
+def _job_action_terms_in_text(t: str) -> bool:
+    """Acción de búsqueda laboral; evita «buscan» (flujos) por substring de «busca»."""
+    action_terms = (
+        "busca",
+        "busco",
+        "buscar",
+        "encuentra",
+        "dame",
+        "pásame",
+        "pasame",
+        "mandame",
+        "envía",
+        "envia",
+        "url",
+        "enlace",
+        "link",
+        "revisar",
+        "postular",
+        "aplicar",
+        "vacantes",
+    )
+    return any(_text_has_word_boundary(x, t) for x in action_terms) or "http" in t or "www." in t
+
+
 def _looks_like_job_add_command(incoming: str) -> bool:
     raw = (incoming or "").strip().lower()
     if not raw:
@@ -436,39 +504,7 @@ def job_hunter_user_requests_job_search(incoming: str) -> bool:
         )
     ):
         return True
-    job_terms = (
-        "trabajo",
-        "empleo",
-        "vacante",
-        "oferta",
-        "linkedin",
-        "greenhouse",
-        "lever",
-        "data scientist",
-        "científico de datos",
-        "ciencia de datos",
-    )
-    action_terms = (
-        "busca",
-        "buscar",
-        "encuentra",
-        "dame",
-        "pásame",
-        "pasame",
-        "mandame",
-        "envía",
-        "envia",
-        "url",
-        "enlace",
-        "link",
-        "revisar",
-        "postular",
-        "aplicar",
-        "vacantes",
-    )
-    result = any(x in t for x in job_terms) and (
-        any(x in t for x in action_terms) or "http" in t or "www." in t
-    )
+    result = _job_labor_terms_in_text(t) and _job_action_terms_in_text(t)
     return result
 
 
@@ -487,9 +523,6 @@ def _user_signals_cashflow_stress(incoming: str) -> bool:
         "sin liquidez",
         "no me alcanza",
         "no me va a alcanzar",
-        "flujo de caja",
-        # No incluir «deuda(s)» suelta: consultas de ledger en DuckDB (finanz) suelen decir
-        # «resumen de mis deudas» y no deben disparar INCOME_INJECTION / A2A Job-Hunter.
         "necesito ingresos",
         "ingreso extra",
         "ingresos extra",
@@ -498,7 +531,17 @@ def _user_signals_cashflow_stress(incoming: str) -> bool:
         "buscar empleo",
         "conseguir empleo",
     )
-    return any(term in t for term in stress_terms)
+    if any(term in t for term in stress_terms):
+        return True
+    # «Flujo de caja» en análisis macro/infra (Quant, tendencias) no es crisis personal de liquidez.
+    if "flujo de caja" in t:
+        return bool(
+            re.search(
+                r"\b(mi|mis|me|mí|no me alcanza|iliquid|ilíquid|sin (plata|dinero|liquidez))\b",
+                t,
+            )
+        )
+    return False
 
 
 def _pick_job_hunter_worker(available_templates: list[str]) -> Optional[str]:
@@ -723,6 +766,84 @@ def _contains_income_injection_request(text: str) -> bool:
     return "[a2a_request: income_injection]" in t
 
 
+def _user_message_for_a2a_gate(state: dict) -> str:
+    """Texto original del usuario; ignora TAREA sintética de retorno JobHunter → Finanz."""
+    ui = (
+        (state.get("user_incoming") or state.get("incoming") or state.get("input") or "")
+        .strip()
+    )
+    tl = ui.lower()
+    if tl.startswith("tarea:") and any(
+        x in tl
+        for x in (
+            "jobhunter complet",
+            "jobhunter completo",
+            "misión a2a",
+            "mision a2a",
+            "sintetiza los resultados",
+        )
+    ):
+        return ""
+    return ui
+
+
+def _explicit_route_blocks_proactive_a2a(entry_worker_id: str | None, user_incoming: str) -> bool:
+    """
+    Playground/Telegram con worker de ruta explícito (p. ej. Quant-Trader): no forzar Job-Hunter
+    salvo intención laboral/liquidez en el mensaje crudo del usuario.
+    """
+    entry = (entry_worker_id or "").strip()
+    if not entry:
+        return False
+    if _worker_matches_id(entry, "finanz") or _worker_matches_id(entry, "job_hunter"):
+        return False
+    if job_hunter_user_requests_job_search(user_incoming):
+        return False
+    if _user_signals_cashflow_stress(user_incoming):
+        return False
+    return True
+
+
+def _proactive_income_injection_enabled(
+    incoming: str,
+    *,
+    entry_worker_id: str | None = None,
+    available_templates: list[str] | None = None,
+) -> bool:
+    """INCOME_INJECTION proactivo en plan_node (Finanz→JobHunter) solo con intención real."""
+    available = list(available_templates or [])
+    if not _pick_job_hunter_worker(available) or not _finanz_worker_in_templates(available):
+        return False
+    user_msg = (incoming or "").strip()
+    if not user_msg:
+        return False
+    if _explicit_route_blocks_proactive_a2a(entry_worker_id, user_msg):
+        return False
+    return bool(
+        job_hunter_user_requests_job_search(user_msg) or _user_signals_cashflow_stress(user_msg)
+    )
+
+
+def _finanz_should_handoff_income_injection(state: dict, raw_reply: str) -> bool:
+    """
+    Handoff reactivo tras marcador en respuesta Finanz.
+    Respeta entry_worker_id (Quant, etc.); en ruta Finanz o sin ruta explícita confía en el marcador.
+    """
+    if not _contains_income_injection_request(raw_reply):
+        return False
+    user_msg = _user_message_for_a2a_gate(state)
+    if not user_msg:
+        return False
+    entry = (state.get("entry_worker_id") or "").strip()
+    if _explicit_route_blocks_proactive_a2a(entry, user_msg):
+        return False
+    if job_hunter_user_requests_job_search(user_msg) or _user_signals_cashflow_stress(user_msg):
+        return True
+    if not entry or _worker_matches_id(entry, "finanz"):
+        return True
+    return False
+
+
 def _contains_job_opportunity_tracking_request(text: str) -> bool:
     """Handoff A2A: Finanz pide que JobHunter persista vacante/postulación en job_opportunities."""
     t = (text or "").strip().lower()
@@ -740,7 +861,9 @@ def route_finanz_reply_a2a_branch(state: dict) -> str | None:
     raw_reply = state.get("last_worker_raw_reply") or state.get("reply") or ""
     if _worker_matches_id(current_worker, "finanz") and _contains_job_opportunity_tracking_request(raw_reply):
         return "handoff_job_track"
-    if _worker_matches_id(current_worker, "finanz") and _contains_income_injection_request(raw_reply):
+    if _worker_matches_id(current_worker, "finanz") and _finanz_should_handoff_income_injection(
+        state, raw_reply
+    ):
         return "handoff_to_target"
     return None
 
@@ -1269,23 +1392,12 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     # (ej. IB «Cambios en calificaciones» → inspect_schema; logs 2026-05-11 gateway).
     if "[VLM_CONTEXT" in text and "Contexto visual adjunto:" in text:
         return (incoming or "").strip(), None
+    # Briefings estructurados (macro, geopolítica, etc.): no sustituir por TAREA de listar tablas.
+    if re.match(r"^##\s+\S", text):
+        return text, None
     t = text.lower()
     override: Optional[str] = None
-    _explicit_duckdb_schema_request = bool(
-        re.search(
-            r"\b(listar\s+tablas|tablas\s+disponibles|qu[ée]\s+tablas|que\s+tablas|"
-            r"tablas\s+de\s+la\s+base|tablas\s+en\s+(la\s+)?(base|duckdb)|"
-            r"show\s+tables|information_schema\.tables|"
-            r"esquema\s+de\s+la\s+base|schema\s+de\s+la\s+base|estructura\s+de\s+la\s+base|"
-            r"listar\s+(el\s+)?esquema|ver\s+(el\s+)?esquema|mostrar\s+(el\s+)?esquema|"
-            r"nombre\s+de\s+la\s+db|nombre\s+db)\b",
-            t,
-        )
-        or (
-            re.search(r"\b(tables|tablas)\b", t)
-            and re.search(r"\b(base|duckdb|datos|database|bd)\b", t)
-        )
-    )
+    _explicit_duckdb_schema_request = explicit_duckdb_schema_request(text)
     if (worker_id or "").strip().lower() == "quant-trader" and _quant_operational_intent_requires_fly_command(text):
         return load_guardrail("manager_tasks", "quant_operational_fly_command"), None
     # BI Analyst: preguntas meta (qué puedes hacer, quién eres) → el modelo a veces ignora soul.md y copia
@@ -1976,9 +2088,14 @@ def build_manager_graph(
         ):
             mercenary_spec = None
 
-        # Prioridad A2A: en crisis de caja + intención laboral, enrutar a JobHunter si está disponible.
+        # Prioridad A2A: Job-Hunter solo con intención laboral/liquidez real (respeta entry_worker_id).
         job_hunter_in_team = _pick_job_hunter_worker(list(available_plan or []))
-        cashflow_job_intent = _user_signals_cashflow_stress(incoming) or job_hunter_user_requests_job_search(incoming)
+        entry_wid = (state.get("entry_worker_id") or "").strip() or None
+        cashflow_job_intent = _proactive_income_injection_enabled(
+            incoming,
+            entry_worker_id=entry_wid,
+            available_templates=list(available_plan or []),
+        )
         if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _orch_affirm and not _hrp_fast and not _visual_fast and not _url_fast:
             assigned = job_hunter_in_team
 
@@ -2050,9 +2167,12 @@ def build_manager_graph(
             }
             handoff_context = dict(active_mission)
 
+        user_incoming = (state.get("user_incoming") or incoming or "").strip()
+
         out: ManagerAgentState = {
             "planned_task": planned_final,
             "incoming": incoming,
+            "user_incoming": user_incoming,
             "task_summary": task_summary,
             "plan_title": plan_title or None,
             "tasks": tasks or [],
@@ -2085,6 +2205,17 @@ def build_manager_graph(
                 out["assigned_worker_id"] = _canon_re
                 if _canon_re not in available_plan:
                     available_plan = list(available_plan) + [_canon_re]
+        elif route_entry and (
+            not cashflow_job_intent
+            or _explicit_route_blocks_proactive_a2a(entry_wid, user_incoming)
+        ) and not is_job_add_command:
+            # Playground / multiplex: worker elegido en UI debe ganar al planner (salvo A2A laboral real).
+            _all_plan_disk = list_workers(troot)
+            _canon_play = _resolve_template_id(_all_plan_disk, route_entry)
+            if _canon_play and _canon_play in _all_plan_disk:
+                out["assigned_worker_id"] = _canon_play
+                if _canon_play not in available_plan:
+                    available_plan = list(available_plan) + [_canon_play]
 
         if _strip_mercenary_spec_for_browser_worker(out, troot):
             mercenary_spec = None
@@ -2152,6 +2283,17 @@ def build_manager_graph(
     def invoke_worker_node(state: ManagerAgentState, config: RunnableConfig) -> ManagerAgentState:
         """Invoca el grafo del worker asignado; set_busy/set_idle y append_task_audit. Solo invoca si el worker existe en templates."""
         chat_id = state.get("chat_id") or ""
+        from duckclaw.graphs.chat_cancel import ChatCancelledError, raise_if_chat_cancelled
+
+        try:
+            raise_if_chat_cancelled(str(chat_id or "").strip())
+        except ChatCancelledError:
+            set_idle(chat_id)
+            return {
+                "reply": "Interrumpido.",
+                "_audit_done": True,
+                "assigned_worker_id": (state.get("assigned_worker_id") or "").strip() or None,
+            }
         tenant_id = state.get("tenant_id") or "default"
         user_id = state.get("user_id") or chat_id or "default"
         vault_db_path = (state.get("vault_db_path") or "").strip()
@@ -2358,9 +2500,11 @@ def build_manager_graph(
             # Pasar la tarea planificada al worker para que use herramientas y no responda genérico
             # Incluimos chat_id para que el worker pueda leer sandbox_enabled por sesión.
             _out_hb_tok = (state.get("outbound_telegram_bot_token") or "").strip() or None
+            _user_incoming_invoke = (state.get("user_incoming") or incoming or "").strip()
             worker_state = {
                 "input": planned_task,
                 "incoming": planned_task,
+                "user_incoming": _user_incoming_invoke,
                 "history": history,
                 "chat_id": chat_id,
                 "tenant_id": tenant_id,
@@ -2444,7 +2588,16 @@ def build_manager_graph(
                     outbound_bot_token=_out_hb_tok,
                     routing_worker_id=str(assigned or "").strip() or None,
                 )
-            worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
+            try:
+                raise_if_chat_cancelled(str(chat_id or "").strip())
+                worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
+            except ChatCancelledError:
+                set_idle(chat_id)
+                return {
+                    "reply": "Interrumpido.",
+                    "_audit_done": True,
+                    "assigned_worker_id": str(assigned or "").strip() or None,
+                }
             _wdb_peek = getattr(worker_graph, "_worker_db", None)
             if _wdb_peek is not None and _wdb_peek is not db:
                 _peek_rw = not bool(getattr(_wdb_peek, "_read_only", False))
@@ -2808,7 +2961,9 @@ def build_manager_graph(
             raw_reply
         ):
             return "handoff_job_track"
-        if _worker_matches_id(current_worker, "finanz") and _contains_income_injection_request(raw_reply):
+        if _worker_matches_id(current_worker, "finanz") and _finanz_should_handoff_income_injection(
+            state, raw_reply
+        ):
             return "handoff_to_target"
         if state.get("replan_requested"):
             log_sys(_obs, "manager route: replan -> plan (reintento de planificación)")
@@ -2864,6 +3019,8 @@ def build_manager_graph(
             out["username"] = state["username"]
         if "available_templates" in state:
             out["available_templates"] = state["available_templates"]
+        if state.get("user_incoming"):
+            out["user_incoming"] = state.get("user_incoming")
         if "plan_title" in state:
             out["plan_title"] = state["plan_title"]
         if "tasks" in state:
@@ -2912,6 +3069,8 @@ def build_manager_graph(
             out["username"] = state["username"]
         if "available_templates" in state:
             out["available_templates"] = state["available_templates"]
+        if state.get("user_incoming"):
+            out["user_incoming"] = state.get("user_incoming")
         if "plan_title" in state:
             out["plan_title"] = state["plan_title"]
         if "tasks" in state:
@@ -2981,6 +3140,10 @@ def build_manager_graph(
             out["username"] = state["username"]
         if "available_templates" in state:
             out["available_templates"] = state["available_templates"]
+        if state.get("user_incoming"):
+            out["user_incoming"] = state.get("user_incoming")
+        if state.get("entry_worker_id"):
+            out["entry_worker_id"] = state.get("entry_worker_id")
         if "plan_title" in state:
             out["plan_title"] = state["plan_title"]
         if "tasks" in state:

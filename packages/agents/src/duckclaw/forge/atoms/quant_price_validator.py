@@ -8,7 +8,7 @@ import json
 import re
 from typing import Any, Optional, Tuple
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 
 _TICKER_PAT = re.compile(r"\b([A-Z]{1,5})\b")
 # Cotización probable: decimal con al menos 2 dígitos fraccionarios o con símbolo $
@@ -21,6 +21,19 @@ _VLM_MARKER = "VLM_CONTEXT"
 _EVIDENCE_TOOLS = {"fetch_market_data", "fetch_ib_gateway_ohlcv", "fetch_lake_ohlcv", "read_sql"}
 
 _NUMERIC_VERIFY_STATUSES = frozenset({"verified", "mismatch", "no_evidence"})
+
+VISUAL_EVIDENCE_RETRY_REASON = "missing_tool_evidence_for_vlm_claim"
+
+_VISUAL_EVIDENCE_USER_ERROR = (
+    "❌ Regla de Evidencia Única: detecté contexto visual y cifras de mercado sin tool call válido en este turno. "
+    "Ejecuta fetch_market_data/fetch_ib_gateway_ohlcv/fetch_lake_ohlcv o read_sql primero y luego recalculo."
+)
+
+_VISUAL_EVIDENCE_RETRY_DIRECTIVE = (
+    "Contexto VLM con cifras de mercado detectadas en tu borrador. "
+    "Ejecuta read_sql o fetch_market_data/fetch_ib_gateway_ohlcv/fetch_lake_ohlcv en este turno "
+    "antes de redactar cotizaciones. No cites precios sin un ToolMessage válido de evidencia."
+)
 
 
 def spec_is_finanz_quant(spec: Any) -> bool:
@@ -344,6 +357,11 @@ def _tool_message_satisfies_visual_evidence(m: ToolMessage) -> bool:
     return False
 
 
+def visual_evidence_retry_system_message() -> SystemMessage:
+    """Mensaje interno para reintento en grafo (no se expone al usuario)."""
+    return SystemMessage(content=_VISUAL_EVIDENCE_RETRY_DIRECTIVE)
+
+
 def enforce_visual_evidence_rule(
     *,
     incoming: str,
@@ -379,8 +397,4 @@ def enforce_visual_evidence_rule(
     for m in messages or []:
         if isinstance(m, ToolMessage) and _tool_message_satisfies_visual_evidence(m):
             return reply, None
-    return (
-        "❌ Regla de Evidencia Única: detecté contexto visual y cifras de mercado sin tool call válido en este turno. "
-        "Ejecuta fetch_market_data/fetch_ib_gateway_ohlcv/fetch_lake_ohlcv o read_sql primero y luego recalculo.",
-        "missing_tool_evidence_for_vlm_claim",
-    )
+    return (_VISUAL_EVIDENCE_USER_ERROR, VISUAL_EVIDENCE_RETRY_REASON)

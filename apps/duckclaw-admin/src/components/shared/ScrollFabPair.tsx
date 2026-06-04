@@ -21,7 +21,9 @@ export function ScrollFabPair({
   if (!showScrollTop && !showScrollBottom) return null;
 
   return (
-    <div className={`pointer-events-none fixed bottom-24 right-6 z-20 flex flex-col gap-2 ${className}`}>
+    <div
+      className={`pointer-events-none fixed bottom-24 right-6 z-20 hidden lg:flex flex-col gap-2 ${className}`}
+    >
       {showScrollTop && (
         <button
           type="button"

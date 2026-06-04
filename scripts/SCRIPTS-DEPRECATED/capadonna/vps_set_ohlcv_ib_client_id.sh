@@ -20,7 +20,7 @@
 #   OHLCV_IB_CLIENT_ID=47 SSH_TARGET=capadonna@192.0.2.10 ./scripts/capadonna/vps_set_ohlcv_ib_client_id.sh
 #
 set -euo pipefail
-SSH_TARGET="${SSH_TARGET:-capadonna@192.0.2.10}"
+SSH_TARGET="${SSH_TARGET:-root@192.0.2.10}"
 CID="${OHLCV_IB_CLIENT_ID:-43}"
 
 print_remote_block() {

@@ -37,7 +37,7 @@ El Quant-Trader tiene acceso a un stack de herramientas especializadas:
 4. *Comandos Fly de Operación Determinista*
     /quant_cycle: Orquesta en un solo comando `fetch -> portfolio -> evaluate -> signal`, con salida estructurada por etapas.
     /execute-signal uuid: Aprobación HITL para ejecutar una señal pendiente.
-    /cancel_signal uuid: Cancelación de una señal pendiente en ledger.
+    /cancel_signal uuid [--force]: Cancela señal pendiente o fallida (FAILED) en ledger; --force descarta estados atascados (excepto EXECUTED).
 
 ---
 

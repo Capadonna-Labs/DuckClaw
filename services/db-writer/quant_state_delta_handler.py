@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid as uuid_lib
 from datetime import datetime, timedelta, timezone
@@ -15,7 +16,7 @@ import duckdb
 
 from core.config import settings
 from duckclaw.gateway_db import get_gateway_db_path
-from duckclaw.vaults import db_root, validate_user_db_path
+from duckclaw.vaults import resolve_user_id_for_db_path
 from models.quant_state_delta import (
     ConversationCompactionMutation,
     IntradayMocAccumMutation,
@@ -26,6 +27,12 @@ from models.quant_state_delta import (
 )
 
 logger = logging.getLogger("db-writer.quant_state_delta")
+
+_LEDGER_DDL_APPLIED: set[str] = set()
+_DEBUG_LOG_PATH = (
+    os.environ.get("DUCKCLAW_DEBUG_LOG_PATH")
+    or str(Path(__file__).resolve().parents[2] / ".cursor" / "debug-fd1dbb.log")
+)
 
 
 _LEDGER_DDL = """
@@ -205,27 +212,54 @@ def _coerce_mandate_id_to_uuid(raw: str) -> str:
         return str(uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, "duckclaw:mandate:" + s))
 
 
-def _infer_private_folder_uid(db_path: str) -> str | None:
-    """Si la ruta es db/private/<carpeta>/..., devuelve el segmento de carpeta (coincide con user_vault_dir)."""
+def _agent_debug_log(
+    location: str,
+    message: str,
+    data: dict[str, Any],
+    *,
+    hypothesis_id: str,
+    run_id: str = "pre-fix",
+) -> None:
+    # region agent log
     try:
-        path = Path(db_path).expanduser().resolve()
-        rel = path.relative_to(db_root().resolve())
-        parts = rel.parts
-        if len(parts) >= 2 and parts[0] == "private":
-            return str(parts[1])
-    except (ValueError, OSError):
+        payload = {
+            "sessionId": "fd1dbb",
+            "location": location,
+            "message": message,
+            "data": data,
+            "hypothesisId": hypothesis_id,
+            "runId": run_id,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
         pass
-    return None
+    # endregion
 
 
-def _resolve_quant_user_id_for_path(user_id: str, target_db_path: str, tenant_id: str) -> str | None:
-    """Alinea user_id del delta con db/private/<uid>/ cuando el productor envía default u otro slug."""
-    if validate_user_db_path(user_id, target_db_path, tenant_id=tenant_id):
-        return str(user_id or "default").strip() or "default"
-    inferred = _infer_private_folder_uid(target_db_path)
-    if inferred and validate_user_db_path(inferred, target_db_path, tenant_id=tenant_id):
-        return inferred
-    return None
+def _ensure_quant_ledger_schema(con: duckdb.DuckDBPyConnection, target_db_path: str) -> None:
+    """DDL idempotente; se ejecuta una vez por archivo .duckdb por proceso writer."""
+    try:
+        key = os.path.realpath(target_db_path)
+    except OSError:
+        key = target_db_path
+    if key in _LEDGER_DDL_APPLIED:
+        return
+    con.execute(_LEDGER_DDL)
+    for _stmt in _QUANT_CORE_TRADE_SIGNALS_MIGRATION.strip().split(";"):
+        _s = _stmt.strip()
+        if _s:
+            con.execute(_s)
+    for _stmt in _INTRADAY_MOC_ACCUM_DDL.strip().split(";"):
+        _s = _stmt.strip()
+        if _s:
+            con.execute(_s)
+    for _stmt in _DREAMER_SEMANTIC_TELEGRAM_DDL.strip().split(";"):
+        _s = _stmt.strip()
+        if _s:
+            con.execute(_s)
+    _LEDGER_DDL_APPLIED.add(key)
 
 
 def _is_duckdb_lock_error(exc: BaseException) -> bool:
@@ -530,12 +564,14 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
 
 
 def _sync_handle_quant_state_delta(message: str) -> None:
+    t0 = time.perf_counter()
     data = json.loads(message)
     delta = QuantStateDelta.model_validate(data)
+    delta_type = str(delta.delta_type or "").strip()
     tenant_id = str(delta.tenant_id or "default").strip() or "default"
     raw_user_id = str(delta.user_id or "default").strip() or "default"
     target_db_path = str(delta.target_db_path or "").strip()
-    resolved_uid = _resolve_quant_user_id_for_path(raw_user_id, target_db_path, tenant_id)
+    resolved_uid = resolve_user_id_for_db_path(raw_user_id, target_db_path, tenant_id=tenant_id)
     if resolved_uid is None:
         logger.warning("QUANT_STATE_DELTA rejected: invalid db_path for user")
         return
@@ -547,19 +583,7 @@ def _sync_handle_quant_state_delta(message: str) -> None:
     con = _connect_duckdb_writable(target_db_path)
     try:
         con.execute("BEGIN TRANSACTION")
-        con.execute(_LEDGER_DDL)
-        for _stmt in _QUANT_CORE_TRADE_SIGNALS_MIGRATION.strip().split(";"):
-            _s = _stmt.strip()
-            if _s:
-                con.execute(_s)
-        for _stmt in _INTRADAY_MOC_ACCUM_DDL.strip().split(";"):
-            _s = _stmt.strip()
-            if _s:
-                con.execute(_s)
-        for _stmt in _DREAMER_SEMANTIC_TELEGRAM_DDL.strip().split(";"):
-            _s = _stmt.strip()
-            if _s:
-                con.execute(_s)
+        _ensure_quant_ledger_schema(con, target_db_path)
         _apply_delta(con, delta)
         con.execute("COMMIT")
     except Exception:
@@ -570,6 +594,25 @@ def _sync_handle_quant_state_delta(message: str) -> None:
         raise
     finally:
         con.close()
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+    logger.info(
+        "QUANT_STATE_DELTA commit ok delta_type=%s user_id=%s path=%s elapsed_ms=%.1f",
+        delta_type,
+        user_id,
+        target_db_path,
+        elapsed_ms,
+    )
+    _agent_debug_log(
+        "quant_state_delta_handler.py:_sync_handle_quant_state_delta",
+        "state_delta_commit",
+        {
+            "delta_type": delta_type,
+            "elapsed_ms": round(elapsed_ms, 2),
+            "target_db_path": target_db_path,
+            "user_id": user_id,
+        },
+        hypothesis_id="C",
+    )
 
 
 async def handle_quant_state_delta_message(redis_client: Any, message: str) -> None:

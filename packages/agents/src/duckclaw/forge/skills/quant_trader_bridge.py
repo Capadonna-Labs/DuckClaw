@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from contextlib import contextmanager
 import re
 import statistics
 import time
@@ -80,6 +81,39 @@ def _ibkr_execute_order_timeout_sec() -> float:
     return float(max(30, min(t, 600)))
 
 
+def _resolve_execute_account_equity_usd() -> tuple[Optional[float], str]:
+    """
+    Equity para sizing del POST al hook: portfolio API → ``IBKR_EXECUTE_ACCOUNT_EQUITY_USD``.
+    """
+    eq, err = fetch_ibkr_total_equity_numeric()
+    if eq is not None and eq > 0:
+        return float(eq), "portfolio_api"
+    raw = (os.environ.get("IBKR_EXECUTE_ACCOUNT_EQUITY_USD") or "").strip()
+    if raw:
+        try:
+            v = float(raw)
+            if v > 0:
+                return v, "env_fallback"
+        except ValueError:
+            pass
+    return None, err or "no_equity"
+
+
+def _execute_url_host_hint(url: str) -> str:
+    try:
+        from urllib.parse import urlparse
+
+        host = (urlparse(url).hostname or "").strip()
+        if host in ("100.75.4.17",):
+            return (
+                f" URL apunta a Tailscale ({host}); desde el Mac suele hacer timeout. "
+                "Usa la IP pública en .env y `pm2 restart DuckClaw-Gateway --update-env`."
+            )
+    except Exception:
+        pass
+    return ""
+
+
 def _is_broker_post_timeout(exc: BaseException) -> bool:
     """True si ``urlopen`` falló por tiempo de espera (no confundir con 'connection refused')."""
     if isinstance(exc, TimeoutError):
@@ -122,12 +156,199 @@ def _env_truthy(name: str) -> bool:
 
 
 def _auto_execute_wait_timeout_sec() -> float:
-    raw = (os.environ.get("DUCKCLAW_QUANT_AUTO_EXECUTE_WAIT_SEC") or "5").strip()
+    raw = (os.environ.get("DUCKCLAW_QUANT_AUTO_EXECUTE_WAIT_SEC") or "10").strip()
     try:
         t = float(raw)
     except ValueError:
-        t = 5.0
+        t = 10.0
     return max(0.2, min(t, 60.0))
+
+
+_DEBUG_LOG_PATH = os.environ.get("DUCKCLAW_DEBUG_LOG_PATH") or str(
+    __import__("pathlib").Path(__file__).resolve().parents[6] / ".cursor" / "debug-fd1dbb.log"
+)
+
+
+def _agent_debug_log(
+    location: str,
+    message: str,
+    data: dict[str, Any],
+    *,
+    hypothesis_id: str,
+    run_id: str = "pre-fix",
+) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "fd1dbb",
+            "location": location,
+            "message": message,
+            "data": data,
+            "hypothesisId": hypothesis_id,
+            "runId": run_id,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(os.path.normpath(_DEBUG_LOG_PATH), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
+
+
+@contextmanager
+def _vault_writer_handoff(db: Any, *, resume_after: bool = True):
+    """
+    Libera el handle RO/RW del gateway sobre el vault para que db-writer pueda COMMIT.
+    Con ``resume_after=False``, el caller debe reabrir tras esperar el StateDelta (evita lock).
+    """
+    release = getattr(db, "release_file_handle_for_external_writer", None)
+    susp = getattr(db, "suspend_readonly_file_handle", None)
+    resu = getattr(db, "resume_readonly_file_handle", None)
+    released = False
+    if bool(getattr(db, "_read_only", False)):
+        try:
+            if callable(release):
+                release()
+                released = True
+            elif callable(susp):
+                susp()
+                released = True
+        except Exception:
+            released = False
+    try:
+        yield released
+    finally:
+        if released and resume_after and callable(resu):
+            try:
+                resu()
+            except Exception:
+                pass
+
+
+def _resume_ro_vault(db: Any, released: bool) -> None:
+    if not released:
+        return
+    resu = getattr(db, "resume_readonly_file_handle", None)
+    if callable(resu):
+        try:
+            resu()
+        except Exception:
+            pass
+
+
+def _wait_until_signal_status(
+    db: Any,
+    signal_id: str,
+    statuses: tuple[str, ...],
+    *,
+    timeout_sec: float = 8.0,
+) -> bool:
+    """Poll efímero hasta que db-writer aplique TRADE_SIGNAL_* (vault debe seguir liberado)."""
+    sid = (signal_id or "").strip()
+    if not sid or not statuses:
+        return False
+    db_path = _vault_db_path(db)
+    if not db_path:
+        return False
+    esc = sid.replace("'", "''")
+    want = {s.strip().upper() for s in statuses if s.strip()}
+    q = (
+        "SELECT status FROM finance_worker.trade_signals WHERE signal_id='"
+        + esc
+        + "' LIMIT 1"
+    )
+    deadline = time.monotonic() + float(timeout_sec)
+    step = 0.08
+    max_step = 0.35
+    iteration = 0
+    t0 = time.monotonic()
+    while time.monotonic() < deadline:
+        iteration += 1
+        rows, _err = _ephemeral_readonly_query(db_path, q)
+        if rows and isinstance(rows[0], dict):
+            st = str(rows[0].get("status") or "").strip().upper()
+            if st in want:
+                _agent_debug_log(
+                    "quant_trader_bridge.py:_wait_until_signal_status",
+                    "signal_status_applied",
+                    {
+                        "signal_id": sid,
+                        "status": st,
+                        "iterations": iteration,
+                        "wait_ms": round((time.monotonic() - t0) * 1000.0, 2),
+                    },
+                    hypothesis_id="C",
+                )
+                return True
+        time.sleep(step)
+        step = min(step * 1.35, max_step)
+    _agent_debug_log(
+        "quant_trader_bridge.py:_wait_until_signal_status",
+        "signal_status_timeout",
+        {
+            "signal_id": sid,
+            "want": sorted(want),
+            "iterations": iteration,
+            "wait_ms": round((time.monotonic() - t0) * 1000.0, 2),
+            "timeout_sec": timeout_sec,
+        },
+        hypothesis_id="C",
+    )
+    return False
+
+
+def _vault_db_path(db: Any) -> str:
+    return str(getattr(db, "_path", "") or get_quant_tool_db_path() or "").strip()
+
+
+def _ephemeral_readonly_query(db_path: str, sql: str) -> tuple[list[dict[str, Any]], str | None]:
+    """Consulta RO efímera sin reabrir el handle RO del gateway (evita lock durante poll)."""
+    import duckdb
+
+    path = (db_path or "").strip()
+    if not path or path == ":memory:":
+        return [], "invalid_db_path"
+    try:
+        con = duckdb.connect(path, read_only=True)
+    except Exception as exc:  # noqa: BLE001
+        return [], str(exc)[:200]
+    try:
+        result = con.execute(sql)
+        rows = result.fetchall()
+        names = [d[0] for d in result.description]
+        out = [dict(zip(names, (str(v) for v in row))) for row in rows]
+        return out, None
+    except Exception as exc:  # noqa: BLE001
+        return [], str(exc)[:200]
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+
+
+def _ephemeral_read_trade_signal_row(db: Any, signal_id: str) -> tuple[list[dict[str, Any]], str | None]:
+    sid = (signal_id or "").strip().lower()
+    esc = sid.replace("'", "''")
+    q = (
+        "SELECT human_approved, status, ticker, signal_type, proposed_weight, mandate_id "
+        "FROM finance_worker.trade_signals WHERE signal_id='"
+        + esc
+        + "' LIMIT 1"
+    )
+    return _ephemeral_readonly_query(_vault_db_path(db), q)
+
+
+def _ephemeral_trading_session_mode(db: Any) -> str:
+    rows, _ = _ephemeral_readonly_query(
+        _vault_db_path(db),
+        "SELECT mode FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1",
+    )
+    if rows and isinstance(rows[0], dict):
+        m = str(rows[0].get("mode") or "paper").strip().lower()
+        if m in ("paper", "live"):
+            return m
+    return "paper"
 
 
 def _quant_auto_execute_allowed_for_session_mode(db: Any) -> bool:
@@ -247,49 +468,82 @@ def _wait_until_signal_row_visible(db: Any, signal_id: str, *, timeout_sec: floa
     """
     Tras encolar StateDelta, el db-writer persiste con latencia. Poll hasta que la fila exista o timeout.
 
-    Con DuckDB, un handle RO mantiene lock de archivo: el db-writer no puede escribir la fila
-    mientras el gateway tenga la conexión abierta. Entre cada intento, suspendemos el RO
-    (mismo criterio que read_sql) para ceder el archivo al writer, luego reabrimos y consultamos.
+    El handle RO del gateway no debe usarse en el bucle: ``DuckClaw.query`` reabre la conexión vía
+    ``_ensure_python_exec_connection`` y retoma el lock. Liberamos el handle una vez y consultamos
+    con conexiones RO efímeras hasta ver la fila o agotar el timeout.
     """
     sid = (signal_id or "").strip()
     if not sid:
         return False
-    deadline = time.time() + float(timeout_sec)
+    db_path = str(getattr(db, "_path", "") or get_quant_tool_db_path() or "").strip()
     esc = sid.replace("'", "''")
     q = (
         "SELECT 1 AS ok FROM finance_worker.trade_signals WHERE signal_id='"
         + esc
         + "' LIMIT 1"
     )
-    step = 0.05
+    release = getattr(db, "release_file_handle_for_external_writer", None)
     susp = getattr(db, "suspend_readonly_file_handle", None)
     resu = getattr(db, "resume_readonly_file_handle", None)
     ro = bool(getattr(db, "_read_only", False))
-    release_each_iter = ro and callable(susp) and callable(resu)
-    iteration = 0
-    t0 = time.time()
-    while time.time() < deadline:
-        iteration += 1
-        if release_each_iter:
-            try:
+    released = False
+    if ro:
+        try:
+            if callable(release):
+                release()
+                released = True
+            elif callable(susp):
                 susp()
-            except Exception:
-                pass
+                released = True
+        except Exception:
+            released = False
+    deadline = time.monotonic() + float(timeout_sec)
+    step = 0.08
+    max_step = 0.35
+    iteration = 0
+    last_err: str | None = None
+    t0 = time.monotonic()
+    try:
+        while time.monotonic() < deadline:
+            iteration += 1
+            rows, err = _ephemeral_readonly_query(db_path, q)
+            last_err = err
+            if rows and isinstance(rows[0], dict):
+                _agent_debug_log(
+                    "quant_trader_bridge.py:_wait_until_signal_row_visible",
+                    "signal_row_visible",
+                    {
+                        "signal_id": sid,
+                        "iterations": iteration,
+                        "wait_ms": round((time.monotonic() - t0) * 1000.0, 2),
+                        "released_ro": released,
+                    },
+                    hypothesis_id="A",
+                )
+                return True
             time.sleep(step)
+            step = min(step * 1.35, max_step)
+        _agent_debug_log(
+            "quant_trader_bridge.py:_wait_until_signal_row_visible",
+            "signal_row_timeout",
+            {
+                "signal_id": sid,
+                "iterations": iteration,
+                "wait_ms": round((time.monotonic() - t0) * 1000.0, 2),
+                "timeout_sec": timeout_sec,
+                "last_query_error": last_err,
+                "released_ro": released,
+                "db_path": db_path,
+            },
+            hypothesis_id="A",
+        )
+        return False
+    finally:
+        if released and callable(resu):
             try:
                 resu()
             except Exception:
                 pass
-        try:
-            raw = db.query(q)
-            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        except Exception:
-            rows = []
-        if rows and isinstance(rows[0], dict):
-            return True
-        if not release_each_iter:
-            time.sleep(step)
-    return False
 
 
 def _normalize_proposed_weight_pct(raw: float) -> float:
@@ -1507,16 +1761,9 @@ def _execute_approved_signal_impl(
     sid = (signal_id or "").strip().lower()
     if not sid:
         return json.dumps({"error": "signal_id requerido"}, ensure_ascii=False)
-    try:
-        raw = db.query(
-            "SELECT human_approved, status, ticker, signal_type, proposed_weight, mandate_id "
-            "FROM finance_worker.trade_signals WHERE signal_id='"
-            + sid
-            + "' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except Exception as exc:
-        return json.dumps({"error": f"DB_READ_FAILED: {exc}"}, ensure_ascii=False)
+    rows, read_err = _ephemeral_read_trade_signal_row(db, sid)
+    if read_err:
+        return json.dumps({"error": f"DB_READ_FAILED: {read_err}"}, ensure_ascii=False)
     if not rows:
         return json.dumps(
             {
@@ -1549,7 +1796,7 @@ def _execute_approved_signal_impl(
         )
     if str(row.get("status") or "").upper() in ("DISCARDED", "CANCELLED"):
         return json.dumps({"error": "signal stale/discarded"}, ensure_ascii=False)
-    session_mode = _trading_session_mode(db)
+    session_mode = _ephemeral_trading_session_mode(db)
     env_mode = (os.environ.get("IBKR_ACCOUNT_MODE") or "paper").strip().lower()
     if session_mode == "live" and env_mode != "live":
         return json.dumps(
@@ -1572,15 +1819,16 @@ def _execute_approved_signal_impl(
     if not url:
         url = _derive_ibkr_execute_order_url_from_portfolio()
     if not url:
-        push_quant_state_delta_sync(
-            {
-                **_state_delta_base(),
-                "target_db_path": tgt,
-                "delta_type": "TRADE_SIGNAL_EXECUTED",
-                "mutation": {"signal_id": sid},
-            },
-            duckclaw_db=db,
-        )
+        with _vault_writer_handoff(db):
+            push_quant_state_delta_sync(
+                {
+                    **_state_delta_base(),
+                    "target_db_path": tgt,
+                    "delta_type": "TRADE_SIGNAL_EXECUTED",
+                    "mutation": {"signal_id": sid},
+                },
+                duckclaw_db=db,
+            )
         return json.dumps(
             {
                 "status": "simulated",
@@ -1613,6 +1861,9 @@ def _execute_approved_signal_impl(
     mid = str(sig_row.get("mandate_id") or ov.get("mandate_id") or "").strip()
     if mid:
         post["mandate_id"] = mid
+    eq, eq_source = _resolve_execute_account_equity_usd()
+    if eq is not None and eq > 0:
+        post["account_equity_usd"] = float(eq)
     payload = json.dumps(post, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
@@ -1624,30 +1875,47 @@ def _execute_approved_signal_impl(
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     broker_parsed: dict[str, Any] = {}
-    released_ro_for_broker = False
-    susp = getattr(db, "suspend_readonly_file_handle", None)
-    resu = getattr(db, "resume_readonly_file_handle", None)
-    ro = bool(getattr(db, "_read_only", False))
-    if ro and callable(susp) and callable(resu):
-        try:
-            susp()
-            released_ro_for_broker = True
-        except Exception:
-            released_ro_for_broker = False
-    try:
+    body = ""
+    released_ro = False
+    with _vault_writer_handoff(db, resume_after=False) as released_ro:
+        _agent_debug_log(
+            "quant_trader_bridge.py:_execute_approved_signal_impl",
+            "broker_handoff",
+            {
+                "signal_id": sid,
+                "released_ro": released_ro,
+                "execute_url_host": (url.split("/")[2] if "://" in url else url)[:80],
+                "exec_timeout_sec": exec_timeout_sec,
+                "equity_source": eq_source,
+                "has_account_equity_usd": "account_equity_usd" in post,
+                "account_equity_usd": post.get("account_equity_usd"),
+            },
+            hypothesis_id="B",
+            run_id="post-fix",
+        )
         try:
             with urllib.request.urlopen(req, timeout=exec_timeout_sec) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as exc:
             _push_signal_failed(db, sid)
+            _wait_until_signal_status(db, sid, ("FAILED",), timeout_sec=8.0)
             broker_msg = _broker_message_from_http_error(exc)
             err_obj: dict[str, Any] = {"error": f"Broker HTTP {exc.code}"}
             if broker_msg:
                 err_obj["broker_message"] = broker_msg
+            if eq is None or eq <= 0:
+                err_obj["hint"] = (
+                    "Configura IBKR_EXECUTE_ACCOUNT_EQUITY_USD en el host del hook de ejecución "
+                    "o asegura que get_ibkr_portfolio devuelva net_liquidation/total_value."
+                )
+            _resume_ro_vault(db, released_ro)
             return json.dumps(err_obj, ensure_ascii=False)
         except urllib.error.URLError as exc:
             _push_signal_failed(db, sid)
+            _wait_until_signal_status(db, sid, ("FAILED",), timeout_sec=8.0)
+            _resume_ro_vault(db, released_ro)
             if _is_broker_post_timeout(exc):
+                _url_hint = _execute_url_host_hint(url)
                 return json.dumps(
                     {
                         "error": "BROKER_TIMEOUT",
@@ -1655,35 +1923,33 @@ def _execute_approved_signal_impl(
                             "El hook de ejecución no respondió a tiempo. "
                             "Aumenta IBKR_EXECUTE_ORDER_TIMEOUT_SEC (actual "
                             f"{exec_timeout_sec:.0f}s) o revisa el servicio en el host del broker."
+                            f"{_url_hint}"
                         ),
                         "timeout_sec": exec_timeout_sec,
+                        "execute_url_host": (url.split("/")[2] if "://" in url else "")[:80],
                     },
                     ensure_ascii=False,
                 )
             return json.dumps({"error": str(exc.reason)}, ensure_ascii=False)
-    finally:
-        if released_ro_for_broker and callable(resu):
-            try:
-                resu()
-            except Exception:
-                pass
 
-    try:
-        if body.strip().startswith("{"):
-            _bp = json.loads(body)
-            if isinstance(_bp, dict):
-                broker_parsed = _bp
-    except json.JSONDecodeError:
-        broker_parsed = {}
-    push_quant_state_delta_sync(
-        {
-            **_state_delta_base(),
-            "target_db_path": tgt,
-            "delta_type": "TRADE_SIGNAL_EXECUTED",
-            "mutation": {"signal_id": sid},
-        },
-        duckclaw_db=db,
-    )
+        try:
+            if body.strip().startswith("{"):
+                _bp = json.loads(body)
+                if isinstance(_bp, dict):
+                    broker_parsed = _bp
+        except json.JSONDecodeError:
+            broker_parsed = {}
+        push_quant_state_delta_sync(
+            {
+                **_state_delta_base(),
+                "target_db_path": tgt,
+                "delta_type": "TRADE_SIGNAL_EXECUTED",
+                "mutation": {"signal_id": sid},
+            },
+            duckclaw_db=db,
+        )
+        _wait_until_signal_status(db, sid, ("EXECUTED",), timeout_sec=8.0)
+    _resume_ro_vault(db, released_ro)
     out_obj: dict[str, Any] = {
         "status": "sent",
         "signal_id": sid,

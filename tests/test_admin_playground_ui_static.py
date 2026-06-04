@@ -311,9 +311,12 @@ def test_floating_chat_uses_fixed_large_panel_and_header_actions() -> None:
     assert "const PANEL_WIDTH_PX = 560" in floating
     assert "const PANEL_HEIGHT_PX = 720" in floating
     assert "width: PANEL_WIDTH_PX" in floating
-    assert "height: `min(${PANEL_HEIGHT_PX}px, calc(100vh - 2rem))`" in floating
+    assert "height: `min(${PANEL_HEIGHT_PX}px, calc(100dvh - 2rem))`" in floating
+    assert "NARROW_BREAKPOINT_PX" in floating
+    assert "conversationManage={{" in floating
     assert "headerActions={" in floating
-    assert "aria-label=\"Mostrar conversaciones\"" in floating
+    assert "ChatViewTabBar" in panel
+    assert "ConversationManagePanel" in panel
     assert "aria-label=\"Abrir Playground completo\"" in floating
     assert "aria-label={loading ? 'Minimizar chat (el agente sigue pensando)' : 'Cerrar chat'}" in floating
     assert "Redimensionar ventana de chat" not in floating

@@ -68,6 +68,14 @@ def _meta_key(tenant_id: str, session_id: str) -> str:
     return f"{_CONV_META_PREFIX}{tid}:{sid}"
 
 
+def admin_conversation_tenant_candidates(primary_tenant_id: str) -> list[str]:
+    """Perfil nuevo + conversaciones indexadas bajo ``default`` antes del RBAC por tenant."""
+    tid = (primary_tenant_id or "default").strip() or "default"
+    if tid == "default":
+        return [tid]
+    return [tid, "default"]
+
+
 def should_index_admin_conversation(session_id: str) -> bool:
     sid = (session_id or "").strip()
     if not sid:
@@ -222,6 +230,66 @@ async def upsert_conversation_meta(
     except Exception as exc:
         _log.warning("admin_conversations: upsert %s: %s", meta_key, exc)
         return None
+
+
+async def resolve_conversation_view(
+    redis_client: Any,
+    primary_tenant_id: str,
+    session_id: str,
+) -> tuple[str, AdminConversationMeta | None, list[dict[str, Any]]]:
+    """Meta + historial: tenant del perfil primero, luego legado ``default``."""
+    from core.chat_history import redis_load_chat_history
+
+    sid = (session_id or "").strip()
+    if not sid:
+        return (primary_tenant_id or "default").strip() or "default", None, []
+    best_meta: AdminConversationMeta | None = None
+    best_messages: list[dict[str, Any]] = []
+    resolved_tid = (primary_tenant_id or "default").strip() or "default"
+    for try_tid in admin_conversation_tenant_candidates(resolved_tid):
+        meta = await get_conversation_meta(redis_client, try_tid, sid)
+        messages = await redis_load_chat_history(redis_client, try_tid, sid)
+        if meta is None and not messages:
+            continue
+        resolved_tid = try_tid
+        best_meta = meta
+        best_messages = messages
+        break
+    return resolved_tid, best_meta, best_messages
+
+
+async def list_conversations_merged(
+    redis_client: Any,
+    primary_tenant_id: str,
+    *,
+    section: str | None = None,
+    worker: str | None = None,
+    actor: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[AdminConversationMeta], int]:
+    """Lista uniendo tenant del perfil y ``default`` (sin duplicar session_id)."""
+    seen: dict[str, AdminConversationMeta] = {}
+    for try_tid in admin_conversation_tenant_candidates(primary_tenant_id):
+        items, _ = await list_conversations(
+            redis_client,
+            try_tid,
+            section=section,
+            worker=worker,
+            actor=actor,
+            q=q,
+            limit=200,
+            offset=0,
+        )
+        for meta in items:
+            prev = seen.get(meta.session_id)
+            if prev is None or (meta.updated_at or "") > (prev.updated_at or ""):
+                seen[meta.session_id] = meta
+    merged = sorted(seen.values(), key=lambda m: m.updated_at or "", reverse=True)
+    total = len(merged)
+    page = merged[offset : offset + limit]
+    return page, total
 
 
 async def list_conversations(

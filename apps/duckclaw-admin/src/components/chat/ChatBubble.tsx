@@ -91,15 +91,17 @@ export function ChatBubble({
   const isError = m.role === 'error';
   const isHeartbeat = m.role === 'heartbeat';
   const isInterrupted = Boolean(m.interrupted);
-  const isUserCommand =
-    isUser && Boolean((m.text || '').trim()) && (m.text || '').trim().startsWith('/');
+  const isAssistant = m.role === 'assistant';
   const displayText =
     isHeartbeat && m.text
       ? stripHeartbeatBodyPrefix(m.text, m.workerId, m.swarmSlot ?? 1)
       : m.text;
-  const canCopy = isUserCommand && !m.streaming;
+  const hasCopyableText = Boolean((displayText || '').trim());
+  const canCopy =
+    !m.streaming && !isHeartbeat && hasCopyableText && (isAssistant || isUser);
   const showActions =
     canCopy || (canRetry && Boolean(onRetry)) || (canEdit && Boolean(onEdit));
+  const actionsAlwaysVisible = canCopy && (isAssistant || isError);
   const [copied, setCopied] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<ChatImagePreview | null>(null);
   const heartbeatLabel =
@@ -134,7 +136,7 @@ export function ChatBubble({
 
   return (
     <div
-      className={`group relative max-w-[90%] min-w-0 rounded-2xl px-4 py-3 text-sm overflow-hidden ${
+      className={`group relative max-w-[90%] max-sm:max-w-full max-sm:w-full min-w-0 rounded-2xl px-4 py-3 text-sm overflow-hidden ${
         isUser
           ? 'ml-auto bg-gov-blue-700 text-white'
           : isError
@@ -148,8 +150,10 @@ export function ChatBubble({
     >
       {showActions && (
         <div
-          className={`absolute top-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity ${
-            isUser ? 'right-2' : 'right-2'
+          className={`absolute top-2 right-2 flex items-center gap-0.5 transition-opacity ${
+            actionsAlwaysVisible
+              ? 'opacity-100'
+              : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 max-sm:opacity-100'
           }`}
         >
           {canEdit && onEdit && (

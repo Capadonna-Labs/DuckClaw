@@ -5,10 +5,14 @@ from duckclaw.integrations.llm_providers import (
     build_agent_graph,
     build_duckclaw_tools,
     coerce_json_tool_invoke,
+    extract_dsml_tool_invokes,
     extract_embedded_json_tool_invokes,
+    extract_embedded_tool_invokes,
     lc_message_content_to_text,
+    reply_contains_dsml_tool_markup,
     sanitize_worker_reply_phase1,
     sanitize_worker_reply_text,
+    strip_dsml_tool_markup,
     _validate_read_sql,
     _validate_write_sql,
     _safe_table_name,
@@ -140,6 +144,44 @@ def test_extract_embedded_json_tool_invokes_semicolon_separated_pair() -> None:
 def test_extract_embedded_json_tool_invokes_single_same_as_coerce() -> None:
     raw = '{"name": "read_sql", "parameters": {"query": "SELECT 1"}}'
     assert extract_embedded_json_tool_invokes(raw) == [("read_sql", {"query": "SELECT 1"})]
+
+
+def test_extract_dsml_tool_invokes_deepseek_markup() -> None:
+    raw = (
+        "<｜DSML｜tool_calls>\n"
+        '<｜DSML｜invoke name="get_current_time">\n\n</｜DSML｜invoke>\n'
+        '<｜DSML｜invoke name="read_sql">\n'
+        '<｜DSML｜parameter name="query" string="true">SELECT 1</｜DSML｜parameter>\n'
+        "</｜DSML｜invoke>\n"
+        "</｜DSML｜tool_calls>"
+    )
+    got = extract_dsml_tool_invokes(raw)
+    assert got == [
+        ("get_current_time", {}),
+        ("read_sql", {"query": "SELECT 1"}),
+    ]
+    assert extract_embedded_tool_invokes(raw) == got
+
+
+def test_sanitize_worker_reply_strips_dsml_tool_markup() -> None:
+    raw = (
+        "Quant-Trader 1\n\n"
+        "<｜DSML｜tool_calls>\n"
+        '<｜DSML｜invoke name="read_sql">\n'
+        '<｜DSML｜parameter name="query" string="true">SELECT 1</｜DSML｜parameter>\n'
+        "</｜DSML｜invoke>\n"
+        "</｜DSML｜tool_calls>"
+    )
+    out = sanitize_worker_reply_text(raw)
+    assert "DSML" not in out
+    assert "invoke" not in out.lower()
+    assert "Quant-Trader 1" in out
+
+
+def test_reply_contains_dsml_tool_markup() -> None:
+    assert reply_contains_dsml_tool_markup('<｜DSML｜invoke name="x">')
+    assert not reply_contains_dsml_tool_markup("hola mundo")
+    assert strip_dsml_tool_markup("") == ""
 
 
 def test_lc_message_content_to_text_list_blocks() -> None:

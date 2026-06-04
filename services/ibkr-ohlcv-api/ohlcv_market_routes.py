@@ -70,6 +70,7 @@ class _ExecuteApprovedBody(BaseModel):
     mandate_id: str | None = Field(default=None, max_length=64)
     action: str | None = Field(default=None, max_length=8)
     quantity: float | None = Field(default=None)
+    account_equity_usd: float | None = Field(default=None, gt=0)
 
 
 def _resolve_execute_order_hook() -> tuple[str, str] | None:
@@ -133,6 +134,8 @@ def _embedded_execute_json(body: _ExecuteApprovedBody) -> str | None:
                 mid = (body.mandate_id or "").strip()
                 if mid:
                     payload["mandate_id"] = mid
+                if body.account_equity_usd is not None and body.account_equity_usd > 0:
+                    payload["account_equity_usd"] = float(body.account_equity_usd)
                 return json.dumps(payload, separators=(",", ":"))
     return None
 
@@ -528,6 +531,8 @@ def post_broker_execute(request: Request, body: _ExecuteApprovedBody) -> JSONRes
     emb = _embedded_execute_json(body)
     if emb:
         child_env["DUCKCLAW_EMBEDDED_EXECUTE_JSON"] = emb
+    if body.account_equity_usd is not None and body.account_equity_usd > 0:
+        child_env["IBKR_EXECUTE_ACCOUNT_EQUITY_USD"] = str(body.account_equity_usd)
     try:
         proc = subprocess.run(
             [py, script, sid, paper_flag],

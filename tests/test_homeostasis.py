@@ -229,7 +229,7 @@ def test_register_homeostasis_skill_no_config() -> None:
 
 
 def test_register_homeostasis_skill_with_config() -> None:
-    """register_homeostasis_skill adds homeostasis_check tool when config present."""
+    """register_homeostasis_skill adds homeostasis_check + assess_crons_alignment when config present."""
     from duckclaw.forge.skills.homeostasis_bridge import register_homeostasis_skill
 
     db = duckclaw.DuckClaw(":memory:")
@@ -252,9 +252,10 @@ def test_register_homeostasis_skill_with_config() -> None:
     })()
     tools = []
     register_homeostasis_skill(tools, spec, db)
-    assert len(tools) == 1
-    assert tools[0].name == "homeostasis_check"
-    result = tools[0].invoke({"belief_key": "presupuesto", "observed_value": 4800.0})
+    names = {t.name for t in tools}
+    assert names == {"homeostasis_check", "assess_crons_alignment"}
+    hc = next(t for t in tools if t.name == "homeostasis_check")
+    result = hc.invoke({"belief_key": "presupuesto", "observed_value": 4800.0})
     plan = json.loads(result)
     assert plan["action"] == "maintain"
 

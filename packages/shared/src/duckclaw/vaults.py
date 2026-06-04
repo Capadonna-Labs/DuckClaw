@@ -518,6 +518,38 @@ def validate_user_db_path(user_id: Any, db_path: str, tenant_id: Any | None = No
     return False
 
 
+def infer_private_folder_uid_from_db_path(db_path: str) -> str | None:
+    """Si la ruta es db/private/<carpeta>/..., devuelve el segmento de carpeta (user_vault_dir)."""
+    try:
+        path = Path(db_path).expanduser().resolve()
+        rel = path.relative_to(db_root().resolve())
+        parts = rel.parts
+        if len(parts) >= 2 and parts[0] == "private":
+            return str(parts[1])
+    except (ValueError, OSError):
+        pass
+    return None
+
+
+def resolve_user_id_for_db_path(
+    user_id: Any,
+    db_path: str,
+    *,
+    tenant_id: Any | None = None,
+) -> str | None:
+    """
+    user_id del productor (slug tenant/chat) alineado con db/private/<uid>/ cuando aplica.
+    Devuelve None si la ruta no es válida para ningún candidato.
+    """
+    uid = str(user_id or "default").strip() or "default"
+    if validate_user_db_path(uid, db_path, tenant_id=tenant_id):
+        return uid
+    inferred = infer_private_folder_uid_from_db_path(db_path)
+    if inferred and validate_user_db_path(inferred, db_path, tenant_id=tenant_id):
+        return inferred
+    return None
+
+
 def shared_tenant_dir(tenant_id: Any) -> Path:
     """Directorio db/shared/{tenant_slug}/ (mkdir incluso si aún no hay .duckdb)."""
     path = db_root() / "shared" / _safe_user_id(tenant_id)

@@ -42,6 +42,7 @@ def test_route_finanz_reply_a2a_branch_income_injection_when_finanz_on_team() ->
         "available_templates": ["finanz", "job_hunter"],
         "assigned_worker_id": "finanz",
         "last_worker_raw_reply": "ok [a2a_request: income_injection]",
+        "user_incoming": "necesito ingresos extra este mes",
     }
     assert route_finanz_reply_a2a_branch(st) == "handoff_to_target"
 

@@ -115,15 +115,17 @@ scp -q \
   "$REPO_ROOT/services/ibkr-ohlcv-api/portfolio_routes.py" \
   "$REPO_ROOT/services/ibkr-ohlcv-api/requirements.txt" \
   "${SSH_TARGET}:${REMOTE_ROOT}/services/ibkr-ohlcv-api/"
+CAPADONNA_SCRIPTS="${REPO_ROOT}/scripts/capadonna"
+[[ -d "$CAPADONNA_SCRIPTS" ]] || CAPADONNA_SCRIPTS="${REPO_ROOT}/scripts/SCRIPTS-DEPRECATED/capadonna"
 scp -q \
-  "$REPO_ROOT/scripts/capadonna/ibkr_historical_bars.py" \
-  "$REPO_ROOT/scripts/capadonna/ibkr_portfolio_snapshot.py" \
-  "$REPO_ROOT/scripts/capadonna/broker_execute_signal.py" \
-  "$REPO_ROOT/scripts/capadonna/vps_deploy_ibkr_ohlcv_hetzner.sh" \
+  "${CAPADONNA_SCRIPTS}/ibkr_historical_bars.py" \
+  "${CAPADONNA_SCRIPTS}/ibkr_portfolio_snapshot.py" \
+  "${CAPADONNA_SCRIPTS}/broker_execute_signal.py" \
+  "${CAPADONNA_SCRIPTS}/vps_deploy_ibkr_ohlcv_hetzner.sh" \
   "${SSH_TARGET}:${REMOTE_ROOT}/scripts/capadonna/"
-scp -q \
-  "$REPO_ROOT/scripts/capadonna/export_lake_ohlcv.py" \
-  "${SSH_TARGET}:${REMOTE_ROOT}/scripts/"
+EXPORT_LAKE="${CAPADONNA_SCRIPTS}/export_lake_ohlcv.py"
+[[ -f "$EXPORT_LAKE" ]] || EXPORT_LAKE="${REPO_ROOT}/scripts/SCRIPTS-DEPRECATED/capadonna/export_lake_ohlcv.py"
+scp -q "$EXPORT_LAKE" "${SSH_TARGET}:${REMOTE_ROOT}/scripts/"
 
 echo "=== Instalando en el VPS ==="
 ssh -t "$SSH_TARGET" "REMOTE_ROOT='${REMOTE_ROOT}' IBKR_API_KEY='${API_KEY}' bash ${REMOTE_ROOT}/scripts/capadonna/vps_deploy_ibkr_ohlcv_hetzner.sh --local"

@@ -93,6 +93,22 @@ def _load_signal_row(signal_id: str) -> RowLoad:
     return (tkr, st, w)
 
 
+def _embedded_account_equity_usd() -> float | None:
+    """Equity del POST enriquecido (gateway) embebida en DUCKCLAW_EMBEDDED_EXECUTE_JSON."""
+    raw = (os.environ.get("DUCKCLAW_EMBEDDED_EXECUTE_JSON") or "").strip()
+    if not raw:
+        return None
+    try:
+        d = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    try:
+        eq = float(d.get("account_equity_usd") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return eq if eq > 0 else None
+
+
 def _plan_from_embedded() -> _WeightPlan | _SharesPlan | None:
     raw = (os.environ.get("DUCKCLAW_EMBEDDED_EXECUTE_JSON") or "").strip()
     if not raw:
@@ -346,13 +362,14 @@ async def main_async(signal_id: str, use_paper: bool) -> None:
         contract = Stock(ticker, "SMART", "USD")
         await ib.qualifyContractsAsync(contract)
 
-        equity_env = (os.environ.get("IBKR_EXECUTE_ACCOUNT_EQUITY_USD") or "").strip()
-        equity: float | None = None
-        if equity_env:
-            try:
-                equity = float(equity_env)
-            except ValueError:
-                equity = None
+        equity = _embedded_account_equity_usd()
+        if equity is None or equity <= 0:
+            equity_env = (os.environ.get("IBKR_EXECUTE_ACCOUNT_EQUITY_USD") or "").strip()
+            if equity_env:
+                try:
+                    equity = float(equity_env)
+                except ValueError:
+                    equity = None
         if equity is None or equity <= 0:
             equity = await _net_liquidation_usd(ib)
         if equity is None or equity <= 0:

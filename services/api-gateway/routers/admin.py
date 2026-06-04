@@ -218,6 +218,24 @@ def _playground_worker_allowed_in_team(team_ctx: dict[str, Any], worker_id: str)
     return wid in aliases
 
 
+def _playground_worker_explicitly_in_team(team_ctx: dict[str, Any], worker_id: str) -> bool:
+    """Equipo explícito (sin atajo ``team_source=all``) para consola con actor real."""
+    from duckclaw.workers.template_registry import resolve_template_id_global
+    from duckclaw.workers.worker_ids import normalize_worker_id
+
+    wid = normalize_worker_id(worker_id)
+    if not wid or wid == "default":
+        return True
+    aliases: set[str] = set()
+    for raw in team_ctx.get("workers") or []:
+        label = str(raw or "").strip()
+        if not label:
+            continue
+        aliases.add(normalize_worker_id(label))
+        aliases.add(normalize_worker_id(resolve_template_id_global(label) or label))
+    return wid in aliases
+
+
 def _playground_workers_payload(raw_workers: list[str]) -> dict[str, Any]:
     """Normaliza equipo Playground: ids canónicos en disco + etiquetas de manifest."""
     from duckclaw.workers.manifest import load_manifest
@@ -1163,7 +1181,9 @@ async def playground_config(
     if redis_client is not None and eff_chat:
         from core.admin_conversations import get_conversation_meta
 
-        conv_meta = await get_conversation_meta(redis_client, eff_tenant, eff_chat)
+        from core.admin_conversations import resolve_conversation_view
+
+        _, conv_meta, _ = await resolve_conversation_view(redis_client, eff_tenant, eff_chat)
         if conv_meta is not None:
             selected_worker_id = (
                 (conv_meta.preferred_worker_id or conv_meta.last_worker_id or "").strip()
@@ -1453,10 +1473,15 @@ async def playground_chat(
     )
     console_actor = (request.headers.get("x-duckclaw-actor") or "").strip()
     db_first_console = bool(console_actor and console_actor.lower() not in ("admin-ui", ""))
+    explicit_team = _playground_worker_explicitly_in_team(team_ctx, wid)
+    team_allowed = _playground_worker_allowed_in_team(team_ctx, wid)
     if not catalog_allowed:
         if db_first_console:
-            raise _problem(403, "Worker no asignado al catálogo del actor", wid)
-        if not _playground_worker_allowed_in_team(team_ctx, wid):
+            if (team_ctx.get("team_source") or "") == "all":
+                raise _problem(403, "Worker no asignado al catálogo del actor", wid)
+            if not explicit_team:
+                raise _problem(403, "Worker no asignado al catálogo del actor", wid)
+        elif not team_allowed:
             raise _problem(403, "Worker no asignado al catálogo del actor", wid)
     session_id = (body.chat_id or "admin-playground").strip() or "admin-playground"
     if body.images:
@@ -1511,6 +1536,7 @@ async def playground_chat(
                 eff_tenant,
                 redis_client=redis_client,
                 delivery_context=delivery_context,
+                http_request=request,
             ),
             media_type="text/event-stream",
             headers=dict(SSE_HEADERS),
@@ -1544,6 +1570,28 @@ async def playground_chat(
             payload.update(visual)
         return payload
     return {"ok": True, "worker_id": wid, "response": str(result or "")}
+
+
+class PlaygroundChatCancelBody(BaseModel):
+    chat_id: str = Field(..., min_length=1, max_length=128)
+
+
+@router.post("/playground/chat/cancel", dependencies=[Depends(_require_admin_key)])
+async def playground_chat_cancel(body: PlaygroundChatCancelBody) -> dict[str, Any]:
+    """Marca interrupción cooperativa para un chat admin en curso (Redis + grafo)."""
+    session_id = (body.chat_id or "").strip()
+    if not session_id:
+        raise _problem(400, "chat_id vacío", body.chat_id)
+    from duckclaw.graphs.chat_cancel import request_chat_cancel
+
+    ok = request_chat_cancel(session_id)
+    try:
+        from duckclaw.forge.skills.comfyui_bridge import cancel_comfy_generation_for_chat
+
+        cancel_comfy_generation_for_chat(session_id)
+    except Exception:
+        pass
+    return {"ok": True, "chat_id": session_id, "cancelled": ok}
 
 
 class ComfyuiGenerateBody(BaseModel):
@@ -2655,11 +2703,11 @@ async def admin_list_conversations(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
-    from core.admin_conversations import list_conversations
+    from core.admin_conversations import list_conversations_merged
 
     tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
     redis_client = getattr(request.app.state, "redis", None)
-    items, total = await list_conversations(
+    items, total = await list_conversations_merged(
         redis_client,
         tid,
         section=section,
@@ -2737,20 +2785,18 @@ async def admin_get_conversation(
     session_id: str,
     tenant_id: str = Query("default"),
 ) -> dict[str, Any]:
-    from core.admin_conversations import get_conversation_meta
-    from core.chat_history import redis_load_chat_history
+    from core.admin_conversations import resolve_conversation_view
 
     tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
     sid = (session_id or "").strip()
     if not sid:
         raise _problem(400, "session_id vacío", session_id)
     redis_client = getattr(request.app.state, "redis", None)
-    meta = await get_conversation_meta(redis_client, tid, sid)
-    messages = await redis_load_chat_history(redis_client, tid, sid)
+    resolved_tid, meta, messages = await resolve_conversation_view(redis_client, tid, sid)
     if meta is None and not messages:
         raise _problem(404, "Conversación no encontrada", sid)
     out: dict[str, Any] = {
-        "tenant_id": tid,
+        "tenant_id": resolved_tid,
         "session_id": sid,
         "messages": messages,
     }

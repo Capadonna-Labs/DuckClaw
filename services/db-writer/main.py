@@ -22,7 +22,7 @@ from duckclaw.db_write_queue import (
     task_status_redis_key,
 )
 from duckclaw.gateway_db import get_gateway_db_path
-from duckclaw.vaults import validate_user_db_path
+from duckclaw.vaults import resolve_user_id_for_db_path
 
 # Configuración de logging robusto
 logging.basicConfig(
@@ -72,7 +72,8 @@ async def execute_write(redis_client: redis.Redis, message: str) -> None:
                 DbWriteTaskStatus(status="failed", detail="No hay query SQL"),
             )
             return
-        if not validate_user_db_path(user_id, target_db_path, tenant_id=tenant_id):
+        resolved_uid = resolve_user_id_for_db_path(user_id, target_db_path, tenant_id=tenant_id)
+        if resolved_uid is None:
             logger.warning("[%s] Rechazado: db_path fuera del directorio permitido del usuario.", task_id)
             await _publish_task_status(
                 redis_client,
@@ -80,6 +81,7 @@ async def execute_write(redis_client: redis.Redis, message: str) -> None:
                 DbWriteTaskStatus(status="failed", detail="db_path inválido para el usuario"),
             )
             return
+        user_id = resolved_uid
 
         try:
             from duckclaw.shared_db_grants import path_is_under_shared_tree, user_may_access_shared_path

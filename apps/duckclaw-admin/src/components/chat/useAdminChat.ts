@@ -238,10 +238,13 @@ export function useAdminChat({
 
   const finalizeCancelledGeneration = useCallback(() => {
     setMessages((m) => {
-      if (m.length === 0) return m;
-      const last = m[m.length - 1];
-      if (last?.role !== 'assistant' || !last.streaming) return stripThinkingStatusHeartbeats(m);
-      const base = m.slice(0, -1);
+      const closedTools = finalizeRunningToolHeartbeats(m);
+      if (closedTools.length === 0) return closedTools;
+      const last = closedTools[closedTools.length - 1];
+      if (last?.role !== 'assistant' || !last.streaming) {
+        return stripThinkingStatusHeartbeats(closedTools);
+      }
+      const base = closedTools.slice(0, -1);
       if (last.text.trim()) {
         return stripThinkingStatusHeartbeats([...base, { ...last, streaming: false }]);
       }
@@ -254,10 +257,13 @@ export function useAdminChat({
 
   const cancelGeneration = useCallback(() => {
     abortControllerRef.current?.abort();
+    if (chatId) {
+      void adminService.playgroundChatCancel(chatId).catch(() => undefined);
+    }
     setLoading(false);
     setThinking(false);
     finalizeCancelledGeneration();
-  }, [finalizeCancelledGeneration]);
+  }, [chatId, finalizeCancelledGeneration]);
 
   const loadConfig = useCallback(() => {
     if (!enabled) return;

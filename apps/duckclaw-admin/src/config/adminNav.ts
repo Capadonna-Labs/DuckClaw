@@ -116,6 +116,7 @@ export const ADMIN_NAV_STRUCTURE: readonly AdminNavEntry[] = [
   { type: 'group', group: OPERATION_NAV_GROUP },
   { type: 'group', group: PLAYGROUND_NAV_GROUP },
   { type: 'group', group: BUILD_NAV_GROUP },
+  { type: 'group', group: DATA_NAV_GROUP },
   { type: 'group', group: SECURITY_NAV_GROUP },
 ];
 

@@ -30,9 +30,31 @@ def _repo_root() -> Path:
     return Path(raw) if raw else _REPO_ROOT
 
 
-def _duckdb_explorer_legacy_schema_names() -> set[str]:
-    """Schemas legacy conocidos; extendible por env para otros devs/repos."""
+def _duckdb_explorer_legacy_schema_names(
+    *,
+    tenant_id: str | None = None,
+    actor_email: str | None = None,
+) -> set[str]:
+    """Schemas legacy conocidos; DB-first con fallback env para compatibilidad."""
     raw = os.environ.get("DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS", "")
+    if tenant_id and actor_email:
+        try:
+            from core.admin_identity import open_gateway_db
+            from duckclaw.admin_runtime_settings import resolve_runtime_setting
+
+            with open_gateway_db(read_only=False) as db:
+                resolved = resolve_runtime_setting(
+                    db,
+                    tenant_id=tenant_id,
+                    actor_email=actor_email,
+                    domain="duckdb",
+                    key="legacy_schemas",
+                    env_key="DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS",
+                    default="",
+                )
+            raw = str(resolved.get("value") or raw or "")
+        except Exception:
+            raw = os.environ.get("DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS", "")
     configured = {item.strip().lower() for item in raw.split(",") if item.strip()}
     return set(_DUCKDB_EXPLORER_LEGACY_SCHEMAS) | configured
 
@@ -916,6 +938,58 @@ def _resolved_llm_env() -> dict[str, str]:
     return {"provider": prov, "model": model, "base_url": base}
 
 
+def _runtime_setting_text(
+    db: Any,
+    *,
+    tenant_id: str,
+    actor_email: str,
+    domain: str,
+    key: str,
+) -> dict[str, str]:
+    from duckclaw.admin_runtime_settings import resolve_runtime_setting
+
+    resolved = resolve_runtime_setting(
+        db,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+        domain=domain,
+        key=key,
+        default="",
+    )
+    return {
+        "value": str(resolved.get("value") or "").strip(),
+        "source": str(resolved.get("source") or "").strip(),
+    }
+
+
+def _playground_runtime_defaults(tenant_id: str, actor_email: str) -> dict[str, str]:
+    try:
+        from core.admin_identity import open_gateway_db
+
+        with open_gateway_db(read_only=False) as db:
+            pairs = {
+                "llm_provider": ("llm", "provider"),
+                "llm_model": ("llm", "model"),
+                "llm_base_url": ("llm", "base_url"),
+                "default_worker_id": ("playground", "default_worker_id"),
+                "default_vault_db_path": ("playground", "default_vault_db_path"),
+            }
+            out: dict[str, str] = {}
+            for out_key, (domain, key) in pairs.items():
+                item = _runtime_setting_text(
+                    db,
+                    tenant_id=tenant_id,
+                    actor_email=actor_email,
+                    domain=domain,
+                    key=key,
+                )
+                if item["source"] == "db" and item["value"]:
+                    out[out_key] = item["value"]
+            return out
+    except Exception:
+        return {}
+
+
 def _resolved_llm_for_chat(chat_id: str | None) -> dict[str, str]:
     """LLM efectivo: override agent_config del chat (p. ej. /model) o .env del gateway."""
     env = _resolved_llm_env()
@@ -945,6 +1019,70 @@ def _resolved_llm_for_chat(chat_id: str | None) -> dict[str, str]:
         "model": (model or env["model"] or "").strip(),
         "base_url": (base_url or env["base_url"] or "").strip(),
         "scope": "chat" if has_chat else "env",
+    }
+
+
+def _resolved_llm_for_playground(
+    *,
+    chat_id: str,
+    tenant_id: str,
+    actor_email: str,
+) -> dict[str, str]:
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.graphs.on_the_fly_commands import _effective_llm_triplet_for_chat_ui, get_chat_state
+
+    env = _resolved_llm_env()
+    cid = (chat_id or "").strip()
+    gw = (get_gateway_db_path() or "").strip()
+    if not cid or not gw or not os.path.isfile(gw):
+        runtime = _playground_runtime_defaults(tenant_id, actor_email)
+        if any(runtime.get(k) for k in ("llm_provider", "llm_model", "llm_base_url")):
+            return {
+                "provider": runtime.get("llm_provider", env["provider"]).strip(),
+                "model": runtime.get("llm_model", env["model"]).strip(),
+                "base_url": runtime.get("llm_base_url", env["base_url"]).strip(),
+                "scope": "runtime",
+            }
+        return {**env, "scope": "env"}
+
+    try:
+        db = DuckClaw(gw, read_only=True, engine="python")
+    except Exception:
+        return {**env, "scope": "env", "db_lock_error": True}
+    try:
+        chat_provider = (get_chat_state(db, cid, "llm_provider") or "").strip()
+        chat_model = (get_chat_state(db, cid, "llm_model") or "").strip()
+        chat_base_url = (get_chat_state(db, cid, "llm_base_url") or "").strip()
+        legacy_provider, legacy_model, legacy_base_url = _effective_llm_triplet_for_chat_ui(db, cid)
+    except Exception:
+        chat_provider = chat_model = chat_base_url = ""
+        legacy_provider = legacy_model = legacy_base_url = ""
+    finally:
+        db.close()
+
+    if chat_provider or chat_model or chat_base_url:
+        return {
+            "provider": (legacy_provider or env["provider"]).strip(),
+            "model": (legacy_model or env["model"]).strip(),
+            "base_url": (legacy_base_url or env["base_url"]).strip(),
+            "scope": "chat",
+        }
+
+    runtime = _playground_runtime_defaults(tenant_id, actor_email)
+    if any(runtime.get(k) for k in ("llm_provider", "llm_model", "llm_base_url")):
+        return {
+            "provider": (runtime.get("llm_provider") or legacy_provider or env["provider"]).strip(),
+            "model": (runtime.get("llm_model") or legacy_model or env["model"]).strip(),
+            "base_url": (runtime.get("llm_base_url") or legacy_base_url or env["base_url"]).strip(),
+            "scope": "runtime",
+        }
+
+    return {
+        "provider": (legacy_provider or env["provider"]).strip(),
+        "model": (legacy_model or env["model"]).strip(),
+        "base_url": (legacy_base_url or env["base_url"]).strip(),
+        "scope": "legacy",
     }
 
 
@@ -1011,9 +1149,14 @@ async def playground_config(
     workers_list = _merge_playground_catalog_and_team_workers(workers_list, team_ctx)
     workers_payload = {"workers": workers_list, "workers_invalid": [], "team_hint_extra": ""}
     eff_chat = (chat_id or team_ctx.get("team_chat_id") or "admin-playground").strip()
-    llm = _resolved_llm_for_chat(eff_chat)
-    catalog = _playground_llm_catalog(llm.get("provider", ""))
     eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")
+    runtime_defaults = _playground_runtime_defaults(eff_tenant, str(profile.get("email") or actor))
+    llm = _resolved_llm_for_playground(
+        chat_id=eff_chat,
+        tenant_id=eff_tenant,
+        actor_email=str(profile.get("email") or actor),
+    )
+    catalog = _playground_llm_catalog(llm.get("provider", ""))
     team_hint = (team_ctx.get("team_hint") or "") + workers_payload.get("team_hint_extra", "")
     selected_worker_id = ""
     redis_client = getattr(request.app.state, "redis", None)
@@ -1025,12 +1168,18 @@ async def playground_config(
             selected_worker_id = (
                 (conv_meta.preferred_worker_id or conv_meta.last_worker_id or "").strip()
             )
+    if not selected_worker_id:
+        runtime_worker = re.sub(r"[^a-zA-Z0-9_-]", "", runtime_defaults.get("default_worker_id", ""))
+        visible_worker_ids = {str(item.get("id") or "").strip() for item in workers_payload["workers"]}
+        if runtime_worker and runtime_worker in visible_worker_ids:
+            selected_worker_id = runtime_worker
     default_wid = _pick_playground_worker(team_ctx, selected_worker_id or None)
     vault = await _resolved_vault_for_admin_chat(
         eff_chat,
         team_ctx,
         default_wid,
         request=request,
+        runtime_default_vault=runtime_defaults.get("default_vault_db_path"),
     )
     vault_options = _playground_vault_options_for_team(team_ctx)
     return {
@@ -2722,7 +2871,7 @@ async def admin_auth_login(body: AdminLoginBody, request: Request, response: Res
 
 @router.get("/auth/me")
 async def admin_auth_me(request: Request) -> dict[str, Any]:
-    from core.admin_auth import SESSION_COOKIE, load_session, refresh_session, session_user_public
+    from core.admin_auth import SESSION_COOKIE, destroy_session, load_session, refresh_session, session_user_public
 
     redis_client = getattr(request.app.state, "redis", None)
     session_id = request.cookies.get(SESSION_COOKIE)
@@ -2733,11 +2882,30 @@ async def admin_auth_me(request: Request) -> dict[str, Any]:
     if not session:
         raise HTTPException(status_code=401, detail="Session expired")
 
+    email = str(session.get("email") or "").strip()
+    if not email:
+        await destroy_session(redis_client, session_id)
+        raise HTTPException(status_code=401, detail="Session user missing")
+
+    from core.admin_identity import attach_profile_to_console_user, open_gateway_db
+    from duckclaw.admin_console_users import get_by_email
+
+    with open_gateway_db(read_only=True) as db:
+        user = get_by_email(db, email)
+        if not user or not bool(user.get("active", True)):
+            await destroy_session(redis_client, session_id)
+            raise HTTPException(status_code=401, detail="Session user not active")
+        public_user = {
+            **session,
+            "email": user.get("email"),
+            "nombre": user.get("nombre"),
+            "rol": user.get("rol"),
+            "initials": user.get("initials") or "",
+        }
+        session = attach_profile_to_console_user(db, public_user)
+
     session = await refresh_session(redis_client, session_id, session)
     if not (session.get("profile") or {}).get("tenant_id"):
-        from core.admin_identity import attach_profile_to_console_user, open_gateway_db
-
-        email = str(session.get("email") or "").strip()
         if email:
             with open_gateway_db(read_only=True) as db:
                 session = attach_profile_to_console_user(db, dict(session))
@@ -4107,8 +4275,9 @@ async def _resolved_vault_for_admin_chat(
     *,
     body_override: str | None = None,
     request: Request | None = None,
+    runtime_default_vault: str | None = None,
 ) -> dict[str, Any]:
-    """Bóveda efectiva: body > meta conversación > worker/activa."""
+    """Bóveda efectiva: body > meta conversación > runtime DB-first > worker/activa."""
     from duckclaw.gateway_db import resolve_env_duckdb_path
 
     cid = (chat_id or "").strip()
@@ -4130,6 +4299,16 @@ async def _resolved_vault_for_admin_chat(
         default_path = _playground_vault_db_path(team_ctx, worker_id)
     except Exception:
         default_path = ""
+    runtime_default = (runtime_default_vault or "").strip()
+    if not override and runtime_default:
+        runtime_effective = resolve_env_duckdb_path(runtime_default)
+        if os.path.isfile(runtime_effective):
+            return {
+                "effective_path": runtime_effective,
+                "scope": "runtime",
+                "override_path": None,
+                "default_path": runtime_default,
+            }
     effective = resolve_env_duckdb_path(override or default_path)
     return {
         "effective_path": effective,
@@ -4426,10 +4605,21 @@ class DuckdbLegacySchemaDropBody(BaseModel):
 
 def _duckdb_actor_scope(actor: str | None, vault_uid: str) -> dict[str, str]:
     actor_email = (actor or "admin-ui").strip().lower() or "admin-ui"
+    tenant_id = _gateway_effective_tenant_id("default")
+    if "@" in actor_email:
+        try:
+            from core.admin_identity import open_gateway_db
+            from duckclaw.admin_user_profiles import ensure_profile_for_user
+
+            with open_gateway_db(read_only=False) as db:
+                profile = ensure_profile_for_user(db, email=actor_email)
+            tenant_id = str(profile.get("tenant_id") or tenant_id)
+        except Exception:
+            pass
     return {
         "actor_email": actor_email,
         "vault_user_id": vault_uid,
-        "tenant_id": _gateway_effective_tenant_id("default"),
+        "tenant_id": tenant_id,
     }
 
 
@@ -4555,7 +4745,10 @@ async def duckdb_legacy_schemas(
     try:
         catalog = fetch_table_catalog(con)
         schemas = catalog.get("schemas") or {}
-        candidates = _duckdb_explorer_legacy_schema_names()
+        candidates = _duckdb_explorer_legacy_schema_names(
+            tenant_id=scope["tenant_id"],
+            actor_email=scope["actor_email"],
+        )
         out = [
             {
                 "schema": str(schema),
@@ -4584,25 +4777,29 @@ async def duckdb_drop_legacy_schemas(
 ) -> dict[str, Any]:
     if body.confirm != _DROP_LEGACY_SCHEMAS_CONFIRM:
         raise _problem(400, "Confirmación requerida", _DROP_LEGACY_SCHEMAS_CONFIRM)
-    candidates = _duckdb_explorer_legacy_schema_names()
-    requested = []
-    for raw in body.schemas:
-        schema = (raw or "").strip().lower()
-        if not schema:
-            continue
-        if schema not in candidates:
-            raise _problem(400, "Schema no permitido para cleanup legacy", schema)
-        requested.append(schema)
-    requested = sorted(set(requested))
-    if not requested:
-        raise _problem(400, "schemas requerido", "Selecciona al menos un schema legacy")
-
     try:
         con, resolved, scope = _duckdb_writable_session(body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
         raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    candidates = _duckdb_explorer_legacy_schema_names(
+        tenant_id=scope["tenant_id"],
+        actor_email=scope["actor_email"],
+    )
+    requested = []
+    for raw in body.schemas:
+        schema = (raw or "").strip().lower()
+        if not schema:
+            continue
+        if schema not in candidates:
+            con.close()
+            raise _problem(400, "Schema no permitido para cleanup legacy", schema)
+        requested.append(schema)
+    requested = sorted(set(requested))
+    if not requested:
+        con.close()
+        raise _problem(400, "schemas requerido", "Selecciona al menos un schema legacy")
     dropped: list[str] = []
     try:
         existing = {

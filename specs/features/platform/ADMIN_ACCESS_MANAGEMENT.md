@@ -11,6 +11,7 @@ Vista unificada en la consola web para administrar:
 3. **Permisos sobre bases DuckDB compartidas** (`user_shared_db_access`)
 
 Fuente de verdad DuckDB: hub del gateway (`get_gateway_db_path()`). Escrituras vía gateway admin API (DuckClaw RW en hub, mismo patrón que whitelist Telegram).
+Redis solo mantiene sesiones/rate-limit temporales; no es autoridad de usuarios. Cada `/auth/me` revalida `admin_console_users.active` en DuckDB antes de renovar la sesión.
 
 ## Persistencia
 

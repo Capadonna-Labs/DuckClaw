@@ -47,6 +47,31 @@ def test_me_refreshes_session_ttl(
     assert ttl_after > ttl_before
 
 
+def test_me_rejects_session_when_console_user_missing_from_duckdb(
+    gateway_admin_client: TestClient, session_redis
+) -> None:
+    from core.admin_auth import create_session
+
+    session_id, _ = asyncio.run(
+        create_session(
+            session_redis,
+            user={
+                "id": "user-ghost",
+                "email": "ghost@test.local",
+                "nombre": "Ghost User",
+                "rol": "admin",
+                "initials": "GU",
+                "profile": {"tenant_id": "user-ghost"},
+            },
+        )
+    )
+
+    me = gateway_admin_client.get("/api/v1/admin/auth/me", cookies={"session": session_id})
+
+    assert me.status_code == 401
+    assert asyncio.run(session_redis.get(f"sess:{session_id}")) is None
+
+
 def test_logout_clears_session(gateway_admin_client: TestClient, session_redis) -> None:
     r = _login(gateway_admin_client)
     session_id = r.cookies.get("session")

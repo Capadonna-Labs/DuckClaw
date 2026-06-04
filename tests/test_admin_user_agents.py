@@ -108,3 +108,8 @@ def test_user_agent_endpoint_creates_runtime_agent_and_playground_lists_it(
     workers = {w["id"]: w for w in cfg.json()["workers"]}
     assert "default" in workers
     assert workers["sales_bot"]["label"] == "Sales Bot"
+
+    templates = gateway_admin_client.get("/api/v1/admin/templates", headers=headers)
+    assert templates.status_code == 200
+    template_ids = {item["id"] for item in templates.json()["templates"]}
+    assert "sales_bot" in template_ids

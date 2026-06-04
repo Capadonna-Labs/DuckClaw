@@ -15,6 +15,7 @@ Browser → Next.js BFF (/api/admin/auth/*) → Gateway (/api/v1/admin/auth/*) �
 ```
 
 - **Gateway**: verifica credenciales, emite cookies `session` + `csrf_token`, almacena sesión en Redis.
+- **DuckDB es autoridad de identidad**: `/auth/me` revalida que el email de la sesión exista y esté activo en `admin_console_users`; si no, destruye la sesión Redis y devuelve `401`.
 - **BFF**: proxy simple en login; deriva rol desde `/auth/me` (no confía en headers del cliente); valida CSRF en mutaciones.
 - **Frontend**: Zustand sin persist; hydrate vía `/api/admin/auth/me`; `credentials: 'include'`.
 
@@ -45,6 +46,7 @@ Columnas de auth (migración `002_admin_auth_columns`):
 - Cookie `session`: HttpOnly, Secure (prod), SameSite=Lax
 - Cookie `csrf_token`: readable por JS (double-submit)
 - `/auth/me` **refresca TTL** en cada request
+- `/auth/me` no acepta sesiones huérfanas: Redis no puede mantener logueado a un usuario ausente o inactivo en DuckDB.
 
 ## Rate limiting y delay
 

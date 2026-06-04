@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import SettingsSection from '@/components/settings/SettingsSection';
 import { DuckDbVaultSelector } from '@/components/duckdb/DuckDbVaultSelector';
@@ -23,7 +23,10 @@ export default function DuckDbPage() {
   const [tab, setTab] = useState<TabId>('explorer');
   const [vaultPath, setVaultPath] = useState('');
   const [vaults, setVaults] = useState<{ path: string; scope: string }[]>([]);
-  const [env, setEnv] = useState<Record<string, string>>({});
+  const [runtimeScope, setRuntimeScope] = useState<{ tenant_id: string; actor_email: string } | null>(null);
+  const [legacySchemasValue, setLegacySchemasValue] = useState('');
+  const [legacySchemasSource, setLegacySchemasSource] = useState('');
+  const [runtimeMsg, setRuntimeMsg] = useState<string | null>(null);
   const [legacySchemas, setLegacySchemas] = useState<{ schema: string; table_count: number }[]>([]);
   const [selectedLegacy, setSelectedLegacy] = useState<string[]>([]);
   const [confirmCleanup, setConfirmCleanup] = useState(false);
@@ -31,10 +34,24 @@ export default function DuckDbPage() {
   const [cleanupError, setCleanupError] = useState<string | null>(null);
   const [explorerRefresh, setExplorerRefresh] = useState(0);
 
+  const loadRuntimeSettings = useCallback(() => {
+    adminService
+      .getRuntimeSettings({ domains: ['duckdb'] })
+      .then((r) => {
+        setRuntimeScope({ tenant_id: r.tenant_id, actor_email: r.actor_email });
+        const legacy = r.settings.find((item) => item.domain === 'duckdb' && item.key === 'legacy_schemas');
+        setLegacySchemasValue(String(legacy?.value_text ?? ''));
+        setLegacySchemasSource(String(legacy?.source ?? 'default'));
+      })
+      .catch((e) =>
+        setRuntimeMsg(e instanceof Error ? e.message : 'No se pudo cargar Configuración DuckDB')
+      );
+  }, []);
+
   useEffect(() => {
     adminService.listVaults().then((r) => setVaults(r.vaults));
-    adminService.getEnv().then((e) => setEnv(e.values));
-  }, []);
+    loadRuntimeSettings();
+  }, [loadRuntimeSettings]);
 
   useEffect(() => {
     if (tab !== 'explorer') return;
@@ -68,7 +85,24 @@ export default function DuckDbPage() {
     }
   };
 
-  const duckKeys = Object.entries(env).filter(([k]) => k.includes('DUCK') || k.includes('DB'));
+  const saveLegacySchemasSetting = async () => {
+    setRuntimeMsg(null);
+    try {
+      await adminService.patchRuntimeSettings([
+        {
+          domain: 'duckdb',
+          key: 'legacy_schemas',
+          value: legacySchemasValue,
+          scope: 'actor',
+        },
+      ]);
+      setRuntimeMsg('Configuración DuckDB guardada en DuckDB.');
+      loadRuntimeSettings();
+      setExplorerRefresh((v) => v + 1);
+    } catch (e) {
+      setRuntimeMsg(e instanceof Error ? e.message : 'No se pudo guardar Configuración DuckDB');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -158,6 +192,52 @@ export default function DuckDbPage() {
 
       {tab === 'overview' && (
         <div className="space-y-8">
+          <SettingsSection
+            titulo="Configuración DuckDB"
+            descripcion="Runtime settings DB-first; .env queda como fallback de arranque."
+            icono={<Database size={22} />}
+          >
+            <div className="grid gap-4">
+              <div className="grid gap-2 rounded-2xl border border-gov-blue-100 bg-gov-blue-50/60 p-4 dark:border-dark-border dark:bg-dark-bg">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gov-blue-700 dark:text-dark-cyan">
+                      admin_runtime_settings
+                    </p>
+                    <h3 className="mt-1 font-black dark:text-dark-text">Schemas legacy configurados</h3>
+                    <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
+                      Lista CSV de schemas que el explorer puede marcar para limpieza controlada.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-gov-blue-700 dark:bg-dark-surface dark:text-dark-cyan">
+                    Fuente: {legacySchemasSource || 'default'}
+                  </span>
+                </div>
+                <textarea
+                  value={legacySchemasValue}
+                  onChange={(e) => setLegacySchemasValue(e.target.value)}
+                  rows={3}
+                  placeholder="pqrsd_crm, quant_core, war_room_core"
+                  className="w-full rounded-xl border px-3 py-2 font-mono text-sm dark:border-dark-border dark:bg-dark-surface"
+                />
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+                    Actor: {runtimeScope?.actor_email || 'cargando'} · Tenant:{' '}
+                    {runtimeScope?.tenant_id || 'cargando'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void saveLegacySchemasSetting()}
+                    className="rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white"
+                  >
+                    Guardar en DuckDB
+                  </button>
+                </div>
+                {runtimeMsg && <p className="text-sm text-gov-blue-700 dark:text-dark-cyan">{runtimeMsg}</p>}
+              </div>
+            </div>
+          </SettingsSection>
+
           <SettingsSection titulo="Bóvedas" icono={<Database size={22} />}>
             <ul className="text-sm font-mono space-y-1 max-h-64 overflow-y-auto">
               {vaults.map((v) => (
@@ -166,17 +246,6 @@ export default function DuckDbPage() {
                 </li>
               ))}
             </ul>
-          </SettingsSection>
-          <SettingsSection
-            titulo="Variables .env"
-            descripcion="Valores enmascarados"
-            icono={<Database size={22} />}
-          >
-            <dl className="text-sm space-y-2">
-              {duckKeys.map(([k, v]) => (
-                <EnvRow key={k} k={k} v={v} />
-              ))}
-            </dl>
           </SettingsSection>
         </div>
       )}
@@ -194,15 +263,6 @@ export default function DuckDbPage() {
         onCancel={() => setConfirmCleanup(false)}
         onConfirm={cleanupLegacySchemas}
       />
-    </div>
-  );
-}
-
-function EnvRow({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex gap-4">
-      <dt className="font-mono text-gov-gray-500 w-48 shrink-0">{k}</dt>
-      <dd className="font-mono">{v}</dd>
     </div>
   );
 }

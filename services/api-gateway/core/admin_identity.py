@@ -23,6 +23,7 @@ from duckclaw.admin_worker_catalog import (
 from duckclaw.admin_workspace import (
     attach_agent_to_project,
     create_project,
+    deactivate_project_for_actor,
     detach_agent_from_project,
     list_project_agents,
     list_projects_with_agents_for_actor,
@@ -263,3 +264,7 @@ def detach_project_agent_by_worker_id(
         worker_uid=worker["worker_uid"],
         actor_email=actor_email,
     )
+
+
+def deactivate_workspace_project_for_actor(db: Any, *, actor_email: str, project_id: str) -> bool:
+    return deactivate_project_for_actor(db, project_id=project_id, actor_email=actor_email)

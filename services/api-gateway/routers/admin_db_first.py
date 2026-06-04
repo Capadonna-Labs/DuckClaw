@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from routers.admin import _actor_from_header, _problem, _require_admin_key
@@ -47,6 +47,30 @@ class UserAgentCreateBody(BaseModel):
     system_prompt: str = ""
     description: str = ""
     skills: list[str] = Field(default_factory=list)
+
+
+class RuntimeSettingPatchItem(BaseModel):
+    domain: str = Field(..., min_length=1)
+    key: str = Field(..., min_length=1)
+    value: Any = ""
+    scope: str = "actor"
+    value_kind: str = "string"
+    secret: bool = False
+
+
+class RuntimeSettingsPatchBody(BaseModel):
+    settings: list[RuntimeSettingPatchItem] = Field(default_factory=list)
+
+
+def _runtime_setting_scope(item: RuntimeSettingPatchItem, *, actor: str, tenant_id: str) -> tuple[str, str]:
+    scope = (item.scope or "actor").strip().lower()
+    if scope == "global":
+        return "global", ""
+    if scope == "tenant":
+        return tenant_id, ""
+    if scope == "actor":
+        return tenant_id, actor
+    raise ValueError(f"scope inválido: {item.scope}")
 
 
 @router.post("/templates/import", dependencies=[Depends(_require_admin_key)])
@@ -131,6 +155,78 @@ async def delete_template_context(
     return {"ok": True, **result}
 
 
+@router.get("/settings/runtime", dependencies=[Depends(_require_admin_key)])
+async def list_runtime_settings(
+    domain: list[str] | None = Query(None),
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_runtime_settings import list_runtime_settings_effective
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+
+    with open_gateway_db(read_only=False) as db:
+        profile = ensure_profile_for_user(db, email=actor)
+        settings = list_runtime_settings_effective(
+            db,
+            tenant_id=profile["tenant_id"],
+            actor_email=profile["email"],
+            domains=domain or None,
+        )
+    return {
+        "tenant_id": profile["tenant_id"],
+        "actor_email": profile["email"],
+        "settings": settings,
+    }
+
+
+@router.patch("/settings/runtime", dependencies=[Depends(_require_admin_key)])
+async def patch_runtime_settings(
+    body: RuntimeSettingsPatchBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_resources import record_resource_event
+    from duckclaw.admin_runtime_settings import upsert_runtime_setting
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+
+    updated: list[str] = []
+    with open_gateway_db(read_only=False) as db:
+        profile = ensure_profile_for_user(db, email=actor)
+        for item in body.settings:
+            tenant_id, scoped_actor = _runtime_setting_scope(
+                item,
+                actor=profile["email"],
+                tenant_id=profile["tenant_id"],
+            )
+            value = item.value
+            value_json = value if isinstance(value, (dict, list)) else None
+            value_text = "" if value_json is not None else str(value or "")
+            upsert_runtime_setting(
+                db,
+                tenant_id=tenant_id,
+                actor_email=scoped_actor,
+                domain=item.domain,
+                key=item.key,
+                value_text=value_text,
+                value_json=value_json,
+                value_kind="json" if value_json is not None else item.value_kind,
+                secret=item.secret,
+                updated_by=profile["email"],
+            )
+            domain_key = f"{item.domain.strip().lower()}.{item.key.strip().lower()}"
+            updated.append(domain_key)
+            record_resource_event(
+                db,
+                tenant_id=profile["tenant_id"],
+                actor_email=profile["email"],
+                resource_kind="runtime_setting",
+                resource_id=domain_key,
+                event_type="runtime_setting.updated",
+                payload={"domain": item.domain, "setting": item.key, "scope": item.scope},
+            )
+    return {"ok": True, "updated": updated}
+
+
 @router.get("/workspace/projects", dependencies=[Depends(_require_admin_key)])
 async def list_workspace_projects(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
     from core.admin_identity import list_projects_with_agents_for_actor, open_gateway_db
@@ -156,6 +252,20 @@ async def create_workspace_project(
             visibility=body.visibility,
         )
     return {"project": project}
+
+
+@router.delete("/workspace/projects/{project_id}", dependencies=[Depends(_require_admin_key)])
+async def delete_workspace_project(
+    project_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import deactivate_workspace_project_for_actor, open_gateway_db
+
+    with open_gateway_db(read_only=False) as db:
+        ok = deactivate_workspace_project_for_actor(db, actor_email=actor, project_id=project_id)
+    if not ok:
+        raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
+    return {"ok": True, "project_id": project_id}
 
 
 @router.get("/workspace/projects/{project_id}/agents", dependencies=[Depends(_require_admin_key)])

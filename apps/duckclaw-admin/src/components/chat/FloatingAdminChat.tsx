@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Bot, MessageSquare, X, Maximize2 } from 'lucide-react';
+import { Bot, X, Maximize2 } from 'lucide-react';
 import { ThinkingDots } from '@/components/chat/ChatBubble';
 import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
-import { ConversationInbox } from '@/components/chat/ConversationInbox';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { useAdminChat } from '@/components/chat/useAdminChat';
 import { useFloatingChatUnread } from '@/components/chat/useFloatingChatUnread';
@@ -19,6 +18,20 @@ const BUBBLE_SIZE_PX = 48;
 const EDGE_INSET_PX = 16;
 const PANEL_WIDTH_PX = 560;
 const PANEL_HEIGHT_PX = 720;
+const NARROW_BREAKPOINT_PX = 640;
+
+function useNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(`(max-width: ${NARROW_BREAKPOINT_PX}px)`);
+    const apply = () => setNarrow(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+  return narrow;
+}
 
 /** Si la ruta es /templates/[workerId], usar ese agente por defecto. */
 function workerFromPath(pathname: string): string {
@@ -49,6 +62,7 @@ function maxDragOffset(): number {
 
 export function FloatingAdminChat() {
   const pathname = usePathname();
+  const isNarrow = useNarrowViewport();
   const [open, setOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [tenantId, setTenantId] = useState<string | undefined>();
@@ -64,6 +78,7 @@ export function FloatingAdminChat() {
   const sectionTitle = titleForAdminPath(pathname);
   const pathWorker = useMemo(() => workerFromPath(pathname), [pathname]);
   const conv = useActiveConversation(tenantId, section);
+  const { createConversation, selectConversation } = conv;
   const chat = useAdminChat({
     chatId: conv.sessionId ?? '',
     initialWorker: pathWorker,
@@ -181,102 +196,121 @@ export function FloatingAdminChat() {
     return null;
   }
 
+  const bubbleBottomClass = isNarrow
+    ? 'bottom-[max(1rem,env(safe-area-inset-bottom))]'
+    : 'bottom-4';
+
+  const headerActions = (
+    <div className="flex items-center justify-end gap-1 shrink-0">
+      <Link
+        href="/playground"
+        className="p-1.5 rounded-lg text-gov-blue-700 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
+        title="Abrir Playground completo"
+        aria-label="Abrir Playground completo"
+      >
+        <Maximize2 size={16} />
+      </Link>
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="p-1.5 rounded-lg text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
+        aria-label={loading ? 'Minimizar chat (el agente sigue pensando)' : 'Cerrar chat'}
+        title={loading ? 'Minimizar y seguir en segundo plano' : 'Cerrar'}
+      >
+        <X size={18} />
+      </button>
+    </div>
+  );
+
+  const chatPanel =
+    conv.bootstrapping || !conv.sessionId ? (
+      <p className="flex-1 flex items-center justify-center text-xs text-gov-gray-400 p-4">
+        Cargando…
+      </p>
+    ) : (
+      <AdminChatPanel
+        key={conv.sessionId}
+        chatId={conv.sessionId}
+        chat={chat}
+        variant="compact"
+        sectionTitle={sectionTitle}
+        conversationTitle={conv.conversationTitle}
+        emptyHint={`Pregunta sobre ${sectionTitle}…`}
+        showWorkerLink={false}
+        headerActions={headerActions}
+        onRenameConversation={conv.renameConversation}
+        conversationManage={{
+          tenantId,
+          section: '',
+          refreshToken: conv.refreshToken,
+          onSelect: (id, meta) => selectConversation(id, meta?.title),
+          onCreateNew: () => void createConversation(),
+        }}
+        className="flex-1 min-h-0 w-full"
+      />
+    );
+
+  const panelBody = (
+    <div className="relative flex flex-1 min-h-0 w-full pointer-events-auto overflow-hidden rounded-2xl max-sm:rounded-none">
+      {chatPanel}
+    </div>
+  );
+
   return (
-    <div
-      className={`fixed bottom-4 z-40 flex flex-col gap-2 pointer-events-none ${
-        panelOpensRight ? 'items-start' : 'items-end'
-      }`}
-      style={{ right: `calc(${EDGE_INSET_PX}px + ${offsetX}px)` }}
-    >
-      {notifyPerm === 'denied' && !open && (
-        <p
-          className="pointer-events-none max-w-[220px] rounded-lg bg-amber-50 px-2 py-1 text-[10px] text-amber-900 shadow dark:bg-amber-950/90 dark:text-amber-100"
-          role="status"
-        >
-          Notificaciones bloqueadas en el navegador. Actívalas en Ajustes del sitio.
-        </p>
-      )}
-      {open && (
+    <>
+      {open && isNarrow && (
         <div
-          className={`pointer-events-auto relative flex flex-col animate-in slide-in-from-bottom-4 fade-in duration-200 ${
-            panelOpensRight ? 'self-start' : 'self-end'
-          }`}
-          style={{
-            width: PANEL_WIDTH_PX,
-            height: `min(${PANEL_HEIGHT_PX}px, calc(100vh - 2rem))`,
-            maxWidth: 'calc(100vw - 2rem)',
-          }}
-          role="dialog"
-          aria-label={`Chat en ${sectionTitle}`}
+          className="fixed inset-0 z-50 flex flex-col pointer-events-auto bg-gov-blue-900/40 backdrop-blur-[1px] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+          role="presentation"
+          onClick={() => setOpen(false)}
         >
-          <div className="flex flex-1 min-h-0 pointer-events-auto overflow-hidden">
-            {inboxOpen && conv.sessionId && (
-              <ConversationInbox
-                tenantId={tenantId}
-                defaultSectionFilter=""
-                activeSessionId={conv.sessionId}
-                refreshToken={conv.refreshToken}
-                variant="compact"
-                onSelect={(id, meta) => {
-                  conv.selectConversation(id, meta?.title);
-                  setInboxOpen(false);
-                }}
-                onTitleRenamed={(_id, title) => conv.syncConversationTitle(title)}
-                className="border-r dark:border-dark-border"
-              />
-            )}
-            {conv.bootstrapping || !conv.sessionId ? (
-              <p className="flex-1 flex items-center justify-center text-xs text-gov-gray-400 p-4">
-                Cargando…
-              </p>
-            ) : (
-              <AdminChatPanel
-                key={conv.sessionId}
-                chatId={conv.sessionId}
-                chat={chat}
-                variant="compact"
-                sectionTitle={sectionTitle}
-                conversationTitle={conv.conversationTitle}
-                emptyHint={`Pregunta sobre ${sectionTitle}…`}
-                showWorkerLink={false}
-                headerActions={
-                  <div className="flex items-center justify-end gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setInboxOpen((v) => !v)}
-                      className="p-1.5 rounded-lg text-gov-blue-700 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
-                      title="Conversaciones"
-                      aria-label="Mostrar conversaciones"
-                      aria-expanded={inboxOpen}
-                    >
-                      <MessageSquare size={16} />
-                    </button>
-                    <Link
-                      href="/playground"
-                      className="p-1.5 rounded-lg text-gov-blue-700 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
-                      title="Abrir Playground completo"
-                      aria-label="Abrir Playground completo"
-                    >
-                      <Maximize2 size={16} />
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => setOpen(false)}
-                      className="p-1.5 rounded-lg text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
-                      aria-label={loading ? 'Minimizar chat (el agente sigue pensando)' : 'Cerrar chat'}
-                      title={loading ? 'Minimizar y seguir en segundo plano' : 'Cerrar'}
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-                }
-                className="flex-1 min-h-0"
-              />
-            )}
+          <div
+            className="flex flex-1 flex-col min-h-0 w-full max-w-full bg-white dark:bg-dark-surface shadow-2xl animate-in slide-in-from-bottom-4 fade-in duration-200"
+            role="dialog"
+            aria-label={`Chat en ${sectionTitle}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {panelBody}
           </div>
         </div>
       )}
 
+      <div
+        className={`fixed ${bubbleBottomClass} z-40 flex flex-col gap-2 pointer-events-none ${
+          isNarrow ? 'left-4 items-start' : panelOpensRight ? 'items-start' : 'items-end'
+        }`}
+        style={
+          isNarrow
+            ? undefined
+            : { right: `calc(${EDGE_INSET_PX}px + ${offsetX}px)` }
+        }
+      >
+        {notifyPerm === 'denied' && !open && (
+          <p
+            className="pointer-events-none max-w-[220px] rounded-lg bg-amber-50 px-2 py-1 text-[10px] text-amber-900 shadow dark:bg-amber-950/90 dark:text-amber-100"
+            role="status"
+          >
+            Notificaciones bloqueadas en el navegador. Actívalas en Ajustes del sitio.
+          </p>
+        )}
+        {open && !isNarrow && (
+          <div
+            className={`pointer-events-auto relative flex flex-col animate-in slide-in-from-bottom-4 fade-in duration-200 ${
+              panelOpensRight ? 'self-start' : 'self-end'
+            }`}
+            style={{
+              width: PANEL_WIDTH_PX,
+              height: `min(${PANEL_HEIGHT_PX}px, calc(100dvh - 2rem))`,
+              maxWidth: 'calc(100vw - 2rem)',
+            }}
+            role="dialog"
+            aria-label={`Chat en ${sectionTitle}`}
+          >
+            {panelBody}
+          </div>
+        )}
+
+        {(!open || !isNarrow) && (
       <button
         type="button"
         onClick={onBubbleClick}
@@ -319,6 +353,8 @@ export function FloatingAdminChat() {
           </span>
         )}
       </button>
-    </div>
+        )}
+      </div>
+    </>
   );
 }

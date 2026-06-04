@@ -60,6 +60,45 @@ from duckclaw.workers.worker_ids import (
     normalize_worker_id,
 )
 
+def _raise_if_chat_cancelled_from_state(state: dict) -> None:
+    from duckclaw.graphs.chat_cancel import raise_if_chat_cancelled
+
+    cid = str(state.get("chat_id") or state.get("session_id") or "").strip()
+    if cid:
+        raise_if_chat_cancelled(cid)
+
+
+_DEBUG_LOG_PATH = os.environ.get("DUCKCLAW_DEBUG_LOG_PATH") or str(
+    Path(__file__).resolve().parents[5] / ".cursor" / "debug-fd1dbb.log"
+)
+
+
+def _ibkr_cancel_debug_log(
+    location: str,
+    message: str,
+    data: dict[str, Any],
+    *,
+    hypothesis_id: str,
+    run_id: str = "pre-fix",
+) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "fd1dbb",
+            "location": location,
+            "message": message,
+            "data": data,
+            "hypothesisId": hypothesis_id,
+            "runId": run_id,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(os.path.normpath(_DEBUG_LOG_PATH), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
+
+
 _NO_TASK_PATTERN = re.compile(
     r"^(hola|hi|hey|buenos?\s*d[ií]as?|buenas?\s*tardes?|buenas?\s*noches?|"
     r"qu[eé]\s*tal|qu[eé]\s*hay|saludos?|hello|ciao|adios?|chao)\s*[!.]?$",
@@ -91,6 +130,45 @@ _TABLE_CONTENT_PHRASE = re.compile(
 )
 
 
+def incoming_is_manager_planned_guardrail_task(text: str) -> bool:
+    """TAREA inyectada por el manager (guardrails); no confundir con intención cruda del usuario."""
+    raw = (text or "").strip()
+    if not raw.lower().startswith("tarea:"):
+        return False
+    low = raw.lower()
+    return "information_schema" in low or "show tables" in low or "lista de tablas" in low
+
+
+_SCHEMA_EXPLICIT_PHRASE = re.compile(
+    r"\b(listar\s+tablas|tablas\s+disponibles|qu[ée]\s+tablas|que\s+tablas|"
+    r"tablas\s+de\s+la\s+base|tablas\s+en\s+(la\s+)?(base|duckdb)|"
+    r"show\s+tables|information_schema\.tables|"
+    r"esquema\s+de\s+la\s+base|schema\s+de\s+la\s+base|estructura\s+de\s+la\s+base|"
+    r"listar\s+(el\s+)?esquema|ver\s+(el\s+)?esquema|mostrar\s+(el\s+)?esquema|"
+    r"nombre\s+de\s+la\s+db|nombre\s+db)\b",
+    re.IGNORECASE,
+)
+_SCHEMA_TABLE_NEAR_DB = re.compile(
+    r"\b(tablas?|tables?)\b.{0,50}\b(duckdb|base\s+de\s+datos|information_schema)\b|"
+    r"\b(duckdb|base\s+de\s+datos|information_schema)\b.{0,50}\b(tablas?|tables?)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def explicit_duckdb_schema_request(text: str) -> bool:
+    """
+    ¿El usuario pide inventario de tablas/esquema DuckDB?
+    No activar por boletines largos que mencionan «datos» en un bullet y «tablas» en otro
+  (p. ej. notas técnicas con Halodoc + DuckDB en el mismo mensaje).
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if _SCHEMA_EXPLICIT_PHRASE.search(raw):
+        return True
+    return bool(_SCHEMA_TABLE_NEAR_DB.search(raw))
+
+
 def incoming_is_schema_query_heuristic(text: str) -> bool:
     """
     ¿Forzar inspect_schema? No si el usuario pegó sólo una URL HTTP(S): el path puede
@@ -98,6 +176,8 @@ def incoming_is_schema_query_heuristic(text: str) -> bool:
     Exportado para tests.
     """
     if not text or not text.strip():
+        return False
+    if incoming_is_manager_planned_guardrail_task(text):
         return False
     if bool(_LONE_HTTP_URL_ONLY_LINE.match(text.strip())):
         return False
@@ -108,10 +188,7 @@ def incoming_is_schema_query_heuristic(text: str) -> bool:
         return False
     if _TABLE_CONTENT_PHRASE.search(t):
         return False
-    return any(
-        k in t
-        for k in ("tablas", "tabla", "duckdb", "esquema", "schema", "estructura", "qué tablas", "que tablas")
-    )
+    return explicit_duckdb_schema_request(text)
 
 
 # Preguntas sobre DB/tablas/esquema son siempre tarea concreta (evitar "¿Cuál es mi tarea?")
@@ -619,6 +696,16 @@ def _duckclaw_env_truthy(name: str) -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _visual_evidence_max_retries() -> int:
+    """Reintentos en grafo tras Regla de Evidencia Única (default 1)."""
+    raw = (os.environ.get("DUCKCLAW_VISUAL_EVIDENCE_MAX_RETRIES") or "1").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 1
+    return max(0, n)
+
+
 def _quant_ohlcv_context_summary_forced_fetch_enabled() -> bool:
     """Opt-in: forzar ingesta OHLCV en turnos SUMMARIZE_* cuando el texto pide velas explícitas."""
     return _duckclaw_env_truthy("DUCKCLAW_QUANT_OHLCV_ON_CONTEXT_SUMMARY")
@@ -875,6 +962,48 @@ def _quant_tool_called_since(messages: list[Any], from_idx: int, tool_name: str)
     return False
 
 
+def _quant_tool_called_recently(
+    messages: list[Any],
+    tool_name: str,
+    *,
+    max_messages: int = 32,
+) -> bool:
+    """True si la herramienta apareció en los últimos mensajes del hilo (evita bucles IBKR)."""
+    from langchain_core.messages import ToolMessage
+
+    tail = list(messages or [])[-max(1, max_messages) :]
+    for m in tail:
+        if isinstance(m, ToolMessage) and str(getattr(m, "name", "") or "") == tool_name:
+            return True
+    return False
+
+
+def _quant_strip_duplicate_ibkr_portfolio_tool_calls(
+    messages: list[Any],
+    tool_calls: list[Any],
+    *,
+    last_human_idx: int,
+) -> list[Any]:
+    """Quita get_ibkr_portfolio repetido en el mismo turno tras un snapshot exitoso."""
+    if not tool_calls:
+        return tool_calls
+    already_in_turn = _quant_tool_called_since(
+        messages or [], last_human_idx, "get_ibkr_portfolio"
+    )
+    filtered: list[Any] = []
+    seen_pf_in_batch = False
+    for tc in tool_calls:
+        name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+        if str(name or "") != "get_ibkr_portfolio":
+            filtered.append(tc)
+            continue
+        if already_in_turn or seen_pf_in_batch:
+            continue
+        seen_pf_in_batch = True
+        filtered.append(tc)
+    return filtered
+
+
 def _quant_latest_tool_json_since(messages: list[Any], from_idx: int, tool_name: str) -> dict[str, Any]:
     from langchain_core.messages import ToolMessage
 
@@ -997,11 +1126,14 @@ def _reply_is_tool_label_json_echo(text: str) -> bool:
 
 
 def _reply_is_quant_tool_json_echo(text: str) -> bool:
+    from duckclaw.integrations.llm_providers import reply_contains_dsml_tool_markup
+
     return (
         _reply_is_get_current_time_json_only(text)
         or _reply_is_fetch_market_data_json_only(text)
         or _reply_is_read_sql_json_only(text)
         or _reply_is_tool_label_json_echo(text)
+        or reply_contains_dsml_tool_markup(text)
     )
 
 
@@ -3190,6 +3322,13 @@ def build_worker_graph(
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             pass
+    else:
+        try:
+            from duckclaw.forge.skills.homeostasis_bridge import register_goals_alignment_skill
+            register_goals_alignment_skill(tools, db)
+            tools_by_name = {t.name: t for t in tools}
+        except Exception:
+            pass
 
     # Strix Sandbox: `run_sandbox` si hay security_policy.yaml; `run_browser_sandbox` si browser_sandbox en manifest.
     try:
@@ -3453,7 +3592,7 @@ def build_worker_graph(
     else:
         from duckclaw.integrations.llm_providers import (
             bind_tools_with_parallel_default as _bind_tools,
-            extract_embedded_json_tool_invokes,
+            extract_embedded_tool_invokes,
         )
 
         # Cache de re-ligado por modo (evita re-bind costoso por chat/turno).
@@ -3890,10 +4029,25 @@ def build_worker_graph(
             ) or ("partida" in t and ("ultima" in t or "última" in t or "reciente" in t))
 
         def agent_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
+            _raise_if_chat_cancelled_from_state(state)
+            if state.get("visual_evidence_graph_retry"):
+                state = {**state, "visual_evidence_graph_retry": False}
             _chat_ctx = state.get("chat_id") or state.get("session_id") or "default"
             _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"
             _log_chat = format_chat_log_identity(str(_chat_ctx).strip() or "default", state.get("username"))
             set_log_context(tenant_id=_tenant_ctx, worker_id=worker_id, chat_id=_log_chat)
+            try:
+                from duckclaw.forge.skills.goals_tool_context import (
+                    set_goals_tool_chat_id,
+                    set_goals_tool_db_path,
+                    set_goals_tool_worker_id,
+                )
+
+                set_goals_tool_chat_id(str(_chat_ctx))
+                set_goals_tool_worker_id(worker_id)
+                set_goals_tool_db_path(str(path))
+            except Exception:
+                pass
             ibkr_session_on = has_ibkr and _ibkr_enabled_for_state(state)
             _ev_msgs = state.get("messages") or []
             _ev_last = _ev_msgs[-1] if _ev_msgs else None
@@ -3922,6 +4076,13 @@ def build_worker_graph(
                     if isinstance(m, HumanMessage) and getattr(m, "content", None):
                         incoming = (str(m.content) or "").strip()
                         break
+            _user_incoming_raw = (state.get("user_incoming") or "").strip()
+            _intent_incoming = (
+                _user_incoming_raw
+                if _user_incoming_raw
+                and incoming_is_manager_planned_guardrail_task(incoming)
+                else incoming
+            )
             telegram_context_summarize_directive = (
                 "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in (incoming or "")
                 or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
@@ -3935,11 +4096,28 @@ def build_worker_graph(
                 str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
                 and proactive_review_event_phrase_in_text(str(incoming or ""))
             )
-            is_schema = _is_schema_query(incoming)
-            is_table_content = _is_table_content_query(incoming)
-            is_latest_game = _is_latest_game_query(incoming)
-            _is_portfolio_kw = _incoming_is_portfolio_query(incoming) or _user_explicitly_requests_ibkr_portfolio(
-                incoming
+            if _is_goals_tick_msg:
+                try:
+                    from duckclaw.forge.homeostasis.goals_alignment import (
+                        alignment_review_phrase_in_text,
+                        pick_nudge_opener,
+                    )
+                    from duckclaw.graphs.chat_heartbeat import publish_admin_chat_heartbeat
+
+                    if alignment_review_phrase_in_text(str(incoming or "")):
+                        publish_admin_chat_heartbeat(
+                            str(_chat_ctx),
+                            pick_nudge_opener(str(_chat_ctx), time.time()),
+                            kind="alignment",
+                            worker_id=worker_id,
+                        )
+                except Exception:
+                    pass
+            is_schema = _is_schema_query(_intent_incoming)
+            is_table_content = _is_table_content_query(_intent_incoming)
+            is_latest_game = _is_latest_game_query(_intent_incoming)
+            _is_portfolio_kw = _incoming_is_portfolio_query(_intent_incoming) or _user_explicitly_requests_ibkr_portfolio(
+                _intent_incoming
             )
             _is_portfolio_quant_retry = (
                 is_quant_trader(_lid)
@@ -4777,6 +4955,36 @@ def build_worker_graph(
             )
             if _quant_vlm_read_sql_evidence:
                 force_read_sql = True
+            _force_vlm_evidence_retry = bool(
+                int(state.get("visual_evidence_retry_count") or 0) > 0
+                and is_market_worker(_lid_l)
+                and has_read_sql
+                and _worker_use_heuristic_first_tool(spec)
+                and not telegram_context_summarize_directive
+                and not summarize_stored_directive
+                and not already_has_tool_result
+                and not _quant_deterministic_cycle
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                    or force_reddit
+                    or force_fetch_ib_gateway
+                    or force_fetch_market_data
+                    or force_quant_propose_signal
+                    or force_quant_signal_fetch_ib
+                    or force_quant_signal_fetch_md
+                    or force_plot_docs
+                    or force_run_sandbox
+                    or force_pqrsd_fetch_canonical
+                    or force_execute_approved_signal
+                )
+            )
+            if _force_vlm_evidence_retry:
+                force_read_sql = True
             _last_human_idx = _quant_last_human_index(state.get("messages") or [])
             _has_fetch_since_last_human = _quant_tool_called_since(
                 state.get("messages") or [], _last_human_idx, "fetch_ib_gateway_ohlcv"
@@ -5343,6 +5551,7 @@ def build_worker_graph(
                 _invoked_llm = _bind_tools(llm, _nr_ex)
             _llm_invoke_exc: BaseException | None = None
             try:
+                _raise_if_chat_cancelled_from_state(state)
                 from duckclaw.integrations.llm_providers import invoke_chat_model_with_transient_retries
 
                 resp = invoke_chat_model_with_transient_retries(_invoked_llm, _groq_msgs)
@@ -5366,6 +5575,10 @@ def build_worker_graph(
                             resp, _reddit_resolved_comments_url
                         )
             except Exception as exc:
+                from duckclaw.graphs.chat_cancel import ChatCancelledError
+
+                if isinstance(exc, ChatCancelledError):
+                    raise
                 _llm_invoke_exc = exc
                 _log.warning("[%s] LLM invoke failed in agent_node: %s", _wl, exc, exc_info=True)
                 from duckclaw.integrations.llm_providers import failure_provider_label_for_llm_invoke
@@ -5392,7 +5605,15 @@ def build_worker_graph(
                 str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
                 and proactive_review_event_phrase_in_text(str(incoming or ""))
             )
-            if force_portfolio and ibkr_session_on and _is_goals_tick and not tool_calls:
+            if (
+                force_portfolio
+                and ibkr_session_on
+                and _is_goals_tick
+                and not tool_calls
+                and not _quant_tool_called_since(
+                    state.get("messages") or [], _last_human_idx, "get_ibkr_portfolio"
+                )
+            ):
                 _forced_tid = f"call_forced_ibkr_{int(time.time() * 1000)}"
                 forced_tc = [{"name": "get_ibkr_portfolio", "args": {}, "id": _forced_tid, "type": "tool_call"}]
                 try:
@@ -5749,6 +5970,46 @@ def build_worker_graph(
                     except Exception:
                         resp = AIMessage(content="", tool_calls=forced_tc_gct)
                     tool_calls = forced_tc_gct
+            if tool_calls and (is_market_worker(_lid) or _lid_l in (WORKER_QUANT_TRADER, WORKER_FINANZ)):
+                _lh_ibkr = _quant_last_human_index(state.get("messages") or [])
+                _tc_before = len(tool_calls)
+                tool_calls = _quant_strip_duplicate_ibkr_portfolio_tool_calls(
+                    state.get("messages") or [],
+                    tool_calls,
+                    last_human_idx=_lh_ibkr,
+                )
+                if len(tool_calls) < _tc_before:
+                    _ibkr_cancel_debug_log(
+                        "factory.py:agent_node",
+                        "stripped duplicate get_ibkr_portfolio",
+                        {
+                            "chat_id": str(state.get("chat_id") or state.get("session_id") or ""),
+                            "before": _tc_before,
+                            "after": len(tool_calls),
+                            "already_in_turn": _quant_tool_called_since(
+                                state.get("messages") or [],
+                                _lh_ibkr,
+                                "get_ibkr_portfolio",
+                            ),
+                        },
+                        hypothesis_id="H1",
+                    )
+                    if tool_calls:
+                        try:
+                            resp = resp.model_copy(update={"tool_calls": tool_calls})
+                        except Exception:
+                            resp = AIMessage(
+                                content=str(getattr(resp, "content", "") or ""),
+                                tool_calls=tool_calls,
+                            )
+                    else:
+                        resp = AIMessage(
+                            content=(
+                                "Ya consulté el portfolio IBKR en este turno; "
+                                "resumo con los datos obtenidos."
+                            )
+                        )
+                        tool_calls = []
             out = {**state, "messages": state["messages"] + [resp]}
             if _market_inline_synth_attempted:
                 out["market_inline_synthesis_attempted"] = True
@@ -5771,6 +6032,8 @@ def build_worker_graph(
             return out
 
     def tools_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
+        _cid_tools = str(state.get("chat_id") or state.get("session_id") or "").strip()
+        _raise_if_chat_cancelled_from_state(state)
         from duckclaw.graphs.chat_heartbeat import (
             format_tool_heartbeat,
             heartbeat_message_for_tool,
@@ -5961,9 +6224,17 @@ def build_worker_graph(
                 new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
         else:
             for tc in tool_calls:
+                _raise_if_chat_cancelled_from_state(state)
                 name = (tc.get("name") or "").strip()
                 args = tc.get("args") or {}
                 tid = tc.get("id") or ""
+                if name == "get_ibkr_portfolio":
+                    _ibkr_cancel_debug_log(
+                        "factory.py:tools_node",
+                        "executing get_ibkr_portfolio",
+                        {"chat_id": _cid_tools, "tool_round": _tool_round},
+                        hypothesis_id="H1",
+                    )
                 tool = tool_lookup.get(name)
                 if tool:
                     _tool_t0: float | None = None
@@ -6305,7 +6576,7 @@ def build_worker_graph(
             out_empty = {**state, "reply": "Sin respuesta generada."}
             out_empty.update(_identity_fields(state))
             return out_empty
-        _embedded_invokes = extract_embedded_json_tool_invokes(reply)
+        _embedded_invokes = extract_embedded_tool_invokes(reply)
         if _embedded_invokes:
             from duckclaw.utils import format_tool_reply
 
@@ -6438,8 +6709,12 @@ def build_worker_graph(
         except Exception:
             pass
         try:
-            from duckclaw.forge.atoms.quant_price_validator import quant_reply_price_audit
-            from duckclaw.forge.atoms.quant_price_validator import enforce_visual_evidence_rule
+            from duckclaw.forge.atoms.quant_price_validator import (
+                VISUAL_EVIDENCE_RETRY_REASON,
+                enforce_visual_evidence_rule,
+                quant_reply_price_audit,
+                visual_evidence_retry_system_message,
+            )
 
             # Turnos /context (SUMMARIZE_*): sin auditorías cuánticas/VLM que puedan sustituir el resumen.
             if reply and not incoming_has_context_summarize_directive(_rescind_incoming):
@@ -6450,7 +6725,61 @@ def build_worker_graph(
                     db=db,
                     spec=spec,
                 )
-                if vreason:
+                if vreason == VISUAL_EVIDENCE_RETRY_REASON:
+                    _ve_max = _visual_evidence_max_retries()
+                    _ve_count = int(state.get("visual_evidence_retry_count") or 0)
+                    if _ve_count < _ve_max:
+                        _log.warning(
+                            "Finanz visual evidence audit: %s — in-graph retry %s/%s",
+                            vreason,
+                            _ve_count + 1,
+                            _ve_max,
+                        )
+                        _msgs_retry = list(msgs) + [visual_evidence_retry_system_message()]
+                        out_retry: dict = {
+                            **state,
+                            "messages": _msgs_retry,
+                            "reply": "",
+                            "internal_reply": "",
+                            "visual_evidence_retry_count": _ve_count + 1,
+                            "visual_evidence_graph_retry": True,
+                        }
+                        out_retry.update(_identity_fields(state))
+                        _sb_retry = (state.get("sandbox_photo_base64") or "").strip()
+                        if _sb_retry:
+                            out_retry["sandbox_photo_base64"] = _sb_retry
+                        _aid_retry = (state.get("visual_artifact_id") or "").strip()
+                        if _aid_retry:
+                            out_retry["visual_artifact_id"] = _aid_retry
+                        return out_retry
+                    _log.warning(
+                        "Finanz visual evidence audit: %s — retries exhausted",
+                        vreason,
+                    )
+                    _spec_lid_ve = _spec_logical_worker_id(spec)
+                    _lh_ve = _quant_last_human_index(list(msgs) if msgs else [])
+                    _det_ve = _deterministic_market_worker_tool_summary(
+                        list(msgs), _lh_ve, _spec_lid_ve, _inc_for_ctx
+                    )
+                    if _det_ve:
+                        reply = sanitize_worker_reply_text(_det_ve)
+                    elif is_market_worker(_spec_lid_ve) and llm is not None:
+                        _repaired = _repair_quant_vlm_tool_egress_reply(
+                            llm,
+                            spec,
+                            _inc_for_ctx,
+                            "",
+                            list(msgs),
+                            skip_llm_synthesis=False,
+                        )
+                        if (_repaired or "").strip():
+                            reply = sanitize_worker_reply_text(_repaired)
+                    if not (reply or "").strip():
+                        reply = (
+                            "No pude validar las cifras de mercado de la imagen con datos del ledger. "
+                            "Intenta de nuevo o especifica el símbolo."
+                        )
+                elif vreason:
                     _log.warning("Finanz visual evidence audit: %s", vreason)
                     reply = new_v
                 new_r, qreason = quant_reply_price_audit(db, spec, reply, messages=msgs)
@@ -6559,6 +6888,9 @@ def build_worker_graph(
     def route_after_fact_check(state: dict) -> str:
         return state.get("context_guard_route", "approved")
 
+    def route_after_set_reply(state: dict) -> str:
+        return "agent" if state.get("visual_evidence_graph_retry") else "end"
+
     def homeostasis_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         """HomeostasisNode: Percepción-Sorpresa-Restauración-Actualización. Fase 1: pass-through (tabla ya creada en run_schema).
         IMPORTANTE: retornar state para preservar input/incoming; retornar {} vacío hace que LangGraph pierda el estado."""
@@ -6620,7 +6952,11 @@ def build_worker_graph(
         graph.add_edge("tools", "context_monitor")
     else:
         graph.add_edge("tools", "agent")
-    graph.add_edge("set_reply", END)
+    graph.add_conditional_edges(
+        "set_reply",
+        route_after_set_reply,
+        {"agent": "agent", "end": END},
+    )
 
     compiled = graph.compile()
     compiled._worker_spec = spec

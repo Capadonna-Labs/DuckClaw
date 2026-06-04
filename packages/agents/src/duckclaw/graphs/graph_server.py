@@ -692,6 +692,7 @@ async def _ainvoke(
     state: dict[str, Any] = {
         "input": message,
         "incoming": message,
+        "user_incoming": message,
         "history": history or [],
         "chat_id": chat_id,
         "tenant_id": tenant_id,

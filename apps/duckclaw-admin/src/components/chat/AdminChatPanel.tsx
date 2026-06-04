@@ -1,7 +1,13 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Bot, Brain, ChevronDown, ChevronRight, ImagePlus, Send, X } from 'lucide-react';
+import { ChatViewTabBar, type ChatViewTab } from '@/components/chat/ChatViewTabBar';
+import {
+  ConversationManagePanel,
+  type ConversationManagePanelProps,
+} from '@/components/chat/ConversationManagePanel';
 import { useAuthStore } from '@/store/authStore';
 import { ChatBubble, ThinkingBubble } from '@/components/chat/ChatBubble';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
@@ -32,6 +38,11 @@ export type AdminChatPanelProps = {
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
   headerActions?: React.ReactNode;
+  /** Pestaña «Conversación» (selector, renombrar, nueva/eliminar). */
+  conversationManage?: Pick<
+    ConversationManagePanelProps,
+    'tenantId' | 'section' | 'refreshToken' | 'onSelect' | 'onCreateNew'
+  >;
   className?: string;
 };
 
@@ -54,8 +65,15 @@ export function AdminChatPanel({
   conversationTitle,
   onRenameConversation,
   headerActions,
+  conversationManage,
   className = '',
 }: AdminChatPanelProps) {
+  const [viewTab, setViewTab] = useState<ChatViewTab>('chat');
+  const showConversationTab = Boolean(conversationManage && chatId && onRenameConversation);
+
+  useEffect(() => {
+    setViewTab('chat');
+  }, [chatId]);
   const { usuario } = useAuthStore();
   const internalChat = useAdminChat({ chatId, initialWorker, enabled: !chatProp });
   const chat = chatProp ?? internalChat;
@@ -107,7 +125,7 @@ export function AdminChatPanel({
           }`}
         >
           {isCompact ? (
-            <div className="flex flex-col items-start gap-2 w-full">
+            <div className="flex flex-col items-stretch gap-2 w-full min-w-0 max-sm:max-h-[10.5rem] max-sm:overflow-y-auto max-sm:overscroll-contain">
               <div className="flex items-center justify-between gap-2 w-full">
                 <div className="min-w-0">
                   <p className="text-sm font-black dark:text-dark-text truncate">
@@ -134,9 +152,11 @@ export function AdminChatPanel({
                 />
               )}
               {chatId && (config?.catalog?.length ?? 0) > 0 && (
-                <label className="flex flex-wrap items-center gap-2 text-[10px] w-full">
-                  <Brain size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
-                  <span className="text-gov-gray-500 dark:text-dark-muted shrink-0">Modelo</span>
+                <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
+                  <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
+                    <Brain size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
+                    Modelo
+                  </span>
                   <ChatLlmSelectors
                     chatId={chatId}
                     provider={config?.llm?.provider ?? ''}
@@ -148,14 +168,16 @@ export function AdminChatPanel({
                   />
                 </label>
               )}
-              <label className="flex items-center gap-2 text-[10px] w-full">
-                <Bot size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
-                <span className="text-gov-gray-500 dark:text-dark-muted shrink-0">Worker</span>
+              <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
+                <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
+                  <Bot size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
+                  Worker
+                </span>
                 <select
                   value={workerId}
                   onChange={(e) => setWorkerId(e.target.value, { persist: true })}
                   disabled={!config?.workers?.length || config?.authorized === false}
-                  className="text-[10px] px-1.5 py-1 border rounded-md dark:border-dark-border dark:bg-dark-bg max-w-[180px] disabled:opacity-50"
+                  className="text-[10px] px-1.5 py-2 min-h-[40px] border rounded-md dark:border-dark-border dark:bg-dark-bg w-full max-w-full disabled:opacity-50"
                   aria-label="Worker"
                 >
                   {(config?.workers ?? []).map((w) => {
@@ -249,7 +271,7 @@ export function AdminChatPanel({
         </header>
       )}
 
-      {config?.team_hint && (
+      {config?.team_hint && viewTab === 'chat' && (
         <p
           className={`text-[10px] px-3 py-1.5 border-b shrink-0 ${
             config.authorized === false
@@ -266,12 +288,30 @@ export function AdminChatPanel({
         </p>
       )}
 
-      <div className="relative flex-1 min-h-0 flex flex-col">
+      {showConversationTab ? (
+        <ChatViewTabBar active={viewTab} onChange={setViewTab} />
+      ) : null}
+
+      {showConversationTab && viewTab === 'conversation' && conversationManage ? (
+        <ConversationManagePanel
+          tenantId={conversationManage.tenantId}
+          section={conversationManage.section}
+          activeSessionId={chatId}
+          conversationTitle={conversationTitle}
+          refreshToken={conversationManage.refreshToken}
+          onSelect={conversationManage.onSelect}
+          onCreateNew={conversationManage.onCreateNew}
+          onRename={onRenameConversation}
+          onAfterChange={() => setViewTab('chat')}
+        />
+      ) : (
+        <>
+      <div className="relative flex-1 min-h-0 min-w-0 flex flex-col w-full">
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className={`flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3 min-h-0 ${
-            isCompact ? 'max-h-[min(50vh,420px)]' : 'min-h-[320px]'
+          className={`flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3 min-h-0 w-full ${
+            isCompact ? '' : 'min-h-[320px]'
           }`}
         >
         {messages.length === 0 && (
@@ -347,7 +387,7 @@ export function AdminChatPanel({
           <button
             type="button"
             onClick={() => scrollToBottom('smooth')}
-            className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface"
+            className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface max-lg:bottom-16"
             aria-label="Ir al final de la conversación"
             title="Ir abajo"
           >
@@ -356,7 +396,7 @@ export function AdminChatPanel({
         )}
       </div>
 
-      <footer className="p-3 border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50 shrink-0">
+      <footer className="p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50 shrink-0 relative z-20">
         {imageAttachments.pendingImages.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
             {imageAttachments.pendingImages.map((img) => (
@@ -437,6 +477,8 @@ export function AdminChatPanel({
           <p className="text-xs text-red-600 mt-1.5">{imageAttachments.attachError || error}</p>
         )}
       </footer>
+        </>
+      )}
     </section>
   );
 }

@@ -68,16 +68,35 @@ def _connect_duckdb_writable_with_retry(
     raise last
 
 
+def _resolve_enqueue_user_id(
+    *,
+    user_id: str,
+    target_db_path: str,
+    tenant_id: str,
+) -> str:
+    from duckclaw.vaults import resolve_user_id_for_db_path
+
+    resolved = resolve_user_id_for_db_path(
+        user_id,
+        target_db_path,
+        tenant_id=tenant_id or None,
+    )
+    if resolved is None:
+        raise ValueError("db_path inválido para el usuario")
+    return resolved
+
+
 def _validate_write_target(
     *,
     user_id: str,
     target_db_path: str,
     tenant_id: str,
 ) -> None:
-    from duckclaw.vaults import validate_user_db_path
-
-    if not validate_user_db_path(user_id, target_db_path, tenant_id=tenant_id or None):
-        raise ValueError("db_path inválido para el usuario")
+    _resolve_enqueue_user_id(
+        user_id=user_id,
+        target_db_path=target_db_path,
+        tenant_id=tenant_id,
+    )
 
     try:
         from duckclaw import DuckClaw
@@ -124,8 +143,12 @@ def apply_duckdb_write_sync(
     target = str(db_path or "").strip()
     if not target:
         raise ValueError("db_path vacío")
-    uid = str(user_id or "default").strip() or "default"
     tid_tenant = str(tenant_id or "default").strip() or "default"
+    uid = _resolve_enqueue_user_id(
+        user_id=str(user_id or "default").strip() or "default",
+        target_db_path=target,
+        tenant_id=tid_tenant,
+    )
     _validate_write_target(user_id=uid, target_db_path=target, tenant_id=tid_tenant)
     try:
         con = _connect_duckdb_writable_with_retry(target)
@@ -179,10 +202,16 @@ def enqueue_duckdb_write_sync(
     import redis
 
     tid = task_id or str(uuid.uuid4())
+    tid_tenant = str(tenant_id or "default").strip() or "default"
+    uid = _resolve_enqueue_user_id(
+        user_id=str(user_id or "default").strip() or "default",
+        target_db_path=str(db_path or "").strip(),
+        tenant_id=tid_tenant,
+    )
     payload = {
         "task_id": tid,
         "tenant_id": tenant_id,
-        "user_id": user_id,
+        "user_id": uid,
         "db_path": db_path,
         "query": query,
         "params": list(params or []),

@@ -4,15 +4,17 @@
 # Si el gateway envía siempre POST enriquecido a IBKR_EXECUTE_ORDER_URL, puedes omitir la copia del .duckdb:
 #   export SKIP_DUCKDB_COPY=1
 #
-# Uso (con fallback DB en el VPS):
+# Hetzner (recomendado): usa vps_patch_execute_equity_hetzner.sh en su lugar.
+#
+# Uso legacy Capadonna home:
 #   export VPS=capadonna@100.97.151.69
 #   export LOCAL_DUCKDB="/ruta/local/a/tu.boveda.duckdb"
-#   ./scripts/capadonna/deploy_execute_hook_vps.sh
 #
-# Uso (solo script + hook; sin IBKR_EXECUTE_ORDER_DB_PATH en el drop-in):
-#   export VPS=capadonna@100.97.151.69
+# Uso Hetzner (solo script, POST enriquecido desde Mac):
+#   export VPS=root@100.75.4.17
+#   export REMOTE_DIR=/root/duckclaw/scripts/capadonna
 #   export SKIP_DUCKDB_COPY=1
-#   ./scripts/capadonna/deploy_execute_hook_vps.sh
+#   ./scripts/SCRIPTS-DEPRECATED/capadonna/deploy_execute_hook_vps.sh
 #
 # Luego en el VPS (con sudo):
 #   sudo tee /etc/systemd/system/capadonna-observability.service.d/99-execute-order.conf <<'EOF'
@@ -21,14 +23,14 @@
 
 set -euo pipefail
 
-VPS="${VPS:-capadonna@100.97.151.69}"
-REMOTE_DIR="${REMOTE_DIR:-/home/capadonna/var/duckclaw_execute}"
+VPS="${VPS:-root@100.75.4.17}"
+REMOTE_DIR="${REMOTE_DIR:-/root/duckclaw/scripts/capadonna}"
 REMOTE_DB="${REMOTE_DB:-${REMOTE_DIR}/vault.duckdb}"
 LOCAL_DUCKDB="${LOCAL_DUCKDB:-}"
 SKIP_DUCKDB_COPY="${SKIP_DUCKDB_COPY:-}"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-SCRIPT_SRC="${ROOT}/scripts/capadonna/broker_execute_signal.py"
+SCRIPT_SRC="${ROOT}/scripts/SCRIPTS-DEPRECATED/capadonna/broker_execute_signal.py"
 
 if [[ -z "${SKIP_DUCKDB_COPY}" ]]; then
   if [[ -z "${LOCAL_DUCKDB}" ]]; then
@@ -55,7 +57,7 @@ scp -o BatchMode=yes "${LOCAL_DUCKDB}" "${VPS}:${REMOTE_DB}"
 echo "==> scp broker_execute_signal.py"
 scp -o BatchMode=yes "${SCRIPT_SRC}" "${VPS}:${REMOTE_DIR}/broker_execute_signal.py"
 
-PY_REMOTE="/home/capadonna/projects/Capadonna-Driller/.venv/bin/python"
+PY_REMOTE="${PY_REMOTE:-/root/duckclaw/.venv/bin/python}"
 SCRIPT_REMOTE="${REMOTE_DIR}/broker_execute_signal.py"
 
 echo ""

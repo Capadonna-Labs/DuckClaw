@@ -24,7 +24,7 @@
 /reject|Rechazar última acción
 /execute-signal <uuid>|HITL: confirma ejecución (Quant Trader: execute_approved_signal); alias /execute_signal
 /execute_all_moc <session_uid>|HITL Quant: ejecuta todas las señales moc_hrp_cfd pendientes de esa sesión MOC
-/cancel_signal <uuid>|HITL: cancela señal pendiente (PENDING_HITL/AWAITING_HITL)
+/cancel_signal <uuid> [--force]|HITL: cancela señal pendiente o fallida (PENDING_HITL/AWAITING_HITL/PENDING/FAILED); --force limpia otros estados excepto EXECUTED
 /trading-session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--confirm] [--status] [--stop]|Quant: sesión activa + session_goal + auto delta de /crons (live requiere --confirm)
 /quant_cycle [--tickers A,B] [--timeframe 1h] [--lookback_days 20] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--execute auto|off]|Quant: pipeline determinista (fetch -> portfolio -> evaluate -> señal) con salida estructurada
 /profile|Quant: muestra perfil de inversión inferido desde VSS (semantic_memory)

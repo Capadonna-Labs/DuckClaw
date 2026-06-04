@@ -38,6 +38,8 @@ class ManagerAgentState(TypedDict, total=False):
 
     incoming: str
     input: Optional[str]
+    # Mensaje crudo del usuario (no TAREA sintética ni síntesis A2A); para gates de handoff.
+    user_incoming: Optional[str]
     history: list
 
     planned_task: str

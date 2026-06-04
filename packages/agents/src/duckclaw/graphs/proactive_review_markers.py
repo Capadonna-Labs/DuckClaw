@@ -10,4 +10,11 @@ GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY = "Revisión periódica de /goals"
 def proactive_review_event_phrase_in_text(text: str) -> bool:
     """True si el texto incluye la marca del tick programado vía ``/crons --delta`` (o legado ``/goals``)."""
     t = text or ""
-    return GOALS_PROACTIVE_REVIEW_PHRASE_CRONS in t or GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY in t
+    if GOALS_PROACTIVE_REVIEW_PHRASE_CRONS in t or GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY in t:
+        return True
+    try:
+        from duckclaw.forge.homeostasis.goals_alignment import GOALS_ALIGNMENT_REVIEW_PHRASE
+
+        return GOALS_ALIGNMENT_REVIEW_PHRASE in t
+    except Exception:
+        return False

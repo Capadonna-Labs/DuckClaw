@@ -80,12 +80,62 @@ def test_plan_task_quant_backtest_keeps_original_user_text() -> None:
     assert task.strip() == msg
 
 
+def test_plan_task_tech_news_bulletin_with_duckdb_not_list_tables() -> None:
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    msg = (
+        "- App en vivo con DuckDB y Astro.\n"
+        "- Halodoc centraliza calidad de datos y relaciones entre tablas en Redshift."
+    )
+    task, override = _plan_task(msg, "Quant-Trader")
+    assert override is None
+    assert not task.strip().lower().startswith("tarea:")
+
+
 def test_cashflow_stress_intent_detection() -> None:
     from duckclaw.graphs.manager_graph import _user_signals_cashflow_stress
 
     assert _user_signals_cashflow_stress("ando ilíquido y no me alcanza este mes")
     assert _user_signals_cashflow_stress("necesito ingresos extra para pagar deudas")
     assert not _user_signals_cashflow_stress("muéstrame el esquema de tablas")
+
+
+def test_macro_flujo_de_caja_does_not_signal_personal_cashflow_stress() -> None:
+    from duckclaw.graphs.manager_graph import _user_signals_cashflow_stress
+
+    assert not _user_signals_cashflow_stress(
+        "Tendencias en infra de IA: pipelines on-device y flujo de caja empresarial en edge"
+    )
+    assert _user_signals_cashflow_stress("mi flujo de caja está mal y no me alcanza")
+
+
+def test_proactive_income_injection_blocked_for_quant_entry_without_job_intent() -> None:
+    from duckclaw.graphs.manager_graph import _proactive_income_injection_enabled
+
+    msg = "Resume tendencias de infraestructura IA y arquitecturas híbridas cloud-edge"
+    assert not _proactive_income_injection_enabled(
+        msg,
+        entry_worker_id="Quant-Trader",
+        available_templates=["finanz", "Job-Hunter", "Quant-Trader"],
+    )
+    assert _proactive_income_injection_enabled(
+        "buscar empleo remoto como data engineer",
+        entry_worker_id="Quant-Trader",
+        available_templates=["finanz", "Job-Hunter"],
+    )
+
+
+def test_finanz_marker_handoff_blocked_for_quant_entry_without_job_intent() -> None:
+    from duckclaw.graphs.manager_graph import _finanz_should_handoff_income_injection
+
+    state = {
+        "entry_worker_id": "Quant-Trader",
+        "user_incoming": "¿Cómo va el PnL de mi cartera quant?",
+    }
+    assert not _finanz_should_handoff_income_injection(
+        state,
+        "Operación rechazada. [a2a_request: income_injection]",
+    )
 
 
 def test_ledger_debt_queries_do_not_signal_cashflow_stress() -> None:
@@ -211,6 +261,45 @@ def test_job_hunter_synthesis_task_does_not_trigger_tavily_intent() -> None:
         "prioriza 3 vacantes accionables"
     )
     assert not job_hunter_user_requests_job_search(syn)
+
+
+def test_plan_task_preserves_structured_macro_briefing() -> None:
+    from duckclaw.graphs.manager_graph import _plan_task
+
+    macro = (
+        "## Macro y geopolítica\n"
+        "- Shock de oferta por la guerra en Irán.\n"
+        "## Ideas quant\n"
+        "- Pipelines on-device."
+    )
+    planned, override = _plan_task(macro, "Quant-Trader")
+    assert override is None
+    assert planned == macro
+    assert "tablas de la base" not in planned.lower()
+
+
+def test_macro_geopolitics_does_not_trigger_job_hunter_intent() -> None:
+    """«shock de oferta» + «los flujos buscan» no deben disparar job_terms+action (substring busca)."""
+    from duckclaw.graphs.manager_graph import (
+        _explicit_route_blocks_proactive_a2a,
+        _proactive_income_injection_enabled,
+        job_hunter_user_requests_job_search,
+    )
+
+    macro = (
+        "## Macro y geopolítica\n"
+        "- Canadá en recesión; shock de oferta por la guerra en Irán.\n"
+        "- Los flujos buscan refugio sin abandonar riesgo del todo.\n"
+        "## Ideas quant/dev\n"
+        "- Pipelines on-device y trading infra en tus agentes."
+    )
+    assert not job_hunter_user_requests_job_search(macro)
+    assert _explicit_route_blocks_proactive_a2a("Quant-Trader", macro)
+    assert not _proactive_income_injection_enabled(
+        macro,
+        entry_worker_id="Quant-Trader",
+        available_templates=["finanz", "Job-Hunter", "Quant-Trader"],
+    )
 
 
 def test_summarize_stored_context_does_not_trigger_job_hunter_or_cashflow_handoff() -> None:

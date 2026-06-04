@@ -80,6 +80,19 @@ Resumen en un solo mensaje de sensores y rutas de datos del **proceso del gatewa
 
 Autoriza o deniega una operación retenida por SQLValidator o SandboxPipeline (grafo en `interrupt`). HITL para acciones sensibles.
 
+### G1. `/cancel_signal <uuid> [--force]` (Quant / ledger)
+
+Marca una señal como `CANCELLED` en el ledger (`finance_worker.trade_signals` y `quant_core.trade_signals`). La lectura de estado consulta ambas tablas (Quant suele tener filas solo en `quant_core`).
+
+| Modo | Estados cancelables (pre-check) | SQL |
+|------|----------------------------------|-----|
+| Normal | `PENDING_HITL`, `AWAITING_HITL`, `PENDING`, `FAILED` | `UPDATE … WHERE status IN (…)` |
+| `--force` | Cualquiera excepto `EXECUTED` | `UPDATE … WHERE status != 'EXECUTED'` |
+
+- Ya `CANCELLED`: respuesta idempotente (sin re-encolar escritura).
+- `EXECUTED`: no cancelable ni con `--force`.
+- Mutaciones vía `_vault_apply_sql_statements` (cola Redis si la bóveda está en `read_only`).
+
 ### H. `/prompt [texto]` | `/system_prompt` | `/system`
 
 Sin args: muestra el system prompt actual (del worker o modificado). Con args: actualiza el system prompt global. Persiste en `agent_config` (clave global).
@@ -142,7 +155,7 @@ Consulta creencias del HomeostasisManager (tabla `agent_beliefs` por worker). El
 |-----|----------------|
 | `/crons` | Lista en dos bloques: **Tus crons** — bloque 🎯 Manager (objetivos homeostasis) y, cuando aplica, un subtítulo unificado **`Revisión proactiva`** (o **`Revisión proactiva (TRADING_TICK)`** si `goals_delta_meta.trigger` es `trading_session`) con: intervalo humanizado y **cron-id `delta`** cuando `goals_delta_seconds` > 0 (más cuenta atrás aproximada si hay anclas), mensaje explícito de inconsistencia si hay meta `trading_session` pero intervalo apagado, línea opcional **Sesión Quant** (`session_uid` acortado si es tipo UUID largo; origen `schedule_quant_trading_proactive_ticks` / `/trading-session`); horario de reloj con **cron-id `wall`** en nota aparte si hay `--timestamp` — y **Del bot (infraestructura)** (intervalos del escaneo de DuckDB del ticker, ciclo homeostasis del daemon, y si el gateway embebido puede correr el mismo escaneo). Los números salen de `GOALS_TICKER_POLL_SECONDS`, `HEARTBEAT_INTERVAL_SECONDS` y `DUCKCLAW_EMBED_GOALS_TICKER` en el host. |
 | `/crons --reset` | Borra goals del chat y la revisión proactiva (`--delta`); en Quant limpia riesgo en bóveda si aplica |
-| `/crons --delta 20min` | Programa revisión periódica (mín. 60s, máx. 7d). Unidades: `s`, `m`/`min`, `h`. Guarda `goals_delta_seconds`, `goals_proactive_tenant_id`, anclas de schedule y **`goals_delta_meta` con `trigger: goals_cli`**. **Borra** `goals_cron_wall` si existía (exclusivo con `--timestamp`). Establece `goals_proactive_last_fire_epoch` al **momento actual** para que el primer tick espere el intervalo completo (no el siguiente poll del gateway ~45s). |
+| `/crons --delta 20min` | Programa revisión periódica (mín. 60s, máx. 7d). Unidades: `s`, `m`/`min`, `h`. Flags opcionales: **`--notify admin\|telegram\|both`**, **`--mode always\|on_misalignment`** (default `on_misalignment`), **`--jitter 20%`**. Guarda `goals_delta_seconds`, `goals_proactive_tenant_id`, `goals_proactive_notify_channel`, anclas y **`goals_delta_meta`** (`trigger: goals_cli`, `mode`, `jitter_ratio`). **Borra** `goals_cron_wall` si existía. Ver [GOALS_ALIGNMENT_PROACTIVE.md](GOALS_ALIGNMENT_PROACTIVE.md). |
 | `/crons --delta off` | Desactiva **solo** la programación por intervalo (`goals_delta_seconds` y anclas relacionadas; meta con `trigger: goals_cli`). **No** borra `goals_cron_wall` ni el horario `--timestamp`. Sincroniza en hub + bóvedas del mismo `db/private/<uid>/` (misma regla multiplex que antes). |
 | `/crons --timestamp once YYYY-MM-DDTHH:MM` | Horario de reloj (zona por defecto `America/Bogota`, override `DUCKCLAW_CRONS_WALL_TZ`): una sola ejecución. Persiste JSON en `agent_config` → `chat_{id}_goals_cron_wall`; pone `goals_delta_meta.trigger = goals_wall` salvo que ya exista `trading_session`. **Exclusivo** con `--delta`: al guardar `--timestamp` se limpia el intervalo (equivalente a apagar solo la parte delta). Tras un tick exitoso, tipo `once` se elimina el JSON del wall. |
 | `/crons --timestamp every HH:MM [weekdays\|lun mar …]` | Repetición diaria o en días concretos (`weekdays` = lun–vie). Misma persistencia y exclusividad que `once`. |

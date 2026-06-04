@@ -22,7 +22,11 @@ from routers.telegram_inbound_webhook import (
     _extract_visual_payload_with_reply,
     _wr_vlm_collect_album_items,
 )
-from duckclaw.forge.atoms.quant_price_validator import enforce_visual_evidence_rule
+from duckclaw.forge.atoms.quant_price_validator import (
+    VISUAL_EVIDENCE_RETRY_REASON,
+    enforce_visual_evidence_rule,
+    visual_evidence_retry_system_message,
+)
 
 
 class _FakeRedisLists:
@@ -128,7 +132,15 @@ def test_visual_evidence_rule_blocks_prices_without_tool_evidence() -> None:
         reply="VIX está en 24.55 y bajando",
     )
     assert "Regla de Evidencia Única" in reply
-    assert reason == "missing_tool_evidence_for_vlm_claim"
+    assert reason == VISUAL_EVIDENCE_RETRY_REASON
+
+
+def test_visual_evidence_retry_system_message_content() -> None:
+    msg = visual_evidence_retry_system_message()
+    text = str(getattr(msg, "content", "") or "")
+    assert "read_sql" in text
+    assert "fetch_market_data" in text
+    assert "ToolMessage" in text
 
 
 def test_visual_evidence_rule_allows_when_tool_evidence_exists() -> None:
@@ -180,7 +192,7 @@ def test_visual_evidence_rule_blocks_known_ticker_price_without_tools() -> None:
         db=_FakeDB(),
         spec=_FakeSpec(),
     )
-    assert reason == "missing_tool_evidence_for_vlm_claim"
+    assert reason == VISUAL_EVIDENCE_RETRY_REASON
     assert "Regla de Evidencia" in reply
 
 

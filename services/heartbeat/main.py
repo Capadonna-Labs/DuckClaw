@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import time
 import uuid
@@ -33,6 +34,8 @@ from duckclaw.forge.atoms.cron_wall_schedule import wall_once_expired, wall_sche
 from duckclaw.graphs.on_the_fly_commands import (
     _GOALS_CRON_WALL_KEY,
     _GOALS_DELTA_META_KEY,
+    _GOALS_PROACTIVE_NOTIFY_KEY,
+    _crons_debug_log,
     _GOALS_PROACTIVE_LAST_FIRE_KEY,
     _GOALS_PROACTIVE_TENANT_KEY,
     build_goals_proactive_system_event_message,
@@ -205,6 +208,23 @@ async def check_cooldown(r: redis.Redis, tenant_id: str, alert_type: str) -> boo
     return True
 
 
+async def check_alignment_nudge_cooldown(
+    r: redis.Redis | None,
+    tenant_id: str,
+    chat_id: str,
+    delta_s: int,
+) -> bool:
+    """True si se puede enviar nudge de alineación; si ok, fija cooldown."""
+    if r is None:
+        return True
+    key = f"cooldown:{tenant_id}:{chat_id}:alignment_nudge"
+    if await r.exists(key):
+        return False
+    ttl = max(60, min(int(delta_s), 14400))
+    await r.setex(key, ttl, "locked")
+    return True
+
+
 async def _evaluate_homeostasis() -> List[Dict[str, Any]]:
     """
     Recorre workers con homeostasis_config y evalúa sus beliefs.
@@ -264,6 +284,12 @@ async def _run_goals_proactive_tick() -> None:
     headers: Dict[str, str] = {}
     if TAILSCALE_AUTH_KEY:
         headers["X-Tailscale-Auth-Key"] = TAILSCALE_AUTH_KEY
+    r_client: redis.Redis | None = None
+    if REDIS_URL:
+        try:
+            r_client = redis.from_url(REDIS_URL)
+        except Exception:
+            r_client = None
 
     for db_path in scan_paths:
         await _run_goals_proactive_tick_one_db(
@@ -272,6 +298,7 @@ async def _run_goals_proactive_tick() -> None:
             headers=headers,
             scan_paths_n=len(scan_paths),
             all_scan_paths=scan_paths,
+            redis_client=r_client,
         )
 
 
@@ -282,6 +309,7 @@ async def _run_goals_proactive_tick_one_db(
     headers: Dict[str, str],
     scan_paths_n: int,
     all_scan_paths: List[str],
+    redis_client: redis.Redis | None = None,
 ) -> None:
     try:
         with duckclaw_open_for_read_scan(db_path) as db_ro:
@@ -401,13 +429,6 @@ async def _run_goals_proactive_tick_one_db(
                 )
                 continue
 
-            last_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY) or "").strip()
-            try:
-                last_fire = float(last_raw) if last_raw else 0.0
-            except ValueError:
-                last_fire = 0.0
-            if last_fire > 0 and (now - last_fire) < float(delta_s):
-                continue
             meta_raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
             meta: Dict[str, Any] = {}
             if meta_raw:
@@ -417,6 +438,21 @@ async def _run_goals_proactive_tick_one_db(
                         meta = maybe_meta
                 except Exception:
                     meta = {}
+            from duckclaw.forge.homeostasis.goals_alignment import normalize_jitter_ratio
+
+            jitter_ratio = normalize_jitter_ratio(meta.get("jitter_ratio"))
+            effective_delta = float(delta_s) * (
+                1.0 - jitter_ratio + 2.0 * jitter_ratio * random.random()
+            )
+            last_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY) or "").strip()
+            try:
+                last_fire = float(last_raw) if last_raw else 0.0
+            except ValueError:
+                last_fire = 0.0
+            if last_fire > 0 and (now - last_fire) < effective_delta:
+                continue
+            notify_channel = ""
+            message = ""
             if str(meta.get("trigger") or "").strip().lower() == "trading_session":
                 session_uid = str(meta.get("session_uid") or "").strip()
                 tickers: list[str] = []
@@ -479,6 +515,13 @@ async def _run_goals_proactive_tick_one_db(
                 else:
                     message = "[SYSTEM_EVENT: No hay session_uid en goals_delta_meta. Tick cancelado.]"
             else:
+                from duckclaw.forge.homeostasis.goals_alignment import (
+                    assess_goals_alignment,
+                    build_alignment_nudge_system_event,
+                    normalize_notify_channel,
+                    normalize_proactive_mode,
+                )
+
                 trading_obj: str | None = None
                 if _is_qt:
                     _qpath = _resolve_quant_trader_vault_path(all_scan_paths)
@@ -506,9 +549,44 @@ async def _run_goals_proactive_tick_one_db(
                                         trading_obj = o
                         except Exception:
                             trading_obj = None
-                message = build_goals_proactive_system_event_message(
-                    goals, trading_session_objective=trading_obj
+                proactive_mode = normalize_proactive_mode(meta.get("mode"))
+                report = assess_goals_alignment(db, chat_id, worker_id=_wid_pre)
+                notify_channel = normalize_notify_channel(
+                    get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)
                 )
+                if proactive_mode == "on_misalignment" and report.aligned:
+                    logger.debug(
+                        "goals_proactive: alineado; omitiendo tick chat=%s mode=%s",
+                        chat_id,
+                        proactive_mode,
+                    )
+                    continue
+                if not report.aligned:
+                    if not await check_alignment_nudge_cooldown(
+                        redis_client, tenant_id or "default", str(chat_id), delta_s
+                    ):
+                        logger.debug(
+                            "goals_proactive: cooldown alineación chat=%s",
+                            chat_id,
+                        )
+                        continue
+                    message = build_alignment_nudge_system_event(
+                        report,
+                        trading_session_objective=trading_obj,
+                        chat_id=str(chat_id),
+                        epoch=now,
+                    )
+                else:
+                    message = build_goals_proactive_system_event_message(
+                        goals, trading_session_objective=trading_obj
+                    )
+
+        if not notify_channel:
+            from duckclaw.forge.homeostasis.goals_alignment import normalize_notify_channel
+
+            notify_channel = normalize_notify_channel(
+                get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)
+            )
 
         _wid = (worker_id or "").strip()
         vault_for_gateway = str(Path(db_path).expanduser().resolve())
@@ -526,10 +604,21 @@ async def _run_goals_proactive_tick_one_db(
             "tenant_id": tenant_id,
             "is_system_prompt": True,
             "skip_session_lock": True,
+            "notify_channel": notify_channel,
         }
         if _qt_vault:
             payload["vault_db_path"] = _qt_vault
         url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
+        _crons_debug_log(
+            "heartbeat/main.py:_run_goals_proactive_tick_one_db",
+            "goals_proactive_http_post",
+            {
+                "chat_id": str(chat_id),
+                "worker_id": worker_id,
+                "db_path_tail": str(Path(db_path).name),
+            },
+            hypothesis_id="C",
+        )
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -549,6 +638,12 @@ async def _run_goals_proactive_tick_one_db(
             continue
 
         if 200 <= resp.status_code < 300:
+            _crons_debug_log(
+                "heartbeat/main.py:_run_goals_proactive_tick_one_db",
+                "goals_proactive_http_ok",
+                {"chat_id": str(chat_id), "status_code": resp.status_code},
+                hypothesis_id="C",
+            )
             _resp_text = ""
             try:
                 _payload = resp.json() if (resp.text or "").strip().startswith("{") else {}

@@ -10,7 +10,7 @@
 #   SSH_TARGET=capadonna@TU_HOST ./scripts/capadonna/vps_observability_ib_env_paper.sh
 #
 set -euo pipefail
-SSH_TARGET="${SSH_TARGET:-capadonna@100.97.151.69}"
+SSH_TARGET="${SSH_TARGET:-root@100.75.4.17}"
 
 exec ssh -t "$SSH_TARGET" 'set -euo pipefail
 UNIT=/etc/systemd/system/capadonna-observability.service

@@ -1,5 +1,6 @@
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import { mutationHeaders } from '@/lib/csrfClient';
+import { readSseChatStream } from '@/lib/sseChat';
 import type {
   AdminHealth,
   EnvConfigResponse,
@@ -1175,6 +1176,16 @@ export const adminService = {
       body: JSON.stringify(body),
     }),
 
+  /** Interrumpe un turno de chat admin en curso (flag Redis en gateway). */
+  playgroundChatCancel: async (chat_id: string) =>
+    adminFetch<{ ok: boolean; chat_id: string; cancelled?: boolean }>(
+      '/playground/chat/cancel',
+      {
+        method: 'POST',
+        body: JSON.stringify({ chat_id }),
+      }
+    ),
+
   /** Chat con SSE: tokens progresivos hasta evento [DONE]. */
   playgroundChatStream: async (
     body: {
@@ -1214,7 +1225,6 @@ export const adminService = {
     },
     options?: { signal?: AbortSignal }
   ) => {
-    const { readSseChatStream } = await import('@/lib/sseChat');
     const res = await fetch('/api/admin/playground/chat', {
       method: 'POST',
       headers: {

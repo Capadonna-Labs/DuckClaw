@@ -1394,6 +1394,7 @@ async def agent_chat(
                 worker_id or default_worker_id_from_env(),
                 session_id,
                 tenant_id,
+                http_request=http_request,
                 **_invoke_kw,
             ),
             media_type="text/event-stream",
@@ -1410,30 +1411,35 @@ async def agent_chat(
         try:
             resp_text = (result.get("response") or "").strip() if isinstance(result, dict) else ""
             if resp_text:
-                uid_out = (body.user_id or "").strip() or session_id
-                loop = asyncio.get_running_loop()
-                _redis_url = str(settings.REDIS_URL)
-                _dc_deliver = GatewayDeliveryContext(
-                    channel=_dc_http.channel,
-                    telegram_multipart_tail_delivery=_dc_http.telegram_multipart_tail_delivery,
-                    telegram_mcp=_dc_http.telegram_mcp,
-                    telegram_forced_vault_db_path=_dc_http.telegram_forced_vault_db_path,
-                    outbound_bot_token=_dc_http.outbound_bot_token,
-                    prefer_native_bot_api=True,
-                )
-                await loop.run_in_executor(
-                    None,
-                    lambda: _deliver_outbound_by_channel(
-                        _dc_deliver,
-                        chat_id=session_id,
-                        user_id=uid_out,
-                        text=resp_text,
-                        worker_id=(worker_id or ""),
-                        tenant_id=tenant_id,
-                        redis_url=_redis_url,
+                from core.goals_proactive_delivery import resolve_notify_channel, should_deliver_telegram
+
+                _notify_deliver = resolve_notify_channel(body)
+                _telegram_ok = should_deliver_telegram(_notify_deliver, session_id)
+                if _telegram_ok:
+                    uid_out = (body.user_id or "").strip() or session_id
+                    loop = asyncio.get_running_loop()
+                    _redis_url = str(settings.REDIS_URL)
+                    _dc_deliver = GatewayDeliveryContext(
+                        channel=_dc_http.channel,
+                        telegram_multipart_tail_delivery=_dc_http.telegram_multipart_tail_delivery,
+                        telegram_mcp=_dc_http.telegram_mcp,
+                        telegram_forced_vault_db_path=_dc_http.telegram_forced_vault_db_path,
+                        outbound_bot_token=_dc_http.outbound_bot_token,
                         prefer_native_bot_api=True,
-                    ),
-                )
+                    )
+                    await loop.run_in_executor(
+                        None,
+                        lambda: _deliver_outbound_by_channel(
+                            _dc_deliver,
+                            chat_id=session_id,
+                            user_id=uid_out,
+                            text=resp_text,
+                            worker_id=(worker_id or ""),
+                            tenant_id=tenant_id,
+                            redis_url=_redis_url,
+                            prefer_native_bot_api=True,
+                        ),
+                    )
         except Exception as exc:  # noqa: BLE001
             _gateway_log.warning("agent_chat forced outbound failed: %s", exc)
     # Cliente HTTP puede cerrar antes (timeout ~300s, proxy, etc.): reenvío best-effort
@@ -1639,11 +1645,31 @@ def _admin_visual_fields_from_invoke_result(
     return out
 
 
+async def _abort_chat_invoke_task(session_id: str, invoke_task: asyncio.Task[Any]) -> None:
+    from duckclaw.graphs.chat_cancel import request_chat_cancel
+
+    request_chat_cancel(session_id)
+    try:
+        from duckclaw.forge.skills.comfyui_bridge import cancel_comfy_generation_for_chat
+
+        cancel_comfy_generation_for_chat(session_id)
+    except Exception:
+        pass
+    if not invoke_task.done():
+        invoke_task.cancel()
+        try:
+            await invoke_task
+        except Exception:
+            pass
+
+
 async def _invoke_chat_sse_body(
     payload: ChatRequest,
     worker_id: str,
     session_id: str,
     tenant_id: str,
+    *,
+    http_request: Request | None = None,
     **invoke_kwargs: Any,
 ):
     """Generador SSE: invoca el grafo, heartbeats admin en vivo y tokens + [DONE]."""
@@ -1686,7 +1712,19 @@ async def _invoke_chat_sse_body(
     )
 
     try:
+        from duckclaw.graphs.chat_cancel import is_chat_cancel_requested
+
         while not invoke_task.done():
+            if http_request is not None and await http_request.is_disconnected():
+                await _abort_chat_invoke_task(session_id, invoke_task)
+                yield sse_error("Interrumpido por el usuario.")
+                yield sse_terminal_done()
+                return
+            if is_chat_cancel_requested(session_id):
+                await _abort_chat_invoke_task(session_id, invoke_task)
+                yield sse_error("Interrumpido por el usuario.")
+                yield sse_terminal_done()
+                return
             try:
                 hb = await asyncio.wait_for(heartbeat_queue.get(), timeout=0.2)
                 yield sse_heartbeat(
@@ -1765,17 +1803,7 @@ async def _invoke_chat_sse_body(
             except Exception:
                 pass
         if not invoke_task.done():
-            try:
-                from duckclaw.forge.skills.comfyui_bridge import cancel_comfy_generation_for_chat
-
-                cancel_comfy_generation_for_chat(session_id)
-            except Exception:
-                pass
-            invoke_task.cancel()
-            try:
-                await invoke_task
-            except Exception:
-                pass
+            await _abort_chat_invoke_task(session_id, invoke_task)
 
 
 async def _invoke_chat(
@@ -1825,6 +1853,9 @@ async def _invoke_chat(
 
     message = (payload.message or "").strip()
     session_id = (session_id or "default").strip() or "default"
+    from duckclaw.graphs.chat_cancel import ChatCancelledError, clear_chat_cancel
+
+    clear_chat_cancel(session_id)
     tenant_id = _effective_tenant_id(tenant_id)
     # Campos opcionales: defaults resilientes
     chat_type = (payload.chat_type or "private").strip().lower() or "private"
@@ -2115,6 +2146,21 @@ async def _invoke_chat(
                 outbound_telegram_bot_token=(dc.outbound_bot_token or "").strip() or None,
                 entry_worker_id=(worker_id or "").strip() or None,
             )
+        except ChatCancelledError:
+            try:
+                from duckclaw.graphs.activity import set_idle
+
+                set_idle(session_id)
+            except Exception:
+                pass
+            elapsed_cancel = int((time.monotonic() - t0) * 1000)
+            return {
+                "response": "Interrumpido.",
+                "session_id": session_id,
+                "worker_id": worker_id,
+                "elapsed_ms": elapsed_cancel,
+                "interrupted": True,
+            }
         except Exception as exc:
             try:
                 from duckclaw.graphs.activity import set_idle
@@ -2322,11 +2368,12 @@ async def _invoke_chat(
                 reply_text = reply_text[:cap] + "…"
         except Exception:
             pass
-    if (
-        not is_system_prompt
-        and redis_client is not None
+    _persist_history = (
+        redis_client is not None
         and gateway_chat_history_enabled()
-    ):
+        and (reply_plain_for_storage or "").strip()
+    )
+    if _persist_history and not is_system_prompt:
         if is_war_room_tenant(tenant_id):
             from core.gateway_acl_db import get_war_room_acl_duckdb
 
@@ -2369,6 +2416,44 @@ async def _invoke_chat(
                 )
             except Exception:
                 pass
+    elif _persist_history and is_system_prompt:
+        from core.goals_proactive_delivery import resolve_notify_channel, should_persist_admin_history
+
+        _notify_ch = resolve_notify_channel(payload)
+        if should_persist_admin_history(_notify_ch, session_id):
+            u_sys = normalize_history_item(
+                {"role": "user", "content": "[Revisión proactiva /crons]"}
+            )
+            a_sys = normalize_history_item({"role": "assistant", "content": reply_plain_for_storage})
+            if u_sys and a_sys:
+                saved_items = history_for_model + [u_sys, a_sys]
+                await redis_save_chat_history(
+                    redis_client,
+                    tenant_id,
+                    session_id,
+                    saved_items,
+                )
+                try:
+                    from core.admin_conversations import (
+                        get_conversation_meta,
+                        upsert_conversation_meta,
+                    )
+
+                    existing_conv = await get_conversation_meta(redis_client, tenant_id, session_id)
+                    conv_section = existing_conv.section if existing_conv else None
+                    await upsert_conversation_meta(
+                        redis_client,
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        actor=(username or "").strip() or "Sistema",
+                        section=conv_section,
+                        last_worker_id=(effective_worker_id or worker_id or "").strip(),
+                        user_message="[Revisión proactiva /crons]",
+                        assistant_message=reply_plain_for_storage or "",
+                        message_count=len(saved_items),
+                    )
+                except Exception:
+                    pass
     # ``response`` debe ser Markdown/texto plano: el webhook de Telegram y
     # ``_outbound_deliver_chat_text_sync`` aplican ``llm_markdown_to_telegram_html`` una sola vez.
     # Si aquí devolviéramos ``reply_text`` (ya HTML), la segunda pasada escapa ``<a>`` → el usuario ve
@@ -2395,6 +2480,7 @@ async def _invoke_chat(
         out_resp["sandbox_chart_delivered"] = chart_sent
     if isinstance(result, dict):
         out_resp.update(_admin_visual_fields_from_invoke_result(session_id, result, tenant_id))
+    clear_chat_cancel(session_id)
     return out_resp
 
 

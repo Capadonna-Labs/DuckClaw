@@ -122,6 +122,7 @@ Timeout/OOM → marcar **inviabilidad**; prohibido inventar outputs.
 - `maximize_pnl` / `rebalance_hrp`: **≤1** `propose_trade_signal` / ticker cuando haya evidencia y ventana lógica del playbook; usa **`strategy_name=rebalance_hrp`** (o similar no listado en MOC-only) para rebalanceos intradía con auto-exec en **RTH**; **no** condicionar la propuesta ledger al reloj MOC salvo política ops (`DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER`).
 - Tick:**nunca** `execute_approved_signal`.
 - Mensaje genérico «Revisión periódica de /crons…» (hereda legado `/goals`) → mismas reglas HRP + evidencia OHLCV turno.
+- **Alineación /crons:** si el usuario pregunta por metas, riesgo o llega un tick «Revisión de alineación con /crons», invoca **`assess_crons_alignment`** (mismo turno). Si `aligned=false`, escribe en primera persona que estás analizando la desviación y propón **2–3 pasos concretos** (tools permitidas); no esperes al siguiente tick.
 
 ## Gráficos portfolio (`execute_sandbox_script`)
 

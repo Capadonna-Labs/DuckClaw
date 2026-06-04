@@ -34,7 +34,7 @@ export type ConversationInboxProps = {
   defaultSectionFilter?: string;
   activeSessionId: string | null;
   onSelect: (sessionId: string, meta?: AdminConversation) => void;
-  variant?: 'sidebar' | 'compact';
+  variant?: 'sidebar' | 'compact' | 'overlay';
   refreshToken?: number;
   /** Sincroniza título en panel/header cuando se renombra la conversación activa. */
   onTitleRenamed?: (sessionId: string, title: string) => void;
@@ -128,11 +128,16 @@ export function ConversationInbox({
   };
 
   const isCompact = variant === 'compact';
+  const isOverlay = variant === 'overlay';
 
   return (
     <aside
-      className={`flex flex-col min-h-0 border-r dark:border-dark-border bg-gov-gray-50/80 dark:bg-dark-bg/80 shrink-0 ${
-        isCompact ? 'w-full h-full min-h-0' : 'w-[280px] min-w-[240px]'
+      className={`flex flex-col min-h-0 bg-gov-gray-50/80 dark:bg-dark-bg/80 shrink-0 ${
+        isOverlay
+          ? 'absolute inset-0 z-30 w-full max-w-none border-0'
+          : isCompact
+            ? 'w-full h-full min-h-0 border-r dark:border-dark-border'
+            : 'w-[280px] min-w-[240px] border-r dark:border-dark-border'
       } ${className}`}
     >
       <div className="p-3 border-b dark:border-dark-border shrink-0">

@@ -198,6 +198,50 @@ def test_duckdb_legacy_schema_cleanup_requires_confirmation_and_drops_schema(
     assert "quant_core" not in remaining
 
 
+def test_duckdb_legacy_schemas_can_be_configured_db_first(
+    gateway_admin_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    user_dir = repo_root / "db" / "private" / "owner123"
+    user_dir.mkdir(parents=True)
+    user_db = user_dir / "axis.duckdb"
+    con = duckdb.connect(str(user_db))
+    con.execute("CREATE SCHEMA custom_legacy")
+    con.execute("CREATE TABLE custom_legacy.legacy_table (id INTEGER)")
+    con.close()
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+    monkeypatch.delenv("DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS", raising=False)
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"}
+
+    configured = gateway_admin_client.patch(
+        "/api/v1/admin/settings/runtime",
+        headers=headers,
+        json={
+            "settings": [
+                {
+                    "domain": "duckdb",
+                    "key": "legacy_schemas",
+                    "value": "custom_legacy",
+                    "scope": "actor",
+                }
+            ]
+        },
+    )
+    assert configured.status_code == 200
+
+    listed = gateway_admin_client.get(
+        "/api/v1/admin/duckdb/legacy-schemas",
+        headers=headers,
+    )
+
+    assert listed.status_code == 200
+    assert "custom_legacy" in [item["schema"] for item in listed.json()["schemas"]]
+
+
 def test_runtime_vaults_are_scoped_to_authenticated_actor(
     gateway_admin_client: TestClient,
     tmp_path: Path,

@@ -88,6 +88,31 @@ export default function ProjectsPage() {
     }
   };
 
+  const deleteDbProject = async (project: WorkspaceProject) => {
+    if (!canWrite) return;
+    const confirmed = window.confirm(
+      `Eliminar proyecto "${project.name}"?\n\nSe ocultará el proyecto y se quitarán sus agentes asignados. No se borran workers, versiones ni templates.`
+    );
+    if (!confirmed) return;
+    setError(null);
+    try {
+      await adminService.deleteWorkspaceProject(project.project_id);
+      setWorkspaceAgents((prev) => {
+        const next = { ...prev };
+        delete next[project.project_id];
+        return next;
+      });
+      setSelectedWorkers((prev) => {
+        const next = { ...prev };
+        delete next[project.project_id];
+        return next;
+      });
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo eliminar el proyecto');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -168,9 +193,21 @@ export default function ProjectsPage() {
                       <p className="mt-2 text-sm text-gov-gray-600 dark:text-dark-muted">{project.description}</p>
                     )}
                   </div>
-                  <span className="rounded-full bg-gov-cyan-100 px-3 py-1 text-[11px] font-black text-gov-blue-800">
-                    {workspaceAgents[project.project_id]?.length ?? project.agent_count ?? 0} agentes
-                  </span>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <span className="rounded-full bg-gov-cyan-100 px-3 py-1 text-[11px] font-black text-gov-blue-800">
+                      {workspaceAgents[project.project_id]?.length ?? project.agent_count ?? 0} agentes
+                    </span>
+                    {canWrite && (
+                      <button
+                        type="button"
+                        onClick={() => void deleteDbProject(project)}
+                        className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-[11px] font-black text-red-700 hover:border-red-300 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+                        aria-label={`Eliminar proyecto ${project.name}`}
+                      >
+                        <Trash2 size={12} /> Eliminar proyecto
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-2">

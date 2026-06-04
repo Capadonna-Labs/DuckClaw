@@ -257,6 +257,48 @@ def list_projects_with_agents_for_actor(db: Any, *, actor_email: str) -> list[di
     ]
 
 
+def deactivate_project_for_actor(db: Any, *, project_id: str, actor_email: str) -> bool:
+    """Soft-delete a project owned by actor and detach its active agents."""
+    ensure_admin_workspace_schema(db)
+    email = (actor_email or "").strip().lower()
+    pid = (project_id or "").strip()
+    rows = _query_all_dicts(
+        db,
+        "SELECT project_id FROM main.admin_projects "
+        f"WHERE project_id = '{_sql_lit(pid, 64)}' "
+        f"AND owner_email = '{_sql_lit(email, 256)}' "
+        "AND active = true LIMIT 1",
+    )
+    if not rows:
+        return False
+    db.execute(
+        f"""
+        UPDATE main.admin_project_agents
+        SET active = false, updated_at = CURRENT_TIMESTAMP
+        WHERE project_id = '{_sql_lit(pid, 64)}'
+          AND active = true
+        """
+    )
+    db.execute(
+        f"""
+        UPDATE main.admin_projects
+        SET active = false,
+            status = 'inactive',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE project_id = '{_sql_lit(pid, 64)}'
+          AND owner_email = '{_sql_lit(email, 256)}'
+          AND active = true
+        """
+    )
+    remaining = _query_all_dicts(
+        db,
+        "SELECT project_id FROM main.admin_projects "
+        f"WHERE project_id = '{_sql_lit(pid, 64)}' "
+        "AND active = true LIMIT 1",
+    )
+    return not bool(remaining)
+
+
 def detach_agent_from_project(
     db: Any,
     *,

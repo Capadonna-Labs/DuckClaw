@@ -43,6 +43,8 @@ export default function PlaygroundPage() {
   );
   const [workerId, setWorkerId] = useState(initialWorker);
   const [projectId, setProjectId] = useState(initialProject);
+  const [defaultsSaving, setDefaultsSaving] = useState(false);
+  const [defaultsMsg, setDefaultsMsg] = useState<string | null>(null);
 
   const conv = useActiveConversation(config?.effective_tenant_id, 'playground');
   const {
@@ -60,7 +62,7 @@ export default function PlaygroundPage() {
   );
   const selectableWorkers = useMemo(
     () =>
-      activeProject
+      activeProject && projectWorkerIds.length > 0
         ? (config?.workers ?? []).filter((worker) => projectWorkerIds.includes(workerOptionId(worker)))
         : (config?.workers ?? []),
     [activeProject, config?.workers, projectWorkerIds]
@@ -177,6 +179,31 @@ export default function PlaygroundPage() {
   const toggleConfigSection = useCallback((section: Exclude<PlaygroundConfigSection, null>) => {
     setOpenConfigSection((current) => (current === section ? null : section));
   }, []);
+  const savePlaygroundDefaults = useCallback(async () => {
+    if (!config) return;
+    setDefaultsSaving(true);
+    setDefaultsMsg(null);
+    try {
+      await adminService.patchRuntimeSettings([
+        { domain: 'llm', key: 'provider', value: config.llm?.provider || '', scope: 'actor' },
+        { domain: 'llm', key: 'model', value: config.llm?.model || '', scope: 'actor' },
+        { domain: 'llm', key: 'base_url', value: config.llm?.base_url || '', scope: 'actor' },
+        { domain: 'playground', key: 'default_worker_id', value: workerId || '', scope: 'actor' },
+        {
+          domain: 'playground',
+          key: 'default_vault_db_path',
+          value: activeVaultPath || '',
+          scope: 'actor',
+        },
+      ]);
+      setDefaultsMsg('Defaults guardados en DuckDB.');
+      loadConfig();
+    } catch (e) {
+      setDefaultsMsg(e instanceof Error ? e.message : 'No se pudieron guardar defaults');
+    } finally {
+      setDefaultsSaving(false);
+    }
+  }, [activeVaultPath, config, loadConfig, workerId]);
   const panelToggleTitle = panelOpen ? 'Ocultar panel de configuración' : 'Mostrar panel de configuración';
 
   return (
@@ -275,7 +302,10 @@ export default function PlaygroundPage() {
         )}
         {activeProject && (
           <p className="mx-4 mb-2 text-xs text-gov-blue-800 dark:text-dark-cyan bg-gov-cyan-50 dark:bg-dark-bg border border-gov-cyan-200 dark:border-dark-border px-3 py-2 rounded-xl">
-            Proyecto activo: <strong>{activeProject.name}</strong>. Verás solo los agentes de este proyecto.
+            Proyecto activo: <strong>{activeProject.name}</strong>.{' '}
+            {projectWorkerIds.length > 0
+              ? 'Verás solo los agentes de este proyecto.'
+              : 'Proyecto sin agentes asignados; se muestran todos tus agentes disponibles.'}
           </p>
         )}
         {conv.bootstrapping || !conv.sessionId ? (
@@ -333,6 +363,9 @@ export default function PlaygroundPage() {
                 activeVaultPath={activeVaultPath}
                 activeVaultScope={activeVaultScope}
                 workerLabel={workerId || '—'}
+                defaultsSaving={defaultsSaving}
+                defaultsMsg={defaultsMsg}
+                onSaveDefault={savePlaygroundDefaults}
             />
             <ConfigAccordionSection
               title="Comandos"
@@ -527,11 +560,17 @@ function CurrentConfigSummary({
   activeVaultPath,
   activeVaultScope,
   workerLabel,
+  defaultsSaving,
+  defaultsMsg,
+  onSaveDefault,
 }: {
   config: Awaited<ReturnType<typeof adminService.getPlaygroundConfig>> | null;
   activeVaultPath: string;
   activeVaultScope?: string;
   workerLabel: string;
+  defaultsSaving: boolean;
+  defaultsMsg: string | null;
+  onSaveDefault: () => void;
 }) {
   return (
     <section className="sticky top-0 z-10 rounded-3xl border border-gov-blue-100 dark:border-dark-border bg-white/95 dark:bg-dark-surface/95 p-4 shadow-sm backdrop-blur space-y-3">
@@ -556,16 +595,25 @@ function CurrentConfigSummary({
         <SummaryChip label="Agente" value={workerLabel} />
       </div>
 
-      {config?.llm?.scope === 'chat' && (
-        <p className="text-[10px] text-gov-blue-700 dark:text-dark-cyan">
-          Modelo fijado para esta conversación.
+      <div className="rounded-2xl border border-gov-blue-100 bg-gov-blue-50/70 p-3 dark:border-dark-border dark:bg-dark-bg">
+        <button
+          type="button"
+          onClick={onSaveDefault}
+          disabled={!config || defaultsSaving}
+          className="w-full rounded-xl bg-gov-blue-700 px-3 py-2 text-xs font-black text-white disabled:opacity-50"
+        >
+          {defaultsSaving ? 'Guardando…' : 'Guardar como default'}
+        </button>
+        <p className="mt-2 text-[10px] text-gov-gray-500 dark:text-dark-muted">
+          Guarda este modelo, agente y DuckDB como preferencia DB-first de tu usuario.
         </p>
-      )}
-      {activeVaultScope === 'chat' && (
-        <p className="text-[10px] text-gov-blue-700 dark:text-dark-cyan">
-          DuckDB fijada para esta conversación (no por worker).
-        </p>
-      )}
+        {defaultsMsg && (
+          <p className="mt-2 text-[10px] font-semibold text-gov-blue-700 dark:text-dark-cyan">
+            {defaultsMsg}
+          </p>
+        )}
+      </div>
+
     </section>
   );
 }

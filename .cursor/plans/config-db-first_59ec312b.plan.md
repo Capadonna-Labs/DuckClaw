@@ -4,19 +4,22 @@ overview: Migrar la configuración visible de DuckClaw Admin desde una lista cru
 todos:
   - id: runtime-spec
     content: Documentar Runtime Settings DB-first y frontera con .env bootstrap
-    status: pending
+    status: completed
   - id: runtime-backend
     content: Crear tabla, helpers y endpoints /settings/runtime con masking y auditoría
-    status: pending
+    status: completed
   - id: duckdb-settings-ui
     content: Reemplazar panel Variables .env por Configuración DuckDB DB-first
-    status: pending
+    status: completed
   - id: legacy-config-migration
     content: Leer schemas legacy desde runtime settings con fallback env
-    status: pending
+    status: completed
   - id: runtime-tests
     content: Agregar tests backend/UI de precedencia, secretos y ausencia de panel .env crudo
-    status: pending
+    status: completed
+  - id: playground-defaults
+    content: Guardar y resolver defaults LLM/agente/bóveda del Playground desde runtime settings
+    status: completed
 isProject: false
 ---
 
@@ -59,14 +62,14 @@ flowchart LR
 
 - Specs y tests:
   - Documentar la frontera `.env bootstrap` vs `runtime settings DB-first` en `specs/features/platform/DUCKCLAW_ADMIN_UI.md`.
-  - Agregar spec específica si el alcance crece: `specs/features/platform/ADMIN_RUNTIME_SETTINGS.md`.
+  - Spec específica creada: `specs/features/platform/ADMIN_RUNTIME_SETTINGS.md`.
   - Tests backend para precedencia DB > env > default, secretos enmascarados y auditoría.
   - Tests UI estáticos para asegurar que `/duckdb` no renderiza “Variables .env” como panel principal.
 
 ## Fases Seguras
 1. Introducir tabla y endpoints DB-first sin romper `/env`.
 2. Migrar solo la sección DuckDB y legacy schema config.
-3. Migrar LLM/API keys y textos que mencionan `.env`.
+3. Migrar LLM y defaults de Playground a Runtime Settings DB-first. ✅
 4. Migrar Telegram/MCP/ComfyUI por dominio.
 5. Marcar `/env` como legacy interno y dejarlo fuera del flujo normal de usuario.
 

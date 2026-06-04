@@ -115,15 +115,25 @@ def create_runtime_agent(
     description: str = "",
     skills: list[str] | None = None,
 ) -> dict[str, Any]:
+    from duckclaw.admin_worker_catalog import (
+        add_worker_context,
+        add_worker_version,
+        create_worker,
+        get_worker_by_tenant_worker_id,
+    )
+
     ensure_admin_user_agents_table(db)
     profile = ensure_profile_for_user(db, email=owner_email)
     wid = sanitize_worker_id(worker_id)
     tenant_id = profile["tenant_id"]
     if any(a["worker_id"] == wid for a in list_user_agents(db, owner_email)):
         raise ValueError(f"Agente ya existe: {wid}")
+    if get_worker_by_tenant_worker_id(db, tenant_id=tenant_id, worker_id=wid):
+        raise ValueError(f"Agente ya existe: {wid}")
 
     agent_dir = runtime_agents_root() / tenant_id / wid
     agent_dir.mkdir(parents=True, exist_ok=False)
+    prompt = (system_prompt or "").strip()
     manifest = {
         "id": wid,
         "display_name": (display_name or wid).strip(),
@@ -131,11 +141,12 @@ def create_runtime_agent(
         "tenant_id": tenant_id,
         "source_template_id": (source_template_id or "default").strip() or "default",
         "description": (description or "").strip(),
-        "system_prompt": (system_prompt or "").strip(),
+        "system_prompt": prompt,
         "skills": list(skills or []),
     }
     manifest_path = agent_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    manifest_json = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+    manifest_path.write_text(manifest_json, encoding="utf-8")
 
     db.execute(
         f"""
@@ -151,5 +162,32 @@ def create_runtime_agent(
           true
         )
         """
+    )
+    worker = create_worker(
+        db,
+        owner_email=profile["email"],
+        worker_id=wid,
+        display_name=(display_name or wid).strip(),
+        source_kind="runtime",
+        source_template_id=(source_template_id or "default").strip() or "default",
+        visibility="private",
+    )
+    files_snapshot = {"manifest.json": manifest_json}
+    if prompt:
+        files_snapshot["system_prompt.md"] = prompt
+        add_worker_context(
+            db,
+            worker_uid=worker["worker_uid"],
+            title="system_prompt.md",
+            content_md=prompt,
+            sort_order=10,
+        )
+    add_worker_version(
+        db,
+        worker_uid=worker["worker_uid"],
+        created_by=profile["email"],
+        manifest_snapshot=manifest,
+        files_snapshot=files_snapshot,
+        change_note="Agente runtime creado desde consola admin",
     )
     return next(a for a in list_user_agents(db, owner_email) if a["worker_id"] == wid)

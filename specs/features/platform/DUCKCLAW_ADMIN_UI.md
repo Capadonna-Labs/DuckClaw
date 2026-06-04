@@ -52,6 +52,7 @@ Badge UI: **canónico (archivo)** vs **override (runtime)**.
 ### Proyectos
 - `GET /workspace/projects` — proyectos DB-first visibles para el actor autenticado
 - `POST /workspace/projects` — crea proyecto DB-first
+- `DELETE /workspace/projects/{project_id}` — soft-delete del proyecto owned por el actor y de sus asignaciones
 - `GET /workspace/projects/{project_id}/agents` — agentes asignados al proyecto
 - `POST /workspace/projects/{project_id}/agents` — asigna agente existente al proyecto
 - `DELETE /workspace/projects/{project_id}/agents/{worker_id}` — quita relación proyecto-agente
@@ -97,9 +98,9 @@ Ver [`ADMIN_ACCESS_MANAGEMENT.md`](ADMIN_ACCESS_MANAGEMENT.md).
 Ver [`ADMIN_CHAT_IMAGE_ATTACHMENTS.md`](ADMIN_CHAT_IMAGE_ATTACHMENTS.md).
 
 - `POST /playground/chat` — body opcional `images[]` (`mime_type`, `data_base64`); VLM en gateway antes del worker.
-- `PUT /playground/model` — `{ chat_id, provider, model?, base_url? }`; equivalente a `/model provider=…` por conversación (agent_config).
+- `PUT /playground/model` — `{ chat_id, provider, model?, base_url? }`; equivalente a `/model provider=…` por conversación (agent_config). Tiene precedencia sobre defaults DB-first del actor.
 - `PUT /playground/vault` — `{ chat_id, tenant_id?, vault_db_path? }`; bóveda DuckDB por conversación (Redis `AdminConversationMeta.vault_db_path`). Vacío quita override.
-- `GET /playground/config?chat_id=` — LLM efectivo del chat (override) o .env global; incluye `vault` (ruta efectiva, scope) y `vault_options`.
+- `GET /playground/config?chat_id=` — LLM, agente y bóveda efectivos: override por conversación → Runtime Settings DB-first del actor → legacy/global/env. Incluye `vault` (ruta efectiva, scope) y `vault_options`.
 - UI: selector de bóveda en Playground y chat flotante (no en `/templates/[workerId]`).
 
 ### Catálogo MCP y Skills
@@ -152,12 +153,12 @@ En el `Sidebar`, la entrada `Playground` se comporta como selector expandible de
 - `Nueva conversación`: navega a `/playground?new=1`; la página crea un hilo nuevo, lo marca activo y refresca el inbox.
 
 La página `/playground` no renderiza un panel lateral `ConversationInbox`; el área de contenido queda reservada para el chat y su panel de configuración.
-El panel derecho de Playground se organiza como `Estado actual` compacto (modelo, DuckDB y agente) más acordeones de una sola apertura: `Comandos`, `Cambiar bóveda`, `Cambiar modelo` e `Instrucciones`. No renderiza la tarjeta `Run settings`, no muestra `Base URL` por defecto y evita duplicar la misma bóveda/modelo en varias tarjetas abiertas.
+El panel derecho de Playground se organiza como `Estado actual` compacto (modelo, DuckDB y agente) más acordeones de una sola apertura: `Comandos`, `Cambiar bóveda`, `Cambiar modelo` e `Instrucciones`. No renderiza la tarjeta `Run settings`, no muestra `Base URL` por defecto y evita duplicar la misma bóveda/modelo en varias tarjetas abiertas. `Estado actual` incluye la acción `Guardar como default`, que persiste modelo, agente y DuckDB actuales en `admin_runtime_settings` con scope del actor.
 El control para ocultar/mostrar este panel es un único botón flotante superior icon-only en la misma posición para ambos estados; mantiene `aria-label`/`title`, pero no muestra texto como `Ocultar panel`.
 La guía de comandos del chat vive en Playground como panel colapsable `Comandos`, dentro del panel de configuración. Muestra comandos frecuentes (`/team`, `/vault`, `/model`, `/workers`) y permite `Ver todos`. Overview no renderiza `Fly Commands`; `/commands` redirige a `/playground`.
 El aviso técnico `Equipo de este chat (/workers)` y el enlace `Variables globales (.env)` no se muestran en el panel Playground.
 Las rutas `Auditoría` y `Settings` pertenecen al grupo `Seguridad`. Las rutas `Train` y `VNC` pertenecen al grupo `Agentes`. `Integraciones` se muestra como selector dentro de `Agentes` con `Telegram` y `Edge devices`; no se muestra como grupo separado. El grupo `Sistema avanzado` no se muestra en el sidebar.
-El sidebar admin queda reducido a cuatro grupos visibles: `Inicio`, `Playground`, `Agentes` y `Seguridad`. Solo un grupo se mantiene abierto a la vez, sin hints descriptivos ni tarjetas con borde por grupo. `DuckDB` y `Runtime overrides` no aparecen en la navegación principal.
+El sidebar admin queda reducido a grupos operativos visibles: `Inicio`, `Playground`, `Agentes`, `Datos` y `Seguridad`. Solo un grupo se mantiene abierto a la vez, sin hints descriptivos ni tarjetas con borde por grupo. `DuckDB` permanece visible en `Datos` porque es la vista principal de consulta/configuración DB-first; `Runtime overrides` no aparece como flujo principal.
 
 ### Health (admin)
 - `GET /health` — gateway + workers count + flags Redis

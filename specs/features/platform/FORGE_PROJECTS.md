@@ -28,7 +28,7 @@ Agrupar workers y contexto compartido sin datos del operador en el repositorio.
 
 Legacy: rutas `/api/v1/admin/forge-projects*` y BFF `/api/admin/forge-projects*`.
 
-Nuevo contrato: `/api/v1/admin/workspace/projects*`, con asignación relacional de agentes sin duplicar datos del worker.
+Nuevo contrato: `/api/v1/admin/workspace/projects*`, con asignación relacional de agentes sin duplicar datos del worker. El borrado de proyecto es soft-delete en DuckDB: desactiva `admin_projects` y sus relaciones activas en `admin_project_agents`, sin tocar workers ni carpetas locales.
 
 ## Ejemplo de contexto compartido
 

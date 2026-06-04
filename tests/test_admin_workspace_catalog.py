@@ -270,6 +270,32 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
     )
     assert listed_after.json()["agents"] == []
 
+    deleted = gateway_admin_client.delete(
+        f"/api/v1/admin/workspace/projects/{project_id}",
+        headers=headers,
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {"ok": True, "project_id": project_id}
+
+    projects_after = gateway_admin_client.get("/api/v1/admin/workspace/projects", headers=headers)
+    assert projects_after.status_code == 200
+    assert project_id not in {item["project_id"] for item in projects_after.json()["projects"]}
+
+    con = duckdb.connect(str(gateway_db), read_only=True)
+    try:
+        project_row = con.execute(
+            "SELECT active, status FROM main.admin_projects WHERE project_id = ?",
+            [project_id],
+        ).fetchone()
+        worker_count = con.execute(
+            "SELECT COUNT(*) FROM main.admin_worker_catalog WHERE worker_id = 'axis-radar'",
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+    assert project_row == (False, "inactive")
+    assert worker_count == 1
+
 
 def test_resource_events_record_cross_cutting_audit_without_owning_permissions(gateway_db: Path) -> None:
     from duckclaw.admin_resources import (

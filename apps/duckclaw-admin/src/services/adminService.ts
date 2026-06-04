@@ -371,6 +371,44 @@ export const adminService = {
       body: JSON.stringify({ values }),
     }),
 
+  getRuntimeSettings: (params?: { domains?: string[] }) => {
+    const q = new URLSearchParams();
+    params?.domains?.forEach((domain) => q.append('domain', domain));
+    const qs = q.toString();
+    return adminFetch<{
+      tenant_id: string;
+      actor_email: string;
+      settings: {
+        setting_id: string;
+        tenant_id: string;
+        actor_email: string;
+        domain: string;
+        key: string;
+        value_kind: string;
+        secret: boolean;
+        source: string;
+        configured: boolean;
+        value_text?: string;
+        value_json?: unknown;
+        masked_value?: string;
+        updated_at: string;
+      }[];
+    }>(`/settings/runtime${qs ? `?${qs}` : ''}`);
+  },
+
+  patchRuntimeSettings: (settings: {
+    domain: string;
+    key: string;
+    value: unknown;
+    scope?: 'actor' | 'tenant' | 'global';
+    value_kind?: string;
+    secret?: boolean;
+  }[]) =>
+    adminFetch<{ ok: boolean; updated: string[] }>('/settings/runtime', {
+      method: 'PATCH',
+      body: JSON.stringify({ settings }),
+    }),
+
   getTelegramRoutes: () =>
     adminFetch<{
       format: string;
@@ -1086,6 +1124,12 @@ export const adminService = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  deleteWorkspaceProject: (projectId: string) =>
+    adminFetch<{ ok: boolean; project_id: string }>(
+      `/workspace/projects/${encodeURIComponent(projectId)}`,
+      { method: 'DELETE' }
+    ),
 
   listWorkspaceProjectAgents: (projectId: string) =>
     adminFetch<{

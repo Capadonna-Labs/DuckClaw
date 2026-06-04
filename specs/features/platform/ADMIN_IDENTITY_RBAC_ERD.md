@@ -111,6 +111,7 @@ Contrato Proyectos DB-first:
 
 - `GET /api/v1/admin/workspace/projects` lista proyectos visibles para el actor autenticado, incluyendo `agent_count` calculado desde `admin_project_agents`.
 - `POST /api/v1/admin/workspace/projects` crea un proyecto en `admin_projects` para el tenant/perfil del actor, sin crear carpetas en `forge/projects`.
+- `DELETE /api/v1/admin/workspace/projects/{project_id}` desactiva lógicamente un proyecto owned por el actor y sus relaciones `admin_project_agents`. No borra workers, versiones, contextos ni carpetas.
 - `GET /api/v1/admin/workspace/projects/{project_id}/agents` lista los workers activos asignados al proyecto desde `admin_project_agents`.
 - `POST /api/v1/admin/workspace/projects/{project_id}/agents` asigna un worker visible del catálogo al proyecto por `worker_id`; la relación persiste `worker_uid`, `role` y `sort_order`.
 - `DELETE /api/v1/admin/workspace/projects/{project_id}/agents/{worker_id}` desactiva lógicamente la relación proyecto-worker. No borra el worker, sus versiones, contextos ni carpetas de templates.

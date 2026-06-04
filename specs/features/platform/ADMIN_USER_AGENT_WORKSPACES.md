@@ -30,6 +30,8 @@ Relacionado: [`ADMIN_CONSOLE_AUTH.md`](ADMIN_CONSOLE_AUTH.md), [`ADMIN_ACCESS_MA
   - `source_template_id`
   - `manifest_path`
   - `active`
+- Cada agente runtime también debe registrar su identidad actual en `main.admin_worker_catalog` y una versión inicial en `main.admin_worker_versions`.
+  Así `/templates`, el selector de workers y los proyectos DB-first leen el mismo catálogo visible por tenant.
 - Los manifiestos runtime se guardan fuera del árbol de templates globales, por defecto en `.duckclaw/runtime/agents/{tenant_id}/{worker_id}/manifest.json`.
 
 ## Contexto de Sesión

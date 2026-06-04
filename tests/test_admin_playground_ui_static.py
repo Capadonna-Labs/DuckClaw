@@ -106,7 +106,7 @@ def test_integrations_are_nested_inside_agents_selector() -> None:
     assert 'href="/integrations/edge-devices"' in sidebar
 
 
-def test_admin_sidebar_is_reduced_to_four_visible_groups() -> None:
+def test_admin_sidebar_keeps_core_groups_and_data_access() -> None:
     nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
     sidebar = Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(encoding="utf-8")
     structure_body = nav.split("export const ADMIN_NAV_STRUCTURE", 1)[1].split(
@@ -121,6 +121,9 @@ def test_admin_sidebar_is_reduced_to_four_visible_groups() -> None:
     build_body = nav.split("export const BUILD_NAV_GROUP", 1)[1].split(
         "export const DATA_NAV_GROUP", 1
     )[0]
+    data_body = nav.split("export const DATA_NAV_GROUP", 1)[1].split(
+        "export const INTEGRATIONS_NAV_GROUP", 1
+    )[0]
     security_body = nav.split("export const SECURITY_NAV_GROUP", 1)[1].split(
         "export const SYSTEM_NAV_GROUP", 1
     )[0]
@@ -129,12 +132,14 @@ def test_admin_sidebar_is_reduced_to_four_visible_groups() -> None:
     assert "label: 'Playground'" in playground_body
     assert "label: 'Chat'" in playground_body
     assert "label: 'Agentes'" in build_body
+    assert "label: 'Datos'" in data_body
+    assert "href: '/duckdb'" in data_body
     assert "label: 'Seguridad'" in security_body
     assert "{ type: 'group', group: OPERATION_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: PLAYGROUND_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: BUILD_NAV_GROUP }" in structure_body
+    assert "{ type: 'group', group: DATA_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: SECURITY_NAV_GROUP }" in structure_body
-    assert "{ type: 'group', group: DATA_NAV_GROUP }" not in structure_body
     assert "{ type: 'group', group: INTEGRATIONS_NAV_GROUP }" not in structure_body
     assert "{ type: 'group', group: SYSTEM_NAV_GROUP }" not in structure_body
     assert "hint:" not in operation_body
@@ -202,12 +207,20 @@ def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
 
     assert "const activeVaultPath = chat.vaultPath || config?.vault?.effective_path || ''" in page
+    assert "projectWorkerIds.length > 0" in page
+    assert "Proyecto sin agentes asignados" in page
     assert "activeVaultPath={activeVaultPath}" in page
     assert "effectivePath={activeVaultPath}" in page
     assert "Estado actual" in page
     assert "CurrentConfigSummary" in page
+    assert "Guardar como default" in page
+    assert "savePlaygroundDefaults" in page
+    assert "patchRuntimeSettings" in page
+    assert "default_worker_id" in page
+    assert "default_vault_db_path" in page
     assert "DuckDB" in page
-    assert "Modelo fijado para esta conversación." in page
+    assert "Modelo fijado para esta conversación." not in page
+    assert "DuckDB fijada para esta conversación" not in page
     assert "Run settings" not in page
     assert "Base URL" not in page
     assert "Override por conversación" not in page
@@ -407,7 +420,15 @@ def test_duckdb_page_exposes_confirmed_legacy_schema_cleanup() -> None:
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
 
     assert "Schemas legacy detectados" in page
+    assert "Configuración DuckDB" in page
+    assert "Schemas legacy configurados" in page
+    assert "getRuntimeSettings" in page
+    assert "patchRuntimeSettings" in page
+    assert "Variables .env" not in page
+    assert "getEnv()" not in page
     assert "ConfirmDangerModal" in page
     assert "DROP_LEGACY_SCHEMAS" in page
     assert "listDuckdbLegacySchemas" in service
     assert "dropDuckdbLegacySchemas" in service
+    assert "getRuntimeSettings" in service
+    assert "patchRuntimeSettings" in service

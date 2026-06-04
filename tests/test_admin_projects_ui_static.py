@@ -12,5 +12,9 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     assert "admin_project_agents" in workspace
     assert "Asignar agente" in page
     assert "removeWorkspaceProjectAgent" in page
+    assert "deleteWorkspaceProject" in page
+    assert "Eliminar proyecto" in page
+    assert "confirm(" in page
     assert "listWorkspaceProjects" in service
     assert "assignWorkspaceProjectAgent" in service
+    assert "deleteWorkspaceProject" in service

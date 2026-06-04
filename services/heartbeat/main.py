@@ -549,7 +549,11 @@ async def _run_goals_proactive_tick_one_db(
                                         trading_obj = o
                         except Exception:
                             trading_obj = None
-                proactive_mode = normalize_proactive_mode(meta.get("mode"))
+                if "mode" in meta and str(meta.get("mode") or "").strip():
+                    proactive_mode = normalize_proactive_mode(str(meta.get("mode")))
+                else:
+                    # Schedules legacy (pre GOALS_ALIGNMENT) y tests sin meta.mode: tick periódico.
+                    proactive_mode = "always"
                 report = assess_goals_alignment(db, chat_id, worker_id=_wid_pre)
                 notify_channel = normalize_notify_channel(
                     get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)
@@ -581,12 +585,12 @@ async def _run_goals_proactive_tick_one_db(
                         goals, trading_session_objective=trading_obj
                     )
 
-        if not notify_channel:
-            from duckclaw.forge.homeostasis.goals_alignment import normalize_notify_channel
+            if not notify_channel:
+                from duckclaw.forge.homeostasis.goals_alignment import normalize_notify_channel
 
-            notify_channel = normalize_notify_channel(
-                get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)
-            )
+                notify_channel = normalize_notify_channel(
+                    get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)
+                )
 
         _wid = (worker_id or "").strip()
         vault_for_gateway = str(Path(db_path).expanduser().resolve())

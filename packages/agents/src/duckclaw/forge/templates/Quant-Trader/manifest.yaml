@@ -54,6 +54,7 @@ skills:
 - accumulate_moc_intraday_state
 - propose_trade_signal
 - execute_approved_signal
+- cancel_trade_signal
 - search_semantic_context
 - macro_pgq_context
 forge_context:

@@ -31,6 +31,7 @@ from duckclaw.forge.skills.intraday_accum_window import (
     inside_reference_accumulation_trading_week_cot,
     inside_reference_equity_rth_cot,
 )
+from duckclaw.forge.atoms.trade_signal_cancel import cancel_trade_signal_in_ledger
 from duckclaw.forge.skills.quant_hitl import consume_execute_order_grant, grant_execute_order
 from duckclaw.forge.skills.quant_tool_context import (
     get_quant_tool_chat_id,
@@ -1751,6 +1752,37 @@ def _propose_trade_signal_impl(
     return json.dumps(out, ensure_ascii=False)
 
 
+@log_tool_execution_sync(name="cancel_trade_signal")
+def _cancel_trade_signal_impl(
+    db: Any,
+    *,
+    signal_id: str,
+    reason: str = "",
+    force: bool = False,
+) -> str:
+    from duckclaw.graphs.on_the_fly_commands import _vault_apply_sql_statements
+
+    tid = get_quant_tool_tenant_id() or "default"
+    outcome = cancel_trade_signal_in_ledger(
+        db,
+        signal_id,
+        force=bool(force),
+        tenant_id=tid,
+        apply_sql=_vault_apply_sql_statements,
+        resolve_prefix=True,
+    )
+    payload: dict[str, Any] = {
+        "status": "ok" if outcome.ok else "error",
+        "signal_id": outcome.signal_id or (signal_id or "").strip().lower(),
+        "previous_status": outcome.previous_status or None,
+        "new_status": "CANCELLED" if outcome.ok else None,
+        "reason": (reason or "").strip() or None,
+        "message": outcome.message,
+        "already_cancelled": outcome.already_cancelled,
+    }
+    return json.dumps({k: v for k, v in payload.items() if v is not None}, ensure_ascii=False)
+
+
 @log_tool_execution_sync(name="execute_approved_signal")
 def _execute_approved_signal_impl(
     db: Any,
@@ -2157,6 +2189,18 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
     def _execute_approved_signal(signal_id: str) -> str:
         return _execute_approved_signal_impl(db, signal_id=signal_id)
 
+    def _cancel_trade_signal(
+        signal_id: str,
+        reason: str = "",
+        force: bool = False,
+    ) -> str:
+        return _cancel_trade_signal_impl(
+            db,
+            signal_id=signal_id,
+            reason=reason,
+            force=bool(force),
+        )
+
     def _evaluate_cfd_state(
         session_uid: str,
         tickers: list[str],
@@ -2302,6 +2346,19 @@ def register_quant_trader_skills(db: Any, llm: Any, tools: list[Any]) -> None:
                 "con IBKR_ACCOUNT_MODE; se envia cabecera X-Duckclaw-IBKR-Account-Mode (paper|live). "
                 "La respuesta puede incluir campos del broker (p. ej. ib_order_id, qty); citarlos literalmente; "
                 "no es lo mismo que get_ibkr_portfolio (IBKR_PORTFOLIO_API_URL), que es snapshot aparte."
+            ),
+        )
+    )
+    tools.append(
+        StructuredTool.from_function(
+            _cancel_trade_signal,
+            name="cancel_trade_signal",
+            description=(
+                "Cancela una señal en el ledger HITL (finance_worker.trade_signals y quant_core.trade_signals). "
+                "signal_id: UUID completo o prefijo hex único (ej. 0ca13a71). "
+                "Estados cancelables: PENDING_HITL, AWAITING_HITL, PENDING, FAILED; force=true limpia otros excepto EXECUTED. "
+                "No ejecuta en broker. Equivalente fly: /cancel_signal. "
+                "Prohibido inventar /execute_signal --action cancel."
             ),
         )
     )

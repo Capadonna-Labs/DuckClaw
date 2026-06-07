@@ -15,6 +15,30 @@ from duckclaw.admin_user_profiles import ensure_profile_for_user
 from duckclaw.shared_db_grants import _query_all_dicts, _sql_lit
 
 _WORKER_ID_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+PLATFORM_ORCHESTRATOR_WORKER_ID = "platform-orchestrator"
+PLATFORM_ORCHESTRATOR_DISPLAY_NAME = "Platform Orchestrator"
+PLATFORM_ORCHESTRATOR_SOURCE_KIND = "system_seed"
+
+_PLATFORM_ORCHESTRATOR_SYSTEM_PROMPT = """# Platform Orchestrator
+
+Eres el orquestador de plataforma personal del usuario autenticado.
+
+Tu trabajo es acompañar al usuario en la creación de proyectos, workers, contexto compartido y selección de skills. Antes de proponer cambios, entrevista al usuario sobre:
+
+- objetivo de negocio o técnico;
+- dominio y restricciones;
+- datos disponibles;
+- resultado esperado;
+- workers necesarios;
+- skills existentes o faltantes.
+
+Nunca crees ni modifiques recursos sin confirmación explícita. Prefiere contratos DB-first y no escribas en carpetas legacy. No inventes secretos ni API keys; si falta un secreto, indícalo como configuración pendiente.
+"""
+
+_PLATFORM_ORCHESTRATOR_OVERVIEW = """# Platform Orchestrator
+
+Worker DB-first siempre disponible para guiar creación de proyectos, agentes, contexto compartido y skills.
+"""
 
 _ADMIN_WORKER_CATALOG_DDL = """
 CREATE TABLE IF NOT EXISTS main.admin_worker_catalog (
@@ -180,7 +204,22 @@ def _first_row(db: Any, sql: str) -> dict[str, Any] | None:
     return None
 
 
-def _worker_row_to_public(row: dict[str, Any]) -> dict[str, str]:
+def _coerce_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"false", "0", "no", "off"}:
+        return False
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    return default
+
+
+def _worker_row_to_public(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "worker_uid": str(row.get("worker_uid") or ""),
         "tenant_id": str(row.get("tenant_id") or ""),
@@ -191,7 +230,7 @@ def _worker_row_to_public(row: dict[str, Any]) -> dict[str, str]:
         "source_template_id": str(row.get("source_template_id") or "default"),
         "visibility": str(row.get("visibility") or "private"),
         "status": str(row.get("status") or "active"),
-        "active": str(bool(row.get("active", True))),
+        "active": _coerce_bool(row.get("active"), True),
         "created_at": str(row.get("created_at") or ""),
         "updated_at": str(row.get("updated_at") or ""),
     }
@@ -267,7 +306,12 @@ def create_worker(
     return created
 
 
-def list_visible_workers_for_actor(db: Any, *, actor_email: str) -> list[dict[str, str]]:
+def list_visible_workers_for_actor(
+    db: Any,
+    *,
+    actor_email: str,
+    include_inactive: bool = False,
+) -> list[dict[str, str]]:
     """Return the public default worker plus DB-catalog workers visible to actor."""
     ensure_admin_worker_catalog_schema(db)
     actor = (actor_email or "").strip().lower()
@@ -279,6 +323,9 @@ def list_visible_workers_for_actor(db: Any, *, actor_email: str) -> list[dict[st
             "display_name": "Default",
             "source": "template",
             "visibility": "public",
+            "source_template_id": "default",
+            "status": "active",
+            "active": True,
         }
     ]
     if "@" not in actor:
@@ -291,7 +338,7 @@ def list_visible_workers_for_actor(db: Any, *, actor_email: str) -> list[dict[st
         "wc.source_kind, wc.source_template_id, wc.visibility, wc.status, wc.active, wc.created_at, wc.updated_at "
         "FROM main.admin_worker_catalog wc "
         "LEFT JOIN main.admin_worker_assignments wa ON wa.worker_uid = wc.worker_uid "
-        "WHERE wc.active = true "
+        f"WHERE {'1 = 1' if include_inactive else 'wc.active = true'} "
         f"AND wc.tenant_id = '{_sql_lit(profile['tenant_id'], 128)}' "
         f"AND (wc.owner_email = '{_sql_lit(profile['email'], 256)}' "
         "OR wc.visibility = 'public' "
@@ -312,6 +359,8 @@ def list_visible_workers_for_actor(db: Any, *, actor_email: str) -> list[dict[st
                 "source": "catalog",
                 "visibility": public["visibility"],
                 "source_template_id": public["source_template_id"],
+                "status": public["status"],
+                "active": public["active"],
             }
         )
     return workers
@@ -336,6 +385,27 @@ def deactivate_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id:
         """
     )
     return worker
+
+
+def reactivate_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id: str) -> dict[str, str] | None:
+    """Reactivate a soft-deleted catalog worker owned by the actor."""
+    ensure_admin_worker_catalog_schema(db)
+    actor = (actor_email or "").strip().lower()
+    if "@" not in actor:
+        return None
+    profile = ensure_profile_for_user(db, email=actor)
+    wid = sanitize_catalog_worker_id(worker_id)
+    worker = get_worker_by_tenant_worker_id(db, tenant_id=profile["tenant_id"], worker_id=wid)
+    if not worker or worker["owner_email"] != profile["email"]:
+        return None
+    db.execute(
+        f"""
+        UPDATE main.admin_worker_catalog
+        SET active = true, status = 'active', updated_at = CURRENT_TIMESTAMP
+        WHERE worker_uid = '{_sql_lit(worker["worker_uid"], 64)}'
+        """
+    )
+    return get_worker_by_uid(db, worker["worker_uid"]) or worker
 
 
 def add_worker_version(
@@ -440,6 +510,65 @@ def get_latest_worker_version(db: Any, *, worker_uid: str) -> dict[str, Any] | N
     return out
 
 
+def ensure_platform_orchestrator_for_actor(db: Any, *, actor_email: str) -> dict[str, Any]:
+    """Ensure the per-user DB-first platform orchestrator exists and is active."""
+    ensure_admin_worker_catalog_schema(db)
+    actor = (actor_email or "").strip().lower()
+    if "@" not in actor:
+        raise ValueError("actor_email requerido")
+    profile = ensure_profile_for_user(db, email=actor)
+    worker = get_worker_by_tenant_worker_id(
+        db,
+        tenant_id=profile["tenant_id"],
+        worker_id=PLATFORM_ORCHESTRATOR_WORKER_ID,
+    )
+    if worker:
+        db.execute(
+            f"""
+            UPDATE main.admin_worker_catalog
+            SET active = true,
+                status = 'active',
+                display_name = '{_sql_lit(PLATFORM_ORCHESTRATOR_DISPLAY_NAME, 256)}',
+                source_kind = '{PLATFORM_ORCHESTRATOR_SOURCE_KIND}',
+                source_template_id = '{PLATFORM_ORCHESTRATOR_WORKER_ID}',
+                visibility = 'private',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE worker_uid = '{_sql_lit(worker["worker_uid"], 64)}'
+            """
+        )
+        worker = get_worker_by_uid(db, worker["worker_uid"]) or worker
+    else:
+        worker = create_worker(
+            db,
+            owner_email=profile["email"],
+            worker_id=PLATFORM_ORCHESTRATOR_WORKER_ID,
+            display_name=PLATFORM_ORCHESTRATOR_DISPLAY_NAME,
+            source_kind=PLATFORM_ORCHESTRATOR_SOURCE_KIND,
+            source_template_id=PLATFORM_ORCHESTRATOR_WORKER_ID,
+            visibility="private",
+        )
+
+    latest = get_latest_worker_version(db, worker_uid=worker["worker_uid"])
+    if latest is None:
+        add_worker_version(
+            db,
+            worker_uid=worker["worker_uid"],
+            created_by=profile["email"],
+            manifest_snapshot={
+                "id": PLATFORM_ORCHESTRATOR_WORKER_ID,
+                "name": PLATFORM_ORCHESTRATOR_DISPLAY_NAME,
+                "description": "Guía DB-first para crear proyectos, workers, contexto compartido y skills.",
+                "source_kind": PLATFORM_ORCHESTRATOR_SOURCE_KIND,
+            },
+            files_snapshot={
+                "system_prompt.md": _PLATFORM_ORCHESTRATOR_SYSTEM_PROMPT,
+                "WORKER_OVERVIEW.md": _PLATFORM_ORCHESTRATOR_OVERVIEW,
+            },
+            change_note="Seed inicial Platform Orchestrator",
+        )
+    return worker
+
+
 def get_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id: str) -> dict[str, str] | None:
     ensure_admin_worker_catalog_schema(db)
     actor = (actor_email or "").strip().lower()
@@ -448,7 +577,7 @@ def get_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id: str) -
     profile = ensure_profile_for_user(db, email=actor)
     wid = sanitize_catalog_worker_id(worker_id)
     worker = get_worker_by_tenant_worker_id(db, tenant_id=profile["tenant_id"], worker_id=wid)
-    if worker and worker["active"] == "True" and worker["owner_email"] == profile["email"]:
+    if worker and _coerce_bool(worker.get("active"), True) and worker["owner_email"] == profile["email"]:
         return worker
     return None
 

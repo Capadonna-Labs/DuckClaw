@@ -448,6 +448,33 @@ async def delete_conversation(
         return False
 
 
+async def delete_conversation_merged(
+    redis_client: Any,
+    primary_tenant_id: str,
+    session_id: str,
+) -> str | None:
+    """Elimina una conversación desde el mismo espacio lógico que usa el listado.
+
+    Durante la migración RBAC hubo conversaciones indexadas bajo ``default``. La UI
+    lista tenant actual + default; borrar debe resolver el tenant real antes de
+    limpiar metadatos e historial.
+    """
+    sid = (session_id or "").strip()
+    if not sid:
+        return None
+    for tid in admin_conversation_tenant_candidates(primary_tenant_id):
+        meta = await get_conversation_meta(redis_client, tid, sid)
+        if meta is None:
+            from core.chat_history import redis_load_chat_history
+
+            messages = await redis_load_chat_history(redis_client, tid, sid)
+            if not messages:
+                continue
+        if await delete_conversation(redis_client, tid, sid):
+            return tid
+    return None
+
+
 async def reindex_admin_conversations(
     redis_client: Any,
     tenant_id: str,

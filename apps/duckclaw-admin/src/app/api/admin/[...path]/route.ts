@@ -189,6 +189,17 @@ async function proxy(req: NextRequest, segments: string[]) {
     }
   }
 
+  if (res.status === 404 && sub.startsWith('workspace/orchestrator/')) {
+    return NextResponse.json(
+      {
+        detail:
+          'El Gateway no expone Platform Orchestrator todavía. Reinicia DuckClaw-Gateway con PM2 para cargar las rutas DB-first nuevas.',
+        code: 'gateway_stale',
+      },
+      { status: 503 }
+    );
+  }
+
   return new NextResponse(text, {
     status: res.status,
     headers: { 'Content-Type': res.headers.get('content-type') || 'application/json' },

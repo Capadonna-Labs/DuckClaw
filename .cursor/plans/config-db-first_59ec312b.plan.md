@@ -20,6 +20,18 @@ todos:
   - id: playground-defaults
     content: Guardar y resolver defaults LLM/agente/bóveda del Playground desde runtime settings
     status: completed
+  - id: telegram-runtime-settings
+    content: Migrar configuración visible de Telegram a Runtime Settings DB-first con fallback .env
+    status: completed
+  - id: mcp-runtime-settings
+    content: Migrar configuración visible de MCP a Runtime Settings DB-first con fallback .env
+    status: completed
+  - id: comfyui-runtime-settings
+    content: Migrar configuración visible de ComfyUI/imágenes a Runtime Settings DB-first con fallback .env
+    status: completed
+  - id: env-legacy-internal
+    content: Marcar /env como legacy interno y retirarlo del flujo normal de UI
+    status: pending
 isProject: false
 ---
 
@@ -70,8 +82,14 @@ flowchart LR
 1. Introducir tabla y endpoints DB-first sin romper `/env`.
 2. Migrar solo la sección DuckDB y legacy schema config.
 3. Migrar LLM y defaults de Playground a Runtime Settings DB-first. ✅
-4. Migrar Telegram/MCP/ComfyUI por dominio.
+4. Migrar Telegram/MCP/ComfyUI por dominio, en PRs o commits separados para no mezclar secretos ni contratos.
 5. Marcar `/env` como legacy interno y dejarlo fuera del flujo normal de usuario.
+
+## Pendiente de Migración por Dominio
+- **Telegram:** completado para rutas webhook (`telegram.webhook_routes`) con tokens write-only, lectura DB-first y fallback `.env`. La whitelist/guard ya usa DuckDB (`authorized_users`) y queda fuera de `/env`.
+- **MCP:** completado para puerto DuckClaw MCP HTTP (`mcp.port`) con lectura DB-first y fallback `DUCKCLAW_MCP_PORT`. `config/mcp_servers.yaml` permanece de solo lectura en v1.
+- **ComfyUI / imágenes:** completado para URL base y timeout (`comfyui.api_url`, `comfyui.timeout_sec`) con lectura DB-first y fallback `.env`. Flags de edición/inbound quedan como siguiente corte si se exponen en UI.
+- **`/env` legacy:** ocultar del flujo normal de navegación y mantenerlo solo como herramienta interna de bootstrap/soporte con copy explícito de legacy.
 
 ## Riesgos y Mitigación
 - Riesgo: romper arranque local si se elimina `.env` demasiado pronto. Mitigación: `.env` sigue como fallback bootstrap.

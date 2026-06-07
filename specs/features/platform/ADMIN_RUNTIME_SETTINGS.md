@@ -124,6 +124,37 @@ Precedencia de lectura en `/playground/config`:
 
 La acción UI “Guardar como default” en Playground escribe solo en `admin_runtime_settings` con scope `actor`.
 
+## Tercer Corte Telegram
+
+Migrar rutas webhook de Telegram:
+
+- `telegram.webhook_routes`: valor compacto de rutas webhook, secreto/write-only porque contiene tokens Bot API.
+- Lectura efectiva: Runtime Settings DB-first → `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` en `.env` → vacío.
+- `GET /telegram/routes` parsea la configuración efectiva y devuelve tokens enmascarados, `source` y `runtime_key`.
+- `PUT /telegram/routes` escribe solo en `admin_runtime_settings`; no modifica `.env`.
+- El Gateway registra rutas dinámicas al arrancar desde `telegram.webhook_routes`, con fallback `.env` para compatibilidad.
+
+## Cuarto Corte MCP
+
+Migrar configuración visible de MCP:
+
+- `mcp.port`: puerto del servidor DuckClaw MCP HTTP.
+- Lectura efectiva: Runtime Settings DB-first → `DUCKCLAW_MCP_PORT` en `.env` → `8001`.
+- `GET /catalog/mcp` devuelve `duckclaw_mcp.port`, `source` y `runtime_key`.
+- La UI `/mcp` permite guardar el puerto en `admin_runtime_settings`; reiniciar MCP aplica el cambio.
+- `config/mcp_servers.yaml` permanece como catálogo estático/stdio en v1; editarlo desde UI sigue fuera de alcance.
+
+## Quinto Corte ComfyUI
+
+Migrar configuración visible de imágenes:
+
+- `comfyui.api_url`: URL base HTTP del API ComfyUI.
+- `comfyui.timeout_sec`: timeout total de generación.
+- Lectura efectiva: Runtime Settings DB-first → `COMFYUI_API_URL` / `COMFYUI_TIMEOUT_SEC` en `.env` → defaults locales.
+- `GET /comfyui/status` devuelve fuente efectiva, runtime keys, estado de checkpoints y health.
+- `POST /comfyui/generate` usa la configuración efectiva del Gateway y no depende solo de variables de entorno.
+- La UI `/gen/image` permite guardar URL y timeout en DuckDB; `.env` queda como fallback bootstrap.
+
 ## Criterios de Aceptación
 
 - `bootstrap_core_schema` crea `admin_runtime_settings`.
@@ -132,3 +163,6 @@ La acción UI “Guardar como default” en Playground escribe solo en `admin_ru
 - `/duckdb` no renderiza “Variables .env” como panel principal.
 - `DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS` funciona desde DB-first con fallback env.
 - `/playground/config` usa defaults DB-first del actor sin pisar overrides por conversación.
+- `/telegram` no renderiza un editor crudo de `.env` y guarda rutas webhook en DuckDB DB-first.
+- `/mcp` muestra y guarda `mcp.port` DB-first con fallback `DUCKCLAW_MCP_PORT`.
+- `/gen/image` muestra y guarda `comfyui.api_url` y `comfyui.timeout_sec` DB-first.

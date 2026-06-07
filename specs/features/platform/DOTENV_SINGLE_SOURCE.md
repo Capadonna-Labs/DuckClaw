@@ -1,8 +1,10 @@
-# Dotenv — única fuente de secretos (v1.0.0)
+# Dotenv — bootstrap de secretos (v1.1.0)
 
 ## Regla
 
-- **Secretos** (`*_API_KEY`, `*_TOKEN`, `*_SECRET`, `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`, etc.) → **solo** `.env` en la raíz del repo.
+- **Bootstrap técnico** (`*_API_KEY`, `*_TOKEN`, `*_SECRET`, `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`, etc.) puede vivir en `.env` en la raíz del repo para arrancar procesos y conservar compatibilidad.
+- **Configuración editable desde DuckClaw Admin** debe migrar a `admin_runtime_settings` DB-first. Si contiene secretos, la UI los trata como write-only y solo devuelve estado enmascarado.
+- Mientras un dominio migra, `.env` es fallback compatible, no interfaz principal de producto.
 - **No** commitear valores reales en `config/ecosystem.api.config.cjs` ni `config/api_gateways_pm2.json`.
 
 ## Runtime

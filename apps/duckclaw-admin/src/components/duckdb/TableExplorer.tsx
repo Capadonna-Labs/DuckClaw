@@ -106,10 +106,11 @@ export function TableExplorer({ vaultPath, refreshKey = 0 }: Props) {
 
   return (
     <div className="flex flex-col gap-3 h-[calc(100vh-220px)] min-h-[420px]">
-      <div className="grid gap-2 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-xs text-slate-300 md:grid-cols-4">
+      <div className="grid gap-2 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-xs text-slate-300 md:grid-cols-5">
         <SessionMetric label="BD de sesión" value={shortPath(catalogMeta?.vault_path || vaultPath)} />
+        <SessionMetric label="Actor consola" value={catalogMeta?.actor_email || '—'} />
         <SessionMetric label="Usuario vault" value={catalogMeta?.vault_user_id || '—'} />
-        <SessionMetric label="Tenant" value={catalogMeta?.tenant_id || '—'} />
+        <SessionMetric label="Tenant perfil" value={catalogMeta?.tenant_id || '—'} />
         <SessionMetric label="Tablas visibles" value={String(catalogMeta?.table_count ?? countTables(schemas))} />
       </div>
 

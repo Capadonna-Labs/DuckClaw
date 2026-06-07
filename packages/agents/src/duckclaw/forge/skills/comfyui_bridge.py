@@ -185,6 +185,15 @@ def _comfy_timeout_sec() -> float:
         return 420.0
 
 
+def _coerce_comfy_timeout_sec(value: Any) -> float:
+    if value is None or value == "":
+        return _comfy_timeout_sec()
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return _comfy_timeout_sec()
+
+
 
 
 def _default_img2img_denoise() -> float:
@@ -713,7 +722,7 @@ def _generate_visual_asset_impl(
     duckclaw_db: Any = None,
 ) -> str:
     cfg = comfyui_config if isinstance(comfyui_config, dict) else {}
-    base_url = _comfy_base_url()
+    base_url = str(cfg.get("api_url") or _comfy_base_url()).strip().rstrip("/")
     if not base_url:
         return _error_json("COMFYUI_API_URL no está configurada. Añádela al .env del gateway.")
 
@@ -722,7 +731,7 @@ def _generate_visual_asset_impl(
         return _error_json("El parámetro prompt no puede estar vacío.")
 
     template_name = str(cfg.get("template") or "comfy_default").strip() or "comfy_default"
-    timeout_sec = _comfy_timeout_sec()
+    timeout_sec = _coerce_comfy_timeout_sec(cfg.get("timeout_sec"))
     client_id = str(uuid.uuid4())
     from duckclaw.forge.skills.quant_tool_context import get_quant_tool_chat_id
 

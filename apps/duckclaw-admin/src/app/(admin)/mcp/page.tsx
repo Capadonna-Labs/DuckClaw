@@ -6,7 +6,7 @@ import { adminService } from '@/services/adminService';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
 import { useAuthStore } from '@/store/authStore';
-import { Cable, Circle, Play, RefreshCw } from 'lucide-react';
+import { Cable, Circle, Database, Play, RefreshCw } from 'lucide-react';
 
 type McpLive = Awaited<ReturnType<typeof adminService.getMcpLiveStatus>>;
 
@@ -20,18 +20,50 @@ export default function McpPage() {
   const [error, setError] = useState<string | null>(null);
   const [opsRunning, setOpsRunning] = useState<string | null>(null);
   const [opsOutput, setOpsOutput] = useState<string | null>(null);
+  const [mcpPort, setMcpPort] = useState('8001');
+  const [mcpSource, setMcpSource] = useState('default');
+  const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   const refreshLive = useCallback(() => {
     return adminService.getMcpLiveStatus().then(setLive).catch(() => setLive(null));
   }, []);
 
+  const refreshCatalog = useCallback(() => {
+    return adminService.getMcpCatalog().then((catalog) => {
+      setData(catalog);
+      setMcpPort(catalog.duckclaw_mcp.port || '8001');
+      setMcpSource(catalog.duckclaw_mcp.source || 'default');
+    });
+  }, []);
+
   useEffect(() => {
     refreshLive();
-    adminService
-      .getMcpCatalog()
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
-  }, [refreshLive]);
+    refreshCatalog().catch((e) => setError(e instanceof Error ? e.message : 'Error'));
+  }, [refreshCatalog, refreshLive]);
+
+  const saveMcpSettings = async () => {
+    if (!canRunOps) return;
+    const port = mcpPort.trim();
+    if (!/^\d{2,5}$/.test(port)) {
+      setSettingsMsg('Puerto inválido');
+      return;
+    }
+    setSettingsSaving(true);
+    setSettingsMsg(null);
+    try {
+      await adminService.patchRuntimeSettings([
+        { domain: 'mcp', key: 'port', value: port, scope: 'global' },
+      ]);
+      setSettingsMsg('Configuración MCP guardada en DuckDB. Reinicia MCP para aplicar el puerto.');
+      await refreshCatalog();
+      await refreshLive();
+    } catch (e) {
+      setSettingsMsg(e instanceof Error ? e.message : 'No se pudo guardar configuración MCP');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
 
   const runMcpOp = async (opId: 'pm2_start_mcp' | 'pm2_restart_mcp' | 'pm2_logs_mcp') => {
     setOpsRunning(opId);
@@ -106,6 +138,42 @@ export default function McpPage() {
 
       {data && (
         <>
+          <SettingsSection
+            titulo="Configuración MCP"
+            descripcion="Runtime Settings DB-first; .env queda como fallback de arranque."
+            icono={<Database size={22} />}
+          >
+            <div className="grid gap-3 max-w-xl text-sm">
+              <div>
+                <label htmlFor="mcp-port" className="text-xs font-bold uppercase text-gov-gray-500">
+                  Puerto DuckClaw MCP
+                </label>
+                <input
+                  id="mcp-port"
+                  value={mcpPort}
+                  onChange={(e) => setMcpPort(e.target.value)}
+                  disabled={!canRunOps}
+                  className="mt-1 w-full rounded-xl border px-3 py-2 font-mono dark:border-dark-border dark:bg-dark-bg"
+                />
+              </div>
+              <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+                Fuente efectiva: <span className="font-mono">{mcpSource}</span> · setting{' '}
+                <span className="font-mono">mcp.port</span>
+              </p>
+              {canRunOps && (
+                <button
+                  type="button"
+                  onClick={() => void saveMcpSettings()}
+                  disabled={settingsSaving}
+                  className="w-fit rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  {settingsSaving ? 'Guardando…' : 'Guardar en DuckDB'}
+                </button>
+              )}
+              {settingsMsg && <p className="text-xs text-gov-blue-700 dark:text-dark-cyan">{settingsMsg}</p>}
+            </div>
+          </SettingsSection>
+
           <SettingsSection
             titulo="Servidor DuckClaw MCP"
             descripcion={isUp ? 'Proceso detectado en localhost' : 'No responde en localhost'}

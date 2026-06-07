@@ -24,6 +24,26 @@ def test_workers_ui_uses_generic_catalog_import_and_no_folder_delete_language() 
     assert "import_axis" not in service
 
 
+def test_workers_ui_exposes_inactive_catalog_workers_and_reactivation() -> None:
+    page = TEMPLATES_PAGE.read_text(encoding="utf-8")
+    service = ADMIN_SERVICE.read_text(encoding="utf-8")
+
+    assert "showInactive" in page
+    assert "include_inactive" in service
+    assert "reactivateTemplate" in service
+    assert "Reactivar" in page
+    assert "inactivo" in page
+
+
+def test_workers_ui_does_not_offer_deactivation_for_default_template() -> None:
+    page = TEMPLATES_PAGE.read_text(encoding="utf-8")
+
+    assert "isCatalogManaged" in page
+    assert "canWrite && isCatalogManaged && !isInactive && !isProtectedWorker" in page
+    assert "agent.source === 'catalog'" in page
+    assert "agent.id === 'platform-orchestrator'" in page
+
+
 def test_worker_detail_ui_marks_catalog_workers_read_only() -> None:
     detail_page = TEMPLATE_DETAIL_PAGE.read_text(encoding="utf-8")
 
@@ -37,3 +57,12 @@ def test_worker_detail_ui_marks_catalog_workers_read_only() -> None:
     assert "Añadir contexto" in detail_page
     assert "deleteTemplateContext" in detail_page
     assert "reorderTemplateContexts" in detail_page
+
+
+def test_catalog_context_creation_gives_feedback_and_keeps_new_tab() -> None:
+    detail_page = TEMPLATE_DETAIL_PAGE.read_text(encoding="utf-8")
+
+    assert "contextError" in detail_page
+    assert "Escribe un nombre para el contexto" in detail_page
+    assert "disabled={!title.trim()}" in detail_page
+    assert "load(title)" in detail_page

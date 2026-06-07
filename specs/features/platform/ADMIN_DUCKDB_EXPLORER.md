@@ -12,8 +12,8 @@
 |--------|------|-------------|
 | `GET` | `/duckdb/tables` | Catálogo `information_schema.tables` por schema. Query: `vault_path?` |
 | `POST` | `/duckdb/query` | Body `{ "query": "SELECT …", "vault_path?": "…" }` → `{ columns, rows, row_count, limit_applied? }` |
-| `GET` | `/duckdb/legacy-schemas` | Lista schemas no canónicos candidatos a limpieza; no oculta datos. |
-| `POST` | `/duckdb/legacy-schemas/drop` | Body `{ "schemas": ["..."], "vault_path?", "confirm": "DROP_LEGACY_SCHEMAS" }`; elimina schemas con confirmación explícita. |
+| `GET` | `/duckdb/legacy-schemas` | Lista schemas no canónicos y tablas legacy en `main` candidatas a limpieza; no oculta datos. |
+| `POST` | `/duckdb/legacy-schemas/drop` | Body `{ "schemas": ["..."], "main_tables": ["..."], "vault_path?", "confirm": "DROP_LEGACY_SCHEMAS" }`; elimina con confirmación explícita y allow-list. |
 | `GET` | `/duckdb/pgq-graph` | Grafo `{ nodes, links }` para react-force-graph-2d. Query: `vault_path?` |
 | `POST` | `/duckdb/vector-search` | Body `{ "query?": "", "limit?": 10, "vault_path?": "…" }` → `{ results, mode, warning? }` |
 
@@ -41,8 +41,8 @@ Todos protegidos con `X-Admin-Key` (`_require_admin_key`).
 - Solo `SELECT` / `WITH` (rechazar DDL/DML).
 - Si la query no incluye `LIMIT`, el gateway añade **LIMIT 500** server-side.
 - El explorer no debe esconder schemas legacy: si existen en la bóveda, se muestran como evidencia.
-- La limpieza de schemas ajenos al perfil se hace por endpoint dedicado, con modal de confirmación, auditoría y allow-list de nombres candidatos. No se ejecuta DDL arbitrario desde el editor SQL.
-- La allow-list default incluye schemas legacy conocidos y puede extenderse con `DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS`.
+- La limpieza de schemas o tablas `main` ajenas al perfil se hace por endpoint dedicado, con modal de confirmación, auditoría y allow-list de nombres candidatos. No se ejecuta DDL arbitrario desde el editor SQL.
+- La allow-list default incluye schemas legacy conocidos y tablas `main.leila_orders` / `main.leila_products`; puede extenderse con Runtime Settings DB-first (`duckdb.legacy_schemas`, `duckdb.legacy_main_tables`) y fallback `.env` (`DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS`, `DUCKCLAW_ADMIN_DUCKDB_LEGACY_MAIN_TABLES`).
 
 ---
 

@@ -13,6 +13,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Terminal,
+  Trash2,
   X,
 } from 'lucide-react';
 import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
@@ -557,6 +558,7 @@ function PlaygroundHistoryView({ tenantId }: { tenantId?: string }) {
   const [conversations, setConversations] = useState<AdminConversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const uniqueConversations = useMemo(
     () => uniqueConversationsBySession(conversations),
     [conversations]
@@ -584,6 +586,24 @@ function PlaygroundHistoryView({ tenantId }: { tenantId?: string }) {
       cancelled = true;
     };
   }, [tenantId]);
+
+  const deleteHistoryConversation = async (conversation: AdminConversation) => {
+    const title = conversation.title || conversation.session_id;
+    const confirmed = window.confirm(
+      `Eliminar esta conversación?\n\n"${title}"\n\nSe borrará del historial y no aparecerá en la bandeja.`
+    );
+    if (!confirmed) return;
+    setError(null);
+    setDeletingSessionId(conversation.session_id);
+    try {
+      await adminService.deleteConversation(conversation.session_id, tenantId);
+      setConversations((prev) => prev.filter((item) => item.session_id !== conversation.session_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar la conversación');
+    } finally {
+      setDeletingSessionId(null);
+    }
+  };
 
   return (
     <section className="flex-1 min-w-0 min-h-[calc(100vh-8rem)] lg:min-h-0 lg:h-full bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
@@ -618,27 +638,39 @@ function PlaygroundHistoryView({ tenantId }: { tenantId?: string }) {
           <ul className="grid gap-2">
             {uniqueConversations.map((conversation) => (
               <li key={conversation.session_id}>
-                <Link
-                  href={`/playground?conversation=${encodeURIComponent(conversation.session_id)}`}
-                  className="block rounded-2xl border dark:border-dark-border p-4 hover:border-gov-blue-300 hover:bg-gov-blue-50/50 dark:hover:bg-dark-bg transition-colors"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-bold truncate dark:text-dark-text">
-                        {conversation.title || conversation.session_id}
-                      </p>
-                      <p className="text-xs text-gov-gray-500 mt-1 line-clamp-2">
-                        {conversation.last_message_preview || 'Sin mensajes todavía'}
-                      </p>
+                <div className="flex items-stretch gap-2 rounded-2xl border dark:border-dark-border p-3 hover:border-gov-blue-300 hover:bg-gov-blue-50/50 dark:hover:bg-dark-bg transition-colors">
+                  <Link
+                    href={`/playground?conversation=${encodeURIComponent(conversation.session_id)}`}
+                    className="min-w-0 flex-1"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-bold truncate dark:text-dark-text">
+                          {conversation.title || conversation.session_id}
+                        </p>
+                        <p className="text-xs text-gov-gray-500 mt-1 line-clamp-2">
+                          {conversation.last_message_preview || 'Sin mensajes todavía'}
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-wide text-gov-gray-400 shrink-0">
+                        {formatConversationTime(conversation.updated_at)}
+                      </span>
                     </div>
-                    <span className="text-[10px] font-black uppercase tracking-wide text-gov-gray-400 shrink-0">
-                      {formatConversationTime(conversation.updated_at)}
-                    </span>
-                  </div>
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-400 mt-2">
-                    {conversation.last_worker_id || 'sin worker'} · {conversation.message_count} mensajes
-                  </p>
-                </Link>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-400 mt-2">
+                      {conversation.last_worker_id || 'sin worker'} · {conversation.message_count} mensajes
+                    </p>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => void deleteHistoryConversation(conversation)}
+                    disabled={deletingSessionId === conversation.session_id}
+                    className="shrink-0 self-center rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+                    aria-label={`Eliminar conversación ${conversation.title || conversation.session_id}`}
+                  >
+                    <Trash2 size={15} aria-hidden />
+                    <span className="sr-only">Eliminar</span>
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

@@ -1,5 +1,5 @@
 """
-OHLCV HTTP API standalone (contrato DuckClaw). En Capadonna suele montarse el router en
+OHLCV HTTP API standalone (contrato DuckClaw).
 observability_api.py en lugar de este proceso.
 
 Incluye GET /api/market/ohlcv, GET /api/market/ibkr/historical y POST /api/broker/execute

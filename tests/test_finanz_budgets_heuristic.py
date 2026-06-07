@@ -4,7 +4,7 @@ from duckclaw.workers.factory import _is_finanz_budgets_query, _is_finanz_debts_
 
 
 def test_is_finanz_budgets_query_resumen_mis_presupuestos() -> None:
-    assert _is_finanz_budgets_query("Dame un resumen de mis presupuestos")
+    assert _is_finanz_budgets_query("Dame un resumen de presupuestos")
     assert _is_finanz_budgets_query("resumen de presupuestos")
 
 
@@ -22,4 +22,4 @@ def test_is_finanz_budgets_query_negative() -> None:
 def test_is_finanz_debts_still_distinct_from_budgets() -> None:
     assert _is_finanz_debts_query("Dame un resumen de mis deudas")
     assert not _is_finanz_budgets_query("Dame un resumen de mis deudas")
-    assert not _is_finanz_debts_query("Dame un resumen de mis presupuestos")
+    assert not _is_finanz_debts_query("Dame un resumen de presupuestos")

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS finance_worker.categories (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Cuentas (Bancolombia, Nequi, Efectivo, etc.)
+-- Cuentas (banco, billetera digital, efectivo, etc.)
 CREATE TABLE IF NOT EXISTS finance_worker.cuentas (
   id INTEGER PRIMARY KEY,
   name VARCHAR NOT NULL UNIQUE,

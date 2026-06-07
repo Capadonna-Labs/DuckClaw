@@ -16,7 +16,7 @@ def test_mlx_gemma4_alias_uses_env_path(monkeypatch) -> None:
 
 def test_mlx_gemma4_alias_default_repo_when_env_unset(monkeypatch) -> None:
     monkeypatch.delenv("MLX_GEMMA4_MODEL_PATH", raising=False)
-    monkeypatch.setenv("MLX_MODEL_PATH", "/data/models/Slayer-8B-V1")
+    monkeypatch.setenv("MLX_MODEL_PATH", "/data/models/custom-model-v1")
     assert mlx_openai_compatible_model_name("gemma4") == MLX_GEMMA4_DEFAULT_REPO_ID
     assert mlx_openai_compatible_model_name("Gemma-4") == MLX_GEMMA4_DEFAULT_REPO_ID
 
@@ -30,5 +30,5 @@ def test_mlx_gemma4_alias_follows_mlx_model_path_when_gemma(monkeypatch) -> None
 
 def test_mlx_short_name_non_gemma_still_uses_mlx_model_path(monkeypatch) -> None:
     monkeypatch.delenv("MLX_GEMMA4_MODEL_PATH", raising=False)
-    monkeypatch.setenv("MLX_MODEL_PATH", "/data/models/Slayer-8B-V1")
-    assert mlx_openai_compatible_model_name("Slayer-8B") == "/data/models/Slayer-8B-V1"
+    monkeypatch.setenv("MLX_MODEL_PATH", "/data/models/custom-model-v1")
+    assert mlx_openai_compatible_model_name("custom-model") == "/data/models/custom-model-v1"

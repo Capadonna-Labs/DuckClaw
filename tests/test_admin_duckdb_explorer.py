@@ -26,7 +26,7 @@ def test_duckdb_actor_scope_falls_back_to_actor_tenant_not_gateway_tenant(
     def _raise_open_gateway_db(*_args, **_kwargs):
         raise RuntimeError("gateway db unavailable")
 
-    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "Marco")
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "test-tenant")
     monkeypatch.setattr(admin_identity, "open_gateway_db", _raise_open_gateway_db)
 
     scope = admin_router._duckdb_actor_scope("owner@example.com", "owner123")
@@ -34,7 +34,7 @@ def test_duckdb_actor_scope_falls_back_to_actor_tenant_not_gateway_tenant(
     assert scope["actor_email"] == "owner@example.com"
     assert scope["vault_user_id"] == "owner123"
     assert scope["tenant_id"] == tenant_id_for_email("owner@example.com")
-    assert scope["tenant_id"] != "Marco"
+    assert scope["tenant_id"] != "test-tenant"
 
 
 @pytest.fixture
@@ -129,7 +129,7 @@ def test_duckdb_tables_default_to_authenticated_actor_vault(
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
     monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
-    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "Marco")
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "test-tenant")
 
     response = gateway_admin_client.get(
         "/api/v1/admin/duckdb/tables",
@@ -141,7 +141,7 @@ def test_duckdb_tables_default_to_authenticated_actor_vault(
     assert data["vault_user_id"] == "owner123"
     assert data["actor_email"] == "owner@example.com"
     assert data["tenant_id"] == tenant_id_for_email("owner@example.com")
-    assert data["tenant_id"] != "Marco"
+    assert data["tenant_id"] != "test-tenant"
     assert data["vault_path"].endswith("db/private/owner123/axis.duckdb")
     assert data["schemas"]["actor_schema"] == ["visible_table"]
 

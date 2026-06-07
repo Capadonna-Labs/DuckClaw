@@ -270,7 +270,7 @@ def check_10_openrouter() -> str:
             models_count = len(resp.json().get("data", []))
             return (
                 _ok(f"OpenRouter conectado. Modelos disponibles: {models_count}. "
-                    f"App: openrouter.ai/apps?url=https://github.com/Capadonna-Labs/duckclaw")
+                    f"App: openrouter.ai/apps?url=https://github.com/duckclaw/duckclaw")
             )
         return _fail(f"OpenRouter: HTTP {resp.status_code}")
     except Exception as exc:  # noqa: BLE001

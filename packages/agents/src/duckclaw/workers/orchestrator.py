@@ -108,14 +108,7 @@ def effective_delegation_pool(
     return intersected if intersected else pool
 
 
-# Heurística de dominio (ESCALATION_PROTOCOL AXIS) cuando el planner no devuelve delegate.
-_DELEGATE_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\b(cve|cve-\d|exploit|threat\s*intel|osint|feed|ioc)\b", re.I), "AXIS-Radar"),
-    (re.compile(r"\b(red\s*team|purple\s*team|mitre|att&ck|ofensiv|pentest|exploit\s*chain)\b", re.I), "AXIS-Sentinel"),
-    (re.compile(r"\b(lab|hacklab|vm|máquina|maquina|phantom|práctica|practica)\b", re.I), "AXIS-Phantom"),
-    (re.compile(r"\b(commit|repo|git|código|codigo|python|rust|api|refactor|bug)\b", re.I), "AXIS-Coder"),
-    (re.compile(r"\b(perfil|nivel|skill|habilidad|mirror|autoevaluación)\b", re.I), "AXIS-Mirror"),
-)
+_DELEGATE_RULES: tuple[tuple[re.Pattern[str], str], ...] = ()
 
 
 def pick_delegate_heuristic(

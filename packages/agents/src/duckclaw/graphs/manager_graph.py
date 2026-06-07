@@ -1770,11 +1770,6 @@ def _capabilities_fast_reply_text(
         return load_guardrail("capabilities", "bi_analyst")
     if wl == "finanz":
         return load_guardrail("capabilities", "finanz")
-    if wl in ("axis-maestro", "maestro") or wl_norm == "axis-maestro":
-        sub = "\n".join(f"- {x}" for x in pool) if pool else (
-            "- AXIS-Coder\n- AXIS-Mirror\n- AXIS-Radar\n- AXIS-Sentinel\n- AXIS-Phantom"
-        )
-        return format_guardrail("capabilities", "axis_maestro", sub=sub)
     if wl_norm == "siata-analyst":
         return load_guardrail("capabilities", "siata_analyst")
     if w:

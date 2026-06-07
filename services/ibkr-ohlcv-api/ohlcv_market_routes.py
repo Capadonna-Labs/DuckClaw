@@ -1,7 +1,7 @@
 """
 Rutas FastAPI para GET /api/market/ohlcv y GET /api/market/ibkr/historical (contrato DuckClaw).
 
-Montar con app.include_router en Capadonna Observability (puerto 8002) o en la app
+Montar con app.include_router en el servicio de observabilidad (puerto 8002) o en la app
 standalone de main.py.
 
 1) Lake: OHLCV_LAKE_PYTHON / OHLCV_LAKE_SCRIPT o defaults bajo project_root.

@@ -51,17 +51,6 @@ def _alias_index_cached(templates_root_str: str) -> dict[str, str]:
             raw = data.get(key)
             if isinstance(raw, str) and raw.strip():
                 index[raw.strip().lower()] = folder
-        deps = data.get("dependencies")
-        if isinstance(deps, dict):
-            agents = deps.get("agents")
-            if isinstance(agents, list):
-                for a in agents:
-                    if isinstance(a, str) and a.strip():
-                        # agent_id corto en dependencies → carpeta AXIS-* si existe
-                        short = a.strip().lower()
-                        axis = f"axis-{short.replace('_', '-')}"
-                        if axis in index:
-                            index[short] = index[axis]
     return index
 
 

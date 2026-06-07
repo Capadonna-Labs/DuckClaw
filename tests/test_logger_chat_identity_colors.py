@@ -24,20 +24,20 @@ def _ansi_codes(s: str) -> list[str]:
     return re.findall(r"\033\[[0-9;]+m", s)
 
 
-def test_jhonny_uses_pinned_palette(colors_on) -> None:
-    """user_id 7866121890: colores fijos (no hash) para reconocerlo en pm2 logs."""
-    j = format_chat_identity_column_for_terminal("@Jhonny (7866121890)")
-    h = format_chat_identity_column_for_terminal("@Someone (7866121890)")
-    cj, ch = _ansi_codes(j), _ansi_codes(h)
-    assert cj == ch and len(cj) >= 2
-    juan = format_chat_identity_column_for_terminal(f"@Juan ({TELEGRAM_TEST_USER_ID})")
-    assert _ansi_codes(juan) != cj
+def test_colors_no_collision(colors_on) -> None:
+    """Same alias+id yields same colors; different user yields different colors."""
+    a = format_chat_identity_column_for_terminal("@UsuarioUno (999000001)")
+    b = format_chat_identity_column_for_terminal("@UsuarioUno (999000001)")
+    ca, cb = _ansi_codes(a), _ansi_codes(b)
+    assert ca == cb and len(ca) >= 2
+    c = format_chat_identity_column_for_terminal(f"@Otro ({TELEGRAM_TEST_USER_ID})")
+    assert _ansi_codes(c) != ca
 
 
-def test_juan_and_aleila_not_same_palette_slot(colors_on, monkeypatch) -> None:
+def test_two_users_not_same_palette_slot(colors_on, monkeypatch) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
-    j = format_chat_identity_column_for_terminal(f"@Juan ({TELEGRAM_TEST_USER_ID})")
-    a = format_chat_identity_column_for_terminal("@Aleila Camargo (8729050846)")
+    j = format_chat_identity_column_for_terminal(f"@Usuario ({TELEGRAM_TEST_USER_ID})")
+    a = format_chat_identity_column_for_terminal("@UsuarioDos (999000002)")
     assert j != a
     cj, ca = _ansi_codes(j), _ansi_codes(a)
     assert len(cj) >= 2 and len(ca) >= 2

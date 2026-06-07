@@ -176,12 +176,12 @@ def test_resolve_promotes_existing_non_default_when_default_active(tmp_path, mon
 def test_validate_shared_paths_user_and_tenant(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     user = "u-shared"
-    tenant = "Leila Store"
+    tenant = "example-store"
     private_dir = tmp_path / "db" / "private" / user
     private_dir.mkdir(parents=True, exist_ok=True)
     shared_user = tmp_path / "db" / "shared" / user
     shared_user.mkdir(parents=True, exist_ok=True)
-    tid_slug = "leila_store"
+    tid_slug = "example-store"
     shared_tenant = tmp_path / "db" / "shared" / tid_slug
     shared_tenant.mkdir(parents=True, exist_ok=True)
     p_private = private_dir / "x.duckdb"

@@ -85,8 +85,6 @@ def default_tenant_id_from_env() -> str:
         if v:
             return v
     pm2 = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
-    if pm2 == "Leila-Gateway":
-        return "Leila Store"
     if pm2 == "BI-Analyst-Gateway":
         return "BI-Analyst"
     dbp = (
@@ -94,8 +92,6 @@ def default_tenant_id_from_env() -> str:
         or os.environ.get("DUCKCLAW_DB_PATH")
         or ""
     ).lower()
-    if "leiladb" in dbp:
-        return "Leila Store"
     if "bi_analyst" in dbp:
         return "BI-Analyst"
     if "siatadb" in dbp:

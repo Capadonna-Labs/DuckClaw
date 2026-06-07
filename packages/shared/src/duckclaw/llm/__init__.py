@@ -1,4 +1,4 @@
 """LLM provider facades and utilities."""
 
-from duckclaw.llm.providers import *  # noqa: F403
+from duckclaw.integrations.llm_providers import *  # noqa: F403
 

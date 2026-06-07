@@ -177,4 +177,4 @@ Más detalle: [docs/development.md](docs/development.md#troubleshooting).
 
 ## Origen del código
 
-Migrado desde el hackathon [retoPWRSomegahack](https://github.com/ManePeqsiCoda/retoPWRSomegahack) (rama `samuel_dev-interfaz`) hacia `apps/duckclaw-admin`. Ver [EXTERNAL_RETO_PWR.md](EXTERNAL_RETO_PWR.md).
+Migrado desde el hackathon [retoPWRSomegahack](https://github.com/ManePeqsiCoda/retoPWRSomegahack) hacia `apps/duckclaw-admin`. Ver [EXTERNAL_RETO_PWR.md](EXTERNAL_RETO_PWR.md).

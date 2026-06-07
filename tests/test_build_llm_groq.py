@@ -54,20 +54,20 @@ def test_build_llm_legacy_llm_provider_env_used_when_duckclaw_empty(
 
 
 def test_build_llm_mlx_resolves_short_alias_to_mlx_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Alias tipo Slayer-8B (chat / LLM_MODEL) → ruta local MLX_MODEL_PATH para la API OpenAI-compat."""
-    monkeypatch.setenv("MLX_MODEL_PATH", "/data/models/Slayer-8B-V1")
+    """Alias tipo custom-model (chat / LLM_MODEL) → ruta local MLX_MODEL_PATH para la API OpenAI-compat."""
+    monkeypatch.setenv("MLX_MODEL_PATH", "/data/models/custom-model-v1")
     monkeypatch.delenv("MLX_MODEL_ID", raising=False)
     monkeypatch.delenv("DUCKCLAW_LLM_PROVIDER", raising=False)
     monkeypatch.delenv("DUCKCLAW_LLM_MODEL", raising=False)
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     llm = build_llm(
         "mlx",
-        "Slayer-8B",
+        "custom-model",
         "http://127.0.0.1:8080/v1",
         prefer_env_provider=False,
     )
     assert llm is not None
-    assert getattr(llm, "model_name", None) == "/data/models/Slayer-8B-V1"
+    assert getattr(llm, "model_name", None) == "/data/models/custom-model-v1"
 
 
 def test_build_llm_mlx_keeps_hf_repo_id(monkeypatch: pytest.MonkeyPatch) -> None:

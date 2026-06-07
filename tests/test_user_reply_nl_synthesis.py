@@ -459,7 +459,7 @@ def test_repair_summarize_new_context_strips_stored_line_and_rebuilds() -> None:
     out = mod.repair_summarize_new_context_egress(bad, incoming=inc)
     assert "Resumen del contexto ingresado" in out
     assert "Apple" in out or "gafas" in out.lower()
-    assert "Bancolombia" not in out
+    assert "BancoEjemplo" not in out
     assert mod.SUMMARIZE_STORED_CONTEXT_MARK not in out
 
 
@@ -469,13 +469,13 @@ def test_repair_summarize_new_context_replaces_hallucinated_ledger() -> None:
         + "\nCautious hiring: layoffs under 50 people.\n\nGlassdoor 2026 rankings.\n"
     )
     bad = (
-        "Los saldos de las cuentas locales: Bancolombia (3.2 M COP), Nequi (1.1 M COP).\n"
+        "Los saldos de las cuentas locales: BancoEjemplo (3.2 M COP), BilleteraEjemplo (1.1 M COP).\n"
         "IBKR efectivo 4500 USD.\n"
     )
     out = mod.repair_summarize_new_context_egress(bad, incoming=inc)
     assert "hiring" in out.lower() or "layoff" in out.lower() or "glassdoor" in out.lower()
-    assert "Bancolombia" not in out
-    assert "Nequi" not in out
+    assert "BancoEjemplo" not in out
+    assert "BilleteraEjemplo" not in out
 
 
 def test_repair_summarize_new_context_passthrough_when_not_new_directive() -> None:

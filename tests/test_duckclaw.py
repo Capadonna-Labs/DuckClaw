@@ -5,7 +5,7 @@ db = duckclaw.DuckClaw(":memory:")
 
 # Crear tabla e insertar
 db.execute("CREATE TABLE test (id INTEGER, name TEXT)")
-db.execute("INSERT INTO test VALUES (1, 'Slayer-8B'), (2, 'Navigator-3B')")
+db.execute("INSERT INTO test VALUES (1, 'model-alpha'), (2, 'model-beta')")
 
 # Consultar (devuelve JSON por defecto)
 result = db.query("SELECT * FROM test")

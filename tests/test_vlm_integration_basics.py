@@ -537,7 +537,7 @@ def test_mlx_http_vision_model_ignores_text_only_mlx_model_id(
     monkeypatch.delenv("DUCKCLAW_VLM_MLX_VLM_MODEL", raising=False)
     monkeypatch.delenv("MLX_VLM_MODEL", raising=False)
     monkeypatch.delenv("MLX_GEMMA4_MODEL_PATH", raising=False)
-    monkeypatch.setenv("MLX_MODEL_ID", "/models/Slayer-8B-V1.1")
+    monkeypatch.setenv("MLX_MODEL_ID", "/models/custom-model-v1.1")
     assert vlm_mod._mlx_http_vision_model() == "mlx-community/gemma-4-e4b-it-4bit"
 
 

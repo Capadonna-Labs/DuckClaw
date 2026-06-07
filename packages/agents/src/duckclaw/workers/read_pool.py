@@ -29,7 +29,7 @@ _sem: Optional[threading.BoundedSemaphore] = None
 _sem_lock = threading.Lock()
 
 
-_RE_MAC_MINI_CUOTA = re.compile(r"^Mac Mini - Cuota\s+", re.IGNORECASE)
+_RE_AGREGADO_CUOTA = re.compile(r"^.+\s+-\s+Cuota\s+", re.IGNORECASE)
 
 
 def _finanz_row_amount_cop(r: dict[str, str]) -> float:
@@ -39,31 +39,30 @@ def _finanz_row_amount_cop(r: dict[str, str]) -> float:
         return 0.0
 
 
-def _finanz_deudas_mac_mini_installment_ids_to_exclude(rows: list[dict[str, str]]) -> set[str]:
+def _finanz_deudas_installment_ids_to_exclude(rows: list[dict[str, str]]) -> set[str]:
     """
-    Si coexisten fila agregada Mac Mini (TC Bancolombia) y filas «Mac Mini - Cuota …»,
-    excluye esas cuotas del total para no doblar el mismo crédito (evidencia traces 2026-04).
+    Si coexisten fila agregada de un crédito y filas de cuotas mensuales del mismo,
+    excluye esas cuotas del total para no doblar el mismo crédito.
     """
-    tc = "TC Bancolombia"
-    has_aggregate = False
-    installment_ids: list[str] = []
+    creditor_groups: dict[str, dict] = {}
     for r in rows:
         if _finanz_row_amount_cop(r) <= 0:
             continue
         cred = (r.get("creditor") or "").strip()
         desc = (r.get("description") or "").strip()
-        if cred != tc:
+        if not cred or not desc:
             continue
-        if _RE_MAC_MINI_CUOTA.match(desc):
-            installment_ids.append(str(r.get("id", "")))
-            continue
-        dlow = desc.lower()
-        if "mac mini" not in dlow:
-            continue
-        if "8 cuotas" in dlow or "cuotas mensuales" in dlow:
-            has_aggregate = True
-    if has_aggregate and len(installment_ids) >= 2:
-        return {i for i in installment_ids if i}
+        if cred not in creditor_groups:
+            creditor_groups[cred] = {"first_description": desc, "installment_ids": [], "has_aggregate": False}
+        if _RE_AGREGADO_CUOTA.match(desc):
+            creditor_groups[cred]["installment_ids"].append(str(r.get("id", "")))
+        else:
+            dlow = desc.lower()
+            if "cuotas" in dlow or "cuotas mensuales" in dlow:
+                creditor_groups[cred]["has_aggregate"] = True
+    for cred, info in creditor_groups.items():
+        if info["has_aggregate"] and len(info["installment_ids"]) >= 2:
+            return {i for i in info["installment_ids"] if i}
     return set()
 
 
@@ -86,7 +85,7 @@ def _maybe_wrap_finanz_deudas_read_sql(spec: WorkerSpec, query: str, raw: str) -
         return raw
     if not isinstance(parsed, list) or not parsed:
         return raw
-    exclude = _finanz_deudas_mac_mini_installment_ids_to_exclude(parsed)
+    exclude = _finanz_deudas_installment_ids_to_exclude(parsed)
     if not exclude:
         return raw
     naive = sum(_finanz_row_amount_cop(r) for r in parsed if _finanz_row_amount_cop(r) > 0)
@@ -99,7 +98,7 @@ def _maybe_wrap_finanz_deudas_read_sql(spec: WorkerSpec, query: str, raw: str) -
         "suma_todas_las_filas_cop": naive,
         "total_recomendado_resumen_cop": deduped,
         "regla_aplicada": (
-            "Excluidas del total las filas «Mac Mini - Cuota …» (TC Bancolombia) porque coexisten "
+            "Excluidas del total las filas de cuotas mensuales porque coexisten "
             "con la fila agregada del mismo crédito; no sumar ambas en un único total."
         ),
         "ids_excluidos_del_total": sorted(exclude),

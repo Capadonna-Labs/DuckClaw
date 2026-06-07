@@ -70,10 +70,10 @@ def test_llm_markdown_double_conversion_escapes_html_entities() -> None:
 
 
 def test_llm_markdown_link_tg_user_mention() -> None:
-    raw = f"- [Juan](tg://user?id={TELEGRAM_TEST_USER_ID}) ({TELEGRAM_TEST_USER_ID}) · rol: admin"
+    raw = f"- [Usuario](tg://user?id={TELEGRAM_TEST_USER_ID}) ({TELEGRAM_TEST_USER_ID}) · rol: admin"
     html = llm_markdown_to_telegram_html(raw)
     assert f'<a href="tg://user?id={TELEGRAM_TEST_USER_ID}">' in html
-    assert "Juan" in html
+    assert "Usuario" in html
     assert "[" not in html
     assert "\\" not in html
 

@@ -301,7 +301,7 @@ def _ibkr_resolve_payload_with_optional_alt(
     fb = (os.environ.get("IBKR_ACCOUNT_MODE_ALT_FALLBACK") or "1").strip().lower()
     if fb in ("0", "false", "no"):
         return data, effective, configured
-    # Solo reintento ante snapshot_unavailable (desajuste paper/live frecuente en Capadonna).
+    # Solo reintento ante snapshot_unavailable (desajuste paper/live).
     if _ibkr_error_suggests_mode_mismatch(data):
         alt = "live" if configured == "paper" else "paper"
         data_alt = _ibkr_fetch_portfolio_payload(api_url, api_key, positions_url, alt)
@@ -443,7 +443,7 @@ def _extract_portfolio_context(data: Any, *, account_mode_for_display: Optional[
     err = data.get("error") or data.get("message") or data.get("detail")
     if err and isinstance(err, str):
         el = err.lower()
-        # snapshot_unavailable: HTTP OK pero el servicio (p. ej. Capadonna) no pudo leer cuenta/posiciones;
+        # snapshot_unavailable: HTTP OK pero el servicio no pudo leer cuenta/posiciones;
         # no es lo mismo que IB Gateway caído (véase logs [ibkr] API OK + error en JSON).
         if "snapshot_unavailable" in el:
             disp = account_mode_for_display if account_mode_for_display is not None else _ibkr_account_mode()
@@ -453,7 +453,7 @@ def _extract_portfolio_context(data: Any, *, account_mode_for_display: Optional[
                 "cuenta/posiciones desde IB Gateway/TWS. "
                 f"DuckClaw ya pidió modo **{disp}** en la cabecera `X-Duckclaw-IBKR-Account-Mode`. "
                 "Si en el VPS el Gateway está en live y aquí también es live, el problema suele estar en el **servicio** "
-                "que sirve `IBKR_PORTFOLIO_API_URL` (Capadonna): `IB_ENV`, clientId único, sesión TWS/API, o logs del worker portfolio. "
+                "que sirve `IBKR_PORTFOLIO_API_URL`: `IB_ENV`, clientId único, sesión TWS/API, o logs del worker portfolio. "
                 "Con `IBKR_ACCOUNT_MODE_ALT_FALLBACK=1` (por defecto) ya se reintenta el otro modo (paper/live); si tras eso sigue este error, "
                 "revisa el backend, no el `.env` del gateway DuckClaw."
             )

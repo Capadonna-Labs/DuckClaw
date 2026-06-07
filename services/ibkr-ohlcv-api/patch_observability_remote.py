@@ -2,7 +2,7 @@
 """Run on VPS: patch observability_api.py to include OHLCV router."""
 from pathlib import Path
 
-p = Path("/home/capadonna/projects/Capadonna-Driller/services/observability_api.py")
+p = Path("~/.duckclaw/observability_api.py").expanduser()
 text = p.read_text(encoding="utf-8")
 if "_duckclaw_ohlcv_router" in text:
     print("already_patched")

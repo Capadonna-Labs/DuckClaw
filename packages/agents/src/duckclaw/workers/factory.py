@@ -793,7 +793,7 @@ def _user_requests_github_pr(text: str) -> bool:
     return False
 
 
-_GITHUB_DEFAULT_OWNER = "Capadonna-Labs"
+_GITHUB_DEFAULT_OWNER = ""  # debe definirse vía entorno o variable
 _GITHUB_DEFAULT_REPO = "DuckClaw"
 _GITHUB_REFS_HEADS_PREFIX = "refs/heads/"
 
@@ -2334,7 +2334,6 @@ def _finanz_should_force_ibkr_after_local_cuentas_read(
 
 
 _TASK_AWARENESS_PROMPT = load_guardrail("prompts", "task_awareness_default")
-_AXIS_COORDINATOR_TASK_AWARENESS_PROMPT = load_guardrail("prompts", "task_awareness_axis")
 
 
 def _escape_attach_path(path: str) -> str:
@@ -3483,7 +3482,7 @@ def _schedule_run_browser_novnc_tool_heartbeat(
 
 
 def _sync_finanz_lake_beliefs(db: Any, spec: WorkerSpec) -> None:
-    """Actualiza observed_value de creencias lake_* según env (Capadonna SSH)."""
+    """Actualiza observed_value de creencias lake_* según env (SSH al VPS)."""
     _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
     if not is_finanz(_lid):
         return
@@ -4128,21 +4127,7 @@ def build_worker_graph(
     has_homeostasis = bool(getattr(spec, "homeostasis_config", None))
     crm_config = getattr(spec, "crm_config", None) or {}
     crm_enabled = bool(crm_config.get("enabled", False))
-    _wid_for_task = (getattr(spec, "worker_id", None) or "").strip()
-    _is_axis_coordinator = _wid_for_task in ("AXIS-Maestro", "maestro")
-    if not _is_axis_coordinator:
-        try:
-            from duckclaw.workers.orchestrator import load_orchestrator_config
-
-            _is_axis_coordinator = load_orchestrator_config(_wid_for_task) is not None
-        except Exception:
-            pass
-    if _is_axis_coordinator:
-        _task_block = (
-            _TASK_AWARENESS_PROMPT.strip() + "\n" + _AXIS_COORDINATOR_TASK_AWARENESS_PROMPT.strip()
-        )
-    else:
-        _task_block = _TASK_AWARENESS_PROMPT.strip()
+    _task_block = _TASK_AWARENESS_PROMPT.strip()
     _system_prompt_only = (system_prompt or "").strip()
     _task_block_resolved = _task_block
     effective_prompt = _system_prompt_only + "\n\n" + _task_block_resolved
@@ -6282,7 +6267,7 @@ def build_worker_graph(
                         SystemMessage(
                             content=(
                                 "INNEGOCIABLE: hay push_files previo sin create_pull_request. "
-                                "Siguiente paso = create_pull_request (Capadonna-Labs/DuckClaw). "
+                                "Siguiente paso = create_pull_request (en el repositorio DuckClaw). "
                                 "Prohibido cancel_trade_signal, run_sandbox o bucles search_code."
                             )
                         )

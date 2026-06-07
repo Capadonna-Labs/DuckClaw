@@ -69,7 +69,6 @@ def telegram_agent_token_env_name(worker_id: str) -> str:
 
 _LEGACY_ENV_BY_WORKER: dict[str, tuple[str, ...]] = {
     "bi_analyst": ("TELEGRAM_BOT_TOKEN_BI_ANALYST",),
-    "LeilaAssistant": ("TELEGRAM_BOT_TOKEN_LEILA",),
     "siata_analyst": ("TELEGRAM_BOT_TOKEN_SIATA",),
 }
 

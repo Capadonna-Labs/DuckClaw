@@ -25,7 +25,7 @@ def test_normalize_telegram_chat_id_for_outbound() -> None:
 
     assert normalize_telegram_chat_id_for_outbound(TELEGRAM_TEST_USER_ID) == TELEGRAM_TEST_USER_ID
     assert (
-        normalize_telegram_chat_id_for_outbound(f"@Juan ({TELEGRAM_TEST_USER_ID})")
+        normalize_telegram_chat_id_for_outbound(f"@Usuario ({TELEGRAM_TEST_USER_ID})")
         == TELEGRAM_TEST_USER_ID
     )
     assert normalize_telegram_chat_id_for_outbound("-1001234567890") == "-1001234567890"
@@ -57,7 +57,7 @@ def test_is_chat_heartbeat_enabled_matches_numeric_key_for_display_chat_id(
 
     from duckclaw.graphs.chat_heartbeat import is_chat_heartbeat_enabled
 
-    assert is_chat_heartbeat_enabled("SIATA", f"@Juan ({TELEGRAM_TEST_USER_ID})") is True
+    assert is_chat_heartbeat_enabled("SIATA", f"@Usuario ({TELEGRAM_TEST_USER_ID})") is True
 
 
 def test_format_delegation_heartbeat_message_includes_title_and_tasks() -> None:

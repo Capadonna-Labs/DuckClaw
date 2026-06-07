@@ -862,6 +862,7 @@ def _admin_audit(
 
 
 def _actor_from_header(x_actor: str | None = Header(None, alias="X-Duckclaw-Actor")) -> str:
+    """Actor email from header. Defaults to \"admin-ui\" for admin-key-authenticated requests."""
     return (x_actor or "admin-ui").strip()[:128] or "admin-ui"
 
 
@@ -1828,9 +1829,11 @@ async def comfyui_generate(
 async def admin_health(request: Request) -> dict[str, Any]:
     workers: list[str] = []
     try:
+        from core.admin_identity import open_gateway_db
         from duckclaw.workers.factory import list_workers
 
-        workers = list_workers()
+        with open_gateway_db(read_only=True) as db:
+            workers = list_workers(db=db)
     except Exception:
         workers = []
     redis_ok = False

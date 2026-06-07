@@ -11,6 +11,10 @@ export function ConsoleUsersPanel() {
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [pendingDeactivate, setPendingDeactivate] = useState<ConsoleUser | null>(null);
+  const [resetPasswordUser, setResetPasswordUser] = useState<ConsoleUser | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resetPasswordBusy, setResetPasswordBusy] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   const [email, setEmail] = useState('');
   const [nombre, setNombre] = useState('');
@@ -55,14 +59,28 @@ export function ConsoleUsersPanel() {
     }
   };
 
-  const resetPassword = async (userEmail: string) => {
-    const pw = prompt(`Nueva contraseña para ${userEmail}`);
-    if (!pw?.trim()) return;
+  const visibleUsers = showInactive ? users : users.filter((user) => user.active);
+  const inactiveCount = users.filter((user) => !user.active).length;
+
+  const resetPassword = async () => {
+    if (!resetPasswordUser) return;
+    const pw = resetPasswordValue.trim();
+    if (!pw) {
+      setError('Escribe una nueva contraseña.');
+      return;
+    }
+    setResetPasswordBusy(true);
+    setError(null);
     try {
-      await adminService.patchConsoleUser(userEmail, { password: pw });
-      setMsg(`Contraseña actualizada para ${userEmail}`);
+      await adminService.patchConsoleUser(resetPasswordUser.email, { password: pw });
+      setMsg(`Contraseña actualizada para ${resetPasswordUser.email}`);
+      setResetPasswordUser(null);
+      setResetPasswordValue('');
+      load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error');
+    } finally {
+      setResetPasswordBusy(false);
     }
   };
 
@@ -83,6 +101,21 @@ export function ConsoleUsersPanel() {
       {error && <p className="text-red-600 text-sm">{error}</p>}
       {msg && <p className="text-green-700 text-sm">{msg}</p>}
 
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border bg-gov-gray-50 px-3 py-2 text-xs dark:border-dark-border dark:bg-dark-bg">
+        <p className="text-gov-gray-600 dark:text-dark-muted">
+          {showInactive
+            ? 'Mostrando usuarios activos e inactivos.'
+            : `${inactiveCount} usuarios inactivos ocultos.`}
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowInactive((value) => !value)}
+          className="font-bold text-gov-blue-700 dark:text-dark-cyan"
+        >
+          {showInactive ? 'Ocultar inactivos' : 'Ver inactivos'}
+        </button>
+      </div>
+
       <div className="overflow-hidden rounded-2xl border dark:border-dark-border">
         <table className="w-full text-sm">
           <thead className="bg-gov-gray-50 dark:bg-dark-bg text-left">
@@ -95,7 +128,7 @@ export function ConsoleUsersPanel() {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {visibleUsers.map((u) => (
               <tr key={u.email} className="border-t dark:border-dark-border">
                 <td className="px-4 py-2 font-mono text-xs">{u.email}</td>
                 <td className="px-4 py-2">{u.nombre}</td>
@@ -104,9 +137,14 @@ export function ConsoleUsersPanel() {
                 <td className="px-4 py-2 flex gap-2">
                   <button
                     type="button"
-                    onClick={() => resetPassword(u.email)}
+                    onClick={() => {
+                      setResetPasswordUser(u);
+                      setResetPasswordValue('');
+                      setError(null);
+                      setMsg(null);
+                    }}
                     className="text-gov-blue-700"
-                    aria-label="Reset password"
+                    aria-label={`Cambiar contraseña de ${u.email}`}
                   >
                     <KeyRound size={16} />
                   </button>
@@ -190,6 +228,61 @@ export function ConsoleUsersPanel() {
         onCancel={() => setPendingDeactivate(null)}
         onConfirm={() => void deactivate()}
       />
+      {resetPasswordUser && (
+        <>
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[200]" aria-hidden />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reset-password-title"
+            className="fixed top-1/2 left-1/2 z-[201] w-full max-w-md -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border bg-white shadow-2xl dark:border-dark-border dark:bg-dark-surface"
+          >
+            <div className="border-b p-5 dark:border-dark-border">
+              <h2 id="reset-password-title" className="text-lg font-bold dark:text-dark-text">
+                Nueva contraseña
+              </h2>
+              <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
+                Cambiarás la contraseña de{' '}
+                <span className="font-mono text-xs">{resetPasswordUser.email}</span>.
+              </p>
+            </div>
+            <div className="space-y-3 p-5">
+              <input
+                type="password"
+                value={resetPasswordValue}
+                onChange={(event) => setResetPasswordValue(event.target.value)}
+                placeholder="Nueva contraseña"
+                className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+                autoFocus
+              />
+              <p className="text-xs text-gov-gray-500">
+                El valor anterior no se muestra. La actualización queda registrada en auditoría.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 border-t bg-gov-gray-50 p-4 dark:border-dark-border dark:bg-dark-bg">
+              <button
+                type="button"
+                disabled={resetPasswordBusy}
+                onClick={() => {
+                  setResetPasswordUser(null);
+                  setResetPasswordValue('');
+                }}
+                className="rounded-xl border px-4 py-2 text-sm font-semibold dark:border-dark-border"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={resetPasswordBusy || !resetPasswordValue.trim()}
+                onClick={() => void resetPassword()}
+                className="rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+              >
+                {resetPasswordBusy ? 'Guardando…' : 'Actualizar contraseña'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -17,6 +17,8 @@ export interface TemplateSummary {
   source?: string;
   visibility?: string;
   source_template_id?: string;
+  status?: string;
+  active?: boolean;
   schema_name?: string;
   temperature?: number;
   topology?: string;

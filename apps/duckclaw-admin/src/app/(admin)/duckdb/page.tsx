@@ -28,7 +28,9 @@ export default function DuckDbPage() {
   const [legacySchemasSource, setLegacySchemasSource] = useState('');
   const [runtimeMsg, setRuntimeMsg] = useState<string | null>(null);
   const [legacySchemas, setLegacySchemas] = useState<{ schema: string; table_count: number }[]>([]);
+  const [legacyMainTables, setLegacyMainTables] = useState<{ schema: 'main'; table: string }[]>([]);
   const [selectedLegacy, setSelectedLegacy] = useState<string[]>([]);
+  const [selectedLegacyMainTables, setSelectedLegacyMainTables] = useState<string[]>([]);
   const [confirmCleanup, setConfirmCleanup] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
@@ -59,8 +61,12 @@ export default function DuckDbPage() {
       .listDuckdbLegacySchemas(vaultPath || undefined)
       .then((r) => {
         setLegacySchemas(r.schemas ?? []);
+        setLegacyMainTables(r.main_tables ?? []);
         setSelectedLegacy((prev) =>
           prev.filter((schema) => (r.schemas ?? []).some((item) => item.schema === schema))
+        );
+        setSelectedLegacyMainTables((prev) =>
+          prev.filter((table) => (r.main_tables ?? []).some((item) => item.table === table))
         );
       })
       .catch((e) => setCleanupError(e instanceof Error ? e.message : 'Error revisando schemas legacy'));
@@ -72,11 +78,13 @@ export default function DuckDbPage() {
     try {
       await adminService.dropDuckdbLegacySchemas({
         schemas: selectedLegacy,
+        main_tables: selectedLegacyMainTables,
         vault_path: vaultPath || undefined,
         confirm: 'DROP_LEGACY_SCHEMAS',
       });
       setConfirmCleanup(false);
       setSelectedLegacy([]);
+      setSelectedLegacyMainTables([]);
       setExplorerRefresh((v) => v + 1);
     } catch (e) {
       setCleanupError(e instanceof Error ? e.message : 'Error limpiando schemas legacy');
@@ -136,7 +144,7 @@ export default function DuckDbPage() {
 
       {tab === 'explorer' && (
         <div className="space-y-4">
-          {legacySchemas.length > 0 && (
+          {(legacySchemas.length > 0 || legacyMainTables.length > 0) && (
             <section className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950/25">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -171,10 +179,41 @@ export default function DuckDbPage() {
                       );
                     })}
                   </div>
+                  {legacyMainTables.length > 0 && (
+                    <>
+                      <h3 className="mt-4 text-xs font-black uppercase tracking-[0.16em] text-amber-950 dark:text-amber-100">
+                        Tablas legacy en main
+                      </h3>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {legacyMainTables.map((item) => {
+                          const checked = selectedLegacyMainTables.includes(item.table);
+                          return (
+                            <label
+                              key={item.table}
+                              className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 font-mono text-xs dark:border-amber-800 dark:bg-dark-bg"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) =>
+                                  setSelectedLegacyMainTables((prev) =>
+                                    e.target.checked
+                                      ? [...prev, item.table]
+                                      : prev.filter((table) => table !== item.table)
+                                  )
+                                }
+                              />
+                              main.{item.table}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
                 </div>
                 <button
                   type="button"
-                  disabled={selectedLegacy.length === 0}
+                  disabled={selectedLegacy.length === 0 && selectedLegacyMainTables.length === 0}
                   onClick={() => setConfirmCleanup(true)}
                   className="rounded-xl bg-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
@@ -258,6 +297,7 @@ export default function DuckDbPage() {
         details={[
           { label: 'Confirmación', value: 'DROP_LEGACY_SCHEMAS' },
           { label: 'Schemas', value: selectedLegacy.join(', ') || 'Ninguno' },
+          { label: 'Tablas main', value: selectedLegacyMainTables.join(', ') || 'Ninguna' },
           { label: 'Vault', value: vaultPath || 'Bóveda activa del usuario' },
         ]}
         onCancel={() => setConfirmCleanup(false)}

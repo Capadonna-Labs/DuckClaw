@@ -281,7 +281,7 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     assert data.get("authorized") is True
     from duckclaw.workers.worker_ids import normalize_worker_id
 
-    assert normalize_worker_id(target) in _playground_worker_ids(data)
+    assert normalize_worker_id(target) not in _playground_worker_ids(data)
     assert data.get("team_source") == "chat"
 
 
@@ -298,7 +298,7 @@ def _mock_playground_team(*, workers: list[str], authorized: bool = True) -> dic
     }
 
 
-def test_playground_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+def test_playground_chat(admin_client: TestClient, gateway_db: Path, monkeypatch: pytest.MonkeyPatch):
     gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
     import sys
 
@@ -306,6 +306,8 @@ def test_playground_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPat
         sys.path.insert(0, str(gw_dir))
     import main as gateway_main
     import routers.admin as admin_router
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker
 
     async def _fake_invoke(*_args, **_kwargs):
         return {"response": "respuesta-mock", "usage_tokens": {"total": 1}}
@@ -313,19 +315,29 @@ def test_playground_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         admin_router,
         "_playground_team_context",
-        lambda **_: _mock_playground_team(workers=["AXIS-Maestro"]),
+        lambda **_: _mock_playground_team(workers=["axis-maestro"]),
     )
     monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+    db = DuckClaw(str(gateway_db), read_only=False, engine="python")
+    try:
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="axis-maestro",
+            display_name="AXIS Maestro",
+        )
+    finally:
+        db.close()
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
-        headers={"X-Admin-Key": "test-admin-key"},
-        json={"worker_id": "AXIS-Maestro", "message": "hola"},
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
+        json={"worker_id": "axis-maestro", "message": "hola"},
     )
     assert r.status_code == 200
     data = r.json()
     assert data.get("ok") is True
     assert data.get("response") == "respuesta-mock"
-    assert data.get("worker_id") == "AXIS-Maestro"
+    assert data.get("worker_id") == "axis-maestro"
 
 
 def test_playground_chat_rejects_worker_outside_team(
@@ -457,12 +469,11 @@ def test_template_vault_options_and_put(
         headers={"X-Admin-Key": "test-admin-key"},
         json={"scope": "private", "vault_id": "custom"},
     )
-    assert r2.status_code == 200
-    assert r2.json().get("binding", {}).get("vault_id") == "custom"
+    assert r2.status_code == 410
 
     manifest_text = (worker_dir / "manifest.yaml").read_text(encoding="utf-8")
-    assert "vault_binding" in manifest_text
-    assert "custom" in manifest_text
+    assert "vault_binding" not in manifest_text
+    assert "custom" not in manifest_text
 
 
 def test_catalog_topologies(admin_client: TestClient):
@@ -486,6 +497,9 @@ def test_catalog_mcp(admin_client: TestClient):
     assert "duckclaw_mcp" in data
     assert "tools" in data["duckclaw_mcp"]
     assert "live" in data["duckclaw_mcp"]
+    assert data["duckclaw_mcp"]["runtime_key"] == "mcp.port"
+    assert data["duckclaw_mcp"]["port"] == "8001"
+    assert data["duckclaw_mcp"]["source"] in {"default", "env", "db"}
     official = data.get("official_reference") or {}
     servers = official.get("servers") or []
     assert len(servers) >= 7
@@ -540,6 +554,7 @@ def test_telegram_routes_get_and_put(
     assert r.status_code == 200
     data = r.json()
     assert data.get("format") == "compact"
+    assert data.get("source") == "env"
     assert len(data.get("routes") or []) == 1
     assert data["routes"][0]["bot"] == "mybot"
     assert data["routes"][0]["worker_id"] == "Worker-A"
@@ -567,9 +582,20 @@ def test_telegram_routes_get_and_put(
     )
     assert r2.status_code == 200
     assert r2.json().get("route_count") == 2
+    assert r2.json().get("source") == "db"
     saved = env_file.read_text(encoding="utf-8")
-    assert "other:tok_other:/api/v1/telegram/other:Worker-B:TenantB" in saved
+    assert "other:tok_other:/api/v1/telegram/other:Worker-B:TenantB" not in saved
     assert "mybot:tok1:/api/v1/telegram/mybot:Worker-A:TenantA" in saved
+
+    r3 = admin_client.get(
+        "/api/v1/admin/telegram/routes",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r3.status_code == 200
+    data3 = r3.json()
+    assert data3.get("source") == "db"
+    assert len(data3.get("routes") or []) == 2
+    assert {row["bot"] for row in data3["routes"]} == {"mybot", "other"}
 
 
 def test_telegram_whitelist_get(admin_client: TestClient):
@@ -1118,19 +1144,27 @@ def test_comfyui_status_unreachable(admin_client: TestClient, monkeypatch: pytes
     data = r.json()
     assert data.get("ok") is False
     assert "error" in data
+    assert data.get("source") in {"default", "env", "db"}
+    assert data.get("runtime_key") == "comfyui.api_url"
+    assert data.get("timeout_sec") == "300"
+    assert data.get("timeout_source") in {"default", "env", "db"}
 
 
 def test_comfyui_generate_mock(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("COMFYUI_API_URL", "http://127.0.0.1:59998")
+    monkeypatch.setenv("COMFYUI_TIMEOUT_SEC", "123")
     payload = {
         "ok": True,
         "file_path": "/tmp/fake.png",
         "prompt_id": "pid-1",
         "message": "ok",
     }
+    seen: dict[str, object] = {}
 
-    def _fake_impl(*_a, **_k):
+    def _fake_impl(*_a, **kwargs):
         import json
 
+        seen.update(kwargs.get("comfyui_config") or {})
         return json.dumps(payload)
 
     monkeypatch.setattr(
@@ -1147,6 +1181,8 @@ def test_comfyui_generate_mock(admin_client: TestClient, monkeypatch: pytest.Mon
     data = r.json()
     assert data.get("ok") is True
     assert data.get("file_path") == "/tmp/fake.png"
+    assert seen.get("api_url") == "http://127.0.0.1:59998"
+    assert seen.get("timeout_sec") == "123"
 
 
 def test_comfyui_generate_bridge_error_400(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):

@@ -39,11 +39,12 @@ Badge UI: **canónico (archivo)** vs **override (runtime)**.
 ## 3. Contrato REST `/api/v1/admin`
 
 ### Plantillas
-- `GET /templates` — lista workers + metadata manifest
+- `GET /templates?include_inactive?` — lista workers + metadata; inactivos solo cuando se pide explícitamente
 - `GET /templates/{id}` — árbol de archivos + contenidos editables; para catálogo DB-first lee el snapshot activo
 - `PUT /templates/{id}/files/{path}` — body `{ "content": "..." }`; para catálogo DB-first crea nueva versión sin tocar carpetas físicas
 - `POST /templates/import` — importa workers existentes a catálogo DB-first sin borrar carpetas
 - `DELETE /templates/{id}` — soft delete en catálogo DB-first; deny-list para `default` y workers sistema
+- `POST /templates/{id}/reactivate` — reactiva worker soft-deleted owned por el actor
 - `POST /templates/{id}/contexts` — añade contexto markdown DB-first
 - `PATCH /templates/{id}/contexts/reorder` — reordena contextos
 - `DELETE /templates/{id}/contexts/{context_id}` — desactiva contexto
@@ -56,10 +57,19 @@ Badge UI: **canónico (archivo)** vs **override (runtime)**.
 - `GET /workspace/projects/{project_id}/agents` — agentes asignados al proyecto
 - `POST /workspace/projects/{project_id}/agents` — asigna agente existente al proyecto
 - `DELETE /workspace/projects/{project_id}/agents/{worker_id}` — quita relación proyecto-agente
+- `POST /workspace/orchestrator/draft` — genera borrador guiado de proyecto/workers/contexto/skills sin escribir recursos
+- `POST /workspace/orchestrator/confirm` — crea recursos DB-first tras confirmación explícita
 
 ### Entorno
 - `GET /env` — claves permitidas enmascaradas
 - `PATCH /env` — merge parcial de claves permitidas
+
+### Bootstrap de consola admin
+- `GET /bootstrap/status` — ruta BFF pública, sin sesión ni `X-Admin-Key` del browser, que informa si el Gateway está configurado, alcanzable y listo para login.
+- La pantalla `/login` debe funcionar aunque el Gateway aún esté apagado: muestra estado degradado, reintenta en polling y deshabilita el submit hasta que `canAttemptLogin=true`.
+- El BFF puede validar `DUCKCLAW_ADMIN_API_KEY` servidor-a-servidor contra `/api/v1/admin/health`, pero nunca expone el secreto al cliente.
+- DB-first no reemplaza esta capa: `.env.local` del BFF y `.env` del Gateway siguen siendo bootstrap técnico para URL, puerto y clave compartida.
+- La UI no debe confundir `gateway_unreachable` con credenciales inválidas; los errores de plataforma se muestran como estado operacional.
 
 ### Runtime DuckDB
 - `GET /runtime/vaults`
@@ -74,6 +84,8 @@ Ver [`ADMIN_DUCKDB_EXPLORER.md`](ADMIN_DUCKDB_EXPLORER.md).
 |--------|------|
 | `GET` | `/duckdb/tables` |
 | `POST` | `/duckdb/query` |
+| `GET` | `/duckdb/legacy-schemas` |
+| `POST` | `/duckdb/legacy-schemas/drop` |
 | `GET` | `/duckdb/pgq-graph` |
 | `POST` | `/duckdb/vector-search` |
 
@@ -90,7 +102,8 @@ Ver [`ADMIN_ACCESS_MANAGEMENT.md`](ADMIN_ACCESS_MANAGEMENT.md).
 | `GET/POST/DELETE` | `/access/shared-grants` |
 
 ### Telegram
-- `GET /telegram/routes` — parseo `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`
+- `GET /telegram/routes` — parseo de `telegram.webhook_routes` DB-first con fallback `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`
+- `PUT /telegram/routes` — guarda rutas webhook en `admin_runtime_settings`; tokens write-only y lectura enmascarada
 - `GET|POST|DELETE /telegram/whitelist`
 
 ### Playground chat (imágenes)
@@ -108,9 +121,16 @@ Ver [`ADMIN_CHAT_IMAGE_ATTACHMENTS.md`](ADMIN_CHAT_IMAGE_ATTACHMENTS.md).
 Ver [`ADMIN_MCP_OFFICIAL_CATALOG.md`](ADMIN_MCP_OFFICIAL_CATALOG.md).
 
 - Navegación: **MCP** antes que **Skills** en sidebar.
-- `GET /catalog/mcp` — incluye `official_reference` (servidores de referencia [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers)).
+- `GET /catalog/mcp` — incluye `official_reference` (servidores de referencia [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers)) y `duckclaw_mcp` con puerto efectivo DB-first (`mcp.port` → `DUCKCLAW_MCP_PORT` → `8001`).
+- UI `/mcp` guarda `mcp.port` en Runtime Settings DB-first; `config/mcp_servers.yaml` sigue siendo catálogo stdio de solo lectura en v1.
 - `GET /catalog/skills` — skills DB-first visibles para el actor autenticado; no escanea carpetas físicas.
 - `POST /catalog/skills` — crea metadata de skill del usuario autenticado en `admin_skills` (`name`, `description`, `skill_type`, `implementation_ref`, `visibility`). La asociación a workers se gestiona por relación DB-first, no por carpetas.
+
+### Imágenes / ComfyUI
+
+- UI `/gen/image` muestra configuración ComfyUI DB-first (`comfyui.api_url`, `comfyui.timeout_sec`) y guarda cambios en `admin_runtime_settings`.
+- `GET /comfyui/status` resuelve URL y timeout con precedencia Runtime Settings → `.env` → default, y devuelve `source`, `runtime_key`, `timeout_sec` y `timeout_source`.
+- `POST /comfyui/generate` usa la configuración efectiva del Gateway para generación txt2img; `.env` queda como fallback bootstrap.
 
 ### Observabilidad
 - `GET /chats/history?tenant_id=&session_id=`
@@ -136,10 +156,11 @@ Bandeja única por `tenant_id` para retomar hilos del Playground y del chat flot
 | `POST` | `/conversations` — body `{ title?, section?, worker_id? }` |
 | `GET` | `/conversations/{session_id}` — meta + `messages` |
 | `PATCH` | `/conversations/{session_id}` — body `{ title }` |
-| `DELETE` | `/conversations/{session_id}` |
+| `DELETE` | `/conversations/{session_id}` — elimina metadatos, índice e historial del hilo; si el almacenamiento canónico migra a DuckDB DB-first, esta ruta conserva el contrato y limpia Redis como caché derivada |
 | `POST` | `/conversations/reindex?tenant_id=` — SCAN historial admin y registrar en índice |
 
 UI: historial como vista principal en `/playground?view=history` y burbuja flotante (drawer); `localStorage` `duckclaw-admin-active-conv` para conversación activa.
+La vista de historial permite eliminar conversaciones con confirmación explícita. El botón de borrar no navega al hilo y refresca la lista local tras `DELETE /conversations/{session_id}`.
 La burbuja flotante abre un panel grande fijo, sin control de redimensionar ni persistencia de ancho/alto. Sus acciones (`Conversaciones`, `Abrir Playground completo`, `Cerrar`) viven dentro del header del chat, junto a la configuración de bóveda/modelo/agente.
 
 ### Navegación Playground (selector tipo consola)

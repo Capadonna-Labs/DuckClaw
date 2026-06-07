@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, ShieldCheck, Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react';
 import { adminPostAuthPath, useAuthStore } from '@/store/authStore';
 import { DEV_HINT_EMAIL, DEV_LOGIN_HINT_ENABLED } from '@/config/adminUsers';
+import { BootstrapStatusBanner } from '@/components/auth/BootstrapStatusBanner';
+import { useAdminBootstrapStatus } from '@/hooks/useAdminBootstrapStatus';
 
 function LoginForm() {
   const router = useRouter();
@@ -12,6 +14,8 @@ function LoginForm() {
   const queryLoginAttempted = useRef(false);
   const { loginWithCredentials, isAuthenticated, isSubmitting, loginError, hasHydrated } =
     useAuthStore();
+  const { status: bootstrapStatus, loading: bootstrapLoading } = useAdminBootstrapStatus();
+  const bootstrap = bootstrapStatus ?? { canAttemptLogin: false };
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -41,11 +45,15 @@ function LoginForm() {
         setFieldError('Mínimo 8 caracteres');
         return;
       }
+      if (!bootstrap.canAttemptLogin) {
+        setFieldError(null);
+        return;
+      }
       setFieldError(null);
       await loginWithCredentials(em, pw);
       redirectIfAuthed();
     },
-    [loginWithCredentials, redirectIfAuthed]
+    [bootstrap.canAttemptLogin, loginWithCredentials, redirectIfAuthed]
   );
 
   useEffect(() => {
@@ -56,6 +64,7 @@ function LoginForm() {
     if (qEmail) setEmail(qEmail);
     if (qPassword) setPassword(qPassword);
     if (!qEmail || !qPassword) return;
+    if (!bootstrap.canAttemptLogin) return;
 
     queryLoginAttempted.current = true;
     if (typeof window !== 'undefined') {
@@ -63,7 +72,7 @@ function LoginForm() {
     }
 
     void submitLogin(qEmail, qPassword);
-  }, [searchParams, submitLogin]);
+  }, [bootstrap.canAttemptLogin, searchParams, submitLogin]);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,6 +94,10 @@ function LoginForm() {
             Consola de configuración
           </p>
         </header>
+
+        <div className="mb-5">
+          <BootstrapStatusBanner status={bootstrapStatus} loading={bootstrapLoading} />
+        </div>
 
         <form onSubmit={onSubmit} className="space-y-5">
           <div className="block space-y-2">
@@ -140,11 +153,11 @@ function LoginForm() {
 
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || !bootstrap.canAttemptLogin}
             className="w-full py-3 rounded-xl bg-gov-blue-700 text-white font-bold flex justify-center gap-2 disabled:opacity-60"
           >
             {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : null}
-            {isSubmitting ? 'Entrando…' : 'Entrar'}
+            {isSubmitting ? 'Entrando…' : bootstrap.canAttemptLogin ? 'Entrar' : 'Esperando Gateway…'}
           </button>
         </form>
       </div>

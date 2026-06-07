@@ -29,13 +29,14 @@ export default function TemplatesPage() {
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [showInactive, setShowInactive] = useState(false);
 
   const reload = useCallback(() => {
     adminService
-      .listTemplates()
+      .listTemplates({ include_inactive: showInactive })
       .then(setItems)
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
-  }, []);
+  }, [showInactive]);
 
   useEffect(() => {
     reload();
@@ -53,6 +54,17 @@ export default function TemplatesPage() {
       setError(e instanceof Error ? e.message : 'No se pudo eliminar');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const reactivateTemplate = async (agent: TemplateSummary) => {
+    if (!canWrite) return;
+    setError(null);
+    try {
+      await adminService.reactivateTemplate(agent.id);
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo reactivar');
     }
   };
 
@@ -127,10 +139,10 @@ export default function TemplatesPage() {
           </p>
         </div>
         <Link
-          href="/projects/new"
+          href="/projects"
           className="px-4 py-2 bg-gov-blue-700 text-white text-sm font-bold rounded-xl"
         >
-          {isAdmin ? 'Nuevo proyecto' : 'Crear agente'}
+          {isAdmin ? 'Crear con Orchestrator' : 'Crear proyecto'}
         </Link>
       </header>
 
@@ -146,7 +158,18 @@ export default function TemplatesPage() {
         />
       )}
 
-      <TemplateSearch q={q} setQ={setQ} />
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <TemplateSearch q={q} setQ={setQ} />
+        {canWrite && (
+          <button
+            type="button"
+            onClick={() => setShowInactive((value) => !value)}
+            className="rounded-xl border border-gov-gray-200 px-3 py-2 text-xs font-black text-gov-gray-600 transition-colors hover:border-gov-blue-300 hover:text-gov-blue-700 dark:border-dark-border dark:text-dark-muted"
+          >
+            {showInactive ? 'Ocultar inactivos' : 'Mostrar inactivos'}
+          </button>
+        )}
+      </div>
 
       {error && <p className="text-red-600 text-sm">{error}</p>}
 
@@ -163,8 +186,10 @@ export default function TemplatesPage() {
           totalItems={paginated.totalItems}
           canWrite={canWrite}
           isAdmin={isAdmin}
+          showInactive={showInactive}
           onPageChange={setPage}
           onRequestDelete={setPendingDelete}
+          onRequestReactivate={reactivateTemplate}
         />
       )}
 
@@ -287,8 +312,10 @@ function AgentsGrid({
   totalItems,
   canWrite,
   isAdmin,
+  showInactive,
   onPageChange,
   onRequestDelete,
+  onRequestReactivate,
 }: {
   items: TemplateSummary[];
   page: number;
@@ -296,8 +323,10 @@ function AgentsGrid({
   totalItems: number;
   canWrite: boolean;
   isAdmin: boolean;
+  showInactive: boolean;
   onPageChange: (page: number) => void;
   onRequestDelete: (t: TemplateSummary) => void;
+  onRequestReactivate: (t: TemplateSummary) => void;
 }) {
   return (
     <section className="space-y-4">
@@ -306,6 +335,11 @@ function AgentsGrid({
           <p className="text-sm font-black text-gov-gray-900 dark:text-dark-text">
             {totalItems} {totalItems === 1 ? 'agente' : 'agentes'} disponibles
           </p>
+          {showInactive && (
+            <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
+              Los marcados como inactivo están soft-deleted y no se asignan ni aparecen en chat.
+            </p>
+          )}
         </div>
         <PaginationControls
           page={page}
@@ -322,6 +356,7 @@ function AgentsGrid({
             canWrite={canWrite}
             isAdmin={isAdmin}
             onRequestDelete={onRequestDelete}
+            onRequestReactivate={onRequestReactivate}
           />
         ))}
       </div>
@@ -334,16 +369,25 @@ function AgentCard({
   canWrite,
   isAdmin,
   onRequestDelete,
+  onRequestReactivate,
 }: {
   agent: TemplateSummary;
   canWrite: boolean;
   isAdmin: boolean;
   onRequestDelete: (t: TemplateSummary) => void;
+  onRequestReactivate: (t: TemplateSummary) => void;
 }) {
   const metadata = agentMetadata(agent);
+  const isInactive = agent.active === false || agent.status === 'inactive';
+  const isCatalogManaged = agent.source === 'catalog' && Boolean(agent.worker_uid);
+  const isProtectedWorker = agent.id === 'platform-orchestrator';
 
   return (
-    <article className="group flex min-h-[190px] flex-col rounded-2xl border border-gov-gray-100 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-gov-blue-300 hover:shadow-md dark:border-dark-border dark:bg-dark-surface">
+    <article className={`group flex min-h-[190px] flex-col rounded-2xl border p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-gov-blue-300 hover:shadow-md dark:border-dark-border ${
+      isInactive
+        ? 'border-amber-200 bg-amber-50/80 opacity-80 dark:bg-amber-950/20'
+        : 'border-gov-gray-100 bg-white dark:bg-dark-surface'
+    }`}>
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gov-blue-50 text-gov-blue-700 dark:bg-dark-bg dark:text-dark-cyan">
           <Bot size={18} />
@@ -354,7 +398,7 @@ function AgentCard({
               {agent.name ?? agent.id}
             </h2>
             <span className="shrink-0 rounded-full bg-gov-gray-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-gov-gray-500 dark:bg-dark-bg dark:text-dark-muted">
-              {isAdmin ? 'worker' : 'agente'}
+              {isInactive ? 'inactivo' : isAdmin ? 'worker' : 'agente'}
             </span>
           </div>
           <p className="mt-1 line-clamp-1 font-mono text-[11px] text-gov-gray-400 dark:text-dark-muted">
@@ -393,7 +437,16 @@ function AgentCard({
         >
           {isAdmin ? 'Editar' : 'Abrir'}
         </Link>
-        {canWrite && (
+        {canWrite && isInactive && (
+          <button
+            type="button"
+            onClick={() => onRequestReactivate(agent)}
+            className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-green-700 transition-colors hover:bg-green-50 dark:text-green-300 dark:hover:bg-green-950/30"
+          >
+            Reactivar
+          </button>
+        )}
+        {canWrite && isCatalogManaged && !isInactive && !isProtectedWorker && (
           <button
             type="button"
             onClick={() => onRequestDelete(agent)}

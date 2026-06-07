@@ -6,7 +6,8 @@ import SettingsSection from '@/components/settings/SettingsSection';
 import { adminService } from '@/services/adminService';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import { parseArtifactIdFromPath } from '@/lib/artifactPreview';
-import { Image, RefreshCw, Sparkles } from 'lucide-react';
+import { useAuthStore } from '@/store/authStore';
+import { Database, Image as ImageIcon, RefreshCw, Sparkles } from 'lucide-react';
 
 const ASPECT_FALLBACK = ['1:1', '16:9', '9:16', '4:3', '3:4'];
 
@@ -15,6 +16,8 @@ function formatElapsedSec(ms: number): string {
 }
 
 export default function GenImagePage() {
+  const { usuario } = useAuthStore();
+  const canWriteSettings = usuario?.rol === 'admin';
   const [status, setStatus] = useState<Awaited<
     ReturnType<typeof adminService.getComfyuiStatus>
   > | null>(null);
@@ -30,6 +33,12 @@ export default function GenImagePage() {
   const [loading, setLoading] = useState(false);
   const [opsBusy, setOpsBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [comfyApiUrl, setComfyApiUrl] = useState('http://127.0.0.1:8188');
+  const [comfySource, setComfySource] = useState('default');
+  const [comfyTimeoutSec, setComfyTimeoutSec] = useState('300');
+  const [comfyTimeoutSource, setComfyTimeoutSource] = useState('default');
   const [result, setResult] = useState<{
     file_path?: string;
     artifact_id?: string;
@@ -69,6 +78,10 @@ export default function GenImagePage() {
         adminService.getPlaygroundConfig(),
       ]);
       setStatus(st);
+      setComfyApiUrl(st.url || 'http://127.0.0.1:8188');
+      setComfySource(st.source || 'default');
+      setComfyTimeoutSec(st.timeout_sec || '300');
+      setComfyTimeoutSource(st.timeout_source || 'default');
       setTemplates(tpl.templates);
       setDefaultTemplate(tpl.default || 'comfy_default');
       setTemplate((prev) => prev || tpl.default || 'comfy_default');
@@ -121,6 +134,34 @@ export default function GenImagePage() {
       );
     } finally {
       setOpsBusy(null);
+    }
+  };
+
+  const saveComfySettings = async () => {
+    if (!canWriteSettings) return;
+    const apiUrl = comfyApiUrl.trim().replace(/\/$/, '');
+    const timeoutSec = comfyTimeoutSec.trim();
+    if (!/^https?:\/\/.+/.test(apiUrl)) {
+      setSettingsMsg('URL inválida. Usa http:// o https://.');
+      return;
+    }
+    if (!/^\d{1,5}(\.\d+)?$/.test(timeoutSec)) {
+      setSettingsMsg('Timeout inválido.');
+      return;
+    }
+    setSettingsSaving(true);
+    setSettingsMsg(null);
+    try {
+      await adminService.patchRuntimeSettings([
+        { domain: 'comfyui', key: 'api_url', value: apiUrl, scope: 'global' },
+        { domain: 'comfyui', key: 'timeout_sec', value: timeoutSec, scope: 'global' },
+      ]);
+      setSettingsMsg('Configuración ComfyUI guardada en DuckDB.');
+      await loadMeta();
+    } catch (e) {
+      setSettingsMsg(e instanceof Error ? e.message : 'No se pudo guardar ComfyUI');
+    } finally {
+      setSettingsSaving(false);
     }
   };
 
@@ -198,6 +239,52 @@ export default function GenImagePage() {
       )}
 
       <SettingsSection
+        titulo="Configuración ComfyUI"
+        descripcion="Runtime Settings DB-first; .env queda como fallback de arranque."
+        icono={<Database size={22} />}
+      >
+        <div className="grid gap-3 max-w-2xl text-sm">
+          <label htmlFor="comfyui-api-url" className="block">
+            <span className="text-xs font-bold uppercase text-gov-gray-500">API URL</span>
+            <input
+              id="comfyui-api-url"
+              value={comfyApiUrl}
+              onChange={(e) => setComfyApiUrl(e.target.value)}
+              disabled={!canWriteSettings}
+              className="mt-1 w-full rounded-xl border px-3 py-2 font-mono dark:border-dark-border dark:bg-dark-bg"
+            />
+          </label>
+          <label htmlFor="comfyui-timeout-sec" className="block max-w-xs">
+            <span className="text-xs font-bold uppercase text-gov-gray-500">Timeout segundos</span>
+            <input
+              id="comfyui-timeout-sec"
+              value={comfyTimeoutSec}
+              onChange={(e) => setComfyTimeoutSec(e.target.value)}
+              disabled={!canWriteSettings}
+              className="mt-1 w-full rounded-xl border px-3 py-2 font-mono dark:border-dark-border dark:bg-dark-bg"
+            />
+          </label>
+          <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+            Fuente efectiva: <span className="font-mono">{comfySource}</span> · setting{' '}
+            <span className="font-mono">comfyui.api_url</span>; timeout{' '}
+            <span className="font-mono">{comfyTimeoutSource}</span> · setting{' '}
+            <span className="font-mono">comfyui.timeout_sec</span>
+          </p>
+          {canWriteSettings && (
+            <button
+              type="button"
+              onClick={() => void saveComfySettings()}
+              disabled={settingsSaving}
+              className="w-fit rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            >
+              {settingsSaving ? 'Guardando…' : 'Guardar en DuckDB'}
+            </button>
+          )}
+          {settingsMsg && <p className="text-xs text-gov-blue-700 dark:text-dark-cyan">{settingsMsg}</p>}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
         titulo="Servicio ComfyUI"
         descripcion="PM2 y health check del API local"
         icono={<Sparkles size={22} />}
@@ -257,7 +344,7 @@ export default function GenImagePage() {
       <SettingsSection
         titulo="Generar imagen"
         descripcion="Workflow API comfy_default (u otro template)"
-        icono={<Image size={22} />}
+        icono={<ImageIcon size={22} />}
       >
         <div className="grid gap-4 max-w-2xl">
           <label className="block text-sm">
@@ -340,9 +427,10 @@ export default function GenImagePage() {
         <SettingsSection
           titulo="Resultado"
           descripcion="Artefacto guardado en el vault del tenant"
-          icono={<Image size={22} />}
+          icono={<ImageIcon size={22} />}
         >
           {previewSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={previewSrc}
               alt="Generada por ComfyUI"

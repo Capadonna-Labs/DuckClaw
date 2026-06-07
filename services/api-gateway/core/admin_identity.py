@@ -24,10 +24,13 @@ from duckclaw.admin_worker_catalog import (
 from duckclaw.admin_workspace import (
     attach_agent_to_project,
     create_project,
-    deactivate_project_for_actor,
+    delete_project_for_actor,
     detach_agent_from_project,
+    get_project_context_for_actor,
     list_project_agents,
+    list_projects_page_for_actor,
     list_projects_with_agents_for_actor,
+    set_project_status_for_actor,
 )
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.vaults import db_root, list_vault_options_for_user
@@ -113,6 +116,30 @@ def effective_actor_email(actor_email: str) -> str:
     if "@" in admin_email:
         return admin_email
     return "admin@duckclaw.local"
+
+
+def list_workspace_projects_page_for_actor(
+    db: Any,
+    *,
+    actor_email: str,
+    q: str = "",
+    status: str = "active",
+    sort: str = "updated_at",
+    direction: str = "desc",
+    limit: int = 25,
+    offset: int = 0,
+) -> dict[str, Any]:
+    actor_email = effective_actor_email(actor_email)
+    return list_projects_page_for_actor(
+        db,
+        actor_email=actor_email,
+        q=q,
+        status=status,
+        sort=sort,
+        direction=direction,
+        limit=limit,
+        offset=offset,
+    )
 
 
 def attach_profile_to_console_user(db: Any, user: dict[str, Any]) -> dict[str, Any]:
@@ -234,6 +261,13 @@ def resolve_playground_worker_for_project(
         if not worker_allowed_for_actor(db, actor_email=actor_email, worker_id=wid):
             raise PermissionError(f"Worker no asignado al catálogo: {wid}")
         return wid, ""
+    if wid == "platform-orchestrator":
+        project = get_project_context_for_actor(db, project_id=pid, actor_email=actor_email)
+        if not project:
+            raise PermissionError(f"Proyecto no visible: {pid}")
+        if not worker_allowed_for_actor(db, actor_email=actor_email, worker_id=wid):
+            raise PermissionError(f"Worker no asignado al catálogo: {wid}")
+        return wid, pid
     agents = list_project_agents(db, project_id=pid, actor_email=actor_email)
     if not agents:
         raise PermissionError(f"Proyecto no visible: {pid}")
@@ -291,4 +325,25 @@ def detach_project_agent_by_worker_id(
 
 def deactivate_workspace_project_for_actor(db: Any, *, actor_email: str, project_id: str) -> bool:
     actor_email = effective_actor_email(actor_email)
-    return deactivate_project_for_actor(db, project_id=project_id, actor_email=actor_email)
+    return delete_project_for_actor(db, project_id=project_id, actor_email=actor_email)
+
+
+def set_workspace_project_status_for_actor(
+    db: Any,
+    *,
+    actor_email: str,
+    project_id: str,
+    status: str,
+) -> dict[str, Any] | None:
+    actor_email = effective_actor_email(actor_email)
+    return set_project_status_for_actor(
+        db,
+        project_id=project_id,
+        actor_email=actor_email,
+        status=status,
+    )
+
+
+def project_context_for_actor(db: Any, *, actor_email: str, project_id: str) -> dict[str, Any] | None:
+    actor_email = effective_actor_email(actor_email)
+    return get_project_context_for_actor(db, project_id=project_id, actor_email=actor_email)

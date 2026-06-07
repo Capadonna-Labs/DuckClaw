@@ -155,7 +155,7 @@ def list_projects_for_actor(db: Any, *, actor_email: str) -> list[dict[str, str]
         "  SELECT project_id, COUNT(*) AS agent_count "
         "  FROM main.admin_project_agents WHERE active = true GROUP BY project_id"
         ") a ON a.project_id = p.project_id "
-        f"WHERE p.active = true AND (p.owner_email = '{_sql_lit(email, 256)}' "
+        f"WHERE p.active = true AND LOWER(p.status) = 'active' AND (p.owner_email = '{_sql_lit(email, 256)}' "
         f"OR m.email = '{_sql_lit(email, 256)}') "
         "ORDER BY p.updated_at DESC, p.created_at DESC, p.name",
     )
@@ -166,6 +166,86 @@ def list_projects_for_actor(db: Any, *, actor_email: str) -> list[dict[str, str]
             project["agent_count"] = int(row.get("agent_count") or 0)
             projects.append(project)
     return projects
+
+
+def list_projects_page_for_actor(
+    db: Any,
+    *,
+    actor_email: str,
+    q: str = "",
+    status: str = "active",
+    sort: str = "updated_at",
+    direction: str = "desc",
+    limit: int = 25,
+    offset: int = 0,
+) -> dict[str, Any]:
+    ensure_admin_workspace_schema(db)
+    email = (actor_email or "").strip().lower()
+    query = (q or "").strip().lower()
+    safe_status = (status or "active").strip().lower()
+    safe_limit = max(1, min(int(limit or 25), 100))
+    safe_offset = max(0, int(offset or 0))
+    sort_map = {
+        "updated_at": "p.updated_at",
+        "created_at": "p.created_at",
+        "name": "p.name",
+        "agent_count": "agent_count",
+    }
+    sort_expr = sort_map.get((sort or "updated_at").strip().lower(), "p.updated_at")
+    sort_dir = "ASC" if (direction or "").strip().lower() == "asc" else "DESC"
+    where = [
+        "p.active = true",
+        f"(p.owner_email = '{_sql_lit(email, 256)}' OR m.email = '{_sql_lit(email, 256)}')",
+    ]
+    if safe_status and safe_status != "all":
+        where.append(f"LOWER(p.status) = '{_sql_lit(safe_status, 32)}'")
+    if query:
+        like = _sql_lit(f"%{query}%", 512)
+        where.append(
+            "(LOWER(p.name) LIKE '"
+            + like
+            + "' OR LOWER(COALESCE(p.description, '')) LIKE '"
+            + like
+            + "' OR LOWER(p.project_id) LIKE '"
+            + like
+            + "')"
+        )
+    where_sql = " AND ".join(where)
+    base_from = (
+        "FROM main.admin_projects p "
+        "LEFT JOIN main.admin_project_members m ON m.project_id = p.project_id "
+        "LEFT JOIN ("
+        "  SELECT project_id, COUNT(*) AS agent_count "
+        "  FROM main.admin_project_agents WHERE active = true GROUP BY project_id"
+        ") a ON a.project_id = p.project_id "
+    )
+    total_rows = _query_all_dicts(
+        db,
+        "SELECT COUNT(DISTINCT p.project_id) AS total " + base_from + f"WHERE {where_sql}",
+    )
+    rows = _query_all_dicts(
+        db,
+        "SELECT DISTINCT p.project_id, p.tenant_id, p.owner_email, p.name, p.description, "
+        "p.status, p.visibility, p.created_at, p.updated_at, "
+        "COALESCE(a.agent_count, 0) AS agent_count "
+        + base_from
+        + f"WHERE {where_sql} "
+        + f"ORDER BY {sort_expr} {sort_dir}, p.created_at DESC, p.name "
+        + f"LIMIT {safe_limit} OFFSET {safe_offset}",
+    )
+    projects: list[dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            project = _project_row(dict(row))
+            project["agent_count"] = int(row.get("agent_count") or 0)
+            project["agents"] = list_project_agents(
+                db,
+                project_id=str(project.get("project_id") or ""),
+                actor_email=email,
+            )
+            projects.append(project)
+    total = int(total_rows[0].get("total") or 0) if total_rows and isinstance(total_rows[0], dict) else 0
+    return {"projects": projects, "total": total, "limit": safe_limit, "offset": safe_offset}
 
 
 def attach_agent_to_project(
@@ -257,8 +337,80 @@ def list_projects_with_agents_for_actor(db: Any, *, actor_email: str) -> list[di
     ]
 
 
-def deactivate_project_for_actor(db: Any, *, project_id: str, actor_email: str) -> bool:
-    """Soft-delete a project owned by actor and detach its active agents."""
+def get_project_context_for_actor(db: Any, *, project_id: str, actor_email: str) -> dict[str, Any] | None:
+    ensure_admin_workspace_schema(db)
+    email = (actor_email or "").strip().lower()
+    pid = (project_id or "").strip()
+    rows = _query_all_dicts(
+        db,
+        "SELECT p.project_id, p.tenant_id, p.owner_email, p.name, p.description, p.status, p.visibility, "
+        "p.created_at, p.updated_at "
+        "FROM main.admin_projects p "
+        "LEFT JOIN main.admin_project_members m ON m.project_id = p.project_id "
+        f"WHERE p.project_id = '{_sql_lit(pid, 64)}' "
+        "AND p.active = true "
+        "AND LOWER(p.status) = 'active' "
+        f"AND (p.owner_email = '{_sql_lit(email, 256)}' OR m.email = '{_sql_lit(email, 256)}') "
+        "LIMIT 1",
+    )
+    if not rows or not isinstance(rows[0], dict):
+        return None
+    project = _project_row(dict(rows[0]))
+    project["agents"] = list_project_agents(db, project_id=pid, actor_email=email)
+    return project
+
+
+def set_project_status_for_actor(
+    db: Any,
+    *,
+    project_id: str,
+    actor_email: str,
+    status: str,
+) -> dict[str, Any] | None:
+    """Set a reversible project status for projects owned by actor."""
+    ensure_admin_workspace_schema(db)
+    email = (actor_email or "").strip().lower()
+    pid = (project_id or "").strip()
+    safe_status = (status or "").strip().lower()
+    if safe_status not in {"active", "inactive"}:
+        raise ValueError(f"status inválido: {status}")
+    rows = _query_all_dicts(
+        db,
+        "SELECT project_id FROM main.admin_projects "
+        f"WHERE project_id = '{_sql_lit(pid, 64)}' "
+        f"AND owner_email = '{_sql_lit(email, 256)}' "
+        "AND active = true LIMIT 1",
+    )
+    if not rows:
+        return None
+    db.execute(
+        f"""
+        UPDATE main.admin_projects
+        SET status = '{_sql_lit(safe_status, 32)}',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE project_id = '{_sql_lit(pid, 64)}'
+          AND owner_email = '{_sql_lit(email, 256)}'
+          AND active = true
+        """
+    )
+    updated = _query_all_dicts(
+        db,
+        "SELECT project_id, tenant_id, owner_email, name, description, status, visibility, created_at, updated_at "
+        "FROM main.admin_projects "
+        f"WHERE project_id = '{_sql_lit(pid, 64)}' "
+        f"AND owner_email = '{_sql_lit(email, 256)}' "
+        "AND active = true LIMIT 1",
+    )
+    if not updated or not isinstance(updated[0], dict):
+        return None
+    project = _project_row(dict(updated[0]))
+    project["agent_count"] = len(list_project_agents(db, project_id=pid, actor_email=email))
+    project["agents"] = list_project_agents(db, project_id=pid, actor_email=email)
+    return project
+
+
+def delete_project_for_actor(db: Any, *, project_id: str, actor_email: str) -> bool:
+    """Hard-delete a project owned by actor and its project-only relations."""
     ensure_admin_workspace_schema(db)
     email = (actor_email or "").strip().lower()
     pid = (project_id or "").strip()
@@ -273,21 +425,21 @@ def deactivate_project_for_actor(db: Any, *, project_id: str, actor_email: str) 
         return False
     db.execute(
         f"""
-        UPDATE main.admin_project_agents
-        SET active = false, updated_at = CURRENT_TIMESTAMP
+        DELETE FROM main.admin_project_agents
         WHERE project_id = '{_sql_lit(pid, 64)}'
-          AND active = true
         """
     )
     db.execute(
         f"""
-        UPDATE main.admin_projects
-        SET active = false,
-            status = 'inactive',
-            updated_at = CURRENT_TIMESTAMP
+        DELETE FROM main.admin_project_members
+        WHERE project_id = '{_sql_lit(pid, 64)}'
+        """
+    )
+    db.execute(
+        f"""
+        DELETE FROM main.admin_projects
         WHERE project_id = '{_sql_lit(pid, 64)}'
           AND owner_email = '{_sql_lit(email, 256)}'
-          AND active = true
         """
     )
     remaining = _query_all_dicts(
@@ -297,6 +449,11 @@ def deactivate_project_for_actor(db: Any, *, project_id: str, actor_email: str) 
         "AND active = true LIMIT 1",
     )
     return not bool(remaining)
+
+
+def deactivate_project_for_actor(db: Any, *, project_id: str, actor_email: str) -> bool:
+    """Backward-compatible name: project deletion is now hard-delete."""
+    return delete_project_for_actor(db, project_id=project_id, actor_email=actor_email)
 
 
 def detach_agent_from_project(

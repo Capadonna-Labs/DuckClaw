@@ -64,7 +64,10 @@ export default function PlaygroundPage() {
   const selectableWorkers = useMemo(
     () =>
       activeProject && projectWorkerIds.length > 0
-        ? (config?.workers ?? []).filter((worker) => projectWorkerIds.includes(workerOptionId(worker)))
+        ? (config?.workers ?? []).filter((worker) => {
+            const id = workerOptionId(worker);
+            return projectWorkerIds.includes(id) || workerOptionId(worker) === 'platform-orchestrator';
+          })
         : (config?.workers ?? []),
     [activeProject, config?.workers, projectWorkerIds]
   );
@@ -135,10 +138,10 @@ export default function PlaygroundPage() {
         setConfig(c);
         const fromServer = (c.selected_worker_id || '').trim();
         const ids = workerOptionIds(c.workers);
-        if (fromServer && ids.includes(fromServer)) {
-          setWorkerId(fromServer);
-        } else if (initialWorker && ids.includes(initialWorker)) {
+        if (initialWorker && ids.includes(initialWorker)) {
           setWorkerId(initialWorker);
+        } else if (fromServer && ids.includes(fromServer)) {
+          setWorkerId(fromServer);
         } else if (ids.includes('default')) {
           setWorkerId('default');
         } else {
@@ -382,7 +385,9 @@ export default function PlaygroundPage() {
                 </select>
               </>
             )}
-            <label className="text-xs font-bold text-gov-gray-500">Agente</label>
+            <label className="text-xs font-bold text-gov-gray-500">
+              {activeProject ? 'Agente guía' : 'Agente'}
+            </label>
             <select
               value={workerId}
               onChange={(e) => {

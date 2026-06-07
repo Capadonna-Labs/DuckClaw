@@ -167,7 +167,13 @@ def test_orchestrator_draft_suggests_available_skills_without_creating_project(
     assert response.status_code == 200
     body = response.json()
     assert body["project"]["name"]
+    assert body["project"]["description"] != "Crear un proyecto para consultar clientes CRM y responder casos de soporte"
+    assert "Proyecto orientado" in body["project"]["description"]
     assert body["workers"][0]["worker_id"]
+    assert body["workers"][0]["display_name"] != body["project"]["name"]
+    assert "Asistente" in body["workers"][0]["display_name"]
+    assert "Lectura del objetivo" in body["shared_context"]
+    assert "Análisis del Orchestrator" in body["shared_context"]
     assert any(skill["name"] == "crm_lookup" and skill["available"] for skill in body["suggested_skills"])
 
     con = duckdb.connect(str(gateway_db))
@@ -176,6 +182,85 @@ def test_orchestrator_draft_suggests_available_skills_without_creating_project(
     finally:
         con.close()
     assert after_projects == before_projects
+
+
+def test_orchestrator_draft_uses_configured_model_when_available(
+    gateway_db: Path,
+    gateway_admin_client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import main as gateway_main
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_MODEL", "gpt-test")
+    monkeypatch.setenv("LLM_BASE_URL", "http://llm.local/v1")
+    captured: dict[str, str] = {}
+
+    async def _fake_invoke(chat, worker_id, **kwargs):
+        captured["worker_id"] = worker_id
+        captured["message"] = chat.message
+        captured["session_id"] = kwargs.get("session_id", "")
+        return {
+            "response": """
+            {
+              "project": {
+                "name": "Academia FastAPI",
+                "description": "Proyecto orientado a aprender FastAPI con práctica guiada y validación DB-first."
+              },
+              "workers": [
+                {
+                  "worker_id": "academia-fastapi-agent",
+                  "display_name": "Asistente Academia FastAPI",
+                  "role": "member",
+                  "system_prompt": "Guía al usuario con ejercicios FastAPI y revisión paso a paso."
+                }
+              ],
+              "shared_context": "# Análisis del Orchestrator\\n\\n## Lectura del objetivo\\nAprender FastAPI.",
+              "suggested_skills": [
+                {"name": "fastapi_testing", "reason": "Pruebas de endpoints", "available": false}
+              ],
+              "questions": ["¿Qué nivel tienes en Python?"]
+            }
+            """,
+            "assigned_worker_id": worker_id,
+        }
+
+    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+
+    response = gateway_admin_client.post(
+        "/api/v1/admin/workspace/orchestrator/draft",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
+        json={"prompt": "Quiero aprender FastAPI con ejercicios y guías"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert captured["worker_id"] == "platform-orchestrator"
+    assert "Responde SOLO JSON válido" in captured["message"]
+    assert captured["session_id"].startswith("admin-orchestrator-draft-")
+    assert body["project"]["name"] == "Academia FastAPI"
+    assert body["workers"][0]["display_name"] == "Asistente Academia FastAPI"
+    assert body["questions"] == ["¿Qué nivel tienes en Python?"]
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        assert con.execute("SELECT COUNT(*) FROM main.admin_projects").fetchone()[0] == 0
+    finally:
+        con.close()
+
+
+def test_orchestrator_draft_does_not_hardcode_fake_skill_suggestions(
+    gateway_admin_client,
+) -> None:
+    response = gateway_admin_client.post(
+        "/api/v1/admin/workspace/orchestrator/draft",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
+        json={"prompt": "Quiero aprender C++ moderno con ejercicios de consola"},
+    )
+
+    assert response.status_code == 200
+    names = {skill["name"] for skill in response.json()["suggested_skills"]}
+    assert "project_planning" not in names
 
 
 def test_orchestrator_confirm_creates_project_workers_context_and_assignments(
@@ -407,7 +492,7 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
         headers=headers,
     )
     assert deleted.status_code == 200
-    assert deleted.json() == {"ok": True, "project_id": project_id}
+    assert deleted.json() == {"ok": True, "hard_deleted": True, "project_id": project_id}
 
     projects_after = gateway_admin_client.get("/api/v1/admin/workspace/projects", headers=headers)
     assert projects_after.status_code == 200
@@ -415,18 +500,134 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
 
     con = duckdb.connect(str(gateway_db), read_only=True)
     try:
-        project_row = con.execute(
-            "SELECT active, status FROM main.admin_projects WHERE project_id = ?",
+        project_count = con.execute(
+            "SELECT COUNT(*) FROM main.admin_projects WHERE project_id = ?",
             [project_id],
         ).fetchone()
+        agent_count = con.execute(
+            "SELECT COUNT(*) FROM main.admin_project_agents WHERE project_id = ?",
+            [project_id],
+        ).fetchone()[0]
+        member_count = con.execute(
+            "SELECT COUNT(*) FROM main.admin_project_members WHERE project_id = ?",
+            [project_id],
+        ).fetchone()[0]
         worker_count = con.execute(
             "SELECT COUNT(*) FROM main.admin_worker_catalog WHERE worker_id = 'axis-radar'",
         ).fetchone()[0]
     finally:
         con.close()
 
-    assert project_row == (False, "inactive")
+    assert project_count == (0,)
+    assert agent_count == 0
+    assert member_count == 0
     assert worker_count == 1
+
+
+def test_gateway_workspace_projects_support_search_sort_and_pagination(
+    gateway_admin_client,
+    gateway_db: Path,
+) -> None:
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    names = ["FastAPI Academy", "CRM Support", "FastAPI RAG"]
+    for name in names:
+        created = gateway_admin_client.post(
+            "/api/v1/admin/workspace/projects",
+            headers=headers,
+            json={"name": name, "description": f"Descripcion {name}"},
+        )
+        assert created.status_code == 200
+
+    listed = gateway_admin_client.get(
+        "/api/v1/admin/workspace/projects?q=fastapi&sort=name&direction=asc&limit=1&offset=0",
+        headers=headers,
+    )
+
+    assert listed.status_code == 200
+    payload = listed.json()
+    assert payload["total"] == 2
+    assert payload["limit"] == 1
+    assert payload["offset"] == 0
+    assert [project["name"] for project in payload["projects"]] == ["FastAPI Academy"]
+    assert payload["projects"][0]["agents"] == []
+
+    second_page = gateway_admin_client.get(
+        "/api/v1/admin/workspace/projects?q=fastapi&sort=name&direction=asc&limit=1&offset=1",
+        headers=headers,
+    )
+
+    assert second_page.status_code == 200
+    assert second_page.json()["total"] == 2
+    assert [project["name"] for project in second_page.json()["projects"]] == ["FastAPI RAG"]
+    assert second_page.json()["projects"][0]["agents"] == []
+
+
+def test_gateway_workspace_projects_can_deactivate_reactivate_and_hard_delete(
+    gateway_admin_client,
+    gateway_db: Path,
+) -> None:
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    created = gateway_admin_client.post(
+        "/api/v1/admin/workspace/projects",
+        headers=headers,
+        json={"name": "Proyecto reversible", "description": "Debe poder pausarse"},
+    )
+    assert created.status_code == 200
+    project_id = created.json()["project"]["project_id"]
+
+    deactivated = gateway_admin_client.post(
+        f"/api/v1/admin/workspace/projects/{project_id}/deactivate",
+        headers=headers,
+    )
+    assert deactivated.status_code == 200
+    assert deactivated.json()["project"]["status"] == "inactive"
+
+    active_list = gateway_admin_client.get("/api/v1/admin/workspace/projects", headers=headers)
+    assert project_id not in {item["project_id"] for item in active_list.json()["projects"]}
+
+    inactive_list = gateway_admin_client.get(
+        "/api/v1/admin/workspace/projects?status=inactive",
+        headers=headers,
+    )
+    assert inactive_list.status_code == 200
+    inactive = {item["project_id"]: item for item in inactive_list.json()["projects"]}
+    assert inactive[project_id]["status"] == "inactive"
+
+    playground = gateway_admin_client.get("/api/v1/admin/playground/config", headers=headers)
+    assert project_id not in {item["project_id"] for item in playground.json()["projects"]}
+
+    reactivated = gateway_admin_client.post(
+        f"/api/v1/admin/workspace/projects/{project_id}/reactivate",
+        headers=headers,
+    )
+    assert reactivated.status_code == 200
+    assert reactivated.json()["project"]["status"] == "active"
+
+    active_after = gateway_admin_client.get("/api/v1/admin/workspace/projects", headers=headers)
+    assert project_id in {item["project_id"] for item in active_after.json()["projects"]}
+
+    deactivated_again = gateway_admin_client.post(
+        f"/api/v1/admin/workspace/projects/{project_id}/deactivate",
+        headers=headers,
+    )
+    assert deactivated_again.status_code == 200
+
+    deleted = gateway_admin_client.delete(
+        f"/api/v1/admin/workspace/projects/{project_id}",
+        headers=headers,
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {"ok": True, "hard_deleted": True, "project_id": project_id}
+
+    con = duckdb.connect(str(gateway_db), read_only=True)
+    try:
+        project_count = con.execute(
+            "SELECT COUNT(*) FROM main.admin_projects WHERE project_id = ?",
+            [project_id],
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert project_count == 0
 
 
 def test_resource_events_record_cross_cutting_audit_without_owning_permissions(gateway_db: Path) -> None:
@@ -580,6 +781,134 @@ def test_gateway_templates_can_list_and_reactivate_inactive_catalog_worker(
 
     listed_after = gateway_admin_client.get("/api/v1/admin/templates", headers=headers)
     assert "ejemplo" in {item["id"] for item in listed_after.json()["templates"]}
+
+
+def test_gateway_templates_can_hard_delete_catalog_worker_relations(
+    gateway_admin_client,
+    gateway_db: Path,
+) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import (
+        add_worker_context,
+        add_worker_version,
+        attach_skill_to_worker,
+        create_worker,
+        grant_worker_capability,
+        register_capability,
+        register_skill,
+    )
+    from duckclaw.admin_workspace import attach_agent_to_project, create_project
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    db = DuckClaw(get_gateway_db_path(), read_only=False, engine="python")
+    try:
+        worker = create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="delete-me",
+            display_name="Delete Me",
+        )
+        add_worker_version(
+            db,
+            worker_uid=worker["worker_uid"],
+            created_by="admin@test.local",
+            manifest_snapshot={"id": "delete-me"},
+            files_snapshot={"system_prompt.md": "hola"},
+        )
+        add_worker_context(
+            db,
+            worker_uid=worker["worker_uid"],
+            title="Contexto",
+            content_md="contexto",
+        )
+        skill = register_skill(
+            db,
+            name="delete_me_skill",
+            description="Skill temporal",
+            skill_type="atom",
+            implementation_ref="tests.delete_me",
+            owner_email="admin@test.local",
+            tenant_id=worker["tenant_id"],
+        )
+        attach_skill_to_worker(db, worker_uid=worker["worker_uid"], skill_id=skill["skill_id"])
+        capability = register_capability(
+            db,
+            name="delete_me_capability",
+            kind="tool",
+            provider="tests",
+        )
+        grant_worker_capability(
+            db,
+            worker_uid=worker["worker_uid"],
+            capability_id=capability["capability_id"],
+        )
+        project = create_project(
+            db,
+            owner_email="admin@test.local",
+            name="Proyecto con worker borrable",
+        )
+        attach_agent_to_project(
+            db,
+            project_id=project["project_id"],
+            worker_uid=worker["worker_uid"],
+        )
+        worker_uid = worker["worker_uid"]
+    finally:
+        db.close()
+
+    deleted = gateway_admin_client.delete(
+        "/api/v1/admin/templates/delete-me/hard-delete",
+        headers=headers,
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {"ok": True, "id": "delete-me", "hard_deleted": True}
+
+    con = duckdb.connect(str(gateway_db), read_only=True)
+    try:
+        counts = {
+            table: con.execute(
+                f"SELECT COUNT(*) FROM main.{table} WHERE worker_uid = ?",
+                [worker_uid],
+            ).fetchone()[0]
+            for table in [
+                "admin_worker_catalog",
+                "admin_worker_versions",
+                "admin_worker_contexts",
+                "admin_worker_skills",
+                "admin_worker_capabilities",
+                "admin_project_agents",
+            ]
+        }
+    finally:
+        con.close()
+
+    assert counts == {
+        "admin_worker_catalog": 0,
+        "admin_worker_versions": 0,
+        "admin_worker_contexts": 0,
+        "admin_worker_skills": 0,
+        "admin_worker_capabilities": 0,
+        "admin_project_agents": 0,
+    }
+
+
+def test_gateway_templates_hard_delete_keeps_protected_workers(
+    gateway_admin_client,
+) -> None:
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+
+    default_response = gateway_admin_client.delete(
+        "/api/v1/admin/templates/default/hard-delete",
+        headers=headers,
+    )
+    orchestrator_response = gateway_admin_client.delete(
+        "/api/v1/admin/templates/platform-orchestrator/hard-delete",
+        headers=headers,
+    )
+
+    assert default_response.status_code == 403
+    assert orchestrator_response.status_code == 403
 
 
 def test_get_visible_worker_for_actor_accepts_boolean_active_rows(gateway_db: Path) -> None:
@@ -819,7 +1148,10 @@ def test_playground_config_and_chat_support_db_first_project_scope(
     assert projects[project["project_id"]]["name"] == "Operación AXIS"
     assert [agent["worker_id"] for agent in projects[project["project_id"]]["agents"]] == ["axis-radar"]
 
+    captured: dict[str, str] = {}
+
     async def _fake_invoke(_chat, worker_id, **_kwargs):
+        captured["message"] = _chat.message
         return {"response": f"ok:{worker_id}", "assigned_worker_id": worker_id}
 
     monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
@@ -837,6 +1169,29 @@ def test_playground_config_and_chat_support_db_first_project_scope(
     assert chat.status_code == 200
     assert chat.json()["project_id"] == project["project_id"]
     assert chat.json()["worker_id"] == "axis-radar"
+    assert "[PROJECT_CONTEXT]" in captured["message"]
+    assert "Operación AXIS" in captured["message"]
+    assert "Scope para Playground" in captured["message"]
+    assert "hola" in captured["message"]
+
+    orchestrator_chat = gateway_admin_client.post(
+        "/api/v1/admin/playground/chat",
+        headers=headers,
+        json={
+            "project_id": project["project_id"],
+            "worker_id": "platform-orchestrator",
+            "message": "guíame",
+            "chat_id": "project-orchestrator-playground",
+        },
+    )
+    assert orchestrator_chat.status_code == 200
+    assert orchestrator_chat.json()["project_id"] == project["project_id"]
+    assert orchestrator_chat.json()["worker_id"] == "platform-orchestrator"
+    assert "[PROJECT_CONTEXT]" in captured["message"]
+    assert "Operación AXIS" in captured["message"]
+    assert "AXIS Radar" not in captured["message"]
+    assert "axis-radar" in captured["message"]
+    assert "guíame" in captured["message"]
 
     rejected = gateway_admin_client.post(
         "/api/v1/admin/playground/chat",

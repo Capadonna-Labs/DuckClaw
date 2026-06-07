@@ -1455,6 +1455,7 @@ async def playground_chat(
     from core.admin_identity import (
         get_visible_worker_for_actor,
         open_gateway_db,
+        project_context_for_actor,
         resolve_playground_worker_for_project,
     )
     from duckclaw.admin_user_profiles import ensure_profile_for_user
@@ -1467,6 +1468,7 @@ async def playground_chat(
         "telegram_user_id": "",
     }
     catalog_allowed = False
+    project_context: dict[str, Any] | None = None
     try:
         with open_gateway_db(read_only=True) as db:
             profile = ensure_profile_for_user(db, email=actor)
@@ -1479,6 +1481,12 @@ async def playground_chat(
                         project_id=project_id,
                         worker_id=wid,
                     )
+                    if project_id:
+                        project_context = project_context_for_actor(
+                            db,
+                            actor_email=actor,
+                            project_id=project_id,
+                        )
                 except PermissionError as exc:
                     raise _problem(403, str(exc), wid) from exc
     except FileNotFoundError:
@@ -1544,6 +1552,23 @@ async def playground_chat(
         request=request,
     )
     vault_path = vault_info.get("effective_path") or ""
+    if project_context:
+        agent_ids = [
+            str(agent.get("worker_id") or "").strip()
+            for agent in project_context.get("agents", [])
+            if str(agent.get("worker_id") or "").strip()
+        ]
+        project_block = "\n".join(
+            [
+                "[PROJECT_CONTEXT]",
+                f"Nombre: {project_context.get('name') or ''}",
+                f"Descripción: {project_context.get('description') or ''}",
+                f"Agentes activos: {', '.join(agent_ids) if agent_ids else 'ninguno'}",
+                "Usa esta descripción para orientar al usuario, proponer próximos pasos y pedir datos faltantes.",
+                "[/PROJECT_CONTEXT]",
+            ]
+        )
+        msg = f"{project_block}\n\n{msg}"
 
     chat = ChatRequest(
         message=msg,
@@ -2434,6 +2459,34 @@ async def reactivate_template(
     return {"ok": True, "id": wid, "action": "reactivated"}
 
 
+@router.delete("/templates/{worker_id}/hard-delete", dependencies=[Depends(_require_admin_key)])
+async def hard_delete_template(
+    worker_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_worker_catalog import hard_delete_visible_worker_for_actor
+
+    wid = worker_id.strip()
+    if wid == "default" or wid in _PROTECTED_TEMPLATE_IDS:
+        raise _problem(403, "Plantilla protegida", wid)
+    with open_gateway_db(read_only=False) as db:
+        db.execute("BEGIN TRANSACTION")
+        try:
+            worker = hard_delete_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+            if not worker:
+                db.execute("ROLLBACK")
+                raise _problem(404, "Worker no encontrado en catálogo", wid)
+            db.execute("COMMIT")
+        except HTTPException:
+            raise
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
+    _admin_audit("template.hard_delete", f"templates/{wid}", "catalog_hard_delete", actor=actor)
+    return {"ok": True, "id": wid, "hard_deleted": True}
+
+
 @router.post("/templates/{worker_id}/validate", dependencies=[Depends(_require_admin_key)])
 async def validate_template(worker_id: str) -> dict[str, Any]:
     raise _problem(
@@ -2861,7 +2914,7 @@ async def admin_delete_conversation(
     deleted_tid = await delete_conversation_merged(redis_client, tid, sid)
     if deleted_tid is None:
         raise _problem(404, "Conversación no encontrada", sid)
-    return {"ok": True, "session_id": sid, "tenant_id": deleted_tid}
+    return {"ok": True, "hard_deleted": True, "session_id": sid, "tenant_id": deleted_tid}
 
 
 @router.post("/conversations/reindex", dependencies=[Depends(_require_admin_key)])

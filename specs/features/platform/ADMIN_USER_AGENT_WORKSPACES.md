@@ -34,8 +34,19 @@ Relacionado: [`ADMIN_CONSOLE_AUTH.md`](ADMIN_CONSOLE_AUTH.md), [`ADMIN_ACCESS_MA
   Así `/templates`, el selector de workers y los proyectos DB-first leen el mismo catálogo visible por tenant.
 - `active=false` / `status='inactive'` en `main.admin_worker_catalog` es soft-delete: por defecto no aparece en Workers, selectores ni Playground.
   La consola admin puede pedir `GET /templates?include_inactive=true` para auditoría y usar `POST /templates/{worker_id}/reactivate` para restaurar un worker owned por el actor sin tocar snapshots ni carpetas.
+- La acción “Eliminar definitivo” de workers realiza hard-delete DB-first del worker owned por el actor y sus relaciones (`admin_worker_versions`, `admin_worker_contexts`, `admin_worker_skills`, `admin_worker_capabilities`, `admin_project_agents`, asignaciones). No borra carpetas de templates legacy.
+- `default` y `platform-orchestrator` son workers protegidos: no pueden desactivarse ni eliminarse desde la UX normal.
 - Cada perfil debe tener un worker DB-first permanente `platform-orchestrator` (`Platform Orchestrator`) para guiar creación de proyectos, workers, contexto y skills. Ver [`PLATFORM_ORCHESTRATOR_WORKER.md`](PLATFORM_ORCHESTRATOR_WORKER.md).
 - Los manifiestos runtime se guardan fuera del árbol de templates globales, por defecto en `.duckclaw/runtime/agents/{tenant_id}/{worker_id}/manifest.json`.
+
+## Proyectos DB-first
+
+- `main.admin_projects.description` es contexto operativo del proyecto, no solo texto decorativo de UI.
+- Cuando Playground recibe `project_id`, el Gateway debe leer `name` y `description` del proyecto visible para el actor e inyectarlos como contexto al LLM antes del mensaje del usuario.
+- La acción “Desactivar proyecto” marca el proyecto como `status='inactive'` sin borrar filas. El proyecto sale de Playground y del contexto LLM hasta reactivarse.
+- La acción “Activar proyecto” restaura un proyecto `inactive` a `status='active'`.
+- La acción “Eliminar definitivo” realiza hard-delete transaccional de `main.admin_projects`, `main.admin_project_members` y `main.admin_project_agents`.
+- El hard-delete de un proyecto no borra workers, versions, contexts ni skills; solo elimina el contenedor de proyecto y sus asignaciones.
 
 ## Contexto de Sesión
 
@@ -50,3 +61,7 @@ Relacionado: [`ADMIN_CONSOLE_AUTH.md`](ADMIN_CONSOLE_AUTH.md), [`ADMIN_ACCESS_MA
 - Crear agente como usuario normal no escribe en `packages/agents/src/duckclaw/forge/templates`.
 - `/playground/config` expone el catálogo del usuario logueado y su tenant efectivo.
 - Tests cubren auth, CSRF/RBAC, tenant único, aislamiento de agentes y no suplantación de tenant/Telegram.
+- Tests cubren desactivar/reactivar workers y hard-delete transaccional de workers, preservando protecciones de sistema.
+- Tests cubren que eliminar proyecto borra físicamente la fila y sus relaciones, sin borrar workers.
+- Tests cubren que proyectos `inactive` se listan bajo filtro explícito, pueden reactivarse y no entran al Playground.
+- Tests cubren que `admin_projects.description` llega al contexto del LLM cuando se usa `project_id`.

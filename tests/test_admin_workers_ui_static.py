@@ -18,6 +18,7 @@ def test_workers_ui_uses_generic_catalog_import_and_no_folder_delete_language() 
     assert "Importar templates" in page
     assert "include_prefixes" in page
     assert "Desactivar del catálogo" in page
+    assert "Eliminar definitivo" in page
     assert "Se borrará la carpeta" not in page
     assert "rmtree" not in page
     assert "import_axis" not in page
@@ -35,11 +36,26 @@ def test_workers_ui_exposes_inactive_catalog_workers_and_reactivation() -> None:
     assert "inactivo" in page
 
 
+def test_workers_ui_separates_deactivate_from_hard_delete() -> None:
+    page = TEMPLATES_PAGE.read_text(encoding="utf-8")
+    service = ADMIN_SERVICE.read_text(encoding="utf-8")
+
+    assert "pendingDeactivate" in page
+    assert "pendingHardDelete" in page
+    assert "deactivateTemplate" in service
+    assert "hardDeleteTemplate" in service
+    assert "/hard-delete" in service
+    assert "Sí, desactivar del catálogo" in page
+    assert "Sí, eliminar definitivamente" in page
+    assert "No borra carpetas de templates legacy" in page
+
+
 def test_workers_ui_does_not_offer_deactivation_for_default_template() -> None:
     page = TEMPLATES_PAGE.read_text(encoding="utf-8")
 
     assert "isCatalogManaged" in page
-    assert "canWrite && isCatalogManaged && !isInactive && !isProtectedWorker" in page
+    assert "canWrite && isCatalogManaged && !isProtectedWorker" in page
+    assert "{!isInactive && (" in page
     assert "agent.source === 'catalog'" in page
     assert "agent.id === 'platform-orchestrator'" in page
 

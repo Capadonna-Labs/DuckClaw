@@ -59,6 +59,43 @@ export interface OrchestratorDraft {
   questions: string[];
 }
 
+export interface WorkspaceProjectSummary {
+  project_id: string;
+  tenant_id: string;
+  owner_email: string;
+  name: string;
+  description: string;
+  status: string;
+  visibility: string;
+  agent_count?: number;
+  agents?: {
+    worker_uid: string;
+    worker_id: string;
+    display_name: string;
+    role: string;
+    sort_order: string;
+  }[];
+}
+
+export interface WorkspaceProjectsQuery {
+  /** q: search text for name, description or project id. */
+  q?: string;
+  status?: string;
+  sort?: 'updated_at' | 'created_at' | 'name' | 'agent_count';
+  direction?: 'asc' | 'desc';
+  /** limit: maximum number of projects to return. */
+  limit?: number;
+  /** offset: zero-based pagination offset. */
+  offset?: number;
+}
+
+export interface WorkspaceProjectsPage {
+  projects: WorkspaceProjectSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface IndustryOption {
   id: string;
   name: string;
@@ -236,6 +273,22 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
+function workspaceProjectsQueryString(params?: WorkspaceProjectsQuery): string {
+  const qs = new URLSearchParams();
+  if (params?.q) qs.set('q', params.q);
+  if (params?.status) qs.set('status', params.status);
+  if (params?.sort) qs.set('sort', params.sort);
+  if (params?.direction) qs.set('direction', params.direction);
+  if (params?.limit != null) qs.set('limit', String(params.limit));
+  if (params?.offset != null) qs.set('offset', String(params.offset));
+  const suffix = qs.toString();
+  return suffix ? `?${suffix}` : '';
+}
+
+function listWorkspaceProjectsPage(params?: WorkspaceProjectsQuery) {
+  return adminFetch<WorkspaceProjectsPage>(`/workspace/projects${workspaceProjectsQueryString(params)}`);
+}
+
 export const adminService = {
   health: () => adminFetch<AdminHealth>('/health'),
 
@@ -389,8 +442,17 @@ export const adminService = {
       body: JSON.stringify(body),
     }),
 
+  deactivateTemplate: (id: string) =>
+    adminFetch<{ ok: boolean }>(`/templates/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   deleteTemplate: (id: string) =>
     adminFetch<{ ok: boolean }>(`/templates/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  hardDeleteTemplate: (id: string) =>
+    adminFetch<{ ok: boolean; hard_deleted: boolean }>(
+      `/templates/${encodeURIComponent(id)}/hard-delete`,
+      { method: 'DELETE' }
+    ),
 
   reactivateTemplate: (id: string) =>
     adminFetch<{ ok: boolean; action: string }>(`/templates/${encodeURIComponent(id)}/reactivate`, {
@@ -1109,19 +1171,10 @@ export const adminService = {
       body: JSON.stringify(body),
     }),
 
+  listWorkspaceProjectsPage,
+
   listWorkspaceProjects: () =>
-    adminFetch<{
-      projects: {
-        project_id: string;
-        tenant_id: string;
-        owner_email: string;
-        name: string;
-        description: string;
-        status: string;
-        visibility: string;
-        agent_count?: number;
-      }[];
-    }>('/workspace/projects').then((r) => r.projects),
+    listWorkspaceProjectsPage().then((r) => r.projects),
 
   createWorkspaceProject: (body: { name: string; description?: string; visibility?: string }) =>
     adminFetch<{
@@ -1141,9 +1194,21 @@ export const adminService = {
     }),
 
   deleteWorkspaceProject: (projectId: string) =>
-    adminFetch<{ ok: boolean; project_id: string }>(
+    adminFetch<{ ok: boolean; hard_deleted: boolean; project_id: string }>(
       `/workspace/projects/${encodeURIComponent(projectId)}`,
       { method: 'DELETE' }
+    ),
+
+  deactivateWorkspaceProject: (projectId: string) =>
+    adminFetch<{ ok: boolean; project: WorkspaceProjectSummary }>(
+      `/workspace/projects/${encodeURIComponent(projectId)}/deactivate`,
+      { method: 'POST' }
+    ),
+
+  reactivateWorkspaceProject: (projectId: string) =>
+    adminFetch<{ ok: boolean; project: WorkspaceProjectSummary }>(
+      `/workspace/projects/${encodeURIComponent(projectId)}/reactivate`,
+      { method: 'POST' }
     ),
 
   listWorkspaceProjectAgents: (projectId: string) =>

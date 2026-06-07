@@ -1,0 +1,22 @@
+COMANDOS DUCKOPS STACK
+======================
+
+cd /Users/workstation/Developer/duckclaw
+
+uv run duckops stack up
+
+uv run duckops stack status
+
+uv run duckops stack status --json
+
+uv run duckops stack up --no-wait
+
+uv run duckops stack up --timeout 60
+
+uv run duckops stack up --host 127.0.0.1 --port 8000
+
+uv run duckops stack status --host 127.0.0.1 --port 8000
+
+pnpm stack:up
+
+pnpm stack:status

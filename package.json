@@ -4,6 +4,7 @@
   "description": "Monorepo DuckClaw. Admin UI: pnpm en apps/duckclaw-admin (admin:*).",
   "scripts": {
     "kanban": "npx -y vibe-kanban --port 3333",
+    "dev:admin": "pnpm --dir apps/duckclaw-admin dev",
     "admin:dev": "pnpm --dir apps/duckclaw-admin dev",
     "admin:dev:tailscale": "pnpm --dir apps/duckclaw-admin dev:tailscale",
     "admin:serve-tailscale": "bash scripts/tailscale_serve_admin.sh",
@@ -11,6 +12,9 @@
     "admin:start": "pnpm --dir apps/duckclaw-admin start",
     "admin:lint": "pnpm --dir apps/duckclaw-admin lint",
     "admin:install": "pnpm --dir apps/duckclaw-admin install",
+    "stack:up": "uv run duckops stack up",
+    "stack:status": "uv run duckops stack status",
+    "dev:local": "pnpm stack:up && pnpm admin:dev",
     "crm:bootstrap-db": "uv run python scripts/bootstrap_dbs.py"
   }
 }

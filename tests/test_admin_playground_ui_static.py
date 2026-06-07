@@ -11,6 +11,8 @@ def test_playground_ui_can_scope_chat_to_db_first_project() -> None:
     assert "Proyecto activo" in page
     assert "projectId" in page
     assert "selectableWorkers" in page
+    assert "workerOptionId(worker) === 'platform-orchestrator'" in page
+    assert "Agente guía" in page
     assert "project_id: projectId || undefined" in hook
     assert "project_id?: string" in service
 
@@ -393,8 +395,22 @@ def test_projects_page_only_renders_db_first_projects() -> None:
     assert "listForgeProjects" not in page
     assert "Legacy filesystem" not in page
     assert "forge/projects/" not in page
-    assert "Agrupa tus agentes" in page
-    assert "No hay agentes asignables" in page
+    assert "listWorkspaceProjectsPage" in page
+    assert "ProjectsCatalogToolbar" in page
+    assert "ProjectsTable" in page
+    assert 'href="/projects/orchestrator"' in page
+    assert "orchestratorPrompt" not in page
+    assert "createOrchestratorDraft" not in page
+    assert "confirmOrchestratorDraft" not in page
+
+
+def test_playground_initial_worker_query_wins_over_server_selection() -> None:
+    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    load_config_body = page.split("const loadConfig = useCallback", 1)[1].split("useEffect(() => {", 1)[0]
+
+    assert load_config_body.index("initialWorker && ids.includes(initialWorker)") < load_config_body.index(
+        "fromServer && ids.includes(fromServer)"
+    )
 
 
 def test_kanban_storage_is_scoped_by_authenticated_actor() -> None:

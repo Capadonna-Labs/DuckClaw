@@ -1036,6 +1036,16 @@ def test_admin_conversations_crud(admin_client: TestClient):
     )
     assert r5.status_code == 200
     assert r5.json().get("ok") is True
+    assert r5.json().get("hard_deleted") is True
+
+    r6 = admin_client.get(
+        "/api/v1/admin/conversations",
+        headers=headers,
+        params={"tenant_id": "default", "section": "playground", "limit": 20},
+    )
+    assert r6.status_code == 200
+    convs_after = r6.json().get("conversations") or []
+    assert not any(c.get("session_id") == sid for c in convs_after)
 
 
 def test_admin_auth_login_smoke(

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -127,6 +129,178 @@ def _orchestrator_worker_id_from_project(name: str) -> str:
     return base[:64] or "guided-agent"
 
 
+def _orchestrator_description_from_prompt(prompt: str, project_name: str) -> str:
+    goal = re.sub(r"\s+", " ", (prompt or "").strip()).strip(" .")
+    if not goal:
+        return f"Proyecto orientado a estructurar {project_name} con guía del Platform Orchestrator."
+    if len(goal) > 220:
+        goal = goal[:217].rstrip() + "..."
+    return (
+        f"Proyecto orientado a convertir el objetivo '{goal}' en un flujo DB-first con contexto, "
+        "workers sugeridos y pasos de validación antes de ejecutar cambios."
+    )[:512]
+
+
+def _orchestrator_worker_display_name(project_name: str) -> str:
+    base = re.sub(r"\s+", " ", (project_name or "Proyecto guiado").strip())
+    return f"Asistente {base}"[:128]
+
+
+def _orchestrator_fallback_draft(
+    *,
+    prompt: str,
+    suggested_skills: list[dict[str, Any]],
+) -> dict[str, Any]:
+    project_name = _orchestrator_title_from_prompt(prompt)
+    worker_id = _orchestrator_worker_id_from_project(project_name)
+    project_description = _orchestrator_description_from_prompt(prompt, project_name)
+    shared_context = "\n".join(
+        [
+            "# Análisis del Orchestrator",
+            "",
+            "## Lectura del objetivo",
+            prompt,
+            "",
+            "## Supuestos iniciales",
+            "- El proyecto debe operar con configuración DB-first.",
+            "- El usuario revisará el borrador antes de persistir cambios.",
+            "- Los workers sugeridos deben pedir datos faltantes antes de actuar.",
+        ]
+    )
+    return {
+        "project": {
+            "name": project_name,
+            "description": project_description,
+        },
+        "workers": [
+            {
+                "worker_id": worker_id,
+                "display_name": _orchestrator_worker_display_name(project_name),
+                "role": "member",
+                "system_prompt": (
+                    f"Actúa como asistente especializado del proyecto {project_name}. "
+                    "Usa el contexto compartido, convierte objetivos en pasos verificables y pregunta antes "
+                    "de asumir datos faltantes."
+                ),
+            }
+        ],
+        "shared_context": shared_context,
+        "suggested_skills": suggested_skills,
+        "questions": [
+            "¿Qué fuentes de datos debe usar este proyecto?",
+            "¿Qué resultado concreto esperas del worker principal?",
+            "¿Hay restricciones de tono, seguridad o aprobación humana?",
+        ],
+    }
+
+
+def _extract_json_object(raw: str) -> dict[str, Any] | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?", "", text, flags=re.I).strip()
+        text = re.sub(r"```$", "", text).strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _orchestrator_draft_prompt(prompt: str, suggested_skills: list[dict[str, Any]]) -> str:
+    return (
+        "Actúas como Platform Orchestrator de DuckClaw.\n"
+        "Responde SOLO JSON válido, sin markdown, sin texto extra.\n"
+        "No inventes secretos. No escribas en DB. Solo prepara un borrador revisable.\n"
+        "Schema exacto:\n"
+        "{"
+        '"project":{"name":"string","description":"string"},'
+        '"workers":[{"worker_id":"string","display_name":"string","role":"member","system_prompt":"string"}],'
+        '"shared_context":"markdown string",'
+        '"suggested_skills":[{"name":"string","reason":"string","available":true}],'
+        '"questions":["string"]'
+        "}\n"
+        f"Skills detectadas o sugeridas: {json.dumps(suggested_skills, ensure_ascii=False)}\n"
+        f"Objetivo del usuario:\n{prompt}"
+    )
+
+
+def _orchestrator_has_configured_llm(*, tenant_id: str, actor: str) -> bool:
+    from routers.admin import _resolved_llm_for_playground
+
+    llm = _resolved_llm_for_playground(
+        chat_id="admin-orchestrator-draft",
+        tenant_id=tenant_id,
+        actor_email=actor,
+    )
+    return any(str(llm.get(key) or "").strip() for key in ("provider", "model", "base_url"))
+
+
+def _validated_orchestrator_draft_or_fallback(
+    *,
+    raw_response: str,
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    parsed = _extract_json_object(raw_response)
+    if not parsed:
+        return fallback
+    try:
+        return OrchestratorDraftPayloadBody.model_validate(parsed).model_dump()
+    except Exception:
+        return fallback
+
+
+async def _orchestrator_model_draft_or_fallback(
+    *,
+    actor: str,
+    tenant_id: str,
+    prompt: str,
+    fallback: dict[str, Any],
+    suggested_skills: list[dict[str, Any]],
+) -> dict[str, Any]:
+    from core.models import ChatRequest
+    from duckclaw.channels import GatewayDeliveryContext
+    import main as gateway_main
+
+    session_id = f"admin-orchestrator-draft-{uuid.uuid4().hex}"
+    chat = ChatRequest(
+        message=_orchestrator_draft_prompt(prompt, suggested_skills),
+        chat_id=session_id,
+        user_id=actor or "admin-ui",
+        username=actor or "admin-ui",
+        chat_type="private",
+        tenant_id=tenant_id,
+        stream=False,
+    )
+    try:
+        result = await gateway_main._invoke_chat(
+            chat,
+            "platform-orchestrator",
+            session_id=session_id,
+            tenant_id=tenant_id,
+            redis_client=None,
+            delivery_context=GatewayDeliveryContext.trusted_admin_console(),
+        )
+    except Exception:
+        next_fallback = dict(fallback)
+        next_fallback["shared_context"] = (
+            f"{fallback.get('shared_context') or ''}\n\n"
+            "> Nota: no se pudo invocar el modelo configurado; se usó análisis local estructurado."
+        ).strip()
+        return next_fallback
+    raw = ""
+    if isinstance(result, dict):
+        raw = str(result.get("response") or result.get("reply") or "")
+    else:
+        raw = str(result or "")
+    return _validated_orchestrator_draft_or_fallback(raw_response=raw, fallback=fallback)
+
+
 def _orchestrator_skill_suggestions(db: Any, *, actor_email: str, prompt: str) -> list[dict[str, Any]]:
     from duckclaw.admin_user_profiles import ensure_profile_for_user
     from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema
@@ -165,13 +339,7 @@ def _orchestrator_skill_suggestions(db: Any, *, actor_email: str, prompt: str) -
             )
     if suggestions:
         return suggestions[:6]
-    return [
-        {
-            "name": "project_planning",
-            "reason": "Skill sugerida para estructurar objetivos, roles y contexto del proyecto.",
-            "available": False,
-        }
-    ]
+    return []
 
 
 @router.post("/templates/import", dependencies=[Depends(_require_admin_key)])
@@ -329,12 +497,28 @@ async def patch_runtime_settings(
 
 
 @router.get("/workspace/projects", dependencies=[Depends(_require_admin_key)])
-async def list_workspace_projects(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
-    from core.admin_identity import list_projects_with_agents_for_actor, open_gateway_db
+async def list_workspace_projects(
+    q: str = "",
+    status: str = "active",
+    sort: str = "updated_at",
+    direction: str = "desc",
+    limit: int = 25,
+    offset: int = 0,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import list_workspace_projects_page_for_actor, open_gateway_db
 
     with open_gateway_db(read_only=True) as db:
-        projects = list_projects_with_agents_for_actor(db, actor_email=actor)
-    return {"projects": projects}
+        return list_workspace_projects_page_for_actor(
+            db,
+            actor_email=actor,
+            q=q,
+            status=status,
+            sort=sort,
+            direction=direction,
+            limit=limit,
+            offset=offset,
+        )
 
 
 @router.post("/workspace/projects", dependencies=[Depends(_require_admin_key)])
@@ -363,10 +547,54 @@ async def delete_workspace_project(
     from core.admin_identity import deactivate_workspace_project_for_actor, open_gateway_db
 
     with open_gateway_db(read_only=False) as db:
-        ok = deactivate_workspace_project_for_actor(db, actor_email=actor, project_id=project_id)
+        db.execute("BEGIN TRANSACTION")
+        try:
+            ok = deactivate_workspace_project_for_actor(db, actor_email=actor, project_id=project_id)
+            db.execute("COMMIT")
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
     if not ok:
         raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
-    return {"ok": True, "project_id": project_id}
+    return {"ok": True, "hard_deleted": True, "project_id": project_id}
+
+
+@router.post("/workspace/projects/{project_id}/deactivate", dependencies=[Depends(_require_admin_key)])
+async def deactivate_workspace_project(
+    project_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db, set_workspace_project_status_for_actor
+
+    with open_gateway_db(read_only=False) as db:
+        project = set_workspace_project_status_for_actor(
+            db,
+            actor_email=actor,
+            project_id=project_id,
+            status="inactive",
+        )
+    if project is None:
+        raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
+    return {"ok": True, "project": project}
+
+
+@router.post("/workspace/projects/{project_id}/reactivate", dependencies=[Depends(_require_admin_key)])
+async def reactivate_workspace_project(
+    project_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db, set_workspace_project_status_for_actor
+
+    with open_gateway_db(read_only=False) as db:
+        project = set_workspace_project_status_for_actor(
+            db,
+            actor_email=actor,
+            project_id=project_id,
+            status="active",
+        )
+    if project is None:
+        raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
+    return {"ok": True, "project": project}
 
 
 @router.get("/workspace/projects/{project_id}/agents", dependencies=[Depends(_require_admin_key)])
@@ -433,35 +661,21 @@ async def workspace_orchestrator_draft(
     from duckclaw.admin_worker_catalog import ensure_platform_orchestrator_for_actor
 
     prompt = body.prompt.strip()
-    project_name = _orchestrator_title_from_prompt(prompt)
+    tenant_id = "default"
     with open_gateway_db(read_only=False) as db:
-        ensure_platform_orchestrator_for_actor(db, actor_email=actor)
+        orchestrator = ensure_platform_orchestrator_for_actor(db, actor_email=actor)
+        tenant_id = str(orchestrator.get("tenant_id") or "default").strip() or "default"
         suggested_skills = _orchestrator_skill_suggestions(db, actor_email=actor, prompt=prompt)
-    worker_id = _orchestrator_worker_id_from_project(project_name)
-    return {
-        "project": {
-            "name": project_name,
-            "description": prompt[:512],
-        },
-        "workers": [
-            {
-                "worker_id": worker_id,
-                "display_name": project_name,
-                "role": "member",
-                "system_prompt": (
-                    "Ayuda al usuario a cumplir el objetivo del proyecto usando el contexto compartido, "
-                    "preguntando antes de asumir datos faltantes."
-                ),
-            }
-        ],
-        "shared_context": f"# Contexto compartido\n\nObjetivo inicial:\n\n{prompt}",
-        "suggested_skills": suggested_skills,
-        "questions": [
-            "¿Qué fuentes de datos debe usar este proyecto?",
-            "¿Qué resultado concreto esperas del worker principal?",
-            "¿Hay restricciones de tono, seguridad o aprobación humana?",
-        ],
-    }
+    fallback = _orchestrator_fallback_draft(prompt=prompt, suggested_skills=suggested_skills)
+    if not _orchestrator_has_configured_llm(tenant_id=tenant_id, actor=actor):
+        return fallback
+    return await _orchestrator_model_draft_or_fallback(
+        actor=actor,
+        tenant_id=tenant_id,
+        prompt=prompt,
+        fallback=fallback,
+        suggested_skills=suggested_skills,
+    )
 
 
 @router.post("/workspace/orchestrator/confirm", dependencies=[Depends(_require_admin_key)])

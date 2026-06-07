@@ -85,6 +85,12 @@ El draft no crea recursos. Solo prepara una propuesta revisable.
 
 La confirmación debe ser idempotente por `request_id` cuando se agregue soporte de UI completo. En la primera fase, la UI debe evitar doble submit y el backend debe reutilizar workers existentes del actor si el `worker_id` ya existe.
 
+## Guía Sobre Proyectos Existentes
+
+Cuando el usuario abre un proyecto existente con `platform-orchestrator`, el Gateway debe usar `main.admin_projects.description` como contexto primario del LLM. Esa descripción representa el objetivo del proyecto y debe orientar respuestas, preguntas de seguimiento, propuesta de workers, skills y próximos pasos.
+
+El orquestador puede leer proyectos activos visibles para el actor y proponer cambios, pero solo puede escribir tras confirmación explícita. Los proyectos `inactive` quedan fuera de Playground/contexto LLM hasta reactivarse. La acción “Eliminar definitivo” de proyectos es hard-delete del contenedor y sus relaciones, sin borrar workers, versions, contexts ni skills.
+
 ## Skills
 
 La sugerencia de skills lee `main.admin_skills` y los snippets expuestos por `GET /catalog/skills`. El orquestador puede recomendar skills no instaladas, pero debe marcarlas como `available=false` y explicar que requieren instalación/configuración.
@@ -107,3 +113,5 @@ API keys como `DEEPSEEK_API_KEY` siguen siendo secretos bootstrap por `.env` has
 - El draft guiado no escribe en DB.
 - La confirmación crea proyecto, workers, contexto y asignaciones en tablas DB-first.
 - Tests cubren aislamiento por tenant, bootstrap del worker y endpoints draft/confirm.
+- Tests cubren que un proyecto existente inyecta `name` y `description` al contexto LLM cuando Playground envía `project_id`.
+- Tests cubren que el enlace “guiar con Orchestrator” usa `worker=platform-orchestrator&project=<project_id>`.

@@ -408,6 +408,61 @@ def reactivate_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id:
     return get_worker_by_uid(db, worker["worker_uid"]) or worker
 
 
+def hard_delete_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id: str) -> dict[str, Any] | None:
+    """Physically remove an actor-owned catalog worker and worker-scoped relations."""
+    ensure_admin_worker_catalog_schema(db)
+    actor = (actor_email or "").strip().lower()
+    if "@" not in actor:
+        return None
+    profile = ensure_profile_for_user(db, email=actor)
+    worker = get_worker_by_tenant_worker_id(
+        db,
+        tenant_id=profile["tenant_id"],
+        worker_id=worker_id,
+    )
+    if not worker or worker["owner_email"] != profile["email"]:
+        return None
+    worker_uid = str(worker.get("worker_uid") or "")
+    if not worker_uid:
+        return None
+    for table in (
+        "admin_project_agents",
+        "admin_worker_assignments",
+        "admin_worker_contexts",
+        "admin_worker_versions",
+        "admin_worker_skills",
+        "admin_worker_capabilities",
+    ):
+        db.execute(
+            f"""
+            DELETE FROM main.{table}
+            WHERE worker_uid = '{_sql_lit(worker_uid, 64)}'
+            """
+        )
+    from duckclaw.admin_user_agents import ensure_admin_user_agents_table
+
+    ensure_admin_user_agents_table(db)
+    db.execute(
+        f"""
+        DELETE FROM main.admin_user_agents
+        WHERE tenant_id = '{_sql_lit(profile["tenant_id"], 128)}'
+          AND owner_email = '{_sql_lit(profile["email"], 256)}'
+          AND worker_id = '{_sql_lit(worker["worker_id"], 64)}'
+        """
+    )
+    db.execute(
+        f"""
+        DELETE FROM main.admin_worker_catalog
+        WHERE worker_uid = '{_sql_lit(worker_uid, 64)}'
+          AND owner_email = '{_sql_lit(profile["email"], 256)}'
+        """
+    )
+    remaining = get_worker_by_uid(db, worker_uid)
+    if remaining:
+        return None
+    return worker
+
+
 def add_worker_version(
     db: Any,
     *,

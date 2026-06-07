@@ -27,6 +27,9 @@ def test_admin_login_has_public_bootstrap_status_contract() -> None:
     assert "/api/v1/admin/health" in lib
     assert "canAttemptLogin" in lib
     assert "gateway_unreachable" in lib
+    assert "pm2Status" in lib
+    assert "recoveryCommand" in lib
+    assert "pm2 jlist" in lib
 
 
 def test_login_page_renders_degraded_gateway_state_without_masking_as_credentials() -> None:
@@ -42,5 +45,7 @@ def test_login_page_renders_degraded_gateway_state_without_masking_as_credential
     assert "disabled={isSubmitting || !bootstrap.canAttemptLogin}" in login
     assert "Gateway iniciando" in banner
     assert "Reintentando automáticamente" in banner
+    assert "pnpm stack:up" in banner
+    assert "status.recoveryCommand" in banner
     assert "gateway_unreachable" in store
     assert "Gateway no disponible" in store

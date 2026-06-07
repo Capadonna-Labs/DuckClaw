@@ -22,7 +22,8 @@ export default function TemplatesPage() {
   const [items, setItems] = useState<TemplateSummary[]>([]);
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<TemplateSummary | null>(null);
+  const [pendingDeactivate, setPendingDeactivate] = useState<TemplateSummary | null>(null);
+  const [pendingHardDelete, setPendingHardDelete] = useState<TemplateSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [includePrefixes, setIncludePrefixes] = useState('');
   const [includeTemplates, setIncludeTemplates] = useState('');
@@ -42,16 +43,31 @@ export default function TemplatesPage() {
     reload();
   }, [reload]);
 
-  const confirmDelete = async () => {
-    if (!pendingDelete || !canWrite) return;
+  const confirmDeactivate = async () => {
+    if (!pendingDeactivate || !canWrite) return;
     setDeleting(true);
     setError(null);
     try {
-      await adminService.deleteTemplate(pendingDelete.id);
-      setPendingDelete(null);
+      await adminService.deactivateTemplate(pendingDeactivate.id);
+      setPendingDeactivate(null);
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo eliminar');
+      setError(e instanceof Error ? e.message : 'No se pudo desactivar');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const confirmHardDelete = async () => {
+    if (!pendingHardDelete || !canWrite) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await adminService.hardDeleteTemplate(pendingHardDelete.id);
+      setPendingHardDelete(null);
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo eliminar definitivamente');
     } finally {
       setDeleting(false);
     }
@@ -188,29 +204,49 @@ export default function TemplatesPage() {
           isAdmin={isAdmin}
           showInactive={showInactive}
           onPageChange={setPage}
-          onRequestDelete={setPendingDelete}
+          onRequestDeactivate={setPendingDeactivate}
+          onRequestHardDelete={setPendingHardDelete}
           onRequestReactivate={reactivateTemplate}
         />
       )}
 
       <ConfirmDangerModal
-        isOpen={!!pendingDelete}
+        isOpen={!!pendingDeactivate}
         title="Desactivar del catálogo"
         description="Oculta este worker del catálogo DB-first para tu tenant. No borra carpetas de templates ni archivos en disco."
         confirmLabel="Sí, desactivar del catálogo"
         isLoading={deleting}
         details={
-          pendingDelete
+          pendingDeactivate
             ? [
-                { label: 'Worker ID', value: pendingDelete.id },
-                { label: 'Nombre', value: pendingDelete.name ?? '—' },
-                { label: 'Origen', value: pendingDelete.source ?? 'catalog' },
-                { label: 'Visibilidad', value: pendingDelete.visibility ?? 'private' },
+                { label: 'Worker ID', value: pendingDeactivate.id },
+                { label: 'Nombre', value: pendingDeactivate.name ?? '—' },
+                { label: 'Origen', value: pendingDeactivate.source ?? 'catalog' },
+                { label: 'Visibilidad', value: pendingDeactivate.visibility ?? 'private' },
               ]
             : []
         }
-        onCancel={() => !deleting && setPendingDelete(null)}
-        onConfirm={confirmDelete}
+        onCancel={() => !deleting && setPendingDeactivate(null)}
+        onConfirm={confirmDeactivate}
+      />
+
+      <ConfirmDangerModal
+        isOpen={!!pendingHardDelete}
+        title="Eliminar definitivo"
+        description="Elimina físicamente este worker y sus relaciones DB-first. No borra carpetas de templates legacy."
+        confirmLabel="Sí, eliminar definitivamente"
+        isLoading={deleting}
+        details={
+          pendingHardDelete
+            ? [
+                { label: 'Worker ID', value: pendingHardDelete.id },
+                { label: 'Nombre', value: pendingHardDelete.name ?? '—' },
+                { label: 'Relaciones', value: 'versions, contexts, skills, capabilities y proyectos' },
+              ]
+            : []
+        }
+        onCancel={() => !deleting && setPendingHardDelete(null)}
+        onConfirm={confirmHardDelete}
       />
     </div>
   );
@@ -314,7 +350,8 @@ function AgentsGrid({
   isAdmin,
   showInactive,
   onPageChange,
-  onRequestDelete,
+  onRequestDeactivate,
+  onRequestHardDelete,
   onRequestReactivate,
 }: {
   items: TemplateSummary[];
@@ -325,7 +362,8 @@ function AgentsGrid({
   isAdmin: boolean;
   showInactive: boolean;
   onPageChange: (page: number) => void;
-  onRequestDelete: (t: TemplateSummary) => void;
+  onRequestDeactivate: (t: TemplateSummary) => void;
+  onRequestHardDelete: (t: TemplateSummary) => void;
   onRequestReactivate: (t: TemplateSummary) => void;
 }) {
   return (
@@ -355,7 +393,8 @@ function AgentsGrid({
             agent={agent}
             canWrite={canWrite}
             isAdmin={isAdmin}
-            onRequestDelete={onRequestDelete}
+            onRequestDeactivate={onRequestDeactivate}
+            onRequestHardDelete={onRequestHardDelete}
             onRequestReactivate={onRequestReactivate}
           />
         ))}
@@ -368,13 +407,15 @@ function AgentCard({
   agent,
   canWrite,
   isAdmin,
-  onRequestDelete,
+  onRequestDeactivate,
+  onRequestHardDelete,
   onRequestReactivate,
 }: {
   agent: TemplateSummary;
   canWrite: boolean;
   isAdmin: boolean;
-  onRequestDelete: (t: TemplateSummary) => void;
+  onRequestDeactivate: (t: TemplateSummary) => void;
+  onRequestHardDelete: (t: TemplateSummary) => void;
   onRequestReactivate: (t: TemplateSummary) => void;
 }) {
   const metadata = agentMetadata(agent);
@@ -446,15 +487,26 @@ function AgentCard({
             Reactivar
           </button>
         )}
-        {canWrite && isCatalogManaged && !isInactive && !isProtectedWorker && (
-          <button
-            type="button"
-            onClick={() => onRequestDelete(agent)}
-            className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30"
-          >
-            <Trash2 size={14} />
-            Desactivar
-          </button>
+        {canWrite && isCatalogManaged && !isProtectedWorker && (
+          <div className="flex flex-wrap justify-end gap-1">
+            {!isInactive && (
+              <button
+                type="button"
+                onClick={() => onRequestDeactivate(agent)}
+                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-700 transition-colors hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/30"
+              >
+                Desactivar
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onRequestHardDelete(agent)}
+              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30"
+            >
+              <Trash2 size={14} />
+              Eliminar definitivo
+            </button>
+          </div>
         )}
       </div>
     </article>

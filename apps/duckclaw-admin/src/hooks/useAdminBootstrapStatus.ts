@@ -35,6 +35,8 @@ export function useAdminBootstrapStatus(): BootstrapState {
             message: 'Gateway iniciando o sin responder.',
             detail: 'No se pudo consultar el estado local de bootstrap.',
             gatewayHint: 'BFF local',
+            pm2Status: 'unknown',
+            recoveryCommand: 'pnpm stack:up',
             checkedAt: new Date().toISOString(),
           } satisfies AdminBootstrapStatus),
         loading: false,

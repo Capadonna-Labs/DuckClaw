@@ -36,18 +36,34 @@ export function BootstrapStatusBanner({
 
   const isGatewayStarting =
     status.code === 'gateway_unreachable' || status.code === 'gateway_unconfigured';
+  const gatewayTitle =
+    isGatewayStarting && status.pm2Status === 'missing'
+      ? 'Gateway no registrado en PM2'
+      : isGatewayStarting
+        ? 'Gateway iniciando'
+        : status.message;
+  const gatewayDetail =
+    isGatewayStarting && status.pm2Status === 'missing'
+      ? 'El frontend está listo, pero falta iniciar el stack backend con el launcher operativo.'
+      : isGatewayStarting
+        ? 'Reintentando automáticamente. Puedes abrir la interfaz antes del Gateway sin perder el flujo.'
+        : 'Revisa la configuración bootstrap del BFF y del Gateway.';
 
   return (
     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
       <p className="flex items-center gap-2 font-semibold">
         {isGatewayStarting ? <Loader2 size={16} className="animate-spin" /> : <AlertCircle size={16} />}
-        {isGatewayStarting ? 'Gateway iniciando' : status.message}
+        {gatewayTitle}
       </p>
-      <p className="mt-1 text-xs text-amber-800">
-        {isGatewayStarting
-          ? 'Reintentando automáticamente. Puedes abrir la interfaz antes del Gateway sin perder el flujo.'
-          : 'Revisa la configuración bootstrap del BFF y del Gateway.'}
-      </p>
+      <p className="mt-1 text-xs text-amber-800">{gatewayDetail}</p>
+      {isGatewayStarting && (
+        <p className="mt-2 text-xs text-amber-800">
+          Arranque recomendado:{' '}
+          <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px]">
+            {status.recoveryCommand || 'pnpm stack:up'}
+          </code>
+        </p>
+      )}
       {status.gatewayHint && (
         <p className="mt-2 font-mono text-[11px] text-amber-700">{status.gatewayHint}</p>
       )}

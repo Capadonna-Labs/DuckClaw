@@ -563,6 +563,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         _gateway_log.warning("llm_usage_log: no se pudo asegurar tabla al arranque: %s", exc)
 
+    try:
+        from duckclaw.catalog_seed import seed_catalog_if_empty
+
+        seed_catalog_if_empty(get_db())
+        _gateway_log.info("catalog: templates importados desde filesystem")
+    except Exception as exc:  # noqa: BLE001
+        _gateway_log.debug("catalog seed skipped: %s", exc)
+
     yield
 
     _gt = getattr(app.state, "goals_ticker_task", None)

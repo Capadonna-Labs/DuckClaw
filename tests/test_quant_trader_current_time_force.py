@@ -96,8 +96,8 @@ def test_incoming_has_vlm_context() -> None:
     assert not _incoming_has_vlm_context("solo texto sin vlm")
 
 
-def test_spec_logical_worker_id_quant_trader() -> None:
-    spec = load_manifest("Quant-Trader")
+def test_spec_logical_worker_id_quant_trader(catalog_db) -> None:
+    spec = load_manifest("Quant-Trader", db=catalog_db, tenant_id="default")
     lid = _spec_logical_worker_id(spec)
     assert lid == "quant_trader"
     assert is_quant_trader(lid)
@@ -234,8 +234,8 @@ def test_market_worker_ids_and_egress_brand() -> None:
     assert _market_worker_egress_brand("quant_trader") == "Quant-Trader"
 
 
-def test_finanz_manifest_is_market_worker() -> None:
-    spec = load_manifest("finanz")
+def test_finanz_manifest_is_market_worker(catalog_db) -> None:
+    spec = load_manifest("finanz", db=catalog_db, tenant_id="default")
     lid = _spec_logical_worker_id(spec)
     assert lid == WORKER_FINANZ
     assert is_finanz(lid)

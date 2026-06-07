@@ -26,6 +26,20 @@ def db():
     return DuckClaw(path)
 
 
+@pytest.fixture(autouse=True)
+def _patch_catalog(monkeypatch, catalog_db):
+    from duckclaw.workers.factory import list_workers as _real_lw
+    from duckclaw.workers.manifest import load_manifest as _real_lm
+    monkeypatch.setattr(
+        "duckclaw.workers.factory.list_workers",
+        lambda **kw: _real_lw(db=catalog_db, tenant_id="default", **kw),
+    )
+    monkeypatch.setattr(
+        "duckclaw.workers.manifest.load_manifest",
+        lambda wid, **kw: _real_lm(wid, db=catalog_db, tenant_id="default", **kw),
+    )
+
+
 def test_role_switch_stores_worker_id(db) -> None:
     """/role finanz stores worker_id in agent_config."""
     chat_id = "test_role_123"
@@ -80,11 +94,11 @@ def test_handle_command_processes_role(db) -> None:
     assert get_worker_id_for_chat(db, chat_id) == "manager"
 
 
-def test_role_no_args_shows_usage(db) -> None:
+def test_role_no_args_shows_usage(db, catalog_db) -> None:
     """/role without args shows usage and available workers."""
     chat_id = "test_role_usage"
     reply = execute_role_switch(db, chat_id, "")
     assert "Uso" in reply or "role" in reply.lower()
-    available = list_workers()
+    available = list_workers(db=catalog_db, tenant_id="default")
     if available:
         assert any(w in reply for w in available)

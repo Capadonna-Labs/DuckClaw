@@ -3778,6 +3778,8 @@ def build_worker_graph(
     tool_surface: Literal["full", "context_synthesis", "visual_generation", "url_research"] = "full",
     incoming_hint: str | None = None,
     open_vault_read_only: bool = False,
+    db: Any | None = None,
+    tenant_id: str = "default",
 ) -> Any:
     """
     Build a compiled LangGraph for a worker. Used by AgentAssembler._build_worker
@@ -3805,8 +3807,11 @@ def build_worker_graph(
     ``open_vault_read_only``: para ``SUMMARIZE_NEW_CONTEXT`` / ``SUMMARIZE_STORED_CONTEXT`` el worker no debe
     escribir en la bóveda (spec Context Injection). Abrir RW compite con el **db-writer** cuando éste inserta
     contexto vía cola en el mismo ``.duckdb``; DuckDB permite **solo lectura** concurrente con otro proceso en RW.
+
+    Si ``db`` se proporciona, el WorkerSpec se carga desde el DB catalog
+    (``admin_worker_catalog``) en lugar del filesystem ``forge/templates/``.
     """
-    spec = load_manifest(worker_id, templates_root)
+    spec = load_manifest(worker_id, templates_root, db=db, tenant_id=tenant_id)
     path = _get_db_path(worker_id, instance_name, db_path)
     shared_resolved = _resolve_shared_db_path(spec, shared_db_path)
 
@@ -7837,8 +7842,13 @@ def build_worker_graph(
     return compiled
 
 
-def list_workers(templates_root: Optional[Path] = None) -> list[str]:
-    """Return worker_id for each template in templates/workers/."""
+def list_workers(
+    templates_root: Optional[Path] = None,
+    db: Any | None = None,
+    tenant_id: str = "default",
+) -> list[str]:
+    """Return worker_id for each template (filesystem + DB catalog if available)."""
+    fs_ids: list[str] = []
     if templates_root is not None:
         workers_dir = templates_root / "templates" / "workers"
     else:
@@ -7846,9 +7856,24 @@ def list_workers(templates_root: Optional[Path] = None) -> list[str]:
             from duckclaw.forge import WORKERS_TEMPLATES_DIR
             workers_dir = WORKERS_TEMPLATES_DIR
         except ImportError:
-            # packages/agents/src/duckclaw/workers -> packages/agents
             root = Path(__file__).resolve().parent.parent.parent.parent
             workers_dir = root / "templates" / "workers"
-    if not workers_dir.is_dir():
-        return []
-    return [d.name for d in workers_dir.iterdir() if d.is_dir() and (d / "manifest.yaml").is_file()]
+    if workers_dir.is_dir():
+        fs_ids = [d.name for d in workers_dir.iterdir() if d.is_dir() and (d / "manifest.yaml").is_file()]
+
+    cat_ids: list[str] = []
+    if db is not None:
+        try:
+            from duckclaw.catalog_worker import list_catalog_template_ids
+
+            cat_ids = list_catalog_template_ids(db, tenant_id)
+        except Exception as exc:
+            _log.warning("list_workers catalog fallback failed: %s", exc)
+
+    seen: set[str] = set()
+    merged: list[str] = []
+    for wid in fs_ids + cat_ids:
+        if wid not in seen:
+            seen.add(wid)
+            merged.append(wid)
+    return merged

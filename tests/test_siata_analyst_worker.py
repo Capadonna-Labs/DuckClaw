@@ -18,8 +18,8 @@ from duckclaw.workers.loader import append_domain_closure_block, load_system_pro
 from duckclaw.workers.manifest import load_manifest
 
 
-def test_siata_analyst_manifest_extensions_and_network() -> None:
-    spec = load_manifest("SIATA-Analyst")
+def test_siata_analyst_manifest_extensions_and_network(catalog_db) -> None:
+    spec = load_manifest("SIATA-Analyst", db=catalog_db, tenant_id="default")
     assert spec.logical_worker_id == "siata_analyst"
     assert spec.read_only is True
     assert spec.duckdb_extensions == ["httpfs", "json"]
@@ -30,8 +30,8 @@ def test_siata_analyst_manifest_extensions_and_network() -> None:
     assert (spec.openweather_config or {}).get("enabled") is True
 
 
-def test_siata_analyst_prompts_contain_siata_and_read_sql() -> None:
-    spec = load_manifest("SIATA-Analyst")
+def test_siata_analyst_prompts_contain_siata_and_read_sql(catalog_db) -> None:
+    spec = load_manifest("SIATA-Analyst", db=catalog_db, tenant_id="default")
     base = load_system_prompt(spec)
     assert "PM2.5" in base or "pm25" in base.lower()
     assert "read_sql" in base
@@ -47,15 +47,15 @@ def test_siata_analyst_prompts_contain_siata_and_read_sql() -> None:
     assert "ventas" in closed.lower() or "finanzas" in closed.lower()
 
 
-def test_scrape_siata_radar_skill_registered(tmp_path: Path) -> None:
+def test_scrape_siata_radar_skill_registered(catalog_db, tmp_path: Path) -> None:
     db = DuckClaw(str(tmp_path / "siata_tools.duckdb"))
-    spec = load_manifest("SIATA-Analyst")
+    spec = load_manifest("SIATA-Analyst", db=catalog_db, tenant_id="default")
     tools = _build_worker_tools(db, spec)
     names = {t.name for t in tools}
     assert "scrape_siata_radar_realtime" in names
 
 
-def test_siata_openweather_bridge_registration_called(tmp_path: Path) -> None:
+def test_siata_openweather_bridge_registration_called(catalog_db, tmp_path: Path) -> None:
     db_path = str(tmp_path / "siata_openweather_bridge.duckdb")
     db = DuckClaw(db_path)
 
@@ -73,6 +73,7 @@ def test_siata_openweather_bridge_registration_called(tmp_path: Path) -> None:
             _StubLLM(),
             reuse_db=db,
             tool_surface="full",
+            db=catalog_db,
         )
         m_ow.assert_called_once()
 
@@ -85,7 +86,7 @@ def _ok_response(text: str) -> MagicMock:
 
 
 @patch("requests.get")
-def test_scrape_siata_radar_nested_folders(mock_get: MagicMock, tmp_path: Path) -> None:
+def test_scrape_siata_radar_nested_folders(mock_get: MagicMock, catalog_db, tmp_path: Path) -> None:
     index_html = """
     <tr class="even"><td class="indexcolname"><a href="40/">40/</a></td></tr>
     """
@@ -102,7 +103,7 @@ def test_scrape_siata_radar_nested_folders(mock_get: MagicMock, tmp_path: Path) 
         _ok_response(files_html),
     ]
     db = DuckClaw(str(tmp_path / "radar_nested.duckdb"))
-    spec = load_manifest("SIATA-Analyst")
+    spec = load_manifest("SIATA-Analyst", db=catalog_db, tenant_id="default")
     tools = _build_worker_tools(db, spec)
     tool = {t.name: t for t in tools}["scrape_siata_radar_realtime"]
 
@@ -120,7 +121,7 @@ def test_scrape_siata_radar_nested_folders(mock_get: MagicMock, tmp_path: Path) 
 
 
 @patch("requests.get")
-def test_scrape_siata_radar_compact_timestamp_filename(mock_get: MagicMock, tmp_path: Path) -> None:
+def test_scrape_siata_radar_compact_timestamp_filename(mock_get: MagicMock, catalog_db, tmp_path: Path) -> None:
     """YYYYMMDDHHMM antes de la extensión (p. ej. 202603291623.png como en producción)."""
     index_html = '<tr class="even"><td class="indexcolname"><a href="20_DBZH/">20_DBZH/</a></td></tr>'
     sub_html = '<a href="20260329/">20260329/</a>'
@@ -131,7 +132,7 @@ def test_scrape_siata_radar_compact_timestamp_filename(mock_get: MagicMock, tmp_
         _ok_response(files_html),
     ]
     db = DuckClaw(str(tmp_path / "radar_compact.duckdb"))
-    spec = load_manifest("SIATA-Analyst")
+    spec = load_manifest("SIATA-Analyst", db=catalog_db, tenant_id="default")
     tools = _build_worker_tools(db, spec)
     tool = {t.name: t for t in tools}["scrape_siata_radar_realtime"]
     out = tool.invoke({})
@@ -143,7 +144,7 @@ def test_scrape_siata_radar_compact_timestamp_filename(mock_get: MagicMock, tmp_
 
 
 @patch("requests.get")
-def test_scrape_siata_radar_date_at_root(mock_get: MagicMock, tmp_path: Path) -> None:
+def test_scrape_siata_radar_date_at_root(mock_get: MagicMock, catalog_db, tmp_path: Path) -> None:
     index_html = """
     <a href="20260329/">d2</a>
     """
@@ -151,7 +152,7 @@ def test_scrape_siata_radar_date_at_root(mock_get: MagicMock, tmp_path: Path) ->
     mock_get.side_effect = [_ok_response(index_html), _ok_response(files_html)]
 
     db = DuckClaw(str(tmp_path / "radar_root.duckdb"))
-    spec = load_manifest("SIATA-Analyst")
+    spec = load_manifest("SIATA-Analyst", db=catalog_db, tenant_id="default")
     tools = _build_worker_tools(db, spec)
     tool = {t.name: t for t in tools}["scrape_siata_radar_realtime"]
     out = tool.invoke({})
@@ -165,10 +166,10 @@ def test_scrape_siata_radar_date_at_root(mock_get: MagicMock, tmp_path: Path) ->
 
 
 @patch("requests.get")
-def test_scrape_siata_radar_connection_error(mock_get: MagicMock, tmp_path: Path) -> None:
+def test_scrape_siata_radar_connection_error(mock_get: MagicMock, catalog_db, tmp_path: Path) -> None:
     mock_get.side_effect = requests.exceptions.ConnectionError("refused")
     db = DuckClaw(str(tmp_path / "radar_err.duckdb"))
-    spec = load_manifest("SIATA-Analyst")
+    spec = load_manifest("SIATA-Analyst", db=catalog_db, tenant_id="default")
     tools = _build_worker_tools(db, spec)
     tool = {t.name: t for t in tools}["scrape_siata_radar_realtime"]
     out = tool.invoke({})
@@ -177,9 +178,9 @@ def test_scrape_siata_radar_connection_error(mock_get: MagicMock, tmp_path: Path
     assert "error" in data
 
 
-def test_siata_read_json_requires_limit(tmp_path: Path) -> None:
+def test_siata_read_json_requires_limit(catalog_db, tmp_path: Path) -> None:
     db = DuckClaw(str(tmp_path / "siata_limit.duckdb"))
-    spec = load_manifest("SIATA-Analyst")
+    spec = load_manifest("SIATA-Analyst", db=catalog_db, tenant_id="default")
     tools = _build_worker_tools(db, spec)
     by_name = {t.name: t for t in tools}
     bad = by_name["read_sql"].invoke({"query": "SELECT * FROM read_json_auto('https://example.com/x.json')"})

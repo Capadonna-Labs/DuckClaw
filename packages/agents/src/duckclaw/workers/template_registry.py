@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import yaml
@@ -20,16 +20,37 @@ def _templates_dir(templates_root: Path | None = None) -> Path:
     return WORKERS_TEMPLATES_DIR
 
 
-def list_template_ids(templates_root: Path | None = None) -> list[str]:
-    """Ids canónicos = nombre de carpeta con manifest.yaml."""
+def list_template_ids(
+    templates_root: Path | None = None,
+    db: Any | None = None,
+    tenant_id: str = "default",
+) -> list[str]:
+    """Ids canónicos = filesystem templates + DB catalog (if db provided)."""
     root = _templates_dir(templates_root)
-    if not root.is_dir():
-        return []
-    return sorted(
-        d.name
-        for d in root.iterdir()
-        if d.is_dir() and (d / "manifest.yaml").is_file()
-    )
+    fs_ids: list[str] = []
+    if root.is_dir():
+        fs_ids = sorted(
+            d.name
+            for d in root.iterdir()
+            if d.is_dir() and (d / "manifest.yaml").is_file()
+        )
+
+    cat_ids: list[str] = []
+    if db is not None:
+        try:
+            from duckclaw.catalog_worker import list_catalog_template_ids
+
+            cat_ids = list_catalog_template_ids(db, tenant_id)
+        except Exception:
+            pass
+
+    seen: set[str] = set()
+    merged: list[str] = []
+    for wid in fs_ids + cat_ids:
+        if wid not in seen:
+            seen.add(wid)
+            merged.append(wid)
+    return merged
 
 
 @lru_cache(maxsize=4)

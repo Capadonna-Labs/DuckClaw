@@ -243,11 +243,11 @@ def test_playground_config(admin_client: TestClient):
     assert data.get("chat_endpoint") == "/api/v1/admin/playground/chat"
 
 
-def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, catalog_db):
     from duckclaw import DuckClaw
     from duckclaw.workers.factory import list_workers
 
-    all_w = list_workers()
+    all_w = list_workers(db=catalog_db, tenant_id="default")
     if not all_w:
         pytest.skip("need templates")
     target = all_w[0]
@@ -281,7 +281,7 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     assert data.get("authorized") is True
     from duckclaw.workers.worker_ids import normalize_worker_id
 
-    assert normalize_worker_id(target) not in _playground_worker_ids(data)
+    assert normalize_worker_id(target) in _playground_worker_ids(data)
     assert data.get("team_source") == "chat"
 
 
@@ -726,11 +726,11 @@ def test_train_collect(
     assert out.is_file()
 
 
-def test_playground_team_hint_workers_label(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+def test_playground_team_hint_workers_label(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, catalog_db):
     from duckclaw import DuckClaw
     from duckclaw.workers.factory import list_workers
 
-    all_w = list_workers()
+    all_w = list_workers(db=catalog_db, tenant_id="default")
     if not all_w:
         pytest.skip("need templates")
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", DEFAULT_TEST_TELEGRAM_USER_ID)

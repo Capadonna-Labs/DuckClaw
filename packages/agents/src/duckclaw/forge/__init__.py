@@ -1,26 +1,22 @@
 """
 duckclaw.forge — único punto de instanciación de agentes LangGraph.
 
-Toda la configuración de agentes se declara en YAML dentro de forge/templates/.
-AgentAssembler lee el YAML y devuelve un LangGraph compilado listo para usar.
-
-Spec: Agent Forge Refactor
+Agents are loaded from the DB catalog at runtime. Router YAMLs
+live in forge/ directly. Industry data lives in forge/industries_data/.
 """
+from __future__ import annotations
 
 from pathlib import Path
 
 from .assembler import AgentAssembler
 
-# Rutas a templates built-in
 FORGE_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = FORGE_DIR / "templates"
-ENTRY_ROUTER_YAML = TEMPLATES_DIR / "entry_router.yaml"
-MANAGER_ROUTER_YAML = TEMPLATES_DIR / "manager_router.yaml"
-# Ruta a plantillas de workers: forge/templates/ (cada subdir con manifest.yaml es un worker)
-# finanz, personalizable, powerseal, research_worker, support, etc.
-WORKERS_TEMPLATES_DIR = TEMPLATES_DIR
-INDUSTRIES_TEMPLATES_DIR = TEMPLATES_DIR / "industries"
+ENTRY_ROUTER_YAML = FORGE_DIR / "entry_router.yaml"
+MANAGER_ROUTER_YAML = FORGE_DIR / "manager_router.yaml"
+WORKERS_TEMPLATES_DIR = FORGE_DIR / "seed"  # fallback bootstrap path (only "default")
+INDUSTRIES_TEMPLATES_DIR = FORGE_DIR / "industries_data"
 PROJECTS_DIR = FORGE_DIR / "projects"
+WORKFLOWS_DIR = FORGE_DIR / "workflows"
 
 __all__ = [
     "AgentAssembler",
@@ -29,5 +25,5 @@ __all__ = [
     "WORKERS_TEMPLATES_DIR",
     "INDUSTRIES_TEMPLATES_DIR",
     "PROJECTS_DIR",
-    "TEMPLATES_DIR",
+    "WORKFLOWS_DIR",
 ]

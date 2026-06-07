@@ -14,15 +14,15 @@ from duckclaw.workers.loader import load_seed_sql, run_schema
 from duckclaw.workers.manifest import load_manifest
 
 
-def test_list_workers_includes_bi_analyst() -> None:
-    names = list_workers()
-    assert "BI-Analyst" in names or "bi_analyst" in names
+def test_list_workers_includes_bi_analyst(catalog_db) -> None:
+    names = list_workers(db=catalog_db, tenant_id="default")
+    assert "BI-Analyst" in names or "bi_analyst" in names or "bi-analyst" in names
 
 
-def test_run_schema_loads_seed_data(tmp_path: Path) -> None:
+def test_run_schema_loads_seed_data(catalog_db, tmp_path: Path) -> None:
     db_path = tmp_path / "bi.duckdb"
     db = DuckClaw(str(db_path))
-    spec = load_manifest("BI-Analyst")
+    spec = load_manifest("BI-Analyst", db=catalog_db, tenant_id="default")
     assert "DELETE FROM analytics_core.sales" in load_seed_sql(spec)
     run_schema(db, spec)
     raw = db.query("SELECT COUNT(*) AS c FROM analytics_core.sales")
@@ -32,9 +32,9 @@ def test_run_schema_loads_seed_data(tmp_path: Path) -> None:
     assert int(json.loads(raw_m)[0]["c"]) == 200
 
 
-def test_bi_analyst_tools_readonly_no_run_sql(tmp_path: Path) -> None:
+def test_bi_analyst_tools_readonly_no_run_sql(catalog_db, tmp_path: Path) -> None:
     db = DuckClaw(str(tmp_path / "w.duckdb"))
-    spec = load_manifest("BI-Analyst")
+    spec = load_manifest("BI-Analyst", db=catalog_db, tenant_id="default")
     run_schema(db, spec)
     tools = _build_worker_tools(db, spec)
     names = {t.name for t in tools}
@@ -45,9 +45,9 @@ def test_bi_analyst_tools_readonly_no_run_sql(tmp_path: Path) -> None:
     assert "admin_sql" not in names
 
 
-def test_bi_analyst_select_star_requires_limit(tmp_path: Path) -> None:
+def test_bi_analyst_select_star_requires_limit(catalog_db, tmp_path: Path) -> None:
     db = DuckClaw(str(tmp_path / "w2.duckdb"))
-    spec = load_manifest("BI-Analyst")
+    spec = load_manifest("BI-Analyst", db=catalog_db, tenant_id="default")
     run_schema(db, spec)
     tools = _build_worker_tools(db, spec)
     by_name = {t.name: t for t in tools}
@@ -60,8 +60,8 @@ def test_bi_analyst_select_star_requires_limit(tmp_path: Path) -> None:
     assert len(parsed) == 3
 
 
-def test_manifest_context_pruning_config() -> None:
-    spec = load_manifest("BI-Analyst")
+def test_manifest_context_pruning_config(catalog_db) -> None:
+    spec = load_manifest("BI-Analyst", db=catalog_db, tenant_id="default")
     cp = getattr(spec, "context_pruning_config", None)
     assert isinstance(cp, dict)
     assert cp.get("enabled") is True

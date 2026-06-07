@@ -122,9 +122,9 @@ def test_synthesize_user_visible_reply_finanz_adds_subtotal_rules_to_system() ->
     assert "ibkr" in (msgs[0].content or "").lower()
 
 
-def test_load_manifest_default_egress_nl_true() -> None:
+def test_load_manifest_default_egress_nl_true(catalog_db) -> None:
     """finanz manifest debe asumir síntesis activa sin clave explícita."""
-    spec = load_manifest("finanz")
+    spec = load_manifest("finanz", db=catalog_db, tenant_id="default")
     assert spec.egress_natural_language_synthesis is True
 
 

@@ -584,6 +584,17 @@ def test_manager_capabilities_fast_path_ok() -> None:
     assert "resumen" in fz or "cuenta" in fz
 
 
+def _fake_load_manifest(wid, *a, **kw):
+    from unittest.mock import MagicMock
+
+    s = MagicMock()
+    s.browser_sandbox = True
+    s.egress_natural_language_synthesis = True
+    s.worker_id = wid
+    s.skills_list = []
+    return s
+
+
 def test_entry_worker_id_routes_normal_message_to_bound_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     """Telegram multiplex: entry_worker_id debe ganar a available[0] (evita finanz en bot PQRSD)."""
     from duckclaw.graphs.manager_graph import build_manager_graph
@@ -606,6 +617,7 @@ def test_entry_worker_id_routes_normal_message_to_bound_worker(monkeypatch: pyte
     def _fake_builder(worker_id, *_args, **_kwargs):  # noqa: ANN001
         return _FakeWorkerGraph(str(worker_id))
 
+    monkeypatch.setattr("duckclaw.workers.manifest.load_manifest", _fake_load_manifest)
     monkeypatch.setattr("duckclaw.workers.factory.build_worker_graph", _fake_builder)
     monkeypatch.setattr(
         "duckclaw.workers.factory.list_workers",
@@ -642,6 +654,7 @@ def test_entry_worker_id_routes_normal_message_to_bound_worker(monkeypatch: pyte
 
 
 def test_manager_a2a_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("duckclaw.workers.manifest.load_manifest", _fake_load_manifest)
     from duckclaw.graphs.manager_graph import build_manager_graph
 
     monkeypatch.delenv("DUCKCLAW_DEFAULT_WORKER_ID", raising=False)
@@ -710,6 +723,7 @@ def test_manager_a2a_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pyt
 
 
 def test_manager_job_track_marker_routes_finanz_to_jobhunter_and_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("duckclaw.workers.manifest.load_manifest", _fake_load_manifest)
     """A2A JOB_OPPORTUNITY_TRACKING: Finanz emite marcador → JobHunter persiste → Finanz confirma."""
     from duckclaw.graphs.manager_graph import build_manager_graph
 
@@ -779,17 +793,7 @@ def test_manager_job_track_marker_routes_finanz_to_jobhunter_and_back(monkeypatc
 
 
 def test_finanz_manifest_includes_job_opportunities_allowlist() -> None:
-    raw = (
-        Path(__file__).resolve().parents[1]
-        / "packages"
-        / "agents"
-        / "src"
-        / "duckclaw"
-        / "forge"
-        / "templates"
-        / "finanz"
-        / "manifest.yaml"
-    ).read_text(encoding="utf-8")
+    raw = Path("/tmp/seed_templates/finanz/manifest.yaml").read_text(encoding="utf-8")
     assert "job_opportunities" in raw
     assert "allowed_tables:" in raw
 
@@ -1104,11 +1108,11 @@ def test_should_disable_mercenary_admin_ui_chat() -> None:
     assert not _should_disable_mercenary_for_admin_ui("123456789")
 
 
-def test_strip_mercenary_spec_for_browser_worker_quant() -> None:
+def test_strip_mercenary_spec_for_browser_worker_quant(catalog_db) -> None:
     from duckclaw.graphs.manager_graph import _strip_mercenary_spec_for_browser_worker
 
     out = {"assigned_worker_id": "Quant-Trader", "mercenary_spec": {"directive": "x", "timeout": 30}}
-    assert _strip_mercenary_spec_for_browser_worker(out) is True
+    assert _strip_mercenary_spec_for_browser_worker(out, db=catalog_db) is True
     assert "mercenary_spec" not in out
 
 

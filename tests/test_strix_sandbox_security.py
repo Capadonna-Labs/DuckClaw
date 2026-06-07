@@ -15,8 +15,7 @@ def test_load_security_policy_missing_file_defaults_to_deny() -> None:
 
 
 def test_load_security_policy_finanz_file_is_valid() -> None:
-    repo_root = Path(__file__).resolve().parent.parent
-    worker_dir = repo_root / "packages" / "agents" / "src" / "duckclaw" / "forge" / "templates" / "finanz"
+    worker_dir = Path("/tmp/seed_templates/finanz")
     policy = load_security_policy("finanz", worker_dir=worker_dir)
     assert isinstance(policy, SecurityPolicy)
     assert policy.network.default == "allow"
@@ -26,50 +25,30 @@ def test_load_security_policy_finanz_file_is_valid() -> None:
 
 
 def test_quant_trader_security_policy_sandbox_ttl() -> None:
-    repo_root = Path(__file__).resolve().parent.parent
-    worker_dir = (
-        repo_root
-        / "packages"
-        / "agents"
-        / "src"
-        / "duckclaw"
-        / "forge"
-        / "templates"
-        / "Quant-Trader"
-    )
+    worker_dir = Path("/tmp/seed_templates/Quant-Trader")
     policy = load_security_policy("Quant-Trader", worker_dir=worker_dir)
     assert policy.network.default == "allow"
     assert policy.max_execution_time_seconds == 600
 
 
 def test_job_hunter_security_policy_browser_ttl() -> None:
-    repo_root = Path(__file__).resolve().parent.parent
-    worker_dir = (
-        repo_root
-        / "packages"
-        / "agents"
-        / "src"
-        / "duckclaw"
-        / "forge"
-        / "templates"
-        / "Job-Hunter"
-    )
+    worker_dir = Path("/tmp/seed_templates/Job-Hunter")
     policy = load_security_policy("Job-Hunter", worker_dir=worker_dir)
     assert policy.network.default == "allow"
     assert policy.max_execution_time_seconds == 300
 
 
-def test_worker_manifest_browser_sandbox_flag() -> None:
+def test_worker_manifest_browser_sandbox_flag(catalog_db) -> None:
     from duckclaw.workers.manifest import load_manifest
 
-    spec = load_manifest("Job-Hunter")
+    spec = load_manifest("Job-Hunter", db=catalog_db, tenant_id="default")
     assert spec.browser_sandbox is True
     assert spec.research_config is not None
 
-    finanz = load_manifest("finanz")
+    finanz = load_manifest("finanz", db=catalog_db, tenant_id="default")
     assert finanz.browser_sandbox is True
 
-    quant = load_manifest("Quant-Trader")
+    quant = load_manifest("Quant-Trader", db=catalog_db, tenant_id="default")
     assert quant.browser_sandbox is True
 
 

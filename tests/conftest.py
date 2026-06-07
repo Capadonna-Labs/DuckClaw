@@ -165,3 +165,106 @@ def gateway_admin_client(gateway_db: Path, monkeypatch: pytest.MonkeyPatch, sess
     client = TestClient(load_gateway_app())
     client.app.state.redis = session_redis
     return client
+
+
+@pytest.fixture(scope="session")
+def catalog_db():
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    import duckdb
+
+    from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema
+    from duckclaw.catalog_seed import seed_catalog_from_templates
+
+    tmp = Path(tempfile.mkdtemp())
+    db = duckdb.connect(str(tmp / "catalog.duckdb"))
+    ensure_admin_worker_catalog_schema(db)
+
+    _extract_test_seeds(tmp)
+    seed_catalog_from_templates(
+        db,
+        owner_email="test@duckclaw.local",
+        templates_root=str(tmp / "seed_templates"),
+        include_template_ids=(),
+        tenant_id="default",
+    )
+
+    yield db
+    db.close()
+
+
+def _extract_test_seeds(target: Path) -> None:
+    """Extract template files from git history for test catalog seeding."""
+    import subprocess
+
+    commit = "60295ad"
+    templates_source = "packages/agents/src/duckclaw/forge/templates"
+    seed_dir = target / "seed_templates"
+
+    # Workers to extract
+    for wid in ("BI-Analyst", "default", "finanz", "Job-Hunter", "Manager",
+                "PQRSD-Assistant", "Quant-Trader", "research_worker",
+                "SIATA-Analyst", "support"):
+        wdir = seed_dir / wid
+        wdir.mkdir(parents=True, exist_ok=True)
+        for fname in ("manifest.yaml", "system_prompt.md", "schema.sql",
+                       "seed_data.sql", "soul.md", "domain_closure.md",
+                       "security_policy.yaml", "homeostasis.yaml",
+                       "AGENT_OVERVIEW.md", "orchestrator_planner.md"):
+            src = f"{commit}:{templates_source}/{wid}/{fname}"
+            try:
+                out = subprocess.check_output(
+                    ["git", "show", src],
+                    stderr=subprocess.DEVNULL,
+                )
+                (wdir / fname).write_bytes(out)
+            except subprocess.CalledProcessError:
+                pass
+
+        # Skills
+        try:
+            skill_files = subprocess.check_output(
+                ["git", "ls-tree", "--name-only", f"{commit}:{templates_source}/{wid}/skills"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip().split("\n")
+            sdir = wdir / "skills"
+            sdir.mkdir(exist_ok=True)
+            for sf in skill_files:
+                sf = sf.strip()
+                if sf:
+                    out = subprocess.check_output(
+                        ["git", "show", f"{commit}:{templates_source}/{wid}/skills/{sf}"],
+                        stderr=subprocess.DEVNULL,
+                    )
+                    (sdir / sf).write_bytes(out)
+        except subprocess.CalledProcessError:
+            pass
+
+        # Guardrails
+        try:
+            gr_files = subprocess.check_output(
+                ["git", "ls-tree", "--name-only", f"{commit}:{templates_source}/{wid}/guardrails"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip().split("\n")
+            gdir = wdir / "guardrails"
+            gdir.mkdir(exist_ok=True)
+            for gf in gr_files:
+                gf = gf.strip()
+                if gf:
+                    out = subprocess.check_output(
+                        ["git", "show", f"{commit}:{templates_source}/{wid}/guardrails/{gf}"],
+                        stderr=subprocess.DEVNULL,
+                    )
+                    (gdir / gf).write_bytes(out)
+        except subprocess.CalledProcessError:
+            pass
+
+
+def load_test_manifest(worker_id, db):
+    from duckclaw.workers.manifest import load_manifest
+
+    return load_manifest(worker_id, db=db, tenant_id="default")

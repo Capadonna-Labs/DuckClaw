@@ -486,8 +486,8 @@ def add_worker_version(
         VALUES (
           '{_sql_lit(worker_uid, 64)}',
           {version},
-          '{_sql_lit(_json(manifest_snapshot), 65535)}',
-          '{_sql_lit(_json(files_snapshot), 65535)}',
+          '{_sql_lit(_json(manifest_snapshot), 1048576)}',
+          '{_sql_lit(_json(files_snapshot), 1048576)}',
           '{_sql_lit(created_by, 256)}',
           '{_sql_lit(change_note, 512)}'
         )

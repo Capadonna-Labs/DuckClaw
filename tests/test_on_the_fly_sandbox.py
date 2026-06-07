@@ -80,7 +80,7 @@ def test_filter_tools_for_sandbox_removes_run_sandbox() -> None:
     ]
 
 
-def test_admin_ui_chat_defaults_sandbox_enabled(tmp_path) -> None:
+def test_admin_ui_chat_defaults_sandbox_enabled(catalog_db, tmp_path) -> None:
     """admin-conv-* sin clave explícita debe exponer run_browser_sandbox (sandbox ON por defecto)."""
 
     from langchain_core.messages import AIMessage
@@ -101,14 +101,14 @@ def test_admin_ui_chat_defaults_sandbox_enabled(tmp_path) -> None:
     db_path = str(tmp_path / "finanz_admin_default_sandbox.duckdb")
     db = DuckClaw(db_path)
     chat_admin = "admin-conv-test-default-sandbox"
-    worker_graph = build_worker_graph("finanz", db_path, _StubLLM(), reuse_db=db)
+    worker_graph = build_worker_graph("finanz", db_path, _StubLLM(), reuse_db=db, db=catalog_db)
     res = worker_graph.invoke(
         {"incoming": "abre una pagina", "history": [], "chat_id": chat_admin}
     )
     assert res.get("reply", "").strip() == "BROWSER_ON"
 
 
-def test_worker_sandbox_binding_respects_chat_id(tmp_path) -> None:
+def test_worker_sandbox_binding_respects_chat_id(catalog_db, tmp_path) -> None:
     """
     Smoke test unitario:
     - Si sandbox_enabled=true para chat_id=X, el worker debe "usar modo ON".
@@ -140,7 +140,7 @@ def test_worker_sandbox_binding_respects_chat_id(tmp_path) -> None:
     set_chat_state(db, chat_on, "sandbox_enabled", "true")
     set_chat_state(db, chat_off, "sandbox_enabled", "false")
 
-    worker_graph = build_worker_graph("finanz", db_path, _StubLLM(), reuse_db=db)
+    worker_graph = build_worker_graph("finanz", db_path, _StubLLM(), reuse_db=db, db=catalog_db)
 
     res_on = worker_graph.invoke(
         {"incoming": "Ejecuta el código: print(2+2)", "history": [], "chat_id": chat_on}
@@ -153,7 +153,7 @@ def test_worker_sandbox_binding_respects_chat_id(tmp_path) -> None:
     assert res_off.get("reply", "").strip() == "SANDBOX_OFF"
 
 
-def test_worker_sandbox_tool_call_uses_chat_id(tmp_path, monkeypatch) -> None:
+def test_worker_sandbox_tool_call_uses_chat_id(catalog_db, tmp_path, monkeypatch) -> None:
     """
     Reproduce el bug observado en logs:
     - Primero el agent genera tool_call: `run_sandbox`
@@ -211,7 +211,7 @@ def test_worker_sandbox_tool_call_uses_chat_id(tmp_path, monkeypatch) -> None:
     set_chat_state(db, chat_on, "sandbox_enabled", "true")
     set_chat_state(db, chat_off, "sandbox_enabled", "false")
 
-    worker_graph = build_worker_graph("finanz", db_path, _StubLLM(), reuse_db=db)
+    worker_graph = build_worker_graph("finanz", db_path, _StubLLM(), reuse_db=db, db=catalog_db)
 
     res_on = worker_graph.invoke(
         {"incoming": "Ejecuta el código: print(2+2)", "history": [], "chat_id": chat_on}

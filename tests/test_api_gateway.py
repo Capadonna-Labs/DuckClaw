@@ -231,7 +231,13 @@ def test_agent_history_requires_session(client: TestClient) -> None:
     assert data.get("worker_id") == "finanz"
 
 
-def test_agent_workers_list(client: TestClient) -> None:
+def test_agent_workers_list(client: TestClient, catalog_db, monkeypatch) -> None:
+    from duckclaw.workers.factory import list_workers as _real_list_workers
+
+    monkeypatch.setattr(
+        "duckclaw.workers.factory.list_workers",
+        lambda **kw: _real_list_workers(db=catalog_db, tenant_id="default", **kw),
+    )
     r = client.get("/api/v1/agent/workers")
     assert r.status_code == 200
     data = r.json()

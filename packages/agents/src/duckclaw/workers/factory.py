@@ -3821,35 +3821,34 @@ def build_worker_graph(
     if reuse_db is not None:
         reuse_path = str(getattr(reuse_db, "_path", "") or "").strip()
     reuse_read_only = bool(getattr(reuse_db, "_read_only", False)) if reuse_db is not None else False
-    skip_private = bool(
-        reuse_db is not None
-        and reuse_path
-        and _same_duckdb_file(reuse_path, path)
-        and not (shared_resolved or "").strip()
-        and not reuse_read_only
-        and not open_vault_read_only
-    )
+    same_as_reuse = bool(reuse_db is not None and reuse_path and _same_duckdb_file(reuse_path, path))
     effective_vault_ro = bool(spec.read_only) or bool(open_vault_read_only)
-    if skip_private:
+    if same_as_reuse and not (shared_resolved or "").strip() and not open_vault_read_only:
         db = reuse_db
-        _log.debug("build_worker_graph: reuse DuckClaw (same file, no shared, skip private ATTACH) path=%s", path)
+        _log.debug(
+            "build_worker_graph: reuse DuckClaw (same file) path=%s ro=%s",
+            path, reuse_read_only,
+        )
     else:
-        # RW: manifest quant_core / señales. RO: manifest read_only o turnos SUMMARIZE_* (sin INSERT en vault).
         # Motor Python para RW en archivo: el manager ya abrió RO con duckdb Python; mezclar bridge C++ (auto)
-        # + Python en el mismo .duckdb en un PID provoca «different configuration» (misma causa que fly en api-gateway).
+        # + Python en el mismo .duckdb en un PID provoca «different configuration».
         _engine: Literal["auto", "python"] = (
             "python"
             if not effective_vault_ro and (path or "").strip() not in ("", ":memory:")
             else "auto"
         )
         db = DuckClaw(path, read_only=effective_vault_ro, engine=_engine)
-    # La conexión DuckClaw ya es al archivo de la bóveda; ATTACH del mismo path como `private`
-    # abre otra vista del mismo archivo y en DuckDB suele disparar «different configuration».
+    # DuckDB no permite dos conexiones con config distinta al mismo archivo en el mismo PID.
+    # Si ya tenemos una conexión (reuse_db) al mismo path, reusarla sin abrir otra.
     db_open_path = str(getattr(db, "_path", "") or path or "").strip()
     vault_path_for_attach = str(path or "").strip()
-    skip_private_attach = bool(skip_private) or _same_duckdb_file(
-        db_open_path, vault_path_for_attach
-    )
+    same_as_attached = _same_duckdb_file(db_open_path, vault_path_for_attach)
+    skip_private_attach = same_as_reuse or same_as_attached
+    if same_as_attached:
+        _log.debug(
+            "build_worker_graph: vault path == db path, skip ATTACH. path=%s",
+            path,
+        )
     _apply_forge_attaches(
         db,
         path,

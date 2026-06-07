@@ -120,8 +120,9 @@ from duckclaw.channels import build_telegram_webhook_delivery_context
 
 from core.telegram_compact_webhook_routes import (
     TelegramPathWebhookBinding,
+    compact_route_to_path_binding,
     fastapi_relative_path,
-    load_path_webhook_bindings_from_env,
+    parse_compact_telegram_webhook_routes,
 )
 
 _log = logging.getLogger("duckclaw.gateway.telegram_inbound_webhook")
@@ -130,6 +131,28 @@ _TELEGRAM_GEMINI_VLM_503_TEXT = (
     "⚠️ Gemini no está disponible para visión en este momento (503). "
     "Reintenta más tarde o configura MLX local (Gemma VLM / mlx_vlm)."
 )
+
+
+def _telegram_webhook_routes_raw() -> str:
+    """Rutas Telegram DB-first con fallback `.env` para bootstrap."""
+    raw_env = (os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()
+    try:
+        from core.admin_identity import open_gateway_db
+        from duckclaw.admin_runtime_settings import resolve_runtime_setting
+
+        with open_gateway_db(read_only=False) as db:
+            resolved = resolve_runtime_setting(
+                db,
+                tenant_id="global",
+                actor_email="",
+                domain="telegram",
+                key="webhook_routes",
+                env_key="DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES",
+                default="",
+            )
+        return str(resolved.get("value") or raw_env or "").strip()
+    except Exception:
+        return raw_env
 
 
 async def _notify_telegram_gemini_vlm_503(*, bot_token: str, chat_id: Any) -> None:
@@ -809,13 +832,16 @@ def build_telegram_inbound_webhook_router(
     router = APIRouter(prefix="/api/v1/telegram", tags=["telegram-inbound-webhook"])
 
     _compact_path_bindings: list[TelegramPathWebhookBinding] = []
-    _raw_compact_routes = (os.environ.get("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES") or "").strip()
+    _raw_compact_routes = _telegram_webhook_routes_raw()
     if _raw_compact_routes and not _raw_compact_routes.startswith("[") and ":/api/" in _raw_compact_routes:
         try:
-            _compact_path_bindings = load_path_webhook_bindings_from_env()
+            _compact_path_bindings = [
+                compact_route_to_path_binding(route)
+                for route in parse_compact_telegram_webhook_routes(_raw_compact_routes)
+            ]
         except ValueError as exc:
             _log.error(
-                "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES (compacto) inválido; rutas por path desactivadas hasta corregir .env: %s",
+                "telegram.webhook_routes inválido; rutas por path desactivadas hasta corregir Runtime Settings o .env fallback: %s",
                 exc,
             )
             _compact_path_bindings = []

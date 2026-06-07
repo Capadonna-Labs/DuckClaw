@@ -44,6 +44,26 @@ _FALLBACKS: dict[tuple[str, str], dict[str, str]] = {
     ("duckdb", "legacy_schemas"): {
         "env_key": "DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS",
         "default": "",
+    },
+    ("duckdb", "legacy_main_tables"): {
+        "env_key": "DUCKCLAW_ADMIN_DUCKDB_LEGACY_MAIN_TABLES",
+        "default": "",
+    },
+    ("telegram", "webhook_routes"): {
+        "env_key": "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES",
+        "default": "",
+    },
+    ("mcp", "port"): {
+        "env_key": "DUCKCLAW_MCP_PORT",
+        "default": "8001",
+    },
+    ("comfyui", "api_url"): {
+        "env_key": "COMFYUI_API_URL",
+        "default": "http://127.0.0.1:8188",
+    },
+    ("comfyui", "timeout_sec"): {
+        "env_key": "COMFYUI_TIMEOUT_SEC",
+        "default": "300",
     }
 }
 

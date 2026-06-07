@@ -8,6 +8,9 @@ import { MessageSquare, Plus, Trash2 } from 'lucide-react';
 type RouteRow = {
   bot: string;
   path: string;
+  worker_id: string;
+  tenant_id: string;
+  vault_env_var: string;
   token: string;
   token_masked?: string;
 };
@@ -19,6 +22,7 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
   const [rows, setRows] = useState<RouteRow[]>([]);
   const [knownBots, setKnownBots] = useState<string[]>([]);
   const [format, setFormat] = useState<string>('empty');
+  const [source, setSource] = useState<string>('default');
   const [parseError, setParseError] = useState<string | null>(null);
   const [routesMsg, setRoutesMsg] = useState<string | null>(null);
   const [routesError, setRoutesError] = useState<string | null>(null);
@@ -29,12 +33,16 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
       .getTelegramRoutes()
       .then((r) => {
         setFormat(r.format);
+        setSource(r.source ?? 'default');
         setKnownBots(r.known_bots ?? []);
         setParseError(r.parse_error ?? null);
         setRows(
           (r.routes ?? []).map((row) => ({
             bot: row.bot,
             path: row.path,
+            worker_id: row.worker_id || row.bot,
+            tenant_id: row.tenant_id || 'default',
+            vault_env_var: row.vault_env_var || '',
             token: '',
             token_masked: row.token_masked,
           }))
@@ -55,7 +63,14 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
     const bot = knownBots.find((b) => !rows.some((r) => r.bot === b)) ?? '';
     setRows((prev) => [
       ...prev,
-      { bot, path: bot ? DEFAULT_PATH(bot) : '/api/v1/telegram/', token: '' },
+      {
+        bot,
+        path: bot ? DEFAULT_PATH(bot) : '/api/v1/telegram/',
+        worker_id: bot || 'default',
+        tenant_id: 'default',
+        vault_env_var: '',
+        token: '',
+      },
     ]);
   };
 
@@ -72,11 +87,14 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
       const payload = rows.map((r) => ({
         bot: r.bot.trim().toLowerCase(),
         path: r.path.trim(),
+        worker_id: r.worker_id.trim(),
+        tenant_id: r.tenant_id.trim(),
+        ...(r.vault_env_var.trim() ? { vault_env_var: r.vault_env_var.trim() } : {}),
         ...(r.token.trim() ? { token: r.token.trim() } : {}),
       }));
       const res = await adminService.putTelegramRoutes(payload);
       setRoutesMsg(
-        `Guardado (${res.route_count} rutas). Reinicia el gateway: ${res.restart_hint ?? 'pm2 restart DuckClaw-Gateway --update-env'}`
+        `Guardado en DuckDB (${res.route_count} rutas). ${res.restart_hint ?? 'Reinicia DuckClaw-Gateway para registrar rutas dinámicas.'}`
       );
       loadRoutes();
     } catch (e) {
@@ -91,18 +109,22 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
   return (
     <SettingsSection
       titulo="Rutas webhook"
-      descripcion="DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES (formato compacto en .env)"
+      descripcion="Runtime Settings DB-first con .env como fallback bootstrap"
       icono={<MessageSquare size={22} />}
     >
       <div className="space-y-4">
+        <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+          Fuente efectiva: <span className="font-mono">{source}</span> · setting{' '}
+          <span className="font-mono">telegram.webhook_routes</span>
+        </p>
         {parseError && (
           <p className="text-sm text-red-600 dark:text-red-400">
-            Error al parsear .env: {parseError}
+            Error al parsear rutas Telegram: {parseError}
           </p>
         )}
         {jsonMode && (
           <p className="text-sm text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl p-3">
-            El valor actual es JSON multiplex. Edítalo en <code className="text-xs">.env</code> o
+            El valor actual viene en formato JSON multiplex legacy. Migra a formato compacto desde Runtime Settings o
             migra a formato compacto manualmente.
           </p>
         )}
@@ -116,14 +138,17 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
                     <th className="px-3 py-2 font-mono text-xs">bot</th>
                     <th className="px-3 py-2 font-mono text-xs">token</th>
                     <th className="px-3 py-2 font-mono text-xs">path</th>
+                    <th className="px-3 py-2 font-mono text-xs">worker</th>
+                    <th className="px-3 py-2 font-mono text-xs">tenant</th>
+                    <th className="px-3 py-2 font-mono text-xs">vault env</th>
                     {canWrite && <th className="px-3 py-2 w-10" />}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={canWrite ? 4 : 3} className="px-4 py-6 text-center text-gov-gray-500">
-                        Sin rutas. Añade una fila o configura el .env.
+                      <td colSpan={canWrite ? 7 : 6} className="px-4 py-6 text-center text-gov-gray-500">
+                        Sin rutas. Añade una fila o conserva el fallback bootstrap.
                       </td>
                     </tr>
                   )}
@@ -183,6 +208,42 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
                           <span className="font-mono text-xs px-2 break-all">{row.path}</span>
                         )}
                       </td>
+                      <td className="px-2 py-2 align-top">
+                        {canWrite ? (
+                          <input
+                            value={row.worker_id}
+                            onChange={(e) => updateRow(i, { worker_id: e.target.value })}
+                            className="w-full min-w-[8rem] px-2 py-1.5 font-mono text-xs border rounded-lg dark:border-dark-border dark:bg-dark-bg"
+                            placeholder="Worker-A"
+                          />
+                        ) : (
+                          <span className="font-mono text-xs px-2">{row.worker_id}</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 align-top">
+                        {canWrite ? (
+                          <input
+                            value={row.tenant_id}
+                            onChange={(e) => updateRow(i, { tenant_id: e.target.value })}
+                            className="w-full min-w-[8rem] px-2 py-1.5 font-mono text-xs border rounded-lg dark:border-dark-border dark:bg-dark-bg"
+                            placeholder="default"
+                          />
+                        ) : (
+                          <span className="font-mono text-xs px-2">{row.tenant_id}</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 align-top">
+                        {canWrite ? (
+                          <input
+                            value={row.vault_env_var}
+                            onChange={(e) => updateRow(i, { vault_env_var: e.target.value })}
+                            className="w-full min-w-[10rem] px-2 py-1.5 font-mono text-xs border rounded-lg dark:border-dark-border dark:bg-dark-bg"
+                            placeholder="DUCKCLAW_AXIS_DB_PATH"
+                          />
+                        ) : (
+                          <span className="font-mono text-xs px-2">{row.vault_env_var || '—'}</span>
+                        )}
+                      </td>
                       {canWrite && (
                         <td className="px-2 py-2 align-top">
                           <button
@@ -217,7 +278,7 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
                   disabled={saving || rows.length === 0}
                   className="px-4 py-2 bg-gov-blue-700 text-white rounded-xl text-sm font-bold disabled:opacity-50"
                 >
-                  {saving ? 'Guardando…' : 'Guardar rutas en .env'}
+                  {saving ? 'Guardando…' : 'Guardar rutas en DuckDB'}
                 </button>
                 <button
                   type="button"
@@ -236,8 +297,7 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
 
         <p className="text-xs text-gov-gray-500">
           Formato: <code className="font-mono">bot:token:/api/v1/telegram/…</code> separado por comas.
-          Tras guardar, reinicia <strong>DuckClaw-Gateway</strong> y registra webhooks si cambió la URL
-          pública.
+          Los tokens son write-only: si el campo queda vacío, se conserva el token efectivo actual.
         </p>
       </div>
     </SettingsSection>

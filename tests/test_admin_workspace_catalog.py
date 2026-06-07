@@ -95,6 +95,138 @@ def test_worker_catalog_enforces_tenant_scoped_unique_worker_ids(gateway_db: Pat
         con.close()
 
 
+def test_platform_orchestrator_is_seeded_per_actor_and_versioned(gateway_db: Path) -> None:
+    from duckclaw.admin_worker_catalog import (
+        ensure_platform_orchestrator_for_actor,
+        get_latest_worker_version,
+    )
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        adapter = _Adapter(con)
+        alice = ensure_platform_orchestrator_for_actor(adapter, actor_email="alice@test.local")
+        alice_again = ensure_platform_orchestrator_for_actor(adapter, actor_email="alice@test.local")
+        bob = ensure_platform_orchestrator_for_actor(adapter, actor_email="bob@test.local")
+        latest = get_latest_worker_version(adapter, worker_uid=alice["worker_uid"])
+    finally:
+        con.close()
+
+    assert alice["worker_id"] == "platform-orchestrator"
+    assert alice["display_name"] == "Platform Orchestrator"
+    assert alice["source_kind"] == "system_seed"
+    assert alice["visibility"] == "private"
+    assert alice["worker_uid"] == alice_again["worker_uid"]
+    assert bob["worker_uid"] != alice["worker_uid"]
+    assert latest is not None
+    assert latest["manifest_snapshot"]["id"] == "platform-orchestrator"
+    assert "system_prompt.md" in latest["files_snapshot"]
+
+
+def test_gateway_templates_auto_seed_platform_orchestrator(gateway_admin_client) -> None:
+    response = gateway_admin_client.get(
+        "/api/v1/admin/templates",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
+    )
+
+    assert response.status_code == 200
+    templates = {item["id"]: item for item in response.json()["templates"]}
+    assert templates["platform-orchestrator"]["source"] == "catalog"
+    assert templates["platform-orchestrator"]["visibility"] == "private"
+    assert templates["platform-orchestrator"]["active"] is True
+
+
+def test_orchestrator_draft_suggests_available_skills_without_creating_project(
+    gateway_db: Path,
+    gateway_admin_client,
+) -> None:
+    from duckclaw.admin_worker_catalog import register_skill
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        adapter = _Adapter(con)
+        register_skill(
+            adapter,
+            name="crm_lookup",
+            description="Consulta clientes CRM",
+            skill_type="python",
+            implementation_ref="duckclaw.skills.crm",
+            owner_email="alice@test.local",
+        )
+        before_projects = con.execute(
+            "SELECT COUNT(*) FROM main.admin_projects"
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+    response = gateway_admin_client.post(
+        "/api/v1/admin/workspace/orchestrator/draft",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
+        json={"prompt": "Crear un proyecto para consultar clientes CRM y responder casos de soporte"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["project"]["name"]
+    assert body["workers"][0]["worker_id"]
+    assert any(skill["name"] == "crm_lookup" and skill["available"] for skill in body["suggested_skills"])
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        after_projects = con.execute("SELECT COUNT(*) FROM main.admin_projects").fetchone()[0]
+    finally:
+        con.close()
+    assert after_projects == before_projects
+
+
+def test_orchestrator_confirm_creates_project_workers_context_and_assignments(
+    gateway_db: Path,
+    gateway_admin_client,
+) -> None:
+    draft = {
+        "project": {"name": "Soporte CRM", "description": "Atiende casos con datos CRM"},
+        "workers": [
+            {
+                "worker_id": "crm-support-agent",
+                "display_name": "CRM Support Agent",
+                "role": "member",
+                "system_prompt": "Ayuda a resolver casos usando contexto CRM.",
+            }
+        ],
+        "shared_context": "# Contexto CRM\nUsar tono claro.",
+        "suggested_skills": [{"name": "crm_lookup", "reason": "consulta clientes", "available": False}],
+        "questions": [],
+    }
+    response = gateway_admin_client.post(
+        "/api/v1/admin/workspace/orchestrator/confirm",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
+        json={"draft": draft},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["project"]["name"] == "Soporte CRM"
+    assert payload["created"]["workers"][0]["worker_id"] == "crm-support-agent"
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        row = con.execute(
+            """
+            SELECT p.name, wc.worker_id, ctx.title
+            FROM main.admin_projects p
+            JOIN main.admin_project_agents pa ON pa.project_id = p.project_id
+            JOIN main.admin_worker_catalog wc ON wc.worker_uid = pa.worker_uid
+            JOIN main.admin_worker_contexts ctx ON ctx.worker_uid = wc.worker_uid
+            WHERE p.project_id = ?
+            """,
+            [payload["project"]["project_id"]],
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert row == ("Soporte CRM", "crm-support-agent", "Contexto compartido")
+
+
 def test_contexts_skills_and_capabilities_are_many_to_many(gateway_db: Path) -> None:
     from duckclaw.admin_worker_catalog import (
         add_worker_context,
@@ -399,7 +531,89 @@ def test_gateway_templates_lists_default_and_actor_catalog_not_all_filesystem_te
     templates = {item["id"]: item for item in response.json()["templates"]}
     assert "default" in templates
     assert templates["axis-coder"]["name"] == "AXIS Coder"
+    assert templates["axis-coder"]["worker_uid"]
+    assert templates["axis-coder"]["visibility"] == "private"
+    assert templates["axis-coder"]["source_template_id"] == "default"
     assert "AXIS-Mirror" not in templates
+
+
+def test_gateway_templates_can_list_and_reactivate_inactive_catalog_worker(
+    gateway_admin_client,
+    gateway_db: Path,
+) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker, deactivate_visible_worker_for_actor
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    db = DuckClaw(get_gateway_db_path(), read_only=False, engine="python")
+    try:
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="ejemplo",
+            display_name="Ejemplo",
+        )
+        deactivate_visible_worker_for_actor(db, actor_email="admin@test.local", worker_id="ejemplo")
+    finally:
+        db.close()
+
+    active_only = gateway_admin_client.get("/api/v1/admin/templates", headers=headers)
+    assert active_only.status_code == 200
+    assert "ejemplo" not in {item["id"] for item in active_only.json()["templates"]}
+
+    with_inactive = gateway_admin_client.get(
+        "/api/v1/admin/templates?include_inactive=true",
+        headers=headers,
+    )
+    assert with_inactive.status_code == 200
+    templates = {item["id"]: item for item in with_inactive.json()["templates"]}
+    assert templates["ejemplo"]["active"] is False
+    assert templates["ejemplo"]["status"] == "inactive"
+
+    reactivated = gateway_admin_client.post(
+        "/api/v1/admin/templates/ejemplo/reactivate",
+        headers=headers,
+    )
+    assert reactivated.status_code == 200
+    assert reactivated.json()["action"] == "reactivated"
+
+    listed_after = gateway_admin_client.get("/api/v1/admin/templates", headers=headers)
+    assert "ejemplo" in {item["id"] for item in listed_after.json()["templates"]}
+
+
+def test_get_visible_worker_for_actor_accepts_boolean_active_rows(gateway_db: Path) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker, get_visible_worker_for_actor
+
+    db = DuckClaw(str(gateway_db), read_only=False, engine="python")
+    try:
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="axis-maestro",
+            display_name="AXIS Maestro",
+        )
+        worker = get_visible_worker_for_actor(
+            db,
+            actor_email="admin@test.local",
+            worker_id="axis-maestro",
+        )
+    finally:
+        db.close()
+
+    assert worker is not None
+    assert worker["worker_id"] == "axis-maestro"
+
+
+def test_gateway_rejects_default_template_deactivation_explicitly(gateway_admin_client) -> None:
+    response = gateway_admin_client.delete(
+        "/api/v1/admin/templates/default",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["title"] == "Plantilla protegida"
 
 
 def test_gateway_template_detail_rejects_unassigned_filesystem_template(

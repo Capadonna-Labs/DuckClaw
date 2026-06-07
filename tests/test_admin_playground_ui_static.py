@@ -203,6 +203,20 @@ def test_playground_selects_conversation_from_sidebar_history() -> None:
     assert "selectConversationById(requestedConversation)" in page
 
 
+def test_playground_history_can_delete_conversation_with_confirmation() -> None:
+    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+
+    assert "deleteConversation:" in service
+    assert "const deleteHistoryConversation = async (conversation: AdminConversation)" in page
+    assert "window.confirm" in page
+    assert "Eliminar esta conversación" in page
+    assert "adminService.deleteConversation(conversation.session_id, tenantId)" in page
+    assert "setConversations((prev) => prev.filter" in page
+    assert "aria-label={`Eliminar conversación ${conversation.title || conversation.session_id}`}" in page
+    assert "Eliminar" in page
+
+
 def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
 
@@ -379,6 +393,8 @@ def test_projects_page_only_renders_db_first_projects() -> None:
     assert "listForgeProjects" not in page
     assert "Legacy filesystem" not in page
     assert "forge/projects/" not in page
+    assert "Agrupa tus agentes" in page
+    assert "No hay agentes asignables" in page
 
 
 def test_kanban_storage_is_scoped_by_authenticated_actor() -> None:
@@ -406,6 +422,11 @@ def test_console_user_delete_uses_confirm_danger_modal() -> None:
     assert "pendingDeactivate" in panel
     assert "confirm(`" not in panel
     assert "title=\"Desactivar usuario\"" in panel
+    assert "resetPasswordUser" in panel
+    assert "Nueva contraseña" in panel
+    assert "prompt(" not in panel
+    assert "showInactive" in panel
+    assert "usuarios inactivos ocultos" in panel
 
 
 def test_skills_page_exposes_new_skill_db_first_form() -> None:
@@ -431,6 +452,9 @@ def test_duckdb_page_exposes_confirmed_legacy_schema_cleanup() -> None:
     assert "getEnv()" not in page
     assert "ConfirmDangerModal" in page
     assert "DROP_LEGACY_SCHEMAS" in page
+    assert "legacyMainTables" in page
+    assert "Tablas legacy en main" in page
+    assert "main_tables" in service
     assert "listDuckdbLegacySchemas" in service
     assert "dropDuckdbLegacySchemas" in service
     assert "getRuntimeSettings" in service

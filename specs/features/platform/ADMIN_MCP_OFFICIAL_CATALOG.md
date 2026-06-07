@@ -42,8 +42,9 @@ Actualización del catálogo: **manual** al cambiar upstream (no sync automátic
 ## 4. UI `/mcp`
 
 1. Copy: MCP recomendado (stdio en `config/mcp_servers.yaml`, DuckClaw HTTP, bridges Docker/npm).
-2. Sección **Servidores de referencia (oficial)** — tabla con install copiable y enlace al repo.
-3. Pie: enlace al repo + MCP Registry; CTA secundario a `/skills`.
+2. Sección **Configuración MCP** — `mcp.port` DB-first con fallback `DUCKCLAW_MCP_PORT`.
+3. Sección **Servidores de referencia (oficial)** — tabla con install copiable y enlace al repo.
+4. Pie: enlace al repo + MCP Registry; CTA secundario a `/skills`.
 
 ## 5. UI `/skills`
 

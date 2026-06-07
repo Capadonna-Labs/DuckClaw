@@ -18,3 +18,7 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     assert "listWorkspaceProjects" in service
     assert "assignWorkspaceProjectAgent" in service
     assert "deleteWorkspaceProject" in service
+    assert "Platform Orchestrator" in page
+    assert "createOrchestratorDraft" in service
+    assert "confirmOrchestratorDraft" in service
+    assert "/workspace/orchestrator/draft" in service

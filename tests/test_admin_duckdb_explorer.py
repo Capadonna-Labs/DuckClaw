@@ -10,6 +10,33 @@ from fastapi.testclient import TestClient
 _ADMIN_HEADERS = {"X-Admin-Key": "test-admin-key"}
 
 
+def test_duckdb_actor_scope_falls_back_to_actor_tenant_not_gateway_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    from duckclaw.admin_user_profiles import tenant_id_for_email
+
+    gw_dir = Path(__file__).resolve().parents[1] / "services" / "api-gateway"
+    if str(gw_dir) not in sys.path:
+        sys.path.insert(0, str(gw_dir))
+    import core.admin_identity as admin_identity
+    import routers.admin as admin_router
+
+    def _raise_open_gateway_db(*_args, **_kwargs):
+        raise RuntimeError("gateway db unavailable")
+
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "Marco")
+    monkeypatch.setattr(admin_identity, "open_gateway_db", _raise_open_gateway_db)
+
+    scope = admin_router._duckdb_actor_scope("owner@example.com", "owner123")
+
+    assert scope["actor_email"] == "owner@example.com"
+    assert scope["vault_user_id"] == "owner123"
+    assert scope["tenant_id"] == tenant_id_for_email("owner@example.com")
+    assert scope["tenant_id"] != "Marco"
+
+
 @pytest.fixture
 def explorer_db(tmp_path: Path) -> Path:
     dbf = tmp_path / "explorer.duckdb"
@@ -89,6 +116,8 @@ def test_duckdb_tables_default_to_authenticated_actor_vault(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from duckclaw.admin_user_profiles import tenant_id_for_email
+
     repo_root = tmp_path / "repo"
     user_dir = repo_root / "db" / "private" / "owner123"
     user_dir.mkdir(parents=True)
@@ -100,6 +129,7 @@ def test_duckdb_tables_default_to_authenticated_actor_vault(
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
     monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "Marco")
 
     response = gateway_admin_client.get(
         "/api/v1/admin/duckdb/tables",
@@ -109,6 +139,9 @@ def test_duckdb_tables_default_to_authenticated_actor_vault(
     assert response.status_code == 200
     data = response.json()
     assert data["vault_user_id"] == "owner123"
+    assert data["actor_email"] == "owner@example.com"
+    assert data["tenant_id"] == tenant_id_for_email("owner@example.com")
+    assert data["tenant_id"] != "Marco"
     assert data["vault_path"].endswith("db/private/owner123/axis.duckdb")
     assert data["schemas"]["actor_schema"] == ["visible_table"]
 
@@ -196,6 +229,68 @@ def test_duckdb_legacy_schema_cleanup_requires_confirmation_and_drops_schema(
     finally:
         con.close()
     assert "quant_core" not in remaining
+
+
+def test_duckdb_legacy_cleanup_detects_and_drops_main_legacy_tables(
+    gateway_admin_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    user_dir = repo_root / "db" / "private" / "owner123"
+    user_dir.mkdir(parents=True)
+    user_db = user_dir / "axis.duckdb"
+    con = duckdb.connect(str(user_db))
+    con.execute("CREATE TABLE main.leila_orders (id INTEGER)")
+    con.execute("CREATE TABLE main.leila_products (id INTEGER)")
+    con.execute("CREATE TABLE main.keep_me (id INTEGER)")
+    con.close()
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"}
+
+    listed = gateway_admin_client.get(
+        "/api/v1/admin/duckdb/legacy-schemas",
+        headers=headers,
+    )
+    assert listed.status_code == 200
+    assert {item["table"] for item in listed.json()["main_tables"]} == {
+        "leila_orders",
+        "leila_products",
+    }
+
+    rejected = gateway_admin_client.post(
+        "/api/v1/admin/duckdb/legacy-schemas/drop",
+        headers=headers,
+        json={"main_tables": ["leila_orders"], "confirm": "wrong"},
+    )
+    assert rejected.status_code == 400
+
+    dropped = gateway_admin_client.post(
+        "/api/v1/admin/duckdb/legacy-schemas/drop",
+        headers=headers,
+        json={
+            "main_tables": ["leila_orders", "leila_products"],
+            "confirm": "DROP_LEGACY_SCHEMAS",
+        },
+    )
+    assert dropped.status_code == 200
+    assert dropped.json()["dropped_main_tables"] == ["leila_orders", "leila_products"]
+
+    con = duckdb.connect(str(user_db), read_only=True)
+    try:
+        remaining = {
+            str(row[0])
+            for row in con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+            ).fetchall()
+        }
+    finally:
+        con.close()
+    assert "keep_me" in remaining
+    assert "leila_orders" not in remaining
+    assert "leila_products" not in remaining
 
 
 def test_duckdb_legacy_schemas_can_be_configured_db_first(

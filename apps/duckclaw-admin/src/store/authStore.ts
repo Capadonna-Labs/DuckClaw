@@ -6,10 +6,14 @@ function parseLoginError(status: number, data: unknown): string {
   if (status === 429) return 'Demasiados intentos. Espera un momento.';
   if (data && typeof data === 'object') {
     const root = data as Record<string, unknown>;
+    if (root.code === 'gateway_unreachable') {
+      return 'Gateway no disponible. La consola reintentará cuando termine de iniciar.';
+    }
     if (typeof root.detail === 'string' && root.detail.toLowerCase().includes('invalid')) {
       return 'Correo o contraseña inválidos';
     }
   }
+  if (status === 503) return 'Gateway no disponible. Revisa el estado de la plataforma.';
   return 'Correo o contraseña inválidos';
 }
 

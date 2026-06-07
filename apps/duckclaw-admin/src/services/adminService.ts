@@ -39,6 +39,26 @@ export interface CreateSkillInput {
   visibility?: 'private' | 'public';
 }
 
+export interface OrchestratorDraft {
+  project: {
+    name: string;
+    description: string;
+  };
+  workers: {
+    worker_id: string;
+    display_name: string;
+    role: string;
+    system_prompt: string;
+  }[];
+  shared_context: string;
+  suggested_skills: {
+    name: string;
+    reason: string;
+    available: boolean;
+  }[];
+  questions: string[];
+}
+
 export interface IndustryOption {
   id: string;
   name: string;
@@ -97,12 +117,18 @@ export interface DuckdbLegacySchema {
   tables: string[];
 }
 
+export interface DuckdbLegacyMainTable {
+  schema: 'main';
+  table: string;
+}
+
 export interface DuckdbLegacySchemasResponse {
   vault_path: string;
   vault_user_id?: string;
   actor_email?: string;
   tenant_id?: string;
   schemas: DuckdbLegacySchema[];
+  main_tables: DuckdbLegacyMainTable[];
   confirm: string;
 }
 
@@ -223,8 +249,10 @@ export const adminService = {
     return adminFetch<OverviewMetrics>(`/overview/metrics${suffix}`);
   },
 
-  listTemplates: () =>
-    adminFetch<{ templates: TemplateSummary[] }>('/templates').then((r) => r.templates),
+  listTemplates: (params?: { include_inactive?: boolean }) => {
+    const q = params?.include_inactive ? '?include_inactive=true' : '';
+    return adminFetch<{ templates: TemplateSummary[] }>(`/templates${q}`).then((r) => r.templates);
+  },
 
   getTemplate: (id: string) => adminFetch<TemplateDetail>(`/templates/${encodeURIComponent(id)}`),
 
@@ -364,6 +392,11 @@ export const adminService = {
   deleteTemplate: (id: string) =>
     adminFetch<{ ok: boolean }>(`/templates/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  reactivateTemplate: (id: string) =>
+    adminFetch<{ ok: boolean; action: string }>(`/templates/${encodeURIComponent(id)}/reactivate`, {
+      method: 'POST',
+    }),
+
   getEnv: () => adminFetch<EnvConfigResponse>('/env'),
 
   patchEnv: (values: Record<string, string>) =>
@@ -413,15 +446,31 @@ export const adminService = {
   getTelegramRoutes: () =>
     adminFetch<{
       format: string;
-      routes: { bot: string; path: string; token_masked?: string }[];
+      source?: string;
+      runtime_key?: string;
+      routes: {
+        bot: string;
+        path: string;
+        worker_id?: string;
+        tenant_id?: string;
+        vault_env_var?: string;
+        token_masked?: string;
+      }[];
       known_bots?: string[];
       parse_error?: string;
       raw_masked?: string;
       restart_hint?: string;
     }>('/telegram/routes'),
 
-  putTelegramRoutes: (routes: { bot: string; path: string; token?: string }[]) =>
-    adminFetch<{ ok: boolean; route_count: number; restart_hint?: string }>('/telegram/routes', {
+  putTelegramRoutes: (routes: {
+    bot: string;
+    path: string;
+    worker_id: string;
+    tenant_id: string;
+    vault_env_var?: string;
+    token?: string;
+  }[]) =>
+    adminFetch<{ ok: boolean; updated?: string[]; source?: string; route_count: number; restart_hint?: string }>('/telegram/routes', {
       method: 'PUT',
       body: JSON.stringify({ routes }),
     }),
@@ -533,8 +582,18 @@ export const adminService = {
     return adminFetch<DuckdbLegacySchemasResponse>(`/duckdb/legacy-schemas${q}`);
   },
 
-  dropDuckdbLegacySchemas: (body: { schemas: string[]; vault_path?: string; confirm: string }) =>
-    adminFetch<{ ok: boolean; dropped: string[]; vault_path: string }>('/duckdb/legacy-schemas/drop', {
+  dropDuckdbLegacySchemas: (body: {
+    schemas: string[];
+    main_tables?: string[];
+    vault_path?: string;
+    confirm: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      dropped: string[];
+      dropped_main_tables: string[];
+      vault_path: string;
+    }>('/duckdb/legacy-schemas/drop', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -741,8 +800,11 @@ export const adminService = {
       duckclaw_mcp: {
         command: string;
         url: string;
+        port?: string;
+        source?: string;
+        runtime_key?: string;
         tools: McpToolInfo[];
-        live?: { reachable: boolean; status_code?: number; error?: string };
+        live?: { reachable: boolean; status_code?: number; error?: string; port?: string; url?: string };
       };
       stdio_servers: { id: string; enabled: boolean; note: string }[];
       official_reference: {
@@ -778,6 +840,10 @@ export const adminService = {
     adminFetch<{
       ok: boolean;
       url: string;
+      source?: string;
+      runtime_key?: string;
+      timeout_sec?: string;
+      timeout_source?: string;
       latency_ms?: number;
       error?: string;
       system?: Record<string, unknown>;
@@ -1162,6 +1228,30 @@ export const adminService = {
       `/workspace/projects/${encodeURIComponent(projectId)}/agents/${encodeURIComponent(workerId)}`,
       { method: 'DELETE' }
     ),
+
+  createOrchestratorDraft: (body: { prompt: string }) =>
+    adminFetch<OrchestratorDraft>('/workspace/orchestrator/draft', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  confirmOrchestratorDraft: (draft: OrchestratorDraft) =>
+    adminFetch<{
+      ok: boolean;
+      project: {
+        project_id: string;
+        tenant_id: string;
+        owner_email: string;
+        name: string;
+        description: string;
+        status: string;
+        visibility: string;
+      };
+      created: { workers: TemplateSummary[] };
+    }>('/workspace/orchestrator/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ draft }),
+    }),
 
   listEnvForgeProjectPresets: () =>
     adminFetch<{

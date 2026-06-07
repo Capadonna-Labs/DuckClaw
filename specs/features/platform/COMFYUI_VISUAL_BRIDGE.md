@@ -13,6 +13,14 @@ Integrar ComfyUI como motor de generación de imágenes para workers DuckClaw. E
 | `COMFYUI_SAMPLER_STEPS` | Pasos del KSampler (opcional; default del workflow `20`). En Mac MPS, `12` reduce ~40% el tiempo. |
 | `DUCKCLAW_VISUAL_STATE_DELTA_QUEUE` | Cola Redis (default `duckclaw:state_delta:visual`). |
 
+En DuckClaw Admin, `COMFYUI_API_URL` y `COMFYUI_TIMEOUT_SEC` son fallback bootstrap.
+La fuente editable es `admin_runtime_settings`:
+
+- `comfyui.api_url`
+- `comfyui.timeout_sec`
+
+El Gateway resuelve Runtime Settings → `.env` → default y pasa la configuración efectiva al bridge.
+
 ## Manifest del worker
 
 ```yaml

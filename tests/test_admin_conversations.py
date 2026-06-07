@@ -15,9 +15,11 @@ if str(_gw) not in sys.path:
 from core.admin_conversations import (
     AdminConversationMeta,
     derive_section_from_session_id,
+    delete_conversation_merged,
     delete_conversation,
     get_conversation_meta,
     list_conversations,
+    list_conversations_merged,
     new_admin_conversation_session_id,
     patch_conversation_title,
     should_index_admin_conversation,
@@ -197,3 +199,30 @@ def test_patch_conversation_worker():
     import asyncio
 
     asyncio.run(_test_patch_conversation_worker_impl())
+
+
+async def _test_delete_conversation_merged_removes_default_legacy_impl():
+    redis = build_fake_redis()
+    sid = new_admin_conversation_session_id()
+    await upsert_conversation_meta(
+        redis,
+        tenant_id="default",
+        session_id=sid,
+        title="Legacy default",
+        section="playground",
+    )
+
+    items, total = await list_conversations_merged(redis, "Marco", section="playground")
+    assert total == 1
+    assert items[0].session_id == sid
+    assert items[0].tenant_id == "default"
+
+    deleted_tid = await delete_conversation_merged(redis, "Marco", sid)
+    assert deleted_tid == "default"
+    assert await get_conversation_meta(redis, "default", sid) is None
+
+
+def test_delete_conversation_merged_removes_default_legacy():
+    import asyncio
+
+    asyncio.run(_test_delete_conversation_merged_removes_default_legacy_impl())

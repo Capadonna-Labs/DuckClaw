@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { adminService } from '@/services/adminService';
+import type { OrchestratorDraft } from '@/services/adminService';
 import { useAuthStore } from '@/store/authStore';
-import { FolderKanban, Plus, Trash2 } from 'lucide-react';
+import { FolderKanban, Plus, Sparkles, Trash2 } from 'lucide-react';
 import type { TemplateSummary } from '@/types/admin';
 
 type WorkspaceProject = Awaited<ReturnType<typeof adminService.listWorkspaceProjects>>[number];
@@ -20,6 +21,9 @@ export default function ProjectsPage() {
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const [selectedWorkers, setSelectedWorkers] = useState<Record<string, string>>({});
+  const [orchestratorPrompt, setOrchestratorPrompt] = useState('');
+  const [orchestratorDraft, setOrchestratorDraft] = useState<OrchestratorDraft | null>(null);
+  const [orchestratorBusy, setOrchestratorBusy] = useState(false);
 
   const reload = useCallback(() => {
     async function loadAll() {
@@ -57,6 +61,41 @@ export default function ProjectsPage() {
       reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo crear el proyecto');
+    }
+  };
+
+  const createGuidedDraft = async () => {
+    const prompt = orchestratorPrompt.trim();
+    if (!canWrite || prompt.length < 10) return;
+    setError(null);
+    setOrchestratorBusy(true);
+    try {
+      const draft = await adminService.createOrchestratorDraft({ prompt });
+      setOrchestratorDraft(draft);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo generar el borrador guiado');
+    } finally {
+      setOrchestratorBusy(false);
+    }
+  };
+
+  const confirmGuidedDraft = async () => {
+    if (!canWrite || !orchestratorDraft) return;
+    const confirmed = window.confirm(
+      `Crear proyecto "${orchestratorDraft.project.name}" con ${orchestratorDraft.workers.length} agente(s)?`
+    );
+    if (!confirmed) return;
+    setError(null);
+    setOrchestratorBusy(true);
+    try {
+      await adminService.confirmOrchestratorDraft(orchestratorDraft);
+      setOrchestratorPrompt('');
+      setOrchestratorDraft(null);
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo confirmar el borrador guiado');
+    } finally {
+      setOrchestratorBusy(false);
     }
   };
 
@@ -121,7 +160,7 @@ export default function ProjectsPage() {
             <FolderKanban size={28} /> Proyectos
           </h1>
           <p className="text-sm text-gov-gray-500 dark:text-dark-muted mt-1">
-            Organiza tus agentes por proyecto.
+            Agrupa tus agentes por cliente, flujo o iniciativa.
           </p>
         </div>
         {canWrite && (
@@ -136,6 +175,116 @@ export default function ProjectsPage() {
 
       {error && <p className="text-red-600 text-sm">{error}</p>}
 
+      {canWrite && (
+        <section className="overflow-hidden rounded-3xl border border-gov-blue-100 bg-gradient-to-br from-white via-gov-cyan-50 to-gov-gray-50 p-5 shadow-sm dark:border-dark-border dark:from-dark-surface dark:via-dark-bg dark:to-slate-950">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <p className="inline-flex items-center gap-2 rounded-full bg-gov-blue-700 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white">
+                <Sparkles size={12} /> Platform Orchestrator
+              </p>
+              <h2 className="mt-3 text-2xl font-black text-gov-gray-900 dark:text-dark-text">
+                Crea tu proyecto con preguntas guiadas
+              </h2>
+              <p className="mt-2 text-sm text-gov-gray-600 dark:text-dark-muted">
+                Describe objetivo, datos y resultado esperado. El orquestador prepara un borrador
+                DB-first de proyecto, agente, contexto compartido y skills sugeridas antes de crear nada.
+              </p>
+            </div>
+            <Link
+              href="/playground?worker_id=platform-orchestrator"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-gov-blue-200 bg-white px-4 py-2 text-sm font-black text-gov-blue-800 hover:border-gov-blue-500 dark:border-dark-border dark:bg-dark-bg dark:text-dark-cyan"
+            >
+              Abrir chat del Orchestrator
+            </Link>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+            <div className="space-y-3">
+              <textarea
+                value={orchestratorPrompt}
+                onChange={(e) => setOrchestratorPrompt(e.target.value)}
+                placeholder="Ej: Quiero un proyecto para soporte comercial que consulte clientes CRM, clasifique casos y genere respuestas aprobables por humano..."
+                rows={6}
+                className="w-full rounded-2xl border border-gov-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-gov-blue-500 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void createGuidedDraft()}
+                  disabled={orchestratorBusy || orchestratorPrompt.trim().length < 10}
+                  className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50"
+                >
+                  <Sparkles size={16} /> Generar borrador
+                </button>
+                {orchestratorDraft && (
+                  <button
+                    type="button"
+                    onClick={() => setOrchestratorDraft(null)}
+                    disabled={orchestratorBusy}
+                    className="rounded-xl border px-4 py-2 text-sm font-bold dark:border-dark-border"
+                  >
+                    Descartar
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <aside className="rounded-2xl border border-gov-blue-100 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
+              {orchestratorDraft ? (
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gov-blue-700">
+                      Borrador revisable
+                    </p>
+                    <h3 className="mt-1 font-black dark:text-dark-text">{orchestratorDraft.project.name}</h3>
+                    <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
+                      {orchestratorDraft.project.description}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    {orchestratorDraft.workers.map((worker) => (
+                      <div key={worker.worker_id} className="rounded-xl bg-gov-gray-50 px-3 py-2 text-xs dark:bg-dark-bg">
+                        <strong>{worker.display_name}</strong>
+                        <span className="ml-2 font-mono text-gov-gray-500">{worker.worker_id}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {orchestratorDraft.suggested_skills.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {orchestratorDraft.suggested_skills.map((skill) => (
+                        <span
+                          key={skill.name}
+                          className={`rounded-full px-2 py-1 text-[11px] font-bold ${
+                            skill.available
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                              : 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
+                          }`}
+                          title={skill.reason}
+                        >
+                          {skill.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void confirmGuidedDraft()}
+                    disabled={orchestratorBusy}
+                    className="w-full rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50"
+                  >
+                    Confirmar y crear DB-first
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-gov-gray-500 dark:text-dark-muted">
+                  El preview aparecerá aquí. Nada se guarda hasta confirmar explícitamente.
+                </p>
+              )}
+            </aside>
+          </div>
+        </section>
+      )}
+
       <section className="rounded-2xl border border-gov-blue-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
@@ -144,7 +293,8 @@ export default function ProjectsPage() {
             </p>
             <h2 className="mt-1 text-xl font-black dark:text-dark-text">Proyectos con agentes asignados</h2>
             <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-              Elige qué agentes pertenecen a cada proyecto; la asignación se persiste en la base de datos.
+              Elige qué agentes pertenecen a cada proyecto. La asignación se guarda en DuckDB y
+              afecta el filtro de agentes del Playground.
             </p>
           </div>
           {canWrite && (
@@ -243,7 +393,7 @@ export default function ProjectsPage() {
                       }
                       className="min-w-0 flex-1 rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-surface"
                     >
-                      <option value="">Selecciona worker del catálogo</option>
+                      <option value="">Selecciona un agente disponible</option>
                       {visibleWorkers.map((worker) => (
                         <option key={worker.id} value={worker.id}>
                           {worker.name || worker.id}
@@ -258,6 +408,12 @@ export default function ProjectsPage() {
                       Asignar agente
                     </button>
                   </div>
+                )}
+                {canWrite && visibleWorkers.length === 0 && (
+                  <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                    No hay agentes asignables en tu catálogo DB-first. Importa o crea un agente
+                    primero; los templates legacy de archivo no se asignan a proyectos.
+                  </p>
                 )}
               </article>
             ))}

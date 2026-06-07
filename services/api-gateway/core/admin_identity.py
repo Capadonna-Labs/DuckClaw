@@ -13,6 +13,7 @@ from duckclaw.admin_worker_catalog import (
     add_catalog_worker_context,
     deactivate_visible_worker_for_actor,
     deactivate_worker_context,
+    ensure_platform_orchestrator_for_actor,
     get_latest_worker_version,
     get_visible_worker_for_actor,
     list_visible_workers_for_actor,
@@ -114,15 +115,31 @@ def attach_profile_to_console_user(db: Any, user: dict[str, Any]) -> dict[str, A
     return out
 
 
-def list_templates_payload(db: Any, *, actor_email: str) -> list[dict[str, Any]]:
+def list_templates_payload(
+    db: Any,
+    *,
+    actor_email: str,
+    include_inactive: bool = False,
+) -> list[dict[str, Any]]:
+    ensure_platform_orchestrator_for_actor(db, actor_email=actor_email)
     items: list[dict[str, Any]] = []
-    for row in list_visible_workers_for_actor(db, actor_email=actor_email):
+    for row in list_visible_workers_for_actor(
+        db,
+        actor_email=actor_email,
+        include_inactive=include_inactive,
+    ):
         wid = str(row.get("id") or row.get("worker_id") or "")
         items.append(
             {
                 "id": wid,
+                "worker_uid": str(row.get("worker_uid") or ""),
+                "worker_id": str(row.get("worker_id") or wid),
                 "name": str(row.get("display_name") or row.get("name") or wid),
                 "source": str(row.get("source") or "catalog"),
+                "visibility": str(row.get("visibility") or "private"),
+                "source_template_id": str(row.get("source_template_id") or "default"),
+                "status": str(row.get("status") or "active"),
+                "active": bool(row.get("active", True)),
                 "read_only": str(row.get("source") or "") == "catalog",
             }
         )
@@ -166,6 +183,7 @@ def catalog_template_detail(db: Any, *, actor_email: str, worker_id: str) -> dic
 def playground_workers_for_actor(db: Any, *, actor_email: str) -> list[dict[str, str]]:
     from duckclaw.admin_user_agents import list_user_agents
 
+    ensure_platform_orchestrator_for_actor(db, actor_email=actor_email)
     seen: set[str] = set()
     workers: list[dict[str, str]] = []
     for row in list_visible_workers_for_actor(db, actor_email=actor_email):

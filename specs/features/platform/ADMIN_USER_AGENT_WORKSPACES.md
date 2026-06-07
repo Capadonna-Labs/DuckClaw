@@ -32,6 +32,9 @@ Relacionado: [`ADMIN_CONSOLE_AUTH.md`](ADMIN_CONSOLE_AUTH.md), [`ADMIN_ACCESS_MA
   - `active`
 - Cada agente runtime también debe registrar su identidad actual en `main.admin_worker_catalog` y una versión inicial en `main.admin_worker_versions`.
   Así `/templates`, el selector de workers y los proyectos DB-first leen el mismo catálogo visible por tenant.
+- `active=false` / `status='inactive'` en `main.admin_worker_catalog` es soft-delete: por defecto no aparece en Workers, selectores ni Playground.
+  La consola admin puede pedir `GET /templates?include_inactive=true` para auditoría y usar `POST /templates/{worker_id}/reactivate` para restaurar un worker owned por el actor sin tocar snapshots ni carpetas.
+- Cada perfil debe tener un worker DB-first permanente `platform-orchestrator` (`Platform Orchestrator`) para guiar creación de proyectos, workers, contexto y skills. Ver [`PLATFORM_ORCHESTRATOR_WORKER.md`](PLATFORM_ORCHESTRATOR_WORKER.md).
 - Los manifiestos runtime se guardan fuera del árbol de templates globales, por defecto en `.duckclaw/runtime/agents/{tenant_id}/{worker_id}/manifest.json`.
 
 ## Contexto de Sesión

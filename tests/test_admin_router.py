@@ -486,6 +486,9 @@ def test_catalog_mcp(admin_client: TestClient):
     assert "duckclaw_mcp" in data
     assert "tools" in data["duckclaw_mcp"]
     assert "live" in data["duckclaw_mcp"]
+    assert data["duckclaw_mcp"]["runtime_key"] == "mcp.port"
+    assert data["duckclaw_mcp"]["port"] == "8001"
+    assert data["duckclaw_mcp"]["source"] in {"default", "env", "db"}
     official = data.get("official_reference") or {}
     servers = official.get("servers") or []
     assert len(servers) >= 7
@@ -540,6 +543,7 @@ def test_telegram_routes_get_and_put(
     assert r.status_code == 200
     data = r.json()
     assert data.get("format") == "compact"
+    assert data.get("source") == "env"
     assert len(data.get("routes") or []) == 1
     assert data["routes"][0]["bot"] == "mybot"
     assert data["routes"][0]["worker_id"] == "Worker-A"
@@ -567,9 +571,20 @@ def test_telegram_routes_get_and_put(
     )
     assert r2.status_code == 200
     assert r2.json().get("route_count") == 2
+    assert r2.json().get("source") == "db"
     saved = env_file.read_text(encoding="utf-8")
-    assert "other:tok_other:/api/v1/telegram/other:Worker-B:TenantB" in saved
+    assert "other:tok_other:/api/v1/telegram/other:Worker-B:TenantB" not in saved
     assert "mybot:tok1:/api/v1/telegram/mybot:Worker-A:TenantA" in saved
+
+    r3 = admin_client.get(
+        "/api/v1/admin/telegram/routes",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r3.status_code == 200
+    data3 = r3.json()
+    assert data3.get("source") == "db"
+    assert len(data3.get("routes") or []) == 2
+    assert {row["bot"] for row in data3["routes"]} == {"mybot", "other"}
 
 
 def test_telegram_whitelist_get(admin_client: TestClient):
@@ -1118,19 +1133,27 @@ def test_comfyui_status_unreachable(admin_client: TestClient, monkeypatch: pytes
     data = r.json()
     assert data.get("ok") is False
     assert "error" in data
+    assert data.get("source") in {"default", "env", "db"}
+    assert data.get("runtime_key") == "comfyui.api_url"
+    assert data.get("timeout_sec") == "300"
+    assert data.get("timeout_source") in {"default", "env", "db"}
 
 
 def test_comfyui_generate_mock(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("COMFYUI_API_URL", "http://127.0.0.1:59998")
+    monkeypatch.setenv("COMFYUI_TIMEOUT_SEC", "123")
     payload = {
         "ok": True,
         "file_path": "/tmp/fake.png",
         "prompt_id": "pid-1",
         "message": "ok",
     }
+    seen: dict[str, object] = {}
 
-    def _fake_impl(*_a, **_k):
+    def _fake_impl(*_a, **kwargs):
         import json
 
+        seen.update(kwargs.get("comfyui_config") or {})
         return json.dumps(payload)
 
     monkeypatch.setattr(
@@ -1147,6 +1170,8 @@ def test_comfyui_generate_mock(admin_client: TestClient, monkeypatch: pytest.Mon
     data = r.json()
     assert data.get("ok") is True
     assert data.get("file_path") == "/tmp/fake.png"
+    assert seen.get("api_url") == "http://127.0.0.1:59998"
+    assert seen.get("timeout_sec") == "123"
 
 
 def test_comfyui_generate_bridge_error_400(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):

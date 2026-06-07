@@ -40,6 +40,7 @@ export default function TemplateEditorPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newContextTitle, setNewContextTitle] = useState('');
+  const [contextError, setContextError] = useState<string | null>(null);
 
   const markdownFile = isMarkdownPath(tab);
   const isCatalogWorker = detail?.source === 'catalog' || detail?.read_only === true;
@@ -61,13 +62,14 @@ export default function TemplateEditorPage() {
     return { promptFiles: prompts, contextFiles: contexts, otherFiles: rest };
   }, [detail]);
 
-  const load = useCallback(() => {
-    if (!workerId) return;
-    adminService
+  const load = useCallback((preferredPath?: string) => {
+    if (!workerId) return Promise.resolve();
+    return adminService
       .getTemplate(workerId)
       .then((d) => {
         setDetail(d);
         const preferred =
+          (preferredPath && d.contents[preferredPath] !== undefined && preferredPath) ||
           (focusFile && d.contents[focusFile] !== undefined && focusFile) ||
           (d.contents['system_prompt.md'] !== undefined && 'system_prompt.md') ||
           (d.contents['manifest.yaml'] !== undefined && 'manifest.yaml') ||
@@ -112,9 +114,14 @@ export default function TemplateEditorPage() {
   };
 
   const createContext = async () => {
-    if (!workerId || !isCatalogWorker || !newContextTitle.trim()) return;
+    if (!workerId || !isCatalogWorker) return;
+    if (!newContextTitle.trim()) {
+      setContextError('Escribe un nombre para el contexto.');
+      return;
+    }
     setMsg(null);
     setError(null);
+    setContextError(null);
     try {
       const title = newContextTitle.trim().endsWith('.md')
         ? newContextTitle.trim()
@@ -127,7 +134,7 @@ export default function TemplateEditorPage() {
       setNewContextTitle('');
       setTab(title);
       setMsg('Contexto creado en DuckDB');
-      load();
+      await load(title);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error creando contexto');
     }
@@ -226,7 +233,11 @@ export default function TemplateEditorPage() {
           {isCatalogWorker && canWrite && (
             <CatalogContextTools
               title={newContextTitle}
-              onTitleChange={setNewContextTitle}
+              error={contextError}
+              onTitleChange={(value) => {
+                setNewContextTitle(value);
+                setContextError(null);
+              }}
               onCreate={createContext}
               onMoveUp={() => moveCurrentContext(-1)}
               onMoveDown={() => moveCurrentContext(1)}
@@ -290,6 +301,7 @@ export default function TemplateEditorPage() {
 
 function CatalogContextTools({
   title,
+  error,
   canDelete,
   onTitleChange,
   onCreate,
@@ -298,6 +310,7 @@ function CatalogContextTools({
   onDelete,
 }: {
   title: string;
+  error: string | null;
   canDelete: boolean;
   onTitleChange: (v: string) => void;
   onCreate: () => void;
@@ -316,10 +329,12 @@ function CatalogContextTools({
         placeholder="nuevo_contexto.md"
         className="mt-2 w-full rounded-lg border px-2 py-1.5 text-[11px] dark:border-dark-border dark:bg-dark-bg"
       />
+      {error && <p className="mt-1 px-1 text-[10px] font-semibold text-red-600">{error}</p>}
       <button
         type="button"
         onClick={onCreate}
-        className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg bg-gov-blue-700 px-2 py-1.5 text-[11px] font-black text-white"
+        disabled={!title.trim()}
+        className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg bg-gov-blue-700 px-2 py-1.5 text-[11px] font-black text-white disabled:opacity-50"
       >
         <Plus size={12} /> Añadir contexto
       </button>

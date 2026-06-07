@@ -5,9 +5,13 @@ import { repoRoot } from '@/lib/localOps';
 export function comfyuiApiUrl(): string {
   return (
     process.env.COMFYUI_API_URL?.trim() ||
-    process.env.NEXT_PUBLIC_COMFYUI_API_URL?.trim() ||
     'http://127.0.0.1:8188'
   ).replace(/\/$/, '');
+}
+
+function comfyuiTimeoutSec(): string {
+  const raw = (process.env.COMFYUI_TIMEOUT_SEC || '300').trim();
+  return /^\d{1,5}(\.\d+)?$/.test(raw) ? raw : '300';
 }
 
 export async function comfyuiStatusLocal(): Promise<{
@@ -18,8 +22,15 @@ export async function comfyuiStatusLocal(): Promise<{
   system?: Record<string, unknown>;
   checkpoints?: string[];
   checkpoints_ready?: boolean;
+  source?: string;
+  runtime_key?: string;
+  timeout_sec?: string;
+  timeout_source?: string;
 }> {
   const base = comfyuiApiUrl();
+  const source = process.env.COMFYUI_API_URL ? 'env' : 'default';
+  const timeout_sec = comfyuiTimeoutSec();
+  const timeout_source = process.env.COMFYUI_TIMEOUT_SEC ? 'env' : 'default';
   const url = `${base}/system_stats`;
   const started = Date.now();
   try {
@@ -31,6 +42,10 @@ export async function comfyuiStatusLocal(): Promise<{
         error: `ComfyUI HTTP ${res.status}`,
         checkpoints: [],
         checkpoints_ready: false,
+        source,
+        runtime_key: 'comfyui.api_url',
+        timeout_sec,
+        timeout_source,
       };
     }
     const data = (await res.json()) as Record<string, unknown>;
@@ -59,6 +74,10 @@ export async function comfyuiStatusLocal(): Promise<{
       system: data,
       checkpoints,
       checkpoints_ready: checkpoints.length > 0,
+      source,
+      runtime_key: 'comfyui.api_url',
+      timeout_sec,
+      timeout_source,
     };
   } catch (e) {
     return {
@@ -67,6 +86,10 @@ export async function comfyuiStatusLocal(): Promise<{
       error: e instanceof Error ? e.message : 'No se pudo conectar con ComfyUI',
       checkpoints: [],
       checkpoints_ready: false,
+      source,
+      runtime_key: 'comfyui.api_url',
+      timeout_sec,
+      timeout_source,
     };
   }
 }

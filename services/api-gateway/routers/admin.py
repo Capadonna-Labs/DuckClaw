@@ -17,12 +17,24 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _EDITABLE_SUFFIXES = frozenset({".yaml", ".yml", ".md", ".sql", ".py", ".txt", ".json"})
-_PROTECTED_TEMPLATE_IDS = frozenset({"entry_router", "manager_router"})
+_PROTECTED_TEMPLATE_IDS = frozenset({"entry_router", "manager_router", "platform-orchestrator"})
 _CATALOG_STARTER_SKIP = frozenset({"entry_router", "manager_router", "industries"})
 _ENV_ALLOW_PREFIXES = ("TELEGRAM_", "DUCKDB_", "DUCKCLAW_", "LANGCHAIN_", "OPENAI_", "GROQ_", "DEEPSEEK_")
 _ENV_ALLOW_EXACT = frozenset({"LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "REDIS_URL"})
 _DUCKDB_EXPLORER_LEGACY_SCHEMAS = frozenset({"pqrsd_crm", "quant_core", "war_room_core"})
+_DUCKDB_EXPLORER_LEGACY_MAIN_TABLES = frozenset({"leila_orders", "leila_products"})
 _DROP_LEGACY_SCHEMAS_CONFIRM = "DROP_LEGACY_SCHEMAS"
+_TELEGRAM_WEBHOOK_ROUTES_ENV_KEY = "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES"
+_TELEGRAM_WEBHOOK_ROUTES_DOMAIN = "telegram"
+_TELEGRAM_WEBHOOK_ROUTES_KEY = "webhook_routes"
+_MCP_PORT_ENV_KEY = "DUCKCLAW_MCP_PORT"
+_MCP_PORT_DOMAIN = "mcp"
+_MCP_PORT_KEY = "port"
+_COMFYUI_API_URL_ENV_KEY = "COMFYUI_API_URL"
+_COMFYUI_TIMEOUT_SEC_ENV_KEY = "COMFYUI_TIMEOUT_SEC"
+_COMFYUI_DOMAIN = "comfyui"
+_COMFYUI_API_URL_KEY = "api_url"
+_COMFYUI_TIMEOUT_SEC_KEY = "timeout_sec"
 
 
 def _repo_root() -> Path:
@@ -57,6 +69,149 @@ def _duckdb_explorer_legacy_schema_names(
             raw = os.environ.get("DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS", "")
     configured = {item.strip().lower() for item in raw.split(",") if item.strip()}
     return set(_DUCKDB_EXPLORER_LEGACY_SCHEMAS) | configured
+
+
+def _duckdb_explorer_legacy_main_table_names(
+    *,
+    tenant_id: str | None = None,
+    actor_email: str | None = None,
+) -> set[str]:
+    """Main tables known to belong to old domain demos; DB-first with env fallback."""
+    raw = os.environ.get("DUCKCLAW_ADMIN_DUCKDB_LEGACY_MAIN_TABLES", "")
+    if tenant_id and actor_email:
+        try:
+            from core.admin_identity import open_gateway_db
+            from duckclaw.admin_runtime_settings import resolve_runtime_setting
+
+            with open_gateway_db(read_only=False) as db:
+                resolved = resolve_runtime_setting(
+                    db,
+                    tenant_id=tenant_id,
+                    actor_email=actor_email,
+                    domain="duckdb",
+                    key="legacy_main_tables",
+                    env_key="DUCKCLAW_ADMIN_DUCKDB_LEGACY_MAIN_TABLES",
+                    default="",
+                )
+            raw = str(resolved.get("value") or raw or "")
+        except Exception:
+            raw = os.environ.get("DUCKCLAW_ADMIN_DUCKDB_LEGACY_MAIN_TABLES", "")
+    configured = {item.strip().lower() for item in raw.split(",") if item.strip()}
+    return set(_DUCKDB_EXPLORER_LEGACY_MAIN_TABLES) | configured
+
+
+def _telegram_webhook_routes_runtime_setting() -> dict[str, Any]:
+    """Rutas Telegram DB-first con fallback a `.env` bootstrap."""
+    raw_env = (
+        _read_env_key_unmasked(_TELEGRAM_WEBHOOK_ROUTES_ENV_KEY)
+        or os.environ.get(_TELEGRAM_WEBHOOK_ROUTES_ENV_KEY)
+        or ""
+    ).strip()
+    try:
+        from core.admin_identity import open_gateway_db
+        from duckclaw.admin_runtime_settings import resolve_runtime_setting
+
+        with open_gateway_db(read_only=False) as db:
+            resolved = resolve_runtime_setting(
+                db,
+                tenant_id="global",
+                actor_email="",
+                domain=_TELEGRAM_WEBHOOK_ROUTES_DOMAIN,
+                key=_TELEGRAM_WEBHOOK_ROUTES_KEY,
+                env_key=_TELEGRAM_WEBHOOK_ROUTES_ENV_KEY,
+                default="",
+            )
+        return {
+            "value": str(resolved.get("value") or raw_env or "").strip(),
+            "source": str(resolved.get("source") or ("env" if raw_env else "default")),
+        }
+    except Exception:
+        return {"value": raw_env, "source": "env" if raw_env else "default"}
+
+
+def _upsert_telegram_webhook_routes_runtime_setting(serialized: str, *, actor: str) -> None:
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_runtime_settings import upsert_runtime_setting
+
+    with open_gateway_db(read_only=False) as db:
+        upsert_runtime_setting(
+            db,
+            tenant_id="global",
+            actor_email="",
+            domain=_TELEGRAM_WEBHOOK_ROUTES_DOMAIN,
+            key=_TELEGRAM_WEBHOOK_ROUTES_KEY,
+            value_text=serialized,
+            value_kind="string",
+            secret=True,
+            updated_by=actor,
+        )
+
+
+def _mcp_port_runtime_setting() -> dict[str, str]:
+    """Puerto MCP DB-first con fallback `.env` bootstrap."""
+    raw_env = (os.environ.get(_MCP_PORT_ENV_KEY) or "8001").strip() or "8001"
+    try:
+        from core.admin_identity import open_gateway_db
+        from duckclaw.admin_runtime_settings import resolve_runtime_setting
+
+        with open_gateway_db(read_only=False) as db:
+            resolved = resolve_runtime_setting(
+                db,
+                tenant_id="global",
+                actor_email="",
+                domain=_MCP_PORT_DOMAIN,
+                key=_MCP_PORT_KEY,
+                env_key=_MCP_PORT_ENV_KEY,
+                default="8001",
+            )
+        raw = str(resolved.get("value") or raw_env or "8001").strip() or "8001"
+        source = str(resolved.get("source") or ("env" if raw_env else "default"))
+    except Exception:
+        raw = raw_env
+        source = "env" if os.environ.get(_MCP_PORT_ENV_KEY) is not None else "default"
+    if not re.fullmatch(r"\d{2,5}", raw):
+        raw = "8001"
+        source = "default"
+    return {"value": raw, "source": source}
+
+
+def _comfyui_runtime_settings() -> dict[str, str]:
+    """Configuración ComfyUI DB-first con fallback `.env` bootstrap."""
+    raw_api_env = (os.environ.get(_COMFYUI_API_URL_ENV_KEY) or "http://127.0.0.1:8188").strip()
+    raw_timeout_env = (os.environ.get(_COMFYUI_TIMEOUT_SEC_ENV_KEY) or "300").strip()
+
+    def _resolve(key: str, env_key: str, default: str) -> tuple[str, str]:
+        try:
+            from core.admin_identity import open_gateway_db
+            from duckclaw.admin_runtime_settings import resolve_runtime_setting
+
+            with open_gateway_db(read_only=False) as db:
+                resolved = resolve_runtime_setting(
+                    db,
+                    tenant_id="global",
+                    actor_email="",
+                    domain=_COMFYUI_DOMAIN,
+                    key=key,
+                    env_key=env_key,
+                    default=default,
+                )
+            return str(resolved.get("value") or default).strip(), str(resolved.get("source") or "default")
+        except Exception:
+            env_value = os.environ.get(env_key)
+            return (env_value or default).strip(), "env" if env_value is not None else "default"
+
+    api_url, api_source = _resolve(_COMFYUI_API_URL_KEY, _COMFYUI_API_URL_ENV_KEY, raw_api_env or "http://127.0.0.1:8188")
+    timeout_sec, timeout_source = _resolve(_COMFYUI_TIMEOUT_SEC_KEY, _COMFYUI_TIMEOUT_SEC_ENV_KEY, raw_timeout_env or "300")
+    api_url = (api_url or "http://127.0.0.1:8188").rstrip("/")
+    if not re.fullmatch(r"\d{1,5}(\.\d+)?", timeout_sec or ""):
+        timeout_sec = "300"
+        timeout_source = "default"
+    return {
+        "api_url": api_url,
+        "source": api_source,
+        "timeout_sec": timeout_sec,
+        "timeout_source": timeout_source,
+    }
 
 
 def _quote_duckdb_ident(value: str) -> str:
@@ -1148,7 +1303,7 @@ async def playground_config(
     workers_list: list[dict[str, str]] = [{"id": "default", "label": "Default"}]
     projects: list[dict[str, Any]] = []
     try:
-        with open_gateway_db(read_only=True) as db:
+        with open_gateway_db(read_only=False) as db:
             profile = ensure_profile_for_user(db, email=actor)
             workers_list = playground_workers_for_actor(db, actor_email=actor)
             projects = list_projects_with_agents_for_actor(db, actor_email=actor)
@@ -1418,9 +1573,9 @@ async def playground_chat(
 ):
     """Chat de prueba desde consola admin (exento Tailscale vía prefijo /admin/)."""
     from core.admin_identity import (
+        get_visible_worker_for_actor,
         open_gateway_db,
         resolve_playground_worker_for_project,
-        worker_allowed_for_actor,
     )
     from duckclaw.admin_user_profiles import ensure_profile_for_user
 
@@ -1435,7 +1590,7 @@ async def playground_chat(
     try:
         with open_gateway_db(read_only=True) as db:
             profile = ensure_profile_for_user(db, email=actor)
-            if worker_allowed_for_actor(db, actor_email=actor, worker_id=wid):
+            if get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
                 catalog_allowed = True
                 try:
                     wid, project_id = resolve_playground_worker_for_project(
@@ -1472,9 +1627,14 @@ async def playground_chat(
         chat_id=body.chat_id,
     )
     console_actor = (request.headers.get("x-duckclaw-actor") or "").strip()
-    db_first_console = bool(console_actor and console_actor.lower() not in ("admin-ui", ""))
+    db_first_console = bool(
+        (actor or "").strip().lower() not in ("", "admin-ui")
+        or (console_actor and console_actor.lower() not in ("admin-ui", ""))
+    )
     explicit_team = _playground_worker_explicitly_in_team(team_ctx, wid)
     team_allowed = _playground_worker_allowed_in_team(team_ctx, wid)
+    if wid != "default" and not catalog_allowed:
+        raise _problem(403, "Worker no asignado al catálogo del actor", wid)
     if not catalog_allowed:
         if db_first_console:
             if (team_ctx.get("team_source") or "") == "all":
@@ -1646,7 +1806,8 @@ async def comfyui_status() -> dict[str, Any]:
 
     import httpx
 
-    base = (os.environ.get("COMFYUI_API_URL") or "http://127.0.0.1:8188").strip().rstrip("/")
+    runtime = _comfyui_runtime_settings()
+    base = runtime["api_url"]
     if not base:
         return {"ok": False, "url": "", "error": "COMFYUI_API_URL no configurada"}
     url = f"{base}/system_stats"
@@ -1672,6 +1833,10 @@ async def comfyui_status() -> dict[str, Any]:
         return {
             "ok": True,
             "url": base,
+            "source": runtime["source"],
+            "runtime_key": "comfyui.api_url",
+            "timeout_sec": runtime["timeout_sec"],
+            "timeout_source": runtime["timeout_source"],
             "latency_ms": latency_ms,
             "system": data if isinstance(data, dict) else {},
             "checkpoints": checkpoints,
@@ -1681,6 +1846,10 @@ async def comfyui_status() -> dict[str, Any]:
         return {
             "ok": False,
             "url": base,
+            "source": runtime["source"],
+            "runtime_key": "comfyui.api_url",
+            "timeout_sec": runtime["timeout_sec"],
+            "timeout_source": runtime["timeout_source"],
             "error": str(exc)[:500],
             "checkpoints": [],
             "checkpoints_ready": False,
@@ -1710,9 +1879,12 @@ async def comfyui_generate(
     set_quant_tool_tenant_id(tenant_id)
     set_quant_tool_user_id((actor or "admin-ui").strip() or "admin-ui")
 
+    runtime = _comfyui_runtime_settings()
     cfg = {
         "enabled": True,
         "template": (body.template or "comfy_default").strip() or "comfy_default",
+        "api_url": runtime["api_url"],
+        "timeout_sec": runtime["timeout_sec"],
     }
 
     def _run() -> str:
@@ -2072,11 +2244,14 @@ async def admin_overview_metrics(
 
 
 @router.get("/templates", dependencies=[Depends(_require_admin_key)])
-async def list_templates(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
+async def list_templates(
+    include_inactive: bool = Query(False),
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
     from core.admin_identity import list_templates_payload, open_gateway_db
 
-    with open_gateway_db(read_only=True) as db:
-        items = list_templates_payload(db, actor_email=actor)
+    with open_gateway_db(read_only=False) as db:
+        items = list_templates_payload(db, actor_email=actor, include_inactive=include_inactive)
     return {"templates": items}
 
 
@@ -2391,7 +2566,7 @@ async def delete_template(
     from duckclaw.admin_worker_catalog import deactivate_visible_worker_for_actor, get_visible_worker_for_actor
 
     wid = worker_id.strip()
-    if wid in _PROTECTED_TEMPLATE_IDS:
+    if wid == "default" or wid in _PROTECTED_TEMPLATE_IDS:
         raise _problem(403, "Plantilla protegida", wid)
     with open_gateway_db(read_only=False) as db:
         worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
@@ -2400,6 +2575,25 @@ async def delete_template(
             _admin_audit("template.delete", f"templates/{wid}", "catalog_deactivate", actor=actor)
             return {"ok": True, "id": wid, "action": "deactivated"}
     raise _problem(404, "Plantilla no encontrada en catálogo", wid)
+
+
+@router.post("/templates/{worker_id}/reactivate", dependencies=[Depends(_require_admin_key)])
+async def reactivate_template(
+    worker_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_worker_catalog import reactivate_visible_worker_for_actor
+
+    wid = worker_id.strip()
+    if wid in _PROTECTED_TEMPLATE_IDS:
+        raise _problem(403, "Plantilla protegida", wid)
+    with open_gateway_db(read_only=False) as db:
+        worker = reactivate_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+    if not worker:
+        raise _problem(404, "Worker inactivo no encontrado en catálogo", wid)
+    _admin_audit("template.reactivate", f"templates/{wid}", "catalog_reactivate", actor=actor)
+    return {"ok": True, "id": wid, "action": "reactivated"}
 
 
 @router.post("/templates/{worker_id}/validate", dependencies=[Depends(_require_admin_key)])
@@ -2458,12 +2652,11 @@ async def patch_env_config(
 @router.get("/telegram/routes", dependencies=[Depends(_require_admin_key)])
 async def get_telegram_routes() -> dict[str, Any]:
     from duckclaw.integrations.telegram.compact_webhook_routes import (
-        known_compact_bot_names,
         parse_compact_telegram_webhook_routes,
     )
 
-    key = "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES"
-    raw = (_read_env_key_unmasked(key) or os.environ.get(key) or "").strip()
+    resolved = _telegram_webhook_routes_runtime_setting()
+    raw = str(resolved.get("value") or "").strip()
     routes: list[dict[str, str]] = []
     fmt = "empty"
     if raw:
@@ -2478,7 +2671,9 @@ async def get_telegram_routes() -> dict[str, Any]:
                     "routes": [],
                     "parse_error": str(exc),
                     "raw_masked": _mask_secret(raw),
-                    "known_bots": list(known_compact_bot_names()),
+                    "known_bots": [],
+                    "source": resolved.get("source", "default"),
+                    "runtime_key": "telegram.webhook_routes",
                 }
             if compact:
                 fmt = "compact"
@@ -2497,7 +2692,9 @@ async def get_telegram_routes() -> dict[str, Any]:
         "format": fmt,
         "routes": routes,
         "raw_masked": _mask_secret(raw) if raw else "",
-        "known_bots": list(known_compact_bot_names()),
+        "known_bots": [str(route.get("bot") or "") for route in routes],
+        "source": resolved.get("source", "default"),
+        "runtime_key": "telegram.webhook_routes",
     }
 
 
@@ -2513,8 +2710,8 @@ async def put_telegram_routes(
         serialize_compact_telegram_webhook_routes,
     )
 
-    key = "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES"
-    current_raw = (_read_env_key_unmasked(key) or os.environ.get(key) or "").strip()
+    current = _telegram_webhook_routes_runtime_setting()
+    current_raw = str(current.get("value") or "").strip()
     current_by_bot = {
         r.bot_name: r for r in parse_compact_telegram_webhook_routes(current_raw)
     }
@@ -2561,14 +2758,14 @@ async def put_telegram_routes(
     except ValueError as exc:
         raise _problem(400, "Rutas inválidas", str(exc)) from exc
 
-    backup, updated = _merge_env_lines({key: serialized})
-    _admin_audit("telegram.routes.put", key, f"{len(built)} rutas", actor=actor)
+    _upsert_telegram_webhook_routes_runtime_setting(serialized, actor=actor)
+    _admin_audit("telegram.routes.put", "telegram.webhook_routes", f"{len(built)} rutas", actor=actor)
     return {
         "ok": True,
-        "updated": updated,
-        "backup": str(backup),
+        "updated": ["telegram.webhook_routes"],
+        "source": "db",
         "route_count": len(built),
-        "restart_hint": "pm2 restart DuckClaw-Gateway --update-env",
+        "restart_hint": "Reinicia DuckClaw-Gateway para registrar rutas dinámicas DB-first",
     }
 
 
@@ -2832,17 +3029,17 @@ async def admin_delete_conversation(
     session_id: str,
     tenant_id: str = Query("default"),
 ) -> dict[str, Any]:
-    from core.admin_conversations import delete_conversation
+    from core.admin_conversations import delete_conversation_merged
 
     tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
     sid = (session_id or "").strip()
     if not sid:
         raise _problem(400, "session_id vacío", session_id)
     redis_client = getattr(request.app.state, "redis", None)
-    ok = await delete_conversation(redis_client, tid, sid)
-    if not ok:
+    deleted_tid = await delete_conversation_merged(redis_client, tid, sid)
+    if deleted_tid is None:
         raise _problem(404, "Conversación no encontrada", sid)
-    return {"ok": True, "session_id": sid, "tenant_id": tid}
+    return {"ok": True, "session_id": sid, "tenant_id": deleted_tid}
 
 
 @router.post("/conversations/reindex", dependencies=[Depends(_require_admin_key)])
@@ -3420,6 +3617,240 @@ class CatalogSkillCreateBody(BaseModel):
         return visibility
 
 
+class OrchestratorDraftBody(BaseModel):
+    prompt: str = Field(..., min_length=10, max_length=4000)
+
+
+class OrchestratorDraftProjectBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str = Field(default="", max_length=2048)
+
+
+class OrchestratorDraftWorkerBody(BaseModel):
+    worker_id: str = Field(..., min_length=1, max_length=64)
+    display_name: str = Field(..., min_length=1, max_length=128)
+    role: str = Field(default="member", max_length=64)
+    system_prompt: str = Field(default="", max_length=8000)
+
+
+class OrchestratorSuggestedSkillBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    reason: str = Field(default="", max_length=512)
+    available: bool = False
+
+
+class OrchestratorDraftPayloadBody(BaseModel):
+    project: OrchestratorDraftProjectBody
+    workers: list[OrchestratorDraftWorkerBody] = Field(default_factory=list, max_length=8)
+    shared_context: str = Field(default="", max_length=16000)
+    suggested_skills: list[OrchestratorSuggestedSkillBody] = Field(default_factory=list, max_length=16)
+    questions: list[str] = Field(default_factory=list, max_length=12)
+
+
+class OrchestratorConfirmBody(BaseModel):
+    draft: OrchestratorDraftPayloadBody
+
+
+def _orchestrator_title_from_prompt(prompt: str) -> str:
+    text = re.sub(r"\s+", " ", (prompt or "").strip())
+    cleaned = re.sub(r"^(crear|crea|necesito|quiero|ayudame a crear)\s+", "", text, flags=re.I)
+    words = cleaned.split()
+    if not words:
+        return "Proyecto guiado"
+    title = " ".join(words[:6]).strip(" .,:;")
+    return title[:1].upper() + title[1:]
+
+
+def _orchestrator_worker_id_from_project(name: str) -> str:
+    from duckclaw.admin_worker_catalog import sanitize_catalog_worker_id
+
+    base = sanitize_catalog_worker_id(name or "guided-agent").replace("_", "-")
+    if not base.endswith("-agent"):
+        base = f"{base}-agent"
+    return base[:64] or "guided-agent"
+
+
+def _orchestrator_skill_suggestions(db: Any, *, actor_email: str, prompt: str) -> list[dict[str, Any]]:
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema
+
+    ensure_admin_worker_catalog_schema(db)
+    profile = ensure_profile_for_user(db, email=actor_email)
+    rows = db.execute(
+        """
+        SELECT name, description, implementation_ref
+        FROM main.admin_skills
+        WHERE active = true
+          AND tenant_id IN (?, 'global')
+          AND (owner_email = ? OR visibility = 'public')
+        ORDER BY name
+        """,
+        [profile["tenant_id"], profile["email"]],
+    )
+    prompt_key = (prompt or "").lower()
+    suggestions: list[dict[str, Any]] = []
+    for name, description, implementation_ref in rows:
+        skill_name = str(name or "").strip()
+        if not skill_name:
+            continue
+        tokens = {part for part in re.split(r"[^a-zA-Z0-9]+", skill_name.lower()) if len(part) >= 3}
+        desc = str(description or "").strip()
+        matched = any(token in prompt_key for token in tokens) or (
+            bool(desc) and any(part in prompt_key for part in re.split(r"[^a-zA-Z0-9]+", desc.lower()) if len(part) >= 4)
+        )
+        if matched:
+            suggestions.append(
+                {
+                    "name": skill_name,
+                    "reason": desc or f"Disponible como {implementation_ref}",
+                    "available": True,
+                }
+            )
+    if suggestions:
+        return suggestions[:6]
+    return [
+        {
+            "name": "project_planning",
+            "reason": "Skill sugerida para estructurar objetivos, roles y contexto del proyecto.",
+            "available": False,
+        }
+    ]
+
+
+@router.post("/workspace/orchestrator/draft", dependencies=[Depends(_require_admin_key)])
+async def workspace_orchestrator_draft(
+    body: OrchestratorDraftBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_worker_catalog import ensure_platform_orchestrator_for_actor
+
+    prompt = body.prompt.strip()
+    project_name = _orchestrator_title_from_prompt(prompt)
+    with open_gateway_db(read_only=False) as db:
+        ensure_platform_orchestrator_for_actor(db, actor_email=actor)
+        suggested_skills = _orchestrator_skill_suggestions(db, actor_email=actor, prompt=prompt)
+    worker_id = _orchestrator_worker_id_from_project(project_name)
+    return {
+        "project": {
+            "name": project_name,
+            "description": prompt[:512],
+        },
+        "workers": [
+            {
+                "worker_id": worker_id,
+                "display_name": project_name,
+                "role": "member",
+                "system_prompt": (
+                    "Ayuda al usuario a cumplir el objetivo del proyecto usando el contexto compartido, "
+                    "preguntando antes de asumir datos faltantes."
+                ),
+            }
+        ],
+        "shared_context": f"# Contexto compartido\n\nObjetivo inicial:\n\n{prompt}",
+        "suggested_skills": suggested_skills,
+        "questions": [
+            "¿Qué fuentes de datos debe usar este proyecto?",
+            "¿Qué resultado concreto esperas del worker principal?",
+            "¿Hay restricciones de tono, seguridad o aprobación humana?",
+        ],
+    }
+
+
+@router.post("/workspace/orchestrator/confirm", dependencies=[Depends(_require_admin_key)])
+async def workspace_orchestrator_confirm(
+    body: OrchestratorConfirmBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_worker_catalog import (
+        add_worker_context,
+        add_worker_version,
+        create_worker,
+        ensure_platform_orchestrator_for_actor,
+        get_visible_worker_for_actor,
+    )
+    from duckclaw.admin_workspace import (
+        attach_agent_to_project,
+        create_project as create_workspace_project,
+        ensure_admin_workspace_schema,
+    )
+
+    draft = body.draft
+    created_workers: list[dict[str, Any]] = []
+    with open_gateway_db(read_only=False) as db:
+        ensure_platform_orchestrator_for_actor(db, actor_email=actor)
+        ensure_admin_workspace_schema(db)
+        db.execute("BEGIN TRANSACTION")
+        try:
+            project = create_workspace_project(
+                db,
+                owner_email=actor,
+                name=draft.project.name,
+                description=draft.project.description,
+            )
+            for index, worker_body in enumerate(draft.workers):
+                existing = get_visible_worker_for_actor(
+                    db,
+                    actor_email=actor,
+                    worker_id=worker_body.worker_id,
+                )
+                worker = existing or create_worker(
+                    db,
+                    owner_email=actor,
+                    worker_id=worker_body.worker_id,
+                    display_name=worker_body.display_name,
+                    source_kind="orchestrator_draft",
+                    source_template_id="platform-orchestrator",
+                    visibility="private",
+                )
+                if existing is None:
+                    add_worker_version(
+                        db,
+                        worker_uid=worker["worker_uid"],
+                        created_by=actor,
+                        manifest_snapshot={
+                            "id": worker["worker_id"],
+                            "name": worker["display_name"],
+                            "description": draft.project.description,
+                            "skills": [skill.name for skill in draft.suggested_skills if skill.available],
+                        },
+                        files_snapshot={
+                            "system_prompt.md": worker_body.system_prompt,
+                            "soul.md": draft.shared_context,
+                        },
+                        change_note="Creado desde Platform Orchestrator",
+                    )
+                if draft.shared_context.strip():
+                    add_worker_context(
+                        db,
+                        worker_uid=worker["worker_uid"],
+                        title="Contexto compartido",
+                        content_md=draft.shared_context,
+                        sort_order=0,
+                    )
+                attach_agent_to_project(
+                    db,
+                    project_id=project["project_id"],
+                    worker_uid=worker["worker_uid"],
+                    role=worker_body.role or "member",
+                    sort_order=index,
+                )
+                created_workers.append(worker)
+            db.execute("COMMIT")
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
+    _admin_audit(
+        "workspace.orchestrator.confirm",
+        str(project.get("project_id")),
+        str(project.get("name")),
+        actor=actor,
+        meta={"workers": [worker.get("worker_id") for worker in created_workers]},
+    )
+    return {"ok": True, "project": project, "created": {"workers": created_workers}}
+
+
 @router.get("/catalog/skills", dependencies=[Depends(_require_admin_key)])
 async def catalog_skills(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
     global_skills: list[dict[str, str]] = []
@@ -3644,7 +4075,8 @@ async def _probe_mcp_http(port: str) -> dict[str, Any]:
 
 @router.get("/catalog/mcp", dependencies=[Depends(_require_admin_key)])
 async def catalog_mcp() -> dict[str, Any]:
-    mcp_port = (os.environ.get("DUCKCLAW_MCP_PORT") or "8001").strip()
+    mcp_port_setting = _mcp_port_runtime_setting()
+    mcp_port = mcp_port_setting["value"]
     duckclaw_tools = [
         {
             "name": "open_meteo_current_weather",
@@ -3695,6 +4127,9 @@ async def catalog_mcp() -> dict[str, Any]:
         "duckclaw_mcp": {
             "command": "uv run python -m duckclaw_mcp --host 0.0.0.0 --port " + mcp_port,
             "url": f"http://127.0.0.1:{mcp_port}/mcp",
+            "port": mcp_port,
+            "source": mcp_port_setting["source"],
+            "runtime_key": "mcp.port",
             "tools": duckclaw_tools,
             "live": live,
         },
@@ -4645,6 +5080,7 @@ class DuckdbVectorSearchBody(BaseModel):
 
 class DuckdbLegacySchemaDropBody(BaseModel):
     schemas: list[str] = Field(default_factory=list)
+    main_tables: list[str] = Field(default_factory=list)
     vault_path: str | None = None
     confirm: str = ""
 
@@ -4653,6 +5089,9 @@ def _duckdb_actor_scope(actor: str | None, vault_uid: str) -> dict[str, str]:
     actor_email = (actor or "admin-ui").strip().lower() or "admin-ui"
     tenant_id = _gateway_effective_tenant_id("default")
     if "@" in actor_email:
+        from duckclaw.admin_user_profiles import tenant_id_for_email
+
+        tenant_id = tenant_id_for_email(actor_email)
         try:
             from core.admin_identity import open_gateway_db
             from duckclaw.admin_user_profiles import ensure_profile_for_user
@@ -4795,6 +5234,10 @@ async def duckdb_legacy_schemas(
             tenant_id=scope["tenant_id"],
             actor_email=scope["actor_email"],
         )
+        main_table_candidates = _duckdb_explorer_legacy_main_table_names(
+            tenant_id=scope["tenant_id"],
+            actor_email=scope["actor_email"],
+        )
         out = [
             {
                 "schema": str(schema),
@@ -4804,12 +5247,18 @@ async def duckdb_legacy_schemas(
             for schema, tables in sorted(schemas.items())
             if str(schema).lower() in candidates
         ]
+        main_tables = [
+            {"schema": "main", "table": str(table)}
+            for table in sorted(schemas.get("main") or [])
+            if str(table).lower() in main_table_candidates
+        ]
         return {
             "vault_path": resolved,
             "vault_user_id": scope["vault_user_id"],
             "actor_email": scope["actor_email"],
             "tenant_id": scope["tenant_id"],
             "schemas": out,
+            "main_tables": main_tables,
             "confirm": _DROP_LEGACY_SCHEMAS_CONFIRM,
         }
     finally:
@@ -4833,6 +5282,10 @@ async def duckdb_drop_legacy_schemas(
         tenant_id=scope["tenant_id"],
         actor_email=scope["actor_email"],
     )
+    main_table_candidates = _duckdb_explorer_legacy_main_table_names(
+        tenant_id=scope["tenant_id"],
+        actor_email=scope["actor_email"],
+    )
     requested = []
     for raw in body.schemas:
         schema = (raw or "").strip().lower()
@@ -4843,10 +5296,21 @@ async def duckdb_drop_legacy_schemas(
             raise _problem(400, "Schema no permitido para cleanup legacy", schema)
         requested.append(schema)
     requested = sorted(set(requested))
-    if not requested:
+    requested_main_tables = []
+    for raw in body.main_tables:
+        table = (raw or "").strip().lower()
+        if not table:
+            continue
+        if table not in main_table_candidates:
+            con.close()
+            raise _problem(400, "Tabla main no permitida para cleanup legacy", table)
+        requested_main_tables.append(table)
+    requested_main_tables = sorted(set(requested_main_tables))
+    if not requested and not requested_main_tables:
         con.close()
-        raise _problem(400, "schemas requerido", "Selecciona al menos un schema legacy")
+        raise _problem(400, "cleanup vacío", "Selecciona al menos un schema o tabla main legacy")
     dropped: list[str] = []
+    dropped_main_tables: list[str] = []
     try:
         existing = {
             str(row[0]).lower()
@@ -4854,17 +5318,38 @@ async def duckdb_drop_legacy_schemas(
                 "SELECT schema_name FROM information_schema.schemata"
             ).fetchall()
         }
-        for schema in requested:
-            if schema not in existing:
-                continue
-            con.execute(f"DROP SCHEMA {_quote_duckdb_ident(schema)} CASCADE")
-            dropped.append(schema)
+        existing_main_tables = {
+            str(row[0]).lower()
+            for row in con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+            ).fetchall()
+        }
+        con.execute("BEGIN TRANSACTION")
+        try:
+            for table in requested_main_tables:
+                if table not in existing_main_tables:
+                    continue
+                con.execute(f"DROP TABLE main.{_quote_duckdb_ident(table)}")
+                dropped_main_tables.append(table)
+            for schema in requested:
+                if schema not in existing:
+                    continue
+                con.execute(f"DROP SCHEMA {_quote_duckdb_ident(schema)} CASCADE")
+                dropped.append(schema)
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
         _admin_audit(
             "duckdb.legacy_schema.drop",
             resolved,
-            ",".join(dropped),
+            ",".join(dropped + [f"main.{table}" for table in dropped_main_tables]),
             actor=actor,
-            meta={"tenant_id": scope["tenant_id"], "schemas": dropped},
+            meta={
+                "tenant_id": scope["tenant_id"],
+                "schemas": dropped,
+                "main_tables": dropped_main_tables,
+            },
         )
         return {
             "ok": True,
@@ -4872,6 +5357,7 @@ async def duckdb_drop_legacy_schemas(
             "vault_user_id": scope["vault_user_id"],
             "tenant_id": scope["tenant_id"],
             "dropped": dropped,
+            "dropped_main_tables": dropped_main_tables,
         }
     finally:
         con.close()

@@ -281,7 +281,7 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     assert data.get("authorized") is True
     from duckclaw.workers.worker_ids import normalize_worker_id
 
-    assert normalize_worker_id(target) in _playground_worker_ids(data)
+    assert normalize_worker_id(target) not in _playground_worker_ids(data)
     assert data.get("team_source") == "chat"
 
 
@@ -298,7 +298,7 @@ def _mock_playground_team(*, workers: list[str], authorized: bool = True) -> dic
     }
 
 
-def test_playground_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+def test_playground_chat(admin_client: TestClient, gateway_db: Path, monkeypatch: pytest.MonkeyPatch):
     gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
     import sys
 
@@ -306,6 +306,8 @@ def test_playground_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPat
         sys.path.insert(0, str(gw_dir))
     import main as gateway_main
     import routers.admin as admin_router
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker
 
     async def _fake_invoke(*_args, **_kwargs):
         return {"response": "respuesta-mock", "usage_tokens": {"total": 1}}
@@ -313,19 +315,29 @@ def test_playground_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         admin_router,
         "_playground_team_context",
-        lambda **_: _mock_playground_team(workers=["AXIS-Maestro"]),
+        lambda **_: _mock_playground_team(workers=["axis-maestro"]),
     )
     monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+    db = DuckClaw(str(gateway_db), read_only=False, engine="python")
+    try:
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="axis-maestro",
+            display_name="AXIS Maestro",
+        )
+    finally:
+        db.close()
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
-        headers={"X-Admin-Key": "test-admin-key"},
-        json={"worker_id": "AXIS-Maestro", "message": "hola"},
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
+        json={"worker_id": "axis-maestro", "message": "hola"},
     )
     assert r.status_code == 200
     data = r.json()
     assert data.get("ok") is True
     assert data.get("response") == "respuesta-mock"
-    assert data.get("worker_id") == "AXIS-Maestro"
+    assert data.get("worker_id") == "axis-maestro"
 
 
 def test_playground_chat_rejects_worker_outside_team(
@@ -457,12 +469,11 @@ def test_template_vault_options_and_put(
         headers={"X-Admin-Key": "test-admin-key"},
         json={"scope": "private", "vault_id": "custom"},
     )
-    assert r2.status_code == 200
-    assert r2.json().get("binding", {}).get("vault_id") == "custom"
+    assert r2.status_code == 410
 
     manifest_text = (worker_dir / "manifest.yaml").read_text(encoding="utf-8")
-    assert "vault_binding" in manifest_text
-    assert "custom" in manifest_text
+    assert "vault_binding" not in manifest_text
+    assert "custom" not in manifest_text
 
 
 def test_catalog_topologies(admin_client: TestClient):

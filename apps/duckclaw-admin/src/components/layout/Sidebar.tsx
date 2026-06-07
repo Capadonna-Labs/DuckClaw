@@ -43,7 +43,6 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/projects': FolderPlus,
   '/skills': Blocks,
   '/mcp': Cable,
-  '/projects/new': FolderPlus,
   '/playground': MessageCircle,
   '/integrations': Cable,
   '/gen/image': Image,

@@ -105,6 +105,16 @@ def is_catalog_managed_worker(worker: dict[str, Any] | None) -> bool:
     return bool(worker and str(worker.get("worker_uid") or "").strip())
 
 
+def effective_actor_email(actor_email: str) -> str:
+    actor = (actor_email or "").strip().lower()
+    if "@" in actor:
+        return actor
+    admin_email = (os.environ.get("DUCKCLAW_ADMIN_EMAIL") or "").strip().lower()
+    if "@" in admin_email:
+        return admin_email
+    return "admin@duckclaw.local"
+
+
 def attach_profile_to_console_user(db: Any, user: dict[str, Any]) -> dict[str, Any]:
     email = str(user.get("email") or "").strip()
     if not email:
@@ -121,6 +131,7 @@ def list_templates_payload(
     actor_email: str,
     include_inactive: bool = False,
 ) -> list[dict[str, Any]]:
+    actor_email = effective_actor_email(actor_email)
     ensure_platform_orchestrator_for_actor(db, actor_email=actor_email)
     items: list[dict[str, Any]] = []
     for row in list_visible_workers_for_actor(
@@ -147,6 +158,7 @@ def list_templates_payload(
 
 
 def catalog_template_detail(db: Any, *, actor_email: str, worker_id: str) -> dict[str, Any] | None:
+    actor_email = effective_actor_email(actor_email)
     worker = get_visible_worker_for_actor(db, actor_email=actor_email, worker_id=worker_id)
     if not worker:
         return None
@@ -181,8 +193,7 @@ def catalog_template_detail(db: Any, *, actor_email: str, worker_id: str) -> dic
 
 
 def playground_workers_for_actor(db: Any, *, actor_email: str) -> list[dict[str, str]]:
-    from duckclaw.admin_user_agents import list_user_agents
-
+    actor_email = effective_actor_email(actor_email)
     ensure_platform_orchestrator_for_actor(db, actor_email=actor_email)
     seen: set[str] = set()
     workers: list[dict[str, str]] = []
@@ -197,24 +208,15 @@ def playground_workers_for_actor(db: Any, *, actor_email: str) -> list[dict[str,
                 "label": str(row.get("display_name") or row.get("name") or wid),
             }
         )
-    for agent in list_user_agents(db, actor_email):
-        wid = str(agent.get("worker_id") or "").strip()
-        if not wid or wid in seen:
-            continue
-        seen.add(wid)
-        workers.append({"id": wid, "label": str(agent.get("display_name") or wid)})
     return workers
 
 
 def worker_allowed_for_actor(db: Any, *, actor_email: str, worker_id: str) -> bool:
+    actor_email = effective_actor_email(actor_email)
     wid = (worker_id or "").strip()
     if not wid:
         return False
-    if get_visible_worker_for_actor(db, actor_email=actor_email, worker_id=wid):
-        return True
-    from duckclaw.admin_user_agents import list_user_agents
-
-    return any(a.get("worker_id") == wid for a in list_user_agents(db, actor_email))
+    return bool(get_visible_worker_for_actor(db, actor_email=actor_email, worker_id=wid))
 
 
 def resolve_playground_worker_for_project(
@@ -225,6 +227,7 @@ def resolve_playground_worker_for_project(
     worker_id: str,
 ) -> tuple[str, str]:
     """Returns (effective_worker_id, project_id). Raises ValueError/PermissionError."""
+    actor_email = effective_actor_email(actor_email)
     pid = (project_id or "").strip()
     wid = (worker_id or "").strip() or "default"
     if not pid:
@@ -251,6 +254,7 @@ def attach_project_agent_by_worker_id(
     role: str,
     sort_order: int,
 ) -> dict[str, Any]:
+    actor_email = effective_actor_email(actor_email)
     worker = get_visible_worker_for_actor(db, actor_email=actor_email, worker_id=worker_id)
     if not worker:
         raise ValueError(f"worker no visible: {worker_id}")
@@ -273,6 +277,7 @@ def detach_project_agent_by_worker_id(
     project_id: str,
     worker_id: str,
 ) -> bool:
+    actor_email = effective_actor_email(actor_email)
     worker = get_visible_worker_for_actor(db, actor_email=actor_email, worker_id=worker_id)
     if not worker:
         return False
@@ -285,4 +290,5 @@ def detach_project_agent_by_worker_id(
 
 
 def deactivate_workspace_project_for_actor(db: Any, *, actor_email: str, project_id: str) -> bool:
+    actor_email = effective_actor_email(actor_email)
     return deactivate_project_for_actor(db, project_id=project_id, actor_email=actor_email)

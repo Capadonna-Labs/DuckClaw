@@ -33,7 +33,7 @@ export const USER_WORKSPACE_NAV_GROUP: AdminNavGroup = {
     { href: '/overview', label: 'Inicio', section: 'core', audience: 'user' },
     { href: '/playground', label: 'Chat', section: 'core', audience: 'user' },
     { href: '/templates', label: 'Mis agentes', section: 'core', audience: 'user' },
-    { href: '/projects/new', label: 'Crear agente', section: 'core', audience: 'user' },
+    { href: '/projects', label: 'Proyectos', section: 'core', audience: 'user' },
     { href: '/settings', label: 'Ajustes', section: 'footer', audience: 'user' },
   ],
 };
@@ -168,7 +168,6 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/overview': 'Inicio',
   '/playground': 'Playground',
   '/projects': 'Proyectos',
-  '/projects/new': 'Crear agente',
   '/integrations': 'Integraciones',
   '/gen': 'Gen',
   '/gen/image': 'Image',

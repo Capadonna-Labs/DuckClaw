@@ -164,19 +164,19 @@ export default function ProjectsPage() {
           </p>
         </div>
         {canWrite && (
-          <Link
-            href="/projects/new"
+          <a
+            href="#platform-orchestrator"
             className="inline-flex items-center gap-2 px-4 py-2 bg-gov-blue-700 text-white text-sm font-bold rounded-xl"
           >
-            <Plus size={16} /> Nuevo proyecto o agente
-          </Link>
+            <Plus size={16} /> Crear con Orchestrator
+          </a>
         )}
       </header>
 
       {error && <p className="text-red-600 text-sm">{error}</p>}
 
       {canWrite && (
-        <section className="overflow-hidden rounded-3xl border border-gov-blue-100 bg-gradient-to-br from-white via-gov-cyan-50 to-gov-gray-50 p-5 shadow-sm dark:border-dark-border dark:from-dark-surface dark:via-dark-bg dark:to-slate-950">
+        <section id="platform-orchestrator" className="overflow-hidden rounded-3xl border border-gov-blue-100 bg-gradient-to-br from-white via-gov-cyan-50 to-gov-gray-50 p-5 shadow-sm dark:border-dark-border dark:from-dark-surface dark:via-dark-bg dark:to-slate-950">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-2xl">
               <p className="inline-flex items-center gap-2 rounded-full bg-gov-blue-700 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white">

@@ -139,10 +139,10 @@ export default function TemplatesPage() {
           </p>
         </div>
         <Link
-          href="/projects/new"
+          href="/projects"
           className="px-4 py-2 bg-gov-blue-700 text-white text-sm font-bold rounded-xl"
         >
-          {isAdmin ? 'Nuevo proyecto' : 'Crear agente'}
+          {isAdmin ? 'Crear con Orchestrator' : 'Crear proyecto'}
         </Link>
       </header>
 

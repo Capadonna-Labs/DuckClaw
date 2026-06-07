@@ -616,6 +616,58 @@ def test_gateway_rejects_default_template_deactivation_explicitly(gateway_admin_
     assert response.json()["detail"]["title"] == "Plantilla protegida"
 
 
+def test_gateway_forge_projects_are_retired(gateway_admin_client) -> None:
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+
+    listed = gateway_admin_client.get("/api/v1/admin/forge-projects", headers=headers)
+    created = gateway_admin_client.post(
+        "/api/v1/admin/forge-projects",
+        headers=headers,
+        json={"id": "legacy", "members": ["default"]},
+    )
+    applied = gateway_admin_client.post(
+        "/api/v1/admin/forge-projects/legacy/apply-team",
+        headers=headers,
+    )
+
+    assert listed.status_code == 410
+    assert created.status_code == 410
+    assert applied.status_code == 410
+
+
+def test_gateway_filesystem_template_actions_are_retired(gateway_admin_client) -> None:
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+
+    created = gateway_admin_client.post(
+        "/api/v1/admin/templates",
+        headers=headers,
+        json={"id": "legacy-template", "source_template": "default"},
+    )
+    vault_binding = gateway_admin_client.put(
+        "/api/v1/admin/templates/default/vault-binding",
+        headers=headers,
+        json={"scope": "private", "vault_id": "123"},
+    )
+    validated = gateway_admin_client.post(
+        "/api/v1/admin/templates/default/validate",
+        headers=headers,
+    )
+
+    assert created.status_code == 410
+    assert vault_binding.status_code == 410
+    assert validated.status_code == 410
+
+
+def test_gateway_env_patch_is_retired(gateway_admin_client) -> None:
+    response = gateway_admin_client.patch(
+        "/api/v1/admin/env",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
+        json={"values": {"DUCKCLAW_LLM_PROVIDER": "deepseek"}},
+    )
+
+    assert response.status_code == 410
+
+
 def test_gateway_template_detail_rejects_unassigned_filesystem_template(
     gateway_admin_client,
 ) -> None:
@@ -655,6 +707,16 @@ def test_playground_config_uses_db_first_visible_workers_not_all_filesystem_temp
     assert "default" in workers
     assert workers["axis-coder"]["label"] == "AXIS Coder"
     assert "AXIS-Mirror" not in workers
+
+
+def test_playground_llm_scope_does_not_report_legacy(gateway_admin_client) -> None:
+    response = gateway_admin_client.get(
+        "/api/v1/admin/playground/config",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["llm"]["scope"] != "legacy"
 
 
 def test_playground_config_for_console_actor_does_not_mix_legacy_team_ids_with_catalog(

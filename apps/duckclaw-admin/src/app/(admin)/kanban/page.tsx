@@ -217,10 +217,10 @@ export default function KanbanPage() {
                 <Plus size={16} /> Nueva tarjeta
               </button>
               <Link
-                href="/projects/new"
+                href="/projects"
                 className="px-4 py-2 text-sm font-bold bg-gov-blue-700 text-white rounded-xl"
               >
-                Crear agente
+                Crear con Orchestrator
               </Link>
             </>
           )}

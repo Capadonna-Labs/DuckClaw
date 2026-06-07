@@ -105,7 +105,7 @@ def _execute_url_host_hint(url: str) -> str:
         from urllib.parse import urlparse
 
         host = (urlparse(url).hostname or "").strip()
-        if host in ("100.75.4.17",):
+        if host:
             return (
                 f" URL apunta a Tailscale ({host}); desde el Mac suele hacer timeout. "
                 "Usa la IP pública en .env y `pm2 restart DuckClaw-Gateway --update-env`."

@@ -54,7 +54,7 @@ class SovereignDraft(BaseModel):
     # Identity
     tenant_id: str = "default"
     gateway_pm2_name: str = "DuckClaw-Gateway"
-    default_worker_id: str = "AXIS-Maestro"
+    default_worker_id: str = "default"
     #: Equipo inicial (coma-separado). Vacío = sin límite en .env; ajustable con /workers.
     gateway_team_templates: str = ""
 

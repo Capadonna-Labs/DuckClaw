@@ -4,20 +4,20 @@ import importlib
 from pathlib import Path
 
 
-def test_shared_layer_facades_expose_existing_public_contracts() -> None:
+def test_shared_layer_flat_modules_expose_public_contracts() -> None:
     modules = {
-        "duckclaw.config.gateway_port": "resolve_gateway_port",
-        "duckclaw.config.runtime_env": "resolve_redis_url",
-        "duckclaw.config.env_secrets": "is_secret_env_key",
-        "duckclaw.storage.gateway_db": "get_gateway_db_path",
-        "duckclaw.storage.vaults": "resolve_active_vault",
-        "duckclaw.storage.shared_db_grants": "list_shared_grants_for_tenant",
-        "duckclaw.storage.db_write_queue": "enqueue_duckdb_write_sync",
-        "duckclaw.storage.bootstrap_core": "bootstrap_core_schema",
-        "duckclaw.control_plane.admin_console_users": "ensure_admin_console_users_table",
-        "duckclaw.control_plane.admin_worker_catalog": "ensure_admin_worker_catalog_schema",
-        "duckclaw.control_plane.admin_workspace": "ensure_admin_workspace_schema",
-        "duckclaw.llm.providers": "build_llm",
+        "duckclaw.gateway_port": "resolve_gateway_port",
+        "duckclaw.runtime_env": "resolve_redis_url",
+        "duckclaw.env_secrets": "is_secret_env_key",
+        "duckclaw.gateway_db": "get_gateway_db_path",
+        "duckclaw.vaults": "resolve_active_vault",
+        "duckclaw.shared_db_grants": "list_shared_grants_for_tenant",
+        "duckclaw.db_write_queue": "enqueue_duckdb_write_sync",
+        "duckclaw.bootstrap_core": "bootstrap_core_schema",
+        "duckclaw.admin_console_users": "ensure_admin_console_users_table",
+        "duckclaw.admin_worker_catalog": "ensure_admin_worker_catalog_schema",
+        "duckclaw.admin_workspace": "ensure_admin_workspace_schema",
+        "duckclaw.integrations.llm_providers": "build_llm",
     }
     for module_name, attr in modules.items():
         module = importlib.import_module(module_name)

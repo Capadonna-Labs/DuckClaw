@@ -169,7 +169,7 @@ def test_wrapped_deudas_filas_content_formats_to_prose() -> None:
         "id": "32",
         "description": "Deuda con mamá",
         "amount": "100000.0",
-        "creditor": "Mamá",
+        "creditor": "Proveedor",
         "due_date": "2026-05-29",
     }
     wrapped = json.dumps(
@@ -207,7 +207,7 @@ def test_finanz_read_sql_deuda_json_echo_triggers_egress_repair() -> None:
 
     deudas_json = (
         '[{"id": "32", "description": "Deuda con mamá", "amount": "100000.0", '
-        '"creditor": "Mamá", "due_date": "2026-05-29"}]'
+        '"creditor": "Proveedor", "due_date": "2026-05-29"}]'
     )
     prefixed = f"read_sql: {deudas_json}"
     assert _reply_is_read_sql_json_only(deudas_json)

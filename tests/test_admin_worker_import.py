@@ -15,7 +15,7 @@ class _Adapter:
         return self._con.execute(sql)
 
 
-def _write_template(root: Path, name: str, *, display_name: str = "AXIS Coder") -> Path:
+def _write_template(root: Path, name: str, *, display_name: str = "BI Analyst") -> Path:
     template = root / name
     template.mkdir(parents=True)
     (template / "manifest.yaml").write_text(
@@ -55,7 +55,7 @@ def test_import_templates_to_catalog_is_selective_idempotent_and_non_destructive
     )
 
     templates_root = tmp_path / "templates"
-    axis_template = _write_template(templates_root, "AXIS-Coder", display_name="AXIS Coder")
+    axis_template = _write_template(templates_root, "BI-Analyst", display_name="BI Analyst")
     other_template = _write_template(templates_root, "Other-Dev", display_name="Other Dev")
     before_axis_files = sorted(p.relative_to(axis_template) for p in axis_template.rglob("*") if p.is_file())
     before_other_files = sorted(p.relative_to(other_template) for p in other_template.rglob("*") if p.is_file())
@@ -67,16 +67,16 @@ def test_import_templates_to_catalog_is_selective_idempotent_and_non_destructive
             adapter,
             owner_email="admin@test.local",
             templates_root=templates_root,
-            include_prefixes=("AXIS-",),
+            include_prefixes=("BI-",),
         )
         second = import_templates_to_catalog(
             adapter,
             owner_email="admin@test.local",
             templates_root=templates_root,
-            include_prefixes=("AXIS-",),
+            include_prefixes=("BI-",),
         )
         visible = list_visible_workers_for_actor(adapter, actor_email="admin@test.local")
-        axis_worker = next(worker for worker in visible if worker["id"] == "axis-coder")
+        axis_worker = next(worker for worker in visible if worker["id"] == "bi-analyst")
         contexts = list_worker_contexts(adapter, worker_uid=axis_worker["worker_uid"])
         capabilities = list_worker_capabilities(adapter, worker_uid=axis_worker["worker_uid"])
         version_count = con.execute(
@@ -89,9 +89,9 @@ def test_import_templates_to_catalog_is_selective_idempotent_and_non_destructive
     after_axis_files = sorted(p.relative_to(axis_template) for p in axis_template.rglob("*") if p.is_file())
     after_other_files = sorted(p.relative_to(other_template) for p in other_template.rglob("*") if p.is_file())
 
-    assert [item["worker_id"] for item in first["imported"]] == ["axis-coder"]
+    assert [item["worker_id"] for item in first["imported"]] == ["bi-analyst"]
     assert second["imported"] == []
-    assert second["skipped_existing"] == ["axis-coder"]
+    assert second["skipped_existing"] == ["bi-analyst"]
     assert "other-dev" not in {worker["id"] for worker in visible}
     assert [context["title"] for context in contexts] == ["domain_closure.md", "system_prompt.md"]
     assert {capability["name"] for capability in capabilities} == {"CAP-CODER-001", "CAP-CODER-002"}
@@ -140,14 +140,14 @@ def test_template_import_script_apply_import_uses_db_path_and_templates_root(
     from duckclaw.admin_worker_catalog import list_visible_workers_for_actor
 
     templates_root = tmp_path / "templates"
-    _write_template(templates_root, "AXIS-Coder", display_name="AXIS Coder")
+    _write_template(templates_root, "BI-Analyst", display_name="BI Analyst")
     script = importlib.import_module("scripts.import_templates_to_catalog")
 
     result = script.apply_import(
         db_path=str(gateway_db),
         owner_email="admin@test.local",
         templates_root=str(templates_root),
-        include_prefixes=("AXIS-",),
+        include_prefixes=("BI-",),
     )
 
     con = duckdb.connect(str(gateway_db))
@@ -156,8 +156,8 @@ def test_template_import_script_apply_import_uses_db_path_and_templates_root(
     finally:
         con.close()
 
-    assert [item["worker_id"] for item in result["imported"]] == ["axis-coder"]
-    assert "axis-coder" in {worker["id"] for worker in visible}
+    assert [item["worker_id"] for item in result["imported"]] == ["bi-analyst"]
+    assert "bi-analyst" in {worker["id"] for worker in visible}
 
 
 def test_template_import_module_and_script_do_not_hardcode_axis() -> None:
@@ -169,9 +169,9 @@ def test_template_import_module_and_script_do_not_hardcode_axis() -> None:
     module_source = inspect.getsource(admin_template_import)
     cli_source = inspect.getsource(cli)
 
-    assert "AXIS" not in module_source
+    assert "BI" not in module_source
     assert "import_axis" not in module_source
-    assert "AXIS" not in cli_source
+    assert "BI" not in cli_source
     assert "import_axis" not in cli_source
 
 

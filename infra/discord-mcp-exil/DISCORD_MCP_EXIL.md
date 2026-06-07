@@ -11,13 +11,13 @@ Si Duckclaw escucha **8000** y Funnel usa **`http://127.0.0.1:8000`**, MCP **no*
 - `./infra/discord-mcp-exil/run-local-mac.sh` (manual, 127.0.0.1:8010) y Cursor en modo **`url`** contra `http://127.0.0.1:8010/mcp` si tu transport es HTTP.
 - **Opcional PM2:** `DISCORD_MCP_PYTHON=/ruta/al/python pm2 start config/ecosystem.discord-mcp.config.cjs` — solo si quieres MCP fuera de Cursor.
 
-**Discord:** MCP abre segunda sesión Gateway (`discord.py`). Si `capadonna-bot` usa el mismo Bot Token que envías por `Authorization`, fallará; crea segunda app Discord para MCPOps.
+**Discord:** MCP abre segunda sesión Gateway (`discord.py`). Si el bot usa el mismo Token que envías por `Authorization`, fallará; crea segunda app Discord para MCPOps.
 
 Despliegue remoto ejemplo:
 
 ```bash
-./infra/discord-mcp-exil/sync-to-vps.sh capadonna@100.97.151.69
-ssh capadonna@100.97.151.69 'cd ~/services/discord-mcp-exil && docker compose up -d --build'
+./infra/discord-mcp-exil/sync-to-vps.sh user@192.0.2.1
+ssh user@192.0.2.1 'cd ~/services/discord-mcp-exil && docker compose up -d --build'
 ```
 
-Cursor `~/.cursor/mcp.json`: `http://100.97.151.69:8010/mcp` con `"Authorization": "<token_bot_MCP_ops>"`.
+Cursor `~/.cursor/mcp.json`: `http://192.0.2.1:8010/mcp` con `"Authorization": "<token_bot_MCP_ops>"`.

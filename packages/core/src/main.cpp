@@ -12,7 +12,7 @@ int main() {
 
         // 3. Crear una tabla de prueba y meter datos
         db.execute("CREATE TABLE IF NOT EXISTS usuarios (id INTEGER, nombre VARCHAR);");
-        db.execute("INSERT INTO usuarios VALUES (1, 'Juan'), (2, 'Leila');");
+        db.execute("INSERT INTO usuarios VALUES (1, 'Alice'), (2, 'Bob');");
 
         // 4. Hacer una consulta (retorna JSON gracias a tu método)
         std::string json_result = db.query("SELECT * FROM usuarios;");

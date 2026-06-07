@@ -14,7 +14,6 @@ from duckclaw.guardrails.loader import (
 
 _REQUIRED = [
     ("prompts", "task_awareness_default"),
-    ("prompts", "task_awareness_axis"),
     ("directives", "pqrsd_datos_primero"),
     ("directives", "tool_choice_generic"),
     ("directives", "quant_autoexec"),
@@ -42,11 +41,9 @@ _REQUIRED = [
     ("manager_tasks", "list_database_tables"),
     ("manager_tasks", "job_track_synthesis_finanz"),
     ("manager_tasks", "job_income_synthesis_finanz"),
-    ("capabilities", "axis_coordinator"),
     ("capabilities", "job_hunter"),
     ("capabilities", "bi_analyst"),
     ("capabilities", "finanz"),
-    ("capabilities", "axis_maestro"),
     ("capabilities", "siata_analyst"),
     ("capabilities", "generic_worker"),
     ("capabilities", "default_fallback"),

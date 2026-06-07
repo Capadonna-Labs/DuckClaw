@@ -450,11 +450,11 @@ def test_coerce_planner_payload() -> None:
             "plan_title": "M",
             "tasks": ["a"],
             "mercenary": {"directive": "probe", "timeout": 60},
-            "delegate_worker_id": "AXIS-Coder",
+            "delegate_worker_id": "default",
         }
     )
     assert m3 == {"directive": "probe", "timeout": 60}
-    assert d3 == "AXIS-Coder"
+    assert d3 == "default"
     _, _, m4, _ = _coerce_planner_payload(
         {"plan_title": "M", "tasks": ["a"], "mercenary": {"directive": "x", "timeout": 900}}
     )
@@ -938,7 +938,7 @@ def test_entry_route_system_event_trading_tick_and_plan_task_bypass() -> None:
     assert _is_entry_route_system_event(goals_crons)
     assert _is_goals_proactive_system_event(goals_crons)
 
-    plain = "cuánto tengo en Nequi"
+    plain = "cuánto tengo en BilleteraEjemplo"
     assert not _is_entry_route_system_event(plain)
 
     task, override = _plan_task(tick, "finanz")

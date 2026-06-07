@@ -1,7 +1,7 @@
 """
 Ingesta OHLCV hacia quant_core.ohlcv_data (Finanz + quant habilitado).
 
-Histórico (timeframes configurables): SSH al lake Capadonna — CAPADONNA_SSH_HOST,
+Histórico (timeframes configurables): SSH al lake de datos — CAPADONNA_SSH_HOST,
 CAPADONNA_REMOTE_OHLC_CMD (plantilla JSON en stdout). Ver specs:
 specs/features/quant/QUANT_CAPADONNA_OHLC_IBKR.md
 
@@ -366,7 +366,7 @@ def _http_fetch_json_at_base(
         hint = ""
         if refused:
             hint = (
-                " Si la API Capadonna (puerto 8002) está en el VPS/Tailscale, "
+                " Si la API de datos (puerto 8002) está en el VPS/Tailscale, "
                 "IBKR_GATEWAY_OHLCV_URL debe usar el mismo host que IBKR_PORTFOLIO_API_URL "
                 "(p. ej. /api/market/ohlcv o /api/market/ibkr/historical). "
                 "127.0.0.1:8002 solo sirve con servicio local o túnel."
@@ -1078,7 +1078,7 @@ def register_quant_market_skill(db: Any, tools: list[Any], spec: Any) -> None:
             _run_lake,
             name="fetch_lake_ohlcv",
             description=(
-                "Lee OHLCV (o serie de precio en moc/) del Lake Capadonna vía SSH (Tailscale). Devuelve solo JSON con barras; "
+                "Lee OHLCV del lake de datos vía SSH (Tailscale). Devuelve solo JSON con barras; "
                 "no persiste en DuckDB. Timeframes: 1d→daily, 1w/1M→gold, intradía→intraday, moc→moc; también daily|gold|intraday|moc. "
                 "Errores: CAPADONNA_OFFLINE, SSH_FAILED. lookback_days default 90."
             ),

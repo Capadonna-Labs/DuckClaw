@@ -204,13 +204,13 @@ def test_orchestrator_draft_uses_configured_model_when_available(
             "response": """
             {
               "project": {
-                "name": "Academia FastAPI",
+                "name": "Proyecto Ejemplo",
                 "description": "Proyecto orientado a aprender FastAPI con práctica guiada y validación DB-first."
               },
               "workers": [
                 {
                   "worker_id": "academia-fastapi-agent",
-                  "display_name": "Asistente Academia FastAPI",
+                  "display_name": "Asistente Ejemplo",
                   "role": "member",
                   "system_prompt": "Guía al usuario con ejercicios FastAPI y revisión paso a paso."
                 }
@@ -238,8 +238,8 @@ def test_orchestrator_draft_uses_configured_model_when_available(
     assert captured["worker_id"] == "platform-orchestrator"
     assert "Responde SOLO JSON válido" in captured["message"]
     assert captured["session_id"].startswith("admin-orchestrator-draft-")
-    assert body["project"]["name"] == "Academia FastAPI"
-    assert body["workers"][0]["display_name"] == "Asistente Academia FastAPI"
+    assert body["project"]["name"] == "Proyecto Ejemplo"
+    assert body["workers"][0]["display_name"] == "Asistente Ejemplo"
     assert body["questions"] == ["¿Qué nivel tienes en Python?"]
 
     con = duckdb.connect(str(gateway_db))
@@ -735,7 +735,7 @@ def test_gateway_templates_lists_default_and_actor_catalog_not_all_filesystem_te
     assert templates["axis-coder"]["worker_uid"]
     assert templates["axis-coder"]["visibility"] == "private"
     assert templates["axis-coder"]["source_template_id"] == "default"
-    assert "AXIS-Mirror" not in templates
+    assert "BI-Analyst" not in templates
 
 
 def test_gateway_templates_can_list_and_reactivate_inactive_catalog_worker(
@@ -920,19 +920,19 @@ def test_get_visible_worker_for_actor_accepts_boolean_active_rows(gateway_db: Pa
         create_worker(
             db,
             owner_email="admin@test.local",
-            worker_id="axis-maestro",
+            worker_id="bi-analyst",
             display_name="AXIS Maestro",
         )
         worker = get_visible_worker_for_actor(
             db,
             actor_email="admin@test.local",
-            worker_id="axis-maestro",
+            worker_id="bi-analyst",
         )
     finally:
         db.close()
 
     assert worker is not None
-    assert worker["worker_id"] == "axis-maestro"
+    assert worker["worker_id"] == "bi-analyst"
 
 
 def test_gateway_rejects_default_template_deactivation_explicitly(gateway_admin_client) -> None:
@@ -1001,7 +1001,7 @@ def test_gateway_template_detail_rejects_unassigned_filesystem_template(
     gateway_admin_client,
 ) -> None:
     response = gateway_admin_client.get(
-        "/api/v1/admin/templates/AXIS-Mirror",
+        "/api/v1/admin/templates/BI-Analyst",
         headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
     )
 
@@ -1035,7 +1035,7 @@ def test_playground_config_uses_db_first_visible_workers_not_all_filesystem_temp
     workers = {item["id"]: item for item in response.json()["workers"]}
     assert "default" in workers
     assert workers["axis-coder"]["label"] == "AXIS Coder"
-    assert "AXIS-Mirror" not in workers
+    assert "BI-Analyst" not in workers
 
 
 def test_playground_llm_scope_does_not_report_legacy(gateway_admin_client) -> None:
@@ -1060,12 +1060,12 @@ def test_playground_config_for_console_actor_does_not_mix_legacy_team_ids_with_c
     db = DuckClaw(get_gateway_db_path(), read_only=False, engine="python")
     try:
         profile = ensure_profile_for_user(db, email="admin@test.local")
-        set_tenant_team_templates(db, profile["tenant_id"], ["AXIS-Maestro", "AXIS-Radar"])
+        set_tenant_team_templates(db, profile["tenant_id"], ["BI-Analyst", "BI-Analyst"])
         create_worker(
             db,
             owner_email="admin@test.local",
-            worker_id="axis-maestro",
-            display_name="MAESTRO",
+            worker_id="bi-analyst",
+            display_name="ANALISTA",
         )
         create_worker(
             db,
@@ -1083,10 +1083,10 @@ def test_playground_config_for_console_actor_does_not_mix_legacy_team_ids_with_c
 
     assert response.status_code == 200
     ids = [item["id"] for item in response.json()["workers"]]
-    assert "axis-maestro" in ids
+    assert "bi-analyst" in ids
     assert "axis-radar" in ids
-    assert "AXIS-Maestro" not in ids
-    assert "AXIS-Radar" not in ids
+    assert "BI-Analyst" not in ids
+    assert "BI-Analyst" not in ids
     assert len(ids) == len(set(ids))
 
 
@@ -1096,7 +1096,7 @@ def test_playground_chat_rejects_unassigned_filesystem_worker_before_execution(
     response = gateway_admin_client.post(
         "/api/v1/admin/playground/chat",
         headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
-        json={"worker_id": "AXIS-Mirror", "message": "hola"},
+        json={"worker_id": "BI-Analyst", "message": "hola"},
     )
 
     assert response.status_code == 403

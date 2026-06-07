@@ -33,7 +33,7 @@ def _ensure_duckclaw_llm_env_from_legacy_llm_vars() -> None:
 
 # OpenRouter App Attribution — DuckClaw en openrouter.ai/rankings y openrouter.ai/apps
 OPENROUTER_ATTRIBUTION_HEADERS: dict[str, str] = {
-    "HTTP-Referer": "https://github.com/Capadonna-Labs/duckclaw",
+    "HTTP-Referer": "https://github.com/duckclaw/duckclaw",
     "X-OpenRouter-Title": "DuckClaw - Sovereign Agent Harness",
     "X-OpenRouter-Categories": "cloud-agent,cli-agent",
 }

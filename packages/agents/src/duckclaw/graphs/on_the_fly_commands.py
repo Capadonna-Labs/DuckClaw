@@ -3291,7 +3291,7 @@ def _ssh_reach_icon(reach: str) -> str:
 
 
 def _capadonna_lake_status_lines(*, compact: bool) -> list[str]:
-    """Líneas de diagnóstico Lake Capadonna (misma lógica que /lake; compact para /sensors)."""
+    """Líneas de diagnóstico de datos del VPS (misma lógica que /lake; compact para /sensors)."""
     from duckclaw.forge.skills.quant_market_bridge import (
         capadonna_ssh_config_ok,
         lake_belief_observed_values,
@@ -3327,13 +3327,13 @@ def _capadonna_lake_status_lines(*, compact: bool) -> list[str]:
         icfg = "✅" if strict else "⚠️"
         ireach = _ssh_reach_icon(reach)
         return [
-            "🌊 Lake Capadonna · SSH / Tailscale",
+            "🌊 Lake de datos · SSH / Tailscale",
             f"   {icfg} Config operativa: {'sí' if strict else 'no'} · CAPADONNA_SSH_HOST: {'sí' if host else 'no'}",
             f"   📊 Creencias 0/1: lake_host_configured≈{int(host_v)} · lake_status_online≈{int(online_v)}",
             f"   {ireach} Alcance SSH (rápido): {reach}",
         ]
     lines = [
-        "Capadonna Lake (SSH)",
+        "Lake de datos (SSH)",
         f"- CAPADONNA_SSH_HOST: {'sí' if host else 'no'}",
         f"- CAPADONNA_SSH_USER: {user}",
         f"- CAPADONNA_REMOTE_OHLC_CMD: {'sí' if cmd_set else 'no'}",
@@ -3413,7 +3413,7 @@ def _probe_ibkr_market_data(timeout_s: float = 8.0) -> str:
         if e.code == 404:
             return (
                 "Mercado OHLC: HTTP 404 — la URL no existe en el API "
-                "(despliega GET /api/market/ohlcv, p. ej. services/ibkr-ohlcv-api en :8002; ver spec Capadonna). "
+                "(despliega GET /api/market/ohlcv, p. ej. services/ibkr-ohlcv-api en :8002). "
                 "Histórico 1d/1w/1M/moc vía lake SSH está bien; "
                 "intradía necesita ese endpoint o quita IBKR_MARKET_DATA_URL del .env."
             )[:280]
@@ -3520,7 +3520,7 @@ def execute_sensors(db: Any) -> str:
     try:
         blocks.extend(_capadonna_lake_status_lines(compact=True))
     except Exception as e:
-        blocks.append("🌊 Lake Capadonna")
+        blocks.append("🌊 Lake de datos")
         blocks.append(_sensor_line_bullet("❌", f"Error — {str(e)[:100]}"))
 
     blocks.append("")
@@ -3609,7 +3609,7 @@ def execute_sensors(db: Any) -> str:
 
 
 def execute_lake_status() -> str:
-    """/lake [status]: variables Capadonna y prueba SSH corta (BatchMode, ConnectTimeout=5)."""
+    """/lake [status]: variables de lake y prueba SSH corta (BatchMode, ConnectTimeout=5)."""
     try:
         lines = _capadonna_lake_status_lines(compact=False)
     except Exception as e:

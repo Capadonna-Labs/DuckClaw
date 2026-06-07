@@ -11,8 +11,8 @@ def test_ibkr_portfolio_url_in_dotenv_override_keys() -> None:
 
 
 def test_apply_dotenv_overrides_replaces_stale_pm2_ibkr_url(monkeypatch) -> None:
-    monkeypatch.setenv("IBKR_PORTFOLIO_API_URL", "http://100.97.151.69:8002/api/portfolio/summary")
+    monkeypatch.setenv("IBKR_PORTFOLIO_API_URL", "http://192.0.2.1:8002/api/portfolio/summary")
     apply_dotenv_overrides_to_os_environ(
-        {"IBKR_PORTFOLIO_API_URL": "http://100.75.4.17:8002/api/portfolio/summary"}
+        {"IBKR_PORTFOLIO_API_URL": "http://192.0.2.2:8002/api/portfolio/summary"}
     )
-    assert os.environ["IBKR_PORTFOLIO_API_URL"] == "http://100.75.4.17:8002/api/portfolio/summary"
+    assert os.environ["IBKR_PORTFOLIO_API_URL"] == "http://192.0.2.2:8002/api/portfolio/summary"

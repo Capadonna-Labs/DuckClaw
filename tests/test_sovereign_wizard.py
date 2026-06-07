@@ -365,7 +365,7 @@ def test_patch_pm2_preserves_shared_when_draft_has_no_secondary(tmp_path: Path) 
     cfg = {
         "apps": [
             {
-                "name": "Leila-Gateway",
+                "name": "example-gateway",
                 "env": {
                     "DUCKDB_PATH": "/_prior.duckdb",
                     "DUCKCLAW_SHARED_DB_PATH": shared_path,
@@ -377,7 +377,7 @@ def test_patch_pm2_preserves_shared_when_draft_has_no_secondary(tmp_path: Path) 
         json.dumps(cfg, indent=2), encoding="utf-8"
     )
     draft = SovereignDraft(
-        gateway_pm2_name="Leila-Gateway",
+        gateway_pm2_name="example-gateway",
         duckdb_vault_path="db/new_vault.duckdb",
         duckdb_shared_path="",
     )
@@ -598,7 +598,7 @@ def test_render_header_includes_version_and_repo(tmp_path: Path) -> None:
     from duckops.sovereign.draft import SovereignDraft
     from duckops.sovereign.tui_shell import StepInfo, render_header
 
-    draft = SovereignDraft(tenant_id="TestTenant", default_worker_id="AXIS-Maestro")
+    draft = SovereignDraft(tenant_id="TestTenant", default_worker_id="default")
     panel_wizard = render_header(
         draft,
         tmp_path,
@@ -678,10 +678,10 @@ def test_workers_catalog_lists_forge_templates() -> None:
     repo = Path(__file__).resolve().parent.parent
     picks = list_worker_picks(repo)
     ids = {p.worker_id for p in picks}
-    assert "AXIS-Maestro" in ids
+    assert "default" in ids
     assert "default" in ids
     assert resolve_worker_choice("1", picks, repo) == picks[0].worker_id
-    assert resolve_worker_choice("maestro", picks, repo) == "AXIS-Maestro"
+    assert resolve_worker_choice("default", picks, repo) == "default"
     assert suggest_default_worker_id(picks, "nope") in ids
 
 
@@ -698,7 +698,7 @@ def test_materialize_writes_owner_and_team_env(tmp_path: Path, monkeypatch: pyte
         default_worker_id="Worker-A",
         redis_url="redis://localhost:6379/0",
         duckdb_vault_path="db/test.duckdb",
-        tenant_id="Marco",
+        tenant_id="test-tenant",
     )
     monkeypatch.setattr(m, "ensure_duckdb_file", lambda *_a, **_k: True)
     monkeypatch.setattr(m, "seed_telegram_guard_admins", lambda *_a, **_k: None)

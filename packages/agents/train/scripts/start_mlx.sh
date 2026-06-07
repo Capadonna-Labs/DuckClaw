@@ -27,7 +27,7 @@ if [ -z "$PYTHON_PATH" ]; then
 fi
 MODEL_PATH="${MLX_MODEL_PATH:-}"
 if [ -z "$MODEL_PATH" ]; then
-  echo "Error: define MLX_MODEL_PATH en ${REPO_ROOT}/.env (ruta al modelo MLX en disco). Ej.: MLX_MODEL_PATH=\$HOME/models/Slayer-8B-V1"
+  echo "Error: define MLX_MODEL_PATH en ${REPO_ROOT}/.env (ruta al modelo MLX en disco). Ej.: MLX_MODEL_PATH=\$HOME/models/mi-modelo"
   exit 1
 fi
 

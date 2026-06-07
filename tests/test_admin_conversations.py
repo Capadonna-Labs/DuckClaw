@@ -212,12 +212,12 @@ async def _test_delete_conversation_merged_removes_default_legacy_impl():
         section="playground",
     )
 
-    items, total = await list_conversations_merged(redis, "Marco", section="playground")
+    items, total = await list_conversations_merged(redis, "test-tenant", section="playground")
     assert total == 1
     assert items[0].session_id == sid
     assert items[0].tenant_id == "default"
 
-    deleted_tid = await delete_conversation_merged(redis, "Marco", sid)
+    deleted_tid = await delete_conversation_merged(redis, "test-tenant", sid)
     assert deleted_tid == "default"
     assert await get_conversation_meta(redis, "default", sid) is None
 

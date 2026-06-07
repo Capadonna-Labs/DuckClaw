@@ -147,7 +147,7 @@ def test_format_field_experience_block() -> None:
         "finance_worker",
         lesson_belief_key("TSLA lake", "empty bars"),
         "TSLA lake empty",
-        "Si LAKE_EMPTY_BARS, revisar parquet en Capadonna.",
+        "Si LAKE_EMPTY_BARS, revisar parquet en el lake de datos.",
         2.0,
     )
     block = format_field_experience_block("precio de TSLA y lake", db, "finance_worker", 5)

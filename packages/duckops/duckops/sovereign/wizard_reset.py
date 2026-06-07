@@ -13,7 +13,7 @@ _CONFIG_PATH = _WIZARD_DIR / "wizard_config.json"
 
 NEUTRAL_DUCKDB_VAULT = "db/sovereign_memory.duckdb"
 NEUTRAL_GATEWAY_PM2 = "DuckClaw-Gateway"
-NEUTRAL_WORKER_CANDIDATES = ("AXIS-Maestro", "default")
+NEUTRAL_WORKER_CANDIDATES = ("default",)
 
 
 def wizard_state_paths() -> tuple[Path, Path]:
@@ -38,7 +38,7 @@ def clear_wizard_state(*, draft: bool = True, config: bool = True) -> list[Path]
 
 def fresh_sovereign_draft(*, worker_id: str | None = None) -> SovereignDraft:
     """Borrador neutro sin leer .env ni sesiones previas."""
-    wid = (worker_id or "AXIS-Maestro").strip() or "AXIS-Maestro"
+    wid = (worker_id or "default").strip() or "default"
     return SovereignDraft(
         wizard_profile="express",
         duckdb_vault_path=NEUTRAL_DUCKDB_VAULT,
@@ -59,7 +59,7 @@ def default_worker_for_fresh(pick_ids: list[str]) -> str:
     for cand in NEUTRAL_WORKER_CANDIDATES:
         if cand in ids:
             return cand
-    return pick_ids[0] if pick_ids else "AXIS-Maestro"
+    return pick_ids[0] if pick_ids else "default"
 
 
 def load_saved_draft_or_none() -> SovereignDraft | None:

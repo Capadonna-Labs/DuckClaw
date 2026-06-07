@@ -25,7 +25,7 @@ def test_unescape_triple_before_exclamation_matches_double_escape_noise() -> Non
 
 
 def test_telegram_safe_after_unescape_is_stable() -> None:
-    raw = "¡Hola Valentina! Soy Leila."
+    raw = "¡Hola Usuario! Soy Asistente."
     once = _telegram_safe(raw)
     twice = _telegram_safe(once)
     assert "\\" in twice

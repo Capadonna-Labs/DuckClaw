@@ -45,7 +45,7 @@ Herramientas típicas expuestas (nombres exactos pueden variar por versión del 
   - create_pull_request / PRs
   - create_or_update_file / blobs y commits API
 
-Repo por defecto sugerido en prompts si el worker no especifica: owner Capadonna-Labs,
+Repo por defecto sugerido en prompts si el worker no especifica: owner duckclaw,
 repo duckclaw (los tools siguen exigiendo owner/repo salvo configuración MCP alternativa).
 
 Documentación servidor: https://github.com/github/github-mcp-server

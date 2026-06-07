@@ -65,11 +65,11 @@ def test_team_list_deduplicates_same_user_multiple_tenant_rows(db) -> None:
     d = db
     d.execute(
         "INSERT INTO main.authorized_users (tenant_id, user_id, username, role) "
-        "VALUES ('Trabajo', '9', 'Juan', 'admin')"
+        "VALUES ('Trabajo', '9', 'usuario', 'admin')"
     )
     d.execute(
         "INSERT INTO main.authorized_users (tenant_id, user_id, username, role) "
-        "VALUES ('trabajo', '9', 'Juan', 'user')"
+        "VALUES ('trabajo', '9', 'usuario', 'user')"
     )
     reply = handle_command(d, "chat_1", "/team", requester_id="9", tenant_id="Trabajo")
     assert reply is not None

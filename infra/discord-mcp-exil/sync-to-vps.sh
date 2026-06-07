@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-TARGET="${1:-capadonna@100.97.151.69}"
-REMOTE_DIR="${REMOTE_DIR:-/home/capadonna/services/discord-mcp-exil}"
+TARGET="${1:-user@192.0.2.1}"
+REMOTE_DIR="${REMOTE_DIR:-/home/user/services/discord-mcp-exil}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ssh "$TARGET" "mkdir -p '$REMOTE_DIR'"

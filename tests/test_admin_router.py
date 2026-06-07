@@ -613,7 +613,7 @@ def test_telegram_whitelist_resolves_gateway_tenant(
     admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     """default en UI → tenant efectivo del gateway (p. ej. Marco vía DUCKCLAW_GATEWAY_TENANT_ID)."""
-    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "Marco")
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "test-tenant")
     dbf = tmp_path / "hub.duckdb"
     monkeypatch.setattr(
         "duckclaw.gateway_db.get_gateway_db_path",
@@ -642,8 +642,8 @@ def test_telegram_whitelist_resolves_gateway_tenant(
     )
     assert r.status_code == 200
     data = r.json()
-    assert data.get("effective_tenant_id") == "Marco"
-    assert data.get("tenant_id") == "Marco"
+    assert data.get("effective_tenant_id") == "test-tenant"
+    assert data.get("tenant_id") == "test-tenant"
     ids = [u["user_id"] for u in data.get("users") or []]
     assert DEFAULT_TEST_TELEGRAM_USER_ID_ALT in ids
 
@@ -658,7 +658,7 @@ def test_telegram_whitelist_resolves_gateway_tenant(
         },
     )
     assert r2.status_code == 200
-    assert r2.json().get("tenant_id") == "Marco"
+    assert r2.json().get("tenant_id") == "test-tenant"
 
     con = duckdb.connect(str(dbf))
     row = con.execute(
@@ -667,7 +667,7 @@ def test_telegram_whitelist_resolves_gateway_tenant(
     ).fetchone()
     con.close()
     assert row is not None
-    assert row[0] == "Marco"
+    assert row[0] == "test-tenant"
 
 
 def test_train_status_requires_key(admin_client: TestClient):

@@ -336,22 +336,8 @@ def _merge_playground_catalog_and_team_workers(
     catalog_workers: list[dict[str, str]],
     team_ctx: dict[str, Any],
 ) -> list[dict[str, str]]:
-    """Catálogo DB-first + equipo legacy (/workers, tenant, env) para el selector del playground."""
-    from duckclaw.workers.template_registry import resolve_template_id_global
-    from duckclaw.workers.worker_ids import normalize_worker_id
-
-    merged = list(catalog_workers)
-    seen = {str(w.get("id") or "").strip() for w in merged if w.get("id")}
-    for raw in team_ctx.get("workers") or []:
-        label = str(raw or "").strip()
-        if not label:
-            continue
-        rid = resolve_template_id_global(label) or label
-        norm = normalize_worker_id(rid)
-        if norm and norm not in seen:
-            merged.append({"id": norm, "label": label})
-            seen.add(norm)
-    return merged
+    """Admin Playground muestra solo catálogo DB-first; team legacy queda para Telegram."""
+    return list(catalog_workers)
 
 
 def _playground_worker_allowed_in_team(team_ctx: dict[str, Any], worker_id: str) -> bool:
@@ -525,110 +511,6 @@ def _templates_dir() -> Path:
     from duckclaw.forge import WORKERS_TEMPLATES_DIR
 
     return WORKERS_TEMPLATES_DIR
-
-
-def _projects_dir() -> Path:
-    from duckclaw.forge import PROJECTS_DIR
-
-    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
-    return PROJECTS_DIR
-
-
-def _safe_project_slug(slug: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9_-]", "", (slug or "").strip())
-    if not s:
-        raise _problem(400, "slug inválido", slug or "")
-    return s
-
-
-def _read_project_yaml(path: Path) -> dict[str, Any]:
-    import yaml
-
-    if not path.is_file():
-        return {}
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return data if isinstance(data, dict) else {}
-
-
-def _write_project_yaml(path: Path, data: dict[str, Any]) -> None:
-    import yaml
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False),
-        encoding="utf-8",
-    )
-
-
-def _canonicalize_project_members(members: list[str]) -> list[str]:
-    from duckclaw.workers.template_registry import list_template_ids, resolve_template_id
-
-    all_ids = list_template_ids()
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in members:
-        w = str(raw or "").strip()
-        if not w:
-            continue
-        canonical = resolve_template_id(all_ids, w) or w
-        if canonical not in all_ids or canonical in seen:
-            continue
-        seen.add(canonical)
-        out.append(canonical)
-    return out
-
-
-def _list_forge_projects() -> list[dict[str, Any]]:
-    from duckclaw.forge.team_env import load_team_from_env
-
-    root = _projects_dir()
-    by_slug: dict[str, dict[str, Any]] = {}
-    env_row = load_team_from_env()
-    if env_row:
-        env_row = dict(env_row)
-    for env_row in [env_row] if env_row else []:
-        sid = str(env_row.get("slug") or env_row.get("id") or "").strip()
-        if not sid:
-            continue
-        members = _canonicalize_project_members(list(env_row.get("members") or []))
-        if not members:
-            continue
-        by_slug[sid] = {
-            "id": sid,
-            "slug": sid,
-            "display_name": str(env_row.get("display_name") or sid),
-            "coordinator": env_row.get("coordinator"),
-            "members": members,
-            "shared_vault_id": env_row.get("shared_vault_id"),
-            "source": "env",
-            "path": f"forge/projects/{sid}",
-        }
-    if root.is_dir():
-        for d in sorted(root.iterdir()):
-            if not d.is_dir() or d.name.startswith((".", "_")):
-                continue
-            manifest = d / "project.yaml"
-            if not manifest.is_file():
-                continue
-            data = _read_project_yaml(manifest)
-            pid = str(data.get("id") or d.name).strip()
-            members_raw = data.get("members")
-            member_list = (
-                _canonicalize_project_members(members_raw)
-                if isinstance(members_raw, list)
-                else []
-            )
-            by_slug[d.name] = {
-                "id": pid,
-                "slug": d.name,
-                "display_name": str(data.get("display_name") or pid),
-                "coordinator": data.get("coordinator"),
-                "members": member_list,
-                "shared_vault_id": data.get("shared_vault_id"),
-                "source": "disk",
-                "path": str(d.relative_to(_repo_root())),
-            }
-    return sorted(by_slug.values(), key=lambda x: str(x.get("slug") or ""))
 
 
 def _require_admin_key(x_admin_key: str | None = Header(None, alias="X-Admin-Key")) -> None:
@@ -1168,18 +1050,18 @@ def _resolved_llm_for_chat(chat_id: str | None) -> dict[str, str]:
     env = _resolved_llm_env()
     cid = (chat_id or "").strip()
     if not cid:
-        return {**env, "scope": "env"}
+        return {**env, "scope": "env_bootstrap"}
     from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
     from duckclaw.graphs.on_the_fly_commands import _effective_llm_triplet_for_chat_ui
 
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
-        return {**env, "scope": "env"}
+        return {**env, "scope": "env_bootstrap"}
     try:
         db = DuckClaw(gw, read_only=True, engine="python")
     except Exception:
-        return {**env, "scope": "env", "db_lock_error": True}
+        return {**env, "scope": "env_bootstrap", "db_lock_error": True}
     try:
         provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, cid)
     except Exception:
@@ -1191,7 +1073,7 @@ def _resolved_llm_for_chat(chat_id: str | None) -> dict[str, str]:
         "provider": (provider or env["provider"] or "").strip(),
         "model": (model or env["model"] or "").strip(),
         "base_url": (base_url or env["base_url"] or "").strip(),
-        "scope": "chat" if has_chat else "env",
+        "scope": "chat" if has_chat else "env_bootstrap",
     }
 
 
@@ -1203,7 +1085,7 @@ def _resolved_llm_for_playground(
 ) -> dict[str, str]:
     from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
-    from duckclaw.graphs.on_the_fly_commands import _effective_llm_triplet_for_chat_ui, get_chat_state
+    from duckclaw.graphs.on_the_fly_commands import get_chat_state
 
     env = _resolved_llm_env()
     cid = (chat_id or "").strip()
@@ -1217,45 +1099,43 @@ def _resolved_llm_for_playground(
                 "base_url": runtime.get("llm_base_url", env["base_url"]).strip(),
                 "scope": "runtime",
             }
-        return {**env, "scope": "env"}
+        return {**env, "scope": "env_bootstrap"}
 
     try:
         db = DuckClaw(gw, read_only=True, engine="python")
     except Exception:
-        return {**env, "scope": "env", "db_lock_error": True}
+        return {**env, "scope": "env_bootstrap", "db_lock_error": True}
     try:
         chat_provider = (get_chat_state(db, cid, "llm_provider") or "").strip()
         chat_model = (get_chat_state(db, cid, "llm_model") or "").strip()
         chat_base_url = (get_chat_state(db, cid, "llm_base_url") or "").strip()
-        legacy_provider, legacy_model, legacy_base_url = _effective_llm_triplet_for_chat_ui(db, cid)
     except Exception:
         chat_provider = chat_model = chat_base_url = ""
-        legacy_provider = legacy_model = legacy_base_url = ""
     finally:
         db.close()
 
     if chat_provider or chat_model or chat_base_url:
         return {
-            "provider": (legacy_provider or env["provider"]).strip(),
-            "model": (legacy_model or env["model"]).strip(),
-            "base_url": (legacy_base_url or env["base_url"]).strip(),
+            "provider": (chat_provider or env["provider"]).strip(),
+            "model": (chat_model or env["model"]).strip(),
+            "base_url": (chat_base_url or env["base_url"]).strip(),
             "scope": "chat",
         }
 
     runtime = _playground_runtime_defaults(tenant_id, actor_email)
     if any(runtime.get(k) for k in ("llm_provider", "llm_model", "llm_base_url")):
         return {
-            "provider": (runtime.get("llm_provider") or legacy_provider or env["provider"]).strip(),
-            "model": (runtime.get("llm_model") or legacy_model or env["model"]).strip(),
-            "base_url": (runtime.get("llm_base_url") or legacy_base_url or env["base_url"]).strip(),
+            "provider": (runtime.get("llm_provider") or env["provider"]).strip(),
+            "model": (runtime.get("llm_model") or env["model"]).strip(),
+            "base_url": (runtime.get("llm_base_url") or env["base_url"]).strip(),
             "scope": "runtime",
         }
 
     return {
-        "provider": (legacy_provider or env["provider"]).strip(),
-        "model": (legacy_model or env["model"]).strip(),
-        "base_url": (legacy_base_url or env["base_url"]).strip(),
-        "scope": "legacy",
+        "provider": env["provider"].strip(),
+        "model": env["model"].strip(),
+        "base_url": env["base_url"].strip(),
+        "scope": "env_bootstrap",
     }
 
 
@@ -2388,52 +2268,11 @@ async def put_template_vault_binding(
     body: VaultBindingPutBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    from duckclaw.vaults import normalize_vault_binding, resolve_template_vault_path
-
-    wid = worker_id.strip()
-    if not (_templates_dir() / wid).is_dir():
-        raise _problem(404, "Plantilla no encontrada", wid)
-    scope = (body.scope or "").strip().lower()
-    binding: dict[str, str] | None
-    if not scope:
-        binding = None
-    elif scope == "private":
-        binding = normalize_vault_binding({"scope": "private", "vault_id": body.vault_id or ""})
-        if not binding:
-            raise _problem(400, "vault_id requerido para scope=private", body.vault_id or "")
-    elif scope == "shared":
-        binding = normalize_vault_binding({"scope": "shared", "path": body.path or ""})
-        if not binding:
-            raise _problem(400, "path requerido para scope=shared", body.path or "")
-    else:
-        raise _problem(400, "scope inválido", scope)
-    _merge_manifest_vault_binding(wid, binding)
-    from duckclaw.vaults import normalize_vault_binding
-
-    import yaml
-
-    manifest_path = _manifest_file_for_worker(wid)
-    raw_loaded = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-    fc_out = raw_loaded.get("forge_context") if isinstance(raw_loaded, dict) else {}
-    binding_out = (
-        normalize_vault_binding(fc_out.get("vault_binding"))
-        if isinstance(fc_out, dict)
-        else None
+    raise _problem(
+        410,
+        "Vault binding filesystem retirado",
+        "Importa el worker al catálogo DB-first y administra contexto desde DuckDB.",
     )
-    resolved = resolve_template_vault_path(binding_out, _default_vault_user_id(), require_exists=False)
-    _admin_audit(
-        "template.vault_binding.put",
-        f"templates/{wid}",
-        scope or "cleared",
-        actor=actor,
-        meta={"binding": binding, "resolved_path": resolved},
-    )
-    return {
-        "ok": True,
-        "worker_id": wid,
-        "binding": binding_out,
-        "resolved_path": resolved,
-    }
 
 
 def _read_manifest_skills(template_dir: Path) -> list[str]:
@@ -2549,12 +2388,11 @@ async def create_template(
     body: TemplateCreateBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    wid = re.sub(r"[^a-zA-Z0-9_-]", "", body.id.strip())
-    if not wid:
-        raise _problem(400, "id inválido", body.id)
-    _create_worker_from_source(wid=wid, source_template=body.source_template)
-    _admin_audit("template.create", f"templates/{wid}", body.source_template, actor=actor)
-    return {"ok": True, "id": wid}
+    raise _problem(
+        410,
+        "Creación filesystem de templates retirada",
+        "Usa Platform Orchestrator o importa templates existentes al catálogo DB-first.",
+    )
 
 
 @router.delete("/templates/{worker_id}", dependencies=[Depends(_require_admin_key)])
@@ -2598,26 +2436,11 @@ async def reactivate_template(
 
 @router.post("/templates/{worker_id}/validate", dependencies=[Depends(_require_admin_key)])
 async def validate_template(worker_id: str) -> dict[str, Any]:
-    from duckclaw.workers.manifest import load_manifest
-
-    errors: list[str] = []
-    try:
-        load_manifest(worker_id)
-    except Exception as exc:
-        errors.append(f"manifest: {exc}")
-    if worker_id.upper().startswith("AXIS-"):
-        try:
-            from duckclaw.adf_validator import validate_agent
-
-            base = _templates_dir() / worker_id
-            result = validate_agent(base, canonical_agent_id=worker_id)
-            if not result.valid:
-                errors.extend(result.errors or [])
-        except ImportError:
-            pass
-        except Exception as exc:
-            errors.append(f"adf: {exc}")
-    return {"ok": len(errors) == 0, "errors": errors}
+    raise _problem(
+        410,
+        "Validación filesystem retirada",
+        "La validación operativa se realiza sobre snapshots DB-first del catálogo.",
+    )
 
 
 @router.get("/env", dependencies=[Depends(_require_admin_key)])
@@ -2641,12 +2464,11 @@ async def patch_env_config(
     body: EnvPatchBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    env_path = _env_file()
-    if not env_path.is_file():
-        raise _problem(404, ".env no encontrado", str(env_path))
-    backup, updated = _merge_env_lines(body.values)
-    _admin_audit("env.patch", ".env", ",".join(updated), actor=actor)
-    return {"ok": True, "updated": updated, "backup": str(backup)}
+    raise _problem(
+        410,
+        "Edición genérica de .env retirada",
+        "Usa Runtime Settings para configuración visible y Secret Settings para API keys.",
+    )
 
 
 @router.get("/telegram/routes", dependencies=[Depends(_require_admin_key)])
@@ -3617,240 +3439,6 @@ class CatalogSkillCreateBody(BaseModel):
         return visibility
 
 
-class OrchestratorDraftBody(BaseModel):
-    prompt: str = Field(..., min_length=10, max_length=4000)
-
-
-class OrchestratorDraftProjectBody(BaseModel):
-    name: str = Field(..., min_length=1, max_length=128)
-    description: str = Field(default="", max_length=2048)
-
-
-class OrchestratorDraftWorkerBody(BaseModel):
-    worker_id: str = Field(..., min_length=1, max_length=64)
-    display_name: str = Field(..., min_length=1, max_length=128)
-    role: str = Field(default="member", max_length=64)
-    system_prompt: str = Field(default="", max_length=8000)
-
-
-class OrchestratorSuggestedSkillBody(BaseModel):
-    name: str = Field(..., min_length=1, max_length=128)
-    reason: str = Field(default="", max_length=512)
-    available: bool = False
-
-
-class OrchestratorDraftPayloadBody(BaseModel):
-    project: OrchestratorDraftProjectBody
-    workers: list[OrchestratorDraftWorkerBody] = Field(default_factory=list, max_length=8)
-    shared_context: str = Field(default="", max_length=16000)
-    suggested_skills: list[OrchestratorSuggestedSkillBody] = Field(default_factory=list, max_length=16)
-    questions: list[str] = Field(default_factory=list, max_length=12)
-
-
-class OrchestratorConfirmBody(BaseModel):
-    draft: OrchestratorDraftPayloadBody
-
-
-def _orchestrator_title_from_prompt(prompt: str) -> str:
-    text = re.sub(r"\s+", " ", (prompt or "").strip())
-    cleaned = re.sub(r"^(crear|crea|necesito|quiero|ayudame a crear)\s+", "", text, flags=re.I)
-    words = cleaned.split()
-    if not words:
-        return "Proyecto guiado"
-    title = " ".join(words[:6]).strip(" .,:;")
-    return title[:1].upper() + title[1:]
-
-
-def _orchestrator_worker_id_from_project(name: str) -> str:
-    from duckclaw.admin_worker_catalog import sanitize_catalog_worker_id
-
-    base = sanitize_catalog_worker_id(name or "guided-agent").replace("_", "-")
-    if not base.endswith("-agent"):
-        base = f"{base}-agent"
-    return base[:64] or "guided-agent"
-
-
-def _orchestrator_skill_suggestions(db: Any, *, actor_email: str, prompt: str) -> list[dict[str, Any]]:
-    from duckclaw.admin_user_profiles import ensure_profile_for_user
-    from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema
-
-    ensure_admin_worker_catalog_schema(db)
-    profile = ensure_profile_for_user(db, email=actor_email)
-    rows = db.execute(
-        """
-        SELECT name, description, implementation_ref
-        FROM main.admin_skills
-        WHERE active = true
-          AND tenant_id IN (?, 'global')
-          AND (owner_email = ? OR visibility = 'public')
-        ORDER BY name
-        """,
-        [profile["tenant_id"], profile["email"]],
-    )
-    prompt_key = (prompt or "").lower()
-    suggestions: list[dict[str, Any]] = []
-    for name, description, implementation_ref in rows:
-        skill_name = str(name or "").strip()
-        if not skill_name:
-            continue
-        tokens = {part for part in re.split(r"[^a-zA-Z0-9]+", skill_name.lower()) if len(part) >= 3}
-        desc = str(description or "").strip()
-        matched = any(token in prompt_key for token in tokens) or (
-            bool(desc) and any(part in prompt_key for part in re.split(r"[^a-zA-Z0-9]+", desc.lower()) if len(part) >= 4)
-        )
-        if matched:
-            suggestions.append(
-                {
-                    "name": skill_name,
-                    "reason": desc or f"Disponible como {implementation_ref}",
-                    "available": True,
-                }
-            )
-    if suggestions:
-        return suggestions[:6]
-    return [
-        {
-            "name": "project_planning",
-            "reason": "Skill sugerida para estructurar objetivos, roles y contexto del proyecto.",
-            "available": False,
-        }
-    ]
-
-
-@router.post("/workspace/orchestrator/draft", dependencies=[Depends(_require_admin_key)])
-async def workspace_orchestrator_draft(
-    body: OrchestratorDraftBody,
-    actor: str = Depends(_actor_from_header),
-) -> dict[str, Any]:
-    from core.admin_identity import open_gateway_db
-    from duckclaw.admin_worker_catalog import ensure_platform_orchestrator_for_actor
-
-    prompt = body.prompt.strip()
-    project_name = _orchestrator_title_from_prompt(prompt)
-    with open_gateway_db(read_only=False) as db:
-        ensure_platform_orchestrator_for_actor(db, actor_email=actor)
-        suggested_skills = _orchestrator_skill_suggestions(db, actor_email=actor, prompt=prompt)
-    worker_id = _orchestrator_worker_id_from_project(project_name)
-    return {
-        "project": {
-            "name": project_name,
-            "description": prompt[:512],
-        },
-        "workers": [
-            {
-                "worker_id": worker_id,
-                "display_name": project_name,
-                "role": "member",
-                "system_prompt": (
-                    "Ayuda al usuario a cumplir el objetivo del proyecto usando el contexto compartido, "
-                    "preguntando antes de asumir datos faltantes."
-                ),
-            }
-        ],
-        "shared_context": f"# Contexto compartido\n\nObjetivo inicial:\n\n{prompt}",
-        "suggested_skills": suggested_skills,
-        "questions": [
-            "¿Qué fuentes de datos debe usar este proyecto?",
-            "¿Qué resultado concreto esperas del worker principal?",
-            "¿Hay restricciones de tono, seguridad o aprobación humana?",
-        ],
-    }
-
-
-@router.post("/workspace/orchestrator/confirm", dependencies=[Depends(_require_admin_key)])
-async def workspace_orchestrator_confirm(
-    body: OrchestratorConfirmBody,
-    actor: str = Depends(_actor_from_header),
-) -> dict[str, Any]:
-    from core.admin_identity import open_gateway_db
-    from duckclaw.admin_worker_catalog import (
-        add_worker_context,
-        add_worker_version,
-        create_worker,
-        ensure_platform_orchestrator_for_actor,
-        get_visible_worker_for_actor,
-    )
-    from duckclaw.admin_workspace import (
-        attach_agent_to_project,
-        create_project as create_workspace_project,
-        ensure_admin_workspace_schema,
-    )
-
-    draft = body.draft
-    created_workers: list[dict[str, Any]] = []
-    with open_gateway_db(read_only=False) as db:
-        ensure_platform_orchestrator_for_actor(db, actor_email=actor)
-        ensure_admin_workspace_schema(db)
-        db.execute("BEGIN TRANSACTION")
-        try:
-            project = create_workspace_project(
-                db,
-                owner_email=actor,
-                name=draft.project.name,
-                description=draft.project.description,
-            )
-            for index, worker_body in enumerate(draft.workers):
-                existing = get_visible_worker_for_actor(
-                    db,
-                    actor_email=actor,
-                    worker_id=worker_body.worker_id,
-                )
-                worker = existing or create_worker(
-                    db,
-                    owner_email=actor,
-                    worker_id=worker_body.worker_id,
-                    display_name=worker_body.display_name,
-                    source_kind="orchestrator_draft",
-                    source_template_id="platform-orchestrator",
-                    visibility="private",
-                )
-                if existing is None:
-                    add_worker_version(
-                        db,
-                        worker_uid=worker["worker_uid"],
-                        created_by=actor,
-                        manifest_snapshot={
-                            "id": worker["worker_id"],
-                            "name": worker["display_name"],
-                            "description": draft.project.description,
-                            "skills": [skill.name for skill in draft.suggested_skills if skill.available],
-                        },
-                        files_snapshot={
-                            "system_prompt.md": worker_body.system_prompt,
-                            "soul.md": draft.shared_context,
-                        },
-                        change_note="Creado desde Platform Orchestrator",
-                    )
-                if draft.shared_context.strip():
-                    add_worker_context(
-                        db,
-                        worker_uid=worker["worker_uid"],
-                        title="Contexto compartido",
-                        content_md=draft.shared_context,
-                        sort_order=0,
-                    )
-                attach_agent_to_project(
-                    db,
-                    project_id=project["project_id"],
-                    worker_uid=worker["worker_uid"],
-                    role=worker_body.role or "member",
-                    sort_order=index,
-                )
-                created_workers.append(worker)
-            db.execute("COMMIT")
-        except Exception:
-            db.execute("ROLLBACK")
-            raise
-    _admin_audit(
-        "workspace.orchestrator.confirm",
-        str(project.get("project_id")),
-        str(project.get("name")),
-        actor=actor,
-        meta={"workers": [worker.get("worker_id") for worker in created_workers]},
-    )
-    return {"ok": True, "project": project, "created": {"workers": created_workers}}
-
-
 @router.get("/catalog/skills", dependencies=[Depends(_require_admin_key)])
 async def catalog_skills(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
     global_skills: list[dict[str, str]] = []
@@ -4294,64 +3882,25 @@ async def create_project(
 
 @router.get("/forge-projects", dependencies=[Depends(_require_admin_key)])
 async def list_forge_projects() -> dict[str, Any]:
-    return {"projects": _list_forge_projects()}
+    raise _problem(
+        410,
+        "Forge Projects legacy retirado",
+        "Usa /workspace/projects y Platform Orchestrator DB-first.",
+    )
 
 
 @router.get("/forge-projects/env-presets", dependencies=[Depends(_require_admin_key)])
 async def forge_project_env_presets() -> dict[str, Any]:
-    from duckclaw.forge.team_env import load_team_from_env
-
-    presets: list[dict[str, Any]] = []
-    env_row = load_team_from_env()
-    for row in [env_row] if env_row else []:
-        sid = str(row.get("slug") or row.get("id") or "").strip()
-        members = _canonicalize_project_members(list(row.get("members") or []))
-        if not sid or not members:
-            continue
-        ctx = (row.get("shared_context") or "").strip()
-        ctx_file = (row.get("shared_context_file") or "").strip()
-        if not ctx and ctx_file:
-            p = Path(ctx_file)
-            if not p.is_absolute():
-                p = (_repo_root() / ctx_file).resolve()
-            if p.is_file():
-                ctx = p.read_text(encoding="utf-8")
-        presets.append(
-            {
-                "id": sid,
-                "display_name": str(row.get("display_name") or sid),
-                "coordinator": row.get("coordinator"),
-                "members": members,
-                "shared_vault_id": row.get("shared_vault_id"),
-                "shared_context": ctx,
-                "source": "env",
-            }
-        )
-    return {"presets": presets}
+    raise _problem(
+        410,
+        "Presets DUCKCLAW_TEAM_* retirados",
+        "Usa proyectos DB-first y asignaciones admin_project_agents.",
+    )
 
 
 @router.get("/forge-projects/{slug}", dependencies=[Depends(_require_admin_key)])
 async def get_forge_project(slug: str) -> dict[str, Any]:
-    sid = _safe_project_slug(slug)
-    base = _projects_dir() / sid
-    manifest = base / "project.yaml"
-    if not manifest.is_file():
-        raise _problem(404, "Proyecto no encontrado", sid)
-    data = _read_project_yaml(manifest)
-    shared_path = base / "_shared" / "context.md"
-    shared_context = ""
-    if shared_path.is_file():
-        shared_context = shared_path.read_text(encoding="utf-8")
-    return {
-        "id": str(data.get("id") or sid),
-        "slug": sid,
-        "display_name": str(data.get("display_name") or sid),
-        "coordinator": data.get("coordinator"),
-        "members": data.get("members") if isinstance(data.get("members"), list) else [],
-        "shared_vault_id": data.get("shared_vault_id"),
-        "shared_context": shared_context,
-        "path": str(base.relative_to(_repo_root())),
-    }
+    raise _problem(410, "Forge Projects legacy retirado", slug)
 
 
 @router.post("/forge-projects", dependencies=[Depends(_require_admin_key)])
@@ -4359,43 +3908,11 @@ async def create_forge_project(
     body: ForgeProjectCreateBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    sid = _safe_project_slug(body.id)
-    base = _projects_dir() / sid
-    if (base / "project.yaml").is_file():
-        raise _problem(409, "Proyecto ya existe", sid)
-
-    members = _canonicalize_project_members(body.members)
-    if not members:
-        raise _problem(400, "Sin miembros válidos", "Añade templates existentes en forge/templates")
-
-    coordinator = (body.coordinator or "").strip() or None
-
-    data: dict[str, Any] = {
-        "id": sid,
-        "display_name": (body.display_name or sid).strip(),
-        "coordinator": coordinator,
-        "members": members,
-        "shared_vault_id": (body.shared_vault_id or "").strip() or None,
-        "shared_context_file": "./_shared/context.md",
-    }
-    _write_project_yaml(base / "project.yaml", data)
-    shared = (body.shared_context or "").strip()
-    if shared:
-        (base / "_shared").mkdir(parents=True, exist_ok=True)
-        (base / "_shared" / "context.md").write_text(shared + "\n", encoding="utf-8")
-
-    if body.apply_tenant_team:
-        from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
-        from duckclaw.graphs.on_the_fly_commands import set_tenant_team_templates
-
-        gw = (get_gateway_db_path() or "").strip()
-        if gw and os.path.isfile(gw):
-            db = GatewayDbEphemeralReadonly(gw)
-            tid = _gateway_effective_tenant_id(body.tenant_id)
-            set_tenant_team_templates(db, tid, members)
-
-    _admin_audit("forge_project.create", f"forge/projects/{sid}", sid, actor=actor, meta={"members": members})
-    return {"ok": True, "id": sid, "path": str(base.relative_to(_repo_root())), "members": members}
+    raise _problem(
+        410,
+        "Forge Projects legacy retirado",
+        "Crea proyectos desde /workspace/projects o Platform Orchestrator.",
+    )
 
 
 @router.patch("/forge-projects/{slug}", dependencies=[Depends(_require_admin_key)])
@@ -4404,28 +3921,7 @@ async def patch_forge_project(
     body: ForgeProjectPatchBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    sid = _safe_project_slug(slug)
-    base = _projects_dir() / sid
-    manifest = base / "project.yaml"
-    if not manifest.is_file():
-        raise _problem(404, "Proyecto no encontrado", sid)
-    data = _read_project_yaml(manifest)
-    if body.display_name is not None:
-        data["display_name"] = body.display_name.strip()
-    if body.members is not None:
-        data["members"] = _canonicalize_project_members(body.members)
-    if body.coordinator is not None:
-        data["coordinator"] = body.coordinator.strip() or None
-    if body.shared_vault_id is not None:
-        data["shared_vault_id"] = body.shared_vault_id.strip() or None
-    _write_project_yaml(manifest, data)
-    if body.shared_context is not None:
-        (base / "_shared").mkdir(parents=True, exist_ok=True)
-        (base / "_shared" / "context.md").write_text(
-            (body.shared_context or "").strip() + "\n", encoding="utf-8"
-        )
-    _admin_audit("forge_project.patch", f"forge/projects/{sid}", sid, actor=actor)
-    return {"ok": True, "id": sid}
+    raise _problem(410, "Forge Projects legacy retirado", slug)
 
 
 @router.delete("/forge-projects/{slug}", dependencies=[Depends(_require_admin_key)])
@@ -4433,13 +3929,7 @@ async def delete_forge_project(
     slug: str,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    sid = _safe_project_slug(slug)
-    base = _projects_dir() / sid
-    if not base.is_dir():
-        raise _problem(404, "Proyecto no encontrado", sid)
-    shutil.rmtree(base)
-    _admin_audit("forge_project.delete", f"forge/projects/{sid}", sid, actor=actor)
-    return {"ok": True, "id": sid}
+    raise _problem(410, "Forge Projects legacy retirado", slug)
 
 
 @router.post("/forge-projects/{slug}/apply-team", dependencies=[Depends(_require_admin_key)])
@@ -4448,33 +3938,11 @@ async def apply_forge_project_team(
     tenant_id: str = Query("default"),
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    sid = _safe_project_slug(slug)
-    manifest = _projects_dir() / sid / "project.yaml"
-    if not manifest.is_file():
-        raise _problem(404, "Proyecto no encontrado", sid)
-    data = _read_project_yaml(manifest)
-    members_raw = data.get("members")
-    members = _canonicalize_project_members(members_raw if isinstance(members_raw, list) else [])
-    if not members:
-        raise _problem(400, "Proyecto sin miembros", sid)
-
-    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
-    from duckclaw.graphs.on_the_fly_commands import set_tenant_team_templates
-
-    gw = (get_gateway_db_path() or "").strip()
-    if not gw or not os.path.isfile(gw):
-        raise _problem(503, "Gateway DuckDB no encontrada", gw or "")
-    db = GatewayDbEphemeralReadonly(gw)
-    tid = _gateway_effective_tenant_id(tenant_id)
-    set_tenant_team_templates(db, tid, members)
-    _admin_audit(
-        "forge_project.apply_team",
-        f"forge/projects/{sid}",
-        tid,
-        actor=actor,
-        meta={"members": members},
+    raise _problem(
+        410,
+        "Team templates legacy retirado",
+        "Usa admin_project_agents en Proyectos DB-first.",
     )
-    return {"ok": True, "tenant_id": tid, "members": members}
 
 
 def _kanban_status_from_audit(status: str, age_seconds: float) -> str:

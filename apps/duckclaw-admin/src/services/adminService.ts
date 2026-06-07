@@ -1109,58 +1109,6 @@ export const adminService = {
       body: JSON.stringify(body),
     }),
 
-  listForgeProjects: () =>
-    adminFetch<{
-      projects: {
-        id: string;
-        slug: string;
-        display_name: string;
-        coordinator?: string | null;
-        members: string[];
-        shared_vault_id?: string | null;
-        source?: string;
-        path: string;
-      }[];
-    }>('/forge-projects').then((r) => r.projects),
-
-  getForgeProject: (slug: string) =>
-    adminFetch<{
-      id: string;
-      slug: string;
-      display_name: string;
-      coordinator?: string | null;
-      members: string[];
-      shared_vault_id?: string | null;
-      shared_context?: string;
-      path: string;
-    }>(`/forge-projects/${encodeURIComponent(slug)}`),
-
-  createForgeProject: (body: {
-    id: string;
-    display_name?: string;
-    members?: string[];
-    coordinator?: string;
-    shared_vault_id?: string;
-    shared_context?: string;
-    apply_tenant_team?: boolean;
-    tenant_id?: string;
-  }) =>
-    adminFetch<{ ok: boolean; id: string; path: string; members: string[] }>('/forge-projects', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-
-  applyForgeProjectTeam: (slug: string, tenantId = 'default') =>
-    adminFetch<{ ok: boolean; tenant_id: string; members: string[] }>(
-      `/forge-projects/${encodeURIComponent(slug)}/apply-team?tenant_id=${encodeURIComponent(tenantId)}`,
-      { method: 'POST', body: JSON.stringify({}) }
-    ),
-
-  deleteForgeProject: (slug: string) =>
-    adminFetch<{ ok: boolean; id: string }>(`/forge-projects/${encodeURIComponent(slug)}`, {
-      method: 'DELETE',
-    }),
-
   listWorkspaceProjects: () =>
     adminFetch<{
       projects: {
@@ -1252,18 +1200,6 @@ export const adminService = {
       method: 'POST',
       body: JSON.stringify({ draft }),
     }),
-
-  listEnvForgeProjectPresets: () =>
-    adminFetch<{
-      presets: {
-        id: string;
-        display_name: string;
-        coordinator?: string | null;
-        members: string[];
-        shared_vault_id?: string | null;
-        shared_context?: string;
-      }[];
-    }>('/forge-projects/env-presets').then((r) => r.presets),
 
   setPlaygroundModel: (body: {
     chat_id: string;

@@ -129,10 +129,10 @@ function UserHomeActions() {
         primary
       />
       <HomeAction
-        href="/projects/new"
+        href="/projects"
         icon={PlusCircle}
-        title="Crear agente"
-        description="Wizard guiado sin tocar infraestructura."
+        title="Crear con Orchestrator"
+        description="Proyectos y agentes DB-first con borrador revisable."
       />
       <HomeAction
         href="/templates"

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from routers.admin import _actor_from_header, _problem, _require_admin_key
+from routers.admin import _actor_from_header, _admin_audit, _problem, _require_admin_key
 
 router = APIRouter(tags=["admin-db-first"])
 
@@ -38,6 +39,40 @@ class ProjectAgentBody(BaseModel):
     worker_id: str = Field(..., min_length=1)
     role: str = "member"
     sort_order: int = 0
+
+
+class OrchestratorDraftBody(BaseModel):
+    prompt: str = Field(..., min_length=10, max_length=4000)
+
+
+class OrchestratorDraftProjectBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str = Field(default="", max_length=2048)
+
+
+class OrchestratorDraftWorkerBody(BaseModel):
+    worker_id: str = Field(..., min_length=1, max_length=64)
+    display_name: str = Field(..., min_length=1, max_length=128)
+    role: str = Field(default="member", max_length=64)
+    system_prompt: str = Field(default="", max_length=8000)
+
+
+class OrchestratorSuggestedSkillBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    reason: str = Field(default="", max_length=512)
+    available: bool = False
+
+
+class OrchestratorDraftPayloadBody(BaseModel):
+    project: OrchestratorDraftProjectBody
+    workers: list[OrchestratorDraftWorkerBody] = Field(default_factory=list, max_length=8)
+    shared_context: str = Field(default="", max_length=16000)
+    suggested_skills: list[OrchestratorSuggestedSkillBody] = Field(default_factory=list, max_length=16)
+    questions: list[str] = Field(default_factory=list, max_length=12)
+
+
+class OrchestratorConfirmBody(BaseModel):
+    draft: OrchestratorDraftPayloadBody
 
 
 class UserAgentCreateBody(BaseModel):
@@ -71,6 +106,72 @@ def _runtime_setting_scope(item: RuntimeSettingPatchItem, *, actor: str, tenant_
     if scope == "actor":
         return tenant_id, actor
     raise ValueError(f"scope inválido: {item.scope}")
+
+
+def _orchestrator_title_from_prompt(prompt: str) -> str:
+    text = re.sub(r"\s+", " ", (prompt or "").strip())
+    cleaned = re.sub(r"^(crear|crea|necesito|quiero|ayudame a crear)\s+", "", text, flags=re.I)
+    words = cleaned.split()
+    if not words:
+        return "Proyecto guiado"
+    title = " ".join(words[:6]).strip(" .,:;")
+    return title[:1].upper() + title[1:]
+
+
+def _orchestrator_worker_id_from_project(name: str) -> str:
+    from duckclaw.admin_worker_catalog import sanitize_catalog_worker_id
+
+    base = sanitize_catalog_worker_id(name or "guided-agent").replace("_", "-")
+    if not base.endswith("-agent"):
+        base = f"{base}-agent"
+    return base[:64] or "guided-agent"
+
+
+def _orchestrator_skill_suggestions(db: Any, *, actor_email: str, prompt: str) -> list[dict[str, Any]]:
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema
+
+    ensure_admin_worker_catalog_schema(db)
+    profile = ensure_profile_for_user(db, email=actor_email)
+    rows = db.execute(
+        """
+        SELECT name, description, implementation_ref
+        FROM main.admin_skills
+        WHERE active = true
+          AND tenant_id IN (?, 'global')
+          AND (owner_email = ? OR visibility = 'public')
+        ORDER BY name
+        """,
+        [profile["tenant_id"], profile["email"]],
+    )
+    prompt_key = (prompt or "").lower()
+    suggestions: list[dict[str, Any]] = []
+    for name, description, implementation_ref in rows:
+        skill_name = str(name or "").strip()
+        if not skill_name:
+            continue
+        tokens = {part for part in re.split(r"[^a-zA-Z0-9]+", skill_name.lower()) if len(part) >= 3}
+        desc = str(description or "").strip()
+        matched = any(token in prompt_key for token in tokens) or (
+            bool(desc) and any(part in prompt_key for part in re.split(r"[^a-zA-Z0-9]+", desc.lower()) if len(part) >= 4)
+        )
+        if matched:
+            suggestions.append(
+                {
+                    "name": skill_name,
+                    "reason": desc or f"Disponible como {implementation_ref}",
+                    "available": True,
+                }
+            )
+    if suggestions:
+        return suggestions[:6]
+    return [
+        {
+            "name": "project_planning",
+            "reason": "Skill sugerida para estructurar objetivos, roles y contexto del proyecto.",
+            "available": False,
+        }
+    ]
 
 
 @router.post("/templates/import", dependencies=[Depends(_require_admin_key)])
@@ -321,6 +422,140 @@ async def detach_workspace_project_agent(
             worker_id=worker_id,
         )
     return {"ok": ok}
+
+
+@router.post("/workspace/orchestrator/draft", dependencies=[Depends(_require_admin_key)])
+async def workspace_orchestrator_draft(
+    body: OrchestratorDraftBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_worker_catalog import ensure_platform_orchestrator_for_actor
+
+    prompt = body.prompt.strip()
+    project_name = _orchestrator_title_from_prompt(prompt)
+    with open_gateway_db(read_only=False) as db:
+        ensure_platform_orchestrator_for_actor(db, actor_email=actor)
+        suggested_skills = _orchestrator_skill_suggestions(db, actor_email=actor, prompt=prompt)
+    worker_id = _orchestrator_worker_id_from_project(project_name)
+    return {
+        "project": {
+            "name": project_name,
+            "description": prompt[:512],
+        },
+        "workers": [
+            {
+                "worker_id": worker_id,
+                "display_name": project_name,
+                "role": "member",
+                "system_prompt": (
+                    "Ayuda al usuario a cumplir el objetivo del proyecto usando el contexto compartido, "
+                    "preguntando antes de asumir datos faltantes."
+                ),
+            }
+        ],
+        "shared_context": f"# Contexto compartido\n\nObjetivo inicial:\n\n{prompt}",
+        "suggested_skills": suggested_skills,
+        "questions": [
+            "¿Qué fuentes de datos debe usar este proyecto?",
+            "¿Qué resultado concreto esperas del worker principal?",
+            "¿Hay restricciones de tono, seguridad o aprobación humana?",
+        ],
+    }
+
+
+@router.post("/workspace/orchestrator/confirm", dependencies=[Depends(_require_admin_key)])
+async def workspace_orchestrator_confirm(
+    body: OrchestratorConfirmBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_worker_catalog import (
+        add_worker_context,
+        add_worker_version,
+        create_worker,
+        ensure_platform_orchestrator_for_actor,
+        get_visible_worker_for_actor,
+    )
+    from duckclaw.admin_workspace import (
+        attach_agent_to_project,
+        create_project as create_workspace_project,
+        ensure_admin_workspace_schema,
+    )
+
+    draft = body.draft
+    created_workers: list[dict[str, Any]] = []
+    with open_gateway_db(read_only=False) as db:
+        ensure_platform_orchestrator_for_actor(db, actor_email=actor)
+        ensure_admin_workspace_schema(db)
+        db.execute("BEGIN TRANSACTION")
+        try:
+            project = create_workspace_project(
+                db,
+                owner_email=actor,
+                name=draft.project.name,
+                description=draft.project.description,
+            )
+            for index, worker_body in enumerate(draft.workers):
+                existing = get_visible_worker_for_actor(
+                    db,
+                    actor_email=actor,
+                    worker_id=worker_body.worker_id,
+                )
+                worker = existing or create_worker(
+                    db,
+                    owner_email=actor,
+                    worker_id=worker_body.worker_id,
+                    display_name=worker_body.display_name,
+                    source_kind="orchestrator_draft",
+                    source_template_id="platform-orchestrator",
+                    visibility="private",
+                )
+                if existing is None:
+                    add_worker_version(
+                        db,
+                        worker_uid=worker["worker_uid"],
+                        created_by=actor,
+                        manifest_snapshot={
+                            "id": worker["worker_id"],
+                            "name": worker["display_name"],
+                            "description": draft.project.description,
+                            "skills": [skill.name for skill in draft.suggested_skills if skill.available],
+                        },
+                        files_snapshot={
+                            "system_prompt.md": worker_body.system_prompt,
+                            "soul.md": draft.shared_context,
+                        },
+                        change_note="Creado desde Platform Orchestrator",
+                    )
+                if draft.shared_context.strip():
+                    add_worker_context(
+                        db,
+                        worker_uid=worker["worker_uid"],
+                        title="Contexto compartido",
+                        content_md=draft.shared_context,
+                        sort_order=0,
+                    )
+                attach_agent_to_project(
+                    db,
+                    project_id=project["project_id"],
+                    worker_uid=worker["worker_uid"],
+                    role=worker_body.role or "member",
+                    sort_order=index,
+                )
+                created_workers.append(worker)
+            db.execute("COMMIT")
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
+    _admin_audit(
+        "workspace.orchestrator.confirm",
+        str(project.get("project_id")),
+        str(project.get("name")),
+        actor=actor,
+        meta={"workers": [worker.get("worker_id") for worker in created_workers]},
+    )
+    return {"ok": True, "project": project, "created": {"workers": created_workers}}
 
 
 @router.post("/user-agents", dependencies=[Depends(_require_admin_key)])

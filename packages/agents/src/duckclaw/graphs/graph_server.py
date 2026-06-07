@@ -269,6 +269,13 @@ def _is_duckdb_lock_error(exc: BaseException) -> bool:
     )
 
 
+def _open_duckclaw_writable_with_retry(db_path: str) -> Any:
+    """Abre DuckClaw RW al archivo con engine=python (evita mezclar C++ native + Python duckdb)."""
+    from duckclaw import DuckClaw
+
+    return DuckClaw(db_path, read_only=False, engine="python")
+
+
 def _open_duckclaw_readonly_with_retry(db_path: str) -> Any:
     """
     Abre DuckClaw RO al archivo; reintenta si el db-writer u otro proceso tiene el lock RW.

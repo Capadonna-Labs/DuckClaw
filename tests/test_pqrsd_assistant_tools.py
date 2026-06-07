@@ -20,11 +20,8 @@ from duckclaw.workers.factory import (
 )
 from duckclaw.workers.manifest import load_manifest
 
-_REPO = Path(__file__).resolve().parents[1]
-_SKILL_PATH = (
-    _REPO
-    / "packages/agents/src/duckclaw/forge/templates/PQRSD-Assistant/skills/pqrsd_portal_fetch.py"
-)
+_SEED_TEMPLATES = Path("/tmp/seed_templates")
+_SKILL_PATH = _SEED_TEMPLATES / "PQRSD-Assistant/skills/pqrsd_portal_fetch.py"
 
 
 def _load_pqrsd_skill():
@@ -89,8 +86,8 @@ def test_pqrsd_contact_only_skip_forced_fetch() -> None:
     assert _pqrsd_contact_only_skip_forced_fetch(with_story) is False
 
 
-def test_pqrsd_manifest_loads() -> None:
-    spec = load_manifest("PQRSD-Assistant")
+def test_pqrsd_manifest_loads(catalog_db) -> None:
+    spec = load_manifest("PQRSD-Assistant", db=catalog_db, tenant_id="default")
     assert spec.logical_worker_id == "pqrsd_assistant"
     assert spec.read_only is False
     assert spec.network_access is True
@@ -102,30 +99,27 @@ def test_pqrsd_manifest_loads() -> None:
     assert "pqrsd_sandbox_identificacion" in (spec.skills_list or [])
     assert getattr(spec, "research_config", None) is not None
     assert (spec.research_config or {}).get("tavily_enabled") is True
-    pol = (
-        _REPO
-        / "packages/agents/src/duckclaw/forge/templates/PQRSD-Assistant/security_policy.yaml"
-    )
+    pol = Path("/tmp/seed_templates/PQRSD-Assistant/security_policy.yaml")
     assert pol.is_file()
 
 
-def test_strip_mercenary_spec_for_pqrsd_assistant() -> None:
+def test_strip_mercenary_spec_for_pqrsd_assistant(catalog_db) -> None:
     from duckclaw.graphs.manager_graph import _strip_mercenary_spec_for_pqrsd_assistant
 
     out = {"assigned_worker_id": "PQRSD-Assistant", "mercenary_spec": {"directive": "x", "timeout": 30}}
-    assert _strip_mercenary_spec_for_pqrsd_assistant(out) is True
+    assert _strip_mercenary_spec_for_pqrsd_assistant(out, db=catalog_db) is True
     assert "mercenary_spec" not in out
     out2 = {"assigned_worker_id": "finanz", "mercenary_spec": {"directive": "x", "timeout": 30}}
-    assert _strip_mercenary_spec_for_pqrsd_assistant(out2) is True
+    assert _strip_mercenary_spec_for_pqrsd_assistant(out2, db=catalog_db) is True
     assert "mercenary_spec" not in out2
     out3 = {"assigned_worker_id": "Manager", "mercenary_spec": {"directive": "x", "timeout": 30}}
-    assert _strip_mercenary_spec_for_pqrsd_assistant(out3) is False
+    assert _strip_mercenary_spec_for_pqrsd_assistant(out3, db=catalog_db) is False
     assert "mercenary_spec" in out3
 
 
-def test_pqrsd_tools_registered(tmp_path: Path) -> None:
+def test_pqrsd_tools_registered(catalog_db, tmp_path: Path) -> None:
     db = DuckClaw(str(tmp_path / "pqrsd.duckdb"))
-    spec = load_manifest("PQRSD-Assistant")
+    spec = load_manifest("PQRSD-Assistant", db=catalog_db, tenant_id="default")
     tools = _build_worker_tools(db, spec)
     names = {t.name for t in tools}
     assert "pqrsd_fetch_canonical" in names
@@ -169,8 +163,9 @@ def test_pqrsd_fetch_ok_truncates() -> None:
     assert "truncado" in (out.get("text") or "") or len(out.get("text", "")) <= mod._MAX_TEXT_CHARS + 30
 
 
-def test_pqrsd_entity_routing_returns_rows() -> None:
+def test_pqrsd_entity_routing_returns_rows(monkeypatch) -> None:
     mod = _load_pqrsd_skill()
+    monkeypatch.setattr(mod, "_load_routing_rows", lambda: [{"entity": "Emvarias", "dependencia": "Prueba"}])
     out = json.loads(mod.pqrsd_entity_routing_impl())
     rows = out.get("rows")
     assert isinstance(rows, list)

@@ -58,8 +58,21 @@ def get_worker_dir(worker_id: str, templates_root: Optional[Path] = None) -> Pat
     return path
 
 
-def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> WorkerSpec:
-    """Load and validate manifest.yaml for a worker. Raises if missing or invalid."""
+def load_manifest(
+    worker_id: str,
+    templates_root: Optional[Path] = None,
+    db: Any = None,
+    tenant_id: str = "default",
+) -> WorkerSpec:
+    """Load WorkerSpec from DB catalog (if ``db`` provided) or filesystem fallback."""
+    if db is not None:
+        try:
+            from duckclaw.catalog_worker import load_manifest_from_catalog
+
+            return load_manifest_from_catalog(db, worker_id, tenant_id)
+        except Exception:
+            pass
+
     worker_dir = get_worker_dir(worker_id, templates_root)
     manifest_path = worker_dir / "manifest.yaml"
     if not manifest_path.is_file():
@@ -68,7 +81,6 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
     try:
         import yaml
     except ImportError:
-        # Minimal YAML parse for required keys
         raw = manifest_path.read_text(encoding="utf-8")
         data = _minimal_yaml_parse(raw)
     else:
@@ -77,6 +89,15 @@ def load_manifest(worker_id: str, templates_root: Optional[Path] = None) -> Work
     if not isinstance(data, dict):
         raise ValueError("manifest.yaml must be a YAML object")
 
+    return build_spec_from_manifest(data, worker_id, worker_dir)
+
+
+def build_spec_from_manifest(
+    data: dict,
+    worker_id: str,
+    worker_dir: Path,
+) -> WorkerSpec:
+    """Build WorkerSpec from parsed manifest dict (filesystem or catalog source)."""
     name = (data.get("name") or data.get("id") or worker_id).strip()
     logical_worker_id = (data.get("id") or worker_id).strip()
     schema_name = (data.get("schema_name") or data.get("schema") or _default_schema(worker_id)).strip()

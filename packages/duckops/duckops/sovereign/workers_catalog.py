@@ -22,8 +22,13 @@ class WorkerPick:
 def _templates_dir(repo_root: Path | None) -> Path | None:
     if repo_root is None:
         return None
-    p = repo_root / "packages" / "agents" / "src" / "duckclaw" / "forge" / "templates"
-    return p if p.is_dir() else None
+    for candidate in (
+        repo_root / "packages" / "agents" / "src" / "duckclaw" / "forge" / "seed",
+        repo_root / "packages" / "agents" / "src" / "duckclaw" / "forge" / "templates",
+    ):
+        if candidate.is_dir():
+            return candidate
+    return None
 
 
 def _read_manifest_label(folder: Path) -> str:
@@ -51,7 +56,12 @@ def _scan_template_ids(templates_dir: Path) -> list[str]:
     )
 
 
-def list_worker_picks(repo_root: Path | None = None) -> list[WorkerPick]:
+def list_worker_picks(
+    repo_root: Path | None = None,
+    *,
+    db: object = None,
+    tenant_id: str = "default",
+) -> list[WorkerPick]:
     """Lista plantillas con manifest; usa registry duckclaw si está en PYTHONPATH."""
     templates_dir = _templates_dir(repo_root)
     if templates_dir is None:
@@ -67,7 +77,7 @@ def list_worker_picks(repo_root: Path | None = None) -> list[WorkerPick]:
                 sys.path.insert(0, root_s)
         from duckclaw.workers.template_registry import list_template_ids
 
-        ids = list_template_ids(templates_dir)
+        ids = list_template_ids(templates_dir, db=db, tenant_id=tenant_id)
     except Exception:
         ids = _scan_template_ids(templates_dir)
 

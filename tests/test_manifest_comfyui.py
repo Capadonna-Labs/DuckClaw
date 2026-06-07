@@ -5,8 +5,8 @@ from __future__ import annotations
 from duckclaw.workers.manifest import load_manifest
 
 
-def test_load_manifest_default_has_comfyui_config() -> None:
-    spec = load_manifest("default")
+def test_load_manifest_default_has_comfyui_config(catalog_db) -> None:
+    spec = load_manifest("default", db=catalog_db, tenant_id="default")
     cfg = getattr(spec, "comfyui_config", None)
     assert isinstance(cfg, dict)
     assert cfg.get("enabled") is True

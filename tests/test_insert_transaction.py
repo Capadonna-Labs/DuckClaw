@@ -32,10 +32,13 @@ def finanz_db(tmp_path):
     return db
 
 
-def test_insert_transaction_assigns_next_id(finanz_db) -> None:
-    from duckclaw.forge.templates.finanz.skills.insert_transaction import get_tools
+def test_insert_transaction_assigns_next_id(finanz_db, catalog_db) -> None:
+    from duckclaw.workers.factory import _build_worker_tools
+    from duckclaw.workers.manifest import load_manifest
 
-    tool = get_tools(finanz_db, "finance_worker")[0]
+    spec = load_manifest("finanz", db=catalog_db, tenant_id="default")
+    tools = _build_worker_tools(finanz_db, spec)
+    tool = next(t for t in tools if t.name == "insert_transaction")
     raw = tool.invoke(
         {"amount": -5600, "description": "Jugo Hit", "category_id": 9, "tx_date": "2026-05-24"}
     )

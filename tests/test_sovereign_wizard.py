@@ -668,7 +668,7 @@ def test_load_gateway_chat_config_from_env(
     assert cfg.telegram_user_id == "42"
 
 
-def test_workers_catalog_lists_forge_templates() -> None:
+def test_workers_catalog_lists_forge_templates(catalog_db) -> None:
     from duckops.sovereign.workers_catalog import (
         list_worker_picks,
         resolve_worker_choice,
@@ -676,7 +676,7 @@ def test_workers_catalog_lists_forge_templates() -> None:
     )
 
     repo = Path(__file__).resolve().parent.parent
-    picks = list_worker_picks(repo)
+    picks = list_worker_picks(repo, db=catalog_db)
     ids = {p.worker_id for p in picks}
     assert "default" in ids
     assert "default" in ids

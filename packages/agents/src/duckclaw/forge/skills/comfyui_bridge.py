@@ -31,7 +31,7 @@ _log = logging.getLogger(__name__)
 _DEFAULT_COMFY_URL = "http://127.0.0.1:8188"
 _HTTP_TIMEOUT_SEC = 60.0
 _MAX_B64_IN_TOOL_RESPONSE = 500_000
-_WORKFLOWS_DIR = Path(__file__).resolve().parent.parent / "templates" / "workflows"
+from duckclaw.forge import WORKFLOWS_DIR as _WORKFLOWS_DIR
 
 _comfy_jobs_lock = threading.Lock()
 _comfy_jobs: dict[str, dict[str, Any]] = {}

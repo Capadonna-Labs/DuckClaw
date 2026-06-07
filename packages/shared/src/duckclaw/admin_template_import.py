@@ -21,7 +21,7 @@ from duckclaw.admin_worker_catalog import (
 )
 from duckclaw.shared_db_grants import _query_all_dicts, _sql_lit
 
-_IMPORT_FILE_SUFFIXES = {".yaml", ".yml", ".md", ".sql", ".txt", ".json"}
+_IMPORT_FILE_SUFFIXES = {".yaml", ".yml", ".md", ".sql", ".txt", ".json", ".py"}
 _DEFAULT_EXCLUDED_TEMPLATE_IDS = ("default",)
 
 

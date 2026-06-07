@@ -249,4 +249,6 @@ class AgentAssembler:
             llm_base_url=overrides.get("llm_base_url"),
             shared_db_path=shared_db_path,
             reuse_db=db,
+            db=db,
+            tenant_id=overrides.get("instance_name", "default"),
         )

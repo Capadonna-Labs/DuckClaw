@@ -1668,16 +1668,9 @@ class ComfyuiGenerateBody(BaseModel):
 
 
 def _list_comfyui_templates() -> list[dict[str, Any]]:
-    workflows_dir = (
-        _repo_root()
-        / "packages"
-        / "agents"
-        / "src"
-        / "duckclaw"
-        / "forge"
-        / "templates"
-        / "workflows"
-    )
+    from duckclaw.forge import WORKFLOWS_DIR
+
+    workflows_dir = WORKFLOWS_DIR
     templates: list[dict[str, Any]] = []
     if not workflows_dir.is_dir():
         return templates

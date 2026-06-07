@@ -32,6 +32,7 @@ def test_lone_https_url_regex() -> None:
 
 def test_build_worker_graph_url_research_skips_github_reddit_mql5(
     monkeypatch: pytest.MonkeyPatch,
+    catalog_db,
 ) -> None:
     """MQL5 solo URL: no registra bridges stdio pesados."""
     registered: dict[str, bool] = {"github": False, "reddit": False, "trends": False}
@@ -79,6 +80,7 @@ def test_build_worker_graph_url_research_skips_github_reddit_mql5(
         None,
         tool_surface="url_research",
         incoming_hint="https://www.mql5.com/es/code/99",
+        db=catalog_db,
     )
     assert registered["github"] is False
     assert registered["reddit"] is False
@@ -87,6 +89,7 @@ def test_build_worker_graph_url_research_skips_github_reddit_mql5(
 
 def test_build_worker_graph_url_research_registers_reddit_for_reddit_url(
     monkeypatch: pytest.MonkeyPatch,
+    catalog_db,
 ) -> None:
     """Reddit solo URL: registra MCP reddit (no Tavily sustituto)."""
     registered: dict[str, bool] = {"reddit": False}
@@ -120,5 +123,6 @@ def test_build_worker_graph_url_research_registers_reddit_for_reddit_url(
         None,
         tool_surface="url_research",
         incoming_hint="https://www.reddit.com/r/test/comments/abc/",
+        db=catalog_db,
     )
     assert registered["reddit"] is True

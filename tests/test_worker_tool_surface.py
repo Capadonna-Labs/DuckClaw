@@ -16,6 +16,7 @@ def finanz_db_path(tmp_path: Path) -> str:
 
 def test_build_worker_graph_context_synthesis_skips_stdio_mcp_registers(
     finanz_db_path: str,
+    catalog_db,
 ) -> None:
     """Modo síntesis: omite GitHub y Google Trends; Reddit sí (URLs /context Reddit)."""
     from duckclaw import DuckClaw
@@ -43,6 +44,7 @@ def test_build_worker_graph_context_synthesis_skips_stdio_mcp_registers(
             _StubLLM(),
             reuse_db=db,
             tool_surface="context_synthesis",
+            db=catalog_db,
         )
         m_gh.assert_not_called()
         m_rd.assert_called_once()
@@ -51,6 +53,7 @@ def test_build_worker_graph_context_synthesis_skips_stdio_mcp_registers(
 
 def test_build_worker_graph_full_skips_reddit_without_reddit_in_hint(
     finanz_db_path: str,
+    catalog_db,
 ) -> None:
     """Turnos full sin Reddit (p. ej. admin_sql / cuentas) no deben cargar Reddit MCP."""
     from duckclaw import DuckClaw
@@ -79,6 +82,7 @@ def test_build_worker_graph_full_skips_reddit_without_reddit_in_hint(
             reuse_db=db,
             tool_surface="full",
             incoming_hint="Actualiza el saldo de Nequi a 44400 COP",
+            db=catalog_db,
         )
         m_rd.assert_not_called()
         m_gt.assert_called_once()
@@ -86,6 +90,7 @@ def test_build_worker_graph_full_skips_reddit_without_reddit_in_hint(
 
 def test_build_worker_graph_full_registers_reddit_when_hint_mentions_reddit(
     finanz_db_path: str,
+    catalog_db,
 ) -> None:
     from duckclaw import DuckClaw
     from duckclaw.workers.factory import build_worker_graph
@@ -107,6 +112,7 @@ def test_build_worker_graph_full_registers_reddit_when_hint_mentions_reddit(
             reuse_db=db,
             tool_surface="full",
             incoming_hint="Resume https://www.reddit.com/r/test/s/abc123",
+            db=catalog_db,
         )
         m_rd.assert_called_once()
 
@@ -120,6 +126,7 @@ def isolated_finanz_db_path(tmp_path: Path) -> str:
 
 def test_build_worker_graph_summarize_directive_opens_vault_read_only(
     isolated_finanz_db_path: str,
+    catalog_db,
 ) -> None:
     """SUMMARIZE_* debe abrir la bóveda RO (evita lock vs db-writer durante context injection)."""
     from duckclaw import DuckClaw
@@ -149,5 +156,6 @@ def test_build_worker_graph_summarize_directive_opens_vault_read_only(
             _StubLLM(),
             tool_surface="context_synthesis",
             open_vault_read_only=True,
+            db=catalog_db,
         )
     assert any(ro is True for (ro,) in opened), "expected at least one DuckClaw(..., read_only=True)"

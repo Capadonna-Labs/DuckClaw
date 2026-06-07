@@ -599,7 +599,7 @@ def _worker_matches_id(worker_id: str | None, alias: str | None) -> bool:
 
 
 def _strip_mercenary_spec_for_browser_worker(
-    out: dict[str, Any], templates_root: Path | None = None
+    out: dict[str, Any], templates_root: Path | None = None, db: Any = None
 ) -> bool:
     """
     Workers con ``browser_sandbox`` en manifest usan ``run_browser_sandbox`` (Playwright), no mercenario stub.
@@ -611,7 +611,7 @@ def _strip_mercenary_spec_for_browser_worker(
     try:
         from duckclaw.workers.manifest import load_manifest
 
-        spec = load_manifest(wid, templates_root)
+        spec = load_manifest(wid, templates_root, db=db, tenant_id="default")
         if not getattr(spec, "browser_sandbox", False):
             return False
     except Exception:
@@ -620,9 +620,9 @@ def _strip_mercenary_spec_for_browser_worker(
     return True
 
 
-def _strip_mercenary_spec_for_pqrsd_assistant(out: dict[str, Any]) -> bool:
+def _strip_mercenary_spec_for_pqrsd_assistant(out: dict[str, Any], db: Any = None) -> bool:
     """Compat tests: mismo criterio que workers con browser_sandbox en manifest."""
-    return _strip_mercenary_spec_for_browser_worker(out, None)
+    return _strip_mercenary_spec_for_browser_worker(out, None, db=db)
 
 
 def _should_disable_mercenary_for_admin_ui(chat_id: str | None) -> bool:
@@ -2392,7 +2392,7 @@ def build_manager_graph(
             from duckclaw.workers.factory import _get_db_path, _same_duckdb_file
             from duckclaw.workers.manifest import load_manifest
 
-            spec_inv = load_manifest(assigned, troot)
+            spec_inv = load_manifest(assigned, troot, db=db, tenant_id=tenant_id)
             mgr_path = str(getattr(db, "_path", "") or "").strip()
             worker_resolved = _get_db_path(
                 assigned, tenant_id, (vault_db_path or db_path or None)
@@ -2467,6 +2467,8 @@ def build_manager_graph(
                     instance_name=tenant_id,  # Aislar por tenant (Forge/WorkerFactory)
                     shared_db_path=shared_db_path or None,
                     reuse_db=db,
+                    db=db,
+                    tenant_id=tenant_id,
                     tool_surface=(
                         "visual_generation"
                         if _visual_lite_mcp

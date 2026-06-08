@@ -1,32 +1,43 @@
-# Índice SDD (`specs/SDD_INDEX.md`)
+# SDD Index — DuckClaw Spec-Driven Development
 
-## Capa consolidada (`specs/core/`)
+## DB-First Hardening — Status
+
+| Prioridad | Tarea | Fase | Estado |
+|-----------|-------|------|--------|
+| P0 | Migraciones versionadas + constraints | Phase 1 | 🔴 Pendiente |
+| P0 | DB-Writer comandos tipados + idempotencia | Phase 2 | 🔴 Pendiente |
+| P0 | Gateway sin RW directo productivo | Phase 3 | 🔴 Pendiente |
+| P1 | Completar modelo: conversaciones, kanban, workflows, MCP | Phase 4 | 🔴 Pendiente |
+| P1 | Admin UI sin fallbacks filesystem | Phase 5 | 🔴 Pendiente |
+| P1 | Tests de migraciones, writer, gateway | Phase 6 | 🔴 Pendiente |
+| P2 | Auditoría e idempotencia en writes | Phase 4 | 🔴 Pendiente |
+| P2 | Runtime Settings DB > env | Phase 4 | 🔴 Pendiente |
+
+## Core specs
 
 Principios transversales — leer antes de cambios grandes:
 
 | Archivo | Contenido |
 |---------|-----------|
-| **00_Flujo de Vida del Dato (Wizard).md** | Onboarding, bóvedas, deploy |
-| **01_System_Infrastructure.md** | Monorepo, Tailscale, API Gateway, PM2/Docker, CI/CD |
-| **02_Analytical_Memory_Architecture.md** | DuckDB, PGQ, VSS, CRM, persistencia |
-| **03_Skills_and_Tooling_Framework.md** | Tavily, Strix, MCP, sandbox, ingesta |
-| **04_Cognitive_Agent_Logic.md** | Workers, homeostasis, HITL, SFT, singleton writer (Gateway → Redis → db-writer) |
+| `docs/core/00_Flujo de Vida del Dato (Wizard).md` | Onboarding, bóvedas, deploy |
+| `docs/core/01_System_Infrastructure.md` | Monorepo, Tailscale, API Gateway, PM2/Docker, CI/CD |
+| `docs/core/02_Analytical_Memory_Architecture.md` | DuckDB, PGQ, VSS, CRM, persistencia |
+| `docs/core/03_Skills_and_Tooling_Framework.md` | Tavily, Strix, MCP, sandbox, ingesta |
+| `docs/core/04_Cognitive_Agent_Logic.md` | Workers, homeostasis, HITL, SFT, singleton writer |
+| `features/platform/LEGACY_RETIREMENT_DB_FIRST.md` | Migración DB-first — hoja de ruta |
+| `features/platform/ADMIN_IDENTITY_RBAC_ERD.md` | RBAC, actores y visibilidad |
+| `features/platform/ADMIN_RUNTIME_SETTINGS.md` | Precedencia env vs DB |
+| `features/platform/SPAWN_GENERIC_DEPLOY.md` | Deploy automático VPS |
 
-## Features de producto (`specs/features/`)
+## Features de producto
 
-Specs **vivas** referenciadas por código y manifests. Organizadas por dominio; índice completo:
+→ **[`features/FEATURES_INDEX.md`](features/FEATURES_INDEX.md)**
 
-→ **[`specs/features/FEATURES_INDEX.md`](features/FEATURES_INDEX.md)**
+## Plan de implementación
 
-## Otros
-
-| Ruta | Uso |
-|------|-----|
-| [`05_ADF_AGENT_DEFINITION_FRAMEWORK.md`](05_ADF_AGENT_DEFINITION_FRAMEWORK.md) | Plantillas AXIS (ADF) |
-| [`features/platform/AGENTS_SHARED_PACKAGE_REORG.md`](features/platform/AGENTS_SHARED_PACKAGE_REORG.md) | Límites de paquetes shared/agents y mapa de imports |
-| [`specs/meta/`](meta/PLAN_FORMAT_STANDARD.md) | Formato obligatorio de planes |
-| [`specs/archive/`](archive/ARCHIVE_INDEX.md) | Migraciones y planes ya ejecutados |
-
-## Runbooks
-
-No duplicar procedimientos en specs: [`docs/operations/`](../docs/operations/index.md) enlaza operación; las specs de feature apuntan al runbook cuando aplica (p. ej. Homeostasis, Multi-Vault).
+1. **Phase 1**: Migraciones versionadas + constraints DB
+2. **Phase 2**: DB-Writer comandos tipados
+3. **Phase 3**: Gateway sin RW directo
+4. **Phase 4**: Modelo completo + auditoría
+5. **Phase 5**: Admin UI sin fallbacks
+6. **Phase 6**: Tests integrales

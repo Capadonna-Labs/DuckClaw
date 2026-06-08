@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   const bodyText = await req.text();
   let wantsStream = false;
   try {
-    const parsed = JSON.parse(bodyText) as { stream?: boolean };
+    const parsed = JSON.parse(bodyText) as { worker_id?: string; chat_id?: string; stream?: boolean; project_id?: string };
     wantsStream = Boolean(parsed.stream);
   } catch {
     /* cuerpo no JSON */

@@ -461,6 +461,7 @@ def test_skills_page_exposes_new_skill_db_first_form() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/skills/page.tsx").read_text(encoding="utf-8")
     summary = Path("apps/duckclaw-admin/src/app/(admin)/skills/summary/page.tsx").read_text(encoding="utf-8")
     new_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/new/page.tsx").read_text(encoding="utf-8")
+    create_form = Path("apps/duckclaw-admin/src/components/skills/SkillCreateForm.tsx").read_text(encoding="utf-8")
     global_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/global/page.tsx").read_text(encoding="utf-8")
     local_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/local/page.tsx").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
@@ -473,8 +474,8 @@ def test_skills_page_exposes_new_skill_db_first_form() -> None:
     assert "filterScope" not in page
     assert "Resumen de skills" in summary
     assert "Nueva skill" in new_page
-    assert "createSkill" in new_page
-    assert "implementationRef" in new_page
+    assert "createSkill" in create_form
+    assert "implementationRef" in create_form
     assert "Skills globales" in global_page
     assert "Skills locales" in local_page
     assert "createSkill:" in service

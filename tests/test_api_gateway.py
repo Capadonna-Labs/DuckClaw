@@ -224,11 +224,11 @@ def test_clean_agent_response_strips_pre_tags() -> None:
 
 
 def test_agent_history_requires_session(client: TestClient) -> None:
-    r = client.get("/api/v1/agent/finanz/history?session_id=s1")
+    r = client.get("/api/v1/agent/default/history?session_id=s1")
     assert r.status_code == 200
     data = r.json()
     assert "history" in data
-    assert data.get("worker_id") == "finanz"
+    assert data.get("worker_id") == "default"
 
 
 def test_agent_workers_list(client: TestClient, catalog_db, monkeypatch) -> None:
@@ -243,7 +243,7 @@ def test_agent_workers_list(client: TestClient, catalog_db, monkeypatch) -> None
     data = r.json()
     assert "workers" in data
     assert isinstance(data["workers"], list)
-    assert "finanz" in data["workers"]
+    assert "default" in data["workers"]
 
 
 def test_forget_command_via_api_succeeds(
@@ -254,7 +254,7 @@ def test_forget_command_via_api_succeeds(
     """POST /forget with session_id='default' succeeds (fix for API gateway bug)."""
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", owner_user_id)
     r = client.post(
-        "/api/v1/agent/finanz/chat",
+        "/api/v1/agent/default/chat",
         json={
             "message": "/forget",
             "chat_id": "default",

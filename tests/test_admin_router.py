@@ -353,7 +353,7 @@ def test_playground_chat_rejects_worker_outside_team(
     monkeypatch.setattr(
         admin_router,
         "_playground_team_context",
-        lambda **_: _mock_playground_team(workers=["finanz"]),
+        lambda **_: _mock_playground_team(workers=["default"]),
     )
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
@@ -771,7 +771,7 @@ def test_kanban_worker_states(admin_client: TestClient, monkeypatch: pytest.Monk
     r = admin_client.get(
         "/api/v1/admin/kanban/worker-states",
         headers={"X-Admin-Key": "test-admin-key"},
-        params={"workers": "finanz,default"},
+        params={"workers": "default,default"},
     )
     assert r.status_code == 200
     data = r.json()
@@ -785,14 +785,14 @@ def test_kanban_swarm_slots(admin_client: TestClient, monkeypatch: pytest.Monkey
     def _fake_slots(tid: str, wids: list[str] | None) -> list[dict]:
         return [
             {
-                "worker_id": "finanz",
+                "worker_id": "default",
                 "slot": 1,
                 "chat_scope": None,
                 "started_at": 1.0,
                 "active": True,
             },
             {
-                "worker_id": "finanz",
+                "worker_id": "default",
                 "slot": 2,
                 "chat_scope": "123",
                 "started_at": 2.0,
@@ -805,13 +805,13 @@ def test_kanban_swarm_slots(admin_client: TestClient, monkeypatch: pytest.Monkey
     r = admin_client.get(
         "/api/v1/admin/kanban/swarm-slots",
         headers={"X-Admin-Key": "test-admin-key"},
-        params={"workers": "finanz"},
+        params={"workers": "default"},
     )
     assert r.status_code == 200
     data = r.json()
     assert data["instances"]
-    assert data["states"]["finanz:1"] == "en_progreso"
-    assert data["states"]["finanz:2"] == "en_progreso"
+    assert data["states"]["default:1"] == "en_progreso"
+    assert data["states"]["default:2"] == "en_progreso"
 
 
 def test_admin_sandbox_status(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
@@ -844,7 +844,7 @@ def test_admin_sandbox_chat_policy_deny_worker(admin_client: TestClient, monkeyp
         lambda **kwargs: {
             "authorized": True,
             "tenant_id": "default",
-            "workers": ["Quant-Trader"],
+            "workers": ["default"],
             "telegram_user_id": "123",
             "team_chat_id": "123",
         },
@@ -861,7 +861,7 @@ def test_admin_sandbox_chat_policy_deny_worker(admin_client: TestClient, monkeyp
         "_sandbox_chat_policy_payload",
         lambda **kwargs: {
             "chat_id": kwargs["chat_id"],
-            "worker_id": "Quant-Trader",
+            "worker_id": "default",
             "sandbox_enabled": False,
             "sandbox_network_enabled": None,
             "yaml_network_default": "deny",
@@ -874,7 +874,7 @@ def test_admin_sandbox_chat_policy_deny_worker(admin_client: TestClient, monkeyp
     r = admin_client.get(
         "/api/v1/admin/sandbox/chat-policy",
         headers={"X-Admin-Key": "test-admin-key"},
-        params={"chat_id": "admin-section-vnc", "worker_id": "Quant-Trader"},
+        params={"chat_id": "admin-section-vnc", "worker_id": "default"},
     )
     assert r.status_code == 200
     assert r.json()["network_toggle_available"] is False
@@ -890,7 +890,7 @@ def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pyt
         lambda **kwargs: {
             "authorized": True,
             "tenant_id": "default",
-            "workers": ["finanz"],
+            "workers": ["default"],
             "telegram_user_id": "123",
             "team_chat_id": "123",
         },
@@ -926,7 +926,7 @@ def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pyt
         "_sandbox_chat_policy_payload",
         lambda **kwargs: {
             "chat_id": kwargs["chat_id"],
-            "worker_id": "finanz",
+            "worker_id": "default",
             "effective_network": "allow",
             "network_toggle_available": True,
         },
@@ -939,7 +939,7 @@ def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pyt
     r = admin_client.post(
         "/api/v1/admin/sandbox/network",
         headers={"X-Admin-Key": "test-admin-key"},
-        json={"chat_id": "admin-section-vnc", "enabled": True, "worker_id": "finanz"},
+        json={"chat_id": "admin-section-vnc", "enabled": True, "worker_id": "default"},
     )
     assert r.status_code == 200
     assert r.json()["ok"] is True
@@ -978,13 +978,13 @@ def test_admin_sandbox_novnc_prepare(admin_client: TestClient, monkeypatch: pyte
     r = admin_client.post(
         "/api/v1/admin/sandbox/novnc/prepare",
         headers={"X-Admin-Key": "test-admin-key"},
-        json={"chat_id": "admin-playground", "worker_id": "finanz"},
+        json={"chat_id": "admin-playground", "worker_id": "default"},
     )
     assert r.status_code == 200
     data = r.json()
     assert data["vnc_url"]
     assert data["session_id"]
-    assert data["worker_id"] == "finanz"
+    assert data["worker_id"] == "default"
 
 
 def test_admin_conversations_crud(admin_client: TestClient):
@@ -996,7 +996,7 @@ def test_admin_conversations_crud(admin_client: TestClient):
         "/api/v1/admin/conversations",
         headers=headers,
         params={"tenant_id": "default"},
-        json={"title": "Test conv", "section": "playground", "worker_id": "finanz"},
+        json={"title": "Test conv", "section": "playground", "worker_id": "default"},
     )
     assert r.status_code == 200
     data = r.json()

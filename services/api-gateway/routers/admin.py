@@ -862,8 +862,14 @@ def _admin_audit(
 
 
 def _actor_from_header(x_actor: str | None = Header(None, alias="X-Duckclaw-Actor")) -> str:
-    """Actor email from header. Defaults to \"admin-ui\" for admin-key-authenticated requests."""
-    return (x_actor or "admin-ui").strip()[:128] or "admin-ui"
+    """Actor email from header, or DUCKCLAW_ADMIN_EMAIL if header is unset."""
+    raw = (x_actor or "").strip()[:128]
+    if raw and raw != "admin-ui":
+        return raw
+    admin_email = os.environ.get("DUCKCLAW_ADMIN_EMAIL", "").strip()
+    if admin_email and "@" in admin_email:
+        return admin_email[:128]
+    return raw or "admin-ui"
 
 
 def _chat_config_prefix(chat_id: str) -> str:

@@ -138,15 +138,15 @@ export default function PlaygroundPage() {
         setConfig(c);
         const fromServer = (c.selected_worker_id || '').trim();
         const ids = workerOptionIds(c.workers);
+        let nextWorker = ids[0] ?? '';
         if (initialWorker && ids.includes(initialWorker)) {
-          setWorkerId(initialWorker);
+          nextWorker = initialWorker;
         } else if (fromServer && ids.includes(fromServer)) {
-          setWorkerId(fromServer);
+          nextWorker = fromServer;
         } else if (ids.includes('default')) {
-          setWorkerId('default');
-        } else {
-          setWorkerId(ids[0] ?? '');
+          nextWorker = 'default';
         }
+        setWorkerId(nextWorker);
       })
       .catch(() => undefined);
   }, [initialWorker, conv.sessionId]);

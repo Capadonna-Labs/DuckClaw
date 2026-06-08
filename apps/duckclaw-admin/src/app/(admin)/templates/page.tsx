@@ -31,7 +31,9 @@ export default function TemplatesPage() {
   const reload = useCallback(() => {
     adminService
       .listTemplates({ include_inactive: showInactive })
-      .then(setItems)
+      .then((nextItems) => {
+        setItems(nextItems);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
   }, [showInactive]);
 

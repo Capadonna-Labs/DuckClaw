@@ -1038,6 +1038,41 @@ def test_playground_config_uses_db_first_visible_workers_not_all_filesystem_temp
     assert "BI-Analyst" not in workers
 
 
+def test_admin_health_uses_actor_visible_db_first_workers(
+    gateway_admin_client,
+) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    db = DuckClaw(get_gateway_db_path(), read_only=False, engine="python")
+    try:
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="axis-coder",
+            display_name="AXIS Coder",
+        )
+        create_worker(
+            db,
+            owner_email="other@test.local",
+            worker_id="axis-other",
+            display_name="Other Worker",
+        )
+    finally:
+        db.close()
+
+    response = gateway_admin_client.get(
+        "/api/v1/admin/health",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["workers_count"] == 2
+    assert set(data["workers"]) == {"default", "axis-coder"}
+
+
 def test_playground_llm_scope_does_not_report_legacy(gateway_admin_client) -> None:
     response = gateway_admin_client.get(
         "/api/v1/admin/playground/config",

@@ -66,11 +66,6 @@ export default function OverviewPage() {
         <h1 className="text-3xl font-black text-gov-gray-900 dark:text-dark-text tracking-tight">
           {isAdmin ? 'Overview' : 'Inicio'}
         </h1>
-        <p className="text-sm text-gov-gray-500 dark:text-dark-muted mt-1">
-          {isAdmin
-            ? 'Estado del gateway, arranque de plataforma y comandos fly'
-            : 'Crea agentes, conversa con default y retoma tus tareas recientes.'}
-        </p>
       </header>
 
       {error && <GatewayErrorBanner message={error} />}

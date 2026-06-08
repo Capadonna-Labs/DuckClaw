@@ -4,7 +4,7 @@ import { type FormEvent, useEffect, useState } from 'react';
 import { adminService, type SkillCatalogItem } from '@/services/adminService';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
-import { Blocks, Plus } from 'lucide-react';
+import { Blocks, Plus, Search } from 'lucide-react';
 
 const EMPTY_SKILL_FORM = {
   name: '',
@@ -21,6 +21,7 @@ export default function SkillsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_SKILL_FORM);
   const [saving, setSaving] = useState(false);
+  const [filterScope, setFilterScope] = useState<'all' | 'global' | 'local'>('all');
 
   const loadSkills = () =>
     adminService.getSkillsCatalog().then((r) => {
@@ -70,14 +71,21 @@ export default function SkillsPage() {
             s.path.toLowerCase().includes(needle) ||
             (s.worker_id ?? '').toLowerCase().includes(needle)
         );
+  const filteredGlobalSkills = filter(globalSkills);
+  const filteredLocalSkills = filter(localSkills);
+  const totalSkills = globalSkills.length + localSkills.length;
+  const hasAnySkill = totalSkills > 0;
+  const showGlobalSkills = filterScope === 'all' || filterScope === 'global';
+  const showLocalSkills = filterScope === 'all' || filterScope === 'local';
 
   return (
     <PageShell>
       <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-3xl font-black dark:text-dark-text">Skills</h1>
-          <p className="text-sm text-gov-gray-500 mt-1">
-            Crea y administra capacidades reutilizables para tus agentes.
+          <p className="mt-1 max-w-2xl text-sm text-gov-gray-500 dark:text-dark-muted">
+            Crea metadata DB-first y revisa capacidades globales o locales sin mezclar
+            responsabilidades con MCP.
           </p>
         </div>
         <button
@@ -89,6 +97,24 @@ export default function SkillsPage() {
           Nueva skill
         </button>
       </header>
+
+      <section className="rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">
+              Resumen de skills
+            </h2>
+            <p className="text-sm text-gov-gray-500 dark:text-dark-muted">
+              Vista separada para inventario, búsqueda y creación de capacidades.
+            </p>
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <SkillSummaryCard label="Total" value={totalSkills} />
+          <SkillSummaryCard label="Globales" value={globalSkills.length} />
+          <SkillSummaryCard label="Locales" value={localSkills.length} />
+        </div>
+      </section>
 
       {showCreate && (
         <form
@@ -168,30 +194,94 @@ export default function SkillsPage() {
 
       {error && <p className="text-red-600 text-sm">{error}</p>}
 
-      <input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Buscar skill…"
-        maxLength={50}
-        className="w-full max-w-md px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-surface text-sm"
-      />
+      <section className="flex flex-col gap-3 rounded-3xl border border-gov-gray-100 bg-white p-4 shadow-sm dark:border-dark-border dark:bg-dark-surface lg:flex-row lg:items-center lg:justify-between">
+        <div className="relative max-w-md flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gov-gray-400" size={18} />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Buscar skill…"
+            maxLength={50}
+            className="w-full rounded-xl border py-2 pl-10 pr-3 text-sm dark:border-dark-border dark:bg-dark-bg"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {[
+            ['all', 'Todas'],
+            ['global', 'Globales'],
+            ['local', 'Locales'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setFilterScope(value as 'all' | 'global' | 'local')}
+              className={`rounded-xl px-3 py-2 text-xs font-black transition-colors ${
+                filterScope === value
+                  ? 'bg-gov-blue-700 text-white'
+                  : 'border border-gov-gray-200 text-gov-gray-600 hover:border-gov-blue-300 dark:border-dark-border dark:text-dark-muted'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
 
-      <SettingsSection
-        titulo="Mis skills globales"
-        descripcion="Capacidades reutilizables entre mis agentes"
-        icono={<Blocks size={22} />}
-      >
-        <SkillTable items={filter(globalSkills)} />
-      </SettingsSection>
+      {!hasAnySkill && <EmptySkillsState onCreate={() => setShowCreate(true)} />}
 
-      <SettingsSection
-        titulo="Skills locales de mis agentes"
-        descripcion="Capacidades específicas de cada agente"
-        icono={<Blocks size={22} />}
-      >
-        <SkillTable items={filter(localSkills)} showWorker />
-      </SettingsSection>
+      {showGlobalSkills && (
+        <SettingsSection
+          titulo="Mis skills globales"
+          descripcion="Capacidades reutilizables entre mis agentes"
+          icono={<Blocks size={22} />}
+        >
+          <SkillTable items={filteredGlobalSkills} />
+        </SettingsSection>
+      )}
+
+      {showLocalSkills && (
+        <SettingsSection
+          titulo="Skills locales de mis agentes"
+          descripcion="Capacidades específicas de cada agente"
+          icono={<Blocks size={22} />}
+        >
+          <SkillTable items={filteredLocalSkills} showWorker />
+        </SettingsSection>
+      )}
     </PageShell>
+  );
+}
+
+function SkillSummaryCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-2xl border border-gov-gray-100 bg-gov-gray-50 p-4 dark:border-dark-border dark:bg-dark-bg">
+      <p className="text-xs font-black uppercase tracking-[0.18em] text-gov-gray-500 dark:text-dark-muted">
+        {label}
+      </p>
+      <p className="mt-2 text-3xl font-black text-gov-gray-900 dark:text-dark-text">{value}</p>
+    </div>
+  );
+}
+
+function EmptySkillsState({ onCreate }: { onCreate: () => void }) {
+  return (
+    <section className="rounded-3xl border border-dashed border-gov-blue-200 bg-gov-blue-50/50 p-6 text-center dark:border-dark-border dark:bg-dark-bg">
+      <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">
+        Todavía no hay skills DB-first
+      </h2>
+      <p className="mx-auto mt-2 max-w-xl text-sm text-gov-gray-500 dark:text-dark-muted">
+        Crea una skill global para reutilizarla entre agentes. Las skills locales aparecen desde
+        snapshots activos de workers.
+      </p>
+      <button
+        type="button"
+        onClick={onCreate}
+        className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-800"
+      >
+        <Plus size={16} />
+        Crear primera skill
+      </button>
+    </section>
   );
 }
 

@@ -1851,7 +1851,7 @@ def build_manager_graph(
         incoming_r = (state.get("incoming") or state.get("input") or "").strip()
         entry_r = (state.get("entry_worker_id") or "").strip()
         _entry_route_ev = _is_entry_route_system_event(incoming_r)
-        _all_disk_r = list_workers(troot)
+        _all_disk_r = list_workers(troot, db=db, tenant_id=tenant_id)
         # Multiplex Telegram (p. ej. /api/v1/telegram/pqrsd-assistant): el API Gateway
         # pasa entry_worker_id=PQRSD-Assistant. Antes solo se fusionaba en SYSTEM_EVENT
         # (TRADING_TICK, goals ticker); los mensajes normales quedaban con assigned=available[0]
@@ -1988,7 +1988,7 @@ def build_manager_graph(
         )
         # Preservar incoming por si el estado no lo propaga (fallback: input, message)
         incoming = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
-        available_plan = state.get("available_templates") or list_workers(troot)
+        available_plan = state.get("available_templates") or list_workers(troot, db=db, tenant_id=_tid)
         default_worker = available_plan[0] if available_plan else None
         assigned = (state.get("assigned_worker_id") or default_worker or "").strip() or default_worker
         coordinator_id = (state.get("coordinator_worker_id") or "").strip() or None
@@ -2194,7 +2194,7 @@ def build_manager_graph(
 
         route_entry = (state.get("entry_worker_id") or "").strip()
         if route_entry and _is_entry_route_system_event(incoming):
-            _all_plan_disk = list_workers(troot)
+            _all_plan_disk = list_workers(troot, db=db, tenant_id=_tid)
             _canon_re = _resolve_template_id(_all_plan_disk, route_entry)
             if _canon_re and _canon_re in _all_plan_disk:
                 out["assigned_worker_id"] = _canon_re
@@ -2205,7 +2205,7 @@ def build_manager_graph(
             or _explicit_route_blocks_proactive_a2a(entry_wid, user_incoming)
         ) and not is_job_add_command:
             # Playground / multiplex: worker elegido en UI debe ganar al planner (salvo A2A laboral real).
-            _all_plan_disk = list_workers(troot)
+            _all_plan_disk = list_workers(troot, db=db, tenant_id=_tid)
             _canon_play = _resolve_template_id(_all_plan_disk, route_entry)
             if _canon_play and _canon_play in _all_plan_disk:
                 out["assigned_worker_id"] = _canon_play
@@ -2297,9 +2297,9 @@ def build_manager_graph(
         planned_task = (state.get("planned_task") or "").strip() or incoming
         plan_title = (state.get("plan_title") or "").strip() or None
         history = state.get("history") or []
-        available = list(state.get("available_templates") or list_workers(troot))
+        available = list(state.get("available_templates") or list_workers(troot, db=db, tenant_id=tenant_id))
         assigned = (state.get("assigned_worker_id") or "").strip() or None
-        _all_iw = list_workers(troot)
+        _all_iw = list_workers(troot, db=db, tenant_id=tenant_id)
         if assigned and assigned not in available and _is_entry_route_system_event(incoming):
             _entry_iw = (state.get("entry_worker_id") or "").strip()
             _c_iw = _resolve_template_id(_all_iw, assigned) or (

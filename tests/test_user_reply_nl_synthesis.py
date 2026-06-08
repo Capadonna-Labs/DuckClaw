@@ -60,41 +60,6 @@ def test_maybe_synthesize_reply_skips_when_spec_off() -> None:
     llm.invoke.assert_not_called()
 
 
-def test_finanz_repair_ibkr_replaces_gateway_disconnect_when_snapshot_unavailable() -> None:
-    from langchain_core.messages import ToolMessage
-
-    tool = ToolMessage(
-        content=(
-            "Cuenta IBKR solicitada: **live**.\n\n"
-            "Snapshot de cuenta IBKR no disponible (`snapshot_unavailable`). "
-            "No es lo mismo que sin conexión HTTP."
-        ),
-        tool_call_id="ib1",
-        name="get_ibkr_portfolio",
-    )
-    chart = "\U0001f4c8"
-    reply = (
-        "RESUMEN\n\n"
-        "Cuenta IBKR:\n"
-        "- Estado: Gateway desconectado (modo live)\n"
-        "- Detalle: El IB Gateway no está logueado\n\n"
-        f"{chart} Situación general:\n"
-        "- Liquidez local: 1 COP\n"
-    )
-    out = mod.finanz_repair_ibkr_snapshot_disconnect_paraphrase(
-        [tool], reply, worker_id="finanz"
-    )
-    assert "Gateway desconectado" not in out
-    assert "snapshot_unavailable" in out.lower()
-    assert "Liquidez local" in out
-
-
-def test_finanz_repair_ibkr_noop_for_other_workers() -> None:
-    reply = "Cuenta IBKR:\n- Estado: Gateway desconectado (modo live)\n"
-    out = mod.finanz_repair_ibkr_snapshot_disconnect_paraphrase([], reply, worker_id="quant")
-    assert out == reply
-
-
 def test_maybe_synthesize_reply_invokes_llm() -> None:
     from langchain_core.messages import AIMessage
 
@@ -102,29 +67,15 @@ def test_maybe_synthesize_reply_invokes_llm() -> None:
     llm.invoke.return_value = AIMessage(content="**Hola** mundo.\n\n**Siguientes pasos**\n- uno")
     spec = MagicMock()
     spec.egress_natural_language_synthesis = True
-    spec.worker_id = "finanz"
+    spec.worker_id = "default"
     out = mod.maybe_synthesize_reply(llm, spec=spec, user_ask="cuentas", reply_candidate='[{"x":1}]')
     assert "Hola" in out
     llm.invoke.assert_called_once()
 
 
-def test_synthesize_user_visible_reply_finanz_adds_subtotal_rules_to_system() -> None:
-    from langchain_core.messages import AIMessage, SystemMessage
-
-    llm = MagicMock()
-    llm.invoke.return_value = AIMessage(content="Listo.")
-    mod.synthesize_user_visible_reply(
-        llm, user_ask="resumen cuentas", raw_evidence="[]", worker_id="finanz"
-    )
-    msgs = llm.invoke.call_args[0][0]
-    assert isinstance(msgs[0], SystemMessage)
-    assert "subtotal" in (msgs[0].content or "").lower()
-    assert "ibkr" in (msgs[0].content or "").lower()
-
-
 def test_load_manifest_default_egress_nl_true(catalog_db) -> None:
-    """finanz manifest debe asumir síntesis activa sin clave explícita."""
-    spec = load_manifest("finanz", db=catalog_db, tenant_id="default")
+    """default manifest debe asumir síntesis activa sin clave explícita."""
+    spec = load_manifest("default", db=catalog_db, tenant_id="default")
     assert spec.egress_natural_language_synthesis is True
 
 
@@ -144,7 +95,7 @@ def test_maybe_synthesize_reddit_compact_when_env_global_off_uses_deterministic(
     llm = MagicMock()
     spec = MagicMock()
     spec.egress_natural_language_synthesis = True
-    spec.worker_id = "finanz"
+    spec.worker_id = "default"
     md = """## r/worldnews (Top 2 posts)
 
 - **Hilo A** (Score: 10) - [Enlace](https://reddit.com/a)
@@ -244,7 +195,7 @@ def test_rescind_llm_then_deterministic_when_synthesis_not_acceptable() -> None:
     llm.invoke.return_value = AIMessage(content="no debe usarse")
     spec = MagicMock()
     spec.egress_natural_language_synthesis = True
-    spec.worker_id = "finanz"
+    spec.worker_id = "default"
     inc = mod.SUMMARIZE_STORED_CONTEXT_MARK + "\n--- registro 1 ---\ntengo 23 años"
     out = mod.rescind_trivial_context_summary_reply(llm, spec, incoming=inc, reply_candidate="Listo.")
     assert "23" in out
@@ -265,7 +216,7 @@ def test_rescind_prefers_llm_prose_when_substantial_no_bullet_lines() -> None:
     )
     spec = MagicMock()
     spec.egress_natural_language_synthesis = True
-    spec.worker_id = "finanz"
+    spec.worker_id = "default"
     inc = mod.SUMMARIZE_STORED_CONTEXT_MARK + "\n--- registro 1 ---\ntengo 23 años"
     out = mod.rescind_trivial_context_summary_reply(llm, spec, incoming=inc, reply_candidate="Listo.")
     assert "23" in out
@@ -277,7 +228,7 @@ def test_rescind_deterministic_before_llm_and_egress_gates() -> None:
     """``llm is None`` o ``egress_natural_language_synthesis=False`` no deben bloquear el parser de registros."""
     spec = MagicMock()
     spec.egress_natural_language_synthesis = False
-    spec.worker_id = "Job-Hunter"
+    spec.worker_id = "default"
     inc = mod.SUMMARIZE_STORED_CONTEXT_MARK + "\n--- registro 1 ---\nGemma 4 Apache 2.0\n"
     out = mod.rescind_trivial_context_summary_reply(None, spec, incoming=inc, reply_candidate="Listo.")
     assert "Gemma" in out or "Apache" in out
@@ -291,7 +242,7 @@ def test_rescind_falls_back_deterministic_when_llm_still_listo() -> None:
     llm.invoke.return_value = AIMessage(content="Listo.")
     spec = MagicMock()
     spec.egress_natural_language_synthesis = True
-    spec.worker_id = "finanz"
+    spec.worker_id = "default"
     inc = (
         mod.SUMMARIZE_STORED_CONTEXT_MARK
         + "\n--- registro 1 (source=x) ---\ntengo 23 años\n\n"
@@ -338,7 +289,7 @@ def test_rescind_keeps_first_bullets_when_no_registro_dump() -> None:
     llm = MagicMock()
     spec = MagicMock()
     spec.egress_natural_language_synthesis = True
-    spec.worker_id = "finanz"
+    spec.worker_id = "default"
     inc = mod.SUMMARIZE_STORED_CONTEXT_MARK
     cand = "• **Dato**: ya resumido con suficiente texto\n"
     out = mod.rescind_trivial_context_summary_reply(llm, spec, incoming=inc, reply_candidate=cand)
@@ -354,7 +305,7 @@ def test_rescind_runs_when_first_reply_bold_title_without_bullets() -> None:
     llm.invoke.return_value = AIMessage(content="Listo.")
     spec = MagicMock()
     spec.egress_natural_language_synthesis = True
-    spec.worker_id = "Job-Hunter"
+    spec.worker_id = "default"
     inc = mod.SUMMARIZE_STORED_CONTEXT_MARK + "\n--- registro 1 ---\nGemma 4 nota larga\n"
     first = "**Resumen del contexto (base de datos)**\n\nListo."
     out = mod.rescind_trivial_context_summary_reply(llm, spec, incoming=inc, reply_candidate=first)
@@ -372,7 +323,7 @@ def test_rescind_uses_deterministic_when_syn_only_bold_header_and_listo() -> Non
     )
     spec = MagicMock()
     spec.egress_natural_language_synthesis = True
-    spec.worker_id = "finanz"
+    spec.worker_id = "default"
     inc = mod.SUMMARIZE_STORED_CONTEXT_MARK + "\n--- registro 1 ---\ntengo 23 años\n"
     out = mod.rescind_trivial_context_summary_reply(llm, spec, incoming=inc, reply_candidate="Listo.")
     assert "23" in out
@@ -389,7 +340,7 @@ def test_rescind_invokes_llm_when_directive_only_and_listo() -> None:
     )
     spec = MagicMock()
     spec.egress_natural_language_synthesis = True
-    spec.worker_id = "finanz"
+    spec.worker_id = "default"
     out = mod.rescind_trivial_context_summary_reply(
         llm, spec, incoming=mod.SUMMARIZE_STORED_CONTEXT_MARK, reply_candidate="Listo."
     )
@@ -507,63 +458,3 @@ def test_repair_summarize_new_context_keeps_clean_vlm_text() -> None:
     out = mod.repair_summarize_new_context_egress(clean_reply, incoming=inc)
     assert out == clean_reply
 
-
-def test_finanz_repair_ibkr_skips_relabel_when_tool_unverified() -> None:
-    from langchain_core.messages import ToolMessage
-
-    tool = ToolMessage(
-        content=(
-            "**Finanz — cuenta IBKR (modo no verificado):** texto.\n\n"
-            "Estado: IBKR Gateway conectado (modo cuenta del snapshot: no verificado (API sin metadatos de cuenta)).\n"
-        ),
-        tool_call_id="ib1",
-        name="get_ibkr_portfolio",
-    )
-    reply = "📊 X\n\nIBKR (USD) - Paper\n- Efectivo: $1\n"
-    out = mod.finanz_repair_ibkr_tool_live_vs_reply_paper([tool], reply, worker_id="finanz")
-    assert "Paper" in out
-
-
-def test_finanz_repair_ibkr_live_vs_paper_relabels_when_tool_live() -> None:
-    from langchain_core.messages import ToolMessage
-
-    tool = ToolMessage(
-        content=(
-            "**Finanz — cuenta IBKR (live):** snapshot.\n\n"
-            "Estado: IBKR Gateway conectado (modo cuenta del snapshot: live).\n"
-            "Valor total: $1\n"
-        ),
-        tool_call_id="ib1",
-        name="get_ibkr_portfolio",
-    )
-    reply = "📊 X\n\nIBKR (USD) - Paper\n- Efectivo: $1\n"
-    out = mod.finanz_repair_ibkr_tool_live_vs_reply_paper([tool], reply, worker_id="finanz")
-    assert "Paper" not in out
-    assert "Live" in out
-
-
-def test_finanz_strip_ibkr_block_without_tool_in_turn() -> None:
-    from langchain_core.messages import AIMessage, HumanMessage
-
-    msgs = [
-        HumanMessage(content="Dame un resumen de mis cuentas"),
-        AIMessage(content="sin tools"),
-    ]
-    reply = (
-        "📊 Local\n\n"
-        "💰 Total: 1 COP\n\n"
-        "IBKR (USD) - Paper\n"
-        "- Efectivo: $999\n\n"
-        "TOTAL COMBINADO\n"
-        "- Local: 1\n"
-        "- IBKR: 2\n"
-    )
-    out = mod.finanz_strip_ibkr_block_without_tool_in_turn(
-        msgs,
-        reply,
-        worker_id="finanz",
-        user_ask="Dame un resumen de mis cuentas",
-    )
-    assert "IBKR (USD) - Paper" not in out
-    assert "TOTAL COMBINADO" not in out
-    assert "get_ibkr_portfolio" in out.lower()

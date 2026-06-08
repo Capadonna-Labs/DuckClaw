@@ -15,8 +15,8 @@ def test_workers_ui_uses_generic_catalog_import_and_no_folder_delete_language() 
 
     assert "importTemplatesToCatalog" in service
     assert "/templates/import" in service
-    assert "Importar templates" in page
-    assert "include_prefixes" in page
+    assert "Crear con Orchestrator" in page
+    assert "catálogo DB-first" in page
     assert "Desactivar del catálogo" in page
     assert "Eliminar definitivo" in page
     assert "Se borrará la carpeta" not in page

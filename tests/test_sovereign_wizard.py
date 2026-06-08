@@ -657,14 +657,14 @@ def test_load_gateway_chat_config_from_env(
     (tmp_path / ".env").write_text(
         "DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8484\n"
         "DUCKCLAW_ADMIN_API_KEY=adm\n"
-        "DUCKCLAW_DEFAULT_WORKER_ID=finanz\n"
+        "DUCKCLAW_DEFAULT_WORKER_ID=default\n"
         "DUCKCLAW_OWNER_ID=42\n",
         encoding="utf-8",
     )
     cfg = load_gateway_chat_config(tmp_path)
     assert cfg.base_url == "http://127.0.0.1:8484"
     assert cfg.admin_key == "adm"
-    assert cfg.default_worker_id == "finanz"
+    assert cfg.default_worker_id == "default"
     assert cfg.telegram_user_id == "42"
 
 
@@ -679,7 +679,7 @@ def test_workers_catalog_lists_forge_templates(catalog_db) -> None:
     picks = list_worker_picks(repo, db=catalog_db)
     ids = {p.worker_id for p in picks}
     assert "default" in ids
-    assert "default" in ids
+    assert len(ids) == 1
     assert resolve_worker_choice("1", picks, repo) == picks[0].worker_id
     assert resolve_worker_choice("default", picks, repo) == "default"
     assert suggest_default_worker_id(picks, "nope") in ids

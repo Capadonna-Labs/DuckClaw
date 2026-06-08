@@ -425,10 +425,22 @@ def test_kanban_storage_is_scoped_by_authenticated_actor() -> None:
 
 def test_mcp_page_does_not_render_official_reference_as_user_catalog() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/mcp/page.tsx").read_text(encoding="utf-8")
+    catalog = Path("apps/duckclaw-admin/src/app/(admin)/mcp/catalog/page.tsx").read_text(encoding="utf-8")
 
     assert "OfficialMcpReferenceTable" not in page
-    assert "Servidores de referencia" not in page
+    assert "Catálogo oficial MCP" not in page
     assert "MCP Registry" not in page
+    assert "OfficialMcpReferenceTable" in catalog
+    assert "Catálogo oficial MCP" in catalog
+    assert "MCP Registry" in catalog
+
+
+def test_overview_and_projects_headers_do_not_render_legacy_helper_copy() -> None:
+    overview = Path("apps/duckclaw-admin/src/app/(admin)/overview/page.tsx").read_text(encoding="utf-8")
+    projects = Path("apps/duckclaw-admin/src/app/(admin)/projects/page.tsx").read_text(encoding="utf-8")
+
+    assert "Estado del gateway, arranque de plataforma y comandos fly" not in overview
+    assert "Catálogo DB-first de proyectos, agentes asignados y contexto activo." not in projects
 
 
 def test_console_user_delete_uses_confirm_danger_modal() -> None:
@@ -447,11 +459,24 @@ def test_console_user_delete_uses_confirm_danger_modal() -> None:
 
 def test_skills_page_exposes_new_skill_db_first_form() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/skills/page.tsx").read_text(encoding="utf-8")
+    summary = Path("apps/duckclaw-admin/src/app/(admin)/skills/summary/page.tsx").read_text(encoding="utf-8")
+    new_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/new/page.tsx").read_text(encoding="utf-8")
+    global_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/global/page.tsx").read_text(encoding="utf-8")
+    local_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/local/page.tsx").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
 
-    assert "Nueva skill" in page
-    assert "createSkill" in page
-    assert "implementationRef" in page
+    assert 'href="/skills/summary"' in page
+    assert 'href="/skills/new"' in page
+    assert 'href="/skills/global"' in page
+    assert 'href="/skills/local"' in page
+    assert "createSkill" not in page
+    assert "filterScope" not in page
+    assert "Resumen de skills" in summary
+    assert "Nueva skill" in new_page
+    assert "createSkill" in new_page
+    assert "implementationRef" in new_page
+    assert "Skills globales" in global_page
+    assert "Skills locales" in local_page
     assert "createSkill:" in service
 
 

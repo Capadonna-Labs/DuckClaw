@@ -6,7 +6,7 @@ import { adminService } from '@/services/adminService';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
 import { useAuthStore } from '@/store/authStore';
-import { Cable, Circle, Database, Play, RefreshCw } from 'lucide-react';
+import { Cable, Circle, Database, ExternalLink, Package, Play, RefreshCw, Terminal } from 'lucide-react';
 
 type McpLive = Awaited<ReturnType<typeof adminService.getMcpLiveStatus>>;
 
@@ -109,21 +109,27 @@ export default function McpPage() {
         </p>
       </header>
 
-      <McpLiveBanner
-        live={live}
-        isUp={isUp}
-        canRunOps={canRunOps}
-        opsRunning={opsRunning}
-        onStart={() => runMcpOp('pm2_start_mcp')}
-        onRestart={() => runMcpOp('pm2_restart_mcp')}
-        onRefresh={refreshLive}
-      />
-
-      {opsOutput && (
-        <pre className="p-4 text-xs font-mono bg-slate-900 text-slate-100 rounded-xl overflow-x-auto max-h-48 whitespace-pre-wrap">
-          {opsOutput}
-        </pre>
-      )}
+      <SettingsSection
+        titulo="Estado runtime MCP"
+        descripcion={isUp ? 'Servidor HTTP respondiendo' : 'Servidor HTTP sin respuesta'}
+        icono={<Circle size={22} />}
+        collapsible={false}
+      >
+        <McpLiveBanner
+          live={live}
+          isUp={isUp}
+          canRunOps={canRunOps}
+          opsRunning={opsRunning}
+          onStart={() => runMcpOp('pm2_start_mcp')}
+          onRestart={() => runMcpOp('pm2_restart_mcp')}
+          onRefresh={refreshLive}
+        />
+        {opsOutput && (
+          <pre className="mt-4 max-h-48 overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-900 p-4 font-mono text-xs text-slate-100">
+            {opsOutput}
+          </pre>
+        )}
+      </SettingsSection>
 
       {data?._gateway_stale && (
         <p className="text-sm text-amber-800 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 p-3 rounded-xl">
@@ -176,10 +182,17 @@ export default function McpPage() {
 
           <SettingsSection
             titulo="Servidor DuckClaw MCP"
-            descripcion={isUp ? 'Proceso detectado en localhost' : 'No responde en localhost'}
-            icono={<Cable size={22} />}
+            descripcion="Comando efectivo y endpoint HTTP local"
+            icono={<Terminal size={22} />}
           >
             <McpCmdBlock data={data} live={live} isUp={isUp} />
+          </SettingsSection>
+
+          <SettingsSection
+            titulo="Herramientas DuckClaw MCP"
+            descripcion="Tools expuestas por el servidor DuckClaw HTTP"
+            icono={<Cable size={22} />}
+          >
             <table className="w-full text-sm mt-4">
               <thead>
                 <tr className="text-left text-gov-gray-500">
@@ -198,7 +211,38 @@ export default function McpPage() {
             </table>
           </SettingsSection>
 
-          <SettingsSection titulo="Servidores stdio (config)" icono={<Cable size={22} />}>
+          <SettingsSection
+            titulo="Catálogo oficial MCP"
+            descripcion="Referencia curada de modelcontextprotocol/servers"
+            icono={<Package size={22} />}
+          >
+            <OfficialMcpReferenceTable servers={data.official_reference.servers} />
+            <div className="mt-4 flex flex-wrap gap-3 text-xs font-bold">
+              <a
+                href={data.official_reference.registry_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-gov-blue-700 hover:border-gov-blue-400 dark:border-dark-border dark:text-dark-cyan"
+              >
+                MCP Registry <ExternalLink size={14} />
+              </a>
+              <a
+                href={data.official_reference.source_repo}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-gov-blue-700 hover:border-gov-blue-400 dark:border-dark-border dark:text-dark-cyan"
+              >
+                {data.official_reference.source_label} <ExternalLink size={14} />
+              </a>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            titulo="Servidores stdio (solo lectura)"
+            descripcion="Config actual desde config/mcp_servers.yaml"
+            icono={<Cable size={22} />}
+            defaultOpen={false}
+          >
             <ul className="text-sm space-y-2">
               {data.stdio_servers.map((s) => (
                 <li key={s.id} className="p-2 rounded-lg bg-gov-gray-50 dark:bg-dark-bg">
@@ -216,6 +260,57 @@ export default function McpPage() {
         </>
       )}
     </PageShell>
+  );
+}
+
+function OfficialMcpReferenceTable({
+  servers,
+}: {
+  servers: NonNullable<
+    Awaited<ReturnType<typeof adminService.getMcpCatalog>>
+  >['official_reference']['servers'];
+}) {
+  if (servers.length === 0) {
+    return <p className="py-4 text-sm text-gov-gray-500">Sin servidores oficiales cargados.</p>;
+  }
+  return (
+    <div className="overflow-x-auto rounded-2xl border dark:border-dark-border">
+      <table className="w-full text-sm">
+        <thead className="bg-gov-gray-50 text-left text-gov-gray-500 dark:bg-dark-bg">
+          <tr>
+            <th className="px-3 py-2">Servidor</th>
+            <th className="px-3 py-2">Runtime</th>
+            <th className="px-3 py-2">Install</th>
+            <th className="px-3 py-2">Repo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {servers.map((server) => (
+            <tr key={server.id} className="border-t dark:border-dark-border">
+              <td className="px-3 py-3 align-top">
+                <p className="font-black text-gov-gray-900 dark:text-dark-text">{server.name}</p>
+                <p className="mt-1 max-w-sm text-xs text-gov-gray-500 dark:text-dark-muted">
+                  {server.description}
+                </p>
+              </td>
+              <td className="px-3 py-3 align-top">
+                <span className="rounded-lg bg-gov-gray-50 px-2 py-1 font-mono text-xs dark:bg-dark-bg">
+                  {server.runtime}
+                </span>
+              </td>
+              <td className="px-3 py-3 align-top">
+                <code className="block max-w-md rounded-lg bg-slate-950 px-3 py-2 text-[11px] text-slate-100">
+                  {server.install}
+                </code>
+              </td>
+              <td className="px-3 py-3 align-top font-mono text-xs text-gov-gray-500">
+                {server.repo_path}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

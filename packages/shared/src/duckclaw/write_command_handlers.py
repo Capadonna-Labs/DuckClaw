@@ -1,0 +1,417 @@
+"""Typed command handlers for DuckDB write operations.
+
+Each handler receives a DuckDB connection (with active transaction) and the
+command payload dict. Handlers do NOT manage transactions — the caller
+(db-writer or inline executor) wraps them in BEGIN/COMMIT/ROLLBACK.
+
+Usage::
+
+    from duckclaw.write_command_handlers import dispatch_command
+
+    conn = duckdb.connect(path, read_only=False)
+    conn.execute("BEGIN TRANSACTION")
+    try:
+        dispatch_command(conn, payload)
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+"""
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+from typing import Any
+from pathlib import Path
+
+_log = logging.getLogger(__name__)
+
+
+def dispatch_command(conn: Any, payload: dict) -> None:
+    """Route command_type to the appropriate handler.
+
+    Raises ValueError for unknown command types.
+    """
+    command_type = str(payload.get("command_type") or "").strip()
+    if not command_type:
+        raise ValueError("command_type required")
+
+    handlers = {
+        "upsert_worker": _apply_upsert_worker,
+        "deactivate_worker": _apply_deactivate_worker,
+        "create_project": _apply_create_project,
+        "add_project_member": _apply_add_project_member,
+        "assign_agent_to_project": _apply_assign_agent_to_project,
+        "upsert_runtime_setting": _apply_upsert_runtime_setting,
+        "upsert_kanban_card": _apply_upsert_kanban_card,
+        "delete_kanban_card": _apply_delete_kanban_card,
+    }
+    handler = handlers.get(command_type)
+    if handler is None:
+        raise ValueError(f"Unknown command_type: {command_type}")
+
+    handler(conn, payload)
+
+
+def _resolve_worker_uid(conn: Any, worker_id: str, tenant_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT worker_uid FROM main.admin_worker_catalog "
+        "WHERE worker_id = ? AND tenant_id = ?",
+        [worker_id, tenant_id],
+    ).fetchone()
+    return str(row[0]) if row else None
+
+
+def _require_project_exists(conn: Any, project_id: str) -> str:
+    """Raise ValueError if project does not exist or is not active. Returns tenant_id."""
+    row = conn.execute(
+        "SELECT tenant_id, active, status FROM main.admin_projects WHERE project_id = ?",
+        [project_id],
+    ).fetchone()
+    if not row:
+        raise ValueError(f"Project not found: {project_id}")
+    if not row[1] or str(row[2] or "").strip() == "archived":
+        raise ValueError(f"Project is not active: {project_id}")
+    return str(row[0])
+
+
+def _require_worker_exists(conn: Any, worker_uid: str) -> str | None:
+    """Raise ValueError if worker_uid does not exist or is not active. Returns tenant_id."""
+    row = conn.execute(
+        "SELECT tenant_id, active FROM main.admin_worker_catalog WHERE worker_uid = ?",
+        [worker_uid],
+    ).fetchone()
+    if not row:
+        raise ValueError(f"Worker not found: {worker_uid}")
+    if not row[1]:
+        raise ValueError(f"Worker is not active: {worker_uid}")
+    return str(row[0])
+
+
+def _apply_upsert_worker(conn: Any, payload: dict) -> None:
+    worker_id = str(payload["worker_id"])
+    display_name = str(payload.get("display_name", worker_id))
+    tenant_id = str(payload.get("tenant_id", "default"))
+    owner = str(payload.get("actor_email", "system"))
+    source_kind = str(payload.get("source_kind", "runtime"))
+    source_tpl = str(payload.get("source_template_id", "default"))
+    visibility = str(payload.get("visibility", "private"))
+    existing_uid = _resolve_worker_uid(conn, worker_id, tenant_id)
+
+    if existing_uid:
+        conn.execute(
+            "UPDATE main.admin_worker_catalog "
+            "SET display_name = ?, source_kind = ?, source_template_id = ?, "
+            "visibility = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE worker_id = ? AND tenant_id = ?",
+            [display_name, source_kind, source_tpl, visibility, worker_id, tenant_id],
+        )
+    else:
+        wuid = str(payload.get("worker_uid", f"wrk_{uuid.uuid4().hex}"))
+        conn.execute(
+            "INSERT INTO main.admin_worker_catalog "
+            "(worker_uid, tenant_id, owner_email, worker_id, display_name, "
+            "source_kind, source_template_id, visibility, active) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, true)",
+            [wuid, tenant_id, owner, worker_id, display_name, source_kind, source_tpl, visibility],
+        )
+        existing_uid = wuid
+
+    # Version the snapshot if provided
+    manifest = payload.get("manifest_snapshot")
+    files = payload.get("files_snapshot")
+    if manifest or files:
+        import json as _json
+        row = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) FROM main.admin_worker_versions "
+            "WHERE worker_uid = ?", [existing_uid],
+        ).fetchone()
+        next_ver = (int(row[0]) if row[0] is not None else 0) + 1
+        conn.execute(
+            "INSERT INTO main.admin_worker_versions "
+            "(worker_uid, version, manifest_snapshot_json, files_snapshot_json, created_by) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [
+                existing_uid, next_ver,
+                _json.dumps(manifest or {}, default=str, ensure_ascii=False),
+                _json.dumps(files or {}, default=str, ensure_ascii=False),
+                owner,
+            ],
+        )
+
+    # Insert system_prompt as a context if provided
+    system_prompt = str(payload.get("system_prompt", "")).strip()
+    if system_prompt:
+        import uuid as _uuid
+        cid = f"ctx_{_uuid.uuid4().hex[:16]}"
+        conn.execute(
+            "INSERT OR REPLACE INTO main.admin_worker_contexts "
+            "(context_id, worker_uid, title, content_md) VALUES (?, ?, 'system_prompt', ?)",
+            [cid, existing_uid, system_prompt],
+        )
+
+
+def _apply_deactivate_worker(conn: Any, payload: dict) -> None:
+    worker_id = str(payload["worker_id"])
+    tenant_id = str(payload.get("tenant_id", "default"))
+    conn.execute(
+        "UPDATE main.admin_worker_catalog "
+        "SET active = false, status = 'inactive', updated_at = CURRENT_TIMESTAMP "
+        "WHERE worker_id = ? AND tenant_id = ?",
+        [worker_id, tenant_id],
+    )
+
+
+def _apply_create_project(conn: Any, payload: dict) -> None:
+    project_id = str(payload["project_id"])
+    name = str(payload["name"])
+    desc = str(payload.get("description", ""))
+    tenant_id = str(payload.get("tenant_id", "default"))
+    owner = str(payload.get("actor_email", "system"))
+
+    existing = conn.execute(
+        "SELECT project_id FROM main.admin_projects WHERE project_id = ?",
+        [project_id],
+    ).fetchone()
+
+    if existing:
+        conn.execute(
+            "UPDATE main.admin_projects "
+            "SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE project_id = ?",
+            [name, desc, project_id],
+        )
+    else:
+        conn.execute(
+            "INSERT INTO main.admin_projects "
+            "(project_id, tenant_id, owner_email, name, description, status, active) "
+            "VALUES (?, ?, ?, ?, ?, 'active', true)",
+            [project_id, tenant_id, owner, name, desc],
+        )
+
+    # Assign agents if provided
+    agent_uids = payload.get("agent_worker_uids") or []
+    if isinstance(agent_uids, list) and agent_uids:
+        for wuid in agent_uids:
+            if not isinstance(wuid, str) or not wuid.strip():
+                continue
+            wuid = str(wuid).strip()
+            worker_tenant = _require_worker_exists(conn, wuid)
+            if worker_tenant != tenant_id:
+                raise ValueError(
+                    f"Worker tenant mismatch: project={tenant_id} worker={worker_tenant}"
+                )
+            existing_agent = conn.execute(
+                "SELECT worker_uid FROM main.admin_project_agents "
+                "WHERE project_id = ? AND worker_uid = ?",
+                [project_id, wuid],
+            ).fetchone()
+            if not existing_agent:
+                conn.execute(
+                    "INSERT INTO main.admin_project_agents "
+                    "(project_id, worker_uid, role) VALUES (?, ?, 'member')",
+                    [project_id, wuid],
+                )
+
+
+def _apply_upsert_runtime_setting(conn: Any, payload: dict) -> None:
+    domain = str(payload["domain"])
+    key = str(payload["key"])
+    value = str(payload["value"])
+    value_kind = str(payload.get("value_kind", "string"))
+    secret = bool(payload.get("secret", False))
+    tenant_id = str(payload.get("tenant_id", "default"))
+    actor = str(payload.get("actor_email", "system"))
+
+    existing = conn.execute(
+        "SELECT setting_id FROM main.admin_runtime_settings "
+        "WHERE tenant_id = ? AND actor_email = ? AND domain = ? AND key = ?",
+        [tenant_id, actor, domain, key],
+    ).fetchone()
+
+    if existing:
+        conn.execute(
+            "UPDATE main.admin_runtime_settings "
+            "SET value_text = ?, value_kind = ?, secret = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE setting_id = ?",
+            [value, value_kind, secret, existing[0]],
+        )
+    else:
+        setting_id = f"set_{uuid.uuid4().hex[:16]}"
+        conn.execute(
+            "INSERT INTO main.admin_runtime_settings "
+            "(setting_id, tenant_id, actor_email, domain, key, value_text, value_kind, secret) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [setting_id, tenant_id, actor, domain, key, value, value_kind, secret],
+        )
+
+
+def _kanban_tags_json(raw: Any) -> str:
+    tags = raw if isinstance(raw, list) else []
+    clean = []
+    for tag in tags:
+        text = str(tag).strip()
+        if text and text not in clean:
+            clean.append(text[:64])
+        if len(clean) >= 16:
+            break
+    return json.dumps(clean, ensure_ascii=False)
+
+
+def _kanban_event(conn: Any, *, card_id: str, event_type: str, actor_email: str, payload: dict) -> None:
+    conn.execute(
+        "INSERT INTO main.admin_kanban_events "
+        "(event_id, card_id, event_type, payload_json, actor_email) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [
+            f"evt_{uuid.uuid4().hex[:16]}",
+            card_id,
+            event_type,
+            json.dumps(payload, ensure_ascii=False, default=str),
+            actor_email,
+        ],
+    )
+
+
+def _apply_upsert_kanban_card(conn: Any, payload: dict) -> None:
+    card_id = str(payload["card_id"]).strip()
+    if not card_id:
+        raise ValueError("card_id required")
+
+    tenant_id = str(payload.get("tenant_id", "default") or "default").strip() or "default"
+    actor_email = str(payload.get("actor_email", "system") or "system").strip() or "system"
+    title = str(payload.get("title") or "").strip()[:120]
+    if not title:
+        raise ValueError("title required")
+    description = str(payload.get("description") or "").strip()[:2000]
+    status = str(payload.get("status") or "todo").strip()
+    if status not in {"todo", "in_progress", "done", "cancelled"}:
+        raise ValueError(f"Invalid kanban status: {status}")
+    priority = int(payload.get("priority") or 0)
+    sort_order = int(payload.get("sort_order") or 0)
+    worker_id = str(payload.get("worker_id") or "").strip()[:128]
+    tags_json = _kanban_tags_json(payload.get("tags"))
+
+    existing = conn.execute(
+        "SELECT tenant_id, actor_email FROM main.admin_kanban_cards WHERE card_id = ?",
+        [card_id],
+    ).fetchone()
+    if existing and (str(existing[0]) != tenant_id or str(existing[1]) != actor_email):
+        raise ValueError("Kanban card not found for tenant/actor")
+
+    if existing:
+        conn.execute(
+            "UPDATE main.admin_kanban_cards "
+            "SET title = ?, description = ?, status = ?, priority = ?, sort_order = ?, "
+            "assignee_email = ?, tags_json = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE card_id = ?",
+            [title, description, status, priority, sort_order, worker_id, tags_json, card_id],
+        )
+        event_type = "kanban_card.updated"
+    else:
+        conn.execute(
+            "INSERT INTO main.admin_kanban_cards "
+            "(card_id, tenant_id, actor_email, title, description, status, priority, sort_order, "
+            "assignee_email, tags_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [card_id, tenant_id, actor_email, title, description, status, priority, sort_order, worker_id, tags_json],
+        )
+        event_type = "kanban_card.created"
+
+    _kanban_event(
+        conn,
+        card_id=card_id,
+        event_type=event_type,
+        actor_email=actor_email,
+        payload={"status": status, "title": title, "worker_id": worker_id},
+    )
+
+
+def _apply_delete_kanban_card(conn: Any, payload: dict) -> None:
+    card_id = str(payload["card_id"]).strip()
+    if not card_id:
+        raise ValueError("card_id required")
+
+    tenant_id = str(payload.get("tenant_id", "default") or "default").strip() or "default"
+    actor_email = str(payload.get("actor_email", "system") or "system").strip() or "system"
+    row = conn.execute(
+        "SELECT title, status FROM main.admin_kanban_cards "
+        "WHERE card_id = ? AND tenant_id = ? AND actor_email = ?",
+        [card_id, tenant_id, actor_email],
+    ).fetchone()
+    if not row:
+        raise ValueError("Kanban card not found")
+
+    conn.execute("DELETE FROM main.admin_kanban_cards WHERE card_id = ?", [card_id])
+    _kanban_event(
+        conn,
+        card_id=card_id,
+        event_type="kanban_card.deleted",
+        actor_email=actor_email,
+        payload={"title": row[0], "status": row[1]},
+    )
+
+
+def _apply_add_project_member(conn: Any, payload: dict) -> None:
+    project_id = str(payload["project_id"])
+    member_email = str(payload["member_email"])
+    role = str(payload.get("role", "member"))
+    assigned_by = str(payload.get("actor_email", "system"))
+
+    _require_project_exists(conn, project_id)
+
+    existing = conn.execute(
+        "SELECT email FROM main.admin_project_members "
+        "WHERE project_id = ? AND email = ?",
+        [project_id, member_email],
+    ).fetchone()
+
+    if existing:
+        conn.execute(
+            "UPDATE main.admin_project_members SET role = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE project_id = ? AND email = ?",
+            [role, project_id, member_email],
+        )
+    else:
+        conn.execute(
+            "INSERT INTO main.admin_project_members "
+            "(project_id, email, role, assigned_by) VALUES (?, ?, ?, ?)",
+            [project_id, member_email, role, assigned_by],
+        )
+
+
+def _apply_assign_agent_to_project(conn: Any, payload: dict) -> None:
+    project_id = str(payload["project_id"])
+    worker_uid = str(payload["worker_uid"])
+    role = str(payload.get("role", "member"))
+    sort_order = int(payload.get("sort_order", 0))
+
+    project_tenant = _require_project_exists(conn, project_id)
+    worker_tenant = _require_worker_exists(conn, worker_uid)
+    if worker_tenant != project_tenant:
+        raise ValueError(
+            f"Worker tenant mismatch: project={project_tenant} worker={worker_tenant}"
+        )
+
+    existing = conn.execute(
+        "SELECT worker_uid FROM main.admin_project_agents "
+        "WHERE project_id = ? AND worker_uid = ?",
+        [project_id, worker_uid],
+    ).fetchone()
+
+    if existing:
+        conn.execute(
+            "UPDATE main.admin_project_agents SET role = ?, sort_order = ?, "
+            "updated_at = CURRENT_TIMESTAMP "
+            "WHERE project_id = ? AND worker_uid = ?",
+            [role, sort_order, project_id, worker_uid],
+        )
+    else:
+        conn.execute(
+            "INSERT INTO main.admin_project_agents "
+            "(project_id, worker_uid, role, sort_order) VALUES (?, ?, ?, ?)",
+            [project_id, worker_uid, role, sort_order],
+        )

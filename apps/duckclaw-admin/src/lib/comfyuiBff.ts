@@ -1,7 +1,3 @@
-import { readFileSync, readdirSync } from 'fs';
-import { join } from 'path';
-import { repoRoot } from '@/lib/localOps';
-
 export function comfyuiApiUrl(): string {
   return (
     process.env.COMFYUI_API_URL?.trim() ||
@@ -92,49 +88,4 @@ export async function comfyuiStatusLocal(): Promise<{
       timeout_source,
     };
   }
-}
-
-export function listComfyuiTemplatesLocal(): {
-  templates: { id: string; label: string; aspect_ratios: string[] }[];
-  default: string;
-} {
-  const workflowsDir = join(
-    repoRoot(),
-    'packages',
-    'agents',
-    'src',
-    'duckclaw',
-    'forge',
-    'templates',
-    'workflows'
-  );
-  const fallback = ['1:1', '16:9', '9:16', '4:3', '3:4'];
-  const templates: { id: string; label: string; aspect_ratios: string[] }[] = [];
-  try {
-    for (const name of readdirSync(workflowsDir)) {
-      if (!name.endsWith('.json') || name.endsWith('.meta.json')) continue;
-      const stem = name.replace(/\.json$/, '');
-      const metaPath = join(workflowsDir, `${stem}.meta.json`);
-      let aspect_ratios = fallback;
-      try {
-        const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as {
-          aspect_presets?: Record<string, number[]>;
-        };
-        if (meta.aspect_presets && typeof meta.aspect_presets === 'object') {
-          aspect_ratios = Object.keys(meta.aspect_presets).sort();
-        }
-      } catch {
-        /* sin meta */
-      }
-      templates.push({
-        id: stem,
-        label: stem.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-        aspect_ratios,
-      });
-    }
-  } catch {
-    templates.push({ id: 'comfy_default', label: 'Comfy Default', aspect_ratios: fallback });
-  }
-  templates.sort((a, b) => a.id.localeCompare(b.id));
-  return { templates, default: 'comfy_default' };
 }

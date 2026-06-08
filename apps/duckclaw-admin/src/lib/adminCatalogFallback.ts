@@ -31,10 +31,10 @@ export function repoRoot(): string {
   return join(process.cwd(), '..', '..');
 }
 
-function templatesDir(): string {
+function seedDir(): string {
   return join(
     repoRoot(),
-    'packages/agents/src/duckclaw/forge/templates'
+    'packages/agents/src/duckclaw/forge/seed'
   );
 }
 
@@ -86,9 +86,9 @@ export function fallbackMcpCatalog() {
 const CATALOG_STARTER_SKIP = new Set(['entry_router', 'manager_router', 'industries']);
 
 function manifestDisplayFields(templateId: string): { name: string; subtitle: string } {
-  const manifest = join(templatesDir(), templateId, 'manifest.yaml');
+  const manifest = join(seedDir(), templateId, 'manifest.yaml');
   let name = templateId;
-  let subtitle = `Plantilla forge/templates/${templateId}`;
+  let subtitle = `Seed ${templateId}`;
   if (!existsSync(manifest)) return { name, subtitle };
   try {
     const raw = readFileSync(manifest, 'utf-8');
@@ -96,6 +96,7 @@ function manifestDisplayFields(templateId: string): { name: string; subtitle: st
     const descMatch = raw.match(/^(?:description|subtitle):\s*(.+)$/m);
     if (nameMatch) name = nameMatch[1].replace(/^["']|["']$/g, '').trim();
     if (descMatch) subtitle = descMatch[1].replace(/^["']|["']$/g, '').trim();
+    subtitle += ' (seed, editar desde catálogo DB)';
   } catch {
     /* ignore */
   }
@@ -103,7 +104,7 @@ function manifestDisplayFields(templateId: string): { name: string; subtitle: st
 }
 
 function catalogStarterItems(): { id: string; name: string; path: string; subtitle: string }[] {
-  const root = templatesDir();
+  const root = seedDir();
   if (!existsSync(root)) return [];
   const starters: { id: string; name: string; path: string; subtitle: string }[] = [];
   for (const tid of readdirSync(root)) {
@@ -122,7 +123,7 @@ function catalogStarterItems(): { id: string; name: string; path: string; subtit
 
 export function fallbackIndustriesCatalog() {
   const industries: { id: string; name: string; path: string }[] = [];
-  const indDir = join(templatesDir(), 'industries');
+  const indDir = join(seedDir(), 'industries');
   if (existsSync(indDir)) {
     for (const name of readdirSync(indDir)) {
       if (existsSync(join(indDir, name, 'manifest.yaml'))) {
@@ -155,9 +156,20 @@ export function fallbackTopologies() {
 
 export function fallbackSourcePreview(sourceTemplate: string) {
   const rel = sourceTemplate.trim().replace(/^\/+/, '') || 'default';
-  const dir = join(templatesDir(), rel);
+  const dir = join(seedDir(), rel);
   if (!existsSync(dir)) {
-    return fallbackSourcePreview('default');
+    if (rel !== 'default') return fallbackSourcePreview('default');
+    return {
+      source_template: 'default',
+      name: 'default',
+      description: 'Worker default (seed). Otros workers requieren gateway activo.',
+      topology: 'general',
+      skills: [] as string[],
+      system_prompt: '',
+      soul: '',
+      _fallback: true as const,
+      _note: 'workers no-default requieren catálogo DB (gateway)',
+    };
   }
   let system_prompt = '';
   let soul = '';

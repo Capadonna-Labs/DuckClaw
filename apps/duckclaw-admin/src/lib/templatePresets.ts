@@ -1,4 +1,4 @@
-/** Plantillas mostradas al usuario (ids = rutas en forge/templates o industries/). */
+/** Plantillas mostradas al usuario (ids = worker_id del catálogo DB o seed). */
 
 export interface TemplatePreset {
   id: string;

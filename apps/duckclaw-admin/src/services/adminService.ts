@@ -3,7 +3,6 @@ import { mutationHeaders } from '@/lib/csrfClient';
 import { readSseChatStream } from '@/lib/sseChat';
 import type {
   AdminHealth,
-  EnvConfigResponse,
   FlyCommandEntry,
   TemplateDetail,
   TemplateSummary,
@@ -11,6 +10,7 @@ import type {
   VaultOption,
   ConsoleUser,
   OverviewMetrics,
+  OverviewMetricsParams,
   SharedDbGrant,
   WhitelistUser,
 } from '@/types/admin';
@@ -457,14 +457,6 @@ export const adminService = {
   reactivateTemplate: (id: string) =>
     adminFetch<{ ok: boolean; action: string }>(`/templates/${encodeURIComponent(id)}/reactivate`, {
       method: 'POST',
-    }),
-
-  getEnv: () => adminFetch<EnvConfigResponse>('/env'),
-
-  patchEnv: (values: Record<string, string>) =>
-    adminFetch<{ ok: boolean; updated: string[] }>('/env', {
-      method: 'PATCH',
-      body: JSON.stringify({ values }),
     }),
 
   getRuntimeSettings: (params?: { domains?: string[] }) => {

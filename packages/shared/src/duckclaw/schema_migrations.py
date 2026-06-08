@@ -1,0 +1,720 @@
+"""Versioned schema migrations for DuckClaw DuckDB hub.
+
+Each migration carries explicit DDL strings. Checksum is computed over
+the concatenated DDL so any schema change is detected as drift.
+
+Usage::
+
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    run_pending_migrations(db)  # on gateway startup
+"""
+from __future__ import annotations
+
+import hashlib
+import logging
+from typing import Any
+
+_log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Runner
+# ---------------------------------------------------------------------------
+
+_MIGRATIONS_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS main.schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    checksum VARCHAR NOT NULL
+)
+"""
+
+
+def _checksum(ddl_statements: list[str]) -> str:
+    raw = "\n".join(ddl_statements)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def ensure_migrations_table(db: Any) -> None:
+    db.execute(_MIGRATIONS_TABLE_DDL)
+
+
+def applied_versions(db: Any) -> set[int]:
+    ensure_migrations_table(db)
+    try:
+        rows = db.execute(
+            "SELECT version, checksum FROM main.schema_migrations ORDER BY version"
+        ).fetchall()
+        return {int(r[0]) for r in rows}
+    except Exception:
+        return set()
+
+
+def applied_with_checksums(db: Any) -> dict[int, str]:
+    ensure_migrations_table(db)
+    try:
+        rows = db.execute(
+            "SELECT version, checksum FROM main.schema_migrations ORDER BY version"
+        ).fetchall()
+        return {int(r[0]): str(r[1]) for r in rows}
+    except Exception:
+        return {}
+
+
+def run_pending_migrations(db: Any) -> list[str]:
+    """Apply all pending migrations. Returns list of migration names applied.
+
+    Each migration runs in its own transaction (BEGIN/COMMIT). If migration
+    DDL succeeds but the version record insertion fails, everything rolls back.
+    Already-applied versions are silently skipped.
+
+    Drift detection: if an already-applied version's DDL checksum differs from
+    the current definition, a warning is logged but startup is not blocked.
+    """
+    ensure_migrations_table(db)
+    current_checksums = applied_with_checksums(db)
+    applied_names: list[str] = []
+
+    for version, name, ddl in sorted(_ALL_MIGRATIONS):
+        chk = _checksum(ddl)
+
+        # Drift detection — log warning, don't block
+        if version in current_checksums:
+            if current_checksums[version] != chk:
+                _log.warning(
+                    "migration %s drift: expected checksum %s, got %s. "
+                    "The DDL definition changed after this version was applied.",
+                    name,
+                    current_checksums[version],
+                    chk,
+                )
+            continue
+
+        # Apply migration in a transaction
+        try:
+            db.execute("BEGIN TRANSACTION")
+            for stmt in ddl:
+                sql = stmt.strip()
+                if sql:
+                    db.execute(sql)
+            db.execute(
+                "INSERT INTO main.schema_migrations (version, name, checksum) "
+                "VALUES (?, ?, ?)",
+                [version, name, chk],
+            )
+            db.execute("COMMIT")
+            applied_names.append(f"{version:03d}_{name}")
+            _log.info("migration applied: %s", applied_names[-1])
+        except Exception as exc:
+            try:
+                db.execute("ROLLBACK")
+            except Exception:
+                pass
+            _log.error("migration %s failed, rolled back: %s", name, exc)
+            raise
+
+    return applied_names
+
+
+def verify_migration_integrity(db: Any) -> list[str]:
+    """Return list of drift descriptions. Empty list = clean.
+
+    Called from tests to assert no drift. Does not alter the database.
+    """
+    current = applied_with_checksums(db)
+    drifts: list[str] = []
+    for version, name, ddl in sorted(_ALL_MIGRATIONS):
+        if version not in current:
+            continue
+        expected = _checksum(ddl)
+        if current[version] != expected:
+            drifts.append(
+                f"version={version} name={name} "
+                f"registered={current[version]} "
+                f"current_definition={expected}"
+            )
+    return drifts
+
+
+# ---------------------------------------------------------------------------
+# Migration definitions
+# Each entry: (version, name, [ddl_statement, ...])
+# DDL is copied from current module-level DDL constants to guarantee
+# that the migration produces the exact schema the rest of the code expects.
+# ---------------------------------------------------------------------------
+
+_M001_INITIAL_CORE = [
+    # admin_console_users (from admin_console_users.py:_ADMIN_CONSOLE_USERS_DDL)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_console_users (
+        email VARCHAR PRIMARY KEY,
+        nombre VARCHAR NOT NULL,
+        rol VARCHAR NOT NULL DEFAULT 'viewer',
+        password_hash VARCHAR NOT NULL,
+        initials VARCHAR,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    # auth columns (from admin_console_users.py:_AUTH_COLUMN_MIGRATIONS)
+    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS hash_algo TEXT DEFAULT 'pbkdf2_sha256'",
+    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS hash_params JSON",
+    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER DEFAULT 0",
+    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS last_failed_at TIMESTAMP",
+    # admin_user_profiles (from admin_user_profiles.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_user_profiles (
+        email VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL UNIQUE,
+        telegram_user_id VARCHAR,
+        channels_json TEXT,
+        default_worker_id VARCHAR DEFAULT 'default',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    # admin_user_agents (from admin_user_agents.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_user_agents (
+        tenant_id VARCHAR NOT NULL,
+        owner_email VARCHAR NOT NULL,
+        worker_id VARCHAR NOT NULL,
+        display_name VARCHAR NOT NULL,
+        source_template_id VARCHAR DEFAULT 'default',
+        manifest_path VARCHAR NOT NULL,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (tenant_id, worker_id)
+    )
+    """,
+    # admin_worker_catalog (from admin_worker_catalog.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_worker_catalog (
+        worker_uid VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL,
+        owner_email VARCHAR NOT NULL,
+        worker_id VARCHAR NOT NULL,
+        display_name VARCHAR NOT NULL,
+        source_kind VARCHAR DEFAULT 'runtime',
+        source_template_id VARCHAR DEFAULT 'default',
+        visibility VARCHAR DEFAULT 'private',
+        status VARCHAR DEFAULT 'active',
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (tenant_id, worker_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_worker_catalog_owner
+        ON main.admin_worker_catalog (tenant_id, owner_email, active)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_worker_catalog_visibility
+        ON main.admin_worker_catalog (visibility, active)
+    """,
+]
+
+_M002_WORKER_VERSIONS = [
+    # admin_worker_versions (from admin_worker_catalog.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_worker_versions (
+        worker_uid VARCHAR NOT NULL,
+        version INTEGER NOT NULL,
+        manifest_snapshot_json TEXT,
+        files_snapshot_json TEXT,
+        created_by VARCHAR NOT NULL,
+        change_note VARCHAR,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (worker_uid, version)
+    )
+    """,
+]
+
+_M003_WORKER_CONTEXTS = [
+    # admin_worker_contexts (from admin_worker_catalog.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_worker_contexts (
+        context_id VARCHAR PRIMARY KEY,
+        worker_uid VARCHAR NOT NULL,
+        title VARCHAR NOT NULL,
+        content_md TEXT NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_worker_contexts_worker
+        ON main.admin_worker_contexts (worker_uid, active, sort_order)
+    """,
+]
+
+_M004_ASSIGNMENTS = [
+    # admin_worker_assignments (from admin_worker_catalog.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_worker_assignments (
+        worker_uid VARCHAR NOT NULL,
+        target_email VARCHAR NOT NULL,
+        target_tenant_id VARCHAR,
+        permission VARCHAR NOT NULL DEFAULT 'use',
+        assigned_by VARCHAR,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (worker_uid, target_email, permission)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_worker_assignments_target
+        ON main.admin_worker_assignments (target_email, target_tenant_id)
+    """,
+]
+
+_M005_SKILLS_AND_CAPS = [
+    # admin_skills (from admin_worker_catalog.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_skills (
+        skill_id VARCHAR PRIMARY KEY,
+        name VARCHAR NOT NULL UNIQUE,
+        description TEXT,
+        skill_type VARCHAR NOT NULL,
+        implementation_ref VARCHAR NOT NULL,
+        owner_email VARCHAR,
+        tenant_id VARCHAR DEFAULT 'global',
+        visibility VARCHAR DEFAULT 'private',
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    # admin_worker_skills (from admin_worker_catalog.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_worker_skills (
+        worker_uid VARCHAR NOT NULL,
+        skill_id VARCHAR NOT NULL,
+        enabled BOOLEAN DEFAULT true,
+        config_json TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (worker_uid, skill_id)
+    )
+    """,
+    # admin_capabilities (from admin_worker_catalog.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_capabilities (
+        capability_id VARCHAR PRIMARY KEY,
+        name VARCHAR NOT NULL UNIQUE,
+        kind VARCHAR NOT NULL,
+        provider VARCHAR NOT NULL,
+        description TEXT,
+        schema_json TEXT,
+        risk_level VARCHAR DEFAULT 'low',
+        requires_secret BOOLEAN DEFAULT false,
+        requires_network BOOLEAN DEFAULT false,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    # admin_worker_capabilities (from admin_worker_catalog.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_worker_capabilities (
+        worker_uid VARCHAR NOT NULL,
+        capability_id VARCHAR NOT NULL,
+        permission VARCHAR NOT NULL DEFAULT 'use',
+        config_json TEXT,
+        policy_json TEXT,
+        quota_json TEXT,
+        enabled BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (worker_uid, capability_id)
+    )
+    """,
+]
+
+_M006_PROJECTS = [
+    # admin_projects (from admin_workspace.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_projects (
+        project_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL,
+        owner_email VARCHAR NOT NULL,
+        name VARCHAR NOT NULL,
+        description TEXT,
+        status VARCHAR DEFAULT 'active',
+        visibility VARCHAR DEFAULT 'private',
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_projects_owner
+        ON main.admin_projects (tenant_id, owner_email, status)
+    """,
+    # admin_project_members (from admin_workspace.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_project_members (
+        project_id VARCHAR NOT NULL,
+        email VARCHAR NOT NULL,
+        role VARCHAR NOT NULL DEFAULT 'member',
+        assigned_by VARCHAR,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (project_id, email)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_project_members_email
+        ON main.admin_project_members (email)
+    """,
+    # admin_project_agents (from admin_workspace.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_project_agents (
+        project_id VARCHAR NOT NULL,
+        worker_uid VARCHAR NOT NULL,
+        role VARCHAR NOT NULL DEFAULT 'member',
+        sort_order INTEGER DEFAULT 0,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (project_id, worker_uid)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_project_agents_worker
+        ON main.admin_project_agents (worker_uid)
+    """,
+]
+
+_M007_RUNTIME_SETTINGS = [
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_runtime_settings (
+        setting_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL DEFAULT 'global',
+        actor_email VARCHAR NOT NULL DEFAULT '',
+        domain VARCHAR NOT NULL,
+        key VARCHAR NOT NULL,
+        value_text TEXT,
+        value_json TEXT,
+        value_kind VARCHAR NOT NULL DEFAULT 'string',
+        secret BOOLEAN DEFAULT false,
+        source VARCHAR NOT NULL DEFAULT 'db',
+        active BOOLEAN DEFAULT true,
+        created_by VARCHAR,
+        updated_by VARCHAR,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (tenant_id, actor_email, domain, key)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_runtime_settings_lookup
+        ON main.admin_runtime_settings (tenant_id, actor_email, domain, key, active)
+    """,
+]
+
+_M008_RESOURCES = [
+    # admin_resource_events (from admin_resources.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_resource_events (
+        event_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL,
+        actor_email VARCHAR NOT NULL,
+        resource_kind VARCHAR NOT NULL,
+        resource_id VARCHAR NOT NULL,
+        event_type VARCHAR NOT NULL,
+        payload_redacted_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_resource_events_tenant_created
+        ON main.admin_resource_events (tenant_id, created_at)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_resource_events_resource
+        ON main.admin_resource_events (resource_kind, resource_id)
+    """,
+    # admin_resource_tags (from admin_resources.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_resource_tags (
+        resource_kind VARCHAR NOT NULL,
+        resource_id VARCHAR NOT NULL,
+        tag VARCHAR NOT NULL,
+        created_by VARCHAR,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (resource_kind, resource_id, tag)
+    )
+    """,
+    # admin_secret_refs (from admin_resources.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_secret_refs (
+        secret_ref VARCHAR PRIMARY KEY,
+        owner_email VARCHAR,
+        tenant_id VARCHAR NOT NULL,
+        provider VARCHAR NOT NULL,
+        purpose VARCHAR NOT NULL,
+        env_key VARCHAR,
+        status VARCHAR DEFAULT 'active',
+        rotated_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+]
+
+_M009_SHARED_DB_GRANTS = [
+    # user_shared_db_access (from shared_db_grants.py)
+    """
+    CREATE TABLE IF NOT EXISTS main.user_shared_db_access (
+        tenant_id VARCHAR NOT NULL,
+        user_id VARCHAR NOT NULL,
+        resource_key VARCHAR NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (tenant_id, user_id, resource_key)
+    )
+    """,
+]
+
+_M010_WRITE_LEDGER = [
+    # admin_write_ledger — idempotencia/auditoría de writes
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_write_ledger (
+        task_id VARCHAR PRIMARY KEY,
+        command_type VARCHAR NOT NULL,
+        command_json TEXT NOT NULL,
+        status VARCHAR DEFAULT 'pending',
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        processed_at TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_write_ledger_status
+        ON main.admin_write_ledger (status, created_at)
+    """,
+]
+
+_M011_CONVERSATIONS = [
+    # admin_conversations — chat sessions per tenant/user
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_conversations (
+        conversation_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL DEFAULT 'default',
+        actor_email VARCHAR NOT NULL DEFAULT '',
+        title VARCHAR DEFAULT '',
+        worker_id VARCHAR DEFAULT '',
+        vault_path VARCHAR DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_conversations_actor
+        ON main.admin_conversations (tenant_id, actor_email, updated_at)
+    """,
+    # admin_conversation_messages — individual messages
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_conversation_messages (
+        message_id VARCHAR PRIMARY KEY,
+        conversation_id VARCHAR NOT NULL,
+        role VARCHAR NOT NULL,
+        content TEXT,
+        artifact_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_conv_messages_conversation
+        ON main.admin_conversation_messages (conversation_id, created_at)
+    """,
+    # admin_conversation_artifacts — file metadata from chat (images, etc.)
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_conversation_artifacts (
+        artifact_id VARCHAR PRIMARY KEY,
+        conversation_id VARCHAR NOT NULL,
+        message_id VARCHAR,
+        file_type VARCHAR NOT NULL,
+        file_path VARCHAR NOT NULL,
+        file_size_bytes BIGINT DEFAULT 0,
+        mime_type VARCHAR DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_conv_artifacts_conversation
+        ON main.admin_conversation_artifacts (conversation_id, created_at)
+    """,
+]
+
+_M012_KANBAN = [
+    # admin_kanban_cards — planning board items
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_kanban_cards (
+        card_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL DEFAULT 'default',
+        actor_email VARCHAR NOT NULL DEFAULT '',
+        title VARCHAR NOT NULL,
+        description TEXT DEFAULT '',
+        status VARCHAR DEFAULT 'todo'
+            CHECK (status IN ('todo', 'in_progress', 'done', 'cancelled')),
+        priority INTEGER DEFAULT 0,
+        sort_order INTEGER DEFAULT 0,
+        assignee_email VARCHAR DEFAULT '',
+        tags_json TEXT DEFAULT '[]',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_kanban_cards_actor
+        ON main.admin_kanban_cards (tenant_id, actor_email, status, sort_order)
+    """,
+    # admin_kanban_events — card history
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_kanban_events (
+        event_id VARCHAR PRIMARY KEY,
+        card_id VARCHAR NOT NULL,
+        event_type VARCHAR NOT NULL,
+        payload_json TEXT,
+        actor_email VARCHAR NOT NULL DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_kanban_events_card
+        ON main.admin_kanban_events (card_id, created_at)
+    """,
+]
+
+_M013_WORKFLOWS = [
+    # admin_workflows — ComfyUI workflow templates
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_workflows (
+        workflow_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL DEFAULT 'global',
+        name VARCHAR NOT NULL,
+        description TEXT DEFAULT '',
+        category VARCHAR DEFAULT 'general',
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_workflows_name
+        ON main.admin_workflows (tenant_id, name)
+    """,
+    # admin_workflow_versions — versioned workflow JSON
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_workflow_versions (
+        workflow_id VARCHAR NOT NULL,
+        version INTEGER NOT NULL,
+        workflow_json TEXT NOT NULL,
+        metadata_json TEXT DEFAULT '{}',
+        created_by VARCHAR NOT NULL DEFAULT 'system',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (workflow_id, version)
+    )
+    """,
+    # admin_visual_assets — generated image metadata
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_visual_assets (
+        asset_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL DEFAULT 'default',
+        request_json TEXT NOT NULL,
+        workflow_id VARCHAR,
+        asset_path VARCHAR,
+        image_base64_preview TEXT,
+        prompt TEXT DEFAULT '',
+        status VARCHAR DEFAULT 'pending'
+            CHECK (status IN ('pending', 'generating', 'completed', 'failed')),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_visual_assets_tenant
+        ON main.admin_visual_assets (tenant_id, status, created_at)
+    """,
+]
+
+_M014_TOOLS = [
+    # admin_tool_servers — MCP server configurations
+    # NOTE: env_public_json is for NON-SECRET environment metadata (tags, labels, etc.)
+    # Secrets (API keys, tokens) MUST use admin_secret_refs, not this field.
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_tool_servers (
+        server_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL DEFAULT 'global',
+        name VARCHAR NOT NULL,
+        transport VARCHAR NOT NULL DEFAULT 'stdio'
+            CHECK (transport IN ('stdio', 'http', 'docker')),
+        command VARCHAR DEFAULT '',
+        args_json TEXT DEFAULT '[]',
+        env_public_json TEXT DEFAULT '{}'
+            CHECK (
+                json_valid(env_public_json)
+                AND NOT regexp_matches(
+                    lower(env_public_json),
+                    '"[^"]*(secret|token|password|api[_-]?key|apikey)[^"]*"[[:space:]]*:'
+                )
+            ),
+        url VARCHAR DEFAULT '',
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    # admin_tool_bindings — which workers can use which tools
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_tool_bindings (
+        binding_id VARCHAR PRIMARY KEY,
+        server_id VARCHAR NOT NULL,
+        worker_uid VARCHAR NOT NULL,
+        tools_csv VARCHAR DEFAULT '*',
+        enabled BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (server_id, worker_uid)
+    )
+    """,
+    # admin_tool_policies — security policies for tool invocation
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_tool_policies (
+        policy_id VARCHAR PRIMARY KEY,
+        worker_uid VARCHAR NOT NULL,
+        tool_name VARCHAR NOT NULL,
+        allow_network BOOLEAN DEFAULT false,
+        allow_file_read BOOLEAN DEFAULT false,
+        allow_file_write BOOLEAN DEFAULT false,
+        max_execution_seconds INTEGER DEFAULT 30,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (worker_uid, tool_name)
+    )
+    """,
+]
+
+_ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
+    (1, "initial_core", _M001_INITIAL_CORE),
+    (2, "worker_versions", _M002_WORKER_VERSIONS),
+    (3, "worker_contexts", _M003_WORKER_CONTEXTS),
+    (4, "assignments", _M004_ASSIGNMENTS),
+    (5, "skills_and_capabilities", _M005_SKILLS_AND_CAPS),
+    (6, "projects", _M006_PROJECTS),
+    (7, "runtime_settings", _M007_RUNTIME_SETTINGS),
+    (8, "resources", _M008_RESOURCES),
+    (9, "shared_db_grants", _M009_SHARED_DB_GRANTS),
+    (10, "write_ledger", _M010_WRITE_LEDGER),
+    (11, "conversations", _M011_CONVERSATIONS),
+    (12, "kanban", _M012_KANBAN),
+    (13, "workflows", _M013_WORKFLOWS),
+    (14, "tools", _M014_TOOLS),
+]

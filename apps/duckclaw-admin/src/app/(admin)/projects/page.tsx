@@ -97,6 +97,9 @@ export default function ProjectsPage() {
           <h1 className="flex items-center gap-2 text-3xl font-black text-gov-gray-900 dark:text-dark-text">
             <FolderKanban size={28} /> Proyectos
           </h1>
+          <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
+            Catálogo DB-first de proyectos activos e inactivos.
+          </p>
         </div>
         {canWrite && (
           <Link

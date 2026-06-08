@@ -1,118 +1,75 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
 import { NextRequest, NextResponse } from 'next/server';
-import type { KanbanCard, KanbanStatus } from '@/lib/kanbanTypes';
-import { syncKanbanCardsWithTeam } from '@/lib/kanbanSync';
-import { repoRoot } from '@/lib/localOps';
 import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
+import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
 
-const VALID: KanbanStatus[] = ['pendiente', 'en_progreso', 'completo'];
-
-export function kanbanStoreActorKey(actor: string): string {
-  const safe = (actor || 'anonymous')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_.-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return `admin-kanban-${safe || 'anonymous'}`;
+function gatewayStale() {
+  return NextResponse.json(
+    {
+      detail: 'Kanban DB-first requiere endpoint Gateway /api/v1/admin/kanban.',
+      code: 'gateway_stale',
+    },
+    { status: 503 }
+  );
 }
 
-function storePath(actor: string): string {
-  const dir = join(repoRoot(), '.duckclaw');
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, `${kanbanStoreActorKey(actor)}.json`);
-}
+async function proxyKanban(req: NextRequest, roles: ('admin' | 'user')[]) {
+  const auth = await requireAdminRouteAuth(req, { roles });
+  if (!auth.ok) return auth.response;
 
-function loadCards(actor: string): KanbanCard[] {
-  const path = storePath(actor);
-  if (!existsSync(path)) return [];
-  try {
-    const raw = JSON.parse(readFileSync(path, 'utf-8'));
-    return Array.isArray(raw?.cards) ? raw.cards : [];
-  } catch {
-    return [];
+  const base = gatewayBase();
+  const key = adminApiKey();
+  if (!base || !key) return gatewayStale();
+
+  const url = new URL(req.url);
+  const target = `${base}/api/v1/admin/kanban${url.search}`;
+  const headers = gatewayProxyHeaders({ 'X-Admin-Key': key });
+  if (auth.actor) headers['X-Duckclaw-Actor'] = auth.actor;
+  const contentType = req.headers.get('content-type');
+  if (contentType) headers['Content-Type'] = contentType;
+
+  const init: RequestInit = { method: req.method, headers, cache: 'no-store' };
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    init.body = await req.text();
   }
-}
 
-function saveCards(actor: string, cards: KanbanCard[]) {
-  writeFileSync(storePath(actor), JSON.stringify({ cards }, null, 2), 'utf-8');
-}
+  let response: Response;
+  let text: string;
+  try {
+    response = await fetch(target, init);
+    text = await response.text();
+  } catch {
+    return NextResponse.json(
+      {
+        detail: 'No se pudo contactar el Gateway para Kanban DB-first.',
+        code: 'gateway_unreachable',
+      },
+      { status: 503 }
+    );
+  }
 
-function newId(): string {
-  return `card_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  if (response.status === 404) return gatewayStale();
+
+  return new NextResponse(text, {
+    status: response.status,
+    headers: {
+      'Content-Type': response.headers.get('content-type') || 'application/json',
+      'X-Duckclaw-Kanban-Via': 'gateway',
+    },
+  });
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAdminRouteAuth(req, { roles: ['admin', 'user'] });
-  if (!auth.ok) return auth.response;
-
-  let cards = loadCards(auth.actor);
-  try {
-    const synced = await syncKanbanCardsWithTeam(cards, auth.actor);
-    cards = synced.cards;
-    if (synced.changed) saveCards(auth.actor, cards);
-  } catch {
-    /* gateway unreachable: return local cards only */
-  }
-  return NextResponse.json({ cards });
+  return proxyKanban(req, ['admin', 'user']);
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
-  if (!auth.ok) return auth.response;
-
-  const body = await req.json().catch(() => ({}));
-  const title = String(body.title || 'Nuevo agente').trim().slice(0, 120);
-  const description = String(body.description || '').trim().slice(0, 2000);
-  const status = VALID.includes(body.status) ? body.status : 'pendiente';
-  const now = new Date().toISOString();
-  const card: KanbanCard = {
-    id: newId(),
-    title,
-    description,
-    status,
-    worker_id: body.worker_id ? String(body.worker_id) : undefined,
-    tags: Array.isArray(body.tags) ? body.tags.map(String).slice(0, 8) : [],
-    created_at: now,
-    updated_at: now,
-  };
-  const cards = loadCards(auth.actor);
-  cards.unshift(card);
-  saveCards(auth.actor, cards);
-  return NextResponse.json({ ok: true, card });
+  return proxyKanban(req, ['admin']);
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
-  if (!auth.ok) return auth.response;
-
-  const body = await req.json().catch(() => ({}));
-  const id = String(body.id || '').trim();
-  if (!id) return NextResponse.json({ detail: 'id requerido' }, { status: 400 });
-
-  const cards = loadCards(auth.actor);
-  const idx = cards.findIndex((c) => c.id === id);
-  if (idx < 0) return NextResponse.json({ detail: 'Tarjeta no encontrada' }, { status: 404 });
-
-  const cur = cards[idx];
-  if (body.title != null) cur.title = String(body.title).trim().slice(0, 120);
-  if (body.description != null) cur.description = String(body.description).trim().slice(0, 2000);
-  if (body.status != null && VALID.includes(body.status)) cur.status = body.status;
-  if (body.worker_id != null) cur.worker_id = String(body.worker_id) || undefined;
-  cur.updated_at = new Date().toISOString();
-  cards[idx] = cur;
-  saveCards(auth.actor, cards);
-  return NextResponse.json({ ok: true, card: cur });
+  return proxyKanban(req, ['admin']);
 }
 
 export async function DELETE(req: NextRequest) {
-  const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
-  if (!auth.ok) return auth.response;
-
-  const url = new URL(req.url);
-  const id = url.searchParams.get('id')?.trim();
-  if (!id) return NextResponse.json({ detail: 'id requerido' }, { status: 400 });
-  const cards = loadCards(auth.actor).filter((c) => c.id !== id);
-  saveCards(auth.actor, cards);
-  return NextResponse.json({ ok: true });
+  return proxyKanban(req, ['admin']);
 }

@@ -221,26 +221,99 @@ def enqueue_duckdb_write_sync(
     return tid
 
 
+def enqueue_typed_command(
+    command: Any,
+    *,
+    db_path: str,
+    user_id: str = "default",
+    queue_name: str = DEFAULT_WRITE_QUEUE_NAME,
+) -> str:
+    """Enqueue a typed WriteCommand to Redis (or apply inline in Spawn profile).
+
+    Returns task_id. The command payload is enriched with ``db_path``,
+    ``user_id`` and ``tenant_id`` so the db-writer resolves the correct
+    target database and validates ACLs.
+    """
+    tid = command.task_id
+    payload_raw = command.to_redis_payload()
+    import json as _json
+
+    enriched = _json.loads(payload_raw)
+    enriched["db_path"] = str(db_path or "")
+    enriched["user_id"] = str(user_id or "default")
+    enriched["tenant_id"] = enriched.get("tenant_id") or str(command.tenant_id or "default")
+    payload = _json.dumps(enriched, ensure_ascii=False)
+
+    if spawn_inline_writes_enabled():
+        _validate_write_target(
+            user_id=str(user_id or "default"),
+            target_db_path=str(db_path or ""),
+            tenant_id=str(enriched["tenant_id"]),
+        )
+        import duckdb
+
+        conn = duckdb.connect(db_path, read_only=False)
+        status = DbWriteTaskStatus(status="success")
+        _raised: BaseException | None = None
+        try:
+            conn.execute("BEGIN TRANSACTION")
+            from duckclaw.write_command_handlers import dispatch_command
+
+            dispatch_command(conn, enriched)
+            conn.execute(
+                "INSERT INTO main.admin_write_ledger "
+                "(task_id, command_type, command_json, status, created_at) "
+                "VALUES (?, ?, ?, 'completed', CURRENT_TIMESTAMP)",
+                [tid, enriched.get("command_type", ""), payload],
+            )
+            conn.execute("COMMIT")
+        except Exception as exc:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            status = DbWriteTaskStatus(status="failed", detail=str(exc)[:500])
+            _raised = exc
+        finally:
+            conn.close()
+            try:
+                _publish_inline_task_status(tid, status)
+            except Exception:
+                pass
+        if _raised is not None:
+            raise _raised
+        return tid
+
+    import redis
+
+    r = redis.from_url(redis_url_from_env(), decode_responses=True)
+    r.lpush(queue_name, payload)
+    return tid
+
+
 def enqueue_or_apply_duckdb_write_sync(
     *,
     db_path: str,
-    query: str,
+    command: Any | None = None,
+    query: str | None = None,
     params: list[Any] | None = None,
     user_id: str = "default",
     tenant_id: str = "default",
     task_id: str | None = None,
     queue_name: str = DEFAULT_WRITE_QUEUE_NAME,
 ) -> str:
-    """Alias explícito de ``enqueue_duckdb_write_sync`` (cola o inline según perfil)."""
+    """Enqueue a typed command or legacy raw SQL. Typed commands preferred."""
+    if command is not None:
+        return enqueue_typed_command(
+            command, db_path=db_path, user_id=user_id, queue_name=queue_name,
+        )
+    if not query:
+        raise ValueError("query required when no typed command provided")
     return enqueue_duckdb_write_sync(
-        db_path=db_path,
-        query=query,
-        params=params,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        task_id=task_id,
-        queue_name=queue_name,
-    )
+        db_path=db_path, query=query, params=params,
+        user_id=user_id, tenant_id=tenant_id,
+        task_id=task_id, queue_name=queue_name,
+   )
 
 
 def poll_task_status_sync(

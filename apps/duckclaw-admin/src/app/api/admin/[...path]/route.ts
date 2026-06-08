@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { catalogFallbackResponse } from '@/lib/adminCatalogFallback';
-import { fallbackPlaygroundConfig } from '@/lib/playgroundFallback';
 import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
 import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
@@ -182,11 +181,16 @@ async function proxy(req: NextRequest, segments: string[]) {
         headers: { 'X-Duckclaw-Admin-Fallback': 'ops' },
       });
     }
-    if (sub === 'playground/config') {
-      return NextResponse.json(fallbackPlaygroundConfig(), {
-        headers: { 'X-Duckclaw-Admin-Fallback': 'playground' },
-      });
-    }
+  }
+
+  if (res.status === 404 && sub === 'playground/config') {
+    return NextResponse.json(
+      {
+        detail: 'El Gateway no expone /api/v1/admin/playground/config. Configuración DB-first requerida.',
+        code: 'gateway_stale',
+      },
+      { status: 503 }
+    );
   }
 
   if (res.status === 404 && sub.startsWith('workspace/orchestrator/')) {

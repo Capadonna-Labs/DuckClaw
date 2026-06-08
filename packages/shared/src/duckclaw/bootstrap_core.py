@@ -1,12 +1,14 @@
 """
 DDL idempotente del núcleo DuckClaw (perfil genérico / Spawn).
 
-Spec: specs/features/platform/SPAWN_GENERIC_DEPLOY.md
+Spec: docs/specs/features/platform/SPAWN_GENERIC_DEPLOY.md
 Sin esquemas de dominio (quant_core, pqrsd_crm, finance_worker, run_schema forge).
+Las migraciones versionadas están en duckclaw.schema_migrations.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from duckclaw.admin_console_users import ensure_admin_console_users_table, seed_admin_console_users_if_empty
@@ -16,7 +18,10 @@ from duckclaw.admin_user_agents import ensure_admin_user_agents_table
 from duckclaw.admin_user_profiles import ensure_admin_user_profiles_table
 from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema
 from duckclaw.admin_workspace import ensure_admin_workspace_schema
+from duckclaw.schema_migrations import run_pending_migrations
 from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
+
+_log = logging.getLogger(__name__)
 
 _CORE_SEMANTIC_MEMORY_DDL = """
 CREATE SCHEMA IF NOT EXISTS main;
@@ -40,8 +45,14 @@ def bootstrap_core_schema(con: Any, *, seed_admin: bool = True) -> None:
     """
     Aplica tablas indispensables del hub en una conexión DuckDB RW.
 
+    Ejecuta migraciones versionadas primero, luego tablas legacy
+    (semantic_memory, api_conversation, agent_config, etc.).
+
     ``con`` puede ser ``duckdb.DuckDBPyConnection`` o adaptador con ``.execute()``.
     """
+    applied = run_pending_migrations(con)
+    if applied:
+        _log.info("bootstrap: %d migrations applied", len(applied))
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS api_conversation (

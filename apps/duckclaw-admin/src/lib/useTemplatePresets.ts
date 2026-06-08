@@ -46,7 +46,7 @@ function buildPresetsFromCatalog(
   for (const t of templates) {
     const id = t.id;
     if (id === 'default') continue;
-    push(id, t.name ?? id, `Worker en forge/templates/${id}`);
+    push(id, t.name ?? id, `Worker DB-first ${id}`);
   }
 
   return out;

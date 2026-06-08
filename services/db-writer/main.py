@@ -10,6 +10,11 @@ _writer_file = Path(__file__).resolve()
 _repo_root = _writer_file.parent.parent.parent  # db-writer -> services -> repo
 os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_repo_root))
 
+import sys
+_path_src = str(_repo_root / "packages" / "shared" / "src")
+if _path_src not in sys.path:
+    sys.path.insert(0, _path_src)
+
 import duckdb
 import redis.asyncio as redis
 from context_injection_handler import handle_context_injection_message
@@ -32,6 +37,142 @@ logging.basicConfig(
 logger = logging.getLogger("db-writer")
 
 
+async def _is_duplicate_task(
+    redis_client: redis.Redis,
+    task_id: str,
+) -> bool:
+    """Soft dedup via Redis cache. Durable check against admin_write_ledger
+    happens in the transaction itself (INSERT OR REPLACE is safe)."""
+    dedup_key = f"dedup:task:{task_id}"
+    try:
+        was_seen = await redis_client.get(dedup_key)
+        return was_seen is not None
+    except Exception:
+        return False
+
+
+def _validate_target_db_path(user_id: str, target_db_path: str, tenant_id: str | None) -> str:
+    """Validate db_path is accessible for the user. Raises ValueError on failure."""
+    resolved = resolve_user_id_for_db_path(user_id, target_db_path, tenant_id=tenant_id)
+    if resolved is None:
+        raise ValueError("db_path fuera del directorio permitido del usuario")
+
+    try:
+        from duckclaw.shared_db_grants import path_is_under_shared_tree, user_may_access_shared_path
+
+        if path_is_under_shared_tree(target_db_path):
+            acl_path = get_gateway_db_path()
+            acl_con = duckdb.connect(acl_path, read_only=True)
+            try:
+                ok_grant = user_may_access_shared_path(
+                    acl_con,
+                    tenant_id=str(tenant_id or "default").strip() or "default",
+                    user_id=resolved,
+                    shared_db_path=target_db_path,
+                )
+            finally:
+                acl_con.close()
+            if not ok_grant:
+                raise ValueError("sin grant de base compartida")
+    except ValueError:
+        raise
+    except Exception as exc:
+        logger.warning("ACL shared check skipped/failed: %s", exc)
+    return resolved
+
+
+async def _handle_typed_command(
+    redis_client: redis.Redis,
+    task_id: str,
+    payload: dict,
+) -> bool:
+    """Process a typed write command. Returns True if handled, False to fall through to legacy."""
+    command_type = str(payload.get("command_type") or "").strip()
+    if not command_type or command_type == "raw_sql":
+        return False  # Fall through to legacy SQL path
+
+    dedup_key = f"dedup:task:{task_id}"
+
+    if await _is_duplicate_task(redis_client, task_id):
+        logger.info("[%s] Duplicate task skipped (idempotent)", task_id)
+        await _publish_task_status(
+            redis_client, task_id,
+            DbWriteTaskStatus(status="success", detail="already processed"),
+        )
+        return True
+
+    tenant_id = str(payload.get("tenant_id") or "default")
+    target_db_path = str(payload.get("db_path") or settings.DUCKDB_PATH)
+    user_id = str(payload.get("user_id") or "default")
+
+    try:
+        user_id = _validate_target_db_path(
+            user_id, target_db_path, tenant_id if tenant_id != "default" else None
+        )
+    except ValueError as exc:
+        logger.warning("[%s] Rejected: %s", task_id, exc)
+        await _publish_task_status(
+            redis_client, task_id,
+            DbWriteTaskStatus(status="failed", detail=str(exc)),
+        )
+        return True
+
+    try:
+        conn = duckdb.connect(target_db_path, read_only=False)
+        try:
+            conn.execute("BEGIN TRANSACTION")
+
+            # Durable dedup: skip if already completed in the target DB
+            row = conn.execute(
+                "SELECT status FROM main.admin_write_ledger WHERE task_id = ?",
+                [task_id],
+            ).fetchone()
+            if row and row[0] == "completed":
+                conn.execute("ROLLBACK")
+                conn.close()
+                logger.info("[%s] Already completed (ledger dedup)", task_id)
+                await _publish_task_status(
+                    redis_client, task_id,
+                    DbWriteTaskStatus(status="success", detail="already completed"),
+                )
+                await redis_client.set(dedup_key, "1", ex=TASK_STATUS_TTL_SEC * 2)
+                return True
+
+            from duckclaw.write_command_handlers import dispatch_command
+
+            dispatch_command(conn, payload)
+
+            conn.execute(
+                "INSERT INTO main.admin_write_ledger "
+                "(task_id, command_type, command_json, status, created_at) "
+                "VALUES (?, ?, ?, 'completed', CURRENT_TIMESTAMP)",
+                [task_id, command_type, json.dumps(payload, default=str)],
+            )
+            conn.execute("COMMIT")
+
+            # Mark dedup after successful COMMIT
+            await redis_client.set(dedup_key, "1", ex=TASK_STATUS_TTL_SEC * 2)
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.error("[%s] Typed command %s failed: %s", task_id, command_type, exc)
+        await _publish_task_status(
+            redis_client, task_id,
+            DbWriteTaskStatus(status="failed", detail=str(exc)[:500]),
+        )
+        return True
+
+    logger.info("[%s] Command %s completed", task_id, command_type)
+    await _publish_task_status(redis_client, task_id, DbWriteTaskStatus(status="success"))
+    return True
+
+
 async def _publish_task_status(
     redis_client: redis.Redis,
     task_id: str,
@@ -48,13 +189,17 @@ async def _publish_task_status(
 
 
 async def execute_write(redis_client: redis.Redis, message: str) -> None:
-    """Ejecuta la consulta SQL de forma segura y confirma en Redis."""
+    """Ejecuta un comando tipado o query SQL legacy. Confirmación idempotente."""
     task_id = "unknown"
-    target_db_path = ""
-    query = ""
     try:
         payload = json.loads(message)
         task_id = str(payload.get("task_id") or "unknown")
+
+        # Try typed command first
+        if await _handle_typed_command(redis_client, task_id, payload):
+            return
+
+        # Legacy raw SQL path
         query = str(payload.get("query") or "")
         params = payload.get("params", [])
         target_db_path = str(payload.get("db_path") or settings.DUCKDB_PATH)

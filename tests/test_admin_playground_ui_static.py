@@ -413,14 +413,36 @@ def test_playground_initial_worker_query_wins_over_server_selection() -> None:
     )
 
 
-def test_kanban_storage_is_scoped_by_authenticated_actor() -> None:
+def test_kanban_bff_is_gateway_only_no_filesystem_storage() -> None:
     route = Path("apps/duckclaw-admin/src/app/api/admin/kanban/route.ts").read_text(encoding="utf-8")
 
-    assert "storePath(actor: string)" in route
-    assert "kanbanStoreActorKey(actor)" in route
-    assert "loadCards(auth.actor)" in route
-    assert "saveCards(auth.actor, cards)" in route
-    assert "admin-kanban.json" not in route
+    assert "writeFileSync" not in route
+    assert "readFileSync" not in route
+    assert "mkdirSync" not in route
+    assert "admin-kanban" not in route
+    assert "gateway_stale" in route
+    assert "/api/v1/admin/kanban" in route
+
+
+def test_comfyui_templates_bff_is_gateway_only_no_local_workflow_fallback() -> None:
+    route = Path("apps/duckclaw-admin/src/app/api/admin/comfyui/templates/route.ts").read_text(encoding="utf-8")
+
+    assert "listComfyuiTemplatesLocal" not in route
+    assert "local-bff" not in route
+    assert "gateway_stale" in route
+    assert "/api/v1/admin/comfyui/templates" in route
+
+
+def test_admin_service_does_not_expose_generic_env_editing() -> None:
+    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
+
+    assert "getEnv:" not in service
+    assert "patchEnv:" not in service
+    assert "adminFetch<EnvConfigResponse>('/env')" not in service
+    assert "adminFetch<{ ok: boolean; updated: string[] }>('/env'" not in service
+    assert "fallbackPlaygroundConfig" not in proxy
+    assert "X-Duckclaw-Admin-Fallback': 'playground" not in proxy
 
 
 def test_mcp_page_does_not_render_official_reference_as_user_catalog() -> None:

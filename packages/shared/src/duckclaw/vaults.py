@@ -492,6 +492,14 @@ def validate_user_db_path(user_id: Any, db_path: str, tenant_id: Any | None = No
     path = Path(db_path).expanduser().resolve()
     if path.suffix.lower() != ".duckdb":
         return False
+    try:
+        from duckclaw.gateway_db import get_gateway_db_path
+
+        gateway_path = Path(get_gateway_db_path()).expanduser().resolve()
+        if path == gateway_path:
+            return True
+    except Exception:
+        pass
     db_r = db_root().resolve()
     try:
         rel = path.relative_to(db_r)

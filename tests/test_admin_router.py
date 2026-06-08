@@ -814,6 +814,63 @@ def test_kanban_swarm_slots(admin_client: TestClient, monkeypatch: pytest.Monkey
     assert data["states"]["default:2"] == "en_progreso"
 
 
+def test_kanban_cards_db_first_crud(
+    admin_client: TestClient,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import duckdb
+
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
+    con = duckdb.connect(str(gateway_db))
+    try:
+        run_pending_migrations(con)
+    finally:
+        con.close()
+
+    headers = {
+        "X-Admin-Key": "test-admin-key",
+        "X-Duckclaw-Actor": "admin@test.local",
+    }
+    create = admin_client.post(
+        "/api/v1/admin/kanban",
+        headers=headers,
+        json={
+            "title": "Crear agente",
+            "description": "Desde tablero",
+            "status": "pendiente",
+            "worker_id": "default",
+            "tags": ["manual"],
+        },
+    )
+    assert create.status_code == 200
+    created = create.json()["card"]
+    assert created["status"] == "pendiente"
+    assert created["worker_id"] == "default"
+
+    listing = admin_client.get("/api/v1/admin/kanban", headers=headers)
+    assert listing.status_code == 200
+    assert [c["id"] for c in listing.json()["cards"]] == [created["id"]]
+
+    update = admin_client.patch(
+        "/api/v1/admin/kanban",
+        headers=headers,
+        json={"id": created["id"], "status": "en_progreso", "title": "Crear agente DB"},
+    )
+    assert update.status_code == 200
+    assert update.json()["card"]["status"] == "en_progreso"
+
+    delete = admin_client.delete(f"/api/v1/admin/kanban?id={created['id']}", headers=headers)
+    assert delete.status_code == 200
+    assert delete.json()["ok"] is True
+
+    empty = admin_client.get("/api/v1/admin/kanban", headers=headers)
+    assert empty.status_code == 200
+    assert empty.json()["cards"] == []
+
+
 def test_admin_sandbox_status(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     from duckclaw.graphs import sandbox as sb
 

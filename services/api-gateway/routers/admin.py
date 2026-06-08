@@ -1836,11 +1836,20 @@ async def admin_health(request: Request) -> dict[str, Any]:
     workers: list[str] = []
     try:
         from core.admin_identity import open_gateway_db
+        from duckclaw.admin_worker_catalog import list_visible_workers_for_actor
         from duckclaw.workers.factory import list_workers
 
         with open_gateway_db(read_only=True) as db:
-            workers = list_workers(db=db)
-    except Exception:
+            actor = (request.headers.get("x-duckclaw-actor") or "").strip().lower()
+            if actor and "@" in actor:
+                workers = [
+                    str(item.get("id") or item.get("worker_id") or "").strip()
+                    for item in list_visible_workers_for_actor(db, actor_email=actor)
+                    if str(item.get("id") or item.get("worker_id") or "").strip()
+                ]
+            else:
+                workers = list_workers(db=db)
+    except Exception as exc:
         workers = []
     redis_ok = False
     try:

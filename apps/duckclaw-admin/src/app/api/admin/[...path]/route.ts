@@ -106,12 +106,12 @@ async function proxy(req: NextRequest, segments: string[]) {
   const sub = segments.join('/');
   const isHealth = sub === 'health';
 
-  const auth = isHealth ? null : await requireAdminRouteAuth(req);
-  if (auth && !auth.ok) {
+  const auth = await requireAdminRouteAuth(req);
+  if (!auth.ok && !isHealth) {
     return auth.response;
   }
 
-  const role = auth?.role || 'admin';
+  const role = auth.ok ? auth.role : 'admin';
   if (segments[0] === 'audit' && role !== 'admin') {
     return NextResponse.json({ detail: 'Auditoría solo para rol admin' }, { status: 403 });
   }
@@ -126,7 +126,7 @@ async function proxy(req: NextRequest, segments: string[]) {
   const target = `${base}/api/v1/admin/${sub}${url.search}`;
 
   const headers = gatewayProxyHeaders({ 'X-Admin-Key': key });
-  const actor = auth?.actor;
+  const actor = auth.ok ? auth.actor : '';
   if (actor) headers['X-Duckclaw-Actor'] = actor;
   const ct = req.headers.get('content-type');
   if (ct) headers['Content-Type'] = ct;

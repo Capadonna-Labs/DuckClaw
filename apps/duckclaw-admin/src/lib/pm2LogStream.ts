@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { repoRoot } from '@/lib/localOps';
 import { parsePm2LogAppsParam } from '@/lib/pm2LogApps';
+import { listRunningPm2AppNames } from '@/lib/pm2RunningApps';
 
 export function startPm2LogsStream(
   appsParam: string | null,
@@ -9,6 +10,14 @@ export function startPm2LogsStream(
   const parsed = parsePm2LogAppsParam(appsParam);
   if (!parsed.ok) {
     throw new Error(parsed.error);
+  }
+
+  const running = new Set(listRunningPm2AppNames());
+  const missing = parsed.names.filter((name) => !running.has(name));
+  if (missing.length > 0) {
+    throw new Error(
+      `Sin proceso PM2 en este host: ${missing.join(', ')}. MLX-Vision/ComfyUI suelen correr en la Mac GPU.`
+    );
   }
 
   let proc: ChildProcess | null = null;

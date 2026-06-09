@@ -21,6 +21,8 @@ type Props = {
 
 export function Pm2LiveLogsPanel({ embedded = false }: Props) {
   const [selected, setSelected] = useState<string[]>(['DuckClaw-Gateway']);
+  const [runningApps, setRunningApps] = useState<string[]>([...PM2_LOGGABLE_APPS]);
+  const [offlineApps, setOfflineApps] = useState<string[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [logText, setLogText] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -115,22 +117,55 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
 
   useEffect(() => () => stop(), [stop]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/admin/ops/logs/apps', {
+          headers: sessionHeaders('GET'),
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { running?: string[]; offline?: string[] };
+        const running = Array.isArray(data.running) ? data.running : [];
+        const offline = Array.isArray(data.offline) ? data.offline : [];
+        setRunningApps(running);
+        setOfflineApps(offline);
+        setSelected((prev) => prev.filter((name) => running.includes(name)));
+      } catch {
+        /* keep defaults */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const body = (
     <>
       <div className="flex flex-wrap gap-2">
         {PM2_LOGGABLE_APPS.map((name) => {
           const on = selected.includes(name);
-          const disabled = !on && selected.length >= MAX_SELECTED;
+          const isRunning = runningApps.includes(name);
+          const disabled = !isRunning || streaming || (!on && selected.length >= MAX_SELECTED);
           return (
             <button
               key={name}
               type="button"
-              disabled={streaming || disabled}
+              disabled={disabled}
               onClick={() => toggle(name)}
+              title={
+                isRunning
+                  ? name
+                  : `${name}: no está en PM2 de este host (p. ej. GPU en Mac Mini)`
+              }
               className={`px-3 py-2 rounded-xl text-sm font-semibold border transition-colors ${
                 on
                   ? 'bg-gov-blue-700 text-white border-gov-blue-700'
-                  : 'dark:border-dark-border hover:border-gov-blue-500 disabled:opacity-40'
+                  : isRunning
+                    ? 'dark:border-dark-border hover:border-gov-blue-500 disabled:opacity-40'
+                    : 'opacity-40 line-through dark:border-dark-border cursor-not-allowed'
               }`}
             >
               {on ? '✓ ' : ''}
@@ -181,6 +216,12 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
         )}
       </div>
 
+      {offlineApps.length > 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          No disponibles en este host: {offlineApps.join(', ')} (MLX-Vision/ComfyUI suelen estar en la Mac GPU).
+        </p>
+      )}
+
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div
@@ -209,7 +250,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
         <div>
           <h2 className="text-lg font-bold">PM2 logs en vivo</h2>
           <p className="text-sm text-gov-gray-500">
-            Elige hasta 2 servicios y sigue la salida como en consola (solo en este Mac).
+            Elige hasta 2 servicios PM2 de este host y sigue la salida en vivo.
           </p>
         </div>
       </div>

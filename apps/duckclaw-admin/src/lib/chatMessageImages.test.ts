@@ -3,6 +3,7 @@ import {
   artifactIdFromMessageText,
   artifactPreviewFromMessage,
   historyToChatMessages,
+  payloadImagesFromPreviews,
   preserveImagePreviewsFromPrevious,
   userPreviewsFromPayload,
 } from './chatMessageImages';
@@ -11,6 +12,14 @@ import type { ChatMsg } from '../components/chat/types';
 assert.deepEqual(
   userPreviewsFromPayload([{ mime_type: 'image/png', data_base64: 'abc123' }], ['1000377294.png']),
   [{ url: 'data:image/png;base64,abc123', name: '1000377294.png' }]
+);
+
+assert.deepEqual(
+  payloadImagesFromPreviews([
+    { url: 'data:image/png;base64,abc123', name: '1000377294.png' },
+    { url: '/api/admin/artifacts/default/x', name: 'artifact.png' },
+  ]),
+  [{ mime_type: 'image/png', data_base64: 'abc123' }]
 );
 
 const aid = '6a9e78d6-32ee-4d70-858e-5ccf80a27746';

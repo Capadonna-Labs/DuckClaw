@@ -1332,9 +1332,15 @@ export const adminService = {
       telegram_user_id?: string;
       vault_db_path?: string;
       images?: { mime_type: string; data_base64: string }[];
+      voice_response?: boolean;
     },
     handlers: {
       onToken: (chunk: string) => void;
+      onAudio?: (payload: {
+        audio_base64?: string;
+        audio_unavailable?: boolean;
+        audio_format?: 'ogg' | 'wav';
+      }) => void;
       onHeartbeat?: (payload: {
         text: string;
         kind?: 'plan' | 'tool' | 'status' | 'visual';
@@ -1409,6 +1415,12 @@ export const adminService = {
             fly_chart_artifact_ids: ev.fly_chart_artifact_ids,
             artifact_id: ev.artifact_id,
             artifact_tenant_id: ev.artifact_tenant_id,
+          });
+        } else if (ev.type === 'audio') {
+          handlers.onAudio?.({
+            audio_base64: ev.audio_base64,
+            audio_unavailable: ev.audio_unavailable,
+            audio_format: ev.audio_format,
           });
         } else if (ev.type === 'error') {
           throw new Error(ev.message);

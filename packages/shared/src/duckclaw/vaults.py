@@ -62,13 +62,14 @@ def db_root() -> Path:
     """
     Directorio `db/` del monorepo.
 
-    Si el proceso arranca con cwd distinto del repo (p. ej. `services/db-writer`),
-    definir `DUCKCLAW_REPO_ROOT` apuntando a la raíz del monorepo; si no, se usa
-    `Path(\"db\").resolve()` relativo al cwd (comportamiento legacy).
+    Prioridad: ``CAPADONNA_DRILLER_ROOT`` (producto Capadonna-Driller con vaults reales),
+    luego ``DUCKCLAW_REPO_ROOT`` (monorepo DuckClaw). Si ninguno está definido, ``db/``
+    relativo al cwd (legacy).
     """
-    env_root = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
-    if env_root:
-        return (Path(env_root).expanduser().resolve() / "db")
+    for key in ("CAPADONNA_DRILLER_ROOT", "DUCKCLAW_REPO_ROOT"):
+        env_root = (os.environ.get(key) or "").strip()
+        if env_root:
+            return (Path(env_root).expanduser().resolve() / "db")
     return Path("db").resolve()
 
 

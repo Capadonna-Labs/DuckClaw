@@ -186,3 +186,29 @@ def send_sandbox_chart_to_telegram_sync(*, bot_token: str, chat_id: str, image_b
         detail_doc[:1200],
     )
     return False
+
+
+def send_voice_to_telegram_sync(*, bot_token: str, chat_id: str, voice_bytes: bytes) -> bool:
+    """Send OGG/Opus voice note via Telegram sendVoice."""
+    cid = str(chat_id or "").strip()
+    if not cid or not voice_bytes:
+        return False
+    ok, detail = _post_telegram_multipart(
+        bot_token=bot_token,
+        api_method="sendVoice",
+        chat_id=cid,
+        file_field="voice",
+        filename="reply.ogg",
+        file_bytes=voice_bytes,
+        content_type="audio/ogg",
+    )
+    if ok:
+        _log.info("sendVoice OK chat_id=%s bytes=%s", cid, len(voice_bytes))
+        return True
+    _log.warning(
+        "Telegram sendVoice falló chat_id=%s bytes=%s detail=%s",
+        cid,
+        len(voice_bytes),
+        _telegram_api_detail_for_log(detail),
+    )
+    return False

@@ -640,25 +640,26 @@ def _persist_ohlcv_batch(
     db: Any, norm_rows: list[tuple[Any, ...]]
 ) -> tuple[bool, list[tuple[Any, ...]], str]:
     """
-    Persiste velas en quant_core.ohlcv_data.
-    Workers con manifest read_only usan DuckDB RO: las INSERT directas fallan;
-    se encola un único batch vía Redis (mismo patrón que admin_sql en factory).
+    Persiste velas en quant_core.ohlcv_data vía db-writer.
+
+    Econofísica: el gateway no debe mantener lock RW en el vault mientras db-writer
+    hace COMMIT (quant_state_delta, llm_usage_log). Siempre encolar en disco y liberar
+    el handle del gateway antes del poll.
     """
     if not norm_rows:
         return True, [], ""
     sql, flat = _ohlcv_batch_upsert_sql_params(norm_rows)
     path = str(getattr(db, "_path", "") or "").strip()
-    ro = bool(getattr(db, "_read_only", False))
-    if ro and path and path != ":memory:":
+    if path and path != ":memory:":
         from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
 
-        released_ro = False
-        resu = getattr(db, "resume_readonly_file_handle", None)
+        released = False
+        resume = getattr(db, "resume_file_handle", None)
         try:
-            susp = getattr(db, "suspend_readonly_file_handle", None)
-            if callable(susp) and callable(resu):
-                susp()
-                released_ro = True
+            release = getattr(db, "release_file_handle_for_external_writer", None)
+            if callable(release):
+                release()
+                released = True
             resolved = str(Path(path).expanduser().resolve())
             uid = _infer_user_id_for_writer(resolved)
             task_id = enqueue_duckdb_write_sync(
@@ -668,13 +669,13 @@ def _persist_ohlcv_batch(
                 user_id=uid,
                 tenant_id="default",
             )
-            poll_to = 15.0 if released_ro else 3.0
+            poll_to = 20.0 if released else 5.0
             st = poll_task_status_sync(task_id, timeout_sec=poll_to)
             if st is None:
                 return (
                     False,
                     [],
-                    "Cola db-writer sin confirmación (timeout). Comprueba Redis y el proceso DuckClaw-DB-Writer.",
+                    "Cola db-writer sin confirmación (timeout). Comprueba Redis y DuckClaw-DB-Writer.",
                 )
             if st.status != "success":
                 return False, [], (st.detail or "db-writer rechazó o falló la escritura OHLCV.")
@@ -682,9 +683,9 @@ def _persist_ohlcv_batch(
         except Exception as e:
             return False, [], str(e)[:500]
         finally:
-            if released_ro and callable(resu):
+            if released and callable(resume):
                 try:
-                    resu()
+                    resume()
                 except Exception:
                     pass
     try:

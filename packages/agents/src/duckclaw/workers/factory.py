@@ -1543,7 +1543,7 @@ def _quant_is_proceed_like(text: str) -> bool:
     low = str(text).strip().lower()
     if "[system_directive:" in low or "[system_event:" in low:
         return False
-    return bool(re.search(r"\b(procede|continu(a|ar)|sigue|adelante|hazlo)\b", low))
+    return bool(re.search(r"\b(procede|continu(a|ar|úa)|sigue|adelante|hazlo|vamos|dale)\b", low))
 
 
 def _quant_user_requests_inspect_macro_pgq(text: str) -> bool:

@@ -17,6 +17,22 @@ export function userPreviewsFromPayload(
   }));
 }
 
+/** Reconstruye el payload API desde miniaturas data-URL guardadas en el hilo (reintento). */
+export function payloadImagesFromPreviews(
+  previews: ChatImagePreview[] | undefined
+): { mime_type: string; data_base64: string }[] {
+  if (!previews?.length) return [];
+  const out: { mime_type: string; data_base64: string }[] = [];
+  for (const img of previews) {
+    const url = (img.url || '').trim();
+    if (!url.startsWith('data:')) continue;
+    const match = /^data:([^;,]+);base64,(.+)$/i.exec(url);
+    if (!match?.[1] || !match[2]) continue;
+    out.push({ mime_type: match[1].toLowerCase(), data_base64: match[2] });
+  }
+  return out;
+}
+
 export function artifactIdFromMessageText(text: string): string | null {
   const trimmed = (text || '').trim();
   if (!trimmed) return null;

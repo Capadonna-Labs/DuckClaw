@@ -1,0 +1,1 @@
+Flujo: lee el último mensaje del asistente como plan autoritativo; ejecuta la siguiente herramienta pendiente (OHLCV, read_sql, sandbox, propose_trade_signal, hrp_rebalance_ib_gateway) sin replanificar desde cero.

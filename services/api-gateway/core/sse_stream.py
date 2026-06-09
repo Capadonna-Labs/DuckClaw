@@ -85,6 +85,21 @@ def sse_error(message: str, *, status_hint: int | None = None) -> str:
     return sse_data(err)
 
 
+def sse_audio(
+    *,
+    audio_base64: str | None = None,
+    audio_unavailable: bool = False,
+    audio_format: str | None = None,
+) -> str:
+    meta: dict[str, Any] = {"type": "audio", "audio_unavailable": bool(audio_unavailable)}
+    if audio_base64:
+        meta["audio_base64"] = audio_base64
+    fmt = (audio_format or "").strip().lower()
+    if fmt in ("ogg", "wav"):
+        meta["audio_format"] = fmt
+    return sse_data(meta)
+
+
 def sse_terminal_done() -> str:
     return "data: [DONE]\n\n"
 
@@ -162,8 +177,9 @@ async def emit_chat_reply_sse(
     extra: dict[str, Any] | None = None,
     chunk_chars: int = 12,
     delay_s: float = 0.018,
+    emit_terminal: bool = True,
 ) -> AsyncIterator[str]:
-    """Genera eventos SSE token a token y cierre [DONE]."""
+    """Genera eventos SSE token a token; opcionalmente cierre [DONE]."""
     done_extra: dict[str, Any] | None = dict(extra) if extra else None
     if elapsed_ms is not None:
         if done_extra is None:
@@ -178,4 +194,5 @@ async def emit_chat_reply_sse(
         worker_id=worker_id,
         extra=done_extra,
     )
-    yield sse_terminal_done()
+    if emit_terminal:
+        yield sse_terminal_done()

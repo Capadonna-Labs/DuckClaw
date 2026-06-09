@@ -800,6 +800,21 @@ async def create_workspace_project(
     return {"project": project}
 
 
+@router.get("/workspace/projects/{project_id}", dependencies=[Depends(_require_admin_key)])
+async def get_workspace_project(
+    project_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db, project_context_for_actor
+
+    with open_gateway_db(read_only=True) as db:
+        project = project_context_for_actor(db, actor_email=actor, project_id=project_id)
+    if not project:
+        raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
+    agents = list(project.get("agents") or [])
+    return {"project": project, "agents": agents}
+
+
 @router.delete("/workspace/projects/{project_id}", dependencies=[Depends(_require_admin_key)])
 async def delete_workspace_project(
     project_id: str,

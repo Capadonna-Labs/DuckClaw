@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { FolderKanban, Plus } from 'lucide-react';
 import { ProjectsCatalogToolbar } from '@/components/projects/ProjectsCatalogToolbar';
 import { ProjectsTable } from '@/components/projects/ProjectsTable';
+import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
 import { adminService } from '@/services/adminService';
 import type { WorkspaceProjectSummary, WorkspaceProjectsQuery } from '@/services/adminService';
 import { useAuthStore } from '@/store/authStore';
@@ -25,6 +26,8 @@ export default function ProjectsPage() {
   const [limit, setLimit] = useState(25);
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDeleteProject, setPendingDeleteProject] = useState<WorkspaceProjectSummary | null>(null);
+  const [deletingProject, setDeletingProject] = useState(false);
 
   const reload = useCallback(() => {
     setError(null);
@@ -46,18 +49,23 @@ export default function ProjectsPage() {
     reload();
   }, [reload]);
 
-  const deleteProject = async (project: WorkspaceProjectSummary) => {
+  const requestDeleteProject = (project: WorkspaceProjectSummary) => {
     if (!canWrite) return;
-    const confirmed = window.confirm(
-      `Eliminar definitivamente "${project.name}"?\n\nSe eliminará definitivamente de la tabla de proyectos y se quitarán sus asignaciones. No se borran workers, versiones ni templates.`
-    );
-    if (!confirmed) return;
+    setPendingDeleteProject(project);
+  };
+
+  const confirmDeleteProject = async () => {
+    if (!canWrite || !pendingDeleteProject) return;
     setError(null);
+    setDeletingProject(true);
     try {
-      await adminService.deleteWorkspaceProject(project.project_id);
+      await adminService.deleteWorkspaceProject(pendingDeleteProject.project_id);
+      setPendingDeleteProject(null);
       reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo eliminar el proyecto');
+    } finally {
+      setDeletingProject(false);
     }
   };
 
@@ -144,9 +152,29 @@ export default function ProjectsPage() {
       <ProjectsTable
         projects={projects}
         canWrite={canWrite}
-        onDelete={(project) => void deleteProject(project)}
+        onDelete={requestDeleteProject}
         onDeactivate={(project) => void deactivateProject(project)}
         onReactivate={(project) => void reactivateProject(project)}
+      />
+
+      <ConfirmDangerModal
+        isOpen={Boolean(pendingDeleteProject)}
+        title="Eliminar proyecto definitivo"
+        description="Se eliminará definitivamente de la tabla de proyectos y se quitarán sus asignaciones. No se borran workers, versiones ni templates."
+        confirmLabel="Sí, eliminar proyecto"
+        isLoading={deletingProject}
+        details={
+          pendingDeleteProject
+            ? [
+                { label: 'Proyecto', value: pendingDeleteProject.name },
+                { label: 'Project ID', value: pendingDeleteProject.project_id },
+                { label: 'Agentes', value: String(pendingDeleteProject.agent_count ?? 0) },
+                { label: 'Estado', value: pendingDeleteProject.status },
+              ]
+            : []
+        }
+        onCancel={() => !deletingProject && setPendingDeleteProject(null)}
+        onConfirm={() => void confirmDeleteProject()}
       />
 
       <div className="flex items-center justify-between rounded-2xl border border-gov-blue-100 bg-white px-4 py-3 text-sm text-gov-gray-700 dark:border-dark-border dark:bg-dark-surface dark:text-dark-text">

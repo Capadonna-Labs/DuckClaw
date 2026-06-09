@@ -67,6 +67,8 @@ export interface WorkspaceProjectSummary {
   description: string;
   status: string;
   visibility: string;
+  created_at?: string;
+  updated_at?: string;
   agent_count?: number;
   agents?: {
     worker_uid: string;
@@ -1184,6 +1186,12 @@ export const adminService = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  getWorkspaceProject: (projectId: string) =>
+    adminFetch<{
+      project: WorkspaceProjectSummary;
+      agents: NonNullable<WorkspaceProjectSummary['agents']>;
+    }>(`/workspace/projects/${encodeURIComponent(projectId)}`),
 
   deleteWorkspaceProject: (projectId: string) =>
     adminFetch<{ ok: boolean; hard_deleted: boolean; project_id: string }>(

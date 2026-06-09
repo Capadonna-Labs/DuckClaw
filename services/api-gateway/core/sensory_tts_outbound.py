@@ -11,6 +11,7 @@ from core.sensory_client import (
     resolve_voice_id_for_worker,
     sensory_enabled,
     synthesize_text,
+    tts_snippet_for_reply,
 )
 from core.telegram_media_upload import send_voice_to_telegram_sync
 
@@ -30,17 +31,6 @@ def _tts_enabled() -> bool:
     )
 
 
-def _tts_snippet(text: str) -> str:
-    """First paragraph or chunk for TTS (max 1500)."""
-    t = (text or "").strip()
-    if not t:
-        return t
-    para = t.split("\n\n", 1)[0].strip()
-    if len(para) > 1500:
-        return para[:1500]
-    return para
-
-
 async def maybe_send_tts_voice_reply(
     *,
     bot_token: str,
@@ -55,7 +45,7 @@ async def maybe_send_tts_voice_reply(
     """
     if not _tts_enabled():
         return False, None
-    snippet = _tts_snippet(reply_plain)
+    snippet = tts_snippet_for_reply(reply_plain)
     if not snippet:
         return False, None
     voice_id = resolve_voice_id_for_worker(worker_id)

@@ -723,6 +723,10 @@ class PlaygroundChatBody(BaseModel):
         default=False,
         description="Si true, respuesta text/event-stream (tokens SSE + [DONE]).",
     )
+    voice_response: bool = Field(
+        default=False,
+        description="Si true (con stream), sintetiza TTS tras la respuesta y emite evento SSE audio.",
+    )
 
     @model_validator(mode="after")
     def _message_or_images(self) -> "PlaygroundChatBody":
@@ -1609,6 +1613,7 @@ async def playground_chat(
                 redis_client=redis_client,
                 delivery_context=delivery_context,
                 http_request=request,
+                voice_response=bool(body.voice_response),
             ),
             media_type="text/event-stream",
             headers=dict(SSE_HEADERS),
@@ -1819,6 +1824,7 @@ async def playground_voice(
         reply = str(result or "").strip()
 
     audio_b64_out: str | None = None
+    audio_format_out: str | None = None
     audio_unavailable = False
     tts_ms: float | None = None
     if body.voice_response and reply:
@@ -1827,7 +1833,16 @@ async def playground_voice(
             voice_id = resolve_voice_id_for_worker(wid)
             tts_result = await synthesize_text(reply, voice_id)
             audio_b64_out = tts_result.audio_base64
+            audio_format_out = tts_result.audio_format
             tts_ms = (time.perf_counter() - t_tts) * 1000.0
+            import logging as _logging
+
+            _logging.getLogger("duckclaw.gateway.admin_tts").info(
+                "voice_batch ok worker=%s format=%s b64_len=%s",
+                wid,
+                audio_format_out,
+                len(audio_b64_out or ""),
+            )
         except SensoryUnavailable:
             audio_unavailable = True
 
@@ -1837,6 +1852,7 @@ async def playground_voice(
         "transcription": transcription,
         "response": reply,
         "audio_base64": audio_b64_out,
+        "audio_format": audio_format_out,
         "audio_unavailable": audio_unavailable,
         "stt_processing_ms": stt_meta.get("processing_time_ms") if stt_meta else stt_ms,
         "tts_latency_ms": tts_ms,

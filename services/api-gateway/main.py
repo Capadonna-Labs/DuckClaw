@@ -1687,6 +1687,7 @@ async def _invoke_chat_sse_body(
     from core.sse_stream import (
         emit_chat_reply_sse,
         friendly_chat_error_message,
+        sse_audio,
         sse_error,
         sse_heartbeat,
         sse_terminal_done,
@@ -1694,6 +1695,7 @@ async def _invoke_chat_sse_body(
     from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
 
     redis_client = invoke_kwargs.get("redis_client")
+    voice_response = bool(invoke_kwargs.pop("voice_response", False))
     admin_session = is_admin_ui_chat_session(session_id)
     stop = asyncio.Event()
     heartbeat_task: asyncio.Task | None = None
@@ -1784,6 +1786,7 @@ async def _invoke_chat_sse_body(
                 sse_extra = dict(admin_visual)
         else:
             reply = str(result or "")
+        want_tts = voice_response and bool((reply or "").strip())
         async for event in emit_chat_reply_sse(
             reply,
             assigned_worker_id=assigned,
@@ -1791,8 +1794,46 @@ async def _invoke_chat_sse_body(
             worker_id=worker_id,
             elapsed_ms=elapsed_ms,
             extra=sse_extra,
+            emit_terminal=not want_tts,
         ):
             yield event
+        if want_tts:
+            from core.sensory_client import (
+                SensoryUnavailable,
+                resolve_voice_id_for_worker,
+                sensory_enabled,
+                synthesize_text,
+                tts_snippet_for_reply,
+            )
+
+            eff_worker = (assigned or worker_id or "").strip() or worker_id
+            if sensory_enabled():
+                snippet = tts_snippet_for_reply(reply)
+                if snippet:
+                    try:
+                        voice_id = resolve_voice_id_for_worker(eff_worker)
+                        tts_result = await synthesize_text(snippet, voice_id)
+                        import logging as _logging
+
+                        _logging.getLogger("duckclaw.gateway.admin_tts").info(
+                            "sse_audio ok worker=%s format=%s b64_len=%s",
+                            eff_worker,
+                            tts_result.audio_format,
+                            len(tts_result.audio_base64 or ""),
+                        )
+                        yield sse_audio(
+                            audio_base64=tts_result.audio_base64,
+                            audio_format=tts_result.audio_format,
+                        )
+                    except SensoryUnavailable:
+                        yield sse_audio(audio_unavailable=True)
+                    except Exception:
+                        yield sse_audio(audio_unavailable=True)
+                else:
+                    yield sse_audio(audio_unavailable=True)
+            else:
+                yield sse_audio(audio_unavailable=True)
+            yield sse_terminal_done()
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         yield sse_error(detail, status_hint=exc.status_code)

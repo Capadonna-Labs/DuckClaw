@@ -106,6 +106,8 @@ def test_integrations_are_nested_inside_agents_selector() -> None:
     assert 'href="/telegram"' in sidebar
     assert "Edge devices" in sidebar
     assert 'href="/integrations/edge-devices"' in sidebar
+    assert "Sensory node" in sidebar
+    assert 'href="/integrations/sensory-node"' in sidebar
 
 
 def test_admin_sidebar_keeps_core_groups_and_data_access() -> None:
@@ -341,6 +343,30 @@ def test_floating_chat_uses_fixed_large_panel_and_header_actions() -> None:
     assert "resizeRef" not in floating
     assert "headerActions?: React.ReactNode" in panel
     assert "{headerActions}" in panel
+
+
+def test_admin_chat_composer_has_voice_note_button() -> None:
+    panel = Path("apps/duckclaw-admin/src/components/chat/AdminChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    hook = Path("apps/duckclaw-admin/src/components/chat/useVoiceNoteRecorder.ts").read_text(
+        encoding="utf-8"
+    )
+    chat_hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(
+        encoding="utf-8"
+    )
+    bubble = Path("apps/duckclaw-admin/src/components/chat/ChatBubble.tsx").read_text(
+        encoding="utf-8"
+    )
+
+    assert "useVoiceNoteRecorder" in panel
+    assert "sendVoiceNote" in panel
+    assert 'aria-label={voice.recording ? \'Enviar nota de voz\' : \'Grabar nota de voz\'}' in panel
+    assert "<Mic size={18} />" in panel
+    assert "MediaRecorder" in hook
+    assert "sendVoiceNote" in chat_hook
+    assert "voiceNote" in bubble
+    assert "Escuchar respuesta" in bubble
 
 
 def test_admin_pages_avoid_internal_jargon_copy() -> None:

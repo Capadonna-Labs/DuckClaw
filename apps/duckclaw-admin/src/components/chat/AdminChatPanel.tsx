@@ -1,8 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Bot, Brain, ChevronDown, ChevronRight, ImagePlus, Send, X } from 'lucide-react';
+import {
+  Bot,
+  Brain,
+  ChevronDown,
+  ChevronRight,
+  ImagePlus,
+  Mic,
+  Send,
+  Square,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react';
+import { useVoiceNoteRecorder } from '@/components/chat/useVoiceNoteRecorder';
 import { ChatViewTabBar, type ChatViewTab } from '@/components/chat/ChatViewTabBar';
 import {
   ConversationManagePanel,
@@ -94,6 +107,9 @@ export function AdminChatPanel({
     scrollToBottom,
     onScroll,
     send,
+    sendVoiceNote,
+    voiceResponseMode,
+    setVoiceResponseMode,
     retryFromMessage,
     editFromMessage,
     inputRef,
@@ -111,6 +127,22 @@ export function AdminChatPanel({
     workerId &&
     !loading &&
     (input.trim().length > 0 || imageAttachments.hasImages);
+
+  const voice = useVoiceNoteRecorder();
+
+  const handleVoiceClick = useCallback(async () => {
+    if (voice.recording) {
+      voice.setBusy(true);
+      try {
+        const b64 = await voice.stopAndGetBase64();
+        if (b64) await sendVoiceNote(b64);
+      } finally {
+        voice.setBusy(false);
+      }
+      return;
+    }
+    await voice.startRecording();
+  }, [voice, sendVoiceNote]);
 
   return (
     <section
@@ -367,7 +399,8 @@ export function AdminChatPanel({
               message={m}
               canRetry={
                 !loading &&
-                ((m.role === 'user' && Boolean(m.text?.trim())) ||
+                ((m.role === 'user' &&
+                  (Boolean(m.text?.trim()) || Boolean(m.imagePreviews?.length))) ||
                   (m.role === 'assistant' && prevUserIdx >= 0))
               }
               onRetry={
@@ -431,12 +464,41 @@ export function AdminChatPanel({
           <button
             type="button"
             onClick={() => imageAttachments.fileInputRef.current?.click()}
-            disabled={!canSend || loading || imageAttachments.pendingImages.length >= 3}
+            disabled={!canSend || loading || voice.recording || imageAttachments.pendingImages.length >= 3}
             className="px-2 py-2 border rounded-xl dark:border-dark-border disabled:opacity-50 shrink-0"
             aria-label="Adjuntar imagen"
             title="Adjuntar imagen"
           >
             <ImagePlus size={18} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setVoiceResponseMode((v) => !v)}
+            disabled={!canSend}
+            className={`px-2 py-2 border rounded-xl shrink-0 disabled:opacity-50 ${
+              voiceResponseMode
+                ? 'border-gov-blue-300 bg-gov-blue-50 text-gov-blue-800 dark:border-gov-blue-800 dark:bg-gov-blue-950/40 dark:text-gov-blue-200'
+                : 'dark:border-dark-border text-gov-gray-500 dark:text-dark-muted'
+            }`}
+            aria-label="Responder con voz"
+            aria-pressed={voiceResponseMode}
+            title={voiceResponseMode ? 'Responder con voz (activado)' : 'Responder con voz (desactivado)'}
+          >
+            {voiceResponseMode ? <Volume2 size={18} /> : <VolumeX size={18} />}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleVoiceClick()}
+            disabled={!canSend || !workerId || (loading && !voice.recording) || voice.busy}
+            className={`px-2 py-2 border rounded-xl shrink-0 disabled:opacity-50 ${
+              voice.recording
+                ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400'
+                : 'dark:border-dark-border'
+            }`}
+            aria-label={voice.recording ? 'Enviar nota de voz' : 'Grabar nota de voz'}
+            title={voice.recording ? 'Enviar nota de voz' : 'Grabar nota de voz'}
+          >
+            {voice.recording ? <Square size={18} /> : <Mic size={18} />}
           </button>
           <textarea
             ref={inputRef}
@@ -473,8 +535,15 @@ export function AdminChatPanel({
             </button>
           )}
         </div>
-        {(imageAttachments.attachError || error) && (
-          <p className="text-xs text-red-600 mt-1.5">{imageAttachments.attachError || error}</p>
+        {voice.recording ? (
+          <p className="text-xs text-red-600 mt-1.5">Grabando… pulsa el cuadrado para enviar la nota de voz.</p>
+        ) : loading && voice.busy ? (
+          <p className="text-xs text-gov-gray-500 mt-1.5">Transcribiendo nota de voz y generando respuesta…</p>
+        ) : null}
+        {(imageAttachments.attachError || error || voice.error) && (
+          <p className="text-xs text-red-600 mt-1.5">
+            {imageAttachments.attachError || error || voice.error}
+          </p>
         )}
       </footer>
         </>

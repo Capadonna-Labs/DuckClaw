@@ -51,7 +51,15 @@ export async function POST(req: NextRequest) {
       headers: { 'Content-Type': res.headers.get('content-type') || 'application/json' },
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Error de red al gateway';
-    return NextResponse.json({ detail: msg }, { status: 502 });
+    const raw = e instanceof Error ? e.message : 'Error de red al gateway';
+    const cause =
+      e instanceof Error && e.cause instanceof Error ? e.cause.message : '';
+    const timedOut =
+      /timeout|timed out|aborted due to timeout/i.test(raw) ||
+      /timeout|timed out|aborted due to timeout/i.test(cause);
+    const msg = timedOut
+      ? 'Gateway voice proxy timeout (respuesta batch STT+agente+TTS excedió el límite del BFF)'
+      : raw;
+    return NextResponse.json({ detail: msg }, { status: timedOut ? 504 : 502 });
   }
 }

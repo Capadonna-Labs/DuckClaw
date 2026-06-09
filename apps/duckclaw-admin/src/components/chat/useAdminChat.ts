@@ -5,6 +5,7 @@ import { adminService } from '@/services/adminService';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import {
   historyToChatMessages,
+  payloadImagesFromPreviews,
   preserveImagePreviewsFromPrevious,
   userPreviewsFromPayload,
 } from '@/lib/chatMessageImages';
@@ -21,8 +22,15 @@ import {
   writeEphemeralHeartbeats,
 } from '@/lib/chatEphemeralStorage';
 import { workerMatches } from '@/lib/workerOptions';
-import { readStoredVaultPath, writeStoredVaultPath } from '@/lib/conversationVaultStorage';
+import {
+  readActorDefaultVaultPath,
+  readStoredVaultPath,
+  writeStoredVaultPath,
+} from '@/lib/conversationVaultStorage';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
+import { mutationHeaders } from '@/lib/csrfClient';
+import { friendlyGatewayError, parseApiErrorDetail } from '@/lib/adminErrors';
+import { playTtsAudio, primeAudioPlayback, type TtsAudioFormat } from '@/lib/playTtsAudio';
 import {
   finalizeRunningToolHeartbeats,
   createToolInvocationId,
@@ -144,6 +152,7 @@ export function useAdminChat({
   const [config, setConfig] = useState<Awaited<ReturnType<typeof adminService.getPlaygroundConfig>> | null>(
     null
   );
+  const [voiceResponseMode, setVoiceResponseMode] = useState(true);
   const [workerId, setWorkerIdState] = useState(() => {
     const stored = readStoredWorker(chatId);
     if (stored) return stored;
@@ -290,10 +299,13 @@ export function useAdminChat({
         const override = (vault?.override_path || '').trim();
         const effective = (vault?.effective_path || '').trim();
         const storedVault = readStoredVaultPath(chatId);
+        const actorVault = readActorDefaultVaultPath();
         if (override) {
           setVaultPathState(override);
         } else if (storedVault) {
           setVaultPathState(storedVault);
+        } else if (actorVault) {
+          setVaultPathState(actorVault);
         } else if (effective) {
           setVaultPathState(effective);
         }
@@ -591,9 +603,15 @@ export function useAdminChat({
       });
     };
 
+    primeAudioPlayback();
     try {
       let assignedSuffix = '';
       let elapsedFooter = '';
+      let streamAudio: {
+        audioBase64?: string;
+        audioFormat?: TtsAudioFormat;
+        audioUnavailable?: boolean;
+      } | null = null;
       const streamVisual: {
         figure_base64?: string;
         fly_charts_b64?: string[];
@@ -611,10 +629,18 @@ export function useAdminChat({
           telegram_user_id: config?.telegram_user_id,
           vault_db_path: vaultPath || undefined,
           images: payloadImages.length ? payloadImages : undefined,
+          voice_response: voiceResponseMode,
         },
         {
           onToken: appendAssistant,
           onHeartbeat: appendHeartbeat,
+          onAudio: (payload) => {
+            streamAudio = {
+              audioBase64: payload.audio_base64,
+              audioFormat: payload.audio_format,
+              audioUnavailable: Boolean(payload.audio_unavailable),
+            };
+          },
           onDone: (meta) => {
             if (meta.assigned_worker_id && meta.assigned_worker_id !== workerId) {
               assignedSuffix = ` (worker: ${meta.assigned_worker_id})`;
@@ -682,10 +708,33 @@ export function useAdminChat({
             text: base + assignedSuffix + elapsedFooter,
             streaming: false,
             imagePreviews: assistantPreviews ?? last.imagePreviews,
+            audioBase64: streamAudio?.audioBase64,
+            audioFormat: streamAudio?.audioFormat,
+            audioUnavailable: streamAudio?.audioUnavailable,
           };
         }
         return finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next));
       });
+      if (streamAudio?.audioBase64) {
+        const playResult = await playTtsAudio(streamAudio.audioBase64, {
+          format: streamAudio.audioFormat,
+          source: 'chat-sse',
+        });
+        if (!playResult.ok) {
+          setMessages((m) => {
+            if (m.length === 0) return m;
+            const next = [...m];
+            const last = next[next.length - 1];
+            if (last?.role === 'assistant') {
+              next[next.length - 1] = {
+                ...last,
+                audioPlayError: playResult.reason,
+              };
+            }
+            return next;
+          });
+        }
+      }
     } catch (e) {
       if (abortController.signal.aborted) {
         finalizeCancelledGeneration();
@@ -719,6 +768,7 @@ export function useAdminChat({
       projectId,
       vaultPath,
       imageAttachments,
+      voiceResponseMode,
     ]
   );
 
@@ -739,7 +789,10 @@ export function useAdminChat({
       const target = messages[messageIndex];
       if (!target || target.role !== 'user') return;
       const text = (target.text || '').trim();
-      if (!text) return;
+      const payloadImages = payloadImagesFromPreviews(target.imagePreviews);
+      if (!text && payloadImages.length === 0) return;
+      const userPreviewImages =
+        target.imagePreviews?.filter((img) => (img.url || '').trim().startsWith('data:')) ?? [];
       abortControllerRef.current?.abort();
       setMessages((prev) => {
         const removed = prev.slice(messageIndex);
@@ -747,7 +800,7 @@ export function useAdminChat({
         return prev.slice(0, messageIndex);
       });
       setError(null);
-      await runChatTurn(text, []);
+      await runChatTurn(text, payloadImages, userPreviewImages);
     },
     [loading, workerId, messages, runChatTurn]
   );
@@ -791,6 +844,80 @@ export function useAdminChat({
     });
   }, [chatId, workerId]);
 
+  const sendVoiceNote = useCallback(
+    async (audioBase64: string) => {
+      if (!audioBase64.trim() || loading || !workerId) return;
+      primeAudioPlayback();
+      abortControllerRef.current?.abort();
+      setLoading(true);
+      setThinking(false);
+      setError(null);
+      try {
+        const res = await fetch('/api/admin/playground/voice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...mutationHeaders('POST') },
+          body: JSON.stringify({
+            worker_id: workerId,
+            chat_id: chatId,
+            project_id: projectId || undefined,
+            audio_base64: audioBase64,
+            voice_response: true,
+            language_hint: 'es',
+          }),
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          transcription?: string;
+          response?: string;
+          audio_base64?: string | null;
+          audio_format?: 'ogg' | 'wav';
+          audio_unavailable?: boolean;
+          detail?: string;
+        };
+        if (!res.ok) {
+          throw new Error(
+            friendlyGatewayError(parseApiErrorDetail(data, res.status))
+          );
+        }
+        const transcription = (data.transcription || '').trim() || '(sin transcripción)';
+        const reply = (data.response || '').trim();
+        setMessages((m) => [
+          ...m,
+          { role: 'user', text: transcription, voiceNote: true },
+          {
+            role: 'assistant',
+            text: reply,
+            audioBase64: data.audio_base64 || undefined,
+            audioFormat: data.audio_format,
+            audioUnavailable: Boolean(data.audio_unavailable),
+          },
+        ]);
+        if (data.audio_base64) {
+          const playResult = await playTtsAudio(data.audio_base64, {
+            format: data.audio_format,
+            source: 'voice-note',
+          });
+          if (!playResult.ok) {
+            setMessages((m) => {
+              const next = [...m];
+              const last = next[next.length - 1];
+              if (last?.role === 'assistant') {
+                next[next.length - 1] = { ...last, audioPlayError: playResult.reason };
+              }
+              return next;
+            });
+          }
+        }
+        onConversationActivity?.();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Error enviando nota de voz');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [loading, workerId, chatId, projectId, onConversationActivity]
+  );
+
   return {
     config,
     workerId,
@@ -809,6 +936,9 @@ export function useAdminChat({
     scrollToBottom,
     onScroll,
     send,
+    sendVoiceNote,
+    voiceResponseMode,
+    setVoiceResponseMode,
     retryFromMessage,
     editFromMessage,
     inputRef,

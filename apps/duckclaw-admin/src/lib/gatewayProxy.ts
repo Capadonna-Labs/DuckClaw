@@ -2,11 +2,11 @@ import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } fr
 
 /**
  * Undici corta el body a los 300s por defecto (UND_ERR_BODY_TIMEOUT).
- * SSE del playground y generación ComfyUI pueden superar ese tiempo sin cerrar el stream.
+ * SSE del playground, ComfyUI y /playground/voice (STT+agente+TTS batch) pueden superar 120s.
  */
 const LONG_GATEWAY_DISPATCHER = new Agent({
   bodyTimeout: 0,
-  headersTimeout: 120_000,
+  headersTimeout: 600_000,
   connectTimeout: 30_000,
 });
 

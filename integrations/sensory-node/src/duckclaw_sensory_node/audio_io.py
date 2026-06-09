@@ -30,8 +30,29 @@ def decode_audio_base64(audio_b64: str) -> tuple[np.ndarray, int]:
             data = np.mean(data, axis=1)
         return np.asarray(data, dtype=np.float32), int(sr)
     except Exception:
-        buf.seek(0)
-        return _decode_wav_bytes(buf.read())
+        pass
+    try:
+        from pydub import AudioSegment
+
+        seg = AudioSegment.from_file(io.BytesIO(raw))
+        samples = np.array(seg.get_array_of_samples(), dtype=np.float32)
+        width = int(seg.sample_width)
+        if width == 1:
+            samples = (samples - 128.0) / 128.0
+        elif width == 2:
+            samples = samples / 32768.0
+        elif width == 4:
+            samples = samples / 2147483648.0
+        else:
+            denom = float(1 << (8 * width - 1))
+            samples = samples / denom
+        ch = int(seg.channels)
+        if ch > 1:
+            samples = samples.reshape(-1, ch).mean(axis=1)
+        return samples.astype(np.float32), int(seg.frame_rate)
+    except Exception:
+        pass
+    return _decode_wav_bytes(raw)
 
 
 def _decode_wav_bytes(raw: bytes) -> tuple[np.ndarray, int]:

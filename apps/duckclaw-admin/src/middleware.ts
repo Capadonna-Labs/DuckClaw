@@ -15,6 +15,7 @@ export function middleware(request: NextRequest) {
     scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
+    "media-src 'self' blob: data:",
     "font-src 'self' data:",
     "connect-src 'self'",
     "frame-ancestors 'none'",

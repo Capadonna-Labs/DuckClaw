@@ -152,7 +152,18 @@ export function useAdminChat({
   const [config, setConfig] = useState<Awaited<ReturnType<typeof adminService.getPlaygroundConfig>> | null>(
     null
   );
-  const [voiceResponseMode, setVoiceResponseMode] = useState(true);
+  const [voiceResponseMode, setVoiceResponseModeState] = useState(false);
+  const voiceResponseAvailable = Boolean(config?.voice?.available);
+  const setVoiceResponseMode = useCallback(
+    (next: boolean | ((prev: boolean) => boolean)) => {
+      setVoiceResponseModeState((prev) => {
+        const value = typeof next === 'function' ? next(prev) : next;
+        if (value && !voiceResponseAvailable) return false;
+        return value;
+      });
+    },
+    [voiceResponseAvailable]
+  );
   const [workerId, setWorkerIdState] = useState(() => {
     const stored = readStoredWorker(chatId);
     if (stored) return stored;
@@ -280,6 +291,9 @@ export function useAdminChat({
       .getPlaygroundConfig(chatId ? { chat_id: chatId } : undefined)
       .then((c) => {
         setConfig(c);
+        if (!c.voice?.available) {
+          setVoiceResponseModeState(false);
+        }
         if (c.authorized === false) {
           setError(c.team_hint || 'Usuario Telegram no autorizado en este tenant');
           setWorkerId('');
@@ -861,7 +875,7 @@ export function useAdminChat({
             chat_id: chatId,
             project_id: projectId || undefined,
             audio_base64: audioBase64,
-            voice_response: true,
+            voice_response: voiceResponseMode,
             language_hint: 'es',
           }),
         });
@@ -915,7 +929,7 @@ export function useAdminChat({
         setLoading(false);
       }
     },
-    [loading, workerId, chatId, projectId, onConversationActivity]
+    [loading, workerId, chatId, projectId, onConversationActivity, voiceResponseMode]
   );
 
   return {
@@ -938,6 +952,7 @@ export function useAdminChat({
     send,
     sendVoiceNote,
     voiceResponseMode,
+    voiceResponseAvailable,
     setVoiceResponseMode,
     retryFromMessage,
     editFromMessage,

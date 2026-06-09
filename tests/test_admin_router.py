@@ -241,6 +241,32 @@ def test_playground_config(admin_client: TestClient):
     assert "authorized" in data
     assert "team_chat_id" in data
     assert data.get("chat_endpoint") == "/api/v1/admin/playground/chat"
+    voice = data.get("voice") or {}
+    assert "configured" in voice
+    assert "available" in voice
+    assert "tts_loaded" in voice
+
+
+def test_playground_config_voice_available_when_sensory_tts_loaded(
+    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("DUCKCLAW_SENSORY_BASE_URL", "http://127.0.0.1:8001")
+
+    async def _fake_health():
+        return {"tts_loaded": True, "stt_loaded": True}
+
+    from unittest.mock import patch
+
+    with patch("core.sensory_client.sensory_health", side_effect=_fake_health):
+        r = admin_client.get(
+            "/api/v1/admin/playground/config",
+            headers={"X-Admin-Key": "test-admin-key"},
+        )
+    assert r.status_code == 200
+    voice = r.json().get("voice") or {}
+    assert voice.get("configured") is True
+    assert voice.get("available") is True
+    assert voice.get("tts_loaded") is True
 
 
 def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, catalog_db):

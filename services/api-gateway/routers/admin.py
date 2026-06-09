@@ -1248,6 +1248,13 @@ async def playground_config(
         runtime_default_vault=runtime_defaults.get("default_vault_db_path"),
     )
     vault_options = _playground_vault_options_for_team(team_ctx)
+    from core.sensory_client import sensory_enabled, sensory_health
+
+    sensory_health_payload = await sensory_health()
+    voice_configured = sensory_enabled()
+    voice_tts_loaded = bool(
+        sensory_health_payload and sensory_health_payload.get("tts_loaded") is True
+    )
     return {
         "llm": llm,
         "catalog": catalog,
@@ -1273,6 +1280,11 @@ async def playground_config(
             "Proveedor y bóveda DuckDB por conversación. "
             "Sin override de bóveda, usa vault activo del usuario o manifest del worker."
         ),
+        "voice": {
+            "configured": voice_configured,
+            "available": voice_configured and voice_tts_loaded,
+            "tts_loaded": voice_tts_loaded,
+        },
     }
 
 

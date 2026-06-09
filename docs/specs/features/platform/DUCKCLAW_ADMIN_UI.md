@@ -27,7 +27,8 @@ La UI de login deshabilita el submit cuando `bootstrap.canAttemptLogin` es `fals
 ## Playground / chat
 
 - Composer con texto, adjuntos de imagen y notas de voz vía `MediaAttachMenu`.
-- Notas de voz: `useVoiceNoteRecorder` + `sendVoiceNote` en `useAdminChat`; reproducción TTS en `ChatBubble` (`Escuchar respuesta`).
+- **Voz automática (TTS):** apagada por defecto. Solo se puede activar si `GET /playground/config` devuelve `voice.available=true` (sensory node configurado y `tts_loaded`). Sin TTS activo, ni mensajes de texto ni notas de voz solicitan síntesis de respuesta.
+- Notas de voz: `useVoiceNoteRecorder` + `sendVoiceNote` en `useAdminChat`; reproducción TTS en `ChatBubble` (`Escuchar respuesta`) cuando voz automática está ON y sensory responde.
 
 ## Referencias
 

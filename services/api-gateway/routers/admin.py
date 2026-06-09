@@ -723,6 +723,10 @@ class PlaygroundChatBody(BaseModel):
         default=False,
         description="Si true, respuesta text/event-stream (tokens SSE + [DONE]).",
     )
+    voice_response: bool = Field(
+        default=False,
+        description="Si true (con stream), sintetiza TTS tras la respuesta y emite evento SSE audio.",
+    )
 
     @model_validator(mode="after")
     def _message_or_images(self) -> "PlaygroundChatBody":
@@ -1609,6 +1613,7 @@ async def playground_chat(
                 redis_client=redis_client,
                 delivery_context=delivery_context,
                 http_request=request,
+                voice_response=bool(body.voice_response),
             ),
             media_type="text/event-stream",
             headers=dict(SSE_HEADERS),
@@ -1644,8 +1649,224 @@ async def playground_chat(
     return {"ok": True, "worker_id": wid, "response": str(result or "")}
 
 
+class PlaygroundVoiceBody(BaseModel):
+    """Nota de voz → STT → agente → TTS (sin Telegram). STT/TTS son batch; texto del agente puede usar SSE en /playground/chat."""
+
+    worker_id: str = Field(default="default", max_length=64)
+    chat_id: str = Field(default="admin-playground", max_length=128)
+    tenant_id: str = Field(default="default", max_length=64)
+    project_id: str | None = Field(default=None, max_length=64)
+    audio_base64: str = Field(..., min_length=8, description="OGG/WAV/WebM base64 desde el navegador")
+    language_hint: str | None = Field(default="es", max_length=16)
+    voice_response: bool = Field(
+        default=True,
+        description="Si true, sintetiza respuesta con TTS (Identity Lock). Si falla, solo texto.",
+    )
+
+
 class PlaygroundChatCancelBody(BaseModel):
     chat_id: str = Field(..., min_length=1, max_length=128)
+
+
+@router.post("/playground/voice", dependencies=[Depends(_require_admin_key)])
+async def playground_voice(
+    body: PlaygroundVoiceBody,
+    request: Request,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    """
+    Round-trip voz: transcribe en Mac mini → invoke agente → opcional TTS de vuelta.
+    No usa streaming de audio (Whisper/OmniVoice son inferencia batch).
+    """
+    import base64
+    import time
+
+    from core.sensory_client import (
+        SensoryUnavailable,
+        resolve_voice_id_for_worker,
+        sensory_enabled,
+        synthesize_text,
+    )
+    from core.stt_ingest import SensoryUnavailable as SttDown, process_audio_bytes
+
+    if not sensory_enabled():
+        raise _problem(503, "DUCKCLAW_SENSORY_BASE_URL no configurado", "sensory")
+
+    try:
+        audio_bytes = base64.b64decode((body.audio_base64 or "").strip(), validate=False)
+    except Exception as exc:
+        raise _problem(400, "audio_base64 inválido", str(exc)) from exc
+    if not audio_bytes:
+        raise _problem(400, "audio vacío", "")
+
+    t_stt = time.perf_counter()
+    try:
+        msg, stt_meta = await process_audio_bytes(
+            audio_bytes,
+            caption="",
+            language_hint=body.language_hint,
+        )
+    except SttDown as exc:
+        raise _problem(503, "STT no disponible", str(exc)) from exc
+    finally:
+        del audio_bytes
+    stt_ms = (time.perf_counter() - t_stt) * 1000.0
+    transcription = ""
+    if "<audio_transcription>" in msg:
+        import re
+
+        m = re.search(r"<audio_transcription>(.*?)</audio_transcription>", msg, re.DOTALL)
+        if m:
+            transcription = (m.group(1) or "").strip()
+
+    from core.admin_identity import (
+        get_visible_worker_for_actor,
+        open_gateway_db,
+        project_context_for_actor,
+        resolve_playground_worker_for_project,
+    )
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+
+    project_id = (body.project_id or "").strip()
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", body.worker_id.strip()) or "default"
+    profile: dict[str, Any] = {
+        "email": actor,
+        "tenant_id": _gateway_effective_tenant_id("default"),
+        "telegram_user_id": "",
+    }
+    catalog_allowed = False
+    project_context: dict[str, Any] | None = None
+    try:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            if get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
+                catalog_allowed = True
+                try:
+                    wid, project_id = resolve_playground_worker_for_project(
+                        db,
+                        actor_email=actor,
+                        project_id=project_id,
+                        worker_id=wid,
+                    )
+                    if project_id:
+                        project_context = project_context_for_actor(
+                            db,
+                            actor_email=actor,
+                            project_id=project_id,
+                        )
+                except PermissionError as exc:
+                    raise _problem(403, str(exc), wid) from exc
+    except FileNotFoundError:
+        pass
+
+    eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")
+    team_ctx = _playground_team_context(tenant_id=eff_tenant, chat_id=body.chat_id)
+    if wid != "default" and not catalog_allowed:
+        raise _problem(403, "Worker no asignado al catálogo del actor", wid)
+
+    session_id = (body.chat_id or "admin-playground").strip() or "admin-playground"
+    owner_uid = str(team_ctx.get("telegram_user_id") or "").strip()
+    guard_user_id = owner_uid or (actor or "admin-ui")
+
+    from core.models import ChatRequest
+
+    vault_info = await _resolved_vault_for_admin_chat(session_id, team_ctx, wid, request=request)
+    vault_path = vault_info.get("effective_path") or ""
+    if project_context:
+        agent_ids = [
+            str(agent.get("worker_id") or "").strip()
+            for agent in project_context.get("agents", [])
+            if str(agent.get("worker_id") or "").strip()
+        ]
+        project_block = "\n".join(
+            [
+                "[PROJECT_CONTEXT]",
+                f"Nombre: {project_context.get('name') or ''}",
+                f"Descripción: {project_context.get('description') or ''}",
+                f"Agentes activos: {', '.join(agent_ids) if agent_ids else 'ninguno'}",
+                "[/PROJECT_CONTEXT]",
+            ]
+        )
+        msg = f"{project_block}\n\n{msg}"
+
+    chat = ChatRequest(
+        message=msg,
+        chat_id=session_id,
+        user_id=guard_user_id,
+        username=actor or guard_user_id,
+        chat_type="private",
+        tenant_id=eff_tenant,
+        stream=False,
+        vault_db_path=vault_path or None,
+    )
+    redis_client = getattr(request.app.state, "redis", None)
+    import main as gateway_main
+
+    from duckclaw.channels import GatewayDeliveryContext
+
+    delivery_context = GatewayDeliveryContext.trusted_admin_console()
+    try:
+        result = await gateway_main._invoke_chat(
+            chat,
+            wid,
+            session_id=session_id,
+            tenant_id=eff_tenant,
+            redis_client=redis_client,
+            delivery_context=delivery_context,
+        )
+    except Exception as exc:
+        raise _problem(500, "Error en playground voice (agente)", str(exc)) from exc
+
+    reply = ""
+    if isinstance(result, dict):
+        reply = str(result.get("response") or result.get("reply") or "").strip()
+    else:
+        reply = str(result or "").strip()
+
+    audio_b64_out: str | None = None
+    audio_format_out: str | None = None
+    audio_unavailable = False
+    tts_ms: float | None = None
+    if body.voice_response and reply:
+        t_tts = time.perf_counter()
+        try:
+            voice_id = resolve_voice_id_for_worker(wid)
+            tts_result = await synthesize_text(reply, voice_id)
+            audio_b64_out = tts_result.audio_base64
+            audio_format_out = tts_result.audio_format
+            tts_ms = (time.perf_counter() - t_tts) * 1000.0
+            import logging as _logging
+
+            _logging.getLogger("duckclaw.gateway.admin_tts").info(
+                "voice_batch ok worker=%s format=%s b64_len=%s",
+                wid,
+                audio_format_out,
+                len(audio_b64_out or ""),
+            )
+        except SensoryUnavailable:
+            audio_unavailable = True
+
+    payload: dict[str, Any] = {
+        "ok": True,
+        "worker_id": wid,
+        "transcription": transcription,
+        "response": reply,
+        "audio_base64": audio_b64_out,
+        "audio_format": audio_format_out,
+        "audio_unavailable": audio_unavailable,
+        "stt_processing_ms": stt_meta.get("processing_time_ms") if stt_meta else stt_ms,
+        "tts_latency_ms": tts_ms,
+        "streaming": {
+            "audio_stt": "batch",
+            "audio_tts": "batch",
+            "agent_text_sse": "/api/v1/admin/playground/chat con stream=true",
+        },
+    }
+    if isinstance(result, dict):
+        visual = gateway_main._admin_visual_fields_from_invoke_result(session_id, result, eff_tenant)
+        if visual:
+            payload.update(visual)
+    return payload
 
 
 @router.post("/playground/chat/cancel", dependencies=[Depends(_require_admin_key)])

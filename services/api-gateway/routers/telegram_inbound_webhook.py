@@ -815,6 +815,44 @@ def _extract_visual_payload_with_reply(msg: dict[str, Any]) -> tuple[dict[str, s
     return pv, True
 
 
+async def _ingest_telegram_audio_enrich_text(
+    *,
+    text: str,
+    audio: dict[str, Any],
+    audio_from_parent_reply: bool,
+    token_a: str,
+) -> tuple[str, bool]:
+    """
+    Descarga audio, STT vía sensory_node, devuelve texto enriquecido.
+
+    Returns (nuevo_texto, drop_early). drop_early=True on MIME reject only.
+    """
+    mime_type = (audio.get("mime_type") or "").strip().lower()
+    if mime_type and not is_allowed_audio_mime(mime_type):
+        _log.info("telegram_inbound tag=STT_MIME_REJECTED mime=%s", mime_type[:128])
+        return text, True
+    fid = (audio.get("file_id") or "").strip()
+    if not fid or not token_a:
+        return text, False
+    try:
+        raw = await download_telegram_audio_bytes(token_a, fid)
+        enriched, _meta = await process_audio_bytes(
+            raw,
+            caption=text,
+            language_hint="es",
+            from_reply=audio_from_parent_reply,
+        )
+        return enriched, False
+    except SensoryUnavailable as exc:
+        _log.warning("telegram_inbound STT unavailable: %s", exc)
+        audio_only = not (text or "").strip()
+        return stt_down_meta_message(audio_only=audio_only), False
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("telegram_inbound STT failed: %s", exc)
+        audio_only = not (text or "").strip()
+        return stt_down_meta_message(audio_only=audio_only), False
+
+
 def build_telegram_inbound_webhook_router(
     *,
     invoke_agent_chat: Callable[..., Awaitable[Any]],

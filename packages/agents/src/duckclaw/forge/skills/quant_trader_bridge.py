@@ -203,25 +203,22 @@ def _vault_writer_handoff(db: Any, *, resume_after: bool = True):
     Con ``resume_after=False``, el caller debe reabrir tras esperar el StateDelta (evita lock).
     """
     release = getattr(db, "release_file_handle_for_external_writer", None)
-    susp = getattr(db, "suspend_readonly_file_handle", None)
-    resu = getattr(db, "resume_readonly_file_handle", None)
+    resume = getattr(db, "resume_file_handle", None)
+    path = str(getattr(db, "_path", "") or "").strip()
     released = False
-    if bool(getattr(db, "_read_only", False)):
+    if path and path != ":memory:":
         try:
             if callable(release):
                 release()
-                released = True
-            elif callable(susp):
-                susp()
                 released = True
         except Exception:
             released = False
     try:
         yield released
     finally:
-        if released and resume_after and callable(resu):
+        if released and resume_after and callable(resume):
             try:
-                resu()
+                resume()
             except Exception:
                 pass
 
@@ -229,10 +226,10 @@ def _vault_writer_handoff(db: Any, *, resume_after: bool = True):
 def _resume_ro_vault(db: Any, released: bool) -> None:
     if not released:
         return
-    resu = getattr(db, "resume_readonly_file_handle", None)
-    if callable(resu):
+    resume = getattr(db, "resume_file_handle", None)
+    if callable(resume):
         try:
-            resu()
+            resume()
         except Exception:
             pass
 

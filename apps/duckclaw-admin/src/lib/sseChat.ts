@@ -27,6 +27,12 @@ export type SseChatEvent =
       tool_phase?: 'start' | 'done' | 'error';
       elapsed_ms?: number;
     }
+  | {
+      type: 'audio';
+      audio_base64?: string;
+      audio_unavailable?: boolean;
+      audio_format?: 'ogg' | 'wav';
+    }
   | { type: 'error'; message: string; status?: number }
   | { type: 'terminal' };
 
@@ -108,6 +114,19 @@ function parseDataLine(data: string): SseChatEvent | null {
         tool_name: typeof j.tool_name === 'string' ? j.tool_name : undefined,
         tool_phase,
         elapsed_ms: Number.isFinite(elapsed_ms) ? elapsed_ms : undefined,
+      };
+    }
+    if (t === 'audio') {
+      const fmtRaw = String(j.audio_format || '').toLowerCase();
+      const audio_format = fmtRaw === 'wav' || fmtRaw === 'ogg' ? fmtRaw : undefined;
+      return {
+        type: 'audio',
+        audio_base64:
+          typeof j.audio_base64 === 'string' && j.audio_base64.trim()
+            ? j.audio_base64
+            : undefined,
+        audio_unavailable: Boolean(j.audio_unavailable),
+        audio_format,
       };
     }
     if (t === 'error') {

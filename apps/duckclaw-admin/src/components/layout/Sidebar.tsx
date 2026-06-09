@@ -19,6 +19,7 @@ import {
   MessageCircle,
   ChevronDown,
   Cpu,
+  Mic,
   Image,
   Sparkles,
   Hammer,
@@ -49,6 +50,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/runtime': Radio,
   '/telegram': MessageSquare,
   '/integrations/edge-devices': Cpu,
+  '/integrations/sensory-node': Mic,
   '/vnc': Monitor,
   '/duckdb': Database,
   '/train': GraduationCap,
@@ -314,6 +316,13 @@ function IntegrationsNavSelector({
             className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
           >
             Edge devices
+          </Link>
+          <Link
+            href="/integrations/sensory-node"
+            onClick={() => onNavigate?.()}
+            className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
+          >
+            Sensory node
           </Link>
         </div>
       )}

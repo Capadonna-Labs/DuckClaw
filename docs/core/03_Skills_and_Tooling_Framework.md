@@ -68,9 +68,10 @@ Enrutamiento: en `telegram_bot` (o equivalente), parsear comandos que empiezan p
 
 ## 4. Ingestión multimodal (voz y visión)
 
-- **API**: `POST /api/v1/agent/{worker_id}/media/{thread_id}` (multipart: audio/ogg, image/jpeg). Guardado en `/tmp/duckclaw_media/{uuid}`; cola ARQ para procesamiento.
-- **AudioTranscriber**: Whisper (MLX en Apple Silicon); salida texto en `<audio_transcription>`; borrado seguro del archivo (Habeas Data).
-- **VisionInterpreter**: modelo visión edge (p. ej. mlx-vlm); salida en `<image_description>`. Opción tmpfs para media en RAM; solo texto en LangSmith, nunca binario.
+- **Sensory node (Mac mini, Tailscale)**: microservicio `integrations/sensory-node` — STT (`mlx-whisper` 4-bit) y TTS (`OmniVoice` + Identity Lock). Endpoints edge: `POST /api/v1/sensory/transcribe`, `POST /api/v1/sensory/synthesize`, `GET /health`. El gateway VPS expone el mismo contrato como proxy (`routers/sensory.py`) cuando `DUCKCLAW_SENSORY_BASE_URL` apunta al Mac. Telegram voz (entrante/saliente) queda para fase posterior.
+- **AudioTranscriber (cliente)**: `services/api-gateway/core/sensory_client.py` + `stt_ingest.py`; salida enriquecida `<audio_transcription>`; sin disco (Habeas Data).
+- **VisionInterpreter**: implementado vía `vlm_ingest` (mlx-vlm); salida `Contexto visual adjunto:` / `[VLM_CONTEXT …]`.
+- **Legacy spec** (pendiente): `POST /api/v1/agent/{worker_id}/media/{thread_id}` multipart + cola ARQ.
 
 ---
 

@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Pencil, RotateCcw } from 'lucide-react';
+import { Check, Copy, Mic, Pencil, RotateCcw, Volume2 } from 'lucide-react';
 import { ArtifactImageLightbox } from '@/components/chat/ArtifactImageLightbox';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
+import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import {
   formatToolDurationMs,
@@ -115,12 +116,34 @@ export function ChatBubble({
 
   const copyText = useCallback(async () => {
     if (!displayText?.trim()) return;
+    const text = displayText;
+    let ok = false;
     try {
-      await navigator.clipboard.writeText(displayText);
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch {
+        ok = false;
+      }
+    }
+    if (ok) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* ignore */
     }
   }, [displayText]);
 
@@ -242,12 +265,50 @@ export function ChatBubble({
       ) : isUser || isError || isInterrupted || isHeartbeat ? (
         displayText?.trim() ? (
           <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+            {isUser && m.voiceNote ? (
+              <span className="inline-flex items-center gap-1 mr-1 opacity-90" title="Nota de voz">
+                <Mic size={14} aria-hidden />
+              </span>
+            ) : null}
             {displayText}
           </span>
         ) : null
       ) : (
         <>
           <ChatMarkdown content={displayText} />
+          {isAssistant && m.audioBase64 ? (
+            <button
+              type="button"
+              onClick={() => {
+                primeAudioPlayback();
+                void playTtsAudio(m.audioBase64!, {
+                  format: m.audioFormat,
+                  source: 'replay-button',
+                }).then((r) => {
+                  if (!r.ok && typeof window !== 'undefined') {
+                    window.alert(
+                      r.isIOS && r.mime.includes('ogg')
+                        ? 'Safari en iOS no reproduce OGG. El servidor debe devolver WAV.'
+                        : `No se pudo reproducir el audio (${r.reason}).`
+                    );
+                  }
+                });
+              }}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-gov-gray-200 dark:border-dark-border px-2.5 py-1 text-xs font-semibold text-gov-gray-700 dark:text-dark-muted hover:bg-gov-gray-100 dark:hover:bg-dark-border"
+              aria-label="Escuchar respuesta"
+            >
+              <Volume2 size={14} aria-hidden />
+              Escuchar respuesta
+            </button>
+          ) : null}
+          {isAssistant && m.audioPlayError ? (
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+              No se pudo reproducir automáticamente. Pulsa «Escuchar respuesta».
+            </p>
+          ) : null}
+          {isAssistant && m.audioUnavailable && !m.audioBase64 ? (
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">Audio no disponible (TTS).</p>
+          ) : null}
           {m.streaming && displayText && (
             <span className="inline-block w-2 h-4 ml-0.5 bg-gov-blue-600 animate-pulse align-middle" />
           )}

@@ -979,6 +979,7 @@ def _is_entry_route_system_event(text: str) -> bool:
 _QUANT_HRP_AFFIRM_RE = re.compile(
     r"^\s*("
     r"sí|si|ok|dale|adelante|procede|proceda|proceder|"
+    r"continua|continúa|continuar|sigue|siguiente|hazlo|"
     r"confirmo|yes|vamos|listo|claro"
     r")\s*\.?[\s!¡?¿]*$",
     re.IGNORECASE | re.UNICODE,
@@ -1229,6 +1230,44 @@ def _try_quant_hrp_affirm_followup(
     ]
     # Prefijo con símbolos evita que `_quant_extract_tickers` tome "TAREA" o ejemplos (TSLA, …) como ticker primario.
     planned = f"{_ticker_label} " + load_guardrail("manager_tasks", "quant_hrp_affirm_planned")
+    return (title, task_list, planned, "Quant-Trader")
+
+
+def _try_quant_generic_affirm_followup(
+    incoming: str,
+    history: Any,
+    assigned: str,
+    tenant_id: str,
+    available_plan: list[str],
+) -> tuple[str, list[str], str, str] | None:
+    """
+    Confirmación corta tras pregunta genérica del asistente (¿procedo?, ¿continúo?).
+    Evita replan LLM que reinicia sesión o dispersa tool calls.
+    """
+    if not _QUANT_HRP_AFFIRM_RE.match((incoming or "").strip()):
+        return None
+    plans = [str(x) for x in (available_plan or []) if x]
+    if "Quant-Trader" not in plans:
+        return None
+    w = (assigned or "").strip()
+    _tid = (tenant_id or "").strip().lower()
+    if w != "Quant-Trader" and _tid != "cuantitativo":
+        return None
+    bodies = _iter_assistant_bodies_newest_first(history)
+    newest = bodies[0] if bodies else None
+    if not newest:
+        return None
+    if _assistant_asks_hrp_rebalance_followup(newest):
+        return None
+    if not _assistant_asks_generic_confirmation(newest):
+        return None
+    title = "Confirmación — continuar plan Quant-Trader"
+    task_list = [
+        load_guardrail("manager_tasks", "quant_generic_affirm_task_flow"),
+    ]
+    ctx = newest[:4000]
+    planned = load_guardrail("manager_tasks", "quant_generic_affirm_planned")
+    planned = f"{planned}\n\nContexto del mensaje anterior del asistente:\n{ctx}"
     return (title, task_list, planned, "Quant-Trader")
 
 
@@ -1997,6 +2036,7 @@ def build_manager_graph(
             _log.warning("manager plan: incoming vacío en state (keys=%s)", list(state.keys()))
 
         _hrp_fast: tuple[str, list[str], str, str] | None = None
+        _generic_affirm: tuple[str, list[str], str, str] | None = None
         _orch_affirm: tuple[str, list[str], str, str] | None = None
         _visual_fast: tuple[str, list[str], str, str] | None = None
         _url_fast: tuple[str, list[str], str, str] | None = None
@@ -2023,11 +2063,19 @@ def build_manager_graph(
                 [str(x) for x in (available_plan or []) if x],
             )
         if incoming and not _orch_affirm and not _hrp_fast:
+            _generic_affirm = _try_quant_generic_affirm_followup(
+                incoming,
+                state.get("history"),
+                assigned,
+                _tid,
+                [str(x) for x in (available_plan or []) if x],
+            )
+        if incoming and not _orch_affirm and not _hrp_fast and not _generic_affirm:
             _visual_fast = _try_visual_generation_fast_plan(
                 incoming,
                 [str(x) for x in (available_plan or []) if x],
             )
-        if incoming and not _orch_affirm and not _hrp_fast and not _visual_fast:
+        if incoming and not _orch_affirm and not _hrp_fast and not _generic_affirm and not _visual_fast:
             _url_fast = _try_quant_url_research_fast_plan(
                 incoming,
                 [str(x) for x in (available_plan or []) if x],
@@ -2037,6 +2085,9 @@ def build_manager_graph(
             mercenary_spec = None
         elif _hrp_fast:
             plan_title, tasks, _inject_hrp, _ov_hrp = _hrp_fast
+            mercenary_spec = None
+        elif _generic_affirm:
+            plan_title, tasks, _inject_gen, _ov_gen = _generic_affirm
             mercenary_spec = None
         elif _visual_fast:
             plan_title, tasks, _inject_vis, _ov_vis = _visual_fast
@@ -2091,7 +2142,7 @@ def build_manager_graph(
             entry_worker_id=entry_wid,
             available_templates=list(available_plan or []),
         )
-        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _orch_affirm and not _hrp_fast and not _visual_fast and not _url_fast:
+        if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _orch_affirm and not _hrp_fast and not _generic_affirm and not _visual_fast and not _url_fast:
             assigned = job_hunter_in_team
 
         # Mantener lógica existente de ruteo / planned_task
@@ -2107,6 +2158,12 @@ def build_manager_graph(
             override_worker = _ov_hrp
             planned = _inject_hrp
             planned_final = _inject_hrp
+        elif _generic_affirm:
+            if _ov_gen and _ov_gen in (available_plan or []):
+                assigned = _ov_gen
+            override_worker = _ov_gen
+            planned = _inject_gen
+            planned_final = _inject_gen
         elif _visual_fast:
             if _ov_vis and _ov_vis in (available_plan or []):
                 assigned = _ov_vis
@@ -2127,7 +2184,7 @@ def build_manager_graph(
         if replan_enabled() and _pa_plan > 0:
             planned_final = (planned_final or "").strip() + format_replan_task_suffix(_pa_plan, _max_plan)
 
-        if coordinator_id and delegation_pool and not _orch_affirm and not _hrp_fast and not _visual_fast and not _url_fast:
+        if coordinator_id and delegation_pool and not _orch_affirm and not _hrp_fast and not _generic_affirm and not _visual_fast and not _url_fast:
             assigned = _resolve_orchestrator_delegate(
                 incoming,
                 delegation_pool,

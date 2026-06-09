@@ -105,6 +105,7 @@ export function AdminChatPanel({
     send,
     sendVoiceNote,
     voiceResponseMode,
+    voiceResponseAvailable,
     setVoiceResponseMode,
     retryFromMessage,
     editFromMessage,
@@ -463,6 +464,7 @@ export function AdminChatPanel({
             voiceRecording={voice.recording}
             voiceBusy={voice.busy}
             voiceResponseMode={voiceResponseMode}
+            voiceResponseAvailable={voiceResponseAvailable}
             imageCount={imageAttachments.pendingImages.length}
             onPickImage={() => imageAttachments.fileInputRef.current?.click()}
             onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}

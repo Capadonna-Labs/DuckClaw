@@ -375,6 +375,26 @@ def test_admin_chat_composer_has_voice_note_button() -> None:
     assert "Escuchar respuesta" in bubble
 
 
+def test_admin_chat_voice_response_defaults_off_and_gates_tts_toggle() -> None:
+    hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(
+        encoding="utf-8"
+    )
+    menu = Path("apps/duckclaw-admin/src/components/chat/MediaAttachMenu.tsx").read_text(
+        encoding="utf-8"
+    )
+    panel = Path("apps/duckclaw-admin/src/components/chat/AdminChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+
+    assert "useState(false)" in hook or "useState(false);" in hook
+    assert "voiceResponseAvailable" in hook
+    assert "config?.voice?.available" in hook
+    assert "voice_response: voiceResponseMode" in hook
+    assert "voiceResponseAvailable" in menu
+    assert "Sensory TTS no disponible" in menu
+    assert "voiceResponseAvailable={voiceResponseAvailable}" in panel
+
+
 def test_admin_pages_avoid_internal_jargon_copy() -> None:
     targets = [
         "apps/duckclaw-admin/src/app/(admin)/projects/page.tsx",

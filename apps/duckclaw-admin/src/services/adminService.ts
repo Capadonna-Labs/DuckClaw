@@ -1128,6 +1128,11 @@ export const adminService = {
       vault?: PlaygroundVaultInfo;
       vault_options?: { path: string; scope: string; vault_id?: string; label?: string }[];
       selected_worker_id?: string;
+      voice?: {
+        configured: boolean;
+        available: boolean;
+        tts_loaded: boolean;
+      };
       note: string;
     }>(`/playground/config${qs ? `?${qs}` : ''}`);
   },

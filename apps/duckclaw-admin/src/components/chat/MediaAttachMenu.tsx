@@ -9,6 +9,7 @@ export type MediaAttachMenuProps = {
   voiceRecording: boolean;
   voiceBusy: boolean;
   voiceResponseMode: boolean;
+  voiceResponseAvailable: boolean;
   imageCount: number;
   maxImages?: number;
   onPickImage: () => void;
@@ -22,6 +23,7 @@ export function MediaAttachMenu({
   voiceRecording,
   voiceBusy,
   voiceResponseMode,
+  voiceResponseAvailable,
   imageCount,
   maxImages = 3,
   onPickImage,
@@ -42,7 +44,10 @@ export function MediaAttachMenu({
 
   const imageDisabled =
     !canSend || loading || voiceRecording || imageCount >= maxImages;
-  const ttsDisabled = !canSend;
+  const ttsDisabled = !canSend || !voiceResponseAvailable;
+  const ttsUnavailableTitle = voiceResponseAvailable
+    ? undefined
+    : 'Sensory TTS no disponible (configura DUCKCLAW_SENSORY_BASE_URL y arranca sensory_node)';
   const micDisabled = !canSend || (loading && !voiceRecording) || voiceBusy;
 
   return (
@@ -88,12 +93,14 @@ export function MediaAttachMenu({
             role="menuitem"
             disabled={ttsDisabled}
             onClick={onToggleVoiceResponse}
+            title={ttsUnavailableTitle}
             className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left hover:bg-gov-gray-100 dark:hover:bg-dark-bg disabled:opacity-50 ${
               voiceResponseMode
                 ? 'text-gov-blue-800 dark:text-gov-blue-200 font-semibold'
                 : 'text-gov-gray-600 dark:text-dark-muted'
             }`}
             aria-pressed={voiceResponseMode}
+            aria-disabled={ttsDisabled}
           >
             {voiceResponseMode ? <Volume2 size={16} aria-hidden /> : <VolumeX size={16} aria-hidden />}
             Voz automática

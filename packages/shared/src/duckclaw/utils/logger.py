@@ -215,7 +215,6 @@ DEFAULT_STRUCTURED_LOGGERS: tuple[str, ...] = (
     "duckclaw.workers.factory",
     "duckclaw.fly",
     "duckclaw.forge",
-    "duckclaw.forge.skills.ibkr_bridge",
     "duckclaw.bi.agent",
 )
 

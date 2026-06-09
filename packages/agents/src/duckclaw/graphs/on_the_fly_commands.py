@@ -2087,91 +2087,6 @@ def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
     return f"Uso: /sandbox on|off\nEstado actual: {status}."
 
 
-def _parse_ibkr_toggle_args(args: str) -> tuple[Optional[bool], Optional[str], Optional[str]]:
-    """
-    ``/ibkr on --mode paper|live`` | ``/ibkr off``.
-    Retorna (on|off|None, mode|None, error|None).
-    """
-    tokens = (args or "").strip().split()
-    if not tokens:
-        return None, None, None
-    head = tokens[0].strip().lower()
-    on_off: Optional[bool]
-    if head in ("on", "1", "true", "sí", "si"):
-        on_off = True
-    elif head in ("off", "0", "false"):
-        on_off = False
-    else:
-        return None, None, "Uso: /ibkr on --mode paper|live | /ibkr off"
-    mode: Optional[str] = None
-    i = 1
-    while i < len(tokens):
-        if tokens[i] == "--mode" and i + 1 < len(tokens):
-            mode = tokens[i + 1].strip().lower()
-            i += 2
-            continue
-        i += 1
-    if on_off is True:
-        if mode not in ("paper", "live"):
-            return True, None, "Con /ibkr on debes indicar --mode paper o --mode live."
-    return on_off, mode, None
-
-
-def _ibkr_worker_slug(entry_worker_id: str | None) -> str:
-    return re.sub(r"[^a-z0-9]", "", (entry_worker_id or "").strip().lower())
-
-
-def _ibkr_worker_label(entry_worker_id: str | None = None) -> str:
-    """Etiqueta humana del worker activo para mensajes /ibkr."""
-    slug = _ibkr_worker_slug(entry_worker_id)
-    if slug in ("finanz", "finanzworker"):
-        return "Finanz"
-    if slug in ("quanttrader", "quanttraderworker"):
-        return "Quant-Trader"
-    return "este agente"
-
-
-def execute_ibkr_toggle(
-    db: Any,
-    chat_id: Any,
-    args: str,
-    *,
-    entry_worker_id: str | None = None,
-) -> str:
-    """/ibkr on --mode paper|live | /ibkr off: portfolio IBKR por sesión."""
-    on_off, mode, err = _parse_ibkr_toggle_args(args)
-    if err:
-        return err
-    agent = _ibkr_worker_label(entry_worker_id)
-    if on_off is True:
-        set_chat_state(db, chat_id, "ibkr_enabled", "true")
-        set_chat_state(db, chat_id, "ibkr_portfolio_mode", str(mode or "paper"))
-        label = "paper" if mode == "paper" else "live"
-        return (
-            f"IBKR portfolio activado para esta sesión (modo {label}). "
-            f"{agent} puede usar get_ibkr_portfolio en este chat."
-        )
-    if on_off is False:
-        set_chat_state(db, chat_id, "ibkr_enabled", "false")
-        return (
-            f"IBKR portfolio desactivado para esta sesión. "
-            f"{agent} no llamará get_ibkr_portfolio hasta /ibkr on."
-        )
-    enabled = (get_chat_state(db, chat_id, "ibkr_enabled") or "").strip().lower() in (
-        "true",
-        "1",
-        "on",
-        "sí",
-        "si",
-    )
-    cur_mode = (get_chat_state(db, chat_id, "ibkr_portfolio_mode") or "—").strip() or "—"
-    status = f"on ({cur_mode})" if enabled else "off"
-    return (
-        "Uso: /ibkr on --mode paper|live | /ibkr off\n"
-        f"Estado actual: {status}."
-    )
-
-
 def execute_internet_toggle(
     db: Any,
     chat_id: Any,
@@ -3292,11 +3207,14 @@ def _ssh_reach_icon(reach: str) -> str:
 
 def _capadonna_lake_status_lines(*, compact: bool) -> list[str]:
     """Líneas de diagnóstico de datos del VPS (misma lógica que /lake; compact para /sensors)."""
-    from duckclaw.forge.skills.quant_market_bridge import (
-        capadonna_ssh_config_ok,
-        lake_belief_observed_values,
-        _resolved_identity_file,
-    )
+    from duckclaw.capadonna_plugin import load_capadonna_lib
+
+    _qmb = load_capadonna_lib("quant_market_bridge")
+    if _qmb is None:
+        return ["Capadonna lake: plugin no disponible (CAPADONNA_DRILLER_ROOT)."]
+    capadonna_ssh_config_ok = _qmb.capadonna_ssh_config_ok
+    lake_belief_observed_values = _qmb.lake_belief_observed_values
+    _resolved_identity_file = _qmb._resolved_identity_file
 
     host = (os.environ.get("CAPADONNA_SSH_HOST") or "").strip()
     user = (os.environ.get("CAPADONNA_SSH_USER") or "capadonna").strip()
@@ -4442,7 +4360,13 @@ def _session_notionals_from_ibkr_for_tickers(
     """
     import os
 
-    from duckclaw.forge.skills.ibkr_bridge import _ibkr_resolve_payload_with_optional_alt
+    from duckclaw.capadonna_plugin import load_capadonna_lib
+
+    _ibkr = load_capadonna_lib("ibkr_bridge")
+    if _ibkr is None:
+        zero = {p: 0.0 for p in parts}
+        return zero, "capadonna_ibkr_plugin_missing", None
+    _ibkr_resolve_payload_with_optional_alt = _ibkr._ibkr_resolve_payload_with_optional_alt
 
     api_url = (os.environ.get("IBKR_PORTFOLIO_API_URL") or "").strip()
     api_key = (os.environ.get("IBKR_PORTFOLIO_API_KEY") or "").strip()
@@ -4994,12 +4918,12 @@ def _compute_trading_session_pnl_now_with_confidence(
     except Exception:
         pass
     try:
-        from duckclaw.forge.skills.ibkr_bridge import (
-            fetch_ibkr_total_equity_numeric,
-            fetch_ibkr_unrealized_pnl_total_numeric,
-        )
+        from duckclaw.capadonna_plugin import load_capadonna_lib
 
-        ibkr_u, _err = fetch_ibkr_unrealized_pnl_total_numeric()
+        _ibkr = load_capadonna_lib("ibkr_bridge")
+        if _ibkr is None:
+            raise RuntimeError("capadonna ibkr plugin missing")
+        ibkr_u, _err = _ibkr.fetch_ibkr_unrealized_pnl_total_numeric()
         if ibkr_u is not None and abs(float(ibkr_u)) > 1e-12:
             return (float(ibkr_u), True)
         anchor_eq = 0.0
@@ -5014,7 +4938,7 @@ def _compute_trading_session_pnl_now_with_confidence(
         except Exception:
             anchor_eq = 0.0
         if anchor_eq > 1e-9:
-            eq_now, _eq_err = fetch_ibkr_total_equity_numeric()
+            eq_now, _eq_err = _ibkr.fetch_ibkr_total_equity_numeric()
             if eq_now is not None:
                 return (float(eq_now) - float(anchor_eq), True)
     except Exception:
@@ -5489,9 +5413,13 @@ ON CONFLICT (id) DO UPDATE SET
     if not ok:
         return f"No se pudo guardar la sesión: {detail}"
     try:
-        from duckclaw.forge.skills.ibkr_bridge import fetch_ibkr_total_equity_numeric
+        from duckclaw.capadonna_plugin import load_capadonna_lib
 
-        eq, _eq_err = fetch_ibkr_total_equity_numeric()
+        _ibkr = load_capadonna_lib("ibkr_bridge")
+        if _ibkr is not None:
+            eq, _eq_err = _ibkr.fetch_ibkr_total_equity_numeric()
+        else:
+            eq, _eq_err = None, "capadonna_ibkr_plugin_missing"
         if eq is not None:
             _vault_apply_sql_statements(
                 db,
@@ -5557,21 +5485,25 @@ def execute_quant_cycle(
             "`--weight 5` · `--execute auto|off`\n"
             "Si no pasas `--tickers`, se usan los de `quant_core.trading_sessions` (id=active) o `SPY` por defecto."
         )
-    from duckclaw.forge.skills.ibkr_bridge import _get_ibkr_portfolio_impl
-    from duckclaw.forge.skills.quant_market_bridge import _fetch_ib_gateway_ohlcv_impl
-    from duckclaw.forge.skills.quant_tool_context import (
-        bind_quant_market_evidence_chat,
-        note_quant_market_evidence_ticker,
-        reset_quant_market_evidence,
-        set_quant_tool_chat_id,
-        set_quant_tool_db_path,
-        set_quant_tool_tenant_id,
-        set_quant_tool_user_id,
-    )
-    from duckclaw.forge.skills.quant_trader_bridge import (
-        _evaluate_cfd_state_impl,
-        _run_quant_signal_cycle_impl,
-    )
+    from duckclaw.capadonna_plugin import load_capadonna_lib
+
+    _ibkr = load_capadonna_lib("ibkr_bridge")
+    _qmb = load_capadonna_lib("quant_market_bridge")
+    _qtc = load_capadonna_lib("quant_tool_context")
+    _qtb = load_capadonna_lib("quant_trader_bridge")
+    if _ibkr is None or _qmb is None or _qtc is None or _qtb is None:
+        return "Capadonna quant plugins no disponibles (CAPADONNA_DRILLER_ROOT)."
+    _get_ibkr_portfolio_impl = _ibkr._get_ibkr_portfolio_impl
+    _fetch_ib_gateway_ohlcv_impl = _qmb._fetch_ib_gateway_ohlcv_impl
+    bind_quant_market_evidence_chat = _qtc.bind_quant_market_evidence_chat
+    note_quant_market_evidence_ticker = _qtc.note_quant_market_evidence_ticker
+    reset_quant_market_evidence = _qtc.reset_quant_market_evidence
+    set_quant_tool_chat_id = _qtc.set_quant_tool_chat_id
+    set_quant_tool_db_path = _qtc.set_quant_tool_db_path
+    set_quant_tool_tenant_id = _qtc.set_quant_tool_tenant_id
+    set_quant_tool_user_id = _qtc.set_quant_tool_user_id
+    _evaluate_cfd_state_impl = _qtb._evaluate_cfd_state_impl
+    _run_quant_signal_cycle_impl = _qtb._run_quant_signal_cycle_impl
 
     tid = str(tenant_id or "default").strip() or "default"
     cid = str(chat_id).strip() or "default"
@@ -5832,9 +5764,12 @@ def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
     if not ok_ledger:
         return f"No: {ledger_msg}"
     try:
-        from duckclaw.forge.skills.quant_hitl import grant_execute_order
+        from duckclaw.capadonna_plugin import load_capadonna_lib
 
-        grant_execute_order(str(chat_id).strip(), sid)
+        _hitl = load_capadonna_lib("quant_hitl")
+        if _hitl is None:
+            return "Capadonna quant_hitl plugin no disponible."
+        _hitl.grant_execute_order(str(chat_id).strip(), sid)
     except Exception as e:
         return f"No se pudo registrar la confirmación: {e}"
     return (
@@ -5848,11 +5783,12 @@ def execute_quant_profile(db: Any, chat_id: Any, args: str, *, tenant_id: Any = 
     """`/profile`: perfil inferido desde VSS (Quantum vault)."""
     del args
     from duckclaw.forge.atoms.investor_profile_vss import format_profile_summary, get_investor_profile
-    from duckclaw.forge.skills.quant_tool_context import set_quant_tool_db_path
+    from duckclaw.capadonna_plugin import load_capadonna_lib
 
+    _qtc = load_capadonna_lib("quant_tool_context")
     raw_path = str(getattr(db, "_path", "") or "").strip()
-    if raw_path:
-        set_quant_tool_db_path(raw_path)
+    if raw_path and _qtc is not None:
+        _qtc.set_quant_tool_db_path(raw_path)
     tid = str(tenant_id or get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
     try:
         profile = get_investor_profile(db, tid)
@@ -5909,12 +5845,17 @@ def execute_quant_macro_update(
 
 def execute_quant_execute_all_moc(db: Any, chat_id: Any, args: str) -> str:
     """/execute_all_moc <session_uid>: aprueba y ejecuta en secuencia señales MOC batch."""
-    from duckclaw.forge.skills.quant_hitl import grant_execute_order
-    from duckclaw.forge.skills.quant_tool_context import (
-        set_quant_tool_chat_id,
-        set_quant_tool_db_path,
-    )
-    from duckclaw.forge.skills.quant_trader_bridge import _execute_approved_signal_impl
+    from duckclaw.capadonna_plugin import load_capadonna_lib
+
+    _hitl = load_capadonna_lib("quant_hitl")
+    _qtc = load_capadonna_lib("quant_tool_context")
+    _qtb = load_capadonna_lib("quant_trader_bridge")
+    if _hitl is None or _qtc is None or _qtb is None:
+        return "Capadonna quant plugins no disponibles (CAPADONNA_DRILLER_ROOT)."
+    grant_execute_order = _hitl.grant_execute_order
+    set_quant_tool_chat_id = _qtc.set_quant_tool_chat_id
+    set_quant_tool_db_path = _qtc.set_quant_tool_db_path
+    _execute_approved_signal_impl = _qtb._execute_approved_signal_impl
 
     session_uid = (args or "").strip().split()[0] if (args or "").strip() else ""
     if not re.match(
@@ -6211,7 +6152,17 @@ def _dispatch_fly_command(
     if name in ("sandbox", "sandox"):
         return execute_sandbox_toggle(db, chat_id, args)
     if name == "ibkr":
-        return execute_ibkr_toggle(db, chat_id, args, entry_worker_id=entry_worker_id)
+        from duckclaw.capadonna_plugin import dispatch_capadonna_fly_command
+
+        _ibkr = dispatch_capadonna_fly_command(
+            "ibkr", db, chat_id, args, entry_worker_id=entry_worker_id
+        )
+        if _ibkr is not None:
+            return _ibkr
+        return (
+            "Comando /ibkr no disponible: configura CAPADONNA_DRILLER_ROOT "
+            "(Capadonna-Driller workers/duckclaw/lib)."
+        )
     if name in ("internet", "red", "network"):
         return execute_internet_toggle(db, chat_id, args, tenant_id=tenant_id)
     if name == "heartbeat":

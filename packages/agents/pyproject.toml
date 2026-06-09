@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "duckclaw-agents"
 version = "0.1.0"
 description = "LangGraph agents and workers for DuckClaw"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "duckclaw-edge-devices",
     "langgraph>=0.2.0",

@@ -891,7 +891,7 @@ def _github_infer_feature_branch(messages: list[Any]) -> str | None:
 
 _GITHUB_CANCEL_TRADE_SIGNAL_MANIFEST: tuple[str, ...] = (
     "packages/agents/src/duckclaw/forge/atoms/trade_signal_cancel.py",
-    "packages/agents/src/duckclaw/forge/skills/quant_trader_bridge.py",
+    "workers/duckclaw/lib/quant_trader_bridge.py",
     "packages/agents/src/duckclaw/workers/factory.py",
     "tests/test_cancel_trade_signal_tool.py",
     "specs/features/platform/QUANT_TRADE_SIGNAL_CANCEL.md",
@@ -3423,9 +3423,12 @@ def _sync_finanz_lake_beliefs(db: Any, spec: WorkerSpec) -> None:
     if not isinstance(_qcfg, dict) or not _qcfg.get("enabled"):
         return
     try:
-        from duckclaw.forge.skills.quant_market_bridge import lake_belief_observed_values
+        from duckclaw.capadonna_plugin import load_capadonna_lib
 
-        host_v, online_v = lake_belief_observed_values()
+        _qmb = load_capadonna_lib("quant_market_bridge")
+        if _qmb is None:
+            return
+        host_v, online_v = _qmb.lake_belief_observed_values()
     except Exception:
         _log.debug("lake_belief_observed_values failed", exc_info=True)
         return
@@ -3925,15 +3928,16 @@ def build_worker_graph(
 
     if getattr(spec, "ibkr_config", None) is not None:
         try:
-            from duckclaw.forge.skills.ibkr_bridge import (
-                register_ibkr_skill,
-                replace_get_ibkr_portfolio_with_finanz_live_variant,
-            )
+            from duckclaw.capadonna_plugin import register_ibkr_skills
 
-            register_ibkr_skill(tools, spec.ibkr_config)
             _lid_ibkr = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
-            if is_finanz(_lid_ibkr):
-                replace_get_ibkr_portfolio_with_finanz_live_variant(tools, str(path))
+            register_ibkr_skills(
+                tools,
+                spec.ibkr_config,
+                worker_path=str(path),
+                logical_worker_id=_lid_ibkr,
+                is_finanz_worker=is_finanz(_lid_ibkr),
+            )
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             pass
@@ -3956,30 +3960,22 @@ def build_worker_graph(
         except Exception:
             _log.debug("comfyui skills registration skipped", exc_info=True)
 
-    _qcfg = getattr(spec, "quant_config", None)
     _lid_q = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
-    if isinstance(_qcfg, dict) and _qcfg.get("enabled") and is_finanz(_lid_q):
-        try:
-            from duckclaw.forge.skills.quant_market_bridge import register_quant_market_skill
-            from duckclaw.forge.skills.quant_trade_bridge import register_quant_trade_skills
+    try:
+        from duckclaw.capadonna_plugin import register_quant_skills
 
-            register_quant_market_skill(db, tools, spec)
-            register_quant_trade_skills(db, spec, tools)
-            if _qcfg.get("cfd"):
-                from duckclaw.forge.skills.quant_cfd_bridge import register_quant_cfd_skill
-
-                register_quant_cfd_skill(db, spec, tools)
-            tools_by_name = {t.name: t for t in tools}
-        except Exception:
-            _log.debug("quant skills registration skipped", exc_info=True)
-    elif isinstance(_qcfg, dict) and _qcfg.get("enabled") and is_quant_trader(_lid_q) and llm is not None:
-        try:
-            from duckclaw.forge.skills.quant_trader_bridge import register_quant_trader_skills
-
-            register_quant_trader_skills(db, llm, tools)
-            tools_by_name = {t.name: t for t in tools}
-        except Exception:
-            _log.debug("quant_trader skills registration skipped", exc_info=True)
+        register_quant_skills(
+            db=db,
+            spec=spec,
+            tools=tools,
+            llm=llm,
+            logical_worker_id=_lid_q,
+            is_finanz_worker=is_finanz(_lid_q),
+            is_quant_trader_worker=is_quant_trader(_lid_q),
+        )
+        tools_by_name = {t.name: t for t in tools}
+    except Exception:
+        _log.debug("quant skills registration skipped", exc_info=True)
 
     if getattr(spec, "sft_config", None):
         try:
@@ -4125,9 +4121,10 @@ def build_worker_graph(
                 pass
         if is_quant_trader(_lid):
             try:
-                from duckclaw.forge.skills.quant_trader_bridge import quant_trading_session_prompt_block
+                from duckclaw.capadonna_plugin import load_capadonna_lib
 
-                _qblk = quant_trading_session_prompt_block(db)
+                _qtb = load_capadonna_lib("quant_trader_bridge")
+                _qblk = _qtb.quant_trading_session_prompt_block(db) if _qtb is not None else ""
                 if _qblk:
                     prompt = prompt + "\n\n" + _qblk
             except Exception:
@@ -4732,14 +4729,13 @@ def build_worker_graph(
             _ev_msgs = state.get("messages") or []
             _ev_last = _ev_msgs[-1] if _ev_msgs else None
             if is_quant_trader(_lid):
-                from duckclaw.forge.skills.quant_tool_context import (
-                    bind_quant_market_evidence_chat,
-                    reset_quant_market_evidence,
-                )
+                from duckclaw.capadonna_plugin import load_capadonna_lib
 
-                bind_quant_market_evidence_chat(str(_chat_ctx))
-                if _ev_last is None or isinstance(_ev_last, HumanMessage):
-                    reset_quant_market_evidence()
+                _qtc = load_capadonna_lib("quant_tool_context")
+                if _qtc is not None:
+                    _qtc.bind_quant_market_evidence_chat(str(_chat_ctx))
+                    if _ev_last is None or isinstance(_ev_last, HumanMessage):
+                        _qtc.reset_quant_market_evidence()
             _wl = _worker_log_label(worker_id)
             cfg = config or {}
             incoming = (
@@ -6837,20 +6833,16 @@ def build_worker_graph(
             or "execute_approved_signal" in tools_by_name
             or "propose_trade_signal" in tools_by_name
         ):
-            from duckclaw.forge.skills.quant_tool_context import (
-                bind_quant_market_evidence_chat,
-                set_quant_tool_chat_id,
-                set_quant_tool_db_path,
-                set_quant_tool_tenant_id,
-                set_quant_tool_user_id,
-            )
+            from duckclaw.capadonna_plugin import load_capadonna_lib
 
-            bind_quant_market_evidence_chat(str(_chat_ctx))
-            set_quant_tool_chat_id(str(_chat_ctx))
-            set_quant_tool_tenant_id(_tenant_ctx)
-            _q_uid = str(state.get("user_id") or "").strip() or str(_chat_ctx)
-            set_quant_tool_user_id(_q_uid)
-            set_quant_tool_db_path(str(path))
+            _qtc = load_capadonna_lib("quant_tool_context")
+            if _qtc is not None:
+                _qtc.bind_quant_market_evidence_chat(str(_chat_ctx))
+                _qtc.set_quant_tool_chat_id(str(_chat_ctx))
+                _qtc.set_quant_tool_tenant_id(_tenant_ctx)
+                _q_uid = str(state.get("user_id") or "").strip() or str(_chat_ctx)
+                _qtc.set_quant_tool_user_id(_q_uid)
+                _qtc.set_quant_tool_db_path(str(path))
         _wl = _worker_log_label(worker_id)
         messages = state["messages"]
         last = messages[-1]
@@ -7106,13 +7098,12 @@ def build_worker_graph(
                                                 is_admin_ui_chat_session,
                                                 publish_admin_chat_heartbeat,
                                             )
-                                            from duckclaw.forge.skills.quant_tool_context import (
-                                                get_quant_tool_tenant_id,
-                                            )
+                                            from duckclaw.capadonna_plugin import load_capadonna_lib
 
+                                            _qtc = load_capadonna_lib("quant_tool_context")
                                             _cid = str(state.get("chat_id") or "").strip()
-                                            if _cid and is_admin_ui_chat_session(_cid):
-                                                _hb_tid = get_quant_tool_tenant_id()
+                                            if _cid and is_admin_ui_chat_session(_cid) and _qtc is not None:
+                                                _hb_tid = _qtc.get_quant_tool_tenant_id()
                                                 publish_admin_chat_heartbeat(
                                                     _cid,
                                                     "Imagen generada (ComfyUI)",
@@ -7129,17 +7120,16 @@ def build_worker_graph(
                                         from duckclaw.forge.skills.comfyui_bridge import (
                                             read_artifact_image_as_b64,
                                         )
-                                        from duckclaw.forge.skills.quant_tool_context import (
-                                            get_quant_tool_tenant_id,
-                                        )
+                                        from duckclaw.capadonna_plugin import load_capadonna_lib
 
+                                        _qtc = load_capadonna_lib("quant_tool_context")
                                         arts = payload.get("artifacts")
-                                        if isinstance(arts, list) and arts:
+                                        if isinstance(arts, list) and arts and _qtc is not None:
                                             first = str(arts[0] or "").strip()
                                             if first:
                                                 b64_art = read_artifact_image_as_b64(
                                                     first,
-                                                    get_quant_tool_tenant_id(),
+                                                    _qtc.get_quant_tool_tenant_id(),
                                                 )
                                                 if b64_art:
                                                     sandbox_b64 = b64_art
@@ -7335,11 +7325,11 @@ def build_worker_graph(
         reply = replace_bare_summarize_image_on_vlm_gateway_down(reply, incoming=_inc_for_ctx)
         reply = repair_summarize_new_context_egress(reply, incoming=_inc_for_ctx)
         if is_finanz(getattr(spec, "worker_id", "")):
-            from duckclaw.forge.skills.quant_market_bridge import (
-                finanz_reconcile_reply_with_fetch_market_tool,
-            )
+            from duckclaw.capadonna_plugin import load_capadonna_lib
 
-            reply = finanz_reconcile_reply_with_fetch_market_tool(msgs, reply)
+            _qmb = load_capadonna_lib("quant_market_bridge")
+            if _qmb is not None:
+                reply = _qmb.finanz_reconcile_reply_with_fetch_market_tool(msgs, reply)
         reply = format_reddit_mcp_reply_if_applicable(reply)
         suppress_egress = bool(state.get("suppress_subagent_egress"))
 

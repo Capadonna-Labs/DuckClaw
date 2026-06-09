@@ -166,9 +166,12 @@ def _read_quant_drawdown_pct(db: Any) -> float | None:
         anchor = float(rows[0].get("anchor_equity") or 0.0)
         if anchor <= 1e-9:
             return None
-        from duckclaw.forge.skills.ibkr_bridge import fetch_ibkr_total_equity_numeric
+        from duckclaw.capadonna_plugin import load_capadonna_lib
 
-        eq, _ = fetch_ibkr_total_equity_numeric()
+        _ibkr = load_capadonna_lib("ibkr_bridge")
+        if _ibkr is None:
+            return None
+        eq, _ = _ibkr.fetch_ibkr_total_equity_numeric()
         if eq is None:
             return None
         dd = max(0.0, (anchor - float(eq)) / anchor)

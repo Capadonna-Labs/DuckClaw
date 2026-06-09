@@ -67,7 +67,12 @@ def _read_manual_override(db: Any) -> tuple[str | None, float | None, str]:
 
 
 def _vix_last_close(db: Any) -> float | None:
-    from duckclaw.forge.skills.quant_market_bridge import _fetch_ib_gateway_ohlcv_impl
+    from duckclaw.capadonna_plugin import load_capadonna_lib
+
+    _qmb = load_capadonna_lib("quant_market_bridge")
+    if _qmb is None:
+        return None
+    _fetch_ib_gateway_ohlcv_impl = _qmb._fetch_ib_gateway_ohlcv_impl
 
     try:
         raw = _fetch_ib_gateway_ohlcv_impl(db, ticker="VIX", timeframe="1d", lookback_days=7)

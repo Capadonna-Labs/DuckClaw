@@ -212,11 +212,30 @@ def test_generate_visual_asset_empty_prompt(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_state_delta_base_uses_gateway_hub_not_worker_vault(monkeypatch: pytest.MonkeyPatch) -> None:
     from duckclaw.forge.skills.comfyui_bridge import _state_delta_base
-    from duckclaw.forge.skills.quant_tool_context import (
-        set_quant_tool_db_path,
-        set_quant_tool_tenant_id,
-        set_quant_tool_user_id,
-    )
+
+    class _FakeQuantCtx:
+        tenant_id = ""
+        user_id = ""
+
+        @staticmethod
+        def set_quant_tool_db_path(_path: str) -> None:
+            pass
+
+        @classmethod
+        def set_quant_tool_tenant_id(cls, tid: str) -> None:
+            cls.tenant_id = tid
+
+        @classmethod
+        def set_quant_tool_user_id(cls, uid: str) -> None:
+            cls.user_id = uid
+
+        @classmethod
+        def get_quant_tool_tenant_id(cls) -> str:
+            return cls.tenant_id
+
+        @classmethod
+        def get_quant_tool_user_id(cls) -> str:
+            return cls.user_id
 
     hub = "/tmp/finanzdb1.duckdb"
     worker_vault = "/tmp/quant_traderdb1.duckdb"
@@ -224,9 +243,13 @@ def test_state_delta_base_uses_gateway_hub_not_worker_vault(monkeypatch: pytest.
         "duckclaw.gateway_db.get_gateway_db_path",
         lambda: hub,
     )
-    set_quant_tool_db_path(worker_vault)
-    set_quant_tool_tenant_id("Cuantitativo")
-    set_quant_tool_user_id("1726618406")
+    monkeypatch.setattr(
+        "duckclaw.capadonna_plugin.load_capadonna_lib",
+        lambda name: _FakeQuantCtx if name == "quant_tool_context" else None,
+    )
+    _FakeQuantCtx.set_quant_tool_db_path(worker_vault)
+    _FakeQuantCtx.set_quant_tool_tenant_id("Cuantitativo")
+    _FakeQuantCtx.set_quant_tool_user_id("1726618406")
     base = _state_delta_base()
     assert base["target_db_path"] == hub
     assert base["target_db_path"] != worker_vault

@@ -223,7 +223,11 @@ def test_execute_signal_wr_requires_admin(db, monkeypatch: pytest.MonkeyPatch) -
     )
 
     monkeypatch.setattr("duckclaw.graphs.graph_server.get_db", lambda: d)
-    monkeypatch.setattr("duckclaw.forge.skills.quant_hitl.grant_execute_order", lambda *_a, **_k: None)
+    _hitl = type("Hitl", (), {"grant_execute_order": staticmethod(lambda *_a, **_k: None)})()
+    monkeypatch.setattr(
+        "duckclaw.capadonna_plugin.load_capadonna_lib",
+        lambda name: _hitl if name == "quant_hitl" else None,
+    )
     signal_id = "123e4567-e89b-12d3-a456-426614174000"
 
     denied = handle_command(

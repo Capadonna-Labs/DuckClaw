@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "duckclaw-shared"
 version = "0.1.0"
 description = "Shared utilities and integrations for DuckClaw"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.25.0",
     "redis>=5.0.0",

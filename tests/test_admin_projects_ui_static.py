@@ -12,7 +12,7 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     db_first_router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
     bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
 
-    assert "Catálogo DB-first" in page
+    assert "<FolderKanban size={28} /> Proyectos" in page
     assert "listWorkspaceProjectsPage" in page
     assert "page.projects.length === 0" in page
     assert "page.total > 0" in page

@@ -86,6 +86,7 @@ export const INTEGRATIONS_NAV_GROUP: AdminNavGroup = {
   items: [
     { href: '/telegram', label: 'Telegram', section: 'integrations', audience: 'admin' },
     { href: '/integrations/edge-devices', label: 'Edge devices', section: 'integrations', audience: 'admin' },
+    { href: '/integrations/sensory-node', label: 'Sensory node', section: 'integrations', audience: 'admin' },
   ],
 };
 
@@ -173,6 +174,7 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/gen/image': 'Image',
   '/telegram': 'Telegram',
   '/integrations/edge-devices': 'Edge devices',
+  '/integrations/sensory-node': 'Sensory node',
   '/admin': 'Administración',
 };
 

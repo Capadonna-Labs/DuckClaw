@@ -2689,6 +2689,12 @@ except ImportError as _admin_imp_err:
     _gateway_log.error("Admin router omitido: %s", _admin_imp_err)
 
 try:
+    from routers.sensory import router as sensory_router
+    app.include_router(sensory_router)
+except ImportError as _sensory_imp_err:
+    _gateway_log.warning("Sensory router omitido: %s", _sensory_imp_err)
+
+try:
     from duckclaw.graphs.novnc_routes import build_novnc_router
 
     app.include_router(

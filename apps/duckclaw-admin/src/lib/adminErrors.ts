@@ -54,5 +54,8 @@ export function friendlyGatewayError(raw: string): string {
   if (/stt inference failed|stt no disponible/i.test(raw)) {
     return 'No se pudo transcribir el audio. El nodo sensory no decodificó el formato; reintenta tras actualizar.';
   }
+  if (/procesando imagen|vlm|connecttimeout.*8081/i.test(m)) {
+    return 'No se pudo analizar la imagen (Mac mini / MLX fuera de línea). El mensaje de texto puede seguir; reintenta cuando Tailscale muestre el Mac activo.';
+  }
   return raw;
 }

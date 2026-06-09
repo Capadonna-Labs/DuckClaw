@@ -9,7 +9,7 @@ Dado que el host es una Mac Mini M4, se utilizará el motor de contenedores de O
 
 *   **Imagen Base:** `python:3.12-slim` (o una imagen personalizada `duckclaw-strix-base` pre-empaquetada con `polars`, `pyarrow` y `requests`).
 *   **Imagen `docker/sandbox` (referencia):** pandas, matplotlib, mplfinance, seaborn, duckdb, scipy, scikit-learn, pyarrow, requests, vaderSentiment, **`yfinance`** (falla si `network=deny` salvo modo offline/cache), **`ml4t-diagnostic[backtest]`** (métricas y motor backtest ML4T; sin **ml4t-data** para no duplicar la ingesta DuckClaw).
-*   **Jobs batch ML4T offline (`network none`):** `scripts/quant/run_ml4t_batch_docker.sh` monta el `.duckdb` **solo lectura** y ejecuta diagnósticos/vector summaries sobre `quant_core.ohlcv_data`; no sustituye al Singleton Writer.
+*   **Jobs batch ML4T offline (`network none`):** `Capadonna-Driller/scripts/quant/run_ml4t_batch_docker.sh` monta el `.duckdb` **solo lectura** y ejecuta diagnósticos/vector summaries sobre `quant_core.ohlcv_data`; no sustituye al Singleton Writer.
 *   **Quant-Trader `execute_sandbox_script`:** plantilla `forge/templates/Quant-Trader/security_policy.yaml` → `max_execution_time_seconds: 600` (techo Pydantic `le=600`). Backtests HRP/ML4T cortaban en 120s.
 *   **Restricciones de Daemon:**
     *   Ejecución forzada con `--user 1000:1000`.

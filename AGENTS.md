@@ -10,7 +10,7 @@ services/       # Long-running processes (FastAPI)
   api-gateway/  # FastAPI front door (main.py)
   db-writer/    # Singleton DuckDB writer (only process with write access)
   heartbeat/    # Proactive messaging
-  ibkr-ohlcv-api/
+# IBKR OHLCV API (:8002) and quant/ibkr ops scripts → Capadonna-Driller repo (see scripts/README-CAPADONNA-OPS.md)
 packages/       # Libraries (editable via pyproject.toml [tool.uv.sources])
   agents/       # LangGraph agent logic, templates, skills
   core/         # C++/Python core bindings

@@ -7,14 +7,10 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
-  ImagePlus,
-  Mic,
   Send,
-  Square,
-  Volume2,
-  VolumeX,
   X,
 } from 'lucide-react';
+import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
 import { useVoiceNoteRecorder } from '@/components/chat/useVoiceNoteRecorder';
 import { ChatViewTabBar, type ChatViewTab } from '@/components/chat/ChatViewTabBar';
 import {
@@ -461,45 +457,17 @@ export function AdminChatPanel({
             className="hidden"
             onChange={(e) => void imageAttachments.onPickFiles(e.target.files)}
           />
-          <button
-            type="button"
-            onClick={() => imageAttachments.fileInputRef.current?.click()}
-            disabled={!canSend || loading || voice.recording || imageAttachments.pendingImages.length >= 3}
-            className="px-2 py-2 border rounded-xl dark:border-dark-border disabled:opacity-50 shrink-0"
-            aria-label="Adjuntar imagen"
-            title="Adjuntar imagen"
-          >
-            <ImagePlus size={18} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setVoiceResponseMode((v) => !v)}
-            disabled={!canSend}
-            className={`px-2 py-2 border rounded-xl shrink-0 disabled:opacity-50 ${
-              voiceResponseMode
-                ? 'border-gov-blue-300 bg-gov-blue-50 text-gov-blue-800 dark:border-gov-blue-800 dark:bg-gov-blue-950/40 dark:text-gov-blue-200'
-                : 'dark:border-dark-border text-gov-gray-500 dark:text-dark-muted'
-            }`}
-            aria-label="Responder con voz"
-            aria-pressed={voiceResponseMode}
-            title={voiceResponseMode ? 'Responder con voz (activado)' : 'Responder con voz (desactivado)'}
-          >
-            {voiceResponseMode ? <Volume2 size={18} /> : <VolumeX size={18} />}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleVoiceClick()}
-            disabled={!canSend || !workerId || (loading && !voice.recording) || voice.busy}
-            className={`px-2 py-2 border rounded-xl shrink-0 disabled:opacity-50 ${
-              voice.recording
-                ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400'
-                : 'dark:border-dark-border'
-            }`}
-            aria-label={voice.recording ? 'Enviar nota de voz' : 'Grabar nota de voz'}
-            title={voice.recording ? 'Enviar nota de voz' : 'Grabar nota de voz'}
-          >
-            {voice.recording ? <Square size={18} /> : <Mic size={18} />}
-          </button>
+          <MediaAttachMenu
+            canSend={canSend && Boolean(workerId)}
+            loading={loading}
+            voiceRecording={voice.recording}
+            voiceBusy={voice.busy}
+            voiceResponseMode={voiceResponseMode}
+            imageCount={imageAttachments.pendingImages.length}
+            onPickImage={() => imageAttachments.fileInputRef.current?.click()}
+            onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}
+            onVoiceNoteClick={() => void handleVoiceClick()}
+          />
           <textarea
             ref={inputRef}
             value={input}

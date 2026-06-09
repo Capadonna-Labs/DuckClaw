@@ -18,7 +18,7 @@ from duckclaw_sensory_node.engines.tts import TTSEngine
 from duckclaw_sensory_node.health import build_health_payload
 from duckclaw_sensory_node.middleware import TailscaleOnlyMiddleware
 from duckclaw_sensory_node.models import STTRequest, STTResponse, TTSRequest, TTSResponse
-from duckclaw_sensory_node.sanitize import sanitize_tts_text
+from duckclaw_sensory_node.sanitize import prepare_tts_text
 
 _log = logging.getLogger("duckclaw.sensory")
 
@@ -98,7 +98,7 @@ def create_app() -> FastAPI:
         if not _tts.has_voice(body.voice_id):
             raise HTTPException(status_code=403, detail=f"voice_id not approved: {body.voice_id}")
 
-        clean = sanitize_tts_text(body.text)
+        clean = prepare_tts_text(body.text)
         if not clean:
             raise HTTPException(status_code=400, detail="text empty after sanitization")
 

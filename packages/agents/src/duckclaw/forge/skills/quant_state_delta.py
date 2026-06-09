@@ -30,8 +30,9 @@ def _same_vault_db_path(lhs: str, rhs: str) -> bool:
 
 def _release_ro_vault_for_remote_writer(payload: dict[str, Any], duckclaw_db: Any | None) -> bool:
     """
-    Cierra el handle RO del gateway/worker sobre el mismo .duckdb que recibirá el db-writer,
+    Cierra el handle del gateway/worker sobre el mismo .duckdb que recibirá el db-writer,
     para que DuckDB permita abrir RW en el proceso writer (encolado vía Redis).
+    Aplica a conexiones RO y RW (quant-trader abre vault RW en el mismo PID).
     """
     if duckclaw_db is None:
         return False
@@ -39,6 +40,13 @@ def _release_ro_vault_for_remote_writer(payload: dict[str, Any], duckclaw_db: An
     db_path = str(getattr(duckclaw_db, "_path", "") or "").strip()
     if not _same_vault_db_path(tgt, db_path):
         return False
+    release = getattr(duckclaw_db, "release_file_handle_for_external_writer", None)
+    if callable(release):
+        try:
+            release()
+            return True
+        except Exception:
+            return False
     if not bool(getattr(duckclaw_db, "_read_only", False)):
         return False
     susp = getattr(duckclaw_db, "suspend_readonly_file_handle", None)

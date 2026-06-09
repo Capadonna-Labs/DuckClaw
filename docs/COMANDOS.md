@@ -225,3 +225,27 @@ export DUCKCLAW_REDDIT_MCP_ARGS="/ruta/a/mcp-reddit/dist/server.js"
 ```
 
 Spec: `specs/features/quant/QUANT_REDDIT_MCP_SENTIMENT.md`.
+
+## Google Trends MCP (Finanz / Quant-Trader)
+
+Incluido en `uv sync` por defecto (`google-trends-mcp` en el venv del gateway). Se registra automáticamente en workers de mercado (`finanz`, `quant_trader`) en turnos con `tool_surface=full` (tools: `interest_over_time`, `related_queries`).
+
+```bash
+cd /root/duckclaw   # o la raíz del monorepo
+uv sync
+pm2 restart DuckClaw-Gateway --update-env
+```
+
+Verificación en Telegram o admin: comando fly `/sensors` — bloque **Google Trends MCP** con ruta al binario `google-trends-mcp` y `mcp_lib=sí`.
+
+Override en manifest del worker (opcional):
+
+```yaml
+skills:
+  - google_trends:
+      tool_allowlist:
+        - interest_over_time
+        - related_queries
+```
+
+Bridge: `packages/agents/src/duckclaw/forge/skills/google_trends_bridge.py`.

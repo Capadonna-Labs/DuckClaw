@@ -1506,6 +1506,8 @@ async def playground_chat(
     if not msg and not body.images:
         raise _problem(400, "message o images requeridos", "")
     if body.images:
+        import logging as _logging
+
         from core.vlm_ingest import enrich_message_with_admin_images
 
         try:
@@ -1516,7 +1518,15 @@ async def playground_chat(
         except ValueError as exc:
             raise _problem(400, str(exc), "images") from exc
         except Exception as exc:
-            raise _problem(502, "Error procesando imagen (VLM)", str(exc)) from exc
+            _logging.getLogger("duckclaw.gateway.admin_playground").warning(
+                "admin playground VLM degraded: %s", exc
+            )
+            base = (body.message or "").strip()
+            note = (
+                "[Imagen adjunta: no se pudo analizar — el servidor VLM (Mac mini) "
+                "no está disponible. El chat continúa solo con el texto.]"
+            )
+            msg = f"{base}\n\n{note}".strip() if base else note
     if not msg:
         raise _problem(400, "message vacío tras VLM", body.message)
     eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")

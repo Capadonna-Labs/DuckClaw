@@ -3413,7 +3413,7 @@ def _probe_ibkr_market_data(timeout_s: float = 8.0) -> str:
         if e.code == 404:
             return (
                 "Mercado OHLC: HTTP 404 — la URL no existe en el API "
-                "(despliega GET /api/market/ohlcv, p. ej. services/ibkr-ohlcv-api en :8002). "
+                "(despliega GET /api/market/ohlcv, p. ej. Capadonna-Driller services/ibkr-ohlcv-api en :8002). "
                 "Histórico 1d/1w/1M/moc vía lake SSH está bien; "
                 "intradía necesita ese endpoint o quita IBKR_MARKET_DATA_URL del .env."
             )[:280]

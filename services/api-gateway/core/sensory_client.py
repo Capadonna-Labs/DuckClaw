@@ -98,14 +98,8 @@ async def transcribe_audio_base64(
 
 
 def tts_snippet_for_reply(text: str) -> str:
-    """First paragraph or chunk for TTS (max 1500 chars)."""
-    t = (text or "").strip()
-    if not t:
-        return t
-    para = t.split("\n\n", 1)[0].strip()
-    if len(para) > 1500:
-        return para[:1500]
-    return para
+    """Full reply for TTS; markdown strip and length cap happen on sensory_node."""
+    return (text or "").strip()
 
 
 def _admin_tts_output_format() -> str:

@@ -349,6 +349,9 @@ def test_admin_chat_composer_has_voice_note_button() -> None:
     panel = Path("apps/duckclaw-admin/src/components/chat/AdminChatPanel.tsx").read_text(
         encoding="utf-8"
     )
+    media_menu = Path("apps/duckclaw-admin/src/components/chat/MediaAttachMenu.tsx").read_text(
+        encoding="utf-8"
+    )
     hook = Path("apps/duckclaw-admin/src/components/chat/useVoiceNoteRecorder.ts").read_text(
         encoding="utf-8"
     )
@@ -361,8 +364,11 @@ def test_admin_chat_composer_has_voice_note_button() -> None:
 
     assert "useVoiceNoteRecorder" in panel
     assert "sendVoiceNote" in panel
-    assert 'aria-label={voice.recording ? \'Enviar nota de voz\' : \'Grabar nota de voz\'}' in panel
-    assert "<Mic size={18} />" in panel
+    assert "MediaAttachMenu" in panel
+    assert "onVoiceNoteClick" in panel
+    assert "Enviar nota de voz" in media_menu
+    assert "Nota de voz" in media_menu
+    assert "<Mic size={16}" in media_menu
     assert "MediaRecorder" in hook
     assert "sendVoiceNote" in chat_hook
     assert "voiceNote" in bubble

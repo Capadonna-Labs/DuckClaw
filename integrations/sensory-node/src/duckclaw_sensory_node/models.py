@@ -41,6 +41,10 @@ class TTSRequest(BaseModel):
         description="ID del vector de voz pre-aprobado (Identity Lock)",
     )
     speed: float = Field(1.0, ge=0.5, le=2.0)
+    output_format: Literal["ogg", "wav"] = Field(
+        default="ogg",
+        description="ogg (Telegram) o wav (Safari/iOS en admin UI)",
+    )
 
     @classmethod
     def reject_reference_injection(cls, payload: dict) -> None:
@@ -51,6 +55,7 @@ class TTSRequest(BaseModel):
 
 
 class TTSResponse(BaseModel):
-    audio_base64: str = Field(..., description="Audio sintetizado en formato OGG/Opus")
+    audio_base64: str = Field(..., description="Audio sintetizado (OGG/Opus o WAV)")
     duration_sec: float
     latency_ms: float
+    audio_format: Literal["ogg", "wav"] = "ogg"

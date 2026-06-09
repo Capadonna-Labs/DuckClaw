@@ -54,6 +54,16 @@ export function ConversationVaultSelector({
         vault_db_path: path,
       });
       onChange(path);
+      void adminService
+        .patchRuntimeSettings([
+          {
+            domain: 'playground',
+            key: 'default_vault_db_path',
+            value: path,
+            scope: 'actor',
+          },
+        ])
+        .catch(() => undefined);
       onUpdated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al guardar bóveda');

@@ -98,21 +98,21 @@ class DuckClaw:
             )
 
     def _ensure_python_exec_connection(self) -> None:
-        """Reabre conexión Python si quedó en None tras suspend_readonly_file_handle."""
+        """Reabre conexión Python si quedó en None tras liberar el handle para db-writer."""
         if self._native is not None:
             return
         if self._con is not None:
             return
         rp = (self._path or "").strip()
-        if self._read_only and rp not in ("", ":memory:"):
+        if rp not in ("", ":memory:"):
             try:
-                self.resume_readonly_file_handle()
+                self.resume_file_handle()
             except Exception:
                 pass
         if self._con is None:
             raise RuntimeError(
-                "DuckDB: conexión cerrada (_con is None). En vaults read_only suele pasar si "
-                "suspend_readonly_file_handle() no fue seguido de resume_readonly_file_handle()."
+                "DuckDB: conexión cerrada (_con is None). Suele pasar si "
+                "release_file_handle_for_external_writer() no fue seguido de resume_file_handle()."
             )
 
     def query(self, sql: str) -> str:
@@ -211,6 +211,14 @@ class DuckClaw:
             return
         if self._con is None:
             self._con = _duckdb_python_connect_with_retry(self._path, read_only=True)
+
+    def resume_file_handle(self) -> None:
+        """Reabre handle RO o RW tras ``release_file_handle_for_external_writer``."""
+        if self._native is not None or self._path == ":memory:":
+            return
+        if self._con is not None:
+            return
+        self._con = _duckdb_python_connect_with_retry(self._path, read_only=self._read_only)
 
 
 __all__ = ["DuckClaw"]

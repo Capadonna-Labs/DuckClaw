@@ -1,7 +1,10 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Mic, Square, Volume2 } from 'lucide-react';
+import { useVoiceNoteRecorder } from '@/components/chat/useVoiceNoteRecorder';
+import { mutationHeaders } from '@/lib/csrfClient';
+import { friendlyGatewayError, parseApiErrorDetail } from '@/lib/adminErrors';
 
 type VoiceResult = {
   ok?: boolean;
@@ -14,79 +17,28 @@ type VoiceResult = {
   tts_latency_ms?: number | null;
 };
 
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const dataUrl = String(reader.result || '');
-      const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-      resolve(b64);
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
-
 export function VoiceLabPanel() {
-  const [recording, setRecording] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<VoiceResult | null>(null);
   const [workerId, setWorkerId] = useState('default');
-  const mediaRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-
-  const stopRecording = useCallback(() => {
-    const rec = mediaRef.current;
-    if (rec && rec.state !== 'inactive') {
-      rec.stop();
-    }
-    mediaRef.current = null;
-    setRecording(false);
-  }, []);
-
-  const startRecording = useCallback(async () => {
-    setError(null);
-    setResult(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime =
-        MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-            ? 'audio/ogg;codecs=opus'
-            : '';
-      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-      chunksRef.current = [];
-      rec.ondataavailable = (ev) => {
-        if (ev.data.size > 0) chunksRef.current.push(ev.data);
-      };
-      rec.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-      };
-      mediaRef.current = rec;
-      rec.start();
-      setRecording(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo acceder al micrófono');
-    }
-  }, []);
+  const {
+    recording,
+    busy,
+    setBusy,
+    error,
+    setError,
+    startRecording,
+    stopAndGetBase64,
+  } = useVoiceNoteRecorder();
 
   const sendVoice = useCallback(async () => {
-    stopRecording();
-    const chunks = chunksRef.current;
-    if (!chunks.length) {
-      setError('Graba una nota de voz primero');
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
-      const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' });
-      const audio_base64 = await blobToBase64(blob);
+      const audio_base64 = await stopAndGetBase64();
+      if (!audio_base64) return;
       const res = await fetch('/api/admin/playground/voice', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...mutationHeaders('POST') },
         body: JSON.stringify({
           worker_id: workerId,
           chat_id: 'admin-voice-lab',
@@ -97,7 +49,7 @@ export function VoiceLabPanel() {
       });
       const data = (await res.json()) as VoiceResult & { detail?: string };
       if (!res.ok) {
-        throw new Error(data.detail || `HTTP ${res.status}`);
+        throw new Error(friendlyGatewayError(parseApiErrorDetail(data, res.status)));
       }
       setResult(data);
       if (data.audio_base64) {
@@ -108,15 +60,19 @@ export function VoiceLabPanel() {
       setError(e instanceof Error ? e.message : 'Error enviando voz');
     } finally {
       setBusy(false);
-      chunksRef.current = [];
     }
-  }, [stopRecording, workerId]);
+  }, [stopAndGetBase64, setBusy, setError, workerId]);
 
   const replayAudio = useCallback(() => {
     if (!result?.audio_base64) return;
     const audio = new Audio(`data:audio/ogg;base64,${result.audio_base64}`);
     void audio.play();
   }, [result]);
+
+  const onStart = useCallback(() => {
+    setResult(null);
+    void startRecording();
+  }, [startRecording]);
 
   return (
     <div className="space-y-4">
@@ -142,7 +98,7 @@ export function VoiceLabPanel() {
         {!recording ? (
           <button
             type="button"
-            onClick={() => void startRecording()}
+            onClick={onStart}
             disabled={busy}
             className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >

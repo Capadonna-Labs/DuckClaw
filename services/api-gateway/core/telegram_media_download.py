@@ -7,6 +7,7 @@ import os
 import httpx
 
 _DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024
+_DEFAULT_MAX_AUDIO_BYTES = 5 * 1024 * 1024
 
 
 def max_telegram_image_bytes() -> int:
@@ -16,7 +17,24 @@ def max_telegram_image_bytes() -> int:
         return _DEFAULT_MAX_IMAGE_BYTES
 
 
-async def download_telegram_file_bytes(bot_token: str, file_id: str) -> bytes:
+def max_telegram_audio_bytes() -> int:
+    try:
+        return int(os.environ.get("DUCKCLAW_TELEGRAM_MAX_AUDIO_BYTES") or str(_DEFAULT_MAX_AUDIO_BYTES))
+    except ValueError:
+        return _DEFAULT_MAX_AUDIO_BYTES
+
+
+async def download_telegram_audio_bytes(bot_token: str, file_id: str) -> bytes:
+    """Descarga audio/voz de Telegram con límite DUCKCLAW_TELEGRAM_MAX_AUDIO_BYTES."""
+    return await download_telegram_file_bytes(bot_token, file_id, max_bytes=max_telegram_audio_bytes())
+
+
+async def download_telegram_file_bytes(
+    bot_token: str,
+    file_id: str,
+    *,
+    max_bytes: int | None = None,
+) -> bytes:
     """
     Descarga bytes de un file_id de Telegram Bot API.
     Raises RuntimeError si getFile falla o el archivo excede el límite de tamaño.
@@ -38,7 +56,7 @@ async def download_telegram_file_bytes(bot_token: str, file_id: str) -> bytes:
         rf = await client.get(f"https://api.telegram.org/file/bot{token}/{file_path}")
         rf.raise_for_status()
         raw = bytes(rf.content or b"")
-    limit = max_telegram_image_bytes()
+    limit = max_bytes if max_bytes is not None else max_telegram_image_bytes()
     if len(raw) > limit:
-        raise RuntimeError(f"imagen demasiado grande ({len(raw)} > {limit})")
+        raise RuntimeError(f"archivo demasiado grande ({len(raw)} > {limit})")
     return raw

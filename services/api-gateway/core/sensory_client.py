@@ -34,6 +34,7 @@ class TTSResult(BaseModel):
     audio_base64: str
     duration_sec: float
     latency_ms: float
+    audio_format: str = "ogg"
 
 
 def _sensory_base_url() -> str:
@@ -96,20 +97,48 @@ async def transcribe_audio_base64(
     return STTResult.model_validate(data)
 
 
+def tts_snippet_for_reply(text: str) -> str:
+    """First paragraph or chunk for TTS (max 1500 chars)."""
+    t = (text or "").strip()
+    if not t:
+        return t
+    para = t.split("\n\n", 1)[0].strip()
+    if len(para) > 1500:
+        return para[:1500]
+    return para
+
+
+def _admin_tts_output_format() -> str:
+    raw = (os.environ.get("DUCKCLAW_ADMIN_TTS_FORMAT") or "wav").strip().lower()
+    return raw if raw in ("ogg", "wav") else "wav"
+
+
 async def synthesize_text(
     text: str,
     voice_id: str,
     *,
     speed: float = 1.0,
+    output_format: str | None = None,
 ) -> TTSResult:
     base = _sensory_base_url()
     if not base:
         raise SensoryUnavailable("DUCKCLAW_SENSORY_BASE_URL not configured")
     url = f"{base}/api/v1/sensory/synthesize"
-    payload = {"text": (text or "")[:1500], "voice_id": voice_id, "speed": speed}
+    fmt = (output_format or _admin_tts_output_format()).strip().lower()
+    if fmt not in ("ogg", "wav"):
+        fmt = "wav"
+    payload: dict[str, Any] = {
+        "text": (text or "")[:1500],
+        "voice_id": voice_id,
+        "speed": speed,
+        "output_format": fmt,
+    }
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(_tts_timeout())) as client:
             r = await client.post(url, json=payload)
+            if r.status_code == 422 and fmt == "wav":
+                payload.pop("output_format", None)
+                r = await client.post(url, json=payload)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         raise SensoryUnavailable(str(exc)) from exc
     if r.status_code != 200:

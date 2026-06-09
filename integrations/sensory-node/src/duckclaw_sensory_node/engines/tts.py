@@ -13,12 +13,45 @@ from typing import Any
 
 import numpy as np
 
-from duckclaw_sensory_node.audio_io import audio_duration_sec, encode_ogg_opus_base64, mlx_array_to_numpy
+from duckclaw_sensory_node.audio_io import (
+    audio_duration_sec,
+    encode_ogg_opus_base64,
+    encode_wav_base64,
+    mlx_array_to_numpy,
+)
 
 _log = logging.getLogger("duckclaw.sensory.tts")
 
 _DEFAULT_MODEL = "mlx-community/OmniVoice-bf16"
+_DEFAULT_AUDIO_TOKENIZER = "mlx-community/OmniVoice-4bit"
 _TTS_TIMEOUT_MS = float((os.environ.get("DUCKCLAW_SENSORY_TTS_TIMEOUT_MS") or "2000").strip() or "2000")
+
+
+def _audio_tokenizer_path() -> str:
+    explicit = (os.environ.get("DUCKCLAW_SENSORY_AUDIO_TOKENIZER_PATH") or "").strip()
+    if explicit:
+        return explicit
+    model_id = (
+        os.environ.get("DUCKCLAW_SENSORY_AUDIO_TOKENIZER_MODEL") or _DEFAULT_AUDIO_TOKENIZER
+    ).strip()
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(model_id)
+
+
+def _attach_audio_tokenizer(model: Any) -> None:
+    """OmniVoice-bf16 lacks Higgs tokenizer weights; load from OmniVoice-4bit."""
+    if getattr(model, "audio_tokenizer", None) is not None:
+        return
+    try:
+        from mlx_audio.codec.models.higgs_audio.higgs_audio import HiggsAudioTokenizer
+
+        path = _audio_tokenizer_path()
+        model.audio_tokenizer = HiggsAudioTokenizer.from_pretrained(path)
+        _log.info("audio_tokenizer loaded from %s", path)
+    except Exception as exc:
+        _log.error("audio_tokenizer load failed: %s", exc)
+        model.audio_tokenizer = None
 
 
 @dataclass
@@ -107,6 +140,7 @@ class TTSEngine:
             from mlx_audio.tts.utils import load_model
 
             self._model = load_model(self._model_id)
+            _attach_audio_tokenizer(self._model)
             self._sample_rate = int(getattr(self._model, "sample_rate", 24000) or 24000)
             voices_root = _voices_dir()
             manifest_path = voices_root / "manifest.json"
@@ -127,7 +161,14 @@ class TTSEngine:
     def has_voice(self, voice_id: str) -> bool:
         return voice_id in self._voices
 
-    def synthesize(self, text: str, voice_id: str, *, speed: float = 1.0) -> dict[str, Any]:
+    def synthesize(
+        self,
+        text: str,
+        voice_id: str,
+        *,
+        speed: float = 1.0,
+        output_format: str = "ogg",
+    ) -> dict[str, Any]:
         if not self._darwin or self._model is None:
             raise RuntimeError("TTS requires Apple Silicon with mlx-audio loaded")
         if voice_id not in self._voices:
@@ -168,14 +209,29 @@ class TTSEngine:
         if audio_out is None or len(audio_out) == 0:
             raise RuntimeError("TTS produced empty audio")
 
+        peak = float(np.max(np.abs(audio_out))) if len(audio_out) else 0.0
+        if peak < 1e-4:
+            tok = getattr(self._model, "audio_tokenizer", None)
+            raise RuntimeError(
+                "TTS produced silent audio"
+                + (" (audio_tokenizer missing)" if tok is None else "")
+            )
+
         latency_ms = (time.perf_counter() - t0) * 1000.0
         if latency_ms > _TTS_TIMEOUT_MS:
             raise TimeoutError("TTS inference timeout")
 
-        b64, _ = encode_ogg_opus_base64(audio_out, self._sample_rate)
         duration = audio_duration_sec(audio_out, self._sample_rate)
+        fmt = (output_format or "ogg").strip().lower()
+        if fmt == "wav":
+            b64 = encode_wav_base64(audio_out, self._sample_rate)
+            audio_format = "wav"
+        else:
+            b64, _ = encode_ogg_opus_base64(audio_out, self._sample_rate)
+            audio_format = "wav" if b64.startswith("UklGR") else "ogg"
         return {
             "audio_base64": b64,
             "duration_sec": duration,
             "latency_ms": latency_ms,
+            "audio_format": audio_format,
         }

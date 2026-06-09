@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -25,8 +26,12 @@ _stt = STTEngine()
 _tts = TTSEngine()
 
 
-async def _inference_guard() -> None:
+async def _inference_guard() -> AsyncIterator[None]:
     await acquire_inference_slot()
+    try:
+        yield
+    finally:
+        release_inference_slot()
 
 
 @asynccontextmanager
@@ -68,10 +73,12 @@ def create_app() -> FastAPI:
                 language_detected=result["language_detected"],
             )
         except Exception as exc:
-            _log.warning("transcribe failed: %s", type(exc).__name__)
-            raise HTTPException(status_code=503, detail="STT inference failed") from exc
-        finally:
-            release_inference_slot()
+            _log.warning("transcribe failed: %s: %s", type(exc).__name__, exc)
+            msg = str(exc).strip()
+            detail = f"STT inference failed: {type(exc).__name__}"
+            if msg:
+                detail = f"{detail}: {msg[:240]}"
+            raise HTTPException(status_code=503, detail=detail) from exc
 
     @app.exception_handler(RequestValidationError)
     async def validation_handler(_request, exc: RequestValidationError):
@@ -101,18 +108,18 @@ def create_app() -> FastAPI:
                 clean,
                 body.voice_id,
                 speed=body.speed,
+                output_format=body.output_format,
             )
             return TTSResponse(
                 audio_base64=result["audio_base64"],
                 duration_sec=result["duration_sec"],
                 latency_ms=result["latency_ms"],
+                audio_format=result.get("audio_format") or body.output_format,
             )
         except TimeoutError as exc:
             raise HTTPException(status_code=503, detail="TTS inference timeout or OOM") from exc
         except Exception as exc:
             _log.warning("synthesize failed voice=%s err=%s", body.voice_id, type(exc).__name__)
             raise HTTPException(status_code=503, detail="TTS inference timeout or OOM") from exc
-        finally:
-            release_inference_slot()
 
     return app

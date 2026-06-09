@@ -26,4 +26,11 @@ export type ChatMsg = {
   toolStartedAt?: number;
   toolElapsedMs?: number;
   imagePreviews?: ChatImagePreview[];
+  /** Mensaje de usuario originado por nota de voz. */
+  voiceNote?: boolean;
+  /** Audio TTS (base64) en respuesta del asistente. */
+  audioBase64?: string;
+  audioFormat?: 'ogg' | 'wav';
+  audioUnavailable?: boolean;
+  audioPlayError?: string;
 };

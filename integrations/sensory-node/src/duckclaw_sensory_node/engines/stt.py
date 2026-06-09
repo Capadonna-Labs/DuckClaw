@@ -1,4 +1,4 @@
-"""STT engine — mlx-whisper 4-bit, in-memory only."""
+"""STT engine — mlx-audio Whisper on Apple Silicon, in-memory only."""
 
 from __future__ import annotations
 
@@ -15,9 +15,26 @@ from duckclaw_sensory_node.audio_io import chunk_audio, resample_to_16k, write_t
 
 _log = logging.getLogger("duckclaw.sensory.stt")
 
-_DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo-4bit"
+# mlx_whisper cannot load mlx-audio-plus converted weights; use mlx_audio.stt instead.
+_DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo-asr-fp16"
 _CHUNK_SEC = 30.0
 _MAX_SEC = 300.0
+
+
+def _text_from_stt_output(result: Any) -> str:
+    text = getattr(result, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    segments = getattr(result, "segments", None) or []
+    parts: list[str] = []
+    for seg in segments:
+        if isinstance(seg, dict):
+            part = (seg.get("text") or "").strip()
+        else:
+            part = (getattr(seg, "text", None) or "").strip()
+        if part:
+            parts.append(part)
+    return " ".join(parts).strip()
 
 
 class STTEngine:
@@ -25,6 +42,7 @@ class STTEngine:
         self._model_repo = (os.environ.get("DUCKCLAW_SENSORY_STT_MODEL") or _DEFAULT_MODEL).strip()
         self._loaded = False
         self._darwin = sys.platform == "darwin"
+        self._model: Any = None
 
     @property
     def loaded(self) -> bool:
@@ -35,12 +53,13 @@ class STTEngine:
             _log.warning("STT warm skipped: not darwin")
             return
         try:
-            import mlx_whisper  # noqa: F401
+            from mlx_audio.stt.utils import load_model
 
+            self._model = load_model(self._model_repo)
             self._loaded = True
             _log.info("STT engine ready model=%s", self._model_repo)
-        except ImportError as exc:
-            _log.error("mlx-whisper not available: %s", exc)
+        except Exception as exc:
+            _log.error("STT warm failed model=%s: %s", self._model_repo, exc)
 
     def transcribe(self, audio: np.ndarray, sr: int, *, language_hint: str | None = "es") -> dict[str, Any]:
         """
@@ -49,7 +68,10 @@ class STTEngine:
         """
         if not self._darwin:
             raise RuntimeError("STT requires Apple Silicon (darwin)")
-        import mlx_whisper
+        if not self._loaded or self._model is None:
+            raise RuntimeError("STT model not loaded")
+
+        from mlx_audio.stt.generate import generate_transcription
 
         t0 = time.perf_counter()
         audio_16k = resample_to_16k(audio, sr)
@@ -64,23 +86,23 @@ class STTEngine:
                 tmp.write(buf.read())
                 tmp_path = tmp.name
             try:
-                result = mlx_whisper.transcribe(
-                    tmp_path,
-                    path_or_hf_repo=self._model_repo,
+                result = generate_transcription(
+                    model=self._model,
+                    audio=tmp_path,
+                    verbose=False,
                     language=lang,
-                    condition_on_previous_text=False,
-                    compression_ratio_threshold=2.4,
                 )
             finally:
                 try:
                     os.unlink(tmp_path)
                 except OSError:
                     pass
-            seg_text = (result.get("text") or "").strip()
+            seg_text = _text_from_stt_output(result)
             if seg_text:
                 texts.append(seg_text)
-            if result.get("language"):
-                detected = str(result["language"])
+            out_lang = getattr(result, "language", None)
+            if out_lang:
+                detected = str(out_lang)
 
         text = " ".join(texts).strip()
         elapsed_ms = (time.perf_counter() - t0) * 1000.0

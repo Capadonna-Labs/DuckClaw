@@ -20,8 +20,6 @@ Utilidades **puntuales** del monorepo. Runtime de producción: `services/` + `du
 
 | Carpeta | Contenido |
 |---------|-----------|
-| [`quant/`](quant/) | Jobs MOC, ML4T batch, HRP (`moc_pipeline.py`, cron VPS) |
-| [`capadonna/`](capadonna/) | Ops VPS Quant/IBKR (señales, OHLCV, hooks deploy) |
 | [`data_fetch/`](data_fetch/) + [`data_prep/`](data_prep/) + [`plots/`](plots/) | Pipeline PM2.5 salud — ver [`README_pm25_health_pipeline.md`](README_pm25_health_pipeline.md) |
 | [`smoke/`](smoke/) | Probes MCP stdio (GitHub, Telegram) |
 | [`experimental/`](experimental/) | Reservado para laboratorio local; actualmente sin scripts activos |
@@ -35,6 +33,10 @@ uv run duckops mcp prefetch reddit
 uv run duckops comfyui start --dry-run
 uv run python scripts/smoke/smoke_github_mcp_stdio.py
 ```
+
+## Ops Quant/IBKR (producto)
+
+Scripts de hooks IBKR, jobs batch quant y API `:8002` viven en el repo **Capadonna-Driller** — ver [`README-CAPADONNA-OPS.md`](README-CAPADONNA-OPS.md).
 
 ## No versionar
 

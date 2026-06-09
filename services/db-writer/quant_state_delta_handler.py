@@ -29,10 +29,6 @@ from models.quant_state_delta import (
 logger = logging.getLogger("db-writer.quant_state_delta")
 
 _LEDGER_DDL_APPLIED: set[str] = set()
-_DEBUG_LOG_PATH = (
-    os.environ.get("DUCKCLAW_DEBUG_LOG_PATH")
-    or str(Path(__file__).resolve().parents[2] / ".cursor" / "debug-fd1dbb.log")
-)
 
 
 _LEDGER_DDL = """
@@ -210,32 +206,6 @@ def _coerce_mandate_id_to_uuid(raw: str) -> str:
         return s
     except ValueError:
         return str(uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, "duckclaw:mandate:" + s))
-
-
-def _agent_debug_log(
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    *,
-    hypothesis_id: str,
-    run_id: str = "pre-fix",
-) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "fd1dbb",
-            "location": location,
-            "message": message,
-            "data": data,
-            "hypothesisId": hypothesis_id,
-            "runId": run_id,
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
 
 
 def _ensure_quant_ledger_schema(con: duckdb.DuckDBPyConnection, target_db_path: str) -> None:
@@ -601,17 +571,6 @@ def _sync_handle_quant_state_delta(message: str) -> None:
         user_id,
         target_db_path,
         elapsed_ms,
-    )
-    _agent_debug_log(
-        "quant_state_delta_handler.py:_sync_handle_quant_state_delta",
-        "state_delta_commit",
-        {
-            "delta_type": delta_type,
-            "elapsed_ms": round(elapsed_ms, 2),
-            "target_db_path": target_db_path,
-            "user_id": user_id,
-        },
-        hypothesis_id="C",
     )
 
 

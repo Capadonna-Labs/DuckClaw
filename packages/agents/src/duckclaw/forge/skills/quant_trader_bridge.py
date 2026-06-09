@@ -165,37 +165,6 @@ def _auto_execute_wait_timeout_sec() -> float:
     return max(0.2, min(t, 60.0))
 
 
-_DEBUG_LOG_PATH = os.environ.get("DUCKCLAW_DEBUG_LOG_PATH") or str(
-    __import__("pathlib").Path(__file__).resolve().parents[6] / ".cursor" / "debug-fd1dbb.log"
-)
-
-
-def _agent_debug_log(
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    *,
-    hypothesis_id: str,
-    run_id: str = "pre-fix",
-) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "fd1dbb",
-            "location": location,
-            "message": message,
-            "data": data,
-            "hypothesisId": hypothesis_id,
-            "runId": run_id,
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(os.path.normpath(_DEBUG_LOG_PATH), "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
-
-
 @contextmanager
 def _vault_writer_handoff(db: Any, *, resume_after: bool = True):
     """
@@ -258,40 +227,14 @@ def _wait_until_signal_status(
     deadline = time.monotonic() + float(timeout_sec)
     step = 0.08
     max_step = 0.35
-    iteration = 0
-    t0 = time.monotonic()
     while time.monotonic() < deadline:
-        iteration += 1
         rows, _err = _ephemeral_readonly_query(db_path, q)
         if rows and isinstance(rows[0], dict):
             st = str(rows[0].get("status") or "").strip().upper()
             if st in want:
-                _agent_debug_log(
-                    "quant_trader_bridge.py:_wait_until_signal_status",
-                    "signal_status_applied",
-                    {
-                        "signal_id": sid,
-                        "status": st,
-                        "iterations": iteration,
-                        "wait_ms": round((time.monotonic() - t0) * 1000.0, 2),
-                    },
-                    hypothesis_id="C",
-                )
                 return True
         time.sleep(step)
         step = min(step * 1.35, max_step)
-    _agent_debug_log(
-        "quant_trader_bridge.py:_wait_until_signal_status",
-        "signal_status_timeout",
-        {
-            "signal_id": sid,
-            "want": sorted(want),
-            "iterations": iteration,
-            "wait_ms": round((time.monotonic() - t0) * 1000.0, 2),
-            "timeout_sec": timeout_sec,
-        },
-        hypothesis_id="C",
-    )
     return False
 
 
@@ -482,15 +425,15 @@ def _wait_until_signal_row_visible(db: Any, signal_id: str, *, timeout_sec: floa
     )
     release = getattr(db, "release_file_handle_for_external_writer", None)
     susp = getattr(db, "suspend_readonly_file_handle", None)
-    resu = getattr(db, "resume_readonly_file_handle", None)
+    resu = getattr(db, "resume_file_handle", None) or getattr(db, "resume_readonly_file_handle", None)
     ro = bool(getattr(db, "_read_only", False))
     released = False
-    if ro:
+    if getattr(db, "_con", None) is not None or getattr(db, "_native", None) is not None:
         try:
             if callable(release):
                 release()
                 released = True
-            elif callable(susp):
+            elif ro and callable(susp):
                 susp()
                 released = True
         except Exception:
@@ -498,43 +441,13 @@ def _wait_until_signal_row_visible(db: Any, signal_id: str, *, timeout_sec: floa
     deadline = time.monotonic() + float(timeout_sec)
     step = 0.08
     max_step = 0.35
-    iteration = 0
-    last_err: str | None = None
-    t0 = time.monotonic()
     try:
         while time.monotonic() < deadline:
-            iteration += 1
-            rows, err = _ephemeral_readonly_query(db_path, q)
-            last_err = err
+            rows, _err = _ephemeral_readonly_query(db_path, q)
             if rows and isinstance(rows[0], dict):
-                _agent_debug_log(
-                    "quant_trader_bridge.py:_wait_until_signal_row_visible",
-                    "signal_row_visible",
-                    {
-                        "signal_id": sid,
-                        "iterations": iteration,
-                        "wait_ms": round((time.monotonic() - t0) * 1000.0, 2),
-                        "released_ro": released,
-                    },
-                    hypothesis_id="A",
-                )
                 return True
             time.sleep(step)
             step = min(step * 1.35, max_step)
-        _agent_debug_log(
-            "quant_trader_bridge.py:_wait_until_signal_row_visible",
-            "signal_row_timeout",
-            {
-                "signal_id": sid,
-                "iterations": iteration,
-                "wait_ms": round((time.monotonic() - t0) * 1000.0, 2),
-                "timeout_sec": timeout_sec,
-                "last_query_error": last_err,
-                "released_ro": released,
-                "db_path": db_path,
-            },
-            hypothesis_id="A",
-        )
         return False
     finally:
         if released and callable(resu):
@@ -1607,43 +1520,63 @@ def _propose_trade_signal_impl(
     signal_id = str(uuid.uuid4())
     sess = _active_session_snapshot(db)
     session_uid = str((session_uid_override or "").strip() or (sess.get("session_uid") or "")).strip()
-    ok_m = push_quant_state_delta_sync(
-        {
-            **base,
-            "delta_type": "MANDATE_UPSERT",
-            "mutation": {
-                "mandate_id": mid,
-                "source_worker": "finanz",
-                "asset_class": "EQUITY",
-                "direction": "LONG" if str(signal_type).upper() == "ENTRY" else "NEUTRAL",
-                "max_weight_pct": float(limit),
-                "status": "ANALYZING",
+    wait_ledger = _auto_execute_wait_timeout_sec()
+    ledger_ok = False
+    released_handoff = False
+    with _vault_writer_handoff(db, resume_after=False) as released_handoff:
+        ok_m = push_quant_state_delta_sync(
+            {
+                **base,
+                "delta_type": "MANDATE_UPSERT",
+                "mutation": {
+                    "mandate_id": mid,
+                    "source_worker": "finanz",
+                    "asset_class": "EQUITY",
+                    "direction": "LONG" if str(signal_type).upper() == "ENTRY" else "NEUTRAL",
+                    "max_weight_pct": float(limit),
+                    "status": "ANALYZING",
+                },
             },
-        },
-        duckclaw_db=db,
-    )
-    ok_s = push_quant_state_delta_sync(
-        {
-            **base,
-            "delta_type": "TRADE_SIGNAL_PROPOSED",
-            "mutation": {
-                "signal_id": signal_id,
-                "mandate_id": mid,
-                "ticker": tkr,
-                "signal_type": "ENTRY" if st_up != "EXIT" else "EXIT",
-                "proposed_weight": float(guarded),
-                "sandbox_backtest_cid": (sandbox_backtest_cid or "").strip(),
-                "human_approved": False,
-                "status": "PENDING_HITL",
-                "rationale": rr,
-                "session_uid": session_uid,
-                "strategy_name": (strategy_name or "cfd_auto").strip() or "cfd_auto",
+            duckclaw_db=db,
+        )
+        ok_s = push_quant_state_delta_sync(
+            {
+                **base,
+                "delta_type": "TRADE_SIGNAL_PROPOSED",
+                "mutation": {
+                    "signal_id": signal_id,
+                    "mandate_id": mid,
+                    "ticker": tkr,
+                    "signal_type": "ENTRY" if st_up != "EXIT" else "EXIT",
+                    "proposed_weight": float(guarded),
+                    "sandbox_backtest_cid": (sandbox_backtest_cid or "").strip(),
+                    "human_approved": False,
+                    "status": "PENDING_HITL",
+                    "rationale": rr,
+                    "session_uid": session_uid,
+                    "strategy_name": (strategy_name or "cfd_auto").strip() or "cfd_auto",
+                },
             },
-        },
-        duckclaw_db=db,
-    )
+            duckclaw_db=db,
+        )
+        if ok_m and ok_s and wait_ledger > 0:
+            ledger_ok = _wait_until_signal_row_visible(db, signal_id, timeout_sec=wait_ledger)
+    _resume_ro_vault(db, released_handoff)
     if not (ok_m and ok_s):
         return json.dumps({"error": "No se pudo encolar StateDelta en Redis"}, ensure_ascii=False)
+    if not ledger_ok:
+        out_ledger_warn: dict[str, Any] = {
+            "ledger_wait": {
+                "ok": False,
+                "timeout_sec": wait_ledger,
+                "message": (
+                    "StateDelta encolado; la fila aún no visible en DuckDB "
+                    f"tras {wait_ledger:.1f}s (db-writer). Reintenta read_sql antes de execute."
+                ),
+            }
+        }
+    else:
+        out_ledger_warn = {}
 
     out: dict[str, Any] = {
         "status": "PENDING_HITL",
@@ -1654,6 +1587,7 @@ def _propose_trade_signal_impl(
         "proposed_weight": guarded,
         "liquid_capital": cap,
         "hint": f"Senal {signal_id} lista. Requiere /execute-signal {signal_id}",
+        **out_ledger_warn,
     }
 
     strat = strat_eff
@@ -1794,6 +1728,11 @@ def _execute_approved_signal_impl(
     if read_err:
         return json.dumps({"error": f"DB_READ_FAILED: {read_err}"}, ensure_ascii=False)
     if not rows:
+        _wait_until_signal_row_visible(db, sid, timeout_sec=_auto_execute_wait_timeout_sec())
+        rows, read_err = _ephemeral_read_trade_signal_row(db, sid)
+        if read_err:
+            return json.dumps({"error": f"DB_READ_FAILED: {read_err}"}, ensure_ascii=False)
+    if not rows:
         return json.dumps(
             {
                 "error": "signal no existe",
@@ -1907,21 +1846,6 @@ def _execute_approved_signal_impl(
     body = ""
     released_ro = False
     with _vault_writer_handoff(db, resume_after=False) as released_ro:
-        _agent_debug_log(
-            "quant_trader_bridge.py:_execute_approved_signal_impl",
-            "broker_handoff",
-            {
-                "signal_id": sid,
-                "released_ro": released_ro,
-                "execute_url_host": (url.split("/")[2] if "://" in url else url)[:80],
-                "exec_timeout_sec": exec_timeout_sec,
-                "equity_source": eq_source,
-                "has_account_equity_usd": "account_equity_usd" in post,
-                "account_equity_usd": post.get("account_equity_usd"),
-            },
-            hypothesis_id="B",
-            run_id="post-fix",
-        )
         try:
             with urllib.request.urlopen(req, timeout=exec_timeout_sec) as resp:
                 body = resp.read().decode("utf-8", errors="replace")

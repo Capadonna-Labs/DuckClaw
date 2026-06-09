@@ -66,36 +66,12 @@ def _local_cancel_active(chat_id: str) -> bool:
         return True
 
 
-def _debug_cancel_log(chat_id: str, *, local: bool, redis_ok: bool | None = None) -> None:
-    # region agent log
-    try:
-        import json
-        from pathlib import Path
-
-        log_path = Path(__file__).resolve().parents[5] / ".cursor" / "debug-fd1dbb.log"
-        payload = {
-            "sessionId": "fd1dbb",
-            "location": "chat_cancel.py:request_chat_cancel",
-            "message": "cancel requested",
-            "data": {"chat_id": chat_id, "local": local, "redis_ok": redis_ok},
-            "hypothesisId": "H2",
-            "runId": "pre-fix",
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
-
-
 def request_chat_cancel(chat_id: str) -> bool:
     """Set cancel flag (idempotent). Always marks in-process; Redis when configured."""
     cid = str(chat_id or "").strip()
     if not cid:
         return False
     _local_cancel_mark(cid)
-    _debug_cancel_log(cid, local=True)
     url = _redis_url()
     if not url:
         return True
@@ -104,10 +80,8 @@ def request_chat_cancel(chat_id: str) -> bool:
 
         client = redis_sync.Redis.from_url(url, decode_responses=True)
         client.setex(chat_cancel_redis_key(cid), _CHAT_CANCEL_TTL_SECONDS, "1")
-        _debug_cancel_log(cid, local=True, redis_ok=True)
         return True
     except Exception:
-        _debug_cancel_log(cid, local=True, redis_ok=False)
         return True
 
 

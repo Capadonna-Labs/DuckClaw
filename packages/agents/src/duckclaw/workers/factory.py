@@ -68,37 +68,6 @@ def _raise_if_chat_cancelled_from_state(state: dict) -> None:
         raise_if_chat_cancelled(cid)
 
 
-_DEBUG_LOG_PATH = os.environ.get("DUCKCLAW_DEBUG_LOG_PATH") or str(
-    Path(__file__).resolve().parents[5] / ".cursor" / "debug-fd1dbb.log"
-)
-
-
-def _ibkr_cancel_debug_log(
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    *,
-    hypothesis_id: str,
-    run_id: str = "pre-fix",
-) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "fd1dbb",
-            "location": location,
-            "message": message,
-            "data": data,
-            "hypothesisId": hypothesis_id,
-            "runId": run_id,
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(os.path.normpath(_DEBUG_LOG_PATH), "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # endregion
-
-
 _NO_TASK_PATTERN = re.compile(
     r"^(hola|hi|hey|buenos?\s*d[ií]as?|buenas?\s*tardes?|buenas?\s*noches?|"
     r"qu[eé]\s*tal|qu[eé]\s*hay|saludos?|hello|ciao|adios?|chao)\s*[!.]?$",
@@ -1126,19 +1095,6 @@ def _github_try_deterministic_pr_workflow(
                                 len(files_payload),
                                 len(missing),
                             )
-                            # region agent log
-                            _ibkr_cancel_debug_log(
-                                "factory.py:github_pr_workflow:push_complete_partial",
-                                "forcing push_files for incomplete PR",
-                                {
-                                    "head": head,
-                                    "pr_url": pr_url,
-                                    "files": len(files_payload),
-                                    "missing": missing[:5],
-                                },
-                                hypothesis_id="H8",
-                            )
-                            # endregion
                             forced_resp, _ = _github_build_forced_push_files_tool_call(
                                 owner,
                                 repo,
@@ -1182,14 +1138,6 @@ def _github_try_deterministic_pr_workflow(
                 if pr_url and not _github_select_incomplete_feature_pr(
                     _github_parse_pr_payload(tcontent)
                 ):
-                    # region agent log
-                    _ibkr_cancel_debug_log(
-                        "factory.py:github_pr_workflow:existing_pr",
-                        "responding with open PR url",
-                        {"url": pr_url, "tool": tname},
-                        hypothesis_id="H7",
-                    )
-                    # endregion
                     resp = AIMessage(content=f"PR abierto: {pr_url}")
                     out = {**state, "messages": msgs + [resp]}
                     out.update(_identity_fields(state))
@@ -1237,14 +1185,6 @@ def _github_try_deterministic_pr_workflow(
                     if "list_pull_requests" in tools_by_name and not _github_tool_called_since(
                         msgs, lh, "list_pull_requests"
                     ):
-                        # region agent log
-                        _ibkr_cancel_debug_log(
-                            "factory.py:github_pr_workflow:list_after_push",
-                            "forcing list_pull_requests after push_files",
-                            {"head": head},
-                            hypothesis_id="H9",
-                        )
-                        # endregion
                         tid = f"call_github_list_prs_{int(time.time() * 1000)}"
                         forced = AIMessage(
                             content="",
@@ -1281,14 +1221,6 @@ def _github_try_deterministic_pr_workflow(
             and "push_files" in tools_by_name
             and not _github_tool_called_since(msgs, lh, "push_files")
         ):
-            # region agent log
-            _ibkr_cancel_debug_log(
-                "factory.py:github_pr_workflow:proactive_push",
-                "forcing push_files before list (local manifest ready)",
-                {"branch": branch, "files": len(files_payload), "missing": missing[:5]},
-                hypothesis_id="H9",
-            )
-            # endregion
             _log.info(
                 "[%s] github deterministic stage=push_files_proactive head=%s files=%d",
                 worker_label,
@@ -1325,14 +1257,6 @@ def _github_try_deterministic_pr_workflow(
         if "list_pull_requests" in tools_by_name and not _github_tool_called_since(
             msgs, lh, "list_pull_requests"
         ):
-            # region agent log
-            _ibkr_cancel_debug_log(
-                "factory.py:github_pr_workflow:list_prs",
-                "forcing list_pull_requests (push_files absent from history)",
-                {"incoming": str(incoming or "")[:120]},
-                hypothesis_id="H7",
-            )
-            # endregion
             tid = f"call_github_list_prs_{int(time.time() * 1000)}"
             forced = AIMessage(
                 content="",
@@ -2191,6 +2115,7 @@ def _repair_quant_vlm_tool_egress_reply(
     messages: list[Any],
     *,
     skip_llm_synthesis: bool = False,
+    for_admin_console: bool = False,
 ) -> str:
     """Síntesis de respaldo cuando Quant devuelve vacío o JSON crudo tras VLM + tools."""
     from duckclaw.forge.atoms.user_reply_nl_synthesis import synthesize_user_visible_reply
@@ -2245,6 +2170,7 @@ def _repair_quant_vlm_tool_egress_reply(
         user_ask=(incoming or "").strip(),
         raw_evidence=evidence,
         worker_id=wid,
+        for_admin_console=for_admin_console,
     )
     syn_st = (syn or "").strip()
     if syn_st and not _reply_is_quant_tool_json_echo(syn_st):
@@ -2334,6 +2260,13 @@ def _finanz_should_force_ibkr_after_local_cuentas_read(
 
 
 _TASK_AWARENESS_PROMPT = load_guardrail("prompts", "task_awareness_default")
+
+_ADMIN_UI_DISPLAY_EGRESS_BLOCK = (
+    "Formato de respuesta (consola web): usa Markdown rico (**negritas**, listas, ## encabezados) "
+    "y 1–3 emojis por sección cuando ayuden. Cifras en formato normal ($925,898.73, 10:19), "
+    "no en palabras para TTS. No repitas la etiqueta de instancia al inicio (ej. «quant-trader 1»); "
+    "ve directo al contenido."
+)
 
 
 def _escape_attach_path(path: str) -> str:
@@ -3882,11 +3815,15 @@ def build_worker_graph(
             )
         except Exception:
             pass
-    if _register_trends and getattr(spec, "google_trends_config", None) is not None:
+    _lw_trends = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
+    _trends_cfg = getattr(spec, "google_trends_config", None)
+    if _register_trends and _trends_cfg is None and is_market_worker(_lw_trends):
+        _trends_cfg = {}
+    if _register_trends and _trends_cfg is not None:
         try:
             from duckclaw.forge.skills.google_trends_bridge import register_google_trends_skill
 
-            register_google_trends_skill(tools, spec.google_trends_config)
+            register_google_trends_skill(tools, _trends_cfg)
         except Exception:
             pass
     # Reddit: SUMMARIZE_NEW_CONTEXT con URL /r/.../s/...; url_research solo si dominio reddit.com.
@@ -4041,16 +3978,6 @@ def build_worker_graph(
 
             register_quant_trader_skills(db, llm, tools)
             tools_by_name = {t.name: t for t in tools}
-            _ibkr_cancel_debug_log(
-                "factory.py:_build_worker_tools",
-                "quant_trader skills registered",
-                {
-                    "logical_worker_id": _lid_q,
-                    "has_cancel_trade_signal": "cancel_trade_signal" in tools_by_name,
-                    "tool_count": len(tools),
-                },
-                hypothesis_id="H2",
-            )
         except Exception:
             _log.debug("quant_trader skills registration skipped", exc_info=True)
 
@@ -4205,6 +4132,13 @@ def build_worker_graph(
                     prompt = prompt + "\n\n" + _qblk
             except Exception:
                 pass
+        try:
+            from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+            if is_admin_ui_chat_session(str(state.get("chat_id") or state.get("session_id") or "")):
+                prompt = prompt + "\n\n## Consola admin DuckClaw\n" + _ADMIN_UI_DISPLAY_EGRESS_BLOCK
+        except Exception:
+            pass
         messages = [SystemMessage(content=prompt)]
         for h in (state.get("history") or []):
             role = (h.get("role") or "").lower()
@@ -6204,22 +6138,6 @@ def build_worker_graph(
                 force_portfolio_after_local_cuentas,
                 forced_name,
             )
-            if is_quant_trader(_lid) and _quant_wants_cancel:
-                _ibkr_cancel_debug_log(
-                    "factory.py:agent_node",
-                    "quant cancel intent routing",
-                    {
-                        "chat_id": str(state.get("chat_id") or state.get("session_id") or ""),
-                        "has_cancel_trade_signal": has_cancel_trade_signal,
-                        "cancel_sid": _quant_cancel_sid_probe or None,
-                        "is_portfolio": is_portfolio,
-                        "force_read_sql": force_read_sql,
-                        "force_portfolio": force_portfolio,
-                        "forced_name": forced_name,
-                        "is_exec_bug_probe": _is_exec_bug_probe,
-                    },
-                    hypothesis_id="H3",
-                )
             from duckclaw.utils.formatters import sanitize_reddit_tool_messages_for_llm
 
             _msg_list = sanitize_reddit_tool_messages_for_llm(list(state["messages"]))
@@ -6252,14 +6170,6 @@ def build_worker_graph(
                 and not telegram_context_summarize_directive
             )
             if _github_pr_workflow_intent:
-                # region agent log
-                _ibkr_cancel_debug_log(
-                    "factory.py:agent_node:github_guardrail",
-                    "injecting github_pr_workflow guardrail",
-                    {"incoming": str(incoming or "")[:120]},
-                    hypothesis_id="H3",
-                )
-                # endregion
                 _msg_list = [
                     SystemMessage(content=load_guardrail("directives", "github_pr_workflow"))
                 ] + _msg_list
@@ -6648,12 +6558,27 @@ def build_worker_graph(
                     if isinstance(m, ToolMessage)
                 ]
                 _tools_hint = ", ".join(dict.fromkeys(_tools_ran)) if _tools_ran else "herramientas"
+                _admin_inline = False
+                try:
+                    from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+                    _admin_inline = is_admin_ui_chat_session(
+                        str(state.get("chat_id") or state.get("session_id") or "")
+                    )
+                except Exception:
+                    pass
+                _display_rules = (
+                    " Usa Markdown rico y emojis moderados; cifras en formato normal, no para TTS."
+                    if _admin_inline
+                    else ""
+                )
                 _follow_sys = SystemMessage(
                     content=(
                         f"Ya ejecutaste {_tools_hint} en este turno. "
-                        + (f"Encabezado {_brand} con {_clock_hint}. " if _clock_hint else "")
+                        + (f"Encabezado {_brand} con {_clock_hint}. " if _clock_hint and not _admin_inline else "")
                         + "Redacta el análisis macro/financiero completo en español integrando el contexto visual "
                         "y los resultados de herramientas. PROHIBIDO pegar JSON crudo de herramientas."
+                        + _display_rules
                     )
                 )
                 try:
@@ -6856,21 +6781,6 @@ def build_worker_graph(
                     last_human_idx=_lh_ibkr,
                 )
                 if len(tool_calls) < _tc_before:
-                    _ibkr_cancel_debug_log(
-                        "factory.py:agent_node",
-                        "stripped duplicate get_ibkr_portfolio",
-                        {
-                            "chat_id": str(state.get("chat_id") or state.get("session_id") or ""),
-                            "before": _tc_before,
-                            "after": len(tool_calls),
-                            "already_in_turn": _quant_tool_called_since(
-                                state.get("messages") or [],
-                                _lh_ibkr,
-                                "get_ibkr_portfolio",
-                            ),
-                        },
-                        hypothesis_id="H1",
-                    )
                     if tool_calls:
                         try:
                             resp = resp.model_copy(update={"tool_calls": tool_calls})
@@ -7105,13 +7015,6 @@ def build_worker_graph(
                 name = (tc.get("name") or "").strip()
                 args = tc.get("args") or {}
                 tid = tc.get("id") or ""
-                if name == "get_ibkr_portfolio":
-                    _ibkr_cancel_debug_log(
-                        "factory.py:tools_node",
-                        "executing get_ibkr_portfolio",
-                        {"chat_id": _cid_tools, "tool_round": _tool_round},
-                        hypothesis_id="H1",
-                    )
                 tool = tool_lookup.get(name)
                 if tool:
                     _tool_t0: float | None = None
@@ -7372,6 +7275,7 @@ def build_worker_graph(
             finanz_repair_ibkr_tool_live_vs_reply_paper,
             finanz_strip_ibkr_block_without_tool_in_turn,
             incoming_has_context_summarize_directive,
+            maybe_enrich_admin_display_reply,
             maybe_synthesize_reply,
             repair_summarize_new_context_egress,
             replace_bare_summarize_image_on_vlm_gateway_down,
@@ -7379,7 +7283,11 @@ def build_worker_graph(
             rescind_trivial_context_summary_reply,
             state_evidence_for_context_summary_rescind,
         )
-        from duckclaw.graphs.chat_heartbeat import format_tool_heartbeat, schedule_chat_heartbeat_dm
+        from duckclaw.graphs.chat_heartbeat import (
+            format_tool_heartbeat,
+            is_admin_ui_chat_session,
+            schedule_chat_heartbeat_dm,
+        )
         from duckclaw.integrations.llm_providers import (
             lc_message_content_to_text,
             sanitize_worker_reply_phase1,
@@ -7439,8 +7347,17 @@ def build_worker_graph(
             inc = state.get("incoming") or state.get("input") or ""
             return (inc.strip() if isinstance(inc, str) else str(inc or "")).strip()
 
+        _cid_reply = str(state.get("chat_id") or state.get("session_id") or "").strip()
+        _is_admin_ui_reply = is_admin_ui_chat_session(_cid_reply)
+
         def _apply_nl_synthesis(candidate: str) -> str:
-            return maybe_synthesize_reply(llm, spec=spec, user_ask=_nl_user_ask(), reply_candidate=candidate)
+            return maybe_synthesize_reply(
+                llm,
+                spec=spec,
+                user_ask=_nl_user_ask(),
+                reply_candidate=candidate,
+                for_admin_console=_is_admin_ui_reply,
+            )
 
         def _repair_finanz_ibkr_egress(candidate: str) -> str:
             return finanz_repair_ibkr_snapshot_disconnect_paraphrase(
@@ -7544,6 +7461,7 @@ def build_worker_graph(
                     reply or "",
                     msgs,
                     skip_llm_synthesis=_skip_llm_synth,
+                    for_admin_console=_is_admin_ui_reply,
                 )
                 if _reply_is_quant_tool_json_echo(reply or ""):
                     _det_egress = _deterministic_market_worker_tool_summary(
@@ -7699,6 +7617,16 @@ def build_worker_graph(
                     _tn,
                     session_id=str(state.get("session_id") or state.get("chat_id") or ""),
                 )
+        except Exception:
+            pass
+        try:
+            reply = maybe_enrich_admin_display_reply(
+                llm,
+                spec=spec,
+                user_ask=_nl_user_ask(),
+                reply_candidate=reply or "",
+                for_admin_console=_is_admin_ui_reply,
+            )
         except Exception:
             pass
         reply = sanitize_worker_reply_text(reply or "")

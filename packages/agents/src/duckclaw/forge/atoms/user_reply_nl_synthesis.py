@@ -790,6 +790,7 @@ def synthesize_user_visible_reply(
     worker_id: str,
     max_evidence_chars: int | None = None,
     max_tokens: int | None = None,
+    for_admin_console: bool = False,
 ) -> str:
     """Invoca el LLM sin tools; devuelve texto para el usuario o cadena vacía si falla."""
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -804,17 +805,31 @@ def synthesize_user_visible_reply(
             "enlaces uno por uno. Resume en 2–5 frases los temas dominantes y menciona como máximo 1–2 hilos si son "
             "centrales; luego **Siguientes pasos**."
         )
-    _base_rules = (
-        "Eres un asistente que redacta la respuesta FINAL al usuario en español, para Telegram.\n"
-        "Reglas obligatorias:\n"
-        "- No pegues JSON, arrays, SQL ni bloques de código como cuerpo principal; parafrasea en prosa clara.\n"
-        "- Usa Markdown ligero: **negritas**, listas con viñetas cuando ayuden.\n"
-        "- Sé breve y directo; amplía solo si la evidencia lo exige.\n"
-        "- Toda cifra o nombre de dato debe salir solo de la evidencia entre <evidence> y </evidence>; no inventes.\n"
-        "- Termina con un apartado **Siguientes pasos** con 1–2 sugerencias concretas y útiles (sin inventar datos).\n"
-        "- Si la evidencia es un error técnico, explícalo en lenguaje simple sin volver a pegar el JSON crudo entero."
-        f"{_reddit_listing_rules}"
-    )
+    if for_admin_console:
+        _base_rules = (
+            "Eres un asistente que redacta la respuesta FINAL al usuario en español, para la consola web DuckClaw.\n"
+            "Reglas obligatorias:\n"
+            "- Usa Markdown rico: **negritas**, listas con viñetas, encabezados ## cuando organicen el contenido.\n"
+            "- Puedes usar 1–3 emojis por sección si aportan claridad (📊 💡 ⚠️ ✅).\n"
+            "- No optimices el texto para audio/TTS: cifras en formato normal ($736.68, 10:19), no en palabras.\n"
+            "- No pegues JSON, arrays, SQL ni bloques de código como cuerpo principal; parafrasea en prosa clara.\n"
+            "- Toda cifra o nombre de dato debe salir solo de la evidencia entre <evidence> y </evidence>; no inventes.\n"
+            "- Si la evidencia es un error técnico, explícalo con viñetas y rutas/archivos en `código` cuando aplique.\n"
+            "- Termina con **Siguientes pasos** (1–2 acciones concretas) si tiene sentido."
+            f"{_reddit_listing_rules}"
+        )
+    else:
+        _base_rules = (
+            "Eres un asistente que redacta la respuesta FINAL al usuario en español, para Telegram.\n"
+            "Reglas obligatorias:\n"
+            "- No pegues JSON, arrays, SQL ni bloques de código como cuerpo principal; parafrasea en prosa clara.\n"
+            "- Usa Markdown ligero: **negritas**, listas con viñetas cuando ayuden.\n"
+            "- Sé breve y directo; amplía solo si la evidencia lo exige.\n"
+            "- Toda cifra o nombre de dato debe salir solo de la evidencia entre <evidence> y </evidence>; no inventes.\n"
+            "- Termina con un apartado **Siguientes pasos** con 1–2 sugerencias concretas y útiles (sin inventar datos).\n"
+            "- Si la evidencia es un error técnico, explícalo en lenguaje simple sin volver a pegar el JSON crudo entero."
+            f"{_reddit_listing_rules}"
+        )
     _finanz_extra = ""
     if (worker_id or "").strip().lower() == "finanz":
         _finanz_extra = (
@@ -886,6 +901,7 @@ def maybe_synthesize_reply(
     spec: Any,
     user_ask: str,
     reply_candidate: str,
+    for_admin_console: bool = False,
 ) -> str:
     """
     Si aplica política + heurística, sustituye ``reply_candidate`` por síntesis LLM.
@@ -916,6 +932,7 @@ def maybe_synthesize_reply(
         user_ask=(user_ask or "").strip(),
         raw_evidence=reply_candidate,
         worker_id=wid,
+        for_admin_console=for_admin_console,
     )
     syn_st = (synthesized or "").strip()
     if rc_compact and (not syn_st or _body_looks_like_reddit_compact_listing_markdown(syn_st)):
@@ -923,6 +940,51 @@ def maybe_synthesize_reply(
         if det:
             return det
     return syn_st if syn_st else reply_candidate
+
+
+def admin_display_reply_needs_enrichment(text: str) -> bool:
+    """Consola admin: enriquecer prosa plana (sin **/##/emoji) para lectura web."""
+    t = (text or "").strip()
+    if len(t) < 10:
+        return False
+    if "**" in t or "##" in t:
+        return False
+    if any(ord(c) > 0x2600 for c in t[:800]):
+        return False
+    return True
+
+
+def maybe_enrich_admin_display_reply(
+    llm: Any | None,
+    *,
+    spec: Any,
+    user_ask: str,
+    reply_candidate: str,
+    for_admin_console: bool,
+) -> str:
+    """
+    Segunda pasada solo para admin UI cuando el modelo devolvió prosa tipo Telegram/TTS
+    (``reply_needs_nl_synthesis`` no aplica porque no hay JSON ni bloques ``### tool``).
+    """
+    if not for_admin_console or llm is None:
+        return reply_candidate
+    if nl_reply_synthesis_globally_disabled():
+        return reply_candidate
+    rc = (reply_candidate or "").strip()
+    if not admin_display_reply_needs_enrichment(rc):
+        return reply_candidate
+    wid = str(getattr(spec, "worker_id", "") or "").strip() or "worker"
+    synthesized = synthesize_user_visible_reply(
+        llm,
+        user_ask=(user_ask or "").strip(),
+        raw_evidence=rc,
+        worker_id=wid,
+        for_admin_console=True,
+    )
+    syn_st = (synthesized or "").strip()
+    if syn_st:
+        return syn_st
+    return reply_candidate
 
 
 _IBKR_MISLEADING_GATEWAY_PHRASES = (

@@ -1825,9 +1825,19 @@ async def _invoke_chat_sse_body(
                             audio_base64=tts_result.audio_base64,
                             audio_format=tts_result.audio_format,
                         )
-                    except SensoryUnavailable:
+                    except SensoryUnavailable as exc:
+                        import logging as _logging
+
+                        _logging.getLogger("duckclaw.gateway.admin_tts").warning(
+                            "sse_audio unavailable worker=%s: %s", eff_worker, exc
+                        )
                         yield sse_audio(audio_unavailable=True)
-                    except Exception:
+                    except Exception as exc:
+                        import logging as _logging
+
+                        _logging.getLogger("duckclaw.gateway.admin_tts").warning(
+                            "sse_audio failed worker=%s: %s", eff_worker, exc
+                        )
                         yield sse_audio(audio_unavailable=True)
                 else:
                     yield sse_audio(audio_unavailable=True)
@@ -2317,14 +2327,19 @@ async def _invoke_chat(
         format_chat_id_for_terminal(chat_ident, as_repr=True),
         _truncate_log(reply_text),
     )
-    reply_text = _strip_markdown_bold(reply_text or "")
-    # Filtro UX: eliminar menús residuales del LLM antes de devolver al cliente
-    reply_text = clean_agent_response(reply_text or "")
-    if (effective_worker_id or worker_id or "").strip() == "BI-Analyst":
-        reply_text = _beautify_bi_analyst_telegram(reply_text or "")
-        reply_text = _strip_bi_false_chart_delivery_lines(reply_text or "")
-    # Texto plano para Redis/trazas; _telegram_safe solo en la respuesta al cliente (evita \\ que crece cada turno).
-    reply_plain_for_storage = reply_text
+    reply_raw = reply_text or ""
+    is_admin_console = (dc.auth_policy or "").strip() == "trusted_admin_console"
+    if is_admin_console:
+        # Admin UI: conservar markdown/emojis en pantalla; el TTS se limpia en sensory_node.
+        reply_plain_for_storage = reply_raw
+    else:
+        reply_text = _strip_markdown_bold(reply_raw)
+        # Filtro UX: eliminar menús residuales del LLM antes de devolver al cliente Telegram.
+        reply_text = clean_agent_response(reply_text)
+        if (effective_worker_id or worker_id or "").strip() == "BI-Analyst":
+            reply_text = _beautify_bi_analyst_telegram(reply_text or "")
+            reply_text = _strip_bi_false_chart_delivery_lines(reply_text or "")
+        reply_plain_for_storage = reply_text
     chart_sent = False
     if not is_system_prompt and isinstance(result, dict):
         photo_b64 = (result.get("sandbox_photo_base64") or "").strip()

@@ -201,6 +201,40 @@ def test_patch_conversation_worker():
     asyncio.run(_test_patch_conversation_worker_impl())
 
 
+async def _test_generic_conversation_title_updates_from_first_user_message_impl():
+    redis = build_fake_redis()
+    sid = new_admin_conversation_session_id()
+    created = await upsert_conversation_meta(
+        redis,
+        tenant_id="default",
+        session_id=sid,
+        section="playground",
+        title="Conversación 2026-06-09",
+        message_count=0,
+    )
+    assert created is not None
+    assert created.title == "Conversación 2026-06-09"
+
+    updated = await upsert_conversation_meta(
+        redis,
+        tenant_id="default",
+        session_id=sid,
+        section="playground",
+        last_worker_id="ciberseguridad-agent",
+        user_message="Que puedes hacer?",
+        assistant_message="Puedo ayudarte con seguridad.",
+        message_count=2,
+    )
+    assert updated is not None
+    assert updated.title == "Que puedes hacer?"
+
+
+def test_generic_conversation_title_updates_from_first_user_message():
+    import asyncio
+
+    asyncio.run(_test_generic_conversation_title_updates_from_first_user_message_impl())
+
+
 async def _test_delete_conversation_merged_removes_default_legacy_impl():
     redis = build_fake_redis()
     sid = new_admin_conversation_session_id()

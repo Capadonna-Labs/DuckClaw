@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Power, RotateCcw, Trash2 } from 'lucide-react';
+import { Eye, Power, RotateCcw, Trash2 } from 'lucide-react';
 import type { WorkspaceProjectSummary } from '@/services/adminService';
 
 export type ProjectsTableProps = {
@@ -37,14 +37,14 @@ export function ProjectsTable({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-gov-blue-100 bg-white dark:border-dark-border dark:bg-dark-surface">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-2xl border border-gov-blue-100 bg-white dark:border-dark-border dark:bg-dark-surface">
+      <table className="min-w-[820px] w-full text-sm">
         <thead className="bg-gov-gray-50 text-left text-[11px] uppercase tracking-wide text-gov-gray-500 dark:bg-dark-bg dark:text-dark-muted">
           <tr>
             <th className="px-4 py-3">Proyecto</th>
             <th className="px-4 py-3">Estado</th>
             <th className="px-4 py-3">Agentes</th>
-            <th className="px-4 py-3 text-right">Acciones</th>
+            <th className="min-w-[18rem] px-4 py-3 text-right">Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -71,7 +71,15 @@ export function ProjectsTable({
               </td>
               <td className="px-4 py-3 text-gov-gray-700 dark:text-dark-text">{project.agent_count ?? 0}</td>
               <td className="px-4 py-3">
-                <div className="flex justify-end gap-2">
+                <div className="flex flex-wrap justify-end gap-2 whitespace-nowrap">
+                  <Link
+                    href={`/projects/${encodeURIComponent(project.project_id)}`}
+                    className="inline-flex items-center gap-1 rounded-full border border-gov-blue-200 px-3 py-1 text-[11px] font-black text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
+                    aria-label={`Ver proyecto ${project.name}`}
+                  >
+                    <Eye size={12} />
+                    Ver
+                  </Link>
                   {project.status !== 'inactive' && (
                     <Link
                       href={`/playground?worker=platform-orchestrator&project=${encodeURIComponent(project.project_id)}`}

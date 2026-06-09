@@ -92,6 +92,43 @@ function userWriteAllowed(sub: string, method: string): boolean {
   return false;
 }
 
+function isWorkspaceProjectDetailPath(segments: string[]): boolean {
+  return segments.length === 3 && segments[0] === 'workspace' && segments[1] === 'projects' && Boolean(segments[2]);
+}
+
+async function projectDetailFallbackFromList(
+  base: string,
+  headers: Record<string, string>,
+  projectId: string
+): Promise<Record<string, unknown> | null> {
+  const listRes = await fetch(`${base}/api/v1/admin/workspace/projects?status=all&limit=200`, {
+    method: 'GET',
+    headers,
+    cache: 'no-store',
+  });
+  if (!listRes.ok) return null;
+
+  const listJson = await listRes.json();
+  const projects = Array.isArray(listJson?.projects) ? listJson.projects : [];
+  const project = projects.find((item: { project_id?: string }) => item.project_id === projectId);
+  if (!project) return null;
+
+  const agentsRes = await fetch(`${base}/api/v1/admin/workspace/projects/${encodeURIComponent(projectId)}/agents`, {
+    method: 'GET',
+    headers,
+    cache: 'no-store',
+  });
+  const agentsJson = agentsRes.ok ? await agentsRes.json() : {};
+  const agents = Array.isArray(agentsJson?.agents) ? agentsJson.agents : project.agents ?? [];
+
+  return {
+    project: { ...project, agents },
+    agents,
+    _fallback: true,
+    _gateway_stale: true,
+  };
+}
+
 async function proxy(req: NextRequest, segments: string[]) {
   const base = gatewayBase();
   const key = adminApiKey();
@@ -167,6 +204,19 @@ async function proxy(req: NextRequest, segments: string[]) {
       },
       { status: 503 }
     );
+  }
+
+  if (
+    req.method === 'GET' &&
+    isWorkspaceProjectDetailPath(segments) &&
+    (res.status === 404 || res.status === 405)
+  ) {
+    const projectDetail = await projectDetailFallbackFromList(base, headers, decodeURIComponent(segments[2]));
+    if (projectDetail) {
+      return NextResponse.json(projectDetail, {
+        headers: { 'X-Duckclaw-Admin-Fallback': 'project-detail' },
+      });
+    }
   }
 
   if (res.status === 404 && req.method === 'GET') {

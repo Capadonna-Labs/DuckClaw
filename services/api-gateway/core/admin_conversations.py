@@ -128,6 +128,10 @@ def _title_from_first_message(text: str) -> str:
     return t
 
 
+def _is_generic_conversation_title(title: str) -> bool:
+    return bool(re.fullmatch(r"Conversación \d{4}-\d{2}-\d{2}", (title or "").strip()))
+
+
 def new_admin_conversation_session_id() -> str:
     return f"{_ADMIN_CONV_PREFIX}{uuid.uuid4().hex}"
 
@@ -199,6 +203,10 @@ async def upsert_conversation_meta(
         )
         if title and title.strip():
             meta.title = title.strip()
+        elif _is_generic_conversation_title(meta.title):
+            auto_title = _title_from_first_message(user_message)
+            if auto_title:
+                meta.title = auto_title
     else:
         auto_title = _title_from_first_message(user_message) or _title_from_first_message(
             assistant_message

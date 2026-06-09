@@ -26,6 +26,10 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     assert "removeWorkspaceProjectAgent" not in page
     assert "deleteWorkspaceProject" in page
     assert "Eliminar definitivo" in table
+    assert "ConfirmDangerModal" in page
+    assert "pendingDeleteProject" in page
+    assert "confirmDeleteProject" in page
+    assert "Sí, eliminar proyecto" in page
     assert "deactivateWorkspaceProject" in page
     assert "reactivateWorkspaceProject" in page
     assert "status={status}" in page
@@ -44,6 +48,7 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     assert "worker=platform-orchestrator" in table
     assert "project=${encodeURIComponent(project.project_id)}" in table
     assert "Se eliminará definitivamente de la tabla de proyectos" in page
+    assert 'window.confirm(\n      `Eliminar definitivamente "${project.name}"?' not in page
     assert '@router.post("/workspace/orchestrator/draft"' in db_first_router
     assert "workspace/orchestrator/" in bff_proxy
     assert "gateway_stale" in bff_proxy
@@ -91,6 +96,50 @@ def test_projects_catalog_exposes_inactive_filter_and_reversible_actions() -> No
     assert "Eliminar definitivo" in table
     assert "deactivateWorkspaceProject:" in service
     assert "reactivateWorkspaceProject:" in service
+
+
+def test_projects_catalog_links_to_project_detail_page() -> None:
+    table = Path("apps/duckclaw-admin/src/components/projects/ProjectsTable.tsx").read_text(encoding="utf-8")
+    detail_page = Path("apps/duckclaw-admin/src/app/(admin)/projects/[projectId]/page.tsx")
+    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
+
+    assert detail_page.exists()
+    detail_text = detail_page.read_text(encoding="utf-8")
+    assert "getWorkspaceProject" in detail_text
+    assert "Agentes asignados" in detail_text
+    assert "Contexto del proyecto" in detail_text
+    assert "Ver" in table
+    assert "Eye" in table
+    assert "href={`/projects/${encodeURIComponent(project.project_id)}`}" in table
+    assert "overflow-x-auto" in table
+    assert "min-w-[820px]" in table
+    assert "whitespace-nowrap" in table
+    assert "getWorkspaceProject:" in service
+    assert '@router.get("/workspace/projects/{project_id}"' in router
+    assert "projectDetailFallbackFromList" in bff_proxy
+    assert "res.status === 405" in bff_proxy
+
+
+def test_template_editor_explains_db_context_storage() -> None:
+    page = Path("apps/duckclaw-admin/src/app/(admin)/templates/[workerId]/page.tsx").read_text(encoding="utf-8")
+
+    assert "Dónde se almacena" in page
+    assert "main.admin_worker_contexts" in page
+    assert "system_prompt.md" in page
+    assert "soul.md" in page
+    assert "versiones del catálogo" in page
+
+
+def test_playground_project_selection_forces_project_worker() -> None:
+    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+
+    assert "firstProjectWorkerId" in page
+    assert "workerBelongsToActiveProject" in page
+    assert "syncProjectWorkerSelection" in page
+    assert "setPlaygroundWorker" in page
+    assert "worker actual no pertenece al proyecto" in page
 
 
 def test_projects_catalog_and_orchestrator_wizard_are_separate_routes() -> None:

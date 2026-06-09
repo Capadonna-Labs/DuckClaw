@@ -1105,6 +1105,27 @@ def test_admin_conversations_crud(admin_client: TestClient):
     assert not any(c.get("session_id") == sid for c in convs_after)
 
 
+def test_workspace_project_detail_endpoint(admin_client: TestClient):
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    created = admin_client.post(
+        "/api/v1/admin/workspace/projects",
+        headers=headers,
+        json={"name": "Detalle Proyecto", "description": "Proyecto DB-first"},
+    )
+    assert created.status_code == 200
+    project_id = created.json()["project"]["project_id"]
+
+    detail = admin_client.get(
+        f"/api/v1/admin/workspace/projects/{project_id}",
+        headers=headers,
+    )
+    assert detail.status_code == 200
+    data = detail.json()
+    assert data["project"]["project_id"] == project_id
+    assert data["project"]["name"] == "Detalle Proyecto"
+    assert data["agents"] == []
+
+
 def test_admin_auth_login_smoke(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_redis
 ):

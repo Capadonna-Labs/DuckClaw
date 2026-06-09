@@ -71,6 +71,15 @@ export default function PlaygroundPage() {
         : (config?.workers ?? []),
     [activeProject, config?.workers, projectWorkerIds]
   );
+  const firstProjectWorkerId = projectWorkerIds[0] ?? '';
+  const workerBelongsToActiveProject = useCallback(
+    (candidate: string) => {
+      if (!activeProject || projectWorkerIds.length === 0) return true;
+      const id = candidate.trim();
+      return projectWorkerIds.includes(id) || id === 'platform-orchestrator';
+    },
+    [activeProject, projectWorkerIds]
+  );
   const chat = useAdminChat({
     chatId: conv.sessionId ?? '',
     initialWorker: workerId,
@@ -160,6 +169,39 @@ export default function PlaygroundPage() {
       chat.setWorkerId(workerId);
     }
   }, [workerId, chat]);
+
+  const syncProjectWorkerSelection = useCallback(
+    (nextWorker: string) => {
+      const chatId = conv.sessionId;
+      if (!chatId || !nextWorker.trim()) return;
+      const tid = (config?.effective_tenant_id || 'default').trim() || 'default';
+      void adminService
+        .setPlaygroundWorker({
+          chat_id: chatId,
+          tenant_id: tid,
+          worker_id: nextWorker.trim(),
+        })
+        .catch(() => undefined);
+    },
+    [config?.effective_tenant_id, conv.sessionId]
+  );
+
+  useEffect(() => {
+    if (!activeProject || projectWorkerIds.length === 0) return;
+    if (workerBelongsToActiveProject(workerId)) return;
+    const nextWorker = firstProjectWorkerId;
+    if (!nextWorker) return;
+    // El worker actual no pertenece al proyecto: usar el primer agente asignado.
+    setWorkerId(nextWorker);
+    syncProjectWorkerSelection(nextWorker);
+  }, [
+    activeProject,
+    firstProjectWorkerId,
+    projectWorkerIds.length,
+    syncProjectWorkerSelection,
+    workerBelongsToActiveProject,
+    workerId,
+  ]);
 
   useEffect(() => {
     if (!workerId) return;

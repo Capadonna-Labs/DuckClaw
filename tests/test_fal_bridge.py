@@ -52,8 +52,8 @@ def test_fal_queue_urls_fallback_strips_dev_subpath() -> None:
         "fal-ai/flux/dev",
         "rid-1",
     )
-    assert "/fal-ai/flux/requests/rid-1/status" in status
-    assert "/fal-ai/flux/requests/rid-1" == response
+    assert status == "https://queue.fal.run/fal-ai/flux/requests/rid-1/status"
+    assert response == "https://queue.fal.run/fal-ai/flux/requests/rid-1"
 
 
 def test_extract_media_url_image() -> None:

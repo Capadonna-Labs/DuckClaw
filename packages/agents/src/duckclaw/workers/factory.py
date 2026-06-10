@@ -32,7 +32,7 @@ from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
 from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_sync, set_log_context
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 from duckclaw.gateway_db import get_gateway_db_path
-from duckclaw.guardrails.loader import load_guardrail
+from duckclaw.guardrails.loader import load_guardrail, load_guardrail_optional, load_worker_guardrail
 from duckclaw.workers import read_pool
 from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
@@ -762,9 +762,66 @@ def _user_requests_github_pr(text: str) -> bool:
     return False
 
 
-_GITHUB_DEFAULT_OWNER = ""  # debe definirse vía entorno o variable
 _GITHUB_DEFAULT_REPO = "DuckClaw"
 _GITHUB_REFS_HEADS_PREFIX = "refs/heads/"
+
+
+def _github_resolve_owner_repo() -> tuple[str, str]:
+    """Owner/repo para GitHub MCP: env → git remote (sin fallback de org fija)."""
+    owner = (
+        os.environ.get("GITHUB_OWNER") or os.environ.get("DUCKCLAW_GITHUB_OWNER") or ""
+    ).strip()
+    repo = (
+        os.environ.get("GITHUB_REPO") or os.environ.get("DUCKCLAW_GITHUB_REPO") or _GITHUB_DEFAULT_REPO
+    ).strip() or _GITHUB_DEFAULT_REPO
+    if not owner:
+        try:
+            import subprocess
+
+            root = _github_repo_root()
+            r = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                timeout=8,
+            )
+            if r.returncode == 0:
+                m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", r.stdout.strip())
+                if m:
+                    owner = m.group(1)
+                    if repo == _GITHUB_DEFAULT_REPO:
+                        repo = m.group(2)
+        except Exception:
+            pass
+    return owner, repo
+
+
+def _github_infer_branch_from_incoming(incoming: str) -> str | None:
+    text = str(incoming or "")
+    m = re.search(
+        r"\b((?:fix|feat|chore|refactor|hotfix)/[a-z0-9][a-z0-9._/-]{0,80})\b",
+        text,
+        re.IGNORECASE,
+    )
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(?:rama|branch)\s+[`'\"]?([^\s`'\"]+)[`'\"]?", text, re.IGNORECASE)
+    if m:
+        cand = m.group(1).strip().strip("`\"'")
+        if "/" in cand:
+            return cand
+    return None
+
+
+def _github_pr_workflow_guardrail_text(spec: Any) -> str:
+    wdir = getattr(spec, "worker_dir", None) if spec is not None else None
+    if wdir:
+        try:
+            return load_worker_guardrail(wdir, "guardrails/directives/github_pr_workflow.md")
+        except FileNotFoundError:
+            pass
+    return load_guardrail_optional("directives", "github_pr_workflow", default="")
 
 
 def _github_tool_message_fields(msg: Any) -> tuple[str, str] | None:
@@ -809,8 +866,7 @@ def _github_parse_push_files_success(content: str) -> tuple[str, str, str] | Non
     head = ref[len(_GITHUB_REFS_HEADS_PREFIX) :].strip()
     if not head:
         return None
-    owner = _GITHUB_DEFAULT_OWNER
-    repo = _GITHUB_DEFAULT_REPO
+    owner, repo = _github_resolve_owner_repo()
     url = str(payload.get("url") or "")
     m = re.search(r"github\.com/repos/([^/]+)/([^/]+)/", url, re.IGNORECASE)
     if m:
@@ -896,6 +952,21 @@ _GITHUB_CANCEL_TRADE_SIGNAL_MANIFEST: tuple[str, ...] = (
     "tests/test_cancel_trade_signal_tool.py",
     "specs/features/platform/QUANT_TRADE_SIGNAL_CANCEL.md",
 )
+
+
+def _github_is_cancel_trade_signal_pr_intent(incoming: str, branch: str | None) -> bool:
+    if _quant_user_requests_cancel_trade_signal(incoming):
+        return True
+    if branch and "cancel" in branch.lower() and "trade" in branch.lower():
+        return True
+    low = str(incoming or "").lower()
+    return "cancel_trade_signal" in low or "cancel-trade-signal" in low
+
+
+def _github_push_manifest_for_intent(incoming: str, branch: str | None) -> tuple[str, ...] | None:
+    if _github_is_cancel_trade_signal_pr_intent(incoming, branch):
+        return _GITHUB_CANCEL_TRADE_SIGNAL_MANIFEST
+    return None
 
 
 def _github_repo_root() -> Path:
@@ -1011,8 +1082,11 @@ def _github_build_forced_push_files_tool_call(
     return AIMessage(content="", tool_calls=forced_tc), forced_tc
 
 
-def _github_resolve_feature_branch(messages: list[Any]) -> str | None:
-    """Rama del feature en curso (list_branches / PR head / default cancel)."""
+def _github_resolve_feature_branch(messages: list[Any], incoming: str = "") -> str | None:
+    """Rama del feature en curso (mensaje / list_branches / PR head / cancel manifest)."""
+    branch_from_inc = _github_infer_branch_from_incoming(incoming)
+    if branch_from_inc:
+        return branch_from_inc
     incomplete = _github_incomplete_pr_in_recent_tools(messages, -1)
     if incomplete:
         head = str((incomplete.get("head") or {}).get("ref") or "").strip()
@@ -1021,9 +1095,11 @@ def _github_resolve_feature_branch(messages: list[Any]) -> str | None:
     inferred = _github_infer_feature_branch(messages)
     if inferred:
         return inferred
-    files, _ = _github_collect_local_push_files()
-    if files:
-        return "feat/cancel-trade-signal-tool"
+    manifest = _github_push_manifest_for_intent(incoming, "feat/cancel-trade-signal-tool")
+    if manifest:
+        files, _ = _github_collect_local_push_files(manifest)
+        if files:
+            return "feat/cancel-trade-signal-tool"
     return None
 
 
@@ -1066,6 +1142,7 @@ def _github_try_deterministic_pr_workflow(
     msgs = state.get("messages") or []
     if not _github_pr_workflow_resolved_intent(msgs, incoming):
         return None
+    owner, repo = _github_resolve_owner_repo()
     lh = _quant_last_human_index(msgs)
 
     if already_has_tool_result and last_msg is not None:
@@ -1079,14 +1156,18 @@ def _github_try_deterministic_pr_workflow(
                 if incomplete_pr:
                     pr_url = str(incomplete_pr.get("html_url") or "")
                     head = str((incomplete_pr.get("head") or {}).get("ref") or "")
-                    owner, repo = _GITHUB_DEFAULT_OWNER, _GITHUB_DEFAULT_REPO
                     if (
                         head
                         and "push_files" in tools_by_name
                         and not _github_tool_called_since(msgs, lh, "push_files")
                     ):
-                        files_payload, missing = _github_collect_local_push_files()
-                        if files_payload:
+                        manifest = _github_push_manifest_for_intent(incoming, head)
+                        files_payload, missing = (
+                            _github_collect_local_push_files(manifest)
+                            if manifest
+                            else ([], [])
+                        )
+                        if files_payload and owner:
                             _log.info(
                                 "[%s] github deterministic stage=push_files_complete_partial_pr "
                                 "head=%s files=%d missing=%d",
@@ -1109,7 +1190,12 @@ def _github_try_deterministic_pr_workflow(
                             out.update(_identity_fields(state))
                             return out
                     if pr_url and _github_tool_called_since(msgs, lh, "push_files"):
-                        files_payload, missing = _github_collect_local_push_files()
+                        _manifest = _github_push_manifest_for_intent(incoming, head)
+                        files_payload, missing = (
+                            _github_collect_local_push_files(_manifest)
+                            if _manifest
+                            else ([], [])
+                        )
                         resp = AIMessage(
                             content=_github_build_pr_completion_response(
                                 pr_url,
@@ -1122,7 +1208,12 @@ def _github_try_deterministic_pr_workflow(
                         out.update(_identity_fields(state))
                         return out
                     if pr_url:
-                        _, missing = _github_collect_local_push_files()
+                        _manifest = _github_push_manifest_for_intent(incoming, head)
+                        _, missing = (
+                            _github_collect_local_push_files(_manifest)
+                            if _manifest
+                            else ([], [])
+                        )
                         resp = AIMessage(
                             content=(
                                 f"PR incompleto detectado: {pr_url}\n"
@@ -1146,9 +1237,10 @@ def _github_try_deterministic_pr_workflow(
                     tname == "list_pull_requests"
                     and not _github_tool_called_since(msgs, lh, "create_pull_request")
                 ):
-                    head = _github_infer_feature_branch(msgs)
+                    head = _github_resolve_feature_branch(msgs, incoming) or _github_infer_feature_branch(
+                        msgs
+                    )
                     if head:
-                        owner, repo = _GITHUB_DEFAULT_OWNER, _GITHUB_DEFAULT_REPO
                         _log.info(
                             "[%s] github deterministic stage=create_pull_request_from_list "
                             "owner=%s repo=%s head=%s",
@@ -1168,7 +1260,10 @@ def _github_try_deterministic_pr_workflow(
                 if ctx:
                     owner, repo, head = ctx
                     incomplete_pr = _github_incomplete_pr_in_recent_tools(msgs, lh)
-                    files_payload, missing = _github_collect_local_push_files()
+                    _manifest = _github_push_manifest_for_intent(incoming, head)
+                    files_payload, missing = (
+                        _github_collect_local_push_files(_manifest) if _manifest else ([], [])
+                    )
                     if incomplete_pr:
                         pr_url = str(incomplete_pr.get("html_url") or "")
                         resp = AIMessage(
@@ -1192,8 +1287,8 @@ def _github_try_deterministic_pr_workflow(
                                 {
                                     "name": "list_pull_requests",
                                     "args": {
-                                        "owner": _GITHUB_DEFAULT_OWNER,
-                                        "repo": _GITHUB_DEFAULT_REPO,
+                                        "owner": owner,
+                                        "repo": repo,
                                         "state": "open",
                                     },
                                     "id": tid,
@@ -1213,11 +1308,15 @@ def _github_try_deterministic_pr_workflow(
                         return out
 
     if not already_has_tool_result:
-        branch = _github_resolve_feature_branch(msgs)
-        files_payload, missing = _github_collect_local_push_files()
+        branch = _github_resolve_feature_branch(msgs, incoming)
+        manifest = _github_push_manifest_for_intent(incoming, branch)
+        files_payload, missing = (
+            _github_collect_local_push_files(manifest) if manifest else ([], [])
+        )
         if (
             branch
             and files_payload
+            and owner
             and "push_files" in tools_by_name
             and not _github_tool_called_since(msgs, lh, "push_files")
         ):
@@ -1228,8 +1327,8 @@ def _github_try_deterministic_pr_workflow(
                 len(files_payload),
             )
             forced_resp, _ = _github_build_forced_push_files_tool_call(
-                _GITHUB_DEFAULT_OWNER,
-                _GITHUB_DEFAULT_REPO,
+                owner,
+                repo,
                 branch,
                 files_payload,
                 (
@@ -1264,8 +1363,8 @@ def _github_try_deterministic_pr_workflow(
                     {
                         "name": "list_pull_requests",
                         "args": {
-                            "owner": _GITHUB_DEFAULT_OWNER,
-                            "repo": _GITHUB_DEFAULT_REPO,
+                            "owner": owner,
+                            "repo": repo,
                             "state": "open",
                         },
                         "id": tid,
@@ -6224,9 +6323,9 @@ def build_worker_graph(
                 and not telegram_context_summarize_directive
             )
             if _github_pr_workflow_intent:
-                _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "github_pr_workflow"))
-                ] + _msg_list
+                _gh_pr_directive = _github_pr_workflow_guardrail_text(spec)
+                if _gh_pr_directive.strip():
+                    _msg_list = [SystemMessage(content=_gh_pr_directive)] + _msg_list
                 if (
                     _github_needs_create_pr_after_push(state.get("messages") or [])
                     and re.search(r"\bpr\b", str(incoming or "").lower())

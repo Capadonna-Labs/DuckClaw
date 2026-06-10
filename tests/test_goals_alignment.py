@@ -75,7 +75,7 @@ def test_build_alignment_nudge_system_event() -> None:
     )
     msg = build_alignment_nudge_system_event(report, chat_id="c1", epoch=1.0)
     assert msg.startswith("[SYSTEM_EVENT:")
-    assert "Revisión de alineación con /crons" in msg
+    assert "Revisión de alineación con /goals" in msg
 
 
 def test_assess_goals_alignment_anomaly(tmp_path: Path) -> None:

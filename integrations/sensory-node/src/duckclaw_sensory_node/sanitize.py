@@ -35,11 +35,11 @@ _WS = re.compile(r"\s+")
 
 
 def _default_max_chars() -> int:
-    raw = (os.environ.get("DUCKCLAW_SENSORY_TTS_MAX_CHARS") or "500").strip()
+    raw = (os.environ.get("DUCKCLAW_SENSORY_TTS_MAX_CHARS") or "1400").strip()
     try:
-        return max(80, min(1500, int(raw)))
+        return max(80, min(3000, int(raw)))
     except ValueError:
-        return 500
+        return 1400
 
 
 def _table_row_to_speech(line: str) -> str:

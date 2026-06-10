@@ -2959,8 +2959,30 @@ def _quant_trader_reddit_history_anchor_intent(incoming: str, messages: list[Any
     )
 
 
+_VISUAL_IMAGE_TOOL_NAMES = frozenset({"generate_visual_asset", "generate_flux_image"})
+
+
+def _resolve_quant_image_tool(tools_by_name: dict[str, Any]) -> str | None:
+    """Herramienta de imagen activa: Fal Flux si está registrada; si no, ComfyUI local."""
+    if "generate_flux_image" in tools_by_name:
+        return "generate_flux_image"
+    if "generate_visual_asset" in tools_by_name:
+        return "generate_visual_asset"
+    return None
+
+
+def _quant_image_tool_args(tool_name: str, prompt: str) -> dict[str, str]:
+    if tool_name == "generate_flux_image":
+        return {"prompt": prompt, "aspect_ratio": "1:1"}
+    return {"prompt": prompt, "negative_prompt": "", "aspect_ratio": "1:1"}
+
+
+def _is_visual_image_tool_message(msg: Any) -> bool:
+    return (getattr(msg, "name", "") or "") in _VISUAL_IMAGE_TOOL_NAMES
+
+
 def _quant_visual_tool_succeeded_in_turn(messages: list[Any]) -> bool:
-    """True si generate_visual_asset devolvió ok:true en el turno actual (desde último HumanMessage)."""
+    """True si una tool de imagen devolvió ok:true en el turno actual (desde último HumanMessage)."""
     try:
         from langchain_core.messages import HumanMessage, ToolMessage
     except ImportError:
@@ -2972,20 +2994,20 @@ def _quant_visual_tool_succeeded_in_turn(messages: list[Any]) -> bool:
             last_u = i
             break
     for msg in messages[last_u + 1 :]:
-        if isinstance(msg, ToolMessage) and (getattr(msg, "name", "") or "") == "generate_visual_asset":
+        if isinstance(msg, ToolMessage) and _is_visual_image_tool_message(msg):
             return '"ok":true' in str(msg.content or "").replace(" ", "")
     return False
 
 
 def _visual_asset_calls_since_last_human(messages: list[Any]) -> int:
-    """Cuántas veces se invocó generate_visual_asset desde el último HumanMessage."""
+    """Cuántas veces se invocó una tool de imagen desde el último HumanMessage."""
     from langchain_core.messages import HumanMessage, ToolMessage
 
     count = 0
     for msg in reversed(messages or []):
         if isinstance(msg, HumanMessage):
             break
-        if isinstance(msg, ToolMessage) and (getattr(msg, "name", "") or "") == "generate_visual_asset":
+        if isinstance(msg, ToolMessage) and _is_visual_image_tool_message(msg):
             count += 1
     return count
 
@@ -3716,6 +3738,8 @@ def build_worker_graph(
     open_vault_read_only: bool = False,
     db: Any | None = None,
     tenant_id: str = "default",
+    chat_id: str | None = None,
+    config_db: Any | None = None,
 ) -> Any:
     """
     Build a compiled LangGraph for a worker. Used by AgentAssembler._build_worker
@@ -3951,7 +3975,16 @@ def build_worker_graph(
         except Exception:
             pass
 
-    if getattr(spec, "comfyui_config", None) is not None:
+    _visual_provider = "local"
+    try:
+        from duckclaw.forge.skills.visual_provider import resolve_visual_provider
+
+        _cfg_db = config_db if config_db is not None else db
+        _visual_provider = resolve_visual_provider(_cfg_db, chat_id)
+    except Exception:
+        _visual_provider = "local"
+
+    if _visual_provider == "local" and getattr(spec, "comfyui_config", None) is not None:
         try:
             from duckclaw.forge.skills.comfyui_bridge import register_comfyui_skill
 
@@ -3959,6 +3992,20 @@ def build_worker_graph(
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             _log.debug("comfyui skills registration skipped", exc_info=True)
+
+    if _visual_provider == "fal":
+        try:
+            from duckclaw.forge.skills.fal_bridge import register_fal_skill
+
+            _fal_cfg = getattr(spec, "fal_config", None)
+            register_fal_skill(
+                tools,
+                _fal_cfg if isinstance(_fal_cfg, dict) else {},
+                duckclaw_db=db,
+            )
+            tools_by_name = {t.name: t for t in tools}
+        except Exception:
+            _log.debug("fal skills registration skipped", exc_info=True)
 
     _lid_q = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
     try:
@@ -3999,6 +4046,14 @@ def build_worker_graph(
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             pass
+
+    try:
+        from duckclaw.forge.skills.meditate_bridge import register_meditate_skill
+
+        register_meditate_skill(tools, db)
+        tools_by_name = {t.name: t for t in tools}
+    except Exception:
+        _log.debug("meditate skill registration skipped", exc_info=True)
 
     # Strix Sandbox: `run_sandbox` si hay security_policy.yaml; `run_browser_sandbox` si browser_sandbox en manifest.
     try:
@@ -4339,19 +4394,22 @@ def build_worker_graph(
             _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_tavily) if has_tavily else None
         )
 
-        has_generate_visual = "generate_visual_asset" in tools_by_name
-        tool_choice_generate_visual = {
-            "type": "function",
-            "function": {"name": "generate_visual_asset"},
-        }
+        _primary_visual_tool = _resolve_quant_image_tool(tools_by_name)
+        has_generate_visual = _primary_visual_tool is not None
+        tool_choice_generate_visual = (
+            {"type": "function", "function": {"name": _primary_visual_tool}}
+            if _primary_visual_tool
+            else None
+        )
+        _primary_visual_tool_sandbox_off = _resolve_quant_image_tool(tools_by_name_sandbox_off)
         llm_force_generate_visual_on = (
             _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_generate_visual)
-            if has_generate_visual
+            if has_generate_visual and tool_choice_generate_visual
             else None
         )
         llm_force_generate_visual_off = (
             _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_generate_visual)
-            if "generate_visual_asset" in tools_by_name_sandbox_off
+            if _primary_visual_tool_sandbox_off and tool_choice_generate_visual
             else None
         )
 
@@ -4717,12 +4775,14 @@ def build_worker_graph(
                 from duckclaw.forge.skills.goals_tool_context import (
                     set_goals_tool_chat_id,
                     set_goals_tool_db_path,
+                    set_goals_tool_tenant_id,
                     set_goals_tool_worker_id,
                 )
 
                 set_goals_tool_chat_id(str(_chat_ctx))
                 set_goals_tool_worker_id(worker_id)
                 set_goals_tool_db_path(str(path))
+                set_goals_tool_tenant_id(_tenant_ctx)
             except Exception:
                 pass
             ibkr_session_on = has_ibkr and _ibkr_enabled_for_state(state)
@@ -5117,7 +5177,7 @@ def build_worker_graph(
             _visual_tool_already_ok = bool(
                 already_has_tool_result
                 and isinstance(last_msg, ToolMessage)
-                and (last_msg.name or "") == "generate_visual_asset"
+                and _is_visual_image_tool_message(last_msg)
                 and '"ok":true' in str(last_msg.content or "").replace(" ", "")
             )
             force_visual = bool(
@@ -5142,7 +5202,7 @@ def build_worker_graph(
                 is_quant_trader(_lid)
                 and already_has_tool_result
                 and isinstance(last_msg, ToolMessage)
-                and (last_msg.name or "") == "generate_visual_asset"
+                and _is_visual_image_tool_message(last_msg)
                 and '"ok":false' in str(last_msg.content or "").replace(" ", "")
                 and _quant_trader_visual_generation_intent(incoming)
             )
@@ -6018,26 +6078,24 @@ def build_worker_graph(
             if (
                 force_visual
                 and has_generate_visual
+                and _primary_visual_tool
                 and not already_has_tool_result
                 and not _visual_tool_already_ok
             ):
                 _vis_prompt = _quant_visual_prompt_from_incoming(incoming)
-                _forced_tid = f"call_generate_visual_{int(time.time() * 1000)}"
+                _forced_tid = f"call_{_primary_visual_tool}_{int(time.time() * 1000)}"
                 _forced_tc = [
                     {
-                        "name": "generate_visual_asset",
-                        "args": {
-                            "prompt": _vis_prompt,
-                            "negative_prompt": "",
-                            "aspect_ratio": "1:1",
-                        },
+                        "name": _primary_visual_tool,
+                        "args": _quant_image_tool_args(_primary_visual_tool, _vis_prompt),
                         "id": _forced_tid,
                         "type": "tool_call",
                     }
                 ]
                 _log.info(
-                    "[%s] quant deterministic visual → generate_visual_asset prompt=%r",
+                    "[%s] quant deterministic visual → %s prompt=%r",
                     _wl,
+                    _primary_visual_tool,
                     _vis_prompt[:120],
                 )
                 _forced_resp = AIMessage(content="", tool_calls=_forced_tc)
@@ -6082,8 +6140,8 @@ def build_worker_graph(
                                         "get_fmp_stock_dividends"
                                         if force_fmp
                                         else (
-                                            "generate_visual_asset"
-                                            if force_visual
+                                            _primary_visual_tool
+                                            if force_visual and _primary_visual_tool
                                             else (
                                             "tavily_search"
                                             if force_tavily
@@ -6207,12 +6265,13 @@ def build_worker_graph(
                     SystemMessage(content=load_guardrail("directives", "reddit_share_exhausted"))
                 ] + _msg_list
             if is_quant_trader(_lid) and _visual_tool_already_ok:
+                _done_tool = _primary_visual_tool or "generate_visual_asset"
                 _msg_list = [
                     SystemMessage(
                         content=(
-                            "La imagen ya fue generada con generate_visual_asset en este turno. "
+                            f"La imagen ya fue generada con {_done_tool} en este turno. "
                             "Responde al usuario con la ruta/artefacto; NO vuelvas a llamar "
-                            "generate_visual_asset ni edit_visual_asset."
+                            f"{_done_tool} ni edit_visual_asset."
                         )
                     )
                 ] + _msg_list
@@ -7086,7 +7145,7 @@ def build_worker_graph(
                                         sandbox_b64 = fb
                             except (json.JSONDecodeError, TypeError):
                                 pass
-                        if name in ("generate_visual_asset", "edit_visual_asset"):
+                        if name in ("generate_visual_asset", "generate_flux_image", "edit_visual_asset"):
                             try:
                                 payload = json.loads(content)
                                 if isinstance(payload, dict) and payload.get("ok"):
@@ -7497,7 +7556,9 @@ def build_worker_graph(
             from duckclaw.forge.atoms.quant_price_validator import (
                 VISUAL_EVIDENCE_RETRY_REASON,
                 enforce_visual_evidence_rule,
+                quant_bracket_citation_audit,
                 quant_reply_price_audit,
+                spec_needs_quant_bracket_citations,
                 visual_evidence_retry_system_message,
             )
 
@@ -7571,6 +7632,15 @@ def build_worker_graph(
                 if qreason:
                     _log.warning("Finanz quant price audit: %s", qreason)
                     reply = new_r
+                if spec_needs_quant_bracket_citations(spec):
+                    new_rb, breason = quant_bracket_citation_audit(
+                        reply,
+                        messages=msgs,
+                        spec=spec,
+                    )
+                    if breason:
+                        _log.info("Quant bracket citation repair: %s", breason)
+                        reply = new_rb
         except Exception:
             pass
         try:

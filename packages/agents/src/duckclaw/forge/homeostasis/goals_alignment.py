@@ -10,7 +10,7 @@ from typing import Any
 
 from duckclaw.forge.homeostasis.surprise import compute_surprise
 
-GOALS_ALIGNMENT_REVIEW_PHRASE = "Revisión de alineación con /crons"
+GOALS_ALIGNMENT_REVIEW_PHRASE = "Revisión de alineación con /goals"
 
 _NUDGE_OPENERS: tuple[str, ...] = (
     "Estoy revisando cómo va el contexto frente a tus objetivos de /crons.",
@@ -180,15 +180,55 @@ def _read_quant_drawdown_pct(db: Any) -> float | None:
         return None
 
 
-def assess_goals_alignment(
+def refresh_goals_list_observations(
     db: Any,
     chat_id: Any,
+    worker_id: str,
+    goals: list[dict],
+) -> list[dict]:
+    """Refresh observed_value on an in-memory goals list (no agent_config persist)."""
+    if not goals:
+        return goals
+    wid = (worker_id or "").strip().lower()
+    is_quant = wid in ("quant-trader", "quant_trader")
+    from duckclaw.graphs.on_the_fly_commands import get_chat_state
+
+    pnl_raw = (get_chat_state(db, chat_id, "trading_session_last_pnl") or "").strip()
+    pnl_val = _parse_float(pnl_raw.replace(",", "")) if pnl_raw else None
+    out: list[dict] = []
+    for g in goals:
+        if not isinstance(g, dict):
+            continue
+        row = dict(g)
+        key = (row.get("belief_key") or "").strip()
+        kl = key.lower()
+        new_obs: float | None = None
+        if pnl_val is not None and (
+            "pnl" in kl or kl in ("maximize_pnl", "session_pnl", "unrealized_pnl")
+        ):
+            new_obs = pnl_val
+        elif is_quant and kl == "max_portfolio_drawdown_pct":
+            dd = _read_quant_drawdown_pct(db)
+            if dd is not None:
+                new_obs = dd
+        elif row.get("observed_value") is not None:
+            new_obs = _parse_float(row.get("observed_value"))
+        if new_obs is not None:
+            row["observed_value"] = new_obs
+        out.append(row)
+    return out
+
+
+def assess_goals_list_alignment(
+    db: Any,
+    chat_id: Any,
+    goals: list[dict],
     *,
     worker_id: str = "",
 ) -> AlignmentReport:
-    from duckclaw.graphs.on_the_fly_commands import _get_goals_registry_for_chat, get_manager_goals
+    from duckclaw.graphs.on_the_fly_commands import _get_goals_registry_for_chat
 
-    goals = refresh_goal_observations(db, chat_id, worker_id)
+    goals = refresh_goals_list_observations(db, chat_id, worker_id, goals)
     registry = _get_goals_registry_for_chat(db, chat_id)
     key_to_belief = {b.key.strip(): b for b in (registry.beliefs if registry else [])}
 
@@ -263,6 +303,29 @@ def assess_goals_alignment(
         goals_count=len(goals),
         opener_hint=opener,
     )
+
+
+def assess_goals_alignment(
+    db: Any,
+    chat_id: Any,
+    *,
+    worker_id: str = "",
+    tenant_id: str | None = None,
+) -> AlignmentReport:
+    from duckclaw.graphs.on_the_fly_commands import get_chat_state
+
+    try:
+        from harness_core.targets import load_homeostasis_manifest, manifest_goals_as_dicts
+
+        tid = (tenant_id or get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
+        manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id)
+        goals = manifest_goals_as_dicts(manifest)
+        if goals:
+            return assess_goals_list_alignment(db, chat_id, goals, worker_id=worker_id)
+    except Exception:
+        pass
+    goals = refresh_goal_observations(db, chat_id, worker_id)
+    return assess_goals_list_alignment(db, chat_id, goals, worker_id=worker_id)
 
 
 def build_alignment_nudge_system_event(

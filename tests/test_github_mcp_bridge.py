@@ -41,6 +41,14 @@ def test_github_worker_allows_gitclaw_not_random() -> None:
     assert github_worker_allows_mutating_mcp("finanz") is False
 
 
+def test_github_worker_allows_quant_trader_variants() -> None:
+    from duckclaw.forge.skills.github_bridge import github_worker_allows_mutating_mcp
+
+    assert github_worker_allows_mutating_mcp("quant_trader") is True
+    assert github_worker_allows_mutating_mcp("Quant-Trader") is True
+    assert github_worker_allows_mutating_mcp("quant-trader") is True
+
+
 def test_github_worker_env_csv_extra(monkeypatch: pytest.MonkeyPatch) -> None:
     from duckclaw.forge.skills.github_bridge import github_worker_allows_mutating_mcp
 

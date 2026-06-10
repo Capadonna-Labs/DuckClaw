@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -58,9 +59,23 @@ def _stt_timeout() -> float:
 
 def _tts_timeout() -> float:
     try:
-        return float(os.environ.get("DUCKCLAW_SENSORY_TIMEOUT_TTS") or "60.0")
+        return float(os.environ.get("DUCKCLAW_SENSORY_TIMEOUT_TTS") or "90.0")
     except ValueError:
-        return 2.5
+        return 90.0
+
+
+_TTS_TEXT_MAX_LEN = 3000
+_BUILTIN_VOICE_MAP: dict[str, str] = {
+    "quant-trader": "finanz_alert",
+    "quant_trader": "finanz_alert",
+    "Quant-Trader": "finanz_alert",
+    "finanz": "finanz_alert",
+}
+_QUANT_HEADER_RE = re.compile(
+    r"^(?:quant[- ]?trader|Quant-Trader)\s+\d+\s*[·•]\s*[^\n]*(?:\n|$)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_HRULE_RE = re.compile(r"^---+\s*$", re.MULTILINE)
 
 
 def _map_http_error(status: int, detail: str) -> SensoryError:
@@ -98,8 +113,14 @@ async def transcribe_audio_base64(
 
 
 def tts_snippet_for_reply(text: str) -> str:
-    """Full reply for TTS; markdown strip and length cap happen on sensory_node."""
-    return (text or "").strip()
+    """Prepare agent reply for TTS: drop admin headers; sanitize/cap on sensory_node."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    t = _QUANT_HEADER_RE.sub("", t, count=1)
+    t = _HRULE_RE.sub("", t)
+    t = re.sub(r"^(?:quant[- ]?trader)\s+\d+\s*\n", "", t, flags=re.IGNORECASE)
+    return t.strip()
 
 
 def _admin_tts_output_format() -> str:
@@ -122,7 +143,7 @@ async def synthesize_text(
     if fmt not in ("ogg", "wav"):
         fmt = "wav"
     payload: dict[str, Any] = {
-        "text": (text or "")[:1500],
+        "text": (text or "")[:_TTS_TEXT_MAX_LEN],
         "voice_id": voice_id,
         "speed": speed,
         "output_format": fmt,
@@ -150,15 +171,14 @@ def resolve_voice_id_for_worker(worker_id: str) -> str:
     import json
 
     default = "leila_assistant"
-    raw = (os.environ.get("DUCKCLAW_TTS_VOICE_MAP") or "").strip()
-    if not raw:
-        return default
-    try:
-        mapping: dict[str, Any] = json.loads(raw)
-    except json.JSONDecodeError:
-        _log.warning("invalid DUCKCLAW_TTS_VOICE_MAP JSON")
-        return default
     wid = (worker_id or "").strip()
+    raw = (os.environ.get("DUCKCLAW_TTS_VOICE_MAP") or "").strip()
+    mapping: dict[str, Any] = dict(_BUILTIN_VOICE_MAP)
+    if raw:
+        try:
+            mapping.update(json.loads(raw))
+        except json.JSONDecodeError:
+            _log.warning("invalid DUCKCLAW_TTS_VOICE_MAP JSON")
     if wid in mapping:
         return str(mapping[wid])
     if "default" in mapping:

@@ -273,14 +273,29 @@ _READWRITE_IDS_DEFAULT = frozenset({"gitclaw"})
 _READWRITE_IDS_EXTRA_ENV = "DUCKCLAW_GITHUB_MCP_READWRITE_WORKERS"
 
 
+def _github_worker_id_key(worker_id: str) -> str:
+    """Normaliza ids de worker para allowlist (``quant-trader`` ≡ ``quant_trader``)."""
+    return (worker_id or "").strip().lower().replace("-", "_")
+
+
 def github_worker_allows_mutating_mcp(logical_worker_id: str, worker_slug: Optional[str] = None) -> bool:
     """True si el id de worker puede usar MCP GitHub sin GITHUB_READ_ONLY."""
+    from duckclaw.workers.worker_ids import WORKER_QUANT_TRADER, is_quant_trader
+
     extras_raw = os.environ.get(_READWRITE_IDS_EXTRA_ENV, "").strip()
-    csv = {x.strip().lower() for x in extras_raw.split(",") if x.strip()}
-    allow = set(_READWRITE_IDS_DEFAULT) | csv
-    lw = (logical_worker_id or "").strip().lower()
-    slug = (worker_slug or "").strip().lower()
-    return lw in allow or slug in allow
+    csv = {_github_worker_id_key(x) for x in extras_raw.split(",") if x.strip()}
+    allow = {_github_worker_id_key(x) for x in _READWRITE_IDS_DEFAULT} | csv
+    lw = _github_worker_id_key(logical_worker_id)
+    slug = _github_worker_id_key(worker_slug or "")
+    qt_key = _github_worker_id_key(WORKER_QUANT_TRADER)
+    return (
+        lw in allow
+        or slug in allow
+        or lw == qt_key
+        or slug == qt_key
+        or is_quant_trader(logical_worker_id)
+        or is_quant_trader(worker_slug)
+    )
 
 
 def register_github_skill(

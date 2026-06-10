@@ -51,3 +51,10 @@ def test_prepare_truncates_long_plain_text():
     out = prepare_tts_text(long_text, max_chars=120)
     assert len(out) <= 120
     assert "Hola" in out
+
+
+def test_default_max_chars_is_1400(monkeypatch):
+    monkeypatch.delenv("DUCKCLAW_SENSORY_TTS_MAX_CHARS", raising=False)
+    long_text = "x" * 2000
+    out = prepare_tts_text(long_text)
+    assert len(out) <= 1400

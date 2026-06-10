@@ -35,6 +35,10 @@ from duckclaw.graphs.on_the_fly_commands import (
     _GOALS_CRON_WALL_KEY,
     _GOALS_DELTA_META_KEY,
     _GOALS_PROACTIVE_NOTIFY_KEY,
+    _MEDITATE_DELTA_SECONDS_KEY,
+    _MEDITATE_LAST_FIRE_KEY,
+    _MEDITATE_TENANT_KEY,
+    _MEDITATE_WORKER_KEY,
     _crons_debug_log,
     _GOALS_PROACTIVE_LAST_FIRE_KEY,
     _GOALS_PROACTIVE_TENANT_KEY,
@@ -42,9 +46,11 @@ from duckclaw.graphs.on_the_fly_commands import (
     build_trading_tick_system_event_message,
     chat_id_from_goals_cron_wall_key,
     chat_id_from_goals_delta_config_key,
+    chat_id_from_meditate_delta_config_key,
     get_chat_state,
     get_manager_goals,
 )
+from harness_core.targets import get_manifest_goals_for_chat
 from duckclaw.workers.factory import list_workers
 from duckclaw.workers.manifest import load_manifest
 
@@ -59,6 +65,7 @@ REDIS_URL = resolve_redis_url()
 GATEWAY_URL = resolve_agent_chat_url()
 HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "3600"))
 GOALS_TICKER_POLL_SECONDS = int(os.getenv("GOALS_TICKER_POLL_SECONDS", "45"))
+MEDITATE_DEFAULT_DELTA_SECONDS = int(os.getenv("MEDITATE_DELTA_SECONDS", "14400"))
 GITHUB_MCP_HEALTH_SECONDS = float(os.getenv("DUCKCLAW_GITHUB_MCP_HEALTH_SECONDS", "300"))
 _GITHUB_PAT_401_AUDIT_COOLDOWN_KEY = "duckclaw:heartbeat:github_pat_401_audit_v1"
 # POST a /api/v1/agent/chat para el tick de /crons: turnos Quant (varias tools + sandbox) suelen >120s
@@ -363,7 +370,10 @@ async def _run_goals_proactive_tick_one_db(
             continue
 
         with duckclaw_open_for_read_scan(db_path) as db:
-            goals = get_manager_goals(db, chat_id)
+            tenant_id_pre = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
+            goals = get_manifest_goals_for_chat(db, chat_id, tenant_id=tenant_id_pre or None)
+            if not goals:
+                goals = get_manager_goals(db, chat_id)
             meta_raw_pre = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
             meta_pre: Dict[str, Any] = {}
             if meta_raw_pre:
@@ -783,7 +793,10 @@ async def _run_goals_proactive_tick_one_db(
             continue
 
         with duckclaw_open_for_read_scan(db_path) as db:
-            goals = get_manager_goals(db, chat_id_w)
+            tenant_id_w = (get_chat_state(db, chat_id_w, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
+            goals = get_manifest_goals_for_chat(db, chat_id_w, tenant_id=tenant_id_w or None)
+            if not goals:
+                goals = get_manager_goals(db, chat_id_w)
             meta_raw_pre = (get_chat_state(db, chat_id_w, _GOALS_DELTA_META_KEY) or "").strip()
             meta_pre: Dict[str, Any] = {}
             if meta_raw_pre:
@@ -1088,6 +1101,108 @@ async def _run_goals_proactive_tick_one_db(
             )
 
 
+async def _run_meditate_proactive_tick() -> None:
+    """Escanea agent_config y dispara meditate_graph cuando toca (infra, sin SYSTEM_EVENT)."""
+    now = time.time()
+    scan_paths = _goals_ticker_scan_db_paths()
+    for db_path in scan_paths:
+        await _run_meditate_proactive_tick_one_db(db_path, now=now)
+
+
+async def _run_meditate_proactive_tick_one_db(db_path: str, *, now: float) -> None:
+    try:
+        with duckclaw_open_for_read_scan(db_path) as db_ro:
+            raw = db_ro.query(
+                "SELECT key, value FROM agent_config WHERE key LIKE 'chat_%_meditate_delta_seconds'"
+            )
+            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception as exc:  # noqa: BLE001
+        if _goals_proactive_db_open_error_is_expected(exc):
+            logger.debug("meditate_proactive: omitiendo %s: %s", db_path, exc)
+        else:
+            logger.warning("meditate_proactive: no se pudo leer agent_config (%s): %s", db_path, exc)
+        return
+
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("key") or "")
+        chat_id = chat_id_from_meditate_delta_config_key(key)
+        if not chat_id:
+            continue
+        try:
+            delta_s = int(str(row.get("value") or "0").strip() or "0")
+        except ValueError:
+            continue
+        if delta_s <= 0:
+            continue
+
+        with duckclaw_open_for_read_scan(db_path) as db:
+            tenant_id = (get_chat_state(db, chat_id, _MEDITATE_TENANT_KEY) or "").strip()
+            worker_id = (get_chat_state(db, chat_id, _MEDITATE_WORKER_KEY) or "").strip()
+            if not worker_id:
+                worker_id = (get_chat_state(db, chat_id, "worker_id") or "").strip()
+            if not tenant_id:
+                tenant_id = (get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
+            if not worker_id or worker_id.lower() == "manager":
+                logger.debug("meditate_proactive: omitiendo chat=%s sin worker", chat_id)
+                continue
+            last_raw = (get_chat_state(db, chat_id, _MEDITATE_LAST_FIRE_KEY) or "").strip()
+            try:
+                last_fire = float(last_raw) if last_raw else 0.0
+            except ValueError:
+                last_fire = 0.0
+            if last_fire > 0 and (now - last_fire) < float(delta_s):
+                continue
+
+        def _meditate_tick_sync() -> dict:
+            from duckclaw.graphs.on_the_fly_commands import invoke_meditate_cycle_for_chat
+
+            with duckclaw_open_for_read_scan(db_path) as db_sync:
+                tid = tenant_id or (
+                    get_chat_state(db_sync, chat_id, "tenant_id") or "default"
+                ).strip() or "default"
+                return invoke_meditate_cycle_for_chat(
+                    db_sync,
+                    chat_id,
+                    tenant_id=tid,
+                    worker_id=worker_id,
+                    delta_s=delta_s,
+                )
+
+        try:
+            result = await asyncio.to_thread(_meditate_tick_sync)
+            status = str((result or {}).get("status") or "")
+            if status == "failed":
+                logger.warning(
+                    "meditate_proactive: run failed chat=%s err=%s",
+                    chat_id,
+                    (result or {}).get("error"),
+                )
+            else:
+                logger.info("meditate_proactive: tick OK chat=%s worker=%s", chat_id, worker_id)
+                try:
+                    from duckclaw.graphs.on_the_fly_commands import _publish_meditate_tick_heartbeat
+
+                    _publish_meditate_tick_heartbeat(
+                        chat_id,
+                        tenant_id=tenant_id,
+                        worker_id=worker_id,
+                        cycle=result if isinstance(result, dict) else None,
+                    )
+                except Exception:
+                    pass
+            await _enqueue_chat_state_write(
+                db_path=db_path,
+                chat_id=chat_id,
+                tenant_id=tenant_id,
+                key=_MEDITATE_LAST_FIRE_KEY,
+                value=str(now),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("meditate_proactive: invoke failed chat=%s: %s", chat_id, exc)
+
+
 async def _docker_daemon_reachable() -> bool:
     """Comprueba si el CLI ``docker`` puede hablar con el daemon (OrbStack / Docker Desktop)."""
     try:
@@ -1200,6 +1315,11 @@ async def run_heartbeat() -> None:
             await _run_goals_proactive_tick()
         except Exception as exc:  # noqa: BLE001
             logger.exception("goals_proactive: ciclo: %s", exc)
+
+        try:
+            await _run_meditate_proactive_tick()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("meditate_proactive: ciclo: %s", exc)
 
         now_mono = time.monotonic()
         if now_mono - last_github_health >= GITHUB_MCP_HEALTH_SECONDS:

@@ -24,7 +24,25 @@ _log = logging.getLogger("duckclaw.sensory.tts")
 
 _DEFAULT_MODEL = "mlx-community/OmniVoice-bf16"
 _DEFAULT_AUDIO_TOKENIZER = "mlx-community/OmniVoice-4bit"
-_TTS_TIMEOUT_MS = float((os.environ.get("DUCKCLAW_SENSORY_TTS_TIMEOUT_MS") or "2000").strip() or "2000")
+_TTS_TIMEOUT_MS = float(
+    (os.environ.get("DUCKCLAW_SENSORY_TTS_TIMEOUT_MS") or "60000").strip() or "60000"
+)
+
+
+def _max_duration_sec() -> float:
+    raw = (os.environ.get("DUCKCLAW_SENSORY_TTS_MAX_DURATION_SEC") or "90").strip()
+    try:
+        return max(10.0, min(180.0, float(raw)))
+    except ValueError:
+        return 90.0
+
+
+def _num_steps() -> int:
+    raw = (os.environ.get("DUCKCLAW_SENSORY_TTS_NUM_STEPS") or "32").strip()
+    try:
+        return max(16, min(64, int(raw)))
+    except ValueError:
+        return 32
 
 
 def _audio_tokenizer_path() -> str:
@@ -178,12 +196,13 @@ class TTSEngine:
         t0 = time.perf_counter()
         deadline = t0 + (_TTS_TIMEOUT_MS / 1000.0)
 
+        max_dur = _max_duration_sec()
         gen_kwargs: dict[str, Any] = {
             "text": text,
             "language": "spanish",
             "speed": speed,
-            "duration_s": min(30.0, max(3.0, len(text) * 0.06)),
-            "num_steps": 32,
+            "duration_s": min(max_dur, max(3.0, len(text) * 0.06)),
+            "num_steps": _num_steps(),
         }
         if profile.ref_tokens is not None:
             import mlx.core as mx

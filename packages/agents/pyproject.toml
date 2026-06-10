@@ -39,8 +39,8 @@ train = [
 "" = "src"
 
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["duckclaw*"]
+where = ["src", "../.."]
+include = ["duckclaw*", "harness_core*"]
 
 [tool.setuptools.package-data]
 "duckclaw.guardrails" = ["**/*.md", "manager_tasks/**/*.md", "capabilities/**/*.md", "planner_tasks/**/*.md"]

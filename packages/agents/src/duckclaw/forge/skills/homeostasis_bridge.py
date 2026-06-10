@@ -22,40 +22,75 @@ def register_goals_alignment_skill(
         from duckclaw.forge.skills.goals_tool_context import (
             get_goals_tool_chat_id,
             get_goals_tool_db_path,
+            get_goals_tool_tenant_id,
             get_goals_tool_worker_id,
         )
 
+        def _tool_db() -> Any:
+            path = get_goals_tool_db_path()
+            if path and str(getattr(db, "_path", "") or "") != path:
+                try:
+                    from duckclaw import DuckClaw
+
+                    return DuckClaw(path, read_only=True)
+                except Exception:
+                    return db
+            return db
+
         def assess_crons_alignment() -> str:
-            """Mide desalineación entre /crons y el contexto observable; devuelve JSON."""
+            """Mide desalineación entre manifiesto /goals y el contexto observable; devuelve JSON."""
             cid = get_goals_tool_chat_id()
             if not cid:
                 return json.dumps(
                     {"aligned": True, "error": "chat_id no disponible en este turno"},
                     ensure_ascii=False,
                 )
-            path = get_goals_tool_db_path()
-            worker = get_goals_tool_worker_id()
-            use_db = db
-            if path and str(getattr(db, "_path", "") or "") != path:
-                try:
-                    from duckclaw_core import DuckClaw
-
-                    use_db = DuckClaw(path, read_only=True)
-                except Exception:
-                    use_db = db
-            report = assess_goals_alignment(use_db, cid, worker_id=worker)
+            report = assess_goals_alignment(
+                _tool_db(),
+                cid,
+                worker_id=get_goals_tool_worker_id(),
+                tenant_id=get_goals_tool_tenant_id(),
+            )
             return report.to_json()
 
-        tool = StructuredTool.from_function(
-            assess_crons_alignment,
-            name="assess_crons_alignment",
-            description=(
-                "Evalúa alineación entre objetivos /crons del chat y datos observables "
-                "(PnL, drawdown, etc.). Devuelve JSON con aligned, items y desvíos. "
-                "Úsala cuando el usuario pregunte por metas, riesgo o en revisiones proactivas."
-            ),
+        def manage_homeostasis_goals(command: str = "") -> str:
+            """
+            Gestiona el manifiesto homeostasis (/goals): metas de dominio + umbrales infra.
+            command vacío = listar; texto = añadir meta; '--rm key'; '--set metric value'.
+            """
+            cid = get_goals_tool_chat_id()
+            if not cid:
+                return json.dumps({"status": "error", "error": "chat_id no disponible"}, ensure_ascii=False)
+            from duckclaw.graphs.on_the_fly_commands import execute_homeostasis_goals
+
+            msg = execute_homeostasis_goals(
+                _tool_db(),
+                cid,
+                (command or "").strip(),
+                tenant_id=get_goals_tool_tenant_id(),
+            )
+            return json.dumps({"status": "ok", "message": msg}, ensure_ascii=False)
+
+        tools_list.append(
+            StructuredTool.from_function(
+                assess_crons_alignment,
+                name="assess_crons_alignment",
+                description=(
+                    "Evalúa alineación entre el manifiesto /goals y datos observables "
+                    "(PnL, drawdown, etc.). Devuelve JSON con aligned, items y desvíos."
+                ),
+            )
         )
-        tools_list.append(tool)
+        tools_list.append(
+            StructuredTool.from_function(
+                manage_homeostasis_goals,
+                name="manage_homeostasis_goals",
+                description=(
+                    "Lista, añade o edita metas homeostasis y umbrales infra (fuente de /meditate). "
+                    "command='' lista; 'max drawdown 5%' añade; '--rm belief_key'; '--set error_rate_pct 2'."
+                ),
+            )
+        )
     except Exception:
         pass
 

@@ -11,4 +11,6 @@ uv run --project integrations/sensory-node python integrations/sensory-node/scri
   --ref-text "Transcripción exacta del clip de 5 segundos."
 ```
 
+Optional `quant_trader_brief` for Quant-Trader TTS (place `refs/quant_trader_brief.wav` then run `regen_voices_mac.py`).
+
 Do **not** commit PII or production voice tensors to git.

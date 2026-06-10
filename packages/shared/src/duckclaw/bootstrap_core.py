@@ -124,6 +124,28 @@ def bootstrap_core_schema(con: Any, *, seed_admin: bool = True) -> None:
         s = stmt.strip()
         if s:
             con.execute(s)
+    con.execute("CREATE SCHEMA IF NOT EXISTS harness_core")
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS harness_core.homeostasis_targets (
+            tenant_id VARCHAR PRIMARY KEY,
+            targets_json JSON,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS harness_core.meditate_runs (
+            run_id VARCHAR PRIMARY KEY,
+            tenant_id VARCHAR NOT NULL,
+            distance_vector JSON,
+            actions_json JSON,
+            status VARCHAR NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
 
 
 def core_domain_schemas_present(con: Any) -> list[str]:

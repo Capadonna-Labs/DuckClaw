@@ -33,6 +33,13 @@ class Settings(BaseSettings):
             "DUCKCLAW_VISUAL_STATE_DELTA_QUEUE",
         ),
     )
+    MEDITATE_STATE_DELTA_QUEUE_NAME: str = Field(
+        default="duckclaw:state_delta:meditate",
+        validation_alias=AliasChoices(
+            "MEDITATE_STATE_DELTA_QUEUE_NAME",
+            "DUCKCLAW_MEDITATE_STATE_DELTA_QUEUE",
+        ),
+    )
     NEEDS_EMBEDDING_QUEUE_NAME: str = "duckclaw:needs_embedding"
     
     # Ruta absoluta calculada dinámicamente

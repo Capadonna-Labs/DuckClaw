@@ -16,7 +16,9 @@ import sys
 from pathlib import Path
 
 VOICES_DIR = Path(__file__).resolve().parents[1] / "voices"
-ALLOWED = frozenset({"campus_legal_main", "leila_assistant", "finanz_alert"})
+ALLOWED = frozenset(
+    {"campus_legal_main", "leila_assistant", "finanz_alert", "quant_trader_brief"}
+)
 _DEFAULT_AUDIO_TOKENIZER = "mlx-community/OmniVoice-4bit"
 
 

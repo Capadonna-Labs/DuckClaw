@@ -20,6 +20,7 @@ from core.sensory_client import (
     sensory_enabled,
     synthesize_text,
     transcribe_audio_base64,
+    tts_snippet_for_reply,
 )
 
 
@@ -34,6 +35,23 @@ def test_sensory_enabled():
 
 def test_resolve_voice_id_default():
     assert resolve_voice_id_for_worker("unknown") == "leila_assistant"
+
+
+def test_resolve_voice_id_quant_trader_builtin():
+    assert resolve_voice_id_for_worker("quant-trader") == "finanz_alert"
+
+
+def test_tts_snippet_strips_quant_header():
+    raw = (
+        "quant-trader 1 · **MAR 18:05 COT** · Post-mercado\n"
+        "---\n"
+        "## Guerra USA-Irán\n"
+        "Conflicto activo desde febrero."
+    )
+    out = tts_snippet_for_reply(raw)
+    assert "quant-trader" not in out.lower()
+    assert "Conflicto activo" in out
+    assert "---" not in out
 
 
 def test_resolve_voice_id_map(monkeypatch):

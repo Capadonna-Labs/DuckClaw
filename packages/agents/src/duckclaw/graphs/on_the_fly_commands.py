@@ -92,6 +92,14 @@ _GOALS_CRON_WALL_KEY = "goals_cron_wall"
 GOALS_DELTA_MIN_SECONDS = 60
 GOALS_DELTA_MAX_SECONDS = 7 * 24 * 3600
 
+# Termostato infra meditate (/meditate --delta); independiente de /crons --delta
+_MEDITATE_DELTA_SECONDS_KEY = "meditate_delta_seconds"
+_MEDITATE_LAST_FIRE_KEY = "meditate_last_fire_epoch"
+_MEDITATE_TENANT_KEY = "meditate_tenant_id"
+_MEDITATE_WORKER_KEY = "meditate_worker_id"
+MEDITATE_DELTA_MIN_SECONDS = 60
+MEDITATE_DELTA_MAX_SECONDS = 7 * 24 * 3600
+
 # IDs mostrados en /crons para quitar un schedule con /crons --rm <cron-id>
 CRON_SCHEDULE_ID_DELTA = "delta"
 CRON_SCHEDULE_ID_WALL = "wall"
@@ -399,6 +407,350 @@ def chat_id_from_goals_cron_wall_key(key: str) -> Optional[str]:
     if not key.startswith(_PREFIX) or not key.endswith(suf):
         return None
     return key[len(_PREFIX) : -len(suf)] or None
+
+
+def parse_meditate_delta_arg(fragment: str) -> tuple[Optional[int], Optional[str]]:
+    """Alias de parse_goals_delta_arg con mismos límites de intervalo."""
+    return parse_goals_delta_arg(fragment)
+
+
+def chat_id_from_meditate_delta_config_key(key: str) -> Optional[str]:
+    """Extrae chat_id desde fila agent_config con sufijo _meditate_delta_seconds."""
+    suf = f"_{_MEDITATE_DELTA_SECONDS_KEY}"
+    if not key.startswith(_PREFIX) or not key.endswith(suf):
+        return None
+    return key[len(_PREFIX) : -len(suf)] or None
+
+
+def _persist_meditate_chat_state(
+    db: Any,
+    chat_id: Any,
+    key_suffix: str,
+    value: str,
+    *,
+    tenant_id: str = "default",
+) -> tuple[bool, str]:
+    tid = str(tenant_id or "default").strip() or "default"
+    if _skip_runtime_ddl(db):
+        return set_chat_state_via_vault(db, chat_id, key_suffix, value, tenant_id=tid)
+    set_chat_state(db, chat_id, key_suffix, value)
+    return True, ""
+
+
+def clear_meditate_schedule(db: Any, chat_id: Any, *, tenant_id: str = "default") -> None:
+    """Desactiva ticker meditate para el chat."""
+    tid = str(tenant_id or "default").strip() or "default"
+    for k, v in (
+        (_MEDITATE_DELTA_SECONDS_KEY, "0"),
+        (_MEDITATE_LAST_FIRE_KEY, ""),
+        (_MEDITATE_TENANT_KEY, ""),
+        (_MEDITATE_WORKER_KEY, ""),
+    ):
+        _persist_meditate_chat_state(db, chat_id, k, v, tenant_id=tid)
+
+
+def get_meditate_schedule_status(db: Any, chat_id: Any) -> dict[str, Any]:
+    """Estado actual del termostato infra meditate para este chat."""
+    try:
+        secs = int((get_chat_state(db, chat_id, _MEDITATE_DELTA_SECONDS_KEY) or "0").strip() or "0")
+    except ValueError:
+        secs = 0
+    return {
+        "enabled": secs > 0,
+        "interval_seconds": secs,
+        "interval_human": format_goals_delta_interval_human(secs) if secs > 0 else None,
+        "tenant_id": (get_chat_state(db, chat_id, _MEDITATE_TENANT_KEY) or "").strip() or None,
+        "worker_id": (get_chat_state(db, chat_id, _MEDITATE_WORKER_KEY) or "").strip() or None,
+        "last_fire_epoch": (get_chat_state(db, chat_id, _MEDITATE_LAST_FIRE_KEY) or "").strip() or None,
+    }
+
+
+def apply_meditate_schedule(
+    db: Any,
+    chat_id: Any,
+    *,
+    tenant_id: str,
+    worker_id: str,
+    interval_seconds: int,
+    run_first_cycle: bool = True,
+    vault_user_id: Any = None,
+) -> dict[str, Any]:
+    """Activa/desactiva meditate y opcionalmente ejecuta el primer ciclo."""
+    tid = str(tenant_id or "default").strip() or "default"
+    wid = (worker_id or "").strip()
+    if int(interval_seconds) <= 0:
+        clear_meditate_schedule(db, chat_id, tenant_id=tid)
+        return {"status": "disabled", "enabled": False}
+    if not wid or wid.lower() == "manager":
+        return {"status": "error", "error": "worker_id missing or manager"}
+    secs = max(MEDITATE_DELTA_MIN_SECONDS, min(int(interval_seconds), MEDITATE_DELTA_MAX_SECONDS))
+    for k, v in (
+        (_MEDITATE_DELTA_SECONDS_KEY, str(secs)),
+        (_MEDITATE_TENANT_KEY, tid),
+        (_MEDITATE_WORKER_KEY, wid),
+    ):
+        ok, err = _persist_meditate_chat_state(db, chat_id, k, v, tenant_id=tid)
+        if not ok:
+            return {"status": "error", "error": err or f"persist failed: {k}"}
+    human = format_goals_delta_interval_human(secs)
+    out: dict[str, Any] = {
+        "status": "ok",
+        "enabled": True,
+        "interval_seconds": secs,
+        "interval_human": human,
+        "worker_id": wid,
+        "tenant_id": tid,
+    }
+    if not run_first_cycle:
+        _persist_meditate_chat_state(db, chat_id, _MEDITATE_LAST_FIRE_KEY, "0", tenant_id=tid)
+        return out
+    try:
+        result = invoke_meditate_cycle_for_chat(
+            db,
+            chat_id,
+            tenant_id=tid,
+            worker_id=wid,
+            delta_s=secs,
+            vault_user_id=vault_user_id,
+        )
+        out["first_cycle"] = result
+        if str(result.get("status") or "") == "failed":
+            _persist_meditate_chat_state(db, chat_id, _MEDITATE_LAST_FIRE_KEY, "0", tenant_id=tid)
+            out["first_cycle_error"] = result.get("error")
+        else:
+            _persist_meditate_chat_state(
+                db, chat_id, _MEDITATE_LAST_FIRE_KEY, str(time.time()), tenant_id=tid
+            )
+            out["first_cycle_executed"] = True
+            _publish_meditate_tick_heartbeat(
+                chat_id, tenant_id=tid, worker_id=wid, cycle=result if isinstance(result, dict) else None
+            )
+    except Exception as exc:
+        _persist_meditate_chat_state(db, chat_id, _MEDITATE_LAST_FIRE_KEY, "0", tenant_id=tid)
+        out["first_cycle_error"] = str(exc)
+    return out
+
+
+def _format_meditate_cycle_summary(cycle: dict[str, Any] | None) -> str:
+    """Resumen legible del último ciclo meditate (para fly/ticker/admin UI)."""
+    if not cycle:
+        return "sin detalle"
+    align_msg = (cycle.get("alignment_message") or "").strip()
+    if align_msg:
+        return align_msg
+    status = str(cycle.get("status") or "unknown")
+    dist = cycle.get("distance_vector") or {}
+    actions = cycle.get("dispatched_actions") or []
+    action_bits: list[str] = []
+    for raw in actions:
+        if not isinstance(raw, dict):
+            continue
+        at = str(raw.get("action_type") or "?")
+        ex = "ok" if raw.get("executed") else "pendiente"
+        action_bits.append(f"{at}({ex})")
+    metric_bits: list[str] = []
+    for key in ("stale_tasks_count", "error_rate_pct", "memory_fragmentation_index", "db_lock_events"):
+        try:
+            val = float(dist.get(key) or 0)
+        except (TypeError, ValueError):
+            val = 0.0
+        if val:
+            metric_bits.append(f"{key}={val:g}")
+    parts = [f"estado={status}"]
+    if action_bits:
+        parts.append("acciones=" + ", ".join(action_bits))
+    if metric_bits:
+        parts.append("métricas=" + ", ".join(metric_bits))
+    run_id = str(cycle.get("run_id") or "").strip()
+    if run_id:
+        parts.append(f"run={run_id[:8]}")
+    return "; ".join(parts)
+
+
+def _publish_meditate_tick_heartbeat(
+    chat_id: Any,
+    *,
+    tenant_id: str,
+    worker_id: str,
+    cycle: dict[str, Any] | None,
+) -> None:
+    """Notifica en admin UI que un ciclo meditate terminó (infra, sin turno LLM)."""
+    try:
+        from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session, publish_admin_chat_heartbeat
+
+        cid = str(chat_id or "").strip()
+        if not cid or not is_admin_ui_chat_session(cid):
+            return
+        publish_admin_chat_heartbeat(
+            cid,
+            f"[meditate] {_format_meditate_cycle_summary(cycle)}",
+            kind="meditate_tick",
+            worker_id=worker_id,
+            artifact_tenant_id=tenant_id,
+        )
+    except Exception:
+        pass
+
+
+def _resolve_meditate_vault_user_id(
+    db: Any,
+    *,
+    vault_user_id: Any = None,
+    chat_id: Any = None,
+    tenant_id: str = "default",
+) -> str:
+    """user_id para cola MEDITATE_STATE_DELTA (debe pasar validate_user_db_path)."""
+    from pathlib import Path
+
+    from duckclaw.vaults import resolve_user_id_for_db_path
+
+    vault = str(Path(getattr(db, "_path", "") or "").expanduser().resolve())
+    if not vault:
+        return str(vault_user_id or chat_id or tenant_id or "default")
+    tid = str(tenant_id or "default").strip() or "default"
+    for candidate in (vault_user_id, chat_id, tid):
+        uid = resolve_user_id_for_db_path(candidate, vault, tenant_id=tid)
+        if uid:
+            return uid
+    inferred = _infer_user_id_for_audit_queue(vault)
+    return inferred if inferred != "default" else str(vault_user_id or chat_id or tid or "default")
+
+
+def invoke_meditate_cycle_for_chat(
+    db: Any,
+    chat_id: Any,
+    *,
+    tenant_id: str,
+    worker_id: str,
+    delta_s: int,
+    vault_user_id: Any = None,
+) -> dict[str, Any]:
+    """Dispara un ciclo meditate contra la bóveda del handle fly."""
+    from pathlib import Path
+
+    from harness_core.alignment import assess_manifest_alignment
+    from harness_core.graphs.meditate_graph import invoke_meditate_run
+    from harness_core.states.meditate_state import DomainGoal
+    from harness_core.targets import load_homeostasis_manifest, manifest_goals_as_dicts
+    from duckclaw.forge.homeostasis.goals_alignment import refresh_goals_list_observations
+
+    vault = str(Path(getattr(db, "_path", "") or "").expanduser().resolve())
+    if not vault:
+        return {"status": "failed", "error": "vault_db_path missing"}
+    user_id = _resolve_meditate_vault_user_id(
+        db, vault_user_id=vault_user_id, chat_id=chat_id, tenant_id=tenant_id
+    )
+    manifest = load_homeostasis_manifest(db, tenant_id, chat_id=chat_id)
+    refreshed = refresh_goals_list_observations(
+        db, chat_id, worker_id, manifest_goals_as_dicts(manifest)
+    )
+    manifest = manifest.model_copy(
+        update={"goals": [DomainGoal.model_validate(g) for g in refreshed]}
+    )
+    result = invoke_meditate_run(
+        {
+            "tenant_id": tenant_id,
+            "worker_id": worker_id,
+            "chat_id": str(chat_id),
+            "admin_chat_id": str(chat_id),
+            "vault_db_path": vault,
+            "user_id": user_id,
+            "delta_interval_seconds": int(delta_s),
+            "targets": manifest.infra.model_dump(),
+            "domain_goals": manifest_goals_as_dicts(manifest),
+        }
+    )
+    out = result if isinstance(result, dict) else {"status": "failed", "error": "invalid graph result"}
+    try:
+        alignment = assess_manifest_alignment(
+            manifest,
+            out.get("current_metrics") or {},
+            db=db,
+            chat_id=chat_id,
+            worker_id=worker_id,
+        )
+        out["alignment_message"] = alignment.format_message()
+        out["alignment"] = {
+            "aligned": alignment.aligned,
+            "infra_aligned": alignment.infra_aligned,
+            "goals_aligned": alignment.goals_aligned,
+        }
+        for action in out.get("dispatched_actions") or []:
+            if isinstance(action, dict) and action.get("action_type") == "noop":
+                action["alignment_message"] = out["alignment_message"]
+    except Exception:
+        pass
+    return out
+
+
+def execute_meditate(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    tenant_id: Any = None,
+    vault_user_id: Any = None,
+) -> str:
+    """/meditate --delta 4h | /meditate --delta off — termostato infra Harness Core."""
+    tid = str(tenant_id or "default").strip() or "default"
+    raw = (args or "").strip()
+    toks = raw.split()
+    if not toks or toks[0] != "--delta":
+        return (
+            "Uso: /meditate --delta 4h · /meditate --delta off\n"
+            "Termostato de infraestructura (telemetría DuckDB → acciones correctivas). "
+            "Independiente de /crons --delta."
+        )
+    if len(toks) < 2:
+        return "Falta valor tras --delta (ej. 4h, 20min, off)."
+    dur_str = "".join(toks[1:])
+    secs, err = parse_meditate_delta_arg(dur_str)
+    if err:
+        return err
+    if secs == 0:
+        clear_meditate_schedule(db, chat_id, tenant_id=tid)
+        return "Meditate desactivado (/meditate --delta off)."
+    worker_id = (get_chat_state(db, chat_id, "worker_id") or "").strip()
+    if not worker_id or worker_id.lower() == "manager":
+        return "Asigna un worker al chat (/workers) antes de programar /meditate --delta."
+    applied = apply_meditate_schedule(
+        db,
+        chat_id,
+        tenant_id=tid,
+        worker_id=worker_id,
+        interval_seconds=secs,
+        run_first_cycle=True,
+        vault_user_id=vault_user_id,
+    )
+    if applied.get("status") == "error":
+        return f"No se pudo programar meditate: {applied.get('error')}"
+    human = str(applied.get("interval_human") or format_goals_delta_interval_human(secs))
+    first_cycle_note = ""
+    if applied.get("first_cycle_executed"):
+        fc = applied.get("first_cycle") if isinstance(applied.get("first_cycle"), dict) else {}
+        first_cycle_note = f" Primer ciclo: {_format_meditate_cycle_summary(fc)};"
+    elif applied.get("first_cycle_error"):
+        first_cycle_note = (
+            f" Primer ciclo falló: {applied.get('first_cycle_error')}; "
+            "el ticker reintentará en el próximo intervalo."
+        )
+    try:
+        crons_secs = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
+    except ValueError:
+        crons_secs = 0
+    crons_hint = ""
+    if crons_secs <= 0:
+        crons_hint = (
+            " Para que el **agente** revise goals y hable de forma proactiva (SYSTEM_EVENT), "
+            f"activa también `/crons --delta {human}`."
+        )
+    return (
+        f"Meditate infra cada ~{human} para worker `{worker_id}` (tenant `{tid}`)."
+        f"{first_cycle_note} próximo ciclo infra en ~{human}."
+        f"{crons_hint} "
+        "Meditate no despierta al LLM; solo telemetría y correcciones en DuckDB. "
+        "/meditate --delta off para cancelar."
+    )
 
 
 def _apply_interval_only_clear(conn: Any, chat_id: Any) -> None:
@@ -2044,6 +2396,36 @@ def execute_context_toggle(db: Any, chat_id: Any, on_off: str) -> str:
     )
 
 
+def execute_comfyui_provider(db: Any, chat_id: Any, args: str) -> str:
+    """/comfyui --provider local|fal: motor de generacion visual por chat."""
+    from duckclaw.forge.skills.visual_provider import (
+        default_visual_provider,
+        provider_status_message,
+        resolve_visual_provider,
+    )
+
+    raw = (args or "").strip()
+    if raw.startswith("--provider"):
+        val = raw[len("--provider"):].strip()
+    else:
+        val = raw
+    val = val.strip().lower()
+    if val in ("local", "fal"):
+        set_chat_state(db, chat_id, "comfyui_provider", val)
+        return (
+            f"Proveedor visual establecido en '{val}' para esta sesion.\n"
+            + provider_status_message(val)  # type: ignore[arg-type]
+        )
+    if not val:
+        cur = resolve_visual_provider(db, chat_id)
+        return (
+            "Uso: /comfyui --provider local|fal\n"
+            + provider_status_message(cur)
+            + f"\nDefault sin override: {default_visual_provider()}"
+        )
+    return "Uso: /comfyui --provider local|fal"
+
+
 def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
     """/sandbox on|off: habilita/deshabilita ejecución de código para este chat (por `agent_config`)."""
     v = (on_off or "").strip().lower()
@@ -2499,7 +2881,80 @@ def _natural_language_goal_to_params(db: Any, chat_id: Any, text: str) -> Option
         return None
 
 
-def execute_goals(
+def _persist_homeostasis_manifest_db(
+    db: Any,
+    chat_id: Any,
+    tenant_id: str,
+    manifest: Any,
+    *,
+    vault_user_id: Any = None,
+) -> tuple[bool, str]:
+    from pathlib import Path
+
+    from harness_core.targets import save_homeostasis_manifest
+
+    vault = str(Path(getattr(db, "_path", "") or "").expanduser().resolve())
+    if not vault:
+        return False, "vault_db_path missing"
+    uid = _resolve_meditate_vault_user_id(
+        db, vault_user_id=vault_user_id, chat_id=chat_id, tenant_id=tenant_id
+    )
+    ok = save_homeostasis_manifest(
+        tenant_id=tenant_id,
+        user_id=uid,
+        target_db_path=vault,
+        manifest=manifest,
+    )
+    return (True, "") if ok else (False, "cola meditate/homeostasis no disponible")
+
+
+def _format_homeostasis_manifest_listing(
+    db: Any,
+    chat_id: Any,
+    manifest: Any,
+    *,
+    registry: Any = None,
+) -> str:
+    from duckclaw.forge.homeostasis.surprise import compute_surprise
+
+    lines = ["Manifiesto homeostasis", ""]
+    reg = registry if registry is not None else _get_goals_registry_for_chat(db, chat_id)
+    key_to_belief = {b.key.strip(): b for b in (reg.beliefs if reg else [])}
+    lines.append("Metas de dominio:")
+    if not manifest.goals:
+        lines.append("- (ninguna). Añade con /goals <objetivo>")
+    else:
+        for g in manifest.goals:
+            key = (g.belief_key or "").strip()
+            b = key_to_belief.get(key)
+            target = float(g.target_value)
+            thresh = float(g.threshold)
+            if b is not None:
+                target = float(b.target) if b.target is not None else target
+                thresh = float(b.threshold) if b.threshold is not None else thresh
+            observed = g.observed_value
+            title = _goal_title(g.model_dump(), key)
+            comp = getattr(b, "comparison", "symmetric") if b is not None else "symmetric"
+            if key == "max_portfolio_drawdown_pct":
+                comp = "ceiling"
+            if observed is not None and (target != 0 or thresh != 0):
+                res = compute_surprise(float(observed), target, thresh, comparison=comp)
+                st = "⚠️" if res.is_anomaly else "✓"
+                lines.append(f"- {title}: target={target} (obs: {observed}) {st}")
+            else:
+                lines.append(f"- {title}: target={target}, thresh={thresh} (sin dato)")
+    infra = manifest.infra
+    lines.append("")
+    lines.append("Umbrales infra (contraste /meditate):")
+    lines.append(f"- error_rate_pct ≤ {infra.error_rate_pct}")
+    lines.append(f"- stale_tasks_count ≤ {infra.stale_tasks_count}")
+    lines.append(f"- memory_fragmentation_index ≤ {infra.memory_fragmentation_index}")
+    lines.append(f"- avg_latency_ms ≤ {infra.avg_latency_ms}")
+    lines.append(f"- db_lock_events ≤ {infra.db_lock_events}")
+    return "\n".join(lines)
+
+
+def execute_homeostasis_goals(
     db: Any,
     chat_id: Any,
     args: str,
@@ -2507,25 +2962,179 @@ def execute_goals(
     tenant_id: Any = None,
     vault_user_id: Any = None,
 ) -> str:
-    """/crons [--reset] [--delta …] [--timestamp …] [--rm …] | /crons <goal>: listar, programar o quitar schedules, resetear o añadir objetivo. Alias: /goals."""
-    _ = vault_user_id
-    from duckclaw.forge.homeostasis.surprise import compute_surprise
+    """/goals — CRUD del manifiesto homeostasis (metas + umbrales infra) contrastado por /meditate."""
+    from harness_core.states.meditate_state import DomainGoal, HomeostasisManifest
+    from harness_core.targets import load_homeostasis_manifest, set_infra_field
 
-    registry = _get_goals_registry_for_chat(db, chat_id)
-    goals = get_manager_goals(db, chat_id)
     tid = str(tenant_id or "default").strip() or "default"
     active_wid = (get_chat_state(db, chat_id, "worker_id") or "").strip()
+    registry = _get_goals_registry_for_chat(db, chat_id)
+    raw = (args or "").strip()
+    toks = raw.split()
+    manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id)
+
+    if toks and toks[0] == "--migrate":
+        manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id, migrate_legacy=False)
+        legacy = get_manager_goals(db, chat_id)
+        if not legacy:
+            return "No hay metas legacy en agent_config para migrar."
+        if manifest.goals:
+            return f"El manifiesto ya tiene {len(manifest.goals)} meta(s). Usa /goals --reset antes de migrar."
+        goals = [
+            DomainGoal(
+                belief_key=str(g.get("belief_key") or ""),
+                target_value=float(g.get("target_value") or 0),
+                threshold=float(g.get("threshold") or 0),
+                title=str(g.get("title") or g.get("belief_key") or ""),
+                observed_value=(
+                    float(g["observed_value"]) if g.get("observed_value") is not None else None
+                ),
+            )
+            for g in legacy
+            if isinstance(g, dict) and (g.get("belief_key") or "").strip()
+        ]
+        manifest = manifest.model_copy(update={"goals": goals})
+        ok, err = _persist_homeostasis_manifest_db(
+            db, chat_id, tid, manifest, vault_user_id=vault_user_id
+        )
+        if not ok:
+            return f"Migración falló: {err}"
+        return f"✅ Migradas {len(goals)} meta(s) desde agent_config al manifiesto homeostasis."
+
+    if toks and toks[0] == "--reset":
+        manifest = HomeostasisManifest()
+        ok, err = _persist_homeostasis_manifest_db(
+            db, chat_id, tid, manifest, vault_user_id=vault_user_id
+        )
+        if not ok:
+            return f"No se pudo resetear: {err}"
+        return "✅ Manifiesto homeostasis restaurado a defaults. Añade metas con /goals <objetivo>."
+
+    if toks and toks[0] == "--rm" and len(toks) >= 2:
+        key_rm = _normalize_belief_key(" ".join(toks[1:]))
+        new_goals = [g for g in manifest.goals if (g.belief_key or "").strip() != key_rm]
+        if len(new_goals) == len(manifest.goals):
+            return f"No encontré meta `{key_rm}` en el manifiesto."
+        manifest = manifest.model_copy(update={"goals": new_goals})
+        ok, err = _persist_homeostasis_manifest_db(
+            db, chat_id, tid, manifest, vault_user_id=vault_user_id
+        )
+        if not ok:
+            return f"No se pudo guardar: {err}"
+        return f"✅ Meta `{key_rm}` eliminada del manifiesto."
+
+    if toks and toks[0] == "--set" and len(toks) >= 3:
+        field = toks[1].strip()
+        try:
+            val: Any = float(toks[2])
+            if field == "stale_tasks_count" or field == "db_lock_events":
+                val = int(val)
+            manifest = set_infra_field(manifest, field, val)
+        except ValueError as exc:
+            return str(exc)
+        ok, err = _persist_homeostasis_manifest_db(
+            db, chat_id, tid, manifest, vault_user_id=vault_user_id
+        )
+        if not ok:
+            return f"No se pudo guardar: {err}"
+        return f"✅ Umbral infra `{field}` = {val}"
+
+    if raw and not raw.startswith("--"):
+        key_norm = _normalize_belief_key(raw)
+        belief = None
+        if registry:
+            belief = registry.get_belief(raw.strip())
+            if not belief:
+                for b in registry.beliefs:
+                    if _normalize_belief_key(b.key) == key_norm:
+                        belief = b
+                        break
+        if belief:
+            new_goal = DomainGoal(
+                belief_key=belief.key,
+                target_value=float(belief.target),
+                threshold=float(belief.threshold),
+                title=belief.key,
+            )
+        else:
+            params = _natural_language_goal_to_params(db, chat_id, raw)
+            if params:
+                new_goal = DomainGoal(
+                    belief_key=params["belief_key"],
+                    target_value=float(params["target_value"]),
+                    threshold=float(params["threshold"]),
+                    title=str(params.get("title") or params["belief_key"]),
+                )
+            else:
+                new_goal = DomainGoal(
+                    belief_key=key_norm or "objetivo",
+                    target_value=0.0,
+                    threshold=0.0,
+                    title=raw[:120].strip(),
+                )
+        low_raw = raw.lower()
+        ng = new_goal.model_dump()
+        if active_wid == _QUANT_TRADER_TEMPLATE_ID and (
+            "drawdown" in low_raw or "draw down" in low_raw or " max dd" in low_raw or low_raw.strip().startswith("dd ")
+        ):
+            _quant_normalize_drawdown_goal(ng)
+            new_goal = DomainGoal.model_validate(ng)
+        if active_wid == _QUANT_TRADER_TEMPLATE_ID and _quant_is_drawdown_goal(ng):
+            _quant_normalize_drawdown_goal(ng)
+            new_goal = DomainGoal.model_validate(ng)
+        goals = [g for g in manifest.goals if (g.belief_key or "").strip() != new_goal.belief_key]
+        goals.append(new_goal)
+        manifest = manifest.model_copy(update={"goals": goals})
+        if (
+            active_wid == _QUANT_TRADER_TEMPLATE_ID
+            and (new_goal.belief_key or "").strip() == "max_portfolio_drawdown_pct"
+        ):
+            ok_m, det_m = _quant_mirror_max_drawdown_to_vault(
+                db, tenant_id=tid, max_dd=float(new_goal.target_value)
+            )
+            if not ok_m:
+                return f"✅ Meta añadida (aviso: riesgo no guardado en bóveda: {det_m})"
+        ok, err = _persist_homeostasis_manifest_db(
+            db, chat_id, tid, manifest, vault_user_id=vault_user_id
+        )
+        if not ok:
+            return f"No se pudo guardar manifiesto: {err}"
+        title_display = new_goal.title or new_goal.belief_key
+        return f"✅ Meta homeostasis añadida: {title_display}"
+
+    return (
+        _format_homeostasis_manifest_listing(db, chat_id, manifest, registry=registry)
+        + "\n\nUso: /goals <objetivo> · /goals --set error_rate_pct 2 · /goals --rm <key> · "
+        "/goals --migrate · /goals --reset"
+    )
+
+
+def execute_crons_schedule(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    tenant_id: Any = None,
+    vault_user_id: Any = None,
+) -> str:
+    """/crons [--delta …] [--timestamp …] [--rm …] — solo programación proactiva (metas en /goals)."""
+    _ = vault_user_id
+    from harness_core.targets import load_homeostasis_manifest
+
+    tid = str(tenant_id or "default").strip() or "default"
+    manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id)
+    goals_count = len(manifest.goals)
 
     raw = (args or "").strip()
     toks = raw.split()
     _crons_debug_log(
-        "on_the_fly_commands.py:execute_goals",
-        "execute_goals_entry",
+        "on_the_fly_commands.py:execute_crons_schedule",
+        "execute_crons_entry",
         {
             "args_preview": raw[:120],
             "chat_id": str(chat_id),
             "tenant_id": tid,
-            "worker_id": active_wid,
+            "goals_count": goals_count,
         },
         hypothesis_id="A",
     )
@@ -2591,10 +3200,15 @@ def execute_goals(
             },
             hypothesis_id="A",
         )
+        goals_note = (
+            f"Metas homeostasis cargadas: {goals_count}. Define o edita con /goals."
+            if goals_count
+            else "Sin metas en manifiesto: usa /goals <objetivo> antes del ticker proactivo."
+        )
         return (
             f"Revisión proactiva cada ~{human} (modo {mode}, canal {notify_ch}, jitter ~{int(jitter_ratio * 100)}%). "
-            "El ticker disparará un SYSTEM_EVENT cuando haya desalineación con tus objetivos (/crons), "
-            "o en cada intervalo si modo=always. Usa /crons para listar. /crons --delta off para cancelar."
+            "El ticker disparará SYSTEM_EVENT ante desalineación con el manifiesto /goals, "
+            f"o en cada intervalo si modo=always. {goals_note} /crons --delta off para cancelar."
         )
 
     if toks and toks[0] == "--timestamp":
@@ -2685,141 +3299,31 @@ def execute_goals(
             "El intervalo (/crons --delta) no se modifica."
         )
 
-    do_reset = raw.lower() == "--reset"
-
-    if do_reset:
-        clear_goals_proactive_schedule(db, chat_id)
-        set_manager_goals(db, chat_id, [])
-        if active_wid == _QUANT_TRADER_TEMPLATE_ID:
-            ok_r, det_r = _quant_clear_risk_constraints_vault(db, tenant_id=tid)
-            if not ok_r:
-                return (
-                    "✅ Objetivos reiniciados (aviso: no se limpió riesgo en bóveda: "
-                    f"{det_r}). Crea con /crons <objetivo>."
-                )
-        return "✅ Objetivos reiniciados. Crea con /crons <objetivo en lenguaje natural o clave>."
-
-    # Añadir: /crons <clave o lenguaje natural>
     if raw and not raw.startswith("--"):
-        key_norm = _normalize_belief_key(raw)
-        belief = None
-        if registry:
-            belief = registry.get_belief(raw.strip())
-            if not belief:
-                for b in registry.beliefs:
-                    if _normalize_belief_key(b.key) == key_norm:
-                        belief = b
-                        break
-        if belief:
-            new_goal = {
-                "belief_key": belief.key,
-                "target_value": belief.target,
-                "threshold": belief.threshold,
-                "observed_value": None,
-                "title": belief.key,
-            }
-        else:
-            # Lenguaje natural: manager convierte a parámetros homeostasis vía LLM
-            params = _natural_language_goal_to_params(db, chat_id, raw)
-            if params:
-                new_goal = {
-                    "belief_key": params["belief_key"],
-                    "target_value": params["target_value"],
-                    "threshold": params["threshold"],
-                    "observed_value": None,
-                    "title": params["title"],
-                }
-            else:
-                new_goal = {
-                    "belief_key": key_norm or "objetivo",
-                    "target_value": 0.0,
-                    "threshold": 0.0,
-                    "observed_value": None,
-                    "title": raw[:120].strip(),
-                }
-        low_raw = raw.lower()
-        if active_wid == _QUANT_TRADER_TEMPLATE_ID and (
-            "drawdown" in low_raw
-            or "draw down" in low_raw
-            or " max dd" in low_raw
-            or low_raw.strip().startswith("dd ")
-        ):
-            _quant_normalize_drawdown_goal(new_goal)
-        if active_wid == _QUANT_TRADER_TEMPLATE_ID and _quant_is_drawdown_goal(new_goal):
-            _quant_normalize_drawdown_goal(new_goal)
-        existing = [g for g in goals if (g.get("belief_key") or "").strip() == new_goal["belief_key"]]
-        if existing:
-            goals = [g for g in goals if (g.get("belief_key") or "").strip() != new_goal["belief_key"]]
-        goals.append(new_goal)
-        set_manager_goals(db, chat_id, goals)
-        title_display = new_goal.get("title") or new_goal["belief_key"]
-        if (
-            active_wid == _QUANT_TRADER_TEMPLATE_ID
-            and (new_goal.get("belief_key") or "").strip() == "max_portfolio_drawdown_pct"
-        ):
-            try:
-                cap = float(new_goal.get("target_value") or 0.0)
-            except (TypeError, ValueError):
-                cap = 0.0
-            ok_m, det_m = _quant_mirror_max_drawdown_to_vault(db, tenant_id=tid, max_dd=cap)
-            if not ok_m:
-                return f"✅ Objetivo añadido (aviso: riesgo no guardado en bóveda: {det_m})"
-        _crons_debug_log(
-            "on_the_fly_commands.py:execute_goals",
-            "goal_added",
-            {"belief_key": new_goal.get("belief_key"), "chat_id": str(chat_id), "worker_id": active_wid},
-            hypothesis_id="B",
+        return (
+            "Las metas homeostasis se gestionan con /goals (no con /crons).\n"
+            "Ej.: /goals max drawdown 5% · /goals para listar.\n"
+            "/crons solo programa revisiones: --delta, --timestamp, --rm."
         )
-        return f"✅ Objetivo añadido: {title_display}"
 
-    # Listar (por defecto vacío): bloque «Tus crons» + «Del bot (infraestructura)»
     platform = format_platform_cron_summary()
     proactive_section = _crons_goals_delta_listing_section(db, chat_id)
-    user_intro = "Tus crons\n\n\U0001f3af Manager"
-
-    if not goals:
-        user_body = (
-            f"{user_intro}\n"
-            "No hay goals. Crea con /crons <objetivo>, ej. /crons disminuir gasto en recreación."
-        )
-        user_body += proactive_section
-        user_body += _goals_cron_wall_listing_note(db, chat_id)
-        return f"{user_body}\n\n{platform}\n\n/crons --reset"
-
-    lines = [user_intro]
-    try:
-        key_to_belief = {b.key.strip(): b for b in (registry.beliefs if registry else [])}
-        for g in goals:
-            key = (g.get("belief_key") or "").strip()
-            b = key_to_belief.get(key)
-            target = float(g.get("target_value")) if g.get("target_value") is not None else None
-            thresh = float(g.get("threshold")) if g.get("threshold") is not None else None
-            if b is not None:
-                target = target if target is not None else b.target
-                thresh = thresh if thresh is not None else b.threshold
-            try:
-                observed = float(g.get("observed_value")) if g.get("observed_value") is not None else None
-            except (TypeError, ValueError):
-                observed = None
-            title = _goal_title(g, key)
-            comp = "symmetric"
-            if b is not None:
-                comp = getattr(b, "comparison", "symmetric") or "symmetric"
-            elif key == "max_portfolio_drawdown_pct":
-                comp = "ceiling"
-            if observed is not None and target is not None and thresh is not None and (target != 0 or thresh != 0):
-                res = compute_surprise(observed, target, thresh, comparison=comp)
-                st = "⚠️" if res.is_anomaly else "✓"
-                lines.append(f"- {title}: target={target} (obs: {observed}) {st}")
-            elif target is not None and thresh is not None:
-                lines.append(f"- {title}: target={target}, thresh={thresh} (sin dato)")
-            else:
-                lines.append(f"- {title}")
-    except Exception as e:
-        return f"Error: {e}."
     wall_note = _goals_cron_wall_listing_note(db, chat_id)
-    goals_block = "\n".join(lines) + proactive_section + wall_note
-    return f"{goals_block}\n\n{platform}\n\n/crons --reset"
+    goals_hint = (
+        f"Metas homeostasis: {goals_count} en manifiesto (/goals para ver o editar)."
+        if goals_count
+        else "Sin metas en manifiesto. Usa /goals <objetivo>."
+    )
+    user_body = (
+        "Tus crons (programación)\n\n"
+        f"{goals_hint}\n"
+        f"{proactive_section}{wall_note}"
+    )
+    return f"{user_body}\n\n{platform}"
+
+
+# Backward compat: tests and imports that still reference execute_goals.
+execute_goals = execute_crons_schedule
 
 
 def execute_tasks(db: Any, chat_id: Any) -> str:
@@ -6149,6 +6653,8 @@ def _dispatch_fly_command(
         return execute_forget(db, chat_id)
     if name == "context":
         return execute_context_toggle(db, chat_id, args)
+    if name == "comfyui":
+        return execute_comfyui_provider(db, chat_id, args)
     if name in ("sandbox", "sandox"):
         return execute_sandbox_toggle(db, chat_id, args)
     if name == "ibkr":
@@ -6183,13 +6689,25 @@ def _dispatch_fly_command(
         return execute_models(db, chat_id, args)
     if name == "setup":
         return _execute_setup(db, chat_id, args)
-    if name in ("crons", "goals"):
-        return execute_goals(
+    if name == "goals":
+        return execute_homeostasis_goals(
             db,
             chat_id,
             args,
             tenant_id=tenant_id,
             vault_user_id=vault_user_id,
+        )
+    if name == "crons":
+        return execute_crons_schedule(
+            db,
+            chat_id,
+            args,
+            tenant_id=tenant_id,
+            vault_user_id=vault_user_id,
+        )
+    if name == "meditate":
+        return execute_meditate(
+            db, chat_id, args, tenant_id=tenant_id, vault_user_id=vault_user_id
         )
     if name == "tasks":
         return execute_tasks(db, chat_id)

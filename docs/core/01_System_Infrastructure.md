@@ -101,10 +101,10 @@ Integración Angular: EventSource a SSE de chat y subagentes; polling a `/homeos
 
 Pipeline unificado: tests → despliegue Mac Mini y VPS.
 
-- **CI**: pytest (`tests/`), mypy, validación SQL (sqlglot) para SQLValidator. Workflow: `.github/workflows/deploy.yml` (job `test`).
+- **CI**: pytest (`tests/`), mypy, validación SQL (sqlglot) para SQLValidator.
 - **CD Mac Mini**: Self-hosted runner, `git pull`, `uv sync`, `pm2 reload`; health check post-despliegue; rollback automático si falla.
-- **CD VPS** (activo): tras CI verde en `push` a `main`, workflow `.github/workflows/cd-vps.yml` hace SSH al VPS y ejecuta `scripts/deployment/vps/sync_duckclaw_main.sh` (`git pull --ff-only`, `uv sync`, restart PM2 o systemd, `GET /health`). Sync manual en VPS: `bash /root/duckclaw/scripts/deployment/vps/sync_duckclaw_main.sh`.
-- **Secretos GitHub** (repo `Capadonna-Labs/DuckClaw`): `VPS_HOST` (p. ej. IP Tailscale), `VPS_USER` (`root`), `VPS_SSH_KEY` (clave privada deploy). Opcional: `TAILSCALE_AUTH_KEY` para otros jobs.
+- **CD VPS**: SSH/rsync, `docker compose`, reinicio de servicios de ingress (tunnel / reverse proxy) si aplica.
+- **Secretos**: GitHub Secrets (VPS_SSH_KEY, TAILSCALE_AUTH_KEY); sin tokens en repo.
 - **Observabilidad**: Notificación Telegram del resultado del despliegue; registro en LangSmith.
 
 ---

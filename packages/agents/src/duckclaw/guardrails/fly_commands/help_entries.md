@@ -5,13 +5,16 @@
 /roles|Ver todos los trabajadores virtuales (templates)
 /tasks|Estado actual: BUSY/IDLE, subagente, tarea
 /history|Historial de tareas (quién hizo qué)
-/crons|Objetivos + --delta / --timestamp; --rm delta|wall para quitar un schedule
+/goals|Manifiesto homeostasis: metas de dominio + umbrales infra (--set, --rm, --migrate, --reset)
+/crons|Solo programación proactiva: --delta / --timestamp; --rm delta|wall (metas en /goals)
+/meditate|Termostato infra: --delta 4h|10m|off (contrasta manifiesto /goals)
 /prompt <worker_id>|Ver prompt; --change <texto> para cambiar
 /model|Ver o cambiar LLM (provider/model; openrouter, or, deepseek, mlx, …)
 /models|Listar modelos disponibles de un provider (ej. gemini)
 /skills <worker_id>|Herramientas del template
 /forget|Borrar historial de la conversación
 /context|on|off (historial); en Telegram: --add / --summary (memoria semántica)
+/comfyui|Proveedor visual: --provider local|fal (ComfyUI Mac vs Fal.ai cloud)
 /sandbox|Toggle ejecución de código (true|false) para esta sesión
 /sandox|(Alias) /sandbox para tolerar errores de escritura.
 /ibkr|Portfolio IBKR por chat: on --mode paper|live (obligatorio) | off

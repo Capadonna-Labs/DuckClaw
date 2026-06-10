@@ -5185,6 +5185,105 @@ async def duckdb_vector_search(
         con.close()
 
 
+@router.get("/meditate/status", dependencies=[Depends(_require_admin_key)])
+def admin_meditate_status(
+    tenant_id: str = Query("default"),
+    worker_id: str = Query(""),
+) -> dict[str, Any]:
+    """Último run meditate, distance_vector y estado del circuit breaker."""
+    from harness_core.skills.emit_correction_delta import circuit_breaker_redis_key, is_circuit_breaker_active
+
+    tid = (tenant_id or "default").strip() or "default"
+    wid = (worker_id or "").strip()
+    last_run: dict[str, Any] | None = None
+    try:
+        from core.admin_identity import open_gateway_db
+
+        with open_gateway_db(read_only=True) as db:
+            esc = tid.replace("'", "''")
+            raw = db.query(
+                "SELECT run_id, distance_vector, actions_json, status, created_at "
+                "FROM harness_core.meditate_runs "
+                f"WHERE tenant_id = '{esc}' "
+                "ORDER BY created_at DESC LIMIT 1"
+            )
+            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            if rows and isinstance(rows[0], dict):
+                last_run = rows[0]
+    except Exception as exc:
+        last_run = {"error": str(exc)}
+
+    cb_active = is_circuit_breaker_active(tid, wid) if wid else False
+    return {
+        "tenant_id": tid,
+        "worker_id": wid or None,
+        "circuit_breaker_active": cb_active,
+        "circuit_breaker_key": circuit_breaker_redis_key(tid, wid) if wid else None,
+        "last_run": last_run,
+    }
+
+
+class AdminMeditateTickBody(BaseModel):
+    tenant_id: str = "default"
+    worker_id: str
+    vault_db_path: str = ""
+    chat_id: str = "admin"
+    delta_interval_seconds: int = Field(default=14400, ge=60)
+
+
+@router.post("/meditate/tick", dependencies=[Depends(_require_admin_key)])
+def admin_meditate_tick(body: AdminMeditateTickBody) -> dict[str, Any]:
+    """Disparo manual del grafo meditate (admin)."""
+    from harness_core.graphs.meditate_graph import invoke_meditate_run
+    from harness_core.states.meditate_state import HomeostasisTarget
+    from harness_core.targets import load_homeostasis_targets
+
+    tid = (body.tenant_id or "default").strip() or "default"
+    wid = (body.worker_id or "").strip()
+    if not wid:
+        raise _problem(400, "worker_id requerido", "Indica worker_id en el body.")
+
+    vault = (body.vault_db_path or "").strip()
+    if not vault:
+        try:
+            from duckclaw.gateway_db import get_gateway_db_path
+
+            vault = get_gateway_db_path()
+        except Exception as exc:
+            raise _problem(400, "vault_db_path", str(exc)) from exc
+
+    targets_obj = HomeostasisTarget()
+    try:
+        from duckclaw import DuckClaw
+
+        with DuckClaw(vault, read_only=True) as db:
+            targets_obj = load_homeostasis_targets(db, tid)
+    except Exception:
+        pass
+
+    from duckclaw.graphs.on_the_fly_commands import _resolve_meditate_vault_user_id
+
+    meditate_user_id = _resolve_meditate_vault_user_id(
+        type("_VaultDb", (), {"_path": vault})(),
+        chat_id=str(body.chat_id),
+        tenant_id=tid,
+        vault_user_id="admin",
+    )
+    result = invoke_meditate_run(
+        {
+            "tenant_id": tid,
+            "worker_id": wid,
+            "chat_id": str(body.chat_id),
+            "admin_chat_id": str(body.chat_id),
+            "vault_db_path": vault,
+            "user_id": meditate_user_id,
+            "delta_interval_seconds": int(body.delta_interval_seconds),
+            "targets": targets_obj.model_dump(),
+        },
+    )
+    return {"ok": True, "result": result}
+
+
 from routers.admin_db_first import router as _admin_db_first_router  # noqa: E402
 from routers.admin_train import router as _admin_train_router  # noqa: E402
 

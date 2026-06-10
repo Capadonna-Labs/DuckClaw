@@ -1299,9 +1299,25 @@ def _pick_quant_trader_worker(available_templates: list[str]) -> Optional[str]:
     return None
 
 
+def _manager_video_generation_intent(incoming: str) -> bool:
+    low = (incoming or "").strip().lower()
+    if not low:
+        return False
+    return bool(
+        re.search(
+            r"\b(?:video|clip|animacion|animación|kling|reel|mp4)\b",
+            low,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _try_visual_generation_fast_plan(
     incoming: str,
     available_plan: list[str],
+    *,
+    db: Any = None,
+    chat_id: Any = None,
 ) -> tuple[str, list[str], str, str] | None:
     """Evita planner MLX lento en admin/Telegram cuando el usuario pide una imagen."""
     if not _manager_visual_generation_intent(incoming):
@@ -1309,9 +1325,24 @@ def _try_visual_generation_fast_plan(
     qt = _pick_quant_trader_worker(available_plan)
     if not qt:
         return None
-    title = "Generar imagen (ComfyUI)"
+    _tool = "generate_visual_asset"
+    _title = "Generar imagen (ComfyUI local)"
+    try:
+        from duckclaw.forge.skills.visual_provider import resolve_visual_provider
+
+        _prov = resolve_visual_provider(db, chat_id)
+        if _prov == "fal":
+            if _manager_video_generation_intent(incoming):
+                _tool = "generate_kling_video"
+                _title = "Generar video (Fal.ai Kling)"
+            else:
+                _tool = "generate_flux_image"
+                _title = "Generar imagen elite (Fal.ai Flux)"
+    except Exception:
+        pass
+    title = _title
     task_list = [
-        "Usar generate_visual_asset una sola vez con el prompt del usuario.",
+        f"Usar {_tool} una sola vez con el prompt del usuario.",
         "No repetir la herramienta si ya hubo un ToolMessage OK en este turno.",
     ]
     planned = (incoming or "").strip()
@@ -2071,9 +2102,13 @@ def build_manager_graph(
                 [str(x) for x in (available_plan or []) if x],
             )
         if incoming and not _orch_affirm and not _hrp_fast and not _generic_affirm:
+            _vault_path_plan = (state.get("vault_db_path") or "").strip()
+            _plan_cfg_db = _agent_config_db_for_vault(db, _vault_path_plan or None)
             _visual_fast = _try_visual_generation_fast_plan(
                 incoming,
                 [str(x) for x in (available_plan or []) if x],
+                db=_plan_cfg_db,
+                chat_id=state.get("chat_id") or "",
             )
         if incoming and not _orch_affirm and not _hrp_fast and not _generic_affirm and not _visual_fast:
             _url_fast = _try_quant_url_research_fast_plan(
@@ -2512,6 +2547,13 @@ def build_manager_graph(
                     set_visual_state_delta_hub_db(db)
                 except Exception:
                     pass
+            try:
+                from duckclaw.forge.skills.visual_provider import resolve_visual_provider
+
+                _vis_prov = resolve_visual_provider(_cfg_db, chat_id)
+            except Exception:
+                _vis_prov = "local"
+            worker_cache_key = f"{worker_cache_key}::visprov_{_vis_prov}"
             if worker_cache_key not in _worker_graph_cache:
                 _worker_graph_cache[worker_cache_key] = _build_worker_graph(
                     assigned,
@@ -2537,6 +2579,8 @@ def build_manager_graph(
                     ),
                     incoming_hint=_combined,
                     open_vault_read_only=_summarize_vault_ro,
+                    chat_id=str(chat_id or ""),
+                    config_db=_cfg_db,
                 )
             worker_graph = _worker_graph_cache[worker_cache_key]
             set_log_context(

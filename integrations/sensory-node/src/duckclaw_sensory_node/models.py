@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-VoiceId = Literal["campus_legal_main", "leila_assistant", "finanz_alert"]
+VoiceId = Literal["campus_legal_main", "leila_assistant", "finanz_alert", "quant_trader_brief"]
 
 _FORBIDDEN_TTS_REFERENCE_FIELDS = frozenset(
     {
@@ -35,7 +35,7 @@ class STTResponse(BaseModel):
 class TTSRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    text: str = Field(..., max_length=1500, description="Texto a sintetizar")
+    text: str = Field(..., max_length=3000, description="Texto a sintetizar")
     voice_id: VoiceId = Field(
         ...,
         description="ID del vector de voz pre-aprobado (Identity Lock)",

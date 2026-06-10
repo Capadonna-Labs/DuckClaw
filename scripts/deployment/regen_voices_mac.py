@@ -13,6 +13,7 @@ VOICES = [
     ("leila_assistant", "Hola soy Leila tu asistente de DuckClaw"),
     ("finanz_alert", "Alerta financiera DuckClaw revisa tu portafolio"),
     ("campus_legal_main", "Asesoria legal campus DuckClaw"),
+    ("quant_trader_brief", "Resumen de mercado Quant Trader DuckClaw"),
 ]
 
 def main() -> int:

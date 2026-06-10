@@ -26,7 +26,7 @@ Define cómo los agentes interactúan con el entorno: investigación autónoma, 
 - **Puente oficial** (`duckclaw.forge.skills.github_bridge`): servidor MCP oficial **Docker** [`ghcr.io/github/github-mcp-server`](https://github.com/github/github-mcp-server) en **transporte stdio** desde el proceso del gateway (mismo modelo que otros MCP hijo-proceso: `docker run -i --rm …`, sin exponer PAT en línea de comandos logueada).
 - **Variable de token**: PAT vía **`GITHUB_TOKEN`** (o alias `token_env` en `manifest`), copiado al proceso hijo como `GITHUB_PERSONAL_ACCESS_TOKEN`. El token circula solo por **variables de entorno del proceso**; prohibido registrarlo en prompts, traces o auditoría textual.
 - **Toolsets DuckClaw**: por defecto `repos,issues,pull_requests,actions,code_security` (env `GITHUB_TOOLSETS`). El toolset **`projects` está prohibido** (consume contexto MCP excesivo). No añadir toolsets sin justificación/revisión.
-- **Modo solo lectura**: `GITHUB_READ_ONLY=1` en el hijo para workers que no son lista explícita de lectura-escritura (`gitclaw`; override futuro env `DUCKCLAW_GITHUB_MCP_READWRITE_WORKERS`).
+- **Modo solo lectura**: `GITHUB_READ_ONLY=1` en el hijo para workers fuera de la lista lectura-escritura (`gitclaw`, `quant_trader` / `quant-trader`; más ids vía env `DUCKCLAW_GITHUB_MCP_READWRITE_WORKERS` o `github.mcp_read_only: false` en manifest).
 - **`allowed_repos`** en manifest restringen convenciones de seguridad donde aplique (políticas de negocio); el servidor MCP recibe igualmente el alcance efectivo del PAT.
 - **HITL**: acciones destructivas (`delete_branch`, `merge_pr`, etc.) pueden seguir gated con `/approve` en Telegram donde el bridge lo aplique.
 

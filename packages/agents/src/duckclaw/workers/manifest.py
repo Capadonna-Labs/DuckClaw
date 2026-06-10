@@ -130,6 +130,7 @@ def build_spec_from_manifest(
     openweather_config = None
     fmp_config = None
     comfyui_config = None
+    fal_config = None
     for s in skills_list:
         if isinstance(s, dict):
             if "github" in s and github_config is None:
@@ -152,6 +153,8 @@ def build_spec_from_manifest(
                 fmp_config = s["fmp"] if isinstance(s.get("fmp"), dict) else {}
             if "comfyui" in s and comfyui_config is None:
                 comfyui_config = s["comfyui"] if isinstance(s.get("comfyui"), dict) else {}
+            if "fal" in s and fal_config is None:
+                fal_config = s["fal"] if isinstance(s.get("fal"), dict) else {}
     if github_config is None and isinstance(data.get("github"), dict):
         github_config = data["github"]
     if reddit_config is None and isinstance(data.get("reddit"), dict):
@@ -176,6 +179,8 @@ def build_spec_from_manifest(
         quant_config = data["quant"]
     if comfyui_config is None and isinstance(data.get("comfyui"), dict):
         comfyui_config = data["comfyui"]
+    if fal_config is None and isinstance(data.get("fal"), dict):
+        fal_config = data["fal"]
     risk_level = str(data.get("risk_level") or "conservative").strip().lower()
     if risk_level not in ("aggressive", "conservative"):
         risk_level = "conservative"
@@ -294,6 +299,7 @@ def build_spec_from_manifest(
         openweather_config=openweather_config,
         fmp_config=fmp_config,
         comfyui_config=comfyui_config,
+        fal_config=fal_config,
         quant_config=quant_config,
         risk_level=risk_level,
         inference_config=inference_config,
@@ -367,7 +373,7 @@ class WorkerSpec:
         "worker_id", "logical_worker_id", "name", "schema_name", "llm_required", "temperature",
         "topology", "skills_list", "allowed_tables", "read_only", "worker_dir",
         "github_config", "reddit_config", "google_trends_config", "research_config", "tailscale_config", "sft_config",
-        "ibkr_config", "openweather_config", "fmp_config", "comfyui_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config", "crm_config",
+        "ibkr_config", "openweather_config", "fmp_config", "comfyui_config", "fal_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config", "crm_config",
         "forge_shared_db_path_env", "forge_apply_schema_to_shared", "forge_vault_binding",
         "context_pruning_config",
         "duckdb_extensions",
@@ -403,6 +409,7 @@ class WorkerSpec:
         openweather_config: Optional[dict] = None,
         fmp_config: Optional[dict] = None,
         comfyui_config: Optional[dict] = None,
+        fal_config: Optional[dict] = None,
         quant_config: Optional[dict] = None,
         risk_level: str = "conservative",
         inference_config: Optional[dict] = None,
@@ -443,6 +450,7 @@ class WorkerSpec:
         self.openweather_config = openweather_config
         self.fmp_config = fmp_config
         self.comfyui_config = comfyui_config
+        self.fal_config = fal_config
         self.quant_config = quant_config
         self.risk_level = risk_level if risk_level in ("aggressive", "conservative") else "conservative"
         self.inference_config = inference_config

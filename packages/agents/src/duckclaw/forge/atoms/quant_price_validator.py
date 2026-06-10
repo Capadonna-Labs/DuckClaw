@@ -45,6 +45,154 @@ def spec_is_finanz_quant(spec: Any) -> bool:
     return bool(qc.get("enabled"))
 
 
+def spec_needs_quant_bracket_citations(spec: Any) -> bool:
+    """Quant-Trader y Finanz+quant deben citar cifras con ``[tool/ticker]``."""
+    try:
+        from duckclaw.workers.worker_ids import is_quant_trader, normalize_worker_id
+    except ImportError:
+        return False
+    lid = normalize_worker_id(getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", None))
+    if is_quant_trader(lid):
+        return True
+    return spec_is_finanz_quant(spec)
+
+
+_BRACKET_CITATION_RE = re.compile(r"\[[a-z][a-z0-9_]*(?:/[A-Za-z0-9][\w.-]*)?\]", re.IGNORECASE)
+_PCT_FIGURE_RE = re.compile(r"[-+]?\d+(?:\.\d+)?%")
+
+
+def _count_bracket_citations(text: str) -> int:
+    return len(_BRACKET_CITATION_RE.findall(text or ""))
+
+
+def _count_market_figures(text: str) -> int:
+    t = text or ""
+    prices = sum(
+        1
+        for m in _PRICE_PAT.finditer(t)
+        if not _price_in_non_market_context(t, m.start(), m.end())
+        and not _price_in_vix_or_index_context(t, m.start(), m.end())
+    )
+    pcts = len(_PCT_FIGURE_RE.findall(t))
+    return prices + pcts
+
+
+def _ticker_tool_map_from_messages(messages: list[Any]) -> dict[str, str]:
+    """Map uppercase ticker -> tool name from ToolMessages in this turn."""
+    out: dict[str, str] = {}
+    for m in messages or []:
+        if not isinstance(m, ToolMessage):
+            continue
+        nm = str(getattr(m, "name", "") or "").strip()
+        if nm not in _EVIDENCE_TOOLS and nm not in {"get_ibkr_portfolio", "tavily_search", "get_current_time"}:
+            continue
+        content = str(getattr(m, "content", "") or "")
+        if "error" in content.lower()[:200]:
+            continue
+        sym = ""
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict):
+                raw_t = data.get("ticker") or data.get("symbol")
+                if raw_t:
+                    sym = str(raw_t).strip().upper()
+        except (json.JSONDecodeError, TypeError):
+            pass
+        if not sym:
+            for hit in _TICKER_PAT.finditer(content[:400]):
+                cand = hit.group(1)
+                if 1 <= len(cand) <= 5:
+                    sym = cand
+                    break
+        if sym and sym not in out:
+            out[sym] = nm
+    return out
+
+
+def _inject_bracket_citations(
+    text: str,
+    *,
+    ticker_tool_map: dict[str, str],
+    tools_used: set[str],
+) -> str:
+    """Append ``[tool/ticker]`` after precios en tablas o inline cuando faltan citas."""
+    if not text:
+        return text
+    out = text
+    for sym, tool in sorted(ticker_tool_map.items(), key=lambda kv: -len(kv[0])):
+        esc = re.escape(sym)
+        out = re.sub(
+            rf"(\|\s*{esc}\s*\|\s*)(\$?\d[\d.,]*)(\s*\|)",
+            rf"\1\2 [{tool}/{sym}]\3",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            rf"(\b{esc}\b[^\n|{{[\]]{{0,80}}?)(\$?\d{{1,6}}\.\d{{2,6}})(?!\s*\[)",
+            rf"\1\2 [{tool}/{sym}]",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            rf"(\b{esc}\b[^\n|{{[\]]{{0,80}}?)([-+]?\d+(?:\.\d+)?%)(?!\s*\[)",
+            rf"\1\2 [{tool}/{sym}]",
+            out,
+            flags=re.IGNORECASE,
+        )
+    if "get_ibkr_portfolio" in tools_used and "[get_ibkr_portfolio" not in out.lower():
+        for m in _PRICE_PAT.finditer(out):
+            if _price_in_non_market_context(out, m.start(), m.end()):
+                continue
+            frag = out[m.end() : m.end() + 24]
+            if "[" in frag:
+                continue
+            out = out[: m.end()] + " [get_ibkr_portfolio]" + out[m.end() :]
+            break
+    return out
+
+
+def quant_bracket_citation_audit(
+    reply: str,
+    *,
+    messages: Optional[list[Any]] = None,
+    spec: Any = None,
+) -> Tuple[str, Optional[str]]:
+    """
+    Repara respuestas Quant sin citas ``[tool/ticker]`` cuando hubo tools de evidencia en el turno.
+    """
+    if spec is None or not spec_needs_quant_bracket_citations(spec):
+        return reply, None
+    text = (reply or "").strip()
+    if not text:
+        return reply, None
+
+    bracket_n = _count_bracket_citations(text)
+    figure_n = _count_market_figures(text)
+    if figure_n == 0:
+        return reply, None
+    if bracket_n >= max(1, figure_n // 2):
+        return reply, None
+
+    ticker_map = _ticker_tool_map_from_messages(list(messages or []))
+    tools_used: set[str] = set()
+    for m in messages or []:
+        if isinstance(m, ToolMessage):
+            nm = str(getattr(m, "name", "") or "").strip()
+            if nm:
+                tools_used.add(nm)
+    if not ticker_map and not tools_used:
+        return reply, None
+
+    repaired = _inject_bracket_citations(
+        text,
+        ticker_tool_map=ticker_map,
+        tools_used=tools_used,
+    )
+    if repaired == text:
+        return reply, None
+    return repaired, f"injected_brackets figures={figure_n} before={bracket_n} after={_count_bracket_citations(repaired)}"
+
+
 def _last_close(db: Any, ticker: str) -> Optional[float]:
     try:
         t = "".join(c for c in (ticker or "").upper() if c.isalnum())

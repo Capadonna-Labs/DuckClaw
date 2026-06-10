@@ -4,6 +4,8 @@
 
 El microservicio `services/heartbeat` se despierta de forma periódica, evalúa las creencias de homeostasis en DuckDB y, cuando detecta una anomalía, inyecta un **SYSTEM_EVENT** en el API Gateway. El agente decide si debe enviar un mensaje proactivo al usuario usando la herramienta `send_proactive_message`, que usa salida nativa (Bot API / webhook outbound del gateway).
 
+**Nota:** Las **metas** viven en el manifiesto homeostasis (`/goals`, tabla `harness_core.homeostasis_targets`). **`/crons`** solo programa revisiones proactivas del agente (`--delta`, `--timestamp`); el ticker lee metas desde el manifiesto. El termostato de **infra** **meditate** (`/meditate --delta`) contrasta el mismo manifiesto pero no envía SYSTEM_EVENT al worker; ver [Meditate-Homeostasis.md](./Meditate-Homeostasis.md).
+
 ## Flujo de alto nivel
 
 1. `Heartbeat Daemon` ejecuta `run_heartbeat()` cada `HEARTBEAT_INTERVAL_SECONDS` (por defecto 1h).

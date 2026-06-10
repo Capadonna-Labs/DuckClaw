@@ -10,5 +10,9 @@
   "finanz_alert": {
     "file": "finanz_alert.safetensors",
     "ref_text": ""
+  },
+  "quant_trader_brief": {
+    "file": "quant_trader_brief.safetensors",
+    "ref_text": ""
   }
 }

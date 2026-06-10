@@ -521,17 +521,23 @@ async def lifespan(app: FastAPI):
 
             _poll_s = max(5, int(GOALS_TICKER_POLL_SECONDS))
 
+            from services.heartbeat.main import _run_meditate_proactive_tick
+
             async def _goals_ticker_loop() -> None:
                 while True:
                     try:
                         await _run_goals_proactive_tick()
                     except Exception as _loop_exc:  # noqa: BLE001
                         _gateway_log.warning("embedded crons ticker loop error: %s", _loop_exc)
+                    try:
+                        await _run_meditate_proactive_tick()
+                    except Exception as _med_exc:  # noqa: BLE001
+                        _gateway_log.warning("embedded meditate ticker loop error: %s", _med_exc)
                     await asyncio.sleep(_poll_s)
 
             app.state.goals_ticker_task = asyncio.create_task(_goals_ticker_loop())
             _gateway_log.info(
-                "embedded crons ticker enabled (poll=%ss, source=services.heartbeat._run_goals_proactive_tick)",
+                "embedded crons+méditate ticker enabled (poll=%ss, source=services.heartbeat)",
                 _poll_s,
             )
         except Exception as exc:  # noqa: BLE001
@@ -557,8 +563,10 @@ async def lifespan(app: FastAPI):
     try:
         from duckclaw.graphs.graph_server import get_db
         from duckclaw.llm_usage_log import ensure_llm_usage_log_table
+        from duckclaw.media_usage_log import ensure_media_usage_log_table
 
         ensure_llm_usage_log_table(get_db())
+        ensure_media_usage_log_table(get_db())
         _gateway_log.info("llm_usage_log: tabla asegurada en gateway DuckDB")
     except Exception as exc:  # noqa: BLE001
         _gateway_log.warning("llm_usage_log: no se pudo asegurar tabla al arranque: %s", exc)
@@ -1965,6 +1973,29 @@ async def _invoke_chat(
                 pass
     history = payload.history or []
     is_system_prompt = bool(payload.is_system_prompt or False)
+    skip_session_lock = bool(getattr(payload, "skip_session_lock", False) or False)
+    _msg_for_cb = (message or "").strip()
+    _is_fly_command = _msg_for_cb.startswith("/")
+    if not is_system_prompt and not skip_session_lock and not _is_fly_command:
+        try:
+            from harness_core.skills.emit_correction_delta import is_circuit_breaker_active
+
+            if is_circuit_breaker_active(
+                tenant_id,
+                worker_id or "",
+                redis_client=redis_client,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=(
+                        "Meditate circuit breaker activo para este worker. "
+                        "Revisa alertas admin (meditate_critical) antes de reanudar chats."
+                    ),
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
     shared_db_path = (payload.shared_db_path or "").strip() or None
     history_for_model = normalize_history_list(list(history))
     if (
@@ -2047,6 +2078,7 @@ async def _invoke_chat(
         if msg_stripped.startswith("/"):
             cmd_reply: str | None = None
             fly_db = None
+            _fly_elapsed_ms = 0
             try:
                 from duckclaw import DuckClaw
                 from duckclaw.graphs.on_the_fly_commands import handle_command
@@ -2099,6 +2131,7 @@ async def _invoke_chat(
                 except Exception:
                     _fly_cache_n = -1
                 fly_db = DuckClaw(vpath, read_only=False, engine=_fly_engine)
+                _fly_t0 = time.monotonic()
                 cmd_reply = handle_command(
                     fly_db,
                     session_id,
@@ -2109,6 +2142,7 @@ async def _invoke_chat(
                     username=username,
                     entry_worker_id=worker_id,
                 )
+                _fly_elapsed_ms = int((time.monotonic() - _fly_t0) * 1000)
             except Exception as exc:
                 _gateway_log.error("fly command failed chat=%s: %s", format_chat_id_for_terminal(session_id), exc)
             finally:
@@ -2123,7 +2157,7 @@ async def _invoke_chat(
                     "response": cmd_reply,
                     "session_id": session_id,
                     "worker_id": worker_id,
-                    "elapsed_ms": 0,
+                    "elapsed_ms": _fly_elapsed_ms,
                 }
                 try:
                     from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session

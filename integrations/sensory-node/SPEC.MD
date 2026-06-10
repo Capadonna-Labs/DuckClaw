@@ -29,7 +29,7 @@ Edge inference microservice on Apple Silicon (Mac mini). Listens **only** on the
 ## TTS edge cases
 
 - Sanitize markdown/emojis before synthesis.
-- Timeout 2000 ms → HTTP 503 (gateway degrades to text-only).
+- Default max 1400 chars (`DUCKCLAW_SENSORY_TTS_MAX_CHARS`), duration up to 90s, timeout 60s → HTTP 503 on overrun.
 
 ## Network
 

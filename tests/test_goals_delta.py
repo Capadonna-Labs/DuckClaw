@@ -797,9 +797,10 @@ def test_dispatch_crons_and_goals_alias_same_handler(tmp_path: Path) -> None:
     with DuckClaw(db_path, read_only=False) as db:
         out_crons = _dispatch_fly_command(db, 11, "crons", "", tenant_id="default")
         out_goals = _dispatch_fly_command(db, 11, "goals", "", tenant_id="default")
-    assert out_crons == out_goals
-    assert out_crons is not None
-    assert "/crons" in (out_crons or "")
+    assert out_crons is not None and out_goals is not None
+    assert out_crons != out_goals
+    assert "Tus crons" in (out_crons or "")
+    assert "/goals" in (out_goals or "")
 
 
 def test_crons_list_includes_user_and_platform_blocks(tmp_path: Path) -> None:
@@ -829,7 +830,7 @@ def test_crons_list_includes_user_and_platform_blocks(tmp_path: Path) -> None:
     assert "Tus crons" in (out or "")
     assert "Del bot (infraestructura)" in (out or "")
     assert "45" in (out or "") and "3600" in (out or "")
-    assert "/crons --reset" in (out or "")
+    assert "/goals" in (out or "")
 
 
 def test_crons_list_platform_summary_respects_env(tmp_path: Path, monkeypatch: Any) -> None:

@@ -253,7 +253,11 @@ def test_register_homeostasis_skill_with_config() -> None:
     tools = []
     register_homeostasis_skill(tools, spec, db)
     names = {t.name for t in tools}
-    assert names == {"homeostasis_check", "assess_crons_alignment"}
+    assert names == {
+        "homeostasis_check",
+        "assess_crons_alignment",
+        "manage_homeostasis_goals",
+    }
     hc = next(t for t in tools if t.name == "homeostasis_check")
     result = hc.invoke({"belief_key": "presupuesto", "observed_value": 4800.0})
     plan = json.loads(result)

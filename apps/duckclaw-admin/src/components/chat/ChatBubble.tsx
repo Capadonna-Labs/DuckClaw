@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Copy, Mic, Pencil, RotateCcw, Volume2 } from 'lucide-react';
 import { ArtifactImageLightbox } from '@/components/chat/ArtifactImageLightbox';
-import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
+import { ChatMarkdown, looksLikeMarkdown } from '@/components/chat/ChatMarkdown';
 import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import {
@@ -264,14 +264,25 @@ export function ChatBubble({
         <ToolHeartbeatBody message={m} />
       ) : isUser || isError || isInterrupted || isHeartbeat ? (
         displayText?.trim() ? (
-          <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-            {isUser && m.voiceNote ? (
-              <span className="inline-flex items-center gap-1 mr-1 opacity-90" title="Nota de voz">
-                <Mic size={14} aria-hidden />
-              </span>
-            ) : null}
-            {displayText}
-          </span>
+          isUser && looksLikeMarkdown(displayText) ? (
+            <div className="min-w-0">
+              {m.voiceNote ? (
+                <span className="inline-flex items-center gap-1 mb-1 opacity-90" title="Nota de voz">
+                  <Mic size={14} aria-hidden />
+                </span>
+              ) : null}
+              <ChatMarkdown content={displayText} variant="user" />
+            </div>
+          ) : (
+            <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+              {isUser && m.voiceNote ? (
+                <span className="inline-flex items-center gap-1 mr-1 opacity-90" title="Nota de voz">
+                  <Mic size={14} aria-hidden />
+                </span>
+              ) : null}
+              {displayText}
+            </span>
+          )
         ) : null
       ) : (
         <>

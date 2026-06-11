@@ -62,95 +62,140 @@ export function splitPlaygroundWorkerSuffix(text: string): { body: string; worke
   return { body: m[1].trimEnd(), workerNote: m[2].trim() };
 }
 
-const markdownComponents: Components = {
-  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
-  h1: ({ children }) => (
-    <h1 className="text-base font-black mb-2 mt-4 first:mt-0 text-gov-gray-900 dark:text-dark-text">
-      {children}
-    </h1>
-  ),
-  h2: ({ children }) => (
-    <h2 className="text-sm font-bold mb-2 mt-3 first:mt-0 text-gov-gray-900 dark:text-dark-text">
-      {children}
-    </h2>
-  ),
-  h3: ({ children }) => (
-    <h3 className="text-sm font-semibold mb-1.5 mt-2 first:mt-0 text-gov-gray-800 dark:text-dark-text">
-      {children}
-    </h3>
-  ),
-  ul: ({ children }) => <ul className="list-disc pl-5 mb-3 space-y-1.5 last:mb-0">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5 last:mb-0">{children}</ol>,
-  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  blockquote: ({ children }) => (
-    <blockquote className="border-l-4 border-gov-blue-400 dark:border-dark-cyan pl-3 my-3 text-gov-gray-600 dark:text-dark-muted italic">
-      {children}
-    </blockquote>
-  ),
-  hr: () => <hr className="my-4 border-gov-gray-200 dark:border-dark-border" />,
-  strong: ({ children }) => <strong className="font-bold text-gov-gray-900 dark:text-dark-text">{children}</strong>,
-  em: ({ children }) => <em className="italic">{children}</em>,
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-gov-blue-700 dark:text-dark-cyan underline underline-offset-2 hover:text-gov-blue-500 break-all"
-    >
-      {children}
-    </a>
-  ),
-  table: ({ children }) => (
-    <div className="my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-gov-gray-200 dark:border-dark-border [-webkit-overflow-scrolling:touch]">
-      <table className="w-max min-w-full text-xs border-collapse">{children}</table>
-    </div>
-  ),
-  thead: ({ children }) => (
-    <thead className="bg-gov-gray-100 dark:bg-dark-sidebar text-left">{children}</thead>
-  ),
-  th: ({ children }) => (
-    <th className="px-3 py-2 font-bold border-b border-gov-gray-200 dark:border-dark-border">{children}</th>
-  ),
-  td: ({ children }) => (
-    <td className="px-3 py-2 border-b border-gov-gray-100 dark:border-dark-border align-top">{children}</td>
-  ),
-  pre: ({ children }) => (
-    <pre className="my-3 overflow-x-auto rounded-xl bg-gov-gray-900 dark:bg-[#010409] text-gov-gray-50 p-3 text-xs leading-relaxed font-mono">
-      {children}
-    </pre>
-  ),
-  code: ({ className, children, ...props }) => {
-    const isBlock = Boolean(className?.includes('language-'));
-    if (isBlock) {
+const MARKDOWN_SIGNAL =
+  /(^#{1,6}\s|^\s*[-*+]\s+|^\s*\d+\.\s+|```|^\s*>|\*\*[^*\n]+\*\*|\[[^\]]+\]\([^)]+\)|^\|.+\||^---+$/m;
+
+/** Heurística conservadora: solo formatear si hay señales claras de Markdown. */
+export function looksLikeMarkdown(text: string): boolean {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return false;
+  return MARKDOWN_SIGNAL.test(trimmed);
+}
+
+type MarkdownVariant = 'assistant' | 'user';
+
+function buildMarkdownComponents(variant: MarkdownVariant): Components {
+  const isUser = variant === 'user';
+  const heading = isUser ? 'text-white' : 'text-gov-gray-900 dark:text-dark-text';
+  const headingMuted = isUser ? 'text-white/95' : 'text-gov-gray-800 dark:text-dark-text';
+  const bodyStrong = isUser ? 'text-white' : 'text-gov-gray-900 dark:text-dark-text';
+  const link = isUser
+    ? 'text-sky-100 underline underline-offset-2 hover:text-white break-all'
+    : 'text-gov-blue-700 dark:text-dark-cyan underline underline-offset-2 hover:text-gov-blue-500 break-all';
+  const blockquote = isUser
+    ? 'border-l-4 border-white/40 pl-3 my-3 text-white/90 italic'
+    : 'border-l-4 border-gov-blue-400 dark:border-dark-cyan pl-3 my-3 text-gov-gray-600 dark:text-dark-muted italic';
+  const hr = isUser ? 'my-4 border-white/25' : 'my-4 border-gov-gray-200 dark:border-dark-border';
+  const tableWrap = isUser
+    ? 'my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-white/25 [-webkit-overflow-scrolling:touch]'
+    : 'my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-gov-gray-200 dark:border-dark-border [-webkit-overflow-scrolling:touch]';
+  const thead = isUser
+    ? 'bg-white/10 text-left'
+    : 'bg-gov-gray-100 dark:bg-dark-sidebar text-left';
+  const thBorder = isUser ? 'border-b border-white/20' : 'border-b border-gov-gray-200 dark:border-dark-border';
+  const tdBorder = isUser ? 'border-b border-white/15' : 'border-b border-gov-gray-100 dark:border-dark-border';
+  const pre = isUser
+    ? 'my-3 overflow-x-auto rounded-xl bg-black/25 text-white p-3 text-xs leading-relaxed font-mono'
+    : 'my-3 overflow-x-auto rounded-xl bg-gov-gray-900 dark:bg-[#010409] text-gov-gray-50 p-3 text-xs leading-relaxed font-mono';
+  const inlineCode = isUser
+    ? 'px-1.5 py-0.5 rounded-md bg-white/15 text-[0.85em] font-mono text-white'
+    : 'px-1.5 py-0.5 rounded-md bg-gov-gray-200/90 dark:bg-dark-border text-[0.85em] font-mono text-gov-blue-900 dark:text-dark-cyan';
+
+  return {
+    p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+    h1: ({ children }) => (
+      <h1 className={`text-base font-black mb-2 mt-4 first:mt-0 ${heading}`}>
+        {children}
+      </h1>
+    ),
+    h2: ({ children }) => (
+      <h2 className={`text-sm font-bold mb-2 mt-3 first:mt-0 ${heading}`}>
+        {children}
+      </h2>
+    ),
+    h3: ({ children }) => (
+      <h3 className={`text-sm font-semibold mb-1.5 mt-2 first:mt-0 ${headingMuted}`}>
+        {children}
+      </h3>
+    ),
+    ul: ({ children }) => <ul className="list-disc pl-5 mb-3 space-y-1.5 last:mb-0">{children}</ul>,
+    ol: ({ children }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5 last:mb-0">{children}</ol>,
+    li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+    blockquote: ({ children }) => (
+      <blockquote className={blockquote}>
+        {children}
+      </blockquote>
+    ),
+    hr: () => <hr className={hr} />,
+    strong: ({ children }) => <strong className={`font-bold ${bodyStrong}`}>{children}</strong>,
+    em: ({ children }) => <em className="italic">{children}</em>,
+    a: ({ href, children }) => (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={link}
+      >
+        {children}
+      </a>
+    ),
+    table: ({ children }) => (
+      <div className={tableWrap}>
+        <table className="w-max min-w-full text-xs border-collapse">{children}</table>
+      </div>
+    ),
+    thead: ({ children }) => (
+      <thead className={thead}>{children}</thead>
+    ),
+    th: ({ children }) => (
+      <th className={`px-3 py-2 font-bold ${thBorder}`}>{children}</th>
+    ),
+    td: ({ children }) => (
+      <td className={`px-3 py-2 ${tdBorder} align-top`}>{children}</td>
+    ),
+    pre: ({ children }) => (
+      <pre className={pre}>
+        {children}
+      </pre>
+    ),
+    code: ({ className, children, ...props }) => {
+      const isBlock = Boolean(className?.includes('language-'));
+      if (isBlock) {
+        return (
+          <code className={`${className ?? ''} font-mono text-inherit`} {...props}>
+            {children}
+          </code>
+        );
+      }
       return (
-        <code className={`${className ?? ''} font-mono text-inherit`} {...props}>
+        <code
+          className={inlineCode}
+          {...props}
+        >
           {children}
         </code>
       );
-    }
-    return (
-      <code
-        className="px-1.5 py-0.5 rounded-md bg-gov-gray-200/90 dark:bg-dark-border text-[0.85em] font-mono text-gov-blue-900 dark:text-dark-cyan"
-        {...props}
-      >
-        {children}
-      </code>
-    );
-  },
-};
+    },
+  };
+}
+
+const markdownComponents = buildMarkdownComponents('assistant');
 
 type ChatMarkdownProps = {
   content: string;
   className?: string;
+  /** Burbuja de usuario (fondo azul): paleta clara sobre gov-blue. */
+  variant?: MarkdownVariant;
 };
 
 /**
- * Renderiza Markdown (GFM: tablas, listas, código, enlaces) para burbujas del asistente.
+ * Renderiza Markdown (GFM: tablas, listas, código, enlaces) para burbujas del chat.
  * Seguro por defecto: sin HTML crudo (react-markdown).
  */
-export function ChatMarkdown({ content, className = '' }: ChatMarkdownProps) {
+export function ChatMarkdown({ content, className = '', variant = 'assistant' }: ChatMarkdownProps) {
   const { body: rawBody, workerNote } = splitPlaygroundWorkerSuffix(content);
-  const body = dedupeAssistantWorkerHeaders(rawBody);
+  const body = variant === 'assistant' ? dedupeAssistantWorkerHeaders(rawBody) : rawBody.trim();
+  const components = variant === 'user' ? buildMarkdownComponents('user') : markdownComponents;
 
   if (!body.trim() && !workerNote) {
     return null;
@@ -159,7 +204,7 @@ export function ChatMarkdown({ content, className = '' }: ChatMarkdownProps) {
   return (
     <div className={`chat-markdown min-w-0 max-w-full break-words [overflow-wrap:anywhere] ${className}`}>
       {body.trim() ? (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
           {body}
         </ReactMarkdown>
       ) : null}

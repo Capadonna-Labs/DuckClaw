@@ -289,6 +289,34 @@ configure_structured_logging(level=_log_level)
 _gateway_log = logging.getLogger("duckclaw.gateway")
 
 
+def _agent_debug_log(
+    *,
+    location: str,
+    message: str,
+    data: dict[str, Any],
+    hypothesis_id: str,
+    run_id: str = "pre-fix",
+) -> None:
+    # #region agent log
+    try:
+        root = (os.environ.get("CAPADONNA_DRILLER_ROOT") or "").strip() or str(_repo_root)
+        log_path = Path(root) / "debug-480705.log"
+        payload = {
+            "sessionId": "480705",
+            "timestamp": int(time.time() * 1000),
+            "location": location,
+            "message": message,
+            "data": data,
+            "hypothesisId": hypothesis_id,
+            "runId": run_id,
+        }
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
+
 def _install_duckdb_connect_probe() -> None:
     pass
 
@@ -1608,15 +1636,34 @@ def _persist_admin_fly_charts(tenant_id: str, fly_charts_b64: list[str]) -> list
     tid = (tenant_id or "default").strip() or "default"
     art_dir = tenant_artifacts_dir(tid)
     ids: list[str] = []
+    skipped_decode = 0
     for photo_b64 in fly_charts_b64:
         png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
         if not png_bytes:
             png_bytes = decode_sandbox_figure_base64(photo_b64)
         if not png_bytes:
+            skipped_decode += 1
             continue
         aid = str(uuid.uuid4())
         (art_dir / f"{aid}.png").write_bytes(png_bytes)
         ids.append(aid)
+    # #region agent log
+    _agent_debug_log(
+        location="main.py:_persist_admin_fly_charts",
+        message="fly charts persisted",
+        data={
+            "tenant_id": tid,
+            "art_dir": str(art_dir),
+            "chart_count": len(fly_charts_b64),
+            "artifact_ids": ids,
+            "skipped_decode": skipped_decode,
+            "files_exist": [
+                bool((art_dir / f"{aid}.png").is_file()) for aid in ids
+            ],
+        },
+        hypothesis_id="A",
+    )
+    # #endregion
     return ids
 
 
@@ -1641,6 +1688,12 @@ def _admin_visual_fields_from_invoke_result(
         out["artifact_tenant_id"] = tid
         if not (result.get("visual_artifact_id") or result.get("artifact_id") or "").strip():
             out["artifact_id"] = fly_artifact_ids[0]
+    fly_chart_names_raw = result.get("fly_chart_names")
+    fly_chart_names: list[str] = []
+    if isinstance(fly_chart_names_raw, list):
+        fly_chart_names = [str(x).strip() for x in fly_chart_names_raw if str(x).strip()]
+    if fly_chart_names:
+        out["fly_chart_names"] = fly_chart_names
     fly_charts_raw = result.get("fly_charts_b64")
     fly_charts: list[str] = []
     if isinstance(fly_charts_raw, list):
@@ -2161,7 +2214,7 @@ async def _invoke_chat(
                 }
                 try:
                     from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
-                    from duckclaw.graphs.on_the_fly_commands import pop_all_fly_outbound_charts_b64
+                    from duckclaw.graphs.on_the_fly_commands import pop_all_fly_outbound_charts
 
                     loop = asyncio.get_running_loop()
                     token = (
@@ -2170,7 +2223,7 @@ async def _invoke_chat(
                         else ""
                     )
                     admin_ui = is_admin_ui_chat_session(session_id)
-                    fly_charts = pop_all_fly_outbound_charts_b64(session_id)
+                    fly_charts, fly_chart_names = pop_all_fly_outbound_charts(session_id)
                     if token:
                         for photo_b64 in fly_charts:
                             png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
@@ -2189,9 +2242,28 @@ async def _invoke_chat(
                             chart_sent = chart_sent or bool(ok)
                     if admin_ui and fly_charts:
                         fly_resp["fly_charts_b64"] = fly_charts
+                        if fly_chart_names:
+                            fly_resp["fly_chart_names"] = fly_chart_names[: len(fly_charts)]
                         artifact_ids = _persist_admin_fly_charts(tenant_id, fly_charts)
                         if artifact_ids:
                             fly_resp["fly_chart_artifact_ids"] = artifact_ids
+                            fly_resp["artifact_tenant_id"] = tenant_id
+                        # #region agent log
+                        _agent_debug_log(
+                            location="main.py:fly_cmd_charts",
+                            message="fly chart SSE payload",
+                            data={
+                                "session_id": str(session_id),
+                                "tenant_id": tenant_id,
+                                "admin_ui": admin_ui,
+                                "chart_count": len(fly_charts),
+                                "chart_names": fly_chart_names,
+                                "artifact_ids": artifact_ids,
+                                "artifact_tenant_id": fly_resp.get("artifact_tenant_id"),
+                            },
+                            hypothesis_id="B",
+                        )
+                        # #endregion
                         # Inline b64 solo si no hay artifacts (fallback UI legacy)
                         if not artifact_ids:
                             fly_resp["figure_base64"] = fly_charts[0]

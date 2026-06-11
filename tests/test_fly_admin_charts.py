@@ -17,16 +17,24 @@ if str(_GW) not in sys.path:
 
 def test_register_and_pop_fly_outbound_charts_fifo() -> None:
     from duckclaw.graphs.on_the_fly_commands import (
+        pop_all_fly_outbound_charts,
         pop_all_fly_outbound_charts_b64,
         register_fly_outbound_chart_b64,
     )
 
     sid = "admin-conv-test-fly-charts"
-    register_fly_outbound_chart_b64(sid, "chart-a")
-    register_fly_outbound_chart_b64(sid, "chart-b")
+    register_fly_outbound_chart_b64(sid, "chart-a", chart_name="20260608_sesion_pnl.png")
+    register_fly_outbound_chart_b64(sid, "chart-b", chart_name="20260608_sesion_participacion.png")
     popped = pop_all_fly_outbound_charts_b64(sid)
     assert popped == ["chart-a", "chart-b"]
     assert pop_all_fly_outbound_charts_b64(sid) == []
+
+    sid2 = "admin-conv-test-fly-charts-names"
+    register_fly_outbound_chart_b64(sid2, "chart-a", chart_name="a.png")
+    register_fly_outbound_chart_b64(sid2, "chart-b")
+    b64s, names = pop_all_fly_outbound_charts(sid2)
+    assert b64s == ["chart-a", "chart-b"]
+    assert names == ["a.png", "chart-2.png"]
 
 
 def test_admin_visual_fields_from_fly_charts() -> None:
@@ -51,9 +59,14 @@ def test_admin_visual_fields_fly_chart_artifact_ids() -> None:
     result = {
         "response": "status ok",
         "fly_chart_artifact_ids": ["aaa-bbb", "ccc-ddd"],
+        "fly_chart_names": ["20260608_sesion_pnl.png", "20260608_sesion_participacion.png"],
     }
     out = _admin_visual_fields_from_invoke_result("admin-conv-abc", result, "default")
     assert out.get("fly_chart_artifact_ids") == ["aaa-bbb", "ccc-ddd"]
+    assert out.get("fly_chart_names") == [
+        "20260608_sesion_pnl.png",
+        "20260608_sesion_participacion.png",
+    ]
     assert out.get("artifact_id") == "aaa-bbb"
     assert out.get("artifact_tenant_id") == "default"
 

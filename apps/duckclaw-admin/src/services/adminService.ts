@@ -1410,6 +1410,7 @@ export const adminService = {
         figure_base64?: string;
         fly_charts_b64?: string[];
         fly_chart_artifact_ids?: string[];
+        fly_chart_names?: string[];
         artifact_id?: string;
         artifact_tenant_id?: string;
       }) => void;
@@ -1463,6 +1464,7 @@ export const adminService = {
             figure_base64: ev.figure_base64,
             fly_charts_b64: ev.fly_charts_b64,
             fly_chart_artifact_ids: ev.fly_chart_artifact_ids,
+            fly_chart_names: ev.fly_chart_names,
             artifact_id: ev.artifact_id,
             artifact_tenant_id: ev.artifact_tenant_id,
           });

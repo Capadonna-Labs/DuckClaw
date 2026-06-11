@@ -12,6 +12,7 @@ export type SseChatEvent =
       figure_base64?: string;
       fly_charts_b64?: string[];
       fly_chart_artifact_ids?: string[];
+      fly_chart_names?: string[];
       artifact_id?: string;
       artifact_tenant_id?: string;
     }
@@ -66,6 +67,11 @@ function parseDataLine(data: string): SseChatEvent | null {
           : undefined,
         fly_chart_artifact_ids: Array.isArray(j.fly_chart_artifact_ids)
           ? j.fly_chart_artifact_ids.filter(
+              (v): v is string => typeof v === 'string' && v.trim().length > 0
+            )
+          : undefined,
+        fly_chart_names: Array.isArray(j.fly_chart_names)
+          ? j.fly_chart_names.filter(
               (v): v is string => typeof v === 'string' && v.trim().length > 0
             )
           : undefined,

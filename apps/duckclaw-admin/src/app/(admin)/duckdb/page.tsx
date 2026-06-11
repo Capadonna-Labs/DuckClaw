@@ -7,15 +7,17 @@ import { DuckDbVaultSelector } from '@/components/duckdb/DuckDbVaultSelector';
 import { TableExplorer } from '@/components/duckdb/TableExplorer';
 import { PGQVisualizer } from '@/components/duckdb/PGQVisualizer';
 import { VectorExplorer } from '@/components/duckdb/VectorExplorer';
+import { CodeDecisionsPanel } from '@/components/duckdb/CodeDecisionsPanel';
 import { Database } from 'lucide-react';
 import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
 
-type TabId = 'explorer' | 'pgq' | 'vector' | 'overview';
+type TabId = 'explorer' | 'pgq' | 'vector' | 'overview' | 'code';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'explorer', label: 'Data Explorer' },
   { id: 'pgq', label: 'PGQ Graph' },
   { id: 'vector', label: 'Vector Memory' },
+  { id: 'code', label: 'Code HITL' },
   { id: 'overview', label: 'Overview' },
 ];
 
@@ -228,6 +230,8 @@ export default function DuckDbPage() {
       )}
       {tab === 'pgq' && <PGQVisualizer vaultPath={vaultPath} />}
       {tab === 'vector' && <VectorExplorer vaultPath={vaultPath} />}
+
+      {tab === 'code' && <CodeDecisionsPanel vaultPath={vaultPath} />}
 
       {tab === 'overview' && (
         <div className="space-y-8">

@@ -18,6 +18,10 @@ from core.config import settings
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.vaults import resolve_user_id_for_db_path
 from models.quant_state_delta import (
+    BacktestResultMutation,
+    CodeDecisionApproveMutation,
+    CodeDecisionMutation,
+    CodeDecisionRejectMutation,
     ConversationCompactionMutation,
     IntradayMocAccumMutation,
     QuantStateDelta,
@@ -119,6 +123,50 @@ CREATE TABLE IF NOT EXISTS quant_core.session_ticks (
 ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_executed BOOLEAN DEFAULT FALSE;
 ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_notional DECIMAL(15,2);
 ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_n_orders INTEGER;
+
+CREATE TABLE IF NOT EXISTS quant_core.code_decisions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_uid VARCHAR NOT NULL,
+  chat_id VARCHAR,
+  repo VARCHAR(100) NOT NULL,
+  file_path VARCHAR(500) NOT NULL,
+  branch_name VARCHAR(200) NOT NULL,
+  decision_type VARCHAR(50) NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  context TEXT,
+  proposed_change TEXT NOT NULL,
+  rationale TEXT NOT NULL,
+  evidence JSON,
+  status VARCHAR(20) DEFAULT 'PENDING_HITL',
+  pr_number INTEGER,
+  pr_url VARCHAR(500),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_code_decisions_repo ON quant_core.code_decisions(repo);
+CREATE INDEX IF NOT EXISTS idx_code_decisions_status ON quant_core.code_decisions(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_code_decisions_session ON quant_core.code_decisions(session_uid);
+CREATE INDEX IF NOT EXISTS idx_code_decisions_chat ON quant_core.code_decisions(chat_id, status);
+
+CREATE TABLE IF NOT EXISTS quant_core.backtest_results (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code_decision_id UUID REFERENCES quant_core.code_decisions(id),
+  strategy_name VARCHAR(100) NOT NULL,
+  ticker_universe VARCHAR[] NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  sharpe DECIMAL(8,4),
+  sortino DECIMAL(8,4),
+  max_drawdown DECIMAL(8,4),
+  total_return DECIMAL(8,4),
+  volatility DECIMAL(8,4),
+  n_trades INTEGER,
+  win_rate DECIMAL(5,4),
+  sandbox_script TEXT,
+  passed_thresholds BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_backtest_results_decision ON quant_core.backtest_results(code_decision_id);
 """
 
 _INTRADAY_MOC_ACCUM_DDL = """
@@ -455,6 +503,102 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
             WHERE chat_id = ? AND received_at < ?
             """,
             (mut.chat_id, cutoff),
+        )
+        return
+
+    if dt == "CODE_DECISION_PROPOSED":
+        mut = CodeDecisionMutation.model_validate(delta.mutation)
+        evidence_json = json.dumps(mut.evidence if isinstance(mut.evidence, dict) else {}, ensure_ascii=False)
+        con.execute(
+            """
+            INSERT INTO quant_core.code_decisions
+              (id, session_uid, chat_id, repo, file_path, branch_name, decision_type, title,
+               context, proposed_change, rationale, evidence, status, updated_at)
+            VALUES
+              (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::JSON, ?, now())
+            ON CONFLICT (id) DO UPDATE SET
+              context=excluded.context,
+              proposed_change=excluded.proposed_change,
+              rationale=excluded.rationale,
+              evidence=excluded.evidence,
+              status=excluded.status,
+              updated_at=now()
+            """,
+            (
+                mut.id,
+                mut.session_uid,
+                mut.chat_id or None,
+                mut.repo,
+                mut.file_path,
+                mut.branch_name,
+                mut.decision_type,
+                mut.title,
+                mut.context,
+                mut.proposed_change,
+                mut.rationale,
+                evidence_json,
+                mut.status,
+            ),
+        )
+        return
+
+    if dt == "CODE_DECISION_REJECTED":
+        mut = CodeDecisionRejectMutation.model_validate(delta.mutation)
+        con.execute(
+            """
+            UPDATE quant_core.code_decisions
+            SET status='REJECTED', rationale=?, updated_at=now()
+            WHERE id=?
+            """,
+            (mut.rationale or "", mut.id),
+        )
+        return
+
+    if dt == "CODE_DECISION_APPROVED":
+        mut = CodeDecisionApproveMutation.model_validate(delta.mutation)
+        con.execute(
+            """
+            UPDATE quant_core.code_decisions
+            SET status='APPROVED', pr_number=?, pr_url=?, updated_at=now()
+            WHERE id=?
+            """,
+            (mut.pr_number, mut.pr_url or None, mut.id),
+        )
+        return
+
+    if dt == "BACKTEST_RESULT_UPSERT":
+        mut = BacktestResultMutation.model_validate(delta.mutation)
+        tickers = [str(t).strip().upper() for t in (mut.ticker_universe or []) if str(t).strip()]
+        con.execute(
+            """
+            INSERT INTO quant_core.backtest_results
+              (id, code_decision_id, strategy_name, ticker_universe, start_date, end_date,
+               sharpe, sortino, max_drawdown, total_return, volatility, n_trades, win_rate,
+               sandbox_script, passed_thresholds)
+            VALUES
+              (?, ?, ?, ?, ?::DATE, ?::DATE, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+              sharpe=excluded.sharpe,
+              max_drawdown=excluded.max_drawdown,
+              passed_thresholds=excluded.passed_thresholds
+            """,
+            (
+                mut.id,
+                mut.code_decision_id,
+                mut.strategy_name,
+                tickers,
+                mut.start_date,
+                mut.end_date,
+                mut.sharpe,
+                mut.sortino,
+                mut.max_drawdown,
+                mut.total_return,
+                mut.volatility,
+                mut.n_trades,
+                mut.win_rate,
+                mut.sandbox_script,
+                bool(mut.passed_thresholds),
+            ),
         )
         return
 

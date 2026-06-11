@@ -5284,6 +5284,123 @@ def admin_meditate_tick(body: AdminMeditateTickBody) -> dict[str, Any]:
     return {"ok": True, "result": result}
 
 
+class CodeDecisionApproveBody(BaseModel):
+    decision_id: str = Field(..., min_length=8)
+    vault_path: str = Field(..., min_length=4)
+    chat_id: str = ""
+    tenant_id: str = "default"
+    user_id: str = ""
+
+
+class CodeDecisionRejectBody(BaseModel):
+    decision_id: str = Field(..., min_length=8)
+    vault_path: str = Field(..., min_length=4)
+    rationale: str = ""
+    tenant_id: str = "default"
+    user_id: str = ""
+
+
+@router.post("/code/approve", dependencies=[Depends(_require_admin_key)])
+def admin_code_decision_approve(
+    body: CodeDecisionApproveBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    """Aprueba code_decision PENDING_HITL y crea PR en GitHub (backend soberano)."""
+    try:
+        con, resolved, _scope = _duckdb_readonly_session(body.vault_path, actor=actor)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    try:
+        tid = (body.tenant_id or "default").strip() or "default"
+        uid = (body.user_id or actor or tid).strip() or tid
+
+        class _DbShim:
+            _path = resolved
+
+            def query(self, q: str, params: tuple = ()):
+                return con.execute(q, params).fetchdf().to_dict(orient="records")
+
+        from duckclaw.forge.code_decision_service import approve_code_decision
+
+        result = approve_code_decision(
+            _DbShim(),
+            decision_id=body.decision_id.strip(),
+            tenant_id=tid,
+            user_id=uid,
+            chat_id=(body.chat_id or "").strip(),
+        )
+        if result.get("error"):
+            raise _problem(400, "Aprobación fallida", str(result["error"]))
+        return result
+    finally:
+        con.close()
+
+
+@router.post("/code/reject", dependencies=[Depends(_require_admin_key)])
+def admin_code_decision_reject(
+    body: CodeDecisionRejectBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    """Rechaza code_decision."""
+    try:
+        con, resolved, _scope = _duckdb_readonly_session(body.vault_path, actor=actor)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    try:
+        tid = (body.tenant_id or "default").strip() or "default"
+        uid = (body.user_id or actor or tid).strip() or tid
+
+        class _DbShim:
+            _path = resolved
+
+        from duckclaw.forge.code_decision_service import reject_code_decision
+
+        return reject_code_decision(
+            _DbShim(),
+            decision_id=body.decision_id.strip(),
+            tenant_id=tid,
+            user_id=uid,
+            rationale=body.rationale,
+        )
+    finally:
+        con.close()
+
+
+@router.get("/code/decisions", dependencies=[Depends(_require_admin_key)])
+def admin_list_code_decisions(
+    vault_path: str = Query(..., min_length=4),
+    status: str = Query(default="PENDING_HITL"),
+    limit: int = Query(default=20, ge=1, le=100),
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    """Lista decisiones de código del vault Quant Trader."""
+    try:
+        con, resolved, _scope = _duckdb_readonly_session(vault_path, actor=actor)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    try:
+        st = (status or "").strip() or "PENDING_HITL"
+        rows = con.execute(
+            """
+            SELECT id, repo, file_path, branch_name, decision_type, title, status, created_at, pr_url
+            FROM quant_core.code_decisions
+            WHERE status = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            [st, int(limit)],
+        ).fetchdf()
+        return {"vault_path": resolved, "items": rows.to_dict(orient="records"), "status_filter": st}
+    finally:
+        con.close()
+
+
 from routers.admin_db_first import router as _admin_db_first_router  # noqa: E402
 from routers.admin_train import router as _admin_train_router  # noqa: E402
 

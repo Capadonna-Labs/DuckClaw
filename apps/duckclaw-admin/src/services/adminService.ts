@@ -219,6 +219,18 @@ export interface VectorSearchResult {
   warning?: string | null;
 }
 
+export interface CodeDecisionRow {
+  id: string;
+  repo: string;
+  file_path: string;
+  branch_name: string;
+  decision_type: string;
+  title: string;
+  status: string;
+  created_at?: string;
+  pr_url?: string;
+}
+
 export interface AdminConversation {
   session_id: string;
   tenant_id: string;
@@ -656,6 +668,39 @@ export const adminService = {
 
   runDuckdbQuery: (body: { query: string; vault_path?: string }) =>
     adminFetch<DuckdbQueryResult>('/duckdb/query', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  listCodeDecisions: (vaultPath: string, status = 'PENDING_HITL', limit = 20) => {
+    const q = new URLSearchParams({
+      vault_path: vaultPath,
+      status,
+      limit: String(limit),
+    });
+    return adminFetch<{ items: CodeDecisionRow[]; status_filter: string }>(`/code/decisions?${q}`);
+  },
+
+  approveCodeDecision: (body: {
+    decision_id: string;
+    vault_path: string;
+    chat_id?: string;
+    tenant_id?: string;
+    user_id?: string;
+  }) =>
+    adminFetch<{ status: string; pr_url?: string; decision_id: string }>('/code/approve', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  rejectCodeDecision: (body: {
+    decision_id: string;
+    vault_path: string;
+    rationale?: string;
+    tenant_id?: string;
+    user_id?: string;
+  }) =>
+    adminFetch<{ status: string; decision_id: string }>('/code/reject', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

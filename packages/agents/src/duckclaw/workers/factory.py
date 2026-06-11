@@ -19,6 +19,28 @@ from urllib.parse import parse_qs, urlparse
 
 _log = logging.getLogger(__name__)
 
+
+# #region agent log
+def _debug_e2e_log(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    try:
+        root = os.environ.get("DUCKCLAW_REPO_ROOT") or str(Path(__file__).resolve().parents[4])
+        log_path = Path(root) / "debug-97f3cb.log"
+        payload = {
+            "sessionId": "97f3cb",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+# #endregion
+
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -794,6 +816,14 @@ def _github_resolve_owner_repo() -> tuple[str, str]:
                         repo = m.group(2)
         except Exception:
             pass
+    # #region agent log
+    _debug_e2e_log(
+        "H2",
+        "factory.py:_github_resolve_owner_repo",
+        "resolved owner/repo",
+        {"owner": owner, "repo": repo, "owner_from_env": bool(os.environ.get("GITHUB_OWNER") or os.environ.get("DUCKCLAW_GITHUB_OWNER"))},
+    )
+    # #endregion
     return owner, repo
 
 
@@ -814,14 +844,69 @@ def _github_infer_branch_from_incoming(incoming: str) -> str | None:
     return None
 
 
-def _github_pr_workflow_guardrail_text(spec: Any) -> str:
+def _code_evidence_guardrail_text(spec: Any) -> str:
     wdir = getattr(spec, "worker_dir", None) if spec is not None else None
     if wdir:
         try:
-            return load_worker_guardrail(wdir, "guardrails/directives/github_pr_workflow.md")
+            return load_worker_guardrail(wdir, "guardrails/directives/code_evidence_rule.md")
         except FileNotFoundError:
             pass
-    return load_guardrail_optional("directives", "github_pr_workflow", default="")
+    return load_guardrail_optional("directives", "code_evidence_rule", default="")
+
+
+def _quant_user_requests_code_review(text: str) -> bool:
+    low = str(text or "").strip().lower()
+    return bool(
+        re.search(
+            r"\b(revisa|review|revisar|analiza)\b.*\b(archivo|file|pr|pull)\b",
+            low,
+        )
+        or re.search(r"\bcode_review\b", low)
+    )
+
+
+def _quant_user_requests_bug_investigation(text: str) -> bool:
+    low = str(text or "").strip().lower()
+    return bool(
+        re.search(r"\b(ci|ci/cd|cicd|pipeline|workflow|actions)\b.*\b(fall|fail|error|roto)\b", low)
+        or re.search(r"\bvolvi[oó]\s+a\s+fallar\b", low)
+        or re.search(r"\bbug_investigation\b", low)
+    )
+
+
+def _quant_user_requests_backtest_validation(text: str) -> bool:
+    low = str(text or "").strip().lower()
+    return bool(
+        re.search(r"\b(valida|validate|backtest)\b", low)
+        and re.search(r"\b(backtest|sharpe|estrategia|strategy)\b", low)
+    )
+
+
+def _github_pr_workflow_guardrail_text(spec: Any) -> str:
+    wdir = getattr(spec, "worker_dir", None) if spec is not None else None
+    source = "optional"
+    if wdir:
+        try:
+            text = load_worker_guardrail(wdir, "guardrails/directives/github_pr_workflow.md")
+            source = "worker_dir"
+        except FileNotFoundError:
+            text = load_guardrail_optional("directives", "github_pr_workflow", default="")
+    else:
+        text = load_guardrail_optional("directives", "github_pr_workflow", default="")
+    # #region agent log
+    _debug_e2e_log(
+        "H3",
+        "factory.py:_github_pr_workflow_guardrail_text",
+        "guardrail resolved",
+        {
+            "worker_dir": str(wdir or ""),
+            "source": source,
+            "text_len": len(text),
+            "has_directiva": "DIRECTIVA_GITHUB_PR" in text,
+        },
+    )
+    # #endregion
+    return text
 
 
 def _github_tool_message_fields(msg: Any) -> tuple[str, str] | None:
@@ -1143,6 +1228,14 @@ def _github_try_deterministic_pr_workflow(
     if not _github_pr_workflow_resolved_intent(msgs, incoming):
         return None
     owner, repo = _github_resolve_owner_repo()
+    # #region agent log
+    _debug_e2e_log(
+        "H4",
+        "factory.py:_github_try_deterministic_pr_workflow",
+        "PR pipeline entered",
+        {"owner": owner, "repo": repo, "incoming_preview": str(incoming or "")[:120], "has_owner": bool(owner)},
+    )
+    # #endregion
     lh = _quant_last_human_index(msgs)
 
     if already_has_tool_result and last_msg is not None:
@@ -6307,6 +6400,27 @@ def build_worker_graph(
                 _msg_list = [
                     SystemMessage(content=load_guardrail("directives", "tool_choice_generic"))
                 ] + _msg_list
+            _gh_owner, _gh_repo = _github_resolve_owner_repo()
+            if _gh_owner and _gh_repo and any(
+                t in tools_by_name
+                for t in (
+                    "get_file_contents",
+                    "search_code",
+                    "create_or_update_file",
+                    "push_files",
+                    "create_pull_request",
+                )
+            ):
+                _msg_list = [
+                    SystemMessage(
+                        content=(
+                            f"GITHUB_MCP_TARGET (runtime env, INNEGOCIABLE): "
+                            f"owner={_gh_owner} repo={_gh_repo}. "
+                            "Todas las tools GitHub deben usar ese par. "
+                            "No uses Capadonna-Labs/DuckClaw ni config.env.example."
+                        )
+                    )
+                ] + _msg_list
             _quant_autoexec_validation_intent = bool(
                 is_quant_trader(_lid)
                 and _quant_user_requests_autoexec_validation(incoming)
@@ -6322,8 +6436,52 @@ def build_worker_graph(
                 and _github_pr_workflow_resolved_intent(state.get("messages") or [], incoming)
                 and not telegram_context_summarize_directive
             )
+            _quant_coding_intent = bool(
+                is_quant_trader(_lid)
+                and (
+                    _quant_user_requests_bug_investigation(incoming)
+                    or _quant_user_requests_code_review(incoming)
+                    or _quant_user_requests_backtest_validation(incoming)
+                )
+                and not telegram_context_summarize_directive
+            )
+            if _quant_coding_intent:
+                _code_directive = _code_evidence_guardrail_text(spec)
+                if _code_directive.strip():
+                    _msg_list = [SystemMessage(content=_code_directive)] + _msg_list
+                if _quant_user_requests_bug_investigation(incoming) and "get_job_logs" in tools_by_name:
+                    _msg_list = [
+                        SystemMessage(
+                            content=(
+                                "MODO BUG_INVESTIGATION: secuencia obligatoria "
+                                "actions_list → get_job_logs → read_driller_file. "
+                                "Prohibido create_or_update_file/push_files/create_pull_request."
+                            )
+                        )
+                    ] + _msg_list
+                elif _quant_user_requests_code_review(incoming) and "read_driller_file" in tools_by_name:
+                    _msg_list = [
+                        SystemMessage(
+                            content=(
+                                "MODO CODE_REVIEW: usa read_driller_file y search_code. "
+                                "Hallazgos en formato archivo:línea:problema."
+                            )
+                        )
+                    ] + _msg_list
             if _github_pr_workflow_intent:
                 _gh_pr_directive = _github_pr_workflow_guardrail_text(spec)
+                # #region agent log
+                _debug_e2e_log(
+                    "H4",
+                    "factory.py:worker_invoke",
+                    "github PR workflow intent",
+                    {
+                        "worker": _lid,
+                        "directive_len": len(_gh_pr_directive),
+                        "worker_dir": str(getattr(spec, "worker_dir", "") or ""),
+                    },
+                )
+                # #endregion
                 if _gh_pr_directive.strip():
                     _msg_list = [SystemMessage(content=_gh_pr_directive)] + _msg_list
                 if (
@@ -6334,7 +6492,7 @@ def build_worker_graph(
                         SystemMessage(
                             content=(
                                 "INNEGOCIABLE: hay push_files previo sin create_pull_request. "
-                                "Siguiente paso = create_pull_request (en el repositorio DuckClaw). "
+                                "Siguiente paso = create_pull_request (en GITHUB_OWNER/GITHUB_REPO del runtime). "
                                 "Prohibido cancel_trade_signal, run_sandbox o bucles search_code."
                             )
                         )

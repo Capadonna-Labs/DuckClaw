@@ -58,6 +58,53 @@ class ConversationCompactionMutation(BaseModel):
     )
 
 
+class CodeDecisionMutation(BaseModel):
+    id: str = Field(..., min_length=8)
+    session_uid: str = Field(..., min_length=1)
+    chat_id: str = ""
+    repo: str = Field(..., min_length=1)
+    file_path: str = Field(..., min_length=1)
+    branch_name: str = Field(..., min_length=1)
+    decision_type: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1, max_length=200)
+    context: str = ""
+    proposed_change: str = Field(..., min_length=1)
+    rationale: str = ""
+    evidence: dict = Field(default_factory=dict)
+    status: str = "PENDING_HITL"
+    pr_number: int | None = None
+    pr_url: str = ""
+
+
+class CodeDecisionRejectMutation(BaseModel):
+    id: str = Field(..., min_length=8)
+    rationale: str = ""
+
+
+class CodeDecisionApproveMutation(BaseModel):
+    id: str = Field(..., min_length=8)
+    pr_number: int | None = None
+    pr_url: str = ""
+
+
+class BacktestResultMutation(BaseModel):
+    id: str = Field(..., min_length=8)
+    code_decision_id: str | None = None
+    strategy_name: str = Field(..., min_length=1)
+    ticker_universe: list[str] = Field(default_factory=list)
+    start_date: str = Field(..., min_length=4)
+    end_date: str = Field(..., min_length=4)
+    sharpe: float | None = None
+    sortino: float | None = None
+    max_drawdown: float | None = None
+    total_return: float | None = None
+    volatility: float | None = None
+    n_trades: int | None = None
+    win_rate: float | None = None
+    sandbox_script: str = ""
+    passed_thresholds: bool = False
+
+
 class TradeSignalMutation(BaseModel):
     signal_id: str = Field(..., min_length=8)
     mandate_id: str = Field(..., min_length=8)
@@ -92,6 +139,10 @@ class QuantStateDelta(BaseModel):
         "TRADE_SIGNAL_EXECUTED",
         "TRADE_SIGNAL_DISCARDED",
         "TRADE_SIGNAL_FAILED",
+        "CODE_DECISION_PROPOSED",
+        "CODE_DECISION_APPROVED",
+        "CODE_DECISION_REJECTED",
+        "BACKTEST_RESULT_UPSERT",
     ]
     user_id: str = Field(..., min_length=1)
     target_db_path: str = Field(..., min_length=1)

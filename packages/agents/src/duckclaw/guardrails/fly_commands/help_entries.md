@@ -26,6 +26,8 @@
 /approve|Aprobar última acción
 /reject|Rechazar última acción
 /execute-signal <uuid>|HITL: confirma ejecución (Quant Trader: execute_approved_signal); alias /execute_signal
+/approve-code <uuid>|HITL: aprueba code_decision y crea PR (backend soberano); alias /approve_code
+/reject-code <uuid> [razón]|Rechaza code_decision propuesta por Quant Trader
 /execute_all_moc <session_uid>|HITL Quant: ejecuta todas las señales moc_hrp_cfd pendientes de esa sesión MOC
 /cancel_signal <uuid> [--force]|HITL: cancela señal pendiente o fallida (PENDING_HITL/AWAITING_HITL/PENDING/FAILED); --force limpia otros estados excepto EXECUTED
 /trading-session --mode paper|live [--tickers A,B] [--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze] [--confirm] [--status] [--stop]|Quant: sesión activa + session_goal + auto delta de /crons (live requiere --confirm)

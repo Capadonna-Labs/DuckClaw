@@ -10,8 +10,11 @@ Verificar imagen (operadores): docker pull ghcr.io/github/github-mcp-server
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import time
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
@@ -45,11 +48,27 @@ Herramientas típicas expuestas (nombres exactos pueden variar por versión del 
   - create_pull_request / PRs
   - create_or_update_file / blobs y commits API
 
-Repo por defecto sugerido en prompts si el worker no especifica: owner duckclaw,
-repo duckclaw (los tools siguen exigiendo owner/repo salvo configuración MCP alternativa).
+Repo por defecto en runtime: ``GITHUB_OWNER`` / ``GITHUB_REPO`` del gateway (inyectado
+en cada tool repo-scoped). No inferir desde ``config.env.example`` ni DuckClaw.
 
 Documentación servidor: https://github.com/github/github-mcp-server
 """
+
+_REPO_SCOPED_GITHUB_TOOLS = frozenset({
+    "get_file_contents",
+    "search_code",
+    "search_repositories",
+    "list_branches",
+    "list_commits",
+    "create_or_update_file",
+    "push_files",
+    "create_pull_request",
+    "delete_file",
+    "list_issues",
+    "get_issue",
+    "list_pull_requests",
+    "get_pull_request",
+})
 
 _DESTRUCTIVE_TOOLS = frozenset({
     "github_delete_branch",
@@ -59,6 +78,87 @@ _DESTRUCTIVE_TOOLS = frozenset({
     "merge_pr",
     "force_push",
 })
+
+_MUTATING_GITHUB_TOOLS = frozenset({
+    "create_or_update_file",
+    "push_files",
+    "create_pull_request",
+    "delete_file",
+    "update_issue",
+    "create_issue",
+})
+
+_WRITE_GITHUB_TOOL_NAMES = frozenset({
+    "create_or_update_file",
+    "push_files",
+    "create_pull_request",
+    "delete_file",
+})
+
+_PROTECTED_GIT_BRANCHES = frozenset({"main", "master"})
+
+
+def _github_branch_from_payload(payload: dict[str, Any]) -> str:
+    """Extrae rama/ref/head de tools de mutación GitHub."""
+    for key in ("branch", "ref", "head", "base"):
+        raw = str(payload.get(key) or "").strip()
+        if not raw:
+            continue
+        if raw.startswith("refs/heads/"):
+            return raw.split("/", 2)[-1].strip().lower()
+        return raw.lower()
+    return ""
+
+
+def reject_protected_branch_mutation(tool_name: str, payload: dict[str, Any]) -> str | None:
+    """
+    Bloquea mutaciones directas a main/master (EC-NEW-1).
+    Retorna mensaje de error o None si la operación está permitida.
+    """
+    if tool_name not in _MUTATING_GITHUB_TOOLS:
+        return None
+    branch = _github_branch_from_payload(payload)
+    if branch in _PROTECTED_GIT_BRANCHES:
+        return (
+            f"Zero-Trust: mutación en rama protegida '{branch}' bloqueada. "
+            "Usa rama feature (fix/...) + propose_code_change + /approve-code."
+        )
+    return None
+
+
+def github_runtime_owner_repo() -> tuple[str, str]:
+    """Owner/repo canónico para GitHub MCP (env del gateway)."""
+    owner = (
+        os.environ.get("GITHUB_OWNER") or os.environ.get("DUCKCLAW_GITHUB_OWNER") or ""
+    ).strip()
+    repo = (
+        os.environ.get("GITHUB_REPO") or os.environ.get("DUCKCLAW_GITHUB_REPO") or ""
+    ).strip()
+    return owner, repo
+
+
+def apply_github_repo_scope(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Fuerza owner/repo desde env en tools acotadas al repositorio operativo.
+    Evita que el LLM apunte a DuckClaw u otro repo por alucinación o historial.
+    """
+    if tool_name not in _REPO_SCOPED_GITHUB_TOOLS:
+        return payload
+    owner, repo = github_runtime_owner_repo()
+    if not owner or not repo:
+        return payload
+    scoped = dict(payload)
+    llm_owner = scoped.get("owner")
+    llm_repo = scoped.get("repo")
+    scoped["owner"] = owner
+    scoped["repo"] = repo
+    if tool_name == "search_code":
+        query_key = "query" if "query" in scoped else "q" if "q" in scoped else "query"
+        raw_query = str(scoped.get(query_key) or "").strip()
+        repo_token = f"repo:{owner}/{repo}"
+        if repo_token.lower() not in raw_query.lower():
+            scoped[query_key] = f"{repo_token} {raw_query}".strip() if raw_query else repo_token
+    return scoped
 
 
 def github_mcp_toolsets_default() -> str:
@@ -208,6 +308,8 @@ async def connect_github_mcp(
     result: list[Any] = []
     for t in tools_specs:
         name = getattr(t, "name", None) or str(t)
+        if read_only and name in _WRITE_GITHUB_TOOL_NAMES:
+            continue
         is_destructive = any(d in name.lower() for d in _DESTRUCTIVE_TOOLS)
         if is_destructive and hitl_destructive:
             tool = _wrap_with_hitl(t, name)
@@ -231,7 +333,13 @@ def _mcp_tool_to_structured(server_params: Any, tool_spec: Any, name: str) -> Op
 
     def _sync_call(**kwargs: Any) -> str:
         validated = args_model(**kwargs)
-        payload = validated.model_dump(exclude_none=True)
+        payload = apply_github_repo_scope(
+            name,
+            validated.model_dump(exclude_none=True),
+        )
+        branch_err = reject_protected_branch_mutation(name, payload)
+        if branch_err:
+            return json.dumps({"error": branch_err}, ensure_ascii=False)
         return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, payload))
 
     desc = getattr(tool_spec, "description", None) or f"GitHub MCP tool: {name}"
@@ -280,22 +388,103 @@ def _github_worker_id_key(worker_id: str) -> str:
 
 def github_worker_allows_mutating_mcp(logical_worker_id: str, worker_slug: Optional[str] = None) -> bool:
     """True si el id de worker puede usar MCP GitHub sin GITHUB_READ_ONLY."""
-    from duckclaw.workers.worker_ids import WORKER_QUANT_TRADER, is_quant_trader
-
     extras_raw = os.environ.get(_READWRITE_IDS_EXTRA_ENV, "").strip()
     csv = {_github_worker_id_key(x) for x in extras_raw.split(",") if x.strip()}
     allow = {_github_worker_id_key(x) for x in _READWRITE_IDS_DEFAULT} | csv
     lw = _github_worker_id_key(logical_worker_id)
     slug = _github_worker_id_key(worker_slug or "")
-    qt_key = _github_worker_id_key(WORKER_QUANT_TRADER)
-    return (
-        lw in allow
-        or slug in allow
-        or lw == qt_key
-        or slug == qt_key
-        or is_quant_trader(logical_worker_id)
-        or is_quant_trader(worker_slug)
+    return lw in allow or slug in allow
+
+
+def harness_github_owner_repo() -> tuple[str, str]:
+    """Owner/repo read-only del harness DuckClaw (Fase 4)."""
+    owner = (os.environ.get("DUCKCLAW_HARNESS_OWNER") or "Capadonna-Labs").strip()
+    repo = (os.environ.get("DUCKCLAW_HARNESS_REPO") or "DuckClaw").strip()
+    return owner, repo
+
+
+async def connect_harness_github_mcp(
+    *,
+    token_env: str = "GITHUB_TOKEN",
+) -> list[Any]:
+    """
+    Segundo perfil MCP GitHub read-only para analizar el harness DuckClaw.
+    No aplica ``apply_github_repo_scope`` del repo operativo Capadonna-Driller.
+    """
+    if not _mcp_available():
+        return []
+    tok_key = token_env if (token_env or "").strip() else "GITHUB_TOKEN"
+    token = os.environ.get(tok_key, "").strip()
+    if not token:
+        return []
+    try:
+        from mcp.client.stdio import StdioServerParameters
+    except ImportError:
+        return []
+
+    owner, repo = harness_github_owner_repo()
+    env_merged = github_mcp_merged_child_env(token, read_only=True, toolsets="repos,actions")
+    env_merged["GITHUB_OWNER"] = owner
+    env_merged["GITHUB_REPO"] = repo
+    server_params = StdioServerParameters(
+        command="docker",
+        args=github_docker_run_argv(read_only=True),
+        env=env_merged,
     )
+    try:
+        from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_list_tools
+
+        tools_specs = await mcp_stdio_list_tools(server_params)
+    except Exception:
+        _log.exception("Harness GitHub MCP init failed")
+        return []
+
+    from langchain_core.tools import StructuredTool
+
+    allowed = frozenset({"get_file_contents", "search_code", "list_commits", "list_branches"})
+    result: list[Any] = []
+    for t in tools_specs:
+        name = getattr(t, "name", None) or str(t)
+        if name not in allowed:
+            continue
+        raw_schema = getattr(t, "inputSchema", None) or getattr(t, "input_schema", None)
+        args_model = mcp_input_schema_to_args_model(
+            raw_schema if isinstance(raw_schema, dict) else None,
+            f"{name}_harness_github",
+        )
+
+        def _make_call(tool_name: str, sp: Any, am: Any):
+            def _sync_call(**kwargs: Any) -> str:
+                from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_call_tool
+
+                validated = am(**kwargs)
+                payload = validated.model_dump(exclude_none=True)
+                payload["owner"] = owner
+                payload["repo"] = repo
+                if tool_name == "search_code":
+                    qk = "query" if "query" in payload else "q"
+                    raw_q = str(payload.get(qk) or "").strip()
+                    token_repo = f"repo:{owner}/{repo}"
+                    if token_repo.lower() not in raw_q.lower():
+                        payload[qk] = f"{token_repo} {raw_q}".strip() if raw_q else token_repo
+                return _run_async_from_sync(mcp_stdio_call_tool(sp, tool_name, payload))
+
+            return _sync_call
+
+        desc = (
+            getattr(t, "description", None)
+            or f"Harness GitHub MCP (read-only): {name}"
+        )
+        result.append(
+            StructuredTool.from_function(
+                _make_call(name, server_params, args_model),
+                name=f"harness_{name}",
+                description=f"{desc} [DuckClaw harness RO: {owner}/{repo}]",
+                args_schema=args_model,
+                infer_schema=False,
+            )
+        )
+    return result
 
 
 def register_github_skill(

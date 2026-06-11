@@ -156,5 +156,8 @@ def register_quant_skills(
             trader = load_capadonna_lib("quant_trader_bridge")
             if trader is not None:
                 trader.register_quant_trader_skills(db, llm, tools)
+            coding = load_capadonna_lib("quant_coding_bridge")
+            if coding is not None:
+                coding.register_quant_coding_skills(db, llm, tools)
     except Exception:
         _log.debug("capadonna quant skill registration skipped", exc_info=True)

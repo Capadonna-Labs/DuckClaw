@@ -6238,6 +6238,74 @@ def _execute_signal_verify_ledger(db: Any, sid: str) -> tuple[bool, str]:
     return False, "UUID no encontrado en finance_worker.trade_signals ni quant_core.trade_signals."
 
 
+def execute_quant_approve_code(db: Any, chat_id: Any, args: str) -> str:
+    """/approve-code <uuid>: HITL para code_decisions (backend crea PR)."""
+    did = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
+    if not re.match(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        did,
+    ):
+        return "Uso: /approve-code <decision_id_UUID>"
+    try:
+        from duckclaw.capadonna_plugin import load_capadonna_lib
+
+        _hitl = load_capadonna_lib("quant_code_hitl")
+        if _hitl is None:
+            return "Capadonna quant_code_hitl plugin no disponible."
+        if not _hitl.consume_code_decision_grant(str(chat_id).strip(), did):
+            _hitl.grant_code_decision(str(chat_id).strip(), did)
+    except Exception as exc:
+        return f"No se pudo validar grant HITL: {exc}"
+    try:
+        from duckclaw.forge.code_decision_service import approve_code_decision
+
+        tid = str(get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
+        uid = str(get_chat_state(db, chat_id, "last_requester_id") or tid).strip() or tid
+        result = approve_code_decision(
+            db,
+            decision_id=did,
+            tenant_id=tid,
+            user_id=uid,
+            chat_id=str(chat_id).strip(),
+        )
+        if result.get("error"):
+            return f"No: {result['error']}"
+        pr_url = result.get("pr_url") or ""
+        return (
+            f"Código aprobado. decision_id={did}. "
+            f"PR: {pr_url or 'ver GitHub Actions'}."
+        )
+    except Exception as exc:
+        return f"Error al aprobar code_decision: {exc}"
+
+
+def execute_quant_reject_code(db: Any, chat_id: Any, args: str) -> str:
+    """/reject-code <uuid> [razón]: rechaza code_decision."""
+    parts = (args or "").strip().split(maxsplit=1)
+    did = (parts[0] if parts else "").strip().lower()
+    rationale = parts[1] if len(parts) > 1 else ""
+    if not re.match(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        did,
+    ):
+        return "Uso: /reject-code <decision_id_UUID> [razón]"
+    try:
+        from duckclaw.forge.code_decision_service import reject_code_decision
+
+        tid = str(get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
+        uid = str(get_chat_state(db, chat_id, "last_requester_id") or tid).strip() or tid
+        result = reject_code_decision(
+            db,
+            decision_id=did,
+            tenant_id=tid,
+            user_id=uid,
+            rationale=rationale,
+        )
+        return f"Decisión {did} → {result.get('status', 'REJECTED')}."
+    except Exception as exc:
+        return f"Error al rechazar: {exc}"
+
+
 def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
     """/execute-signal <uuid>: HITL para Quant Trader (execute_approved_signal)."""
     sid = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
@@ -6589,6 +6657,10 @@ def _dispatch_fly_command(
         if sub in ("", "status"):
             return execute_lake_status()
         return "Uso: /lake o /lake status"
+    if name in ("approve_code", "approve-code"):
+        return execute_quant_approve_code(db, chat_id, args)
+    if name in ("reject_code", "reject-code"):
+        return execute_quant_reject_code(db, chat_id, args)
     if name in ("execute_signal", "execute-signal"):
         return execute_quant_execute_signal(db, chat_id, args)
     if name == "execute_all_moc":

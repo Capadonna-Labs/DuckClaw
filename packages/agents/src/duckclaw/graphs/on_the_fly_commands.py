@@ -7,6 +7,7 @@ Spec: specs/interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md
 from __future__ import annotations
 
 import base64
+from datetime import datetime
 import json
 import logging
 import math
@@ -130,18 +131,35 @@ def _debug_log_model_config(
     del hypothesis_id, location, message, data, run_id
 
 
-def register_fly_outbound_chart_b64(session_id: Any, b64: str) -> None:
+_FLY_OUTBOUND_CHART_NAMES: dict[str, list[str]] = {}
+
+
+def register_fly_outbound_chart_b64(
+    session_id: Any, b64: str, *, chart_name: str | None = None
+) -> None:
     s = (b64 or "").strip()
     if not s:
         return
     k = str(session_id).strip()
     _FLY_OUTBOUND_CHART_B64.setdefault(k, []).append(s)
+    if chart_name and str(chart_name).strip():
+        _FLY_OUTBOUND_CHART_NAMES.setdefault(k, []).append(str(chart_name).strip())
+
+
+def pop_all_fly_outbound_charts(session_id: Any) -> tuple[list[str], list[str]]:
+    """Devuelve y vacía figuras encoladas (b64, nombres legibles) en orden FIFO."""
+    k = str(session_id).strip()
+    charts_b64 = _FLY_OUTBOUND_CHART_B64.pop(k, [])
+    chart_names = _FLY_OUTBOUND_CHART_NAMES.pop(k, [])
+    while len(chart_names) < len(charts_b64):
+        chart_names.append(f"chart-{len(chart_names) + 1}.png")
+    return charts_b64, chart_names
 
 
 def pop_all_fly_outbound_charts_b64(session_id: Any) -> list[str]:
     """Devuelve y vacía todas las figuras encoladas para este chat (orden FIFO)."""
-    k = str(session_id).strip()
-    return _FLY_OUTBOUND_CHART_B64.pop(k, [])
+    charts_b64, _ = pop_all_fly_outbound_charts(session_id)
+    return charts_b64
 
 
 def pop_fly_outbound_chart_b64(session_id: Any) -> str | None:
@@ -5829,6 +5847,49 @@ def _build_trading_session_pnl_chart_b64(
     return b64
 
 
+def _trading_session_chart_label(db: Any) -> tuple[str, str]:
+    """
+    Etiqueta para filenames de gráficas: fecha Bogotá + apodo de sesión (tickers o uid corto).
+    Econofísica: el filename ancla el snapshot visual al manifold temporal de la sesión.
+    """
+    from zoneinfo import ZoneInfo
+
+    stamp = datetime.now(ZoneInfo("America/Bogota")).strftime("%Y%m%d")
+    slug = "sesion"
+    try:
+        raw = db.query(
+            "SELECT session_uid, tickers, session_goal FROM quant_core.trading_sessions "
+            "WHERE id = 'active' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if rows and isinstance(rows[0], dict):
+            row = rows[0]
+            uid = str(row.get("session_uid") or "").strip()
+            tickers_csv = str(row.get("tickers") or "").strip()
+            goal_raw = row.get("session_goal")
+            goal: dict[str, Any] = {}
+            if isinstance(goal_raw, dict):
+                goal = goal_raw
+            elif isinstance(goal_raw, str) and goal_raw.strip():
+                try:
+                    parsed = json.loads(goal_raw)
+                    if isinstance(parsed, dict):
+                        goal = parsed
+                except json.JSONDecodeError:
+                    goal = {}
+            title = str(goal.get("title") or goal.get("label") or goal.get("name") or "").strip()
+            if title:
+                slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24] or slug
+            elif tickers_csv:
+                first_ticker = tickers_csv.split(",")[0].strip().lower()
+                slug = re.sub(r"[^a-z0-9]+", "-", first_ticker)[:16] or slug
+            elif uid:
+                slug = uid.split("-")[0][:8]
+    except Exception:
+        pass
+    return stamp, slug or "sesion"
+
+
 def execute_trading_session(
     db: Any,
     chat_id: Any,
@@ -5852,6 +5913,9 @@ def execute_trading_session(
         out = _read_trading_session_status_summary(
             db, chat_id=chat_id, vault_user_id=vault_user_id
         )
+        chart_stamp, chart_slug = _trading_session_chart_label(db)
+        pnl_chart_name = f"{chart_stamp}_{chart_slug}_pnl.png"
+        pie_chart_name = f"{chart_stamp}_{chart_slug}_participacion.png"
         try:
             b64c = _build_trading_session_pnl_chart_b64(
                 db, chat_id=chat_id, vault_user_id=vault_user_id
@@ -5859,13 +5923,13 @@ def execute_trading_session(
         except Exception:
             b64c = None
         if b64c:
-            register_fly_outbound_chart_b64(chat_id, b64c)
+            register_fly_outbound_chart_b64(chat_id, b64c, chart_name=pnl_chart_name)
         try:
             pie_b64 = _build_session_participation_pie_b64(db)
         except Exception:
             pie_b64 = None
         if pie_b64:
-            register_fly_outbound_chart_b64(chat_id, pie_b64)
+            register_fly_outbound_chart_b64(chat_id, pie_b64, chart_name=pie_chart_name)
         return out
     if parsed.stop:
         ok_close, detail_close = _close_active_trading_session(

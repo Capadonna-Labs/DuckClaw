@@ -621,15 +621,19 @@ export function useAdminChat({
     try {
       let assignedSuffix = '';
       let elapsedFooter = '';
-      let streamAudio: {
-        audioBase64?: string;
-        audioFormat?: TtsAudioFormat;
-        audioUnavailable?: boolean;
-      } | null = null;
+      let authoritativeResponse = '';
+      const streamAudioRef: {
+        current: {
+          audioBase64?: string;
+          audioFormat?: TtsAudioFormat;
+          audioUnavailable?: boolean;
+        } | null;
+      } = { current: null };
       const streamVisual: {
         figure_base64?: string;
         fly_charts_b64?: string[];
         fly_chart_artifact_ids?: string[];
+        fly_chart_names?: string[];
         artifact_id?: string;
         artifact_tenant_id?: string;
       } = {};
@@ -649,13 +653,16 @@ export function useAdminChat({
           onToken: appendAssistant,
           onHeartbeat: appendHeartbeat,
           onAudio: (payload) => {
-            streamAudio = {
+            streamAudioRef.current = {
               audioBase64: payload.audio_base64,
               audioFormat: payload.audio_format,
               audioUnavailable: Boolean(payload.audio_unavailable),
             };
           },
           onDone: (meta) => {
+            if ((meta.response || '').trim()) {
+              authoritativeResponse = meta.response.trim();
+            }
             if (meta.assigned_worker_id && meta.assigned_worker_id !== workerId) {
               assignedSuffix = ` (worker: ${meta.assigned_worker_id})`;
             }
@@ -671,6 +678,7 @@ export function useAdminChat({
               streamVisual.figure_base64 = meta.figure_base64;
               streamVisual.fly_charts_b64 = meta.fly_charts_b64;
               streamVisual.fly_chart_artifact_ids = meta.fly_chart_artifact_ids;
+              streamVisual.fly_chart_names = meta.fly_chart_names;
               streamVisual.artifact_id = meta.artifact_id;
               streamVisual.artifact_tenant_id = meta.artifact_tenant_id;
             }
@@ -682,27 +690,51 @@ export function useAdminChat({
         finalizeCancelledGeneration();
         return;
       }
+      const capturedStreamAudio = streamAudioRef.current;
       const tenantForArtifact =
         (streamVisual.artifact_tenant_id || config?.effective_tenant_id || 'default').trim() ||
         'default';
       let assistantPreviews: ChatMsg['imagePreviews'] | undefined;
-      const chartNames = ['trading-pnl.png', 'participation-pie.png'];
+      const chartNamesFromStream = (streamVisual.fly_chart_names ?? []).filter((n) => n?.trim());
+      const defaultChartNames = ['trading-pnl.png', 'participation-pie.png'];
+      const chartNameAt = (index: number) =>
+        chartNamesFromStream[index] ?? defaultChartNames[index] ?? `chart-${index + 1}.png`;
       const artifactIdsFromFly = (streamVisual.fly_chart_artifact_ids ?? []).filter((id) =>
         id?.trim()
       );
       const chartsFromFly = (streamVisual.fly_charts_b64 ?? []).filter((b) => b?.trim());
+      // #region agent log
+      fetch('http://127.0.0.1:7725/ingest/46cb6268-ab17-4b27-a8c7-6a3ffadc13b9', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '480705' },
+        body: JSON.stringify({
+          sessionId: '480705',
+          location: 'useAdminChat.ts:flyCharts',
+          message: 'building image previews',
+          data: {
+            tenantForArtifact,
+            artifactIdsFromFly,
+            chartNamesFromStream,
+            chartsFromFlyCount: chartsFromFly.length,
+          },
+          hypothesisId: 'B',
+          runId: 'pre-fix',
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (artifactIdsFromFly.length > 0) {
         assistantPreviews = artifactIdsFromFly.flatMap((aid, i) =>
           artifactImagePreview(tenantForArtifact, aid).map((p) => ({
             ...p,
-            name: chartNames[i] ?? p.name,
+            name: chartNameAt(i),
           }))
         );
       } else if (chartsFromFly.length > 0) {
         assistantPreviews = chartsFromFly.map((b64, i) => {
           const raw = b64.trim();
           const src = raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`;
-          return { url: src, name: chartNames[i] ?? `chart-${i + 1}.png` };
+          return { url: src, name: chartNameAt(i) };
         });
       } else if (streamVisual.figure_base64?.trim()) {
         const raw = streamVisual.figure_base64.trim();
@@ -716,22 +748,26 @@ export function useAdminChat({
         const next = [...m];
         const last = next[next.length - 1];
         if (last?.role === 'assistant') {
-          const base = last.text || '(sin respuesta)';
+          const streamed = (last.text || '').trim();
+          const base =
+            authoritativeResponse.length > streamed.length
+              ? authoritativeResponse
+              : streamed || '(sin respuesta)';
           next[next.length - 1] = {
             role: 'assistant',
             text: base + assignedSuffix + elapsedFooter,
             streaming: false,
             imagePreviews: assistantPreviews ?? last.imagePreviews,
-            audioBase64: streamAudio?.audioBase64,
-            audioFormat: streamAudio?.audioFormat,
-            audioUnavailable: streamAudio?.audioUnavailable,
+            audioBase64: capturedStreamAudio?.audioBase64,
+            audioFormat: capturedStreamAudio?.audioFormat,
+            audioUnavailable: capturedStreamAudio?.audioUnavailable,
           };
         }
         return finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next));
       });
-      if (streamAudio?.audioBase64) {
-        const playResult = await playTtsAudio(streamAudio.audioBase64, {
-          format: streamAudio.audioFormat,
+      if (capturedStreamAudio?.audioBase64) {
+        const playResult = await playTtsAudio(capturedStreamAudio.audioBase64, {
+          format: capturedStreamAudio.audioFormat,
           source: 'chat-sse',
         });
         if (!playResult.ok) {

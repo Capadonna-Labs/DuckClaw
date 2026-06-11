@@ -62,14 +62,23 @@ export function splitPlaygroundWorkerSuffix(text: string): { body: string; worke
   return { body: m[1].trimEnd(), workerNote: m[2].trim() };
 }
 
-const MARKDOWN_SIGNAL =
-  /(^#{1,6}\s|^\s*[-*+]\s+|^\s*\d+\.\s+|```|^\s*>|\*\*[^*\n]+\*\*|\[[^\]]+\]\([^)]+\)|^\|.+\||^---+$/m;
+const MARKDOWN_SIGNALS: RegExp[] = [
+  /^#{1,6}\s/m,
+  /^\s*[-*+]\s+/m,
+  /^\s*\d+\.\s+/m,
+  /```/,
+  /^\s*>/m,
+  /\*\*[^*\n]+\*\*/,
+  /\[[^\]]+\]\([^)]+\)/,
+  /^\|[^|\n]+\|/m,
+  /^---+\s*$/m,
+];
 
 /** Heurística conservadora: solo formatear si hay señales claras de Markdown. */
 export function looksLikeMarkdown(text: string): boolean {
   const trimmed = (text || '').trim();
   if (!trimmed) return false;
-  return MARKDOWN_SIGNAL.test(trimmed);
+  return MARKDOWN_SIGNALS.some((pattern) => pattern.test(trimmed));
 }
 
 type MarkdownVariant = 'assistant' | 'user';

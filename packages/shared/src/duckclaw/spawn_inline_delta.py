@@ -36,6 +36,7 @@ def _ensure_db_writer_import_path() -> bool:
             sys.path.insert(0, p)
     try:
         import context_injection_handler  # noqa: F401
+        import reports_state_delta_handler  # noqa: F401
         import visual_state_delta_handler  # noqa: F401
 
         _writer_import_ok = True
@@ -65,6 +66,19 @@ def apply_visual_state_delta_message_sync(message: str) -> bool:
         from visual_state_delta_handler import _sync_handle_visual_state_delta
 
         _sync_handle_visual_state_delta(message)
+        return True
+    except Exception:
+        return False
+
+
+def apply_reports_state_delta_message_sync(message: str) -> bool:
+    """Ejecuta REPORTS_STATE_DELTA inline (mismo cuerpo que db-writer)."""
+    if not _ensure_db_writer_import_path():
+        return False
+    try:
+        from reports_state_delta_handler import _sync_handle_reports_state_delta
+
+        _sync_handle_reports_state_delta(message)
         return True
     except Exception:
         return False

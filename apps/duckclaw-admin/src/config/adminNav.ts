@@ -74,6 +74,7 @@ export const DATA_NAV_GROUP: AdminNavGroup = {
   label: 'Datos',
   hint: 'Memoria y configuración avanzada',
   items: [
+    { href: '/reports', label: 'Reportes', section: 'core', audience: 'admin' },
     { href: '/duckdb', label: 'DuckDB', section: 'core', audience: 'admin' },
     { href: '/runtime', label: 'Runtime overrides', section: 'core', audience: 'admin' },
   ],

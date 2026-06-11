@@ -12,8 +12,16 @@ const securityHeaders = [
     : []),
 ];
 
+const relaxBuild = process.env.DUCKCLAW_ADMIN_RELAX_BUILD === '1';
+
 const nextConfig = {
   transpilePackages: ['date-fns'],
+  ...(relaxBuild
+    ? {
+        typescript: { ignoreBuildErrors: true },
+        eslint: { ignoreDuringBuilds: true },
+      }
+    : {}),
   async headers() {
     return [{ source: '/(.*)', headers: securityHeaders }];
   },

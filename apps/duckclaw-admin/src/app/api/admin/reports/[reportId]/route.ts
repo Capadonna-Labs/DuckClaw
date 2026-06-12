@@ -4,6 +4,15 @@ import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 export const dynamic = 'force-dynamic';
 
+const REPORT_HTML_CSP =
+  "default-src 'self' https: data:; " +
+  "script-src 'self' https: cdn.jsdelivr.net cdnjs.cloudflare.com unpkg.com cdn.tailwindcss.com 'unsafe-inline'; " +
+  "style-src 'self' https: 'unsafe-inline'; " +
+  "img-src 'self' https: data: blob:; " +
+  "font-src 'self' https: data:; " +
+  "connect-src 'self' https:; " +
+  "frame-ancestors 'self'";
+
 type Ctx = { params: { reportId: string } };
 
 /** Proxy HTML del reporte custom desde el gateway. */
@@ -32,7 +41,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       status: res.status,
       headers: {
         'Content-Type': res.headers.get('content-type') || 'text/html; charset=utf-8',
-        'Content-Security-Policy': res.headers.get('content-security-policy') || '',
+        'Content-Security-Policy': REPORT_HTML_CSP,
+        'X-Frame-Options': 'SAMEORIGIN',
       },
     });
   } catch (e) {

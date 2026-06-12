@@ -6302,6 +6302,56 @@ def _execute_signal_verify_ledger(db: Any, sid: str) -> tuple[bool, str]:
     return False, "UUID no encontrado en finance_worker.trade_signals ni quant_core.trade_signals."
 
 
+def execute_resolve_uncertainty(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
+    """/resolve_uncertainty <event_uuid>: cierra PENDING_HITL y reactiva sesión si no quedan dudas."""
+    eid = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
+    if not re.match(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        eid,
+    ):
+        return "Uso: /resolve_uncertainty <event_id_UUID>"
+    try:
+        from duckclaw.capadonna_plugin import load_capadonna_lib
+
+        bridge = load_capadonna_lib("epistemic_humility_bridge")
+        if bridge is None:
+            return "Capadonna epistemic_humility_bridge no disponible."
+        tid = str(tenant_id or get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
+        uid = str(get_chat_state(db, chat_id, "last_requester_id") or tid).strip() or tid
+        result = bridge.resolve_uncertainty_event(db, event_id=eid, tenant_id=tid, user_id=uid)
+        if result.get("error"):
+            return f"No: {result['error']}"
+        return (
+            f"Incertidumbre resuelta. event_id={result.get('event_id')} "
+            f"session_uid={result.get('session_uid')}"
+        )
+    except Exception as exc:
+        return f"Error al resolver incertidumbre: {exc}"
+
+
+def execute_uncertainty_status(db: Any, chat_id: Any, args: str) -> str:
+    """/uncertainty --status: lista eventos PENDING_HITL de la sesión activa."""
+    _ = chat_id, args
+    try:
+        from duckclaw.capadonna_plugin import load_capadonna_lib
+
+        bridge = load_capadonna_lib("epistemic_humility_bridge")
+        if bridge is None:
+            return "Capadonna epistemic_humility_bridge no disponible."
+        rows = bridge.list_pending_uncertainty_events(db, limit=10)
+        if not rows:
+            return "Sin eventos de incertidumbre PENDING_HITL en la sesión activa."
+        lines = ["**Incertidumbre pendiente (HITL)**"]
+        for row in rows:
+            lines.append(
+                f"- `{row.get('id')}` · {row.get('trigger_context')} · C={row.get('confidence_score')}"
+            )
+        lines.append("\nResuelve con `/resolve_uncertainty <event_id>`.")
+        return "\n".join(lines)
+    except Exception as exc:
+        return f"Error listando incertidumbre: {exc}"
+
+
 def execute_quant_approve_code(db: Any, chat_id: Any, args: str) -> str:
     """/approve-code <uuid>: HITL para code_decisions (backend crea PR)."""
     did = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
@@ -6721,6 +6771,13 @@ def _dispatch_fly_command(
         if sub in ("", "status"):
             return execute_lake_status()
         return "Uso: /lake o /lake status"
+    if name in ("resolve_uncertainty", "resolve-uncertainty"):
+        return execute_resolve_uncertainty(db, chat_id, args, tenant_id=tenant_id)
+    if name == "uncertainty":
+        sub = (args or "").strip().lower()
+        if sub in ("--status", "status", ""):
+            return execute_uncertainty_status(db, chat_id, args)
+        return "Uso: /uncertainty --status"
     if name in ("approve_code", "approve-code"):
         return execute_quant_approve_code(db, chat_id, args)
     if name in ("reject_code", "reject-code"):

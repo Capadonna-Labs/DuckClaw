@@ -141,6 +141,7 @@ def register_quant_skills(
     if not isinstance(qcfg, dict) or not qcfg.get("enabled"):
         return
     try:
+        epistemic = load_capadonna_lib("epistemic_humility_bridge")
         if is_finanz_worker:
             market = load_capadonna_lib("quant_market_bridge")
             trade = load_capadonna_lib("quant_trade_bridge")
@@ -152,6 +153,15 @@ def register_quant_skills(
                 cfd = load_capadonna_lib("quant_cfd_bridge")
                 if cfd is not None:
                     cfd.register_quant_cfd_skill(db, spec, tools)
+            if epistemic is not None and llm is not None:
+                epistemic.register_epistemic_humility_skills(
+                    db,
+                    llm,
+                    tools,
+                    logical_worker_id=logical_worker_id,
+                    is_finanz_worker=True,
+                    is_quant_trader_worker=False,
+                )
         elif is_quant_trader_worker and llm is not None:
             trader = load_capadonna_lib("quant_trader_bridge")
             if trader is not None:
@@ -159,5 +169,14 @@ def register_quant_skills(
             coding = load_capadonna_lib("quant_coding_bridge")
             if coding is not None:
                 coding.register_quant_coding_skills(db, llm, tools)
+            if epistemic is not None:
+                epistemic.register_epistemic_humility_skills(
+                    db,
+                    llm,
+                    tools,
+                    logical_worker_id=logical_worker_id,
+                    is_finanz_worker=False,
+                    is_quant_trader_worker=True,
+                )
     except Exception:
         _log.debug("capadonna quant skill registration skipped", exc_info=True)

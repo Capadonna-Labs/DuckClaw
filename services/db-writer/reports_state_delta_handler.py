@@ -13,7 +13,7 @@ import duckdb
 
 from core.config import settings
 from duckclaw.gateway_db import get_gateway_db_path
-from duckclaw.vaults import validate_user_db_path
+from duckclaw.vaults import resolve_user_id_for_db_path
 from models.reports_state_delta import ReportsStateDelta
 
 logger = logging.getLogger("db-writer.reports_state_delta")
@@ -121,15 +121,21 @@ def _sync_handle_reports_state_delta(message: str) -> None:
         return
 
     tenant_id = str(delta.tenant_id or "default").strip() or "default"
-    user_id = str(delta.user_id or "default").strip() or "default"
+    raw_user_id = str(delta.user_id or "default").strip() or "default"
     target_db_path = str(delta.target_db_path or "").strip()
 
     if not target_db_path:
         logger.warning("REPORTS_STATE_DELTA rejected: empty target_db_path")
         return
-    if not validate_user_db_path(user_id, target_db_path, tenant_id=tenant_id):
-        logger.warning("REPORTS_STATE_DELTA rejected: invalid db_path for user")
+    resolved_uid = resolve_user_id_for_db_path(raw_user_id, target_db_path, tenant_id=tenant_id)
+    if resolved_uid is None:
+        logger.warning(
+            "REPORTS_STATE_DELTA rejected: invalid db_path for user raw_user_id=%s path=%s",
+            raw_user_id,
+            target_db_path[-120:],
+        )
         return
+    user_id = resolved_uid
 
     try:
         from duckclaw import DuckClaw
@@ -164,6 +170,35 @@ def _sync_handle_reports_state_delta(message: str) -> None:
             delta.mutation.report_id,
             target_db_path,
         )
+        # region agent log
+        try:
+            import time
+            from pathlib import Path
+
+            _dbg = {
+                "sessionId": "97f3cb",
+                "hypothesisId": "H4",
+                "location": "reports_state_delta_handler.py",
+                "message": "custom_report_upsert_ok",
+                "data": {
+                    "report_id": delta.mutation.report_id,
+                    "vault": target_db_path[-120:],
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+            for _k in ("DUCKCLAW_REPO_ROOT", "CAPADONNA_DRILLER_ROOT"):
+                _r = (os.environ.get(_k) or "").strip()
+                if _r:
+                    try:
+                        (Path(_r) / "debug-97f3cb.log").open("a", encoding="utf-8").write(
+                            json.dumps(_dbg, ensure_ascii=False) + "\n"
+                        )
+                        break
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+        # endregion
     finally:
         con.close()
 

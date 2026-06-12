@@ -138,6 +138,7 @@ export async function playTtsAudio(
   base64: string,
   opts?: { format?: TtsAudioFormat; source?: string }
 ): Promise<PlayTtsAudioResult> {
+  void opts;
   const trimmed = (base64 || '').trim();
   if (!trimmed) {
     return { ok: false, reason: 'empty_base64', mime: '', isIOS: false };

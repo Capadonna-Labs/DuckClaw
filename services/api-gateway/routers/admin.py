@@ -1517,31 +1517,80 @@ async def playground_chat(
     msg = (body.message or "").strip()
     if not msg and not body.images:
         raise _problem(400, "message o images requeridos", "")
+    eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")
     if body.images:
         import logging as _logging
 
-        from core.vlm_ingest import enrich_message_with_admin_images
+        from core.comfyui_inbound import (
+            ingest_admin_visual_edit_inbound,
+            should_route_admin_playground_edit,
+        )
+        from core.vlm_ingest import decode_admin_image_b64, enrich_message_with_admin_images
 
+        route_admin_edit = should_route_admin_playground_edit(
+            caption=msg,
+            image_count=len(body.images),
+        )
+        # region agent log
         try:
-            msg = await enrich_message_with_admin_images(
-                msg,
-                [img.model_dump() for img in body.images],
+            from core.comfyui_inbound import _agent_debug_log
+
+            _agent_debug_log(
+                hypothesis_id="H1",
+                location="admin.py:playground_chat",
+                message="admin_image_routing",
+                data={
+                    "route_admin_edit": route_admin_edit,
+                    "image_count": len(body.images),
+                    "caption_len": len(msg),
+                    "tenant_id": eff_tenant,
+                },
             )
-        except ValueError as exc:
-            raise _problem(400, str(exc), "images") from exc
-        except Exception as exc:
-            _logging.getLogger("duckclaw.gateway.admin_playground").warning(
-                "admin playground VLM degraded: %s", exc
-            )
-            base = (body.message or "").strip()
-            note = (
-                "[Imagen adjunta: no se pudo analizar — el servidor VLM (Mac mini) "
-                "no está disponible. El chat continúa solo con el texto.]"
-            )
-            msg = f"{base}\n\n{note}".strip() if base else note
+        except Exception:
+            pass
+        # endregion
+        if route_admin_edit:
+            first = body.images[0]
+            mime = str(first.mime_type or "image/jpeg").strip().lower()
+            try:
+                raw = decode_admin_image_b64(str(first.data_base64 or ""))
+                msg = ingest_admin_visual_edit_inbound(
+                    image_bytes=raw,
+                    caption=msg,
+                    tenant_id=eff_tenant,
+                    mime_type=mime,
+                )
+            except ValueError as exc:
+                raise _problem(400, str(exc), "images") from exc
+        else:
+            try:
+                msg = await enrich_message_with_admin_images(
+                    msg,
+                    [img.model_dump() for img in body.images],
+                )
+            except ValueError as exc:
+                raise _problem(400, str(exc), "images") from exc
+            except Exception as exc:
+                _logging.getLogger("duckclaw.gateway.admin_playground").warning(
+                    "admin playground VLM degraded: %s", exc
+                )
+                base = (body.message or "").strip()
+                note = (
+                    "[Imagen adjunta: no se pudo analizar — el servidor VLM (Mac mini) "
+                    "no está disponible. El chat continúa solo con el texto.]"
+                )
+                msg = f"{base}\n\n{note}".strip() if base else note
     if not msg:
         raise _problem(400, "message vacío tras VLM", body.message)
-    eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")
+    _msg_low = msg.lower()
+    if any(k in _msg_low for k in ("reportes", "reporte", "lienzo")) and any(
+        k in _msg_low for k in ("html", "grafico", "gráfico", "dashboard", "tortas", "torta", "chart")
+    ):
+        msg = (
+            "[ADMIN_REPORTES] Publica el HTML con publish_custom_report(report_id=chat_id); "
+            "no pegues el documento HTML en el chat.\n\n"
+            + msg
+        )
     team_ctx = _playground_team_context(
         telegram_user_id=profile.get("telegram_user_id") or body.telegram_user_id,
         tenant_id=eff_tenant,
@@ -4611,10 +4660,10 @@ def _open_playground_vault_db(vault_path: str, *, read_only: bool = True) -> Any
     from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
     from duckclaw.spawn_profile import spawn_inline_writes_enabled
 
-    abs_path = vault_path
+    abs_path = (vault_path or "").strip()
     if not os.path.isabs(abs_path):
-        abs_path = str(_repo_root() / vault_path.lstrip("/"))
-    if not os.path.isfile(abs_path):
+        abs_path = resolve_env_duckdb_path(abs_path)
+    if not abs_path or not os.path.isfile(abs_path):
         raise FileNotFoundError(abs_path)
     ro = read_only
     if read_only and spawn_inline_writes_enabled():
@@ -5401,8 +5450,88 @@ def admin_list_code_decisions(
         con.close()
 
 
+@router.get("/uncertainty/events", dependencies=[Depends(_require_admin_key)])
+def admin_list_uncertainty_events(
+    vault_path: str = Query(..., min_length=4),
+    status: str = Query(default="PENDING_HITL"),
+    limit: int = Query(default=20, ge=1, le=100),
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    """Lista eventos de incertidumbre epistémica del vault Quant."""
+    try:
+        con, resolved, _scope = _duckdb_readonly_session(vault_path, actor=actor)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    try:
+        st = (status or "").strip() or "PENDING_HITL"
+        rows = con.execute(
+            """
+            SELECT id, session_uid, worker_id, trigger_context, confidence_score,
+                   description, proposed_questions, status, created_at
+            FROM quant_core.agent_uncertainty_log
+            WHERE status = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            [st, int(limit)],
+        ).fetchdf()
+        return {"vault_path": resolved, "items": rows.to_dict(orient="records"), "status_filter": st}
+    finally:
+        con.close()
+
+
+class UncertaintyResolveBody(BaseModel):
+    event_id: str = Field(..., min_length=8)
+    vault_path: str = Field(..., min_length=4)
+
+
+@router.post("/uncertainty/resolve", dependencies=[Depends(_require_admin_key)])
+def admin_resolve_uncertainty_event(
+    body: UncertaintyResolveBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    """Resuelve un evento PENDING_HITL (equivalente a /resolve_uncertainty)."""
+    try:
+        con, resolved, scope = _duckdb_readonly_session(body.vault_path, actor=actor)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    finally:
+        con.close()
+    try:
+        from duckclaw.capadonna_plugin import load_capadonna_lib
+
+        bridge = load_capadonna_lib("epistemic_humility_bridge")
+        if bridge is None:
+            raise _problem(503, "Plugin epistémico no disponible", "CAPADONNA_DRILLER_ROOT")
+        from duckclaw import DuckClaw
+
+        duck = DuckClaw(resolved, read_only=True)
+        try:
+            result = bridge.resolve_uncertainty_event(
+                duck,
+                event_id=body.event_id.strip(),
+                tenant_id=(scope or {}).get("tenant_id") or "default",
+                user_id=actor,
+            )
+        finally:
+            duck.close()
+        if result.get("error"):
+            raise _problem(400, "No se pudo resolver", str(result["error"]))
+        return {"vault_path": resolved, **result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _problem(500, "Error resolviendo incertidumbre", str(exc)) from exc
+
+
 from routers.admin_db_first import router as _admin_db_first_router  # noqa: E402
 from routers.admin_train import router as _admin_train_router  # noqa: E402
+from routers.reports import router as _admin_reports_router  # noqa: E402
 
 router.include_router(_admin_db_first_router)
 router.include_router(_admin_train_router)
+router.include_router(_admin_reports_router)

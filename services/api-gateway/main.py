@@ -289,34 +289,6 @@ configure_structured_logging(level=_log_level)
 _gateway_log = logging.getLogger("duckclaw.gateway")
 
 
-def _agent_debug_log(
-    *,
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    hypothesis_id: str,
-    run_id: str = "pre-fix",
-) -> None:
-    # #region agent log
-    try:
-        root = (os.environ.get("CAPADONNA_DRILLER_ROOT") or "").strip() or str(_repo_root)
-        log_path = Path(root) / "debug-480705.log"
-        payload = {
-            "sessionId": "480705",
-            "timestamp": int(time.time() * 1000),
-            "location": location,
-            "message": message,
-            "data": data,
-            "hypothesisId": hypothesis_id,
-            "runId": run_id,
-        }
-        with log_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, default=str) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
-
 def _install_duckdb_connect_probe() -> None:
     pass
 
@@ -1636,34 +1608,15 @@ def _persist_admin_fly_charts(tenant_id: str, fly_charts_b64: list[str]) -> list
     tid = (tenant_id or "default").strip() or "default"
     art_dir = tenant_artifacts_dir(tid)
     ids: list[str] = []
-    skipped_decode = 0
     for photo_b64 in fly_charts_b64:
         png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
         if not png_bytes:
             png_bytes = decode_sandbox_figure_base64(photo_b64)
         if not png_bytes:
-            skipped_decode += 1
             continue
         aid = str(uuid.uuid4())
         (art_dir / f"{aid}.png").write_bytes(png_bytes)
         ids.append(aid)
-    # #region agent log
-    _agent_debug_log(
-        location="main.py:_persist_admin_fly_charts",
-        message="fly charts persisted",
-        data={
-            "tenant_id": tid,
-            "art_dir": str(art_dir),
-            "chart_count": len(fly_charts_b64),
-            "artifact_ids": ids,
-            "skipped_decode": skipped_decode,
-            "files_exist": [
-                bool((art_dir / f"{aid}.png").is_file()) for aid in ids
-            ],
-        },
-        hypothesis_id="A",
-    )
-    # #endregion
     return ids
 
 
@@ -2248,22 +2201,6 @@ async def _invoke_chat(
                         if artifact_ids:
                             fly_resp["fly_chart_artifact_ids"] = artifact_ids
                             fly_resp["artifact_tenant_id"] = tenant_id
-                        # #region agent log
-                        _agent_debug_log(
-                            location="main.py:fly_cmd_charts",
-                            message="fly chart SSE payload",
-                            data={
-                                "session_id": str(session_id),
-                                "tenant_id": tenant_id,
-                                "admin_ui": admin_ui,
-                                "chart_count": len(fly_charts),
-                                "chart_names": fly_chart_names,
-                                "artifact_ids": artifact_ids,
-                                "artifact_tenant_id": fly_resp.get("artifact_tenant_id"),
-                            },
-                            hypothesis_id="B",
-                        )
-                        # #endregion
                         # Inline b64 solo si no hay artifacts (fallback UI legacy)
                         if not artifact_ids:
                             fly_resp["figure_base64"] = fly_charts[0]
@@ -2297,73 +2234,86 @@ async def _invoke_chat(
         except Exception:
             pass
         t0 = time.monotonic()
+        _admin_pg_vault_prev = os.environ.get("DUCKCLAW_ADMIN_PLAYGROUND_VAULT")
+        if auth_policy in {"trusted_admin_console", "trusted_channel_route"}:
+            _admin_pg_vault = (_payload_vault or vault_db_path or "").strip()
+            if _admin_pg_vault:
+                os.environ["DUCKCLAW_ADMIN_PLAYGROUND_VAULT"] = resolve_env_duckdb_path(_admin_pg_vault)
+            else:
+                os.environ.pop("DUCKCLAW_ADMIN_PLAYGROUND_VAULT", None)
         try:
-            result = await ainvoke_manager_ephemeral(
-                message,
-                history_for_model,
-                session_id,
-                tenant_id=tenant_id,
-                user_id=vault_user_id,
-                username=username,
-                vault_db_path=vault_db_path,
-                shared_db_path=shared_db_path,
-                is_system_prompt=is_system_prompt,
-                outbound_telegram_bot_token=(dc.outbound_bot_token or "").strip() or None,
-                entry_worker_id=(worker_id or "").strip() or None,
-            )
-        except ChatCancelledError:
             try:
-                from duckclaw.graphs.activity import set_idle
+                result = await ainvoke_manager_ephemeral(
+                    message,
+                    history_for_model,
+                    session_id,
+                    tenant_id=tenant_id,
+                    user_id=vault_user_id,
+                    username=username,
+                    vault_db_path=vault_db_path,
+                    shared_db_path=shared_db_path,
+                    is_system_prompt=is_system_prompt,
+                    outbound_telegram_bot_token=(dc.outbound_bot_token or "").strip() or None,
+                    entry_worker_id=(worker_id or "").strip() or None,
+                )
+            except ChatCancelledError:
+                try:
+                    from duckclaw.graphs.activity import set_idle
 
-                set_idle(session_id)
-            except Exception:
-                pass
-            elapsed_cancel = int((time.monotonic() - t0) * 1000)
-            return {
-                "response": "Interrumpido.",
-                "session_id": session_id,
-                "worker_id": worker_id,
-                "elapsed_ms": elapsed_cancel,
-                "interrupted": True,
-            }
-        except Exception as exc:
-            try:
-                from duckclaw.graphs.activity import set_idle
-                set_idle(session_id)
-            except Exception:
-                pass
-            try:
-                from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
-                from duckclaw.graphs.graph_server import get_db
-                db = get_db()
-                wid = get_worker_id_for_chat(db, session_id) or worker_id
-                elapsed_fail = int((time.monotonic() - t0) * 1000)
-                append_task_audit(db, session_id, wid, message, "FAILED", elapsed_fail)
-            except Exception:
-                pass
-            try:
-                if os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES", "true").strip().lower() in ("true", "1", "yes"):
-                    from duckclaw.graphs.conversation_traces import append_conversation_trace
-                    from duckclaw.graphs.on_the_fly_commands import get_effective_system_prompt
+                    set_idle(session_id)
+                except Exception:
+                    pass
+                elapsed_cancel = int((time.monotonic() - t0) * 1000)
+                return {
+                    "response": "Interrumpido.",
+                    "session_id": session_id,
+                    "worker_id": worker_id,
+                    "elapsed_ms": elapsed_cancel,
+                    "interrupted": True,
+                }
+            except Exception as exc:
+                try:
+                    from duckclaw.graphs.activity import set_idle
+                    set_idle(session_id)
+                except Exception:
+                    pass
+                try:
+                    from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
                     from duckclaw.graphs.graph_server import get_db
-                    _db = get_db()
-                    _sys = (get_effective_system_prompt(_db, worker_id) or "").strip()
-                    _sys = _sys or (os.environ.get("DUCKCLAW_SYSTEM_PROMPT") or "").strip() or None
-                    append_conversation_trace(
-                        session_id, message, str(exc)[:8192],
-                        worker_id=worker_id, elapsed_ms=elapsed_fail, status="FAILED",
-                        system_prompt=_sys,
-                    )
-            except Exception:
-                pass
-            log_err(_obs_log, "agent_chat failed: %s", exc)
-            _gateway_log.error(
-                "agent_chat failed chat=%s: %s\n%s",
-                format_chat_id_for_terminal(session_id),
-                exc,
-                traceback.format_exc(),
-            )
-            raise HTTPException(status_code=500, detail=str(exc))
+                    db = get_db()
+                    wid = get_worker_id_for_chat(db, session_id) or worker_id
+                    elapsed_fail = int((time.monotonic() - t0) * 1000)
+                    append_task_audit(db, session_id, wid, message, "FAILED", elapsed_fail)
+                except Exception:
+                    pass
+                try:
+                    if os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES", "true").strip().lower() in ("true", "1", "yes"):
+                        from duckclaw.graphs.conversation_traces import append_conversation_trace
+                        from duckclaw.graphs.on_the_fly_commands import get_effective_system_prompt
+                        from duckclaw.graphs.graph_server import get_db
+                        _db = get_db()
+                        _sys = (get_effective_system_prompt(_db, worker_id) or "").strip()
+                        _sys = _sys or (os.environ.get("DUCKCLAW_SYSTEM_PROMPT") or "").strip() or None
+                        append_conversation_trace(
+                            session_id, message, str(exc)[:8192],
+                            worker_id=worker_id, elapsed_ms=elapsed_fail, status="FAILED",
+                            system_prompt=_sys,
+                        )
+                except Exception:
+                    pass
+                log_err(_obs_log, "agent_chat failed: %s", exc)
+                _gateway_log.error(
+                    "agent_chat failed chat=%s: %s\n%s",
+                    format_chat_id_for_terminal(session_id),
+                    exc,
+                    traceback.format_exc(),
+                )
+                raise HTTPException(status_code=500, detail=str(exc))
+        finally:
+            if _admin_pg_vault_prev is None:
+                os.environ.pop("DUCKCLAW_ADMIN_PLAYGROUND_VAULT", None)
+            else:
+                os.environ["DUCKCLAW_ADMIN_PLAYGROUND_VAULT"] = _admin_pg_vault_prev
 
         try:
             from duckclaw.graphs.activity import set_idle

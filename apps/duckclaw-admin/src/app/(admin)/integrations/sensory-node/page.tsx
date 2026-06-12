@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
-import { Mic, ExternalLink } from 'lucide-react';
+import { Mic } from 'lucide-react';
 import { VoiceLabPanel } from '@/components/sensory/VoiceLabPanel';
 
 const PM2_CMD = 'pm2 start config/ecosystem.sensory.config.cjs';

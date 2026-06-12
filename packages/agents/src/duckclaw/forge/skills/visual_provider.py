@@ -1,4 +1,7 @@
-"""Resolucion de proveedor visual por chat (ComfyUI local vs Fal.ai cloud)."""
+"""Resolucion de proveedor visual por chat (Fal.ai cloud vs ComfyUI local).
+
+Prioridad por defecto: Fal.ai si FAL_KEY esta configurada; ComfyUI local como fallback.
+"""
 
 from __future__ import annotations
 
@@ -22,10 +25,10 @@ def _fal_available() -> bool:
 
 
 def default_visual_provider() -> VisualProvider:
-    if _comfy_available():
-        return "local"
     if _fal_available():
         return "fal"
+    if _comfy_available():
+        return "local"
     return "local"
 
 

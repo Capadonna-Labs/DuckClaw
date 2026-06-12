@@ -24,10 +24,16 @@ class _CfgDb:
         pass
 
 
-def test_default_local_when_comfy_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_local_when_only_comfy_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COMFYUI_API_URL", "http://127.0.0.1:8188")
     monkeypatch.delenv("FAL_KEY", raising=False)
     assert default_visual_provider() == "local"
+
+
+def test_default_fal_when_both_env_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMFYUI_API_URL", "http://127.0.0.1:8188")
+    monkeypatch.setenv("FAL_KEY", "test-key")
+    assert default_visual_provider() == "fal"
 
 
 def test_default_fal_when_only_fal_key(monkeypatch: pytest.MonkeyPatch) -> None:

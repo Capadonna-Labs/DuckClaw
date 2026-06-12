@@ -64,7 +64,6 @@ export function FloatingAdminChat() {
   const pathname = usePathname();
   const isNarrow = useNarrowViewport();
   const [open, setOpen] = useState(false);
-  const [inboxOpen, setInboxOpen] = useState(false);
   const [tenantId, setTenantId] = useState<string | undefined>();
   const [offsetX, setOffsetX] = useState(0);
   const dragRef = useRef({

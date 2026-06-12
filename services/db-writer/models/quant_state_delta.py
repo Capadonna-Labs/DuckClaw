@@ -87,6 +87,22 @@ class CodeDecisionApproveMutation(BaseModel):
     pr_url: str = ""
 
 
+class UncertaintyEventMutation(BaseModel):
+    id: str = Field(..., min_length=8)
+    session_uid: str = Field(..., min_length=1)
+    worker_id: str = Field(..., min_length=1, max_length=100)
+    trigger_context: str = Field(..., min_length=1, max_length=100)
+    confidence_score: float = Field(..., ge=0.0, le=1.0)
+    description: str = Field(..., min_length=1)
+    proposed_questions: list[str] = Field(default_factory=list)
+    status: str = "PENDING_HITL"
+
+
+class UncertaintyResolveMutation(BaseModel):
+    id: str = Field(..., min_length=8)
+    session_uid: str = Field(..., min_length=1)
+
+
 class BacktestResultMutation(BaseModel):
     id: str = Field(..., min_length=8)
     code_decision_id: str | None = None
@@ -143,6 +159,8 @@ class QuantStateDelta(BaseModel):
         "CODE_DECISION_APPROVED",
         "CODE_DECISION_REJECTED",
         "BACKTEST_RESULT_UPSERT",
+        "UNCERTAINTY_EVENT_LOGGED",
+        "UNCERTAINTY_RESOLVED",
     ]
     user_id: str = Field(..., min_length=1)
     target_db_path: str = Field(..., min_length=1)

@@ -27,6 +27,10 @@ assert.equal(
   artifactIdFromMessageText(`Guardado en db/private/default/artifacts/${aid}.png`),
   aid
 );
+assert.equal(
+  artifactIdFromMessageText(`artifacts/fal_${aid}.jpg`),
+  aid
+);
 
 const preview = artifactPreviewFromMessage(`artifact_id=${aid}`, 'default');
 assert.equal(preview?.[0]?.artifactId, aid);

@@ -2,7 +2,6 @@
 const isProd = process.env.ENV === 'production';
 
 const securityHeaders = [
-  { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   // microphone=(self) — notas de voz en el compositor del Asistente (getUserMedia)
@@ -23,7 +22,16 @@ const nextConfig = {
       }
     : {}),
   async headers() {
-    return [{ source: '/(.*)', headers: securityHeaders }];
+    return [
+      {
+        source: '/api/admin/reports/:reportId',
+        headers: [
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+        ],
+      },
+      { source: '/(.*)', headers: securityHeaders },
+    ];
   },
 };
 

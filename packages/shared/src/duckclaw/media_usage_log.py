@@ -12,6 +12,9 @@ _MEDIA_USAGE_TABLE = "media_usage_log"
 
 _DEFAULT_RATES: dict[str, float] = {
     "fal-ai/flux/dev": 0.025,
+    "fal-ai/flux/dev/image-to-image": 0.025,
+    "fal-ai/flux-pro/kontext": 0.04,
+    "fal-ai/flux-kontext/dev": 0.025,
     "fal-ai/flux-pro/v1.1-ultra": 0.05,
     "fal-ai/kling-video/v1.6/standard/text-to-video": 0.35,
     "fal-ai/kling/v2.5/video-to-video": 0.35,

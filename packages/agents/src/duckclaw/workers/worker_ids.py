@@ -68,8 +68,13 @@ def is_market_worker(worker_id: str | None) -> bool:
     return normalize_worker_id(worker_id) in MARKET_WORKERS
 
 
+def _canonical_worker_slug(worker_id: str | None) -> str:
+    """Unifica guiones/underscores para comparar IDs de plantilla (p. ej. quant-trader vs quant_trader)."""
+    return normalize_worker_id(worker_id).replace("-", "_")
+
+
 def is_quant_trader(worker_id: str | None) -> bool:
-    return normalize_worker_id(worker_id) == WORKER_QUANT_TRADER
+    return _canonical_worker_slug(worker_id) == _canonical_worker_slug(WORKER_QUANT_TRADER)
 
 
 def is_pqrsd_assistant(worker_id: str | None) -> bool:

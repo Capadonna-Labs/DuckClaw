@@ -67,6 +67,52 @@ def test_playground_chat_requires_message_or_images(admin_client: TestClient) ->
     assert r.status_code == 422
 
 
+def test_playground_chat_with_images_routes_edit_inbound(
+    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict = {}
+
+    def _fake_ingest(**kwargs):
+        captured.update(kwargs)
+        return "[COMFYUI_EDIT source_image_path=/tmp/x.jpg]\nedit"
+
+    from core import comfyui_inbound as ci
+
+    monkeypatch.setattr(ci, "ingest_admin_visual_edit_inbound", _fake_ingest)
+
+    import main as gateway_main
+    import routers.admin as admin_router
+    from test_admin_router import _mock_playground_team
+
+    seen: dict = {}
+
+    async def _fake_invoke(chat, *_a, **_k):
+        seen["message"] = chat.message
+        return {"response": "ok", "assigned_worker_id": "default"}
+
+    monkeypatch.setattr(
+        admin_router,
+        "_playground_team_context",
+        lambda **_: _mock_playground_team(workers=["default"]),
+    )
+    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1")
+
+    r = admin_client.post(
+        "/api/v1/admin/playground/chat",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={
+            "worker_id": "default",
+            "message": "Haz la ropa amarilla",
+            "chat_id": "admin-playground",
+            "images": [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert "COMFYUI_EDIT" in seen.get("message", "")
+    assert captured.get("caption") == "Haz la ropa amarilla"
+
+
 def test_playground_chat_with_images_mock_vlm(
     admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -97,9 +143,12 @@ def test_playground_chat_with_images_mock_vlm(
         headers={"X-Admin-Key": "test-admin-key"},
         json={
             "worker_id": "default",
-            "message": "describe",
+            "message": "compara estas",
             "chat_id": "admin-playground",
-            "images": [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+            "images": [
+                {"mime_type": "image/png", "data_base64": _TINY_PNG_B64},
+                {"mime_type": "image/png", "data_base64": _TINY_PNG_B64},
+            ],
         },
     )
     assert r.status_code == 200, r.text

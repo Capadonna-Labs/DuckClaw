@@ -59,6 +59,8 @@ VLM_GATEWAY_DOWN_META = "[META: VLM_GATEWAY_DOWN]"
 
 _MAX_EVIDENCE_CHARS = 12000
 _MAX_SYNTH_TOKENS = 768
+# Consola admin: respuestas largas (CD/Ruff, listas de archivos) necesitan más salida que Telegram.
+_DEFAULT_ADMIN_SYNTH_MAX_TOKENS = 2048
 # 2.ª pasada tras SUMMARIZE_*: el turno principal ya llenó KV en MLX; evidencia más corta evita OOM Metal.
 _DEFAULT_CONTEXT_SUMMARY_SYNTH_EVIDENCE = 4500
 _DEFAULT_CONTEXT_SUMMARY_SYNTH_MAX_TOKENS = 512
@@ -79,6 +81,29 @@ def context_summary_synthesis_evidence_char_limit() -> int:
         lo=1200,
         hi=_MAX_EVIDENCE_CHARS,
     )
+
+
+def admin_nl_synthesis_max_output_tokens() -> int:
+    """Tope de tokens de salida en síntesis NL para consola admin (respuestas largas)."""
+    return _parse_bounded_int_env(
+        "DUCKCLAW_ADMIN_NL_SYNTH_MAX_TOKENS",
+        _DEFAULT_ADMIN_SYNTH_MAX_TOKENS,
+        lo=512,
+        hi=8192,
+    )
+
+
+def admin_reply_already_polished(text: str) -> bool:
+    """
+    Admin UI: si el worker ya devolvió Markdown estructurado, omitir 2.ª pasada LLM
+    (evita recortes por max_tokens y duplicar trabajo).
+    """
+    t = (text or "").strip()
+    if len(t) < 180:
+        return False
+    has_md = "**" in t or "##" in t
+    has_list = "\n-" in t or "\n1." in t or "\n2." in t or "✅" in t or "❌" in t
+    return bool(has_md and has_list)
 
 
 def context_summary_synthesis_max_output_tokens() -> int:
@@ -796,7 +821,12 @@ def synthesize_user_visible_reply(
     from langchain_core.messages import HumanMessage, SystemMessage
 
     ev_limit = max_evidence_chars if max_evidence_chars is not None else _MAX_EVIDENCE_CHARS
-    mt = max_tokens if max_tokens is not None else _MAX_SYNTH_TOKENS
+    if max_tokens is not None:
+        mt = max_tokens
+    elif for_admin_console:
+        mt = admin_nl_synthesis_max_output_tokens()
+    else:
+        mt = _MAX_SYNTH_TOKENS
 
     _reddit_listing_rules = ""
     if _body_looks_like_reddit_compact_listing_markdown(raw_evidence or ""):
@@ -892,7 +922,40 @@ def synthesize_user_visible_reply(
             else:
                 parts.append(str(b))
         out = "".join(parts)
-    return (str(out) or "").strip()
+    result = (str(out) or "").strip()
+    # #region agent log
+    try:
+        import json as _json
+        import time as _time
+        from pathlib import Path as _Path
+
+        root = os.environ.get("DUCKCLAW_REPO_ROOT") or str(_Path(__file__).resolve().parents[5])
+        log_path = _Path(root) / "debug-480705.log"
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(
+                _json.dumps(
+                    {
+                        "sessionId": "480705",
+                        "hypothesisId": "H1",
+                        "location": "user_reply_nl_synthesis.py:synthesize_user_visible_reply",
+                        "message": "nl synthesis output",
+                        "data": {
+                            "for_admin_console": for_admin_console,
+                            "max_tokens": mt,
+                            "evidence_len": len(raw_evidence or ""),
+                            "output_len": len(result),
+                            "output_tail": result[-120:] if result else "",
+                        },
+                        "timestamp": int(_time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+    return result
 
 
 def maybe_synthesize_reply(
@@ -924,6 +987,8 @@ def maybe_synthesize_reply(
         return _reddit_det_or(reply_candidate)
     if not bool(getattr(spec, "egress_natural_language_synthesis", True)):
         return _reddit_det_or(reply_candidate)
+    if for_admin_console and admin_reply_already_polished(reply_candidate):
+        return reply_candidate
     if not reply_needs_nl_synthesis(reply_candidate):
         return reply_candidate
     wid = str(getattr(spec, "worker_id", "") or "").strip() or "worker"

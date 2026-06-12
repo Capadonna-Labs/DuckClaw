@@ -34,6 +34,8 @@ import { workerOptionId, workerOptionLabel } from '@/lib/workerOptions';
 export type AdminChatPanelProps = {
   chatId: string;
   initialWorker?: string;
+  /** Bloquea el selector de worker (p. ej. página Reportes → ui_designer). */
+  lockWorkerId?: string;
   /** Estado compartido (p. ej. widget flotante con botón fuera del panel) */
   chat?: AdminChatController;
   /** Vista compacta para el widget flotante */
@@ -65,6 +67,7 @@ function chatPanelTitle(sectionTitle?: string): string {
 export function AdminChatPanel({
   chatId,
   initialWorker,
+  lockWorkerId,
   chat: chatProp,
   variant = 'full',
   emptyHint,
@@ -84,8 +87,14 @@ export function AdminChatPanel({
     setViewTab('chat');
   }, [chatId]);
   const { usuario } = useAuthStore();
-  const internalChat = useAdminChat({ chatId, initialWorker, enabled: !chatProp });
+  const internalChat = useAdminChat({
+    chatId,
+    initialWorker,
+    lockWorker: lockWorkerId,
+    enabled: !chatProp,
+  });
   const chat = chatProp ?? internalChat;
+  const workerLocked = Boolean((lockWorkerId || '').trim());
   const {
     config,
     workerId,
@@ -205,7 +214,11 @@ export function AdminChatPanel({
                 <select
                   value={workerId}
                   onChange={(e) => setWorkerId(e.target.value, { persist: true })}
-                  disabled={!config?.workers?.length || config?.authorized === false}
+                  disabled={
+                    workerLocked ||
+                    !config?.workers?.length ||
+                    config?.authorized === false
+                  }
                   className="text-[10px] px-1.5 py-2 min-h-[40px] border rounded-md dark:border-dark-border dark:bg-dark-bg w-full max-w-full disabled:opacity-50"
                   aria-label="Worker"
                 >
@@ -272,7 +285,11 @@ export function AdminChatPanel({
                 <select
                   value={workerId}
                   onChange={(e) => setWorkerId(e.target.value, { persist: true })}
-                  disabled={!config?.workers?.length || config?.authorized === false}
+                  disabled={
+                    workerLocked ||
+                    !config?.workers?.length ||
+                    config?.authorized === false
+                  }
                   className="text-xs px-2 py-1.5 border rounded-lg dark:border-dark-border dark:bg-dark-bg max-w-[140px] disabled:opacity-50"
                   aria-label="Agente"
                 >
@@ -326,11 +343,11 @@ export function AdminChatPanel({
           tenantId={conversationManage.tenantId}
           section={conversationManage.section}
           activeSessionId={chatId}
-          conversationTitle={conversationTitle}
+          conversationTitle={conversationTitle ?? null}
           refreshToken={conversationManage.refreshToken}
           onSelect={conversationManage.onSelect}
           onCreateNew={conversationManage.onCreateNew}
-          onRename={onRenameConversation}
+          onRename={onRenameConversation ?? (async () => {})}
           onAfterChange={() => setViewTab('chat')}
         />
       ) : (

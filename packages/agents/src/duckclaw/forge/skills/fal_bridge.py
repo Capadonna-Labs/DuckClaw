@@ -10,12 +10,15 @@ import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, Literal, Optional
 
 import httpx
 
 from duckclaw.media_generation_models import (
     DEFAULT_FLUX_DEV_ENDPOINT,
+    DEFAULT_FLUX_IMG2IMG_ENDPOINT,
+    DEFAULT_FLUX_KONTEXT_PRO_ENDPOINT,
     DEFAULT_KLING_VIDEO_ENDPOINT,
     MediaGenerationResponse,
 )
@@ -238,6 +241,101 @@ def _guess_ext(data: bytes, media_type: str) -> str:
     return ".png"
 
 
+def _denoise_to_strength(denoise: float | None) -> float:
+    """Mapea denoise ComfyUI (0.35-0.75) a strength Fal img2img (0.5-0.98)."""
+    den = 0.55 if denoise is None else float(denoise)
+    return max(0.5, min(0.98, 0.5 + den * 0.65))
+
+
+def _is_kontext_edit_endpoint(endpoint: str) -> bool:
+    """True si el endpoint Fal es de la familia FLUX Kontext (edicion in-context)."""
+    ep = (endpoint or "").strip().lower()
+    return "kontext" in ep
+
+
+def _enrich_kontext_edit_prompt(edit_prompt: str) -> str:
+    """Envuelve el prompt del usuario para ediciones locales sin regenerar toda la escena."""
+    user_text = (edit_prompt or "").strip()
+    return (
+        f"Edit the image: {user_text}. "
+        "Keep the same person, face, pose, and background. "
+        "Only apply the requested change."
+    )
+
+
+def _kontext_guidance_scale(fal_config: dict[str, Any], endpoint: str) -> float:
+    """CFG por defecto segun tier Kontext (pro=3.5, dev=2.5)."""
+    raw = fal_config.get("kontext_guidance_scale")
+    if raw is not None:
+        try:
+            return max(1.0, min(20.0, float(raw)))
+        except (TypeError, ValueError):
+            pass
+    if "flux-kontext/dev" in (endpoint or "").lower():
+        return 2.5
+    return 3.5
+
+
+def _build_fal_edit_request_body(
+    *,
+    endpoint: str,
+    image_uri: str,
+    edit_prompt: str,
+    denoise: float | None,
+    fal_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Arma el body Fal segun familia: Kontext (edicion local) vs legacy img2img."""
+    if _is_kontext_edit_endpoint(endpoint):
+        body: dict[str, Any] = {
+            "image_url": image_uri,
+            "prompt": _enrich_kontext_edit_prompt(edit_prompt),
+            "num_images": 1,
+            "output_format": "jpeg",
+            "guidance_scale": _kontext_guidance_scale(fal_config, endpoint),
+        }
+        if "flux-kontext/dev" in endpoint.lower():
+            body["resolution_mode"] = str(
+                fal_config.get("kontext_resolution_mode") or "match_input"
+            )
+        return body
+    return {
+        "image_url": image_uri,
+        "prompt": edit_prompt,
+        "strength": _denoise_to_strength(denoise),
+        "num_images": 1,
+        "output_format": "jpeg",
+    }
+
+
+def _mime_for_image_path(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext == ".png":
+        return "image/png"
+    if ext in (".jpg", ".jpeg"):
+        return "image/jpeg"
+    if ext == ".webp":
+        return "image/webp"
+    return "image/jpeg"
+
+
+def _local_image_to_data_uri(path: Path) -> str:
+    """Codifica imagen local como data URI para image_url de Fal.ai."""
+    raw = path.read_bytes()
+    mime = _mime_for_image_path(path)
+    b64 = base64.b64encode(raw).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+
+def _comfy_fallback_available(comfyui_config: Optional[dict]) -> bool:
+    """True si ComfyUI local puede usarse como fallback de edicion."""
+    cfg = comfyui_config if isinstance(comfyui_config, dict) else {}
+    if cfg.get("enabled") is False:
+        return False
+    from duckclaw.forge.skills.comfyui_bridge import _comfy_base_url
+
+    return bool(_comfy_base_url())
+
+
 def _persist_fal_artifact(
     *,
     media_bytes: bytes,
@@ -249,6 +347,8 @@ def _persist_fal_artifact(
     request_id: str,
     duckclaw_db: Any,
     ctx: dict[str, str],
+    operation: str | None = None,
+    source_image_path: str | None = None,
 ) -> tuple[str, str]:
     from duckclaw.forge.skills.comfyui_bridge import tenant_artifacts_dir
     from duckclaw.forge.skills.visual_state_delta import push_visual_state_delta_sync
@@ -267,8 +367,8 @@ def _persist_fal_artifact(
         "file_path": file_path,
         "aspect_ratio": aspect_ratio,
         "prompt_id_comfy": request_id,
-        "operation": f"fal_{media_type}",
-        "source_image_path": media_url.split("?")[0],
+        "operation": operation or f"fal_{media_type}",
+        "source_image_path": source_image_path or media_url.split("?")[0],
     }
     if base.get("target_db_path"):
         push_visual_state_delta_sync(
@@ -288,6 +388,7 @@ def _finish_response(
     media_type: str,
     media_bytes: bytes,
     message: str,
+    artifact_id: str = "",
 ) -> str:
     resp = MediaGenerationResponse(
         success=True,
@@ -302,6 +403,8 @@ def _finish_response(
     payload: dict[str, Any] = resp.model_dump()
     payload["ok"] = True
     payload["artifacts"] = [file_path]
+    if artifact_id:
+        payload["artifact_id"] = artifact_id
     if len(media_bytes) <= _MAX_B64_IN_TOOL_RESPONSE:
         payload["figure_base64"] = base64.b64encode(media_bytes).decode("ascii")
     return json.dumps(payload, ensure_ascii=False)
@@ -317,6 +420,9 @@ async def _fal_generate_async(
     duration_sec: float,
     token_env: str,
     duckclaw_db: Any,
+    persist_operation: str | None = None,
+    source_image_path: str | None = None,
+    success_message: str | None = None,
 ) -> str:
     api_key = _fal_key(token_env)
     if not api_key:
@@ -350,7 +456,7 @@ async def _fal_generate_async(
 
     latency = time.monotonic() - t0
     cost = estimate_media_cost_usd(endpoint, media_type=media_type, duration_sec=duration_sec)
-    file_path, _aid = _persist_fal_artifact(
+    file_path, artifact_id = _persist_fal_artifact(
         media_bytes=media_bytes,
         media_url=media_url,
         prompt=prompt,
@@ -360,6 +466,8 @@ async def _fal_generate_async(
         request_id=submit["request_id"],
         duckclaw_db=duckclaw_db,
         ctx=ctx,
+        operation=persist_operation,
+        source_image_path=source_image_path,
     )
     try:
         append_media_usage_log(
@@ -384,7 +492,8 @@ async def _fal_generate_async(
         model_endpoint=endpoint,
         media_type=media_type,
         media_bytes=media_bytes,
-        message="Media generada via Fal.ai y registrada.",
+        message=success_message or "Media generada via Fal.ai y registrada.",
+        artifact_id=artifact_id,
     )
 
 
@@ -459,6 +568,120 @@ def _generate_kling_video_impl(
     )
 
 
+@log_tool_execution_sync(name="edit_visual_asset")
+def _fal_edit_visual_asset_impl(
+    source_image_path: str,
+    edit_prompt: str,
+    negative_prompt: str = "blurry, distorted, low quality, deformed face",
+    denoise: float | None = None,
+    *,
+    fal_config: Optional[dict] = None,
+    duckclaw_db: Any = None,
+) -> str:
+    """Edicion via Fal.ai: FLUX Kontext [pro] por defecto; legacy img2img si el manifest lo indica."""
+    del negative_prompt  # Kontext y Flux img2img Fal no usan negative_prompt en estos endpoints
+    cfg = fal_config if isinstance(fal_config, dict) else {}
+    edit_text = (edit_prompt or "").strip()
+    if not edit_text:
+        return _error_json("edit_prompt no puede estar vacio.")
+
+    base = _state_delta_base()
+    tenant_id = base["tenant_id"]
+    from duckclaw.forge.skills.comfyui_bridge import validate_source_image_path
+
+    try:
+        src = validate_source_image_path(source_image_path, tenant_id)
+    except ValueError as e:
+        return _error_json(str(e))
+
+    endpoint = str(
+        cfg.get("default_image_edit_endpoint") or DEFAULT_FLUX_KONTEXT_PRO_ENDPOINT
+    ).strip()
+    token_env = str(cfg.get("token_env") or "FAL_KEY")
+    try:
+        image_uri = _local_image_to_data_uri(src)
+    except OSError as exc:
+        return _error_json(f"No se pudo leer imagen fuente: {exc}")
+
+    body = _build_fal_edit_request_body(
+        endpoint=endpoint,
+        image_uri=image_uri,
+        edit_prompt=edit_text,
+        denoise=denoise,
+        fal_config=cfg,
+    )
+    persist_op = "fal_kontext_edit" if _is_kontext_edit_endpoint(endpoint) else "fal_img2img_edit"
+    return _run_async_from_sync(
+        _fal_generate_async(
+            endpoint=endpoint,
+            body=body,
+            prompt=edit_text,
+            aspect_ratio="source",
+            media_type="image",
+            duration_sec=1.0,
+            token_env=token_env,
+            duckclaw_db=duckclaw_db,
+            persist_operation=persist_op,
+            source_image_path=str(src),
+            success_message="Imagen editada via Fal.ai Kontext y registrada.",
+        )
+    )
+
+
+def _edit_visual_asset_with_fallback(
+    source_image_path: str,
+    edit_prompt: str,
+    negative_prompt: str = "blurry, distorted, low quality, deformed face",
+    denoise: float | None = None,
+    *,
+    fal_config: Optional[dict] = None,
+    comfyui_config: Optional[dict] = None,
+    duckclaw_db: Any = None,
+) -> str:
+    """Fal img2img primero; fallback ComfyUI local si Fal falla."""
+    fal_result = _fal_edit_visual_asset_impl(
+        source_image_path,
+        edit_prompt,
+        negative_prompt=negative_prompt,
+        denoise=denoise,
+        fal_config=fal_config,
+        duckclaw_db=duckclaw_db,
+    )
+    try:
+        parsed = json.loads(fal_result)
+        if isinstance(parsed, dict) and parsed.get("ok"):
+            return fal_result
+        fal_error = str(parsed.get("error") or "Fal.ai edit failed")
+    except (json.JSONDecodeError, TypeError):
+        fal_error = "Fal.ai edit devolvio respuesta invalida"
+        parsed = {}
+
+    if not _comfy_fallback_available(comfyui_config):
+        return fal_result
+
+    _log.warning("Fal edit failed (%s); falling back to ComfyUI local", fal_error)
+    from duckclaw.forge.skills.comfyui_bridge import _edit_visual_asset_impl
+
+    comfy_result = _edit_visual_asset_impl(
+        source_image_path,
+        edit_prompt,
+        negative_prompt=negative_prompt,
+        denoise=denoise,
+        comfyui_config=comfyui_config,
+        duckclaw_db=duckclaw_db,
+    )
+    try:
+        comfy_parsed = json.loads(comfy_result)
+        if isinstance(comfy_parsed, dict) and comfy_parsed.get("ok"):
+            return comfy_result
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return _error_json(
+        f"Fal.ai: {fal_error}. ComfyUI fallback tambien fallo."
+    )
+
+
 @log_tool_execution_sync(name="execute_comfy_workflow")
 def _execute_comfy_workflow_impl(
     comfy_workflow_json: dict[str, Any],
@@ -495,6 +718,7 @@ def register_fal_skill(
     fal_config: Optional[dict] = None,
     *,
     duckclaw_db: Any = None,
+    comfyui_config: Optional[dict] = None,
 ) -> None:
     cfg = fal_config if isinstance(fal_config, dict) else {}
     if cfg.get("enabled") is False:
@@ -540,6 +764,22 @@ def register_fal_skill(
             duckclaw_db=duckclaw_db,
         )
 
+    def _edit(
+        source_image_path: str,
+        edit_prompt: str,
+        negative_prompt: str = "blurry, distorted, low quality, deformed face",
+        denoise: float = 0.55,
+    ) -> str:
+        return _edit_visual_asset_with_fallback(
+            source_image_path,
+            edit_prompt,
+            negative_prompt=negative_prompt,
+            denoise=denoise,
+            fal_config=cfg,
+            comfyui_config=comfyui_config,
+            duckclaw_db=duckclaw_db,
+        )
+
     tools_list.append(
         StructuredTool.from_function(
             _flux,
@@ -570,4 +810,17 @@ def register_fal_skill(
             ),
         )
     )
-    _log.info("Fal.ai: registered 3 media tools")
+    tools_list.append(
+        StructuredTool.from_function(
+            _edit,
+            name="edit_visual_asset",
+            description=(
+                "Edita una foto existente via Fal.ai FLUX Kontext [pro] (fallback ComfyUI local si Fal falla). "
+                "Parametros: source_image_path (ruta absoluta en inbound/ o artifacts/ del tenant), "
+                "edit_prompt (instrucciones en espanol), negative_prompt (opcional, solo fallback Comfy), "
+                "denoise (0.35-0.75, solo legacy img2img o fallback Comfy; ignorado en Kontext). "
+                "Usar cuando el mensaje incluya [COMFYUI_EDIT ...] o el usuario pida modificar una foto enviada."
+            ),
+        )
+    )
+    _log.info("Fal.ai: registered 4 media tools")

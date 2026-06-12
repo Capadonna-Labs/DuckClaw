@@ -60,6 +60,7 @@ export const BUILD_NAV_GROUP: AdminNavGroup = {
   items: [
     { href: '/templates', label: 'Agentes', section: 'core', audience: 'admin' },
     { href: '/projects', label: 'Proyectos', section: 'core', audience: 'admin' },
+    { href: '/knowledge', label: 'RAG', section: 'core', audience: 'admin' },
     { href: '/skills', label: 'Skills', section: 'core', audience: 'admin' },
     { href: '/mcp', label: 'MCP', section: 'core', audience: 'admin' },
     { href: '/integrations', label: 'Integraciones', section: 'integrations', audience: 'admin' },
@@ -169,6 +170,7 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/overview': 'Inicio',
   '/playground': 'Playground',
   '/projects': 'Proyectos',
+  '/knowledge': 'RAG',
   '/integrations': 'Integraciones',
   '/gen': 'Gen',
   '/gen/image': 'Image',

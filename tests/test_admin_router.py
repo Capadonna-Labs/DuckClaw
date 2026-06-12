@@ -1126,6 +1126,121 @@ def test_workspace_project_detail_endpoint(admin_client: TestClient):
     assert data["agents"] == []
 
 
+def test_knowledge_sources_and_search_are_scoped(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+) -> None:
+    import duckdb
+
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    con = duckdb.connect(str(gateway_db))
+    try:
+        con.execute(
+            """
+            INSERT INTO main.admin_knowledge_sources
+              (source_id, tenant_id, project_id, worker_uid, source_kind, source_uri, status)
+            VALUES ('ksrc_api', 'default', 'proj_api', 'wrk_api', 'folder', '/docs', 'ready')
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO main.admin_knowledge_documents
+              (document_id, source_id, relative_path, title, checksum)
+            VALUES ('kdoc_api', 'ksrc_api', 'aws/iam.md', 'IAM', 'sha256:api')
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO main.admin_knowledge_chunks
+              (chunk_id, document_id, source_id, tenant_id, project_id, worker_uid,
+               chunk_index, content, content_hash, embedding_status)
+            VALUES
+              ('kchk_api', 'kdoc_api', 'ksrc_api', 'default', 'proj_api', 'wrk_api',
+               0, 'Least privilege policies for cloud access', 'h-api', 'PENDING'),
+              ('kchk_other', 'kdoc_api', 'ksrc_api', 'default', 'proj_other', 'wrk_api',
+               1, 'This other project must not leak', 'h-other', 'PENDING')
+            """
+        )
+    finally:
+        con.close()
+
+    listed = gateway_admin_client.get(
+        "/api/v1/admin/knowledge/sources",
+        headers=headers,
+        params={"project_id": "proj_api"},
+    )
+    assert listed.status_code == 200
+    sources = listed.json()["sources"]
+    assert len(sources) == 1
+    assert sources[0]["source_id"] == "ksrc_api"
+    assert sources[0]["chunk_count"] == 1
+
+    searched = gateway_admin_client.post(
+        "/api/v1/admin/knowledge/search",
+        headers=headers,
+        json={"query": "least privilege", "project_id": "proj_api", "worker_uid": "wrk_api"},
+    )
+    assert searched.status_code == 200
+    results = searched.json()["results"]
+    assert len(results) == 1
+    assert results[0]["relative_path"] == "aws/iam.md"
+    assert results[0]["match_type"] == "lexical"
+
+
+def test_knowledge_uploads_create_project_scoped_chunks(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckdb
+
+    monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+
+    response = gateway_admin_client.post(
+        "/api/v1/admin/knowledge/uploads",
+        headers=headers,
+        data={
+            "project_id": "proj_upload",
+            "worker_uid": "wrk_upload",
+            "display_name": "AWS Docs",
+        },
+        files={
+            "files": (
+                "aws/iam.md",
+                b"# IAM\n\nUse least privilege policies for cloud access.",
+                "text/markdown",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["documents"] == 1
+    assert payload["chunks"] >= 1
+
+    con = duckdb.connect(str(gateway_db), read_only=True)
+    try:
+        row = con.execute(
+            """
+            SELECT s.project_id, s.worker_uid, d.relative_path, c.content
+            FROM main.admin_knowledge_sources s
+            JOIN main.admin_knowledge_documents d ON d.source_id = s.source_id
+            JOIN main.admin_knowledge_chunks c ON c.source_id = s.source_id
+            WHERE s.source_id = ?
+            """,
+            [payload["source_id"]],
+        ).fetchone()
+    finally:
+        con.close()
+    assert row is not None
+    assert row[0] == "proj_upload"
+    assert row[1] == "wrk_upload"
+    assert row[2] == "aws/iam.md"
+    assert "least privilege" in row[3]
+
+
 def test_admin_auth_login_smoke(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_redis
 ):

@@ -20,6 +20,7 @@ _REQUIRED = [
     ("directives", "quant_ohlcv_moc"),
     ("directives", "quant_pipeline_deterministic"),
     ("directives", "reddit_share_exhausted"),
+    ("directives", "rag_context_priority"),
     ("errors", "llm_failure_mlx"),
     ("errors", "llm_failure_groq_tpm"),
     ("errors", "llm_failure_groq_generic"),

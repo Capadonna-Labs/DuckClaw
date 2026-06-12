@@ -24,10 +24,33 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
+
+_DEBUG_LOG_PATH = Path("/Users/workstation/Developer/duckclaw/.cursor/debug-ab0734.log")
+
+
+def _agent_debug_log(hypothesis_id: str, message: str, data: dict[str, Any]) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "ab0734",
+            "runId": "downstream-rag-debug",
+            "hypothesisId": hypothesis_id,
+            "location": "packages/agents/src/duckclaw/graphs/graph_server.py",
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        _DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        pass
+    # endregion
 
 # ── dotenv ─────────────────────────────────────────────────────────────────────
 
@@ -807,6 +830,17 @@ async def ainvoke_manager_ephemeral(
     from duckclaw.graphs.manager_graph import clear_worker_graph_cache
 
     _ensure_llm_config()
+    _agent_debug_log(
+        "H6,H7,H8",
+        "ainvoke_manager_ephemeral received message",
+        {
+            "has_inventory_block": "[RAG_SOURCE_INVENTORY]" in (message or ""),
+            "has_rag_context_block": "[RAG_CONTEXT]" in (message or ""),
+            "message_len": len(message or ""),
+            "history_items": len(history or []),
+            "entry_worker_id": (entry_worker_id or "").strip(),
+        },
+    )
     graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, chat_id, vault_db_path)
     try:
         return await _ainvoke(

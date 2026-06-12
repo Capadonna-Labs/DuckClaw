@@ -13,10 +13,10 @@ def test_admin_reply_already_polished() -> None:
     assert mod.admin_reply_already_polished(short) is False
     long_md = (
         "## ❌ Falla del CD\n\n"
-        "El pipeline falló por **Ruff**.\n\n"
+        "El pipeline de **Continuous Delivery** falló por **Ruff** en el job de lint.\n\n"
         "**Siguientes pasos**\n"
-        "1. Revisar el commit.\n"
-        "2. Ejecutar el pipeline nuevamente.\n"
+        "1. Revisar el commit asociado al fallo y corregir los avisos señalados.\n"
+        "2. Ejecutar el pipeline nuevamente una vez aplicado el fix en la rama.\n"
     )
     assert mod.admin_reply_already_polished(long_md) is True
 

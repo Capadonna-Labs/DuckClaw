@@ -24,7 +24,9 @@ def test_active_conversation_is_scoped_by_authenticated_tenant() -> None:
     assert "activeConversationKey(tenantId)" in storage
     assert "readActiveConversationId(tid)" in hook
     assert "writeActiveConversationId(id, tid)" in hook
-    assert "const created = await adminService.createConversation({ section }, tid)" in hook
+    assert "await adminService.createConversation(" in hook
+    assert "{ section, worker_id: defaultWorkerId || undefined }" in hook
+    assert ", tid" in hook
 
 
 def test_admin_chat_status_text_uses_plain_labels_without_emoji() -> None:

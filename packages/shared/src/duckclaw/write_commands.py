@@ -126,6 +126,58 @@ class DeleteKanbanCardCommand(WriteCommand):
 
 
 # ---------------------------------------------------------------------------
+# Knowledge/RAG commands
+# ---------------------------------------------------------------------------
+
+class CreateKnowledgeSourceCommand(WriteCommand):
+    """Create or update a transversal RAG knowledge source."""
+
+    command_type: Literal["create_knowledge_source"] = "create_knowledge_source"
+    source_id: str = Field(default_factory=lambda: f"ksrc_{uuid.uuid4().hex[:16]}")
+    project_id: str = ""
+    worker_uid: str = ""
+    source_kind: Literal["folder", "file", "url", "manual", "api"] = "folder"
+    source_uri: str
+    display_name: str = ""
+    status: Literal["pending", "indexing", "ready", "failed", "inactive"] = "pending"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_dim: int = 384
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class UpsertKnowledgeDocumentCommand(WriteCommand):
+    """Create or update a normalized document within a knowledge source."""
+
+    command_type: Literal["upsert_knowledge_document"] = "upsert_knowledge_document"
+    document_id: str = Field(default_factory=lambda: f"kdoc_{uuid.uuid4().hex[:16]}")
+    source_id: str
+    relative_path: str
+    title: str = ""
+    mime_type: str = "text/plain"
+    checksum: str
+    byte_size: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class UpsertKnowledgeChunksCommand(WriteCommand):
+    """Replace a document's active RAG chunks with validated chunk payloads."""
+
+    command_type: Literal["upsert_knowledge_chunks"] = "upsert_knowledge_chunks"
+    document_id: str
+    source_id: str
+    project_id: str = ""
+    worker_uid: str = ""
+    chunks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class DeactivateKnowledgeSourceCommand(WriteCommand):
+    """Soft-delete a knowledge source and its derived documents/chunks."""
+
+    command_type: Literal["deactivate_knowledge_source"] = "deactivate_knowledge_source"
+    source_id: str
+
+
+# ---------------------------------------------------------------------------
 # Raw SQL (legacy — keep for admin_sql tool)
 # ---------------------------------------------------------------------------
 

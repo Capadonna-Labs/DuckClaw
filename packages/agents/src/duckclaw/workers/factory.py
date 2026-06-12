@@ -71,6 +71,31 @@ def _raise_if_chat_cancelled_from_state(state: dict) -> None:
 _DEBUG_LOG_PATH = os.environ.get("DUCKCLAW_DEBUG_LOG_PATH") or str(
     Path(__file__).resolve().parents[5] / ".cursor" / "debug-fd1dbb.log"
 )
+_RAG_DEBUG_LOG_PATH = Path("/Users/workstation/Developer/duckclaw/.cursor/debug-ab0734.log")
+
+
+def _rag_debug_log(
+    hypothesis_id: str,
+    message: str,
+    data: dict[str, Any],
+) -> None:
+    # region agent log
+    try:
+        payload = {
+            "sessionId": "ab0734",
+            "runId": "worker-rag-debug",
+            "hypothesisId": hypothesis_id,
+            "location": "packages/agents/src/duckclaw/workers/factory.py",
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        _RAG_DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _RAG_DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        pass
+    # endregion
 
 
 def _ibkr_cancel_debug_log(
@@ -4229,6 +4254,26 @@ def build_worker_graph(
         if (state.get("analytical_summary") or "").strip():
             out["analytical_summary"] = (state.get("analytical_summary") or "").strip()
         out.update(_identity_fields(state))
+        # region agent log
+        _rag_debug_log(
+            "H11,H12",
+            "worker prepare built messages",
+            {
+                "worker_id": worker_id,
+                "logical_worker_id": _lid,
+                "incoming_len": len(incoming),
+                "user_content_len": len(user_content),
+                "prompt_len": len(prompt),
+                "history_items": len(state.get("history") or []),
+                "message_count": len(messages),
+                "incoming_has_inventory": "[RAG_SOURCE_INVENTORY]" in incoming,
+                "incoming_has_rag_context": "[RAG_CONTEXT]" in incoming,
+                "user_content_has_inventory": "[RAG_SOURCE_INVENTORY]" in user_content,
+                "user_content_has_rag_context": "[RAG_CONTEXT]" in user_content,
+                "prompt_mentions_rag": "rag" in prompt.lower(),
+            },
+        )
+        # endregion
         return out
 
     def context_monitor_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
@@ -6204,6 +6249,28 @@ def build_worker_graph(
                 force_portfolio_after_local_cuentas,
                 forced_name,
             )
+            # region agent log
+            _rag_debug_log(
+                "H10,H13",
+                "worker tool routing decision",
+                {
+                    "worker_id": worker_id,
+                    "logical_worker_id": _lid,
+                    "forced_name": forced_name,
+                    "is_schema": is_schema,
+                    "is_table_content": is_table_content,
+                    "force_schema": force_schema,
+                    "force_read_sql": force_read_sql,
+                    "force_admin_sql": force_admin_sql,
+                    "already_has_tool_result": already_has_tool_result,
+                    "heuristic_first_tool": _worker_use_heuristic_first_tool(spec),
+                    "has_get_db_path_tool": "get_db_path" in tools_by_name,
+                    "has_read_sql_tool": "read_sql" in tools_by_name,
+                    "incoming_has_inventory": "[RAG_SOURCE_INVENTORY]" in incoming,
+                    "incoming_has_rag_context": "[RAG_CONTEXT]" in incoming,
+                },
+            )
+            # endregion
             if is_quant_trader(_lid) and _quant_wants_cancel:
                 _ibkr_cancel_debug_log(
                     "factory.py:agent_node",
@@ -6341,6 +6408,14 @@ def build_worker_graph(
                         break
             if _reddit_ctx_block:
                 _msg_list = [SystemMessage(content=_reddit_ctx_block)] + _msg_list
+            _rag_turn_without_db_intent = bool(
+                ("[RAG_CONTEXT]" in (incoming or "") or "[RAG_SOURCE_INVENTORY]" in (incoming or ""))
+                and not explicit_duckdb_schema_request(_intent_incoming)
+            )
+            if _rag_turn_without_db_intent:
+                _msg_list = [
+                    SystemMessage(content=load_guardrail("directives", "rag_context_priority"))
+                ] + _msg_list
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             _invoked_llm: Any = llm_with_tools
             if force_admin_sql:
@@ -6426,6 +6501,59 @@ def build_worker_graph(
                     if not str(getattr(t, "name", "") or "").startswith("reddit_")
                 ]
                 _invoked_llm = _bind_tools(llm, _nr_ex)
+            _debug_bound_tool_names = {
+                str(getattr(t, "name", "") or "")
+                for t in (_tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind)
+            }
+            if _rag_turn_without_db_intent and forced_name == "auto":
+                _bind_base_rag = _tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind
+                _rag_tools = [
+                    t for t in _bind_base_rag if str(getattr(t, "name", "") or "") != "get_db_path"
+                ]
+                if len(_rag_tools) < len(_bind_base_rag):
+                    _invoked_llm = _bind_tools(llm, _rag_tools)
+                    _debug_bound_tool_names = {str(getattr(t, "name", "") or "") for t in _rag_tools}
+                    # region agent log
+                    _rag_debug_log(
+                        "H15",
+                        "worker removed get_db_path for rag turn",
+                        {
+                            "worker_id": worker_id,
+                            "logical_worker_id": _lid,
+                            "tool_count_before": len(_bind_base_rag),
+                            "tool_count_after": len(_rag_tools),
+                        },
+                    )
+                    # endregion
+            _last_human_content = ""
+            for _msg_dbg in reversed(_groq_msgs):
+                if isinstance(_msg_dbg, HumanMessage):
+                    _last_human_content = str(getattr(_msg_dbg, "content", "") or "")
+                    break
+            _system_content_dbg = ""
+            if _groq_msgs and isinstance(_groq_msgs[0], SystemMessage):
+                _system_content_dbg = str(getattr(_groq_msgs[0], "content", "") or "")
+            # region agent log
+            _rag_debug_log(
+                "H11,H12,H13",
+                "worker llm input batch",
+                {
+                    "worker_id": worker_id,
+                    "logical_worker_id": _lid,
+                    "forced_name": forced_name,
+                    "sandbox_enabled": sandbox_enabled,
+                    "groq_message_count": len(_groq_msgs),
+                    "system_len": len(_system_content_dbg),
+                    "last_human_len": len(_last_human_content),
+                    "system_has_inventory": "[RAG_SOURCE_INVENTORY]" in _system_content_dbg,
+                    "system_has_rag_context": "[RAG_CONTEXT]" in _system_content_dbg,
+                    "last_human_has_inventory": "[RAG_SOURCE_INVENTORY]" in _last_human_content,
+                    "last_human_has_rag_context": "[RAG_CONTEXT]" in _last_human_content,
+                    "last_human_starts_with_task": _last_human_content.strip().lower().startswith("tarea:"),
+                    "get_db_path_bound": "get_db_path" in _debug_bound_tool_names,
+                },
+            )
+            # endregion
             _llm_invoke_exc: BaseException | None = None
             try:
                 _raise_if_chat_cancelled_from_state(state)
@@ -6463,6 +6591,35 @@ def build_worker_graph(
                 _pl_fail = failure_provider_label_for_llm_invoke(_invoked_llm, provider)
                 resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=_pl_fail))
             tool_calls = getattr(resp, "tool_calls", None) or []
+            _tc_names_dbg: list[Any] = []
+            for _tc_dbg in tool_calls:
+                if isinstance(_tc_dbg, dict):
+                    _tc_names_dbg.append(_tc_dbg.get("name"))
+                else:
+                    _tc_names_dbg.append(getattr(_tc_dbg, "name", None))
+            _resp_preview_dbg = ""
+            try:
+                from duckclaw.integrations.llm_providers import lc_message_content_to_text as _lc_text_dbg
+
+                _resp_preview_dbg = (_lc_text_dbg(resp) or "").strip()[:220]
+            except Exception:
+                _resp_preview_dbg = str(getattr(resp, "content", "") or "").strip()[:220]
+            # region agent log
+            _rag_debug_log(
+                "H10,H11,H13",
+                "worker llm response",
+                {
+                    "worker_id": worker_id,
+                    "logical_worker_id": _lid,
+                    "forced_name": forced_name,
+                    "tool_call_names": _tc_names_dbg,
+                    "llm_invoke_failed": _llm_invoke_exc is not None,
+                    "response_mentions_duckdb": "duckdb" in _resp_preview_dbg.lower(),
+                    "response_mentions_rag": "rag" in _resp_preview_dbg.lower(),
+                    "response_preview": _resp_preview_dbg,
+                },
+            )
+            # endregion
             if (
                 (_lid_l == WORKER_FINANZ)
                 and force_finanz_admin_sql

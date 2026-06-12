@@ -702,6 +702,90 @@ _M014_TOOLS = [
     """,
 ]
 
+_M015_KNOWLEDGE = [
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_knowledge_sources (
+        source_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL DEFAULT 'default',
+        actor_email VARCHAR NOT NULL DEFAULT 'system',
+        project_id VARCHAR DEFAULT '',
+        worker_uid VARCHAR DEFAULT '',
+        source_kind VARCHAR NOT NULL DEFAULT 'folder'
+            CHECK (source_kind IN ('folder', 'file', 'url', 'manual', 'api')),
+        source_uri TEXT NOT NULL,
+        display_name VARCHAR DEFAULT '',
+        status VARCHAR NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'indexing', 'ready', 'failed', 'inactive')),
+        embedding_model VARCHAR DEFAULT 'sentence-transformers/all-MiniLM-L6-v2',
+        embedding_dim INTEGER DEFAULT 384,
+        metadata_json TEXT DEFAULT '{}'
+            CHECK (json_valid(metadata_json)),
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_knowledge_sources_scope
+        ON main.admin_knowledge_sources (tenant_id, project_id, worker_uid, active, status)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_knowledge_documents (
+        document_id VARCHAR PRIMARY KEY,
+        source_id VARCHAR NOT NULL,
+        relative_path TEXT NOT NULL,
+        title VARCHAR DEFAULT '',
+        mime_type VARCHAR DEFAULT 'text/plain',
+        checksum VARCHAR NOT NULL,
+        byte_size BIGINT DEFAULT 0,
+        metadata_json TEXT DEFAULT '{}'
+            CHECK (json_valid(metadata_json)),
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (source_id, relative_path)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_knowledge_documents_source
+        ON main.admin_knowledge_documents (source_id, active, checksum)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_knowledge_chunks (
+        chunk_id VARCHAR PRIMARY KEY,
+        document_id VARCHAR NOT NULL,
+        source_id VARCHAR NOT NULL,
+        tenant_id VARCHAR NOT NULL DEFAULT 'default',
+        project_id VARCHAR DEFAULT '',
+        worker_uid VARCHAR DEFAULT '',
+        chunk_index INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        content_hash VARCHAR NOT NULL,
+        start_offset INTEGER DEFAULT 0,
+        end_offset INTEGER DEFAULT 0,
+        token_count INTEGER DEFAULT 0,
+        embedding FLOAT[384],
+        embedding_status VARCHAR NOT NULL DEFAULT 'PENDING'
+            CHECK (embedding_status IN ('PENDING', 'READY', 'FAILED')),
+        embedding_model VARCHAR DEFAULT 'sentence-transformers/all-MiniLM-L6-v2',
+        metadata_json TEXT DEFAULT '{}'
+            CHECK (json_valid(metadata_json)),
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (document_id, chunk_index)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_knowledge_chunks_scope
+        ON main.admin_knowledge_chunks (tenant_id, project_id, worker_uid, active, embedding_status)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_knowledge_chunks_source
+        ON main.admin_knowledge_chunks (source_id, document_id, active)
+    """,
+]
+
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "initial_core", _M001_INITIAL_CORE),
     (2, "worker_versions", _M002_WORKER_VERSIONS),
@@ -717,4 +801,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (12, "kanban", _M012_KANBAN),
     (13, "workflows", _M013_WORKFLOWS),
     (14, "tools", _M014_TOOLS),
+    (15, "knowledge", _M015_KNOWLEDGE),
 ]

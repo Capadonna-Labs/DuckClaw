@@ -1,12 +1,13 @@
 'use client';
 
-import { ChevronDown, LogOut, Sun, Moon, Menu } from 'lucide-react';
+import { ChevronDown, LogOut, Sun, Moon, Menu, RefreshCw } from 'lucide-react';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { obtenerIniciales } from '@/lib/utils';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { useEffect, useRef, useState } from 'react';
+import { adminService } from '@/services/adminService';
 
 interface TopbarProps {
   onMenuClick?: () => void;
@@ -17,6 +18,9 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
   const { theme, toggleTheme } = useTheme();
   const { sidebarOpen, toggleSidebar } = useLayoutUiStore();
   const router = useRouter();
+  const canRunOps = usuario?.rol === 'admin';
+  const [stackRestarting, setStackRestarting] = useState(false);
+  const [stackRestartMessage, setStackRestartMessage] = useState<string | null>(null);
 
   const handleLogout = () => {
     logout();
@@ -31,6 +35,25 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
     onMenuClick?.();
   };
 
+  const restartStack = async () => {
+    if (!canRunOps) return;
+    setStackRestarting(true);
+    setStackRestartMessage(null);
+    try {
+      const writer = await adminService.runOps('pm2_restart_db_writer');
+      const gateway = await adminService.runOps('pm2_restart_gateway');
+      setStackRestartMessage(
+        writer.ok && gateway.ok
+          ? 'DB-Writer y Gateway reiniciados. Reintenta la carga RAG en unos segundos.'
+          : 'PM2 no confirmó el reinicio completo de DB-Writer/Gateway.'
+      );
+    } catch (e) {
+      setStackRestartMessage(e instanceof Error ? e.message : 'No se pudo reiniciar DB-Writer/Gateway');
+    } finally {
+      setStackRestarting(false);
+    }
+  };
+
   return (
     <header
       role="banner"
@@ -41,6 +64,27 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
         sidebarOpen={sidebarOpen}
       />
       <div className="flex items-center gap-2 md:gap-4">
+        {canRunOps && (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => void restartStack()}
+              disabled={stackRestarting}
+              className="inline-flex items-center gap-2 rounded-xl border border-gov-blue-100 px-3 py-2 text-xs font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
+              title="Reiniciar DuckClaw-DB-Writer y DuckClaw-Gateway con PM2"
+            >
+              <RefreshCw size={14} className={stackRestarting ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline">
+                {stackRestarting ? 'Reiniciando...' : 'Reiniciar stack'}
+              </span>
+            </button>
+            {stackRestartMessage && (
+              <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-2xl border bg-white p-3 text-xs font-semibold text-gov-gray-700 shadow-lg dark:border-dark-border dark:bg-dark-surface dark:text-dark-text">
+                {stackRestartMessage}
+              </div>
+            )}
+          </div>
+        )}
         <button
           type="button"
           onClick={toggleTheme}

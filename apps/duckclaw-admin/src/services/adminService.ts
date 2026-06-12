@@ -1,4 +1,4 @@
-import { friendlyGatewayError } from '@/lib/adminErrors';
+import { friendlyGatewayError, parseApiErrorDetail } from '@/lib/adminErrors';
 import { mutationHeaders } from '@/lib/csrfClient';
 import { readSseChatStream } from '@/lib/sseChat';
 import type {
@@ -96,6 +96,34 @@ export interface WorkspaceProjectsPage {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface KnowledgeSource {
+  source_id: string;
+  tenant_id: string;
+  project_id: string;
+  worker_uid: string;
+  source_kind: string;
+  source_uri: string;
+  display_name: string;
+  status: string;
+  metadata?: Record<string, unknown>;
+  active: boolean;
+  created_at?: string;
+  updated_at?: string;
+  document_count: number;
+  chunk_count: number;
+}
+
+export interface KnowledgeSearchResult {
+  chunk_id: string;
+  source_id: string;
+  document_id: string;
+  relative_path: string;
+  chunk_index: number;
+  text: string;
+  score?: number | null;
+  match_type: 'vector' | 'lexical';
 }
 
 export interface IndustryOption {
@@ -262,15 +290,30 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const raw =
-      typeof data?.detail === 'string'
-        ? data.detail
-        : data?.detail?.detail ?? data?.title ?? res.statusText;
+    const raw = parseApiErrorDetail(data, res.status);
     const detail =
       data?.code === 'gateway_unreachable' || res.status === 503
         ? friendlyGatewayError(raw || 'gateway_unreachable')
         : friendlyGatewayError(raw || `Error ${res.status}`);
     throw new Error(detail);
+  }
+  return data as T;
+}
+
+async function adminFormFetch<T>(path: string, formData: FormData, method = 'POST'): Promise<T> {
+  const res = await fetch(`/api/admin${path}`, {
+    method,
+    credentials: 'include',
+    headers: {
+      ...sessionHeaders(method),
+    },
+    body: formData,
+    cache: 'no-store',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const raw = parseApiErrorDetail(data, res.status);
+    throw new Error(friendlyGatewayError(raw || `Error ${res.status}`));
   }
   return data as T;
 }
@@ -1242,6 +1285,79 @@ export const adminService = {
       { method: 'DELETE' }
     ),
 
+  listKnowledgeSources: (params: { project_id?: string; worker_uid?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.project_id) qs.set('project_id', params.project_id);
+    if (params.worker_uid) qs.set('worker_uid', params.worker_uid);
+    return adminFetch<{ sources: KnowledgeSource[] }>(`/knowledge/sources${qs.toString() ? `?${qs}` : ''}`).then(
+      (r) => r.sources
+    );
+  },
+
+  createKnowledgeSource: (body: {
+    source_uri: string;
+    display_name?: string;
+    source_kind?: string;
+    project_id?: string;
+    worker_uid?: string;
+    metadata?: Record<string, unknown>;
+    ingest?: boolean;
+    compute_embeddings?: boolean;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      source_id: string;
+      task_ids: string[];
+      documents: number;
+      chunks: number;
+    }>('/knowledge/sources', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  uploadKnowledgeFiles: (body: {
+    files: File[];
+    display_name?: string;
+    project_id?: string;
+    worker_uid?: string;
+    compute_embeddings?: boolean;
+  }) => {
+    const form = new FormData();
+    form.set('display_name', body.display_name || '');
+    form.set('project_id', body.project_id || '');
+    form.set('worker_uid', body.worker_uid || '');
+    form.set('compute_embeddings', body.compute_embeddings ? 'true' : 'false');
+    for (const file of body.files) {
+      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+      form.append('files', file, relativePath);
+    }
+    return adminFormFetch<{
+      ok: boolean;
+      source_id: string;
+      task_ids: string[];
+      documents: number;
+      chunks: number;
+    }>('/knowledge/uploads', form);
+  },
+
+  deleteKnowledgeSource: (sourceId: string) =>
+    adminFetch<{ ok: boolean; source_id: string; task_id: string }>(
+      `/knowledge/sources/${encodeURIComponent(sourceId)}`,
+      { method: 'DELETE' }
+    ),
+
+  searchKnowledge: (body: {
+    query: string;
+    project_id?: string;
+    worker_uid?: string;
+    source_id?: string;
+    limit?: number;
+  }) =>
+    adminFetch<{ results: KnowledgeSearchResult[]; count: number }>('/knowledge/search', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   createOrchestratorDraft: (body: { prompt: string }) =>
     adminFetch<OrchestratorDraft>('/workspace/orchestrator/draft', {
       method: 'POST',
@@ -1306,6 +1422,7 @@ export const adminService = {
       response: string;
       assigned_worker_id?: string;
       usage_tokens?: Record<string, number>;
+      rag_context_count?: number;
     }>('/playground/chat', {
       method: 'POST',
       body: JSON.stringify(body),

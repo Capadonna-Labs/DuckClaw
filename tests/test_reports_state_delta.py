@@ -48,8 +48,8 @@ def test_apply_custom_report_upsert(tmp_path: Path, monkeypatch) -> None:
         published.append(report_id)
 
     monkeypatch.setattr(
-        "reports_state_delta_handler.validate_user_db_path",
-        lambda *_a, **_k: True,
+        "reports_state_delta_handler.resolve_user_id_for_db_path",
+        lambda *_a, **_k: "u1",
     )
     monkeypatch.setattr("reports_state_delta_handler._publish_report_reload", _fake_publish)
 

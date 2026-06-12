@@ -4,7 +4,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import { readActiveConversationId, writeActiveConversationId } from '@/lib/conversationStorage';
 
-export function useActiveConversation(tenantId: string | undefined, section: string) {
+export function useActiveConversation(
+  tenantId: string | undefined,
+  section: string,
+  options?: { defaultWorkerId?: string }
+) {
+  const defaultWorkerId = (options?.defaultWorkerId || '').trim();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [conversationTitle, setConversationTitle] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -36,11 +41,14 @@ export function useActiveConversation(tenantId: string | undefined, section: str
 
   const createConversation = useCallback(async () => {
     const tid = tenantId || 'default';
-    const created = await adminService.createConversation({ section }, tid);
+    const created = await adminService.createConversation(
+      { section, worker_id: defaultWorkerId || undefined },
+      tid
+    );
     selectConversation(created.session_id, created.title);
     bumpRefresh();
     return created;
-  }, [tenantId, section, selectConversation, bumpRefresh]);
+  }, [tenantId, section, defaultWorkerId, selectConversation, bumpRefresh]);
 
   const selectConversationById = useCallback(async (id: string) => {
     const tid = tenantId || 'default';
@@ -79,7 +87,10 @@ export function useActiveConversation(tenantId: string | undefined, section: str
           setBootstrapping(false);
           return;
         }
-        const created = await adminService.createConversation({ section }, tid);
+        const created = await adminService.createConversation(
+      { section, worker_id: defaultWorkerId || undefined },
+      tid
+    );
         if (cancelled) return;
         selectConversation(created.session_id, created.title);
       } catch {

@@ -560,6 +560,76 @@ def _finanz_worker_in_templates(available_templates: list[str]) -> bool:
     return False
 
 
+def _pick_finanz_worker_id(available_templates: list[str]) -> str | None:
+    """Id canónico del worker finanz en el catálogo del tenant, si existe."""
+    for wid in available_templates or []:
+        if _worker_matches_id(wid, "finanz"):
+            return str(wid).strip() or None
+    return None
+
+
+def _duckdb_admin_write_intent(text: str) -> bool:
+    """
+  Econofísica de delegación: mutaciones DuckDB (admin_sql / DDL) requieren worker RW (finanz).
+  Quant-Trader soberano es read_only y no expone admin_sql por diseño.
+  """
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    if re.search(r"\badmin_sql\b", t):
+        return True
+    if re.search(
+        r"\b(create\s+table|alter\s+table|drop\s+table|truncate\s+table|"
+        r"insert\s+into|delete\s+from)\b",
+        t,
+    ):
+        return True
+    if re.search(r"\bupdate\s+[a-z_][\w.]*\b", t):
+        return True
+    if re.search(
+        r"\b(insert_deuda|insert_transaction|insert_cuenta|insert_presupuesto)\b",
+        t,
+    ):
+        return True
+    return False
+
+
+def _debug_agent_log_480705(
+    *,
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict[str, Any] | None = None,
+) -> None:
+    """NDJSON debug (sesión 480705): routing admin_sql / finanz vs quant-trader."""
+    #region agent log
+    try:
+        payload: dict[str, Any] = {
+            "sessionId": "480705",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data or {},
+            "timestamp": int(time.time() * 1000),
+        }
+        candidates = [
+            (os.environ.get("DUCKCLAW_DEBUG_NDJSON_LOG") or "").strip(),
+            "/tmp/debug-480705.log",
+        ]
+        for log_path in candidates:
+            if not log_path:
+                continue
+            try:
+                with open(log_path, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                break
+            except OSError:
+                continue
+    except Exception:
+        pass
+    #endregion
+
+
 def _job_hunter_user_requests_application_tracking(incoming: str) -> bool:
     """
     Seguimiento de postulaciones ya guardadas (DuckDB), sin discovery Tavily.
@@ -1467,6 +1537,17 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
         return text, None
     t = text.lower()
     override: Optional[str] = None
+    if _duckdb_admin_write_intent(text):
+        _debug_agent_log_480705(
+            hypothesis_id="H2",
+            location="manager_graph._plan_task",
+            message="admin_write_intent_override_finanz",
+            data={"incoming_worker_id": (worker_id or "").strip(), "override": "finanz"},
+        )
+        return (
+            f"{_FINANZ_TOOL_PRESSURE_TASK}\n\n--- Mensaje del usuario ---\n{text}",
+            "finanz",
+        )
     _explicit_duckdb_schema_request = explicit_duckdb_schema_request(text)
     if (worker_id or "").strip().lower() == "quant-trader" and _quant_operational_intent_requires_fly_command(text):
         return load_guardrail("manager_tasks", "quant_operational_fly_command"), None
@@ -2180,6 +2261,7 @@ def build_manager_graph(
         if job_hunter_in_team and (cashflow_job_intent or is_job_add_command) and not _orch_affirm and not _hrp_fast and not _generic_affirm and not _visual_fast and not _url_fast:
             assigned = job_hunter_in_team
 
+        override_worker: Optional[str] = None
         # Mantener lógica existente de ruteo / planned_task
         if _orch_affirm:
             if _ov_orch and _ov_orch in (available_plan or []):
@@ -2296,13 +2378,29 @@ def build_manager_graph(
             not cashflow_job_intent
             or _explicit_route_blocks_proactive_a2a(entry_wid, user_incoming)
         ) and not is_job_add_command:
-            # Playground / multiplex: worker elegido en UI debe ganar al planner (salvo A2A laboral real).
-            _all_plan_disk = list_workers(troot, db=db, tenant_id=_tid)
-            _canon_play = _resolve_template_id(_all_plan_disk, route_entry)
-            if _canon_play and _canon_play in _all_plan_disk:
-                out["assigned_worker_id"] = _canon_play
-                if _canon_play not in available_plan:
-                    available_plan = list(available_plan) + [_canon_play]
+            # Playground: UI worker gana al planner salvo mutación DuckDB (admin_sql → finanz RW).
+            _finanz_for_admin = (
+                _duckdb_admin_write_intent(incoming)
+                and _pick_finanz_worker_id(list(available_plan or []))
+            )
+            if _finanz_for_admin:
+                out["assigned_worker_id"] = _finanz_for_admin
+                _debug_agent_log_480705(
+                    hypothesis_id="H3",
+                    location="manager_graph.plan_node",
+                    message="entry_worker_bypassed_for_admin_sql",
+                    data={
+                        "entry_worker_id": route_entry,
+                        "assigned_worker_id": _finanz_for_admin,
+                    },
+                )
+            else:
+                _all_plan_disk = list_workers(troot, db=db, tenant_id=_tid)
+                _canon_play = _resolve_template_id(_all_plan_disk, route_entry)
+                if _canon_play and _canon_play in _all_plan_disk:
+                    out["assigned_worker_id"] = _canon_play
+                    if _canon_play not in available_plan:
+                        available_plan = list(available_plan) + [_canon_play]
 
         if _strip_mercenary_spec_for_browser_worker(out, troot):
             mercenary_spec = None
@@ -2365,6 +2463,17 @@ def build_manager_graph(
         )
         _assigned_for_log = (out.get("assigned_worker_id") or assigned or "").strip() or "?"
         log_sys(_obs, "Worker elegido para el plan: %s", _assigned_for_log)
+        _debug_agent_log_480705(
+            hypothesis_id="H4",
+            location="manager_graph.plan_node",
+            message="worker_assigned_final",
+            data={
+                "assigned_worker_id": _assigned_for_log,
+                "admin_write_intent": _duckdb_admin_write_intent(incoming),
+                "entry_worker_id": (state.get("entry_worker_id") or "").strip() or None,
+                "override_worker": override_worker,
+            },
+        )
         return out
 
     def invoke_worker_node(state: ManagerAgentState, config: RunnableConfig) -> ManagerAgentState:

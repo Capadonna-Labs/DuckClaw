@@ -19,6 +19,8 @@ from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.vaults import resolve_user_id_for_db_path
 from models.quant_state_delta import (
     BacktestResultMutation,
+    UncertaintyEventMutation,
+    UncertaintyResolveMutation,
     CodeDecisionApproveMutation,
     CodeDecisionMutation,
     CodeDecisionRejectMutation,
@@ -167,6 +169,22 @@ CREATE TABLE IF NOT EXISTS quant_core.backtest_results (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_backtest_results_decision ON quant_core.backtest_results(code_decision_id);
+
+CREATE TABLE IF NOT EXISTS quant_core.agent_uncertainty_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_uid VARCHAR NOT NULL,
+  worker_id VARCHAR(100) NOT NULL,
+  trigger_context VARCHAR(100) NOT NULL,
+  confidence_score DOUBLE NOT NULL,
+  description TEXT NOT NULL,
+  proposed_questions JSON NOT NULL,
+  status VARCHAR(50) DEFAULT 'PENDING_HITL',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_uncertainty_session
+  ON quant_core.agent_uncertainty_log (session_uid, status);
+CREATE INDEX IF NOT EXISTS idx_uncertainty_status
+  ON quant_core.agent_uncertainty_log (status);
 """
 
 _INTRADAY_MOC_ACCUM_DDL = """
@@ -599,6 +617,68 @@ def _apply_delta(con: duckdb.DuckDBPyConnection, delta: QuantStateDelta) -> None
                 mut.sandbox_script,
                 bool(mut.passed_thresholds),
             ),
+        )
+        return
+
+    if dt == "UNCERTAINTY_EVENT_LOGGED":
+        mut = UncertaintyEventMutation.model_validate(delta.mutation)
+        questions_json = json.dumps(
+            [str(q).strip() for q in (mut.proposed_questions or []) if str(q).strip()],
+            ensure_ascii=False,
+        )
+        con.execute(
+            """
+            INSERT INTO quant_core.agent_uncertainty_log
+              (id, session_uid, worker_id, trigger_context, confidence_score,
+               description, proposed_questions, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?::JSON, ?)
+            ON CONFLICT (id) DO UPDATE SET
+              description=excluded.description,
+              proposed_questions=excluded.proposed_questions,
+              status=excluded.status
+            """,
+            (
+                mut.id,
+                mut.session_uid,
+                mut.worker_id,
+                mut.trigger_context,
+                float(mut.confidence_score),
+                mut.description,
+                questions_json,
+                mut.status or "PENDING_HITL",
+            ),
+        )
+        con.execute(
+            """
+            UPDATE quant_core.trading_sessions
+            SET status='UNCERTAIN', updated_at=now()
+            WHERE id='active' AND session_uid=?
+            """,
+            (mut.session_uid,),
+        )
+        return
+
+    if dt == "UNCERTAINTY_RESOLVED":
+        mut = UncertaintyResolveMutation.model_validate(delta.mutation)
+        con.execute(
+            """
+            UPDATE quant_core.agent_uncertainty_log
+            SET status='RESOLVED'
+            WHERE id=? AND status='PENDING_HITL'
+            """,
+            (mut.id,),
+        )
+        con.execute(
+            """
+            UPDATE quant_core.trading_sessions
+            SET status='ACTIVE', updated_at=now()
+            WHERE id='active' AND session_uid=?
+            AND NOT EXISTS (
+              SELECT 1 FROM quant_core.agent_uncertainty_log u
+              WHERE u.session_uid=? AND u.status='PENDING_HITL'
+            )
+            """,
+            (mut.session_uid, mut.session_uid),
         )
         return
 

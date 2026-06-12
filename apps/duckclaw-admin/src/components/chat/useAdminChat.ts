@@ -43,6 +43,8 @@ import {
 export type UseAdminChatOptions = {
   chatId: string;
   initialWorker?: string;
+  /** Si se define, no se restaura otro worker desde historial/storage. */
+  lockWorker?: string;
   projectId?: string;
   enabled?: boolean;
   /** Tras cada turno completado (para refrescar inbox). */
@@ -145,10 +147,12 @@ export type AdminChatController = ReturnType<typeof useAdminChat>;
 export function useAdminChat({
   chatId,
   initialWorker = '',
+  lockWorker = '',
   projectId = '',
   enabled = true,
   onConversationActivity,
 }: UseAdminChatOptions) {
+  const pinnedWorker = (lockWorker || '').trim();
   const [config, setConfig] = useState<Awaited<ReturnType<typeof adminService.getPlaygroundConfig>> | null>(
     null
   );
@@ -301,6 +305,7 @@ export function useAdminChat({
         }
         setError(null);
         setWorkerId((prev) => {
+          if (pinnedWorker && workersInclude(c.workers, pinnedWorker)) return pinnedWorker;
           if (prev && workersInclude(c.workers, prev)) return prev;
           if (initialWorker && workersInclude(c.workers, initialWorker)) return initialWorker;
           const stored = readStoredWorker(chatId);
@@ -325,7 +330,7 @@ export function useAdminChat({
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
-  }, [chatId, enabled, initialWorker, setWorkerId]);
+  }, [chatId, enabled, initialWorker, pinnedWorker, setWorkerId]);
 
   useEffect(() => {
     loadConfig();
@@ -336,8 +341,8 @@ export function useAdminChat({
       setWorkerId('');
       return;
     }
-    setWorkerId(initialWorker || readStoredWorker(chatId) || '');
-  }, [chatId, initialWorker, setWorkerId]);
+    setWorkerId(pinnedWorker || initialWorker || readStoredWorker(chatId) || '');
+  }, [chatId, initialWorker, pinnedWorker, setWorkerId]);
 
   const historyTenantId = (config?.effective_tenant_id || 'default').trim() || 'default';
 
@@ -372,7 +377,9 @@ export function useAdminChat({
           data.last_worker_id ||
           ''
         ).trim();
-        if (convWorker && workersInclude(config?.workers, convWorker)) {
+        if (pinnedWorker && workersInclude(config?.workers, pinnedWorker)) {
+          setWorkerId(pinnedWorker);
+        } else if (convWorker && workersInclude(config?.workers, convWorker)) {
           setWorkerId(convWorker);
         }
         const convVault = (data.vault_db_path || '').trim();
@@ -703,26 +710,6 @@ export function useAdminChat({
         id?.trim()
       );
       const chartsFromFly = (streamVisual.fly_charts_b64 ?? []).filter((b) => b?.trim());
-      // #region agent log
-      fetch('http://127.0.0.1:7725/ingest/46cb6268-ab17-4b27-a8c7-6a3ffadc13b9', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '480705' },
-        body: JSON.stringify({
-          sessionId: '480705',
-          location: 'useAdminChat.ts:flyCharts',
-          message: 'building image previews',
-          data: {
-            tenantForArtifact,
-            artifactIdsFromFly,
-            chartNamesFromStream,
-            chartsFromFlyCount: chartsFromFly.length,
-          },
-          hypothesisId: 'B',
-          runId: 'pre-fix',
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (artifactIdsFromFly.length > 0) {
         assistantPreviews = artifactIdsFromFly.flatMap((aid, i) =>
           artifactImagePreview(tenantForArtifact, aid).map((p) => ({

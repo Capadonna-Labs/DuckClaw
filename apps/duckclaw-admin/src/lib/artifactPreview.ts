@@ -2,7 +2,9 @@
 
 export function parseArtifactIdFromPath(filePath?: string | null): string | null {
   if (!filePath?.trim()) return null;
-  const m = filePath.trim().match(/artifacts[/\\]([0-9a-f-]{36})\.(png|jpe?g|webp)$/i);
+  const m = filePath
+    .trim()
+    .match(/artifacts[/\\](?:fal_)?([0-9a-f-]{36})\.(png|jpe?g|webp)$/i);
   return m ? m[1] : null;
 }
 

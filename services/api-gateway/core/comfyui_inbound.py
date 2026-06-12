@@ -1,9 +1,11 @@
-"""Inbound Telegram → edición ComfyUI (img2img) sin MLX-Vision."""
+"""Inbound Telegram / Admin UI → edición visual (img2img) sin MLX-Vision."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,36 @@ from typing import Any
 from core.telegram_media_download import download_telegram_file_bytes
 
 _log = logging.getLogger("duckclaw.gateway.comfyui_inbound")
+
+_DEBUG_LOG_BASENAMES = ("debug-480705.log",)
+
+
+def _agent_debug_log(*, hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    # region agent log
+    payload = {
+        "sessionId": "480705",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    roots: list[Path] = []
+    for key in ("CAPADONNA_DRILLER_ROOT", "DUCKCLAW_REPO_ROOT"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            roots.append(Path(raw).expanduser())
+    roots.append(Path.cwd())
+    for root in roots:
+        for name in _DEBUG_LOG_BASENAMES:
+            try:
+                path = (root / name).resolve()
+                with path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                return
+            except OSError:
+                continue
+    # endregion
 
 COMFYUI_EDIT_TAG = "[COMFYUI_EDIT"
 
@@ -22,6 +54,53 @@ def comfyui_inbound_edit_enabled() -> bool:
         "yes",
         "on",
     )
+
+
+def should_route_admin_playground_edit(
+    *,
+    caption: str,
+    image_count: int,
+) -> bool:
+    """Admin UI: una imagen + caption = intención de edición (Fal/Comfy img2img)."""
+    if image_count != 1:
+        return False
+    return bool((caption or "").strip())
+
+
+def ingest_admin_visual_edit_inbound(
+    *,
+    image_bytes: bytes,
+    caption: str,
+    tenant_id: str,
+    mime_type: str = "image/jpeg",
+) -> str:
+    """Guarda imagen del playground admin en inbound/ e inyecta [COMFYUI_EDIT]."""
+    from core.vlm_ingest import _validate_image_bytes
+
+    mt = _validate_image_bytes(mime_type, image_bytes)
+    out_path = save_inbound_bytes_for_tenant(
+        image_bytes,
+        tenant_id,
+        mime_type=mt,
+    )
+    _log.info(
+        "admin_inbound_edit saved tenant=%s path=%s bytes=%s",
+        tenant_id,
+        out_path,
+        len(image_bytes),
+    )
+    _agent_debug_log(
+        hypothesis_id="H1",
+        location="comfyui_inbound.py:ingest_admin_visual_edit_inbound",
+        message="admin_edit_inbound_saved",
+        data={
+            "tenant_id": tenant_id,
+            "path": str(out_path),
+            "bytes": len(image_bytes),
+            "caption_len": len((caption or "").strip()),
+        },
+    )
+    return build_comfyui_edit_manager_text(str(out_path.resolve()), caption)
 
 
 def should_route_comfyui_edit(

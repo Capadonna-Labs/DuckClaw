@@ -38,6 +38,20 @@ def _open_vault(vault_path: str, *, read_only: bool = True) -> Any:
     return _open_playground_vault_db(vault_path, read_only=read_only)
 
 
+def _html_from_custom_report_rows(rows: Any) -> str | None:
+    if not rows:
+        return None
+    row = rows[0]
+    if isinstance(row, dict):
+        html = row.get("html_content")
+    elif isinstance(row, (list, tuple)) and row:
+        html = row[0]
+    else:
+        return None
+    text = str(html or "").strip()
+    return text or None
+
+
 @router.get("/reports/llm-usage/summary", dependencies=[Depends(_require_admin_key)])
 async def llm_usage_summary(days: int = Query(7, ge=1, le=90)):
     from routers.admin import _overview_usage_metrics
@@ -71,23 +85,54 @@ async def get_rendered_report(
 
     try:
         try:
-            rows = db.query(
+            rows = db.execute(
                 "SELECT html_content FROM main.custom_reports WHERE report_id = ?",
                 [rid],
-            ).fetchall()
-        except Exception:
+            )
+        except Exception as table_exc:
+            # region agent log
+            try:
+                from core.reports_debug import reports_debug_log
+
+                reports_debug_log(
+                    hypothesis_id="H5",
+                    location="reports.py:get_rendered_report",
+                    message="custom_reports_query_failed",
+                    data={"report_id": rid, "vault": vp[-120:], "error": str(table_exc)[:200]},
+                )
+            except Exception:
+                pass
+            # endregion
             return HTMLResponse(content=_PLACEHOLDER_HTML, headers={"Content-Security-Policy": _CSP})
+        # region agent log
+        try:
+            from core.reports_debug import reports_debug_log
+
+            html_preview = _html_from_custom_report_rows(rows)
+            reports_debug_log(
+                hypothesis_id="H10",
+                location="reports.py:get_rendered_report",
+                message="report_fetch",
+                data={
+                    "report_id": rid,
+                    "vault": vp[-120:],
+                    "row_count": len(rows or []),
+                    "html_len": len(html_preview or ""),
+                    "placeholder": not html_preview,
+                },
+            )
+        except Exception:
+            pass
+        # endregion
     finally:
         try:
             db.close()
         except Exception:
             pass
 
-    if not rows:
+    html = _html_from_custom_report_rows(rows)
+    if not html:
         return HTMLResponse(content=_PLACEHOLDER_HTML, headers={"Content-Security-Policy": _CSP})
-
-    row = rows[0] if isinstance(rows[0], dict) else {}
-    html = str(row.get("html_content") or _PLACEHOLDER_HTML)
     return HTMLResponse(content=html, headers={"Content-Security-Policy": _CSP})
 
 

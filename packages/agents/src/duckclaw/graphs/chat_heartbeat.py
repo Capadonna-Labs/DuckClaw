@@ -283,6 +283,21 @@ def _admin_heartbeat_kind(text: str, *, log_plan_title: str | None = None) -> st
     return "status"
 
 
+def admin_report_chat_id(chat_id: str | None) -> str:
+    """Normaliza chat_id de consola admin (p. ej. email (admin-conv-…)) → report_id."""
+    cid = str(chat_id or "").strip()
+    if not cid:
+        return ""
+    import re
+
+    m = re.search(r"(admin-conv-[a-f0-9]+)", cid, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    if cid.startswith("admin-conv-"):
+        return cid.split()[0]
+    return cid
+
+
 def is_admin_ui_chat_session(chat_id: str | None) -> bool:
     """Sesiones de la consola admin (SSE); sin egress a Bot API / Telegram."""
     cid = str(chat_id or "").strip()
@@ -290,11 +305,13 @@ def is_admin_ui_chat_session(chat_id: str | None) -> bool:
         return False
     if cid in ("admin-playground",):
         return True
-    return (
+    if (
         cid.startswith("admin-section-")
         or cid.startswith("admin-ui")
         or cid.startswith("admin-conv-")
-    )
+    ):
+        return True
+    return "admin-conv-" in cid
 
 
 def is_chat_heartbeat_enabled(tenant_id: str, chat_id: str) -> bool:

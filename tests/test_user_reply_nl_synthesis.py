@@ -8,6 +8,42 @@ from duckclaw.forge.atoms import user_reply_nl_synthesis as mod
 from duckclaw.workers.manifest import load_manifest
 
 
+def test_admin_reply_already_polished() -> None:
+    short = "## Título\n- item"
+    assert mod.admin_reply_already_polished(short) is False
+    long_md = (
+        "## ❌ Falla del CD\n\n"
+        "El pipeline falló por **Ruff**.\n\n"
+        "**Siguientes pasos**\n"
+        "1. Revisar el commit.\n"
+        "2. Ejecutar el pipeline nuevamente.\n"
+    )
+    assert mod.admin_reply_already_polished(long_md) is True
+
+
+def test_maybe_synthesize_skips_polished_admin_reply() -> None:
+    llm = MagicMock()
+    spec = MagicMock()
+    spec.egress_natural_language_synthesis = True
+    spec.worker_id = "quant-trader"
+    polished = (
+        "## ❌ Falla del CD\n\n"
+        "El pipeline de **Continuous Delivery** ha fallado.\n\n"
+        "**Siguientes pasos**\n"
+        "1. Revisar el commit una vez aplicado.\n"
+        "2. Ejecutar el pipeline nuevamente para validar el fix.\n"
+    )
+    out = mod.maybe_synthesize_reply(
+        llm,
+        spec=spec,
+        user_ask="CD falló",
+        reply_candidate=polished,
+        for_admin_console=True,
+    )
+    assert out == polished
+    llm.invoke.assert_not_called()
+
+
 def test_reply_needs_nl_synthesis() -> None:
     assert mod.reply_needs_nl_synthesis('{"a": 1}') is True
     assert mod.reply_needs_nl_synthesis("[1,2]") is True

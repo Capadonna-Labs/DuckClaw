@@ -19,28 +19,6 @@ from urllib.parse import parse_qs, urlparse
 
 _log = logging.getLogger(__name__)
 
-
-# #region agent log
-def _debug_e2e_log(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-    try:
-        root = os.environ.get("DUCKCLAW_REPO_ROOT") or str(Path(__file__).resolve().parents[4])
-        log_path = Path(root) / "debug-97f3cb.log"
-        payload = {
-            "sessionId": "97f3cb",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with log_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-# #endregion
-
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -816,14 +794,6 @@ def _github_resolve_owner_repo() -> tuple[str, str]:
                         repo = m.group(2)
         except Exception:
             pass
-    # #region agent log
-    _debug_e2e_log(
-        "H2",
-        "factory.py:_github_resolve_owner_repo",
-        "resolved owner/repo",
-        {"owner": owner, "repo": repo, "owner_from_env": bool(os.environ.get("GITHUB_OWNER") or os.environ.get("DUCKCLAW_GITHUB_OWNER"))},
-    )
-    # #endregion
     return owner, repo
 
 
@@ -884,29 +854,12 @@ def _quant_user_requests_backtest_validation(text: str) -> bool:
 
 def _github_pr_workflow_guardrail_text(spec: Any) -> str:
     wdir = getattr(spec, "worker_dir", None) if spec is not None else None
-    source = "optional"
     if wdir:
         try:
-            text = load_worker_guardrail(wdir, "guardrails/directives/github_pr_workflow.md")
-            source = "worker_dir"
+            return load_worker_guardrail(wdir, "guardrails/directives/github_pr_workflow.md")
         except FileNotFoundError:
-            text = load_guardrail_optional("directives", "github_pr_workflow", default="")
-    else:
-        text = load_guardrail_optional("directives", "github_pr_workflow", default="")
-    # #region agent log
-    _debug_e2e_log(
-        "H3",
-        "factory.py:_github_pr_workflow_guardrail_text",
-        "guardrail resolved",
-        {
-            "worker_dir": str(wdir or ""),
-            "source": source,
-            "text_len": len(text),
-            "has_directiva": "DIRECTIVA_GITHUB_PR" in text,
-        },
-    )
-    # #endregion
-    return text
+            pass
+    return load_guardrail_optional("directives", "github_pr_workflow", default="")
 
 
 def _github_tool_message_fields(msg: Any) -> tuple[str, str] | None:
@@ -1228,14 +1181,6 @@ def _github_try_deterministic_pr_workflow(
     if not _github_pr_workflow_resolved_intent(msgs, incoming):
         return None
     owner, repo = _github_resolve_owner_repo()
-    # #region agent log
-    _debug_e2e_log(
-        "H4",
-        "factory.py:_github_try_deterministic_pr_workflow",
-        "PR pipeline entered",
-        {"owner": owner, "repo": repo, "incoming_preview": str(incoming or "")[:120], "has_owner": bool(owner)},
-    )
-    # #endregion
     lh = _quant_last_human_index(msgs)
 
     if already_has_tool_result and last_msg is not None:
@@ -3151,7 +3096,13 @@ def _quant_trader_reddit_history_anchor_intent(incoming: str, messages: list[Any
     )
 
 
-_VISUAL_IMAGE_TOOL_NAMES = frozenset({"generate_visual_asset", "generate_flux_image"})
+_VISUAL_IMAGE_TOOL_NAMES = frozenset(
+    {"generate_visual_asset", "generate_flux_image", "edit_visual_asset"}
+)
+_COMFYUI_EDIT_PATH_RE = re.compile(
+    r"\[COMFYUI_EDIT\s+source_image_path=([^\]]+)\]",
+    re.IGNORECASE,
+)
 
 
 def _resolve_quant_image_tool(tools_by_name: dict[str, Any]) -> str | None:
@@ -3250,6 +3201,66 @@ def _quant_visual_prompt_from_incoming(incoming: str) -> str:
     return s[:500]
 
 
+def _parse_comfyui_edit_inbound(incoming: str) -> dict[str, str] | None:
+    """Extrae ruta fuente y prompt de edición del bloque [COMFYUI_EDIT ...] (Admin/Telegram)."""
+    s = (incoming or "").strip()
+    if "[COMFYUI_EDIT" not in s:
+        return None
+    m = _COMFYUI_EDIT_PATH_RE.search(s)
+    if not m:
+        return None
+    source_path = m.group(1).strip()
+    if not source_path:
+        return None
+    cap_m = re.search(r"Instrucciones:\s*«([^»]+)»", s)
+    edit_prompt = cap_m.group(1).strip() if cap_m else ""
+    if not edit_prompt:
+        for line in s.splitlines():
+            low = line.lower()
+            if low.startswith("usuario dice:"):
+                edit_prompt = line.split(":", 1)[-1].strip()
+                break
+    if not edit_prompt:
+        edit_prompt = s[:500]
+    return {"source_image_path": source_path, "edit_prompt": edit_prompt[:500]}
+
+
+def _quant_trader_visual_edit_intent(incoming: str) -> bool:
+    """Pedido de edición img2img (inbound ComfyUI/Fal) en Quant-Trader."""
+    return _parse_comfyui_edit_inbound(incoming) is not None
+
+
+def _rewrite_ephemeral_fal_media_urls(reply: str, messages: list[Any]) -> str:
+    """Sustituye enlaces fal.media (CDN efímero) por ruta local del artefacto persistido."""
+    text = reply or ""
+    if "fal.media" not in text:
+        return text
+    try:
+        from langchain_core.messages import ToolMessage
+    except ImportError:
+        return text
+    artifact_path = ""
+    for msg in reversed(messages or []):
+        if not isinstance(msg, ToolMessage):
+            continue
+        if (getattr(msg, "name", "") or "") not in _VISUAL_IMAGE_TOOL_NAMES:
+            continue
+        try:
+            payload = json.loads(str(msg.content or ""))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            continue
+        fp = str(payload.get("file_path") or "").strip()
+        if fp:
+            artifact_path = fp
+            break
+    if not artifact_path:
+        return re.sub(r"https?://[^\s)\]]*fal\.media[^\s)\]]*", "", text)
+    rel = artifact_path
+    if "/artifacts/" in artifact_path:
+        rel = "artifacts/" + artifact_path.split("/artifacts/", 1)[-1]
+    return re.sub(r"https?://[^\s)\]]*fal\.media[^\s)\]]*", rel, text)
 
 
 def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -> str:
@@ -4194,6 +4205,7 @@ def build_worker_graph(
                 tools,
                 _fal_cfg if isinstance(_fal_cfg, dict) else {},
                 duckclaw_db=db,
+                comfyui_config=getattr(spec, "comfyui_config", None),
             )
             tools_by_name = {t.name: t for t in tools}
         except Exception:
@@ -4246,6 +4258,27 @@ def build_worker_graph(
         tools_by_name = {t.name: t for t in tools}
     except Exception:
         _log.debug("meditate skill registration skipped", exc_info=True)
+
+    try:
+        _skills_reports = frozenset(
+            {"publish_custom_report", "update_custom_report_title", "read_llm_usage_summary"}
+        )
+        _manifest_has_reports = any(s in skills_list for s in _skills_reports)
+        _force_publish_reports = False
+        try:
+            from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session as _is_admin_ui_reports
+
+            if _is_admin_ui_reports(str(chat_id or "")):
+                _force_publish_reports = True
+        except Exception:
+            pass
+        if _manifest_has_reports or _force_publish_reports:
+            from duckclaw.forge.skills.custom_reports_bridge import register_custom_reports_skill
+
+            register_custom_reports_skill(tools, db, spec, force_publish=_force_publish_reports)
+        tools_by_name = {t.name: t for t in tools}
+    except Exception:
+        _log.debug("custom reports skill registration skipped", exc_info=True)
 
     # Strix Sandbox: `run_sandbox` si hay security_policy.yaml; `run_browser_sandbox` si browser_sandbox en manifest.
     try:
@@ -4602,6 +4635,24 @@ def build_worker_graph(
         llm_force_generate_visual_off = (
             _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_generate_visual)
             if _primary_visual_tool_sandbox_off and tool_choice_generate_visual
+            else None
+        )
+
+        has_edit_visual = "edit_visual_asset" in tools_by_name
+        tool_choice_edit_visual = (
+            {"type": "function", "function": {"name": "edit_visual_asset"}}
+            if has_edit_visual
+            else None
+        )
+        has_edit_visual_sandbox_off = "edit_visual_asset" in tools_by_name_sandbox_off
+        llm_force_edit_visual_on = (
+            _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_edit_visual)
+            if has_edit_visual and tool_choice_edit_visual
+            else None
+        )
+        llm_force_edit_visual_off = (
+            _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_edit_visual)
+            if has_edit_visual_sandbox_off and tool_choice_edit_visual
             else None
         )
 
@@ -5090,6 +5141,17 @@ def build_worker_graph(
             )
             if _quant_wants_cancel:
                 is_portfolio = False
+            _is_admin_reports_title_only = False
+            try:
+                from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session as _iau_title_sess
+                from duckclaw.forge.skills.custom_reports_bridge import admin_reports_title_only_intent
+
+                if _iau_title_sess(str(state.get("chat_id") or state.get("session_id") or "")):
+                    _is_admin_reports_title_only = admin_reports_title_only_intent(_intent_incoming)
+            except Exception:
+                pass
+            if _is_admin_reports_title_only:
+                is_portfolio = False
             force_finanz_cuentas = (
                 is_finanz(_lid)
                 and has_read_sql
@@ -5149,6 +5211,95 @@ def build_worker_graph(
             if _gh_early_out is not None:
                 return _gh_early_out
 
+            # Admin Reportes — solo título: forzar update_custom_report_title (evita clock_anchor → get_current_time).
+            try:
+                from duckclaw.graphs.chat_heartbeat import (
+                    admin_report_chat_id,
+                    is_admin_ui_chat_session as _iau_det_title,
+                )
+                from duckclaw.forge.skills.custom_reports_bridge import (
+                    admin_reports_title_only_intent as _arto_det,
+                    extract_report_title_from_intent,
+                )
+
+                _cid_raw = str(state.get("chat_id") or state.get("session_id") or "").strip()
+                _cid_det = admin_report_chat_id(_cid_raw) or _cid_raw
+                _title_intent_in = (_intent_incoming or incoming or "").strip()
+                _title_only_turn = bool(_iau_det_title(_cid_raw) and _arto_det(_title_intent_in))
+                if _title_only_turn:
+                    _lh_title = _quant_last_human_index(state.get("messages") or [])
+                    _title_already = _quant_tool_called_since(
+                        state.get("messages") or [], _lh_title, "update_custom_report_title"
+                    )
+                    _new_title = extract_report_title_from_intent(_title_intent_in) or extract_report_title_from_intent(
+                        incoming
+                    )
+                    _has_title_tool = "update_custom_report_title" in tools_by_name
+                    _log.info(
+                        "[%s] admin title-only turn report_id=%s has_tool=%s title_ok=%s already=%s",
+                        _wl,
+                        _cid_det[:48],
+                        _has_title_tool,
+                        bool(_new_title),
+                        _title_already,
+                    )
+                    if _new_title and _cid_det and not _title_already:
+                        if _has_title_tool:
+                            _forced_tid_title = f"call_admin_report_title_{int(time.time() * 1000)}"
+                            _forced_tc_title = [
+                                {
+                                    "name": "update_custom_report_title",
+                                    "args": {"report_id": _cid_det, "title": _new_title},
+                                    "id": _forced_tid_title,
+                                    "type": "tool_call",
+                                }
+                            ]
+                            _log.info(
+                                "[%s] admin deterministic update_custom_report_title report_id=%s title=%r",
+                                _wl,
+                                _cid_det[:48],
+                                _new_title[:80],
+                            )
+                            _out_title = {
+                                **state,
+                                "messages": state["messages"]
+                                + [AIMessage(content="", tool_calls=_forced_tc_title)],
+                            }
+                            _out_title.update(_identity_fields(state))
+                            return _out_title
+                        try:
+                            from duckclaw.forge.skills.custom_reports_bridge import (
+                                _update_custom_report_title_impl,
+                            )
+
+                            _raw_title = _update_custom_report_title_impl(
+                                db,
+                                report_id=_cid_det,
+                                title=_new_title,
+                            )
+                            _forced_tid_title = f"call_admin_report_title_direct_{int(time.time() * 1000)}"
+                            _tm_title = ToolMessage(
+                                content=_raw_title,
+                                name="update_custom_report_title",
+                                tool_call_id=_forced_tid_title,
+                            )
+                            _log.info(
+                                "[%s] admin direct update_custom_report_title (tool missing from bind) report_id=%s",
+                                _wl,
+                                _cid_det[:48],
+                            )
+                            _out_title = {**state, "messages": state["messages"] + [_tm_title]}
+                            _out_title.update(_identity_fields(state))
+                            return _out_title
+                        except Exception as _dir_title_exc:
+                            _log.warning(
+                                "[%s] admin direct title update failed: %s",
+                                _wl,
+                                _dir_title_exc,
+                            )
+            except Exception as _title_det_exc:
+                _log.warning("[%s] admin title-only deterministic block error: %s", _wl, _title_det_exc)
+
             _orch = None
             _orch_forced: str | None = None
             try:
@@ -5176,10 +5327,14 @@ def build_worker_graph(
                 force_finanz_db_validation = False
                 force_finanz_admin_sql = False
 
+            _skip_orch_gct_for_title = bool(
+                _is_admin_reports_title_only and "update_custom_report_title" in tools_by_name
+            )
             if (
                 _orch_forced == "get_current_time"
                 and "get_current_time" in tools_by_name
                 and not telegram_context_summarize_directive
+                and not _skip_orch_gct_for_title
             ):
                 _lh_orch_gct = _quant_last_human_index(state.get("messages") or [])
                 if not _quant_tool_called_since(
@@ -5372,10 +5527,30 @@ def build_worker_graph(
                 and _is_visual_image_tool_message(last_msg)
                 and '"ok":true' in str(last_msg.content or "").replace(" ", "")
             )
+            _comfyui_edit_parsed = _parse_comfyui_edit_inbound(incoming)
+            force_edit_visual = bool(
+                is_quant_trader(_lid)
+                and has_edit_visual
+                and _comfyui_edit_parsed
+                and not telegram_context_summarize_directive
+                and not summarize_stored_directive
+                and _visual_calls_this_turn == 0
+                and not already_has_tool_result
+                and not _visual_tool_already_ok
+                and not (
+                    force_schema
+                    or force_admin_sql
+                    or force_read_sql
+                    or force_portfolio
+                    or force_fmp
+                    or force_tavily
+                )
+            )
             force_visual = bool(
                 is_quant_trader(_lid)
                 and has_generate_visual
                 and _quant_trader_visual_generation_intent(incoming)
+                and not _quant_trader_visual_edit_intent(incoming)
                 and not telegram_context_summarize_directive
                 and not summarize_stored_directive
                 and _visual_calls_this_turn == 0
@@ -5419,7 +5594,10 @@ def build_worker_graph(
             if (
                 _visual_tool_already_ok
                 and is_quant_trader(_lid)
-                and _quant_trader_visual_generation_intent(incoming)
+                and (
+                    _quant_trader_visual_generation_intent(incoming)
+                    or _quant_trader_visual_edit_intent(incoming)
+                )
             ):
                 caption = "Imagen generada."
                 try:
@@ -6268,6 +6446,70 @@ def build_worker_graph(
                     return _out_url
 
             if (
+                force_edit_visual
+                and has_edit_visual
+                and _comfyui_edit_parsed
+                and not already_has_tool_result
+                and not _visual_tool_already_ok
+            ):
+                _edit_args = {
+                    "source_image_path": _comfyui_edit_parsed["source_image_path"],
+                    "edit_prompt": _comfyui_edit_parsed["edit_prompt"],
+                }
+                _forced_tid = f"call_edit_visual_asset_{int(time.time() * 1000)}"
+                _forced_tc = [
+                    {
+                        "name": "edit_visual_asset",
+                        "args": _edit_args,
+                        "id": _forced_tid,
+                        "type": "tool_call",
+                    }
+                ]
+                _log.info(
+                    "[%s] quant deterministic edit → edit_visual_asset path=%r prompt=%r",
+                    _wl,
+                    _edit_args["source_image_path"][:80],
+                    _edit_args["edit_prompt"][:80],
+                )
+                # region agent log
+                try:
+                    from pathlib import Path as _DbgPath
+
+                    _dbg_roots = [
+                        (os.environ.get("CAPADONNA_DRILLER_ROOT") or "").strip(),
+                        (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip(),
+                    ]
+                    _dbg_payload = {
+                        "sessionId": "480705",
+                        "runId": "post-fix",
+                        "hypothesisId": "H2-force-edit",
+                        "location": "factory.py:force_edit_visual",
+                        "message": "deterministic edit_visual_asset",
+                        "data": {
+                            "source_image_path": _edit_args["source_image_path"][:120],
+                            "edit_prompt_len": len(_edit_args["edit_prompt"]),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                    for _dr in _dbg_roots:
+                        if not _dr:
+                            continue
+                        try:
+                            (_DbgPath(_dr) / "debug-480705.log").open("a", encoding="utf-8").write(
+                                json.dumps(_dbg_payload, ensure_ascii=False) + "\n"
+                            )
+                            break
+                        except OSError:
+                            continue
+                except Exception:
+                    pass
+                # endregion
+                _forced_resp = AIMessage(content="", tool_calls=_forced_tc)
+                _out_edit = {**state, "messages": state["messages"] + [_forced_resp]}
+                _out_edit.update(_identity_fields(state))
+                return _out_edit
+
+            if (
                 force_visual
                 and has_generate_visual
                 and _primary_visual_tool
@@ -6468,20 +6710,45 @@ def build_worker_graph(
                             )
                         )
                     ] + _msg_list
+            try:
+                from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session as _admin_ui_for_reports
+                from duckclaw.forge.skills.custom_reports_bridge import (
+                    admin_reports_publish_intent,
+                    admin_reports_title_only_intent,
+                )
+
+                _cid_reports = str(state.get("chat_id") or state.get("session_id") or "")
+                if (
+                    _admin_ui_for_reports(_cid_reports)
+                    and admin_reports_publish_intent(incoming)
+                    and (
+                        "publish_custom_report" in tools_by_name
+                        or "update_custom_report_title" in tools_by_name
+                    )
+                ):
+                    if admin_reports_title_only_intent(incoming):
+                        _ar_directive = (
+                            "ADMIN_REPORTES — SOLO TÍTULO (INNEGOCIABLE): "
+                            f"Llama ÚNICAMENTE `update_custom_report_title(report_id={_cid_reports!r}, title=...)`. "
+                            "PROHIBIDO en este turno: get_ibkr_portfolio, publish_custom_report, regenerar HTML, "
+                            "o leer/pegar html_content. La tool conserva el dashboard existente y actualiza "
+                            "title en DB + <title>/<h1> del documento."
+                        )
+                    else:
+                        _ar_directive = (
+                            "ADMIN_REPORTES (INNEGOCIABLE): tienes escritura en main.custom_reports "
+                            "vía tools (NO uses INSERT/UPDATE SQL — el worker es read_only para SQL). "
+                            f"- Nuevo dashboard: `publish_custom_report(report_id={_cid_reports!r}, "
+                            "html_content=..., title=...). "
+                            f"- Solo cambiar título: `update_custom_report_title(report_id={_cid_reports!r}, title=...)`. "
+                            "Si el usuario pide SOLO título, no regeneres HTML ni llames get_ibkr_portfolio. "
+                            "Prohibido pegar el HTML completo en el chat; el admin lo ve en el iframe."
+                        )
+                    _msg_list = [SystemMessage(content=_ar_directive)] + _msg_list
+            except Exception as _ar_err:
+                _log.debug("ADMIN_REPORTES directive skipped: %s", _ar_err)
             if _github_pr_workflow_intent:
                 _gh_pr_directive = _github_pr_workflow_guardrail_text(spec)
-                # #region agent log
-                _debug_e2e_log(
-                    "H4",
-                    "factory.py:worker_invoke",
-                    "github PR workflow intent",
-                    {
-                        "worker": _lid,
-                        "directive_len": len(_gh_pr_directive),
-                        "worker_dir": str(getattr(spec, "worker_dir", "") or ""),
-                    },
-                )
-                # #endregion
                 if _gh_pr_directive.strip():
                     _msg_list = [SystemMessage(content=_gh_pr_directive)] + _msg_list
                 if (
@@ -6521,7 +6788,11 @@ def build_worker_graph(
                 _msg_list = [
                     SystemMessage(content=load_guardrail("directives", "reddit_share_exhausted"))
                 ] + _msg_list
-            if is_quant_trader(_lid) and _visual_tool_already_ok:
+            if (
+                is_quant_trader(_lid)
+                and _visual_tool_already_ok
+                and not _quant_trader_visual_edit_intent(incoming)
+            ):
                 _done_tool = _primary_visual_tool or "generate_visual_asset"
                 _msg_list = [
                     SystemMessage(
@@ -6606,6 +6877,9 @@ def build_worker_graph(
             elif force_tavily:
                 _ft = llm_force_tavily_on if sandbox_enabled else llm_force_tavily_off
                 _invoked_llm = _ft or llm_with_tools
+            elif force_edit_visual:
+                _fev = llm_force_edit_visual_on if sandbox_enabled else llm_force_edit_visual_off
+                _invoked_llm = _fev or llm_with_tools
             elif force_visual:
                 _fgv = llm_force_generate_visual_on if sandbox_enabled else llm_force_generate_visual_off
                 _invoked_llm = _fgv or llm_with_tools
@@ -7378,6 +7652,42 @@ def build_worker_graph(
                                 vnc_url=_vnc_pre,
                                 novnc_session_id=_sid or "",
                             )
+                        if name in (
+                            "propose_trade_signal",
+                            "propose_trade",
+                            "propose_code_change",
+                        ):
+                            try:
+                                from duckclaw.capadonna_plugin import load_capadonna_lib
+
+                                _eph = load_capadonna_lib("epistemic_humility_bridge")
+                                if _eph is not None and db is not None:
+                                    _st_args = invoke_args if isinstance(invoke_args, dict) else {}
+                                    _sig_type = str(
+                                        _st_args.get("signal_type") or ""
+                                    ).strip().upper()
+                                    _trade_act = str(_st_args.get("action") or "").strip().upper()
+                                    _block = _eph.has_active_uncertainty(db)
+                                    if _block and not (
+                                        name == "propose_trade_signal" and _sig_type == "EXIT"
+                                    ):
+                                        if name == "propose_trade" and _trade_act == "HOLD":
+                                            _block = False
+                                        if _block:
+                                            content = json.dumps(
+                                                _eph.epistemic_block_payload(),
+                                                ensure_ascii=False,
+                                            )
+                                            new_msgs.append(
+                                                ToolMessage(
+                                                    content=content,
+                                                    tool_call_id=tid,
+                                                    name=name,
+                                                )
+                                            )
+                                            continue
+                            except Exception:
+                                pass
                         _schedule_tool_heartbeat(name)
                         if (
                             name == "run_sandbox"
@@ -7420,9 +7730,14 @@ def build_worker_graph(
                                             _cid = str(state.get("chat_id") or "").strip()
                                             if _cid and is_admin_ui_chat_session(_cid) and _qtc is not None:
                                                 _hb_tid = _qtc.get_quant_tool_tenant_id()
+                                                _hb_label = (
+                                                    "Imagen editada"
+                                                    if name == "edit_visual_asset"
+                                                    else "Imagen generada"
+                                                )
                                                 publish_admin_chat_heartbeat(
                                                     _cid,
-                                                    "Imagen generada (ComfyUI)",
+                                                    _hb_label,
                                                     kind="visual",
                                                     artifact_id=aid,
                                                     artifact_tenant_id=_hb_tid,
@@ -7937,6 +8252,19 @@ def build_worker_graph(
         except Exception:
             pass
         try:
+            if _is_admin_ui_reply:
+                from duckclaw.forge.skills.custom_reports_bridge import auto_publish_html_from_admin_reply
+
+                reply, _auto_pub = auto_publish_html_from_admin_reply(
+                    reply or "",
+                    chat_id=_cid_reply,
+                    db=db,
+                    messages=list(msgs) if msgs else None,
+                    incoming=_inc_for_ctx or "",
+                )
+        except Exception:
+            pass
+        try:
             reply = maybe_enrich_admin_display_reply(
                 llm,
                 spec=spec,
@@ -7946,6 +8274,7 @@ def build_worker_graph(
             )
         except Exception:
             pass
+        reply = _rewrite_ephemeral_fal_media_urls(reply or "", list(msgs) if msgs else [])
         reply = sanitize_worker_reply_text(reply or "")
         if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) and msgs:
             _spec_lid_fb = _spec_logical_worker_id(spec)

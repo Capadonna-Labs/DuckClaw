@@ -171,9 +171,11 @@ export default function TokenUsageChart({ initial }: Props) {
                 className="text-gov-gray-500 dark:text-dark-muted"
               />
               <Tooltip
-                formatter={(value: number, name: string) =>
-                  name === 'USD' ? formatUsd(value) : formatTokens(value)
-                }
+                formatter={(value, name) => {
+                  const n = typeof value === 'number' ? value : Number(value ?? 0);
+                  const label = String(name ?? '');
+                  return label === 'USD' ? formatUsd(n) : formatTokens(n);
+                }}
                 contentStyle={{
                   backgroundColor: '#1e293b',
                   border: '1px solid #334155',

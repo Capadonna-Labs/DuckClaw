@@ -1,5 +1,5 @@
 import { existsSync } from 'fs';
-import { appendFile, readFile } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { repoRoot } from '@/lib/localOps';
 
@@ -20,31 +20,6 @@ const MIME: Record<string, string> = {
   webp: 'image/webp',
 };
 
-async function agentDebugLog(
-  location: string,
-  message: string,
-  data: Record<string, unknown>,
-  hypothesisId: string
-): Promise<void> {
-  // #region agent log
-  try {
-    const logPath = resolve(resolveProductDbRoot(), 'debug-480705.log');
-    const payload = {
-      sessionId: '480705',
-      timestamp: Date.now(),
-      location,
-      message,
-      data,
-      hypothesisId,
-      runId: 'pre-fix',
-    };
-    await appendFile(logPath, `${JSON.stringify(payload)}\n`, 'utf8');
-  } catch {
-    /* noop */
-  }
-  // #endregion
-}
-
 export async function readTenantArtifact(
   tenantId: string,
   artifactId: string
@@ -60,44 +35,63 @@ export async function readTenantArtifact(
     return null;
   }
 
-  for (const ext of ['png', 'webp', 'jpg', 'jpeg'] as const) {
-    const candidate = join(artifactsDir, `${aid}.${ext}`);
+  const basenameCandidates: string[] = [];
+  for (const prefix of ['', 'fal_'] as const) {
+    for (const ext of ['png', 'webp', 'jpg', 'jpeg'] as const) {
+      basenameCandidates.push(`${prefix}${aid}.${ext}`);
+    }
+  }
+
+  for (const basename of basenameCandidates) {
+    const candidate = join(artifactsDir, basename);
     const resolved = resolve(candidate);
     if (resolved !== artifactsDir && !resolved.startsWith(`${artifactsDir}/`)) {
       continue;
     }
     if (!existsSync(resolved)) continue;
     const bytes = await readFile(resolved);
+    const ext = basename.split('.').pop()?.toLowerCase() || 'png';
     // #region agent log
-    await agentDebugLog(
-      'artifactPreviewServer.ts:readTenantArtifact',
-      'artifact found',
-      {
-        tenantId: tid,
-        artifactId: aid,
-        productRoot,
-        resolvedPath: resolved,
-        byteLength: bytes.length,
-      },
-      'A'
-    );
+    try {
+      const { appendFileSync } = await import('fs');
+      const logPath = join(productRoot, 'debug-480705.log');
+      appendFileSync(
+        logPath,
+        `${JSON.stringify({
+          sessionId: '480705',
+          runId: 'post-fix',
+          hypothesisId: 'H1-fal-prefix',
+          location: 'artifactPreviewServer.ts:readTenantArtifact',
+          message: 'artifact resolved',
+          data: { tenantId: tid, artifactId: aid, resolvedBasename: basename },
+          timestamp: Date.now(),
+        })}\n`
+      );
+    } catch {
+      /* debug log optional */
+    }
     // #endregion
     return { bytes, contentType: MIME[ext] || 'application/octet-stream' };
   }
   // #region agent log
-  await agentDebugLog(
-    'artifactPreviewServer.ts:readTenantArtifact',
-    'artifact not found',
-    {
-      tenantId: tid,
-      artifactId: aid,
-      productRoot,
-      artifactsDir,
-      repoRootEnv: process.env.DUCKCLAW_REPO_ROOT ?? null,
-      capadonnaRootEnv: process.env.CAPADONNA_DRILLER_ROOT ?? null,
-    },
-    'A'
-  );
+  try {
+    const { appendFileSync } = await import('fs');
+    const logPath = join(productRoot, 'debug-480705.log');
+    appendFileSync(
+      logPath,
+      `${JSON.stringify({
+        sessionId: '480705',
+        runId: 'post-fix',
+        hypothesisId: 'H1-fal-prefix',
+        location: 'artifactPreviewServer.ts:readTenantArtifact',
+        message: 'artifact not found',
+        data: { tenantId: tid, artifactId: aid, tried: basenameCandidates.length },
+        timestamp: Date.now(),
+      })}\n`
+    );
+  } catch {
+    /* debug log optional */
+  }
   // #endregion
   return null;
 }

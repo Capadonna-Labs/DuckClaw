@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 DEFAULT_FLUX_DEV_ENDPOINT = "fal-ai/flux/dev"
 DEFAULT_FLUX_PRO_ENDPOINT = "fal-ai/flux-pro/v1.1-ultra"
+DEFAULT_FLUX_IMG2IMG_ENDPOINT = "fal-ai/flux/dev/image-to-image"
+DEFAULT_FLUX_KONTEXT_PRO_ENDPOINT = "fal-ai/flux-pro/kontext"
 DEFAULT_KLING_VIDEO_ENDPOINT = "fal-ai/kling-video/v1.6/standard/text-to-video"
 DEFAULT_WAN_ENDPOINT = "fal-ai/wan/v2.2-a14b/text-to-video"
 

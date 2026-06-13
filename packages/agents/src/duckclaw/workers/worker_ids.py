@@ -1,20 +1,23 @@
 """
-Central registry of logical worker IDs.
+Compatibility shim for legacy logical worker IDs.
 
-Gradual extraction: custom workers (finanz, quant_trader, pqrsd_assistant, etc.)
-will move out of the monorepo; only the default worker stays. This module
-centralizes ID literals so hot paths can switch to env/config without scattered
-string comparisons.
+New runtime code should use ``duckclaw.workers.identity`` and DB-backed
+``WorkerRuntimePolicy``. This module remains only to avoid breaking callers
+that still import legacy constants/predicates during the migration.
 
 Override any ID at runtime via ``DUCKCLAW_WORKER_{NAME}`` (e.g.
 ``DUCKCLAW_WORKER_FINANZ=finance_bot``).
 
-See specs/sistema_de_plantillas_de_agentes_virtual_worker_factory.md
+See specs/features/platform/RAG_TRANSVERSAL_DB_FIRST.md
 """
 
 from __future__ import annotations
 
 import os
+import warnings
+
+from duckclaw.workers.identity import is_worker as _identity_is_worker
+from duckclaw.workers.identity import normalize_worker_id as _identity_normalize_worker_id
 
 __all__ = [
     "WORKER_FINANZ",
@@ -51,34 +54,49 @@ MARKET_WORKERS = frozenset({WORKER_FINANZ, WORKER_QUANT_TRADER})
 PLOT_CAPABLE_WORKERS = frozenset({WORKER_SIATA_ANALYST, WORKER_FINANZ})
 
 
+def _warn_legacy_api(name: str) -> None:
+    warnings.warn(
+        f"duckclaw.workers.worker_ids.{name} is deprecated; use duckclaw.workers.identity",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+
 def normalize_worker_id(worker_id: str | None) -> str:
-    return (worker_id or "").strip().lower()
+    _warn_legacy_api("normalize_worker_id")
+    return _identity_normalize_worker_id(worker_id)
 
 
 def is_worker(worker_id: str | None, *expected: str) -> bool:
-    lid = normalize_worker_id(worker_id)
-    return lid in expected
+    _warn_legacy_api("is_worker")
+    return _identity_is_worker(worker_id, *expected)
 
 
 def is_finanz(worker_id: str | None) -> bool:
-    return normalize_worker_id(worker_id) == WORKER_FINANZ
+    _warn_legacy_api("is_finanz")
+    return _identity_is_worker(worker_id, WORKER_FINANZ)
 
 
 def is_market_worker(worker_id: str | None) -> bool:
-    return normalize_worker_id(worker_id) in MARKET_WORKERS
+    _warn_legacy_api("is_market_worker")
+    return _identity_normalize_worker_id(worker_id) in MARKET_WORKERS
 
 
 def is_quant_trader(worker_id: str | None) -> bool:
-    return normalize_worker_id(worker_id) == WORKER_QUANT_TRADER
+    _warn_legacy_api("is_quant_trader")
+    return _identity_is_worker(worker_id, WORKER_QUANT_TRADER)
 
 
 def is_pqrsd_assistant(worker_id: str | None) -> bool:
-    return normalize_worker_id(worker_id) == WORKER_PQRSD_ASSISTANT
+    _warn_legacy_api("is_pqrsd_assistant")
+    return _identity_is_worker(worker_id, WORKER_PQRSD_ASSISTANT)
 
 
 def is_job_hunter(worker_id: str | None) -> bool:
-    return normalize_worker_id(worker_id) == WORKER_JOB_HUNTER
+    _warn_legacy_api("is_job_hunter")
+    return _identity_is_worker(worker_id, WORKER_JOB_HUNTER)
 
 
 def is_siata_analyst(worker_id: str | None) -> bool:
-    return normalize_worker_id(worker_id) == WORKER_SIATA_ANALYST
+    _warn_legacy_api("is_siata_analyst")
+    return _identity_is_worker(worker_id, WORKER_SIATA_ANALYST)

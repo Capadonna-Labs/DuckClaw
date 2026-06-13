@@ -31,6 +31,7 @@ from duckclaw.graphs.proactive_review_markers import proactive_review_event_phra
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_plan, log_sys, set_log_context
 
 from duckclaw.guardrails.loader import format_guardrail, load_guardrail, load_guardrail_task_list
+from duckclaw.prompt_policies import PromptPolicyResolver
 from duckclaw.workers.factory import explicit_duckdb_schema_request
 from duckclaw.graphs.agent_resilience import (
     classify_exception_for_replan,
@@ -47,27 +48,6 @@ _obs = get_obs_logger()
 _worker_graph_cache: dict[str, Any] = {}
 _vault_invoke_guard = threading.Lock()
 _vault_invoke_locks: dict[str, threading.Lock] = {}
-_DEBUG_LOG_PATH = Path("/Users/workstation/Developer/duckclaw/.cursor/debug-ab0734.log")
-
-
-def _agent_debug_log(hypothesis_id: str, message: str, data: dict[str, Any]) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "ab0734",
-            "runId": "downstream-rag-debug",
-            "hypothesisId": hypothesis_id,
-            "location": "packages/agents/src/duckclaw/graphs/manager_graph.py",
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        _DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
-    except Exception:
-        pass
-    # endregion
 
 
 def _vault_lock_key(path: str) -> str:
@@ -1815,26 +1795,32 @@ def _capabilities_fast_reply_text(
     *,
     coordinator_id: str | None = None,
     delegation_pool: list[str] | None = None,
+    prompt_policies: PromptPolicyResolver | None = None,
 ) -> str:
+    if prompt_policies is None:
+        raise RuntimeError(
+            "capabilities fast reply requires an injected PromptPolicyResolver "
+            "with a migrated DuckDB connection"
+        )
     coord = (coordinator_id or "").strip()
     pool = [x for x in (delegation_pool or []) if (x or "").strip()]
     if coord and pool:
         lines = "\n".join(f"- {w}" for w in pool)
-        return format_guardrail("capabilities", "axis_coordinator", coord=coord, lines=lines)
+        return prompt_policies.format("capability", "axis_coordinator", coord=coord, lines=lines)
     w = (worker_id or "").strip()
     wl = w.lower()
     wl_norm = wl.replace("_", "-")
     if _is_job_hunter_worker(w):
-        return load_guardrail("capabilities", "job_hunter")
+        return prompt_policies.load("capability", "job_hunter")
     if wl == "bi-analyst":
-        return load_guardrail("capabilities", "bi_analyst")
+        return prompt_policies.load("capability", "bi_analyst")
     if wl == "finanz":
-        return load_guardrail("capabilities", "finanz")
+        return prompt_policies.load("capability", "finanz")
     if wl_norm == "siata-analyst":
-        return load_guardrail("capabilities", "siata_analyst")
+        return prompt_policies.load("capability", "siata_analyst")
     if w:
-        return format_guardrail("capabilities", "generic_worker", worker_id=w)
-    return load_guardrail("capabilities", "default_fallback")
+        return prompt_policies.format("capability", "generic_worker", worker_id=w)
+    return prompt_policies.load("capability", "default_fallback")
 
 
 def _task_summary_for_activity(incoming: str, planned_task: str) -> str:
@@ -1866,6 +1852,14 @@ def _extract_tagged_block(text: str, tag: str) -> str:
     return match.group(0).strip() if match else ""
 
 
+def _strip_tagged_blocks(text: str, tags: tuple[str, ...]) -> str:
+    out = text or ""
+    for tag in tags:
+        pattern = re.compile(rf"\[{re.escape(tag)}\].*?\[/{re.escape(tag)}\]", re.DOTALL)
+        out = pattern.sub("", out)
+    return re.sub(r"\n{3,}", "\n\n", out).strip()
+
+
 def _preserve_context_blocks_for_worker(incoming: str, planned_task: str) -> str:
     """El planner resume tareas; estos bloques son grounding y deben llegar intactos al worker."""
     task = (planned_task or "").strip()
@@ -1879,6 +1873,14 @@ def _preserve_context_blocks_for_worker(incoming: str, planned_task: str) -> str
     blocks = [block for block in blocks if block and block not in task]
     if not blocks:
         return task
+    has_rag_blocks = any(block.startswith("[RAG_") for block in blocks)
+    if has_rag_blocks:
+        user_question = _strip_tagged_blocks(
+            incoming,
+            ("PROJECT_CONTEXT", "RAG_SOURCE_INVENTORY", "RAG_CONTEXT"),
+        )
+        if not explicit_duckdb_schema_request(user_question or incoming):
+            task = user_question or "Responde al usuario usando el contexto RAG disponible."
     return "\n\n".join(
         [
             *blocks,
@@ -1921,6 +1923,8 @@ def build_manager_graph(
             db_path = get_gateway_db_path()
         except Exception:
             db_path = ""
+
+    prompt_policies = PromptPolicyResolver(db=db)
 
     # None -> use WORKERS_TEMPLATES_DIR (forge/templates) so workers are forge/templates/<id>/
     troot = templates_root
@@ -2016,7 +2020,10 @@ def build_manager_graph(
         if _manager_capabilities_fast_path_ok(incoming):
             log_sys(_obs, "Capacidades: respuesta directa (sin plan ni subagente)")
             reply = _capabilities_fast_reply_text(
-                assigned, coordinator_id=coord, delegation_pool=pool
+                assigned,
+                coordinator_id=coord,
+                delegation_pool=pool,
+                prompt_policies=prompt_policies,
             )
             _audit_title = "Capacidades (respuesta directa)"
         else:
@@ -2082,18 +2089,6 @@ def build_manager_graph(
         available_plan = state.get("available_templates") or list_workers(troot, db=db, tenant_id=_tid)
         default_worker = available_plan[0] if available_plan else None
         assigned = (state.get("assigned_worker_id") or default_worker or "").strip() or default_worker
-        _agent_debug_log(
-            "H7,H8,H9",
-            "manager plan received incoming",
-            {
-                "has_inventory_block": "[RAG_SOURCE_INVENTORY]" in incoming,
-                "has_rag_context_block": "[RAG_CONTEXT]" in incoming,
-                "incoming_len": len(incoming),
-                "history_items": len(state.get("history") or []),
-                "initial_assigned": assigned,
-                "entry_worker_id": (state.get("entry_worker_id") or "").strip(),
-            },
-        )
         coordinator_id = (state.get("coordinator_worker_id") or "").strip() or None
         delegation_pool = [str(x).strip() for x in (state.get("delegation_pool") or []) if str(x).strip()]
         if not incoming:
@@ -2393,17 +2388,6 @@ def build_manager_graph(
             tasks_preview if tasks_preview else "(sin tareas)",
         )
         _assigned_for_log = (out.get("assigned_worker_id") or assigned or "").strip() or "?"
-        _agent_debug_log(
-            "H7,H9",
-            "manager plan output",
-            {
-                "assigned_worker_id": _assigned_for_log,
-                "plan_title": str(out.get("plan_title") or "")[:160],
-                "planned_task_has_inventory": "[RAG_SOURCE_INVENTORY]" in str(out.get("planned_task") or ""),
-                "planned_task_has_rag_context": "[RAG_CONTEXT]" in str(out.get("planned_task") or ""),
-                "tasks_count": len(out.get("tasks") or []),
-            },
-        )
         log_sys(_obs, "Worker elegido para el plan: %s", _assigned_for_log)
         return out
 
@@ -2468,21 +2452,6 @@ def build_manager_graph(
             }
         task_summary = (state.get("task_summary") or "").strip() or _task_summary_for_activity(incoming, planned_task)
         _combined = planned_task_for_worker or incoming
-        _agent_debug_log(
-            "H7,H8,H9",
-            "manager invoking worker",
-            {
-                "assigned": assigned,
-                "incoming_has_inventory": "[RAG_SOURCE_INVENTORY]" in incoming,
-                "incoming_has_rag_context": "[RAG_CONTEXT]" in incoming,
-                "planned_task_has_inventory": "[RAG_SOURCE_INVENTORY]" in planned_task,
-                "planned_task_has_rag_context": "[RAG_CONTEXT]" in planned_task,
-                "worker_task_has_inventory": "[RAG_SOURCE_INVENTORY]" in planned_task_for_worker,
-                "worker_task_has_rag_context": "[RAG_CONTEXT]" in planned_task_for_worker,
-                "combined_len": len(_combined),
-                "history_items": len(history or []),
-            },
-        )
         _lite_stdio_mcp = _worker_should_use_lite_stdio_mcp_surface(_combined)
         _url_research_mcp = _worker_should_use_url_research_mcp_surface(_combined)
         _visual_lite_mcp = _manager_visual_generation_intent(_combined) and _worker_matches_id(
@@ -2773,16 +2742,6 @@ def build_manager_graph(
                 messages = list(messages)
             # Log tool use para PM2 (tras manager plan)
             _tools_list = _worker_tool_names_from_messages(messages if isinstance(messages, list) else None)
-            _agent_debug_log(
-                "H7,H9",
-                "manager worker completed",
-                {
-                    "assigned": assigned,
-                    "tools": _tools_list,
-                    "reply_preview": str(reply or raw_worker_reply or "")[:220],
-                    "worker_messages_count": len(messages) if isinstance(messages, list) else None,
-                },
-            )
             _log.info(
                 "manager tool_use: delegó a worker=%s | tools usadas=%s",
                 assigned,

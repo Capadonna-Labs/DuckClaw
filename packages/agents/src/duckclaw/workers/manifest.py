@@ -378,6 +378,7 @@ class WorkerSpec:
         "agent_node_heuristic_first_tool",
         "egress_natural_language_synthesis",
         "tool_orchestration_config",
+        "runtime_policy",
     )
 
     def __init__(
@@ -421,6 +422,7 @@ class WorkerSpec:
         agent_node_heuristic_first_tool: bool | None = None,
         egress_natural_language_synthesis: bool = True,
         tool_orchestration_config: Optional[dict] = None,
+        runtime_policy: Any = None,
     ):
         self.worker_id = worker_id
         self.logical_worker_id = logical_worker_id
@@ -461,3 +463,4 @@ class WorkerSpec:
         self.agent_node_heuristic_first_tool = agent_node_heuristic_first_tool
         self.egress_natural_language_synthesis = bool(egress_natural_language_synthesis)
         self.tool_orchestration_config = tool_orchestration_config
+        self.runtime_policy = runtime_policy

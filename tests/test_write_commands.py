@@ -149,6 +149,37 @@ class TestWriteCommands:
         assert raw_delete["command_type"] == "deactivate_knowledge_source"
         assert raw_delete["source_id"] == "ksrc_1"
 
+    def test_prompt_policy_commands_roundtrip(self) -> None:
+        from duckclaw.write_commands import DeactivatePromptPolicyCommand, UpsertPromptPolicyCommand
+
+        upsert = UpsertPromptPolicyCommand(
+            policy_type="system_prompt",
+            policy_name="rag_turn",
+            version=2,
+            content="Policy body created by the test.",
+            metadata={"scope": "rag"},
+            actor_email="test@d.local",
+        )
+        raw_upsert = json.loads(upsert.to_redis_payload())
+        assert raw_upsert["command_type"] == "upsert_prompt_policy"
+        assert raw_upsert["policy_type"] == "system_prompt"
+        assert raw_upsert["policy_name"] == "rag_turn"
+        assert raw_upsert["version"] == 2
+        assert raw_upsert["content"] == "Policy body created by the test."
+        assert raw_upsert["metadata"] == {"scope": "rag"}
+
+        deactivate = DeactivatePromptPolicyCommand(
+            policy_type="system_prompt",
+            policy_name="rag_turn",
+            version=2,
+            actor_email="test@d.local",
+        )
+        raw_deactivate = json.loads(deactivate.to_redis_payload())
+        assert raw_deactivate["command_type"] == "deactivate_prompt_policy"
+        assert raw_deactivate["policy_type"] == "system_prompt"
+        assert raw_deactivate["policy_name"] == "rag_turn"
+        assert raw_deactivate["version"] == 2
+
     def test_each_command_has_unique_task_id(self) -> None:
         from duckclaw.write_commands import UpsertWorkerCommand
 
@@ -412,6 +443,68 @@ class TestCommandHandlers:
             "SELECT DISTINCT active FROM main.admin_knowledge_chunks WHERE source_id = 'ksrc-handler'"
         ).fetchall()
         assert chunk_active == [(False,)]
+
+    def test_prompt_policy_handler_upserts_updates_and_deactivates(self, db_with_migrations) -> None:
+        from duckclaw.prompt_policies import PromptPolicyResolver
+        from duckclaw.write_command_handlers import (
+            _apply_deactivate_prompt_policy,
+            _apply_upsert_prompt_policy,
+            dispatch_command,
+        )
+
+        con = db_with_migrations
+        _apply_upsert_prompt_policy(con, {
+            "policy_type": "system_prompt",
+            "policy_name": "rag_turn",
+            "version": 1,
+            "content": "Worker {worker_id} uses DB policy.",
+            "metadata": {"scope": "rag"},
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+        })
+        assert PromptPolicyResolver(db=con).format(
+            "system_prompt",
+            "rag_turn",
+            worker_id="alpha",
+        ) == "Worker alpha uses DB policy."
+
+        dispatch_command(con, {
+            "command_type": "upsert_prompt_policy",
+            "policy_type": "system_prompt",
+            "policy_name": "rag_turn",
+            "version": 1,
+            "content": "Updated {worker_id} DB policy.",
+            "metadata": {"scope": "rag", "updated": True},
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+        })
+        row = con.execute(
+            "SELECT content, metadata_json, active, status FROM main.prompt_policy_registry "
+            "WHERE policy_type = 'system_prompt' AND policy_name = 'rag_turn' AND version = 1"
+        ).fetchone()
+        assert row[0] == "Updated {worker_id} DB policy."
+        assert json.loads(row[1]) == {"scope": "rag", "updated": True}
+        assert row[2] is True
+        assert row[3] == "active"
+        assert PromptPolicyResolver(db=con).format(
+            "system_prompt",
+            "rag_turn",
+            worker_id="beta",
+        ) == "Updated beta DB policy."
+
+        _apply_deactivate_prompt_policy(con, {
+            "policy_type": "system_prompt",
+            "policy_name": "rag_turn",
+            "version": 1,
+            "tenant_id": "default",
+        })
+        inactive = con.execute(
+            "SELECT active, status FROM main.prompt_policy_registry "
+            "WHERE policy_type = 'system_prompt' AND policy_name = 'rag_turn' AND version = 1"
+        ).fetchone()
+        assert inactive == (False, "inactive")
+        with pytest.raises(FileNotFoundError, match="active prompt policy not found"):
+            PromptPolicyResolver(db=con).load("system_prompt", "rag_turn")
 
     def test_add_project_member(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import (

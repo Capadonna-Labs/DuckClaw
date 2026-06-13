@@ -178,6 +178,36 @@ class DeactivateKnowledgeSourceCommand(WriteCommand):
 
 
 # ---------------------------------------------------------------------------
+# Prompt policy commands
+# ---------------------------------------------------------------------------
+
+PromptPolicyType = Literal["directive", "capability", "system_prompt", "manager_task", "tool_directive"]
+PromptPolicyStatus = Literal["draft", "active", "inactive", "archived"]
+
+
+class UpsertPromptPolicyCommand(WriteCommand):
+    """Create or update a DB-first prompt policy. Idempotent by type + name + version."""
+
+    command_type: Literal["upsert_prompt_policy"] = "upsert_prompt_policy"
+    policy_id: str = ""
+    policy_type: PromptPolicyType
+    policy_name: str
+    version: int = 1
+    status: PromptPolicyStatus = "active"
+    content: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeactivatePromptPolicyCommand(WriteCommand):
+    """Soft-delete one prompt policy version, or all versions for type + name."""
+
+    command_type: Literal["deactivate_prompt_policy"] = "deactivate_prompt_policy"
+    policy_type: PromptPolicyType
+    policy_name: str
+    version: int | None = None
+
+
+# ---------------------------------------------------------------------------
 # Raw SQL (legacy — keep for admin_sql tool)
 # ---------------------------------------------------------------------------
 

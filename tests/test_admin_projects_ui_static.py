@@ -279,8 +279,10 @@ def test_manager_preserves_rag_blocks_for_worker_task() -> None:
     manager = Path("packages/agents/src/duckclaw/graphs/manager_graph.py").read_text(encoding="utf-8")
 
     assert "_preserve_context_blocks_for_worker" in manager
+    assert "_strip_tagged_blocks" in manager
     assert "_extract_tagged_block(incoming, \"RAG_SOURCE_INVENTORY\")" in manager
     assert "_extract_tagged_block(incoming, \"RAG_CONTEXT\")" in manager
+    assert "Responde al usuario usando el contexto RAG disponible." in manager
     assert "planned_task_for_worker = _preserve_context_blocks_for_worker(incoming, planned_task)" in manager
     assert '"input": planned_task_for_worker' in manager
     assert '"incoming": planned_task_for_worker' in manager

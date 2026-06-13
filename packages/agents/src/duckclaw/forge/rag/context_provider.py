@@ -7,10 +7,7 @@ connection and receive structured inventory plus prompt blocks.
 from __future__ import annotations
 
 import re
-import json
-import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable
 
 from duckclaw.forge.rag.knowledge_core import search_knowledge
@@ -19,27 +16,6 @@ RAG_GUIDANCE_LINE = (
     "No confundas la base de conocimiento RAG con la bóveda DuckDB; "
     "DuckDB es almacenamiento interno."
 )
-_DEBUG_LOG_PATH = Path("/Users/workstation/Developer/duckclaw/.cursor/debug-ab0734.log")
-
-
-def _agent_debug_log(hypothesis_id: str, message: str, data: dict[str, Any]) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "ab0734",
-            "runId": "initial-rag-debug",
-            "hypothesisId": hypothesis_id,
-            "location": "packages/agents/src/duckclaw/forge/rag/context_provider.py",
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        _DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
-    except Exception:
-        pass
-    # endregion
 
 
 @dataclass(frozen=True)
@@ -91,17 +67,7 @@ def knowledge_inventory_for_project(
         )
         if hasattr(rows, "fetchall"):
             rows = rows.fetchall()
-    except Exception as exc:
-        _agent_debug_log(
-            "H3",
-            "knowledge inventory query failed",
-            {
-                "project_id_present": bool(project_id),
-                "worker_uid_present": bool(worker_uid),
-                "error_type": type(exc).__name__,
-                "error": str(exc)[:200],
-            },
-        )
+    except Exception:
         return []
     inventory = [
         {
@@ -115,17 +81,6 @@ def knowledge_inventory_for_project(
         }
         for row in rows
     ]
-    _agent_debug_log(
-        "H3",
-        "knowledge inventory query completed",
-        {
-            "project_id_present": bool(project_id),
-            "worker_uid_present": bool(worker_uid),
-            "inventory_count": len(inventory),
-            "document_total": sum(int(item.get("document_count") or 0) for item in inventory),
-            "chunk_total": sum(int(item.get("chunk_count") or 0) for item in inventory),
-        },
-    )
     return inventory
 
 
@@ -161,19 +116,6 @@ def build_knowledge_context(
         rows=rows,
         inventory_block=format_inventory_block(inventory),
         rag_block=format_rag_block(rows),
-    )
-    _agent_debug_log(
-        "H3,H4",
-        "knowledge context built",
-        {
-            "query_len": len(query or ""),
-            "project_id_present": bool(project_id),
-            "worker_uid_present": bool(worker_uid),
-            "inventory_count": len(context.inventory),
-            "retrieval_rows": len(context.rows),
-            "has_inventory_block": bool(context.inventory_block),
-            "has_rag_block": bool(context.rag_block),
-        },
     )
     return context
 

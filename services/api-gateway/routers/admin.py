@@ -36,32 +36,11 @@ _COMFYUI_TIMEOUT_SEC_ENV_KEY = "COMFYUI_TIMEOUT_SEC"
 _COMFYUI_DOMAIN = "comfyui"
 _COMFYUI_API_URL_KEY = "api_url"
 _COMFYUI_TIMEOUT_SEC_KEY = "timeout_sec"
-_AGENT_DEBUG_LOG_PATH = Path("/Users/workstation/Developer/duckclaw/.cursor/debug-ab0734.log")
 
 
 def _repo_root() -> Path:
     raw = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
     return Path(raw) if raw else _REPO_ROOT
-
-
-def _agent_debug_log(hypothesis_id: str, message: str, data: dict[str, Any]) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "ab0734",
-            "runId": "initial-rag-debug",
-            "hypothesisId": hypothesis_id,
-            "location": "services/api-gateway/routers/admin.py",
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        _AGENT_DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _AGENT_DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
-    except Exception:
-        pass
-    # endregion
 
 
 def _duckdb_explorer_legacy_schema_names(
@@ -364,7 +343,7 @@ def _merge_playground_catalog_and_team_workers(
 
 def _playground_worker_allowed_in_team(team_ctx: dict[str, Any], worker_id: str) -> bool:
     from duckclaw.workers.template_registry import resolve_template_id_global
-    from duckclaw.workers.worker_ids import normalize_worker_id
+    from duckclaw.workers.identity import normalize_worker_id
 
     wid = normalize_worker_id(worker_id)
     if not wid or wid == "default":
@@ -384,7 +363,7 @@ def _playground_worker_allowed_in_team(team_ctx: dict[str, Any], worker_id: str)
 def _playground_worker_explicitly_in_team(team_ctx: dict[str, Any], worker_id: str) -> bool:
     """Equipo explícito (sin atajo ``team_source=all``) para consola con actor real."""
     from duckclaw.workers.template_registry import resolve_template_id_global
-    from duckclaw.workers.worker_ids import normalize_worker_id
+    from duckclaw.workers.identity import normalize_worker_id
 
     wid = normalize_worker_id(worker_id)
     if not wid or wid == "default":
@@ -1524,18 +1503,6 @@ async def playground_chat(
                     raise _problem(403, str(exc), wid) from exc
     except FileNotFoundError:
         pass
-    _agent_debug_log(
-        "H1,H2,H5",
-        "playground project resolution",
-        {
-            "body_project_present": bool((body.project_id or "").strip()),
-            "resolved_project_present": bool(project_id),
-            "worker_id": wid,
-            "catalog_allowed": catalog_allowed,
-            "project_context_exists": bool(project_context),
-            "project_agent_count": len(project_context.get("agents", [])) if project_context else 0,
-        },
-    )
     msg = (body.message or "").strip()
     if not msg and not body.images:
         raise _problem(400, "message o images requeridos", "")
@@ -1629,28 +1596,7 @@ async def playground_chat(
                 knowledge_blocks.append(knowledge_context.inventory_block)
             if knowledge_context.rag_block:
                 knowledge_blocks.append(knowledge_context.rag_block)
-            _agent_debug_log(
-                "H3,H4",
-                "knowledge context attached to playground chat",
-                {
-                    "worker_uid_present": bool(worker_uid),
-                    "context_count": rag_context_count,
-                    "has_inventory_block": bool(knowledge_context.inventory_block),
-                    "has_rag_block": bool(knowledge_context.rag_block),
-                    "knowledge_blocks_count": len(knowledge_blocks),
-                },
-            )
-        except Exception as exc:
-            _agent_debug_log(
-                "H3,H4",
-                "knowledge context attach failed",
-                {
-                    "worker_uid_present": bool(worker_uid),
-                    "project_id_present": bool(project_id),
-                    "error_type": type(exc).__name__,
-                    "error": str(exc)[:200],
-                },
-            )
+        except Exception:
             rag_context_count = 0
             knowledge_blocks = []
         project_block = "\n".join(
@@ -1659,8 +1605,8 @@ async def playground_chat(
                 f"Nombre: {project_context.get('name') or ''}",
                 f"Descripción: {project_context.get('description') or ''}",
                 f"Agentes activos: {', '.join(agent_ids) if agent_ids else 'ninguno'}",
-                "No confundas la base de conocimiento RAG con la bóveda DuckDB; DuckDB es almacenamiento interno.",
-                "Usa esta descripción para orientar al usuario, proponer próximos pasos y pedir datos faltantes.",
+                "Usa el conocimiento recuperado para responder la pregunta del usuario antes de hablar de configuración interna.",
+                "Usa esta descripción solo para orientar al usuario, proponer próximos pasos y pedir datos faltantes.",
                 "[/PROJECT_CONTEXT]",
             ]
         )
@@ -1679,19 +1625,6 @@ async def playground_chat(
     redis_client = getattr(request.app.state, "redis", None)
     accept = (request.headers.get("accept") or "").lower()
     wants_stream = bool(body.stream) or "text/event-stream" in accept
-    _agent_debug_log(
-        "H4,H5",
-        "playground chat final message before invoke",
-        {
-            "wants_stream": wants_stream,
-            "body_stream": bool(body.stream),
-            "has_project_context_block": "[PROJECT_CONTEXT]" in msg,
-            "has_inventory_block": "[RAG_SOURCE_INVENTORY]" in msg,
-            "has_rag_context_block": "[RAG_CONTEXT]" in msg,
-            "rag_context_count": rag_context_count,
-            "message_len": len(msg),
-        },
-    )
 
     import main as gateway_main
 
@@ -1909,7 +1842,8 @@ async def playground_voice(
                 f"Nombre: {project_context.get('name') or ''}",
                 f"Descripción: {project_context.get('description') or ''}",
                 f"Agentes activos: {', '.join(agent_ids) if agent_ids else 'ninguno'}",
-                "No confundas la base de conocimiento RAG con la bóveda DuckDB; DuckDB es almacenamiento interno.",
+                "Usa el conocimiento recuperado para responder la pregunta del usuario antes de hablar de configuración interna.",
+                "Usa esta descripción solo para orientar al usuario, proponer próximos pasos y pedir datos faltantes.",
                 "[/PROJECT_CONTEXT]",
             ]
         )

@@ -7,7 +7,7 @@ import pytest
 
 
 def test_migrations_create_expected_tables() -> None:
-    """run_pending_migrations() creates schema_migrations + all 10 versions."""
+    """run_pending_migrations() creates schema_migrations + all 17 versions."""
     import duckdb
     import tempfile
 
@@ -20,7 +20,7 @@ def test_migrations_create_expected_tables() -> None:
     con = duckdb.connect(str(tmp / "test.duckdb"))
 
     applied = run_pending_migrations(con)
-    assert len(applied) == 15, f"Expected 15 migrations, got {len(applied)}: {applied}"
+    assert len(applied) == 17, f"Expected 17 migrations, got {len(applied)}: {applied}"
 
     rows = con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
@@ -63,6 +63,10 @@ def test_migrations_create_expected_tables() -> None:
         "admin_knowledge_sources",
         "admin_knowledge_documents",
         "admin_knowledge_chunks",
+        "prompt_policy_registry",
+        "worker_prompt_bindings",
+        "tool_policy_directives",
+        "worker_runtime_policies",
     }
     missing = expected - tables
     assert not missing, f"Missing tables: {missing}"

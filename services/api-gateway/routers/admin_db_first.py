@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -141,6 +142,15 @@ class KnowledgeSearchBody(BaseModel):
     limit: int = 8
 
 
+class PromptPolicyUpsertBody(BaseModel):
+    policy_type: str = Field(..., min_length=1, max_length=64)
+    policy_name: str = Field(..., min_length=1, max_length=160)
+    version: int = Field(default=1, ge=1)
+    status: str = Field(default="active", max_length=32)
+    content: str = Field(..., min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 _KNOWLEDGE_UPLOAD_MAX_FILES = 40
 _KNOWLEDGE_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
 
@@ -220,6 +230,69 @@ def _fetchall(result: Any) -> list[Any]:
     return []
 
 
+_PROMPT_POLICY_ALIASES = {
+    "capabilities": "capability",
+    "directives": "directive",
+    "manager_tasks": "manager_task",
+    "system_prompts": "system_prompt",
+}
+_PROMPT_POLICY_TYPES = {"directive", "capability", "system_prompt", "manager_task", "tool_directive"}
+_PROMPT_POLICY_STATUSES = {"draft", "active", "inactive", "archived"}
+
+
+def _normalize_prompt_policy_type(raw: str) -> str:
+    value = str(raw or "").strip().lower()
+    normalized = _PROMPT_POLICY_ALIASES.get(value, value)
+    if normalized not in _PROMPT_POLICY_TYPES:
+        raise ValueError(f"policy_type inválido: {raw}")
+    return normalized
+
+
+def _normalize_prompt_policy_status(raw: str) -> str:
+    status = str(raw or "active").strip().lower()
+    if status not in _PROMPT_POLICY_STATUSES:
+        raise ValueError(f"status inválido: {raw}")
+    return status
+
+
+def _prompt_policy_id(policy_type: str, policy_name: str, version: int) -> str:
+    digest = hashlib.sha256(f"{policy_type}:{policy_name}:{version}".encode("utf-8")).hexdigest()
+    return f"ppol_{digest[:24]}"
+
+
+def _prompt_policy_row(row: tuple[Any, ...]) -> dict[str, Any]:
+    (
+        policy_id,
+        policy_type,
+        policy_name,
+        version,
+        status,
+        content,
+        checksum,
+        metadata_json,
+        active,
+        created_at,
+        updated_at,
+    ) = row
+    try:
+        metadata = json.loads(metadata_json or "{}")
+    except json.JSONDecodeError:
+        metadata = {}
+    return {
+        "policy_id": str(policy_id),
+        "policy_type": str(policy_type),
+        "policy_name": str(policy_name),
+        "version": int(version or 0),
+        "status": str(status or ""),
+        "content": str(content or ""),
+        "checksum": str(checksum or ""),
+        "metadata": metadata if isinstance(metadata, dict) else {},
+        "active": bool(active),
+        "created_at": str(created_at),
+        "updated_at": str(updated_at),
+    }
+
+
 def _kanban_card_from_row(row: tuple[Any, ...]) -> dict[str, Any]:
     card_id, title, description, status, worker_id, tags_json, created_at, updated_at = row
     return {
@@ -268,6 +341,22 @@ def _enqueue_knowledge_command(command: Any) -> str:
         if "No hay query SQL" in detail:
             raise ValueError(
                 "DB-Writer desactualizado: reinicia DuckClaw-DB-Writer y DuckClaw-Gateway para aplicar comandos RAG tipados."
+            )
+        raise ValueError(detail)
+    return task_id
+
+
+def _enqueue_prompt_policy_command(command: Any) -> str:
+    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
+    status = poll_task_status_sync(task_id, timeout_sec=0.5)
+    if status and status.status == "failed":
+        detail = status.detail or "prompt policy write failed"
+        if "No hay query SQL" in detail:
+            raise ValueError(
+                "DB-Writer desactualizado: reinicia DuckClaw-DB-Writer y DuckClaw-Gateway para aplicar comandos de prompt policies."
             )
         raise ValueError(detail)
     return task_id
@@ -720,6 +809,122 @@ async def patch_runtime_settings(
                 payload={"domain": item.domain, "setting": item.key, "scope": item.scope},
             )
     return {"ok": True, "updated": updated}
+
+
+@router.get("/prompt-policies", dependencies=[Depends(_require_admin_key)])
+async def list_prompt_policies(
+    policy_type: str = "",
+    policy_name: str = "",
+    include_inactive: bool = False,
+) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    try:
+        if policy_type.strip():
+            clauses.append("policy_type = ?")
+            params.append(_normalize_prompt_policy_type(policy_type))
+        if policy_name.strip():
+            clauses.append("policy_name = ?")
+            params.append(policy_name.strip())
+        if not include_inactive:
+            clauses.append("active = true")
+            clauses.append("status = 'active'")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with open_gateway_db(read_only=True) as db:
+            rows = _fetchall(
+                db.execute(
+                    "SELECT policy_id, policy_type, policy_name, version, status, content, checksum, "
+                    "metadata_json, active, created_at, updated_at "
+                    f"FROM main.prompt_policy_registry {where} "
+                    "ORDER BY policy_type ASC, policy_name ASC, version DESC",
+                    params,
+                )
+            )
+    except ValueError as exc:
+        raise _problem(400, str(exc), "prompt_policy") from exc
+    except Exception as exc:
+        raise _problem(
+            400,
+            "Prompt policy registry no disponible",
+            "Ejecuta migración 16 antes de administrar prompt policies.",
+        ) from exc
+    return {"policies": [_prompt_policy_row(row) for row in rows]}
+
+
+@router.put("/prompt-policies", dependencies=[Depends(_require_admin_key)])
+async def upsert_prompt_policy(
+    body: PromptPolicyUpsertBody,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw.write_commands import UpsertPromptPolicyCommand
+
+    try:
+        policy_type = _normalize_prompt_policy_type(body.policy_type)
+        status = _normalize_prompt_policy_status(body.status)
+        policy_name = body.policy_name.strip()
+        content = body.content
+        if not content.strip():
+            raise ValueError("content requerido")
+        policy_id = _prompt_policy_id(policy_type, policy_name, body.version)
+        command = UpsertPromptPolicyCommand(
+            policy_id=policy_id,
+            policy_type=policy_type,  # type: ignore[arg-type]
+            policy_name=policy_name,
+            version=body.version,
+            status=status,  # type: ignore[arg-type]
+            content=content,
+            metadata=body.metadata,
+            actor_email=actor,
+        )
+        task_id = _enqueue_prompt_policy_command(command)
+    except ValueError as exc:
+        raise _problem(400, str(exc), "prompt_policy") from exc
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "policy": {
+            "policy_id": policy_id,
+            "policy_type": policy_type,
+            "policy_name": policy_name,
+            "version": body.version,
+            "status": status,
+            "active": status == "active",
+        },
+    }
+
+
+@router.delete("/prompt-policies/{policy_type}/{policy_name}", dependencies=[Depends(_require_admin_key)])
+async def deactivate_prompt_policy(
+    policy_type: str,
+    policy_name: str,
+    version: int | None = Query(None, ge=1),
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    from duckclaw.write_commands import DeactivatePromptPolicyCommand
+
+    try:
+        normalized_type = _normalize_prompt_policy_type(policy_type)
+        name = policy_name.strip()
+        if not name:
+            raise ValueError("policy_name requerido")
+        command = DeactivatePromptPolicyCommand(
+            policy_type=normalized_type,  # type: ignore[arg-type]
+            policy_name=name,
+            version=version,
+            actor_email=actor,
+        )
+        task_id = _enqueue_prompt_policy_command(command)
+    except ValueError as exc:
+        raise _problem(404, str(exc), f"{policy_type}/{policy_name}") from exc
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "policy_type": normalized_type,
+        "policy_name": name,
+        "version": version,
+    }
 
 
 @router.get("/kanban", dependencies=[Depends(_require_admin_key)])

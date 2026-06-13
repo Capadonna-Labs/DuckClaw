@@ -22,7 +22,7 @@ from routers.telegram_inbound_webhook import (
     _extract_visual_payload_with_reply,
     _wr_vlm_collect_album_items,
 )
-from duckclaw.forge.atoms.quant_price_validator import (
+from duckclaw.egress.quant_price_validator import (
     VISUAL_EVIDENCE_RETRY_REASON,
     enforce_visual_evidence_rule,
     visual_evidence_retry_system_message,

@@ -158,7 +158,7 @@ def test_duckdb_tables_show_legacy_domain_schemas_until_explicit_cleanup(
     con = duckdb.connect(str(user_db))
     con.execute("CREATE SCHEMA actor_schema")
     con.execute("CREATE TABLE actor_schema.visible_table (id INTEGER)")
-    for schema in ("pqrsd_crm", "quant_core", "war_room_core"):
+    for schema in ("quant_core", "war_room_core"):
         con.execute(f"CREATE SCHEMA {schema}")
         con.execute(f"CREATE TABLE {schema}.legacy_table (id INTEGER)")
     con.close()
@@ -174,7 +174,6 @@ def test_duckdb_tables_show_legacy_domain_schemas_until_explicit_cleanup(
     assert response.status_code == 200
     schemas = response.json()["schemas"]
     assert schemas["actor_schema"] == ["visible_table"]
-    assert schemas["pqrsd_crm"] == ["legacy_table"]
     assert schemas["quant_core"] == ["legacy_table"]
     assert schemas["war_room_core"] == ["legacy_table"]
 
@@ -231,7 +230,7 @@ def test_duckdb_legacy_schema_cleanup_requires_confirmation_and_drops_schema(
     assert "quant_core" not in remaining
 
 
-def test_duckdb_legacy_cleanup_detects_and_drops_main_legacy_tables(
+def test_duckdb_legacy_cleanup_detects_and_drops_configured_main_tables(
     gateway_admin_client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -241,13 +240,17 @@ def test_duckdb_legacy_cleanup_detects_and_drops_main_legacy_tables(
     user_dir.mkdir(parents=True)
     user_db = user_dir / "axis.duckdb"
     con = duckdb.connect(str(user_db))
-    con.execute("CREATE TABLE main.leila_orders (id INTEGER)")
-    con.execute("CREATE TABLE main.leila_products (id INTEGER)")
+    con.execute("CREATE TABLE main.archived_default_orders (id INTEGER)")
+    con.execute("CREATE TABLE main.archived_default_products (id INTEGER)")
     con.execute("CREATE TABLE main.keep_me (id INTEGER)")
     con.close()
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
     monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+    monkeypatch.setenv(
+        "DUCKCLAW_ADMIN_DUCKDB_LEGACY_MAIN_TABLES",
+        "archived_default_orders,archived_default_products",
+    )
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"}
 
     listed = gateway_admin_client.get(
@@ -256,14 +259,14 @@ def test_duckdb_legacy_cleanup_detects_and_drops_main_legacy_tables(
     )
     assert listed.status_code == 200
     assert {item["table"] for item in listed.json()["main_tables"]} == {
-        "leila_orders",
-        "leila_products",
+        "archived_default_orders",
+        "archived_default_products",
     }
 
     rejected = gateway_admin_client.post(
         "/api/v1/admin/duckdb/legacy-schemas/drop",
         headers=headers,
-        json={"main_tables": ["leila_orders"], "confirm": "wrong"},
+        json={"main_tables": ["archived_default_orders"], "confirm": "wrong"},
     )
     assert rejected.status_code == 400
 
@@ -271,12 +274,15 @@ def test_duckdb_legacy_cleanup_detects_and_drops_main_legacy_tables(
         "/api/v1/admin/duckdb/legacy-schemas/drop",
         headers=headers,
         json={
-            "main_tables": ["leila_orders", "leila_products"],
+            "main_tables": ["archived_default_orders", "archived_default_products"],
             "confirm": "DROP_LEGACY_SCHEMAS",
         },
     )
     assert dropped.status_code == 200
-    assert dropped.json()["dropped_main_tables"] == ["leila_orders", "leila_products"]
+    assert dropped.json()["dropped_main_tables"] == [
+        "archived_default_orders",
+        "archived_default_products",
+    ]
 
     con = duckdb.connect(str(user_db), read_only=True)
     try:
@@ -289,8 +295,8 @@ def test_duckdb_legacy_cleanup_detects_and_drops_main_legacy_tables(
     finally:
         con.close()
     assert "keep_me" in remaining
-    assert "leila_orders" not in remaining
-    assert "leila_products" not in remaining
+    assert "archived_default_orders" not in remaining
+    assert "archived_default_products" not in remaining
 
 
 def test_duckdb_legacy_schemas_can_be_configured_db_first(

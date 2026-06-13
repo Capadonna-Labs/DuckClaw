@@ -15,7 +15,6 @@ _SKILL_DICT_RESERVED_KEYS = frozenset(
         "google_trends",
         "research",
         "tailscale",
-        "sft",
         "ibkr",
         "quant",
         "openweather",
@@ -125,7 +124,6 @@ def build_spec_from_manifest(
     google_trends_config = None
     research_config = None
     tailscale_config = None
-    sft_config = None
     ibkr_config = None
     openweather_config = None
     fmp_config = None
@@ -142,8 +140,6 @@ def build_spec_from_manifest(
                 research_config = s["research"] if isinstance(s.get("research"), dict) else {}
             if "tailscale" in s and tailscale_config is None:
                 tailscale_config = s["tailscale"] if isinstance(s.get("tailscale"), dict) else {}
-            if "sft" in s and sft_config is None:
-                sft_config = s["sft"] if isinstance(s.get("sft"), dict) else {}
             if "ibkr" in s and ibkr_config is None:
                 ibkr_config = s["ibkr"] if isinstance(s.get("ibkr"), dict) else {}
             if "openweather" in s and openweather_config is None:
@@ -162,8 +158,6 @@ def build_spec_from_manifest(
         research_config = data["research"]
     if tailscale_config is None and isinstance(data.get("tailscale"), dict):
         tailscale_config = data["tailscale"]
-    if sft_config is None and isinstance(data.get("sft"), dict):
-        sft_config = data["sft"]
     if ibkr_config is None and isinstance(data.get("ibkr"), dict):
         ibkr_config = data["ibkr"]
     if openweather_config is None and isinstance(data.get("openweather"), dict):
@@ -191,11 +185,6 @@ def build_spec_from_manifest(
     context_pruning_config: Optional[dict] = None
     if isinstance(data.get("context_pruning"), dict):
         context_pruning_config = data["context_pruning"]
-    crm_config = None
-    if isinstance(data.get("crm"), dict):
-        crm_config = data["crm"]
-    elif data.get("crm") is True:
-        crm_config = {"enabled": True}
     allowed_tables = data.get("allowed_tables") or []
     if isinstance(allowed_tables, str):
         allowed_tables = [t.strip() for t in allowed_tables.split(",") if t.strip()]
@@ -289,7 +278,6 @@ def build_spec_from_manifest(
         google_trends_config=google_trends_config,
         research_config=research_config,
         tailscale_config=tailscale_config,
-        sft_config=sft_config,
         ibkr_config=ibkr_config,
         openweather_config=openweather_config,
         fmp_config=fmp_config,
@@ -299,7 +287,6 @@ def build_spec_from_manifest(
         inference_config=inference_config,
         homeostasis_config=homeostasis_config,
         context_guard_config=context_guard_config,
-        crm_config=crm_config,
         forge_shared_db_path_env=forge_shared_db_path_env,
         forge_apply_schema_to_shared=forge_apply_schema_to_shared,
         forge_vault_binding=forge_vault_binding,
@@ -366,8 +353,8 @@ class WorkerSpec:
     __slots__ = (
         "worker_id", "logical_worker_id", "name", "schema_name", "llm_required", "temperature",
         "topology", "skills_list", "allowed_tables", "read_only", "worker_dir",
-        "github_config", "reddit_config", "google_trends_config", "research_config", "tailscale_config", "sft_config",
-        "ibkr_config", "openweather_config", "fmp_config", "comfyui_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config", "crm_config",
+        "github_config", "reddit_config", "google_trends_config", "research_config", "tailscale_config",
+        "ibkr_config", "openweather_config", "fmp_config", "comfyui_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config",
         "forge_shared_db_path_env", "forge_apply_schema_to_shared", "forge_vault_binding",
         "context_pruning_config",
         "duckdb_extensions",
@@ -399,7 +386,6 @@ class WorkerSpec:
         google_trends_config: Optional[dict] = None,
         research_config: Optional[dict] = None,
         tailscale_config: Optional[dict] = None,
-        sft_config: Optional[dict] = None,
         ibkr_config: Optional[dict] = None,
         openweather_config: Optional[dict] = None,
         fmp_config: Optional[dict] = None,
@@ -409,7 +395,6 @@ class WorkerSpec:
         inference_config: Optional[dict] = None,
         homeostasis_config: Optional[dict] = None,
         context_guard_config: Optional[dict] = None,
-        crm_config: Optional[dict] = None,
         forge_shared_db_path_env: Optional[str] = None,
         forge_apply_schema_to_shared: bool = False,
         forge_vault_binding: Optional[dict] = None,
@@ -440,7 +425,6 @@ class WorkerSpec:
         self.google_trends_config = google_trends_config
         self.research_config = research_config
         self.tailscale_config = tailscale_config
-        self.sft_config = sft_config
         self.ibkr_config = ibkr_config
         self.openweather_config = openweather_config
         self.fmp_config = fmp_config
@@ -450,7 +434,6 @@ class WorkerSpec:
         self.inference_config = inference_config
         self.homeostasis_config = homeostasis_config
         self.context_guard_config = context_guard_config
-        self.crm_config = crm_config
         self.forge_shared_db_path_env = forge_shared_db_path_env
         self.forge_apply_schema_to_shared = forge_apply_schema_to_shared
         self.forge_vault_binding = forge_vault_binding

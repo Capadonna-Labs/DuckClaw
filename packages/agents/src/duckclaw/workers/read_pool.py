@@ -17,6 +17,10 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from duckclaw.workers.manifest import WorkerSpec
+from duckclaw.workers.runtime_policy_helpers import (
+    worker_has_runtime_capability as _worker_has_runtime_capability,
+    worker_runtime_capability_policy as _worker_runtime_capability_policy,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -70,25 +74,6 @@ def _installment_ids_to_exclude(
         if info["has_aggregate"] and len(info["installment_ids"]) >= 2:
             return {i for i in info["installment_ids"] if i}
     return set()
-
-
-def _worker_has_runtime_capability(spec: WorkerSpec, capability_name: str) -> bool:
-    runtime_policy = getattr(spec, "runtime_policy", None)
-    return bool(
-        runtime_policy is not None
-        and getattr(runtime_policy, "has_capability", lambda _name: False)(capability_name)
-    )
-
-
-def _worker_runtime_capability_policy(spec: WorkerSpec, capability_name: str) -> dict[str, Any]:
-    runtime_policy = getattr(spec, "runtime_policy", None)
-    if runtime_policy is None:
-        return {}
-    policy_for = getattr(runtime_policy, "policy_for", None)
-    if not callable(policy_for):
-        return {}
-    policy = policy_for(capability_name)
-    return dict(policy) if isinstance(policy, dict) else {}
 
 
 def _maybe_wrap_debt_summary_read_sql(spec: WorkerSpec, query: str, raw: str) -> str:

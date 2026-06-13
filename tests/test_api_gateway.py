@@ -322,7 +322,7 @@ def test_pm2_json_lists_gateways_with_explicit_db_path(
     (root / "config").mkdir(parents=True)
     cfg = {
         "apps": [
-            {"name": "SIATA-Gateway", "env": {"DUCKCLAW_SIATA_DB_PATH": "/x/s.duckdb"}},
+            {"name": "SIATA-Gateway", "env": {"DUCKCLAW_GATEWAY_DB_PATH": "/x/s.duckdb"}},
             {"name": "BI-Analyst-Gateway", "env": {"DUCKDB_PATH": "/x/bi.duckdb"}},
         ]
     }
@@ -415,8 +415,3 @@ def test_dedicated_gateway_vault_uses_matched_app_when_pm2_alias_differs(
     assert gateway_main._dedicated_gateway_vault_db_path() == str(dbf.resolve())
 
 
-def test_worker_id_is_pqrsd_assistant_normalizes_ids() -> None:
-    assert gateway_main._worker_id_is_pqrsd_assistant("PQRSD-Assistant") is True
-    assert gateway_main._worker_id_is_pqrsd_assistant("pqrsd_assistant") is True
-    assert gateway_main._worker_id_is_pqrsd_assistant("finanz") is False
-    assert gateway_main._worker_id_is_pqrsd_assistant("") is False

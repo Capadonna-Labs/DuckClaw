@@ -40,7 +40,7 @@ def test_browser_sandbox_accepts_url_without_code(monkeypatch: object) -> None:
         patch("duckclaw.graphs.sandbox.browser_image_available", return_value=True),
         patch("duckclaw.graphs.sandbox.run_in_sandbox", side_effect=_capture),
     ):
-        raw = tool.invoke({"url": "https://www.medellin.gov.co/es/pqrsd/"})
+        raw = tool.invoke({"url": "https://www.medellin.gov.co/es/tramites/"})
 
     assert "medellin.gov.co" in captured["code"]
     data = json.loads(raw)

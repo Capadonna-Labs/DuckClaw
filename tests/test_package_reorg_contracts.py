@@ -42,7 +42,6 @@ def test_agents_runtime_and_manager_facades_expose_public_contracts() -> None:
 def test_training_layout_has_separate_prompt_script_and_dataset_roots() -> None:
     root = Path("packages/agents/train")
     expected = (
-        root / "prompts" / "synthetic" / "pqrsd_gemma4_jsonl.md",
         root / "scripts" / "data" / "curate_traces.py",
         root / "scripts" / "serve" / "start_mlx.sh",
         root / "scripts" / "serve" / "start_mlx_vision.sh",

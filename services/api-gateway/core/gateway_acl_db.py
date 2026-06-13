@@ -11,12 +11,9 @@ import json
 import logging
 from typing import Any
 
-from pathlib import Path
-
 from duckclaw.gateway_db import (
     GatewayDbEphemeralReadonly,
     get_gateway_db_path,
-    get_war_room_acl_db_path,
 )
 
 _log = logging.getLogger("duckclaw.gateway.acl_db")
@@ -81,5 +78,4 @@ def get_war_room_acl_duckdb() -> Any:
 
     El gateway no mantiene un DuckClaw persistente al archivo; siempre lectura efímera sobre la ruta canónica.
     """
-    wr_path = str(Path(get_war_room_acl_db_path()).expanduser().resolve())
-    return ReadOnlyGatewayAclDb(wr_path)
+    return ReadOnlyGatewayAclDb(get_gateway_db_path())

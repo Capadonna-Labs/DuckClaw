@@ -29,7 +29,6 @@ def _duckclaw_repo_root_is_tmp(tmp_path, monkeypatch):
     monkeypatch.delenv("DUCKCLAW_GATEWAY_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKCLAW_TENANT_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKCLAW_VAULT_DB_PATH", raising=False)
-    monkeypatch.delenv("DUCKCLAW_WAR_ROOM_ACL_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKDB_PATH", raising=False)
 
 

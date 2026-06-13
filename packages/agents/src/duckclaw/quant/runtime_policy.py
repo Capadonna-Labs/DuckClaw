@@ -20,11 +20,6 @@ def is_quant_trader(worker_id: str | None) -> bool:
     return False
 
 
-def duckclaw_env_truthy(name: str) -> bool:
-    v = (os.environ.get(name) or "").strip().lower()
-    return v in ("1", "true", "yes", "on")
-
-
 def quant_allows_reddit_anchor_force(
     logical_worker_id: str,
     incoming: str,
@@ -51,19 +46,27 @@ def _quant_trader_vlm_incoming_suggests_market_figure(text: str) -> bool:
     body = re.sub(r"\[VLM_CONTEXT[^\]]*\]", "", raw, flags=re.IGNORECASE)
     return bool(re.search(r"(?:\$\s*)?\b\d{1,6}\.\d{2,6}\b", body))
 
-def _quant_ohlcv_context_summary_forced_fetch_enabled() -> bool:
-    """Opt-in: forzar ingesta OHLCV en turnos SUMMARIZE_* cuando el texto pide velas explícitas."""
-    return duckclaw_env_truthy("DUCKCLAW_QUANT_OHLCV_ON_CONTEXT_SUMMARY")
+def _quant_ohlcv_context_summary_forced_fetch_enabled(spec: Any) -> bool:
+    """DB policy opt-in: permite OHLCV en SUMMARIZE_* solo para workers Quant autorizados."""
+    from duckclaw.workers.runtime_policy_helpers import worker_runtime_capability_flag
+
+    return worker_runtime_capability_flag(
+        spec,
+        "quant_trading",
+        "allow_ohlcv_on_context_summary",
+        default=False,
+    )
 
 def _quant_summarize_allows_forced_ohlcv_fetch(
     incoming: str,
     worker_lid: str,
     *,
+    spec: Any = None,
     is_quant_trading_worker: bool = False,
 ) -> bool:
-    """SUMMARIZE_* no bloquea fetch_market_data si Quant + env + heurística OHLCV del usuario."""
+    """SUMMARIZE_* no bloquea fetch_market_data si Quant + policy DB + heurística OHLCV del usuario."""
     _ = worker_lid
-    if not _quant_ohlcv_context_summary_forced_fetch_enabled():
+    if not _quant_ohlcv_context_summary_forced_fetch_enabled(spec):
         return False
     if not is_quant_trading_worker:
         return False

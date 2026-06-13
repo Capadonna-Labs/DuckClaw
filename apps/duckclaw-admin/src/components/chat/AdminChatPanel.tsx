@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import Link from 'next/link';
 import {
   Bot,
@@ -16,11 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { useVoiceNoteRecorder } from '@/components/chat/useVoiceNoteRecorder';
-import { ChatViewTabBar, type ChatViewTab } from '@/components/chat/ChatViewTabBar';
-import {
-  ConversationManagePanel,
-  type ConversationManagePanelProps,
-} from '@/components/chat/ConversationManagePanel';
+import type { ConversationManagePanelProps } from '@/components/chat/ConversationManagePanel';
 import { useAuthStore } from '@/store/authStore';
 import { ChatBubble, ThinkingBubble } from '@/components/chat/ChatBubble';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
@@ -78,15 +74,8 @@ export function AdminChatPanel({
   conversationTitle,
   onRenameConversation,
   headerActions,
-  conversationManage,
   className = '',
 }: AdminChatPanelProps) {
-  const [viewTab, setViewTab] = useState<ChatViewTab>('chat');
-  const showConversationTab = Boolean(conversationManage && chatId && onRenameConversation);
-
-  useEffect(() => {
-    setViewTab('chat');
-  }, [chatId]);
   const { usuario } = useAuthStore();
   const internalChat = useAdminChat({ chatId, initialWorker, enabled: !chatProp });
   const chat = chatProp ?? internalChat;
@@ -303,41 +292,6 @@ export function AdminChatPanel({
         </header>
       )}
 
-      {config?.team_hint && viewTab === 'chat' && (
-        <p
-          className={`text-[10px] px-3 py-1.5 border-b shrink-0 ${
-            config.authorized === false
-              ? 'bg-red-50 text-red-700 border-red-100 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900'
-              : 'bg-gov-gray-50 text-gov-gray-600 border-gov-gray-100 dark:bg-dark-bg dark:text-dark-muted dark:border-dark-border'
-          }`}
-        >
-          {config.team_hint}
-          {conversationTitle?.trim() ? (
-            <span className="block mt-0.5 font-medium truncate" title={conversationTitle.trim()}>
-              {conversationTitle.trim()}
-            </span>
-          ) : null}
-        </p>
-      )}
-
-      {showConversationTab ? (
-        <ChatViewTabBar active={viewTab} onChange={setViewTab} />
-      ) : null}
-
-      {showConversationTab && viewTab === 'conversation' && conversationManage ? (
-        <ConversationManagePanel
-          tenantId={conversationManage.tenantId}
-          section={conversationManage.section}
-          activeSessionId={chatId}
-          conversationTitle={conversationTitle}
-          refreshToken={conversationManage.refreshToken}
-          onSelect={conversationManage.onSelect}
-          onCreateNew={conversationManage.onCreateNew}
-          onRename={onRenameConversation}
-          onAfterChange={() => setViewTab('chat')}
-        />
-      ) : (
-        <>
       <div className="relative flex-1 min-h-0 min-w-0 flex flex-col w-full">
         <div
           ref={scrollRef}
@@ -546,8 +500,6 @@ export function AdminChatPanel({
           </p>
         )}
       </footer>
-        </>
-      )}
     </section>
   );
 }

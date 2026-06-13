@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 _log = logging.getLogger(__name__)
 
@@ -50,6 +50,16 @@ _GITHUB_DEFAULT_REPO = "DuckClaw"
 _GITHUB_REFS_HEADS_PREFIX = "refs/heads/"
 
 
+def _github_repo_policy(
+    github_workflow_policy: Mapping[str, Any] | None = None,
+) -> tuple[str, str]:
+    """DB policy can override deterministic GitHub repo defaults."""
+    policy = github_workflow_policy if isinstance(github_workflow_policy, Mapping) else {}
+    owner = str(policy.get("owner") or _GITHUB_DEFAULT_OWNER).strip()
+    repo = str(policy.get("repo") or _GITHUB_DEFAULT_REPO).strip() or _GITHUB_DEFAULT_REPO
+    return owner, repo
+
+
 def _github_tool_message_fields(msg: Any) -> tuple[str, str] | None:
     """Nombre y contenido de ToolMessage (LangChain o dict serializado)."""
     from langchain_core.messages import ToolMessage
@@ -75,7 +85,10 @@ def _github_tool_called_since(messages: list[Any], from_idx: int, tool_name: str
     return False
 
 
-def _github_parse_push_files_success(content: str) -> tuple[str, str, str] | None:
+def _github_parse_push_files_success(
+    content: str,
+    github_workflow_policy: Mapping[str, Any] | None = None,
+) -> tuple[str, str, str] | None:
     """Extrae owner, repo y rama de la respuesta JSON de push_files."""
     raw = str(content or "").strip()
     if not raw or raw.startswith("failed"):
@@ -92,8 +105,7 @@ def _github_parse_push_files_success(content: str) -> tuple[str, str, str] | Non
     head = ref[len(_GITHUB_REFS_HEADS_PREFIX) :].strip()
     if not head:
         return None
-    owner = _GITHUB_DEFAULT_OWNER
-    repo = _GITHUB_DEFAULT_REPO
+    owner, repo = _github_repo_policy(github_workflow_policy)
     url = str(payload.get("url") or "")
     m = re.search(r"github\.com/repos/([^/]+)/([^/]+)/", url, re.IGNORECASE)
     if m:
@@ -340,12 +352,14 @@ def _github_try_deterministic_pr_workflow(
     worker_label: str,
     identity_fields: Callable[[dict], dict] | None = None,
     is_cancel_signal_request: Callable[[str], bool] | None = None,
+    github_workflow_policy: Mapping[str, Any] | None = None,
 ) -> dict | None:
     identity_fields = identity_fields or _default_identity_fields
     is_cancel_signal_request = is_cancel_signal_request or (lambda _text: False)
     """Pipeline PR determinista: list → completar parcial | URL | create_pull_request."""
     from langchain_core.messages import AIMessage, ToolMessage
 
+    default_owner, default_repo = _github_repo_policy(github_workflow_policy)
     if "create_pull_request" not in tools_by_name and "push_files" not in tools_by_name:
         return None
     if is_cancel_signal_request(incoming):
@@ -366,7 +380,7 @@ def _github_try_deterministic_pr_workflow(
                 if incomplete_pr:
                     pr_url = str(incomplete_pr.get("html_url") or "")
                     head = str((incomplete_pr.get("head") or {}).get("ref") or "")
-                    owner, repo = _GITHUB_DEFAULT_OWNER, _GITHUB_DEFAULT_REPO
+                    owner, repo = default_owner, default_repo
                     if (
                         head
                         and "push_files" in tools_by_name
@@ -439,7 +453,7 @@ def _github_try_deterministic_pr_workflow(
                 ):
                     head = _github_infer_feature_branch(msgs)
                     if head:
-                        owner, repo = _GITHUB_DEFAULT_OWNER, _GITHUB_DEFAULT_REPO
+                        owner, repo = default_owner, default_repo
                         _log.info(
                             "[%s] github deterministic stage=create_pull_request_from_list "
                             "owner=%s repo=%s head=%s",
@@ -455,7 +469,7 @@ def _github_try_deterministic_pr_workflow(
                         out.update(identity_fields(state))
                         return out
             if tname == "push_files":
-                ctx = _github_parse_push_files_success(tcontent)
+                ctx = _github_parse_push_files_success(tcontent, github_workflow_policy)
                 if ctx:
                     owner, repo, head = ctx
                     incomplete_pr = _github_incomplete_pr_in_recent_tools(msgs, lh)
@@ -485,8 +499,8 @@ def _github_try_deterministic_pr_workflow(
                                 {
                                     "name": "list_pull_requests",
                                     "args": {
-                                        "owner": _GITHUB_DEFAULT_OWNER,
-                                        "repo": _GITHUB_DEFAULT_REPO,
+                                        "owner": default_owner,
+                                        "repo": default_repo,
                                         "state": "open",
                                     },
                                     "id": tid,
@@ -523,8 +537,8 @@ def _github_try_deterministic_pr_workflow(
                 len(files_payload),
             )
             forced_resp, _ = _github_build_forced_push_files_tool_call(
-                _GITHUB_DEFAULT_OWNER,
-                _GITHUB_DEFAULT_REPO,
+                default_owner,
+                default_repo,
                 branch,
                 files_payload,
                 (
@@ -535,7 +549,7 @@ def _github_try_deterministic_pr_workflow(
             out = {**state, "messages": msgs + [forced_resp]}
             out.update(identity_fields(state))
             return out
-        pending = _github_needs_create_pr_after_push(msgs)
+        pending = _github_needs_create_pr_after_push(msgs, github_workflow_policy)
         if pending:
             owner, repo, head = pending
             _log.info(
@@ -561,8 +575,8 @@ def _github_try_deterministic_pr_workflow(
                     {
                         "name": "list_pull_requests",
                         "args": {
-                            "owner": _GITHUB_DEFAULT_OWNER,
-                            "repo": _GITHUB_DEFAULT_REPO,
+                            "owner": default_owner,
+                            "repo": default_repo,
                             "state": "open",
                         },
                         "id": tid,
@@ -611,18 +625,24 @@ def _github_pr_intent_in_recent_human_messages(
     return False
 
 
-def _github_latest_push_files_ctx(messages: list[Any]) -> tuple[str, str, str] | None:
+def _github_latest_push_files_ctx(
+    messages: list[Any],
+    github_workflow_policy: Mapping[str, Any] | None = None,
+) -> tuple[str, str, str] | None:
     for msg in reversed(messages or []):
         fields = _github_tool_message_fields(msg)
         if not fields or fields[0] != "push_files":
             continue
-        ctx = _github_parse_push_files_success(fields[1])
+        ctx = _github_parse_push_files_success(fields[1], github_workflow_policy)
         if ctx:
             return ctx
     return None
 
 
-def _github_needs_create_pr_after_push(messages: list[Any]) -> tuple[str, str, str] | None:
+def _github_needs_create_pr_after_push(
+    messages: list[Any],
+    github_workflow_policy: Mapping[str, Any] | None = None,
+) -> tuple[str, str, str] | None:
     """Último push_files OK sin create_pull_request posterior en el hilo."""
     push_idx = -1
     push_ctx: tuple[str, str, str] | None = None
@@ -630,7 +650,7 @@ def _github_needs_create_pr_after_push(messages: list[Any]) -> tuple[str, str, s
         fields = _github_tool_message_fields(msg)
         if not fields or fields[0] != "push_files":
             continue
-        ctx = _github_parse_push_files_success(fields[1])
+        ctx = _github_parse_push_files_success(fields[1], github_workflow_policy)
         if ctx:
             push_idx = i
             push_ctx = ctx

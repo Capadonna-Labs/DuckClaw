@@ -72,7 +72,6 @@ def _pm2_env_set_multiplex_db_paths(
         "DUCKCLAW_GATEWAY_DB_PATH",
         "DUCKCLAW_TENANT_DB_PATH",
         "DUCKCLAW_VAULT_DB_PATH",
-        "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
     ):
         v = (dot.get(k) or "").strip()
         if v:
@@ -454,7 +453,6 @@ _ENV_PRIMARY_DUCKDB_KEYS: tuple[str, ...] = (
     "DUCKCLAW_GATEWAY_DB_PATH",
     "DUCKCLAW_TENANT_DB_PATH",
     "DUCKCLAW_VAULT_DB_PATH",
-    "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
     "DUCKCLAW_AXIS_DB_PATH",
     "DUCKDB_PATH",
 )

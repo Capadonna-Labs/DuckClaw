@@ -33,6 +33,8 @@ REMOVED_LEGACY_MODELS = (
 
 BACKEND_SCAN_ROOTS = (
     REPO_ROOT / "packages" / "agents",
+    REPO_ROOT / "packages" / "duckops",
+    REPO_ROOT / "packages" / "shared" / "src",
     REPO_ROOT / "services",
     REPO_ROOT / "scripts",
     REPO_ROOT / "tests",
@@ -93,48 +95,55 @@ REMOVED_LEGACY_MODULE_NAMES = frozenset(
 )
 REMOVED_LEGACY_ATOM_MODULE_NAMES = frozenset(path.stem for path in REMOVED_LEGACY_ATOMS)
 
-DB_FIRST_DDL_ALLOWLIST = frozenset(
-    {
-        "packages/agents/src/duckclaw/adf_validator.py",
-        "packages/agents/src/duckclaw/forge/rag/catalog.py",
-        "packages/agents/src/duckclaw/forge/skills/quant_cfd_bridge.py",
-        "packages/agents/src/duckclaw/graphs/graph_rag.py",
-        "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py",
-        "packages/agents/src/duckclaw/graphs/telegram_bot.py",
-        "packages/agents/src/duckclaw/graphs/tools.py",
-        "packages/agents/src/duckclaw/workers/db_runtime.py",
-        "packages/agents/src/duckclaw/workers/factory.py",
-        "packages/agents/src/duckclaw/workers/loader.py",
-        "services/api-gateway/core/war_rooms.py",
-        "services/api-gateway/routers/admin.py",
-        "services/db-writer/context_injection_handler.py",
-        "services/db-writer/quant_state_delta_handler.py",
-        "services/db-writer/visual_state_delta_handler.py",
-    }
-)
+DB_FIRST_DDL_ALLOWLIST_REASONS = {
+    "packages/agents/src/duckclaw/adf_validator.py": "validator creates isolated test/validation tables",
+    "packages/agents/src/duckclaw/forge/rag/catalog.py": "derived RAG catalog bootstrap DDL",
+    "packages/agents/src/duckclaw/forge/skills/quant_cfd_bridge.py": "quant control-plane table bootstrap",
+    "packages/agents/src/duckclaw/graphs/graph_rag.py": "graph memory bootstrap DDL",
+    "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py": "chat command control-plane bootstrap",
+    "packages/agents/src/duckclaw/graphs/telegram_bot.py": "telegram runtime bootstrap",
+    "packages/agents/src/duckclaw/graphs/tools.py": "legacy tool schema bootstrap",
+    "packages/agents/src/duckclaw/workers/db_runtime.py": "worker schema bootstrap",
+    "packages/agents/src/duckclaw/workers/factory.py": "worker-local runtime bootstrap",
+    "packages/agents/src/duckclaw/workers/loader.py": "worker belief bootstrap",
+    "services/api-gateway/core/war_rooms.py": "authorized war-room ACL bootstrap",
+    "services/api-gateway/routers/admin.py": "authorized admin maintenance/bootstrap endpoints",
+    "services/db-writer/context_injection_handler.py": "DB-writer context command schema",
+    "services/db-writer/quant_state_delta_handler.py": "DB-writer quant command schema",
+    "services/db-writer/visual_state_delta_handler.py": "DB-writer visual command schema",
+}
+DB_FIRST_DDL_ALLOWLIST = frozenset(DB_FIRST_DDL_ALLOWLIST_REASONS)
 
-DB_FIRST_READ_WRITE_ALLOWLIST = frozenset(
-    {
-        "packages/agents/src/duckclaw/graphs/graph_server.py",
-        "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py",
-        "services/api-gateway/main.py",
-        "services/api-gateway/routers/admin.py",
-        "services/api-gateway/routers/admin_db_first.py",
-        "services/api-gateway/routers/telegram_inbound_webhook.py",
-        "services/db-writer/context_injection_handler.py",
-        "services/db-writer/main.py",
-        "services/db-writer/quant_state_delta_handler.py",
-        "services/db-writer/visual_state_delta_handler.py",
-    }
-)
+DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
+    "packages/agents/src/duckclaw/graphs/graph_server.py": "legacy graph command handler awaiting DB-writer migration",
+    "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py": "authorized chat command mutations",
+    "services/api-gateway/main.py": "authorized command-plane bridge",
+    "services/api-gateway/routers/admin.py": "authorized admin control-plane mutations",
+    "services/api-gateway/routers/admin_db_first.py": "authorized DB-first admin mutators",
+    "services/db-writer/context_injection_handler.py": "DB-writer context mutations",
+    "services/db-writer/main.py": "singleton DB-writer",
+    "services/db-writer/quant_state_delta_handler.py": "DB-writer quant mutations",
+    "services/db-writer/visual_state_delta_handler.py": "DB-writer visual mutations",
+}
+DB_FIRST_READ_WRITE_ALLOWLIST = frozenset(DB_FIRST_READ_WRITE_ALLOWLIST_REASONS)
 
 SCAN_SUFFIXES = {".py", ".yaml", ".yml", ".json", ".toml"}
 IGNORED_DIRS = {".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "__pycache__", "node_modules"}
 CREATE_TABLE_RE = re.compile(r"\bCREATE\s+TABLE\b", re.IGNORECASE)
 DOMAIN_DB_PATH_ENV_RE = re.compile(
-    r"\bDUCKCLAW_(FINANZ|JOB_HUNTER|SIATA|QUANT_TRADER)_DB_PATH\b"
+    r"\bDUCKCLAW_(FINANZ|JOB_HUNTER|SIATA|QUANT_TRADER|WAR_ROOM_ACL)_DB_PATH\b"
 )
 REMOVED_TENANT_DEMO_TABLE_NAMES = frozenset({"leila_orders", "leila_products"})
+REMOVED_TENANT_DOMAIN_SCHEMA_MARKERS = frozenset(
+    {
+        "TENANT_EXTRA_" "SCHEMAS",
+        '"leila"',
+        '"quant"',
+        '"quant_core"',
+        '"war_room"',
+        '"war_room_core"',
+    }
+)
 REMOVED_DOMAIN_WORKER_ID_SHIMS = frozenset(
     {
         "WORKER_FINANZ",
@@ -363,11 +372,33 @@ def test_gateway_db_does_not_define_domain_specific_path_env_keys() -> None:
     assert offenders == []
 
 
+def test_backend_and_tooling_do_not_define_domain_specific_db_path_env_keys() -> None:
+    offenders: list[str] = []
+    current_test = Path(__file__).resolve()
+    for path in _backend_files():
+        if path.resolve() == current_test:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if DOMAIN_DB_PATH_ENV_RE.search(text):
+            offenders.append(_rel(path))
+
+    assert offenders == []
+
+
 def test_cleanup_default_tenant_tool_does_not_name_demo_tables() -> None:
     cleanup_path = REPO_ROOT / "scripts" / "cleanup_default_duckdb_tenant_schemas.py"
     text = cleanup_path.read_text(encoding="utf-8")
 
     offenders = sorted(name for name in REMOVED_TENANT_DEMO_TABLE_NAMES if name in text)
+
+    assert offenders == []
+
+
+def test_cleanup_default_tenant_tool_does_not_hardcode_domain_schemas() -> None:
+    cleanup_path = REPO_ROOT / "scripts" / "cleanup_default_duckdb_tenant_schemas.py"
+    text = cleanup_path.read_text(encoding="utf-8")
+
+    offenders = sorted(marker for marker in REMOVED_TENANT_DOMAIN_SCHEMA_MARKERS if marker in text)
 
     assert offenders == []
 

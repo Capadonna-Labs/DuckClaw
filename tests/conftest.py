@@ -129,6 +129,7 @@ def gateway_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     from duckclaw.admin_console_users import ensure_admin_console_users_table, upsert_console_user
     from duckclaw.gateway_db import GATEWAY_DB_ENV_KEYS
+    from duckclaw.schema_migrations import run_pending_migrations
     from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
 
     p = tmp_path / "gateway.duckdb"
@@ -137,6 +138,7 @@ def gateway_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     con = duckdb.connect(str(p))
     try:
         adapter = _GatewayDbAdapter(con)
+        run_pending_migrations(adapter)
         ensure_admin_console_users_table(adapter)
         ensure_user_shared_db_access_table(adapter)
         upsert_console_user(

@@ -362,11 +362,9 @@ def _env_dict_for_json(env: dict[str, Any]) -> dict[str, str]:
 _GATEWAY_MERGE_PERSIST_DB_KEYS = frozenset(
     (
         "DUCKCLAW_DB_PATH",
-        "DUCKCLAW_FINANZ_DB_PATH",
-        "DUCKCLAW_JOB_HUNTER_DB_PATH",
-        "DUCKCLAW_SIATA_DB_PATH",
-        "DUCKCLAW_QUANT_TRADER_DB_PATH",
-        "DUCKCLAW_PQRSD_ASSISTANT_DB_PATH",
+        "DUCKCLAW_GATEWAY_DB_PATH",
+        "DUCKCLAW_TENANT_DB_PATH",
+        "DUCKCLAW_VAULT_DB_PATH",
         "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
         "DUCKCLAW_SHARED_DB_PATH",
         "DUCKDB_PATH",
@@ -702,7 +700,7 @@ def serve(
     gateway=True: services/api-gateway/main.py (uvicorn --app-dir services/api-gateway).
     Default name: DuckClaw-Gateway con gateway=True, DuckClaw-API si no.
     delete_pm2_name: opcional; elimina ese proceso PM2 antes de arrancar (sustitución explícita).
-    gateway_db_path: si se indica, fija ``DUCKCLAW_FINANZ_DB_PATH`` y ``DUCKDB_PATH`` para este
+    gateway_db_path: si se indica, fija ``DUCKCLAW_GATEWAY_DB_PATH`` y ``DUCKDB_PATH`` para este
     proceso en el ecosystem (varios gateways pueden usar BDs distintas sin pisar el .env global).
     Con gateway+pm2 se fusionan varios gateways en config/api_gateways_pm2.json y ecosystem.api.config.cjs.
     """
@@ -738,8 +736,7 @@ def serve(
         for key in (
             "LANGCHAIN_TRACING_V2", "LANGCHAIN_API_KEY", "LANGCHAIN_PROJECT",
             "DUCKCLAW_LLM_PROVIDER", "DUCKCLAW_LLM_MODEL", "DUCKCLAW_LLM_BASE_URL",
-            "DUCKCLAW_FINANZ_DB_PATH", "DUCKCLAW_JOB_HUNTER_DB_PATH", "DUCKCLAW_SIATA_DB_PATH",
-            "DUCKCLAW_QUANT_TRADER_DB_PATH", "DUCKCLAW_PQRSD_ASSISTANT_DB_PATH",
+            "DUCKCLAW_GATEWAY_DB_PATH", "DUCKCLAW_TENANT_DB_PATH", "DUCKCLAW_VAULT_DB_PATH",
             "DUCKCLAW_WAR_ROOM_ACL_DB_PATH", "DUCKDB_PATH",
             "MLX_MODEL_ID", "MLX_MODEL_PATH", "MLX_ADAPTER_PATH", "MLX_PORT", "MLX_PYTHON",
             "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
@@ -769,9 +766,9 @@ def serve(
             if not _dbf.is_absolute():
                 _dbf = Path(effective_cwd) / _dbf
             _resolved = str(_dbf.resolve())
-            env_vars["DUCKCLAW_FINANZ_DB_PATH"] = _resolved
+            env_vars["DUCKCLAW_GATEWAY_DB_PATH"] = _resolved
             env_vars["DUCKDB_PATH"] = _resolved
-            forced_env["DUCKCLAW_FINANZ_DB_PATH"] = _resolved
+            forced_env["DUCKCLAW_GATEWAY_DB_PATH"] = _resolved
             forced_env["DUCKDB_PATH"] = _resolved
 
         if gateway:

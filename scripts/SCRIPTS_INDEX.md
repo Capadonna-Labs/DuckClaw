@@ -12,7 +12,6 @@ Utilidades **puntuales** del monorepo. Runtime de producción: `services/` + `du
 | `uv run python scripts/bootstrap_team_admin.py` | [`bootstrap_team_admin.py`](bootstrap_team_admin.py) | Alta admin en whitelist (`user_id` por argumento) |
 | `uv run duckops ingress telegram-register-webhooks` | [`register_webhooks.py`](register_webhooks.py) | Registrar webhooks Telegram |
 | `uv run duckops init` | [`duckclaw_setup_wizard.py`](duckclaw_setup_wizard.py) | Wizard legacy disponible con `duckops init --classic` |
-| `uv run python scripts/verify_pqrsd_telegram_pipeline.py` | [`verify_pqrsd_telegram_pipeline.py`](verify_pqrsd_telegram_pipeline.py) | Smoke pipeline PQRSD |
 | `uv run python scripts/sanitize_traces_for_gemma.py` | [`sanitize_traces_for_gemma.py`](sanitize_traces_for_gemma.py) | Curar JSONL SFT |
 | `uv run duckops db authorized-users` | [`check_authorized_users.py`](check_authorized_users.py) | Listar whitelist en DuckDB hub |
 

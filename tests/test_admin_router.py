@@ -670,60 +670,18 @@ def test_telegram_whitelist_resolves_gateway_tenant(
     assert row[0] == "test-tenant"
 
 
-def test_train_status_requires_key(admin_client: TestClient):
-    assert admin_client.get("/api/v1/admin/train/status").status_code == 401
+def test_train_admin_routes_removed(admin_client: TestClient):
+    headers = {"X-Admin-Key": "test-admin-key"}
 
-
-def test_train_status_ok(admin_client: TestClient):
-    r = admin_client.get(
-        "/api/v1/admin/train/status",
-        headers={"X-Admin-Key": "test-admin-key"},
+    assert admin_client.get("/api/v1/admin/train/status", headers=headers).status_code == 404
+    assert (
+        admin_client.post(
+            "/api/v1/admin/train/pipeline/collect",
+            headers=headers,
+            json={"require_valid_sql": False},
+        ).status_code
+        == 404
     )
-    assert r.status_code == 200
-    data = r.json()
-    assert "paths" in data
-    assert "pipeline" in data
-
-
-def test_train_sample_rejects_path_traversal(admin_client: TestClient):
-    r = admin_client.get(
-        "/api/v1/admin/train/traces/sample",
-        headers={"X-Admin-Key": "test-admin-key"},
-        params={"lake": "conversation_traces", "relative_path": "../../.env"},
-    )
-    assert r.status_code == 400
-
-
-def test_train_collect(
-    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    traces = tmp_path / "2026" / "05" / "17"
-    traces.mkdir(parents=True)
-    row = {
-        "status": "SUCCESS",
-        "messages": [
-            {"role": "user", "content": "hola"},
-            {"role": "assistant", "content": "ok"},
-        ],
-    }
-    (traces / "traces.jsonl").write_text(
-        json.dumps(row) + "\n", encoding="utf-8"
-    )
-    out = tmp_path / "dataset_sft.jsonl"
-    monkeypatch.setenv("DUCKCLAW_CONVERSATION_TRACES_DIR", str(tmp_path))
-    monkeypatch.setattr(
-        "duckclaw.forge.sft.collector.DEFAULT_SFT_DATASET_PATH", out
-    )
-    r = admin_client.post(
-        "/api/v1/admin/train/pipeline/collect",
-        headers={"X-Admin-Key": "test-admin-key"},
-        json={"require_valid_sql": False},
-    )
-    assert r.status_code == 200
-    data = r.json()
-    assert data["ok"] is True
-    assert data["records"] >= 1
-    assert out.is_file()
 
 
 def test_playground_team_hint_workers_label(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, catalog_db):

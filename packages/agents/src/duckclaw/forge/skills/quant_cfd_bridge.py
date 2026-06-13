@@ -77,7 +77,7 @@ def _enqueue_mutation(
 ) -> tuple[bool, str | None]:
     """
     Escritura DuckDB: inline si RW, si no encola a DuckClaw-DB-Writer
-    (mismo patrón que `quant_market_bridge._persist_ohlcv` / PQRSD).
+    (mismo patrón que `quant_market_bridge._persist_ohlcv`).
     """
     path = str(getattr(db, "_path", "") or "").strip()
     if not path or path == ":memory:":

@@ -29,6 +29,6 @@
 ## Referencias de código
 
 - Sandbox: `packages/agents/src/duckclaw/graphs/sandbox.py` (`sandbox_tool_factory`, `extract_latest_sandbox_figures_base64`).
-- Estado / worker: `packages/agents/src/duckclaw/forge/atoms/state.py`, `packages/agents/src/duckclaw/workers/factory.py`.
+- Estado / worker: `packages/agents/src/duckclaw/graphs/state.py`, `packages/agents/src/duckclaw/workers/factory.py`.
 - Manager: `packages/agents/src/duckclaw/graphs/manager_graph.py`, propagación en `packages/agents/src/duckclaw/graphs/graph_server.py`.
 - Gateway: `services/api-gateway/core/telegram_media_upload.py` (`send_sandbox_documents_to_telegram_sync`), `services/api-gateway/main.py`, `services/api-gateway/routers/telegram_inbound_webhook.py`.

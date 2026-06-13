@@ -65,7 +65,7 @@ def main() -> int:
     if not dataset_path.exists():
         print(f"Error: dataset no encontrado: {dataset_path}", file=sys.stderr)
         print(
-            "Ejecuta primero: python -c \"from duckclaw.forge.sft import collect_traces_to_sft; collect_traces_to_sft()\"",
+            "Genera o copia un dataset JSONL compatible antes de ejecutar este trainer.",
             file=sys.stderr,
         )
         return 1

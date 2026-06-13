@@ -23,7 +23,12 @@ from typing import Any, Optional
 
 from langchain_core.runnables import RunnableConfig
 
-from duckclaw.forge.atoms.state import ManagerAgentState
+from duckclaw.graphs.state import ManagerAgentState
+from duckclaw.forge.rag.context_blocks import (
+    extract_tagged_block as _rag_extract_tagged_block,
+    preserve_context_blocks_for_worker as _rag_preserve_context_blocks_for_worker,
+    strip_tagged_blocks as _rag_strip_tagged_blocks,
+)
 from duckclaw.graphs.sandbox import extract_latest_sandbox_figure_base64
 from duckclaw.graphs.subagent_run_id import acquire_subagent_slot, release_subagent_slot
 from duckclaw.utils.langsmith_trace import get_tracing_config
@@ -619,11 +624,6 @@ def _strip_mercenary_spec_for_browser_worker(
         return False
     out.pop("mercenary_spec", None)
     return True
-
-
-def _strip_mercenary_spec_for_pqrsd_assistant(out: dict[str, Any], db: Any = None) -> bool:
-    """Compat tests: mismo criterio que workers con browser_sandbox en manifest."""
-    return _strip_mercenary_spec_for_browser_worker(out, None, db=db)
 
 
 def _should_disable_mercenary_for_admin_ui(chat_id: str | None) -> bool:
@@ -1845,49 +1845,18 @@ def _task_summary_for_activity(incoming: str, planned_task: str) -> str:
 
 
 def _extract_tagged_block(text: str, tag: str) -> str:
-    if not text or not tag:
-        return ""
-    pattern = re.compile(rf"\[{re.escape(tag)}\].*?\[/{re.escape(tag)}\]", re.DOTALL)
-    match = pattern.search(text)
-    return match.group(0).strip() if match else ""
+    return _rag_extract_tagged_block(text, tag)
 
 
 def _strip_tagged_blocks(text: str, tags: tuple[str, ...]) -> str:
-    out = text or ""
-    for tag in tags:
-        pattern = re.compile(rf"\[{re.escape(tag)}\].*?\[/{re.escape(tag)}\]", re.DOTALL)
-        out = pattern.sub("", out)
-    return re.sub(r"\n{3,}", "\n\n", out).strip()
+    return _rag_strip_tagged_blocks(text, tags)
 
 
 def _preserve_context_blocks_for_worker(incoming: str, planned_task: str) -> str:
-    """El planner resume tareas; estos bloques son grounding y deben llegar intactos al worker."""
-    task = (planned_task or "").strip()
-    if not incoming:
-        return task
-    blocks = [
-        _extract_tagged_block(incoming, "PROJECT_CONTEXT"),
-        _extract_tagged_block(incoming, "RAG_SOURCE_INVENTORY"),
-        _extract_tagged_block(incoming, "RAG_CONTEXT"),
-    ]
-    blocks = [block for block in blocks if block and block not in task]
-    if not blocks:
-        return task
-    has_rag_blocks = any(block.startswith("[RAG_") for block in blocks)
-    if has_rag_blocks:
-        user_question = _strip_tagged_blocks(
-            incoming,
-            ("PROJECT_CONTEXT", "RAG_SOURCE_INVENTORY", "RAG_CONTEXT"),
-        )
-        if not explicit_duckdb_schema_request(user_question or incoming):
-            task = user_question or "Responde al usuario usando el contexto RAG disponible."
-    return "\n\n".join(
-        [
-            *blocks,
-            "[WORKER_TASK]",
-            task or "Responde al usuario usando el contexto disponible.",
-            "[/WORKER_TASK]",
-        ]
+    return _rag_preserve_context_blocks_for_worker(
+        incoming,
+        planned_task,
+        explicit_storage_request=explicit_duckdb_schema_request,
     )
 
 
@@ -1947,10 +1916,8 @@ def build_manager_graph(
         entry_r = (state.get("entry_worker_id") or "").strip()
         _entry_route_ev = _is_entry_route_system_event(incoming_r)
         _all_disk_r = list_workers(troot, db=db, tenant_id=tenant_id)
-        # Multiplex Telegram (p. ej. /api/v1/telegram/pqrsd-assistant): el API Gateway
-        # pasa entry_worker_id=PQRSD-Assistant. Antes solo se fusionaba en SYSTEM_EVENT
-        # (TRADING_TICK, goals ticker); los mensajes normales quedaban con assigned=available[0]
-        # (suele ser finanz) → delegación incorrecta. Si hay ruta HTTP, priorizar siempre ese worker.
+        # Multiplex Telegram: el API Gateway pasa entry_worker_id desde la ruta HTTP.
+        # Si hay ruta HTTP, priorizar siempre ese worker sobre el default del equipo.
         _canon_entry = _resolve_template_id(_all_disk_r, entry_r) if entry_r else None
         coordinator_id: str | None = None
         delegation_pool: list[str] = []
@@ -2725,8 +2692,6 @@ def build_manager_graph(
             )
             reply = raw_worker_reply
             _label_reply = f"{assigned} {run_label_n}".strip()
-            # CRM (Next.js): el proxy usa chat_id `crm-ticket-*`; no anteponer etiqueta de subagente.
-            _crm = str(chat_id or "").strip().lower().startswith("crm-ticket-")
             if _visual_lite_mcp and isinstance(worker_invoke, dict):
                 _vis_b64 = (worker_invoke.get("sandbox_photo_base64") or "").strip()
                 _vis_aid = (worker_invoke.get("visual_artifact_id") or "").strip()
@@ -2735,8 +2700,7 @@ def build_manager_graph(
                     if not _short_vis or len(_short_vis) > 240:
                         _short_vis = "Imagen generada."
                     reply = _short_vis
-            if not _crm:
-                reply = _prepend_subagent_label_once(reply, _label_reply)
+            reply = _prepend_subagent_label_once(reply, _label_reply)
             messages = worker_invoke.get("messages")
             if isinstance(messages, tuple):
                 messages = list(messages)
@@ -2773,32 +2737,6 @@ def build_manager_graph(
                         "inferencia: error no transitorio en invoke del worker "
                         f"({(worker_invoke.get('_duckclaw_worker_llm_failure_kind') or 'unknown')})",
                     )
-                elif (assigned or "").strip() == "PQRSD-Assistant":
-                    try:
-                        from duckclaw.forge.atoms.pqrsd_registration_egress_guard import (
-                            pqrsd_persist_tool_used,
-                            pqrsd_reply_claims_internal_registration,
-                        )
-
-                        _pqrsd_replan = pqrsd_reply_claims_internal_registration(
-                            raw_worker_reply
-                        ) and not pqrsd_persist_tool_used(_tools_list)
-                    except Exception:
-                        _pqrsd_replan = False
-                    if _pqrsd_replan:
-                        _rp = "pqrsd: radicación afirmada sin admin_sql ni pqrsd_registrar_radicacion_crm"
-                        reasons_acc = merge_failure_reasons(reasons_acc, _rp)
-                        if pa + 1 < max_a:
-                            replan_after = True
-                            next_plan_attempt = pa + 1
-                            log_sys(
-                                _obs,
-                                "manager replan: PQRSD sin persist -> intento %s/%s",
-                                pa + 2,
-                                max_a,
-                            )
-                        else:
-                            exhausted_final = True
                 else:
                     try:
                         from duckclaw.workers.tool_orchestration import (
@@ -2872,9 +2810,7 @@ def build_manager_graph(
                 )
             reply = msg
             _label_e = f"{assigned} {run_label_n}".strip()
-            _crm_e = str(chat_id or "").strip().lower().startswith("crm-ticket-")
-            if not _crm_e:
-                reply = _prepend_subagent_label_once(reply, _label_e)
+            reply = _prepend_subagent_label_once(reply, _label_e)
             status = "FAILED"
             _retryable, _rreason = classify_exception_for_replan(e, _duckdb_config_clash)
             if replan_enabled() and _retryable:

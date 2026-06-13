@@ -405,7 +405,7 @@ def schedule_telegram_context_summary_background(
             reply_local = (res.get("response") or "").strip() if isinstance(res, dict) else ""
             used_fb = False
             try:
-                from duckclaw.forge.atoms.user_reply_nl_synthesis import (
+                from duckclaw.egress.user_reply_nl_synthesis import (
                     telegram_stored_context_summary_body_when_model_trivial,
                 )
 

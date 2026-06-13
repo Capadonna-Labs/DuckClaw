@@ -31,7 +31,7 @@ from duckclaw.forge.skills.intraday_accum_window import (
     inside_reference_accumulation_trading_week_cot,
     inside_reference_equity_rth_cot,
 )
-from duckclaw.forge.atoms.trade_signal_cancel import cancel_trade_signal_in_ledger
+from duckclaw.forge.skills.quant_trade_signal_cancel import cancel_trade_signal_in_ledger
 from duckclaw.forge.skills.quant_hitl import consume_execute_order_grant, grant_execute_order
 from duckclaw.forge.skills.quant_tool_context import (
     get_quant_tool_chat_id,

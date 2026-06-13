@@ -1,4 +1,4 @@
-"""Bootstrap --core-only: esquema genérico sin dominios quant/pqrsd/finance."""
+"""Bootstrap --core-only: esquema genérico sin dominios quant/finance."""
 
 from __future__ import annotations
 

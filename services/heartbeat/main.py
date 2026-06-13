@@ -30,7 +30,7 @@ from duckclaw.duckdb_read_compat import duckclaw_open_for_read_scan
 from duckclaw.db_write_queue import enqueue_duckdb_write_sync
 from duckclaw.forge.homeostasis import BeliefRegistry, HomeostasisManager
 from duckclaw.gateway_db import get_gateway_db_path, iter_goals_ticker_duckdb_paths, resolve_env_duckdb_path
-from duckclaw.forge.atoms.cron_wall_schedule import wall_once_expired, wall_schedule_should_fire
+from duckclaw.runtime.scheduling.cron_wall_schedule import wall_once_expired, wall_schedule_should_fire
 from duckclaw.graphs.on_the_fly_commands import (
     _GOALS_CRON_WALL_KEY,
     _GOALS_DELTA_META_KEY,
@@ -178,7 +178,7 @@ def _resolve_quant_trader_vault_path(candidate_paths: List[str]) -> str | None:
     Misma bóveda que el webhook multiplex Quant-Trader (quant_traderdb1.duckdb).
     Sin esto, el POST interno cae en dedicated gateway (p. ej. finanzdb) y quant_core.* queda vacío.
     """
-    raw = (os.getenv("DUCKCLAW_QUANT_TRADER_DB_PATH") or "").strip()
+    raw = (os.getenv("DUCKCLAW_HEARTBEAT_TARGET_DB_PATH") or "").strip()
     if raw:
         try:
             return str(Path(resolve_env_duckdb_path(raw)).expanduser().resolve())

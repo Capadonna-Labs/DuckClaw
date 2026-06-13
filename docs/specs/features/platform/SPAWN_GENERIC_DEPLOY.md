@@ -27,7 +27,7 @@ Spawn (o el operador) escribe en la raíz del monorepo:
 | `DUCKCLAW_SPAWN_PROFILE` | No | `1` activa checks opcionales en `doctor.py` |
 | `DUCKCLAW_REPO_ROOT` | No | Ruta absoluta al clone (PM2 / scripts) |
 
-**No** definir en perfil spawn: `DUCKCLAW_FINANZ_DB_PATH`, `DUCKCLAW_QUANT_TRADER_DB_PATH`, multiplex Telegram, etc.
+**No** definir en perfil spawn: rutas DuckDB por agente, multiplex Telegram, etc.
 
 Plantilla: [`config/.env.spawn.example`](../../../config/.env.spawn.example).
 
@@ -83,7 +83,7 @@ Con `DUCKCLAW_SPAWN_PROFILE=1` (y sin `DUCKCLAW_SPAWN_USE_DB_WRITER=1`):
 **No definir en `.env` spawn** (forzarían RO o multiplex industrial):
 
 - `DUCKCLAW_GATEWAY_READ_ONLY`, `*_READ_ONLY` en rutas gateway
-- `DUCKCLAW_FINANZ_DB_PATH`, `DUCKCLAW_QUANT_TRADER_DB_PATH`, etc. (priorizan otro hub y rompen mono-usuario)
+- Rutas DuckDB por agente (priorizan otro hub y rompen mono-usuario)
 
 Escape hatch: `DUCKCLAW_SPAWN_USE_DB_WRITER=1` + PM2 `ecosystem.db-writer.config.cjs` restaura cola + proceso writer.
 

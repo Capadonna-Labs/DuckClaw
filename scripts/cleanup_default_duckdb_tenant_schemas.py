@@ -26,8 +26,6 @@ import duckdb
 # Esquemas de dominio (no pertenecen al tenant default genérico).
 TENANT_EXTRA_SCHEMAS: tuple[str, ...] = (
     "leila",
-    "pqrsd",
-    "pqrsd_crm",
     "quant",
     "quant_core",
     "war_room",
@@ -35,10 +33,7 @@ TENANT_EXTRA_SCHEMAS: tuple[str, ...] = (
 )
 
 # Tablas en main creadas por workers/domains específicos.
-TENANT_EXTRA_MAIN_TABLES: tuple[str, ...] = (
-    "leila_orders",
-    "leila_products",
-)
+TENANT_EXTRA_MAIN_TABLES: tuple[str, ...] = ()
 
 CORE_MAIN_TABLES: frozenset[str] = frozenset(
     {

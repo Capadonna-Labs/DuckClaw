@@ -22,8 +22,8 @@ _PROTECTED_TEMPLATE_IDS = frozenset({"entry_router", "manager_router", "platform
 _CATALOG_STARTER_SKIP = frozenset({"entry_router", "manager_router", "industries"})
 _ENV_ALLOW_PREFIXES = ("TELEGRAM_", "DUCKDB_", "DUCKCLAW_", "LANGCHAIN_", "OPENAI_", "GROQ_", "DEEPSEEK_")
 _ENV_ALLOW_EXACT = frozenset({"LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "REDIS_URL"})
-_DUCKDB_EXPLORER_LEGACY_SCHEMAS = frozenset({"pqrsd_crm", "quant_core", "war_room_core"})
-_DUCKDB_EXPLORER_LEGACY_MAIN_TABLES = frozenset({"leila_orders", "leila_products"})
+_DUCKDB_EXPLORER_LEGACY_SCHEMAS = frozenset({"quant_core", "war_room_core"})
+_DUCKDB_EXPLORER_LEGACY_MAIN_TABLES = frozenset()
 _DROP_LEGACY_SCHEMAS_CONFIRM = "DROP_LEGACY_SCHEMAS"
 _TELEGRAM_WEBHOOK_ROUTES_ENV_KEY = "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES"
 _TELEGRAM_WEBHOOK_ROUTES_DOMAIN = "telegram"
@@ -77,7 +77,7 @@ def _duckdb_explorer_legacy_main_table_names(
     tenant_id: str | None = None,
     actor_email: str | None = None,
 ) -> set[str]:
-    """Main tables known to belong to old domain demos; DB-first with env fallback."""
+    """Main tables configured for cleanup; DB-first with env fallback."""
     raw = os.environ.get("DUCKCLAW_ADMIN_DUCKDB_LEGACY_MAIN_TABLES", "")
     if tenant_id and actor_email:
         try:
@@ -1406,7 +1406,7 @@ async def playground_set_model(body: PlaygroundModelBody, request: Request) -> d
         )
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
-        raise _problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_FINANZ_DB_PATH")
+        raise _problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_GATEWAY_DB_PATH")
     parts = [f"provider={prov}"]
     if body.model and body.model.strip():
         parts.append(f"model={body.model.strip()}")
@@ -5225,7 +5225,5 @@ async def duckdb_vector_search(
 
 
 from routers.admin_db_first import router as _admin_db_first_router  # noqa: E402
-from routers.admin_train import router as _admin_train_router  # noqa: E402
 
 router.include_router(_admin_db_first_router)
-router.include_router(_admin_train_router)

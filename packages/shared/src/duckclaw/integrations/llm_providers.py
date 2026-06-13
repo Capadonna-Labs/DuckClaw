@@ -673,7 +673,7 @@ _DUCKDB_INTERNAL_CRASH_USER_ES = (
 def _strip_duckdb_internal_crash_reply(text: str) -> str:
     """
     Evita que errores INTERNAL de DuckDB (WAL, stack nativo) lleguen a Telegram/trazas como si fueran
-    respuesta del modelo. Evidencia: pqrsd-assistantdb con WAL inconsistente.
+    respuesta del modelo. Evidencia: una bóveda DuckDB de worker con WAL inconsistente.
     """
     s = (text or "").strip()
     if not s or "INTERNAL Error:" not in s:

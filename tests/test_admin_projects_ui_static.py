@@ -277,12 +277,15 @@ def test_topbar_can_restart_gateway_without_gateway_proxy() -> None:
 
 def test_manager_preserves_rag_blocks_for_worker_task() -> None:
     manager = Path("packages/agents/src/duckclaw/graphs/manager_graph.py").read_text(encoding="utf-8")
+    context_blocks = Path("packages/agents/src/duckclaw/forge/rag/context_blocks.py").read_text(encoding="utf-8")
 
+    assert "from duckclaw.forge.rag.context_blocks import" in manager
     assert "_preserve_context_blocks_for_worker" in manager
     assert "_strip_tagged_blocks" in manager
-    assert "_extract_tagged_block(incoming, \"RAG_SOURCE_INVENTORY\")" in manager
-    assert "_extract_tagged_block(incoming, \"RAG_CONTEXT\")" in manager
-    assert "Responde al usuario usando el contexto RAG disponible." in manager
+    assert "explicit_storage_request=explicit_duckdb_schema_request" in manager
+    assert 'extract_tagged_block(incoming, "RAG_SOURCE_INVENTORY")' in context_blocks
+    assert 'extract_tagged_block(incoming, "RAG_CONTEXT")' in context_blocks
+    assert "Responde al usuario usando el contexto RAG disponible." in context_blocks
     assert "planned_task_for_worker = _preserve_context_blocks_for_worker(incoming, planned_task)" in manager
     assert '"input": planned_task_for_worker' in manager
     assert '"incoming": planned_task_for_worker' in manager

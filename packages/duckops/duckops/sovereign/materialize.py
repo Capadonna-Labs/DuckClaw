@@ -66,24 +66,18 @@ def _pm2_env_set_multiplex_db_paths(
     primary_abs: Path,
     primary_rel: str,
 ) -> None:
-    """Sin DUCKCLAW_DB_PATH: rutas por worker + DUCKDB_PATH para db-writer."""
+    """Sin DUCKCLAW_DB_PATH: ruta genérica de gateway + DUCKDB_PATH para db-writer."""
     env.pop("DUCKCLAW_DB_PATH", None)
     for k in (
-        "DUCKCLAW_FINANZ_DB_PATH",
-        "DUCKCLAW_JOB_HUNTER_DB_PATH",
-        "DUCKCLAW_SIATA_DB_PATH",
+        "DUCKCLAW_GATEWAY_DB_PATH",
+        "DUCKCLAW_TENANT_DB_PATH",
+        "DUCKCLAW_VAULT_DB_PATH",
         "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
     ):
         v = (dot.get(k) or "").strip()
         if v:
             env[k] = str(_resolve_repo_db_path(repo_root, v))
-    low = primary_rel.lower()
-    if "job" in low and "hunter" in low:
-        env["DUCKCLAW_JOB_HUNTER_DB_PATH"] = str(primary_abs)
-    elif "siata" in low:
-        env["DUCKCLAW_SIATA_DB_PATH"] = str(primary_abs)
-    elif "finanz" in low:
-        env["DUCKCLAW_FINANZ_DB_PATH"] = str(primary_abs)
+    env["DUCKCLAW_GATEWAY_DB_PATH"] = str(primary_abs)
     env["DUCKDB_PATH"] = str(primary_abs)
 
 
@@ -457,12 +451,12 @@ def load_telegram_creator_hint_from_repo_env(repo_root: Path) -> str:
 
 # Orden alineado con gateway_db (sin DUCKCLAW_DB_PATH).
 _ENV_PRIMARY_DUCKDB_KEYS: tuple[str, ...] = (
-    "DUCKDB_PATH",
-    "DUCKCLAW_FINANZ_DB_PATH",
+    "DUCKCLAW_GATEWAY_DB_PATH",
+    "DUCKCLAW_TENANT_DB_PATH",
+    "DUCKCLAW_VAULT_DB_PATH",
     "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
-    "DUCKCLAW_JOB_HUNTER_DB_PATH",
-    "DUCKCLAW_SIATA_DB_PATH",
     "DUCKCLAW_AXIS_DB_PATH",
+    "DUCKDB_PATH",
 )
 
 
@@ -481,10 +475,10 @@ def _env_duck_path_as_repo_relative(raw: str, repo_root: Path) -> str:
 
 def load_duckdb_vault_hint_from_repo_env(repo_root: Path) -> str:
     """
-    Primera ruta DuckDB no vacía en ``.env`` (hub o por-agente).
+    Primera ruta DuckDB no vacía en ``.env`` (hub, tenant o bóveda).
 
-    No hace falta preguntarla en el wizard si ya defines ``DUCKCLAW_FINANZ_DB_PATH``,
-    ``DUCKCLAW_JOB_HUNTER_DB_PATH``, etc.
+    No hace falta preguntarla en el wizard si ya defines una ruta genérica como
+    ``DUCKCLAW_GATEWAY_DB_PATH`` o ``DUCKCLAW_VAULT_DB_PATH``.
     """
     envp = repo_root / ".env"
     if not envp.is_file():
@@ -791,13 +785,8 @@ def materialize(
     team_raw = (draft.gateway_team_templates or "").strip()
     if team_raw:
         updates["DUCKCLAW_TEAM_MEMBERS"] = team_raw
-    if "job" in _low and "hunter" in _low:
-        updates["DUCKCLAW_JOB_HUNTER_DB_PATH"] = primary_rel
-    elif "siata" in _low:
-        updates["DUCKCLAW_SIATA_DB_PATH"] = primary_rel
-    elif "finanz" in _low:
-        updates["DUCKCLAW_FINANZ_DB_PATH"] = primary_rel
-    elif "axis" in _low:
+    updates["DUCKCLAW_GATEWAY_DB_PATH"] = primary_rel
+    if "axis" in _low:
         updates["DUCKCLAW_AXIS_DB_PATH"] = primary_rel
     if _dw.startswith("axis"):
         updates["DUCKCLAW_AXIS_DB_PATH"] = primary_rel

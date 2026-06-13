@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from duckclaw.forge.atoms import user_reply_nl_synthesis as mod
+from duckclaw.egress import user_reply_nl_synthesis as mod
 from duckclaw.workers.manifest import load_manifest
 
 

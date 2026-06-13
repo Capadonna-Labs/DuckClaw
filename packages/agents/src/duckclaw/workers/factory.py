@@ -33,10 +33,13 @@ from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_s
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.guardrails.loader import load_guardrail
+from duckclaw.prompt_policies import PromptPolicyResolver
 from duckclaw.workers import read_pool
 from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills
+from duckclaw.forge.rag.prompt_policy import rag_turn_system_prompt
+from duckclaw.forge.rag.tool_policy import should_prioritize_rag_over_storage_tools, without_storage_tools
 from duckclaw.workers.field_reflection import (
     collect_tool_error_digest,
     finanz_field_reflection_enabled,
@@ -47,11 +50,10 @@ from duckclaw.workers.field_reflection import (
     persist_field_lesson,
 )
 
+# Legacy ID predicates/constants remain only for branches not migrated in this first DB-first cut.
 from duckclaw.workers.worker_ids import (
     MARKET_WORKERS,
-    PLOT_CAPABLE_WORKERS,
     WORKER_FINANZ,
-    WORKER_PQRSD_ASSISTANT,
     WORKER_QUANT_TRADER,
     is_finanz,
     is_market_worker,
@@ -59,6 +61,7 @@ from duckclaw.workers.worker_ids import (
     is_quant_trader,
     normalize_worker_id,
 )
+from duckclaw.workers.identity import load_worker_runtime_policy
 
 def _raise_if_chat_cancelled_from_state(state: dict) -> None:
     from duckclaw.graphs.chat_cancel import raise_if_chat_cancelled
@@ -71,31 +74,6 @@ def _raise_if_chat_cancelled_from_state(state: dict) -> None:
 _DEBUG_LOG_PATH = os.environ.get("DUCKCLAW_DEBUG_LOG_PATH") or str(
     Path(__file__).resolve().parents[5] / ".cursor" / "debug-fd1dbb.log"
 )
-_RAG_DEBUG_LOG_PATH = Path("/Users/workstation/Developer/duckclaw/.cursor/debug-ab0734.log")
-
-
-def _rag_debug_log(
-    hypothesis_id: str,
-    message: str,
-    data: dict[str, Any],
-) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "ab0734",
-            "runId": "worker-rag-debug",
-            "hypothesisId": hypothesis_id,
-            "location": "packages/agents/src/duckclaw/workers/factory.py",
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        _RAG_DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _RAG_DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
-    except Exception:
-        pass
-    # endregion
 
 
 def _ibkr_cancel_debug_log(
@@ -264,6 +242,57 @@ def _worker_use_heuristic_first_tool(spec: WorkerSpec) -> bool:
         return o
     raw = (os.getenv("DUCKCLAW_WORKER_HEURISTIC_FIRST_TOOL") or "true").strip().lower()
     return raw in ("1", "true", "yes", "on")
+
+
+def _worker_runtime_policy(spec: WorkerSpec) -> Any:
+    """Return the DB-backed runtime policy attached to a WorkerSpec, if available."""
+    return getattr(spec, "runtime_policy", None)
+
+
+def _worker_has_runtime_capability(spec: WorkerSpec, capability_name: str) -> bool:
+    """DB-first capability gate; no worker-name fallback."""
+    runtime_policy = _worker_runtime_policy(spec)
+    has_capability = getattr(runtime_policy, "has_capability", None)
+    if not callable(has_capability):
+        return False
+    try:
+        return bool(has_capability(capability_name))
+    except Exception:
+        return False
+
+
+def _worker_runtime_capability_policy(spec: WorkerSpec, capability_name: str) -> dict[str, Any]:
+    runtime_policy = _worker_runtime_policy(spec)
+    policy_for = getattr(runtime_policy, "policy_for", None)
+    if not callable(policy_for):
+        return {}
+    try:
+        policy = policy_for(capability_name)
+    except Exception:
+        return {}
+    return dict(policy) if isinstance(policy, dict) else {}
+
+
+def _worker_runtime_capability_flag(
+    spec: WorkerSpec,
+    capability_name: str,
+    key: str,
+    *,
+    default: bool = False,
+) -> bool:
+    value = _worker_runtime_capability_policy(spec, capability_name).get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if raw in ("false", "0", "no", "off"):
+        return False
+    if raw in ("true", "1", "yes", "on"):
+        return True
+    return default
 
 
 _PLANNED_TASK_PREFIX = (
@@ -3837,6 +3866,15 @@ def build_worker_graph(
     (``admin_worker_catalog``) en lugar del filesystem ``forge/templates/``.
     """
     spec = load_manifest(worker_id, templates_root, db=db, tenant_id=tenant_id)
+    if db is not None:
+        try:
+            spec.runtime_policy = load_worker_runtime_policy(
+                db,
+                getattr(spec, "logical_worker_id", None) or worker_id,
+                tenant_id=tenant_id,
+            )
+        except Exception as exc:
+            _log.debug("worker runtime policy unavailable for %s: %s", worker_id, exc)
     path = _get_db_path(worker_id, instance_name, db_path)
     shared_resolved = _resolve_shared_db_path(spec, shared_db_path)
 
@@ -3882,6 +3920,7 @@ def build_worker_graph(
         shared_attach_read_only=True,
         skip_private_attach=skip_private_attach,
     )
+    prompt_policies = PromptPolicyResolver(db=db)
 
     system_prompt = load_system_prompt(spec)
     tools = _build_worker_tools(db, spec)
@@ -4019,8 +4058,7 @@ def build_worker_graph(
             )
 
             register_ibkr_skill(tools, spec.ibkr_config)
-            _lid_ibkr = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip().lower()
-            if is_finanz(_lid_ibkr):
+            if _worker_has_runtime_capability(spec, "portfolio_live_bridge"):
                 replace_get_ibkr_portfolio_with_finanz_live_variant(tools, str(path))
             tools_by_name = {t.name: t for t in tools}
         except Exception:
@@ -4201,7 +4239,7 @@ def build_worker_graph(
             incoming = str(incoming or "").strip()
         if _bi_prompt_base is not None:
             prompt = _compose_bi_system_prompt(_bi_prompt_base, (state.get("analytical_summary") or "").strip())
-        elif is_finanz(_lid) and finanz_field_reflection_enabled(spec):
+        elif finanz_field_reflection_enabled(spec):
             fe = format_field_experience_block(incoming, db, spec.schema_name, top_n=5)
             if fe:
                 prompt = append_domain_closure_block(
@@ -4254,26 +4292,6 @@ def build_worker_graph(
         if (state.get("analytical_summary") or "").strip():
             out["analytical_summary"] = (state.get("analytical_summary") or "").strip()
         out.update(_identity_fields(state))
-        # region agent log
-        _rag_debug_log(
-            "H11,H12",
-            "worker prepare built messages",
-            {
-                "worker_id": worker_id,
-                "logical_worker_id": _lid,
-                "incoming_len": len(incoming),
-                "user_content_len": len(user_content),
-                "prompt_len": len(prompt),
-                "history_items": len(state.get("history") or []),
-                "message_count": len(messages),
-                "incoming_has_inventory": "[RAG_SOURCE_INVENTORY]" in incoming,
-                "incoming_has_rag_context": "[RAG_CONTEXT]" in incoming,
-                "user_content_has_inventory": "[RAG_SOURCE_INVENTORY]" in user_content,
-                "user_content_has_rag_context": "[RAG_CONTEXT]" in user_content,
-                "prompt_mentions_rag": "rag" in prompt.lower(),
-            },
-        )
-        # endregion
         return out
 
     def context_monitor_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
@@ -4341,7 +4359,12 @@ def build_worker_graph(
             return True
         if raw in ("false", "0", "off"):
             return False
-        return is_quant_trader(_lid)
+        return _worker_runtime_capability_flag(
+            spec,
+            "portfolio_live_bridge",
+            "enabled_by_default",
+            default=False,
+        )
 
     tools_sandbox_off = filter_tools_for_sandbox(tools, enabled=False)
     tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}
@@ -5162,7 +5185,10 @@ def build_worker_graph(
                     from duckclaw.graphs.on_the_fly_commands import _is_capabilities_smalltalk, _is_simple_greeting
 
                     if _is_capabilities_smalltalk(incoming):
-                        jh_fast_text = _capabilities_fast_reply_text(spec.worker_id)
+                        jh_fast_text = _capabilities_fast_reply_text(
+                            spec.worker_id,
+                            prompt_policies=prompt_policies,
+                        )
                     elif _is_simple_greeting(incoming):
                         jh_fast_text = _greeting_fast_reply_text(spec.worker_id)
                     force_tavily = bool(
@@ -5391,7 +5417,7 @@ def build_worker_graph(
             if not _worker_use_heuristic_first_tool(spec):
                 force_fetch_ib_gateway = False
             force_fetch_market_data = bool(
-                _lid_l in MARKET_WORKERS
+                _worker_has_runtime_capability(spec, "market_data_bridge")
                 and has_fetch_market
                 and _finanz_user_requests_ohlcv_ingest(incoming)
                 and not force_fetch_ib_gateway
@@ -5547,7 +5573,7 @@ def build_worker_graph(
                     "doc plotly",
                 )
             )
-            _plot_capable_worker = normalize_worker_id(_lid) in PLOT_CAPABLE_WORKERS
+            _plot_capable_worker = _worker_has_runtime_capability(spec, "plot_docs_lookup")
             force_plot_docs = bool(
                 has_tavily
                 and _plot_capable_worker
@@ -5652,7 +5678,7 @@ def build_worker_graph(
                     return _out_finanz_gct
 
             force_pqrsd_fetch_canonical = bool(
-                _lid_l == WORKER_PQRSD_ASSISTANT
+                _worker_has_runtime_capability(spec, "canonical_fetch")
                 and has_pqrsd_fetch
                 and _worker_use_heuristic_first_tool(spec)
                 and _pqrsd_substantive_forced_fetch(
@@ -6249,28 +6275,6 @@ def build_worker_graph(
                 force_portfolio_after_local_cuentas,
                 forced_name,
             )
-            # region agent log
-            _rag_debug_log(
-                "H10,H13",
-                "worker tool routing decision",
-                {
-                    "worker_id": worker_id,
-                    "logical_worker_id": _lid,
-                    "forced_name": forced_name,
-                    "is_schema": is_schema,
-                    "is_table_content": is_table_content,
-                    "force_schema": force_schema,
-                    "force_read_sql": force_read_sql,
-                    "force_admin_sql": force_admin_sql,
-                    "already_has_tool_result": already_has_tool_result,
-                    "heuristic_first_tool": _worker_use_heuristic_first_tool(spec),
-                    "has_get_db_path_tool": "get_db_path" in tools_by_name,
-                    "has_read_sql_tool": "read_sql" in tools_by_name,
-                    "incoming_has_inventory": "[RAG_SOURCE_INVENTORY]" in incoming,
-                    "incoming_has_rag_context": "[RAG_CONTEXT]" in incoming,
-                },
-            )
-            # endregion
             if is_quant_trader(_lid) and _quant_wants_cancel:
                 _ibkr_cancel_debug_log(
                     "factory.py:agent_node",
@@ -6297,11 +6301,11 @@ def build_worker_graph(
             )
             if _pqrsd_inject_datos_first_directive:
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "pqrsd_datos_primero"))
+                    SystemMessage(content=prompt_policies.load("directive", "pqrsd_datos_primero"))
                 ] + _msg_list
             if not _worker_use_heuristic_first_tool(spec):
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "tool_choice_generic"))
+                    SystemMessage(content=prompt_policies.load("directive", "tool_choice_generic"))
                 ] + _msg_list
             _quant_autoexec_validation_intent = bool(
                 is_quant_trader(_lid)
@@ -6310,7 +6314,7 @@ def build_worker_graph(
             )
             if _quant_autoexec_validation_intent:
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "quant_autoexec"))
+                    SystemMessage(content=prompt_policies.load("directive", "quant_autoexec"))
                 ] + _msg_list
             _has_github_pr_write = "create_pull_request" in tools_by_name
             _github_pr_workflow_intent = bool(
@@ -6328,7 +6332,7 @@ def build_worker_graph(
                 )
                 # endregion
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "github_pr_workflow"))
+                    SystemMessage(content=prompt_policies.load("directive", "github_pr_workflow"))
                 ] + _msg_list
                 if (
                     _github_needs_create_pr_after_push(state.get("messages") or [])
@@ -6348,7 +6352,7 @@ def build_worker_graph(
                 and telegram_context_summarize_directive
             ):
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "quant_ohlcv_moc"))
+                    SystemMessage(content=prompt_policies.load("directive", "quant_ohlcv_moc"))
                 ] + _msg_list
             _qp_ctx = state.get("quant_pipeline_context")
             if (
@@ -6360,12 +6364,12 @@ def build_worker_graph(
             ):
                 _msg_list = [
                     SystemMessage(
-                        content=load_guardrail("directives", "quant_pipeline_deterministic")
+                        content=prompt_policies.load("directive", "quant_pipeline_deterministic")
                     )
                 ] + _msg_list
             if _reddit_share_mcp_exhausted:
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "reddit_share_exhausted"))
+                    SystemMessage(content=prompt_policies.load("directive", "reddit_share_exhausted"))
                 ] + _msg_list
             if is_quant_trader(_lid) and _visual_tool_already_ok:
                 _msg_list = [
@@ -6408,14 +6412,15 @@ def build_worker_graph(
                         break
             if _reddit_ctx_block:
                 _msg_list = [SystemMessage(content=_reddit_ctx_block)] + _msg_list
-            _rag_turn_without_db_intent = bool(
-                ("[RAG_CONTEXT]" in (incoming or "") or "[RAG_SOURCE_INVENTORY]" in (incoming or ""))
-                and not explicit_duckdb_schema_request(_intent_incoming)
+            _rag_turn_without_db_intent = should_prioritize_rag_over_storage_tools(
+                incoming,
+                _intent_incoming,
+                explicit_storage_request=explicit_duckdb_schema_request,
             )
             if _rag_turn_without_db_intent:
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "rag_context_priority"))
-                ] + _msg_list
+                    SystemMessage(content=rag_turn_system_prompt(prompt_policies, _lid))
+                ] + [m for m in _msg_list if not isinstance(m, SystemMessage)]
             _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
             _invoked_llm: Any = llm_with_tools
             if force_admin_sql:
@@ -6501,59 +6506,11 @@ def build_worker_graph(
                     if not str(getattr(t, "name", "") or "").startswith("reddit_")
                 ]
                 _invoked_llm = _bind_tools(llm, _nr_ex)
-            _debug_bound_tool_names = {
-                str(getattr(t, "name", "") or "")
-                for t in (_tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind)
-            }
             if _rag_turn_without_db_intent and forced_name == "auto":
                 _bind_base_rag = _tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind
-                _rag_tools = [
-                    t for t in _bind_base_rag if str(getattr(t, "name", "") or "") != "get_db_path"
-                ]
+                _rag_tools = without_storage_tools(_bind_base_rag)
                 if len(_rag_tools) < len(_bind_base_rag):
                     _invoked_llm = _bind_tools(llm, _rag_tools)
-                    _debug_bound_tool_names = {str(getattr(t, "name", "") or "") for t in _rag_tools}
-                    # region agent log
-                    _rag_debug_log(
-                        "H15",
-                        "worker removed get_db_path for rag turn",
-                        {
-                            "worker_id": worker_id,
-                            "logical_worker_id": _lid,
-                            "tool_count_before": len(_bind_base_rag),
-                            "tool_count_after": len(_rag_tools),
-                        },
-                    )
-                    # endregion
-            _last_human_content = ""
-            for _msg_dbg in reversed(_groq_msgs):
-                if isinstance(_msg_dbg, HumanMessage):
-                    _last_human_content = str(getattr(_msg_dbg, "content", "") or "")
-                    break
-            _system_content_dbg = ""
-            if _groq_msgs and isinstance(_groq_msgs[0], SystemMessage):
-                _system_content_dbg = str(getattr(_groq_msgs[0], "content", "") or "")
-            # region agent log
-            _rag_debug_log(
-                "H11,H12,H13",
-                "worker llm input batch",
-                {
-                    "worker_id": worker_id,
-                    "logical_worker_id": _lid,
-                    "forced_name": forced_name,
-                    "sandbox_enabled": sandbox_enabled,
-                    "groq_message_count": len(_groq_msgs),
-                    "system_len": len(_system_content_dbg),
-                    "last_human_len": len(_last_human_content),
-                    "system_has_inventory": "[RAG_SOURCE_INVENTORY]" in _system_content_dbg,
-                    "system_has_rag_context": "[RAG_CONTEXT]" in _system_content_dbg,
-                    "last_human_has_inventory": "[RAG_SOURCE_INVENTORY]" in _last_human_content,
-                    "last_human_has_rag_context": "[RAG_CONTEXT]" in _last_human_content,
-                    "last_human_starts_with_task": _last_human_content.strip().lower().startswith("tarea:"),
-                    "get_db_path_bound": "get_db_path" in _debug_bound_tool_names,
-                },
-            )
-            # endregion
             _llm_invoke_exc: BaseException | None = None
             try:
                 _raise_if_chat_cancelled_from_state(state)
@@ -6591,35 +6548,6 @@ def build_worker_graph(
                 _pl_fail = failure_provider_label_for_llm_invoke(_invoked_llm, provider)
                 resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=_pl_fail))
             tool_calls = getattr(resp, "tool_calls", None) or []
-            _tc_names_dbg: list[Any] = []
-            for _tc_dbg in tool_calls:
-                if isinstance(_tc_dbg, dict):
-                    _tc_names_dbg.append(_tc_dbg.get("name"))
-                else:
-                    _tc_names_dbg.append(getattr(_tc_dbg, "name", None))
-            _resp_preview_dbg = ""
-            try:
-                from duckclaw.integrations.llm_providers import lc_message_content_to_text as _lc_text_dbg
-
-                _resp_preview_dbg = (_lc_text_dbg(resp) or "").strip()[:220]
-            except Exception:
-                _resp_preview_dbg = str(getattr(resp, "content", "") or "").strip()[:220]
-            # region agent log
-            _rag_debug_log(
-                "H10,H11,H13",
-                "worker llm response",
-                {
-                    "worker_id": worker_id,
-                    "logical_worker_id": _lid,
-                    "forced_name": forced_name,
-                    "tool_call_names": _tc_names_dbg,
-                    "llm_invoke_failed": _llm_invoke_exc is not None,
-                    "response_mentions_duckdb": "duckdb" in _resp_preview_dbg.lower(),
-                    "response_mentions_rag": "rag" in _resp_preview_dbg.lower(),
-                    "response_preview": _resp_preview_dbg,
-                },
-            )
-            # endregion
             if (
                 (_lid_l == WORKER_FINANZ)
                 and force_finanz_admin_sql

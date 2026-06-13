@@ -786,6 +786,89 @@ _M015_KNOWLEDGE = [
     """,
 ]
 
+_M016_PROMPT_POLICIES = [
+    """
+    CREATE TABLE IF NOT EXISTS main.prompt_policy_registry (
+        policy_id VARCHAR PRIMARY KEY,
+        policy_type VARCHAR NOT NULL
+            CHECK (policy_type IN ('directive', 'capability', 'system_prompt', 'manager_task', 'tool_directive')),
+        policy_name VARCHAR NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        status VARCHAR NOT NULL DEFAULT 'active'
+            CHECK (status IN ('draft', 'active', 'inactive', 'archived')),
+        content TEXT NOT NULL,
+        checksum VARCHAR NOT NULL,
+        metadata_json TEXT DEFAULT '{}'
+            CHECK (json_valid(metadata_json)),
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (policy_type, policy_name, version)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_prompt_policy_registry_lookup
+        ON main.prompt_policy_registry (policy_type, policy_name, active, status, version)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.worker_prompt_bindings (
+        binding_id VARCHAR PRIMARY KEY,
+        worker_uid VARCHAR NOT NULL,
+        policy_id VARCHAR NOT NULL,
+        binding_kind VARCHAR NOT NULL DEFAULT 'default'
+            CHECK (binding_kind IN ('default', 'override', 'fallback')),
+        priority INTEGER NOT NULL DEFAULT 100,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (worker_uid, policy_id, binding_kind)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_worker_prompt_bindings_lookup
+        ON main.worker_prompt_bindings (worker_uid, active, priority)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.tool_policy_directives (
+        directive_id VARCHAR PRIMARY KEY,
+        tool_name VARCHAR NOT NULL,
+        policy_id VARCHAR NOT NULL,
+        scope VARCHAR NOT NULL DEFAULT 'global'
+            CHECK (scope IN ('global', 'worker', 'tenant', 'project')),
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (tool_name, policy_id, scope)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_tool_policy_directives_lookup
+        ON main.tool_policy_directives (tool_name, scope, active)
+    """,
+]
+
+_M017_WORKER_RUNTIME_POLICIES = [
+    """
+    CREATE TABLE IF NOT EXISTS main.worker_runtime_policies (
+        runtime_policy_id VARCHAR PRIMARY KEY,
+        worker_uid VARCHAR NOT NULL,
+        policy_key VARCHAR NOT NULL,
+        policy_scope VARCHAR NOT NULL DEFAULT 'runtime'
+            CHECK (policy_scope IN ('identity', 'category', 'capability', 'tool_policy', 'flag', 'behavior', 'runtime')),
+        policy_value_json TEXT NOT NULL DEFAULT '{}'
+            CHECK (json_valid(policy_value_json)),
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (worker_uid, policy_key, policy_scope)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_worker_runtime_policies_lookup
+        ON main.worker_runtime_policies (worker_uid, active, policy_scope, policy_key)
+    """,
+]
+
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "initial_core", _M001_INITIAL_CORE),
     (2, "worker_versions", _M002_WORKER_VERSIONS),
@@ -802,4 +885,6 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (13, "workflows", _M013_WORKFLOWS),
     (14, "tools", _M014_TOOLS),
     (15, "knowledge", _M015_KNOWLEDGE),
+    (16, "prompt_policies", _M016_PROMPT_POLICIES),
+    (17, "worker_runtime_policies", _M017_WORKER_RUNTIME_POLICIES),
 ]

@@ -78,27 +78,6 @@ from duckclaw.channels import GatewayDeliveryContext
 
 # Cargar .env desde repo root (fuente de verdad para secretos; PM2 env_file + override abajo).
 _repo_root = Path(__file__).resolve().parent.parent.parent
-_AGENT_DEBUG_LOG_PATH = _repo_root / ".cursor" / "debug-ab0734.log"
-
-
-def _agent_debug_log(hypothesis_id: str, message: str, data: dict[str, Any]) -> None:
-    # region agent log
-    try:
-        payload = {
-            "sessionId": "ab0734",
-            "runId": "downstream-rag-debug",
-            "hypothesisId": hypothesis_id,
-            "location": "services/api-gateway/main.py",
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        _AGENT_DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _AGENT_DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
-    except Exception:
-        pass
-    # endregion
 
 _dotenv_flat: dict[str, str] = {}
 if os.environ.get("DUCKCLAW_DISABLE_DOTENV") != "1":
@@ -1923,18 +1902,6 @@ async def _invoke_chat(
             dc = replace(dc, **_patch)
 
     message = (payload.message or "").strip()
-    _agent_debug_log(
-        "H6,H8",
-        "invoke_chat received payload",
-        {
-            "has_inventory_block": "[RAG_SOURCE_INVENTORY]" in message,
-            "has_rag_context_block": "[RAG_CONTEXT]" in message,
-            "message_len": len(message),
-            "history_items": len(payload.history or []),
-            "worker_id": worker_id,
-            "payload_stream": bool(getattr(payload, "stream", False)),
-        },
-    )
     session_id = (session_id or "default").strip() or "default"
     from duckclaw.graphs.chat_cancel import ChatCancelledError, clear_chat_cancel
 
@@ -2216,17 +2183,6 @@ async def _invoke_chat(
             pass
         t0 = time.monotonic()
         try:
-            _agent_debug_log(
-                "H6,H7,H8",
-                "invoke_chat before manager",
-                {
-                    "has_inventory_block": "[RAG_SOURCE_INVENTORY]" in message,
-                    "has_rag_context_block": "[RAG_CONTEXT]" in message,
-                    "history_for_model_items": len(history_for_model or []),
-                    "entry_worker_id": (worker_id or "").strip(),
-                    "vault_db_path_tail": str(vault_db_path or "")[-80:],
-                },
-            )
             result = await ainvoke_manager_ephemeral(
                 message,
                 history_for_model,
@@ -2239,15 +2195,6 @@ async def _invoke_chat(
                 is_system_prompt=is_system_prompt,
                 outbound_telegram_bot_token=(dc.outbound_bot_token or "").strip() or None,
                 entry_worker_id=(worker_id or "").strip() or None,
-            )
-            _agent_debug_log(
-                "H7,H9",
-                "invoke_chat manager result",
-                {
-                    "result_is_dict": isinstance(result, dict),
-                    "assigned_worker_id": result.get("assigned_worker_id") if isinstance(result, dict) else None,
-                    "reply_preview": str((result.get("reply") if isinstance(result, dict) else result) or "")[:200],
-                },
             )
         except ChatCancelledError:
             try:

@@ -125,10 +125,10 @@ def _safe_uploaded_relative_path(filename: str) -> str:
     parts = path.parts
     if any(part in ("", ".", "..") for part in parts):
         raise ValueError("knowledge upload filename is unsafe")
-    if any(part.startswith(".") for part in parts):
-        raise ValueError("hidden knowledge files are not allowed")
     if any(_SECRET_NAME_RE.search(part) for part in parts):
         raise ValueError("knowledge file name looks secret-bearing")
+    if any(part.startswith(".") for part in parts):
+        raise ValueError("hidden knowledge files are not allowed")
     return "/".join(parts)
 
 

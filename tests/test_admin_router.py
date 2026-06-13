@@ -279,7 +279,7 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     assert r.status_code == 200
     data = r.json()
     assert data.get("authorized") is True
-    from duckclaw.workers.worker_ids import normalize_worker_id
+    from duckclaw.workers.identity import normalize_worker_id
 
     assert normalize_worker_id(target) in _playground_worker_ids(data)
     assert data.get("team_source") == "chat"
@@ -869,6 +869,100 @@ def test_kanban_cards_db_first_crud(
     empty = admin_client.get("/api/v1/admin/kanban", headers=headers)
     assert empty.status_code == 200
     assert empty.json()["cards"] == []
+
+
+def test_prompt_policies_admin_crud_is_db_writer_backed(
+    admin_client: TestClient,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckdb
+
+    from duckclaw.prompt_policies import PromptPolicyResolver
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
+    con = duckdb.connect(str(gateway_db))
+    try:
+        run_pending_migrations(con)
+    finally:
+        con.close()
+
+    headers = {
+        "X-Admin-Key": "test-admin-key",
+        "X-Duckclaw-Actor": "admin@test.local",
+    }
+    empty = admin_client.get(
+        "/api/v1/admin/prompt-policies",
+        headers=headers,
+        params={"policy_type": "system_prompt"},
+    )
+    assert empty.status_code == 200
+    assert empty.json()["policies"] == []
+
+    upsert = admin_client.put(
+        "/api/v1/admin/prompt-policies",
+        headers=headers,
+        json={
+            "policy_type": "system_prompt",
+            "policy_name": "rag_turn",
+            "version": 1,
+            "content": "Endpoint policy for {worker_id}.",
+            "metadata": {"created_by_test": True},
+        },
+    )
+    assert upsert.status_code == 200
+    created = upsert.json()["policy"]
+    assert upsert.json()["ok"] is True
+    assert created["policy_type"] == "system_prompt"
+    assert created["policy_name"] == "rag_turn"
+    assert created["version"] == 1
+
+    listed = admin_client.get(
+        "/api/v1/admin/prompt-policies",
+        headers=headers,
+        params={"policy_type": "system_prompt"},
+    )
+    assert listed.status_code == 200
+    policies = listed.json()["policies"]
+    assert len(policies) == 1
+    assert policies[0]["content"] == "Endpoint policy for {worker_id}."
+    assert policies[0]["metadata"] == {"created_by_test": True}
+
+    con = duckdb.connect(str(gateway_db), read_only=True)
+    try:
+        resolved = PromptPolicyResolver(db=con).format(
+            "system_prompt",
+            "rag_turn",
+            worker_id="admin-worker",
+        )
+    finally:
+        con.close()
+    assert resolved == "Endpoint policy for admin-worker."
+
+    deleted = admin_client.delete(
+        "/api/v1/admin/prompt-policies/system_prompt/rag_turn",
+        headers=headers,
+        params={"version": 1},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["ok"] is True
+
+    active = admin_client.get(
+        "/api/v1/admin/prompt-policies",
+        headers=headers,
+        params={"policy_type": "system_prompt"},
+    )
+    assert active.status_code == 200
+    assert active.json()["policies"] == []
+
+    inactive = admin_client.get(
+        "/api/v1/admin/prompt-policies",
+        headers=headers,
+        params={"policy_type": "system_prompt", "include_inactive": True},
+    )
+    assert inactive.status_code == 200
+    assert inactive.json()["policies"][0]["status"] == "inactive"
 
 
 def test_admin_sandbox_status(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):

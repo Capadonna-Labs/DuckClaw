@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from duckclaw.workers.manifest import WorkerSpec
-from duckclaw.workers.worker_ids import is_finanz, is_siata_analyst
 
 _log = logging.getLogger(__name__)
 
@@ -29,33 +28,40 @@ _sem: Optional[threading.BoundedSemaphore] = None
 _sem_lock = threading.Lock()
 
 
-_RE_AGREGADO_CUOTA = re.compile(r"^.+\s+-\s+Cuota\s+", re.IGNORECASE)
+_RE_INSTALLMENT_ROW = re.compile(r"^.+\s+-\s+Cuota\s+", re.IGNORECASE)
 
 
-def _finanz_row_amount_cop(r: dict[str, str]) -> float:
+def _row_amount(row: dict[str, str], amount_field: str) -> float:
     try:
-        return float(r.get("amount") or 0)
+        return float(row.get(amount_field) or 0)
     except (TypeError, ValueError):
         return 0.0
 
 
-def _finanz_deudas_installment_ids_to_exclude(rows: list[dict[str, str]]) -> set[str]:
+def _installment_ids_to_exclude(
+    rows: list[dict[str, str]],
+    *,
+    amount_field: str,
+    creditor_field: str,
+    description_field: str,
+    id_field: str,
+) -> set[str]:
     """
     Si coexisten fila agregada de un crédito y filas de cuotas mensuales del mismo,
     excluye esas cuotas del total para no doblar el mismo crédito.
     """
     creditor_groups: dict[str, dict] = {}
     for r in rows:
-        if _finanz_row_amount_cop(r) <= 0:
+        if _row_amount(r, amount_field) <= 0:
             continue
-        cred = (r.get("creditor") or "").strip()
-        desc = (r.get("description") or "").strip()
+        cred = (r.get(creditor_field) or "").strip()
+        desc = (r.get(description_field) or "").strip()
         if not cred or not desc:
             continue
         if cred not in creditor_groups:
             creditor_groups[cred] = {"first_description": desc, "installment_ids": [], "has_aggregate": False}
-        if _RE_AGREGADO_CUOTA.match(desc):
-            creditor_groups[cred]["installment_ids"].append(str(r.get("id", "")))
+        if _RE_INSTALLMENT_ROW.match(desc):
+            creditor_groups[cred]["installment_ids"].append(str(r.get(id_field, "")))
         else:
             dlow = desc.lower()
             if "cuotas" in dlow or "cuotas mensuales" in dlow:
@@ -66,16 +72,43 @@ def _finanz_deudas_installment_ids_to_exclude(rows: list[dict[str, str]]) -> set
     return set()
 
 
-def _maybe_wrap_finanz_deudas_read_sql(spec: WorkerSpec, query: str, raw: str) -> str:
-    """Anexa totales deduplicados cuando read_sql devuelve filas de finance_worker.deudas."""
-    wid = getattr(spec, "logical_worker_id", None) or spec.worker_id
-    if not is_finanz(wid):
+def _worker_has_runtime_capability(spec: WorkerSpec, capability_name: str) -> bool:
+    runtime_policy = getattr(spec, "runtime_policy", None)
+    return bool(
+        runtime_policy is not None
+        and getattr(runtime_policy, "has_capability", lambda _name: False)(capability_name)
+    )
+
+
+def _worker_runtime_capability_policy(spec: WorkerSpec, capability_name: str) -> dict[str, Any]:
+    runtime_policy = getattr(spec, "runtime_policy", None)
+    if runtime_policy is None:
+        return {}
+    policy_for = getattr(runtime_policy, "policy_for", None)
+    if not callable(policy_for):
+        return {}
+    policy = policy_for(capability_name)
+    return dict(policy) if isinstance(policy, dict) else {}
+
+
+def _maybe_wrap_debt_summary_read_sql(spec: WorkerSpec, query: str, raw: str) -> str:
+    """Anexa totales deduplicados cuando una capability DB define cómo resumir la tabla."""
+    policy = _worker_runtime_capability_policy(spec, "debt_summary_dedup")
+    if not policy:
+        return raw
+    table_name = str(policy.get("table_name") or "").strip().lower()
+    schema_name = str(policy.get("schema_name") or "").strip().lower()
+    amount_field = str(policy.get("amount_field") or "").strip()
+    creditor_field = str(policy.get("creditor_field") or "").strip()
+    description_field = str(policy.get("description_field") or "").strip()
+    id_field = str(policy.get("id_field") or "").strip()
+    if not all((table_name, amount_field, creditor_field, description_field, id_field)):
         return raw
     qlow = query.lower()
-    if "deudas" not in qlow:
+    if table_name not in qlow:
         return raw
     sch = (getattr(spec, "schema_name", None) or "").strip().lower()
-    if "finance_worker" not in qlow and sch != "finance_worker":
+    if schema_name and schema_name not in qlow and sch != schema_name:
         return raw
     try:
         parsed = json.loads(raw)
@@ -85,14 +118,20 @@ def _maybe_wrap_finanz_deudas_read_sql(spec: WorkerSpec, query: str, raw: str) -
         return raw
     if not isinstance(parsed, list) or not parsed:
         return raw
-    exclude = _finanz_deudas_installment_ids_to_exclude(parsed)
+    exclude = _installment_ids_to_exclude(
+        parsed,
+        amount_field=amount_field,
+        creditor_field=creditor_field,
+        description_field=description_field,
+        id_field=id_field,
+    )
     if not exclude:
         return raw
-    naive = sum(_finanz_row_amount_cop(r) for r in parsed if _finanz_row_amount_cop(r) > 0)
+    naive = sum(_row_amount(r, amount_field) for r in parsed if _row_amount(r, amount_field) > 0)
     deduped = sum(
-        _finanz_row_amount_cop(r)
+        _row_amount(r, amount_field)
         for r in parsed
-        if _finanz_row_amount_cop(r) > 0 and str(r.get("id", "")) not in exclude
+        if _row_amount(r, amount_field) > 0 and str(r.get(id_field, "")) not in exclude
     )
     meta = {
         "suma_todas_las_filas_cop": naive,
@@ -218,7 +257,7 @@ def validate_worker_read_sql(spec: WorkerSpec, query: str) -> Optional[str]:
                 )
             }
         )
-    if is_siata_analyst(_lid) and re.search(r"read_json(_auto)?\s*\(", q, re.IGNORECASE):
+    if _worker_has_runtime_capability(spec, "bounded_json_read") and re.search(r"read_json(_auto)?\s*\(", q, re.IGNORECASE):
         if "LIMIT" not in upper and not re.search(r"\bCOUNT\s*\(", upper):
             return json.dumps(
                 {
@@ -248,7 +287,7 @@ def run_worker_read_sql(run_query: Callable[[str], str], spec: WorkerSpec, q: st
     upper = q.upper()
     try:
         raw = _truncate_read_sql_result_for_llm(run_query(q))
-        return _maybe_wrap_finanz_deudas_read_sql(spec, q, raw)
+        return _maybe_wrap_debt_summary_read_sql(spec, q, raw)
     except Exception as e:
         err = str(e)
         if spec.allowed_tables and any(k in upper for k in ("FROM", "JOIN")):
@@ -257,7 +296,7 @@ def run_worker_read_sql(run_query: Callable[[str], str], spec: WorkerSpec, q: st
                 if try_q != q:
                     try:
                         raw2 = _truncate_read_sql_result_for_llm(run_query(try_q))
-                        return _maybe_wrap_finanz_deudas_read_sql(spec, try_q, raw2)
+                        return _maybe_wrap_debt_summary_read_sql(spec, try_q, raw2)
                     except Exception:
                         pass
         return json.dumps({"error": err})

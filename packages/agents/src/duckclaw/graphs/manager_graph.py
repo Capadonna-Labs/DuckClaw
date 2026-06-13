@@ -36,6 +36,26 @@ from duckclaw.graphs.proactive_review_markers import proactive_review_event_phra
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_plan, log_sys, set_log_context
 
 from duckclaw.guardrails.loader import format_guardrail, load_guardrail, load_guardrail_task_list
+from duckclaw.manager.fast_plans import (
+    _capabilities_fast_reply_text,
+    _greeting_fast_reply_text,
+    _manager_capabilities_fast_path_ok,
+    _manager_greeting_fast_path_ok,
+    _manager_visual_generation_intent,
+    _try_quant_generic_affirm_followup,
+    _try_quant_hrp_affirm_followup,
+    _try_quant_url_research_fast_plan,
+    _try_visual_generation_fast_plan,
+)
+from duckclaw.manager.routing import (
+    _LONE_HTTP_URL_ONLY_LINE,
+    _finanz_worker_in_templates,
+    _is_job_hunter_worker,
+    _pick_job_hunter_worker,
+    _pick_quant_trader_worker,
+    _worker_id_alnum_slug,
+    _worker_matches_id,
+)
 from duckclaw.prompt_policies import PromptPolicyResolver
 from duckclaw.workers.factory import explicit_duckdb_schema_request
 from duckclaw.graphs.agent_resilience import (
@@ -309,25 +329,6 @@ def _agent_config_db_for_vault(hub_db: Any, vault_db_path: str | None) -> Any:
     return hub_db
 
 
-def _worker_id_alnum_slug(worker_id: str | None) -> str:
-    """Normaliza id de plantilla (guiones Unicode, espacios) para ramas por worker."""
-    return re.sub(r"[^a-z0-9]", "", (worker_id or "").lower())
-
-
-def _is_job_hunter_worker(worker_id: str | None) -> bool:
-    """True si el id de plantilla corresponde a OSINT JobHunter (carpeta Job-Hunter o id job_hunter)."""
-    w = (worker_id or "").strip()
-    if not w:
-        return False
-    if _worker_id_alnum_slug(w) == "jobhunter":
-        return True
-    norm = w.lower()
-    for ch in ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212", "\uff0d"):
-        norm = norm.replace(ch, "-")
-    norm = norm.replace("_", "-").strip("-")
-    return norm == "job-hunter"
-
-
 def _incoming_has_context_summary_system_directive(incoming: str) -> bool:
     """Directivas del gateway (/context) con volcado largo (URLs, «oferta», noticias): no son misión Job-Hunter."""
     s = incoming or ""
@@ -550,22 +551,6 @@ def _user_signals_cashflow_stress(incoming: str) -> bool:
     return False
 
 
-def _pick_job_hunter_worker(available_templates: list[str]) -> Optional[str]:
-    """Retorna el worker JobHunter presente en el team efectivo."""
-    for wid in available_templates or []:
-        if _is_job_hunter_worker(wid):
-            return wid
-    return None
-
-
-def _finanz_worker_in_templates(available_templates: list[str]) -> bool:
-    """True si el equipo incluye al worker finanz (A2A Manager → Finanz → JobHunter → Finanz)."""
-    for wid in available_templates or []:
-        if _worker_matches_id(wid, "finanz"):
-            return True
-    return False
-
-
 def _job_hunter_user_requests_application_tracking(incoming: str) -> bool:
     """
     Seguimiento de postulaciones ya guardadas (DuckDB), sin discovery Tavily.
@@ -597,11 +582,6 @@ def _job_hunter_user_requests_application_tracking(incoming: str) -> bool:
         return False
     job_kw = ("vacante", "vacantes", "empleo", "trabajo", "postul", "aplic", "oferta", "ofertas")
     return any(k in tl for k in job_kw)
-
-
-def _worker_matches_id(worker_id: str | None, alias: str | None) -> bool:
-    """Compara ids de worker tolerando guiones/underscores/case."""
-    return _worker_id_alnum_slug(worker_id) == _worker_id_alnum_slug(alias)
 
 
 def _strip_mercenary_spec_for_browser_worker(
@@ -684,12 +664,6 @@ def _should_disable_mercenary_for_browser_intent(
         return False
     low = blob.lower()
     return any(m in low for m in _BROWSER_MERCENARY_INTENT_MARKERS)
-
-
-_LONE_HTTP_URL_ONLY_LINE = re.compile(
-    r"^\s*https?://[^\s]+\s*$",
-    re.I,
-)
 
 
 def _should_disable_mercenary_for_quant_lone_https_url(
@@ -975,182 +949,6 @@ def _is_entry_route_system_event(text: str) -> bool:
     return '"type":"TRADING_TICK"' in t or '"type": "TRADING_TICK"' in t
 
 
-# --- Quant-Trader: "Procede" / sí corto tras pregunta HRP → evitar plan LLM "Inicio de sesión" ---
-
-_QUANT_HRP_AFFIRM_RE = re.compile(
-    r"^\s*("
-    r"sí|si|ok|dale|adelante|procede|proceda|proceder|"
-    r"continua|continúa|continuar|sigue|siguiente|hazlo|"
-    r"confirmo|yes|vamos|listo|claro"
-    r")\s*\.?[\s!¡?¿]*$",
-    re.IGNORECASE | re.UNICODE,
-)
-
-
-def _stringify_turn_content_for_hrp(content: Any) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for p in content:
-            if isinstance(p, dict) and (str(p.get("type") or "").lower() == "text"):
-                parts.append(str(p.get("text") or ""))
-            elif isinstance(p, str):
-                parts.append(p)
-        return " ".join(x for x in parts if x)
-    return str(content)
-
-
-def _iter_assistant_bodies_newest_first(history: Any) -> list[str]:
-    """
-    Cuerpos de mensajes assistant (texto) de más reciente a más antiguo.
-    Omite turnos vacíos o solo tool (en historial plano de gateway no suelen existir).
-    """
-    out: list[str] = []
-    if not history:
-        return out
-    for turn in reversed(list(history)):
-        if not isinstance(turn, dict):
-            continue
-        r = str(turn.get("role") or turn.get("type") or "").lower()
-        if r not in ("assistant", "ai", "model"):
-            continue
-        body = _stringify_turn_content_for_hrp(turn.get("content")).strip()
-        if body:
-            out.append(body)
-    return out
-
-
-def _find_hrp_rebalance_affirm_context_assistant_body(history: Any) -> str | None:
-    """
-    Localiza el asistente más reciente cuyo texto pide cierre/continuación de un hilo
-    HRP (no solo el último mensaje del asistente: p. ej. TSLA vino después del HRP).
-    """
-    for body in _iter_assistant_bodies_newest_first(history):
-        if _assistant_asks_hrp_rebalance_followup(body):
-            return body
-    return None
-
-
-def _manager_extract_tickers(text: str) -> list[str]:
-    """Extrae tickers US de texto assistant/planned (evita import circular con factory)."""
-    raw = str(text or "")
-    if not raw:
-        return []
-    banned = {
-        "SYSTEM",
-        "EVENT",
-        "GOALS",
-        "HITL",
-        "IBKR",
-        "UUID",
-        "JSON",
-        "SQL",
-        "HRP",
-        "CFD",
-        "PNL",
-        "LIVE",
-        "PAPER",
-        "PARA",
-        "LUEGO",
-        "CON",
-        "DEL",
-        "LAS",
-        "LOS",
-        "QUE",
-        "UNA",
-        "UNO",
-        "POR",
-        "AND",
-        "THE",
-        "FOR",
-        "TO",
-        "Y",
-        "O",
-        "TAREA",
-        "TASK",
-    }
-    out: list[str] = []
-    seen: set[str] = set()
-    for tk in re.findall(r"\b[A-Z]{1,5}\b", raw):
-        tk = tk.upper()
-        if tk in banned:
-            continue
-        if tk not in seen:
-            out.append(tk)
-            seen.add(tk)
-    return out
-
-
-def _manager_hrp_ticker_label(hrp_body: str) -> str:
-    tickers = _manager_extract_tickers(hrp_body)
-    if len(tickers) >= 2:
-        return f"({tickers[0]}/{tickers[1]})"
-    if len(tickers) == 1:
-        return f"({tickers[0]})"
-    return "(HRP)"
-
-
-def _assistant_asks_generic_confirmation(assistant_text: str) -> bool:
-    """Asistente pide confirmación genérica (¿procedo?, ¿deseas?, ¿quieres?, etc.)."""
-    t = (assistant_text or "").strip()
-    if not t:
-        return False
-    if "?" not in t and "¿" not in t:
-        return False
-    low = t.lower()
-    # Solo verbos de cierre típicos en español; omitir «autoriz*» (p. ej. TSLA/QQQ) para no bloquear scan HRP.
-    return any(
-        k in low
-        for k in (
-            "procedo",
-            "proceda",
-            "proceder",
-            "deseas",
-            "quieres",
-        )
-    )
-
-
-def _assistant_asks_hrp_rebalance_followup(assistant_text: str) -> bool:
-    t = (assistant_text or "").strip()
-    if not t:
-        return False
-    low = t.lower()
-    # Frase típica en español pidiendo señales de compra (no "¿procedo?")
-    if "deseas" in low and "genere" in low and any(
-        x in low for x in ("señal", "señales", "compra", "rebalance", "hrp", "meta", "spy")
-    ):
-        return True
-    if "rebalance_hrp" in low or "rebalanceo hrp" in low or ("rebalanceo" in low and "hrp" in low):
-        if "?" in t or "¿" in t or "procedo" in low or "señal" in low or "rebalance" in low:
-            return True
-    if ("procedo" in low or "proceda" in low) and any(
-        x in low
-        for x in (
-            "señal",
-            "rebalance",
-            "hrp",
-            "meta",
-            "spy",
-            "alineación",
-            "alineacion",
-            "ibkr",
-        )
-    ):
-        return True
-    if "revisión" in low and "alineación" in low and "hrp" in low and "ibkr" in low:
-        return True
-    if "pypfopt" in low or "pyportfolioopt" in low or "hierarchical risk" in low or (
-        "hrp" in low and any(x in low for x in ("óptim", "optim", "peso", "pypfopt"))
-    ):
-        if "?" in t or "procedo" in low or "señal" in low or "rebalance" in low or "deseas" in low:
-            return True
-    return False
-
-
 def _quant_operational_intent_requires_fly_command(incoming: str) -> bool:
     """Intención operativa clara de señal/ejecución que debe forzar UX de `/quant_cycle`."""
     t = (incoming or "").strip().lower()
@@ -1195,170 +993,6 @@ def _quant_operational_intent_requires_fly_command(incoming: str) -> bool:
     if "genera una señal" in t or "genera una senal" in t:
         return True
     return False
-
-
-def _try_quant_hrp_affirm_followup(
-    incoming: str,
-    history: Any,
-    assigned: str,
-    tenant_id: str,
-    available_plan: list[str],
-) -> tuple[str, list[str], str, str] | None:
-    if not _QUANT_HRP_AFFIRM_RE.match((incoming or "").strip()):
-        return None
-    plans = [str(x) for x in (available_plan or []) if x]
-    if "Quant-Trader" not in plans:
-        return None
-    w = (assigned or "").strip()
-    _tid = (tenant_id or "").strip().lower()
-    if w != "Quant-Trader" and _tid != "cuantitativo":
-        return None
-    _bodies = _iter_assistant_bodies_newest_first(history)
-    newest = _bodies[0] if _bodies else None
-    if newest and _assistant_asks_hrp_rebalance_followup(newest):
-        last_a = newest
-    elif newest and _assistant_asks_generic_confirmation(newest):
-        return None
-    else:
-        last_a = _find_hrp_rebalance_affirm_context_assistant_body(history)
-    if not last_a:
-        return None
-    _ticker_label = _manager_hrp_ticker_label(last_a)
-    title = f"Confirmación rebalanceo HRP {_ticker_label}"
-    task_list = [
-        load_guardrail("manager_tasks", "quant_hrp_affirm_task_confirm"),
-        load_guardrail("manager_tasks", "quant_hrp_affirm_task_flow"),
-    ]
-    # Prefijo con símbolos evita que `_quant_extract_tickers` tome "TAREA" o ejemplos (TSLA, …) como ticker primario.
-    planned = f"{_ticker_label} " + load_guardrail("manager_tasks", "quant_hrp_affirm_planned")
-    return (title, task_list, planned, "Quant-Trader")
-
-
-def _try_quant_generic_affirm_followup(
-    incoming: str,
-    history: Any,
-    assigned: str,
-    tenant_id: str,
-    available_plan: list[str],
-) -> tuple[str, list[str], str, str] | None:
-    """
-    Confirmación corta tras pregunta genérica del asistente (¿procedo?, ¿continúo?).
-    Evita replan LLM que reinicia sesión o dispersa tool calls.
-    """
-    if not _QUANT_HRP_AFFIRM_RE.match((incoming or "").strip()):
-        return None
-    plans = [str(x) for x in (available_plan or []) if x]
-    if "Quant-Trader" not in plans:
-        return None
-    w = (assigned or "").strip()
-    _tid = (tenant_id or "").strip().lower()
-    if w != "Quant-Trader" and _tid != "cuantitativo":
-        return None
-    bodies = _iter_assistant_bodies_newest_first(history)
-    newest = bodies[0] if bodies else None
-    if not newest:
-        return None
-    if _assistant_asks_hrp_rebalance_followup(newest):
-        return None
-    if not _assistant_asks_generic_confirmation(newest):
-        return None
-    title = "Confirmación — continuar plan Quant-Trader"
-    task_list = [
-        load_guardrail("manager_tasks", "quant_generic_affirm_task_flow"),
-    ]
-    ctx = newest[:4000]
-    planned = load_guardrail("manager_tasks", "quant_generic_affirm_planned")
-    planned = f"{planned}\n\nContexto del mensaje anterior del asistente:\n{ctx}"
-    return (title, task_list, planned, "Quant-Trader")
-
-
-def _manager_visual_generation_intent(incoming: str) -> bool:
-    """Pedido explícito de imagen (txt2img) → delegar a Quant-Trader sin planner MLX."""
-    s = (incoming or "").strip()
-    if not s or len(s) > 2000:
-        return False
-    low = s.lower()
-    if re.search(
-        r"(?:\b(?:genera|generar|crea|crear|dibuja|dibujar|haz(?:me)?|hacer|pinta|pintar)\b.{0,50}\b(?:imagen(?:es)?|foto(?:s)?|ilustraci[oó]n(?:es)?|caricatura(?:s)?|avatar(?:es)?|picture|image(?:s)?)\b)",
-        low,
-        re.IGNORECASE | re.DOTALL,
-    ):
-        return True
-    return bool(
-        re.search(
-            r"\b(?:txt2img|text-to-image|stable\s*diffusion|comfyui)\b",
-            low,
-            re.IGNORECASE,
-        )
-    )
-
-
-def _pick_quant_trader_worker(available_templates: list[str]) -> Optional[str]:
-    for wid in available_templates or []:
-        if _worker_matches_id(wid, "quant_trader"):
-            return wid
-    return None
-
-
-def _try_visual_generation_fast_plan(
-    incoming: str,
-    available_plan: list[str],
-) -> tuple[str, list[str], str, str] | None:
-    """Evita planner MLX lento en admin/Telegram cuando el usuario pide una imagen."""
-    if not _manager_visual_generation_intent(incoming):
-        return None
-    qt = _pick_quant_trader_worker(available_plan)
-    if not qt:
-        return None
-    title = "Generar imagen (ComfyUI)"
-    task_list = [
-        "Usar generate_visual_asset una sola vez con el prompt del usuario.",
-        "No repetir la herramienta si ya hubo un ToolMessage OK en este turno.",
-    ]
-    planned = (incoming or "").strip()
-    log_sys(_obs, "Plan rápido imagen → %s (sin planner MLX)", qt)
-    return (title, task_list, planned, qt)
-
-
-def _try_quant_url_research_fast_plan(
-    incoming: str,
-    available_plan: list[str],
-) -> tuple[str, list[str], str, str] | None:
-    """
-    Mensaje solo URL (HTTPS): evita planner MLX lento (admin con historial largo de imágenes).
-    Telegram suele ser más rápido porque el chat_id tiene pocos turnos; el admin reutiliza el mismo
-    chat_id con decenas de turnos ComfyUI en Redis.
-    """
-    inc = (incoming or "").strip()
-    if not _LONE_HTTP_URL_ONLY_LINE.match(inc):
-        return None
-    if _manager_visual_generation_intent(inc):
-        return None
-    qt = _pick_quant_trader_worker(available_plan)
-    if not qt:
-        return None
-    low = inc.lower()
-    if "reddit.com" in low:
-        title = "Investigar enlace Reddit"
-        task_list = [
-            "Usar reddit_get_post o reddit_search_reddit con el enlace del usuario.",
-            "Sintetizar hallazgos; no inventar contenido del post.",
-        ]
-    elif "mql5.com" in low:
-        title = "Extraer código MQL5 (browser)"
-        task_list = [
-            "Usar run_browser_sandbox primero (PROTOCOLO MQL5, plantilla stealth).",
-            "No usar solo tavily_search sin haber pasado por el sandbox para esta URL.",
-        ]
-    else:
-        title = "Investigar URL"
-        task_list = [
-            "Usar run_browser_sandbox o tavily_search según el dominio.",
-            "Entregar resumen con evidencia de tools del mismo turno.",
-        ]
-    planned = inc
-    log_sys(_obs, "Plan rápido URL → %s (sin planner MLX)", qt)
-    return (title, task_list, planned, qt)
 
 
 _FINANZ_TOOL_PRESSURE_TASK = load_guardrail("manager_tasks", "finanz_tool_pressure")
@@ -1749,78 +1383,6 @@ def _resolve_orchestrator_delegate(
     if not delegate:
         delegate = pick_delegate_heuristic(incoming, list(pool) + [coordinator_id], coordinator_id=coordinator_id)
     return delegate or coordinator_id
-
-
-def _manager_greeting_fast_path_ok(incoming: str) -> bool:
-    """Saludo corto sin comando fly: evita plan LLM y delegación al worker."""
-    raw = (incoming or "").strip()
-    if not raw or raw.startswith("/"):
-        return False
-    from duckclaw.graphs.on_the_fly_commands import _is_simple_greeting
-
-    return _is_simple_greeting(raw)
-
-
-def _manager_capabilities_fast_path_ok(incoming: str) -> bool:
-    """«Qué puedes hacer?» y similares: respuesta fija sin plan ni subagente."""
-    raw = (incoming or "").strip()
-    if not raw or raw.startswith("/"):
-        return False
-    from duckclaw.graphs.on_the_fly_commands import _is_capabilities_smalltalk
-
-    return _is_capabilities_smalltalk(raw)
-
-
-def _greeting_fast_reply_text(worker_id: str | None) -> str:
-    w = (worker_id or "").strip()
-    wl = w.lower()
-    if _is_job_hunter_worker(w):
-        return (
-            "Hola. Soy **OSINT JobHunter** (búsqueda y extracción de ofertas). "
-            "Di rol, ubicación o remoto y, si quieres, portales (LinkedIn, Lever, etc.). "
-            "Necesitas `/sandbox on` para ejecutar código en el contenedor browser."
-        )
-    if wl == "bi-analyst":
-        return (
-            "Hola. Soy tu analista de BI (DuckDB): consultas de solo lectura, esquema, métricas y gráficos cuando lo pidas. "
-            "¿Qué quieres revisar?"
-        )
-    if w:
-        return f"Hola. Aquí {w}. ¿En qué puedo ayudarte?"
-    return "Hola. ¿En qué puedo ayudarte?"
-
-
-def _capabilities_fast_reply_text(
-    worker_id: str | None,
-    *,
-    coordinator_id: str | None = None,
-    delegation_pool: list[str] | None = None,
-    prompt_policies: PromptPolicyResolver | None = None,
-) -> str:
-    if prompt_policies is None:
-        raise RuntimeError(
-            "capabilities fast reply requires an injected PromptPolicyResolver "
-            "with a migrated DuckDB connection"
-        )
-    coord = (coordinator_id or "").strip()
-    pool = [x for x in (delegation_pool or []) if (x or "").strip()]
-    if coord and pool:
-        lines = "\n".join(f"- {w}" for w in pool)
-        return prompt_policies.format("capability", "axis_coordinator", coord=coord, lines=lines)
-    w = (worker_id or "").strip()
-    wl = w.lower()
-    wl_norm = wl.replace("_", "-")
-    if _is_job_hunter_worker(w):
-        return prompt_policies.load("capability", "job_hunter")
-    if wl == "bi-analyst":
-        return prompt_policies.load("capability", "bi_analyst")
-    if wl == "finanz":
-        return prompt_policies.load("capability", "finanz")
-    if wl_norm == "siata-analyst":
-        return prompt_policies.load("capability", "siata_analyst")
-    if w:
-        return prompt_policies.format("capability", "generic_worker", worker_id=w)
-    return prompt_policies.load("capability", "default_fallback")
 
 
 def _task_summary_for_activity(incoming: str, planned_task: str) -> str:

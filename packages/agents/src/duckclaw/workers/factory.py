@@ -81,6 +81,7 @@ from duckclaw.finance.runtime_policy import (
     finanz_should_force_ibkr_after_local_cuentas_read as _finanz_should_force_ibkr_after_local_cuentas_read,
 )
 from duckclaw.github.workflow import (
+    _github_needs_create_pr_after_push,
     github_pr_workflow_resolved_intent as _github_pr_workflow_resolved_intent,
     try_deterministic_pr_workflow as _github_try_deterministic_pr_workflow,
 )
@@ -2542,6 +2543,7 @@ def build_worker_graph(
                 or _quant_summarize_allows_forced_ohlcv_fetch(
                     incoming,
                     str(_lid or ""),
+                    spec=spec,
                     is_quant_trading_worker=is_quant_trading_worker,
                 )
             )
@@ -2629,6 +2631,7 @@ def build_worker_graph(
             # así el LLM puede responder con texto y no entrar en bucle (inspect_schema -> agent -> inspect_schema).
             last_msg = (state.get("messages") or [])[-1] if state.get("messages") else None
             already_has_tool_result = last_msg is not None and isinstance(last_msg, ToolMessage)
+            _github_workflow_policy = _worker_runtime_capability_policy(spec, "github_workflow")
             _gh_early_out = _github_try_deterministic_pr_workflow(
                 state=state,
                 incoming=incoming,
@@ -2636,6 +2639,7 @@ def build_worker_graph(
                 last_msg=last_msg,
                 already_has_tool_result=already_has_tool_result,
                 worker_label=_wl,
+                github_workflow_policy=_github_workflow_policy,
             )
             if _gh_early_out is not None:
                 return _gh_early_out
@@ -3853,7 +3857,10 @@ def build_worker_graph(
                     SystemMessage(content=prompt_policies.load("directive", "github_pr_workflow"))
                 ] + _msg_list
                 if (
-                    _github_needs_create_pr_after_push(state.get("messages") or [])
+                    _github_needs_create_pr_after_push(
+                        state.get("messages") or [],
+                        _worker_runtime_capability_policy(spec, "github_workflow"),
+                    )
                     and re.search(r"\bpr\b", str(incoming or "").lower())
                 ):
                     _msg_list = [

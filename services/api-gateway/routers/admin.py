@@ -14,7 +14,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from routers.admin_domains.auth import router as auth_router
+from routers.admin_domains.templates_catalog import router as templates_catalog_router
+
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+router.include_router(auth_router)
+router.include_router(templates_catalog_router)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _EDITABLE_SUFFIXES = frozenset({".yaml", ".yml", ".md", ".sql", ".py", ".txt", ".json"})
@@ -22,7 +27,6 @@ _PROTECTED_TEMPLATE_IDS = frozenset({"entry_router", "manager_router", "platform
 _CATALOG_STARTER_SKIP = frozenset({"entry_router", "manager_router", "industries"})
 _ENV_ALLOW_PREFIXES = ("TELEGRAM_", "DUCKDB_", "DUCKCLAW_", "LANGCHAIN_", "OPENAI_", "GROQ_", "DEEPSEEK_")
 _ENV_ALLOW_EXACT = frozenset({"LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "REDIS_URL"})
-_DUCKDB_EXPLORER_LEGACY_SCHEMAS = frozenset({"quant_core", "war_room_core"})
 _DUCKDB_EXPLORER_LEGACY_MAIN_TABLES = frozenset()
 _DROP_LEGACY_SCHEMAS_CONFIRM = "DROP_LEGACY_SCHEMAS"
 _TELEGRAM_WEBHOOK_ROUTES_ENV_KEY = "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES"
@@ -48,14 +52,14 @@ def _duckdb_explorer_legacy_schema_names(
     tenant_id: str | None = None,
     actor_email: str | None = None,
 ) -> set[str]:
-    """Schemas legacy conocidos; DB-first con fallback env para compatibilidad."""
+    """Schemas legacy configurados explícitamente; DB-first con fallback env."""
     raw = os.environ.get("DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS", "")
     if tenant_id and actor_email:
         try:
             from core.admin_identity import open_gateway_db
             from duckclaw.admin_runtime_settings import resolve_runtime_setting
 
-            with open_gateway_db(read_only=False) as db:
+            with open_gateway_db(read_only=True) as db:
                 resolved = resolve_runtime_setting(
                     db,
                     tenant_id=tenant_id,
@@ -69,7 +73,7 @@ def _duckdb_explorer_legacy_schema_names(
         except Exception:
             raw = os.environ.get("DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS", "")
     configured = {item.strip().lower() for item in raw.split(",") if item.strip()}
-    return set(_DUCKDB_EXPLORER_LEGACY_SCHEMAS) | configured
+    return configured
 
 
 def _duckdb_explorer_legacy_main_table_names(
@@ -84,7 +88,7 @@ def _duckdb_explorer_legacy_main_table_names(
             from core.admin_identity import open_gateway_db
             from duckclaw.admin_runtime_settings import resolve_runtime_setting
 
-            with open_gateway_db(read_only=False) as db:
+            with open_gateway_db(read_only=True) as db:
                 resolved = resolve_runtime_setting(
                     db,
                     tenant_id=tenant_id,
@@ -112,7 +116,7 @@ def _telegram_webhook_routes_runtime_setting() -> dict[str, Any]:
         from core.admin_identity import open_gateway_db
         from duckclaw.admin_runtime_settings import resolve_runtime_setting
 
-        with open_gateway_db(read_only=False) as db:
+        with open_gateway_db(read_only=True) as db:
             resolved = resolve_runtime_setting(
                 db,
                 tenant_id="global",
@@ -155,7 +159,7 @@ def _mcp_port_runtime_setting() -> dict[str, str]:
         from core.admin_identity import open_gateway_db
         from duckclaw.admin_runtime_settings import resolve_runtime_setting
 
-        with open_gateway_db(read_only=False) as db:
+        with open_gateway_db(read_only=True) as db:
             resolved = resolve_runtime_setting(
                 db,
                 tenant_id="global",
@@ -186,7 +190,7 @@ def _comfyui_runtime_settings() -> dict[str, str]:
             from core.admin_identity import open_gateway_db
             from duckclaw.admin_runtime_settings import resolve_runtime_setting
 
-            with open_gateway_db(read_only=False) as db:
+            with open_gateway_db(read_only=True) as db:
                 resolved = resolve_runtime_setting(
                     db,
                     tenant_id="global",
@@ -1033,7 +1037,7 @@ def _playground_runtime_defaults(tenant_id: str, actor_email: str) -> dict[str, 
     try:
         from core.admin_identity import open_gateway_db
 
-        with open_gateway_db(read_only=False) as db:
+        with open_gateway_db(read_only=True) as db:
             pairs = {
                 "llm_provider": ("llm", "provider"),
                 "llm_model": ("llm", "model"),
@@ -2440,8 +2444,7 @@ async def admin_overview_metrics(
     return {"usage": usage, "activity": activity, "latency": latency, "db_path": gw}
 
 
-@router.get("/templates", dependencies=[Depends(_require_admin_key)])
-async def list_templates(
+async def _list_templates_impl(
     include_inactive: bool = Query(False),
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
@@ -2452,8 +2455,7 @@ async def list_templates(
     return {"templates": items}
 
 
-@router.get("/templates/{worker_id}", dependencies=[Depends(_require_admin_key)])
-async def get_template(
+async def _get_template_impl(
     worker_id: str,
     include_content: bool = True,
     actor: str = Depends(_actor_from_header),
@@ -2469,8 +2471,7 @@ async def get_template(
     return detail
 
 
-@router.put("/templates/{worker_id}/files/{file_path:path}", dependencies=[Depends(_require_admin_key)])
-async def put_template_file(
+async def _put_template_file_impl(
     worker_id: str,
     file_path: str,
     body: FileWriteBody,
@@ -2539,8 +2540,7 @@ def _merge_manifest_vault_binding(worker_id: str, binding: dict[str, str] | None
     )
 
 
-@router.get("/templates/{worker_id}/vault-options", dependencies=[Depends(_require_admin_key)])
-async def template_vault_options(
+async def _template_vault_options_impl(
     worker_id: str,
     vault_user_id: str | None = Query(None, description="ID dueño de db/private/ (default: DUCKCLAW_OWNER_ID)"),
 ) -> dict[str, Any]:
@@ -2554,8 +2554,7 @@ async def template_vault_options(
     return {"vault_user_id": uid, "worker_id": wid, "options": options}
 
 
-@router.get("/templates/{worker_id}/vault-binding", dependencies=[Depends(_require_admin_key)])
-async def get_template_vault_binding(
+async def _get_template_vault_binding_impl(
     worker_id: str,
     vault_user_id: str | None = Query(None),
 ) -> dict[str, Any]:
@@ -2579,8 +2578,7 @@ async def get_template_vault_binding(
     }
 
 
-@router.put("/templates/{worker_id}/vault-binding", dependencies=[Depends(_require_admin_key)])
-async def put_template_vault_binding(
+async def _put_template_vault_binding_impl(
     worker_id: str,
     body: VaultBindingPutBody,
     actor: str = Depends(_actor_from_header),
@@ -2700,8 +2698,7 @@ def _create_worker_from_source(
     return dest
 
 
-@router.post("/templates", dependencies=[Depends(_require_admin_key)])
-async def create_template(
+async def _create_template_impl(
     body: TemplateCreateBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
@@ -2712,8 +2709,7 @@ async def create_template(
     )
 
 
-@router.delete("/templates/{worker_id}", dependencies=[Depends(_require_admin_key)])
-async def delete_template(
+async def _delete_template_impl(
     worker_id: str,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
@@ -2732,8 +2728,7 @@ async def delete_template(
     raise _problem(404, "Plantilla no encontrada en catálogo", wid)
 
 
-@router.post("/templates/{worker_id}/reactivate", dependencies=[Depends(_require_admin_key)])
-async def reactivate_template(
+async def _reactivate_template_impl(
     worker_id: str,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
@@ -2751,8 +2746,7 @@ async def reactivate_template(
     return {"ok": True, "id": wid, "action": "reactivated"}
 
 
-@router.delete("/templates/{worker_id}/hard-delete", dependencies=[Depends(_require_admin_key)])
-async def hard_delete_template(
+async def _hard_delete_template_impl(
     worker_id: str,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
@@ -2779,8 +2773,7 @@ async def hard_delete_template(
     return {"ok": True, "id": wid, "hard_deleted": True}
 
 
-@router.post("/templates/{worker_id}/validate", dependencies=[Depends(_require_admin_key)])
-async def validate_template(worker_id: str) -> dict[str, Any]:
+async def _validate_template_impl(worker_id: str) -> dict[str, Any]:
     raise _problem(
         410,
         "Validación filesystem retirada",
@@ -3222,8 +3215,7 @@ async def admin_reindex_conversations(
     return {"tenant_id": tid, **stats}
 
 
-@router.post("/auth/login")
-async def admin_auth_login(body: AdminLoginBody, request: Request, response: Response) -> dict[str, Any]:
+async def _admin_auth_login_impl(body: Any, request: Request, response: Response) -> dict[str, Any]:
     from core.admin_auth import (
         apply_login_delay,
         check_ip_rate_limit,
@@ -3277,61 +3269,6 @@ async def admin_auth_login(body: AdminLoginBody, request: Request, response: Res
     set_auth_cookies(response, session_id, csrf_token, request=request)
     logging.getLogger(__name__).info("login_success email=%s ip=%s", body.email, ip)
     return {"user": console_user_public(user)}
-
-
-@router.get("/auth/me")
-async def admin_auth_me(request: Request) -> dict[str, Any]:
-    from core.admin_auth import SESSION_COOKIE, destroy_session, load_session, refresh_session, session_user_public
-
-    redis_client = getattr(request.app.state, "redis", None)
-    session_id = request.cookies.get(SESSION_COOKIE)
-    if not redis_client or not session_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    session = await load_session(redis_client, session_id)
-    if not session:
-        raise HTTPException(status_code=401, detail="Session expired")
-
-    email = str(session.get("email") or "").strip()
-    if not email:
-        await destroy_session(redis_client, session_id)
-        raise HTTPException(status_code=401, detail="Session user missing")
-
-    from core.admin_identity import attach_profile_to_console_user, open_gateway_db
-    from duckclaw.admin_console_users import get_by_email
-
-    with open_gateway_db(read_only=True) as db:
-        user = get_by_email(db, email)
-        if not user or not bool(user.get("active", True)):
-            await destroy_session(redis_client, session_id)
-            raise HTTPException(status_code=401, detail="Session user not active")
-        public_user = {
-            **session,
-            "email": user.get("email"),
-            "nombre": user.get("nombre"),
-            "rol": user.get("rol"),
-            "initials": user.get("initials") or "",
-        }
-        session = attach_profile_to_console_user(db, public_user)
-
-    session = await refresh_session(redis_client, session_id, session)
-    if not (session.get("profile") or {}).get("tenant_id"):
-        if email:
-            with open_gateway_db(read_only=True) as db:
-                session = attach_profile_to_console_user(db, dict(session))
-    return {"user": session_user_public(session)}
-
-
-@router.post("/auth/logout")
-async def admin_auth_logout(request: Request, response: Response) -> dict[str, Any]:
-    from core.admin_auth import SESSION_COOKIE, clear_auth_cookies, destroy_session
-
-    redis_client = getattr(request.app.state, "redis", None)
-    session_id = request.cookies.get(SESSION_COOKIE)
-    if redis_client and session_id:
-        await destroy_session(redis_client, session_id)
-    clear_auth_cookies(response)
-    return {"ok": True}
 
 
 @router.get("/access/overview", dependencies=[Depends(_require_admin_key)])

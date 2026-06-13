@@ -26,7 +26,6 @@ def test_authorized_users_rw_opens_hub_with_python_engine_when_vault_differs(
 ) -> None:
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
     for k in (
-        "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
         "DUCKCLAW_GATEWAY_DB_PATH",
         "DUCKCLAW_TENANT_DB_PATH",
         "DUCKCLAW_VAULT_DB_PATH",

@@ -1178,21 +1178,55 @@ def test_workspace_project_detail_endpoint(admin_client: TestClient):
     assert data["agents"] == []
 
 
+def test_gateway_db_fixture_applies_knowledge_migration(gateway_db: Path) -> None:
+    import duckdb
+
+    con = duckdb.connect(str(gateway_db), read_only=True)
+    try:
+        tables = {
+            row[0]
+            for row in con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
+            ).fetchall()
+        }
+        versions = set()
+        if "schema_migrations" in tables:
+            versions = {
+                int(row[0])
+                for row in con.execute(
+                    "SELECT version FROM main.schema_migrations ORDER BY version"
+                ).fetchall()
+            }
+    finally:
+        con.close()
+
+    assert "schema_migrations" in tables
+    assert "admin_knowledge_sources" in tables
+    assert "admin_knowledge_documents" in tables
+    assert "admin_knowledge_chunks" in tables
+    assert 15 in versions
+
+
 def test_knowledge_sources_and_search_are_scoped(
     gateway_admin_client: TestClient,
     gateway_db: Path,
 ) -> None:
     import duckdb
 
-    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    from duckclaw.admin_user_profiles import tenant_id_for_email
+
+    actor_email = "admin@test.local"
+    tenant_id = tenant_id_for_email(actor_email)
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": actor_email}
     con = duckdb.connect(str(gateway_db))
     try:
         con.execute(
             """
             INSERT INTO main.admin_knowledge_sources
               (source_id, tenant_id, project_id, worker_uid, source_kind, source_uri, status)
-            VALUES ('ksrc_api', 'default', 'proj_api', 'wrk_api', 'folder', '/docs', 'ready')
-            """
+            VALUES ('ksrc_api', ?, 'proj_api', 'wrk_api', 'folder', '/docs', 'ready')
+            """,
+            [tenant_id],
         )
         con.execute(
             """
@@ -1207,11 +1241,12 @@ def test_knowledge_sources_and_search_are_scoped(
               (chunk_id, document_id, source_id, tenant_id, project_id, worker_uid,
                chunk_index, content, content_hash, embedding_status)
             VALUES
-              ('kchk_api', 'kdoc_api', 'ksrc_api', 'default', 'proj_api', 'wrk_api',
+              ('kchk_api', 'kdoc_api', 'ksrc_api', ?, 'proj_api', 'wrk_api',
                0, 'Least privilege policies for cloud access', 'h-api', 'PENDING'),
-              ('kchk_other', 'kdoc_api', 'ksrc_api', 'default', 'proj_other', 'wrk_api',
+              ('kchk_other', 'kdoc_api', 'ksrc_api', ?, 'proj_other', 'wrk_api',
                1, 'This other project must not leak', 'h-other', 'PENDING')
-            """
+            """,
+            [tenant_id, tenant_id],
         )
     finally:
         con.close()

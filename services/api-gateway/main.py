@@ -288,11 +288,10 @@ _install_duckdb_connect_probe()
 _obs_log = get_obs_logger()
 _gateway_log.info(
     "Gateway startup: gateway_db_path=%s DUCKCLAW_PM2_MATCHED_APP_NAME=%s "
-    "DUCKCLAW_WAR_ROOM_ACL_DB_PATH=%s | diagnóstico WR: pm2 logs … --lines 300 "
+    "| diagnóstico WR: pm2 logs … --lines 300 "
     "y grep telegram_inbound_early war_room_gate DROP_NO_MENTION rate_limited",
     get_gateway_db_path() or "(unset)",
     (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip() or "(unset)",
-    (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip() or "(unset)",
 )
 try:
     from duckclaw.integrations.telegram.compact_webhook_routes import load_path_webhook_bindings_from_env

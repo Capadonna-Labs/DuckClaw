@@ -66,14 +66,27 @@ from duckclaw.manager.task_classification import (
     _worker_should_use_lite_stdio_mcp_surface,
     job_hunter_user_requests_job_search,
 )
+from duckclaw.manager.resilience_flow import (
+    _initial_replan_state,
+    _planned_task_with_replan_suffix,
+    _replan_output_fields,
+)
+from duckclaw.manager.task_activity import (
+    _activity_task_for_plan,
+    _append_task_audit_safely,
+    _is_ai_like_message,
+    _message_body_text_for_embedded_tool,
+    _messages_turn_for_tool_audit,
+    _task_summary_for_activity,
+    _tool_name_from_embedded_json_content,
+    _worker_tool_names_from_messages,
+)
 from duckclaw.workers.factory import explicit_duckdb_schema_request
 from duckclaw.prompt_policies import PromptPolicyResolver
 from duckclaw.graphs.agent_resilience import (
     classify_exception_for_replan,
     format_exhausted_plan_failure,
-    format_replan_task_suffix,
     merge_failure_reasons,
-    plan_max_attempts_from_env,
     replan_enabled,
     worker_reply_suggests_replan_without_tools,
 )
@@ -93,174 +106,6 @@ def _vault_lock_key(path: str) -> str:
         return str(Path(p).expanduser().resolve())
     except Exception:
         return str(Path(p).expanduser())
-
-
-def _tool_name_from_embedded_json_content(text: str) -> str | None:
-    """Si el modelo emitió tool como JSON en el texto (p. ej. MLX sin tool_calls), extrae el nombre."""
-    from duckclaw.integrations.llm_providers import coerce_json_tool_invoke
-
-    raw = (text or "").strip()
-    got = coerce_json_tool_invoke(raw)
-    if got:
-        return got[0]
-    # Texto antes del objeto JSON (p. ej. "Voy a consultar:\n{\"name\": ...")
-    i = raw.find("{")
-    if i > 0:
-        got = coerce_json_tool_invoke(raw[i:])
-        if got:
-            return got[0]
-    return None
-
-
-def _messages_turn_for_tool_audit(messages: list[Any]) -> list[Any]:
-    """
-    Mensajes del turno actual respecto al último HumanMessage (tarea del usuario en el worker).
-    Evita mezclar tool_calls de turnos viejos del historial y alinea con prepare_node (último Human = tarea).
-    """
-    try:
-        from langchain_core.messages import HumanMessage
-    except ImportError:
-        HumanMessage = ()  # type: ignore[assignment, misc]
-    last_u = -1
-    for i in range(len(messages) - 1, -1, -1):
-        m = messages[i]
-        if isinstance(m, dict):
-            r = str(m.get("role") or m.get("type") or "").lower()
-            if r in ("human", "user"):
-                last_u = i
-                break
-        elif HumanMessage and isinstance(m, HumanMessage):
-            last_u = i
-            break
-    if last_u < 0:
-        return messages
-    return messages[last_u + 1 :]
-
-
-def _is_ai_like_message(m: Any) -> bool:
-    """True si el mensaje es un turno assistant (LangChain o dict ChatML)."""
-    if m is None:
-        return False
-    if isinstance(m, dict):
-        r = str(m.get("role") or m.get("type") or "").lower()
-        return r in ("ai", "assistant", "model")
-    t = getattr(m, "type", None)
-    if isinstance(t, str) and t.lower() in ("ai", "assistant"):
-        return True
-    try:
-        from langchain_core.messages import AIMessage
-
-        return isinstance(m, AIMessage)
-    except ImportError:
-        return False
-
-
-def _message_body_text_for_embedded_tool(m: Any) -> str:
-    """Texto de ``content`` para parsear JSON de tool embebido (dict o BaseMessage)."""
-    if isinstance(m, dict):
-        from duckclaw.graphs.conversation_traces import _stringify_lc_message_content
-
-        return _stringify_lc_message_content(m.get("content"))
-    from duckclaw.integrations.llm_providers import lc_message_content_to_text
-
-    return lc_message_content_to_text(m)
-
-
-def _worker_tool_names_from_messages(messages: list[Any] | None) -> list[str]:
-    """
-    Nombres de herramientas usadas en el turno del worker (AIMessage.tool_calls + ToolMessage.name).
-    LangChain puede devolver tool_calls como dict o como objetos (p. ej. ToolCall); antes solo se leían dicts
-    y los logs del manager mostraban «ninguna» aunque hubiera read_sql/tavily.
-    Además: MLX a veces deja la invocación solo en ``content`` JSON sin ``tool_calls``; si no hubo tool_calls/tool
-    en el barrido hacia adelante, se busca hacia atrás el último ToolMessage o AIMessage con JSON embebido
-    (p. ej. LangGraph devuelve ``messages`` como tupla o el último turno no es assistant).
-    """
-    if not messages:
-        return []
-    turn = _messages_turn_for_tool_audit(messages)
-    if not turn:
-        return []
-    try:
-        from langchain_core.messages import ToolMessage
-    except ImportError:
-        ToolMessage = ()  # type: ignore[assignment, misc]
-
-    names: list[str] = []
-    for m in turn:
-        if isinstance(m, dict):
-            for tc in m.get("tool_calls") or []:
-                if isinstance(tc, dict):
-                    fn = (tc.get("function") or {}) if isinstance(tc.get("function"), dict) else {}
-                    nm = fn.get("name") or tc.get("name")
-                else:
-                    nm = getattr(tc, "name", None)
-                if nm:
-                    names.append(str(nm))
-            rdict = str(m.get("role") or m.get("type") or "").lower()
-            if rdict == "tool":
-                tn = m.get("name")
-                if tn:
-                    names.append(str(tn))
-            continue
-        for tc in getattr(m, "tool_calls", None) or []:
-            nm = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
-            if nm:
-                names.append(str(nm))
-        addl = getattr(m, "additional_kwargs", None) or {}
-        if isinstance(addl, dict):
-            for tc in addl.get("tool_calls") or []:
-                if isinstance(tc, dict):
-                    fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
-                    nm = fn.get("name") if isinstance(fn, dict) else tc.get("name")
-                else:
-                    nm = getattr(tc, "name", None)
-                if nm:
-                    names.append(str(nm))
-        if ToolMessage and isinstance(m, ToolMessage):
-            tn = getattr(m, "name", None)
-            if tn:
-                names.append(str(tn))
-    names = list(dict.fromkeys(names))
-    if not names and turn:
-        for m in reversed(turn):
-            if isinstance(m, dict):
-                rdict = str(m.get("role") or m.get("type") or "").lower()
-                if rdict == "tool" and m.get("name"):
-                    names.append(str(m["name"]))
-                    break
-                if _is_ai_like_message(m):
-                    embedded = _tool_name_from_embedded_json_content(
-                        _message_body_text_for_embedded_tool(m).strip()
-                    )
-                    if embedded:
-                        names.append(embedded)
-                        break
-                continue
-            if ToolMessage and isinstance(m, ToolMessage):
-                tn = getattr(m, "name", None)
-                if tn:
-                    names.append(str(tn))
-                    break
-                continue
-            if _is_ai_like_message(m):
-                embedded = _tool_name_from_embedded_json_content(
-                    _message_body_text_for_embedded_tool(m).strip()
-                )
-                if embedded:
-                    names.append(embedded)
-                    break
-    names = list(dict.fromkeys(names))
-    if not names and turn:
-        for m in turn:
-            if not _is_ai_like_message(m):
-                continue
-            blob = _message_body_text_for_embedded_tool(m)
-            if re.search(r'["\']name["\']\s*:\s*["\']read_sql["\']', blob) and re.search(
-                r'["\']query["\']\s*:', blob, re.IGNORECASE
-            ):
-                names.append("read_sql")
-                break
-    return list(dict.fromkeys(names))
 
 
 def worker_graph_cache_entry_count() -> int:
@@ -1437,27 +1282,6 @@ def _resolve_orchestrator_delegate(
     return delegate or coordinator_id
 
 
-def _task_summary_for_activity(incoming: str, planned_task: str) -> str:
-    """Resumen corto de la tarea para /tasks (activity), no el planned_task completo."""
-    t = (incoming or "").strip().lower()
-    pt = (planned_task or "").strip().lower()
-    # Nombre de la db
-    if re.search(r"\b(nombre\s+de\s+la\s+db|nombre\s+db|cual\s+es\s+el\s+nombre|nombre\s+de\s+la\s+base)\b", t) or (
-        "nombre" in t and ("db" in t or "base" in t or "datos" in t)
-    ) or "get_db_path" in pt and "nombre" in pt:
-        return "Buscando el nombre de la db disponible."
-    # Tablas / esquema
-    if re.search(
-        r"\b(tablas?|tables?|esquema|schema|estructura|listar\s+tablas|disponibles)\b",
-        t,
-    ) or "tablas" in t or "qué tablas" in t or "que tablas" in t or "show tables" in pt:
-        return "Listando tablas de la base de datos."
-    # Fallback: primeras palabras del mensaje del usuario (máx. ~50 caracteres)
-    if incoming and len(incoming) > 48:
-        return (incoming[:48] + "…").strip()
-    return incoming or "Procesando solicitud."
-
-
 def build_manager_graph(
     db: Any,
     llm: Optional[Any] = None,
@@ -1562,10 +1386,7 @@ def build_manager_graph(
         _ot = (state.get("outbound_telegram_bot_token") or "").strip()
         if _ot:
             out["outbound_telegram_bot_token"] = _ot
-        out["plan_attempt_index"] = 0
-        out["plan_max_attempts"] = plan_max_attempts_from_env()
-        out["plan_failure_reasons"] = []
-        out["replan_requested"] = False
+        out.update(_initial_replan_state())
         return out
 
     def greeting_shortcut_node(state: ManagerAgentState) -> ManagerAgentState:
@@ -1597,18 +1418,16 @@ def build_manager_graph(
             log_sys(_obs, "Saludo: respuesta directa (sin plan ni subagente)")
             reply = _greeting_fast_reply_text(assigned)
             _audit_title = "Saludo directo"
-        try:
-            append_task_audit(
-                db,
-                chat_id,
-                assigned or "manager",
-                incoming,
-                "SUCCESS",
-                0,
-                plan_title=_audit_title,
-            )
-        except Exception:
-            pass
+        _append_task_audit_safely(
+            append_task_audit,
+            db=db,
+            chat_id=chat_id,
+            worker_id=assigned or "manager",
+            incoming=incoming,
+            status="SUCCESS",
+            elapsed_ms=0,
+            plan_title=_audit_title,
+        )
         out: ManagerAgentState = {
             "reply": reply,
             "_audit_done": True,
@@ -1811,9 +1630,8 @@ def build_manager_graph(
             planned, override_worker = _plan_task(incoming, assigned)
             planned_final = planned or incoming
         _pa_plan = int(state.get("plan_attempt_index") or 0)
-        _max_plan = int(state.get("plan_max_attempts") or plan_max_attempts_from_env())
-        if replan_enabled() and _pa_plan > 0:
-            planned_final = (planned_final or "").strip() + format_replan_task_suffix(_pa_plan, _max_plan)
+        _max_plan = int(state.get("plan_max_attempts") or _initial_replan_state()["plan_max_attempts"])
+        planned_final = _planned_task_with_replan_suffix(planned_final, _pa_plan, _max_plan)
 
         if coordinator_id and delegation_pool and not _orch_affirm and not _hrp_fast and not _generic_affirm and not _visual_fast and not _url_fast:
             assigned = _resolve_orchestrator_delegate(
@@ -1939,12 +1757,7 @@ def build_manager_graph(
         if "active_mission" in state and not out.get("active_mission"):
             out["active_mission"] = state.get("active_mission")
         # Actualizar activity para /tasks usando solo el título del plan cuando esté disponible
-        plan_for_task = (plan_title or "").strip()
-        if plan_for_task:
-            # Mostrar únicamente el título del plan en /tasks (sin corchetes)
-            activity_task = plan_for_task
-        else:
-            activity_task = task_summary
+        activity_task = _activity_task_for_plan(plan_title, task_summary)
         set_busy(state.get("chat_id") or "", task=activity_task, worker_id=out.get("assigned_worker_id", assigned))
 
         # Log del plan para PM2 / stdout: título + lista de tasks (worker en línea aparte)
@@ -2052,7 +1865,7 @@ def build_manager_graph(
         _will_suspend_ro = False
         _vault_lock_obj: threading.Lock | None = None
         pa = int(state.get("plan_attempt_index") or 0)
-        max_a = int(state.get("plan_max_attempts") or plan_max_attempts_from_env())
+        max_a = int(state.get("plan_max_attempts") or _initial_replan_state()["plan_max_attempts"])
         reasons_acc = list(state.get("plan_failure_reasons") or [])
         _tools_list: list[str] = []
         replan_after = False
@@ -2523,18 +2336,15 @@ def build_manager_graph(
             out["handoff_context"] = state.get("handoff_context")
         out["last_worker_raw_reply"] = raw_worker_reply or reply
         out["plan_max_attempts"] = max_a
-        if replan_after:
-            out["replan_requested"] = True
-            out["plan_attempt_index"] = next_plan_attempt
-            out["plan_failure_reasons"] = reasons_acc
-        elif exhausted_final:
-            out["replan_requested"] = False
-            out["plan_attempt_index"] = max_a
-            out["plan_failure_reasons"] = reasons_acc
-        else:
-            out["replan_requested"] = False
-            out["plan_attempt_index"] = 0
-            out["plan_failure_reasons"] = []
+        out.update(
+            _replan_output_fields(
+                replan_after=replan_after,
+                exhausted_final=exhausted_final,
+                next_plan_attempt=next_plan_attempt,
+                max_attempts=max_a,
+                failure_reasons=reasons_acc,
+            )
+        )
         return out
 
     def mercenary_node(state: ManagerAgentState) -> ManagerAgentState:

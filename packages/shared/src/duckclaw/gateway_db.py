@@ -2,8 +2,8 @@
 Ruta y acceso a la BD del API Gateway (microservicio services/api-gateway).
 
 Usado por duckclaw.graphs.graph_server, forge, workers y scripts cuando necesitan
-la misma DuckDB que usa el Gateway. Resuelve desde ``DUCKCLAW_*_DB_PATH`` (multiplex)
-y ``DUCKDB_PATH``; no usa ``DUCKCLAW_DB_PATH`` (eliminada).
+la misma DuckDB que usa el Gateway. Resuelve desde claves genéricas de gateway,
+tenant o bóveda y ``DUCKDB_PATH``; no usa ``DUCKCLAW_DB_PATH`` (eliminada).
 """
 
 from __future__ import annotations
@@ -13,15 +13,11 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
-# Multiplex: solo rutas por worker (+ ACL WR opcional). Orden = prioridad del hub efectivo.
+# Orden = prioridad del hub efectivo. No agregar claves por agente/worker aquí.
 GATEWAY_DB_ENV_KEYS: tuple[str, ...] = (
-    "DUCKCLAW_WAR_ROOM_ACL_DB_PATH",
-    "DUCKCLAW_FINANZ_DB_PATH",
-    "DUCKCLAW_JOB_HUNTER_DB_PATH",
-    "DUCKCLAW_SIATA_DB_PATH",
-    "DUCKCLAW_QUANT_TRADER_DB_PATH",
-    "DUCKCLAW_PQRSD_ASSISTANT_DB_PATH",
-    "DUCKCLAW_AXIS_DB_PATH",
+    "DUCKCLAW_GATEWAY_DB_PATH",
+    "DUCKCLAW_TENANT_DB_PATH",
+    "DUCKCLAW_VAULT_DB_PATH",
     "DUCKDB_PATH",
 )
 
@@ -57,29 +53,11 @@ class GatewayDbEphemeralReadonly:
     def execute(self, _sql: str, _params: Any = None) -> Any:
         return None
 
-
-
-
-# Nombre canónico del archivo DuckDB del worker PQRSD-Assistant por usuario (bootstrap / plantillas).
-PQRSD_ASSISTANT_VAULT_FILENAME = "pqrsd-assistantdb1.duckdb"
-
-
-def default_pqrsd_assistant_vault_path(vault_user_id: str) -> str:
-    """
-    Ruta absoluta a ``db/private/<vault_user_id>/pqrsd-assistantdb1.duckdb``.
-
-    Usada cuando ``DUCKCLAW_PQRSD_ASSISTANT_DB_PATH`` no está definido y el chat va al worker
-    PQRSD-Assistant, para no heredar el vault dedicado del hub (p. ej. Finanz).
-    """
-    uid = (vault_user_id or "").strip() or "default"
-    return resolve_env_duckdb_path(f"db/private/{uid}/{PQRSD_ASSISTANT_VAULT_FILENAME}")
-
-
 def resolve_env_duckdb_path(raw: str) -> str:
     """
     Absolutiza una ruta de archivo DuckDB.
 
-    Las rutas relativas (p. ej. ``DUCKCLAW_FINANZ_DB_PATH=db/private/.../x.duckdb``) se
+    Las rutas relativas (p. ej. ``DUCKCLAW_GATEWAY_DB_PATH=db/private/.../x.duckdb``) se
     resuelven contra ``DUCKCLAW_REPO_ROOT``, no contra el cwd del proceso (PM2 puede
     arrancar fuera del repo y abrir otra copia del archivo).
     """
@@ -115,27 +93,11 @@ def get_gateway_db_path() -> str:
     """
     Ruta absoluta del DuckDB del gateway (hub ACL / whitelist).
 
-    Primera variable no vacía entre ``DUCKCLAW_WAR_ROOM_ACL_DB_PATH``,
-    ``DUCKCLAW_FINANZ_DB_PATH``, ``DUCKCLAW_JOB_HUNTER_DB_PATH``,
-    ``DUCKCLAW_SIATA_DB_PATH``, ``DUCKCLAW_QUANT_TRADER_DB_PATH``,
-    ``DUCKCLAW_PQRSD_ASSISTANT_DB_PATH``, ``DUCKCLAW_AXIS_DB_PATH``, luego ``DUCKDB_PATH``; resuelta con
-    ``resolve_env_duckdb_path``.
+    Primera variable no vacía entre ``DUCKCLAW_GATEWAY_DB_PATH``,
+    ``DUCKCLAW_TENANT_DB_PATH``, ``DUCKCLAW_VAULT_DB_PATH`` y
+    ``DUCKDB_PATH``; resuelta con ``resolve_env_duckdb_path``.
     """
     return resolve_env_duckdb_path(raw_gateway_db_path_from_environ())
-
-
-def get_war_room_acl_db_path() -> str:
-    """
-    DuckDB donde vive ``war_room_core.wr_members`` para zero-trust en War Rooms.
-
-    Si ``DUCKCLAW_WAR_ROOM_ACL_DB_PATH`` está definida (p. ej. finanzdb1 mientras el
-    grafo del gateway usa jobhunterdb1), las comprobaciones WR leen esa ruta en solo
-    lectura. Si no, coincide con ``get_gateway_db_path()``.
-    """
-    p = (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip()
-    if p:
-        return resolve_env_duckdb_path(p)
-    return get_gateway_db_path()
 
 
 def get_gateway_db() -> Any:

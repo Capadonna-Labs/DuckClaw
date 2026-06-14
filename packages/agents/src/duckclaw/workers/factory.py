@@ -34,6 +34,10 @@ from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.guardrails.loader import load_guardrail, load_guardrail_optional, load_worker_guardrail
 from duckclaw.workers import read_pool
+from duckclaw.workers.runtime_policy_helpers import (
+    worker_has_runtime_capability as _worker_has_runtime_capability,
+    worker_runtime_capability_flag as _worker_runtime_capability_flag,
+)
 from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills

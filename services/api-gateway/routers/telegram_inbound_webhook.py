@@ -140,7 +140,7 @@ def _telegram_webhook_routes_raw() -> str:
         from core.admin_identity import open_gateway_db
         from duckclaw.admin_runtime_settings import resolve_runtime_setting
 
-        with open_gateway_db(read_only=False) as db:
+        with open_gateway_db(read_only=True) as db:
             resolved = resolve_runtime_setting(
                 db,
                 tenant_id="global",
@@ -405,7 +405,7 @@ def schedule_telegram_context_summary_background(
             reply_local = (res.get("response") or "").strip() if isinstance(res, dict) else ""
             used_fb = False
             try:
-                from duckclaw.forge.atoms.user_reply_nl_synthesis import (
+                from duckclaw.egress.user_reply_nl_synthesis import (
                     telegram_stored_context_summary_body_when_model_trivial,
                 )
 

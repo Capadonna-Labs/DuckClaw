@@ -154,14 +154,6 @@ def build_general_graph(
         except Exception:
             pass
 
-    # SFT pipeline — opcional vía tools_spec
-    if "collect_sft_dataset" in tool_names_set:
-        try:
-            from duckclaw.forge.skills.sft_bridge import register_sft_skill
-            register_sft_skill(tools, {"sft_enabled": True})
-        except Exception:
-            pass
-
     # ContextHubBridge — Ground Truth de APIs externas opcional vía tools_spec
     if "context_hub_bridge" in tool_names_set:
         try:

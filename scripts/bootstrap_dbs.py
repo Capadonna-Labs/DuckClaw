@@ -27,7 +27,6 @@ except ImportError:
 
 import duckdb
 
-from duckclaw.forge.atoms.macro_pgq_seed import ensure_macro_pgq_seed
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.admin_console_users import ensure_admin_console_users_table, seed_admin_console_users_if_empty
 from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
@@ -150,35 +149,6 @@ def _ensure_authorized_users(con: duckdb.DuckDBPyConnection) -> None:
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (tenant_id, user_id)
         );
-        """
-    )
-
-
-def _ensure_pqrsd_crm_schema(con: duckdb.DuckDBPyConnection) -> None:
-    """CRM Next (GovTech): specs/features/finanz/CRM_PQRSD_DUCKDB_PERSISTENCE.md"""
-    con.execute("CREATE SCHEMA IF NOT EXISTS pqrsd_crm;")
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS pqrsd_crm.tickets (
-          id_ticket VARCHAR PRIMARY KEY,
-          tipo_solicitud VARCHAR NOT NULL,
-          id_secretaria VARCHAR NOT NULL,
-          fecha_creacion TIMESTAMP NOT NULL,
-          fecha_limite TIMESTAMP NOT NULL,
-          estado VARCHAR NOT NULL,
-          contenido_raw VARCHAR NOT NULL,
-          resumen_ia VARCHAR,
-          respuesta_sugerida VARCHAR,
-          canal_origen VARCHAR NOT NULL,
-          nombre_ciudadano VARCHAR NOT NULL,
-          updated_at TIMESTAMP NOT NULL DEFAULT now()
-        );
-        """
-    )
-    con.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_pqrsd_crm_tickets_sec_est
-          ON pqrsd_crm.tickets (id_secretaria, estado);
         """
     )
 
@@ -381,7 +351,6 @@ def bootstrap_file(path: Path, templates_root: Path, extensions: list[str]) -> N
         if path.resolve() == gp.resolve():
             seed_admin_console_users_if_empty(adapter)
         _ensure_war_room_schema_sql(con)
-        _ensure_pqrsd_crm_schema(con)
         _ensure_fly_runtime_tables(con)
         for manifest in sorted(templates_root.glob("*/manifest.yaml")):
             wid = manifest.parent.name
@@ -393,10 +362,6 @@ def bootstrap_file(path: Path, templates_root: Path, extensions: list[str]) -> N
                 run_schema(_ExecuteAdapter(con), spec, seed_beliefs=False)
             except Exception as exc:
                 print(f"  [warn] run_schema {wid}: {exc}", file=sys.stderr)
-        try:
-            ensure_macro_pgq_seed(con)
-        except Exception as exc:
-            print(f"  [warn] macro_pgq_seed: {exc}", file=sys.stderr)
     finally:
         con.close()
 
@@ -416,7 +381,7 @@ def main() -> int:
     parser.add_argument(
         "--core-only",
         action="store_true",
-        help="Solo esquema núcleo (Spawn / perfil genérico). Sin quant, pqrsd ni run_schema de templates.",
+        help="Solo esquema núcleo (Spawn / perfil genérico). Sin dominios extra ni run_schema de templates.",
     )
     parser.add_argument(
         "--templates-root",

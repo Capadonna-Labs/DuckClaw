@@ -26,10 +26,9 @@ def _duckclaw_repo_root_is_tmp(tmp_path, monkeypatch):
     monkeypatch.delenv("DUCKCLAW_PM2_PROCESS_NAME", raising=False)
     monkeypatch.delenv("DUCKCLAW_PM2_MATCHED_APP_NAME", raising=False)
     monkeypatch.delenv("DUCKCLAW_DB_PATH", raising=False)
-    monkeypatch.delenv("DUCKCLAW_FINANZ_DB_PATH", raising=False)
-    monkeypatch.delenv("DUCKCLAW_JOB_HUNTER_DB_PATH", raising=False)
-    monkeypatch.delenv("DUCKCLAW_SIATA_DB_PATH", raising=False)
-    monkeypatch.delenv("DUCKCLAW_WAR_ROOM_ACL_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKCLAW_GATEWAY_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKCLAW_TENANT_DB_PATH", raising=False)
+    monkeypatch.delenv("DUCKCLAW_VAULT_DB_PATH", raising=False)
     monkeypatch.delenv("DUCKDB_PATH", raising=False)
 
 
@@ -127,15 +126,15 @@ def test_read_only_skips_agent_config_ddl_rw_persists_chat_state(tmp_path) -> No
     rw.close()
 
 
-def test_vault_fly_uses_session_duckdb_path_over_dedicated_env(tmp_path, monkeypatch):
-    """Multiplex: el gateway abre DuckClaw(bóveda del bot); /vault debe mostrar ese archivo, no la FINANZ por defecto."""
+def test_vault_fly_uses_session_duckdb_path_over_gateway_env(tmp_path, monkeypatch):
+    """Multiplex: el gateway abre DuckClaw(bóveda del bot); /vault debe mostrar ese archivo, no el hub por defecto."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
     fin = tmp_path / "finanzdb1.duckdb"
     fin.write_bytes(b"x" * 100)
     siata = tmp_path / "siatadb1.duckdb"
     siata.write_bytes(b"y" * 100)
-    monkeypatch.setenv("DUCKCLAW_FINANZ_DB_PATH", str(fin))
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_DB_PATH", str(fin))
     monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "DuckClaw-Gateway")
 
     db = _DummyDB()

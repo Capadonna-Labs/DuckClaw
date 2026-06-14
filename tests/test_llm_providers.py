@@ -49,10 +49,10 @@ def test_sanitize_worker_reply_strips_tool_section_headers() -> None:
 
 
 def test_sanitize_worker_reply_replaces_duckdb_wal_internal_crash() -> None:
-    """No exponer stack DuckDB/WAL en Telegram (evidencia: pqrsd-assistantdb1.duckdb)."""
+    """No exponer stack DuckDB/WAL en Telegram."""
     raw = (
-        "PQRSD-Assistant 2\n\nINTERNAL Error: Failure while replaying WAL file "
-        '"/x/pqrsd-assistantdb1.duckdb.wal": Calling DatabaseManager::GetDefaultDatabase\n'
+        "Data-Worker 2\n\nINTERNAL Error: Failure while replaying WAL file "
+        '"/x/workervault.duckdb.wal": Calling DatabaseManager::GetDefaultDatabase\n'
         "This error signals an assertion failure\n\nStack Trace:\n\n0 duckdb_adbc_init\n"
     )
     out = sanitize_worker_reply_text(raw)

@@ -47,7 +47,7 @@ def test_ensure_browser_novnc_session_provisions_and_returns_url(monkeypatch: py
     monkeypatch.setattr(sb, "_browser_image_name", lambda: "duckclaw/browser-env:latest")
 
     try:
-        url = sb.ensure_browser_novnc_session("PQRSD-Assistant", "chat_1")
+        url = sb.ensure_browser_novnc_session("Browser-Worker", "chat_1")
         assert url
         assert "/api/v1/sandbox/novnc/view/" in url
         assert "vnc.html" in url
@@ -122,10 +122,10 @@ def test_schedule_run_browser_novnc_uses_heartbeat_when_enabled(monkeypatch: pyt
     from env_ids import TELEGRAM_TEST_USER_ID
 
     state = {
-        "tenant_id": "PQRS",
+        "tenant_id": "default",
         "chat_id": TELEGRAM_TEST_USER_ID,
         "user_id": TELEGRAM_TEST_USER_ID,
-        "subagent_instance_label": "PQRSD-Assistant 1",
+        "subagent_instance_label": "Browser-Worker 1",
         "heartbeat_plan_title": "Plan",
     }
     sid = TELEGRAM_TEST_USER_ID
@@ -137,13 +137,13 @@ def test_schedule_run_browser_novnc_uses_heartbeat_when_enabled(monkeypatch: pyt
         )
         fac._schedule_run_browser_novnc_tool_heartbeat(
             state,
-            routing_worker_id="PQRSD-Assistant",
+            routing_worker_id="Browser-Worker",
             vnc_url=vnc,
             novnc_session_id=sid,
         )
         fac._schedule_run_browser_novnc_tool_heartbeat(
             state,
-            routing_worker_id="PQRSD-Assistant",
+            routing_worker_id="Browser-Worker",
             vnc_url=vnc,
             novnc_session_id=sid,
         )
@@ -206,7 +206,7 @@ def test_schedule_run_browser_novnc_fallback_when_heartbeat_off(monkeypatch: pyt
             "https://gw.example/api/v1/sandbox/novnc/view/tok/vnc.html"
             "?autoconnect=1&path=api%2Fv1%2Fsandbox%2Fnovnc%2Fview%2Ftok%2Fwebsockify"
         ),
-        routing_worker_id="PQRSD-Assistant",
+        routing_worker_id="Browser-Worker",
     )
     # Thread — wait briefly
     import time

@@ -24,7 +24,6 @@ _LEGACY_BOT_DEFAULT_WORKER: dict[str, str] = {
     "siata": "siata_analyst",
     "jobhunter": "job_hunter",
     "quanttrader": "quant_trader",
-    "pqrsd-assistant": "pqrsd_assistant",
 }
 
 

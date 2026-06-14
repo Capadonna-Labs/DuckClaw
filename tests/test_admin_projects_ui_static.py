@@ -110,6 +110,10 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
     assert "getWorkspaceProject" in detail_text
     assert "Agentes asignados" in detail_text
     assert "Contexto del proyecto" in detail_text
+    assert "Conocimiento RAG" in detail_text
+    assert "listKnowledgeSources" in detail_text
+    assert "Gestionar RAG" in detail_text
+    assert "Importar fuente" not in detail_text
     assert "Ver" in table
     assert "Eye" in table
     assert "href={`/projects/${encodeURIComponent(project.project_id)}`}" in table
@@ -117,9 +121,48 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
     assert "min-w-[820px]" in table
     assert "whitespace-nowrap" in table
     assert "getWorkspaceProject:" in service
+    assert "KnowledgeSource" in service
+    assert "listKnowledgeSources:" in service
+    assert "createKnowledgeSource:" in service
+    assert "searchKnowledge:" in service
     assert '@router.get("/workspace/projects/{project_id}"' in router
+    assert '@router.get("/knowledge/sources"' in router
+    assert '@router.post("/knowledge/search"' in router
     assert "projectDetailFallbackFromList" in bff_proxy
     assert "res.status === 405" in bff_proxy
+
+
+def test_rag_manager_upload_contract_and_navigation() -> None:
+    nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
+    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
+    rag_page = Path("apps/duckclaw-admin/src/app/(admin)/knowledge/page.tsx")
+    project_detail = Path("apps/duckclaw-admin/src/app/(admin)/projects/[projectId]/page.tsx").read_text(
+        encoding="utf-8"
+    )
+
+    assert rag_page.exists()
+    rag_text = rag_page.read_text(encoding="utf-8")
+    assert "{ href: '/knowledge', label: 'RAG'" in nav
+    assert "'/knowledge': Database" in Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "Gestor RAG" in rag_text
+    assert 'type="file"' in rag_text
+    assert "multiple" in rag_text
+    assert "webkitdirectory" in rag_text
+    assert "uploadKnowledgeFiles" in rag_text
+    assert "createKnowledgeSource" in rag_text
+    assert "project_id" in rag_text
+    assert "worker_uid" in rag_text
+    assert "uploadKnowledgeFiles:" in service
+    assert "FormData" in service
+    assert '@router.post("/knowledge/uploads"' in router
+    assert "UploadFile" in router
+    assert "multipart/form-data" in bff_proxy
+    assert "arrayBuffer" in bff_proxy
+    assert 'href={`/knowledge?project=${encodeURIComponent(project.project_id)}`}' in project_detail
 
 
 def test_template_editor_explains_db_context_storage() -> None:
@@ -134,12 +177,18 @@ def test_template_editor_explains_db_context_storage() -> None:
 
 def test_playground_project_selection_forces_project_worker() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    router = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    provider = Path("packages/agents/src/duckclaw/forge/rag/context_provider.py").read_text(encoding="utf-8")
 
     assert "firstProjectWorkerId" in page
     assert "workerBelongsToActiveProject" in page
     assert "syncProjectWorkerSelection" in page
     assert "setPlaygroundWorker" in page
     assert "worker actual no pertenece al proyecto" in page
+    assert "build_knowledge_context" in router
+    assert "_knowledge_inventory_for_project" not in router
+    assert "RAG_SOURCE_INVENTORY" in provider
+    assert "No confundas la base de conocimiento RAG con la bóveda DuckDB" in provider
 
 
 def test_projects_catalog_and_orchestrator_wizard_are_separate_routes() -> None:
@@ -206,3 +255,37 @@ def test_sidebar_project_icon_is_imported() -> None:
     assert "'/projects': FolderPlus" in sidebar
     assert lucide_import is not None
     assert "FolderPlus" in lucide_import.group("body")
+
+
+def test_topbar_can_restart_gateway_without_gateway_proxy() -> None:
+    topbar = Path("apps/duckclaw-admin/src/components/layout/Topbar.tsx").read_text(encoding="utf-8")
+    bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
+    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    errors = Path("apps/duckclaw-admin/src/lib/adminErrors.ts").read_text(encoding="utf-8")
+
+    assert "adminService.runOps('pm2_restart_db_writer')" in topbar
+    assert "adminService.runOps('pm2_restart_gateway')" in topbar
+    assert "Reiniciar stack" in topbar
+    assert "RefreshCw" in topbar
+    assert "localOpsRunFallback" in bff_proxy
+    assert "pm2_restart_db_writer" in bff_proxy
+    assert "pm2_restart_gateway" in bff_proxy
+    assert "start_stack" in bff_proxy
+    assert "parseApiErrorDetail(data, res.status)" in service
+    assert "looksLikeProblemContext" in errors
+
+
+def test_manager_preserves_rag_blocks_for_worker_task() -> None:
+    manager = Path("packages/agents/src/duckclaw/graphs/manager_graph.py").read_text(encoding="utf-8")
+    context_blocks = Path("packages/agents/src/duckclaw/forge/rag/context_blocks.py").read_text(encoding="utf-8")
+
+    assert "from duckclaw.forge.rag.context_blocks import" in manager
+    assert "_preserve_context_blocks_for_worker" in manager
+    assert "_strip_tagged_blocks" in manager
+    assert "explicit_storage_request=explicit_duckdb_schema_request" in manager
+    assert 'extract_tagged_block(incoming, "RAG_SOURCE_INVENTORY")' in context_blocks
+    assert 'extract_tagged_block(incoming, "RAG_CONTEXT")' in context_blocks
+    assert "Responde al usuario usando el contexto RAG disponible." in context_blocks
+    assert "planned_task_for_worker = _preserve_context_blocks_for_worker(incoming, planned_task)" in manager
+    assert '"input": planned_task_for_worker' in manager
+    assert '"incoming": planned_task_for_worker' in manager

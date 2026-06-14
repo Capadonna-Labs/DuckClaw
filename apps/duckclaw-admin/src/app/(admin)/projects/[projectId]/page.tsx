@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Bot, ChevronRight, FolderKanban, PlayCircle } from 'lucide-react';
+import { Bot, ChevronRight, Database, FolderKanban, PlayCircle, RefreshCw } from 'lucide-react';
 import { adminService } from '@/services/adminService';
-import type { WorkspaceProjectSummary } from '@/services/adminService';
+import type { KnowledgeSource, WorkspaceProjectSummary } from '@/services/adminService';
 
 type ProjectDetailResponse = Awaited<ReturnType<typeof adminService.getWorkspaceProject>>;
 
@@ -21,6 +21,9 @@ export default function ProjectDetailPage() {
   const [detail, setDetail] = useState<ProjectDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSource[]>([]);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     if (!projectId) return;
@@ -36,6 +39,21 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadKnowledge = useCallback(() => {
+    if (!projectId) return;
+    setKnowledgeLoading(true);
+    setKnowledgeError(null);
+    adminService
+      .listKnowledgeSources({ project_id: projectId })
+      .then(setKnowledgeSources)
+      .catch((e) => setKnowledgeError(e instanceof Error ? e.message : 'No se pudo cargar conocimiento RAG'))
+      .finally(() => setKnowledgeLoading(false));
+  }, [projectId]);
+
+  useEffect(() => {
+    loadKnowledge();
+  }, [loadKnowledge]);
 
   const project = detail?.project;
   const agents = useMemo(() => detail?.agents ?? project?.agents ?? [], [detail?.agents, project?.agents]);
@@ -117,6 +135,53 @@ export default function ProjectDetailPage() {
       </section>
 
       <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-black text-gov-gray-900 dark:text-dark-text">
+              <Database size={18} />
+              Conocimiento RAG
+            </h2>
+            <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
+              Resumen de fuentes DB-first asociadas a este proyecto.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href={`/knowledge?project=${encodeURIComponent(project.project_id)}`}
+              className="rounded-xl bg-gov-blue-700 px-3 py-2 text-xs font-black text-white hover:bg-gov-blue-900"
+            >
+              Gestionar RAG
+            </Link>
+            <button
+              type="button"
+              onClick={loadKnowledge}
+              disabled={knowledgeLoading}
+              className="inline-flex items-center gap-2 rounded-xl border border-gov-blue-100 px-3 py-2 text-xs font-bold text-gov-blue-800 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan"
+            >
+              <RefreshCw size={14} />
+              Refrescar
+            </button>
+          </div>
+        </div>
+
+        {knowledgeError && <p className="mt-3 text-sm text-red-600">{knowledgeError}</p>}
+
+        {knowledgeLoading ? (
+          <p className="mt-4 text-sm text-gov-gray-500 dark:text-dark-muted">Cargando fuentes RAG…</p>
+        ) : knowledgeSources.length === 0 ? (
+          <p className="mt-4 rounded-2xl border border-dashed border-gov-blue-100 p-4 text-sm text-gov-gray-500 dark:border-dark-border dark:text-dark-muted">
+            Sin fuentes RAG asociadas todavía.
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-3">
+            {knowledgeSources.map((source) => (
+              <KnowledgeSourceCard key={source.source_id} source={source} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
         <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Agentes asignados</h2>
         {agents.length === 0 ? (
           <p className="mt-3 text-sm text-gov-gray-500 dark:text-dark-muted">
@@ -130,6 +195,31 @@ export default function ProjectDetailPage() {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function KnowledgeSourceCard({
+  source,
+}: {
+  source: KnowledgeSource;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-gov-blue-50 p-4 dark:border-dark-border md:flex-row md:items-center md:justify-between">
+      <div className="min-w-0">
+        <p className="font-black text-gov-gray-900 dark:text-dark-text">
+          {source.display_name || source.source_uri}
+        </p>
+        <p className="mt-1 truncate font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
+          {source.source_uri}
+        </p>
+        <p className="mt-2 text-xs text-gov-gray-500 dark:text-dark-muted">
+          {source.status} · {source.document_count} docs · {source.chunk_count} chunks
+        </p>
+      </div>
+      <span className="rounded-full border border-gov-blue-100 px-3 py-1 text-[11px] font-black uppercase tracking-wider text-gov-blue-700 dark:border-dark-border dark:text-dark-cyan">
+        {source.source_kind || 'file'}
+      </span>
     </div>
   );
 }

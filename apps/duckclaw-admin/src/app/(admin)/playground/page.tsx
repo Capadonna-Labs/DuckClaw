@@ -7,11 +7,15 @@ import { adminService, type AdminConversation } from '@/services/adminService';
 import {
   Settings2,
   Bot,
-  ChevronDown,
   ChevronRight,
   Copy,
+  Brain,
+  Database,
+  FileText,
+  MessageSquareText,
   PanelRightClose,
   PanelRightOpen,
+  SlidersHorizontal,
   Terminal,
   Trash2,
   X,
@@ -20,7 +24,7 @@ import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { useAdminChat } from '@/components/chat/useAdminChat';
 import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
-import { LlmProviderCatalog } from '@/components/chat/LlmProviderCatalog';
+import { ChatLlmSelectors } from '@/components/chat/ChatLlmSelectors';
 import { MarkdownSnippetPanel } from '@/components/chat/MarkdownSnippetPanel';
 import { ScrollFabPair } from '@/components/shared/ScrollFabPair';
 import { useScrollFabPair } from '@/components/shared/useScrollFabPair';
@@ -28,7 +32,8 @@ import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/worker
 import type { FlyCommandEntry } from '@/types/admin';
 
 const FREQUENT_CHAT_COMMANDS = new Set(['/team', '/vault', '/model', '/workers']);
-type PlaygroundConfigSection = 'commands' | 'vault' | 'model' | 'instructions' | null;
+type PlaygroundConfig = Awaited<ReturnType<typeof adminService.getPlaygroundConfig>>;
+type PlaygroundSettingsModal = 'commands' | 'vault' | 'model' | 'instructions' | 'routing' | null;
 
 export default function PlaygroundPage() {
   const router = useRouter();
@@ -38,10 +43,8 @@ export default function PlaygroundPage() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [mainScrollEl, setMainScrollEl] = useState<HTMLElement | null>(null);
   const [systemPreview, setSystemPreview] = useState('');
-  const [openConfigSection, setOpenConfigSection] = useState<PlaygroundConfigSection>('commands');
-  const [config, setConfig] = useState<Awaited<ReturnType<typeof adminService.getPlaygroundConfig>> | null>(
-    null
-  );
+  const [settingsModal, setSettingsModal] = useState<PlaygroundSettingsModal>(null);
+  const [config, setConfig] = useState<PlaygroundConfig | null>(null);
   const [workerId, setWorkerId] = useState(initialWorker);
   const [projectId, setProjectId] = useState(initialProject);
   const [defaultsSaving, setDefaultsSaving] = useState(false);
@@ -253,9 +256,23 @@ export default function PlaygroundPage() {
   const pageScroll = useScrollFabPair(mainScrollEl);
   const activeVaultPath = chat.vaultPath || config?.vault?.effective_path || '';
   const activeVaultScope = chat.vaultPath ? 'chat' : config?.vault?.scope;
-  const toggleConfigSection = useCallback((section: Exclude<PlaygroundConfigSection, null>) => {
-    setOpenConfigSection((current) => (current === section ? null : section));
-  }, []);
+  const selectWorker = useCallback(
+    (next: string) => {
+      setWorkerId(next);
+      const chatId = conv.sessionId;
+      if (chatId && next.trim()) {
+        const tid = (config?.effective_tenant_id || 'default').trim() || 'default';
+        void adminService
+          .setPlaygroundWorker({
+            chat_id: chatId,
+            tenant_id: tid,
+            worker_id: next.trim(),
+          })
+          .catch(() => undefined);
+      }
+    },
+    [config?.effective_tenant_id, conv.sessionId]
+  );
   const savePlaygroundDefaults = useCallback(async () => {
     if (!config) return;
     setDefaultsSaving(true);
@@ -283,93 +300,130 @@ export default function PlaygroundPage() {
   }, [activeVaultPath, config, loadConfig, workerId]);
   const panelToggleTitle = panelOpen ? 'Ocultar panel de configuración' : 'Mostrar panel de configuración';
 
-  const configPanelBody = (
-    <>
-      <CurrentConfigSummary
-        config={config}
-        activeVaultPath={activeVaultPath}
-        activeVaultScope={activeVaultScope}
-        workerLabel={workerId || '—'}
-        defaultsSaving={defaultsSaving}
-        defaultsMsg={defaultsMsg}
-        onSaveDefault={savePlaygroundDefaults}
-      />
-      <ConfigAccordionSection
-        title="Comandos"
-        description="Comandos del chat"
-        open={openConfigSection === 'commands'}
-        onToggle={() => toggleConfigSection('commands')}
-      >
-        <ChatCommandsPanel />
-      </ConfigAccordionSection>
-      <ConfigAccordionSection
-        title="Cambiar bóveda"
-        description="DuckDB de esta conversación"
-        open={openConfigSection === 'vault'}
-        onToggle={() => toggleConfigSection('vault')}
-      >
-        {conv.sessionId ? (
-          <ConversationVaultSelector
-            chatId={conv.sessionId}
-            tenantId={config?.effective_tenant_id}
-            value={chat.vaultPath}
-            effectivePath={activeVaultPath}
-            scope={activeVaultScope}
-            options={config?.vault_options}
-            onChange={chat.setVaultPath}
-            onUpdated={loadConfig}
-          />
-        ) : (
-          <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
-        )}
-      </ConfigAccordionSection>
-      <ConfigAccordionSection
-        title="Cambiar modelo"
-        description="Proveedor y modelo LLM"
-        open={openConfigSection === 'model'}
-        onToggle={() => toggleConfigSection('model')}
-      >
-        {conv.sessionId ? (
-          <LlmProviderCatalog
-            chatId={conv.sessionId}
-            catalog={config?.catalog ?? []}
-            onUpdated={loadConfig}
-          />
-        ) : (
-          <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
-        )}
-      </ConfigAccordionSection>
-      <ConfigAccordionSection
-        title="Instrucciones"
-        description="Comportamiento del agente"
-        open={openConfigSection === 'instructions'}
-        onToggle={() => toggleConfigSection('instructions')}
-      >
-        <MarkdownSnippetPanel
-          content={systemPreview}
-          emptyLabel="Sin system_prompt.md"
-          maxHeightClass="max-h-48"
-        />
-        <Link
-          href={`/templates/${workerId}?focus=system_prompt.md`}
-          className="text-xs text-gov-blue-700 font-semibold mt-2 inline-block"
-        >
-          Editar comportamiento →
-        </Link>
-      </ConfigAccordionSection>
-    </>
+  const runSettingsPanel = (
+    <RunSettingsCard
+      config={config}
+      activeVaultPath={activeVaultPath}
+      activeVaultScope={activeVaultScope}
+      workerLabel={
+        workerOptionLabel(
+          selectableWorkers.find((worker) => workerOptionId(worker) === workerId) ?? workerId
+        ) || workerId || '—'
+      }
+      projectLabel={activeProject?.name || 'Todos los agentes'}
+      systemReady={Boolean(systemPreview.trim())}
+      invalidWorkers={config?.workers_invalid ?? []}
+      defaultsSaving={defaultsSaving}
+      defaultsMsg={defaultsMsg}
+      onSaveDefault={savePlaygroundDefaults}
+      onOpen={setSettingsModal}
+    />
   );
 
-  const conversationPickerProps = conv.sessionId
-    ? {
-        tenantId: config?.effective_tenant_id,
-        section: 'playground' as const,
-        activeSessionId: conv.sessionId,
-        refreshToken: conv.refreshToken,
-        onSelect: (id: string, meta?: AdminConversation) => conv.selectConversation(id, meta?.title),
-        onCreateNew: () => void createConversation(),
-      }
-    : null;
+  const settingsDialog = (
+    <>
+      {settingsModal === 'routing' && (
+        <SettingsModal
+          title="Configurar proyecto y agente"
+          description="Selecciona contexto sin ensuciar la superficie del chat."
+          onClose={() => setSettingsModal(null)}
+        >
+          <ProjectAgentControls
+            config={config}
+            projectId={projectId}
+            activeProject={activeProject}
+            projectWorkerIds={projectWorkerIds}
+            selectableWorkers={selectableWorkers}
+            workerId={workerId}
+            onProjectChange={(nextProjectId) => {
+              setProjectId(nextProjectId);
+              setWorkerId('');
+            }}
+            onWorkerChange={selectWorker}
+          />
+        </SettingsModal>
+      )}
+
+      {settingsModal === 'model' && (
+        <SettingsModal
+          title="Modelo"
+          description="Proveedor y modelo LLM de esta conversación."
+          onClose={() => setSettingsModal(null)}
+        >
+          {conv.sessionId ? (
+            <div className="space-y-3">
+              <SettingValue label="Actual" value={`${config?.llm?.provider || '—'} · ${config?.llm?.model || '—'}`} />
+              <ChatLlmSelectors
+                chatId={conv.sessionId}
+                provider={config?.llm?.provider ?? ''}
+                model={config?.llm?.model ?? ''}
+                catalog={config?.catalog ?? []}
+                onUpdated={loadConfig}
+                disabled={config?.authorized === false || chat.loading}
+                compact
+              />
+            </div>
+          ) : (
+            <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
+          )}
+        </SettingsModal>
+      )}
+
+      {settingsModal === 'vault' && (
+        <SettingsModal
+          title="Bóveda DuckDB"
+          description="DuckDB efectivo para este hilo."
+          onClose={() => setSettingsModal(null)}
+        >
+          {conv.sessionId ? (
+            <ConversationVaultSelector
+              chatId={conv.sessionId}
+              tenantId={config?.effective_tenant_id}
+              value={chat.vaultPath}
+              effectivePath={activeVaultPath}
+              scope={activeVaultScope}
+              options={config?.vault_options}
+              onChange={chat.setVaultPath}
+              onUpdated={loadConfig}
+              compact
+            />
+          ) : (
+            <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
+          )}
+        </SettingsModal>
+      )}
+
+      {settingsModal === 'instructions' && (
+        <SettingsModal
+          title="System instructions"
+          description="Prompt base del agente seleccionado."
+          onClose={() => setSettingsModal(null)}
+        >
+          <MarkdownSnippetPanel
+            content={systemPreview}
+            emptyLabel="Sin system_prompt.md"
+            maxHeightClass="max-h-72"
+          />
+          <Link
+            href={`/templates/${workerId}?focus=system_prompt.md`}
+            className="text-xs text-gov-blue-700 font-semibold mt-3 inline-flex items-center gap-1"
+          >
+            Editar comportamiento <ChevronRight size={12} />
+          </Link>
+        </SettingsModal>
+      )}
+
+      {settingsModal === 'commands' && (
+        <SettingsModal
+          title="Comandos"
+          description="Atajos copiables para hablar con el agente."
+          onClose={() => setSettingsModal(null)}
+        >
+          <ChatCommandsPanel />
+        </SettingsModal>
+      )}
+    </>
+  );
 
   return (
     <div className="flex flex-col lg:flex-row gap-4 min-h-0 max-lg:h-[calc(100dvh-4rem)] max-lg:overflow-hidden lg:h-[calc(100vh-8rem)] lg:min-h-0 lg:overflow-hidden relative -mx-4 px-4 md:mx-0 md:px-0">
@@ -384,102 +438,17 @@ export default function PlaygroundPage() {
         <PlaygroundHistoryView tenantId={config?.effective_tenant_id} />
       ) : (
         <>
-      <div className="flex-1 flex flex-col min-w-0 h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] lg:h-full lg:max-h-none bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
-        <header className="flex flex-col gap-3 p-3 sm:p-4 border-b dark:border-dark-border shrink-0">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <h1 className="text-xl font-black dark:text-dark-text flex items-center gap-2">
-                <Bot size={22} /> Playground
-              </h1>
-              <p className="text-xs text-gov-gray-500 mt-0.5">
-                Respuestas en vivo (SSE) · pestaña Conversación para cambiar de hilo
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setPanelOpen((open) => !open)}
-              className="lg:hidden shrink-0 flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border dark:border-dark-border bg-gov-gray-50 dark:bg-dark-bg text-gov-blue-800"
-              aria-expanded={panelOpen}
-              aria-label={panelToggleTitle}
-            >
-              <Settings2 size={16} aria-hidden />
-              Config
-            </button>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            {(config?.projects?.length ?? 0) > 0 && (
-              <>
-                <label className="text-xs font-bold text-gov-gray-500">Proyecto activo</label>
-                <select
-                  value={projectId}
-                  onChange={(e) => {
-                    setProjectId(e.target.value);
-                    setWorkerId('');
-                  }}
-                  className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[200px]"
-                >
-                  <option value="">Todos los agentes</option>
-                  {(config?.projects ?? []).map((p) => (
-                    <option key={p.project_id} value={p.project_id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
-            <label className="text-xs font-bold text-gov-gray-500">
-              {activeProject ? 'Agente guía' : 'Agente'}
-            </label>
-            <select
-              value={workerId}
-              onChange={(e) => {
-                const next = e.target.value;
-                setWorkerId(next);
-                const chatId = conv.sessionId;
-                if (chatId && next.trim()) {
-                  const tid = (config?.effective_tenant_id || 'default').trim() || 'default';
-                  void adminService
-                    .setPlaygroundWorker({
-                      chat_id: chatId,
-                      tenant_id: tid,
-                      worker_id: next.trim(),
-                    })
-                    .catch(() => undefined);
-                }
-              }}
-              className="text-sm px-3 py-2 border rounded-xl dark:border-dark-border dark:bg-dark-bg max-w-[240px]"
-            >
-              {selectableWorkers.map((w) => {
-                const id = workerOptionId(w);
-                const label = workerOptionLabel(w);
-                return (
-                  <option key={id} value={id}>
-                    {label}
-                  </option>
-                );
-              })}
-            </select>
-            <Link
-              href={`/templates/${workerId}`}
-              className="text-xs text-gov-blue-700 font-semibold flex items-center gap-1"
-            >
-              Editar <ChevronRight size={12} />
-            </Link>
-          </div>
-        </header>
-        {config && (config.workers_invalid?.length ?? 0) > 0 && (
-          <p className="mx-4 mb-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 px-3 py-2 rounded-xl">
-            Agentes no disponibles: {(config.workers_invalid ?? []).join(', ')}.
-          </p>
-        )}
-        {activeProject && (
-          <p className="mx-4 mb-2 text-xs text-gov-blue-800 dark:text-dark-cyan bg-gov-cyan-50 dark:bg-dark-bg border border-gov-cyan-200 dark:border-dark-border px-3 py-2 rounded-xl">
-            Proyecto activo: <strong>{activeProject.name}</strong>.{' '}
-            {projectWorkerIds.length > 0
-              ? 'Verás solo los agentes de este proyecto.'
-              : 'Proyecto sin agentes asignados; se muestran todos tus agentes disponibles.'}
-          </p>
-        )}
+      <div className="relative flex-1 flex flex-col min-w-0 h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] lg:h-full lg:max-h-none bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setPanelOpen((open) => !open)}
+          className="lg:hidden absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-full border border-gov-blue-100 bg-white/90 px-3 py-2 text-[11px] font-black text-gov-blue-800 shadow-sm backdrop-blur dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan"
+          aria-expanded={panelOpen}
+          aria-label={panelToggleTitle}
+        >
+          <Settings2 size={15} aria-hidden />
+          Run settings
+        </button>
         {conv.bootstrapping || !conv.sessionId ? (
           <p className="flex-1 flex items-center justify-center text-sm text-gov-gray-400 p-8">
             Cargando conversación…
@@ -495,17 +464,6 @@ export default function PlaygroundPage() {
             showWorkerLink={false}
             conversationTitle={conv.conversationTitle}
             onRenameConversation={conv.renameConversation}
-            conversationManage={
-              conversationPickerProps
-                ? {
-                    tenantId: conversationPickerProps.tenantId,
-                    section: conversationPickerProps.section,
-                    refreshToken: conversationPickerProps.refreshToken,
-                    onSelect: conversationPickerProps.onSelect,
-                    onCreateNew: conversationPickerProps.onCreateNew,
-                  }
-                : undefined
-            }
             emptyHint={
               workerId
                 ? `Escribe un mensaje para hablar con ${workerId}`
@@ -553,7 +511,7 @@ export default function PlaygroundPage() {
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3 overscroll-contain">
-              {configPanelBody}
+              {runSettingsPanel}
             </div>
           </aside>
         </div>
@@ -568,12 +526,14 @@ export default function PlaygroundPage() {
         <div className="w-80 h-full min-h-0 flex flex-col">
           <div className="flex items-center justify-between gap-2 shrink-0 pb-2">
             <span className="text-xs font-bold uppercase text-gov-gray-500 tracking-wide">
-              Configuración
+              Run settings
             </span>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-3">{configPanelBody}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-3">{runSettingsPanel}</div>
         </div>
       </aside>
+
+      {settingsDialog}
         </>
       )}
     </div>
@@ -727,33 +687,41 @@ function PlaygroundHistoryView({ tenantId }: { tenantId?: string }) {
   );
 }
 
-function CurrentConfigSummary({
+function RunSettingsCard({
   config,
   activeVaultPath,
   activeVaultScope,
   workerLabel,
+  projectLabel,
+  systemReady,
+  invalidWorkers,
   defaultsSaving,
   defaultsMsg,
   onSaveDefault,
+  onOpen,
 }: {
-  config: Awaited<ReturnType<typeof adminService.getPlaygroundConfig>> | null;
+  config: PlaygroundConfig | null;
   activeVaultPath: string;
   activeVaultScope?: string;
   workerLabel: string;
+  projectLabel: string;
+  systemReady: boolean;
+  invalidWorkers: string[];
   defaultsSaving: boolean;
   defaultsMsg: string | null;
   onSaveDefault: () => void;
+  onOpen: (modal: Exclude<PlaygroundSettingsModal, null>) => void;
 }) {
   return (
-    <section className="sticky top-0 z-10 rounded-3xl border border-gov-blue-100 dark:border-dark-border bg-white/95 dark:bg-dark-surface/95 p-4 shadow-sm backdrop-blur space-y-3">
-      <div className="flex items-start justify-between gap-3">
+    <section className="sticky top-0 z-10 rounded-[1.75rem] border border-gov-blue-100 bg-white/95 p-3 shadow-sm backdrop-blur dark:border-dark-border dark:bg-dark-surface/95">
+      <div className="flex items-start justify-between gap-3 px-1">
         <div>
-          <h2 className="font-black text-sm flex items-center gap-2 dark:text-dark-text">
-            <Settings2 size={18} className="text-gov-blue-700 dark:text-dark-cyan" />
-            Estado actual
+          <h2 className="flex items-center gap-2 text-sm font-black dark:text-dark-text">
+            <SlidersHorizontal size={18} className="text-gov-blue-700 dark:text-dark-cyan" />
+            Run settings
           </h2>
-          <p className="text-[10px] text-gov-gray-500 mt-1">
-            Lo esencial de esta conversación.
+          <p className="mt-1 text-[10px] text-gov-gray-500">
+            Control de conversación, sin ocupar chat.
           </p>
         </div>
         <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/30 px-2 py-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
@@ -761,13 +729,59 @@ function CurrentConfigSummary({
         </span>
       </div>
 
-      <div className="grid gap-2">
-        <SummaryChip label="Modelo" value={config?.llm?.model || '—'} />
-        <SummaryChip label="DuckDB" value={activeVaultPath || '—'} mono highlight={activeVaultScope === 'chat'} />
-        <SummaryChip label="Agente" value={workerLabel} />
+      <div className="mt-3 grid gap-2">
+        <RunSettingButton
+          icon={<Brain size={16} aria-hidden />}
+          title="Modelo"
+          value={config?.llm?.model || '—'}
+          detail={config?.llm?.provider || 'Proveedor LLM'}
+          onClick={() => onOpen('model')}
+        />
+        <RunSettingButton
+          icon={<Database size={16} aria-hidden />}
+          title="DuckDB"
+          value={activeVaultPath || '—'}
+          detail={activeVaultScope === 'chat' ? 'Por conversación' : 'Default efectivo'}
+          mono
+          onClick={() => onOpen('vault')}
+        />
+        <RunSettingButton
+          icon={<Settings2 size={16} aria-hidden />}
+          title="Proyecto"
+          value={projectLabel}
+          detail="Filtro de agentes"
+          onClick={() => onOpen('routing')}
+        />
+        <RunSettingButton
+          icon={<Bot size={16} aria-hidden />}
+          title="Agente"
+          value={workerLabel}
+          detail="Worker de esta conversación"
+          onClick={() => onOpen('routing')}
+        />
+        <RunSettingButton
+          icon={<FileText size={16} aria-hidden />}
+          title="System instructions"
+          value={systemReady ? 'Cargado' : 'Sin prompt'}
+          detail="Comportamiento del agente"
+          onClick={() => onOpen('instructions')}
+        />
+        <RunSettingButton
+          icon={<MessageSquareText size={16} aria-hidden />}
+          title="Comandos"
+          value="Atajos del chat"
+          detail="/model · /vault · /workers"
+          onClick={() => onOpen('commands')}
+        />
       </div>
 
-      <div className="rounded-2xl border border-gov-blue-100 bg-gov-blue-50/70 p-3 dark:border-dark-border dark:bg-dark-bg">
+      {invalidWorkers.length > 0 && (
+        <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[11px] font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          Agentes no disponibles: {invalidWorkers.join(', ')}.
+        </p>
+      )}
+
+      <div className="mt-3 rounded-2xl border border-gov-blue-100 bg-gov-blue-50/70 p-3 dark:border-dark-border dark:bg-dark-bg">
         <button
           type="button"
           onClick={onSaveDefault}
@@ -776,78 +790,196 @@ function CurrentConfigSummary({
         >
           {defaultsSaving ? 'Guardando…' : 'Guardar como default'}
         </button>
-        <p className="mt-2 text-[10px] text-gov-gray-500 dark:text-dark-muted">
-          Guarda este modelo, agente y DuckDB como preferencia DB-first de tu usuario.
-        </p>
         {defaultsMsg && (
           <p className="mt-2 text-[10px] font-semibold text-gov-blue-700 dark:text-dark-cyan">
             {defaultsMsg}
           </p>
         )}
       </div>
-
     </section>
   );
 }
 
-function SummaryChip({
-  label,
+function RunSettingButton({
+  icon,
+  title,
   value,
+  detail,
   mono,
-  highlight,
+  onClick,
 }: {
-  label: string;
+  icon: React.ReactNode;
+  title: string;
   value: string;
+  detail: string;
   mono?: boolean;
-  highlight?: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div className="rounded-2xl bg-gov-gray-50 dark:bg-dark-bg px-3 py-2">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-500">{label}</p>
-      <p
-        className={`text-xs truncate ${mono ? 'font-mono' : 'font-semibold'} ${
-          highlight ? 'text-gov-blue-800 dark:text-dark-cyan' : 'text-gov-gray-800 dark:text-dark-text'
-        }`}
-        title={value}
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex w-full items-center gap-3 rounded-2xl bg-gov-gray-50 px-3 py-3 text-left transition-colors hover:bg-gov-blue-50 dark:bg-dark-bg dark:hover:bg-dark-border/50"
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-gov-blue-700 shadow-sm dark:bg-dark-surface dark:text-dark-cyan">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[11px] font-bold text-gov-gray-500">{title}</span>
+        <span
+          className={`mt-0.5 block truncate text-sm font-black text-gov-gray-900 dark:text-dark-text ${
+            mono ? 'font-mono text-xs' : ''
+          }`}
+          title={value}
+        >
+          {value}
+        </span>
+        <span className="mt-0.5 block truncate text-[10px] text-gov-gray-500" title={detail}>
+          {detail}
+        </span>
+      </span>
+      <ChevronRight
+        size={16}
+        className="shrink-0 text-gov-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-gov-blue-600"
+        aria-hidden
+      />
+    </button>
+  );
+}
+
+function SettingsModal({
+  title,
+  description,
+  onClose,
+  children,
+}: {
+  title: string;
+  description: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-gov-blue-950/40 p-3 backdrop-blur-sm sm:items-center">
+      <button
+        type="button"
+        className="absolute inset-0"
+        aria-label="Cerrar modal"
+        onClick={onClose}
+      />
+      <section
+        className="relative z-10 flex max-h-[min(760px,92dvh)] w-full max-w-md flex-col overflow-hidden rounded-[2rem] border border-gov-blue-100 bg-white shadow-2xl dark:border-dark-border dark:bg-dark-surface"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
       >
+        <header className="flex items-start justify-between gap-3 border-b border-gov-gray-100 p-4 dark:border-dark-border">
+          <div className="min-w-0">
+            <h3 className="text-base font-black dark:text-dark-text">{title}</h3>
+            <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">{description}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
+            aria-label="Cerrar"
+          >
+            <X size={18} />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+      </section>
+    </div>
+  );
+}
+
+function SettingValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-gov-gray-50 px-3 py-2 dark:bg-dark-bg">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-500">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-semibold dark:text-dark-text" title={value}>
         {value}
       </p>
     </div>
   );
 }
 
-function ConfigAccordionSection({
-  title,
-  description,
-  open,
-  onToggle,
-  children,
+function ProjectAgentControls({
+  config,
+  projectId,
+  activeProject,
+  projectWorkerIds,
+  selectableWorkers,
+  workerId,
+  onProjectChange,
+  onWorkerChange,
 }: {
-  title: string;
-  description: string;
-  open: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
+  config: PlaygroundConfig | null;
+  projectId: string;
+  activeProject?: NonNullable<PlaygroundConfig['projects']>[number];
+  projectWorkerIds: string[];
+  selectableWorkers: NonNullable<PlaygroundConfig['workers']>;
+  workerId: string;
+  onProjectChange: (projectId: string) => void;
+  onWorkerChange: (workerId: string) => void;
 }) {
   return (
-    <section className="bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border overflow-hidden">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-gov-gray-50 dark:hover:bg-dark-bg transition-colors"
-        aria-expanded={open}
-      >
-        <span className="min-w-0">
-          <span className="font-bold text-sm dark:text-dark-text">{title}</span>
-          <span className="block text-xs text-gov-gray-500 mt-1">{description}</span>
+    <div className="space-y-4">
+      {(config?.projects?.length ?? 0) > 0 && (
+        <label className="block space-y-1.5">
+          <span className="text-xs font-bold text-gov-gray-500">Proyecto</span>
+          <select
+            value={projectId}
+            onChange={(e) => onProjectChange(e.target.value)}
+            className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+          >
+            <option value="">Todos los agentes</option>
+            {(config?.projects ?? []).map((p) => (
+              <option key={p.project_id} value={p.project_id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      <label className="block space-y-1.5">
+        <span className="text-xs font-bold text-gov-gray-500">
+          {activeProject ? 'Agente guía' : 'Agente'}
         </span>
-        <ChevronDown
-          size={16}
-          className={`shrink-0 text-gov-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
-      {open && <div className="px-4 pb-4">{children}</div>}
-    </section>
+        <select
+          value={workerId}
+          onChange={(e) => onWorkerChange(e.target.value)}
+          className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+        >
+          {selectableWorkers.map((w) => {
+            const id = workerOptionId(w);
+            const label = workerOptionLabel(w);
+            return (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+
+      <p className="rounded-2xl border border-gov-blue-100 bg-gov-blue-50/70 p-3 text-xs text-gov-blue-800 dark:border-dark-border dark:bg-dark-bg dark:text-dark-cyan">
+        {activeProject
+          ? projectWorkerIds.length > 0
+            ? `Proyecto ${activeProject.name}: solo agentes asignados.`
+            : `Proyecto ${activeProject.name}: sin agentes asignados, se muestran todos.`
+          : 'Sin filtro de proyecto.'}
+      </p>
+
+      {workerId && (
+        <Link
+          href={`/templates/${workerId}`}
+          className="inline-flex items-center gap-1 text-xs font-bold text-gov-blue-700 dark:text-dark-cyan"
+        >
+          Editar agente <ChevronRight size={12} />
+        </Link>
+      )}
+    </div>
   );
 }
 

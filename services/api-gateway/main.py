@@ -68,7 +68,6 @@ from duckclaw.integrations.telegram.telegram_agent_token import (
 from duckclaw.forge.team_env import default_tenant_id_from_env, default_worker_id_from_env
 from duckclaw.gateway_db import (
     GATEWAY_DB_ENV_KEYS,
-    default_pqrsd_assistant_vault_path,
     get_gateway_db_path,
     raw_gateway_db_path_from_mapping,
     resolve_env_duckdb_path,
@@ -78,6 +77,7 @@ from duckclaw.channels import GatewayDeliveryContext
 
 # Cargar .env desde repo root (fuente de verdad para secretos; PM2 env_file + override abajo).
 _repo_root = Path(__file__).resolve().parent.parent.parent
+
 _dotenv_flat: dict[str, str] = {}
 if os.environ.get("DUCKCLAW_DISABLE_DOTENV") != "1":
     for _base in (_repo_root, Path.cwd()):
@@ -170,18 +170,12 @@ def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
         if raw_v:
             os.environ[key] = resolve_env_duckdb_path(raw_v)
     legacy = str(env.get("DUCKCLAW_DB_PATH") or "").strip()
-    if legacy and not any(str(env.get(k) or "").strip() for k in (
-        "DUCKCLAW_FINANZ_DB_PATH",
-        "DUCKCLAW_JOB_HUNTER_DB_PATH",
-        "DUCKCLAW_SIATA_DB_PATH",
-        "DUCKCLAW_QUANT_TRADER_DB_PATH",
-        "DUCKCLAW_PQRSD_ASSISTANT_DB_PATH",
-    )):
-        os.environ.setdefault("DUCKCLAW_FINANZ_DB_PATH", resolve_env_duckdb_path(legacy))
+    if legacy and not any(str(env.get(k) or "").strip() for k in GATEWAY_DB_ENV_KEYS):
+        os.environ.setdefault("DUCKCLAW_GATEWAY_DB_PATH", resolve_env_duckdb_path(legacy))
     if not any(os.environ.get(k) for k in GATEWAY_DB_ENV_KEYS):
         dbp = raw_gateway_db_path_from_mapping(env)
         if dbp:
-            os.environ["DUCKCLAW_FINANZ_DB_PATH"] = resolve_env_duckdb_path(dbp)
+            os.environ["DUCKCLAW_GATEWAY_DB_PATH"] = resolve_env_duckdb_path(dbp)
     _matched_app = (matched_name or "").strip()
     _wid = pm2_app_to_worker_map_from_env().get(_matched_app, "")
     tok = (
@@ -252,11 +246,6 @@ def _dedicated_gateway_vault_db_path() -> str | None:
     return dedicated_gateway_db_path_resolved()
 
 
-def _worker_id_is_pqrsd_assistant(worker_id: str) -> bool:
-    """True si la ruta/query de chat apunta al template PQRSD (id forge: pqrsd_assistant)."""
-    s = (worker_id or "").strip().lower().replace("-", "_")
-    return s == "pqrsd_assistant"
-
 try:
     from core.config import settings
 except ImportError:
@@ -299,11 +288,10 @@ _install_duckdb_connect_probe()
 _obs_log = get_obs_logger()
 _gateway_log.info(
     "Gateway startup: gateway_db_path=%s DUCKCLAW_PM2_MATCHED_APP_NAME=%s "
-    "DUCKCLAW_WAR_ROOM_ACL_DB_PATH=%s | diagnóstico WR: pm2 logs … --lines 300 "
+    "| diagnóstico WR: pm2 logs … --lines 300 "
     "y grep telegram_inbound_early war_room_gate DROP_NO_MENTION rate_limited",
     get_gateway_db_path() or "(unset)",
     (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip() or "(unset)",
-    (os.environ.get("DUCKCLAW_WAR_ROOM_ACL_DB_PATH") or "").strip() or "(unset)",
 )
 try:
     from duckclaw.integrations.telegram.compact_webhook_routes import load_path_webhook_bindings_from_env
@@ -323,13 +311,6 @@ except ValueError as _compact_exc:
     )
 except Exception:
     pass
-_pqrsd_startup = (os.environ.get("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH") or "").strip()
-if _pqrsd_startup:
-    _gateway_log.info(
-        "PQRSD-Assistant: bóveda del worker (DUCKCLAW_PQRSD_ASSISTANT_DB_PATH) → %s "
-        "(hub ACL/whitelist sigue en gateway_db_path arriba)",
-        resolve_env_duckdb_path(_pqrsd_startup),
-    )
 
 
 def _uvicorn_listen_port() -> int:
@@ -1268,7 +1249,7 @@ async def _authorize_or_reject(
     Also increments unauthorized attempts and triggers admin alert after 3 attempts.
 
     telegram_guard_acl_db_path:
-        Bóveda forzada por multiplex Telegram (p. ej. Quant → ``DUCKCLAW_QUANT_TRADER_DB_PATH``).
+        Bóveda forzada por multiplex Telegram (p. ej. ruta genérica ``DUCKCLAW_VAULT_DB_PATH``).
         Se usa en otras comprobaciones del request (p. ej. grants / vault); la whitelist
         ``main.authorized_users`` del Telegram Guard **siempre** se lee del hub
         ``get_gateway_db_path()`` (mismo archivo que comandos fly ``/team``) para no desalinear
@@ -1950,21 +1931,12 @@ async def _invoke_chat(
         vault_db_path = resolve_env_duckdb_path(_payload_vault)
         _telegram_acl_for_guard = vault_db_path
     else:
-        # Hub Finanz + env PQRSD: get_gateway_db_path() prioriza FINANZ; el worker PQRSD debe
-        # usar DUCKCLAW_PQRSD_ASSISTANT_DB_PATH o, si no está definida, db/private/<user>/pqrsd-assistantdb1.duckdb.
-        _pqrsd_raw = (os.environ.get("DUCKCLAW_PQRSD_ASSISTANT_DB_PATH") or "").strip()
-        if _worker_id_is_pqrsd_assistant(worker_id):
-            if _pqrsd_raw:
-                vault_db_path = resolve_env_duckdb_path(_pqrsd_raw)
-            else:
-                vault_db_path = default_pqrsd_assistant_vault_path(vault_user_id)
-        else:
-            _ded_vault = _dedicated_gateway_vault_db_path()
-            if _ded_vault:
-                vault_db_path = _ded_vault
+        _ded_vault = _dedicated_gateway_vault_db_path()
+        if _ded_vault:
+            vault_db_path = _ded_vault
     if not _forced_v and not _payload_vault:
         _route_wid = (worker_id or "").strip()
-        if _route_wid and not _worker_id_is_pqrsd_assistant(_route_wid):
+        if _route_wid:
             try:
                 from duckclaw.vaults import resolve_template_vault_path
                 from duckclaw.workers.manifest import load_manifest
@@ -2700,7 +2672,7 @@ def _resolve_db_path_for_vault(req: WriteRequest | ReadRequest) -> str:
 
 @app.post("/api/v1/db/read")
 async def db_read(req: ReadRequest) -> dict[str, Any]:
-    """Ejecuta SELECT en DuckDB en solo lectura (CRM y clientes internos)."""
+    """Ejecuta SELECT en DuckDB en solo lectura para clientes internos."""
     q = (req.query or "").strip()
     if not q.upper().startswith("SELECT"):
         raise HTTPException(
@@ -2785,14 +2757,6 @@ try:
 except ImportError:
     pass
 
-
-# ── Quotes router (microservicio: routers en services/api-gateway) ───────────
-
-try:
-    from routers.quotes import router as quotes_router
-    app.include_router(quotes_router)
-except ImportError:
-    pass
 
 try:
     from routers.admin import router as admin_router

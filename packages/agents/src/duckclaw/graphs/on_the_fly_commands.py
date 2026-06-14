@@ -35,7 +35,7 @@ from duckclaw.vaults import (
 )
 
 from duckclaw.guardrails.loader import format_guardrail, load_guardrail, load_guardrail_pipe_table
-from duckclaw.forge.atoms.cron_wall_schedule import (
+from duckclaw.runtime.scheduling.cron_wall_schedule import (
     format_cron_wall_human,
     parse_cron_wall_tokens,
 )
@@ -6468,8 +6468,8 @@ def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
 def execute_quant_profile(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
     """`/profile`: perfil inferido desde VSS (Quantum vault)."""
     del args
-    from duckclaw.forge.atoms.investor_profile_vss import format_profile_summary, get_investor_profile
     from duckclaw.capadonna_plugin import load_capadonna_lib
+    from duckclaw.forge.skills.quant_investor_profile import format_profile_summary, get_investor_profile
 
     _qtc = load_capadonna_lib("quant_tool_context")
     raw_path = str(getattr(db, "_path", "") or "").strip()
@@ -6492,7 +6492,7 @@ def execute_quant_macro_update(
     tenant_id: Any = None,
 ) -> str:
     """`/macro --update …`: sólo admin/owner — escribe macro_manual_state vía Singleton Writer."""
-    from duckclaw.forge.atoms.macro_fly_parse import parse_macro_update_cli
+    from duckclaw.runtime.macro_update_parse import parse_macro_update_cli
 
     tid = str(tenant_id or get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
     rid = str(requester_id or get_chat_state(db, chat_id, "last_requester_id") or "").strip()

@@ -128,10 +128,8 @@ def test_caps_posts_and_selftext_length(monkeypatch) -> None:
     assert excerpt.endswith("…")
 
 
-def test_atom_facade_reexports() -> None:
-    from duckclaw.forge.atoms.reddit_listing_to_nl import format_reddit_mcp_reply_if_applicable as fac
-
-    assert fac("plain") == "plain"
+def test_shared_formatter_exposes_reply_passthrough() -> None:
+    assert format_reddit_mcp_reply_if_applicable("plain") == "plain"
 
 
 def test_sanitize_reddit_tool_messages_for_llm() -> None:

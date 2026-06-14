@@ -37,7 +37,7 @@ _MISC_ENV_KEYS: tuple[str, ...] = (
 
 
 def clear_gateway_multiplex_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Quita todas las rutas multiplex del hub (incl. QUANT_TRADER, AXIS, PQRSD)."""
+    """Quita todas las rutas multiplex del hub."""
     for key in GATEWAY_DB_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
     for key in _MISC_ENV_KEYS:

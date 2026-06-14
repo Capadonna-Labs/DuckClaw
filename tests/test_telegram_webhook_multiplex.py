@@ -81,13 +81,13 @@ def test_multiplex_vault_db_env_resolves_path(
             "worker_id": "finanz",
             "tenant_id": "Finanzas",
             "bot_token_env": "TELEGRAM_FINANZ_TOKEN",
-            "vault_db_env": "DUCKCLAW_FINANZ_DB_PATH",
+            "vault_db_env": "DUCKCLAW_VAULT_DB_PATH",
         }
     ]
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", repo)
     monkeypatch.setenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES", json.dumps(routes))
     monkeypatch.setenv("TELEGRAM_FINANZ_TOKEN", "tok-f")
-    monkeypatch.setenv("DUCKCLAW_FINANZ_DB_PATH", "db/fin.duckdb")
+    monkeypatch.setenv("DUCKCLAW_VAULT_DB_PATH", "db/fin.duckdb")
     m._cached_bindings = None
     m._cached_bindings_error = None
     out = m.telegram_webhook_resolve_dispatch(

@@ -8,7 +8,8 @@ def test_playground_ui_can_scope_chat_to_db_first_project() -> None:
     hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
 
-    assert "Proyecto activo" in page
+    assert "projectLabel={activeProject?.name || 'Todos los agentes'}" in page
+    assert 'title="Proyecto"' in page
     assert "projectId" in page
     assert "selectableWorkers" in page
     assert "workerOptionId(worker) === 'platform-orchestrator'" in page
@@ -228,11 +229,11 @@ def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
 
     assert "const activeVaultPath = chat.vaultPath || config?.vault?.effective_path || ''" in page
     assert "projectWorkerIds.length > 0" in page
-    assert "Proyecto sin agentes asignados" in page
+    assert "sin agentes asignados, se muestran todos" in page
     assert "activeVaultPath={activeVaultPath}" in page
     assert "effectivePath={activeVaultPath}" in page
-    assert "Estado actual" in page
-    assert "CurrentConfigSummary" in page
+    assert "RunSettingsCard" in page
+    assert "Control de conversación, sin ocupar chat." in page
     assert "Guardar como default" in page
     assert "savePlaygroundDefaults" in page
     assert "patchRuntimeSettings" in page
@@ -241,7 +242,7 @@ def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
     assert "DuckDB" in page
     assert "Modelo fijado para esta conversación." not in page
     assert "DuckDB fijada para esta conversación" not in page
-    assert "Run settings" not in page
+    assert "Run settings" in page
     assert "Base URL" not in page
     assert "Override por conversación" not in page
     assert "equivalente a /model" not in page
@@ -251,23 +252,24 @@ def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
     assert 'href="/settings"' not in page
 
 
-def test_playground_config_panel_uses_single_open_accordions() -> None:
+def test_playground_config_panel_uses_compact_cards_and_modals() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
     toggle = Path("apps/duckclaw-admin/src/components/layout/PanelToggleButton.tsx").read_text(
         encoding="utf-8"
     )
 
-    assert "type PlaygroundConfigSection = 'commands' | 'vault' | 'model' | 'instructions'" in page
-    assert "const [openConfigSection, setOpenConfigSection] = useState<PlaygroundConfigSection>('commands')" in page
-    assert "function ConfigAccordionSection" in page
-    assert "onToggle={() => toggleConfigSection('commands')}" in page
-    assert "onToggle={() => toggleConfigSection('vault')}" in page
-    assert "onToggle={() => toggleConfigSection('model')}" in page
-    assert "onToggle={() => toggleConfigSection('instructions')}" in page
+    assert "type PlaygroundSettingsModal = 'commands' | 'vault' | 'model' | 'instructions' | 'routing' | null" in page
+    assert "const [settingsModal, setSettingsModal] = useState<PlaygroundSettingsModal>(null)" in page
+    assert "function RunSettingsCard" in page
+    assert "function SettingsModal" in page
+    assert "function ConfigAccordionSection" not in page
+    assert "type PlaygroundConfigSection" not in page
     assert "title=\"Comandos\"" in page
-    assert "title=\"Cambiar bóveda\"" in page
-    assert "title=\"Cambiar modelo\"" in page
-    assert "title=\"Instrucciones\"" in page
+    assert "title=\"DuckDB\"" in page
+    assert "title=\"Modelo\"" in page
+    assert "title=\"System instructions\"" in page
+    assert "title=\"Proyecto\"" in page
+    assert "title=\"Agente\"" in page
     assert "iconOnly?: boolean" in toggle
     assert "aria-label={label}" in toggle
     assert "{!iconOnly && label}" in toggle
@@ -335,8 +337,8 @@ def test_floating_chat_uses_fixed_large_panel_and_header_actions() -> None:
     assert "NARROW_BREAKPOINT_PX" in floating
     assert "conversationManage={{" in floating
     assert "headerActions={" in floating
-    assert "ChatViewTabBar" in panel
-    assert "ConversationManagePanel" in panel
+    assert "ChatViewTabBar" not in panel
+    assert "<ConversationManagePanel" not in panel
     assert "aria-label=\"Abrir Playground completo\"" in floating
     assert "aria-label={loading ? 'Minimizar chat (el agente sigue pensando)' : 'Cerrar chat'}" in floating
     assert "Redimensionar ventana de chat" not in floating

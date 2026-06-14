@@ -188,3 +188,23 @@ def test_admin_visual_assets_routes_live_in_domain_module() -> None:
     assert '@router.get("/status", dependencies=[Depends(require_admin_key)])' in visual_assets
     assert '@router.get("/templates", dependencies=[Depends(require_admin_key)])' in visual_assets
     assert '@router.post("/generate", dependencies=[Depends(require_admin_key)])' in visual_assets
+
+
+def test_admin_kanban_runtime_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    kanban_runtime = Path(
+        "services/api-gateway/routers/admin_domains/kanban_runtime.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.kanban_runtime import router as kanban_runtime_router" in admin
+    assert "router.include_router(kanban_runtime_router)" in admin
+    assert "def _kanban_status_from_audit" not in admin
+    assert "def _resolve_kanban_worker_ids" not in admin
+    assert "def _kanban_audit_states_by_worker" not in admin
+    assert "def _kanban_latest_tasks_by_worker" not in admin
+    assert "def _kanban_instance_key" not in admin
+    assert '@router.get("/kanban/worker-states"' not in admin
+    assert '@router.get("/kanban/swarm-slots"' not in admin
+    assert 'router = APIRouter(prefix="/kanban", tags=["admin-kanban-runtime"])' in kanban_runtime
+    assert '@router.get("/worker-states", dependencies=[Depends(require_admin_key)])' in kanban_runtime
+    assert '@router.get("/swarm-slots", dependencies=[Depends(require_admin_key)])' in kanban_runtime

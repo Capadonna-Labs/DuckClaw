@@ -150,13 +150,8 @@ def resolve_target_db_path() -> str:
             return gw
     except Exception:
         pass
-    raw_q = (os.environ.get("DUCKCLAW_QUANT_TRADER_DB_PATH") or "").strip()
-    if raw_q:
-        p = resolve_env_duckdb_path(raw_q)
-        _log.info("Dreamer DuckDB destino (fallback Quant vault): %s", p)
-        return p
     _log.error(
-        "Defina DUCKCLAW_DREAMER_TARGET_DB o rutas de gateway / DUCKCLAW_QUANT_TRADER_DB_PATH en .env."
+        "Defina DUCKCLAW_DREAMER_TARGET_DB o una ruta genérica de gateway en .env."
     )
     sys.exit(1)
 

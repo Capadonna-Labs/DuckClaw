@@ -127,9 +127,9 @@ class DuckClaw:
 
     def execute(self, sql: str, params: Optional[Any] = None) -> Any:
         if self._native is not None:
-            if params is not None:
-                return self._native.execute(sql, params)
-            return self._native.execute(sql)
+            if params is None:
+                return self._native.execute(sql)
+            self.release_file_handle_for_external_writer()
         self._ensure_python_exec_connection()
         if params is not None:
             self._con.execute(sql, params)

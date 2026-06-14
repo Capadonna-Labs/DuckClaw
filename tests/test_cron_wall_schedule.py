@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from duckclaw.forge.atoms.cron_wall_schedule import (
+from duckclaw.runtime.scheduling.cron_wall_schedule import (
     CRON_WALL_V1,
     parse_cron_wall_tokens,
     wall_once_expired,

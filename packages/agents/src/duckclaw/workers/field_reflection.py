@@ -1,4 +1,4 @@
-"""Field reflection (Finanz): detectar errores de tools, persistir lecciones, rankear Experiencia de Campo."""
+"""Field reflection: detectar errores de tools, persistir lecciones y rankear experiencia."""
 
 from __future__ import annotations
 
@@ -7,13 +7,14 @@ import json
 import re
 from typing import Any, Optional
 
-from duckclaw.workers.worker_ids import is_finanz
-
-
 def finanz_field_reflection_enabled(spec: Any) -> bool:
-    """True solo para worker lógico finanz y si manifest no desactiva field_reflection."""
-    lid = getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", None)
-    if not is_finanz(lid):
+    """True cuando la capability DB ``field_reflection`` está activa para el worker."""
+    runtime_policy = getattr(spec, "runtime_policy", None)
+    has_db_capability = bool(
+        runtime_policy is not None
+        and getattr(runtime_policy, "has_capability", lambda _name: False)("field_reflection")
+    )
+    if not has_db_capability:
         return False
     cfg = getattr(spec, "field_reflection_config", None) or {}
     return bool(cfg.get("enabled", True))

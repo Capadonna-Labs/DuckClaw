@@ -1,45 +1,8 @@
-"""Tests: plantilla industry (loader) y UnifiedMemoryOrchestrator (humo)."""
+"""Tests: UnifiedMemoryOrchestrator and tenant vault smoke checks."""
 
 from __future__ import annotations
 
 import json
-
-import pytest
-
-
-@pytest.mark.slow
-def test_apply_industry_business_standard_creates_schemas(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    import duckdb
-
-    from duckclaw.forge.industries.loader import apply_industry_to_db
-
-    con = duckdb.connect(":memory:")
-    home = str(tmp_path).replace("'", "''")
-    con.execute(f"SET home_directory='{home}';")
-    apply_industry_to_db(con, "business_standard")
-    n = con.execute(
-        "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema IN ('core','rbac','org','flow')"
-    ).fetchone()[0]
-    assert int(n) >= 6
-    con.close()
-
-
-def test_seed_industry_agent_config_inserts_keys(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    import duckdb
-
-    from duckclaw.forge.industries.loader import seed_industry_agent_config
-
-    con = duckdb.connect(":memory:")
-    seed_industry_agent_config(con, "business_standard")
-    row = con.execute(
-        "SELECT value FROM main.agent_config WHERE key = 'industry_template'"
-    ).fetchone()
-    assert row and row[0] == "business_standard"
-    con.close()
-
 
 def test_classify_memory_route_prefers_sql_for_conteo():
     from duckclaw.forge.skills.unified_memory_orchestrator import classify_memory_route

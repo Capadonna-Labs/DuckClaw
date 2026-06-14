@@ -33,7 +33,12 @@ from duckclaw.utils.logger import format_chat_log_identity, log_tool_execution_s
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.guardrails.loader import load_guardrail, load_guardrail_optional, load_worker_guardrail
+from duckclaw.prompt_policies import PromptPolicyResolver
 from duckclaw.workers import read_pool
+from duckclaw.workers.runtime_policy_helpers import (
+    worker_has_runtime_capability as _worker_has_runtime_capability,
+    worker_runtime_capability_flag as _worker_runtime_capability_flag,
+)
 from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills
@@ -47,18 +52,33 @@ from duckclaw.workers.field_reflection import (
     persist_field_lesson,
 )
 
-from duckclaw.workers.worker_ids import (
-    MARKET_WORKERS,
-    PLOT_CAPABLE_WORKERS,
-    WORKER_FINANZ,
-    WORKER_PQRSD_ASSISTANT,
-    WORKER_QUANT_TRADER,
-    is_finanz,
-    is_market_worker,
-    is_pqrsd_assistant,
-    is_quant_trader,
-    normalize_worker_id,
-)
+from duckclaw.workers.identity import normalize_worker_id
+
+_FINANCE_LEDGER_ID = "finanz"
+_QUANT_TRADING_ID = "quant_trader"
+_PQRSD_ASSISTANT_ID = "pqrsd_assistant"
+_MARKET_WORKER_IDS = frozenset({_FINANCE_LEDGER_ID, _QUANT_TRADING_ID})
+_PLOT_WORKER_IDS = frozenset({"siata_analyst", _FINANCE_LEDGER_ID})
+
+
+def _canonical_worker_slug(worker_id: str | None) -> str:
+    return normalize_worker_id(worker_id).replace("-", "_")
+
+
+def is_finanz(worker_id: str | None) -> bool:
+    return normalize_worker_id(worker_id) == _FINANCE_LEDGER_ID
+
+
+def is_market_worker(worker_id: str | None) -> bool:
+    return normalize_worker_id(worker_id) in _MARKET_WORKER_IDS
+
+
+def is_pqrsd_assistant(worker_id: str | None) -> bool:
+    return normalize_worker_id(worker_id) == _PQRSD_ASSISTANT_ID
+
+
+def is_quant_trader(worker_id: str | None) -> bool:
+    return _canonical_worker_slug(worker_id) == _canonical_worker_slug(_QUANT_TRADING_ID)
 
 def _raise_if_chat_cancelled_from_state(state: dict) -> None:
     from duckclaw.graphs.chat_cancel import raise_if_chat_cancelled
@@ -984,7 +1004,7 @@ def _github_infer_feature_branch(messages: list[Any]) -> str | None:
 
 
 _GITHUB_CANCEL_TRADE_SIGNAL_MANIFEST: tuple[str, ...] = (
-    "packages/agents/src/duckclaw/forge/atoms/trade_signal_cancel.py",
+    "packages/agents/src/duckclaw/forge/skills/quant_trade_signal_cancel.py",
     "workers/duckclaw/lib/quant_trader_bridge.py",
     "packages/agents/src/duckclaw/workers/factory.py",
     "tests/test_cancel_trade_signal_tool.py",
@@ -1934,9 +1954,9 @@ def _reply_is_quant_tool_json_echo(text: str) -> bool:
 
 def _market_worker_egress_brand(worker_id: str | None) -> str:
     lid = normalize_worker_id(worker_id)
-    if lid == WORKER_FINANZ:
+    if lid == _FINANCE_LEDGER_ID:
         return "Finanz"
-    if lid == WORKER_QUANT_TRADER:
+    if lid == _QUANT_TRADING_ID:
         return "Quant-Trader"
     return (worker_id or "Worker").strip() or "Worker"
 
@@ -2255,7 +2275,7 @@ def _repair_quant_vlm_tool_egress_reply(
     for_admin_console: bool = False,
 ) -> str:
     """Síntesis de respaldo cuando Quant devuelve vacío o JSON crudo tras VLM + tools."""
-    from duckclaw.forge.atoms.user_reply_nl_synthesis import synthesize_user_visible_reply
+    from duckclaw.egress.user_reply_nl_synthesis import synthesize_user_visible_reply
     from langchain_core.messages import ToolMessage
 
     lh = _quant_last_human_index(messages)
@@ -2289,7 +2309,7 @@ def _repair_quant_vlm_tool_egress_reply(
     evidence_parts.append(f"Contexto del usuario:\n{(incoming or '').strip()}")
     evidence = "\n\n".join(evidence_parts)
 
-    wid = str(getattr(spec, "worker_id", "") or "").strip() or WORKER_QUANT_TRADER
+    wid = str(getattr(spec, "worker_id", "") or "").strip() or _QUANT_TRADING_ID
     _lh = _quant_last_human_index(messages)
     _lid = str(getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", "") or "")
 
@@ -4390,15 +4410,6 @@ def build_worker_graph(
                 prompt = effective_prompt
         else:
             prompt = effective_prompt
-        if crm_enabled:
-            try:
-                from duckclaw.forge.crm.context_injector import graph_context_injector
-                lead_id = state.get("chat_id") or state.get("session_id") or "default"
-                lead_ctx = graph_context_injector(db, lead_id)
-                if lead_ctx:
-                    prompt = prompt + "\n\n<lead_context>\n" + lead_ctx + "\n</lead_context>"
-            except Exception:
-                pass
         if is_quant_trader(_lid):
             try:
                 from duckclaw.capadonna_plugin import load_capadonna_lib
@@ -5452,9 +5463,13 @@ def build_worker_graph(
                         job_hunter_user_requests_job_search,
                     )
                     from duckclaw.graphs.on_the_fly_commands import _is_capabilities_smalltalk, _is_simple_greeting
+                    from duckclaw.prompt_policies import PromptPolicyResolver
 
                     if _is_capabilities_smalltalk(incoming):
-                        jh_fast_text = _capabilities_fast_reply_text(spec.worker_id)
+                        jh_fast_text = _capabilities_fast_reply_text(
+                            spec.worker_id,
+                            prompt_policies=PromptPolicyResolver(db),
+                        )
                     elif _is_simple_greeting(incoming):
                         jh_fast_text = _greeting_fast_reply_text(spec.worker_id)
                     force_tavily = bool(
@@ -5688,7 +5703,7 @@ def build_worker_graph(
             # Quant Trader: si hay URL dedicada al GET /api/market/ibkr/historical, forzar esa tool en lugar
             # de fetch_market_data (evita lake+HTTP genérico cuando el usuario configuró solo IB Gateway).
             force_fetch_ib_gateway = bool(
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and has_fetch_ib_gateway
                 and bool(_ibgw_url)
                 and _finanz_user_requests_ohlcv_ingest(incoming)
@@ -5706,7 +5721,7 @@ def build_worker_graph(
             if not _worker_use_heuristic_first_tool(spec):
                 force_fetch_ib_gateway = False
             force_fetch_market_data = bool(
-                _lid_l in MARKET_WORKERS
+                _lid_l in _MARKET_WORKER_IDS
                 and has_fetch_market
                 and _finanz_user_requests_ohlcv_ingest(incoming)
                 and not force_fetch_ib_gateway
@@ -5729,7 +5744,7 @@ def build_worker_graph(
             force_quant_signal_fetch_md = False
             force_quant_goals_evaluate_cfd = False
             if (
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and _quant_user_requests_new_trade_signal(incoming)
                 and not _quant_user_requests_execute_approved_signal(incoming)
                 and _worker_use_heuristic_first_tool(spec)
@@ -5767,7 +5782,7 @@ def build_worker_graph(
                     elif has_fetch_market:
                         force_quant_signal_fetch_md = True
             if (
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and _is_goals_tick_msg
                 and has_evaluate_cfd_state
                 and _worker_use_heuristic_first_tool(spec)
@@ -5792,7 +5807,7 @@ def build_worker_graph(
 
             _incoming_l = (incoming or "").lower()
             _quant_explicit_evaluate_request = bool(
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and has_evaluate_cfd_state
                 and (
                     "evaluate_cfd_state" in _incoming_l
@@ -5824,7 +5839,7 @@ def build_worker_graph(
                 force_quant_goals_evaluate_cfd = True
 
             _quant_explicit_backtest_sandbox_request = bool(
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and (
                     "backtest" in _incoming_l
                     or "backtesting" in _incoming_l
@@ -5862,7 +5877,7 @@ def build_worker_graph(
                     "doc plotly",
                 )
             )
-            _plot_capable_worker = normalize_worker_id(_lid) in PLOT_CAPABLE_WORKERS
+            _plot_capable_worker = normalize_worker_id(_lid) in _PLOT_WORKER_IDS
             force_plot_docs = bool(
                 has_tavily
                 and _plot_capable_worker
@@ -5883,7 +5898,7 @@ def build_worker_graph(
                 and not already_has_tool_result
             )
             _quant_explicit_sandbox_first_tool = bool(
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and has_run_sandbox
                 and _quant_explicit_backtest_sandbox_request
             )
@@ -5967,7 +5982,7 @@ def build_worker_graph(
                     return _out_finanz_gct
 
             force_pqrsd_fetch_canonical = bool(
-                _lid_l == WORKER_PQRSD_ASSISTANT
+                _lid_l == _PQRSD_ASSISTANT_ID
                 and has_pqrsd_fetch
                 and _worker_use_heuristic_first_tool(spec)
                 and _pqrsd_substantive_forced_fetch(
@@ -5989,7 +6004,7 @@ def build_worker_graph(
                 _pqrsd_skipped_forced_fetch = True
 
             force_execute_approved_signal = bool(
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and has_execute_approved_signal
                 and _quant_user_requests_execute_approved_signal(incoming)
                 and _worker_use_heuristic_first_tool(spec)
@@ -6017,7 +6032,7 @@ def build_worker_graph(
                 force_execute_approved_signal = False
 
             force_quant_autoexec_validation_read_sql = bool(
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and has_read_sql
                 and _quant_user_requests_autoexec_validation(incoming)
                 and _worker_use_heuristic_first_tool(spec)
@@ -6045,9 +6060,9 @@ def build_worker_graph(
             if force_quant_autoexec_validation_read_sql:
                 force_read_sql = True
 
-            _quant_proceed_like = bool(_lid_l == WORKER_QUANT_TRADER and _quant_is_proceed_like(incoming))
+            _quant_proceed_like = bool(_lid_l == _QUANT_TRADING_ID and _quant_is_proceed_like(incoming))
             _quant_deterministic_cycle = bool(
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and _worker_use_heuristic_first_tool(spec)
                 and not telegram_context_summarize_directive
                 and (
@@ -6057,7 +6072,7 @@ def build_worker_graph(
                 )
             )
             _quant_vlm_read_sql_evidence = bool(
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and has_read_sql
                 and _worker_use_heuristic_first_tool(spec)
                 and not telegram_context_summarize_directive
@@ -6167,7 +6182,7 @@ def build_worker_graph(
             if _m_rm:
                 _regime_macro_pgq = str(_m_rm.group(1) or "").strip().upper()
             if (
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and has_inspect_macro_pgq
                 and _quant_user_requests_inspect_macro_pgq(incoming)
                 and _worker_use_heuristic_first_tool(spec)
@@ -6267,7 +6282,7 @@ def build_worker_graph(
                 _out_forced.update(_identity_fields(state))
                 return _out_forced
             if (
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and _quant_user_requests_execute_approved_signal(incoming)
                 and has_execute_approved_signal
                 and _quant_signal_id
@@ -6296,7 +6311,7 @@ def build_worker_graph(
 
             _quant_cancel_sid = _quant_extract_cancel_signal_ref(incoming)
             if (
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and _quant_user_requests_cancel_trade_signal(incoming)
                 and has_cancel_trade_signal
                 and _quant_cancel_sid
@@ -6342,7 +6357,7 @@ def build_worker_graph(
             elif _reddit_anchor_u and _REDDIT_COMMENTS_IN_URL_RE.search(_reddit_anchor_u):
                 _reddit_comments_for_http = _reddit_anchor_u.split("#")[0].split("?")[0].rstrip("/")
             _quant_reddit_http_fast = bool(
-                (_lid_l == WORKER_QUANT_TRADER or is_quant_trader(_lid))
+                (_lid_l == _QUANT_TRADING_ID or is_quant_trader(_lid))
                 and (_quant_lone_reddit_only or _q_reddit_hist)
                 and not has_reddit_tools
                 and _reddit_comments_for_http
@@ -6374,7 +6389,7 @@ def build_worker_graph(
             _has_run_browser = "run_browser_sandbox" in tools_by_name
             _has_tavily_mql5 = "tavily_search" in tools_by_name
             _quant_lone_mql5_url = bool(
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and _LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip())
                 and "mql5.com" in (incoming or "").lower()
             )
@@ -6419,7 +6434,7 @@ def build_worker_graph(
                     return _out_m
 
             if (
-                _lid_l == WORKER_QUANT_TRADER
+                _lid_l == _QUANT_TRADING_ID
                 and _LONE_HTTP_URL_ONLY_LINE.match((incoming or "").strip())
                 and already_has_tool_result
                 and isinstance(last_msg, ToolMessage)
@@ -6596,6 +6611,7 @@ def build_worker_graph(
             from duckclaw.utils.formatters import sanitize_reddit_tool_messages_for_llm
 
             _msg_list = sanitize_reddit_tool_messages_for_llm(list(state["messages"]))
+            prompt_policies = PromptPolicyResolver(db)
             _pqrsd_inject_datos_first_directive = bool(
                 is_pqrsd_assistant(_lid)
                 and not already_has_tool_result
@@ -6603,11 +6619,11 @@ def build_worker_graph(
             )
             if _pqrsd_inject_datos_first_directive:
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "pqrsd_datos_primero"))
+                    SystemMessage(content=prompt_policies.load("directive", "pqrsd_datos_primero"))
                 ] + _msg_list
             if not _worker_use_heuristic_first_tool(spec):
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "tool_choice_generic"))
+                    SystemMessage(content=prompt_policies.load("directive", "tool_choice_generic"))
                 ] + _msg_list
             _gh_owner, _gh_repo = _github_resolve_owner_repo()
             if _gh_owner and _gh_repo and any(
@@ -6637,7 +6653,7 @@ def build_worker_graph(
             )
             if _quant_autoexec_validation_intent:
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "quant_autoexec"))
+                    SystemMessage(content=prompt_policies.load("directive", "quant_autoexec"))
                 ] + _msg_list
             _has_github_pr_write = "create_pull_request" in tools_by_name
             _github_pr_workflow_intent = bool(
@@ -6736,7 +6752,7 @@ def build_worker_graph(
                 and telegram_context_summarize_directive
             ):
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "quant_ohlcv_moc"))
+                    SystemMessage(content=prompt_policies.load("directive", "quant_ohlcv_moc"))
                 ] + _msg_list
             _qp_ctx = state.get("quant_pipeline_context")
             if (
@@ -6748,12 +6764,12 @@ def build_worker_graph(
             ):
                 _msg_list = [
                     SystemMessage(
-                        content=load_guardrail("directives", "quant_pipeline_deterministic")
+                        content=prompt_policies.load("directive", "quant_pipeline_deterministic")
                     )
                 ] + _msg_list
             if _reddit_share_mcp_exhausted:
                 _msg_list = [
-                    SystemMessage(content=load_guardrail("directives", "reddit_share_exhausted"))
+                    SystemMessage(content=prompt_policies.load("directive", "reddit_share_exhausted"))
                 ] + _msg_list
             if (
                 is_quant_trader(_lid)
@@ -6897,7 +6913,7 @@ def build_worker_graph(
                 resp = invoke_chat_model_with_transient_retries(_invoked_llm, _groq_msgs)
                 _lid_lower_for_reddit_patch = (_lid or "").strip().lower()
                 if (
-                    normalize_worker_id(_lid_lower_for_reddit_patch) in MARKET_WORKERS
+                    normalize_worker_id(_lid_lower_for_reddit_patch) in _MARKET_WORKER_IDS
                     and resp is not None
                     and getattr(resp, "tool_calls", None)
                 ):
@@ -6927,7 +6943,7 @@ def build_worker_graph(
                 resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=_pl_fail))
             tool_calls = getattr(resp, "tool_calls", None) or []
             if (
-                (_lid_l == WORKER_FINANZ)
+                (_lid_l == _FINANCE_LEDGER_ID)
                 and force_finanz_admin_sql
                 and not tool_calls
                 and _llm_invoke_exc is None
@@ -6962,7 +6978,7 @@ def build_worker_graph(
                     resp = AIMessage(content=str(getattr(resp, "content", "") or ""), tool_calls=forced_tc)
                 tool_calls = getattr(resp, "tool_calls", None) or forced_tc
             _is_quant_forced_without_tools = (
-                (_lid_l == WORKER_QUANT_TRADER)
+                (_lid_l == _QUANT_TRADING_ID)
                 and not tool_calls
                 and (
                     force_quant_signal_fetch_ib
@@ -7006,7 +7022,7 @@ def build_worker_graph(
                     except Exception:
                         resp = AIMessage(content=str(getattr(resp, "content", "") or ""), tool_calls=forced_tc)
                     tool_calls = getattr(resp, "tool_calls", None) or forced_tc
-            if (_lid_l == WORKER_QUANT_TRADER) and force_quant_propose_signal and not tool_calls:
+            if (_lid_l == _QUANT_TRADING_ID) and force_quant_propose_signal and not tool_calls:
                 _fallback_tool_name = (
                     "run_quant_signal_cycle"
                     if ("run_quant_signal_cycle" in tools_by_name)
@@ -7303,7 +7319,7 @@ def build_worker_graph(
                         and _quant_trader_should_force_current_time(incoming)
                     )
                     or (
-                        (_lid_l == WORKER_FINANZ)
+                        (_lid_l == _FINANCE_LEDGER_ID)
                         and _finanz_should_force_current_time(incoming)
                     )
                     or _response_mentions_wall_clock(_resp_content)
@@ -7325,7 +7341,7 @@ def build_worker_graph(
                     except Exception:
                         resp = AIMessage(content="", tool_calls=forced_tc_gct)
                     tool_calls = forced_tc_gct
-            if tool_calls and (is_market_worker(_lid) or _lid_l in (WORKER_QUANT_TRADER, WORKER_FINANZ)):
+            if tool_calls and (is_market_worker(_lid) or _lid_l in (_QUANT_TRADING_ID, _FINANCE_LEDGER_ID)):
                 _lh_ibkr = _quant_last_human_index(state.get("messages") or [])
                 _tc_before = len(tool_calls)
                 tool_calls = _quant_strip_duplicate_ibkr_portfolio_tool_calls(
@@ -7858,7 +7874,7 @@ def build_worker_graph(
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
         from duckclaw.utils import format_tool_reply
-        from duckclaw.forge.atoms.user_reply_nl_synthesis import (
+        from duckclaw.egress.user_reply_nl_synthesis import (
             finanz_repair_ibkr_snapshot_disconnect_paraphrase,
             finanz_repair_ibkr_tool_live_vs_reply_paper,
             finanz_strip_ibkr_block_without_tool_in_turn,
@@ -8074,7 +8090,7 @@ def build_worker_graph(
         if not suppress_egress:
             _notify_final_heartbeat()
         try:
-            from duckclaw.forge.atoms.job_hunter_output_validator import (
+            from duckclaw.egress.job_hunter_output_validator import (
                 job_hunter_blocked_reply_message,
                 job_hunter_reply_should_block,
                 spec_is_job_hunter as _jh_spec_check,
@@ -8092,7 +8108,7 @@ def build_worker_graph(
         except Exception:
             pass
         try:
-            from duckclaw.forge.atoms.quant_price_validator import (
+            from duckclaw.egress.quant_price_validator import (
                 VISUAL_EVIDENCE_RETRY_REASON,
                 enforce_visual_evidence_rule,
                 quant_bracket_citation_audit,
@@ -8183,7 +8199,7 @@ def build_worker_graph(
         except Exception:
             pass
         try:
-            from duckclaw.forge.atoms.job_hunter_output_validator import spec_is_job_hunter as _jh_spec_check
+            from duckclaw.egress.job_hunter_output_validator import spec_is_job_hunter as _jh_spec_check
 
             _inc_text = (state.get("incoming") or state.get("input") or "").strip().lower()
             if reply and _jh_spec_check(spec) and "job_opportunity_tracking" in _inc_text and "a2a" in reply.lower():
@@ -8200,21 +8216,6 @@ def build_worker_graph(
                     "Registro completado exitosamente.",
                     reply,
                     flags=re.IGNORECASE,
-                )
-        except Exception:
-            pass
-        try:
-            if (getattr(spec, "worker_id", "") or "").strip() == "PQRSD-Assistant" and reply:
-                from duckclaw.forge.atoms.pqrsd_registration_egress_guard import (
-                    pqrsd_guard_registration_egress,
-                )
-                from duckclaw.graphs.manager_graph import _worker_tool_names_from_messages
-
-                _tn = _worker_tool_names_from_messages(list(msgs) if msgs else None)
-                reply = pqrsd_guard_registration_egress(
-                    reply,
-                    _tn,
-                    session_id=str(state.get("session_id") or state.get("chat_id") or ""),
                 )
         except Exception:
             pass
@@ -8292,15 +8293,15 @@ def build_worker_graph(
     max_retries = int(context_guard_config.get("max_retries", 2))
 
     def fact_check_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
-        from duckclaw.forge.atoms.validators import fact_checker_node as _fc
+        from duckclaw.validators.context_guard import fact_checker_node as _fc
         return _fc(state, llm, max_retries=max_retries)
 
     def self_correction_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
-        from duckclaw.forge.atoms.validators import self_correction_node as _sc
+        from duckclaw.validators.context_guard import self_correction_node as _sc
         return _sc(state, llm)
 
     def handoff_reply_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
-        from duckclaw.forge.atoms.validators import handoff_reply_node as _hr
+        from duckclaw.validators.context_guard import handoff_reply_node as _hr
         return _hr(state)
 
     def route_after_fact_check(state: dict) -> str:

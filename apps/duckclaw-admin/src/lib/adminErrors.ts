@@ -22,6 +22,10 @@ export function isGatewayUnreachableMessage(message: string): boolean {
   );
 }
 
+function looksLikeProblemContext(value: string): boolean {
+  return /^[a-z][a-z0-9_.:-]{2,64}$/i.test(value) && !value.includes(' ');
+}
+
 /** Extrae mensaje legible de respuestas FastAPI (detail string u objeto RFC7807). */
 export function parseApiErrorDetail(data: unknown, status = 500): string {
   if (!data || typeof data !== 'object') return `Error ${status}`;
@@ -29,6 +33,13 @@ export function parseApiErrorDetail(data: unknown, status = 500): string {
   if (typeof root.detail === 'string') return root.detail;
   if (root.detail && typeof root.detail === 'object') {
     const inner = root.detail as Record<string, unknown>;
+    if (
+      typeof inner.title === 'string' &&
+      typeof inner.detail === 'string' &&
+      looksLikeProblemContext(inner.detail)
+    ) {
+      return inner.title;
+    }
     if (typeof inner.detail === 'string') return inner.detail;
     if (typeof inner.title === 'string') return inner.title;
   }

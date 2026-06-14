@@ -6,7 +6,7 @@ from duckclaw.forge.skills.research_bridge import (
 
 
 def test_hostname_from_domain_spec_strips_www_and_path() -> None:
-    assert _hostname_from_domain_spec("https://www.medellin.gov.co/es/pqrsd/") == "medellin.gov.co"
+    assert _hostname_from_domain_spec("https://www.medellin.gov.co/es/tramites/") == "medellin.gov.co"
     assert _hostname_from_domain_spec("medellin.gov.co") == "medellin.gov.co"
     assert _hostname_from_domain_spec("www.medellin.gov.co/foo") == "medellin.gov.co"
 

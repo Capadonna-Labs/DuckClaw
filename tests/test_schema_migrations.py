@@ -7,7 +7,7 @@ import pytest
 
 
 def test_migrations_create_expected_tables() -> None:
-    """run_pending_migrations() creates schema_migrations + all 10 versions."""
+    """run_pending_migrations() creates schema_migrations + all 17 versions."""
     import duckdb
     import tempfile
 
@@ -20,7 +20,7 @@ def test_migrations_create_expected_tables() -> None:
     con = duckdb.connect(str(tmp / "test.duckdb"))
 
     applied = run_pending_migrations(con)
-    assert len(applied) == 14, f"Expected 14 migrations, got {len(applied)}: {applied}"
+    assert len(applied) == 17, f"Expected 17 migrations, got {len(applied)}: {applied}"
 
     rows = con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
@@ -60,11 +60,99 @@ def test_migrations_create_expected_tables() -> None:
         "admin_tool_servers",
         "admin_tool_bindings",
         "admin_tool_policies",
+        "admin_knowledge_sources",
+        "admin_knowledge_documents",
+        "admin_knowledge_chunks",
+        "prompt_policy_registry",
+        "worker_prompt_bindings",
+        "tool_policy_directives",
+        "worker_runtime_policies",
     }
     missing = expected - tables
     assert not missing, f"Missing tables: {missing}"
 
     assert verify_migration_integrity(con) == []
+
+    con.close()
+
+
+def test_rag_knowledge_tables_have_key_columns_and_constraints() -> None:
+    """RAG transversal tables support source/document/chunk lifecycle."""
+    import duckdb
+    import tempfile
+    from pathlib import Path
+
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    tmp = Path(tempfile.mkdtemp())
+    con = duckdb.connect(str(tmp / "test.duckdb"))
+    run_pending_migrations(con)
+
+    cols = _columns(con, "admin_knowledge_sources")
+    for c in (
+        "source_id",
+        "tenant_id",
+        "project_id",
+        "worker_uid",
+        "source_kind",
+        "source_uri",
+        "status",
+        "embedding_model",
+        "metadata_json",
+        "active",
+    ):
+        assert c in cols, f"admin_knowledge_sources missing {c}"
+
+    cols = _columns(con, "admin_knowledge_documents")
+    for c in (
+        "document_id",
+        "source_id",
+        "relative_path",
+        "title",
+        "mime_type",
+        "checksum",
+        "metadata_json",
+        "active",
+    ):
+        assert c in cols, f"admin_knowledge_documents missing {c}"
+
+    cols = _columns(con, "admin_knowledge_chunks")
+    for c in (
+        "chunk_id",
+        "document_id",
+        "chunk_index",
+        "content",
+        "embedding",
+        "embedding_status",
+        "embedding_model",
+        "token_count",
+        "active",
+    ):
+        assert c in cols, f"admin_knowledge_chunks missing {c}"
+
+    con.execute(
+        """
+        INSERT INTO main.admin_knowledge_sources
+          (source_id, tenant_id, source_kind, source_uri, status, metadata_json)
+        VALUES ('src_1', 'tenant_a', 'folder', '/tmp/docs', 'ready', '{"label":"docs"}')
+        """
+    )
+    with pytest.raises(Exception, match="Constraint"):
+        con.execute(
+            """
+            INSERT INTO main.admin_knowledge_sources
+              (source_id, tenant_id, source_kind, source_uri, status)
+            VALUES ('src_bad_status', 'tenant_a', 'folder', '/tmp/docs', 'bogus')
+            """
+        )
+    with pytest.raises(Exception, match="Constraint"):
+        con.execute(
+            """
+            INSERT INTO main.admin_knowledge_sources
+              (source_id, tenant_id, source_kind, source_uri, metadata_json)
+            VALUES ('src_bad_json', 'tenant_a', 'folder', '/tmp/docs', 'not-json')
+            """
+        )
 
     con.close()
 

@@ -720,7 +720,7 @@ def test_playground_team_hint_workers_label(admin_client: TestClient, monkeypatc
 
 
 def test_kanban_worker_states(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    from routers.admin import _kanban_status_from_audit
+    from routers.admin_domains.kanban_runtime import _kanban_status_from_audit
 
     assert _kanban_status_from_audit("SUCCESS", 900) == "en_progreso"
     assert _kanban_status_from_audit("SUCCESS", 4000) == "completo"

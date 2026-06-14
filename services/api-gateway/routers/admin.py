@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 from routers.admin_domains.access_management import router as access_management_router
 from routers.admin_domains.auth import router as auth_router
 from routers.admin_domains.duckdb_explorer import router as duckdb_explorer_router
+from routers.admin_domains.kanban_runtime import router as kanban_runtime_router
 from routers.admin_domains.playground_chat import (
     _open_playground_vault_db,
     _pick_playground_worker,
@@ -32,6 +33,7 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 router.include_router(access_management_router)
 router.include_router(auth_router)
 router.include_router(duckdb_explorer_router)
+router.include_router(kanban_runtime_router)
 router.include_router(playground_chat_router)
 router.include_router(runtime_config_router)
 router.include_router(sandbox_sessions_router)
@@ -1874,191 +1876,6 @@ async def apply_forge_project_team(
         "Team templates legacy retirado",
         "Usa admin_project_agents en Proyectos DB-first.",
     )
-
-
-def _kanban_status_from_audit(status: str, age_seconds: float) -> str:
-    """Map latest task_audit_log row to kanban column id."""
-    st = (status or "").strip().upper()
-    if age_seconds < 30 * 60:
-        return "en_progreso"
-    if st == "SUCCESS":
-        return "completo"
-    return "pendiente"
-
-
-def _resolve_kanban_worker_ids(
-    workers: str | None,
-    tenant_id: str | None,
-) -> list[str]:
-    raw_ids = [re.sub(r"[^a-zA-Z0-9_-]", "", w.strip()) for w in (workers or "").split(",")]
-    worker_ids = [w for w in raw_ids if w]
-    if not worker_ids:
-        team_ctx = _playground_team_context(tenant_id=tenant_id)
-        worker_ids = list(team_ctx.get("workers") or [])
-    return worker_ids
-
-
-def _kanban_audit_states_by_worker(worker_ids: list[str]) -> dict[str, str]:
-    from datetime import datetime, timezone
-
-    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
-
-    states: dict[str, str] = {w: "pendiente" for w in worker_ids}
-    if not worker_ids:
-        return states
-    gw = (get_gateway_db_path() or "").strip()
-    if not gw or not os.path.isfile(gw):
-        return states
-    db = GatewayDbEphemeralReadonly(gw)
-    now = datetime.now(timezone.utc)
-    in_list = ", ".join("'" + w.replace("'", "''") + "'" for w in worker_ids)
-    try:
-        rows = db.query(
-            f"""
-            SELECT worker_id, status, created_at
-            FROM task_audit_log
-            WHERE worker_id IN ({in_list})
-            ORDER BY created_at DESC
-            """
-        )
-    except Exception:
-        return states
-    seen: set[str] = set()
-    for row in rows or []:
-        if not isinstance(row, dict):
-            continue
-        wid = str(row.get("worker_id") or "").strip()
-        if not wid or wid in seen:
-            continue
-        seen.add(wid)
-        created = row.get("created_at")
-        age_seconds = 999999.0
-        if created is not None:
-            try:
-                if hasattr(created, "tzinfo") and created.tzinfo is None:
-                    created = created.replace(tzinfo=timezone.utc)
-                age_seconds = max(0.0, (now - created).total_seconds())
-            except Exception:
-                age_seconds = 999999.0
-        states[wid] = _kanban_status_from_audit(str(row.get("status") or ""), age_seconds)
-    return states
-
-
-def _kanban_latest_tasks_by_worker(worker_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Última fila de task_audit_log por worker (plan_title / query_prefix para Tablero)."""
-    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
-
-    tasks: dict[str, dict[str, str]] = {}
-    if not worker_ids:
-        return tasks
-    gw = (get_gateway_db_path() or "").strip()
-    if not gw or not os.path.isfile(gw):
-        return tasks
-    db = GatewayDbEphemeralReadonly(gw)
-    in_list = ", ".join("'" + w.replace("'", "''") + "'" for w in worker_ids)
-    try:
-        rows = db.query(
-            f"""
-            SELECT worker_id, query_prefix, plan_title
-            FROM task_audit_log
-            WHERE worker_id IN ({in_list})
-            ORDER BY created_at DESC
-            """
-        )
-    except Exception:
-        return tasks
-    seen: set[str] = set()
-    for row in rows or []:
-        if not isinstance(row, dict):
-            continue
-        wid = str(row.get("worker_id") or "").strip()
-        if not wid or wid in seen:
-            continue
-        seen.add(wid)
-        entry: dict[str, str] = {}
-        plan = str(row.get("plan_title") or "").strip()
-        query = str(row.get("query_prefix") or "").strip()
-        if plan:
-            entry["plan_title"] = plan
-        if query:
-            entry["query_prefix"] = query
-        if entry:
-            tasks[wid] = entry
-    return tasks
-
-
-def _kanban_instance_key(worker_id: str, slot: int) -> str:
-    return f"{worker_id}:{slot}"
-
-
-@router.get("/kanban/worker-states", dependencies=[Depends(_require_admin_key)])
-async def kanban_worker_states(
-    workers: str | None = Query(None, description="Comma-separated worker ids"),
-    tenant_id: str | None = Query(None),
-) -> dict[str, Any]:
-    """
-    Latest task_audit_log status per worker for Tablero sync (/workers team).
-    Incluye claves compuestas ``{worker_id}:1`` (slot base) además de ``{worker_id}``.
-    """
-    worker_ids = _resolve_kanban_worker_ids(workers, tenant_id)
-    if not worker_ids:
-        return {"workers": [], "states": {}}
-    audit = _kanban_audit_states_by_worker(worker_ids)
-    states: dict[str, str] = dict(audit)
-    for wid, st in audit.items():
-        states[_kanban_instance_key(wid, 1)] = st
-    return {"workers": worker_ids, "states": states}
-
-
-@router.get("/kanban/swarm-slots", dependencies=[Depends(_require_admin_key)])
-async def kanban_swarm_slots(
-    workers: str | None = Query(None, description="Comma-separated worker ids"),
-    tenant_id: str | None = Query(None),
-) -> dict[str, Any]:
-    """
-    Instancias swarm activas (Redis) y estados por ``{worker_id}:{slot}`` para el Tablero.
-    """
-    from duckclaw.graphs.subagent_run_id import list_active_swarm_slots
-
-    worker_ids = _resolve_kanban_worker_ids(workers, tenant_id)
-    if not worker_ids:
-        return {"workers": [], "instances": [], "states": {}}
-
-    tid = _gateway_effective_tenant_id(tenant_id)
-    raw_slots = list_active_swarm_slots(tid, worker_ids)
-    audit = _kanban_audit_states_by_worker(worker_ids)
-    tasks = _kanban_latest_tasks_by_worker(worker_ids)
-
-    active_by_worker: dict[str, set[int]] = {w: set() for w in worker_ids}
-    instances: list[dict[str, Any]] = []
-    for row in raw_slots:
-        wid = str(row.get("worker_id") or "").strip()
-        slot = int(row.get("slot") or 0)
-        if not wid or slot < 1:
-            continue
-        active_by_worker.setdefault(wid, set()).add(slot)
-        instances.append(
-            {
-                "worker_id": wid,
-                "slot": slot,
-                "chat_scope": row.get("chat_scope"),
-                "started_at": row.get("started_at"),
-                "active": True,
-            }
-        )
-
-    states: dict[str, str] = {}
-    for wid in worker_ids:
-        key1 = _kanban_instance_key(wid, 1)
-        if 1 in active_by_worker.get(wid, set()):
-            states[key1] = "en_progreso"
-        else:
-            states[key1] = audit.get(wid, "pendiente")
-        for slot in sorted(active_by_worker.get(wid, set())):
-            if slot >= 2:
-                states[_kanban_instance_key(wid, slot)] = "en_progreso"
-
-    return {"workers": worker_ids, "instances": instances, "states": states, "tasks": tasks}
 
 
 def _iter_template_ids_for_catalog() -> list[str]:

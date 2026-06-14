@@ -166,6 +166,24 @@ CREATE TABLE IF NOT EXISTS main.admin_worker_capabilities (
 );
 """
 
+_WORKER_RUNTIME_POLICIES_DDL = """
+CREATE TABLE IF NOT EXISTS main.worker_runtime_policies (
+    runtime_policy_id VARCHAR PRIMARY KEY,
+    worker_uid VARCHAR NOT NULL,
+    policy_key VARCHAR NOT NULL,
+    policy_scope VARCHAR NOT NULL DEFAULT 'runtime'
+        CHECK (policy_scope IN ('identity', 'category', 'capability', 'tool_policy', 'flag', 'behavior', 'runtime')),
+    policy_value_json TEXT NOT NULL DEFAULT '{}'
+        CHECK (json_valid(policy_value_json)),
+    active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (worker_uid, policy_key, policy_scope)
+);
+CREATE INDEX IF NOT EXISTS idx_worker_runtime_policies_lookup
+    ON main.worker_runtime_policies (worker_uid, active, policy_scope, policy_key);
+"""
+
 
 def ensure_admin_worker_catalog_schema(db: Any) -> None:
     if getattr(db, "_read_only", False):
@@ -179,6 +197,7 @@ def ensure_admin_worker_catalog_schema(db: Any) -> None:
         _ADMIN_WORKER_SKILLS_DDL,
         _ADMIN_CAPABILITIES_DDL,
         _ADMIN_WORKER_CAPABILITIES_DDL,
+        _WORKER_RUNTIME_POLICIES_DDL,
     ):
         for stmt in ddl.strip().split(";"):
             sql = stmt.strip()

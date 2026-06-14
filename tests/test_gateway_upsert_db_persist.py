@@ -12,7 +12,7 @@ def test_upsert_preserves_db_path_when_incoming_env_differs() -> None:
             "host": "0.0.0.0",
             "port": 8000,
             "env": {
-                "DUCKCLAW_FINANZ_DB_PATH": "/vault/finanz.duckdb",
+                "DUCKCLAW_GATEWAY_DB_PATH": "/vault/primary.duckdb",
                 "DUCKCLAW_SHARED_DB_PATH": "/shared/cat.duckdb",
                 "DUCKDB_PATH": "/vault/finanz.duckdb",
                 "FOO": "1",
@@ -20,7 +20,7 @@ def test_upsert_preserves_db_path_when_incoming_env_differs() -> None:
         }
     ]
     env_vars = {
-        "DUCKCLAW_JOB_HUNTER_DB_PATH": "/other/jobhunter.duckdb",
+        "DUCKCLAW_TENANT_DB_PATH": "/other/tenant.duckdb",
         "PYTHONPATH": "/repo",
         "BAR": "2",
     }
@@ -32,7 +32,7 @@ def test_upsert_preserves_db_path_when_incoming_env_differs() -> None:
         env_vars=env_vars,
     )
     env = out[0]["env"]
-    assert env["DUCKCLAW_FINANZ_DB_PATH"] == "/vault/finanz.duckdb"
+    assert env["DUCKCLAW_GATEWAY_DB_PATH"] == "/vault/primary.duckdb"
     assert env["DUCKCLAW_SHARED_DB_PATH"] == "/shared/cat.duckdb"
     assert env["DUCKDB_PATH"] == "/vault/finanz.duckdb"
     assert env["BAR"] == "2"
@@ -45,10 +45,10 @@ def test_upsert_forced_env_overrides_persisted_db_paths() -> None:
             "name": "Finanz-Gateway",
             "host": "0.0.0.0",
             "port": 8000,
-            "env": {"DUCKCLAW_FINANZ_DB_PATH": "/a/old.duckdb"},
+            "env": {"DUCKCLAW_GATEWAY_DB_PATH": "/a/old.duckdb"},
         }
     ]
-    env_vars = {"DUCKCLAW_FINANZ_DB_PATH": "/b/from_dotenv.duckdb"}
+    env_vars = {"DUCKCLAW_GATEWAY_DB_PATH": "/b/from_dotenv.duckdb"}
     out = _upsert_gateway_app(
         apps,
         name="Finanz-Gateway",
@@ -56,19 +56,19 @@ def test_upsert_forced_env_overrides_persisted_db_paths() -> None:
         port=8000,
         env_vars=env_vars,
         forced_env={
-            "DUCKCLAW_FINANZ_DB_PATH": "/c/explicit.duckdb",
+            "DUCKCLAW_GATEWAY_DB_PATH": "/c/explicit.duckdb",
             "DUCKDB_PATH": "/c/explicit.duckdb",
         },
     )
     env = out[0]["env"]
-    assert env["DUCKCLAW_FINANZ_DB_PATH"] == "/c/explicit.duckdb"
+    assert env["DUCKCLAW_GATEWAY_DB_PATH"] == "/c/explicit.duckdb"
     assert env["DUCKDB_PATH"] == "/c/explicit.duckdb"
 
 
 def test_upsert_new_gateway_uses_incoming_db_path() -> None:
     apps: list[dict] = []
     env_vars = {
-        "DUCKCLAW_FINANZ_DB_PATH": "/x/brand_new.duckdb",
+        "DUCKCLAW_GATEWAY_DB_PATH": "/x/brand_new.duckdb",
         "DUCKDB_PATH": "/x/brand_new.duckdb",
         "PYTHONPATH": "/repo",
     }
@@ -80,7 +80,7 @@ def test_upsert_new_gateway_uses_incoming_db_path() -> None:
         env_vars=env_vars,
     )
     assert len(out) == 1
-    assert out[0]["env"]["DUCKCLAW_FINANZ_DB_PATH"] == "/x/brand_new.duckdb"
+    assert out[0]["env"]["DUCKCLAW_GATEWAY_DB_PATH"] == "/x/brand_new.duckdb"
     assert out[0]["port"] == 9000
 
 
@@ -90,7 +90,7 @@ def test_upsert_fills_empty_persisted_db_path_from_incoming() -> None:
             "name": "Finanz-Gateway",
             "host": "0.0.0.0",
             "port": 8000,
-            "env": {"DUCKCLAW_FINANZ_DB_PATH": ""},
+            "env": {"DUCKCLAW_GATEWAY_DB_PATH": ""},
         }
     ]
     out = _upsert_gateway_app(
@@ -98,6 +98,6 @@ def test_upsert_fills_empty_persisted_db_path_from_incoming() -> None:
         name="Finanz-Gateway",
         host="0.0.0.0",
         port=8000,
-        env_vars={"DUCKCLAW_FINANZ_DB_PATH": "/fill/in.duckdb", "DUCKDB_PATH": "/fill/in.duckdb"},
+        env_vars={"DUCKCLAW_GATEWAY_DB_PATH": "/fill/in.duckdb", "DUCKDB_PATH": "/fill/in.duckdb"},
     )
-    assert out[0]["env"]["DUCKCLAW_FINANZ_DB_PATH"] == "/fill/in.duckdb"
+    assert out[0]["env"]["DUCKCLAW_GATEWAY_DB_PATH"] == "/fill/in.duckdb"

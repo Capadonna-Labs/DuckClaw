@@ -7,7 +7,7 @@ import json
 import duckdb
 import pytest
 
-from duckclaw.forge.atoms.semantic_memory_hybrid import fetch_semantic_rows_lexical, lexical_tokens
+from duckclaw.memory.semantic_memory_hybrid import fetch_semantic_rows_lexical, lexical_tokens
 
 
 def test_lexical_tokens_strips_stops():

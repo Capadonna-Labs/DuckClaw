@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from duckclaw.forge.atoms.validators import (
+from duckclaw.validators.context_guard import (
     extract_raw_evidence_from_messages,
     _parse_fact_check_result,
     fact_checker_node,

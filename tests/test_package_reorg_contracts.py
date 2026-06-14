@@ -25,16 +25,20 @@ def test_shared_layer_flat_modules_expose_public_contracts() -> None:
 
 
 def test_agents_runtime_and_manager_facades_expose_public_contracts() -> None:
-    modules = {
-        "duckclaw.runtime.graph_server": "get_graph",
-        "duckclaw.runtime.commands": "handle_command",
-        "duckclaw.runtime.sandbox": "_sandbox_stdout_suggests_success_despite_exit",
-        "duckclaw.runtime.heartbeat": "normalize_telegram_chat_id_for_outbound",
-        "duckclaw.runtime.conversation_traces": "append_conversation_trace",
-        "duckclaw.manager.graph": "build_manager_graph",
-        "duckclaw.manager.routing": "clear_worker_graph_cache",
-    }
-    for module_name, attr in modules.items():
+    modules = (
+        ("duckclaw.runtime.graph_server", "get_graph"),
+        ("duckclaw.runtime.commands", "handle_command"),
+        ("duckclaw.runtime.sandbox", "_sandbox_stdout_suggests_success_despite_exit"),
+        ("duckclaw.runtime.heartbeat", "normalize_telegram_chat_id_for_outbound"),
+        ("duckclaw.runtime.conversation_traces", "append_conversation_trace"),
+        ("duckclaw.manager.graph", "build_manager_graph"),
+        ("duckclaw.manager.routing", "clear_worker_graph_cache"),
+        ("duckclaw.manager.routing", "_worker_matches_id"),
+        ("duckclaw.manager.fast_plans", "_try_quant_url_research_fast_plan"),
+        ("duckclaw.manager.task_classification", "job_hunter_user_requests_job_search"),
+        ("duckclaw.manager.planning", "_plan_task"),
+    )
+    for module_name, attr in modules:
         module = importlib.import_module(module_name)
         assert hasattr(module, attr), module_name
 
@@ -42,7 +46,6 @@ def test_agents_runtime_and_manager_facades_expose_public_contracts() -> None:
 def test_training_layout_has_separate_prompt_script_and_dataset_roots() -> None:
     root = Path("packages/agents/train")
     expected = (
-        root / "prompts" / "synthetic" / "pqrsd_gemma4_jsonl.md",
         root / "scripts" / "data" / "curate_traces.py",
         root / "scripts" / "serve" / "start_mlx.sh",
         root / "scripts" / "serve" / "start_mlx_vision.sh",

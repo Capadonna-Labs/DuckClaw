@@ -137,6 +137,9 @@ async def _handle_typed_command(
     try:
         conn = duckdb.connect(target_db_path, read_only=False)
         try:
+            from duckclaw.schema_migrations import run_pending_migrations
+
+            run_pending_migrations(conn)
             conn.execute("BEGIN TRANSACTION")
 
             # Durable dedup: skip if already completed in the target DB

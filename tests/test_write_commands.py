@@ -101,6 +101,85 @@ class TestWriteCommands:
         assert raw_delete["command_type"] == "delete_kanban_card"
         assert raw_delete["card_id"] == "card_1"
 
+    def test_knowledge_commands_roundtrip(self) -> None:
+        from duckclaw.write_commands import (
+            CreateKnowledgeSourceCommand,
+            DeactivateKnowledgeSourceCommand,
+            UpsertKnowledgeChunksCommand,
+            UpsertKnowledgeDocumentCommand,
+        )
+
+        source = CreateKnowledgeSourceCommand(
+            source_id="ksrc_1",
+            tenant_id="tenant_a",
+            actor_email="test@d.local",
+            project_id="proj_a",
+            source_kind="folder",
+            source_uri="/safe/docs",
+            display_name="Docs",
+        )
+        raw_source = json.loads(source.to_redis_payload())
+        assert raw_source["command_type"] == "create_knowledge_source"
+        assert raw_source["source_id"] == "ksrc_1"
+        assert raw_source["project_id"] == "proj_a"
+
+        document = UpsertKnowledgeDocumentCommand(
+            document_id="kdoc_1",
+            source_id="ksrc_1",
+            relative_path="aws/iam.md",
+            checksum="sha256:abc",
+        )
+        raw_document = json.loads(document.to_redis_payload())
+        assert raw_document["command_type"] == "upsert_knowledge_document"
+        assert raw_document["relative_path"] == "aws/iam.md"
+
+        chunks = UpsertKnowledgeChunksCommand(
+            document_id="kdoc_1",
+            source_id="ksrc_1",
+            chunks=[
+                {"chunk_id": "kchk_1", "chunk_index": 0, "content": "IAM policies", "embedding_status": "PENDING"}
+            ],
+        )
+        raw_chunks = json.loads(chunks.to_redis_payload())
+        assert raw_chunks["command_type"] == "upsert_knowledge_chunks"
+        assert raw_chunks["chunks"][0]["chunk_id"] == "kchk_1"
+
+        delete = DeactivateKnowledgeSourceCommand(source_id="ksrc_1")
+        raw_delete = json.loads(delete.to_redis_payload())
+        assert raw_delete["command_type"] == "deactivate_knowledge_source"
+        assert raw_delete["source_id"] == "ksrc_1"
+
+    def test_prompt_policy_commands_roundtrip(self) -> None:
+        from duckclaw.write_commands import DeactivatePromptPolicyCommand, UpsertPromptPolicyCommand
+
+        upsert = UpsertPromptPolicyCommand(
+            policy_type="system_prompt",
+            policy_name="rag_turn",
+            version=2,
+            content="Policy body created by the test.",
+            metadata={"scope": "rag"},
+            actor_email="test@d.local",
+        )
+        raw_upsert = json.loads(upsert.to_redis_payload())
+        assert raw_upsert["command_type"] == "upsert_prompt_policy"
+        assert raw_upsert["policy_type"] == "system_prompt"
+        assert raw_upsert["policy_name"] == "rag_turn"
+        assert raw_upsert["version"] == 2
+        assert raw_upsert["content"] == "Policy body created by the test."
+        assert raw_upsert["metadata"] == {"scope": "rag"}
+
+        deactivate = DeactivatePromptPolicyCommand(
+            policy_type="system_prompt",
+            policy_name="rag_turn",
+            version=2,
+            actor_email="test@d.local",
+        )
+        raw_deactivate = json.loads(deactivate.to_redis_payload())
+        assert raw_deactivate["command_type"] == "deactivate_prompt_policy"
+        assert raw_deactivate["policy_type"] == "system_prompt"
+        assert raw_deactivate["policy_name"] == "rag_turn"
+        assert raw_deactivate["version"] == 2
+
     def test_each_command_has_unique_task_id(self) -> None:
         from duckclaw.write_commands import UpsertWorkerCommand
 
@@ -275,6 +354,157 @@ class TestCommandHandlers:
         })
         row = con.execute("SELECT card_id FROM main.admin_kanban_cards WHERE card_id = 'card-k2'").fetchone()
         assert row is None
+
+    def test_knowledge_source_document_chunks_and_deactivate(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import (
+            _apply_create_knowledge_source,
+            _apply_deactivate_knowledge_source,
+            _apply_upsert_knowledge_chunks,
+            _apply_upsert_knowledge_document,
+        )
+
+        con = db_with_migrations
+        _apply_create_knowledge_source(con, {
+            "source_id": "ksrc-handler",
+            "tenant_id": "tenant_a",
+            "actor_email": "test@d.local",
+            "project_id": "proj_a",
+            "worker_uid": "wrk_a",
+            "source_kind": "folder",
+            "source_uri": "/safe/docs",
+            "display_name": "Docs",
+            "metadata": {"domain": "aws"},
+        })
+        _apply_create_knowledge_source(con, {
+            "source_id": "ksrc-handler",
+            "tenant_id": "tenant_a",
+            "actor_email": "test@d.local",
+            "project_id": "proj_a",
+            "worker_uid": "wrk_a",
+            "source_kind": "folder",
+            "source_uri": "/safe/docs-renamed",
+            "display_name": "Docs v2",
+        })
+        row = con.execute(
+            "SELECT source_uri, display_name, status FROM main.admin_knowledge_sources "
+            "WHERE source_id = 'ksrc-handler'"
+        ).fetchone()
+        assert row == ("/safe/docs-renamed", "Docs v2", "pending")
+
+        _apply_upsert_knowledge_document(con, {
+            "document_id": "kdoc-handler",
+            "source_id": "ksrc-handler",
+            "relative_path": "aws/iam.md",
+            "title": "IAM",
+            "mime_type": "text/markdown",
+            "checksum": "sha256:abc",
+            "byte_size": 42,
+            "metadata": {"section": "security"},
+        })
+        _apply_upsert_knowledge_chunks(con, {
+            "document_id": "kdoc-handler",
+            "source_id": "ksrc-handler",
+            "tenant_id": "tenant_a",
+            "project_id": "proj_a",
+            "worker_uid": "wrk_a",
+            "chunks": [
+                {
+                    "chunk_id": "kchk-handler-1",
+                    "chunk_index": 0,
+                    "content": "IAM policies and least privilege",
+                    "content_hash": "hash-1",
+                    "embedding_status": "PENDING",
+                },
+                {
+                    "chunk_id": "kchk-handler-2",
+                    "chunk_index": 1,
+                    "content": "CloudTrail auditing",
+                    "content_hash": "hash-2",
+                    "embedding": [0.0] * 384,
+                    "embedding_status": "READY",
+                },
+            ],
+        })
+        chunks = con.execute(
+            "SELECT chunk_index, embedding_status FROM main.admin_knowledge_chunks "
+            "WHERE document_id = 'kdoc-handler' ORDER BY chunk_index"
+        ).fetchall()
+        assert chunks == [(0, "PENDING"), (1, "READY")]
+
+        _apply_deactivate_knowledge_source(con, {
+            "source_id": "ksrc-handler",
+            "tenant_id": "tenant_a",
+        })
+        active = con.execute(
+            "SELECT active, status FROM main.admin_knowledge_sources WHERE source_id = 'ksrc-handler'"
+        ).fetchone()
+        assert active == (False, "inactive")
+        chunk_active = con.execute(
+            "SELECT DISTINCT active FROM main.admin_knowledge_chunks WHERE source_id = 'ksrc-handler'"
+        ).fetchall()
+        assert chunk_active == [(False,)]
+
+    def test_prompt_policy_handler_upserts_updates_and_deactivates(self, db_with_migrations) -> None:
+        from duckclaw.prompt_policies import PromptPolicyResolver
+        from duckclaw.write_command_handlers import (
+            _apply_deactivate_prompt_policy,
+            _apply_upsert_prompt_policy,
+            dispatch_command,
+        )
+
+        con = db_with_migrations
+        _apply_upsert_prompt_policy(con, {
+            "policy_type": "system_prompt",
+            "policy_name": "rag_turn",
+            "version": 1,
+            "content": "Worker {worker_id} uses DB policy.",
+            "metadata": {"scope": "rag"},
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+        })
+        assert PromptPolicyResolver(db=con).format(
+            "system_prompt",
+            "rag_turn",
+            worker_id="alpha",
+        ) == "Worker alpha uses DB policy."
+
+        dispatch_command(con, {
+            "command_type": "upsert_prompt_policy",
+            "policy_type": "system_prompt",
+            "policy_name": "rag_turn",
+            "version": 1,
+            "content": "Updated {worker_id} DB policy.",
+            "metadata": {"scope": "rag", "updated": True},
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+        })
+        row = con.execute(
+            "SELECT content, metadata_json, active, status FROM main.prompt_policy_registry "
+            "WHERE policy_type = 'system_prompt' AND policy_name = 'rag_turn' AND version = 1"
+        ).fetchone()
+        assert row[0] == "Updated {worker_id} DB policy."
+        assert json.loads(row[1]) == {"scope": "rag", "updated": True}
+        assert row[2] is True
+        assert row[3] == "active"
+        assert PromptPolicyResolver(db=con).format(
+            "system_prompt",
+            "rag_turn",
+            worker_id="beta",
+        ) == "Updated beta DB policy."
+
+        _apply_deactivate_prompt_policy(con, {
+            "policy_type": "system_prompt",
+            "policy_name": "rag_turn",
+            "version": 1,
+            "tenant_id": "default",
+        })
+        inactive = con.execute(
+            "SELECT active, status FROM main.prompt_policy_registry "
+            "WHERE policy_type = 'system_prompt' AND policy_name = 'rag_turn' AND version = 1"
+        ).fetchone()
+        assert inactive == (False, "inactive")
+        with pytest.raises(FileNotFoundError, match="active prompt policy not found"):
+            PromptPolicyResolver(db=con).load("system_prompt", "rag_turn")
 
     def test_add_project_member(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import (
@@ -506,6 +736,15 @@ class TestCommandHandlers:
 
 class TestEnqueueTypedCommand:
     """Tests for enqueue_typed_command enrichment and validation."""
+
+    def test_typed_writers_apply_migrations_before_write_ledger(self) -> None:
+        db_queue = Path("packages/shared/src/duckclaw/db_write_queue.py").read_text(encoding="utf-8")
+        db_writer = Path("services/db-writer/main.py").read_text(encoding="utf-8")
+
+        assert "run_pending_migrations(conn)" in db_queue
+        assert db_queue.index("run_pending_migrations(conn)") < db_queue.index("BEGIN TRANSACTION")
+        assert "run_pending_migrations(conn)" in db_writer
+        assert db_writer.index("run_pending_migrations(conn)") < db_writer.index("BEGIN TRANSACTION")
 
     def test_enqueue_typed_command_pushes_enriched_payload_once(self, monkeypatch) -> None:
         import sys

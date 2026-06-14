@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 from langchain_core.runnables import RunnableConfig
 
-from duckclaw.forge.atoms.state import ManagerAgentState
+from duckclaw.graphs.state import ManagerAgentState
 from duckclaw.graphs.sandbox import extract_latest_sandbox_figure_base64
 from duckclaw.graphs.subagent_run_id import acquire_subagent_slot, release_subagent_slot
 from duckclaw.utils.langsmith_trace import get_tracing_config
@@ -31,7 +31,43 @@ from duckclaw.graphs.proactive_review_markers import proactive_review_event_phra
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_plan, log_sys, set_log_context
 
 from duckclaw.guardrails.loader import format_guardrail, load_guardrail, load_guardrail_task_list
+from duckclaw.manager.routing import (
+    _LONE_HTTP_URL_ONLY_LINE,
+    _finanz_worker_in_templates,
+    _is_job_hunter_worker,
+    _pick_finanz_worker_id,
+    _pick_job_hunter_worker,
+    _worker_id_alnum_slug,
+    _worker_matches_id,
+)
+from duckclaw.manager.fast_plans import (
+    _manager_video_generation_intent,
+    _manager_visual_generation_intent,
+    _try_quant_url_research_fast_plan,
+    _try_visual_generation_fast_plan,
+)
+from duckclaw.manager.fast_replies import (
+    _capabilities_fast_reply_text,
+    _greeting_fast_reply_text,
+    _manager_capabilities_fast_path_ok,
+    _manager_greeting_fast_path_ok,
+)
+from duckclaw.manager.task_classification import (
+    _LABOR_OFERTA_RE,
+    _NON_LABOR_OFERTA_RE,
+    _incoming_has_context_summary_system_directive,
+    _incoming_looks_like_semantic_context_followup,
+    _job_action_terms_in_text,
+    _job_labor_terms_in_text,
+    _job_hunter_user_requests_application_tracking,
+    _looks_like_job_add_command,
+    _text_has_word_boundary,
+    _user_signals_cashflow_stress,
+    _worker_should_use_lite_stdio_mcp_surface,
+    job_hunter_user_requests_job_search,
+)
 from duckclaw.workers.factory import explicit_duckdb_schema_request
+from duckclaw.prompt_policies import PromptPolicyResolver
 from duckclaw.graphs.agent_resilience import (
     classify_exception_for_replan,
     format_exhausted_plan_failure,
@@ -303,66 +339,6 @@ def _agent_config_db_for_vault(hub_db: Any, vault_db_path: str | None) -> Any:
     return hub_db
 
 
-def _worker_id_alnum_slug(worker_id: str | None) -> str:
-    """Normaliza id de plantilla (guiones Unicode, espacios) para ramas por worker."""
-    return re.sub(r"[^a-z0-9]", "", (worker_id or "").lower())
-
-
-def _is_job_hunter_worker(worker_id: str | None) -> bool:
-    """True si el id de plantilla corresponde a OSINT JobHunter (carpeta Job-Hunter o id job_hunter)."""
-    w = (worker_id or "").strip()
-    if not w:
-        return False
-    if _worker_id_alnum_slug(w) == "jobhunter":
-        return True
-    norm = w.lower()
-    for ch in ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212", "\uff0d"):
-        norm = norm.replace(ch, "-")
-    norm = norm.replace("_", "-").strip("-")
-    return norm == "job-hunter"
-
-
-def _incoming_has_context_summary_system_directive(incoming: str) -> bool:
-    """Directivas del gateway (/context) con volcado largo (URLs, «oferta», noticias): no son misión Job-Hunter."""
-    s = incoming or ""
-    return (
-        "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in s
-        or "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in s
-    )
-
-
-def _incoming_looks_like_semantic_context_followup(incoming: str) -> bool:
-    """
-    Heurística: el usuario pregunta por notas ya indexadas (VSS) sin pegar el cuerpo.
-    Misma superficie de tools que SUMMARIZE_* (stdio MCP liviano / sin Reddit-GitHub-…).
-    """
-    raw = (incoming or "").strip()
-    if not raw or _incoming_has_context_summary_system_directive(raw):
-        return False
-    t = raw.lower()
-    if re.search(
-        r"\b(qué|que|hay|algo)\s+.+\s+(en el contexto|en mi contexto|en la memoria)\b",
-        t,
-    ):
-        return True
-    if re.search(r"\b(en el contexto|en mi contexto|en la memoria)\s*\?", t):
-        return True
-    if re.search(
-        r"\b(tenemos anotado|hay anotado|notas sobre|contexto indexado|memoria semántica|memoria semantica)\b",
-        t,
-    ):
-        return True
-    if "search_semantic" in t:
-        return True
-    return False
-
-
-def _worker_should_use_lite_stdio_mcp_surface(text: str) -> bool:
-    return _incoming_has_context_summary_system_directive(text) or _incoming_looks_like_semantic_context_followup(
-        text
-    )
-
-
 def _worker_should_use_url_research_mcp_surface(text: str) -> bool:
     """
     Mensaje solo URL (HTTPS): omite GitHub/Trends/Reddit en cold start del grafo worker.
@@ -372,200 +348,6 @@ def _worker_should_use_url_research_mcp_surface(text: str) -> bool:
     if not _LONE_HTTP_URL_ONLY_LINE.match(inc):
         return False
     return not _manager_visual_generation_intent(inc)
-
-
-_NON_LABOR_OFERTA_RE = re.compile(
-    r"shock\s+de\s+oferta|oferta\s+y\s+demanda|oferta\s+petrol|oferta\s+energ",
-    re.IGNORECASE,
-)
-_LABOR_OFERTA_RE = re.compile(
-    r"\boferta(s)?\s+(de\s+)?(empleo|trabajo|laboral)\b|\bofertas?\s+laborales?\b",
-    re.IGNORECASE,
-)
-
-
-def _text_has_word_boundary(term: str, text: str) -> bool:
-    if not term or not text:
-        return False
-    return bool(re.search(rf"\b{re.escape(term)}\b", text, flags=re.IGNORECASE))
-
-
-def _job_labor_terms_in_text(t: str) -> bool:
-    """Términos de mercado laboral; «oferta» sola (p. ej. shock de oferta) no cuenta."""
-    if not t:
-        return False
-    single_word = (
-        "trabajo",
-        "empleo",
-        "vacante",
-        "vacantes",
-        "linkedin",
-        "greenhouse",
-        "lever",
-        "postular",
-        "aplicar",
-        "hiring",
-        "headhunter",
-    )
-    if any(_text_has_word_boundary(w, t) for w in single_word):
-        return True
-    for phrase in ("data scientist", "científico de datos", "ciencia de datos"):
-        if phrase in t:
-            return True
-    if _LABOR_OFERTA_RE.search(t):
-        return True
-    return False
-
-
-def _job_action_terms_in_text(t: str) -> bool:
-    """Acción de búsqueda laboral; evita «buscan» (flujos) por substring de «busca»."""
-    action_terms = (
-        "busca",
-        "busco",
-        "buscar",
-        "encuentra",
-        "dame",
-        "pásame",
-        "pasame",
-        "mandame",
-        "envía",
-        "envia",
-        "url",
-        "enlace",
-        "link",
-        "revisar",
-        "postular",
-        "aplicar",
-        "vacantes",
-    )
-    return any(_text_has_word_boundary(x, t) for x in action_terms) or "http" in t or "www." in t
-
-
-def _looks_like_job_add_command(incoming: str) -> bool:
-    raw = (incoming or "").strip().lower()
-    if not raw:
-        return False
-    return (raw.startswith("/job --add ") or raw.startswith("/job add ")) and (
-        "http://" in raw or "https://" in raw
-    )
-
-
-def job_hunter_user_requests_job_search(incoming: str) -> bool:
-    """
-    True si el texto del usuario (o la TAREA inyectada) implica búsqueda de empleo con acción concreta.
-    Usado por el planner del manager y por el worker (forzar tavily_search en el primer turno).
-    """
-    raw = (incoming or "").strip()
-    if not raw:
-        return False
-    if _incoming_has_context_summary_system_directive(raw):
-        return False
-    t = raw.lower()
-    is_job_add_command = _looks_like_job_add_command(raw)
-    if is_job_add_command:
-        return False
-    if _job_hunter_user_requests_application_tracking(raw):
-        return False
-    # Tareas internas de síntesis / retorno A2A: no forzar Tavily.
-    if any(
-        x in t
-        for x in (
-            "jobhunter completó",
-            "jobhunter completo",
-            "completó la misión",
-            "completo la mision",
-            "sintetiza los resultados",
-            "persistió datos en finance_worker",
-            "persistio datos en finance_worker",
-            "misión a2a job_opportunity_tracking",
-            "mision a2a job_opportunity_tracking",
-        )
-    ):
-        return False
-    if "tavily_search" in t:
-        return True
-    if "tarea:" in t and "tavily" in t:
-        return True
-    # Inyecciones del manager tipo «TAREA: … búsqueda de empleo …» deben disparar Fase 1.
-    if t.startswith("tarea:") and any(
-        k in t
-        for k in (
-            "empleo",
-            "trabajo",
-            "vacante",
-            "búsqueda",
-            "busqueda",
-            "enlace",
-            "enlaces",
-            "url",
-            "postular",
-            "linkedin",
-            "tavily",
-        )
-    ):
-        return True
-    result = _job_labor_terms_in_text(t) and _job_action_terms_in_text(t)
-    return result
-
-
-def _user_signals_cashflow_stress(incoming: str) -> bool:
-    """Detecta estrés de caja / iliquidez en español coloquial."""
-    if _incoming_has_context_summary_system_directive(incoming or ""):
-        return False
-    t = (incoming or "").strip().lower()
-    if not t:
-        return False
-    stress_terms = (
-        "iliquido",
-        "ilíquido",
-        "sin plata",
-        "sin dinero",
-        "sin liquidez",
-        "no me alcanza",
-        "no me va a alcanzar",
-        "necesito ingresos",
-        "ingreso extra",
-        "ingresos extra",
-        "conseguir trabajo",
-        "buscar trabajo",
-        "buscar empleo",
-        "conseguir empleo",
-    )
-    if any(term in t for term in stress_terms):
-        return True
-    # «Flujo de caja» en análisis macro/infra (Quant, tendencias) no es crisis personal de liquidez.
-    if "flujo de caja" in t:
-        return bool(
-            re.search(
-                r"\b(mi|mis|me|mí|no me alcanza|iliquid|ilíquid|sin (plata|dinero|liquidez))\b",
-                t,
-            )
-        )
-    return False
-
-
-def _pick_job_hunter_worker(available_templates: list[str]) -> Optional[str]:
-    """Retorna el worker JobHunter presente en el team efectivo."""
-    for wid in available_templates or []:
-        if _is_job_hunter_worker(wid):
-            return wid
-    return None
-
-
-def _finanz_worker_in_templates(available_templates: list[str]) -> bool:
-    """True si el equipo incluye al worker finanz (A2A Manager → Finanz → JobHunter → Finanz)."""
-    for wid in available_templates or []:
-        if _worker_matches_id(wid, "finanz"):
-            return True
-    return False
-
-
-def _pick_finanz_worker_id(available_templates: list[str]) -> str | None:
-    """Id canónico del worker finanz en el catálogo del tenant, si existe."""
-    for wid in available_templates or []:
-        if _worker_matches_id(wid, "finanz"):
-            return str(wid).strip() or None
-    return None
 
 
 def _duckdb_admin_write_intent(text: str) -> bool:
@@ -592,45 +374,6 @@ def _duckdb_admin_write_intent(text: str) -> bool:
     ):
         return True
     return False
-
-
-def _job_hunter_user_requests_application_tracking(incoming: str) -> bool:
-    """
-    Seguimiento de postulaciones ya guardadas (DuckDB), sin discovery Tavily.
-    Ej.: «dame el seguimiento de las vacantes a las que he aplicado».
-    """
-    raw = (incoming or "").strip()
-    if not raw:
-        return False
-    tl = raw.lower()
-    if tl.startswith("tarea:"):
-        return False
-    tracking_kw = (
-        "seguimiento",
-        "postulaciones",
-        "postulación",
-        "postulacion",
-        "aplicaciones enviadas",
-        "apliqué",
-        "aplique",
-        "he aplicado",
-        "a las que he aplicado",
-        "donde apliqué",
-        "donde aplique",
-        "estado de mis postul",
-        "mis postul",
-        "mis aplicaciones",
-    )
-    if not any(k in tl for k in tracking_kw):
-        return False
-    job_kw = ("vacante", "vacantes", "empleo", "trabajo", "postul", "aplic", "oferta", "ofertas")
-    return any(k in tl for k in job_kw)
-
-
-def _worker_matches_id(worker_id: str | None, alias: str | None) -> bool:
-    """Compara ids de worker tolerando guiones/underscores/case."""
-    return _worker_id_alnum_slug(worker_id) == _worker_id_alnum_slug(alias)
-
 
 def _strip_mercenary_spec_for_browser_worker(
     out: dict[str, Any], templates_root: Path | None = None, db: Any = None
@@ -717,12 +460,6 @@ def _should_disable_mercenary_for_browser_intent(
         return False
     low = blob.lower()
     return any(m in low for m in _BROWSER_MERCENARY_INTENT_MARKERS)
-
-
-_LONE_HTTP_URL_ONLY_LINE = re.compile(
-    r"^\s*https?://[^\s]+\s*$",
-    re.I,
-)
 
 
 def _should_disable_mercenary_for_quant_lone_https_url(
@@ -1305,126 +1042,6 @@ def _try_quant_generic_affirm_followup(
     return (title, task_list, planned, "Quant-Trader")
 
 
-def _manager_visual_generation_intent(incoming: str) -> bool:
-    """Pedido explícito de imagen (txt2img) → delegar a Quant-Trader sin planner MLX."""
-    s = (incoming or "").strip()
-    if not s or len(s) > 2000:
-        return False
-    low = s.lower()
-    if re.search(
-        r"(?:\b(?:genera|generar|crea|crear|dibuja|dibujar|haz(?:me)?|hacer|pinta|pintar)\b.{0,50}\b(?:imagen(?:es)?|foto(?:s)?|ilustraci[oó]n(?:es)?|caricatura(?:s)?|avatar(?:es)?|picture|image(?:s)?)\b)",
-        low,
-        re.IGNORECASE | re.DOTALL,
-    ):
-        return True
-    return bool(
-        re.search(
-            r"\b(?:txt2img|text-to-image|stable\s*diffusion|comfyui)\b",
-            low,
-            re.IGNORECASE,
-        )
-    )
-
-
-def _pick_quant_trader_worker(available_templates: list[str]) -> Optional[str]:
-    for wid in available_templates or []:
-        if _worker_matches_id(wid, "quant_trader"):
-            return wid
-    return None
-
-
-def _manager_video_generation_intent(incoming: str) -> bool:
-    low = (incoming or "").strip().lower()
-    if not low:
-        return False
-    return bool(
-        re.search(
-            r"\b(?:video|clip|animacion|animación|kling|reel|mp4)\b",
-            low,
-            re.IGNORECASE,
-        )
-    )
-
-
-def _try_visual_generation_fast_plan(
-    incoming: str,
-    available_plan: list[str],
-    *,
-    db: Any = None,
-    chat_id: Any = None,
-) -> tuple[str, list[str], str, str] | None:
-    """Evita planner MLX lento en admin/Telegram cuando el usuario pide una imagen."""
-    if not _manager_visual_generation_intent(incoming):
-        return None
-    qt = _pick_quant_trader_worker(available_plan)
-    if not qt:
-        return None
-    _tool = "generate_visual_asset"
-    _title = "Generar imagen (ComfyUI local)"
-    try:
-        from duckclaw.forge.skills.visual_provider import resolve_visual_provider
-
-        _prov = resolve_visual_provider(db, chat_id)
-        if _prov == "fal":
-            if _manager_video_generation_intent(incoming):
-                _tool = "generate_kling_video"
-                _title = "Generar video (Fal.ai Kling)"
-            else:
-                _tool = "generate_flux_image"
-                _title = "Generar imagen elite (Fal.ai Flux)"
-    except Exception:
-        pass
-    title = _title
-    task_list = [
-        f"Usar {_tool} una sola vez con el prompt del usuario.",
-        "No repetir la herramienta si ya hubo un ToolMessage OK en este turno.",
-    ]
-    planned = (incoming or "").strip()
-    log_sys(_obs, "Plan rápido imagen → %s (sin planner MLX)", qt)
-    return (title, task_list, planned, qt)
-
-
-def _try_quant_url_research_fast_plan(
-    incoming: str,
-    available_plan: list[str],
-) -> tuple[str, list[str], str, str] | None:
-    """
-    Mensaje solo URL (HTTPS): evita planner MLX lento (admin con historial largo de imágenes).
-    Telegram suele ser más rápido porque el chat_id tiene pocos turnos; el admin reutiliza el mismo
-    chat_id con decenas de turnos ComfyUI en Redis.
-    """
-    inc = (incoming or "").strip()
-    if not _LONE_HTTP_URL_ONLY_LINE.match(inc):
-        return None
-    if _manager_visual_generation_intent(inc):
-        return None
-    qt = _pick_quant_trader_worker(available_plan)
-    if not qt:
-        return None
-    low = inc.lower()
-    if "reddit.com" in low:
-        title = "Investigar enlace Reddit"
-        task_list = [
-            "Usar reddit_get_post o reddit_search_reddit con el enlace del usuario.",
-            "Sintetizar hallazgos; no inventar contenido del post.",
-        ]
-    elif "mql5.com" in low:
-        title = "Extraer código MQL5 (browser)"
-        task_list = [
-            "Usar run_browser_sandbox primero (PROTOCOLO MQL5, plantilla stealth).",
-            "No usar solo tavily_search sin haber pasado por el sandbox para esta URL.",
-        ]
-    else:
-        title = "Investigar URL"
-        task_list = [
-            "Usar run_browser_sandbox o tavily_search según el dominio.",
-            "Entregar resumen con evidencia de tools del mismo turno.",
-        ]
-    planned = inc
-    log_sys(_obs, "Plan rápido URL → %s (sin planner MLX)", qt)
-    return (title, task_list, planned, qt)
-
-
 _FINANZ_TOOL_PRESSURE_TASK = load_guardrail("manager_tasks", "finanz_tool_pressure")
 
 
@@ -1820,72 +1437,6 @@ def _resolve_orchestrator_delegate(
     return delegate or coordinator_id
 
 
-def _manager_greeting_fast_path_ok(incoming: str) -> bool:
-    """Saludo corto sin comando fly: evita plan LLM y delegación al worker."""
-    raw = (incoming or "").strip()
-    if not raw or raw.startswith("/"):
-        return False
-    from duckclaw.graphs.on_the_fly_commands import _is_simple_greeting
-
-    return _is_simple_greeting(raw)
-
-
-def _manager_capabilities_fast_path_ok(incoming: str) -> bool:
-    """«Qué puedes hacer?» y similares: respuesta fija sin plan ni subagente."""
-    raw = (incoming or "").strip()
-    if not raw or raw.startswith("/"):
-        return False
-    from duckclaw.graphs.on_the_fly_commands import _is_capabilities_smalltalk
-
-    return _is_capabilities_smalltalk(raw)
-
-
-def _greeting_fast_reply_text(worker_id: str | None) -> str:
-    w = (worker_id or "").strip()
-    wl = w.lower()
-    if _is_job_hunter_worker(w):
-        return (
-            "Hola. Soy **OSINT JobHunter** (búsqueda y extracción de ofertas). "
-            "Di rol, ubicación o remoto y, si quieres, portales (LinkedIn, Lever, etc.). "
-            "Necesitas `/sandbox on` para ejecutar código en el contenedor browser."
-        )
-    if wl == "bi-analyst":
-        return (
-            "Hola. Soy tu analista de BI (DuckDB): consultas de solo lectura, esquema, métricas y gráficos cuando lo pidas. "
-            "¿Qué quieres revisar?"
-        )
-    if w:
-        return f"Hola. Aquí {w}. ¿En qué puedo ayudarte?"
-    return "Hola. ¿En qué puedo ayudarte?"
-
-
-def _capabilities_fast_reply_text(
-    worker_id: str | None,
-    *,
-    coordinator_id: str | None = None,
-    delegation_pool: list[str] | None = None,
-) -> str:
-    coord = (coordinator_id or "").strip()
-    pool = [x for x in (delegation_pool or []) if (x or "").strip()]
-    if coord and pool:
-        lines = "\n".join(f"- {w}" for w in pool)
-        return format_guardrail("capabilities", "axis_coordinator", coord=coord, lines=lines)
-    w = (worker_id or "").strip()
-    wl = w.lower()
-    wl_norm = wl.replace("_", "-")
-    if _is_job_hunter_worker(w):
-        return load_guardrail("capabilities", "job_hunter")
-    if wl == "bi-analyst":
-        return load_guardrail("capabilities", "bi_analyst")
-    if wl == "finanz":
-        return load_guardrail("capabilities", "finanz")
-    if wl_norm == "siata-analyst":
-        return load_guardrail("capabilities", "siata_analyst")
-    if w:
-        return format_guardrail("capabilities", "generic_worker", worker_id=w)
-    return load_guardrail("capabilities", "default_fallback")
-
-
 def _task_summary_for_activity(incoming: str, planned_task: str) -> str:
     """Resumen corto de la tarea para /tasks (activity), no el planned_task completo."""
     t = (incoming or "").strip().lower()
@@ -2033,8 +1584,13 @@ def build_manager_graph(
         pool = list(state.get("delegation_pool") or [])
         if _manager_capabilities_fast_path_ok(incoming):
             log_sys(_obs, "Capacidades: respuesta directa (sin plan ni subagente)")
+            _vault_path_reply = (state.get("vault_db_path") or "").strip()
+            _reply_policy_db = _agent_config_db_for_vault(db, _vault_path_reply or None)
             reply = _capabilities_fast_reply_text(
-                assigned, coordinator_id=coord, delegation_pool=pool
+                assigned,
+                coordinator_id=coord,
+                delegation_pool=pool,
+                prompt_policies=PromptPolicyResolver(_reply_policy_db),
             )
             _audit_title = "Capacidades (respuesta directa)"
         else:
@@ -2804,32 +2360,6 @@ def build_manager_graph(
                         "inferencia: error no transitorio en invoke del worker "
                         f"({(worker_invoke.get('_duckclaw_worker_llm_failure_kind') or 'unknown')})",
                     )
-                elif (assigned or "").strip() == "PQRSD-Assistant":
-                    try:
-                        from duckclaw.forge.atoms.pqrsd_registration_egress_guard import (
-                            pqrsd_persist_tool_used,
-                            pqrsd_reply_claims_internal_registration,
-                        )
-
-                        _pqrsd_replan = pqrsd_reply_claims_internal_registration(
-                            raw_worker_reply
-                        ) and not pqrsd_persist_tool_used(_tools_list)
-                    except Exception:
-                        _pqrsd_replan = False
-                    if _pqrsd_replan:
-                        _rp = "pqrsd: radicación afirmada sin admin_sql ni pqrsd_registrar_radicacion_crm"
-                        reasons_acc = merge_failure_reasons(reasons_acc, _rp)
-                        if pa + 1 < max_a:
-                            replan_after = True
-                            next_plan_attempt = pa + 1
-                            log_sys(
-                                _obs,
-                                "manager replan: PQRSD sin persist -> intento %s/%s",
-                                pa + 2,
-                                max_a,
-                            )
-                        else:
-                            exhausted_final = True
                 else:
                     try:
                         from duckclaw.workers.tool_orchestration import (

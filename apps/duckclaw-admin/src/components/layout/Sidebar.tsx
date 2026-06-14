@@ -42,6 +42,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/kanban': LayoutGrid,
   '/templates': Bot,
   '/projects': FolderPlus,
+  '/knowledge': Database,
   '/skills': Blocks,
   '/mcp': Cable,
   '/playground': MessageCircle,

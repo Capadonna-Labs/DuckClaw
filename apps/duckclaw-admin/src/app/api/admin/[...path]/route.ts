@@ -84,6 +84,11 @@ const OPS_COMMANDS_FALLBACK = {
 };
 
 const WRITE_METHODS = new Set(['PUT', 'PATCH', 'POST', 'DELETE']);
+const LOCAL_OPS_ALLOWLIST: Record<string, string[]> = {
+  pm2_restart_db_writer: ['pm2', 'restart', 'DuckClaw-DB-Writer', '--update-env'],
+  pm2_restart_gateway: ['pm2', 'restart', 'DuckClaw-Gateway', '--update-env'],
+  pm2_start_gateway: ['pm2', 'start', 'config/ecosystem.api.config.cjs', '--only', 'DuckClaw-Gateway', '--update-env'],
+};
 
 function userWriteAllowed(sub: string, method: string): boolean {
   if (method === 'POST' && sub === 'projects') return true;
@@ -129,6 +134,50 @@ async function projectDetailFallbackFromList(
   };
 }
 
+async function localOpsRunFallback(sub: string, method: string, bodyText: string): Promise<NextResponse | null> {
+  if (sub !== 'ops/run' || method !== 'POST') return null;
+  let opId = '';
+  try {
+    const parsed = JSON.parse(bodyText || '{}') as { op_id?: string };
+    opId = String(parsed.op_id || '').trim();
+  } catch {
+    return NextResponse.json({ detail: 'Payload ops/run inválido' }, { status: 400 });
+  }
+  const argv = LOCAL_OPS_ALLOWLIST[opId];
+  if (!argv) {
+    return NextResponse.json({ detail: 'Comando local no permitido', op_id: opId }, { status: 403 });
+  }
+
+  const { execFile } = await import('node:child_process');
+  const cwd = process.env.DUCKCLAW_REPO_ROOT?.trim() || process.cwd();
+  return new Promise((resolve) => {
+    execFile(
+      argv[0],
+      argv.slice(1),
+      { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => {
+        const exitCode =
+          typeof (error as NodeJS.ErrnoException | null)?.code === 'number'
+            ? Number((error as NodeJS.ErrnoException).code)
+            : error
+              ? 1
+              : 0;
+        resolve(
+          NextResponse.json({
+            ok: exitCode === 0,
+            op_id: opId,
+            exit_code: exitCode,
+            stdout: String(stdout || ''),
+            stderr: String(stderr || ''),
+            executed_via: 'bff-local',
+            _gateway_stale: true,
+          })
+        );
+      }
+    );
+  });
+}
+
 async function proxy(req: NextRequest, segments: string[]) {
   const base = gatewayBase();
   const key = adminApiKey();
@@ -166,10 +215,17 @@ async function proxy(req: NextRequest, segments: string[]) {
   if (actor) headers['X-Duckclaw-Actor'] = actor;
   const ct = req.headers.get('content-type');
   if (ct) headers['Content-Type'] = ct;
+  const isMultipart = ct?.toLowerCase().includes('multipart/form-data') ?? false;
 
+  let bodyText = '';
   const init: RequestInit = { method: req.method, headers, cache: 'no-store' };
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    init.body = await req.text();
+    if (isMultipart) {
+      init.body = await req.arrayBuffer();
+    } else {
+      bodyText = await req.text();
+      init.body = bodyText;
+    }
   }
 
   let res: Response;
@@ -179,6 +235,8 @@ async function proxy(req: NextRequest, segments: string[]) {
     text = await res.text();
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'fetch failed';
+    const localOps = await localOpsRunFallback(sub, req.method, bodyText);
+    if (localOps) return localOps;
     if (sub === 'health') {
       return NextResponse.json(
         {
@@ -248,6 +306,17 @@ async function proxy(req: NextRequest, segments: string[]) {
       {
         detail:
           'El Gateway no expone Platform Orchestrator todavía. Reinicia DuckClaw-Gateway con PM2 para cargar las rutas DB-first nuevas.',
+        code: 'gateway_stale',
+      },
+      { status: 503 }
+    );
+  }
+
+  if (res.status === 404 && sub.startsWith('knowledge/')) {
+    return NextResponse.json(
+      {
+        detail:
+          'El Gateway no expone Knowledge/RAG todavía. Reinicia DuckClaw-Gateway con PM2 para cargar las rutas DB-first nuevas.',
         code: 'gateway_stale',
       },
       { status: 503 }

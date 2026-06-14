@@ -256,6 +256,9 @@ def enqueue_typed_command(
         status = DbWriteTaskStatus(status="success")
         _raised: BaseException | None = None
         try:
+            from duckclaw.schema_migrations import run_pending_migrations
+
+            run_pending_migrations(conn)
             conn.execute("BEGIN TRANSACTION")
             from duckclaw.write_command_handlers import dispatch_command
 

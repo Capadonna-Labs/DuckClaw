@@ -2,7 +2,7 @@
 DDL idempotente del núcleo DuckClaw (perfil genérico / Spawn).
 
 Spec: docs/specs/features/platform/SPAWN_GENERIC_DEPLOY.md
-Sin esquemas de dominio (quant_core, pqrsd_crm, finance_worker, run_schema forge).
+Sin esquemas de dominio (quant_core, finance_worker, run_schema forge).
 Las migraciones versionadas están en duckclaw.schema_migrations.
 """
 
@@ -153,7 +153,7 @@ def core_domain_schemas_present(con: Any) -> list[str]:
     rows = con.execute(
         """
         SELECT schema_name FROM information_schema.schemata
-        WHERE schema_name IN ('quant_core', 'pqrsd_crm', 'finance_worker')
+        WHERE schema_name IN ('quant_core', 'finance_worker')
         """
     ).fetchall()
     return [str(r[0]) for r in rows]

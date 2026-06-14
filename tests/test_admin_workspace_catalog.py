@@ -146,10 +146,10 @@ def test_orchestrator_draft_suggests_available_skills_without_creating_project(
         adapter = _Adapter(con)
         register_skill(
             adapter,
-            name="crm_lookup",
-            description="Consulta clientes CRM",
+            name="ticket_lookup",
+            description="Consulta tickets de soporte",
             skill_type="python",
-            implementation_ref="duckclaw.skills.crm",
+            implementation_ref="duckclaw.skills.ticket_lookup",
             owner_email="alice@test.local",
         )
         before_projects = con.execute(
@@ -161,20 +161,20 @@ def test_orchestrator_draft_suggests_available_skills_without_creating_project(
     response = gateway_admin_client.post(
         "/api/v1/admin/workspace/orchestrator/draft",
         headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
-        json={"prompt": "Crear un proyecto para consultar clientes CRM y responder casos de soporte"},
+        json={"prompt": "Crear un proyecto para consultar tickets y responder casos de soporte"},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["project"]["name"]
-    assert body["project"]["description"] != "Crear un proyecto para consultar clientes CRM y responder casos de soporte"
+    assert body["project"]["description"] != "Crear un proyecto para consultar tickets y responder casos de soporte"
     assert "Proyecto orientado" in body["project"]["description"]
     assert body["workers"][0]["worker_id"]
     assert body["workers"][0]["display_name"] != body["project"]["name"]
     assert "Asistente" in body["workers"][0]["display_name"]
     assert "Lectura del objetivo" in body["shared_context"]
     assert "Análisis del Orchestrator" in body["shared_context"]
-    assert any(skill["name"] == "crm_lookup" and skill["available"] for skill in body["suggested_skills"])
+    assert any(skill["name"] == "ticket_lookup" and skill["available"] for skill in body["suggested_skills"])
 
     con = duckdb.connect(str(gateway_db))
     try:
@@ -268,17 +268,17 @@ def test_orchestrator_confirm_creates_project_workers_context_and_assignments(
     gateway_admin_client,
 ) -> None:
     draft = {
-        "project": {"name": "Soporte CRM", "description": "Atiende casos con datos CRM"},
+        "project": {"name": "Soporte Tickets", "description": "Atiende casos con datos de soporte"},
         "workers": [
             {
-                "worker_id": "crm-support-agent",
-                "display_name": "CRM Support Agent",
+                "worker_id": "ticket-support-agent",
+                "display_name": "Ticket Support Agent",
                 "role": "member",
-                "system_prompt": "Ayuda a resolver casos usando contexto CRM.",
+                "system_prompt": "Ayuda a resolver casos usando contexto de soporte.",
             }
         ],
-        "shared_context": "# Contexto CRM\nUsar tono claro.",
-        "suggested_skills": [{"name": "crm_lookup", "reason": "consulta clientes", "available": False}],
+        "shared_context": "# Contexto soporte\nUsar tono claro.",
+        "suggested_skills": [{"name": "ticket_lookup", "reason": "consulta tickets", "available": False}],
         "questions": [],
     }
     response = gateway_admin_client.post(
@@ -290,8 +290,8 @@ def test_orchestrator_confirm_creates_project_workers_context_and_assignments(
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
-    assert payload["project"]["name"] == "Soporte CRM"
-    assert payload["created"]["workers"][0]["worker_id"] == "crm-support-agent"
+    assert payload["project"]["name"] == "Soporte Tickets"
+    assert payload["created"]["workers"][0]["worker_id"] == "ticket-support-agent"
 
     con = duckdb.connect(str(gateway_db))
     try:
@@ -309,7 +309,7 @@ def test_orchestrator_confirm_creates_project_workers_context_and_assignments(
     finally:
         con.close()
 
-    assert row == ("Soporte CRM", "crm-support-agent", "Contexto compartido")
+    assert row == ("Soporte Tickets", "ticket-support-agent", "Contexto compartido")
 
 
 def test_contexts_skills_and_capabilities_are_many_to_many(gateway_db: Path) -> None:
@@ -343,7 +343,12 @@ def test_contexts_skills_and_capabilities_are_many_to_many(gateway_db: Path) -> 
         add_worker_context(adapter, worker_uid=coder["worker_uid"], title="Dominio", content_md="# Dominio", sort_order=20)
         add_worker_context(adapter, worker_uid=coder["worker_uid"], title="Estilo", content_md="# Estilo", sort_order=10)
 
-        skill = register_skill(adapter, name="crm_lookup", skill_type="python", implementation_ref="duckclaw.skills.crm")
+        skill = register_skill(
+            adapter,
+            name="ticket_lookup",
+            skill_type="python",
+            implementation_ref="duckclaw.skills.ticket_lookup",
+        )
         attach_skill_to_worker(adapter, worker_uid=coder["worker_uid"], skill_id=skill["skill_id"])
         attach_skill_to_worker(adapter, worker_uid=mirror["worker_uid"], skill_id=skill["skill_id"])
 
@@ -371,8 +376,8 @@ def test_contexts_skills_and_capabilities_are_many_to_many(gateway_db: Path) -> 
         con.close()
 
     assert [c["title"] for c in contexts] == ["Estilo", "Dominio"]
-    assert [s["name"] for s in coder_skills] == ["crm_lookup"]
-    assert [s["name"] for s in mirror_skills] == ["crm_lookup"]
+    assert [s["name"] for s in coder_skills] == ["ticket_lookup"]
+    assert [s["name"] for s in mirror_skills] == ["ticket_lookup"]
     assert capabilities[0]["name"] == "duckdb_read"
     assert capabilities[0]["permission"] == "read"
 
@@ -529,7 +534,7 @@ def test_gateway_workspace_projects_support_search_sort_and_pagination(
     gateway_db: Path,
 ) -> None:
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
-    names = ["FastAPI Academy", "CRM Support", "FastAPI RAG"]
+    names = ["FastAPI Academy", "Ticket Support", "FastAPI RAG"]
     for name in names:
         created = gateway_admin_client.post(
             "/api/v1/admin/workspace/projects",

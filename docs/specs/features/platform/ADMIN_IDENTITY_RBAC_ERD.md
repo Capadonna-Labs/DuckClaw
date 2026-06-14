@@ -27,16 +27,14 @@ No es una “tabla padre” como tal. Es más parecido a una base de datos centr
 - Grants a bases compartidas.
 - Configuración por chat/agente.
 
-La ruta se resuelve en orden desde variables como:
+La ruta se resuelve en orden desde variables genéricas:
 
-1. `DUCKCLAW_WAR_ROOM_ACL_DB_PATH`
-2. `DUCKCLAW_FINANZ_DB_PATH`
-3. `DUCKCLAW_JOB_HUNTER_DB_PATH`
-4. `DUCKCLAW_SIATA_DB_PATH`
-5. `DUCKCLAW_QUANT_TRADER_DB_PATH`
-6. `DUCKCLAW_PQRSD_ASSISTANT_DB_PATH`
-7. `DUCKCLAW_AXIS_DB_PATH`
-8. `DUCKDB_PATH`
+1. `DUCKCLAW_GATEWAY_DB_PATH`
+2. `DUCKCLAW_TENANT_DB_PATH`
+3. `DUCKCLAW_VAULT_DB_PATH`
+4. `DUCKDB_PATH`
+
+`DUCKCLAW_WAR_ROOM_ACL_DB_PATH` solo fuerza la base de lectura ACL de War Room; no redefine el hub efectivo del gateway.
 
 ### Identidad de Consola
 

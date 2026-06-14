@@ -35,6 +35,7 @@ def test_agents_runtime_and_manager_facades_expose_public_contracts() -> None:
         ("duckclaw.manager.routing", "clear_worker_graph_cache"),
         ("duckclaw.manager.routing", "_worker_matches_id"),
         ("duckclaw.manager.fast_plans", "_try_quant_url_research_fast_plan"),
+        ("duckclaw.manager.task_classification", "job_hunter_user_requests_job_search"),
         ("duckclaw.manager.planning", "_plan_task"),
     )
     for module_name, attr in modules:

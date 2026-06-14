@@ -5463,9 +5463,13 @@ def build_worker_graph(
                         job_hunter_user_requests_job_search,
                     )
                     from duckclaw.graphs.on_the_fly_commands import _is_capabilities_smalltalk, _is_simple_greeting
+                    from duckclaw.prompt_policies import PromptPolicyResolver
 
                     if _is_capabilities_smalltalk(incoming):
-                        jh_fast_text = _capabilities_fast_reply_text(spec.worker_id)
+                        jh_fast_text = _capabilities_fast_reply_text(
+                            spec.worker_id,
+                            prompt_policies=PromptPolicyResolver(db),
+                        )
                     elif _is_simple_greeting(incoming):
                         jh_fast_text = _greeting_fast_reply_text(spec.worker_id)
                     force_tavily = bool(

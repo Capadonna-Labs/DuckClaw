@@ -62,6 +62,14 @@ def _finanz_worker_in_templates(available_templates: list[str]) -> bool:
     return False
 
 
+def _pick_finanz_worker_id(available_templates: list[str]) -> str | None:
+    """Id canonico del worker finanz en el catalogo del tenant, si existe."""
+    for wid in available_templates or []:
+        if _worker_matches_id(wid, "finanz"):
+            return str(wid).strip() or None
+    return None
+
+
 def _pick_quant_trader_worker(available_templates: list[str]) -> str | None:
     for wid in available_templates or []:
         if _worker_matches_id(wid, "quant_trader"):
@@ -73,6 +81,7 @@ __all__ = [
     "_LONE_HTTP_URL_ONLY_LINE",
     "_finanz_worker_in_templates",
     "_is_job_hunter_worker",
+    "_pick_finanz_worker_id",
     "_pick_job_hunter_worker",
     "_pick_quant_trader_worker",
     "_worker_id_alnum_slug",

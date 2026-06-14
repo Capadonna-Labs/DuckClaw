@@ -6,12 +6,16 @@ import re
 from typing import Any
 
 from duckclaw.guardrails.loader import load_guardrail
+from duckclaw.manager.fast_replies import (
+    _capabilities_fast_reply_text,
+    _greeting_fast_reply_text,
+    _manager_capabilities_fast_path_ok,
+    _manager_greeting_fast_path_ok,
+)
 from duckclaw.manager.routing import (
     _LONE_HTTP_URL_ONLY_LINE,
-    _is_job_hunter_worker,
     _pick_quant_trader_worker,
 )
-from duckclaw.prompt_policies import PromptPolicyResolver
 from duckclaw.utils.logger import get_obs_logger, log_sys
 
 
@@ -247,9 +251,25 @@ def _manager_visual_generation_intent(incoming: str) -> bool:
     return bool(re.search(r"\b(?:txt2img|text-to-image|stable\s*diffusion|comfyui)\b", low, re.IGNORECASE))
 
 
+def _manager_video_generation_intent(incoming: str) -> bool:
+    text = (incoming or "").strip().lower()
+    if not text:
+        return False
+    return bool(
+        re.search(
+            r"\b(?:video|clip|animacion|animación|kling|reel|mp4)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _try_visual_generation_fast_plan(
     incoming: str,
     available_plan: list[str],
+    *,
+    db: Any = None,
+    chat_id: Any = None,
 ) -> tuple[str, list[str], str, str] | None:
     """Evita planner MLX lento en admin/Telegram cuando el usuario pide una imagen."""
     if not _manager_visual_generation_intent(incoming):
@@ -257,9 +277,23 @@ def _try_visual_generation_fast_plan(
     quant_trader = _pick_quant_trader_worker(available_plan)
     if not quant_trader:
         return None
-    title = "Generar imagen (ComfyUI)"
+    tool_name = "generate_visual_asset"
+    title = "Generar imagen (ComfyUI local)"
+    try:
+        from duckclaw.forge.skills.visual_provider import resolve_visual_provider
+
+        visual_provider = resolve_visual_provider(db, chat_id)
+        if visual_provider == "fal":
+            if _manager_video_generation_intent(incoming):
+                tool_name = "generate_kling_video"
+                title = "Generar video (Fal.ai Kling)"
+            else:
+                tool_name = "generate_flux_image"
+                title = "Generar imagen elite (Fal.ai Flux)"
+    except Exception:
+        pass
     task_list = [
-        "Usar generate_visual_asset una sola vez con el prompt del usuario.",
+        f"Usar {tool_name} una sola vez con el prompt del usuario.",
         "No repetir la herramienta si ya hubo un ToolMessage OK en este turno.",
     ]
     planned = (incoming or "").strip()
@@ -304,83 +338,12 @@ def _try_quant_url_research_fast_plan(
     return (title, task_list, planned, quant_trader)
 
 
-def _manager_greeting_fast_path_ok(incoming: str) -> bool:
-    """Saludo corto sin comando fly: evita plan LLM y delegación al worker."""
-    raw = (incoming or "").strip()
-    if not raw or raw.startswith("/"):
-        return False
-    from duckclaw.graphs.on_the_fly_commands import _is_simple_greeting
-
-    return _is_simple_greeting(raw)
-
-
-def _manager_capabilities_fast_path_ok(incoming: str) -> bool:
-    """"Qué puedes hacer?" y similares: respuesta fija sin plan ni subagente."""
-    raw = (incoming or "").strip()
-    if not raw or raw.startswith("/"):
-        return False
-    from duckclaw.graphs.on_the_fly_commands import _is_capabilities_smalltalk
-
-    return _is_capabilities_smalltalk(raw)
-
-
-def _greeting_fast_reply_text(worker_id: str | None) -> str:
-    worker = (worker_id or "").strip()
-    worker_lower = worker.lower()
-    if _is_job_hunter_worker(worker):
-        return (
-            "Hola. Soy **OSINT JobHunter** (búsqueda y extracción de ofertas). "
-            "Di rol, ubicación o remoto y, si quieres, portales (LinkedIn, Lever, etc.). "
-            "Necesitas `/sandbox on` para ejecutar código en el contenedor browser."
-        )
-    if worker_lower == "bi-analyst":
-        return (
-            "Hola. Soy tu analista de BI (DuckDB): consultas de solo lectura, esquema, métricas y gráficos cuando lo pidas. "
-            "¿Qué quieres revisar?"
-        )
-    if worker:
-        return f"Hola. Aquí {worker}. ¿En qué puedo ayudarte?"
-    return "Hola. ¿En qué puedo ayudarte?"
-
-
-def _capabilities_fast_reply_text(
-    worker_id: str | None,
-    *,
-    coordinator_id: str | None = None,
-    delegation_pool: list[str] | None = None,
-    prompt_policies: PromptPolicyResolver | None = None,
-) -> str:
-    if prompt_policies is None:
-        raise RuntimeError(
-            "capabilities fast reply requires an injected PromptPolicyResolver "
-            "with a migrated DuckDB connection"
-        )
-    coord = (coordinator_id or "").strip()
-    pool = [x for x in (delegation_pool or []) if (x or "").strip()]
-    if coord and pool:
-        lines = "\n".join(f"- {worker}" for worker in pool)
-        return prompt_policies.format("capability", "axis_coordinator", coord=coord, lines=lines)
-    worker = (worker_id or "").strip()
-    worker_lower = worker.lower()
-    worker_lower_norm = worker_lower.replace("_", "-")
-    if _is_job_hunter_worker(worker):
-        return prompt_policies.load("capability", "job_hunter")
-    if worker_lower == "bi-analyst":
-        return prompt_policies.load("capability", "bi_analyst")
-    if worker_lower == "finanz":
-        return prompt_policies.load("capability", "finanz")
-    if worker_lower_norm == "siata-analyst":
-        return prompt_policies.load("capability", "siata_analyst")
-    if worker:
-        return prompt_policies.format("capability", "generic_worker", worker_id=worker)
-    return prompt_policies.load("capability", "default_fallback")
-
-
 __all__ = [
     "_capabilities_fast_reply_text",
     "_greeting_fast_reply_text",
     "_manager_capabilities_fast_path_ok",
     "_manager_greeting_fast_path_ok",
+    "_manager_video_generation_intent",
     "_manager_visual_generation_intent",
     "_try_quant_generic_affirm_followup",
     "_try_quant_hrp_affirm_followup",

@@ -17,7 +17,10 @@ from duckops.sovereign.atomic import atomic_write
 from duckops.sovereign.docker_compose import write_compose_override
 from duckops.sovereign.draft import SovereignDraft
 from duckops.sovereign.redis_local import try_start_redis_local
-from duckops.sovereign.strix_policy import patch_security_policy
+try:
+    from duckops.sovereign.strix_policy import patch_security_policy
+except ImportError:
+    patch_security_policy = None
 from duckops.sovereign.stack_health import ensure_db_writer_pm2
 from duckops.sovereign.telegram_set_webhook import register_telegram_webhook_after_deploy
 
@@ -862,7 +865,8 @@ def materialize(
         _db_abs = _resolve_repo_db_path(repo_root, primary_rel)
         seed_telegram_guard_admins(repo_root, _db_abs, draft, console_print)
 
-    patch_security_policy(repo_root, draft.default_worker_id)
+    if patch_security_policy is not None:
+        patch_security_policy(repo_root, draft.default_worker_id)
 
     patch_api_gateways_pm2_for_draft(repo_root, draft, console_print)
     try:

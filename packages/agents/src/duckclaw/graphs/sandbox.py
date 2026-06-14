@@ -211,6 +211,57 @@ def _ensure_image(client: Any, image: str | None = None, *, allow_python_fallbac
         raise RuntimeError(f"No se pudo obtener ninguna imagen Docker para el sandbox: {e}") from e
 
 
+_FUTURE_STMT_RE = re.compile(r"^[ \t]*from __future__ import [^\n]+", re.MULTILINE)
+
+
+def _split_sandbox_user_code(code: str) -> tuple[str, str, str]:
+    """
+    Separa docstring de módulo, sentencias ``from __future__`` y el resto (PEP 236).
+
+    El header matplotlib se inyecta *después* del futuro para que ``python3 -c`` no falle
+    con ``from __future__ imports must occur at the beginning of the file``.
+    """
+    lines = (code or "").splitlines(keepends=True)
+    idx = 0
+    while idx < len(lines) and not lines[idx].strip():
+        idx += 1
+    doc = ""
+    if idx < len(lines):
+        first = lines[idx].strip()
+        if first.startswith(('"""', "'''")):
+            quote = first[:3]
+            if first.count(quote) >= 2 and len(first) > 6:
+                doc = lines[idx]
+                idx += 1
+            else:
+                buf = [lines[idx]]
+                idx += 1
+                while idx < len(lines):
+                    buf.append(lines[idx])
+                    if quote in lines[idx]:
+                        idx += 1
+                        break
+                    idx += 1
+                doc = "".join(buf)
+    while idx < len(lines) and not lines[idx].strip():
+        idx += 1
+    futures: list[str] = []
+    while idx < len(lines):
+        line = lines[idx]
+        if _FUTURE_STMT_RE.match(line.rstrip("\n\r")):
+            futures.append(line.rstrip("\n\r").strip())
+            idx += 1
+            continue
+        if not line.strip():
+            idx += 1
+            continue
+        break
+    rest = "".join(lines[idx:])
+    doc_block = doc if (not doc or doc.endswith("\n")) else doc + "\n"
+    fut_block = ("\n".join(futures) + "\n") if futures else ""
+    return doc_block, fut_block, rest
+
+
 def _inject_sandbox_python_header(code: str) -> str:
     raw = code or ""
     if "_plt_dc.rcParams" in raw:
@@ -221,9 +272,10 @@ def _inject_sandbox_python_header(code: str) -> str:
         if "Available:" in first_line and "pandas" in first_line and "_plt_dc" not in raw:
             nl = stripped.find("\n")
             raw = stripped[nl + 1 :].lstrip() if nl >= 0 else ""
-    if not (raw or "").strip():
-        return _SANDBOX_PYTHON_HEADER
-    return _SANDBOX_PYTHON_HEADER + "\n" + raw
+    doc_block, fut_block, rest = _split_sandbox_user_code(raw)
+    if not (rest or "").strip() and not fut_block and not doc_block:
+        return fut_block + doc_block + _SANDBOX_PYTHON_HEADER
+    return fut_block + doc_block + _SANDBOX_PYTHON_HEADER + ("\n" + rest if rest else "")
 
 
 class StrixSandboxManager:

@@ -14,6 +14,7 @@ from duckclaw.graphs.on_the_fly_commands import (
     clear_meditate_schedule,
     execute_meditate,
     get_chat_state,
+    handle_command,
     set_chat_state,
 )
 
@@ -102,3 +103,10 @@ def test_format_meditate_cycle_summary_alignment_message() -> None:
     summary = _format_meditate_cycle_summary(cycle)
     assert "Contexto alineado" in summary
     assert "DD target=0.05" in summary
+
+
+def test_meditate_self_passes_through_to_llm() -> None:
+    """`/meditate --self` no debe ser manejado por fly; el gateway invoca al LLM."""
+    db = _FakeDb()
+    assert handle_command(db, "42", "/meditate --self", tenant_id="default") is None
+    assert handle_command(db, "42", "/meditate --now", tenant_id="default") is None

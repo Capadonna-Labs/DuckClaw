@@ -594,42 +594,6 @@ def _duckdb_admin_write_intent(text: str) -> bool:
     return False
 
 
-def _debug_agent_log_480705(
-    *,
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict[str, Any] | None = None,
-) -> None:
-    """NDJSON debug (sesión 480705): routing admin_sql / finanz vs quant-trader."""
-    #region agent log
-    try:
-        payload: dict[str, Any] = {
-            "sessionId": "480705",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        candidates = [
-            (os.environ.get("DUCKCLAW_DEBUG_NDJSON_LOG") or "").strip(),
-            "/tmp/debug-480705.log",
-        ]
-        for log_path in candidates:
-            if not log_path:
-                continue
-            try:
-                with open(log_path, "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-                break
-            except OSError:
-                continue
-    except Exception:
-        pass
-    #endregion
-
-
 def _job_hunter_user_requests_application_tracking(incoming: str) -> bool:
     """
     Seguimiento de postulaciones ya guardadas (DuckDB), sin discovery Tavily.
@@ -1538,12 +1502,6 @@ def _plan_task(incoming: str, worker_id: str) -> tuple[str, Optional[str]]:
     t = text.lower()
     override: Optional[str] = None
     if _duckdb_admin_write_intent(text):
-        _debug_agent_log_480705(
-            hypothesis_id="H2",
-            location="manager_graph._plan_task",
-            message="admin_write_intent_override_finanz",
-            data={"incoming_worker_id": (worker_id or "").strip(), "override": "finanz"},
-        )
         return (
             f"{_FINANZ_TOOL_PRESSURE_TASK}\n\n--- Mensaje del usuario ---\n{text}",
             "finanz",
@@ -2385,15 +2343,6 @@ def build_manager_graph(
             )
             if _finanz_for_admin:
                 out["assigned_worker_id"] = _finanz_for_admin
-                _debug_agent_log_480705(
-                    hypothesis_id="H3",
-                    location="manager_graph.plan_node",
-                    message="entry_worker_bypassed_for_admin_sql",
-                    data={
-                        "entry_worker_id": route_entry,
-                        "assigned_worker_id": _finanz_for_admin,
-                    },
-                )
             else:
                 _all_plan_disk = list_workers(troot, db=db, tenant_id=_tid)
                 _canon_play = _resolve_template_id(_all_plan_disk, route_entry)
@@ -2463,17 +2412,6 @@ def build_manager_graph(
         )
         _assigned_for_log = (out.get("assigned_worker_id") or assigned or "").strip() or "?"
         log_sys(_obs, "Worker elegido para el plan: %s", _assigned_for_log)
-        _debug_agent_log_480705(
-            hypothesis_id="H4",
-            location="manager_graph.plan_node",
-            message="worker_assigned_final",
-            data={
-                "assigned_worker_id": _assigned_for_log,
-                "admin_write_intent": _duckdb_admin_write_intent(incoming),
-                "entry_worker_id": (state.get("entry_worker_id") or "").strip() or None,
-                "override_worker": override_worker,
-            },
-        )
         return out
 
     def invoke_worker_node(state: ManagerAgentState, config: RunnableConfig) -> ManagerAgentState:

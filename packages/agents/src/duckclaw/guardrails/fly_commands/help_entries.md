@@ -7,7 +7,7 @@
 /history|Historial de tareas (quién hizo qué)
 /goals|Manifiesto homeostasis: metas de dominio + umbrales infra (--set, --rm, --migrate, --reset)
 /crons|Solo programación proactiva: --delta / --timestamp; --rm delta|wall (metas en /goals)
-/meditate|Termostato infra: --delta 4h|10m|off (contrasta manifiesto /goals)
+/meditate|Infra: --delta 4h|10m|off (contrasta /goals). Quant-Trader: --self|--now pasa al agente (auto-mejora)
 /prompt <worker_id>|Ver prompt; --change <texto> para cambiar
 /model|Ver o cambiar LLM (provider/model; openrouter, or, deepseek, mlx, …)
 /models|Listar modelos disponibles de un provider (ej. gemini)

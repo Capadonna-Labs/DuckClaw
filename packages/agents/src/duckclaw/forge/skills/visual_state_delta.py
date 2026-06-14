@@ -8,7 +8,10 @@ import os
 from contextvars import ContextVar
 from typing import Any
 
-from duckclaw.forge.skills.quant_state_delta import _release_ro_vault_for_remote_writer
+try:
+    from duckclaw.forge.skills.quant_state_delta import _release_ro_vault_for_remote_writer
+except ImportError:
+    _release_ro_vault_for_remote_writer = None
 
 _log = logging.getLogger(__name__)
 
@@ -39,9 +42,10 @@ def push_visual_state_delta_sync(payload: dict[str, Any], *, duckclaw_db: Any | 
     from duckclaw.spawn_profile import spawn_inline_writes_enabled
 
     hub_db = get_visual_state_delta_hub_db()
-    if hub_db is not None:
-        _release_ro_vault_for_remote_writer(payload, hub_db)
-    _release_ro_vault_for_remote_writer(payload, duckclaw_db)
+    if _release_ro_vault_for_remote_writer is not None:
+        if hub_db is not None:
+            _release_ro_vault_for_remote_writer(payload, hub_db)
+        _release_ro_vault_for_remote_writer(payload, duckclaw_db)
 
     if spawn_inline_writes_enabled():
         try:

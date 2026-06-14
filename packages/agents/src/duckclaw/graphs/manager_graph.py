@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 from langchain_core.runnables import RunnableConfig
 
-from duckclaw.forge.atoms.state import ManagerAgentState
+from duckclaw.graphs.state import ManagerAgentState
 from duckclaw.graphs.sandbox import extract_latest_sandbox_figure_base64
 from duckclaw.graphs.subagent_run_id import acquire_subagent_slot, release_subagent_slot
 from duckclaw.utils.langsmith_trace import get_tracing_config
@@ -1916,16 +1916,16 @@ def _capabilities_fast_reply_text(
     wl = w.lower()
     wl_norm = wl.replace("_", "-")
     if _is_job_hunter_worker(w):
-        return load_guardrail("capabilities", "job_hunter")
+        return "Puedo ayudarte con busqueda, filtrado y seguimiento de oportunidades laborales."
     if wl == "bi-analyst":
-        return load_guardrail("capabilities", "bi_analyst")
+        return "Puedo ayudarte con analisis BI, consultas de datos, metricas y visualizaciones."
     if wl == "finanz":
-        return load_guardrail("capabilities", "finanz")
+        return "Puedo ayudarte con cuentas, deudas, presupuestos y consultas financieras con evidencia."
     if wl_norm == "siata-analyst":
-        return load_guardrail("capabilities", "siata_analyst")
+        return "Puedo ayudarte con analisis SIATA, datos ambientales y reportes tecnicos."
     if w:
-        return format_guardrail("capabilities", "generic_worker", worker_id=w)
-    return load_guardrail("capabilities", "default_fallback")
+        return f"Puedo ayudarte como {w}. Describe la tarea y la convierto en pasos ejecutables."
+    return "Puedo ayudarte a planear, ejecutar y verificar tareas con los workers disponibles."
 
 
 def _task_summary_for_activity(incoming: str, planned_task: str) -> str:
@@ -2866,32 +2866,6 @@ def build_manager_graph(
                         "inferencia: error no transitorio en invoke del worker "
                         f"({(worker_invoke.get('_duckclaw_worker_llm_failure_kind') or 'unknown')})",
                     )
-                elif (assigned or "").strip() == "PQRSD-Assistant":
-                    try:
-                        from duckclaw.forge.atoms.pqrsd_registration_egress_guard import (
-                            pqrsd_persist_tool_used,
-                            pqrsd_reply_claims_internal_registration,
-                        )
-
-                        _pqrsd_replan = pqrsd_reply_claims_internal_registration(
-                            raw_worker_reply
-                        ) and not pqrsd_persist_tool_used(_tools_list)
-                    except Exception:
-                        _pqrsd_replan = False
-                    if _pqrsd_replan:
-                        _rp = "pqrsd: radicación afirmada sin admin_sql ni pqrsd_registrar_radicacion_crm"
-                        reasons_acc = merge_failure_reasons(reasons_acc, _rp)
-                        if pa + 1 < max_a:
-                            replan_after = True
-                            next_plan_attempt = pa + 1
-                            log_sys(
-                                _obs,
-                                "manager replan: PQRSD sin persist -> intento %s/%s",
-                                pa + 2,
-                                max_a,
-                            )
-                        else:
-                            exhausted_final = True
                 else:
                     try:
                         from duckclaw.workers.tool_orchestration import (

@@ -47,12 +47,8 @@ def spec_is_finanz_quant(spec: Any) -> bool:
 
 def spec_needs_quant_bracket_citations(spec: Any) -> bool:
     """Quant-Trader y Finanz+quant deben citar cifras con ``[tool/ticker]``."""
-    try:
-        from duckclaw.workers.worker_ids import is_quant_trader, normalize_worker_id
-    except ImportError:
-        return False
-    lid = normalize_worker_id(getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", None))
-    if is_quant_trader(lid):
+    lid = str(getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", None) or "")
+    if lid.strip().lower().replace("-", "_") == "quant_trader":
         return True
     return spec_is_finanz_quant(spec)
 

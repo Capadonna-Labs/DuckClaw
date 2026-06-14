@@ -45,7 +45,7 @@ def resolve_vault_path(vault_path: str | None) -> str:
         return abs_path
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
-        raise FileNotFoundError("Gateway DuckDB no configurada (DUCKCLAW_FINANZ_DB_PATH)")
+        raise FileNotFoundError("Gateway DuckDB no configurada (DUCKCLAW_GATEWAY_DB_PATH)")
     return gw
 
 
@@ -267,7 +267,7 @@ def fetch_recent_semantic_memory(con: Any, limit: int) -> list[dict[str, Any]]:
 def search_semantic_memory_admin(con: Any, query: str, limit: int) -> tuple[list[dict[str, Any]], str, str | None]:
     ensure_semantic_memory_table(con)
     _try_load_vss(con)
-    from duckclaw.forge.atoms.semantic_memory_hybrid import search_semantic_memory_hybrid
+    from duckclaw.memory.semantic_memory_hybrid import search_semantic_memory_hybrid
 
     lim = max(1, min(int(limit), _VECTOR_LIMIT_MAX))
     rows, diag = search_semantic_memory_hybrid(_DuckDbQueryAdapter(con), query, lim)

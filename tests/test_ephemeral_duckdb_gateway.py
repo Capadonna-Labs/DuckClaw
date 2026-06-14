@@ -6,11 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from env_ids import TELEGRAM_TEST_USER_ID
-
 from duckclaw.gateway_db import (
     GatewayDbEphemeralReadonly,
-    default_pqrsd_assistant_vault_path,
     get_gateway_db_path,
 )
 
@@ -19,15 +16,6 @@ def _clear_multiplex_db_env(monkeypatch: pytest.MonkeyPatch) -> None:
     from env_isolation import clear_gateway_multiplex_env
 
     clear_gateway_multiplex_env(monkeypatch)
-
-
-def test_default_pqrsd_assistant_vault_path_uses_canonical_filename(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
-    uid = TELEGRAM_TEST_USER_ID
-    expected = (tmp_path / "db" / "private" / uid / "pqrsd-assistantdb1.duckdb").resolve()
-    assert Path(default_pqrsd_assistant_vault_path(uid)).resolve() == expected
 
 
 def test_gateway_db_ephemeral_readonly_opens_per_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

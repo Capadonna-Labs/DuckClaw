@@ -5,7 +5,6 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Tuple
 
 
@@ -129,9 +128,9 @@ def wr_upsert_member(
     )
     if _war_room_writes_via_queue(db):
         from duckclaw.db_write_queue import enqueue_duckdb_write_sync
-        from duckclaw.gateway_db import get_war_room_acl_db_path
+        from duckclaw.gateway_db import get_gateway_db_path
 
-        db_path = str(Path(get_war_room_acl_db_path()).expanduser().resolve())
+        db_path = get_gateway_db_path()
         enqueue_duckdb_write_sync(
             db_path=db_path,
             query=sql,
@@ -159,9 +158,9 @@ def wr_append_audit(
     )
     if _war_room_writes_via_queue(db):
         from duckclaw.db_write_queue import enqueue_duckdb_write_sync
-        from duckclaw.gateway_db import get_war_room_acl_db_path
+        from duckclaw.gateway_db import get_gateway_db_path
 
-        db_path = str(Path(get_war_room_acl_db_path()).expanduser().resolve())
+        db_path = get_gateway_db_path()
         enqueue_duckdb_write_sync(
             db_path=db_path,
             query=sql,

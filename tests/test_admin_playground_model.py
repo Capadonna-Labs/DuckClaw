@@ -24,7 +24,7 @@ def gateway_with_agent_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         """
     )
     con.close()
-    monkeypatch.setenv("DUCKCLAW_FINANZ_DB_PATH", str(dbf))
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_DB_PATH", str(dbf))
     return dbf
 
 

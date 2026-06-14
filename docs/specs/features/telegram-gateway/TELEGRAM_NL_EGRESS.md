@@ -19,7 +19,7 @@ Los mensajes visibles al usuario en Telegram (y trazas alineadas) deben ser **le
 
 ## Implementación (referencia de código)
 
-- Detección y prompt: `packages/agents/src/duckclaw/forge/atoms/user_reply_nl_synthesis.py`
+- Detección y prompt: `packages/agents/src/duckclaw/egress/user_reply_nl_synthesis.py`
 - Integración: `packages/agents/src/duckclaw/workers/factory.py` → `set_reply`
 - Campo en spec: `packages/agents/src/duckclaw/workers/manifest.py` → `WorkerSpec.egress_natural_language_synthesis`
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = ROOT / "docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md"
+AUTH_SPEC = ROOT / "docs/specs/features/platform/ADMIN_IDENTITY_RBAC_ERD.md"
 BOOTSTRAP_LIB = ROOT / "apps/duckclaw-admin/src/lib/adminBootstrapStatus.ts"
 BOOTSTRAP_ROUTE = ROOT / "apps/duckclaw-admin/src/app/api/admin/bootstrap/status/route.ts"
 BOOTSTRAP_HOOK = ROOT / "apps/duckclaw-admin/src/hooks/useAdminBootstrapStatus.ts"
@@ -13,12 +13,13 @@ LOGIN_PAGE = ROOT / "apps/duckclaw-admin/src/app/(auth)/login/page.tsx"
 AUTH_STORE = ROOT / "apps/duckclaw-admin/src/store/authStore.ts"
 
 
-def test_admin_login_has_public_bootstrap_status_contract() -> None:
-    spec = SPEC.read_text(encoding="utf-8")
+def test_admin_login_uses_canonical_auth_spec_and_public_bootstrap_status() -> None:
+    spec = AUTH_SPEC.read_text(encoding="utf-8")
     route = BOOTSTRAP_ROUTE.read_text(encoding="utf-8")
     lib = BOOTSTRAP_LIB.read_text(encoding="utf-8")
 
-    assert "GET /bootstrap/status" in spec
+    assert "POST /api/admin/auth/login" in spec
+    assert "POST /api/v1/admin/auth/login" in spec
     assert "resolveAdminBootstrapStatus" in route
     assert "requireAdminRouteAuth" not in route
     assert "DUCKCLAW_ADMIN_API_KEY" not in route

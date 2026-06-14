@@ -305,7 +305,7 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     assert r.status_code == 200
     data = r.json()
     assert data.get("authorized") is True
-    from duckclaw.workers.worker_ids import normalize_worker_id
+    from duckclaw.workers.identity import normalize_worker_id
 
     assert normalize_worker_id(target) in _playground_worker_ids(data)
     assert data.get("team_source") == "chat"
@@ -331,7 +331,7 @@ def test_playground_chat(admin_client: TestClient, gateway_db: Path, monkeypatch
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
     import main as gateway_main
-    import routers.admin as admin_router
+    import routers.admin_domains.playground_chat as playground_chat_router
     from duckclaw import DuckClaw
     from duckclaw.admin_worker_catalog import create_worker
 
@@ -339,7 +339,7 @@ def test_playground_chat(admin_client: TestClient, gateway_db: Path, monkeypatch
         return {"response": "respuesta-mock", "usage_tokens": {"total": 1}}
 
     monkeypatch.setattr(
-        admin_router,
+        playground_chat_router,
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["axis-maestro"]),
     )
@@ -374,10 +374,10 @@ def test_playground_chat_rejects_worker_outside_team(
 
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
-    import routers.admin as admin_router
+    import routers.admin_domains.playground_chat as playground_chat_router
 
     monkeypatch.setattr(
-        admin_router,
+        playground_chat_router,
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )
@@ -397,13 +397,13 @@ def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch:
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
     import main as gateway_main
-    import routers.admin as admin_router
+    import routers.admin_domains.playground_chat as playground_chat_router
 
     async def _fake_invoke(*_args, **_kwargs):
         return {"response": "ok"}
 
     monkeypatch.setattr(
-        admin_router,
+        playground_chat_router,
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )
@@ -696,60 +696,18 @@ def test_telegram_whitelist_resolves_gateway_tenant(
     assert row[0] == "test-tenant"
 
 
-def test_train_status_requires_key(admin_client: TestClient):
-    assert admin_client.get("/api/v1/admin/train/status").status_code == 401
+def test_train_admin_routes_removed(admin_client: TestClient):
+    headers = {"X-Admin-Key": "test-admin-key"}
 
-
-def test_train_status_ok(admin_client: TestClient):
-    r = admin_client.get(
-        "/api/v1/admin/train/status",
-        headers={"X-Admin-Key": "test-admin-key"},
+    assert admin_client.get("/api/v1/admin/train/status", headers=headers).status_code == 404
+    assert (
+        admin_client.post(
+            "/api/v1/admin/train/pipeline/collect",
+            headers=headers,
+            json={"require_valid_sql": False},
+        ).status_code
+        == 404
     )
-    assert r.status_code == 200
-    data = r.json()
-    assert "paths" in data
-    assert "pipeline" in data
-
-
-def test_train_sample_rejects_path_traversal(admin_client: TestClient):
-    r = admin_client.get(
-        "/api/v1/admin/train/traces/sample",
-        headers={"X-Admin-Key": "test-admin-key"},
-        params={"lake": "conversation_traces", "relative_path": "../../.env"},
-    )
-    assert r.status_code == 400
-
-
-def test_train_collect(
-    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    traces = tmp_path / "2026" / "05" / "17"
-    traces.mkdir(parents=True)
-    row = {
-        "status": "SUCCESS",
-        "messages": [
-            {"role": "user", "content": "hola"},
-            {"role": "assistant", "content": "ok"},
-        ],
-    }
-    (traces / "traces.jsonl").write_text(
-        json.dumps(row) + "\n", encoding="utf-8"
-    )
-    out = tmp_path / "dataset_sft.jsonl"
-    monkeypatch.setenv("DUCKCLAW_CONVERSATION_TRACES_DIR", str(tmp_path))
-    monkeypatch.setattr(
-        "duckclaw.forge.sft.collector.DEFAULT_SFT_DATASET_PATH", out
-    )
-    r = admin_client.post(
-        "/api/v1/admin/train/pipeline/collect",
-        headers={"X-Admin-Key": "test-admin-key"},
-        json={"require_valid_sql": False},
-    )
-    assert r.status_code == 200
-    data = r.json()
-    assert data["ok"] is True
-    assert data["records"] >= 1
-    assert out.is_file()
 
 
 def test_playground_team_hint_workers_label(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, catalog_db):
@@ -788,7 +746,7 @@ def test_playground_team_hint_workers_label(admin_client: TestClient, monkeypatc
 
 
 def test_kanban_worker_states(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    from routers.admin import _kanban_status_from_audit
+    from routers.admin_domains.kanban_runtime import _kanban_status_from_audit
 
     assert _kanban_status_from_audit("SUCCESS", 900) == "en_progreso"
     assert _kanban_status_from_audit("SUCCESS", 4000) == "completo"
@@ -897,6 +855,100 @@ def test_kanban_cards_db_first_crud(
     assert empty.json()["cards"] == []
 
 
+def test_prompt_policies_admin_crud_is_db_writer_backed(
+    admin_client: TestClient,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckdb
+
+    from duckclaw.prompt_policies import PromptPolicyResolver
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
+    con = duckdb.connect(str(gateway_db))
+    try:
+        run_pending_migrations(con)
+    finally:
+        con.close()
+
+    headers = {
+        "X-Admin-Key": "test-admin-key",
+        "X-Duckclaw-Actor": "admin@test.local",
+    }
+    empty = admin_client.get(
+        "/api/v1/admin/prompt-policies",
+        headers=headers,
+        params={"policy_type": "system_prompt"},
+    )
+    assert empty.status_code == 200
+    assert empty.json()["policies"] == []
+
+    upsert = admin_client.put(
+        "/api/v1/admin/prompt-policies",
+        headers=headers,
+        json={
+            "policy_type": "system_prompt",
+            "policy_name": "rag_turn",
+            "version": 1,
+            "content": "Endpoint policy for {worker_id}.",
+            "metadata": {"created_by_test": True},
+        },
+    )
+    assert upsert.status_code == 200
+    created = upsert.json()["policy"]
+    assert upsert.json()["ok"] is True
+    assert created["policy_type"] == "system_prompt"
+    assert created["policy_name"] == "rag_turn"
+    assert created["version"] == 1
+
+    listed = admin_client.get(
+        "/api/v1/admin/prompt-policies",
+        headers=headers,
+        params={"policy_type": "system_prompt"},
+    )
+    assert listed.status_code == 200
+    policies = listed.json()["policies"]
+    assert len(policies) == 1
+    assert policies[0]["content"] == "Endpoint policy for {worker_id}."
+    assert policies[0]["metadata"] == {"created_by_test": True}
+
+    con = duckdb.connect(str(gateway_db), read_only=True)
+    try:
+        resolved = PromptPolicyResolver(db=con).format(
+            "system_prompt",
+            "rag_turn",
+            worker_id="admin-worker",
+        )
+    finally:
+        con.close()
+    assert resolved == "Endpoint policy for admin-worker."
+
+    deleted = admin_client.delete(
+        "/api/v1/admin/prompt-policies/system_prompt/rag_turn",
+        headers=headers,
+        params={"version": 1},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["ok"] is True
+
+    active = admin_client.get(
+        "/api/v1/admin/prompt-policies",
+        headers=headers,
+        params={"policy_type": "system_prompt"},
+    )
+    assert active.status_code == 200
+    assert active.json()["policies"] == []
+
+    inactive = admin_client.get(
+        "/api/v1/admin/prompt-policies",
+        headers=headers,
+        params={"policy_type": "system_prompt", "include_inactive": True},
+    )
+    assert inactive.status_code == 200
+    assert inactive.json()["policies"][0]["status"] == "inactive"
+
+
 def test_admin_sandbox_status(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     from duckclaw.graphs import sandbox as sb
 
@@ -920,6 +972,7 @@ def test_admin_sandbox_status(admin_client: TestClient, monkeypatch: pytest.Monk
 
 def test_admin_sandbox_chat_policy_deny_worker(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     from routers import admin as admin_mod
+    from routers.admin_domains import sandbox_sessions as sandbox_mod
 
     monkeypatch.setattr(
         admin_mod,
@@ -940,7 +993,7 @@ def test_admin_sandbox_chat_policy_deny_worker(admin_client: TestClient, monkeyp
 
     monkeypatch.setattr(admin_mod, "_open_playground_vault_db", lambda _p, read_only=True: _FakeDb())
     monkeypatch.setattr(
-        admin_mod,
+        sandbox_mod,
         "_sandbox_chat_policy_payload",
         lambda **kwargs: {
             "chat_id": kwargs["chat_id"],
@@ -966,6 +1019,7 @@ def test_admin_sandbox_chat_policy_deny_worker(admin_client: TestClient, monkeyp
 
 def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     from routers import admin as admin_mod
+    from routers.admin_domains import sandbox_sessions as sandbox_mod
 
     monkeypatch.setattr(
         admin_mod,
@@ -1005,7 +1059,7 @@ def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pyt
     monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.set_chat_state_via_vault", _fake_set)
     monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.get_chat_state", _fake_get)
     monkeypatch.setattr(
-        admin_mod,
+        sandbox_mod,
         "_sandbox_chat_policy_payload",
         lambda **kwargs: {
             "chat_id": kwargs["chat_id"],
@@ -1031,9 +1085,9 @@ def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pyt
 
 def test_admin_sandbox_novnc_prepare(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     from duckclaw.graphs import sandbox as sb
-    from routers import admin as admin_mod
+    from routers.admin_domains import sandbox_sessions as sandbox_mod
 
-    monkeypatch.setattr(admin_mod, "_worker_has_browser_sandbox", lambda _w: True)
+    monkeypatch.setattr(sandbox_mod, "_worker_has_browser_sandbox", lambda _w: True)
     monkeypatch.setattr(
         sb,
         "sandbox_runtime_status",
@@ -1152,6 +1206,156 @@ def test_workspace_project_detail_endpoint(admin_client: TestClient):
     assert data["agents"] == []
 
 
+def test_gateway_db_fixture_applies_knowledge_migration(gateway_db: Path) -> None:
+    import duckdb
+
+    con = duckdb.connect(str(gateway_db), read_only=True)
+    try:
+        tables = {
+            row[0]
+            for row in con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
+            ).fetchall()
+        }
+        versions = set()
+        if "schema_migrations" in tables:
+            versions = {
+                int(row[0])
+                for row in con.execute(
+                    "SELECT version FROM main.schema_migrations ORDER BY version"
+                ).fetchall()
+            }
+    finally:
+        con.close()
+
+    assert "schema_migrations" in tables
+    assert "admin_knowledge_sources" in tables
+    assert "admin_knowledge_documents" in tables
+    assert "admin_knowledge_chunks" in tables
+    assert 15 in versions
+
+
+def test_knowledge_sources_and_search_are_scoped(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+) -> None:
+    import duckdb
+
+    from duckclaw.admin_user_profiles import tenant_id_for_email
+
+    actor_email = "admin@test.local"
+    tenant_id = tenant_id_for_email(actor_email)
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": actor_email}
+    con = duckdb.connect(str(gateway_db))
+    try:
+        con.execute(
+            """
+            INSERT INTO main.admin_knowledge_sources
+              (source_id, tenant_id, project_id, worker_uid, source_kind, source_uri, status)
+            VALUES ('ksrc_api', ?, 'proj_api', 'wrk_api', 'folder', '/docs', 'ready')
+            """,
+            [tenant_id],
+        )
+        con.execute(
+            """
+            INSERT INTO main.admin_knowledge_documents
+              (document_id, source_id, relative_path, title, checksum)
+            VALUES ('kdoc_api', 'ksrc_api', 'aws/iam.md', 'IAM', 'sha256:api')
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO main.admin_knowledge_chunks
+              (chunk_id, document_id, source_id, tenant_id, project_id, worker_uid,
+               chunk_index, content, content_hash, embedding_status)
+            VALUES
+              ('kchk_api', 'kdoc_api', 'ksrc_api', ?, 'proj_api', 'wrk_api',
+               0, 'Least privilege policies for cloud access', 'h-api', 'PENDING'),
+              ('kchk_other', 'kdoc_api', 'ksrc_api', ?, 'proj_other', 'wrk_api',
+               1, 'This other project must not leak', 'h-other', 'PENDING')
+            """,
+            [tenant_id, tenant_id],
+        )
+    finally:
+        con.close()
+
+    listed = gateway_admin_client.get(
+        "/api/v1/admin/knowledge/sources",
+        headers=headers,
+        params={"project_id": "proj_api"},
+    )
+    assert listed.status_code == 200
+    sources = listed.json()["sources"]
+    assert len(sources) == 1
+    assert sources[0]["source_id"] == "ksrc_api"
+    assert sources[0]["chunk_count"] == 1
+
+    searched = gateway_admin_client.post(
+        "/api/v1/admin/knowledge/search",
+        headers=headers,
+        json={"query": "least privilege", "project_id": "proj_api", "worker_uid": "wrk_api"},
+    )
+    assert searched.status_code == 200
+    results = searched.json()["results"]
+    assert len(results) == 1
+    assert results[0]["relative_path"] == "aws/iam.md"
+    assert results[0]["match_type"] == "lexical"
+
+
+def test_knowledge_uploads_create_project_scoped_chunks(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckdb
+
+    monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+
+    response = gateway_admin_client.post(
+        "/api/v1/admin/knowledge/uploads",
+        headers=headers,
+        data={
+            "project_id": "proj_upload",
+            "worker_uid": "wrk_upload",
+            "display_name": "AWS Docs",
+        },
+        files={
+            "files": (
+                "aws/iam.md",
+                b"# IAM\n\nUse least privilege policies for cloud access.",
+                "text/markdown",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["documents"] == 1
+    assert payload["chunks"] >= 1
+
+    con = duckdb.connect(str(gateway_db), read_only=True)
+    try:
+        row = con.execute(
+            """
+            SELECT s.project_id, s.worker_uid, d.relative_path, c.content
+            FROM main.admin_knowledge_sources s
+            JOIN main.admin_knowledge_documents d ON d.source_id = s.source_id
+            JOIN main.admin_knowledge_chunks c ON c.source_id = s.source_id
+            WHERE s.source_id = ?
+            """,
+            [payload["source_id"]],
+        ).fetchone()
+    finally:
+        con.close()
+    assert row is not None
+    assert row[0] == "proj_upload"
+    assert row[1] == "wrk_upload"
+    assert row[2] == "aws/iam.md"
+    assert "least privilege" in row[3]
+
+
 def test_admin_auth_login_smoke(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_redis
 ):
@@ -1211,13 +1415,13 @@ def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pyt
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     )
     import main as gateway_main
-    import routers.admin as admin_router
+    import routers.admin_domains.playground_chat as playground_chat_router
 
     async def _fake_invoke(*_a, **_k):
         return {"response": "ok"}
 
     monkeypatch.setattr(
-        admin_router,
+        playground_chat_router,
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )

@@ -79,4 +79,4 @@ Razón: …
 ## Referencias
 
 - Fly equivalente: `/cancel_signal` en [FLY_COMMANDS_UI.md](./FLY_COMMANDS_UI.md) G1
-- Átomo: `packages/agents/src/duckclaw/forge/atoms/trade_signal_cancel.py`
+- Módulo de skill: `packages/agents/src/duckclaw/forge/skills/quant_trade_signal_cancel.py`

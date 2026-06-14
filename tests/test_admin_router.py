@@ -305,7 +305,7 @@ def test_playground_chat(admin_client: TestClient, gateway_db: Path, monkeypatch
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
     import main as gateway_main
-    import routers.admin as admin_router
+    import routers.admin_domains.playground_chat as playground_chat_router
     from duckclaw import DuckClaw
     from duckclaw.admin_worker_catalog import create_worker
 
@@ -313,7 +313,7 @@ def test_playground_chat(admin_client: TestClient, gateway_db: Path, monkeypatch
         return {"response": "respuesta-mock", "usage_tokens": {"total": 1}}
 
     monkeypatch.setattr(
-        admin_router,
+        playground_chat_router,
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["axis-maestro"]),
     )
@@ -348,10 +348,10 @@ def test_playground_chat_rejects_worker_outside_team(
 
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
-    import routers.admin as admin_router
+    import routers.admin_domains.playground_chat as playground_chat_router
 
     monkeypatch.setattr(
-        admin_router,
+        playground_chat_router,
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )
@@ -371,13 +371,13 @@ def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch:
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
     import main as gateway_main
-    import routers.admin as admin_router
+    import routers.admin_domains.playground_chat as playground_chat_router
 
     async def _fake_invoke(*_args, **_kwargs):
         return {"response": "ok"}
 
     monkeypatch.setattr(
-        admin_router,
+        playground_chat_router,
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )
@@ -946,6 +946,7 @@ def test_admin_sandbox_status(admin_client: TestClient, monkeypatch: pytest.Monk
 
 def test_admin_sandbox_chat_policy_deny_worker(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     from routers import admin as admin_mod
+    from routers.admin_domains import sandbox_sessions as sandbox_mod
 
     monkeypatch.setattr(
         admin_mod,
@@ -966,7 +967,7 @@ def test_admin_sandbox_chat_policy_deny_worker(admin_client: TestClient, monkeyp
 
     monkeypatch.setattr(admin_mod, "_open_playground_vault_db", lambda _p, read_only=True: _FakeDb())
     monkeypatch.setattr(
-        admin_mod,
+        sandbox_mod,
         "_sandbox_chat_policy_payload",
         lambda **kwargs: {
             "chat_id": kwargs["chat_id"],
@@ -992,6 +993,7 @@ def test_admin_sandbox_chat_policy_deny_worker(admin_client: TestClient, monkeyp
 
 def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     from routers import admin as admin_mod
+    from routers.admin_domains import sandbox_sessions as sandbox_mod
 
     monkeypatch.setattr(
         admin_mod,
@@ -1031,7 +1033,7 @@ def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pyt
     monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.set_chat_state_via_vault", _fake_set)
     monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.get_chat_state", _fake_get)
     monkeypatch.setattr(
-        admin_mod,
+        sandbox_mod,
         "_sandbox_chat_policy_payload",
         lambda **kwargs: {
             "chat_id": kwargs["chat_id"],
@@ -1057,9 +1059,9 @@ def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pyt
 
 def test_admin_sandbox_novnc_prepare(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     from duckclaw.graphs import sandbox as sb
-    from routers import admin as admin_mod
+    from routers.admin_domains import sandbox_sessions as sandbox_mod
 
-    monkeypatch.setattr(admin_mod, "_worker_has_browser_sandbox", lambda _w: True)
+    monkeypatch.setattr(sandbox_mod, "_worker_has_browser_sandbox", lambda _w: True)
     monkeypatch.setattr(
         sb,
         "sandbox_runtime_status",
@@ -1387,13 +1389,13 @@ def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pyt
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     )
     import main as gateway_main
-    import routers.admin as admin_router
+    import routers.admin_domains.playground_chat as playground_chat_router
 
     async def _fake_invoke(*_a, **_k):
         return {"response": "ok"}
 
     monkeypatch.setattr(
-        admin_router,
+        playground_chat_router,
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )

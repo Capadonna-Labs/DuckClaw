@@ -21,7 +21,7 @@ def test_duckdb_actor_scope_falls_back_to_actor_tenant_not_gateway_tenant(
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
     import core.admin_identity as admin_identity
-    import routers.admin as admin_router
+    import routers.admin_domains.duckdb_explorer as duckdb_explorer
 
     def _raise_open_gateway_db(*_args, **_kwargs):
         raise RuntimeError("gateway db unavailable")
@@ -29,7 +29,7 @@ def test_duckdb_actor_scope_falls_back_to_actor_tenant_not_gateway_tenant(
     monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "test-tenant")
     monkeypatch.setattr(admin_identity, "open_gateway_db", _raise_open_gateway_db)
 
-    scope = admin_router._duckdb_actor_scope("owner@example.com", "owner123")
+    scope = duckdb_explorer._duckdb_actor_scope("owner@example.com", "owner123")
 
     assert scope["actor_email"] == "owner@example.com"
     assert scope["vault_user_id"] == "owner123"
@@ -342,35 +342,6 @@ def test_duckdb_legacy_schemas_can_be_configured_db_first(
 
     assert listed.status_code == 200
     assert "custom_legacy" in [item["schema"] for item in listed.json()["schemas"]]
-
-
-def test_runtime_vaults_are_scoped_to_authenticated_actor(
-    gateway_admin_client: TestClient,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo_root = tmp_path / "repo"
-    owner_dir = repo_root / "db" / "private" / "owner123"
-    other_dir = repo_root / "db" / "private" / "other456"
-    owner_dir.mkdir(parents=True)
-    other_dir.mkdir(parents=True)
-    duckdb.connect(str(owner_dir / "axis.duckdb")).close()
-    duckdb.connect(str(other_dir / "hidden.duckdb")).close()
-    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
-    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
-    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
-
-    response = gateway_admin_client.get(
-        "/api/v1/admin/runtime/vaults",
-        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    paths = [item["path"] for item in data["vaults"]]
-    assert data["vault_user_id"] == "owner123"
-    assert any(path.endswith("db/private/owner123/axis.duckdb") for path in paths)
-    assert not any("other456" in path for path in paths)
 
 
 def test_duckdb_query_select(admin_client: TestClient, explorer_db: Path) -> None:

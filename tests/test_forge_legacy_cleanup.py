@@ -108,8 +108,11 @@ DB_FIRST_DDL_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/workers/loader.py": "worker belief bootstrap",
     "services/api-gateway/core/war_rooms.py": "authorized war-room ACL bootstrap",
     "services/api-gateway/routers/admin.py": "authorized admin maintenance/bootstrap endpoints",
+    "services/api-gateway/routers/admin_domains/runtime_config.py": "authorized admin runtime config bootstrap",
     "services/db-writer/context_injection_handler.py": "DB-writer context command schema",
+    "services/db-writer/meditate_state_delta_handler.py": "DB-writer meditate command schema",
     "services/db-writer/quant_state_delta_handler.py": "DB-writer quant command schema",
+    "services/db-writer/reports_state_delta_handler.py": "DB-writer reports command schema",
     "services/db-writer/visual_state_delta_handler.py": "DB-writer visual command schema",
 }
 DB_FIRST_DDL_ALLOWLIST = frozenset(DB_FIRST_DDL_ALLOWLIST_REASONS)
@@ -117,12 +120,18 @@ DB_FIRST_DDL_ALLOWLIST = frozenset(DB_FIRST_DDL_ALLOWLIST_REASONS)
 DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/graphs/graph_server.py": "legacy graph command handler awaiting DB-writer migration",
     "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py": "authorized chat command mutations",
+    "packages/agents/src/duckclaw/forge/code_decision_service.py": "authorized code decision control-plane mutations",
     "services/api-gateway/main.py": "authorized command-plane bridge",
     "services/api-gateway/routers/admin.py": "authorized admin control-plane mutations",
     "services/api-gateway/routers/admin_db_first.py": "authorized DB-first admin mutators",
+    "services/api-gateway/routers/admin_domains/access_management.py": "authorized admin access mutators",
+    "services/api-gateway/routers/admin_domains/duckdb_explorer.py": "authorized admin DuckDB maintenance mutators",
+    "services/api-gateway/routers/admin_domains/playground_chat.py": "authorized admin playground conversation mutators",
     "services/db-writer/context_injection_handler.py": "DB-writer context mutations",
     "services/db-writer/main.py": "singleton DB-writer",
+    "services/db-writer/meditate_state_delta_handler.py": "DB-writer meditate mutations",
     "services/db-writer/quant_state_delta_handler.py": "DB-writer quant mutations",
+    "services/db-writer/reports_state_delta_handler.py": "DB-writer reports mutations",
     "services/db-writer/visual_state_delta_handler.py": "DB-writer visual mutations",
 }
 DB_FIRST_READ_WRITE_ALLOWLIST = frozenset(DB_FIRST_READ_WRITE_ALLOWLIST_REASONS)

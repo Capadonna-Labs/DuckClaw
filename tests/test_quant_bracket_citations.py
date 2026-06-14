@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from langchain_core.messages import ToolMessage
 
-from duckclaw.forge.atoms.quant_price_validator import quant_bracket_citation_audit
+from duckclaw.egress.quant_price_validator import quant_bracket_citation_audit
 
 
 def _quant_spec() -> SimpleNamespace:

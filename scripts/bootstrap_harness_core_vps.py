@@ -29,7 +29,7 @@ def main() -> int:
     path = (
         sys.argv[1]
         if len(sys.argv) > 1
-        else (os.environ.get("DUCKCLAW_FINANZ_DB_PATH") or "").strip()
+        else (os.environ.get("DUCKDB_PATH") or "").strip()
     )
     if not path:
         print("usage: bootstrap_harness_core_vps.py <duckdb_path>", file=sys.stderr)

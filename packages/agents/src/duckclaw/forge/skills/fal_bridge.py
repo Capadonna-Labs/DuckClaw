@@ -1,4 +1,4 @@
-﻿"""Fal.ai Bridge — generacion multimedia cloud (Flux, Kling, ComfyUI serverless)."""
+"""Fal.ai Bridge — generacion multimedia cloud (Flux, Kling, ComfyUI serverless)."""
 
 from __future__ import annotations
 

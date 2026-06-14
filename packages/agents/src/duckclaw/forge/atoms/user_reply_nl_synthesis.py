@@ -923,38 +923,6 @@ def synthesize_user_visible_reply(
                 parts.append(str(b))
         out = "".join(parts)
     result = (str(out) or "").strip()
-    # #region agent log
-    try:
-        import json as _json
-        import time as _time
-        from pathlib import Path as _Path
-
-        root = os.environ.get("DUCKCLAW_REPO_ROOT") or str(_Path(__file__).resolve().parents[5])
-        log_path = _Path(root) / "debug-480705.log"
-        with log_path.open("a", encoding="utf-8") as fh:
-            fh.write(
-                _json.dumps(
-                    {
-                        "sessionId": "480705",
-                        "hypothesisId": "H1",
-                        "location": "user_reply_nl_synthesis.py:synthesize_user_visible_reply",
-                        "message": "nl synthesis output",
-                        "data": {
-                            "for_admin_console": for_admin_console,
-                            "max_tokens": mt,
-                            "evidence_len": len(raw_evidence or ""),
-                            "output_len": len(result),
-                            "output_tail": result[-120:] if result else "",
-                        },
-                        "timestamp": int(_time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     return result
 
 

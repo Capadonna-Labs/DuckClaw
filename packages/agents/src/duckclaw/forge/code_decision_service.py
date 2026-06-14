@@ -20,7 +20,10 @@ from duckclaw.forge.skills.github_bridge import (
     reject_protected_branch_mutation,
 )
 from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_call_tool
-from duckclaw.forge.skills.quant_state_delta import push_quant_state_delta_sync
+try:
+    from duckclaw.forge.skills.quant_state_delta import push_quant_state_delta_sync
+except ImportError:
+    push_quant_state_delta_sync = None
 
 _log = logging.getLogger(__name__)
 
@@ -171,20 +174,21 @@ def approve_code_decision(
             pr_url = url_m.group(0)
 
     db_path = str(getattr(db, "_path", "") or "")
-    push_quant_state_delta_sync(
-        {
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "target_db_path": db_path,
-            "delta_type": "CODE_DECISION_APPROVED",
-            "mutation": {
-                "id": decision_id,
-                "pr_number": int(pr_number) if pr_number else None,
-                "pr_url": pr_url,
+    if push_quant_state_delta_sync is not None:
+        push_quant_state_delta_sync(
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "target_db_path": db_path,
+                "delta_type": "CODE_DECISION_APPROVED",
+                "mutation": {
+                    "id": decision_id,
+                    "pr_number": pr_number if pr_number else None,
+                    "pr_url": pr_url,
+                },
             },
-        },
-        duckclaw_db=db,
-    )
+            duckclaw_db=db,
+        )
 
     return {
         "status": "APPROVED",
@@ -206,6 +210,8 @@ def reject_code_decision(
 ) -> dict[str, Any]:
     """Marca decisión como REJECTED."""
     db_path = str(getattr(db, "_path", "") or "")
+    if push_quant_state_delta_sync is None:
+        return {"status": "FAILED", "decision_id": decision_id, "error": "quant_state_delta no disponible"}
     ok = push_quant_state_delta_sync(
         {
             "tenant_id": tenant_id,

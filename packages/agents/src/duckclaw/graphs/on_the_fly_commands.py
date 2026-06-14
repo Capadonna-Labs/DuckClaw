@@ -44,7 +44,12 @@ from duckclaw.graphs.proactive_review_markers import (
     GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY,
     proactive_review_event_phrase_in_text,
 )
-from duckclaw.graphs.trading_hours_cot import COT_TZ_NAME, quant_event_horario_line
+try:
+    from duckclaw.graphs.trading_hours_cot import COT_TZ_NAME, quant_event_horario_line
+except ImportError:
+    COT_TZ_NAME = "America/Bogota"
+    def quant_event_horario_line() -> str:
+        return ""
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_fly, structured_log_context
 from duckclaw.utils.telegram_markdown_v2 import TELEGRAM_MARKDOWN_V2_SPECIAL
 
@@ -4317,6 +4322,8 @@ class TradingSessionCliArgs(BaseModel):
     confirm: bool = False
     stop: bool = False
     status: bool = False
+    update: bool = False
+    anchor_equity: Optional[float] = None
     max_drawdown_pct: float = 2.0
     position_size_pct: float = 5.0
     signal_threshold: str = "GAS"
@@ -4343,6 +4350,8 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
     confirm = False
     stop = False
     status = False
+    update = False
+    anchor_equity: Optional[float] = None
     max_drawdown = 2.0
     position_size = 5.0
     signal_threshold = "GAS"
@@ -4371,6 +4380,19 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
             status = True
             i += 1
             continue
+        if t in ("--update", "update"):
+            update = True
+            i += 1
+            continue
+        if t in ("--anchor-equity", "--anchor_equity") and i + 1 < len(tokens):
+            try:
+                anchor_equity = float(str(tokens[i + 1] or "").replace(",", "").strip())
+            except ValueError:
+                return None, "--anchor-equity debe ser numérico"
+            if anchor_equity <= 0:
+                return None, "--anchor-equity debe ser mayor que 0"
+            i += 2
+            continue
         if t == "--max-drawdown" and i + 1 < len(tokens):
             try:
                 max_drawdown = float(tokens[i + 1])
@@ -4396,7 +4418,15 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
         i += 1
     if stop and status:
         return None, "Usa --stop o --status, no ambos."
-    if (not stop and not status) and not mode:
+    if update and (stop or status):
+        return None, "Usa --update sin --stop ni --status."
+    if update and mode:
+        return None, "Con --update no uses --mode; se conserva el modo de la sesión activa."
+    if update and not tickers_raw and anchor_equity is None:
+        return None, "Con --update indica --tickers y/o --anchor-equity"
+    if update and mode is None and not stop and not status:
+        pass
+    elif (not stop and not status and not update) and not mode:
         return None, "Falta --mode paper|live"
     if mode and mode not in ("paper", "live"):
         return None, "mode debe ser paper o live"
@@ -4419,6 +4449,8 @@ def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArg
                 "confirm": bool(confirm),
                 "stop": bool(stop),
                 "status": bool(status),
+                "update": bool(update),
+                "anchor_equity": anchor_equity,
                 "max_drawdown_pct": float(max_drawdown),
                 "position_size_pct": float(position_size),
                 "signal_threshold": signal_threshold or "GAS",
@@ -5890,6 +5922,126 @@ def _trading_session_chart_label(db: Any) -> tuple[str, str]:
     return stamp, slug or "sesion"
 
 
+def _merge_trading_session_goal_tickers(existing_goal: Any, tickers_csv: str) -> str:
+    """Conserva session_goal existente y sustituye solo la lista de tickers."""
+    tickers_list = [x.strip().upper() for x in (tickers_csv or "").split(",") if x.strip()]
+    goal: dict[str, Any] = {}
+    if isinstance(existing_goal, dict):
+        goal = dict(existing_goal)
+    elif isinstance(existing_goal, str) and existing_goal.strip():
+        try:
+            parsed_goal = json.loads(existing_goal)
+            if isinstance(parsed_goal, dict):
+                goal = parsed_goal
+        except json.JSONDecodeError:
+            goal = {}
+    goal["tickers"] = tickers_list
+    return json.dumps(goal, ensure_ascii=False)
+
+
+def _apply_trading_session_anchor_equity(
+    db: Any,
+    *,
+    tenant_id: str,
+    anchor_equity: float,
+) -> tuple[bool, str]:
+    """
+    Fija anchor_equity y peak_equity en la sesión activa (referencia PnL si IBKR no responde).
+
+    Econofísica: ancla manual cuando el observador externo (broker) pierde señal.
+    """
+    eq = float(anchor_equity)
+    if eq <= 0:
+        return False, "anchor_equity debe ser mayor que 0"
+    return _vault_apply_sql_statements(
+        db,
+        [
+            (_TRADING_SESSIONS_DDL, None),
+            (
+                "UPDATE quant_core.trading_sessions SET anchor_equity = ?, peak_equity = ?, "
+                "updated_at = now() WHERE id = ? AND status = 'ACTIVE'",
+                [eq, eq, _TRADING_SESSION_ROW_ID],
+            ),
+        ],
+        tenant_id=tenant_id,
+    )
+
+
+def _update_active_trading_session(
+    db: Any,
+    *,
+    tickers_csv: str = "",
+    anchor_equity: Optional[float] = None,
+    tenant_id: str,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Actualiza tickers y/o anchor_equity sin rotar session_uid.
+
+    Econofísica: el observador mantiene el mismo marco temporal (UID) al ampliar activos o re-anclar capital.
+    """
+    try:
+        raw = db.query(
+            "SELECT mode, tickers, session_uid, session_goal, status, anchor_equity "
+            "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
+        )
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except Exception as exc:
+        return False, f"lectura sesión: {exc}", {}
+    if not rows or not isinstance(rows[0], dict):
+        return (
+            False,
+            "No hay sesión activa. Inicia con `/trading-session --mode paper|live --tickers ...`.",
+            {},
+        )
+    row = rows[0]
+    status = str(row.get("status") or "").strip().upper()
+    if status != "ACTIVE":
+        return (
+            False,
+            f"Sesión id=active está {status or 'sin status'}; no se puede actualizar.",
+            {},
+        )
+    new_tickers = (tickers_csv or "").strip()
+    if not new_tickers and anchor_equity is None:
+        return False, "Indica --tickers y/o --anchor-equity.", {}
+    statements: list[tuple[str, Optional[list[Any]]]] = [(_TRADING_SESSIONS_DDL, None)]
+    goal_json = str(row.get("session_goal") or "")
+    if new_tickers:
+        goal_json = _merge_trading_session_goal_tickers(row.get("session_goal"), new_tickers)
+        statements.append(
+            (
+                "UPDATE quant_core.trading_sessions SET tickers = ?, session_goal = CAST(? AS JSON), "
+                "updated_at = now() WHERE id = ? AND status = 'ACTIVE'",
+                [new_tickers, goal_json, _TRADING_SESSION_ROW_ID],
+            )
+        )
+    if anchor_equity is not None:
+        eq = float(anchor_equity)
+        statements.append(
+            (
+                "UPDATE quant_core.trading_sessions SET anchor_equity = ?, peak_equity = ?, "
+                "updated_at = now() WHERE id = ? AND status = 'ACTIVE'",
+                [eq, eq, _TRADING_SESSION_ROW_ID],
+            )
+        )
+    ok, detail = _vault_apply_sql_statements(db, statements, tenant_id=tenant_id)
+    if not ok:
+        return False, detail, {}
+    return (
+        True,
+        "",
+        {
+            "mode": str(row.get("mode") or "paper"),
+            "session_uid": str(row.get("session_uid") or ""),
+            "old_tickers": str(row.get("tickers") or ""),
+            "new_tickers": new_tickers or str(row.get("tickers") or ""),
+            "old_anchor_equity": row.get("anchor_equity"),
+            "new_anchor_equity": float(anchor_equity) if anchor_equity is not None else None,
+            "session_goal": goal_json,
+        },
+    )
+
+
 def execute_trading_session(
     db: Any,
     chat_id: Any,
@@ -5898,17 +6050,43 @@ def execute_trading_session(
     tenant_id: Any = None,
     vault_user_id: Any = None,
 ) -> str:
-    """/trading-session --mode paper|live [--tickers A,B] [--objective ...] [--confirm] [--status] [--stop]."""
+    """/trading-session --mode paper|live [--tickers A,B] [--update] [--objective ...] [--confirm] [--status] [--stop]."""
     parsed, err = _parse_trading_session_cli(args)
     if err or parsed is None:
         return (
             f"Error: {err}\n\n"
             "Uso: `/trading-session --mode paper|live [--tickers AAPL,NVDA] [--confirm]`\n"
-            "Extras: `--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze` · `--max-drawdown 2` · "
+            "Actualizar sin nueva sesión: `/trading-session --update --tickers AAPL,NVDA` "
+            "o `--update --anchor-equity 916645` (también `update --tickers ...`).\n"
+            "Extras: `--anchor-equity N` (manual si IBKR falla) · "
+            "`--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze` · `--max-drawdown 2` · "
             "`--position-size 5` · `--signal GAS` · `--status` · `--stop`\n"
             "Modo **live** exige añadir **--confirm** en el mismo mensaje (riesgo de capital)."
         )
     tid = str(tenant_id or "default").strip() or "default"
+    if parsed.update:
+        ok_up, detail_up, meta = _update_active_trading_session(
+            db,
+            tickers_csv=parsed.tickers_csv,
+            anchor_equity=parsed.anchor_equity,
+            tenant_id=tid,
+        )
+        if not ok_up:
+            return f"No se pudo actualizar la sesión: {detail_up}"
+        uid = str(meta.get("session_uid") or "").strip() or "?"
+        mode = str(meta.get("mode") or "paper").upper()
+        lines = [f"Sesión **{mode}** actualizada (mismo `session_uid`: `{uid}`)."]
+        if parsed.tickers_csv:
+            old_t = str(meta.get("old_tickers") or "").strip() or "(vacío)"
+            new_t = str(meta.get("new_tickers") or "").strip()
+            lines.append(f"Tickers: `{old_t}` → `{new_t}` (session_goal sincronizado).")
+        if parsed.anchor_equity is not None:
+            old_ae = meta.get("old_anchor_equity")
+            new_ae = float(parsed.anchor_equity)
+            old_s = f"{float(old_ae):,.2f}" if old_ae is not None else "N/D"
+            lines.append(f"anchor_equity: {old_s} → **{new_ae:,.2f}** USD (peak_equity igualado).")
+        lines.append("/crons y session_uid se conservan.")
+        return "\n".join(lines)
     if parsed.status:
         out = _read_trading_session_status_summary(
             db, chat_id=chat_id, vault_user_id=vault_user_id
@@ -5980,27 +6158,40 @@ ON CONFLICT (id) DO UPDATE SET
     )
     if not ok:
         return f"No se pudo guardar la sesión: {detail}"
-    try:
-        from duckclaw.capadonna_plugin import load_capadonna_lib
-
-        _ibkr = load_capadonna_lib("ibkr_bridge")
-        if _ibkr is not None:
-            eq, _eq_err = _ibkr.fetch_ibkr_total_equity_numeric()
+    anchor_note = ""
+    if parsed.anchor_equity is not None:
+        ok_ae, detail_ae = _apply_trading_session_anchor_equity(
+            db,
+            tenant_id=tid,
+            anchor_equity=float(parsed.anchor_equity),
+        )
+        if ok_ae:
+            anchor_note = f"\nanchor_equity manual: **{float(parsed.anchor_equity):,.2f}** USD."
         else:
-            eq, _eq_err = None, "capadonna_ibkr_plugin_missing"
-        if eq is not None:
-            _vault_apply_sql_statements(
-                db,
-                [
-                    (
-                        "UPDATE quant_core.trading_sessions SET anchor_equity = ?, peak_equity = ? WHERE id = ?",
-                        [float(eq), float(eq), _TRADING_SESSION_ROW_ID],
-                    )
-                ],
-                tenant_id=tid,
-            )
-    except Exception:
-        pass
+            anchor_note = f"\nNo se pudo fijar anchor_equity manual: {detail_ae}"
+    else:
+        try:
+            from duckclaw.capadonna_plugin import load_capadonna_lib
+
+            _ibkr = load_capadonna_lib("ibkr_bridge")
+            if _ibkr is not None:
+                eq, _eq_err = _ibkr.fetch_ibkr_total_equity_numeric()
+            else:
+                eq, _eq_err = None, "capadonna_ibkr_plugin_missing"
+            if eq is not None:
+                _vault_apply_sql_statements(
+                    db,
+                    [
+                        (
+                            "UPDATE quant_core.trading_sessions SET anchor_equity = ?, peak_equity = ? WHERE id = ?",
+                            [float(eq), float(eq), _TRADING_SESSION_ROW_ID],
+                        )
+                    ],
+                    tenant_id=tid,
+                )
+                anchor_note = f"\nanchor_equity IBKR: **{float(eq):,.2f}** USD."
+        except Exception:
+            pass
     enabled, secs = _ensure_trading_session_goals_delta(
         db,
         chat_id=chat_id,
@@ -6029,7 +6220,7 @@ ON CONFLICT (id) DO UPDATE SET
         f"Sesión de trading **{mode.upper()}** registrada en `quant_core.trading_sessions` (status=ACTIVE)."
         f"{tick_note}\n"
         f"session_goal: `{goal_json}`\n"
-        f"{delta_msg}\n"
+        f"{delta_msg}{anchor_note}\n"
         "El reactor Quant debe leer tickers y `status=ACTIVE` antes de proponer señales."
     )
 
@@ -6899,6 +7090,9 @@ def _dispatch_fly_command(
             vault_user_id=vault_user_id,
         )
     if name == "meditate":
+        args_norm = (args or "").strip().lower()
+        if args_norm in ("--self", "--now"):
+            return None
         return execute_meditate(
             db, chat_id, args, tenant_id=tenant_id, vault_user_id=vault_user_id
         )

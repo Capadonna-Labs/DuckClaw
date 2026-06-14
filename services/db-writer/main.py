@@ -19,10 +19,25 @@ import duckdb
 import redis.asyncio as redis
 from context_injection_handler import handle_context_injection_message
 from core.config import settings
-from meditate_state_delta_handler import handle_meditate_state_delta_message
-from quant_state_delta_handler import handle_quant_state_delta_message
-from reports_state_delta_handler import handle_reports_state_delta_message
-from visual_state_delta_handler import handle_visual_state_delta_message
+try:
+    from meditate_state_delta_handler import handle_meditate_state_delta_message
+except ImportError:
+    handle_meditate_state_delta_message = None
+
+try:
+    from quant_state_delta_handler import handle_quant_state_delta_message
+except ImportError:
+    handle_quant_state_delta_message = None
+
+try:
+    from reports_state_delta_handler import handle_reports_state_delta_message
+except ImportError:
+    handle_reports_state_delta_message = None
+
+try:
+    from visual_state_delta_handler import handle_visual_state_delta_message
+except ImportError:
+    handle_visual_state_delta_message = None
 from duckclaw.db_write_queue import (
     TASK_STATUS_TTL_SEC,
     DbWriteTaskStatus,
@@ -331,7 +346,9 @@ async def _context_injection_loop(redis_client: redis.Redis) -> None:
 
 
 async def _quant_state_delta_loop(redis_client: redis.Redis) -> None:
-    """Persiste ledger Quant (finance_worker.trade_signals, etc.) desde la misma cola que el producer."""
+    if handle_quant_state_delta_message is None:
+        logger.warning("QUANT_STATE_DELTA handler no disponible; omitiendo loop")
+        return
     q = str(settings.QUANT_STATE_DELTA_QUEUE_NAME).strip()
     logger.info("Escuchando cola QUANT_STATE_DELTA (MANDATE_UPSERT, TRADE_SIGNAL_*): %s", q)
     while True:
@@ -345,6 +362,9 @@ async def _quant_state_delta_loop(redis_client: redis.Redis) -> None:
 
 
 async def _visual_state_delta_loop(redis_client: redis.Redis) -> None:
+    if handle_visual_state_delta_message is None:
+        logger.warning("VISUAL_STATE_DELTA handler no disponible; omitiendo loop")
+        return
     q = str(settings.VISUAL_STATE_DELTA_QUEUE_NAME).strip()
     logger.info("Escuchando cola VISUAL_STATE_DELTA (VISUAL_ASSET_UPSERT): %s", q)
     while True:
@@ -358,6 +378,9 @@ async def _visual_state_delta_loop(redis_client: redis.Redis) -> None:
 
 
 async def _meditate_state_delta_loop(redis_client: redis.Redis) -> None:
+    if handle_meditate_state_delta_message is None:
+        logger.warning("MEDITATE_STATE_DELTA handler no disponible; omitiendo loop")
+        return
     q = str(settings.MEDITATE_STATE_DELTA_QUEUE_NAME).strip()
     logger.info("Escuchando cola MEDITATE_STATE_DELTA (PURGE_STALE_TASKS, QUARANTINE_MEMORY): %s", q)
     while True:
@@ -371,6 +394,9 @@ async def _meditate_state_delta_loop(redis_client: redis.Redis) -> None:
 
 
 async def _reports_state_delta_loop(redis_client: redis.Redis) -> None:
+    if handle_reports_state_delta_message is None:
+        logger.warning("REPORTS_STATE_DELTA handler no disponible; omitiendo loop")
+        return
     q = str(settings.REPORTS_STATE_DELTA_QUEUE_NAME).strip()
     logger.info("Escuchando cola REPORTS_STATE_DELTA (CUSTOM_REPORT_UPSERT): %s", q)
     while True:

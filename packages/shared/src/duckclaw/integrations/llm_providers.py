@@ -33,7 +33,7 @@ def _ensure_duckclaw_llm_env_from_legacy_llm_vars() -> None:
 
 # OpenRouter App Attribution — DuckClaw en openrouter.ai/rankings y openrouter.ai/apps
 OPENROUTER_ATTRIBUTION_HEADERS: dict[str, str] = {
-    "HTTP-Referer": "https://github.com/duckclaw/duckclaw",
+    "HTTP-Referer": "https://github.com/Capadonna-Labs/DuckClaw", # by JuanArevalo-dev
     "X-OpenRouter-Title": "DuckClaw - Sovereign Agent Harness",
     "X-OpenRouter-Categories": "cloud-agent,cli-agent",
 }
@@ -285,6 +285,56 @@ def _debug_log_rate_limit_pause(
     del provider, attempt, wait_sec, reason
 
 
+def _openrouter_attribution_wire_snapshot(llm: Any) -> dict[str, str | bool]:
+    """Lee headers de atribución del cliente HTTP sin exponer secretos."""
+    root = getattr(llm, "root_client", None)
+    bound = getattr(llm, "bound", None)
+    if root is None and bound is not None:
+        root = getattr(bound, "root_client", None)
+    default_headers = getattr(root, "default_headers", None) if root is not None else None
+    headers = dict(default_headers) if isinstance(default_headers, dict) else {}
+    referer = str(headers.get("HTTP-Referer") or "").strip()
+    title = str(
+        headers.get("X-OpenRouter-Title") or headers.get("X-Title") or ""
+    ).strip()
+    categories = str(headers.get("X-OpenRouter-Categories") or "").strip()
+    model_hint = ""
+    for attr in ("model_name", "model", "model_id"):
+        model_val = getattr(llm, attr, None)
+        if model_val is not None and str(model_val).strip():
+            model_hint = str(model_val).strip()
+            break
+    return {
+        "referer": referer,
+        "title": title,
+        "categories": categories,
+        "has_referer": bool(referer),
+        "model": model_hint,
+    }
+
+
+def _debug_agent_openrouter_log(hypothesis_id: str, message: str, data: dict[str, Any]) -> None:
+    """NDJSON de depuración (sesión 480705); ruta vía DUCKCLAW_DEBUG_LOG_PATH."""
+    log_path = (os.environ.get("DUCKCLAW_DEBUG_LOG_PATH") or "").strip()
+    if not log_path:
+        return
+    try:
+        import json
+
+        payload = {
+            "sessionId": "480705",
+            "hypothesisId": hypothesis_id,
+            "location": "llm_providers.py:invoke_chat_model_with_transient_retries",
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(log_path, "a", encoding="utf-8") as debug_file:
+            debug_file.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def invoke_chat_model_with_transient_retries(
     llm: Any,
     messages: Any,
@@ -308,6 +358,14 @@ def invoke_chat_model_with_transient_retries(
             "con el uso de esta sesión."
         )
         _or_attribution_logged = True
+    if provider == "openrouter":
+        # #region agent log
+        _debug_agent_openrouter_log(
+            "H1",
+            "openrouter_invoke_attribution_snapshot",
+            _openrouter_attribution_wire_snapshot(llm),
+        )
+        # #endregion
     cooldown_until = _PROVIDER_COOLDOWN_UNTIL.get(provider, 0.0)
     now = time.time()
     if cooldown_until > now:

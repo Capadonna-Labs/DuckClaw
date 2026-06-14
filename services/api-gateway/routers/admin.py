@@ -1531,24 +1531,6 @@ async def playground_chat(
             caption=msg,
             image_count=len(body.images),
         )
-        # region agent log
-        try:
-            from core.comfyui_inbound import _agent_debug_log
-
-            _agent_debug_log(
-                hypothesis_id="H1",
-                location="admin.py:playground_chat",
-                message="admin_image_routing",
-                data={
-                    "route_admin_edit": route_admin_edit,
-                    "image_count": len(body.images),
-                    "caption_len": len(msg),
-                    "tenant_id": eff_tenant,
-                },
-            )
-        except Exception:
-            pass
-        # endregion
         if route_admin_edit:
             first = body.images[0]
             mime = str(first.mime_type or "image/jpeg").strip().lower()

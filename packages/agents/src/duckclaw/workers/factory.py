@@ -6471,39 +6471,6 @@ def build_worker_graph(
                     _edit_args["source_image_path"][:80],
                     _edit_args["edit_prompt"][:80],
                 )
-                # region agent log
-                try:
-                    from pathlib import Path as _DbgPath
-
-                    _dbg_roots = [
-                        (os.environ.get("CAPADONNA_DRILLER_ROOT") or "").strip(),
-                        (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip(),
-                    ]
-                    _dbg_payload = {
-                        "sessionId": "480705",
-                        "runId": "post-fix",
-                        "hypothesisId": "H2-force-edit",
-                        "location": "factory.py:force_edit_visual",
-                        "message": "deterministic edit_visual_asset",
-                        "data": {
-                            "source_image_path": _edit_args["source_image_path"][:120],
-                            "edit_prompt_len": len(_edit_args["edit_prompt"]),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                    for _dr in _dbg_roots:
-                        if not _dr:
-                            continue
-                        try:
-                            (_DbgPath(_dr) / "debug-480705.log").open("a", encoding="utf-8").write(
-                                json.dumps(_dbg_payload, ensure_ascii=False) + "\n"
-                            )
-                            break
-                        except OSError:
-                            continue
-                except Exception:
-                    pass
-                # endregion
                 _forced_resp = AIMessage(content="", tool_calls=_forced_tc)
                 _out_edit = {**state, "messages": state["messages"] + [_forced_resp]}
                 _out_edit.update(_identity_fields(state))

@@ -51,47 +51,7 @@ export async function readTenantArtifact(
     if (!existsSync(resolved)) continue;
     const bytes = await readFile(resolved);
     const ext = basename.split('.').pop()?.toLowerCase() || 'png';
-    // #region agent log
-    try {
-      const { appendFileSync } = await import('fs');
-      const logPath = join(productRoot, 'debug-480705.log');
-      appendFileSync(
-        logPath,
-        `${JSON.stringify({
-          sessionId: '480705',
-          runId: 'post-fix',
-          hypothesisId: 'H1-fal-prefix',
-          location: 'artifactPreviewServer.ts:readTenantArtifact',
-          message: 'artifact resolved',
-          data: { tenantId: tid, artifactId: aid, resolvedBasename: basename },
-          timestamp: Date.now(),
-        })}\n`
-      );
-    } catch {
-      /* debug log optional */
-    }
-    // #endregion
     return { bytes, contentType: MIME[ext] || 'application/octet-stream' };
   }
-  // #region agent log
-  try {
-    const { appendFileSync } = await import('fs');
-    const logPath = join(productRoot, 'debug-480705.log');
-    appendFileSync(
-      logPath,
-      `${JSON.stringify({
-        sessionId: '480705',
-        runId: 'post-fix',
-        hypothesisId: 'H1-fal-prefix',
-        location: 'artifactPreviewServer.ts:readTenantArtifact',
-        message: 'artifact not found',
-        data: { tenantId: tid, artifactId: aid, tried: basenameCandidates.length },
-        timestamp: Date.now(),
-      })}\n`
-    );
-  } catch {
-    /* debug log optional */
-  }
-  // #endregion
   return null;
 }

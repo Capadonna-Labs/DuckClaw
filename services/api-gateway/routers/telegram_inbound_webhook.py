@@ -50,7 +50,10 @@ from core.vlm_ingest import (
     vlm_post_inference_cooldown,
 )
 from duckclaw.gateway_db import resolve_env_duckdb_path
-from duckclaw.forge.skills.moc_execution_window import parse_moc_execution_window_bounds
+try:
+    from duckclaw.forge.skills.moc_execution_window import parse_moc_execution_window_bounds
+except ImportError:
+    parse_moc_execution_window_bounds = None
 
 
 def _context_time_anchor_block(
@@ -73,7 +76,10 @@ def _context_time_anchor_block(
         dt = datetime.now(timezone.utc)
     dow_es = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
     label_dow = dow_es[dt.weekday()]
-    start_s, end_s, win_s = parse_moc_execution_window_bounds()
+    if parse_moc_execution_window_bounds is not None:
+        start_s, end_s, win_s = parse_moc_execution_window_bounds()
+    else:
+        start_s, end_s, win_s = 0, 0, "N/A"
     cur_s = dt.hour * 3600 + dt.minute * 60 + int(dt.second)
     is_weekend = dt.weekday() >= 5
     inside_moc = (not is_weekend) and (start_s <= cur_s <= end_s)

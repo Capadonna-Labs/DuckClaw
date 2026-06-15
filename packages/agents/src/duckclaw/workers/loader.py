@@ -103,7 +103,7 @@ def _seed_agent_beliefs(db: Any, spec: WorkerSpec) -> None:
     if not config or not isinstance(config, dict):
         return
     try:
-        from duckclaw.forge.homeostasis.belief_registry import BeliefRegistry
+        from duckclaw.homeostasis import BeliefRegistry
         registry = BeliefRegistry.from_config(config)
         if not registry.beliefs:
             return

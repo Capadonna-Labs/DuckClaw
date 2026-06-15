@@ -36,7 +36,7 @@ def test_run_heartbeat_builds_payloads(monkeypatch: Any) -> None:
     # Simular anomalies y capturar posts en vez de hacer HTTP real
     anomalies: List[Dict[str, Any]] = [
         {
-            "tenant_id": "finance_worker",
+            "tenant_id": "analytics_worker",
             "belief_key": "presupuesto_mensual",
             "observed_value": 5000.0,
             "admin_chat_id": "12345",
@@ -85,7 +85,7 @@ def test_run_heartbeat_builds_payloads(monkeypatch: Any) -> None:
             async with DummyClient() as client:
                 await client.post(
                     heartbeat.GATEWAY_URL,
-                    params={"tenant_id": tenant_id, "worker_id": "finanz"},
+                    params={"tenant_id": tenant_id},
                     json=payload,
                     headers={},
                     timeout=30,

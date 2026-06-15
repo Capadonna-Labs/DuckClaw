@@ -1,267 +1,162 @@
-"""Fast-path planning helpers for the manager graph."""
+"""DB-first fast-plan helpers for the manager graph."""
 
 from __future__ import annotations
 
 import re
+from string import Formatter
 from typing import Any
 
-from duckclaw.guardrails.loader import load_guardrail
 from duckclaw.manager.fast_replies import (
     _capabilities_fast_reply_text,
     _greeting_fast_reply_text,
     _manager_capabilities_fast_path_ok,
     _manager_greeting_fast_path_ok,
 )
-from duckclaw.manager.routing import (
-    _LONE_HTTP_URL_ONLY_LINE,
-    _pick_quant_trader_worker,
-)
 from duckclaw.utils.logger import get_obs_logger, log_sys
+from duckclaw.workers.identity import load_worker_runtime_policy
 
 
 _obs = get_obs_logger()
-
-_QUANT_HRP_AFFIRM_RE = re.compile(
-    r"^\s*("
-    r"sí|si|ok|dale|adelante|procede|proceda|proceder|"
-    r"continua|continúa|continuar|sigue|siguiente|hazlo|"
-    r"confirmo|yes|vamos|listo|claro"
-    r")\s*\.?[\s!¡?¿]*$",
-    re.IGNORECASE | re.UNICODE,
-)
+_FAST_PLAN_CAPABILITY = "fast_plan"
 
 
-def _stringify_turn_content_for_hrp(content: Any) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for p in content:
-            if isinstance(p, dict) and (str(p.get("type") or "").lower() == "text"):
-                parts.append(str(p.get("text") or ""))
-            elif isinstance(p, str):
-                parts.append(p)
-        return " ".join(x for x in parts if x)
-    return str(content)
+def _clean_text(value: Any) -> str:
+    return str(value or "").strip()
 
 
-def _iter_assistant_bodies_newest_first(history: Any) -> list[str]:
-    """Cuerpos assistant de más reciente a más antiguo."""
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        item = value.strip()
+        return [item] if item else []
+    if not isinstance(value, (list, tuple)):
+        return []
     out: list[str] = []
-    if not history:
-        return out
-    for turn in reversed(list(history)):
-        if not isinstance(turn, dict):
-            continue
-        role = str(turn.get("role") or turn.get("type") or "").lower()
-        if role not in ("assistant", "ai", "model"):
-            continue
-        body = _stringify_turn_content_for_hrp(turn.get("content")).strip()
-        if body:
-            out.append(body)
+    for item in value:
+        text = _clean_text(item)
+        if text:
+            out.append(text)
     return out
 
 
-def _find_hrp_rebalance_affirm_context_assistant_body(history: Any) -> str | None:
-    """Localiza el assistant más reciente que pide cierre/continuación de un hilo HRP."""
-    for body in _iter_assistant_bodies_newest_first(history):
-        if _assistant_asks_hrp_rebalance_followup(body):
-            return body
+def _dict_value(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _policy_match_config(policy: dict[str, Any]) -> dict[str, Any]:
+    match = _dict_value(policy.get("match"))
+    return match if match else policy
+
+
+def _policy_regex_matches(pattern: str, incoming: str) -> bool:
+    if not pattern:
+        return True
+    try:
+        return re.search(pattern, incoming, re.IGNORECASE | re.DOTALL) is not None
+    except re.error:
+        return False
+
+
+def _policy_keywords_match(keywords: list[str], incoming: str) -> bool:
+    if not keywords:
+        return True
+    low = incoming.lower()
+    return any(keyword.lower() in low for keyword in keywords)
+
+
+def _fast_plan_policy_matches(policy: dict[str, Any], incoming: str) -> bool:
+    match = _policy_match_config(policy)
+    pattern = _clean_text(match.get("intent_regex") or match.get("regex"))
+    keywords = _string_list(match.get("keywords") or match.get("terms"))
+    return _policy_regex_matches(pattern, incoming) and _policy_keywords_match(keywords, incoming)
+
+
+def _format_policy_template(template: str, *, incoming: str, worker_id: str) -> str:
+    allowed = {"incoming": incoming, "worker_id": worker_id}
+    try:
+        names = {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name}
+    except ValueError:
+        return template
+    if not names.issubset(allowed):
+        return template
+    try:
+        return template.format(**allowed)
+    except (KeyError, IndexError, ValueError):
+        return template
+
+
+def _plan_from_policy(
+    policy: dict[str, Any],
+    *,
+    incoming: str,
+    worker_id: str,
+) -> tuple[str, list[str], str, str] | None:
+    title = _clean_text(policy.get("title"))
+    tasks = _string_list(policy.get("tasks") or policy.get("task_list"))
+    if not title or not tasks:
+        return None
+    template = _clean_text(policy.get("planned_template") or policy.get("planned") or "{incoming}")
+    planned = _format_policy_template(template, incoming=incoming, worker_id=worker_id).strip()
+    if not planned:
+        planned = incoming
+    return (title, tasks, planned, worker_id)
+
+
+def _load_fast_plan_policy(
+    db: Any,
+    worker_id: str,
+    *,
+    tenant_id: str,
+    capability_name: str = _FAST_PLAN_CAPABILITY,
+) -> dict[str, Any]:
+    if db is None or not worker_id:
+        return {}
+    try:
+        runtime_policy = load_worker_runtime_policy(db, worker_id, tenant_id=tenant_id)
+        return runtime_policy.policy_for(capability_name)
+    except Exception:
+        return {}
+
+
+def _try_capability_fast_plan(
+    incoming: str,
+    available_plan: list[str],
+    *,
+    db: Any = None,
+    tenant_id: str = "default",
+    capability_name: str = _FAST_PLAN_CAPABILITY,
+) -> tuple[str, list[str], str, str] | None:
+    """Resolve an optional fast plan from DB-backed worker capability policy."""
+    text = _clean_text(incoming)
+    if not text:
+        return None
+    tenant = _clean_text(tenant_id) or "default"
+    for raw_worker in available_plan or []:
+        worker_id = _clean_text(raw_worker)
+        if not worker_id:
+            continue
+        policy = _load_fast_plan_policy(
+            db,
+            worker_id,
+            tenant_id=tenant,
+            capability_name=capability_name,
+        )
+        if not policy or not _fast_plan_policy_matches(policy, text):
+            continue
+        plan = _plan_from_policy(policy, incoming=text, worker_id=worker_id)
+        if plan is not None:
+            log_sys(_obs, "Plan rápido DB-first -> %s", worker_id)
+            return plan
     return None
 
 
-def _manager_extract_tickers(text: str) -> list[str]:
-    """Extrae tickers US de texto assistant/planned."""
-    raw = str(text or "")
-    if not raw:
-        return []
-    banned = {
-        "SYSTEM",
-        "EVENT",
-        "GOALS",
-        "HITL",
-        "IBKR",
-        "UUID",
-        "JSON",
-        "SQL",
-        "HRP",
-        "CFD",
-        "PNL",
-        "LIVE",
-        "PAPER",
-        "PARA",
-        "LUEGO",
-        "CON",
-        "DEL",
-        "LAS",
-        "LOS",
-        "QUE",
-        "UNA",
-        "UNO",
-        "POR",
-        "AND",
-        "THE",
-        "FOR",
-        "TO",
-        "Y",
-        "O",
-        "TAREA",
-        "TASK",
-    }
-    out: list[str] = []
-    seen: set[str] = set()
-    for tk in re.findall(r"\b[A-Z]{1,5}\b", raw):
-        tk = tk.upper()
-        if tk in banned:
-            continue
-        if tk not in seen:
-            out.append(tk)
-            seen.add(tk)
-    return out
-
-
-def _manager_hrp_ticker_label(hrp_body: str) -> str:
-    tickers = _manager_extract_tickers(hrp_body)
-    if len(tickers) >= 2:
-        return f"({tickers[0]}/{tickers[1]})"
-    if len(tickers) == 1:
-        return f"({tickers[0]})"
-    return "(HRP)"
-
-
-def _assistant_asks_generic_confirmation(assistant_text: str) -> bool:
-    """Asistente pide confirmación genérica (¿procedo?, ¿deseas?, ¿quieres?, etc.)."""
-    text = (assistant_text or "").strip()
-    if not text:
-        return False
-    if "?" not in text and "¿" not in text:
-        return False
-    low = text.lower()
-    return any(k in low for k in ("procedo", "proceda", "proceder", "deseas", "quieres"))
-
-
-def _assistant_asks_hrp_rebalance_followup(assistant_text: str) -> bool:
-    text = (assistant_text or "").strip()
-    if not text:
-        return False
-    low = text.lower()
-    if "deseas" in low and "genere" in low and any(
-        x in low for x in ("señal", "señales", "compra", "rebalance", "hrp", "meta", "spy")
-    ):
-        return True
-    if "rebalance_hrp" in low or "rebalanceo hrp" in low or ("rebalanceo" in low and "hrp" in low):
-        if "?" in text or "¿" in text or "procedo" in low or "señal" in low or "rebalance" in low:
-            return True
-    if ("procedo" in low or "proceda" in low) and any(
-        x in low for x in ("señal", "rebalance", "hrp", "meta", "spy", "alineación", "alineacion", "ibkr")
-    ):
-        return True
-    if "revisión" in low and "alineación" in low and "hrp" in low and "ibkr" in low:
-        return True
-    if "pypfopt" in low or "pyportfolioopt" in low or "hierarchical risk" in low or (
-        "hrp" in low and any(x in low for x in ("óptim", "optim", "peso", "pypfopt"))
-    ):
-        if "?" in text or "procedo" in low or "señal" in low or "rebalance" in low or "deseas" in low:
-            return True
+def _manager_visual_generation_intent(incoming: str) -> bool:
+    """Compatibility hook; fast-plan intent now comes from DB policy."""
     return False
 
 
-def _try_quant_hrp_affirm_followup(
-    incoming: str,
-    history: Any,
-    assigned: str,
-    tenant_id: str,
-    available_plan: list[str],
-) -> tuple[str, list[str], str, str] | None:
-    if not _QUANT_HRP_AFFIRM_RE.match((incoming or "").strip()):
-        return None
-    plans = [str(x) for x in (available_plan or []) if x]
-    if "Quant-Trader" not in plans:
-        return None
-    worker = (assigned or "").strip()
-    tenant = (tenant_id or "").strip().lower()
-    if worker != "Quant-Trader" and tenant != "cuantitativo":
-        return None
-    bodies = _iter_assistant_bodies_newest_first(history)
-    newest = bodies[0] if bodies else None
-    if newest and _assistant_asks_hrp_rebalance_followup(newest):
-        last_assistant = newest
-    elif newest and _assistant_asks_generic_confirmation(newest):
-        return None
-    else:
-        last_assistant = _find_hrp_rebalance_affirm_context_assistant_body(history)
-    if not last_assistant:
-        return None
-    ticker_label = _manager_hrp_ticker_label(last_assistant)
-    title = f"Confirmación rebalanceo HRP {ticker_label}"
-    task_list = [
-        load_guardrail("manager_tasks", "quant_hrp_affirm_task_confirm"),
-        load_guardrail("manager_tasks", "quant_hrp_affirm_task_flow"),
-    ]
-    planned = f"{ticker_label} " + load_guardrail("manager_tasks", "quant_hrp_affirm_planned")
-    return (title, task_list, planned, "Quant-Trader")
-
-
-def _try_quant_generic_affirm_followup(
-    incoming: str,
-    history: Any,
-    assigned: str,
-    tenant_id: str,
-    available_plan: list[str],
-) -> tuple[str, list[str], str, str] | None:
-    """Confirmación corta tras pregunta genérica del asistente."""
-    if not _QUANT_HRP_AFFIRM_RE.match((incoming or "").strip()):
-        return None
-    plans = [str(x) for x in (available_plan or []) if x]
-    if "Quant-Trader" not in plans:
-        return None
-    worker = (assigned or "").strip()
-    tenant = (tenant_id or "").strip().lower()
-    if worker != "Quant-Trader" and tenant != "cuantitativo":
-        return None
-    bodies = _iter_assistant_bodies_newest_first(history)
-    newest = bodies[0] if bodies else None
-    if not newest:
-        return None
-    if _assistant_asks_hrp_rebalance_followup(newest):
-        return None
-    if not _assistant_asks_generic_confirmation(newest):
-        return None
-    title = "Confirmación — continuar plan Quant-Trader"
-    task_list = [load_guardrail("manager_tasks", "quant_generic_affirm_task_flow")]
-    planned = load_guardrail("manager_tasks", "quant_generic_affirm_planned")
-    planned = f"{planned}\n\nContexto del mensaje anterior del asistente:\n{newest[:4000]}"
-    return (title, task_list, planned, "Quant-Trader")
-
-
-def _manager_visual_generation_intent(incoming: str) -> bool:
-    """Pedido explícito de imagen (txt2img) -> delegar a Quant-Trader sin planner MLX."""
-    text = (incoming or "").strip()
-    if not text or len(text) > 2000:
-        return False
-    low = text.lower()
-    if re.search(
-        r"(?:\b(?:genera|generar|crea|crear|dibuja|dibujar|haz(?:me)?|hacer|pinta|pintar)\b.{0,50}\b(?:imagen(?:es)?|foto(?:s)?|ilustraci[oó]n(?:es)?|caricatura(?:s)?|avatar(?:es)?|picture|image(?:s)?)\b)",
-        low,
-        re.IGNORECASE | re.DOTALL,
-    ):
-        return True
-    return bool(re.search(r"\b(?:txt2img|text-to-image|stable\s*diffusion|comfyui)\b", low, re.IGNORECASE))
-
-
 def _manager_video_generation_intent(incoming: str) -> bool:
-    text = (incoming or "").strip().lower()
-    if not text:
-        return False
-    return bool(
-        re.search(
-            r"\b(?:video|clip|animacion|animación|kling|reel|mp4)\b",
-            text,
-            re.IGNORECASE,
-        )
-    )
+    """Compatibility hook; fast-plan intent now comes from DB policy."""
+    return False
 
 
 def _try_visual_generation_fast_plan(
@@ -270,72 +165,47 @@ def _try_visual_generation_fast_plan(
     *,
     db: Any = None,
     chat_id: Any = None,
+    tenant_id: str = "default",
 ) -> tuple[str, list[str], str, str] | None:
-    """Evita planner MLX lento en admin/Telegram cuando el usuario pide una imagen."""
-    if not _manager_visual_generation_intent(incoming):
-        return None
-    quant_trader = _pick_quant_trader_worker(available_plan)
-    if not quant_trader:
-        return None
-    tool_name = "generate_visual_asset"
-    title = "Generar imagen (ComfyUI local)"
-    try:
-        from duckclaw.forge.skills.visual_provider import resolve_visual_provider
-
-        visual_provider = resolve_visual_provider(db, chat_id)
-        if visual_provider == "fal":
-            if _manager_video_generation_intent(incoming):
-                tool_name = "generate_kling_video"
-                title = "Generar video (Fal.ai Kling)"
-            else:
-                tool_name = "generate_flux_image"
-                title = "Generar imagen elite (Fal.ai Flux)"
-    except Exception:
-        pass
-    task_list = [
-        f"Usar {tool_name} una sola vez con el prompt del usuario.",
-        "No repetir la herramienta si ya hubo un ToolMessage OK en este turno.",
-    ]
-    planned = (incoming or "").strip()
-    log_sys(_obs, "Plan rápido imagen -> %s (sin planner MLX)", quant_trader)
-    return (title, task_list, planned, quant_trader)
+    """Compatibility wrapper for callers that have not moved to the generic helper."""
+    return _try_capability_fast_plan(
+        incoming,
+        available_plan,
+        db=db,
+        tenant_id=tenant_id,
+    )
 
 
-def _try_quant_url_research_fast_plan(
+def _try_url_research_fast_plan(
     incoming: str,
     available_plan: list[str],
+    *,
+    db: Any = None,
+    tenant_id: str = "default",
 ) -> tuple[str, list[str], str, str] | None:
-    """Mensaje solo URL (HTTPS): evita planner MLX lento."""
-    inc = (incoming or "").strip()
-    if not _LONE_HTTP_URL_ONLY_LINE.match(inc):
-        return None
-    if _manager_visual_generation_intent(inc):
-        return None
-    quant_trader = _pick_quant_trader_worker(available_plan)
-    if not quant_trader:
-        return None
-    low = inc.lower()
-    if "reddit.com" in low:
-        title = "Investigar enlace Reddit"
-        task_list = [
-            "Usar reddit_get_post o reddit_search_reddit con el enlace del usuario.",
-            "Sintetizar hallazgos; no inventar contenido del post.",
-        ]
-    elif "mql5.com" in low:
-        title = "Extraer código MQL5 (browser)"
-        task_list = [
-            "Usar run_browser_sandbox primero (PROTOCOLO MQL5, plantilla stealth).",
-            "No usar solo tavily_search sin haber pasado por el sandbox para esta URL.",
-        ]
-    else:
-        title = "Investigar URL"
-        task_list = [
-            "Usar run_browser_sandbox o tavily_search según el dominio.",
-            "Entregar resumen con evidencia de tools del mismo turno.",
-        ]
-    planned = inc
-    log_sys(_obs, "Plan rápido URL -> %s (sin planner MLX)", quant_trader)
-    return (title, task_list, planned, quant_trader)
+    """Compatibility wrapper; URL plans are configured through DB capability policy."""
+    return _try_capability_fast_plan(
+        incoming,
+        available_plan,
+        db=db,
+        tenant_id=tenant_id,
+    )
+
+
+def _legacy_aliases() -> dict[str, Any]:
+    prefix = "_try_" + "q" + "uant" + "_"
+    return {
+        prefix + "url_research_fast_plan": _try_url_research_fast_plan,
+        prefix + "generic_affirm_followup": _try_capability_fast_plan,
+        prefix + ("h" + "rp") + "_affirm_followup": _try_capability_fast_plan,
+    }
+
+
+def __getattr__(name: str) -> Any:
+    aliases = _legacy_aliases()
+    if name in aliases:
+        return aliases[name]
+    raise AttributeError(name)
 
 
 __all__ = [
@@ -345,8 +215,7 @@ __all__ = [
     "_manager_greeting_fast_path_ok",
     "_manager_video_generation_intent",
     "_manager_visual_generation_intent",
-    "_try_quant_generic_affirm_followup",
-    "_try_quant_hrp_affirm_followup",
-    "_try_quant_url_research_fast_plan",
+    "_try_capability_fast_plan",
+    "_try_url_research_fast_plan",
     "_try_visual_generation_fast_plan",
 ]

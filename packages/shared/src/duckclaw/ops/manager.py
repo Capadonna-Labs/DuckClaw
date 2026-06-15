@@ -748,8 +748,8 @@ def serve(
             if val:
                 env_vars[key] = val
         # Tokens / rutas webhook Telegram: deben refrescarse desde .env en cada deploy;
-        # si no, el merge conserva TELEGRAM_FINANZ_TOKEN u otros en JSON y el legado
-        # POST …/webhook/finanz responde con el bot equivocado (mismo chat_id en DM).
+        # si no, el merge conserva tokens de workers antiguos en JSON y el legado
+        # POST …/webhook/<worker> responde con el bot equivocado (mismo chat_id en DM).
         for key in os.environ:
             if key.startswith("TELEGRAM_") or key.startswith("DUCKCLAW_TELEGRAM_"):
                 val = (os.environ.get(key) or "").strip()

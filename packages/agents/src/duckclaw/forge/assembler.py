@@ -182,7 +182,7 @@ class AgentAssembler:
 
     def _build_manager(self, db: Any, llm: Any, **overrides) -> Any:
         """Construye el grafo manager (orquestador de subagentes)."""
-        from duckclaw.graphs.manager_graph import build_manager_graph
+        from duckclaw.manager.graph import build_manager_graph
 
         # None => build_manager_graph usa WORKERS_TEMPLATES_DIR (forge/templates)
         templates_root = overrides.get("templates_root")

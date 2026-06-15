@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from duckclaw.egress.quant_price_validator import (
+from duckclaw.egress.evidence_validator import (
     VISUAL_EVIDENCE_RETRY_REASON,
     enforce_visual_evidence_rule,
     visual_evidence_retry_system_message,

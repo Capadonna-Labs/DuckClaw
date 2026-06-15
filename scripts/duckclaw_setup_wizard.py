@@ -222,10 +222,10 @@ def _normalize_db_to_db_folder(raw: str, repo_root: Path) -> str:
     s = (raw or "").strip()
     if not s or not _valid_db_path(s):
         return "db/telegram.duckdb"
-    # Si ya está en db/<algo>, mantener (puede ser db/finanz.duckdb)
+    # Si ya está en db/<algo>, mantener.
     if s.replace("\\", "/").startswith("db/"):
         return s
-    # Extraer nombre del archivo (ej. finanz.duckdb desde /path/to/finanz.duckdb)
+    # Extraer nombre del archivo desde la ruta indicada.
     name = Path(s).name
     if not name.lower().endswith(".duckdb"):
         name = name + ".duckdb" if name else "telegram.duckdb"
@@ -2008,7 +2008,7 @@ def _run_section(
     if section_id == "db_path":
         console.print(Panel("Ruta de la base de datos", title="DB", border_style="cyan"))
         console.print(
-            "[dim]Puedes poner ruta completa bajo el repo (p. ej. db/private/…/finanz.duckdb). "
+            "[dim]Puedes poner ruta completa bajo el repo (p. ej. db/private/…/duckclaw.duckdb). "
             "Si solo indicas el nombre y ya existe otro .duckdb con el mismo nombre en db/, "
             "se reutiliza ese archivo — no se crea uno nuevo en db/ raíz ni se sobrescribe.[/]"
         )

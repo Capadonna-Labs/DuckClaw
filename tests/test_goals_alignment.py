@@ -6,7 +6,7 @@ from typing import Any
 
 import duckdb
 
-from duckclaw.forge.homeostasis.goals_alignment import (
+from duckclaw.homeostasis.goals_alignment import (
     AlignmentReport,
     assess_goals_alignment,
     build_alignment_nudge_system_event,
@@ -94,13 +94,13 @@ def test_assess_goals_alignment_anomaly(tmp_path: Path) -> None:
             }
         ],
     )
-    set_chat_state(db, chat_id, "worker_id", "Quant-Trader")
-    report = assess_goals_alignment(db, chat_id, worker_id="Quant-Trader")
+    set_chat_state(db, chat_id, "worker_id", "analytics-worker")
+    report = assess_goals_alignment(db, chat_id, worker_id="analytics-worker")
     assert report.aligned is False
     assert report.misaligned_count >= 1
 
 
-def test_refresh_goal_observations_pnl(tmp_path: Path) -> None:
+def test_refresh_goal_observations_preserves_persisted_observed_value(tmp_path: Path) -> None:
     db = _make_db(tmp_path / "b.duckdb")
     chat_id = "88"
     set_manager_goals(
@@ -108,22 +108,22 @@ def test_refresh_goal_observations_pnl(tmp_path: Path) -> None:
         chat_id,
         [
             {
-                "belief_key": "session_pnl",
+                "belief_key": "error_rate_pct",
                 "target_value": 100.0,
                 "threshold": 10.0,
-                "title": "PnL sesión",
+                "observed_value": 250.5,
+                "title": "Error rate",
             }
         ],
     )
-    set_chat_state(db, chat_id, "trading_session_last_pnl", "250.5")
-    goals = refresh_goal_observations(db, chat_id, "Quant-Trader")
+    goals = refresh_goal_observations(db, chat_id, "analytics-worker")
     assert goals and float(goals[0].get("observed_value")) == 250.5
 
 
 def test_execute_goals_delta_with_notify_and_mode(tmp_path: Path) -> None:
     db = _make_db(tmp_path / "c.duckdb")
     chat_id = "77"
-    set_chat_state(db, chat_id, "worker_id", "Quant-Trader")
+    set_chat_state(db, chat_id, "worker_id", "analytics-worker")
     out = execute_goals(db, chat_id, "--delta 90s --notify admin --mode on_misalignment", tenant_id="T1")
     assert "Revisión proactiva" in out
     assert "admin" in out

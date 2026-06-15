@@ -25,7 +25,7 @@ def test_maybe_synthesize_skips_polished_admin_reply() -> None:
     llm = MagicMock()
     spec = MagicMock()
     spec.egress_natural_language_synthesis = True
-    spec.worker_id = "quant-trader"
+    spec.worker_id = "default"
     polished = (
         "## ❌ Falla del CD\n\n"
         "El pipeline de **Continuous Delivery** ha fallado.\n\n"
@@ -53,15 +53,15 @@ def test_reply_needs_nl_synthesis() -> None:
 
 def test_reply_needs_nl_synthesis_reddit_mcp_prefixed_or_truncated() -> None:
     """Prefijo worker + JSON listado MCP no empieza por '{'; JSON truncado no pasa json.loads."""
-    blob_ok = 'finanz 2\n\n{\n  "subreddit": "worldnews",\n  "sort": "hot",\n  "posts": []\n}'
+    blob_ok = 'worker 2\n\n{\n  "subreddit": "worldnews",\n  "sort": "hot",\n  "posts": []\n}'
     assert mod.reply_needs_nl_synthesis(blob_ok) is True
-    broken = 'finanz 2\n\n{"subreddit":"worldnews","posts":[{"title":"x"'
+    broken = 'worker 2\n\n{"subreddit":"worldnews","posts":[{"title":"x"'
     assert mod.reply_needs_nl_synthesis(broken) is True
 
 
 def test_reply_needs_nl_synthesis_reddit_compact_markdown_listing() -> None:
     """Listado Markdown post-formatter (no JSON) debe disparar síntesis NL."""
-    md = """finanz 2
+    md = """worker 2
 
 ## r/worldnews (Top 8 posts)
 
@@ -72,7 +72,7 @@ def test_reply_needs_nl_synthesis_reddit_compact_markdown_listing() -> None:
 
 
 def test_reply_needs_nl_synthesis_combined_tool_blocks() -> None:
-    combined = "### read_sql\n[\n  {\"id\": \"1\", \"name\": \"Nequi\"}\n]\n\n### get_ibkr_portfolio\n{\"cash\": 1.0}"
+    combined = "### read_sql\n[\n  {\"id\": \"1\", \"name\": \"Example\"}\n]\n\n### fetch_external_snapshot\n{\"value\": 1.0}"
     assert mod.reply_needs_nl_synthesis(combined) is True
 
 
@@ -82,8 +82,8 @@ def test_reply_needs_nl_synthesis_plain_hash_headers_no_json() -> None:
 
 
 def test_reply_needs_nl_synthesis_snake_tool_prose_block() -> None:
-    ibkr = "finanz 2\n\n### get_ibkr_portfolio\nEstado: IBKR Gateway conectado.\nValor total: $1"
-    assert mod.reply_needs_nl_synthesis(ibkr) is True
+    tool_block = "worker 2\n\n### fetch_external_snapshot\nEstado: servicio conectado.\nValor total: $1"
+    assert mod.reply_needs_nl_synthesis(tool_block) is True
 
 
 def test_maybe_synthesize_reply_skips_when_spec_off() -> None:
@@ -147,8 +147,8 @@ def test_maybe_synthesize_reddit_compact_when_env_global_off_uses_deterministic(
 
 def test_reply_is_trivial_for_context_summary() -> None:
     assert mod.reply_is_trivial_for_context_summary("Listo.") is True
-    assert mod.reply_is_trivial_for_context_summary("finanz 2\n\nListo.") is True
-    assert mod.reply_is_trivial_for_context_summary("finanz 2\n\n**Listo.**") is True
+    assert mod.reply_is_trivial_for_context_summary("worker 2\n\nListo.") is True
+    assert mod.reply_is_trivial_for_context_summary("worker 2\n\n**Listo.**") is True
     assert mod.reply_is_trivial_for_context_summary("**Listo.**") is True
     assert mod.reply_is_trivial_for_context_summary("• a\n• b") is False
     assert mod.reply_is_trivial_for_context_summary("- uno\n- dos") is False
@@ -284,7 +284,7 @@ def test_rescind_falls_back_deterministic_when_llm_still_listo() -> None:
         + "\n--- registro 1 (source=x) ---\ntengo 23 años\n\n"
         + "--- registro 2 (source=x) ---\nvivo en Medellín\n"
     )
-    out = mod.rescind_trivial_context_summary_reply(llm, spec, incoming=inc, reply_candidate="finanz 2\n\nListo.")
+    out = mod.rescind_trivial_context_summary_reply(llm, spec, incoming=inc, reply_candidate="worker 2\n\nListo.")
     assert "23" in out
     assert "Medellín" in out
     assert "Resumen del contexto" in out
@@ -450,19 +450,19 @@ def test_repair_summarize_new_context_strips_stored_line_and_rebuilds() -> None:
     assert mod.SUMMARIZE_STORED_CONTEXT_MARK not in out
 
 
-def test_repair_summarize_new_context_replaces_hallucinated_ledger() -> None:
+def test_repair_summarize_new_context_replaces_hallucinated_amounts() -> None:
     inc = (
         mod.SUMMARIZE_NEW_CONTEXT_MARK
         + "\nCautious hiring: layoffs under 50 people.\n\nGlassdoor 2026 rankings.\n"
     )
     bad = (
-        "Los saldos de las cuentas locales: BancoEjemplo (3.2 M COP), BilleteraEjemplo (1.1 M COP).\n"
-        "IBKR efectivo 4500 USD.\n"
+        "El resumen inventado agrega valores que no aparecen en el volcado: $3.2M y $1.1M.\n"
+        "También añade un total externo de $4500.\n"
     )
     out = mod.repair_summarize_new_context_egress(bad, incoming=inc)
     assert "hiring" in out.lower() or "layoff" in out.lower() or "glassdoor" in out.lower()
-    assert "BancoEjemplo" not in out
-    assert "BilleteraEjemplo" not in out
+    assert "$3.2M" not in out
+    assert "$4500" not in out
 
 
 def test_repair_summarize_new_context_passthrough_when_not_new_directive() -> None:

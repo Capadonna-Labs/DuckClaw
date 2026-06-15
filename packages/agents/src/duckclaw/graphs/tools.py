@@ -77,9 +77,9 @@ def admin_sql(db: Any, query: str) -> str:
             raw = db.query(q)
             return raw
 
-        # SingletonWriterBridge: encolar si Redis configurado (spec Auditoria_Arquitectura)
+        # SingletonWriterBridge: encolar si Redis configurado (owner canonico DB-first).
         try:
-            from duckclaw.forge.homeostasis.singleton_writer import enqueue_write
+            from duckclaw.db_write_queue import enqueue_write
             if enqueue_write(q):
                 return json.dumps({"status": "ok", "queued": True})
         except Exception:
@@ -151,7 +151,7 @@ def manage_memory(db: Any, action: str, key: str, value: str = "") -> str:
                 f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP"
             )
             try:
-                from duckclaw.forge.homeostasis.singleton_writer import enqueue_write
+                from duckclaw.db_write_queue import enqueue_write
                 if enqueue_write(sql):
                     return json.dumps({"status": "ok", "queued": True})
             except Exception:
@@ -161,7 +161,7 @@ def manage_memory(db: Any, action: str, key: str, value: str = "") -> str:
         if action == "delete":
             sql = f"DELETE FROM {_MEMORY_TABLE} WHERE key = '{key_safe}'"
             try:
-                from duckclaw.forge.homeostasis.singleton_writer import enqueue_write
+                from duckclaw.db_write_queue import enqueue_write
                 if enqueue_write(sql):
                     return json.dumps({"status": "ok", "queued": True})
             except Exception:

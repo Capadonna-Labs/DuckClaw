@@ -2,7 +2,7 @@
 Resolución de la DuckDB dedicada por gateway PM2 (config/api_gateways_pm2.json).
 
 Usado por el API Gateway (vault/fly) y por comandos fly (/vault) para no mostrar
-finanzdb1 del registry cuando el proceso es p. ej. SIATA-Gateway o BI-Analyst-Gateway.
+vaults de otro proceso cuando el gateway PM2 tiene DuckDB explícita.
 """
 
 from __future__ import annotations

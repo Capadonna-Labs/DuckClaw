@@ -39,7 +39,7 @@ export interface CreateSkillInput {
   visibility?: 'private' | 'public';
 }
 
-export interface OrchestratorDraft {
+export interface ManagedWorkspaceDraft {
   project: {
     name: string;
     description: string;
@@ -1408,13 +1408,13 @@ export const adminService = {
       body: JSON.stringify(body),
     }),
 
-  createOrchestratorDraft: (body: { prompt: string }) =>
-    adminFetch<OrchestratorDraft>('/workspace/orchestrator/draft', {
+  createManagedWorkspaceDraft: (body: { prompt: string }) =>
+    adminFetch<ManagedWorkspaceDraft>('/workspace/orchestrator/draft', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
 
-  confirmOrchestratorDraft: (draft: OrchestratorDraft) =>
+  confirmManagedWorkspaceDraft: (draft: ManagedWorkspaceDraft) =>
     adminFetch<{
       ok: boolean;
       project: {

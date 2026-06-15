@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 
@@ -114,6 +115,25 @@ def test_prompt_policy_registry_tables_exist() -> None:
     assert "prompt_policy_registry" in tables
     assert "worker_prompt_bindings" in tables
     assert "tool_policy_directives" in tables
+
+
+def test_managed_workspace_draft_policy_is_seeded_by_migrations() -> None:
+    import duckdb
+
+    from duckclaw.prompt_policies import PromptPolicyResolver
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+
+    content = PromptPolicyResolver(db=con).load("manager_task", "admin_workspace_managed_draft")
+    policy = json.loads(content)
+
+    assert policy["draft_prompt_template"]
+    assert policy["fallback"]["worker_id_template"]
+    assert policy["confirm"]["source_kind"]
+    assert "Platform Orchestrator" not in content
+    assert "platform-orchestrator" not in content
 
 
 def test_directives_and_capabilities_markdown_dirs_are_removed() -> None:

@@ -41,11 +41,6 @@ import redis.asyncio as redis
 
 from core.sandbox_figure_b64 import decode_sandbox_figure_base64, decode_valid_sandbox_image_bytes
 from core.telegram_media_upload import send_sandbox_chart_to_telegram_sync
-from core.war_rooms import (
-    is_war_room_tenant,
-    wr_lookup_member_clearance,
-    wr_members_count,
-)
 
 from core.chat_history import (
     gateway_chat_history_enabled,
@@ -110,7 +105,7 @@ def _apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
     ``DUCKCLAW_PM2_PROCESS_NAME`` o ``--port`` (uvicorn).
 
     También aplica `TELEGRAM_BOT_TOKEN` desde ese mismo bloque `env` si viene definido y no vacío:
-    así BI-Analyst-Gateway puede usar el bot de BI aunque el .env global traiga el token de Finanz.
+    así un gateway dedicado puede usar su bot aunque el .env global traiga otro token.
     Se ejecuta después de cargar .env, así este valor **sustituye** al de setdefault.
 
     Returns:
@@ -288,8 +283,8 @@ _install_duckdb_connect_probe()
 _obs_log = get_obs_logger()
 _gateway_log.info(
     "Gateway startup: gateway_db_path=%s DUCKCLAW_PM2_MATCHED_APP_NAME=%s "
-    "| diagnóstico WR: pm2 logs … --lines 300 "
-    "y grep telegram_inbound_early war_room_gate DROP_NO_MENTION rate_limited",
+    "| diagnóstico Telegram: pm2 logs ... --lines 300 "
+    "y grep telegram_inbound_early rate_limited",
     get_gateway_db_path() or "(unset)",
     (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip() or "(unset)",
 )
@@ -910,8 +905,6 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
     uid = _escape_sql_literal(user_id, max_len=128)
     def _ensure_authorized_users_table() -> None:
         # Best-effort: usa el mismo `db` en el que estamos para evitar lock.
-        if getattr(db, "_war_room_acl_readonly", False):
-            return
         try:
             db.execute(_AUTHORIZED_USERS_TABLE_DDL)
         except Exception:
@@ -954,28 +947,6 @@ async def _lookup_whitelist_role(redis_client: Any, db: Any, tenant_id: str, use
         except Exception:
             pass
     return None
-
-
-async def _lookup_wr_clearance(redis_client: Any, db: Any, tenant_id: str, user_id: str) -> Optional[str]:
-    key = f"wr_clearance:{str(tenant_id or '').strip().lower()}:{user_id}"
-    if redis_client is not None:
-        try:
-            cached = await redis_client.get(key)
-            if cached:
-                return str(cached).strip() or None
-        except Exception:
-            pass
-    clearance = ""
-    try:
-        clearance = wr_lookup_member_clearance(db, tenant_id, user_id)
-    except Exception:
-        clearance = ""
-    if clearance and redis_client is not None:
-        try:
-            await redis_client.set(key, clearance, ex=300)
-        except Exception:
-            pass
-    return clearance or None
 
 
 def _send_security_alert_to_admin(user_id: str, tenant_id: str) -> None:
@@ -1261,22 +1232,10 @@ async def _authorize_or_reject(
         return
 
     redis_client = getattr(app.state, "redis", None)
-    from core.gateway_acl_db import get_gateway_acl_duckdb, get_war_room_acl_duckdb
+    from core.gateway_acl_db import get_gateway_acl_duckdb
 
     db = get_gateway_acl_duckdb()[0]
-    if is_war_room_tenant(tenant_id):
-        wr_db = get_war_room_acl_duckdb()
-        # Bootstrap WR: mientras no haya miembros registrados, no bloquear al primer operador.
-        # El zero-trust estricto se activa automáticamente cuando wr_members > 0.
-        try:
-            if wr_members_count(wr_db, tenant_id) <= 0:
-                _langsmith_auth_log(auth_status="authorized", user_id=user_id, tenant_id=tenant_id)
-                return
-        except Exception:
-            pass
-        role = await _lookup_wr_clearance(redis_client, wr_db, tenant_id, user_id)
-    else:
-        role = await _lookup_whitelist_role(redis_client, db, tenant_id, user_id)
+    role = await _lookup_whitelist_role(redis_client, db, tenant_id, user_id)
     if role:
         _langsmith_auth_log(auth_status="authorized", user_id=user_id, tenant_id=tenant_id)
         return
@@ -1501,7 +1460,7 @@ def _strip_markdown_bold(s: str) -> str:
 def clean_agent_response(response: str) -> str:
     """
     Limpia menús residuales del LLM para que la respuesta final sea concisa.
-    Quita líneas sueltas (p. ej. \"¿Cuál es mi tarea?\") y bullets de menú finanz sin truncar el resto del texto.
+    Quita líneas sueltas y bullets de menú sin truncar el resto del texto.
     """
     if not response or not isinstance(response, str):
         return response
@@ -2096,7 +2055,7 @@ async def _invoke_chat(
                         _gateway_log.info("fly_team_audit path_compare_error=%s", _audit_exc)
                 # Libera handles DuckDB del worker cacheado (misma bóveda) antes de abrir fly RW.
                 try:
-                    from duckclaw.graphs.manager_graph import (
+                    from duckclaw.manager.graph import (
                         clear_worker_graph_cache,
                         worker_graph_cache_entry_count,
                     )
@@ -2466,17 +2425,6 @@ async def _invoke_chat(
         and (reply_plain_for_storage or "").strip()
     )
     if _persist_history and not is_system_prompt:
-        if is_war_room_tenant(tenant_id):
-            from core.gateway_acl_db import get_war_room_acl_duckdb
-
-            wr_role = await _lookup_wr_clearance(redis_client, get_war_room_acl_duckdb(), tenant_id, user_id)
-            if not wr_role:
-                return {
-                    "response": "Clearance Revoked.",
-                    "session_id": session_id,
-                    "worker_id": effective_worker_id or worker_id,
-                    "elapsed_ms": elapsed_ms,
-                }
         u = normalize_history_item({"role": "user", "content": message})
         a = normalize_history_item({"role": "assistant", "content": reply_plain_for_storage})
         if u and a:

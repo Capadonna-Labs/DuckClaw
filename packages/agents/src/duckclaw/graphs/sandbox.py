@@ -69,7 +69,7 @@ except Exception:
 
 # Imagen base por defecto; sobreescribible con STRIX_SANDBOX_IMAGE
 _DEFAULT_IMAGE = "duckclaw/sandbox:latest"
-# Imagen browser (OSINT JobHunter / Strix Browser Sandbox); STRIX_BROWSER_IMAGE
+# Imagen browser (Strix Browser Sandbox); STRIX_BROWSER_IMAGE
 _DEFAULT_BROWSER_IMAGE = "duckclaw/browser-env:latest"
 # Límites de texto devuelto al LLM en run_browser_sandbox (evitar reventar contexto; MQL5 puede ser largo).
 _BROWSER_SANDBOX_STDOUT_TAIL = 4000
@@ -550,9 +550,7 @@ class StrixSandboxManager:
     def _collect_artifacts(self, out_dir: Path, *, session_id: str = "") -> list[str]:
         """Mueve artefactos del directorio de salida a la carpeta de plots del proyecto."""
         artifacts = []
-        sid = str(session_id or "").strip()
-        wr_bucket = sid if sid.startswith("wr_") else ""
-        plots_dir = Path("output") / "sandbox" / (wr_bucket or "default")
+        plots_dir = Path("output") / "sandbox" / "default"
         plots_dir.mkdir(parents=True, exist_ok=True)
         for f in out_dir.iterdir():
             if f.is_file():
@@ -1218,23 +1216,21 @@ def _sandbox_stdout_suggests_success_despite_exit(stdout: str, *, exit_code: int
 
 def _browser_sandbox_summary(stdout: str, artifacts: list[str]) -> tuple[str, int | None, str | None]:
     """status corto, filas inferidas, nombre de archivo parquet si existe."""
-    jobs: int | None = None
+    rows: int | None = None
     file_hint: str | None = None
     for a in artifacts:
         if Path(a).suffix.lower() == ".parquet":
             file_hint = Path(a).name
-            jobs = _parquet_row_count(a)
+            rows = _parquet_row_count(a)
             break
-    if jobs is None and stdout:
-        m = re.search(r"(\d+)\s+vacantes", stdout, flags=re.IGNORECASE)
-        if not m:
-            m = re.search(r"Extracci[oó]n completada:\s*(\d+)", stdout, flags=re.IGNORECASE)
+    if rows is None and stdout:
+        m = re.search(r"Extracci[oó]n completada:\s*(\d+)", stdout, flags=re.IGNORECASE)
         if m:
-            jobs = int(m.group(1))
-    if jobs is not None and file_hint is None:
-        file_hint = "osint_jobs.parquet"
-    st = "success" if file_hint or (jobs is not None and jobs >= 0) else "completed"
-    return st, jobs, file_hint
+            rows = int(m.group(1))
+    if rows is not None and file_hint is None:
+        file_hint = "output.parquet"
+    st = "success" if file_hint or (rows is not None and rows >= 0) else "completed"
+    return st, rows, file_hint
 
 
 class MercenaryResultObject(BaseModel):
@@ -1572,7 +1568,7 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             inject_python_header=False,
             chat_id=cid,
         )
-        st, jobs_n, parquet_name = _browser_sandbox_summary(result.stdout or "", result.artifacts or [])
+        st, rows_n, parquet_name = _browser_sandbox_summary(result.stdout or "", result.artifacts or [])
         effective_ok = result.exit_code == 0 and not result.timed_out
         if not effective_ok and _sandbox_stdout_suggests_success_despite_exit(
             result.stdout or "", exit_code=int(result.exit_code or 0)
@@ -1581,7 +1577,7 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
         out: dict[str, Any] = {
             "exit_code": result.exit_code,
             "status": st if effective_ok else "error",
-            "jobs_extracted": jobs_n,
+            "rows_extracted": rows_n,
             "file": parquet_name,
             "stdout_tail": (result.stdout or "")[-_BROWSER_SANDBOX_STDOUT_TAIL:],
             "stderr_tail": (result.stderr or "")[-_BROWSER_SANDBOX_STDERR_TAIL:],
@@ -1618,7 +1614,7 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
         compact_keys = (
             "exit_code",
             "status",
-            "jobs_extracted",
+            "rows_extracted",
             "file",
             "stdout_tail",
             "stderr_tail",
@@ -1654,7 +1650,7 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "`pre, code, .b-code-block, textarea.mql4`. En otros sitios (p. ej. muchos trackers) suele ir mejor "
             "domcontentloaded + wait_for_selector acotado. "
             "**Contrato de salida:** imprime JSON o texto útil a stdout; la tool devuelve stdout_tail/stderr_tail para el agente. "
-            "OSINT JobHunter: resúmenes en stdout y/o `/workspace/output/osint_jobs.parquet` (no volcar HTML masivo). "
+            "Para extracción tabular, escribe un Parquet bajo `/workspace/output/` y resume stdout sin volcar HTML masivo. "
             "Tras Parquet, `read_sql` con read_parquet y rutas en `artifacts`. "
             "Parámetros válidos **únicamente**: **code**, **url**, **language** ('python'|'bash'), "
             "**data_sql**, **session_id**, **worker_id**. "

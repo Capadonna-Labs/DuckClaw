@@ -220,7 +220,7 @@ export default function KanbanPage() {
                 href="/projects"
                 className="px-4 py-2 text-sm font-bold bg-gov-blue-700 text-white rounded-xl"
               >
-                Crear con Orchestrator
+                Crear borrador administrado
               </Link>
             </>
           )}

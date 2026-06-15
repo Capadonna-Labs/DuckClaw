@@ -194,7 +194,7 @@ def _discover_existing_user_vaults_with_size(uid: str) -> list[tuple[str, int]]:
         except Exception:
             size = 0
         out.append((vid, size))
-    # Largest first so real vaults like finanzdb1 outrank fresh default files.
+    # Largest first so real vaults outrank fresh default files.
     out.sort(key=lambda x: x[1], reverse=True)
     return out
 

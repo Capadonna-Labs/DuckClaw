@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 function gone() {
   return NextResponse.json(
     {
-      detail: 'Forge Projects filesystem fue retirado de la consola. Usa Proyectos DB-first o Platform Orchestrator.',
+      detail: 'Forge Projects filesystem fue retirado de la consola. Usa Proyectos DB-first o el flujo administrado de workspace.',
       code: 'legacy_forge_projects_retired',
     },
     { status: 410 }

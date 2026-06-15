@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from duckclaw.manager.task_classification import (
     _incoming_looks_like_semantic_context_followup,
-    _job_hunter_user_requests_application_tracking,
-    _user_signals_cashflow_stress,
     _worker_should_use_lite_stdio_mcp_surface,
-    job_hunter_user_requests_job_search,
 )
+
+
+TASK_CLASSIFICATION_PATH = Path("packages/agents/src/duckclaw/manager/task_classification.py")
 
 
 @pytest.mark.parametrize(
@@ -30,13 +32,27 @@ def test_lite_stdio_surface_covers_context_directives_and_followups() -> None:
     assert _worker_should_use_lite_stdio_mcp_surface("noticias de la Fed") is False
 
 
-def test_job_search_classification_excludes_tracking_and_add_commands() -> None:
-    assert job_hunter_user_requests_job_search("Busca vacantes remotas de data scientist") is True
-    assert job_hunter_user_requests_job_search("/job --add https://example.com/job") is False
-    assert job_hunter_user_requests_job_search("dame seguimiento de mis postulaciones") is False
+def test_task_classification_has_no_hardcoded_vertical_policy() -> None:
+    source = TASK_CLASSIFICATION_PATH.read_text(encoding="utf-8").lower()
+    banned_markers = (
+        "job",
+        "career",
+        "empleo",
+        "trabajo",
+        "vacante",
+        "postul",
+        "finanz",
+        "quant",
+        "pqrs",
+        "leila",
+        "war_room",
+    )
+    offenders = [marker for marker in banned_markers if marker in source]
+
+    assert offenders == []
 
 
-def test_application_tracking_and_cashflow_classification() -> None:
-    assert _job_hunter_user_requests_application_tracking("estado de mis postulaciones a vacantes") is True
-    assert _user_signals_cashflow_stress("estoy sin liquidez y necesito ingreso extra") is True
-    assert _user_signals_cashflow_stress("analiza flujo de caja de esta empresa") is False
+def test_vertical_phrases_are_not_special_cased_by_manager_classifier() -> None:
+    assert _worker_should_use_lite_stdio_mcp_surface("Busca vacantes remotas de data scientist") is False
+    assert _worker_should_use_lite_stdio_mcp_surface("/job --add https://example.com/job") is False
+    assert _worker_should_use_lite_stdio_mcp_surface("dame seguimiento de mis postulaciones") is False

@@ -77,7 +77,7 @@ export function fallbackMcpCatalog() {
     },
     stdio_servers,
     official_reference: loadOfficialMcpReferenceFromRepo(),
-    github_note: 'GitHub MCP vía forge/skills/github_bridge.py (Docker)',
+    github_note: 'GitHub MCP vía duckclaw.github.mcp_bridge (Docker)',
     _fallback: true as const,
     _gateway_stale: true as const,
   };

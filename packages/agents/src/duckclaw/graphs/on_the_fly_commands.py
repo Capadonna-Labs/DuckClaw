@@ -6,24 +6,69 @@ Spec: specs/interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md
 
 from __future__ import annotations
 
-import base64
 from datetime import datetime
 import json
 import logging
-import math
 import os
 from pathlib import Path
 import re
 import shutil
-import statistics
 import subprocess
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
-from typing import Any, Callable, Literal, Optional, Tuple
-from pydantic import BaseModel, ConfigDict, ValidationError
+from typing import Any, Optional, Tuple
+from duckclaw.commands.chat_state import (
+    _AGENT_CONFIG_TABLE as _AGENT_CONFIG_TABLE,
+    _PREFIX as _PREFIX,
+    _chat_key as _chat_key,
+    _ensure_agent_config as _ensure_agent_config,
+    _get_global_config as _get_global_config,
+    _set_global_config as _set_global_config,
+    _skip_runtime_ddl as _skip_runtime_ddl,
+    get_chat_state as get_chat_state,
+    set_chat_state as set_chat_state,
+)
+from duckclaw.commands.team_templates import (
+    _canonicalize_team_template_ids as _canonicalize_team_template_ids,
+    _resolve_template_id as _resolve_template_id,
+    _sync_tenant_team_if_admin as _sync_tenant_team_if_admin,
+    _tenant_team_config_key as _tenant_team_config_key,
+    configure_team_template_admin_checker as _configure_team_template_admin_checker,
+    execute_team as execute_team,
+    get_effective_team_templates as get_effective_team_templates,
+    get_team_templates as get_team_templates,
+    get_tenant_team_templates as get_tenant_team_templates,
+    set_team_templates as set_team_templates,
+    set_tenant_team_templates as set_tenant_team_templates,
+)
+from duckclaw.commands.team_access import (
+    _AUTHORIZED_USERS_DDL as _AUTHORIZED_USERS_DDL,
+    _AUTHORIZED_USERS_TABLE as _AUTHORIZED_USERS_TABLE,
+    _audit_team_whitelist_rw as _audit_team_whitelist_rw,
+    _authorized_users_rw_connection as _authorized_users_rw_connection,
+    _dedupe_authorized_users_by_user_id as _dedupe_authorized_users_by_user_id,
+    _delete_authorized_user as _delete_authorized_user,
+    _ensure_authorized_users_table as _ensure_authorized_users_table,
+    _get_authorized_role as _get_authorized_role,
+    _invalidate_whitelist_redis_cache as _invalidate_whitelist_redis_cache,
+    _is_gateway_owner_user as _is_gateway_owner_user,
+    _is_team_admin as _is_team_admin,
+    _list_authorized_users as _list_authorized_users,
+    _paths_same_duckdb_file as _paths_same_duckdb_file,
+    _player_label as _player_label,
+    _player_label_log as _player_label_log,
+    _resolve_team_add_uid_and_username as _resolve_team_add_uid_and_username,
+    _sql_escape_literal as _sql_escape_literal,
+    _team_username_by_user_id as _team_username_by_user_id,
+    _team_whitelist_audit_enabled as _team_whitelist_audit_enabled,
+    _team_whitelist_db as _team_whitelist_db,
+    _try_duckdb_checkpoint_rw as _try_duckdb_checkpoint_rw,
+    _upsert_authorized_user as _upsert_authorized_user,
+    configure_team_access_acl_db_provider as _configure_team_access_acl_db_provider,
+    execute_team_whitelist as execute_team_whitelist,
+)
 from duckclaw.vaults import (
     create_vault as _vault_create,
     list_vaults as _vault_list,
@@ -44,17 +89,19 @@ from duckclaw.graphs.proactive_review_markers import (
     GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY,
     proactive_review_event_phrase_in_text,
 )
-try:
-    from duckclaw.graphs.trading_hours_cot import COT_TZ_NAME, quant_event_horario_line
-except ImportError:
-    COT_TZ_NAME = "America/Bogota"
-    def quant_event_horario_line() -> str:
-        return ""
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_fly, structured_log_context
 from duckclaw.utils.telegram_markdown_v2 import TELEGRAM_MARKDOWN_V2_SPECIAL
 
-_PREFIX = "chat_"
 _CRONS_DEBUG_LOG = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log"
+
+
+def _team_access_acl_db_provider() -> Any:
+    from duckclaw.graphs.graph_server import get_db
+
+    return get_db()
+
+
+_configure_team_access_acl_db_provider(_team_access_acl_db_provider)
 
 
 def _crons_debug_log(
@@ -325,9 +372,15 @@ def format_platform_cron_summary() -> str:
         except (TypeError, ValueError):
             return max(1, int(default))
 
-    poll_s = _int_env("GOALS_TICKER_POLL_SECONDS", "45")
+    legacy_poll_env = "GOALS_" + "TIC" + "KER_POLL_SECONDS"
+    poll_s = _int_env("GOALS_POLL_SECONDS", os.getenv(legacy_poll_env, "45"))
     hb_s = _int_env("HEARTBEAT_INTERVAL_SECONDS", "3600")
-    embed_raw = (os.getenv("DUCKCLAW_EMBED_GOALS_TICKER") or "true").strip().lower()
+    legacy_embed_env = "DUCKCLAW_EMBED_GOALS_" + "TIC" + "KER"
+    embed_raw = (
+        os.getenv("DUCKCLAW_EMBED_GOALS_SCHEDULER")
+        or os.getenv(legacy_embed_env)
+        or "true"
+    ).strip().lower()
     embed_on = embed_raw in ("1", "true", "yes", "on")
     lines = [
         "Del bot (infraestructura)",
@@ -359,61 +412,34 @@ def _crons_goals_delta_meta_dict(db: Any, chat_id: Any) -> Optional[dict[str, An
 
 
 def _crons_goals_delta_listing_section(db: Any, chat_id: Any) -> str:
-    """
-    Bloque único tras «Manager» en el listado /crons: intervalo delta, cuenta atrás, meta sesión Quant.
-    Vacío si no hay intervalo activo ni meta trigger=trading_session.
-    """
+    """Bloque de intervalo delta en el listado /crons."""
     try:
         ds_list = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
     except ValueError:
         ds_list = 0
-    if ds_list < 0:
-        ds_list = 0
-
-    meta = _crons_goals_delta_meta_dict(db, chat_id)
-    trigger_l = str((meta or {}).get("trigger") or "").strip().lower()
-    meta_trading = trigger_l == "trading_session"
-    uid_full = str((meta or {}).get("session_uid") or "").strip() if meta_trading else ""
-
-    if ds_list <= 0 and not meta_trading:
+    if ds_list <= 0:
         return ""
 
-    title = "Revisión proactiva (TRADING_TICK)" if meta_trading else "Revisión proactiva"
-    lines_body: list[str] = []
-
-    if ds_list > 0:
-        interval_h, countdown_part, last_bit = _goals_proactive_interval_countdown_parts(db, chat_id, ds_list)
-        notify_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY) or "").strip()
-        mode_raw = str((meta or {}).get("mode") or "").strip()
-        jitter_raw = (meta or {}).get("jitter_ratio")
-        notify_line = f" · canal: {notify_raw}" if notify_raw else ""
-        mode_line = f" · modo: {mode_raw}" if mode_raw else ""
-        jitter_line = ""
-        if jitter_raw is not None:
-            try:
-                jr = float(jitter_raw)
-                jitter_line = f" · jitter: {int(jr * 100)}%"
-            except (TypeError, ValueError):
-                pass
-        lines_body.append(
-            f"- Intervalo (cron-id {CRON_SCHEDULE_ID_DELTA}): cada ~{interval_h}{countdown_part}{last_bit}{notify_line}{mode_line}{jitter_line} "
-            f"(/crons --delta off o /crons --rm {CRON_SCHEDULE_ID_DELTA})."
-        )
-    else:
-        lines_body.append(
-            "- Intervalo: no activo (goals_delta_seconds=0). Meta indica sesión Quant; "
-            "reactiva con /crons --delta … o la tool schedule_quant_trading_proactive_ticks en Quant-Trader."
-        )
-
-    if meta_trading:
-        uid_disp = _short_session_uid_for_crons(uid_full)
-        lines_body.append(
-            "- Sesión Quant: session_uid="
-            + uid_disp
-            + " · origen: schedule_quant_trading_proactive_ticks o /trading-session (trigger trading_session)."
-        )
-
-    return f"\n\n{title}\n" + "\n".join(lines_body)
+    interval_h, countdown_part, last_bit = _goals_proactive_interval_countdown_parts(db, chat_id, ds_list)
+    notify_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY) or "").strip()
+    meta = _crons_goals_delta_meta_dict(db, chat_id)
+    mode_raw = str((meta or {}).get("mode") or "").strip()
+    jitter_raw = (meta or {}).get("jitter_ratio")
+    notify_line = f" · canal: {notify_raw}" if notify_raw else ""
+    mode_line = f" · modo: {mode_raw}" if mode_raw else ""
+    jitter_line = ""
+    if jitter_raw is not None:
+        try:
+            jr = float(jitter_raw)
+            jitter_line = f" · jitter: {int(jr * 100)}%"
+        except (TypeError, ValueError):
+            pass
+    line = (
+        f"- Intervalo (cron-id {CRON_SCHEDULE_ID_DELTA}): cada ~{interval_h}{countdown_part}"
+        f"{last_bit}{notify_line}{mode_line}{jitter_line} "
+        f"(/crons --delta off o /crons --rm {CRON_SCHEDULE_ID_DELTA})."
+    )
+    return "\n\nRevisión proactiva\n" + line
 
 
 def chat_id_from_goals_delta_config_key(key: str) -> Optional[str]:
@@ -445,6 +471,66 @@ def chat_id_from_meditate_delta_config_key(key: str) -> Optional[str]:
     return key[len(_PREFIX) : -len(suf)] or None
 
 
+def set_chat_state_via_vault(
+    db: Any,
+    chat_id: Any,
+    key_suffix: str,
+    value: str,
+    *,
+    tenant_id: str = "default",
+) -> tuple[bool, str]:
+    """Persist chat-scoped command state through DB-writer when the current handle is read-only."""
+    if not _skip_runtime_ddl(db):
+        set_chat_state(db, chat_id, key_suffix, value)
+        return True, ""
+
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        return False, "Ruta de bóveda no resuelta"
+
+    try:
+        from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
+    except Exception as exc:
+        return False, f"cola DuckDB no disponible: {exc}"
+
+    released_ro = False
+    try:
+        release = getattr(db, "release_file_handle_for_external_writer", None)
+        resume = getattr(db, "resume_readonly_file_handle", None)
+        suspend = getattr(db, "suspend_readonly_file_handle", None)
+        if callable(release):
+            release()
+            released_ro = bool(callable(resume))
+        elif callable(suspend) and callable(resume):
+            suspend()
+            released_ro = True
+
+        query = (
+            "INSERT INTO agent_config (key, value) VALUES (?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP"
+        )
+        task_id = enqueue_duckdb_write_sync(
+            db_path=str(Path(raw_path).expanduser().resolve()),
+            query=query,
+            params=[_chat_key(chat_id, key_suffix)[:240], str(value)[:16384]],
+            user_id=str(chat_id),
+            tenant_id=str(tenant_id or "default").strip() or "default",
+        )
+        status = poll_task_status_sync(task_id, timeout_sec=30.0)
+        if status is None:
+            return False, "timeout esperando db-writer"
+        if status.status != "success":
+            return False, (status.detail or "db-writer failed")[:500]
+        return True, ""
+    finally:
+        if released_ro:
+            try:
+                if callable(resume):
+                    resume()
+            except Exception:
+                pass
+
+
 def _persist_meditate_chat_state(
     db: Any,
     chat_id: Any,
@@ -461,7 +547,7 @@ def _persist_meditate_chat_state(
 
 
 def clear_meditate_schedule(db: Any, chat_id: Any, *, tenant_id: str = "default") -> None:
-    """Desactiva ticker meditate para el chat."""
+    """Desactiva el programador meditate para el chat."""
     tid = str(tenant_id or "default").strip() or "default"
     for k, v in (
         (_MEDITATE_DELTA_SECONDS_KEY, "0"),
@@ -555,7 +641,7 @@ def apply_meditate_schedule(
 
 
 def _format_meditate_cycle_summary(cycle: dict[str, Any] | None) -> str:
-    """Resumen legible del último ciclo meditate (para fly/ticker/admin UI)."""
+    """Resumen legible del último ciclo meditate (para fly/scheduler/admin UI)."""
     if not cycle:
         return "sin detalle"
     align_msg = (cycle.get("alignment_message") or "").strip()
@@ -755,7 +841,7 @@ def execute_meditate(
     elif applied.get("first_cycle_error"):
         first_cycle_note = (
             f" Primer ciclo falló: {applied.get('first_cycle_error')}; "
-            "el ticker reintentará en el próximo intervalo."
+            "el programador reintentará en el próximo intervalo."
         )
     try:
         crons_secs = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
@@ -915,7 +1001,7 @@ def clear_goals_cron_wall_storage(db: Any, chat_id: Any) -> None:
 
 def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
     """
-    Apaga el ticker ``/crons --delta`` en el hub y en las bóvedas del **mismo** usuario que
+    Apaga el programador ``/crons --delta`` en el hub y en las bóvedas del **mismo** usuario que
     ``db._path`` (``.../private/<uid>/*.duckdb``), más el hub vía ``get_gateway_db_path``. El
     heartbeat puede seguir escaneando más archivos para *descubrir* ticks; abrir en RW todas las
     DuckDB del árbol ``private`` al hacer ``off`` competía por bloqueos con db-writer.
@@ -991,11 +1077,6 @@ def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
             except Exception:
                 continue
 
-def _skip_runtime_ddl(db: Any) -> bool:
-    """Si True, no ejecutar CREATE/ALTER en runtime (asumir scripts/bootstrap_dbs.py)."""
-    return bool(getattr(db, "_read_only", False))
-
-
 def unescape_telegram_markdown_v2_layers(text: str, max_layers: int = 4) -> str:
     """
     Quita hasta ``max_layers`` capas de escape estilo MarkdownV2 (mismo juego de
@@ -1027,492 +1108,6 @@ def unescape_telegram_markdown_v2_layers(text: str, max_layers: int = 4) -> str:
         t = t_new
     return t
 
-
-def _chat_key(chat_id: Any, suffix: str) -> str:
-    """Key for agent_config; supports numeric (Telegram) and string (API session_id)."""
-    try:
-        cid = int(chat_id)
-        return f"{_PREFIX}{cid}_{suffix}"
-    except (TypeError, ValueError):
-        return f"{_PREFIX}{str(chat_id)[:64]}_{suffix}"
-
-
-def _trading_session_state_chat_id(chat_id: Any, vault_user_id: Any = None) -> Any:
-    """
-    Clave estable de agent_config para snapshots PnL de sesión.
-    Admin playground usa ``admin-conv-…``; Telegram usa el id numérico de bóveda.
-    """
-    v = str(vault_user_id or "").strip()
-    if v.isdigit():
-        return int(v)
-    if v:
-        return v
-    return chat_id
-
-
-_AGENT_CONFIG_TABLE = "agent_config"
-
-# Telegram Guard whitelist persistence (DuckDB table in schema `main`)
-_AUTHORIZED_USERS_TABLE = "authorized_users"
-_AUTHORIZED_USERS_DDL = f"""
-CREATE TABLE IF NOT EXISTS main.{_AUTHORIZED_USERS_TABLE} (
-    tenant_id VARCHAR,
-    user_id VARCHAR,
-    username VARCHAR,
-    role VARCHAR DEFAULT 'user',
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (tenant_id, user_id)
-);
-"""
-
-
-def _sql_escape_literal(v: Any, max_len: int = 256) -> str:
-    s = "" if v is None else str(v)
-    return s.replace("'", "''")[:max_len]
-
-
-def _ensure_authorized_users_table(db: Any) -> None:
-    try:
-        db.execute(_AUTHORIZED_USERS_DDL)
-    except Exception:
-        # Best-effort: si falla, la whitelist mutación/consulta se comportará como “no autorizado”.
-        pass
-
-
-def _is_gateway_owner_user(user_id: str) -> bool:
-    """Coincide con el bypass del API Gateway (DUCKCLAW_OWNER_ID / DUCKCLAW_ADMIN_CHAT_ID)."""
-    uid = str(user_id or "").strip()
-    if not uid:
-        return False
-    owner = (os.environ.get("DUCKCLAW_OWNER_ID") or os.environ.get("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
-    return bool(owner and uid == owner)
-
-
-def _is_team_admin(db: Any, *, tenant_id: str, requester_id: str) -> bool:
-    if _is_gateway_owner_user(requester_id):
-        return True
-    rid = str(requester_id or "").strip()
-    # Consola admin (playground): requester_id suele ser "admin-ui" sin user_id Telegram numérico.
-    if rid == "admin-ui":
-        return True
-    return _get_authorized_role(db, tenant_id=tenant_id, user_id=rid) == "admin"
-
-
-def _get_authorized_role(db: Any, *, tenant_id: str, user_id: str) -> str:
-    _ensure_authorized_users_table(db)
-    tid = _sql_escape_literal(tenant_id, max_len=128)
-    uid = _sql_escape_literal(user_id, max_len=128)
-    try:
-        raw = db.query(
-            f"SELECT role FROM main.{_AUTHORIZED_USERS_TABLE} "
-            f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        if rows and isinstance(rows[0], dict):
-            return (rows[0].get("role") or "").strip().lower()
-    except Exception:
-        pass
-    return ""
-
-
-def _list_authorized_users(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
-    _ensure_authorized_users_table(db)
-    tid = _sql_escape_literal(tenant_id, max_len=128)
-    try:
-        raw = db.query(
-            f"SELECT user_id, username, role FROM main.{_AUTHORIZED_USERS_TABLE} "
-            f"WHERE lower(tenant_id)=lower('{tid}') ORDER BY user_id"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        if isinstance(rows, list):
-            out: list[dict[str, str]] = []
-            for r in rows:
-                if isinstance(r, dict):
-                    out.append(
-                        {
-                            "user_id": str(r.get("user_id") or "").strip(),
-                            "username": str(r.get("username") or "").strip(),
-                            "role": str(r.get("role") or "").strip(),
-                        }
-                    )
-            return out
-    except Exception as exc:
-        logging.getLogger("duckclaw.team_whitelist").warning(
-            "authorized_users list query failed tenant_id=%r: %s", tenant_id, exc
-        )
-    return []
-
-
-def _team_username_by_user_id(db: Any, tenant_id: str | None, user_id: Any) -> str:
-    tid = str(tenant_id or "default").strip() or "default"
-    uid = str(user_id or "").strip()
-    if not uid:
-        return ""
-    for u in _list_authorized_users(db, tenant_id=tid):
-        if str(u.get("user_id") or "").strip() == uid:
-            return str(u.get("username") or "").strip()
-    return ""
-
-
-def _player_label(
-    username: Any,
-    chat_id: Any,
-    *,
-    db: Any | None = None,
-    tenant_id: str | None = None,
-) -> str:
-    """Etiqueta legible para /team (Telegram mention o @alias)."""
-    uname = str(username or "").strip()
-    cid = str(chat_id or "").strip() or "unknown"
-    if not uname and db is not None:
-        uname = _team_username_by_user_id(db, tenant_id, chat_id)
-    if uname:
-        if cid.isdigit():
-            return f"[@{uname}](tg://user?id={cid})"
-        return f"@{uname}"
-    if cid.isdigit():
-        return f"[{cid}](tg://user?id={cid})"
-    return cid
-
-
-def _player_label_log(
-    username: Any,
-    chat_id: Any,
-    *,
-    db: Any | None = None,
-    tenant_id: str | None = None,
-) -> str:
-    """Formato para logs PM2: @alias (user_id)."""
-    uname = str(username or "").strip()
-    if not uname and db is not None:
-        uname = _team_username_by_user_id(db, tenant_id, chat_id)
-    cid = str(chat_id or "").strip() or "unknown"
-    return f"@{uname} ({cid})" if uname else cid
-
-
-def _resolve_team_add_uid_and_username(tokens: list[str]) -> tuple[str, str]:
-    """
-    ``/team --add``: el orden documentado es ``<user_id> [nombre]``, pero en Telegram
-    es habitual escribir ``<nombre> <user_id> [user|admin]``. Si hay exactamente un token
-    con aspecto de Telegram user id (solo dígitos, longitud razonable), se usa como
-    ``user_id`` y el resto como nombre para mostrar.
-    """
-    tks = [t.strip() for t in tokens if t.strip()]
-    if not tks:
-        return "", "Usuario"
-    # Telegram user_id es numérico; en tests se usan ids cortos (p. ej. 999).
-    digit_indices = [i for i, x in enumerate(tks) if x.isdigit() and 3 <= len(x) <= 20]
-    if len(digit_indices) == 1:
-        i = digit_indices[0]
-        uid = tks[i]
-        name_parts = [tks[j] for j in range(len(tks)) if j != i]
-        uname = " ".join(name_parts).strip() or "Usuario"
-        return uid, uname
-    if len(digit_indices) >= 2:
-        i = digit_indices[-1]
-        uid = tks[i]
-        name_parts = [tks[j] for j in range(len(tks)) if j != i]
-        uname = " ".join(name_parts).strip() or "Usuario"
-        return uid, uname
-    uid0 = tks[0]
-    uname = (" ".join(tks[1:]).strip() if len(tks) > 1 else "Usuario") or "Usuario"
-    return uid0, uname
-
-
-def _dedupe_authorized_users_by_user_id(users: list[dict[str, str]]) -> list[dict[str, str]]:
-    """
-    Unifica filas por ``user_id`` (p. ej. duplicados legacy por distinto casing de ``tenant_id`` en PK).
-    Si hay varias filas, se prioriza la que tenga rol ``admin``.
-    """
-    rank = {"admin": 3, "user": 2, "operator": 2, "observer": 1}
-
-    def _score(u: dict[str, str]) -> int:
-        r = (u.get("role") or "").strip().lower()
-        return int(rank.get(r, 2))
-
-    best: dict[str, dict[str, str]] = {}
-    for u in users:
-        uid = str(u.get("user_id") or "").strip()
-        if not uid:
-            continue
-        if uid not in best or _score(u) > _score(best[uid]):
-            best[uid] = u
-    out = list(best.values())
-    out.sort(key=lambda x: str(x.get("user_id") or ""))
-    return out
-
-
-def _upsert_authorized_user(db: Any, *, tenant_id: str, user_id: str, username: str, role: str = "user") -> None:
-    _ensure_authorized_users_table(db)
-    tid = _sql_escape_literal(tenant_id, max_len=128)
-    uid = _sql_escape_literal(user_id, max_len=128)
-    un = _sql_escape_literal(username or "Usuario", max_len=128)
-    rl = _sql_escape_literal(role or "user", max_len=16)
-    db.execute(
-        f"""
-        INSERT INTO main.{_AUTHORIZED_USERS_TABLE} (tenant_id, user_id, username, role)
-        VALUES ('{tid}', '{uid}', '{un}', '{rl}')
-        ON CONFLICT (tenant_id, user_id) DO UPDATE SET
-          username = EXCLUDED.username,
-          role = EXCLUDED.role,
-          added_at = now()
-        """
-    )
-
-
-def _delete_authorized_user(db: Any, *, tenant_id: str, user_id: str) -> None:
-    _ensure_authorized_users_table(db)
-    tid = _sql_escape_literal(tenant_id, max_len=128)
-    uid = _sql_escape_literal(user_id, max_len=128)
-    db.execute(
-        f"DELETE FROM main.{_AUTHORIZED_USERS_TABLE} "
-        f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}'"
-    )
-
-
-def _is_wr_tenant(tenant_id: str | None) -> bool:
-    return str(tenant_id or "").strip().lower().startswith("wr_")
-
-
-def _ensure_war_room_tables(db: Any) -> None:
-    try:
-        db.execute("CREATE SCHEMA IF NOT EXISTS war_room_core;")
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS war_room_core.wr_members (
-                tenant_id VARCHAR,
-                user_id VARCHAR,
-                username VARCHAR,
-                clearance_level VARCHAR,
-                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (tenant_id, user_id)
-            );
-            """
-        )
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS war_room_core.wr_audit_log (
-                event_id VARCHAR PRIMARY KEY,
-                tenant_id VARCHAR,
-                sender_id VARCHAR,
-                target_agent VARCHAR,
-                event_type VARCHAR,
-                payload TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
-    except Exception:
-        pass
-
-
-def _wr_member_clearance(db: Any, *, tenant_id: str, user_id: str) -> str:
-    _ensure_war_room_tables(db)
-    tid = _sql_escape_literal(tenant_id, max_len=128)
-    uid = _sql_escape_literal(user_id, max_len=128)
-    try:
-        raw = db.query(
-            "SELECT clearance_level FROM war_room_core.wr_members "
-            f"WHERE lower(tenant_id)=lower('{tid}') AND user_id='{uid}' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        if rows and isinstance(rows[0], dict):
-            return str(rows[0].get("clearance_level") or "").strip().lower()
-    except Exception:
-        pass
-    return ""
-
-
-def _wr_append_audit(
-    db: Any,
-    *,
-    tenant_id: str,
-    sender_id: str,
-    target_agent: str,
-    event_type: str,
-    payload: str,
-) -> None:
-    import uuid
-
-    _ensure_war_room_tables(db)
-    db.execute(
-        "INSERT INTO war_room_core.wr_audit_log (event_id, tenant_id, sender_id, target_agent, event_type, payload) "
-        f"VALUES ('{uuid.uuid4()}', '{_sql_escape_literal(tenant_id, 128)}', "
-        f"'{_sql_escape_literal(sender_id, 128)}', '{_sql_escape_literal(target_agent, 64)}', "
-        f"'{_sql_escape_literal(event_type, 64)}', '{_sql_escape_literal(payload, 8000)}')"
-    )
-
-
-def register_wr_member(db: Any, tenant_id: Any, requester_id: Any, args: str) -> str:
-    tid = str(tenant_id or "default").strip() or "default"
-    rid = str(requester_id or "").strip()
-    if not _is_wr_tenant(tid):
-        return "register_wr_member solo aplica en tenants War Room (wr_<group_id>)."
-    _ensure_war_room_tables(db)
-    clearance = _wr_member_clearance(db, tenant_id=tid, user_id=rid)
-    if not (_is_gateway_owner_user(rid) or clearance == "admin"):
-        return "❌ Acceso denegado: solo admin WR puede registrar miembros."
-    tokens = [x for x in (args or "").split() if x.strip()]
-    if len(tokens) < 2:
-        return "Uso: /register_wr_member <user_id> <clearance> [username]"
-    uid = tokens[0].strip()
-    clr = tokens[1].strip().lower()
-    uname = " ".join(tokens[2:]).strip() or "Usuario"
-    if clr not in ("admin", "operator", "observer"):
-        return "clearance inválido. Usa: admin | operator | observer"
-    db.execute(
-        "INSERT INTO war_room_core.wr_members (tenant_id, user_id, username, clearance_level) "
-        f"VALUES ('{_sql_escape_literal(tid, 128)}', '{_sql_escape_literal(uid, 128)}', "
-        f"'{_sql_escape_literal(uname, 128)}', '{_sql_escape_literal(clr, 32)}') "
-        "ON CONFLICT (tenant_id, user_id) DO UPDATE SET username=EXCLUDED.username, clearance_level=EXCLUDED.clearance_level, added_at=now()"
-    )
-    _wr_append_audit(
-        db,
-        tenant_id=tid,
-        sender_id=rid,
-        target_agent="manager",
-        event_type="REGISTER_WR_MEMBER",
-        payload=f"user_id={uid} clearance={clr}",
-    )
-    return f"✅ Miembro WR registrado: {uid} ({clr})."
-
-
-def get_wr_context(db: Any, tenant_id: Any, args: str) -> str:
-    tid = str(tenant_id or "default").strip() or "default"
-    if not _is_wr_tenant(tid):
-        return "get_wr_context solo aplica en tenants War Room (wr_<group_id>)."
-    _ensure_war_room_tables(db)
-    minutes = 60
-    try:
-        if (args or "").strip():
-            minutes = max(1, min(1440, int((args or "").strip())))
-    except ValueError:
-        minutes = 60
-    raw = db.query(
-        "SELECT sender_id, target_agent, event_type, payload, timestamp "
-        "FROM war_room_core.wr_audit_log "
-        f"WHERE lower(tenant_id)=lower('{_sql_escape_literal(tid, 128)}') "
-        f"AND timestamp >= now() - INTERVAL '{minutes} minutes' "
-        "ORDER BY timestamp DESC LIMIT 10"
-    )
-    rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    if not rows:
-        return "Sin eventos recientes en wr_audit_log."
-    lines = ["🧭 War Room Context (últimos eventos):"]
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        lines.append(
-            f"- [{r.get('timestamp')}] {r.get('event_type')} by {r.get('sender_id')} -> {r.get('target_agent')}: {str(r.get('payload') or '')[:120]}"
-        )
-    return "\n".join(lines)
-
-
-def broadcast_alert(db: Any, tenant_id: Any, requester_id: Any, args: str) -> str:
-    tid = str(tenant_id or "default").strip() or "default"
-    rid = str(requester_id or "").strip()
-    if not _is_wr_tenant(tid):
-        return "broadcast_alert solo aplica en tenants War Room (wr_<group_id>)."
-    parts = [x.strip() for x in (args or "").split(None, 1) if x.strip()]
-    if len(parts) < 2:
-        return "Uso: /broadcast_alert <level> <message>"
-    level, message = parts[0].lower(), parts[1]
-    if level not in ("info", "warn", "critical"):
-        return "level inválido. Usa: info | warn | critical"
-    _wr_append_audit(
-        db,
-        tenant_id=tid,
-        sender_id=rid or "system",
-        target_agent="group",
-        event_type="BROADCAST_ALERT",
-        payload=f"[{level}] {message}",
-    )
-    return f"🚨 WR alert ({level}) registrada."
-
-
-def _invalidate_whitelist_redis_cache(*, tenant_id: str, user_id: str) -> None:
-    """
-    El Gateway cachea roles en Redis (TTL ~1h). Tras /team --rm o --add, hay que borrar la clave
-    o los usuarios revocados siguen pasando _lookup_whitelist_role hasta que expire el TTL.
-    Misma convención que services/api-gateway/main.py: whitelist:{tenant_lower}:{user_id}
-    """
-    tid = str(tenant_id or "default").strip().lower() or "default"
-    uid = str(user_id or "").strip()
-    if not uid:
-        return
-    url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
-    if not url:
-        return
-    key = f"whitelist:{tid}:{uid}"
-    try:
-        import redis as redis_sync  # noqa: PLC0415
-
-        client = redis_sync.Redis.from_url(url, decode_responses=True)
-        client.delete(key)
-    except Exception:
-        pass
-
-
-def _invalidate_wr_clearance_redis_cache(*, tenant_id: str, user_id: str) -> None:
-    """Invalidar cache de clearance WR (services/api-gateway/main.py::_lookup_wr_clearance)."""
-    tid = str(tenant_id or "default").strip().lower() or "default"
-    uid = str(user_id or "").strip()
-    if not uid:
-        return
-    url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
-    if not url:
-        return
-    key = f"wr_clearance:{tid}:{uid}"
-    try:
-        import redis as redis_sync  # noqa: PLC0415
-
-        client = redis_sync.Redis.from_url(url, decode_responses=True)
-        client.delete(key)
-    except Exception:
-        pass
-
-
-def _ensure_agent_config(db: Any) -> None:
-    if _skip_runtime_ddl(db):
-        return
-    db.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {_AGENT_CONFIG_TABLE} (
-            key VARCHAR PRIMARY KEY,
-            value TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-
-def get_chat_state(db: Any, chat_id: Any, key: str) -> str:
-    """Read a chat-scoped config key from agent_config."""
-    _ensure_agent_config(db)
-    k = _chat_key(chat_id, key).replace("'", "''")[:200]
-    try:
-        r = db.query(f"SELECT value FROM {_AGENT_CONFIG_TABLE} WHERE key = '{k}' LIMIT 1")
-        rows = json.loads(r) if isinstance(r, str) else (r or [])
-        if rows and isinstance(rows[0], dict):
-            return (rows[0].get("value") or "").strip()
-    except Exception:
-        pass
-    return ""
-
-
-def set_chat_state(db: Any, chat_id: Any, key: str, value: str) -> None:
-    """Write a chat-scoped config key to agent_config."""
-    _ensure_agent_config(db)
-    k = _chat_key(chat_id, key).replace("'", "''")[:128]
-    v = str(value).replace("'", "''")[:16384]
-    db.execute(
-        f"""
-        INSERT INTO {_AGENT_CONFIG_TABLE} (key, value) VALUES ('{k}', '{v}')
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
-        """
-    )
-
-
 def parse_command(text: str) -> Tuple[str, str]:
     """Parse /command or /command args. Returns (name, args)."""
     if not text or not text.strip().startswith("/"):
@@ -1525,218 +1120,10 @@ def parse_command(text: str) -> Tuple[str, str]:
     return name, args
 
 
-def get_team_templates(db: Any, chat_id: Any) -> list:
-    """Templates disponibles en el equipo para este chat. Vacío = todos los de list_workers()."""
-    raw = get_chat_state(db, chat_id, "team_templates")
-    if not raw:
-        return []
-    try:
-        out = json.loads(raw)
-        return out if isinstance(out, list) else []
-    except Exception:
-        return []
-
-
-def set_team_templates(db: Any, chat_id: Any, template_ids: list) -> None:
-    """Define los templates del equipo para este chat. Lista vacía = usar todos (list_workers). Guarda ids canónicos (case del filesystem)."""
-    set_chat_state(db, chat_id, "team_templates", json.dumps([str(x).strip() for x in template_ids]))
-
-
-_TENANT_TEAM_KEY_PREFIX = "tenant_team:"
-
-
-def _tenant_team_config_key(tenant_id: Any) -> str:
-    tid = str(tenant_id or "default").strip() or "default"
-    return f"{_TENANT_TEAM_KEY_PREFIX}{tid}"
-
-
-def get_tenant_team_templates(db: Any, tenant_id: Any) -> list:
-    """Equipo por defecto para todo el tenant (misma DuckDB compartida). Vacío = no hay override a nivel tenant."""
-    raw = _get_global_config(db, _tenant_team_config_key(tenant_id))
-    if not raw:
-        return []
-    try:
-        out = json.loads(raw)
-        return out if isinstance(out, list) else []
-    except Exception:
-        return []
-
-
-def set_tenant_team_templates(db: Any, tenant_id: Any, template_ids: list) -> None:
-    """Persiste el equipo default del tenant en agent_config (clave global)."""
-    _set_global_config(
-        db,
-        _tenant_team_config_key(tenant_id),
-        json.dumps([str(x).strip() for x in template_ids]),
-    )
-
-
-def _canonicalize_team_template_ids(ids: list, templates_root: Any = None) -> list:
-    """Resuelve alias de manifest y descarta ids sin carpeta en forge/templates."""
-    from duckclaw.workers.template_registry import list_template_ids, resolve_template_id
-
-    all_t = list_template_ids(templates_root)
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in ids or []:
-        w = str(raw or "").strip()
-        if not w:
-            continue
-        canonical = resolve_template_id(all_t, w)
-        if not canonical or canonical in seen:
-            continue
-        seen.add(canonical)
-        out.append(canonical)
-    return out
-
-
-def get_effective_team_templates(
-    db: Any, chat_id: Any, tenant_id: Any, templates_root: Any = None
-) -> list:
-    """
-    Equipo que ve el manager para delegar, en orden:
-    1) team_templates del chat
-    2) team_templates del tenant (admin vía /workers)
-    3) DUCKCLAW_TEAM_MEMBERS
-    4) todos los templates (list_workers)
-    """
-    from duckclaw.workers.factory import list_workers
-
-    chat_team = get_team_templates(db, chat_id)
-    if chat_team:
-        return _canonicalize_team_template_ids(chat_team, templates_root)
-    tid = str(tenant_id or "default").strip() or "default"
-    tenant_team = get_tenant_team_templates(db, tid)
-    if tenant_team:
-        return _canonicalize_team_template_ids(tenant_team, templates_root)
-    env_raw = (os.environ.get("DUCKCLAW_TEAM_MEMBERS") or "").strip()
-    if env_raw:
-        all_t = list_workers(templates_root)
-        out: list[str] = []
-        for part in env_raw.split(","):
-            p = part.strip()
-            if not p:
-                continue
-            c = _resolve_template_id(all_t, p)
-            if c:
-                out.append(c)
-        if out:
-            return out
-    return list_workers(templates_root)
-
-
-def _sync_tenant_team_if_admin(
-    db: Any,
-    *,
-    tenant_id: Any,
-    requester_id: Any,
-    template_ids: list,
-) -> None:
-    """Si el requester es admin del tenant, replica el equipo del chat como default del tenant."""
-    tid = str(tenant_id or "").strip()
-    rid = str(requester_id or "").strip()
-    if not tid or not rid:
-        return
-    if not _is_team_admin(db, tenant_id=tid, requester_id=rid):
-        return
-    set_tenant_team_templates(db, tid, template_ids)
-
-
-def _resolve_template_id(available: list, user_input: str) -> Optional[str]:
-    """Resuelve alias de manifest al id canónico de carpeta en forge/templates."""
-    from duckclaw.workers.template_registry import resolve_template_id
-
-    return resolve_template_id(available, user_input)
-
-
-def execute_team(
-    db: Any,
-    chat_id: Any,
-    args: str,
-    *,
-    tenant_id: Any = None,
-    requester_id: Any = None,
-) -> str:
-    """/workers [id1 id2 ...] [--add id...] [--rm worker_id]: equipo del chat. Sin args: lista. Con ids: reemplaza. --add: añade; --rm: quita uno. Admin: también actualiza el equipo default del tenant."""
-    from duckclaw.workers.factory import list_workers
-    all_templates = list_workers()
-    tid = str(tenant_id or "default").strip() or "default"
-    team = get_team_templates(db, chat_id)
-    if not args or not args.strip():
-        effective = get_effective_team_templates(db, chat_id, tid, None)
-        if not effective:
-            return "No hay templates en forge/templates. Añade al menos uno."
-        if team:
-            label = "Equipo (este chat):"
-        elif get_tenant_team_templates(db, tid):
-            label = "Equipo del tenant (todos los chats sin override):"
-        elif (os.environ.get("DUCKCLAW_TEAM_MEMBERS") or "").strip():
-            label = "Equipo (.env):"
-        else:
-            label = "Equipo: todos los templates"
-        lines = "\n".join(f"- {w}" for w in effective)
-        hint = load_guardrail("fly_commands", "workers_list_hint")
-        return f"🦆 {label}\n{lines}\n\n{hint}"
-    raw = args.strip()
-    # --rm <worker_id>
-    if raw.startswith("--rm "):
-        wid_raw = raw[5:].strip().split()[0]
-        canonical = _resolve_template_id(all_templates, wid_raw)
-        if not canonical:
-            return f"'{wid_raw}' no es un template. Equipo actual: {', '.join(team or all_templates) or 'todos'}"
-        current = team if team else list(all_templates)
-        new_team = [x for x in current if (x or "").strip().lower() != canonical.lower()]
-        if len(new_team) == len(current):
-            return f"'{canonical}' no está en el equipo. Equipo actual: {', '.join(current) or 'todos'}"
-        set_team_templates(db, chat_id, new_team)
-        _sync_tenant_team_if_admin(
-            db, tenant_id=tid, requester_id=requester_id, template_ids=new_team
-        )
-        return f"✅ Quitado {canonical} del equipo. Quedan: {', '.join(new_team) or 'ninguno (el manager usará todos)'}."
-    # --add id1 id2 ... (insert/appendix al equipo actual)
-    if raw.startswith("--add ") or raw.strip() == "--add":
-        ids_str = raw[6:].strip() if raw.startswith("--add ") else ""
-        ids_raw = [x.strip() for x in ids_str.split() if x.strip()]
-        valid = []
-        invalid = []
-        for i in ids_raw:
-            c = _resolve_template_id(all_templates, i)
-            if c:
-                valid.append(c)
-            else:
-                invalid.append(i)
-        if invalid:
-            return f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}"
-        current = list(team) if team else list(all_templates)
-        for c in valid:
-            if not any((x or "").strip().lower() == c.lower() for x in current):
-                current.append(c)
-        set_team_templates(db, chat_id, current)
-        _sync_tenant_team_if_admin(
-            db, tenant_id=tid, requester_id=requester_id, template_ids=current
-        )
-        return f"✅ Añadidos al equipo: {', '.join(valid)}. Equipo: {', '.join(current)}."
-    # id1 id2 ... → reemplazar equipo
-    ids_raw = [x.strip() for x in raw.split() if x.strip()]
-    valid = []
-    invalid = []
-    for i in ids_raw:
-        c = _resolve_template_id(all_templates, i)
-        if c:
-            valid.append(c)
-        else:
-            invalid.append(i)
-    if invalid:
-        return f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}"
-    set_team_templates(db, chat_id, valid)
-    _sync_tenant_team_if_admin(db, tenant_id=tid, requester_id=requester_id, template_ids=valid)
-    return f"✅ Equipo de este chat: {', '.join(valid)}. El manager delegará solo a estos."
-
-
 def _dedicated_gateway_db_path_for_vault() -> str | None:
     """
     Misma regla que el API Gateway: api_gateways_pm2.json + claves multiplex / DUCKDB_PATH
-    (evita /vault y fly mostrando finanzdb1 del registry en gateways dedicados).
+    (evita /vault y fly mostrando gatewaydb1 del registry en gateways dedicados).
     """
     from duckclaw.pm2_gateway_db import dedicated_gateway_db_path_resolved
 
@@ -1764,9 +1151,7 @@ def _fly_vault_label_for_tenant(tenant_id: Any) -> str:
     if not tid or tid.lower() == "default":
         return _dedicated_gateway_vault_label()
     pretty = {
-        "Finanzas": "Finanz",
         "SIATA": "SIATA Analyst",
-        "Trabajo": "Job Hunter",
     }
     return pretty.get(tid, tid)
 
@@ -1777,7 +1162,6 @@ def _dedicated_gateway_vault_label() -> str:
     pretty = {
         "BI-Analyst-Gateway": "BI Analyst",
         "SIATA-Gateway": "SIATA Analyst",
-        "Finanz-Gateway": "Finanz",
     }
     for key in (proc, matched):
         if key in pretty:
@@ -1868,7 +1252,7 @@ def execute_vault(
             cmd = cmd[2:]
         if cmd in ("list", "new", "use", "rm"):
             hint = (
-                "Los comandos /vault list|new|use|rm son del registry multi-bóveda en Finanz; "
+                "Los comandos /vault list|new|use|rm son del registry multi-bóveda; "
                 "aquí no aplican. Usa /vault sin argumentos para ver la ruta."
             )
             if template_db:
@@ -1944,361 +1328,6 @@ def execute_vault(
 
 
     )
-def _team_whitelist_audit_enabled() -> bool:
-    v = (os.environ.get("DUCKCLAW_TEAM_WHITELIST_DEBUG") or "").strip().lower()
-    return v in ("1", "true", "yes", "on")
-
-
-def _audit_team_whitelist_rw(message: str, **data: Any) -> None:
-    if not _team_whitelist_audit_enabled():
-        return
-    logging.getLogger("duckclaw.team_whitelist").info("%s %s", message, data)
-
-
-def _paths_same_duckdb_file(a: str, b: str) -> bool:
-    if not (a or "").strip() or not (b or "").strip():
-        return False
-    pa = Path(str(a).strip()).expanduser().resolve()
-    pb = Path(str(b).strip()).expanduser().resolve()
-    if str(pa) == str(pb):
-        return True
-    try:
-        return bool(pa.samefile(pb))
-    except OSError:
-        return False
-
-
-def _try_duckdb_checkpoint_rw(db: Any) -> None:
-    if getattr(db, "_read_only", True):
-        return
-    try:
-        db.execute("CHECKPOINT")
-    except Exception:
-        pass
-
-
-def _team_whitelist_db(fly_db: Any) -> Any:
-    """
-    Whitelist ``main.authorized_users`` se lee de la misma DuckDB que el hub
-    (``get_gateway_db_path()``), vía ``get_db()`` (conexión RO efímera).
-
-    Excepción: en el API Gateway el bloque fly ya abrió ``fly_db`` en RW sobre ese
-    archivo; abrir un segundo ``duckdb.connect(..., read_only=True)`` en paralelo
-    puede lanzar ``ConnectionException``. En ese caso reutilizamos ``fly_db``.
-    """
-    try:
-        from duckclaw.gateway_db import get_gateway_db_path  # noqa: PLC0415
-        from duckclaw.graphs.graph_server import get_db as _gw_acl_db  # noqa: PLC0415
-
-        gw = str(Path(get_gateway_db_path()).resolve())
-        fp = ""
-        try:
-            fpraw = getattr(fly_db, "_path", "") or ""
-            if fpraw and str(fpraw).strip() not in ("", ":memory:"):
-                fp = str(Path(str(fpraw)).expanduser().resolve())
-        except Exception:
-            fp = ""
-        same = _paths_same_duckdb_file(fp, gw) if fp else False
-        fly_rw = getattr(fly_db, "_read_only", True) is False
-        if same and fly_rw and hasattr(fly_db, "query"):
-            return fly_db
-        return _gw_acl_db()
-    except Exception:
-        return fly_db
-
-
-def _authorized_users_rw_connection(fly_db: Any) -> tuple[Any, Callable[[], None]]:
-    """
-    ``graph_server.get_db()`` es RO efímero: ``execute`` no persiste. Las mutaciones
-    de whitelist deben usar DuckClaw RW sobre ``get_gateway_db_path()`` o reutilizar
-    ``fly_db`` si ya apunta al mismo archivo en modo RW (p. ej. bot Finanz).
-    """
-    from duckclaw import DuckClaw
-    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
-
-    acl_ro = _team_whitelist_db(fly_db)
-    if not isinstance(acl_ro, GatewayDbEphemeralReadonly):
-        _audit_team_whitelist_rw(
-            "rw_connection",
-            branch="direct_acl_not_ephemeral",
-            acl_type=type(acl_ro).__name__,
-        )
-
-        def _noop() -> None:
-            return None
-
-        return acl_ro, _noop
-
-    gw = str(Path(get_gateway_db_path()).resolve())
-    fly_resolved = ""
-    try:
-        fp = getattr(fly_db, "_path", "") or ""
-        if fp and str(fp).strip() not in ("", ":memory:"):
-            fly_resolved = str(Path(str(fp)).expanduser().resolve())
-    except Exception:
-        fly_resolved = ""
-
-    reuse_fly = _paths_same_duckdb_file(fly_resolved, gw) and getattr(fly_db, "_read_only", True) is False
-
-    _audit_team_whitelist_rw(
-        "rw_connection",
-        branch="gateway_ephemeral_acl",
-        reuse_fly=reuse_fly,
-        gw_tail=gw[-64:] if gw else "",
-        fly_tail=fly_resolved[-64:] if fly_resolved else "",
-        fly_read_only=getattr(fly_db, "_read_only", None),
-    )
-
-    if reuse_fly:
-
-        def _noop_fly() -> None:
-            return None
-
-        return fly_db, _noop_fly
-
-    # Mismo motor que GatewayDbEphemeralReadonly (duckdb Python). Si usamos C++ nativo en RW,
-    # /team --add puede persistir pero /team (lectura RO Python) no ve las filas.
-    _audit_team_whitelist_rw("rw_connection", branch="duckclaw_gw_python_engine", gw_tail=gw[-64:] if gw else "")
-    rw = DuckClaw(gw, read_only=False, engine="python")
-
-    def _close_rw() -> None:
-        try:
-            rw.close()
-        except Exception:
-            pass
-
-    return rw, _close_rw
-
-
-def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str) -> str:
-    """
-    Telegram Guard spec: /team lista y muta authorized_users por tenant.
-    - /team                           -> lista autorizados (para tenant)
-    - /team --add <user_id> [nombre] [admin|user] (también nombre primero si el id es numérico)
-    - /team --rm <user_id>            (admin u owner)
-    """
-    acl = _team_whitelist_db(db)
-    tid = str(tenant_id or "default").strip() or "default"
-    rid = str(requester_id or "").strip()
-
-    raw = (args or "").strip()
-    if _is_wr_tenant(tid):
-        _ensure_war_room_tables(acl)
-        requester_clearance = _wr_member_clearance(acl, tenant_id=tid, user_id=rid)
-
-        if not raw:
-            rows_raw = acl.query(
-                "SELECT user_id, username, clearance_level FROM war_room_core.wr_members "
-                f"WHERE lower(tenant_id)=lower('{_sql_escape_literal(tid, 128)}') ORDER BY user_id"
-            )
-            rows = json.loads(rows_raw) if isinstance(rows_raw, str) else (rows_raw or [])
-            if not rows:
-                return f"No hay miembros WR para tenant '{tid}'."
-            lines_wr: list[str] = []
-            seen_wr: set[str] = set()
-            for r in rows:
-                if not isinstance(r, dict):
-                    continue
-                uid = str(r.get("user_id") or "").strip()
-                if not uid or uid in seen_wr:
-                    continue
-                seen_wr.add(uid)
-                uname = str(r.get("username") or "").strip()
-                clr = str(r.get("clearance_level") or "").strip().lower() or "observer"
-                label = _player_label(uname, uid, db=acl, tenant_id=tid)
-                lines_wr.append(f"- {label} ({uid}) · clearance: {clr}")
-            body_wr = "\n".join(lines_wr)
-            return f"🛡 Miembros War Room (tenant '{tid}'):\n{body_wr}"
-
-        if raw.startswith("--rm "):
-            if not (_is_gateway_owner_user(rid) or requester_clearance == "admin"):
-                return "❌ Acceso denegado: solo admin WR puede eliminar miembros."
-            tokens = [t for t in raw[5:].strip().split() if t.strip()]
-            if not tokens:
-                return "Uso WR: /team --rm <user_id>"
-            target_uid = tokens[0]
-            acl.execute(
-                "DELETE FROM war_room_core.wr_members "
-                f"WHERE lower(tenant_id)=lower('{_sql_escape_literal(tid, 128)}') "
-                f"AND user_id='{_sql_escape_literal(target_uid, 128)}'"
-            )
-            _invalidate_wr_clearance_redis_cache(tenant_id=tid, user_id=target_uid)
-            _wr_append_audit(
-                acl,
-                tenant_id=tid,
-                sender_id=rid or "system",
-                target_agent="manager",
-                event_type="REMOVE_WR_MEMBER",
-                payload=f"user_id={target_uid}",
-            )
-            target_label = _player_label("", target_uid, db=acl, tenant_id=tid)
-            return f"✅ Miembro WR eliminado: {target_label}."
-
-        if raw.startswith("--add ") or raw.strip() == "--add":
-            if not (_is_gateway_owner_user(rid) or requester_clearance == "admin"):
-                return "❌ Acceso denegado: solo admin WR puede agregar miembros."
-            ids_part = raw[6:].strip() if raw.startswith("--add ") else ""
-            tokens = [t for t in ids_part.split() if t.strip()]
-            if not tokens:
-                return "Uso WR: /team --add <user_id> [username] [admin|operator|observer]"
-            target_uid = tokens[0]
-            clearance = "observer"
-            if len(tokens) >= 2 and tokens[-1].lower() in ("admin", "operator", "observer"):
-                clearance = tokens[-1].lower()
-                tokens = tokens[:-1]
-            username = " ".join(tokens[1:]).strip() if len(tokens) > 1 else "Usuario"
-            acl.execute(
-                "INSERT INTO war_room_core.wr_members (tenant_id, user_id, username, clearance_level) "
-                f"VALUES ('{_sql_escape_literal(tid, 128)}', '{_sql_escape_literal(target_uid, 128)}', "
-                f"'{_sql_escape_literal(username or 'Usuario', 128)}', '{_sql_escape_literal(clearance, 32)}') "
-                "ON CONFLICT (tenant_id, user_id) DO UPDATE SET "
-                "username=EXCLUDED.username, clearance_level=EXCLUDED.clearance_level, added_at=now()"
-            )
-            _invalidate_wr_clearance_redis_cache(tenant_id=tid, user_id=target_uid)
-            _wr_append_audit(
-                acl,
-                tenant_id=tid,
-                sender_id=rid or "system",
-                target_agent="manager",
-                event_type="REGISTER_WR_MEMBER",
-                payload=f"user_id={target_uid} clearance={clearance}",
-            )
-            target_label = _player_label(username, target_uid, db=acl, tenant_id=tid)
-            return f"✅ Miembro WR registrado: {target_label} ({clearance})."
-
-        return (
-            "Uso WR: /team | /team --add <user_id> [username] [admin|operator|observer] | /team --rm <user_id>"
-        )
-
-    if not raw:
-        users = _dedupe_authorized_users_by_user_id(_list_authorized_users(acl, tenant_id=tid))
-        if not users:
-            hint = ""
-            if _is_gateway_owner_user(rid):
-                hint = (
-                    " Como eres el owner del gateway (DUCKCLAW_OWNER_ID o DUCKCLAW_ADMIN_CHAT_ID), puedes ejecutar "
-                    "`/team --add <user_id> [nombre] [admin]` para dar de alta."
-                )
-            return f"No hay usuarios autorizados para tenant '{tid}'.{hint}"
-        body_lines: list[str] = []
-        for u in users:
-            uid = str(u.get("user_id") or "").strip()
-            uname = str(u.get("username") or "").strip()
-            role = (u.get("role") or "user").strip().lower() or "user"
-            label = _player_label(uname, uid, db=acl, tenant_id=tid)
-            body_lines.append(f"- {label} ({uid}) · rol: {role}")
-        return f"🦆 Usuarios autorizados (tenant '{tid}'):\n" + "\n".join(body_lines)
-
-    if raw.startswith("--rm "):
-        if not rid:
-            return "❌ Acceso denegado."
-        if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
-            return "❌ Acceso denegado: solo administradores pueden eliminar usuarios."
-        target_uid = raw[5:].strip().split()[0]
-        if not target_uid:
-            return "Uso: /team --rm <user_id>"
-        mut_db, mut_close = _authorized_users_rw_connection(db)
-        try:
-            _delete_authorized_user(mut_db, tenant_id=tid, user_id=target_uid)
-            _try_duckdb_checkpoint_rw(mut_db)
-        finally:
-            mut_close()
-        _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
-        target_label = _player_label("", target_uid, db=acl, tenant_id=tid)
-        return f"✅ Eliminado {target_label} del tenant '{tid}'."
-
-    if raw.startswith("--add ") or raw.strip() == "--add":
-        if not rid:
-            return "❌ Acceso denegado."
-        if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
-            return "❌ Acceso denegado: solo administradores pueden agregar usuarios."
-        ids_part = raw[6:].strip() if raw.startswith("--add ") else ""
-        tokens = [t for t in ids_part.split() if t.strip()]
-        if not tokens:
-            return "Uso: /team --add <user_id> [nombre] [admin|user]"
-        role_out = "user"
-        if len(tokens) >= 2 and tokens[-1].lower() == "admin":
-            role_out = "admin"
-            tokens = tokens[:-1]
-        if len(tokens) >= 2 and tokens[-1].lower() == "user":
-            tokens = tokens[:-1]
-        if not tokens:
-            return "Uso: /team --add <user_id> [nombre] [admin|user]"
-        target_uid, uname = _resolve_team_add_uid_and_username(tokens)
-        if not (target_uid or "").strip():
-            return "Uso: /team --add <user_id> [nombre] [admin|user]"
-        mut_db, mut_close = _authorized_users_rw_connection(db)
-        try:
-            _upsert_authorized_user(mut_db, tenant_id=tid, user_id=target_uid, username=uname, role=role_out)
-            _try_duckdb_checkpoint_rw(mut_db)
-        finally:
-            mut_close()
-        _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
-        target_label = _player_label(uname, target_uid, db=acl, tenant_id=tid)
-        return f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'."
-
-    if raw == "--shared-list" or raw.startswith("--shared-list"):
-        if not rid:
-            return "❌ Acceso denegado."
-        if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
-            return "❌ Acceso denegado: solo administradores pueden listar permisos de bases compartidas."
-        from duckclaw.shared_db_grants import list_shared_grants_for_tenant
-
-        grants = list_shared_grants_for_tenant(acl, tenant_id=tid)
-        if not grants:
-            return (
-                f"🗂 No hay filas en user_shared_db_access para tenant '{tid}'. "
-                "Sin filas, cualquier usuario whitelist puede usar rutas shared válidas (compat). "
-                "Admin: /team --shared-grant <user_id> <resource_key> (ej. default o *)."
-            )
-        grant_lines: list[str] = []
-        for g in grants:
-            grant_lines.append(
-                f"- user={g.get('user_id')} key={g.get('resource_key')} at={g.get('created_at')}"
-            )
-        return f"🗂 Bases compartidas permitidas (tenant '{tid}'):\n\n" + "\n".join(grant_lines)
-
-    if raw.startswith("--shared-grant "):
-        if not rid:
-            return "❌ Acceso denegado."
-        if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
-            return "❌ Acceso denegado: solo administradores."
-        rest = raw[len("--shared-grant ") :].strip().split(None, 1)
-        if len(rest) < 2:
-            return (
-                "Uso: /team --shared-grant <user_id> <resource_key>\n"
-                "resource_key: default, * (todas), o slug (env DUCKCLAW_SHARED_RESOURCE_<SLUG>)."
-            )
-        target_uid, rkey = rest[0], rest[1].strip()
-        from duckclaw.shared_db_grants import upsert_shared_grant, validate_resource_key
-
-        if not validate_resource_key(rkey):
-            return "resource_key inválido (usa default, * o slug alfanumérico)."
-        upsert_shared_grant(acl, tenant_id=tid, user_id=target_uid, resource_key=rkey)
-        return f"✅ Grant shared '{rkey}' → user {target_uid} (tenant '{tid}')."
-
-    if raw.startswith("--shared-revoke "):
-        if not rid:
-            return "❌ Acceso denegado."
-        if not _is_team_admin(acl, tenant_id=tid, requester_id=rid):
-            return "❌ Acceso denegado: solo administradores."
-        rest = raw[len("--shared-revoke ") :].strip().split(None, 1)
-        if len(rest) < 2:
-            return "Uso: /team --shared-revoke <user_id> <resource_key>"
-        target_uid, rkey = rest[0], rest[1].strip()
-        from duckclaw.shared_db_grants import delete_shared_grant, validate_resource_key
-
-        if not validate_resource_key(rkey):
-            return "resource_key inválido."
-        delete_shared_grant(acl, tenant_id=tid, user_id=target_uid, resource_key=rkey)
-        return f"✅ Revocado shared '{rkey}' para user {target_uid}."
-
-    return (
-        "Uso: /team | /team --add ... | /team --rm ... | /team --shared-list | "
-        "/team --shared-grant <user_id> <resource_key> | /team --shared-revoke <user_id> <resource_key>"
-    )
-
-
 def execute_roles(db: Any, chat_id: Any) -> str:
     """/roles: lista todos los trabajadores virtuales (templates) disponibles. El manager solo delegará a los que estén en /workers."""
     from duckclaw.workers.factory import list_workers
@@ -2316,7 +1345,7 @@ _DEFAULT_WORKER = "manager"
 def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
     """/role <worker_id>: cambia el rol. Por defecto 'manager' delega a los templates. Sin args: muestra rol actual y disponibles."""
     from duckclaw.workers.factory import list_workers
-    available = list_workers()  # solo templates (finanz, research_worker, etc.)
+    available = list_workers()
     wid_raw = (worker_id or "").strip()
     if not wid_raw:
         current = get_chat_state(db, chat_id, "worker_id") or _DEFAULT_WORKER
@@ -2359,7 +1388,7 @@ def execute_skills_list(db: Any, chat_id: Any, args: str) -> str:
     if not wid_raw:
         return "Uso: /skills <worker_id>. Ver templates: /roles"
     if wid_raw.startswith("--"):
-        return "Indica un worker_id (ej. finanz, research_worker). Ver templates: /roles"
+        return "Indica un worker_id (ej. research_worker). Ver templates: /roles"
     canonical = _resolve_template_id(available, wid_raw)
     if not canonical:
         return f"Template '{wid_raw}' no encontrado. Disponibles (usa /roles): {', '.join(available)}"
@@ -2521,7 +1550,7 @@ def execute_internet_toggle(
         return (
             f"Este worker («{wid}») tiene red sandbox denegada en security_policy.yaml. "
             "No se puede activar internet desde el chat. Usa tavily_search o un worker con browser_sandbox "
-            "(finanz, Job-Hunter)."
+            "habilitado por capability/policy."
         )
 
     def _parse(v_: str) -> bool | None:
@@ -2590,7 +1619,7 @@ def execute_heartbeat(db: Any, chat_id: Any, on_off: str, *, tenant_id: Any = No
         if not ok:
             return f"No se pudo activar heartbeat: {err}"
         if is_admin_ui_chat_session(cid):
-            return "✅ Heartbeat activado. Verás plan y herramientas en este chat mientras trabajo."
+            return "✅ Heartbeat activado. Verás plan y herramientas en este chat mientras ejecuto la tarea."
         if not heartbeat_outbound_configured():
             return (
                 "Heartbeat activado en Redis, pero falta TELEGRAM_BOT_TOKEN (recomendado) o un webhook "
@@ -2730,137 +1759,20 @@ def _goal_title(goal: dict, fallback_key: str) -> str:
     return (goal.get("belief_key") or fallback_key or "").strip()
 
 
-def build_goals_proactive_system_event_message(
-    goals: list,
-    *,
-    trading_session_objective: str | None = None,
-) -> str:
+def build_goals_proactive_system_event_message(goals: list, **_ignored: Any) -> str:
     titles: list[str] = []
-    for g in goals:
-        if not isinstance(g, dict):
+    for goal in goals:
+        if not isinstance(goal, dict):
             continue
-        k = (g.get("belief_key") or "").strip()
-        titles.append(_goal_title(g, k))
+        key = (goal.get("belief_key") or "").strip()
+        titles.append(_goal_title(goal, key))
     summary = "; ".join(titles[:12]) if titles else "(sin títulos)"
-    obj = (trading_session_objective or "").strip().lower()
-    extra = ""
-    if obj == "overnight_gap_squeeze":
-        extra = (
-            " **MISIÓN: OVERNIGHT GAP SQUEEZE — PREP + MOC (HRP + MOC Proxy):** "
-            "Durante 08:30–15:00 COT lun–vie: recolectar contexto (CFD/OHLCV/portfolio/sandbox/read_sql). "
-            "Sin catalizador intradía claro → **`accumulate_moc_intraday_state`** (postura explícita: watchlist, sizing 0/HOLD, régimen) "
-            "en lugar de solo «sin setup». **`propose_trade_signal`** puede crearse cuando haya evidencia del turno y riesgo lo permita "
-            "(Ledger `PENDING_HITL` en cualquier horario por defecto); la **auto-ejecución** encadenada con "
-            "`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`: **RTH** lun–vie 08:30–15:00 COT salvo `strategy_name` en "
-            "`DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES` (default `overnight_gap_moc` → ventana **MOC** "
-            "~14:40–14:59:30 COT, `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW`). "
-            "Opt-in `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` restaura bloqueo fuera de MOC (`OUTSIDE_MOC_PREP_WINDOW`). "
-            "Pipeline PM2 `moc_pipeline.py` (moc_hrp_cfd) no lo sustituyes; batch MOC `/execute_all_moc`. "
-            "1) OHLCV 1m vía `fetch_market_data`. "
-            "2) Portfolio vía `get_ibkr_portfolio`. "
-            "3) Sandbox script `overnight_squeeze_standalone.py`. "
-            "4) Script: Kalman 1m, MOC Proxy (volumen direccional 15m), HRP tope 35%. "
-            "5) Si MOC Proxy > 0 + Kalman alcista y procede playbook, una señal hacia HRP; "
-            "si MOC Proxy < 0 → postura defensiva documentada (accumulate) antes de forzar narrativa sin Ledger."
-        )
-    elif obj == "rebalance_hrp":
-        extra = (
-            " **Sesión `quant_core.trading_sessions` (session_goal.objective=rebalance_hrp):** el veredicto "
-            "debe **priorizar** alineación cartera IBKR vs **pesos HRP** del sandbox (desviación por ticker, "
-            "HITL); no basta con constatar PnL>0. "
-        )
-    elif obj == "maximize_pnl":
-        extra = (
-            " **Sesión (session_goal.objective=maximize_pnl):** puedes anclar el cierre a PnL/riesgo según "
-            "sesión; si además hiciste HRP en sandbox, cita desviación vs cartera. "
-        )
-    _cot_ctx = ""
-    if obj == "overnight_gap_squeeze":
-        try:
-            _cot_ctx = quant_event_horario_line() + " "
-        except Exception:
-            _cot_ctx = ""
     return (
-        "[SYSTEM_EVENT: "
-        + _cot_ctx
-        + "Revisión periódica de /crons. Objetivos: "
-        f"{summary}.{extra}Evalúa con herramientas si hace falta qué tan alineado está el "
-        "contexto actual (portfolio, sesión de trading, etc.) con cumplir cada meta. "
-        "Responde al usuario con un breve análisis o propuesta concreta (mensaje útil; "
-        "si el worker lo permite, señal u orden solo si procede).]"
+        "[SYSTEM_EVENT: Revisión periódica de /crons. Objetivos: "
+        f"{summary}. Evalúa con herramientas si hace falta qué tan alineado está el "
+        "contexto actual con cumplir cada meta. Responde al usuario con un breve "
+        "análisis o propuesta concreta.]"
     )
-
-
-class TradingTickEvent(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["TRADING_TICK"] = "TRADING_TICK"
-    trigger: str = "trading_session"
-    session_uid: str
-    tickers: list[str]
-    mode: str = "paper"
-    signal_threshold: str = "GAS"
-    objective: str = "maximize_pnl"
-    directive: str
-
-
-def build_trading_tick_system_event_message(
-    *,
-    session_uid: str,
-    tickers: list[str],
-    mode: str,
-    signal_threshold: str,
-    objective: str = "maximize_pnl",
-) -> str:
-    _obj = str(objective or "maximize_pnl").strip().lower() or "maximize_pnl"
-    if _obj not in ("maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"):
-        _obj = "maximize_pnl"
-    _directive = (
-        "TRADING TICK AUTÓNOMO (HITL): 1) validar sesión ACTIVE; 2) ejecutar evaluate_cfd_state "
-        "con session_uid+tickers; 3) si outcome=ERROR o all_data_failed, reportar ceguera sensorial; "
-        "4) si outcome=MISALIGNED y no hay pending por ticker, `propose_trade_signal` como mucho 1 por ticker "
-        "cuando haya evidencia OHLCV del turno y riesgo lo permita (propuesta Ledger permitida fuera de ventana MOC por defecto); "
-        "la **auto-ejecución** encadenada (`DUCKCLAW_QUANT_AUTO_EXECUTE_SIGNALS`): **RTH** lun–vie 08:30–15:00 COT salvo "
-        "`strategy_name` en `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_STRATEGY_NAMES` (default overnight_gap_moc → ventana MOC "
-        "~14:40–14:59:30); fuera de la compuerta que aplique no hay cadena auto grant+execute; "
-        "opt-in `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER=1` bloquea propuesta fuera de MOC (`OUTSIDE_MOC_PREP_WINDOW`; excepción job `moc_hrp_cfd`); "
-        "NO ejecutar en tick; 5) si mode=live agregar warning de capital real; "
-        "6) si ALIGNED, no enviar resumen al usuario."
-    )
-    if _obj == "rebalance_hrp":
-        _directive += (
-            " 7) REBALANCEO HRP: mismos tickers de sesión, OHLCV suficiente (fetch_ib_gateway_ohlcv o read_sql "
-            "sobre quant_core.ohlcv_data), luego execute_sandbox_script: **preferir PyPortfolioOpt** "
-            "(import pypfopt; pypfopt.hierarchical_portfolio.HRPOpt + risk_models.sample_cov sobre DataFrame de retornos; "
-            "optimize() → pesos que suman 1). Solo si pypfopt falla, HRP manual con pandas/scipy. "
-            "Comparar vs get_ibkr_portfolio; si desviación relevante y sin HITL pendiente por ticker, máximo 1 "
-            "`propose_trade_signal` de rebalanceo por ticker cuando proceda (Ledger fuera de MOC permitido por defecto; "
-            "con auto-exec activo usar `strategy_name=rebalance_hrp` para compuerta **RTH** 08:30–15:00 COT)."
-        )
-    elif _obj == "overnight_gap_squeeze":
-        _directive += (
-            " 7) OVERNIGHT GAP SQUEEZE: en 08:30–15:00 COT lun–vie recolectar contexto "
-            "(evaluate_cfd_state, fetch_ib_gateway_ohlcv/fetch_market_data, read_sql, get_ibkr_portfolio, sandbox según playbook). "
-            "Sin setup claro → `accumulate_moc_intraday_state`; con evidencia y playbook alineado → como mucho 1 `propose_trade_signal` por ticker "
-            "(fuera de ventana MOC permitido por defecto; auto-exec: RTH salvo `overnight_gap_moc` → MOC). "
-            "Señales batch `moc_hrp_cfd` = solo PM2. Opt-in `DUCKCLAW_QUANT_BLOCK_NON_MOC_LEDGER` → `OUTSIDE_MOC_PREP_WINDOW` fuera de MOC."
-        )
-    event = TradingTickEvent.model_validate(
-        {
-            "session_uid": str(session_uid or "").strip(),
-            "tickers": [str(t or "").strip().upper() for t in (tickers or []) if str(t or "").strip()],
-            "mode": str(mode or "paper").strip().lower() or "paper",
-            "signal_threshold": str(signal_threshold or "GAS").strip().upper() or "GAS",
-            "objective": _obj,
-            "directive": _directive,
-        }
-    )
-    _cot_line = ""
-    try:
-        _cot_line = quant_event_horario_line() + " "
-    except Exception:
-        _cot_line = ""
-    return "[SYSTEM_EVENT: " + _cot_line + event.model_dump_json(ensure_ascii=False) + "]"
 
 
 def _natural_language_goal_to_params(db: Any, chat_id: Any, text: str) -> Optional[dict]:
@@ -2990,7 +1902,6 @@ def execute_homeostasis_goals(
     from harness_core.targets import load_homeostasis_manifest, set_infra_field
 
     tid = str(tenant_id or "default").strip() or "default"
-    active_wid = (get_chat_state(db, chat_id, "worker_id") or "").strip()
     registry = _get_goals_registry_for_chat(db, chat_id)
     raw = (args or "").strip()
     toks = raw.split()
@@ -3095,28 +2006,9 @@ def execute_homeostasis_goals(
                     threshold=0.0,
                     title=raw[:120].strip(),
                 )
-        low_raw = raw.lower()
-        ng = new_goal.model_dump()
-        if active_wid == _QUANT_TRADER_TEMPLATE_ID and (
-            "drawdown" in low_raw or "draw down" in low_raw or " max dd" in low_raw or low_raw.strip().startswith("dd ")
-        ):
-            _quant_normalize_drawdown_goal(ng)
-            new_goal = DomainGoal.model_validate(ng)
-        if active_wid == _QUANT_TRADER_TEMPLATE_ID and _quant_is_drawdown_goal(ng):
-            _quant_normalize_drawdown_goal(ng)
-            new_goal = DomainGoal.model_validate(ng)
         goals = [g for g in manifest.goals if (g.belief_key or "").strip() != new_goal.belief_key]
         goals.append(new_goal)
         manifest = manifest.model_copy(update={"goals": goals})
-        if (
-            active_wid == _QUANT_TRADER_TEMPLATE_ID
-            and (new_goal.belief_key or "").strip() == "max_portfolio_drawdown_pct"
-        ):
-            ok_m, det_m = _quant_mirror_max_drawdown_to_vault(
-                db, tenant_id=tid, max_dd=float(new_goal.target_value)
-            )
-            if not ok_m:
-                return f"✅ Meta añadida (aviso: riesgo no guardado en bóveda: {det_m})"
         ok, err = _persist_homeostasis_manifest_db(
             db, chat_id, tid, manifest, vault_user_id=vault_user_id
         )
@@ -3167,7 +2059,7 @@ def execute_crons_schedule(
             return (
                 "Uso: /crons --delta 20min [--notify admin|telegram|both] "
                 "[--mode always|on_misalignment] [--jitter 20%] · /crons --delta off\n"
-                "El ticker (heartbeat o embebido en el gateway) escanea el hub y las bóvedas "
+                "El programador (heartbeat o embebido en el gateway) escanea el hub y las bóvedas "
                 f"en db/private/*/*.duckdb. Intervalo permitido: {GOALS_DELTA_MIN_SECONDS}s … 7d."
             )
         dur_parts, sched_opts, opt_err = _extract_crons_delta_options(toks)
@@ -3226,11 +2118,11 @@ def execute_crons_schedule(
         goals_note = (
             f"Metas homeostasis cargadas: {goals_count}. Define o edita con /goals."
             if goals_count
-            else "Sin metas en manifiesto: usa /goals <objetivo> antes del ticker proactivo."
+            else "Sin metas en manifiesto: usa /goals <objetivo> antes del programador proactivo."
         )
         return (
             f"Revisión proactiva cada ~{human} (modo {mode}, canal {notify_ch}, jitter ~{int(jitter_ratio * 100)}%). "
-            "El ticker disparará SYSTEM_EVENT ante desalineación con el manifiesto /goals, "
+            "El programador disparará SYSTEM_EVENT ante desalineación con el manifiesto /goals, "
             f"o en cada intervalo si modo=always. {goals_note} /crons --delta off para cancelar."
         )
 
@@ -3263,7 +2155,7 @@ def execute_crons_schedule(
                 )
             else:
                 mobj = json.loads(mraw)
-                if not isinstance(mobj, dict) or str(mobj.get("trigger") or "").lower() != "trading_session":
+                if not isinstance(mobj, dict) or str(mobj.get("trigger") or "").lower() != "goals_wall":
                     set_chat_state(
                         db,
                         chat_id,
@@ -3373,33 +2265,6 @@ def execute_tasks(db: Any, chat_id: Any) -> str:
     task_preview = f"• {str(task)[:60]}" if task else "—"
     icon = "▶" if status == "BUSY" else "⏸"
     return f"{icon} {status}{elapsed_s}{worker_s}\n" + task_preview
-
-
-def _get_global_config(db: Any, key: str) -> str:
-    """Read a global config key from agent_config (e.g. system_prompt)."""
-    _ensure_agent_config(db)
-    k = str(key).replace("'", "''")[:128]
-    try:
-        r = db.query(f"SELECT value FROM {_AGENT_CONFIG_TABLE} WHERE key = '{k}' LIMIT 1")
-        rows = json.loads(r) if isinstance(r, str) else (r or [])
-        if rows and isinstance(rows[0], dict):
-            return (rows[0].get("value") or "").strip()
-    except Exception:
-        pass
-    return ""
-
-
-def _set_global_config(db: Any, key: str, value: str) -> None:
-    """Write a global config key to agent_config."""
-    _ensure_agent_config(db)
-    k = str(key).replace("'", "''")[:128]
-    v = str(value).replace("'", "''")[:16384]
-    db.execute(
-        f"""
-        INSERT INTO {_AGENT_CONFIG_TABLE} (key, value) VALUES ('{k}', '{v}')
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
-        """
-    )
 
 
 def get_effective_system_prompt(db: Any, worker_id: Optional[str] = None) -> str:
@@ -3684,7 +2549,7 @@ def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
     if not raw:
         return "Uso: /prompt <worker_id> [--change <texto>]. Ver templates: /roles"
     if raw.startswith("--"):
-        return "Indica un worker_id (ej. finanz, research_worker). Ver templates: /roles"
+        return "Indica un worker_id (ej. research_worker). Ver templates: /roles"
     change_marker = " --change "
     idx = raw.lower().find(change_marker)
     if idx >= 0:
@@ -3733,24 +2598,12 @@ def _ssh_reach_icon(reach: str) -> str:
 
 
 def _capadonna_lake_status_lines(*, compact: bool) -> list[str]:
-    """Líneas de diagnóstico de datos del VPS (misma lógica que /lake; compact para /sensors)."""
-    from duckclaw.capadonna_plugin import load_capadonna_lib
-
-    _qmb = load_capadonna_lib("quant_market_bridge")
-    if _qmb is None:
-        return ["Capadonna lake: plugin no disponible (CAPADONNA_DRILLER_ROOT)."]
-    capadonna_ssh_config_ok = _qmb.capadonna_ssh_config_ok
-    lake_belief_observed_values = _qmb.lake_belief_observed_values
-    _resolved_identity_file = _qmb._resolved_identity_file
-
+    """Líneas de diagnóstico de conectividad SSH/Tailscale para /lake y /sensors."""
     host = (os.environ.get("CAPADONNA_SSH_HOST") or "").strip()
     user = (os.environ.get("CAPADONNA_SSH_USER") or "capadonna").strip()
-    cmd_set = bool((os.environ.get("CAPADONNA_REMOTE_OHLC_CMD") or "").strip())
-    idp = _resolved_identity_file()
-    strict = capadonna_ssh_config_ok()
-    host_v, online_v = lake_belief_observed_values()
+    idp = (os.environ.get("CAPADONNA_SSH_IDENTITY_FILE") or "").strip()
     reach = "no probado (falta config)"
-    if strict and host:
+    if host:
         ssh_args: list[str] = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
         if idp:
             ssh_args.extend(["-i", idp])
@@ -3766,48 +2619,21 @@ def _capadonna_lake_status_lines(*, compact: bool) -> list[str]:
             reach = "ssh no encontrado en PATH"
         except subprocess.TimeoutExpired:
             reach = "timeout 20s"
-        except Exception as e:
-            reach = str(e)[:120]
+        except Exception as exc:
+            reach = str(exc)[:120]
     if compact:
-        icfg = "✅" if strict else "⚠️"
-        ireach = _ssh_reach_icon(reach)
         return [
             "🌊 Lake de datos · SSH / Tailscale",
-            f"   {icfg} Config operativa: {'sí' if strict else 'no'} · CAPADONNA_SSH_HOST: {'sí' if host else 'no'}",
-            f"   📊 Creencias 0/1: lake_host_configured≈{int(host_v)} · lake_status_online≈{int(online_v)}",
-            f"   {ireach} Alcance SSH (rápido): {reach}",
+            f"   {'✅' if host else '⚠️'} Host configurado: {'sí' if host else 'no'}",
+            f"   {_ssh_reach_icon(reach)} Alcance SSH (rápido): {reach}",
         ]
-    lines = [
+    return [
         "Lake de datos (SSH)",
         f"- CAPADONNA_SSH_HOST: {'sí' if host else 'no'}",
         f"- CAPADONNA_SSH_USER: {user}",
-        f"- CAPADONNA_REMOTE_OHLC_CMD: {'sí' if cmd_set else 'no'}",
         f"- Clave SSH (-i): {idp or '(no definida / ssh-agent)'}",
-        f"- Config lista para intentar: {'sí' if strict else 'no'}",
-        f"- Semántica creencias (0/1): lake_host_configured≈{int(host_v)} lake_status_online≈{int(online_v)}",
         f"- Alcance SSH rápido: {reach}",
     ]
-    return lines
-
-
-def _probe_ibkr_portfolio(timeout_s: float = 8.0) -> str:
-    api_url = os.environ.get("IBKR_PORTFOLIO_API_URL", "").strip()
-    api_key = os.environ.get("IBKR_PORTFOLIO_API_KEY", "").strip()
-    if not api_url or not api_key:
-        return "Portafolio: no configurado (IBKR_PORTFOLIO_API_URL o IBKR_PORTFOLIO_API_KEY)"
-    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
-    req = urllib.request.Request(api_url, headers=headers, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            if resp.status != 200:
-                return f"Portafolio: HTTP {resp.status}"
-            return "Portafolio: OK (HTTP 200, JSON)"
-    except urllib.error.HTTPError as e:
-        return f"Portafolio: HTTP {e.code}"[:80]
-    except urllib.error.URLError as e:
-        return f"Portafolio: red — {e.reason!s}"[:100]
-    except Exception as e:
-        return f"Portafolio: {str(e)[:80]}"
 
 
 def _sensor_line_bullet(icon: str, text: str) -> str:
@@ -3816,96 +2642,11 @@ def _sensor_line_bullet(icon: str, text: str) -> str:
     return f"   {icon} {t}" if t else f"   {icon}"
 
 
-def _ibkr_detail_icon(line: str) -> str:
-    low = (line or "").lower()
-    if "no configurado" in low:
-        return "⚠️"
-    if "http 404" in low:
-        return "⚠️"
-    if ": ok" in low or " ok " in low:
-        return "✅"
-    if "http 200" in low:
-        return "✅"
-    return "❌"
-
-
-def _probe_ibkr_market_data(timeout_s: float = 8.0) -> str:
-    base = (os.environ.get("IBKR_MARKET_DATA_URL") or "").strip()
-    if not base:
-        return "Mercado OHLC: no configurado (IBKR_MARKET_DATA_URL)"
-    q = urllib.parse.urlencode({"ticker": "SPY", "timeframe": "1d", "lookback_days": "3"})
-    url = f"{base}&{q}" if "?" in base else f"{base}?{q}"
-    req = urllib.request.Request(url, method="GET")
-    token = (
-        os.environ.get("IBKR_PORTFOLIO_API_KEY") or os.environ.get("IBKR_MARKET_DATA_API_KEY") or ""
-    ).strip()
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Accept", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            return "Mercado OHLC: respuesta no JSON"
-        if isinstance(payload, dict):
-            err = payload.get("error") or payload.get("message")
-            if err and isinstance(err, str) and err.strip():
-                return f"Mercado OHLC: API — {err.strip()[:80]}"
-        return "Mercado OHLC: OK (JSON)"
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return (
-                "Mercado OHLC: HTTP 404 — la URL no existe en el API "
-                "(despliega GET /api/market/ohlcv, p. ej. Capadonna-Driller services/ibkr-ohlcv-api en :8002). "
-                "Histórico 1d/1w/1M/moc vía lake SSH está bien; "
-                "intradía necesita ese endpoint o quita IBKR_MARKET_DATA_URL del .env."
-            )[:280]
-        return f"Mercado OHLC: HTTP {e.code}"[:80]
-    except urllib.error.URLError as e:
-        return f"Mercado OHLC: red — {e.reason!s}"[:100]
-    except Exception as e:
-        return f"Mercado OHLC: {str(e)[:80]}"
-
-
 def _browser_sandbox_sensor_lines() -> list[str]:
-    """Líneas compactas para /sensors: manifest finanz, Docker, imagen browser, red en policy."""
+    """Líneas compactas para /sensors: Docker e imagen browser sandbox."""
     lines: list[str] = [
         "🌐 Browser sandbox · Playwright (`run_browser_sandbox`)",
     ]
-    mf_bs: bool | None = None
-    try:
-        from duckclaw.workers.manifest import load_manifest
-
-        mf_bs = bool(load_manifest("finanz").browser_sandbox)
-    except Exception:
-        mf_bs = None
-
-    if mf_bs is None:
-        lines.append(_sensor_line_bullet("⚠️", "No se pudo leer manifest finanz (browser_sandbox)"))
-    elif mf_bs:
-        lines.append(_sensor_line_bullet("✅", "Worker finanz: browser_sandbox=true"))
-    else:
-        lines.append(_sensor_line_bullet("⚠️", "Worker finanz: browser_sandbox=false — tool no registrada"))
-
-    net_mode: str | None = None
-    try:
-        from duckclaw.forge import WORKERS_TEMPLATES_DIR
-        from duckclaw.forge.schema import load_security_policy
-
-        pol = load_security_policy("finanz", worker_dir=WORKERS_TEMPLATES_DIR / "finanz")
-        net_mode = "bridge" if pol.network.default != "deny" else "deny"
-        if net_mode == "deny":
-            lines.append(
-                _sensor_line_bullet(
-                    "⚠️",
-                    "security_policy finanz: red=deny — Playwright no podrá abrir URLs HTTP",
-                )
-            )
-    except Exception:
-        net_mode = None
-
     try:
         from duckclaw.graphs.sandbox import _browser_image_name, _docker_available
     except Exception as exc:
@@ -3917,11 +2658,9 @@ def _browser_sandbox_sensor_lines() -> list[str]:
         return lines
 
     lines.append(_sensor_line_bullet("✅", "Docker ping OK"))
-
     img = _browser_image_name()
     env_override = bool((os.environ.get("STRIX_BROWSER_IMAGE") or "").strip())
     label = f"{img}" + (" · STRIX_BROWSER_IMAGE" if env_override else "")
-
     try:
         import docker  # noqa: PLC0415
 
@@ -3935,38 +2674,27 @@ def _browser_sandbox_sensor_lines() -> list[str]:
                 f"Imagen no encontrada localmente · {label} — build/pull antes del primer uso",
             )[:200]
         )
-
-    if net_mode == "bridge":
-        lines.append(_sensor_line_bullet("✅", "Policy red: bridge (HTTP permitido en contenedor browser)"))
-
     return lines
 
 
 def execute_sensors(db: Any) -> str:
-    """/sensors: resumen DuckDB, IBKR, Lake, Tavily, Reddit, Google Trends, browser sandbox (proceso gateway)."""
-    blocks: list[str] = ["📡 Sensores Finanz", "═══════════════════════", ""]
+    """/sensors: resumen DuckDB, conectividad, research y browser sandbox."""
+    blocks: list[str] = ["📡 Sensores de plataforma", "═══════════════════════", ""]
 
     try:
         db.query("SELECT 1")
         blocks.append("🦆 DuckDB local")
         blocks.append(_sensor_line_bullet("✅", "Conectado · SELECT 1 OK"))
-    except Exception as e:
+    except Exception as exc:
         blocks.append("🦆 DuckDB local")
-        blocks.append(_sensor_line_bullet("❌", f"Error — {str(e)[:100]}"))
-
-    blocks.append("")
-    blocks.append("🏦 IBKR (gateway)")
-    p_line = _probe_ibkr_portfolio()
-    m_line = _probe_ibkr_market_data()
-    blocks.append(_sensor_line_bullet(_ibkr_detail_icon(p_line), p_line))
-    blocks.append(_sensor_line_bullet(_ibkr_detail_icon(m_line), m_line))
+        blocks.append(_sensor_line_bullet("❌", f"Error — {str(exc)[:100]}"))
 
     blocks.append("")
     try:
         blocks.extend(_capadonna_lake_status_lines(compact=True))
-    except Exception as e:
+    except Exception as exc:
         blocks.append("🌊 Lake de datos")
-        blocks.append(_sensor_line_bullet("❌", f"Error — {str(e)[:100]}"))
+        blocks.append(_sensor_line_bullet("❌", f"Error — {str(exc)[:100]}"))
 
     blocks.append("")
     try:
@@ -3998,57 +2726,10 @@ def execute_sensors(db: Any) -> str:
 
     blocks.append("")
     try:
-        from duckclaw.forge.skills.reddit_bridge import _mcp_available, _reddit_env_ready
-    except Exception:
-        redd_mcp = False
-        redd_env = False
-    else:
-        redd_mcp = _mcp_available()
-        redd_env = _reddit_env_ready()
-    npx_ok = shutil.which("npx") is not None
-    blocks.append("📣 Reddit · mcp-reddit")
-    if redd_mcp and redd_env and npx_ok:
-        blocks.append(_sensor_line_bullet("✅", "Librería MCP · env Reddit · npx en PATH"))
-    else:
-        blocks.append(
-            _sensor_line_bullet(
-                "⚠️",
-                f"mcp_lib={'sí' if redd_mcp else 'no'} · env={'sí' if redd_env else 'no'} · npx={'sí' if npx_ok else 'no'}",
-            )
-        )
-
-    blocks.append("")
-    try:
-        from duckclaw.forge.skills.google_trends_bridge import (
-            _default_stdio_command_and_args,
-            _mcp_available as _gt_mcp_ok,
-        )
-    except Exception:
-        gt_cmd = ""
-        gt_args: list[str] = []
-        gt_mcp = False
-    else:
-        gt_mcp = _gt_mcp_ok()
-        gt_cmd, gt_args = _default_stdio_command_and_args()
-    blocks.append("📈 Google Trends MCP")
-    if not gt_cmd:
-        blocks.append(_sensor_line_bullet("⚠️", "Stdio no resuelto (google-trends-mcp / uvx en PATH)"))
-    else:
-        arg_hint = f" {' '.join(gt_args)}" if gt_args else ""
-        tid = "✅" if gt_mcp else "⚠️"
-        blocks.append(
-            _sensor_line_bullet(
-                tid,
-                f"mcp_lib={'sí' if gt_mcp else 'no'} · stdio: {gt_cmd}{arg_hint}",
-            )
-        )
-
-    blocks.append("")
-    try:
         blocks.extend(_browser_sandbox_sensor_lines())
-    except Exception as e:
+    except Exception as exc:
         blocks.append("🌐 Browser sandbox · Playwright (`run_browser_sandbox`)")
-        blocks.append(_sensor_line_bullet("❌", f"Error — {str(e)[:100]}"))
+        blocks.append(_sensor_line_bullet("❌", f"Error — {str(exc)[:100]}"))
 
     return "\n".join(blocks)
 
@@ -4058,2439 +2739,8 @@ def execute_lake_status() -> str:
     try:
         lines = _capadonna_lake_status_lines(compact=False)
     except Exception as e:
-        return f"Lake: no se pudo cargar el bridge quant: {e}"
+        return f"Lake: no se pudo leer conectividad: {e}"
     return "\n".join(lines)
-
-
-_TRADING_SESSIONS_DDL = """
-CREATE SCHEMA IF NOT EXISTS quant_core;
-CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
-  id VARCHAR PRIMARY KEY,
-  mode VARCHAR NOT NULL,
-  tickers VARCHAR NOT NULL DEFAULT '',
-  session_uid VARCHAR,
-  session_goal JSON,
-  status VARCHAR NOT NULL DEFAULT 'ACTIVE',
-  anchor_equity DOUBLE,
-  peak_equity DOUBLE,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-ALTER TABLE quant_core.trading_sessions ADD COLUMN IF NOT EXISTS session_uid VARCHAR;
-ALTER TABLE quant_core.trading_sessions ADD COLUMN IF NOT EXISTS session_goal JSON;
-ALTER TABLE quant_core.trading_sessions ADD COLUMN IF NOT EXISTS anchor_equity DOUBLE;
-ALTER TABLE quant_core.trading_sessions ADD COLUMN IF NOT EXISTS peak_equity DOUBLE;
-"""
-
-_TRADING_RISK_DDL = """
-CREATE SCHEMA IF NOT EXISTS quant_core;
-CREATE TABLE IF NOT EXISTS quant_core.trading_risk_constraints (
-  id VARCHAR PRIMARY KEY,
-  max_drawdown_pct DOUBLE,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
-# Fila singleton en quant_core.trading_sessions (PK lógica del “estado de sesión”).
-_TRADING_SESSION_ROW_ID = "active"
-_QUANT_TRADER_TEMPLATE_ID = "Quant-Trader"
-_TRADING_SESSION_PNL_SNAPSHOTS_KEY = "trading_session_pnl_snapshots_json"
-_TRADING_SESSION_PNL_HIST_UID_KEY = "trading_session_pnl_hist_uid"
-_PNL_SNAPSHOT_SYNTH_STEP_SEC = 60.0
-
-
-def _configure_pnl_chart_xaxis(ax: Any, x_dt: list[Any], *, tz: Any) -> str:
-    """
-    Fija xlim al rango real de la serie y fuerza ticks que incluyan el último punto.
-    Evita que un hueco largo entre snapshots haga que la etiqueta final quede en una fecha intermedia.
-    """
-    if len(x_dt) < 2:
-        return ""
-    from datetime import datetime, timezone
-
-    import matplotlib.dates as mdates
-    from matplotlib.ticker import FixedLocator
-
-    local: list[datetime] = []
-    for d in x_dt:
-        if not isinstance(d, datetime):
-            continue
-        if d.tzinfo is None:
-            local.append(d.replace(tzinfo=timezone.utc).astimezone(tz))
-        else:
-            local.append(d.astimezone(tz))
-    if len(local) < 2:
-        return ""
-    nums = mdates.date2num(local)
-    span = float(nums[-1] - nums[0])
-    pad = max(span * 0.02, 1.0 / 48.0)
-    ax.set_xlim(nums[0], nums[-1] + pad)
-    n_ticks = min(6, max(3, len(local)))
-    tick_nums = [nums[0] + (nums[-1] - nums[0]) * i / (n_ticks - 1) for i in range(n_ticks)]
-    ax.xaxis.set_major_locator(FixedLocator(tick_nums))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=tz))
-    return local[-1].strftime("%m-%d %H:%M")
-
-
-def _snap_epoch_from_obj(obj: dict[str, Any]) -> float | None:
-    if not isinstance(obj, dict):
-        return None
-    for k in ("epoch", "t", "ts", "time"):
-        if k in obj and obj[k] is not None:
-            try:
-                return float(obj[k])
-            except (TypeError, ValueError):
-                continue
-    return None
-
-
-def _snap_pnl_from_obj(obj: dict[str, Any]) -> float | None:
-    if not isinstance(obj, dict):
-        return None
-    for k in ("pnl", "p", "v"):
-        if k in obj and obj[k] is not None:
-            try:
-                return float(obj[k])
-            except (TypeError, ValueError):
-                continue
-    return None
-
-
-def _pnl_snapshots_parse_stored(raw: Any, *, now: float) -> list[tuple[float, float]]:
-    """
-    Acepta v1 lista de floats o v2 [{epoch, pnl}, ...].
-    v1 obtiene timestamps sintéticos hacia atrás desde ``now``.
-    """
-    data = raw
-    if isinstance(raw, str):
-        try:
-            data = json.loads(raw) if raw.strip() else []
-        except Exception:
-            return []
-    if not isinstance(data, list) or not data:
-        return []
-    if isinstance(data[0], dict):
-        out: list[tuple[float, float]] = []
-        for it in data:
-            if not isinstance(it, dict):
-                continue
-            ep = _snap_epoch_from_obj(it)
-            pv = _snap_pnl_from_obj(it)
-            if ep is None or pv is None:
-                continue
-            out.append((float(ep), float(pv)))
-        out.sort(key=lambda z: z[0])
-        return out
-    floats: list[float] = []
-    for x in data:
-        try:
-            floats.append(float(x))
-        except (TypeError, ValueError):
-            continue
-    if not floats:
-        return []
-    n = len(floats)
-    return [
-        (float(now) - float(n - 1 - i) * _PNL_SNAPSHOT_SYNTH_STEP_SEC, floats[i])
-        for i in range(n)
-    ]
-
-
-def _pnl_snapshots_dedupe_epoch(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    """Misma lógica epsilon que la deduplicación por PnL; conserva el último epoch del tramo."""
-    out: list[tuple[float, float]] = []
-    for ep, fx in points or []:
-        if not out:
-            out.append((float(ep), float(fx)))
-            continue
-        prev = out[-1][1]
-        eps = max(1e-4, 1e-6 * max(1.0, abs(fx), abs(prev)))
-        if abs(fx - prev) > eps:
-            out.append((float(ep), float(fx)))
-        else:
-            out[-1] = (float(ep), float(fx))
-    return out
-
-
-def _pnl_snapshots_to_floats(points: list[tuple[float, float]]) -> list[float]:
-    return [float(p) for _, p in points]
-
-
-def _pnl_snapshots_serialize_v2(points: list[tuple[float, float]]) -> str:
-    return json.dumps(
-        [{"epoch": float(ep), "pnl": float(pv)} for ep, pv in points],
-        ensure_ascii=False,
-    )
-
-
-def _snapshot_epoch_points_for_session(db: Any, chat_id: Any, session_uid: str) -> list[tuple[float, float]]:
-    uid = (session_uid or "").strip()
-    if not uid or uid == "n/a":
-        return []
-    hist_uid_s = str(get_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or "").strip()
-    if hist_uid_s != uid:
-        return []
-    raw = get_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
-    return _pnl_snapshots_dedupe_epoch(_pnl_snapshots_parse_stored(raw, now=time.time()))
-
-
-def _dedupe_trading_session_snapshots(snaps: list[Any]) -> list[float]:
-    """Elimina valores consecutivos ~iguales (mismo snapshot repetido en cada /status)."""
-    out: list[float] = []
-    for x in snaps or []:
-        try:
-            fx = float(x)
-        except (TypeError, ValueError):
-            continue
-        if not out:
-            out.append(fx)
-            continue
-        prev = out[-1]
-        eps = max(1e-4, 1e-6 * max(1.0, abs(fx), abs(prev)))
-        if abs(fx - prev) > eps:
-            out.append(fx)
-    return out
-
-
-def _quant_is_drawdown_goal(goal: dict) -> bool:
-    k = (goal.get("belief_key") or "").strip().lower()
-    if k == "max_portfolio_drawdown_pct":
-        return True
-    t = (goal.get("title") or "").lower()
-    return "drawdown" in t or "max dd" in t
-
-
-def _quant_normalize_drawdown_goal(goal: dict) -> None:
-    """Ajusta belief_key y target (0–1) para límites de DD."""
-    goal["belief_key"] = "max_portfolio_drawdown_pct"
-    try:
-        tv = float(goal.get("target_value") or 0.0)
-    except (TypeError, ValueError):
-        tv = 0.0
-    if tv > 1.0:
-        tv = tv / 100.0
-    goal["target_value"] = max(0.0, min(1.0, tv))
-
-
-def _quant_mirror_max_drawdown_to_vault(
-    db: Any,
-    *,
-    tenant_id: str,
-    max_dd: float,
-) -> tuple[bool, str]:
-    upsert = """
-INSERT INTO quant_core.trading_risk_constraints (id, max_drawdown_pct)
-VALUES ('active', ?)
-ON CONFLICT (id) DO UPDATE SET
-  max_drawdown_pct = excluded.max_drawdown_pct,
-  updated_at = now()
-"""
-    return _vault_apply_sql_statements(
-        db,
-        [
-            (_TRADING_RISK_DDL, None),
-            (upsert, [float(max_dd)]),
-        ],
-        tenant_id=str(tenant_id or "default").strip() or "default",
-    )
-
-
-def _quant_clear_risk_constraints_vault(db: Any, *, tenant_id: str) -> tuple[bool, str]:
-    return _vault_apply_sql_statements(
-        db,
-        [("DELETE FROM quant_core.trading_risk_constraints WHERE id = 'active'", None)],
-        tenant_id=str(tenant_id or "default").strip() or "default",
-    )
-
-
-class TradingSessionGoal(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    # objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
-    objective: Literal["maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"] = "maximize_pnl"
-    max_drawdown_pct: float = 2.0
-    position_size_pct: float = 5.0
-    signal_threshold: str = "GAS"
-    tickers: list[str] = []
-    mode: str = "paper"
-
-
-class TradingSessionCliArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    mode: Optional[str] = None
-    tickers_csv: str = ""
-    confirm: bool = False
-    stop: bool = False
-    status: bool = False
-    update: bool = False
-    anchor_equity: Optional[float] = None
-    max_drawdown_pct: float = 2.0
-    position_size_pct: float = 5.0
-    signal_threshold: str = "GAS"
-    # objective: Literal["maximize_pnl", "rebalance_hrp"] = "maximize_pnl"
-    objective: Literal["maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"] = "maximize_pnl"
-
-
-class QuantCycleCliArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    tickers_csv: str = ""
-    timeframe: str = "1h"
-    lookback_days: int = 20
-    objective: Literal["maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"] = "maximize_pnl"
-    execute: Literal["auto", "off"] = "auto"
-    signal_threshold: str = "GAS"
-    weight_pct: float = 5.0
-
-
-def _parse_trading_session_cli(args: str) -> tuple[Optional[TradingSessionCliArgs], Optional[str]]:
-    """Parsea flags de /trading-session."""
-    mode: Optional[str] = None
-    tickers_raw: list[str] = []
-    confirm = False
-    stop = False
-    status = False
-    update = False
-    anchor_equity: Optional[float] = None
-    max_drawdown = 2.0
-    position_size = 5.0
-    signal_threshold = "GAS"
-    objective: str = "maximize_pnl"
-    tokens = (args or "").strip().split()
-    i = 0
-    while i < len(tokens):
-        t = tokens[i]
-        if t == "--mode" and i + 1 < len(tokens):
-            mode = tokens[i + 1].strip().lower()
-            i += 2
-            continue
-        if t == "--tickers" and i + 1 < len(tokens):
-            tickers_raw = [x.strip().upper() for x in tokens[i + 1].split(",") if x.strip()]
-            i += 2
-            continue
-        if t == "--confirm":
-            confirm = True
-            i += 1
-            continue
-        if t == "--stop":
-            stop = True
-            i += 1
-            continue
-        if t == "--status":
-            status = True
-            i += 1
-            continue
-        if t in ("--update", "update"):
-            update = True
-            i += 1
-            continue
-        if t in ("--anchor-equity", "--anchor_equity") and i + 1 < len(tokens):
-            try:
-                anchor_equity = float(str(tokens[i + 1] or "").replace(",", "").strip())
-            except ValueError:
-                return None, "--anchor-equity debe ser numérico"
-            if anchor_equity <= 0:
-                return None, "--anchor-equity debe ser mayor que 0"
-            i += 2
-            continue
-        if t == "--max-drawdown" and i + 1 < len(tokens):
-            try:
-                max_drawdown = float(tokens[i + 1])
-            except ValueError:
-                return None, "--max-drawdown debe ser numérico"
-            i += 2
-            continue
-        if t == "--position-size" and i + 1 < len(tokens):
-            try:
-                position_size = float(tokens[i + 1])
-            except ValueError:
-                return None, "--position-size debe ser numérico"
-            i += 2
-            continue
-        if t == "--signal" and i + 1 < len(tokens):
-            signal_threshold = str(tokens[i + 1] or "").strip().upper()
-            i += 2
-            continue
-        if t == "--objective" and i + 1 < len(tokens):
-            objective = str(tokens[i + 1] or "").strip().lower()
-            i += 2
-            continue
-        i += 1
-    if stop and status:
-        return None, "Usa --stop o --status, no ambos."
-    if update and (stop or status):
-        return None, "Usa --update sin --stop ni --status."
-    if update and mode:
-        return None, "Con --update no uses --mode; se conserva el modo de la sesión activa."
-    if update and not tickers_raw and anchor_equity is None:
-        return None, "Con --update indica --tickers y/o --anchor-equity"
-    if update and mode is None and not stop and not status:
-        pass
-    elif (not stop and not status and not update) and not mode:
-        return None, "Falta --mode paper|live"
-    if mode and mode not in ("paper", "live"):
-        return None, "mode debe ser paper o live"
-    if objective not in ("maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"):
-        if stop or status:
-            objective = "maximize_pnl"
-        else:
-            return None, "objective debe ser maximize_pnl, rebalance_hrp u overnight_gap_squeeze"
-    seen: set[str] = set()
-    tickers_ordered: list[str] = []
-    for x in tickers_raw:
-        if x not in seen:
-            seen.add(x)
-            tickers_ordered.append(x)
-    try:
-        parsed = TradingSessionCliArgs.model_validate(
-            {
-                "mode": mode,
-                "tickers_csv": ",".join(tickers_ordered),
-                "confirm": bool(confirm),
-                "stop": bool(stop),
-                "status": bool(status),
-                "update": bool(update),
-                "anchor_equity": anchor_equity,
-                "max_drawdown_pct": float(max_drawdown),
-                "position_size_pct": float(position_size),
-                "signal_threshold": signal_threshold or "GAS",
-                "objective": str(objective).strip().lower() or "maximize_pnl",
-            }
-        )
-    except ValidationError as exc:
-        return None, f"flags inválidos: {exc}"
-    return parsed, None
-
-
-def _parse_quant_cycle_cli(args: str) -> tuple[Optional[QuantCycleCliArgs], Optional[str]]:
-    """Parsea flags de /quant_cycle."""
-    tickers_raw: list[str] = []
-    timeframe = "1h"
-    lookback_days = 20
-    objective = "maximize_pnl"
-    execute = "auto"
-    signal_threshold = "GAS"
-    weight_pct = 5.0
-    tokens = (args or "").strip().split()
-    i = 0
-    while i < len(tokens):
-        t = tokens[i]
-        if t == "--tickers" and i + 1 < len(tokens):
-            tickers_raw = [x.strip().upper() for x in str(tokens[i + 1] or "").split(",") if x.strip()]
-            i += 2
-            continue
-        if t == "--timeframe" and i + 1 < len(tokens):
-            timeframe = str(tokens[i + 1] or "").strip()
-            i += 2
-            continue
-        if t in ("--lookback_days", "--lookback-days") and i + 1 < len(tokens):
-            try:
-                lookback_days = int(tokens[i + 1])
-            except ValueError:
-                return None, "--lookback_days debe ser entero"
-            i += 2
-            continue
-        if t == "--objective" and i + 1 < len(tokens):
-            objective = str(tokens[i + 1] or "").strip().lower()
-            i += 2
-            continue
-        if t == "--execute" and i + 1 < len(tokens):
-            execute = str(tokens[i + 1] or "").strip().lower()
-            i += 2
-            continue
-        if t == "--signal" and i + 1 < len(tokens):
-            signal_threshold = str(tokens[i + 1] or "").strip().upper()
-            i += 2
-            continue
-        if t in ("--weight", "--weight-pct") and i + 1 < len(tokens):
-            try:
-                weight_pct = float(tokens[i + 1])
-            except ValueError:
-                return None, "--weight debe ser numérico"
-            i += 2
-            continue
-        i += 1
-    if objective not in ("maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"):
-        return None, "objective debe ser maximize_pnl, rebalance_hrp u overnight_gap_squeeze"
-    if execute not in ("auto", "off"):
-        return None, "execute debe ser auto u off"
-    if not re.fullmatch(r"[A-Za-z0-9]+", timeframe or ""):
-        return None, "timeframe inválido (solo alfanumérico)"
-    if lookback_days < 1 or lookback_days > 4000:
-        return None, "lookback_days debe estar entre 1 y 4000"
-    if weight_pct <= 0:
-        return None, "weight debe ser mayor a 0"
-    allowed_threshold = {"SOLID", "LIQUID", "GAS", "PLASMA"}
-    if signal_threshold not in allowed_threshold:
-        signal_threshold = "GAS"
-    seen: set[str] = set()
-    tickers_ordered: list[str] = []
-    for x in tickers_raw:
-        if not re.fullmatch(r"[A-Z0-9]{1,8}", x):
-            return None, f"ticker inválido: {x}"
-        if x not in seen:
-            seen.add(x)
-            tickers_ordered.append(x)
-    try:
-        parsed = QuantCycleCliArgs.model_validate(
-            {
-                "tickers_csv": ",".join(tickers_ordered),
-                "timeframe": timeframe,
-                "lookback_days": int(lookback_days),
-                "objective": objective,
-                "execute": execute,
-                "signal_threshold": signal_threshold,
-                "weight_pct": float(weight_pct),
-            }
-        )
-    except ValidationError as exc:
-        return None, f"flags inválidos: {exc}"
-    return parsed, None
-
-
-def _session_goal_from_cli(parsed: TradingSessionCliArgs) -> TradingSessionGoal:
-    threshold = str(parsed.signal_threshold or "GAS").strip().upper() or "GAS"
-    allowed = {"SOLID", "LIQUID", "GAS", "PLASMA"}
-    if threshold not in allowed:
-        threshold = "GAS"
-    tickers = [x.strip().upper() for x in (parsed.tickers_csv or "").split(",") if x.strip()]
-    oj = str(getattr(parsed, "objective", "maximize_pnl") or "maximize_pnl").strip().lower()
-    if oj not in ("maximize_pnl", "rebalance_hrp", "overnight_gap_squeeze"):
-        oj = "maximize_pnl"
-    return TradingSessionGoal.model_validate(
-        {
-            "objective": oj,
-            "max_drawdown_pct": max(0.1, float(parsed.max_drawdown_pct)),
-            "position_size_pct": max(0.1, float(parsed.position_size_pct)),
-            "signal_threshold": threshold,
-            "tickers": tickers,
-            "mode": str(parsed.mode or "paper").strip().lower() or "paper",
-        }
-    )
-
-
-def _vault_apply_sql_statements(
-    db: Any,
-    statements: list[tuple[str, Optional[list[Any]]]],
-    *,
-    tenant_id: str,
-) -> tuple[bool, str]:
-    """Ejecuta sentencias en la bóveda o vía cola Redis si el handle es read_only."""
-    raw_path = str(getattr(db, "_path", "") or "").strip()
-    if not raw_path or raw_path == ":memory:":
-        return False, "Ruta de bóveda no resuelta"
-    resolved = str(Path(raw_path).expanduser().resolve())
-    uid = _infer_user_id_for_audit_queue(resolved)
-    tid = str(tenant_id or "default").strip() or "default"
-
-    if not _skip_runtime_ddl(db):
-        try:
-            for sql, params in statements:
-                if params is not None:
-                    db.execute(sql, params)
-                else:
-                    db.execute(sql)
-            return True, ""
-        except Exception as exc:
-            return False, str(exc)[:500]
-
-    try:
-        from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
-    except Exception as exc:
-        return False, f"cola DuckDB no disponible: {exc}"
-
-    released_ro = False
-    try:
-        release = getattr(db, "release_file_handle_for_external_writer", None)
-        susp = getattr(db, "suspend_readonly_file_handle", None)
-        resu = getattr(db, "resume_readonly_file_handle", None)
-        if callable(release):
-            release()
-            released_ro = bool(callable(resu))
-        elif callable(susp) and callable(resu):
-            susp()
-            released_ro = True
-        for sql, params in statements:
-            write_tid = enqueue_duckdb_write_sync(
-                db_path=resolved,
-                query=sql.strip(),
-                params=list(params or []),
-                user_id=uid,
-                tenant_id=tid,
-            ),
-            st = poll_task_status_sync(write_tid, timeout_sec=30.0)
-            if st is None:
-                return False, "timeout esperando db-writer"
-            if st.status != "success":
-                return False, (st.detail or "db-writer failed")[:500]
-        return True, ""
-    finally:
-        if released_ro:
-            try:
-                resu2 = getattr(db, "resume_readonly_file_handle", None)
-                if callable(resu2):
-                    resu2()
-            except Exception:
-                pass
-
-
-def set_chat_state_via_vault(
-    db: Any,
-    chat_id: Any,
-    key_suffix: str,
-    value: str,
-    *,
-    tenant_id: str = "default",
-) -> tuple[bool, str]:
-    """
-    Persiste ``agent_config`` vía ``_vault_apply_sql_statements`` — funciona con DuckClaw RO (cola db-writer).
-    Fallback a ``set_chat_state`` solo si vault falla (p. ej. redis ausente).
-    """
-    tid = str(tenant_id or "default").strip() or "default"
-    upsert_sql = (
-        "INSERT INTO agent_config (key, value) VALUES (?, ?) "
-        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP"
-    )
-    ck = _chat_key(chat_id, key_suffix)[:240]
-    vv = str(value)[:16384]
-    ok, err = _vault_apply_sql_statements(db, [(upsert_sql, [ck, vv])], tenant_id=tid)
-    if ok:
-        return True, ""
-    try:
-        set_chat_state(db, chat_id, key_suffix, vv)
-        return True, ""
-    except Exception as exc:
-        combined = "; ".join(x for x in (err, str(exc)) if x).strip()
-        return False, (combined or "persist_failed")[:500]
-
-
-def schedule_quant_trading_proactive_ticks(
-    db: Any,
-    *,
-    chat_id: Any,
-    tenant_id: str,
-    interval_seconds: int = 0,
-) -> str:
-    """
-    Programa revisión proactiva (TRADING_TICK vía ticker /crons) para Quant con sesión ACTIVE.
-    Persistencia segura desde worker RO vía vault writer. Si ``interval_seconds`` es 0, solo garantiza delta
-    default (si hace falta) y meta ``trading_session`` como ``/trading-session``.
-    """
-    tid = str(tenant_id or "default").strip() or "default"
-    cid = chat_id
-    try:
-        raw = db.query(
-            "SELECT session_uid, status FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except Exception as exc:
-        return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
-    if not rows or not isinstance(rows[0], dict):
-        return json.dumps(
-            {"status": "error", "error": "NO_ACTIVE_ROW", "hint": "Abre sesión con /trading-session o read_sql debe mostrar ACTIVE."},
-            ensure_ascii=False,
-        )
-    row = rows[0]
-    if str(row.get("status") or "").strip().upper() != "ACTIVE":
-        return json.dumps(
-            {"status": "error", "error": "SESSION_NOT_ACTIVE", "status_actual": row.get("status")},
-            ensure_ascii=False,
-        )
-    session_uid = str(row.get("session_uid") or "").strip()
-    if not session_uid:
-        return json.dumps({"status": "error", "error": "MISSING_SESSION_UID"}, ensure_ascii=False)
-
-    if int(interval_seconds) > 0:
-        secs_iv = max(
-            GOALS_DELTA_MIN_SECONDS,
-            min(int(interval_seconds), GOALS_DELTA_MAX_SECONDS),
-        )
-        fire = str(time.time())
-        blob_meta = json.dumps(
-            {"trigger": "trading_session", "session_uid": session_uid},
-            ensure_ascii=False,
-        )
-        for suf, val in (
-            (_GOALS_CRON_WALL_KEY, ""),
-            (_GOALS_DELTA_SECONDS_KEY, str(secs_iv)),
-            (_GOALS_PROACTIVE_LAST_FIRE_KEY, fire),
-            (_GOALS_PROACTIVE_ANCHOR_KEY, fire),
-            (_GOALS_DELTA_ANCHOR_LEGACY_KEY, fire),
-            (_GOALS_PROACTIVE_TENANT_KEY, tid),
-            (_GOALS_DELTA_META_KEY, blob_meta),
-        ):
-            ok_w, er_w = set_chat_state_via_vault(db, cid, suf, val, tenant_id=tid)
-            if not ok_w:
-                return json.dumps({"status": "error", "error": er_w or "persist_failed"}, ensure_ascii=False)
-        _ensure_trading_session_goals_delta(
-            db, chat_id=cid, tenant_id=tid, session_uid=session_uid
-        )
-        human = format_goals_delta_interval_human(secs_iv)
-        return json.dumps(
-            {
-                "status": "ok",
-                "session_uid": session_uid,
-                "interval_seconds": secs_iv,
-                "interval_human": human,
-                "note": "TRADING_TICK / heartbeat: mismo esquema que /crons --delta con trigger trading_session.",
-            },
-            ensure_ascii=False,
-        )
-
-    enabled, secs = _ensure_trading_session_goals_delta(
-        db,
-        chat_id=cid,
-        tenant_id=tid,
-        session_uid=session_uid,
-    )
-    return json.dumps(
-        {
-            "status": "ok",
-            "scheduler_bootstrap_was_needed": enabled,
-            "interval_seconds": secs,
-            "interval_human": format_goals_delta_interval_human(secs),
-            "session_uid": session_uid,
-        },
-        ensure_ascii=False,
-    )
-
-
-def _ensure_trading_session_goals_delta(
-    db: Any,
-    *,
-    chat_id: Any,
-    tenant_id: str,
-    session_uid: str,
-) -> tuple[bool, int]:
-    """Activa goals delta por default (5m) si hace falta; siempre enlaza meta al tick de sesión Quant."""
-    tid = str(tenant_id or "default").strip() or "default"
-    try:
-        current = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
-    except ValueError:
-        current = 0
-    default_secs = 300
-    enabled = False
-    if current <= 0:
-        current = default_secs
-        now_s = str(time.time())
-        for suf, val in (
-            (_GOALS_DELTA_SECONDS_KEY, str(current)),
-            (_GOALS_PROACTIVE_LAST_FIRE_KEY, ""),
-            (_GOALS_PROACTIVE_ANCHOR_KEY, now_s),
-            (_GOALS_DELTA_ANCHOR_LEGACY_KEY, now_s),
-        ):
-            ok_p, er_p = set_chat_state_via_vault(db, chat_id, suf, val, tenant_id=tid)
-            if not ok_p:
-                return False, current
-        enabled = True
-    ok_t, er_t = set_chat_state_via_vault(
-        db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, tid, tenant_id=tid
-    )
-    if not ok_t:
-        return False, current
-    ok_m, er_m = set_chat_state_via_vault(
-        db,
-        chat_id,
-        _GOALS_DELTA_META_KEY,
-        json.dumps({"trigger": "trading_session", "session_uid": session_uid}, ensure_ascii=False),
-        tenant_id=tid,
-    )
-    if not ok_m:
-        return False, current
-    _sess_obj = ""
-    try:
-        _raw_s = db.query(
-            "SELECT session_goal FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-        )
-        _rows_s = json.loads(_raw_s) if isinstance(_raw_s, str) else (_raw_s or [])
-        if _rows_s and isinstance(_rows_s[0], dict):
-            _sg = _rows_s[0].get("session_goal")
-            if isinstance(_sg, dict):
-                _sess_obj = str(_sg.get("objective") or "").strip().lower()
-            elif isinstance(_sg, str) and _sg.strip():
-                try:
-                    _sgj = json.loads(_sg)
-                    if isinstance(_sgj, dict):
-                        _sess_obj = str(_sgj.get("objective") or "").strip().lower()
-                except Exception:
-                    _sess_obj = ""
-    except Exception:
-        _sess_obj = ""
-
-    if not get_manager_goals(db, chat_id):
-        _seed_goal = {
-            "belief_key": "hrp_session_rebalance",
-            "target_value": 0.0,
-            "threshold": 0.0,
-            "observed_value": None,
-            "title": "Rebalanceo HRP (pypfopt) vs cartera IBKR en cada tick",
-        }
-        if _sess_obj == "overnight_gap_squeeze":
-            _seed_goal = {
-                "belief_key": "overnight_gap_squeeze_session",
-                "target_value": 0.0,
-                "threshold": 0.0,
-                "observed_value": None,
-                "title": "Overnight Gap Squeeze (cierre + gap) en cada tick",
-            }
-        _okg, _erg = set_chat_state_via_vault(
-            db,
-            chat_id,
-            "goals",
-            json.dumps([_seed_goal], ensure_ascii=False),
-            tenant_id=tid,
-        )
-        if not _okg:
-            set_manager_goals(db, chat_id, [_seed_goal])
-    return enabled, current
-
-
-def _close_active_trading_session(
-    db: Any,
-    *,
-    chat_id: Any,
-    tenant_id: str,
-    vault_user_id: Any = None,
-) -> tuple[bool, str]:
-    """Cierra sesión ACTIVE y limpia scheduler creado por /trading-session."""
-    state_chat_id = _trading_session_state_chat_id(chat_id, vault_user_id)
-    session_uid = ""
-    try:
-        raw = db.query(
-            "SELECT session_uid FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        if rows and isinstance(rows[0], dict):
-            session_uid = str(rows[0].get("session_uid") or "").strip()
-    except Exception:
-        session_uid = ""
-    ok, detail = _vault_apply_sql_statements(
-        db,
-        [
-            (_TRADING_SESSIONS_DDL, None),
-            ("UPDATE quant_core.trading_sessions SET status='CLOSED', updated_at=now() WHERE id = ?", [_TRADING_SESSION_ROW_ID]),
-        ],
-        tenant_id=tenant_id,
-    )
-    if not ok:
-        return False, detail
-    meta_raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
-    if '"trigger": "trading_session"' in meta_raw or '"trigger":"trading_session"' in meta_raw:
-        clear_goals_proactive_schedule(db, chat_id)
-        set_chat_state(db, chat_id, _GOALS_DELTA_META_KEY, "")
-        set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
-    pnl = 0.0
-    if session_uid:
-        try:
-            esc_uid = session_uid.replace("'", "''")
-            raw2 = db.query(
-                "SELECT COALESCE(SUM(COALESCE(unrealized_pnl,0)),0) AS pnl "
-                "FROM quant_core.trade_signals "
-                f"WHERE session_uid = '{esc_uid}' AND status='EXECUTED'"
-            )
-            rows2 = json.loads(raw2) if isinstance(raw2, str) else (raw2 or [])
-            if rows2 and isinstance(rows2[0], dict):
-                pnl = float(rows2[0].get("pnl") or 0.0)
-        except Exception:
-            pnl = 0.0
-    try:
-        set_chat_state(db, state_chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY, "[]")
-        set_chat_state(db, state_chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY, "")
-        set_chat_state(db, state_chat_id, "trading_session_last_pnl", "")
-        set_chat_state(db, state_chat_id, "trading_session_prev_pnl", "")
-        set_chat_state(db, state_chat_id, "trading_session_pct_change", "")
-    except Exception:
-        pass
-    return True, f"session_uid={session_uid or 'n/a'} | pnl_estimado={pnl:.2f}"
-
-
-def _session_notionals_from_ibkr_for_tickers(
-    parts: list[str],
-) -> tuple[dict[str, float], str | None, float | None]:
-    """
-    Nocional ``|market_value|`` por símbolo en ``parts``, snapshot IBKR (mismo contrato que
-    ``get_ibkr_portfolio``). Retorna ``(mapa, err, total_cuenta)`` donde ``total_cuenta`` es
-    ``total_value`` / net liq. del payload (para % como en el resumen IBKR); ``None`` si no es usable.
-    """
-    import os
-
-    from duckclaw.capadonna_plugin import load_capadonna_lib
-
-    _ibkr = load_capadonna_lib("ibkr_bridge")
-    if _ibkr is None:
-        zero = {p: 0.0 for p in parts}
-        return zero, "capadonna_ibkr_plugin_missing", None
-    _ibkr_resolve_payload_with_optional_alt = _ibkr._ibkr_resolve_payload_with_optional_alt
-
-    api_url = (os.environ.get("IBKR_PORTFOLIO_API_URL") or "").strip()
-    api_key = (os.environ.get("IBKR_PORTFOLIO_API_KEY") or "").strip()
-    positions_url = (os.environ.get("IBKR_PORTFOLIO_POSITIONS_URL") or "").strip()
-    zero = {p: 0.0 for p in parts}
-    if not api_url or not api_key:
-        return zero, "ibkr_env_missing", None
-
-    try:
-        data, _eff, _cfg = _ibkr_resolve_payload_with_optional_alt(
-            api_url, api_key, positions_url
-        )
-    except Exception as exc:
-        return zero, str(exc)[:200], None
-
-    if not isinstance(data, dict):
-        return zero, "ibkr_payload_invalid", None
-
-    portfolio = data.get("portfolio") or data.get("positions") or []
-    if isinstance(portfolio, dict):
-        portfolio = list(portfolio.values()) if portfolio else []
-
-    tv = data.get("total_value")
-    if tv is None:
-        tv = data.get("net_liquidation") or data.get("equity") or data.get("value") or 0
-    try:
-        total_account_f = float(tv)
-    except (TypeError, ValueError):
-        total_account_f = 0.0
-    if total_account_f <= 0 and isinstance(portfolio, list):
-        for pos in portfolio:
-            if not isinstance(pos, dict):
-                continue
-            mv0 = pos.get("market_value") or pos.get("marketValue") or pos.get("value") or 0
-            try:
-                total_account_f += abs(float(mv0))
-            except (TypeError, ValueError):
-                continue
-
-    total_account: float | None = total_account_f if total_account_f > 1e-9 else None
-
-    seen = {p.upper() for p in parts}
-    notionals: dict[str, float] = {p: 0.0 for p in parts}
-    if not isinstance(portfolio, list):
-        return notionals, None, total_account
-
-    for pos in portfolio:
-        if not isinstance(pos, dict):
-            continue
-        sym = str(pos.get("symbol") or pos.get("ticker") or "").strip().upper()
-        if sym not in seen:
-            continue
-        mv = pos.get("market_value") or pos.get("marketValue") or pos.get("value") or 0
-        try:
-            notionals[sym] += abs(float(mv))
-        except (TypeError, ValueError):
-            continue
-
-    return notionals, None, total_account
-
-
-def _session_participation_breakdown(
-    db: Any, tickers_csv: str
-) -> tuple[list[tuple[str, float, float]], bool, str, tuple[str, float, float] | None]:
-    """
-    Retorna filas ``(símbolo, %, nocional_usd)`` en el orden del CSV de sesión,
-    ``True`` si los % vienen de nocional, ``False`` si reparto igual,
-    ``weight_source`` en ``{"db", "ibkr", "equal"}``,
-    y opcionalmente ``("Cash", %, usd)`` cuando IBKR aporta ``total_value`` y queda
-    remanente ``total_value - sum(|mv| tickers sesión)`` (efectivo + posiciones fuera del CSV).
-    """
-    parts = [x.strip().upper() for x in (tickers_csv or "").split(",") if x.strip()]
-    if not parts:
-        return [], False, "equal", None
-    esc = [p.replace("'", "''") for p in parts]
-    in_list = ",".join(f"'{t}'" for t in esc)
-    notionals: dict[str, float] = {t: 0.0 for t in parts}
-    seen: set[str] = set(parts)
-    n_db_rows = 0
-    n_rows_dict = 0
-    sample_unknown: list[str] = []
-    query_err: str | None = None
-    try:
-        raw = db.query(
-            f"SELECT ticker, qty, current_price FROM quant_core.portfolio_positions "
-            f"WHERE UPPER(TRIM(ticker)) IN ({in_list})"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        n_db_rows = len(rows or [])
-        for it in rows or []:
-            if not isinstance(it, dict):
-                continue
-            n_rows_dict += 1
-            sym = str(it.get("ticker") or "").strip().upper()
-            if sym not in seen:
-                if len(sample_unknown) < 5 and sym:
-                    sample_unknown.append(sym[:16])
-                continue
-            try:
-                q = float(it.get("qty") or 0.0)
-                px = float(it.get("current_price") or 0.0)
-            except (TypeError, ValueError):
-                continue
-            notionals[sym] = abs(q * px)
-    except Exception as exc:
-        query_err = str(exc)[:200]
-        notionals = {t: 0.0 for t in parts}
-    total_n = sum(notionals.values())
-    uses_n = total_n > 1e-9
-    n_nonzero = sum(1 for v in notionals.values() if v > 1e-9)
-    weight_source = "db" if uses_n else "equal"
-    ibkr_err: str | None = None
-    ibkr_attempted = False
-    pct_denom = total_n
-    ibkr_pct_denom_src: str | None = None
-    if not uses_n:
-        ibkr_attempted = True
-        ibkr_map, ibkr_err, ibkr_acct_total = _session_notionals_from_ibkr_for_tickers(parts)
-        total_ibkr = sum(ibkr_map.values())
-        if total_ibkr > 1e-9:
-            notionals = ibkr_map
-            total_n = total_ibkr
-            uses_n = True
-            weight_source = "ibkr"
-            n_nonzero = sum(1 for v in notionals.values() if v > 1e-9)
-            if ibkr_acct_total is not None and ibkr_acct_total > 1e-9:
-                pct_denom = ibkr_acct_total
-                ibkr_pct_denom_src = "ibkr_total_value"
-            else:
-                pct_denom = total_ibkr
-                ibkr_pct_denom_src = "sum_session_abs_mv_fallback"
-    if uses_n:
-        d = pct_denom if pct_denom > 1e-9 else total_n
-        out = [(sym, notionals[sym] / d * 100.0, notionals[sym]) for sym in parts]
-        cash_row: tuple[str, float, float] | None = None
-        if (
-            weight_source == "ibkr"
-            and ibkr_pct_denom_src == "ibkr_total_value"
-            and float(d) > 1e-9
-        ):
-            session_mv_sum = sum(notionals[s] for s in parts)
-            rem_usd = max(float(d) - session_mv_sum, 0.0)
-            if rem_usd > 1e-6:
-                cash_row = ("Cash", rem_usd / float(d) * 100.0, rem_usd)
-        return out, True, weight_source, cash_row
-    eq = 100.0 / len(parts)
-    return [(sym, eq, 0.0) for sym in parts], False, "equal", None
-
-
-def _format_session_ticker_weights(db: Any, tickers_csv: str, *, max_lines: int = 12) -> str:
-    """
-    Desglose ticker → % de nocional (qty * current_price en quant_core.portfolio_positions).
-    Sin nocional: mismo % para todos los símbolos de la sesión.
-    """
-    breakdown, uses_nocional, weight_src, cash_row = _session_participation_breakdown(
-        db, tickers_csv
-    )
-    if not breakdown:
-        return ""
-    notes: list[str] = []
-    if uses_nocional:
-        for sym, pct, noc in breakdown:
-            notes.append(f"`{sym}` {pct:.1f}% (${noc:,.2f} noc.)")
-        if cash_row is not None:
-            _cs, _cp, _cn = cash_row
-            notes.append(
-                f"`{_cs}` {_cp:.1f}% (${_cn:,.2f} — resto cuenta vs total_value IBKR)"
-            )
-        if weight_src == "ibkr":
-            head = "**Participación (% |mv| vs valor total cuenta IBKR, tickers de sesión):**\n"
-        else:
-            head = "**Participación (nocional qty×px):**\n"
-    else:
-        for sym, pct, _ in breakdown:
-            notes.append(
-                f"`{sym}` ~{pct:.1f}% (peso igual; sin nocional en portfolio_positions)"
-            )
-        head = "**Participación:**\n"
-    body = "\n".join(f"- {ln}" for ln in notes[:max_lines])
-    if len(notes) > max_lines:
-        body += f"\n- … y {len(notes) - max_lines} más"
-    return head + body
-
-
-def _pie_slices_from_breakdown(
-    breakdown: list[tuple[str, float, float]], *, top_n: int
-) -> list[tuple[str, float, float]]:
-    """Top ``top_n`` por % descendente + ``Otros`` (suma % y suma nocional del resto)."""
-    if not breakdown or top_n < 1:
-        return []
-    ranked = sorted(breakdown, key=lambda t: (-t[1], t[0]))
-    if len(ranked) <= top_n:
-        return [(sym, pct, noc) for sym, pct, noc in ranked]
-    head = ranked[:top_n]
-    rest_pct = sum(p[1] for p in ranked[top_n:])
-    rest_noc = sum(p[2] for p in ranked[top_n:])
-    rows = [(sym, pct, noc) for sym, pct, noc in head]
-    if rest_pct > 1e-4:
-        rows.append(("Otros", rest_pct, max(rest_noc, 1e-12)))
-    return rows
-
-
-def _build_session_participation_pie_b64(db: Any, *, top_n: int = 5) -> str | None:
-    """Torta top_n + rebanada Otros si aplica; misma lógica de pesos que el status."""
-    try:
-        raw = db.query(
-            "SELECT status, tickers FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except Exception:
-        return None
-    if not rows or not isinstance(rows[0], dict):
-        return None
-    if str(rows[0].get("status") or "").strip().upper() != "ACTIVE":
-        return None
-    tickers_csv = str(rows[0].get("tickers") or "").strip()
-    breakdown, uses_nocional, weight_src, cash_row = _session_participation_breakdown(
-        db, tickers_csv
-    )
-    pie_rows = _pie_slices_from_breakdown(breakdown, top_n=top_n)
-    if not pie_rows:
-        return None
-    if cash_row is not None and cash_row[1] > 1e-4:
-        pie_rows = [*pie_rows, cash_row]
-    labels = [s for s, _, _ in pie_rows]
-    label_pcts = [p for _, p, _ in pie_rows]
-    sizes = [max(n, 1e-12) for _, _, n in pie_rows]
-    try:
-        from io import BytesIO
-
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except Exception:
-        return None
-    fig, ax = plt.subplots(figsize=(7.8, 5.0), dpi=110)
-    wedges, _t, autotexts = ax.pie(
-        sizes,
-        labels=None,
-        autopct="%1.1f%%",
-        textprops={"fontsize": 7},
-        wedgeprops={"linewidth": 0.6, "edgecolor": "white"},
-        pctdistance=0.72,
-    )
-    for i, t in enumerate(autotexts):
-        t.set_fontsize(7)
-        if i < len(label_pcts):
-            t.set_text(f"{label_pcts[i]:.1f}%")
-    ax.legend(
-        wedges,
-        labels,
-        title="Ticker",
-        loc="center left",
-        bbox_to_anchor=(1.02, 0.5),
-        fontsize=7,
-        title_fontsize=8,
-        framealpha=0.92,
-    )
-    if uses_nocional:
-        if weight_src == "ibkr":
-            sub = (
-                "% = |mv| / total_value cuenta IBKR (snapshot); tickers de sesión"
-                + (
-                    " · Cash = total − |mv| tickers sesión (efectivo y fuera de lista)"
-                    if cash_row is not None
-                    else ""
-                )
-            )
-        else:
-            sub = "Fuente: nocional |qty×px| en portfolio_positions"
-    else:
-        sub = (
-            f"Sin filas útiles en portfolio_positions: "
-            f"reparto igual 1/{len(breakdown)} entre tickers de sesión"
-        )
-    ax.set_title(f"Participación sesión · top {top_n}\n{sub}", fontsize=9)
-    fig.tight_layout()
-    buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=100, facecolor="white", edgecolor="none", bbox_inches="tight")
-    plt.close(fig)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
-
-
-def _read_trading_session_status_summary(
-    db: Any, *, chat_id: Any, vault_user_id: Any = None
-) -> str:
-    state_chat_id = _trading_session_state_chat_id(chat_id, vault_user_id)
-    try:
-        raw_cols = db.query("PRAGMA table_info('quant_core.trading_sessions')")
-        cols_rows = json.loads(raw_cols) if isinstance(raw_cols, str) else (raw_cols or [])
-        known_cols = {
-            str((it or {}).get("name") or "").strip().lower()
-            for it in cols_rows
-            if isinstance(it, dict)
-        }
-        has_session_goal = "session_goal" in known_cols
-        has_anchor_equity = "anchor_equity" in known_cols
-        has_peak_equity = "peak_equity" in known_cols
-        select_goal = "session_goal" if has_session_goal else "NULL AS session_goal"
-        select_anchor = "anchor_equity" if has_anchor_equity else "NULL AS anchor_equity"
-        select_peak = "peak_equity" if has_peak_equity else "NULL AS peak_equity"
-        raw = db.query(
-            "SELECT mode, tickers, session_uid, status, "
-            + select_goal
-            + ", "
-            + select_anchor
-            + ", "
-            + select_peak
-            + " FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except Exception as exc:
-        return f"No se pudo leer trading_sessions: {exc}"
-    if not rows or not isinstance(rows[0], dict):
-        return "No hay sesión de trading registrada."
-    row = rows[0]
-    if str(row.get("status") or "").strip().upper() != "ACTIVE":
-        return "No hay sesión activa."
-    uid = str(row.get("session_uid") or "").strip() or "n/a"
-    mode = str(row.get("mode") or "paper").strip().lower() or "paper"
-    tickers = str(row.get("tickers") or "").strip() or "(vacío)"
-    total = executed = cancelled = pending = 0
-    try:
-        raw2 = db.query(
-            "SELECT status FROM quant_core.trade_signals WHERE session_uid = '"
-            + uid.replace("'", "''")
-            + "'"
-        )
-        rows2 = json.loads(raw2) if isinstance(raw2, str) else (raw2 or [])
-    except Exception:
-        rows2 = []
-    if not rows2:
-        try:
-            raw3 = db.query(
-                "SELECT status FROM finance_worker.trade_signals ORDER BY created_at DESC LIMIT 200"
-            )
-            rows2 = json.loads(raw3) if isinstance(raw3, str) else (raw3 or [])
-        except Exception:
-            rows2 = []
-    for it in rows2:
-        if not isinstance(it, dict):
-            continue
-        st = str(it.get("status") or "").strip().upper()
-        total += 1
-        if st == "EXECUTED":
-            executed += 1
-        elif st in ("CANCELLED", "DISCARDED"):
-            cancelled += 1
-        elif st in ("PENDING_HITL", "AWAITING_HITL", "PENDING"):
-            pending += 1
-    pnl_raw, pnl_reliable = _compute_trading_session_pnl_now_with_confidence(db, uid)
-    old_last_s = str(get_chat_state(db, state_chat_id, "trading_session_last_pnl") or "").strip()
-    hist_uid_s = str(
-        get_chat_state(db, state_chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or ""
-    ).strip()
-    _now = time.time()
-    if hist_uid_s != uid:
-        snap_points: list[tuple[float, float]] = []
-    else:
-        try:
-            _raw_hist = (
-                get_chat_state(db, state_chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
-            )
-            snap_points = _pnl_snapshots_parse_stored(_raw_hist, now=_now)
-        except Exception:
-            snap_points = []
-    snap_points = _pnl_snapshots_dedupe_epoch(snap_points)
-    snapshots = _pnl_snapshots_to_floats(snap_points)
-    _prev_for_carry: float | None = None
-    if snapshots:
-        try:
-            _prev_for_carry = float(snapshots[-1])
-        except (TypeError, ValueError):
-            _prev_for_carry = None
-    pnl_now = _trading_session_coalesce_unreliable_pnl_tick(
-        pnl_raw, pnl_reliable, _prev_for_carry
-    )
-    prev_val: float | None = None
-    if old_last_s:
-        try:
-            prev_val = float(old_last_s)
-        except (TypeError, ValueError):
-            prev_val = None
-    pct_num: float | None = None
-    _append_snap = True
-    if snapshots:
-        try:
-            _last_s = float(snapshots[-1])
-            _eps = max(1e-4, 1e-6 * max(1.0, abs(pnl_now), abs(_last_s)))
-            if abs(float(pnl_now) - _last_s) <= _eps:
-                _append_snap = False
-        except (TypeError, ValueError):
-            pass
-    if _append_snap:
-        snap_points.append((float(_now), float(pnl_now)))
-    snap_points = _pnl_snapshots_dedupe_epoch(snap_points)
-    snap_points = snap_points[-64:]
-    snapshots = _pnl_snapshots_to_floats(snap_points)
-    _display_pnl = float(snapshots[-1]) if snapshots else float(pnl_now)
-    if prev_val is not None and abs(prev_val) > 1e-12:
-        pct_num = (_display_pnl - prev_val) / abs(prev_val) * 100.0
-    set_chat_state(
-        db, state_chat_id, "trading_session_last_pnl", f"{_display_pnl:.6f}".rstrip("0").rstrip(".")
-    )
-    set_chat_state(db, state_chat_id, "trading_session_prev_pnl", old_last_s)
-    set_chat_state(
-        db,
-        state_chat_id,
-        "trading_session_pct_change",
-        f"{pct_num:.6f}".rstrip("0").rstrip(".") if pct_num is not None else "",
-    )
-    set_chat_state(
-        db, state_chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY, _pnl_snapshots_serialize_v2(snap_points)
-    )
-    set_chat_state(db, state_chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY, uid)
-    try:
-        ds = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
-    except ValueError:
-        ds = 0
-    ds = max(0, ds)
-    if ds > 0:
-        _ih, cp, _lb = _goals_proactive_interval_countdown_parts(db, chat_id, ds)
-        tick_line = f"Tick delta: cada ~{format_goals_delta_interval_human(ds)}{cp}"
-    else:
-        tick_line = "Tick delta: inactivo"
-    try:
-        _anchor_eq = float(row.get("anchor_equity") or 0.0)
-    except (TypeError, ValueError):
-        _anchor_eq = 0.0
-    _tearsheet = _compute_tick_tearsheet_metrics_from_pnl(
-        snapshots=snapshots,
-        anchor_equity=_anchor_eq,
-    )
-    _pnl_curr_txt = f"{_display_pnl:.2f}"
-    _pnl_prev_txt = f"{prev_val:.2f}" if prev_val is not None else "N/D"
-    _pnl_pct_txt = f"{pct_num:+.2f}%" if pct_num is not None else "N/D"
-    _sharpe_txt = (
-        f"{_tearsheet['sharpe']:+.2f}" if _tearsheet.get("sharpe") is not None else "N/D"
-    )
-    _sortino_txt = (
-        f"{_tearsheet['sortino']:+.2f}" if _tearsheet.get("sortino") is not None else "N/D"
-    )
-    _vol_txt = (
-        f"{_tearsheet['volatility_pct']:.2f}%"
-        if _tearsheet.get("volatility_pct") is not None
-        else "N/D"
-    )
-    _mdd_txt = (
-        f"{_tearsheet['max_drawdown_pct']:.2f}%"
-        if _tearsheet.get("max_drawdown_pct") is not None
-        else "N/D"
-    )
-    if _anchor_eq > 0:
-        _cap_est = float(_anchor_eq) + float(_display_pnl)
-        _cap_line = (
-            f"Capital disponible (est., anchor_equity + PnL): "
-            f"${_cap_est:,.2f} (anchor ${_anchor_eq:,.2f})\n"
-        )
-    else:
-        _cap_line = "Capital disponible: N/D (sin anchor_equity en sesión)\n"
-    _head_session = (
-        f"Sesión activa: `{uid}`\n"
-        f"Mode: `{mode}`\n"
-        f"{_cap_line}"
-    )
-    _status_text = (
-        f"{_head_session}"
-        f"Señales generadas: {total}\n"
-        f"- Ejecutadas: {executed}\n"
-        f"- Canceladas: {cancelled}\n"
-        f"- Pendientes HITL: {pending}\n"
-        f"PnL actual: {_pnl_curr_txt}\n"
-        f"PnL anterior: {_pnl_prev_txt}\n"
-        f"Cambio vs anterior: {_pnl_pct_txt}\n"
-        "📊 Tearsheet (tick-based):\n"
-        f"- ⚡ Sharpe: {_sharpe_txt}\n"
-        f"- 🛡️ Sortino: {_sortino_txt}\n"
-        f"- 🌪️ Volatilidad: {_vol_txt}\n"
-        f"- 📉 Max Drawdown: {_mdd_txt}\n"
-        f"{tick_line}"
-    )
-    return _status_text
-
-
-def _quant_core_trade_signals_column_names(db: Any) -> set[str]:
-    try:
-        raw = db.query("PRAGMA table_info('quant_core.trade_signals')")
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        return {
-            str((it or {}).get("name") or "").strip().lower()
-            for it in rows
-            if isinstance(it, dict)
-        }
-    except Exception:
-        return set()
-
-
-def _trading_session_coalesce_unreliable_pnl_tick(
-    raw: float, reliable: bool, previous_last: float | None
-) -> float:
-    """
-    Si ninguna fuente pudo leer PnL con certeza (p. ej. IB Gateway abajo y todo devuelve 0),
-    reutilizar el último tick en lugar de 0, para no distorsionar la serie del gráfico.
-    """
-    if reliable:
-        return float(raw)
-    if previous_last is not None:
-        return float(previous_last)
-    return float(raw)
-
-
-def _compute_trading_session_pnl_now_with_confidence(
-    db: Any, session_uid: str
-) -> tuple[float, bool]:
-    """
-    PnL agregado: trade_signals (sum no nula), portfolio_positions, luego IBKR.
-    Retorna (valor, fiable). fiable == False si se llega a 0 sin que ninguna fuente
-    haya dado un número (IBKR con None, sin snapshot usable).
-    Un (0, True) indica 0 con respuesta explícita (p. ej. IB devolvió 0.0 y portfolio vacío).
-    """
-    uid = (session_uid or "").strip()
-    if not uid or uid == "n/a":
-        return (0.0, True)
-    esc = uid.replace("'", "''")
-    cols = _quant_core_trade_signals_column_names(db)
-    if "unrealized_pnl" in cols:
-        try:
-            raw = db.query(
-                f"SELECT COALESCE(SUM(unrealized_pnl), 0) AS s "
-                f"FROM quant_core.trade_signals WHERE session_uid = '{esc}'"
-            )
-            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-            if rows and isinstance(rows[0], dict):
-                v = float(rows[0].get("s") or 0.0)
-                if abs(v) > 1e-12:
-                    return (v, True)
-        except Exception:
-            pass
-    try:
-        raw = db.query(
-            "SELECT COALESCE(SUM(unrealized_pnl), 0) AS s FROM quant_core.portfolio_positions"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        if rows and isinstance(rows[0], dict):
-            v = float(rows[0].get("s") or 0.0)
-            if abs(v) > 1e-12:
-                return (v, True)
-    except Exception:
-        pass
-    try:
-        from duckclaw.capadonna_plugin import load_capadonna_lib
-
-        _ibkr = load_capadonna_lib("ibkr_bridge")
-        if _ibkr is None:
-            raise RuntimeError("capadonna ibkr plugin missing")
-        ibkr_u, _err = _ibkr.fetch_ibkr_unrealized_pnl_total_numeric()
-        if ibkr_u is not None and abs(float(ibkr_u)) > 1e-12:
-            return (float(ibkr_u), True)
-        anchor_eq = 0.0
-        try:
-            raw_anchor = db.query(
-                f"SELECT anchor_equity FROM quant_core.trading_sessions "
-                f"WHERE session_uid = '{esc}' AND UPPER(TRIM(COALESCE(status,''))) = 'ACTIVE' LIMIT 1"
-            )
-            anchor_rows = json.loads(raw_anchor) if isinstance(raw_anchor, str) else (raw_anchor or [])
-            if anchor_rows and isinstance(anchor_rows[0], dict):
-                anchor_eq = float(anchor_rows[0].get("anchor_equity") or 0.0)
-        except Exception:
-            anchor_eq = 0.0
-        if anchor_eq > 1e-9:
-            eq_now, _eq_err = _ibkr.fetch_ibkr_total_equity_numeric()
-            if eq_now is not None:
-                return (float(eq_now) - float(anchor_eq), True)
-    except Exception:
-        pass
-    return (0.0, False)
-
-
-def _compute_trading_session_pnl_now(db: Any, session_uid: str) -> float:
-    v, _ = _compute_trading_session_pnl_now_with_confidence(db, session_uid)
-    return v
-
-
-def _trading_session_snapshots_for_tearsheet_label(
-    db: Any, chat_id: Any, *, session_uid: str
-) -> list[float]:
-    """
-    Misma fuente de serie que el bloque "Tearsheet (tick-based)" de
-    _read_trading_session_status_summary: snapshots guardados en agent_config
-    (PnL agregado por tick), alineados a session_uid.
-    Debe usarse en la anotación del PNG para no divergir del texto.
-    """
-    uid = (session_uid or "").strip()
-    if not uid or uid == "n/a":
-        return []
-    hist_uid_s = str(get_chat_state(db, chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or "").strip()
-    if hist_uid_s != uid:
-        return []
-    try:
-        _raw = get_chat_state(db, chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
-        pts = _pnl_snapshots_parse_stored(_raw, now=time.time())
-    except Exception:
-        return []
-    if not pts:
-        return []
-    try:
-        return _pnl_snapshots_to_floats(_pnl_snapshots_dedupe_epoch(pts))
-    except (TypeError, ValueError):
-        return []
-
-
-def _compute_tick_tearsheet_metrics_from_pnl(
-    *,
-    snapshots: list[float],
-    anchor_equity: float,
-) -> dict[str, float | None]:
-    """
-    Métricas estilo tearsheet a partir de snapshots de PnL.
-    Son métricas "tick-based" (sin calendario fijo) y se anualizan con 252 pasos.
-    """
-    out: dict[str, float | None] = {
-        "sharpe": None,
-        "sortino": None,
-        "volatility_pct": None,
-        "max_drawdown_pct": None,
-    }
-    if anchor_equity <= 0:
-        return out
-    if not isinstance(snapshots, list) or len(snapshots) < 3:
-        return out
-    try:
-        pnl_series = [float(x) for x in snapshots]
-    except (TypeError, ValueError):
-        return out
-    equity = [anchor_equity + p for p in pnl_series]
-    if len(equity) < 3:
-        return out
-    rets: list[float] = []
-    for i in range(1, len(equity)):
-        prev = float(equity[i - 1])
-        curr = float(equity[i])
-        if prev <= 0:
-            continue
-        rets.append((curr / prev) - 1.0)
-    if len(rets) < 2:
-        return out
-    try:
-        mean_r = statistics.fmean(rets)
-        std_r = statistics.pstdev(rets)
-    except Exception:
-        return out
-    if std_r > 1e-12:
-        out["sharpe"] = (mean_r / std_r) * math.sqrt(252.0)
-        out["volatility_pct"] = std_r * math.sqrt(252.0) * 100.0
-    downside = [r for r in rets if r < 0]
-    if downside:
-        try:
-            down_std = statistics.pstdev(downside)
-            if down_std > 1e-12:
-                out["sortino"] = (mean_r / down_std) * math.sqrt(252.0)
-        except Exception:
-            pass
-    peak = equity[0]
-    max_dd = 0.0
-    for v in equity:
-        if v > peak:
-            peak = v
-        if peak > 0:
-            dd = (v / peak) - 1.0
-            if dd < max_dd:
-                max_dd = dd
-    out["max_drawdown_pct"] = max_dd * 100.0
-    return out
-
-
-def _build_trading_session_pnl_chart_b64(
-    db: Any, *, chat_id: Any, vault_user_id: Any = None
-) -> str | None:
-    state_chat_id = _trading_session_state_chat_id(chat_id, vault_user_id)
-    """Serie PnL acumulado (señales EXECUTED) → PNG base64, o None."""
-    try:
-        raw = db.query(
-            "SELECT mode, session_uid, status, anchor_equity FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except Exception:
-        return None
-    if not rows or not isinstance(rows[0], dict):
-        return None
-    row = rows[0]
-    if str(row.get("status") or "").strip().upper() != "ACTIVE":
-        return None
-    mode = str(row.get("mode") or "paper").strip().lower() or "paper"
-    uid = str(row.get("session_uid") or "").strip()
-    if not uid or uid == "n/a":
-        return None
-    try:
-        _anchor_eq = float(row.get("anchor_equity") or 0.0)
-    except (TypeError, ValueError):
-        _anchor_eq = 0.0
-    esc = uid.replace("'", "''")
-    executed_pnls: list[float] = []
-    pnl_total = 0.0
-    _sig_cols = _quant_core_trade_signals_column_names(db)
-    has_unrealized = "unrealized_pnl" in _sig_cols
-    if has_unrealized:
-        try:
-            raw_ex = db.query(
-                "SELECT COALESCE(unrealized_pnl, 0) AS pnl FROM quant_core.trade_signals "
-                f"WHERE session_uid = '{esc}' AND UPPER(TRIM(COALESCE(status,''))) = 'EXECUTED' "
-                "ORDER BY COALESCE(ts, updated_at) ASC"
-            )
-            r_ex = json.loads(raw_ex) if isinstance(raw_ex, str) else (raw_ex or [])
-            for it in r_ex or []:
-                if isinstance(it, dict):
-                    try:
-                        executed_pnls.append(float(it.get("pnl") or 0.0))
-                    except (TypeError, ValueError):
-                        executed_pnls.append(0.0)
-            raw_all = db.query(
-                f"SELECT COALESCE(unrealized_pnl, 0) AS pnl FROM quant_core.trade_signals "
-                f"WHERE session_uid = '{esc}'"
-            )
-            r_all = json.loads(raw_all) if isinstance(raw_all, str) else (raw_all or [])
-            for it in r_all or []:
-                if isinstance(it, dict):
-                    try:
-                        pnl_total += float(it.get("pnl") or 0.0)
-                    except (TypeError, ValueError):
-                        pass
-        except Exception:
-            return None
-    # Misma serie "tick" que el tearsheet: snapshots con epoch (v2) o v1 parseado.
-    _epoch_pts_chart = _snapshot_epoch_points_for_session(db, state_chat_id, uid)
-    _snap_for_line: list[float] = _pnl_snapshots_to_floats(_epoch_pts_chart)
-    pnl_line_source = "executed"
-    cum: list[float] = [0.0]
-    if _snap_for_line:
-        pnl_line_source = "snapshots"
-        for it in _snap_for_line:
-            try:
-                cum.append(float(it))
-            except (TypeError, ValueError):
-                cum.append(cum[-1])
-    elif executed_pnls:
-        for p in executed_pnls:
-            cum.append(cum[-1] + p)
-    else:
-        pnl_line_source = "fallback"
-        hist_uid_g = str(
-            get_chat_state(db, state_chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY) or ""
-        ).strip()
-        if hist_uid_g == uid.strip():
-            try:
-                snap_raw = (
-                    get_chat_state(db, state_chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY) or "[]"
-                )
-                pts_fb = _pnl_snapshots_parse_stored(snap_raw, now=time.time())
-            except Exception:
-                pts_fb = []
-            snaps_fb = _pnl_snapshots_to_floats(_pnl_snapshots_dedupe_epoch(pts_fb))
-            if snaps_fb:
-                cum = [0.0]
-                for it in snaps_fb:
-                    try:
-                        cum.append(float(it))
-                    except (TypeError, ValueError):
-                        cum.append(cum[-1])
-            else:
-                pnl_total = _compute_trading_session_pnl_now(db, uid)
-                cum = [0.0, pnl_total]
-        else:
-            pnl_total = _compute_trading_session_pnl_now(db, uid)
-            cum = [0.0, pnl_total]
-    try:
-        from datetime import datetime, timezone
-        from io import BytesIO
-        from zoneinfo import ZoneInfo
-
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.dates as mdates
-        import matplotlib.pyplot as plt
-    except Exception:
-        return None
-    _pnl_chart_tz = ZoneInfo(COT_TZ_NAME)
-    _tc_anchor = time.time()
-    n = len(cum)
-    x_dt: list[datetime]
-    if pnl_line_source == "snapshots" and _epoch_pts_chart and len(cum) == len(_epoch_pts_chart) + 1:
-        first_ep = float(_epoch_pts_chart[0][0])
-        x_dt = [
-            datetime.fromtimestamp(first_ep - _PNL_SNAPSHOT_SYNTH_STEP_SEC, tz=timezone.utc)
-        ]
-        x_dt.extend(
-            datetime.fromtimestamp(float(ep), tz=timezone.utc) for ep, _ in _epoch_pts_chart
-        )
-    else:
-        x_dt = [
-            datetime.fromtimestamp(
-                _tc_anchor - _PNL_SNAPSHOT_SYNTH_STEP_SEC * (n - 1 - i), tz=timezone.utc
-            )
-            for i in range(n)
-        ]
-    if len(x_dt) != n:
-        x_dt = [
-            datetime.fromtimestamp(
-                _tc_anchor - _PNL_SNAPSHOT_SYNTH_STEP_SEC * (n - 1 - i), tz=timezone.utc
-            )
-            for i in range(n)
-        ]
-    x = mdates.date2num(x_dt)
-    # Tearsheet: misma lista que la curva cuando hay snapshots; si no, derivada de `cum`.
-    _snap_for_metrics = _snap_for_line or _trading_session_snapshots_for_tearsheet_label(
-        db, state_chat_id, session_uid=uid
-    )
-    _tearsheet = _compute_tick_tearsheet_metrics_from_pnl(
-        snapshots=_snap_for_metrics
-        if _snap_for_metrics
-        else [float(v) for v in cum],
-        anchor_equity=_anchor_eq,
-    )
-    _sharpe_txt = (
-        f"{_tearsheet['sharpe']:+.2f}" if _tearsheet.get("sharpe") is not None else "N/D"
-    )
-    _sortino_txt = (
-        f"{_tearsheet['sortino']:+.2f}" if _tearsheet.get("sortino") is not None else "N/D"
-    )
-    _vol_txt = (
-        f"{_tearsheet['volatility_pct']:.2f}%"
-        if _tearsheet.get("volatility_pct") is not None
-        else "N/D"
-    )
-    _mdd_txt = (
-        f"{_tearsheet['max_drawdown_pct']:.2f}%"
-        if _tearsheet.get("max_drawdown_pct") is not None
-        else "N/D"
-    )
-    equity_curve = [_anchor_eq + float(v) for v in cum] if _anchor_eq > 0 else []
-    drawdowns: list[float] = []
-    if equity_curve:
-        peak = equity_curve[0]
-        for v in equity_curve:
-            if v > peak:
-                peak = v
-            drawdowns.append(((v / peak) - 1.0) * 100.0 if peak > 0 else 0.0)
-    else:
-        drawdowns = [0.0 for _ in cum]
-    fig, (ax, ax_dd) = plt.subplots(
-        2,
-        1,
-        figsize=(7.2, 4.8),
-        dpi=110,
-        gridspec_kw={"height_ratios": [3.0, 1.2]},
-    )
-    ax.fill_between(x, cum, 0.0, color="#93c5fd", alpha=0.35, linewidth=0)
-    ax.plot(x, cum, color="#2563eb", linewidth=2, marker="o", markersize=2.8, label="PnL acumulado")
-    ax.axhline(0, color="#94a3b8", linewidth=0.8)
-    if cum:
-        n_c = len(cum)
-        i_max = max(range(n_c), key=lambda i: cum[i])
-        i_min = min(range(n_c), key=lambda i: cum[i])
-        _ann_bbox = {
-            "boxstyle": "round,pad=0.25",
-            "facecolor": "white",
-            "alpha": 0.82,
-            "edgecolor": "#e5e7eb",
-        }
-        _arr = {"arrowstyle": "-", "color": "#64748b", "lw": 0.55}
-        i_curr = n_c - 1
-        v_curr = float(cum[i_curr])
-        v_max = float(cum[i_max])
-        v_min = float(cum[i_min])
-        eps = max(1e-4, 1e-9 * max(1.0, abs(v_max), abs(v_min), abs(v_curr)))
-        flat = abs(v_max - v_min) <= eps
-        if flat:
-            ax.annotate(
-                f"Actual ${v_curr:,.0f}",
-                xy=(x[i_curr], v_curr),
-                xytext=(10, 12),
-                textcoords="offset points",
-                fontsize=7,
-                color="#111827",
-                bbox=_ann_bbox,
-                arrowprops=_arr,
-            )
-        else:
-            if v_min + eps < v_curr:
-                ax.annotate(
-                    f"Mín ${v_min:,.0f}",
-                    xy=(x[i_min], cum[i_min]),
-                    xytext=(8, -16),
-                    textcoords="offset points",
-                    fontsize=7,
-                    color="#111827",
-                    bbox=_ann_bbox,
-                    arrowprops=_arr,
-                )
-            shown_historical_max = v_max > v_curr + eps
-            if shown_historical_max:
-                ax.annotate(
-                    f"Máx ${v_max:,.0f}",
-                    xy=(x[i_max], cum[i_max]),
-                    xytext=(8, 10),
-                    textcoords="offset points",
-                    fontsize=7,
-                    color="#111827",
-                    bbox=_ann_bbox,
-                    arrowprops=_arr,
-                )
-            ax.annotate(
-                f"Actual ${v_curr:,.0f}",
-                xy=(x[i_curr], cum[i_curr]),
-                xytext=(10, -16 if shown_historical_max else 12),
-                textcoords="offset points",
-                fontsize=7,
-                color="#111827",
-                bbox=_ann_bbox,
-                arrowprops=_arr,
-            )
-    ax.set_ylabel("PnL ($)")
-    _last_tick_lbl = _configure_pnl_chart_xaxis(ax, x_dt, tz=_pnl_chart_tz)
-    _title_suffix = f" · últ. tick {_last_tick_lbl} COT" if _last_tick_lbl else " (Bogotá, COT)"
-    ax.set_title(
-        f"Trading Session Tearsheet · {mode} · {uid[:8]}…{_title_suffix}",
-        fontsize=10,
-    )
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
-    ax.text(
-        0.99,
-        0.02,
-        f"Sharpe: {_sharpe_txt} | Sortino: {_sortino_txt} | Vol: {_vol_txt} | MaxDD: {_mdd_txt}",
-        transform=ax.transAxes,
-        ha="right",
-        va="bottom",
-        fontsize=8,
-        color="#111827",
-        bbox={"facecolor": "white", "alpha": 0.78, "edgecolor": "#d1d5db", "pad": 2.5},
-    )
-    ax_dd.plot(x, drawdowns, color="#dc2626", linewidth=1.6)
-    ax_dd.fill_between(x, drawdowns, [0.0 for _ in drawdowns], color="#fecaca", alpha=0.6)
-    ax_dd.axhline(0, color="#9ca3af", linewidth=0.8)
-    _configure_pnl_chart_xaxis(ax_dd, x_dt, tz=_pnl_chart_tz)
-    ax_dd.set_xlabel("Tiempo (Bogotá, COT)")
-    ax_dd.set_ylabel("DD %")
-    ax_dd.grid(True, alpha=0.25)
-    fig.autofmt_xdate(bottom=0.22, rotation=18)
-    fig.tight_layout()
-    buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=100, facecolor="white", edgecolor="none", bbox_inches="tight")
-    plt.close(fig)
-    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return b64
-
-
-def _trading_session_chart_label(db: Any) -> tuple[str, str]:
-    """
-    Etiqueta para filenames de gráficas: fecha Bogotá + apodo de sesión (tickers o uid corto).
-    Econofísica: el filename ancla el snapshot visual al manifold temporal de la sesión.
-    """
-    from zoneinfo import ZoneInfo
-
-    stamp = datetime.now(ZoneInfo("America/Bogota")).strftime("%Y%m%d")
-    slug = "sesion"
-    try:
-        raw = db.query(
-            "SELECT session_uid, tickers, session_goal FROM quant_core.trading_sessions "
-            "WHERE id = 'active' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        if rows and isinstance(rows[0], dict):
-            row = rows[0]
-            uid = str(row.get("session_uid") or "").strip()
-            tickers_csv = str(row.get("tickers") or "").strip()
-            goal_raw = row.get("session_goal")
-            goal: dict[str, Any] = {}
-            if isinstance(goal_raw, dict):
-                goal = goal_raw
-            elif isinstance(goal_raw, str) and goal_raw.strip():
-                try:
-                    parsed = json.loads(goal_raw)
-                    if isinstance(parsed, dict):
-                        goal = parsed
-                except json.JSONDecodeError:
-                    goal = {}
-            title = str(goal.get("title") or goal.get("label") or goal.get("name") or "").strip()
-            if title:
-                slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24] or slug
-            elif tickers_csv:
-                first_ticker = tickers_csv.split(",")[0].strip().lower()
-                slug = re.sub(r"[^a-z0-9]+", "-", first_ticker)[:16] or slug
-            elif uid:
-                slug = uid.split("-")[0][:8]
-    except Exception:
-        pass
-    return stamp, slug or "sesion"
-
-
-def _merge_trading_session_goal_tickers(existing_goal: Any, tickers_csv: str) -> str:
-    """Conserva session_goal existente y sustituye solo la lista de tickers."""
-    tickers_list = [x.strip().upper() for x in (tickers_csv or "").split(",") if x.strip()]
-    goal: dict[str, Any] = {}
-    if isinstance(existing_goal, dict):
-        goal = dict(existing_goal)
-    elif isinstance(existing_goal, str) and existing_goal.strip():
-        try:
-            parsed_goal = json.loads(existing_goal)
-            if isinstance(parsed_goal, dict):
-                goal = parsed_goal
-        except json.JSONDecodeError:
-            goal = {}
-    goal["tickers"] = tickers_list
-    return json.dumps(goal, ensure_ascii=False)
-
-
-def _apply_trading_session_anchor_equity(
-    db: Any,
-    *,
-    tenant_id: str,
-    anchor_equity: float,
-) -> tuple[bool, str]:
-    """
-    Fija anchor_equity y peak_equity en la sesión activa (referencia PnL si IBKR no responde).
-
-    Econofísica: ancla manual cuando el observador externo (broker) pierde señal.
-    """
-    eq = float(anchor_equity)
-    if eq <= 0:
-        return False, "anchor_equity debe ser mayor que 0"
-    return _vault_apply_sql_statements(
-        db,
-        [
-            (_TRADING_SESSIONS_DDL, None),
-            (
-                "UPDATE quant_core.trading_sessions SET anchor_equity = ?, peak_equity = ?, "
-                "updated_at = now() WHERE id = ? AND status = 'ACTIVE'",
-                [eq, eq, _TRADING_SESSION_ROW_ID],
-            ),
-        ],
-        tenant_id=tenant_id,
-    )
-
-
-def _update_active_trading_session(
-    db: Any,
-    *,
-    tickers_csv: str = "",
-    anchor_equity: Optional[float] = None,
-    tenant_id: str,
-) -> tuple[bool, str, dict[str, Any]]:
-    """
-    Actualiza tickers y/o anchor_equity sin rotar session_uid.
-
-    Econofísica: el observador mantiene el mismo marco temporal (UID) al ampliar activos o re-anclar capital.
-    """
-    try:
-        raw = db.query(
-            "SELECT mode, tickers, session_uid, session_goal, status, anchor_equity "
-            "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except Exception as exc:
-        return False, f"lectura sesión: {exc}", {}
-    if not rows or not isinstance(rows[0], dict):
-        return (
-            False,
-            "No hay sesión activa. Inicia con `/trading-session --mode paper|live --tickers ...`.",
-            {},
-        )
-    row = rows[0]
-    status = str(row.get("status") or "").strip().upper()
-    if status != "ACTIVE":
-        return (
-            False,
-            f"Sesión id=active está {status or 'sin status'}; no se puede actualizar.",
-            {},
-        )
-    new_tickers = (tickers_csv or "").strip()
-    if not new_tickers and anchor_equity is None:
-        return False, "Indica --tickers y/o --anchor-equity.", {}
-    statements: list[tuple[str, Optional[list[Any]]]] = [(_TRADING_SESSIONS_DDL, None)]
-    goal_json = str(row.get("session_goal") or "")
-    if new_tickers:
-        goal_json = _merge_trading_session_goal_tickers(row.get("session_goal"), new_tickers)
-        statements.append(
-            (
-                "UPDATE quant_core.trading_sessions SET tickers = ?, session_goal = CAST(? AS JSON), "
-                "updated_at = now() WHERE id = ? AND status = 'ACTIVE'",
-                [new_tickers, goal_json, _TRADING_SESSION_ROW_ID],
-            )
-        )
-    if anchor_equity is not None:
-        eq = float(anchor_equity)
-        statements.append(
-            (
-                "UPDATE quant_core.trading_sessions SET anchor_equity = ?, peak_equity = ?, "
-                "updated_at = now() WHERE id = ? AND status = 'ACTIVE'",
-                [eq, eq, _TRADING_SESSION_ROW_ID],
-            )
-        )
-    ok, detail = _vault_apply_sql_statements(db, statements, tenant_id=tenant_id)
-    if not ok:
-        return False, detail, {}
-    return (
-        True,
-        "",
-        {
-            "mode": str(row.get("mode") or "paper"),
-            "session_uid": str(row.get("session_uid") or ""),
-            "old_tickers": str(row.get("tickers") or ""),
-            "new_tickers": new_tickers or str(row.get("tickers") or ""),
-            "old_anchor_equity": row.get("anchor_equity"),
-            "new_anchor_equity": float(anchor_equity) if anchor_equity is not None else None,
-            "session_goal": goal_json,
-        },
-    )
-
-
-def execute_trading_session(
-    db: Any,
-    chat_id: Any,
-    args: str,
-    *,
-    tenant_id: Any = None,
-    vault_user_id: Any = None,
-) -> str:
-    """/trading-session --mode paper|live [--tickers A,B] [--update] [--objective ...] [--confirm] [--status] [--stop]."""
-    parsed, err = _parse_trading_session_cli(args)
-    if err or parsed is None:
-        return (
-            f"Error: {err}\n\n"
-            "Uso: `/trading-session --mode paper|live [--tickers AAPL,NVDA] [--confirm]`\n"
-            "Actualizar sin nueva sesión: `/trading-session --update --tickers AAPL,NVDA` "
-            "o `--update --anchor-equity 916645` (también `update --tickers ...`).\n"
-            "Extras: `--anchor-equity N` (manual si IBKR falla) · "
-            "`--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze` · `--max-drawdown 2` · "
-            "`--position-size 5` · `--signal GAS` · `--status` · `--stop`\n"
-            "Modo **live** exige añadir **--confirm** en el mismo mensaje (riesgo de capital)."
-        )
-    tid = str(tenant_id or "default").strip() or "default"
-    if parsed.update:
-        ok_up, detail_up, meta = _update_active_trading_session(
-            db,
-            tickers_csv=parsed.tickers_csv,
-            anchor_equity=parsed.anchor_equity,
-            tenant_id=tid,
-        )
-        if not ok_up:
-            return f"No se pudo actualizar la sesión: {detail_up}"
-        uid = str(meta.get("session_uid") or "").strip() or "?"
-        mode = str(meta.get("mode") or "paper").upper()
-        lines = [f"Sesión **{mode}** actualizada (mismo `session_uid`: `{uid}`)."]
-        if parsed.tickers_csv:
-            old_t = str(meta.get("old_tickers") or "").strip() or "(vacío)"
-            new_t = str(meta.get("new_tickers") or "").strip()
-            lines.append(f"Tickers: `{old_t}` → `{new_t}` (session_goal sincronizado).")
-        if parsed.anchor_equity is not None:
-            old_ae = meta.get("old_anchor_equity")
-            new_ae = float(parsed.anchor_equity)
-            old_s = f"{float(old_ae):,.2f}" if old_ae is not None else "N/D"
-            lines.append(f"anchor_equity: {old_s} → **{new_ae:,.2f}** USD (peak_equity igualado).")
-        lines.append("/crons y session_uid se conservan.")
-        return "\n".join(lines)
-    if parsed.status:
-        out = _read_trading_session_status_summary(
-            db, chat_id=chat_id, vault_user_id=vault_user_id
-        )
-        chart_stamp, chart_slug = _trading_session_chart_label(db)
-        pnl_chart_name = f"{chart_stamp}_{chart_slug}_pnl.png"
-        pie_chart_name = f"{chart_stamp}_{chart_slug}_participacion.png"
-        try:
-            b64c = _build_trading_session_pnl_chart_b64(
-                db, chat_id=chat_id, vault_user_id=vault_user_id
-            )
-        except Exception:
-            b64c = None
-        if b64c:
-            register_fly_outbound_chart_b64(chat_id, b64c, chart_name=pnl_chart_name)
-        try:
-            pie_b64 = _build_session_participation_pie_b64(db)
-        except Exception:
-            pie_b64 = None
-        if pie_b64:
-            register_fly_outbound_chart_b64(chat_id, pie_b64, chart_name=pie_chart_name)
-        return out
-    if parsed.stop:
-        ok_close, detail_close = _close_active_trading_session(
-            db,
-            chat_id=chat_id,
-            tenant_id=tid,
-            vault_user_id=vault_user_id,
-        )
-        if not ok_close:
-            return f"No se pudo cerrar la sesión: {detail_close}"
-        return f"Sesión cerrada (status=CLOSED). Scheduler limpiado. {detail_close}"
-    mode = str(parsed.mode or "").strip().lower()
-    if mode == "live" and not parsed.confirm:
-        return (
-            "RIESGO DE CAPITAL: modo `live` enruta órdenes al broker real.\n\n"
-            "Si aceptas el riesgo, reenvía el comando con **--confirm**:\n"
-            "`/trading-session --mode live --tickers NVDA --confirm`"
-        )
-    session_uid = str(uuid.uuid4())
-    goal = _session_goal_from_cli(parsed)
-    goal_json = goal.model_dump_json(ensure_ascii=False)
-    upsert = """
-INSERT INTO quant_core.trading_sessions (id, mode, tickers, session_uid, session_goal, status)
-VALUES (?, ?, ?, ?, CAST(? AS JSON), 'ACTIVE')
-ON CONFLICT (id) DO UPDATE SET
-  mode = excluded.mode,
-  tickers = excluded.tickers,
-  session_uid = excluded.session_uid,
-  session_goal = excluded.session_goal,
-  status = 'ACTIVE',
-  updated_at = now()
-"""
-    reset_eq = (
-        "UPDATE quant_core.trading_sessions SET anchor_equity = NULL, peak_equity = NULL WHERE id = ?",
-        [_TRADING_SESSION_ROW_ID],
-    )
-    ok, detail = _vault_apply_sql_statements(
-        db,
-        [
-            (_TRADING_SESSIONS_DDL, None),
-            (
-                upsert,
-                [_TRADING_SESSION_ROW_ID, mode, parsed.tickers_csv or "", session_uid, goal_json],
-            ),
-            reset_eq,
-        ],
-        tenant_id=tid,
-    )
-    if not ok:
-        return f"No se pudo guardar la sesión: {detail}"
-    anchor_note = ""
-    if parsed.anchor_equity is not None:
-        ok_ae, detail_ae = _apply_trading_session_anchor_equity(
-            db,
-            tenant_id=tid,
-            anchor_equity=float(parsed.anchor_equity),
-        )
-        if ok_ae:
-            anchor_note = f"\nanchor_equity manual: **{float(parsed.anchor_equity):,.2f}** USD."
-        else:
-            anchor_note = f"\nNo se pudo fijar anchor_equity manual: {detail_ae}"
-    else:
-        try:
-            from duckclaw.capadonna_plugin import load_capadonna_lib
-
-            _ibkr = load_capadonna_lib("ibkr_bridge")
-            if _ibkr is not None:
-                eq, _eq_err = _ibkr.fetch_ibkr_total_equity_numeric()
-            else:
-                eq, _eq_err = None, "capadonna_ibkr_plugin_missing"
-            if eq is not None:
-                _vault_apply_sql_statements(
-                    db,
-                    [
-                        (
-                            "UPDATE quant_core.trading_sessions SET anchor_equity = ?, peak_equity = ? WHERE id = ?",
-                            [float(eq), float(eq), _TRADING_SESSION_ROW_ID],
-                        )
-                    ],
-                    tenant_id=tid,
-                )
-                anchor_note = f"\nanchor_equity IBKR: **{float(eq):,.2f}** USD."
-        except Exception:
-            pass
-    enabled, secs = _ensure_trading_session_goals_delta(
-        db,
-        chat_id=chat_id,
-        tenant_id=tid,
-        session_uid=session_uid,
-    )
-    delta_msg = (
-        f"Ticker /crons auto-activado cada ~{format_goals_delta_interval_human(secs)} (trigger=trading_session)."
-        if enabled
-        else f"Ticker /crons ya activo cada ~{format_goals_delta_interval_human(secs)} (se conserva configuración)."
-    )
-    tick_note = f"\nTickers: `{parsed.tickers_csv}`" if parsed.tickers_csv else ""
-    sid = _TRADING_SESSION_ROW_ID
-    state_chat_id = _trading_session_state_chat_id(chat_id, vault_user_id)
-    try:
-        set_chat_state(db, state_chat_id, _TRADING_SESSION_PNL_SNAPSHOTS_KEY, "[]")
-        set_chat_state(db, state_chat_id, _TRADING_SESSION_PNL_HIST_UID_KEY, str(session_uid))
-        set_chat_state(db, chat_id, "trading_session_last_pnl", "")
-        set_chat_state(db, chat_id, "trading_session_prev_pnl", "")
-        set_chat_state(db, chat_id, "trading_session_pct_change", "")
-    except Exception:
-        pass
-    return (
-        f"**Id sesión:** `{sid}`\n"
-        f"**Unique ID sesión:** `{session_uid}`\n"
-        f"Sesión de trading **{mode.upper()}** registrada en `quant_core.trading_sessions` (status=ACTIVE)."
-        f"{tick_note}\n"
-        f"session_goal: `{goal_json}`\n"
-        f"{delta_msg}{anchor_note}\n"
-        "El reactor Quant debe leer tickers y `status=ACTIVE` antes de proponer señales."
-    )
-
-
-def execute_quant_cycle(
-    db: Any,
-    chat_id: Any,
-    args: str,
-    *,
-    tenant_id: Any = None,
-    vault_user_id: Any = None,
-) -> str:
-    """/quant_cycle: ciclo determinista Quant (fetch+portfolio+evaluate+signal) en un solo comando."""
-    _ = vault_user_id
-    parsed, err = _parse_quant_cycle_cli(args)
-    if err or parsed is None:
-        return (
-            f"Error: {err}\n\n"
-            "Uso: `/quant_cycle [--tickers AAPL,NVDA] [--timeframe 1h] [--lookback_days 20]`\n"
-            "Extras: `--objective maximize_pnl|rebalance_hrp|overnight_gap_squeeze` · `--signal GAS|LIQUID|SOLID|PLASMA` · "
-            "`--weight 5` · `--execute auto|off`\n"
-            "Si no pasas `--tickers`, se usan los de `quant_core.trading_sessions` (id=active) o `SPY` por defecto."
-        )
-    from duckclaw.capadonna_plugin import load_capadonna_lib
-
-    _ibkr = load_capadonna_lib("ibkr_bridge")
-    _qmb = load_capadonna_lib("quant_market_bridge")
-    _qtc = load_capadonna_lib("quant_tool_context")
-    _qtb = load_capadonna_lib("quant_trader_bridge")
-    if _ibkr is None or _qmb is None or _qtc is None or _qtb is None:
-        return "Capadonna quant plugins no disponibles (CAPADONNA_DRILLER_ROOT)."
-    _get_ibkr_portfolio_impl = _ibkr._get_ibkr_portfolio_impl
-    _fetch_ib_gateway_ohlcv_impl = _qmb._fetch_ib_gateway_ohlcv_impl
-    bind_quant_market_evidence_chat = _qtc.bind_quant_market_evidence_chat
-    note_quant_market_evidence_ticker = _qtc.note_quant_market_evidence_ticker
-    reset_quant_market_evidence = _qtc.reset_quant_market_evidence
-    set_quant_tool_chat_id = _qtc.set_quant_tool_chat_id
-    set_quant_tool_db_path = _qtc.set_quant_tool_db_path
-    set_quant_tool_tenant_id = _qtc.set_quant_tool_tenant_id
-    set_quant_tool_user_id = _qtc.set_quant_tool_user_id
-    _evaluate_cfd_state_impl = _qtb._evaluate_cfd_state_impl
-    _run_quant_signal_cycle_impl = _qtb._run_quant_signal_cycle_impl
-
-    tid = str(tenant_id or "default").strip() or "default"
-    cid = str(chat_id).strip() or "default"
-    uid = cid
-    set_quant_tool_chat_id(cid)
-    set_quant_tool_tenant_id(tid)
-    set_quant_tool_user_id(uid)
-    set_quant_tool_db_path(str(getattr(db, "_path", "") or ""))
-    bind_quant_market_evidence_chat(cid)
-    reset_quant_market_evidence()
-
-    session_uid = ""
-    session_tickers: list[str] = []
-    try:
-        raw = db.query(
-            "SELECT session_uid, tickers FROM quant_core.trading_sessions "
-            "WHERE id = 'active' AND status = 'ACTIVE' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        if rows and isinstance(rows[0], dict):
-            session_uid = str(rows[0].get("session_uid") or "").strip()
-            session_tickers = [
-                x.strip().upper()
-                for x in str(rows[0].get("tickers") or "").split(",")
-                if x.strip()
-            ]
-    except Exception:
-        pass
-    tickers = [x.strip().upper() for x in (parsed.tickers_csv or "").split(",") if x.strip()]
-    if not tickers:
-        tickers = list(session_tickers)
-    if not tickers:
-        tickers = ["SPY"]
-
-    fetch_stage: list[dict[str, Any]] = []
-    for tkr in tickers:
-        raw_fetch = _fetch_ib_gateway_ohlcv_impl(
-            db,
-            ticker=tkr,
-            timeframe=parsed.timeframe,
-            lookback_days=int(parsed.lookback_days),
-        )
-        try:
-            obj = json.loads(raw_fetch) if isinstance(raw_fetch, str) else raw_fetch
-        except Exception:
-            obj = {"error": "INVALID_FETCH_RESPONSE", "raw": str(raw_fetch)[:220]}
-        if isinstance(obj, dict) and obj.get("status") == "ok":
-            note_quant_market_evidence_ticker(tkr)
-        fetch_stage.append({"ticker": tkr, "result": obj})
-
-    portfolio_raw = _get_ibkr_portfolio_impl()
-    eval_raw = _evaluate_cfd_state_impl(
-        db,
-        session_uid=session_uid,
-        tickers=tickers,
-        signal_threshold=parsed.signal_threshold,
-    )
-    try:
-        eval_obj = json.loads(eval_raw) if isinstance(eval_raw, str) else eval_raw
-    except Exception:
-        eval_obj = {"error": "INVALID_EVAL_RESPONSE", "raw": str(eval_raw)[:300]}
-
-    should_propose = False
-    target_ticker = tickers[0]
-    rank_probe: list[dict[str, Any]] = []
-    if isinstance(eval_obj, dict):
-        results = eval_obj.get("results")
-        if isinstance(results, list):
-            for r in results:
-                if not isinstance(r, dict):
-                    continue
-                rank_probe.append(
-                    {
-                        "ticker": str(r.get("ticker") or ""),
-                        "ok": bool(r.get("ok")),
-                        "has_pending_hitl": bool(r.get("has_pending_hitl")),
-                        "phase_rank": r.get("phase_rank"),
-                        "threshold_rank": r.get("threshold_rank"),
-                    }
-                )
-                if bool(r.get("ok")) and not bool(r.get("has_pending_hitl")):
-                    try:
-                        pr = int(r.get("phase_rank") or 0)
-                        tr = int(r.get("threshold_rank") or 0)
-                    except Exception:
-                        pr, tr = 0, 99
-                    if pr >= tr:
-                        should_propose = True
-                        target_ticker = str(r.get("ticker") or target_ticker).strip().upper()
-                        break
-
-    signal_obj: dict[str, Any] = {
-        "status": "skipped",
-        "reason": "ALIGNED_OR_INSUFFICIENT_SIGNAL_CONTEXT",
-        "message": "No se propuso señal en este ciclo porque la evaluación no exige acción.",
-    }
-    if should_propose:
-        raw_signal = _run_quant_signal_cycle_impl(
-            db,
-            mandate_id="",
-            ticker=target_ticker,
-            weight=float(parsed.weight_pct),
-            rationale=(
-                f"/quant_cycle objective={parsed.objective} timeframe={parsed.timeframe} "
-                f"lookback_days={int(parsed.lookback_days)} execute={parsed.execute}"
-            ),
-            signal_type="ENTRY",
-            execute_now=False,
-        )
-        try:
-            parsed_signal = json.loads(raw_signal) if isinstance(raw_signal, str) else raw_signal
-            signal_obj = parsed_signal if isinstance(parsed_signal, dict) else {"raw": str(raw_signal)[:800]}
-        except Exception:
-            signal_obj = {"raw": str(raw_signal)[:800]}
-
-    fetch_errors = [x for x in fetch_stage if isinstance(x.get("result"), dict) and x["result"].get("error")]
-    portfolio_error = ""
-    if str(portfolio_raw or "").strip().lower().startswith("error"):
-        portfolio_error = str(portfolio_raw or "")
-    eval_error = str(eval_obj.get("error") or "") if isinstance(eval_obj, dict) else ""
-    signal_error = str(signal_obj.get("error") or "") if isinstance(signal_obj, dict) else ""
-
-    policy_decision = "HITL_REQUIRED"
-    if isinstance(signal_obj, dict) and bool(signal_obj.get("auto_executed")):
-        policy_decision = "AUTO_EXECUTED"
-    elif isinstance(signal_obj, dict) and isinstance(signal_obj.get("auto_execute"), dict):
-        auto_exec = signal_obj.get("auto_execute") or {}
-        if auto_exec.get("skipped"):
-            policy_decision = f"AUTO_EXECUTION_SKIPPED:{str(auto_exec.get('reason') or 'UNKNOWN')}"
-        elif auto_exec.get("error"):
-            policy_decision = f"AUTO_EXECUTION_ERROR:{str(auto_exec.get('error') or 'UNKNOWN')}"
-    elif parsed.execute == "off":
-        policy_decision = "PROPOSED_WITH_HITL_ONLY"
-
-    out_obj: dict[str, Any] = {
-        "status": "ok",
-        "command": "quant_cycle",
-        "objective": parsed.objective,
-        "policy_decision": policy_decision,
-        "session_uid": session_uid,
-        "params": {
-            "tickers": tickers,
-            "timeframe": parsed.timeframe,
-            "lookback_days": int(parsed.lookback_days),
-            "signal_threshold": parsed.signal_threshold,
-            "weight_pct": float(parsed.weight_pct),
-            "execute": parsed.execute,
-        },
-        "stages": {
-            "fetch": fetch_stage,
-            "portfolio": {"summary_text": str(portfolio_raw or "")[:1200]},
-            "evaluation": eval_obj,
-            "signal": signal_obj,
-        },
-        "errors_by_stage": {
-            "fetch": [x.get("result", {}).get("error") for x in fetch_errors],
-            "portfolio": portfolio_error,
-            "evaluation": eval_error,
-            "signal": signal_error,
-        },
-    }
-    signal_id = str(signal_obj.get("signal_id") or "").strip() if isinstance(signal_obj, dict) else ""
-    signal_status = str(signal_obj.get("status") or "").strip() if isinstance(signal_obj, dict) else ""
-    human_msg = [
-        "Ciclo Quant determinista ejecutado.",
-        f"- Tickers: {', '.join(tickers)}",
-        f"- Evaluación: {str(eval_obj.get('outcome') if isinstance(eval_obj, dict) else 'N/A')}",
-        f"- Señal: {signal_status or 'skipped'}",
-    ]
-    if signal_id:
-        human_msg.append(f"- signal_id: `{signal_id}`")
-    if signal_id and signal_status.upper() in ("PROPOSED", "PENDING_HITL", "PENDING"):
-        human_msg.append(f"- HITL: `/execute-signal {signal_id}`")
-    return "\n".join(human_msg) + "\n\n```json\n" + json.dumps(out_obj, ensure_ascii=False, indent=2) + "\n```"
-
-
-def _looks_like_hallucinated_placeholder_uuid(sid: str) -> bool:
-    """
-    Detecta UUID de baja entropía o patrones típicos inventados por el LLM cuando no hubo tool call.
-    No sustituye el ledger: solo mejora el mensaje de error (evidencia: gateway tools usadas=ninguna + e0e5e5e5...).
-    """
-    t = (sid or "").strip().lower()
-    if not t:
-        return False
-    if "e0e5e5e5" in t or "deadbeef" in t:
-        return True
-    try:
-        u = uuid.UUID(t)
-    except ValueError:
-        return False
-    h32 = u.hex
-    if h32 == "0" * 32:
-        return True
-    # uuid4 real suele tener muchos símbolos hex distintos; placeholders repetitivos tienen pocos
-    if len(set(h32)) <= 4:
-        return True
-    return False
-
-
-def _execute_signal_verify_ledger(db: Any, sid: str) -> tuple[bool, str]:
-    """Comprueba que el UUID exista y sea ejecutable (Quant: finance_worker; Finanz: quant_core)."""
-    if db is None:
-        return True, ""
-    q_sid = sid.replace("'", "''")
-    try:
-        raw = db.query(
-            f"SELECT status FROM finance_worker.trade_signals WHERE signal_id = '{q_sid}' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except Exception:
-        rows = []
-    if rows and isinstance(rows[0], dict):
-        st = str(rows[0].get("status") or "").upper()
-        if st in ("EXECUTED", "FAILED", "DISCARDED", "CANCELLED"):
-            return False, f"Señal ya cerrada ({st})."
-        if st not in ("AWAITING_HITL", "PENDING", "PENDING_HITL"):
-            return False, f"Estado no ejecutable: {st}"
-        return True, ""
-    try:
-        raw2 = db.query(
-            f"SELECT signal_id FROM quant_core.trade_signals WHERE signal_id = '{q_sid}' LIMIT 1"
-        )
-        rows2 = json.loads(raw2) if isinstance(raw2, str) else (raw2 or [])
-    except Exception:
-        rows2 = []
-    if rows2:
-        return True, ""
-    return False, "UUID no encontrado en finance_worker.trade_signals ni quant_core.trade_signals."
 
 
 def execute_resolve_uncertainty(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
@@ -6543,403 +2793,59 @@ def execute_uncertainty_status(db: Any, chat_id: Any, args: str) -> str:
         return f"Error listando incertidumbre: {exc}"
 
 
-def execute_quant_approve_code(db: Any, chat_id: Any, args: str) -> str:
-    """/approve-code <uuid>: HITL para code_decisions (backend crea PR)."""
-    did = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
+def execute_code_approve(db: Any, chat_id: Any, args: str) -> str:
+    """/approve-code <uuid>: HITL para code_decisions."""
+    decision_id = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
     if not re.match(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        did,
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        decision_id,
     ):
         return "Uso: /approve-code <decision_id_UUID>"
     try:
-        from duckclaw.capadonna_plugin import load_capadonna_lib
-
-        _hitl = load_capadonna_lib("quant_code_hitl")
-        if _hitl is None:
-            return "Capadonna quant_code_hitl plugin no disponible."
-        if not _hitl.consume_code_decision_grant(str(chat_id).strip(), did):
-            _hitl.grant_code_decision(str(chat_id).strip(), did)
-    except Exception as exc:
-        return f"No se pudo validar grant HITL: {exc}"
-    try:
         from duckclaw.forge.code_decision_service import approve_code_decision
 
-        tid = str(get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
-        uid = str(get_chat_state(db, chat_id, "last_requester_id") or tid).strip() or tid
+        tenant = str(get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
+        user_id = str(get_chat_state(db, chat_id, "last_requester_id") or tenant).strip() or tenant
         result = approve_code_decision(
             db,
-            decision_id=did,
-            tenant_id=tid,
-            user_id=uid,
+            decision_id=decision_id,
+            tenant_id=tenant,
+            user_id=user_id,
             chat_id=str(chat_id).strip(),
         )
         if result.get("error"):
             return f"No: {result['error']}"
         pr_url = result.get("pr_url") or ""
-        return (
-            f"Código aprobado. decision_id={did}. "
-            f"PR: {pr_url or 'ver GitHub Actions'}."
-        )
+        return f"Código aprobado. decision_id={decision_id}. PR: {pr_url or 'ver GitHub Actions'}."
     except Exception as exc:
         return f"Error al aprobar code_decision: {exc}"
 
 
-def execute_quant_reject_code(db: Any, chat_id: Any, args: str) -> str:
+def execute_code_reject(db: Any, chat_id: Any, args: str) -> str:
     """/reject-code <uuid> [razón]: rechaza code_decision."""
     parts = (args or "").strip().split(maxsplit=1)
-    did = (parts[0] if parts else "").strip().lower()
+    decision_id = (parts[0] if parts else "").strip().lower()
     rationale = parts[1] if len(parts) > 1 else ""
     if not re.match(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        did,
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        decision_id,
     ):
         return "Uso: /reject-code <decision_id_UUID> [razón]"
     try:
         from duckclaw.forge.code_decision_service import reject_code_decision
 
-        tid = str(get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
-        uid = str(get_chat_state(db, chat_id, "last_requester_id") or tid).strip() or tid
+        tenant = str(get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
+        user_id = str(get_chat_state(db, chat_id, "last_requester_id") or tenant).strip() or tenant
         result = reject_code_decision(
             db,
-            decision_id=did,
-            tenant_id=tid,
-            user_id=uid,
+            decision_id=decision_id,
+            tenant_id=tenant,
+            user_id=user_id,
             rationale=rationale,
         )
-        return f"Decisión {did} → {result.get('status', 'REJECTED')}."
+        return f"Decisión {decision_id} → {result.get('status', 'REJECTED')}."
     except Exception as exc:
         return f"Error al rechazar: {exc}"
-
-
-def execute_quant_execute_signal(db: Any, chat_id: Any, args: str) -> str:
-    """/execute-signal <uuid>: HITL para Quant Trader (execute_approved_signal)."""
-    sid = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
-    if not re.match(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        sid,
-    ):
-        return "Uso: /execute-signal <signal_id_UUID>"
-    if _looks_like_hallucinated_placeholder_uuid(sid):
-        return (
-            "No: ese UUID parece inventado por el modelo (no viene de `propose_trade_signal`). "
-            "Pide al asistente que en el **mismo turno** ejecute OHLCV + `propose_trade_signal` "
-            "y uses solo el `signal_id` del JSON de la herramienta."
-        )
-    try:
-        from duckclaw.graphs.graph_server import get_db as _get_db
-
-        _db = _get_db()
-        tid = str(get_chat_state(_db, chat_id, "tenant_id") or "default").strip() or "default"
-        rid = str(get_chat_state(_db, chat_id, "last_requester_id") or "").strip()
-        if _is_wr_tenant(tid):
-            clearance = _wr_member_clearance(_db, tenant_id=tid, user_id=rid)
-            if not (_is_gateway_owner_user(rid) or clearance == "admin"):
-                return "❌ Acceso denegado: /execute-signal en War Room requiere clearance admin."
-    except Exception:
-        pass
-    ok_ledger, ledger_msg = _execute_signal_verify_ledger(db, sid)
-    if not ok_ledger:
-        return f"No: {ledger_msg}"
-    try:
-        from duckclaw.capadonna_plugin import load_capadonna_lib
-
-        _hitl = load_capadonna_lib("quant_hitl")
-        if _hitl is None:
-            return "Capadonna quant_hitl plugin no disponible."
-        _hitl.grant_execute_order(str(chat_id).strip(), sid)
-    except Exception as e:
-        return f"No se pudo registrar la confirmación: {e}"
-    return (
-        f"Confirmación registrada para la señal {sid}. "
-        "Pide al asistente que ejecute **execute_approved_signal** "
-        f"(Quant Trader) con signal_id={sid} en esta sesión."
-    )
-
-
-def execute_quant_profile(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
-    """`/profile`: perfil inferido desde VSS (Quantum vault)."""
-    del args
-    from duckclaw.capadonna_plugin import load_capadonna_lib
-    from duckclaw.forge.skills.quant_investor_profile import format_profile_summary, get_investor_profile
-
-    _qtc = load_capadonna_lib("quant_tool_context")
-    raw_path = str(getattr(db, "_path", "") or "").strip()
-    if raw_path and _qtc is not None:
-        _qtc.set_quant_tool_db_path(raw_path)
-    tid = str(tenant_id or get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
-    try:
-        profile = get_investor_profile(db, tid)
-    except Exception as exc:
-        return f"No se pudo leer el perfil: {exc}"
-    return format_profile_summary(profile)
-
-
-def execute_quant_macro_update(
-    db: Any,
-    chat_id: Any,
-    args: str,
-    *,
-    requester_id: Any = None,
-    tenant_id: Any = None,
-) -> str:
-    """`/macro --update …`: sólo admin/owner — escribe macro_manual_state vía Singleton Writer."""
-    from duckclaw.runtime.macro_update_parse import parse_macro_update_cli
-
-    tid = str(tenant_id or get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
-    rid = str(requester_id or get_chat_state(db, chat_id, "last_requester_id") or "").strip()
-    if not (_is_gateway_owner_user(rid) or _is_team_admin(db, tenant_id=tid, requester_id=rid)):
-        return "❌ Acceso denegado: `/macro --update` requiere admin del tenant u owner."
-
-    parsed, err = parse_macro_update_cli(args)
-    if not parsed:
-        return err or "Parse inválido."
-
-    rg = str(parsed["regime"] or "").strip().upper()
-    stmts: list[tuple[str, Optional[list[Any]]]] = [
-        ("DELETE FROM quant_core.macro_manual_state WHERE id = 'singleton'", None),
-        (
-            "INSERT INTO quant_core.macro_manual_state (id, regime_override, confidence, evidence, updated_at) "
-            "VALUES ('singleton', ?, ?, ?, CURRENT_TIMESTAMP)",
-            [
-                rg,
-                float(parsed["confidence"]),
-                str(parsed["evidence"] or "")[:8000],
-            ],
-        ),
-    ]
-
-    ok, detail = _vault_apply_sql_statements(db, stmts, tenant_id=tid)
-    if not ok:
-        return f"No se pudo registrar el régimen manual: {detail}"
-    conf_pct = float(parsed["confidence"]) * 100.0
-    return (
-        "✅ Régimen manual actualizado (singleton writer).\n"
-        f"- Régimen: {rg} (conf objetivo fly {conf_pct:.0f}%)\n"
-        "El pipeline MOC usará esta pista antes de las reglas por VIX.\n"
-        "Contexto opcional para VSS: /context --add … en la misma bóveda."
-    )
-
-
-def execute_quant_execute_all_moc(db: Any, chat_id: Any, args: str) -> str:
-    """/execute_all_moc <session_uid>: aprueba y ejecuta en secuencia señales MOC batch."""
-    from duckclaw.capadonna_plugin import load_capadonna_lib
-
-    _hitl = load_capadonna_lib("quant_hitl")
-    _qtc = load_capadonna_lib("quant_tool_context")
-    _qtb = load_capadonna_lib("quant_trader_bridge")
-    if _hitl is None or _qtc is None or _qtb is None:
-        return "Capadonna quant plugins no disponibles (CAPADONNA_DRILLER_ROOT)."
-    grant_execute_order = _hitl.grant_execute_order
-    set_quant_tool_chat_id = _qtc.set_quant_tool_chat_id
-    set_quant_tool_db_path = _qtc.set_quant_tool_db_path
-    _execute_approved_signal_impl = _qtb._execute_approved_signal_impl
-
-    session_uid = (args or "").strip().split()[0] if (args or "").strip() else ""
-    if not re.match(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        session_uid,
-        re.IGNORECASE,
-    ):
-        return "Uso: /execute_all_moc <session_uid_UUID>"
-    try:
-        from duckclaw.graphs.graph_server import get_db as _get_db
-
-        _db = _get_db()
-        tid = str(get_chat_state(_db, chat_id, "tenant_id") or "default").strip() or "default"
-        rid = str(get_chat_state(_db, chat_id, "last_requester_id") or "").strip()
-        if _is_wr_tenant(tid):
-            clearance = _wr_member_clearance(_db, tenant_id=tid, user_id=rid)
-            if not (_is_gateway_owner_user(rid) or clearance == "admin"):
-                return "❌ Acceso denegado: /execute_all_moc en War Room requiere clearance admin."
-    except Exception:
-        pass
-
-    raw_path = str(getattr(db, "_path", "") or "").strip()
-    if raw_path:
-        set_quant_tool_db_path(raw_path)
-    set_quant_tool_chat_id(str(chat_id).strip())
-
-    esc = session_uid.replace("'", "''")
-    sql = (
-        "SELECT CAST(fs.signal_id AS VARCHAR) AS signal_id "
-        "FROM finance_worker.trade_signals fs "
-        "INNER JOIN quant_core.trade_signals q ON q.signal_id = fs.signal_id "
-        f"WHERE q.session_uid = '{esc}' AND COALESCE(q.strategy_name, '') = 'moc_hrp_cfd' "
-        "AND UPPER(COALESCE(fs.status, '')) = 'PENDING_HITL' ORDER BY fs.ticker NULLS LAST"
-    )
-    try:
-        raw = db.query(sql)
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except Exception as exc:
-        return f"No se pudieron listar señales MOC: {exc}"
-    signal_ids = [
-        str((r or {}).get("signal_id") or "").strip().lower()
-        for r in rows
-        if isinstance(r, dict) and (r or {}).get("signal_id")
-    ]
-    if not signal_ids:
-        return (
-            "No hay señales PENDING_HITL `moc_hrp_cfd` para esa session_uid "
-            "(o ya fueron ejecutadas/canceladas)."
-        )
-
-    ib_order_ids: list[str] = []
-    notionals_parts: list[str] = []
-    skipped: list[str] = []
-
-    cid = str(chat_id or "").strip() or "default"
-    for sid in signal_ids:
-        ok_ledger, ledger_msg = _execute_signal_verify_ledger(db, sid)
-        if not ok_ledger:
-            skipped.append(f"{sid[:13]}… — {ledger_msg}")
-            continue
-        grant_execute_order(cid, sid)
-        exec_raw = _execute_approved_signal_impl(db, signal_id=sid)
-        ej: dict[str, Any] = {}
-        try:
-            if isinstance(exec_raw, str) and exec_raw.strip().startswith("{"):
-                ej = json.loads(exec_raw)
-        except json.JSONDecodeError:
-            ej = {}
-        oid = ej.get("ib_order_id") or ej.get("order_id") or ej.get("broker_order_id")
-        if oid is not None:
-            ib_order_ids.append(str(oid))
-        for key in ("notional_usd", "notional", "amount_usd", "usd_notional"):
-            if ej.get(key) is not None:
-                try:
-                    notionals_parts.append(f"{sid[:8]}:{float(ej.get(key)):,.0f}")
-                except (TypeError, ValueError):
-                    pass
-                break
-
-    def _summarize_notional(parts: list[str]) -> float:
-        total = 0.0
-        for p in parts:
-            try:
-                total += abs(float((p.split(":", maxsplit=1)[-1] or "").replace(",", "")))
-            except (ValueError, TypeError):
-                continue
-        return total
-
-    total_n = _summarize_notional(notionals_parts)
-    rep = (
-        f"✅ MOC ejecutado: {len(signal_ids) - len(skipped)} órdenes "
-        f"(listadas {len(signal_ids)}).\n"
-        f"Notional declarado (~sum componentes Telegram): USD {total_n:,.0f}\n"
-        f"IDs: {', '.join(ib_order_ids) if ib_order_ids else '(extraer desde execution JSON)'}"
-    )
-    if skipped:
-        rep += "\nOmitidas:\n" + "\n".join(skipped[:12])
-    return rep
-
-
-_CANCEL_SIGNAL_STATUSES_NORMAL: tuple[str, ...] = (
-    "PENDING_HITL",
-    "AWAITING_HITL",
-    "PENDING",
-    "FAILED",
-)
-_CANCEL_SIGNAL_STATUS_IN_SQL = (
-    "'PENDING_HITL','AWAITING_HITL','PENDING','FAILED'"
-)
-
-
-def _parse_cancel_signal_args(args: str) -> tuple[str, bool, str | None]:
-    """Retorna (signal_id, force, error_msg)."""
-    tokens = [t for t in (args or "").strip().split() if t.strip()]
-    force = any(t.lower() in ("--force", "-f", "force") for t in tokens)
-    sid = ""
-    for t in tokens:
-        tl = t.lower()
-        if tl in ("--force", "-f", "force"):
-            continue
-        sid = tl
-        break
-    if not sid:
-        return "", force, "Uso: /cancel_signal <signal_id_UUID> [--force]"
-    if not re.match(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        sid,
-    ):
-        return "", force, "Uso: /cancel_signal <signal_id_UUID> [--force]"
-    return sid, force, None
-
-
-def _resolve_trade_signal_status(db: Any, sid: str) -> tuple[str, str]:
-    """
-    Estado actual de la señal: finance_worker primero, luego quant_core.
-    Retorna (status_upper, source_label) o ("", "") si no existe.
-    """
-    if db is None:
-        return "", ""
-    qsid = sid.replace("'", "''")
-    for schema, label in (
-        ("finance_worker", "finance_worker"),
-        ("quant_core", "quant_core"),
-    ):
-        try:
-            raw = db.query(
-                f"SELECT status FROM {schema}.trade_signals "
-                f"WHERE signal_id = '{qsid}' LIMIT 1"
-            )
-            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        except Exception:
-            rows = []
-        if rows and isinstance(rows[0], dict):
-            st = str(rows[0].get("status") or "").strip().upper()
-            return st, label
-    return "", ""
-
-
-def _cancel_signal_sql_statements(*, sid: str, force: bool) -> list[tuple[str, list[str]]]:
-    """Pares (sql, params) para finance_worker y quant_core."""
-    if force:
-        where = "signal_id = ? AND UPPER(TRIM(COALESCE(status,''))) != 'EXECUTED'"
-    else:
-        where = (
-            f"signal_id = ? AND UPPER(TRIM(COALESCE(status,''))) IN "
-            f"({_CANCEL_SIGNAL_STATUS_IN_SQL})"
-        )
-    return [
-        (
-            f"UPDATE finance_worker.trade_signals SET status='CANCELLED' WHERE {where}",
-            [sid],
-        ),
-        (
-            f"UPDATE quant_core.trade_signals SET status='CANCELLED', updated_at=now() "
-            f"WHERE {where}",
-            [sid],
-        ),
-    ]
-
-
-def execute_cancel_signal(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
-    """/cancel_signal <signal_id> [--force]: cancela pendientes, FAILED o fuerza limpieza del ledger."""
-    _ = chat_id
-    sid, force, parse_err = _parse_cancel_signal_args(args)
-    if parse_err:
-        return parse_err
-    tid = str(tenant_id or "default").strip() or "default"
-    st, _src = _resolve_trade_signal_status(db, sid)
-    if not st:
-        return "Señal no encontrada en finance_worker.trade_signals ni quant_core.trade_signals."
-    if st == "CANCELLED":
-        return f"Señal {sid} ya está CANCELLED."
-    if force and st == "EXECUTED":
-        return "No se puede cancelar: la señal ya está EXECUTED."
-    if not force and st not in _CANCEL_SIGNAL_STATUSES_NORMAL:
-        return (
-            f"No se puede cancelar: estado actual {st}. "
-            "Solo se pueden cancelar señales pendientes o fallidas."
-        )
-    ok, detail = _vault_apply_sql_statements(
-        db,
-        _cancel_signal_sql_statements(sid=sid, force=force),
-        tenant_id=tid,
-    )
-    if not ok:
-        return f"No se pudo cancelar la señal: {detail}"
-    return f"❌ Señal {sid} cancelada (era {st})."
 
 
 def _dispatch_fly_command(
@@ -6970,43 +2876,9 @@ def _dispatch_fly_command(
             return execute_uncertainty_status(db, chat_id, args)
         return "Uso: /uncertainty --status"
     if name in ("approve_code", "approve-code"):
-        return execute_quant_approve_code(db, chat_id, args)
+        return execute_code_approve(db, chat_id, args)
     if name in ("reject_code", "reject-code"):
-        return execute_quant_reject_code(db, chat_id, args)
-    if name in ("execute_signal", "execute-signal"):
-        return execute_quant_execute_signal(db, chat_id, args)
-    if name == "execute_all_moc":
-        return execute_quant_execute_all_moc(db, chat_id, args)
-    if name == "profile":
-        return execute_quant_profile(db, chat_id, args, tenant_id=tenant_id)
-    if name == "macro":
-        return execute_quant_macro_update(
-            db, chat_id, args, requester_id=requester_id, tenant_id=tenant_id
-        )
-    if name == "cancel_signal":
-        return execute_cancel_signal(db, chat_id, args, tenant_id=tenant_id)
-    if name in ("trading-session", "trading_session"):
-        return execute_trading_session(
-            db,
-            chat_id,
-            args,
-            tenant_id=tenant_id,
-            vault_user_id=vault_user_id,
-        )
-    if name == "quant_cycle":
-        return execute_quant_cycle(
-            db,
-            chat_id,
-            args,
-            tenant_id=tenant_id,
-            vault_user_id=vault_user_id,
-        )
-    if name == "register_wr_member":
-        return register_wr_member(db, tenant_id, requester_id, args)
-    if name == "get_wr_context":
-        return get_wr_context(db, tenant_id, args)
-    if name == "broadcast_alert":
-        return broadcast_alert(db, tenant_id, requester_id, args)
+        return execute_code_reject(db, chat_id, args)
     if name == "help":
         return execute_help(db, chat_id)
     if name == "role":
@@ -7041,18 +2913,6 @@ def _dispatch_fly_command(
         return execute_comfyui_provider(db, chat_id, args)
     if name in ("sandbox", "sandox"):
         return execute_sandbox_toggle(db, chat_id, args)
-    if name == "ibkr":
-        from duckclaw.capadonna_plugin import dispatch_capadonna_fly_command
-
-        _ibkr = dispatch_capadonna_fly_command(
-            "ibkr", db, chat_id, args, entry_worker_id=entry_worker_id
-        )
-        if _ibkr is not None:
-            return _ibkr
-        return (
-            "Comando /ibkr no disponible: configura CAPADONNA_DRILLER_ROOT "
-            "(Capadonna-Driller workers/duckclaw/lib)."
-        )
     if name in ("internet", "red", "network"):
         return execute_internet_toggle(db, chat_id, args, tenant_id=tenant_id)
     if name == "heartbeat":

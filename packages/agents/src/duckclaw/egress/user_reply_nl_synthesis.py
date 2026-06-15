@@ -336,24 +336,10 @@ _BARE_SUMMARIZE_IMAGE_REPLY = re.compile(
 )
 
 # Plantillas que Gemma/MLX suele inventar en turnos SUMMARIZE_NEW_CONTEXT (no vienen del texto pegado).
-_NEW_CONTEXT_WRONG_ACCOUNT_TEMPLATES = (
+_NEW_CONTEXT_UNSUPPORTED_TEMPLATES = (
     "los usuarios finales esperan",
     "¿qué te gustaría hacer con est",
-    "próximas operaciones pendientes",
     "siguiente paso: ¿qué te gustaría",
-)
-
-# Términos de ledger local/IBKR: si aparecen en la respuesta pero no en el volcado NEW → alucinación probable.
-_NEW_CONTEXT_LEDGER_LEXEMES = (
-    "bancolombia",
-    "nequi",
-    "davivienda",
-    "ibkr",
-    "inversión ibkr",
-    "inversion ibkr",
-    "saldos guardados en la base",
-    "total disponible en las cuentas locales",
-    "efectivo disponible de",
 )
 
 _NOISY_UNUSED_RE = re.compile(r"<unused\d+>", re.IGNORECASE)
@@ -421,8 +407,8 @@ def _deterministic_new_context_summary(evidence: str) -> str:
 
 def _new_context_reply_needs_deterministic_reset(reply: str, incoming: str) -> tuple[bool, str]:
     """
-    True si la respuesta del modelo contradice un turno NEW (marcador STORED, plantillas de cuentas,
-    lexemas de ledger ausentes en el volcado).
+    True si la respuesta del modelo contradice un turno NEW (marcador STORED, plantillas ajenas
+    al volcado o montos sin evidencia).
     """
     r = (reply or "").strip()
     inc = (incoming or "").strip()
@@ -432,16 +418,12 @@ def _new_context_reply_needs_deterministic_reset(reply: str, incoming: str) -> t
     inc_low = inc.lower()
     if SUMMARIZE_STORED_CONTEXT_MARK in r:
         return True, "stored_mark_in_reply"
-    for needle in _NEW_CONTEXT_WRONG_ACCOUNT_TEMPLATES:
+    for needle in _NEW_CONTEXT_UNSUPPORTED_TEMPLATES:
         if needle in r_low and needle not in inc_low:
             return True, f"template:{needle[:24]}"
-    for lex in _NEW_CONTEXT_LEDGER_LEXEMES:
-        if lex in r_low and lex not in inc_low:
-            return True, f"ledger_lex:{lex}"
-    # Montos COP/USD tipo ledger sin que el usuario pegara símbolo de moneda en el bloque
-    if re.search(r"\$[\d.,]+\s*(cop|usd)\b", r_low):
-        if "$" not in inc and "cop" not in inc_low and "usd" not in inc_low:
-            return True, "currency_amounts_no_evidence"
+    # Montos con símbolo que no estaban en el bloque: probable alucinación de datos estructurados.
+    if "$" in r and "$" not in inc:
+        return True, "amounts_no_evidence"
     return False, ""
 
 
@@ -510,7 +492,7 @@ def _deterministic_noisy_vlm_new_context_summary(incoming: str) -> str:
 def repair_summarize_new_context_egress(reply: str, *, incoming: str) -> str:
     """
     Corrige egress en ``SUMMARIZE_NEW_CONTEXT``: MLX/Gemma a veces antepone ``SUMMARIZE_STORED_CONTEXT``
-    o inventa saldos/IBKR pese a que el volcado es solo notas (spec: dominio único, sin cuentas en ese turno).
+    o inventa datos estructurados pese a que el volcado es solo notas.
     """
     inc = (incoming or "").strip()
     if SUMMARIZE_NEW_CONTEXT_MARK not in inc:
@@ -592,7 +574,7 @@ def replace_bare_summarize_image_on_vlm_gateway_down(reply: str, *, incoming: st
         "La ingesta de visión en el gateway no pudo analizar la imagen en este turno (no hay bloque "
         "[VLM_CONTEXT]). Si viste un aviso de Gemini 503 o de MLX en el mismo puerto que el LM de texto, "
         "reintenta más tarde, instala **mlx-vlm** en el venv del gateway, o sirve visión en otro puerto "
-        "(`VLM_MLX_BASE_URL`). Mientras tanto, **describe en texto** qué muestra la imagen (ticker, números, "
+        "(`VLM_MLX_BASE_URL`). Mientras tanto, **describe en texto** qué muestra la imagen (datos visibles, números, "
         "pantalla) y sigo con ese contexto."
     )
 
@@ -691,7 +673,7 @@ _TOOL_BLOCK_SNAKE_NAME = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
 
 def _combined_tool_blocks_snake_prose(s: str) -> bool:
     """
-    True si hay ``### snake_case_tool`` seguido de texto (p. ej. ``get_ibkr_portfolio`` + «Estado:…»).
+    True si hay ``### snake_case_tool`` seguido de texto (p. ej. ``fetch_external_snapshot`` + «Estado:…»).
     Sin esto, ``reply_needs_nl_synthesis`` no dispara la 2.ª pasada y el usuario ve el encabezado crudo.
     """
     if "### " not in s:
@@ -710,7 +692,7 @@ def _combined_tool_blocks_snake_prose(s: str) -> bool:
 
 def _body_looks_like_reddit_mcp_listing_json(s: str) -> bool:
     """
-    Listados MCP (subreddit + posts) a menudo van con prefijo ``finanz N`` y no pasan el
+    Listados MCP (subreddit + posts) a menudo van con prefijo de instancia y no pasan el
     ``startswith('{')`` de la heurística JSON pura; si además el JSON está truncado,
     ``json.loads`` falla y el usuario ve el volcado crudo en Telegram.
     """
@@ -860,36 +842,7 @@ def synthesize_user_visible_reply(
             "- Si la evidencia es un error técnico, explícalo en lenguaje simple sin volver a pegar el JSON crudo entero."
             f"{_reddit_listing_rules}"
         )
-    _finanz_extra = ""
-    if (worker_id or "").strip().lower() == "finanz":
-        _finanz_extra = (
-            "\n- Worker Finanz: si la evidencia incluye varias cuentas locales con `balance` y `currency` (p. ej. JSON de "
-            "`read_sql` sobre cuentas), incluye **líneas de subtotal por cada moneda** presente, sumando solo balances de "
-            "la evidencia. Si también hay bloque IBKR, conserva totales del broker en su divisa; **no** unifiques COP y USD "
-            "en un solo total sin tipo de cambio en la evidencia."
-            "\n- Si la evidencia incluye **«Finanz — cuenta IBKR (live):»** o **«modo cuenta del snapshot: live»** "
-            "(sin «no verificado»), **prohibido** rotular el broker como **Paper** por sesión Quant u otros bots; "
-            "la evidencia afirma **live**."
-            "\n- Si la evidencia incluye **«modo no verificado»** o **«modo cuenta del snapshot: no verificado»**, "
-            "**no** afirmes **Live** como hecho; titular neutral (**IBKR (USD)** o «modo no confirmado por la API»). "
-            "**Sí** puedes usar **Paper** si es coherente con lo que el usuario indica sobre su TWS."
-            "\n- Si la evidencia dice **«Finanz — cuenta IBKR (paper):»** o **«modo cuenta del snapshot: paper»**, "
-            "respeta **Paper** en el titular IBKR."
-            "\n- Si la evidencia incluye **«Finanz — IBKR (modo paper):»** y **«no muestra saldos»** (u omitió montos), "
-            "**prohibido** añadir líneas con efectivo USD, valor total cartera o lista de tickers IBKR inventados o del historial."
-            "\n- Presupuestos: si la evidencia trae filas tipo presupuesto vs real (categoría, presupuestado, gastado, **disponible**), "
-            "para cada categoría con cupo mensual muestra **disponible** como «… disponible: …»; **no** uses «acumulado» para esa cifra "
-            "(eso sería confundir cupo restante con gasto ya gastado)."
-            "\n- Deudas / gastos locales: **no** inventes listados ni totales si la evidencia **no** incluye salida reciente de **`read_sql`** "
-            "(u otra tool de datos); si solo hay texto del historial sin tools, dilo y pide un turno con consulta a DuckDB."
-        )
-        if "snapshot_unavailable" in (raw_evidence or "").lower():
-            _finanz_extra += (
-                "\n- IBKR CRÍTICO: si la evidencia menciona `snapshot_unavailable`, **prohibido** escribir «gateway desconectado», "
-                "«no logueado» o «conectar IB Gateway» como síntesis; parafrasea el diagnóstico de la tool: la API respondió, "
-                "el snapshot no estuvo disponible, revisar el servicio portfolio en el VPS (IB_ENV, clientId, logs)."
-            )
-    _sys_text = _base_rules + _finanz_extra
+    _sys_text = _base_rules
     sys = SystemMessage(content=_sys_text)
     ev = _truncate_evidence(raw_evidence or "", ev_limit)
     human = HumanMessage(
@@ -1018,211 +971,3 @@ def maybe_enrich_admin_display_reply(
     if syn_st:
         return syn_st
     return reply_candidate
-
-
-_IBKR_MISLEADING_GATEWAY_PHRASES = (
-    "gateway desconectado",
-    "no está logueado",
-    "no esta logueado",
-    "necesitas conectar el ib gateway",
-    "necesitas conectar",
-    "ib gateway no está",
-    "ib gateway no esta",
-)
-
-
-def finanz_repair_ibkr_snapshot_disconnect_paraphrase(
-    messages: list[Any],
-    reply: str,
-    *,
-    worker_id: str,
-) -> str:
-    """
-    Corrige egress cuando el LLM ignora ``get_ibkr_portfolio`` con ``snapshot_unavailable`` y
-    inventa «gateway desconectado». Sustituye la sección ``Cuenta IBKR:`` por el texto de la tool.
-    """
-    if (worker_id or "").strip().lower() != "finanz":
-        return reply or ""
-    r = (reply or "").strip()
-    if not r:
-        return reply or ""
-    try:
-        from langchain_core.messages import ToolMessage
-    except ImportError:
-        return reply or ""
-
-    from duckclaw.integrations.llm_providers import lc_message_content_to_text
-
-    tool_body = ""
-    for m in reversed(messages or []):
-        if isinstance(m, ToolMessage) and (getattr(m, "name", None) or "") == "get_ibkr_portfolio":
-            tool_body = lc_message_content_to_text(m)
-            break
-    if not tool_body.strip() or "snapshot_unavailable" not in tool_body.lower():
-        return reply or ""
-    rlow = r.lower()
-    if not any(p in rlow for p in _IBKR_MISLEADING_GATEWAY_PHRASES):
-        return reply or ""
-    ibkr_user = tool_body.strip()
-    if len(ibkr_user) > 1400:
-        ibkr_user = ibkr_user[:1397].rstrip() + "…"
-    replacement = (
-        "Cuenta IBKR (diagnóstico de herramienta; no es caída HTTP: el servicio portfolio no entregó snapshot):\n"
-        + ibkr_user
-    )
-    _chart_emoji = "\U0001f4c8"
-    pat = re.compile(
-        rf"(?ms)^Cuenta IBKR:\s*\n.*?(?=^\s*{_chart_emoji}|^\s*Situación general\s*:|^\s*\*\*Situación|\Z)",
-    )
-    m = pat.search(r)
-    if m:
-        start, end = m.span()
-        return (r[:start] + replacement + "\n\n" + r[end:]).strip()
-    return (r + "\n\n" + replacement).strip()
-
-
-def _finanz_last_human_index(messages: list[Any]) -> int | None:
-    from langchain_core.messages import HumanMessage
-
-    for i in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[i], HumanMessage):
-            return i
-    return None
-
-
-def _finanz_has_get_ibkr_since(messages: list[Any], human_idx: int) -> bool:
-    from langchain_core.messages import ToolMessage
-
-    for m in messages[human_idx + 1 :]:
-        if isinstance(m, ToolMessage) and (getattr(m, "name", None) or "") == "get_ibkr_portfolio":
-            return True
-    return False
-
-
-def _finanz_user_ask_may_include_ibkr_snapshot(user_ask: str) -> bool:
-    """True si el usuario pidió resumen de cuentas (local+IBKR típico) o IBKR explícito."""
-    if not user_ask or not user_ask.strip():
-        return False
-    t = user_ask.strip().lower()
-    if "[system_directive:" in t:
-        return False
-    if any(
-        k in t
-        for k in (
-            "ibkr",
-            "interactive brokers",
-            "bolsa",
-            "acciones",
-            "portfolio",
-            "portafolio",
-            "broker",
-        )
-    ):
-        return True
-    return bool(
-        re.search(
-            r"\b(resumen\s+(de\s+)?(mis\s+)?cuentas|saldos?\s+(de\s+)?(mis\s+)?cuentas|"
-            r"mis\s+cuentas\s+bancarias|cuentas\s+bancarias|estado\s+actual\s+de\s+mis\s+cuentas|"
-            r"estatus\s+de\s+mis\s+cuentas)\b",
-            t,
-        )
-    )
-
-
-def finanz_repair_ibkr_tool_live_vs_reply_paper(
-    messages: list[Any],
-    reply: str,
-    *,
-    worker_id: str,
-) -> str:
-    """
-    Si la tool ``get_ibkr_portfolio`` trae preámbulo **live** (variante Finanz) pero el borrador
-    etiqueta IBKR como **Paper**, alinear etiqueta (evita mezclar sesión Quant paper del chat).
-    """
-    if (worker_id or "").strip().lower() != "finanz":
-        return reply or ""
-    r = reply or ""
-    if not r.strip():
-        return reply or ""
-    try:
-        from langchain_core.messages import ToolMessage
-    except ImportError:
-        return reply or ""
-
-    from duckclaw.integrations.llm_providers import lc_message_content_to_text
-
-    tool_body = ""
-    for m in reversed(messages or []):
-        if isinstance(m, ToolMessage) and (getattr(m, "name", None) or "") == "get_ibkr_portfolio":
-            tool_body = lc_message_content_to_text(m)
-            break
-    tb = tool_body.lower()
-    if not tb.strip():
-        return reply or ""
-    if "modo no verificado" in tb or "modo cuenta del snapshot: no verificado" in tb:
-        return reply or ""
-    live_markers = (
-        "cuenta ibkr (live)",
-        "modo cuenta del snapshot: live",
-        "finanz — cuenta ibkr (live):",
-        "siempre en modo **live**",
-    )
-    if not any(x in tb for x in live_markers):
-        return reply or ""
-    rlow = r.lower()
-    if "paper" not in rlow or "ibkr" not in rlow:
-        return reply or ""
-    if not re.search(r"ibkr\s*\([^)]*paper|ibkr\s*\(usd\)\s*[-–—]\s*paper", rlow):
-        return reply or ""
-    r2 = re.sub(
-        r"(?i)(IBKR\s*\([^)]*)\bPaper\b",
-        r"\1Live",
-        r,
-        count=1,
-    )
-    r2 = re.sub(
-        r"(?i)IBKR\s*\(USD\)\s*[-–—]\s*Paper\b",
-        "IBKR (USD) — Live",
-        r2,
-        count=1,
-    )
-    return r2
-
-
-def finanz_strip_ibkr_block_without_tool_in_turn(
-    messages: list[Any],
-    reply: str,
-    *,
-    worker_id: str,
-    user_ask: str,
-) -> str:
-    """
-    Resumen cuentas / IBKR: si no hubo ``get_ibkr_portfolio`` tras el último humano, elimina
-    bloques IBKR / TOTAL COMBINADO inventados desde el historial.
-    """
-    if (worker_id or "").strip().lower() != "finanz":
-        return reply or ""
-    r = (reply or "").strip()
-    if not r:
-        return reply or ""
-    if not _finanz_user_ask_may_include_ibkr_snapshot(user_ask):
-        return reply or ""
-    if re.search(r"\bibkr\b", r, re.I) is None:
-        return reply or ""
-    hi = _finanz_last_human_index(list(messages or []))
-    if hi is None:
-        return reply or ""
-    if _finanz_has_get_ibkr_since(list(messages or []), hi):
-        return reply or ""
-    m_ibkr = re.search(r"(?ms)\n\n(?:\*\*)?IBKR\b.*?(?=\n\nTOTAL\s+COMBINADO\b|\Z)", r)
-    r2 = r
-    if m_ibkr:
-        r2 = (
-            r[: m_ibkr.start()]
-            + "\n\n⚠️ **IBKR:** sin `get_ibkr_portfolio` en este turno — no uses cifras del historial. "
-            "Vuelve a pedir el resumen para ver el bloque IBKR del broker."
-            + r[m_ibkr.end() :]
-        )
-    r2 = re.sub(r"(?ms)\n\nTOTAL\s+COMBINADO\b.*", "", r2, count=1)
-    r2 = r2.strip()
-    return r2

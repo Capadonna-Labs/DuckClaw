@@ -180,6 +180,70 @@ class TestWriteCommands:
         assert raw_deactivate["policy_name"] == "rag_turn"
         assert raw_deactivate["version"] == 2
 
+    def test_authorized_user_commands_roundtrip(self) -> None:
+        from duckclaw.write_commands import DeleteAuthorizedUserCommand, UpsertAuthorizedUserCommand
+
+        upsert = UpsertAuthorizedUserCommand(
+            tenant_id="Finanzas",
+            actor_email="telegram:1",
+            user_id="3",
+            username="user3",
+            role="admin",
+        )
+        raw_upsert = json.loads(upsert.to_redis_payload())
+        assert raw_upsert["command_type"] == "upsert_authorized_user"
+        assert raw_upsert["tenant_id"] == "Finanzas"
+        assert raw_upsert["user_id"] == "3"
+        assert raw_upsert["username"] == "user3"
+        assert raw_upsert["role"] == "admin"
+
+        delete = DeleteAuthorizedUserCommand(
+            tenant_id="Finanzas",
+            actor_email="telegram:1",
+            user_id="3",
+        )
+        raw_delete = json.loads(delete.to_redis_payload())
+        assert raw_delete["command_type"] == "delete_authorized_user"
+        assert raw_delete["tenant_id"] == "Finanzas"
+        assert raw_delete["user_id"] == "3"
+
+    def test_shared_access_commands_roundtrip_without_war_room_core(self) -> None:
+        from duckclaw.write_commands import (
+            DeleteSharedDbGrantCommand,
+            UpsertSharedDbGrantCommand,
+        )
+
+        shared_upsert = UpsertSharedDbGrantCommand(
+            tenant_id="Finanzas",
+            actor_email="telegram:1",
+            user_id="77",
+            resource_key="default",
+        )
+        raw_shared_upsert = json.loads(shared_upsert.to_redis_payload())
+        assert raw_shared_upsert["command_type"] == "upsert_shared_db_grant"
+        assert raw_shared_upsert["resource_key"] == "default"
+
+        shared_delete = DeleteSharedDbGrantCommand(
+            tenant_id="Finanzas",
+            actor_email="telegram:1",
+            user_id="77",
+            resource_key="default",
+        )
+        raw_shared_delete = json.loads(shared_delete.to_redis_payload())
+        assert raw_shared_delete["command_type"] == "delete_shared_db_grant"
+        assert raw_shared_delete["resource_key"] == "default"
+
+    def test_war_room_is_not_a_shared_write_command_domain(self) -> None:
+        import duckclaw.write_commands as write_commands
+
+        removed_names = (
+            "UpsertWarRoomMemberCommand",
+            "DeleteWarRoomMemberCommand",
+            "AppendWarRoomAuditCommand",
+        )
+        for name in removed_names:
+            assert not hasattr(write_commands, name)
+
     def test_each_command_has_unique_task_id(self) -> None:
         from duckclaw.write_commands import UpsertWorkerCommand
 
@@ -506,6 +570,101 @@ class TestCommandHandlers:
         with pytest.raises(FileNotFoundError, match="active prompt policy not found"):
             PromptPolicyResolver(db=con).load("system_prompt", "rag_turn")
 
+    def test_authorized_user_handlers_upsert_and_delete(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        dispatch_command(con, {
+            "command_type": "upsert_authorized_user",
+            "tenant_id": "Finanzas",
+            "actor_email": "telegram:1",
+            "user_id": "3",
+            "username": "user3",
+            "role": "admin",
+        })
+        row = con.execute(
+            "SELECT username, role FROM main.authorized_users "
+            "WHERE tenant_id = 'Finanzas' AND user_id = '3'"
+        ).fetchone()
+        assert row == ("user3", "admin")
+
+        dispatch_command(con, {
+            "command_type": "upsert_authorized_user",
+            "tenant_id": "Finanzas",
+            "actor_email": "telegram:1",
+            "user_id": "3",
+            "username": "renamed",
+            "role": "user",
+        })
+        row = con.execute(
+            "SELECT username, role FROM main.authorized_users "
+            "WHERE tenant_id = 'Finanzas' AND user_id = '3'"
+        ).fetchone()
+        assert row == ("renamed", "user")
+
+        dispatch_command(con, {
+            "command_type": "delete_authorized_user",
+            "tenant_id": "Finanzas",
+            "actor_email": "telegram:1",
+            "user_id": "3",
+        })
+        deleted = con.execute(
+            "SELECT user_id FROM main.authorized_users "
+            "WHERE tenant_id = 'Finanzas' AND user_id = '3'"
+        ).fetchone()
+        assert deleted is None
+
+    def test_war_room_handlers_are_not_registered_in_shared_dispatcher(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        removed_command_types = (
+            "upsert_war_room_member",
+            "append_war_room_audit",
+            "delete_war_room_member",
+        )
+        for command_type in removed_command_types:
+            with pytest.raises(ValueError, match=f"Unknown command_type: {command_type}"):
+                dispatch_command(
+                    con,
+                    {
+                        "command_type": command_type,
+                        "tenant_id": "wr_-1001",
+                        "actor_email": "telegram:1",
+                        "user_id": "77",
+                    },
+                )
+
+    def test_shared_grant_handlers_upsert_and_delete(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        dispatch_command(con, {
+            "command_type": "upsert_shared_db_grant",
+            "tenant_id": "Finanzas",
+            "actor_email": "telegram:1",
+            "user_id": "77",
+            "resource_key": "default",
+        })
+        row = con.execute(
+            "SELECT resource_key FROM main.user_shared_db_access "
+            "WHERE tenant_id = 'Finanzas' AND user_id = '77'"
+        ).fetchone()
+        assert row == ("default",)
+
+        dispatch_command(con, {
+            "command_type": "delete_shared_db_grant",
+            "tenant_id": "Finanzas",
+            "actor_email": "telegram:1",
+            "user_id": "77",
+            "resource_key": "default",
+        })
+        deleted = con.execute(
+            "SELECT resource_key FROM main.user_shared_db_access "
+            "WHERE tenant_id = 'Finanzas' AND user_id = '77'"
+        ).fetchone()
+        assert deleted is None
+
     def test_add_project_member(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import (
             _apply_create_project,
@@ -788,6 +947,47 @@ class TestEnqueueTypedCommand:
         assert enriched["user_id"] == "test-user"
         assert enriched["tenant_id"] == "default"
         assert enriched["task_id"] == cmd.task_id
+
+    def test_enqueue_typed_command_preserves_domain_user_id(self, monkeypatch) -> None:
+        import sys
+        import types
+
+        from duckclaw.db_write_queue import enqueue_typed_command
+        from duckclaw.write_commands import UpsertSharedDbGrantCommand
+
+        lpush_calls: list[tuple[str, str]] = []
+
+        class FakeRedisClient:
+            def lpush(self, queue_name: str, payload: str) -> int:
+                lpush_calls.append((queue_name, payload))
+                return 1
+
+        fake_redis = types.SimpleNamespace(
+            from_url=lambda *_args, **_kwargs: FakeRedisClient(),
+        )
+        monkeypatch.setitem(sys.modules, "redis", fake_redis)
+        monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+        monkeypatch.delenv("DUCKCLAW_SPAWN_PROFILE", raising=False)
+        monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
+
+        cmd = UpsertSharedDbGrantCommand(
+            tenant_id="tenant-a",
+            actor_email="admin@test.local",
+            user_id="target-user",
+            resource_key="default",
+        )
+        task_id = enqueue_typed_command(
+            cmd,
+            db_path="db/private/default/test.duckdb",
+            user_id="admin-actor",
+            queue_name="typed:q",
+        )
+
+        assert task_id == cmd.task_id
+        enriched = json.loads(lpush_calls[0][1])
+        assert enriched["user_id"] == "target-user"
+        assert enriched["db_write_user_id"] == "admin-actor"
+        assert enriched["actor_email"] == "admin@test.local"
 
     def test_assign_agent_rejects_cross_tenant_worker(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import (

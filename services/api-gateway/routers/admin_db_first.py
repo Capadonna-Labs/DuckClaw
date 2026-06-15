@@ -46,38 +46,38 @@ class ProjectAgentBody(BaseModel):
     sort_order: int = 0
 
 
-class OrchestratorDraftBody(BaseModel):
+class WorkspaceManagedDraftBody(BaseModel):
     prompt: str = Field(..., min_length=10, max_length=4000)
 
 
-class OrchestratorDraftProjectBody(BaseModel):
+class WorkspaceManagedDraftProjectBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     description: str = Field(default="", max_length=2048)
 
 
-class OrchestratorDraftWorkerBody(BaseModel):
+class WorkspaceManagedDraftWorkerBody(BaseModel):
     worker_id: str = Field(..., min_length=1, max_length=64)
     display_name: str = Field(..., min_length=1, max_length=128)
     role: str = Field(default="member", max_length=64)
     system_prompt: str = Field(default="", max_length=8000)
 
 
-class OrchestratorSuggestedSkillBody(BaseModel):
+class WorkspaceManagedDraftSuggestedSkillBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     reason: str = Field(default="", max_length=512)
     available: bool = False
 
 
-class OrchestratorDraftPayloadBody(BaseModel):
-    project: OrchestratorDraftProjectBody
-    workers: list[OrchestratorDraftWorkerBody] = Field(default_factory=list, max_length=8)
+class WorkspaceManagedDraftPayloadBody(BaseModel):
+    project: WorkspaceManagedDraftProjectBody
+    workers: list[WorkspaceManagedDraftWorkerBody] = Field(default_factory=list, max_length=8)
     shared_context: str = Field(default="", max_length=16000)
-    suggested_skills: list[OrchestratorSuggestedSkillBody] = Field(default_factory=list, max_length=16)
+    suggested_skills: list[WorkspaceManagedDraftSuggestedSkillBody] = Field(default_factory=list, max_length=16)
     questions: list[str] = Field(default_factory=list, max_length=12)
 
 
-class OrchestratorConfirmBody(BaseModel):
-    draft: OrchestratorDraftPayloadBody
+class WorkspaceManagedDraftConfirmBody(BaseModel):
+    draft: WorkspaceManagedDraftPayloadBody
 
 
 class UserAgentCreateBody(BaseModel):
@@ -149,6 +149,30 @@ class PromptPolicyUpsertBody(BaseModel):
     status: str = Field(default="active", max_length=32)
     content: str = Field(..., min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceManagedDraftFallbackPolicy(BaseModel):
+    project_name_template: str = Field(..., min_length=1)
+    project_description_template: str = Field(..., min_length=1)
+    worker_id_template: str = Field(..., min_length=1)
+    worker_display_name_template: str = Field(..., min_length=1)
+    worker_role: str = Field(..., min_length=1, max_length=64)
+    system_prompt_template: str = Field(..., min_length=1)
+    shared_context_template: str = Field(..., min_length=1)
+    model_error_note_template: str = Field(..., min_length=1)
+    questions: list[str] = Field(..., max_length=12)
+
+
+class WorkspaceManagedDraftConfirmPolicy(BaseModel):
+    source_kind: str = Field(..., min_length=1, max_length=64)
+    context_title: str = Field(..., min_length=1, max_length=160)
+    change_note: str = Field(..., min_length=1, max_length=256)
+
+
+class WorkspaceManagedDraftPolicy(BaseModel):
+    draft_prompt_template: str = Field(..., min_length=1)
+    fallback: WorkspaceManagedDraftFallbackPolicy
+    confirm: WorkspaceManagedDraftConfirmPolicy
 
 
 _KNOWLEDGE_UPLOAD_MAX_FILES = 40
@@ -238,6 +262,8 @@ _PROMPT_POLICY_ALIASES = {
 }
 _PROMPT_POLICY_TYPES = {"directive", "capability", "system_prompt", "manager_task", "tool_directive"}
 _PROMPT_POLICY_STATUSES = {"draft", "active", "inactive", "archived"}
+_WORKSPACE_MANAGED_DRAFT_POLICY_TYPE = "manager_task"
+_WORKSPACE_MANAGED_DRAFT_POLICY_NAME = "admin_workspace_managed_draft"
 
 
 def _normalize_prompt_policy_type(raw: str) -> str:
@@ -425,86 +451,142 @@ def _knowledge_source_row(row: tuple[Any, ...]) -> dict[str, Any]:
     }
 
 
-def _orchestrator_title_from_prompt(prompt: str) -> str:
+def _workspace_managed_draft_policy(db: Any) -> WorkspaceManagedDraftPolicy:
+    from duckclaw.prompt_policies import PromptPolicyResolver
+
+    content = PromptPolicyResolver(db=db).load(
+        _WORKSPACE_MANAGED_DRAFT_POLICY_TYPE,
+        _WORKSPACE_MANAGED_DRAFT_POLICY_NAME,
+    )
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "managed workspace draft policy content must be valid JSON"
+        ) from exc
+    try:
+        return WorkspaceManagedDraftPolicy.model_validate(parsed)
+    except Exception as exc:
+        raise RuntimeError(
+            "managed workspace draft policy is missing required templates"
+        ) from exc
+
+
+def _workspace_policy_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, FileNotFoundError):
+        return _problem(
+            503,
+            "Managed workspace draft policy missing",
+            (
+                "Create an active manager_task/admin_workspace_managed_draft "
+                "prompt policy before using this managed flow."
+            ),
+        )
+    return _problem(
+        500,
+        "Managed workspace draft policy invalid",
+        str(exc),
+    )
+
+
+def _workspace_managed_title_seed(prompt: str) -> str:
     text = re.sub(r"\s+", " ", (prompt or "").strip())
-    cleaned = re.sub(r"^(crear|crea|necesito|quiero|ayudame a crear)\s+", "", text, flags=re.I)
-    words = cleaned.split()
+    words = text.split()
     if not words:
-        return "Proyecto guiado"
+        return "draft"
     title = " ".join(words[:6]).strip(" .,:;")
     return title[:1].upper() + title[1:]
 
 
-def _orchestrator_worker_id_from_project(name: str) -> str:
+def _workspace_managed_worker_id(raw: str) -> str:
     from duckclaw.admin_worker_catalog import sanitize_catalog_worker_id
 
-    base = sanitize_catalog_worker_id(name or "guided-agent").replace("_", "-")
-    if not base.endswith("-agent"):
-        base = f"{base}-agent"
-    return base[:64] or "guided-agent"
+    worker_id = sanitize_catalog_worker_id(raw).replace("_", "-").strip("-")
+    if not worker_id:
+        raise RuntimeError("managed workspace draft policy produced an empty worker_id")
+    return worker_id[:64]
 
 
-def _orchestrator_description_from_prompt(prompt: str, project_name: str) -> str:
-    goal = re.sub(r"\s+", " ", (prompt or "").strip()).strip(" .")
-    if not goal:
-        return f"Proyecto orientado a estructurar {project_name} con guía del Platform Orchestrator."
-    if len(goal) > 220:
-        goal = goal[:217].rstrip() + "..."
-    return (
-        f"Proyecto orientado a convertir el objetivo '{goal}' en un flujo DB-first con contexto, "
-        "workers sugeridos y pasos de validación antes de ejecutar cambios."
-    )[:512]
-
-
-def _orchestrator_worker_display_name(project_name: str) -> str:
-    base = re.sub(r"\s+", " ", (project_name or "Proyecto guiado").strip())
-    return f"Asistente {base}"[:128]
-
-
-def _orchestrator_fallback_draft(
+def _workspace_managed_template_values(
     *,
     prompt: str,
     suggested_skills: list[dict[str, Any]],
+    project_name: str = "",
+) -> dict[str, str]:
+    goal = re.sub(r"\s+", " ", (prompt or "").strip()).strip(" .")
+    title = _workspace_managed_title_seed(goal)
+    slug = _workspace_managed_worker_id(title)
+    values = {
+        "prompt": prompt,
+        "goal": goal,
+        "title": title,
+        "slug": slug,
+        "suggested_skills_json": json.dumps(suggested_skills, ensure_ascii=False),
+    }
+    if project_name:
+        values["project_name"] = project_name
+    return values
+
+
+def _workspace_managed_format(template: str, values: dict[str, str]) -> str:
+    try:
+        return template.format(**values).strip()
+    except KeyError as exc:
+        raise RuntimeError(
+            f"managed workspace draft policy references unknown placeholder: {exc}"
+        ) from exc
+
+
+def _workspace_managed_fallback_draft(
+    *,
+    prompt: str,
+    suggested_skills: list[dict[str, Any]],
+    policy: WorkspaceManagedDraftPolicy,
 ) -> dict[str, Any]:
-    project_name = _orchestrator_title_from_prompt(prompt)
-    worker_id = _orchestrator_worker_id_from_project(project_name)
-    project_description = _orchestrator_description_from_prompt(prompt, project_name)
-    shared_context = "\n".join(
-        [
-            "# Análisis del Orchestrator",
-            "",
-            "## Lectura del objetivo",
-            prompt,
-            "",
-            "## Supuestos iniciales",
-            "- El proyecto debe operar con configuración DB-first.",
-            "- El usuario revisará el borrador antes de persistir cambios.",
-            "- Los workers sugeridos deben pedir datos faltantes antes de actuar.",
-        ]
+    values = _workspace_managed_template_values(
+        prompt=prompt,
+        suggested_skills=suggested_skills,
+    )
+    fallback_policy = policy.fallback
+    project_name = _workspace_managed_format(fallback_policy.project_name_template, values)
+    values = _workspace_managed_template_values(
+        prompt=prompt,
+        suggested_skills=suggested_skills,
+        project_name=project_name,
+    )
+    worker_id = _workspace_managed_worker_id(
+        _workspace_managed_format(fallback_policy.worker_id_template, values)
     )
     return {
         "project": {
             "name": project_name,
-            "description": project_description,
+            "description": _workspace_managed_format(
+                fallback_policy.project_description_template,
+                values,
+            )[:2048],
         },
         "workers": [
             {
                 "worker_id": worker_id,
-                "display_name": _orchestrator_worker_display_name(project_name),
-                "role": "member",
-                "system_prompt": (
-                    f"Actúa como asistente especializado del proyecto {project_name}. "
-                    "Usa el contexto compartido, convierte objetivos en pasos verificables y pregunta antes "
-                    "de asumir datos faltantes."
-                ),
+                "display_name": _workspace_managed_format(
+                    fallback_policy.worker_display_name_template,
+                    values,
+                )[:128],
+                "role": _workspace_managed_format(fallback_policy.worker_role, values)[:64],
+                "system_prompt": _workspace_managed_format(
+                    fallback_policy.system_prompt_template,
+                    values,
+                )[:8000],
             }
         ],
-        "shared_context": shared_context,
+        "shared_context": _workspace_managed_format(
+            fallback_policy.shared_context_template,
+            values,
+        )[:16000],
         "suggested_skills": suggested_skills,
         "questions": [
-            "¿Qué fuentes de datos debe usar este proyecto?",
-            "¿Qué resultado concreto esperas del worker principal?",
-            "¿Hay restricciones de tono, seguridad o aprobación humana?",
+            _workspace_managed_format(question, values)[:512]
+            for question in fallback_policy.questions
         ],
     }
 
@@ -527,36 +609,32 @@ def _extract_json_object(raw: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def _orchestrator_draft_prompt(prompt: str, suggested_skills: list[dict[str, Any]]) -> str:
-    return (
-        "Actúas como Platform Orchestrator de DuckClaw.\n"
-        "Responde SOLO JSON válido, sin markdown, sin texto extra.\n"
-        "No inventes secretos. No escribas en DB. Solo prepara un borrador revisable.\n"
-        "Schema exacto:\n"
-        "{"
-        '"project":{"name":"string","description":"string"},'
-        '"workers":[{"worker_id":"string","display_name":"string","role":"member","system_prompt":"string"}],'
-        '"shared_context":"markdown string",'
-        '"suggested_skills":[{"name":"string","reason":"string","available":true}],'
-        '"questions":["string"]'
-        "}\n"
-        f"Skills detectadas o sugeridas: {json.dumps(suggested_skills, ensure_ascii=False)}\n"
-        f"Objetivo del usuario:\n{prompt}"
+def _workspace_managed_draft_prompt(
+    prompt: str,
+    suggested_skills: list[dict[str, Any]],
+    policy: WorkspaceManagedDraftPolicy,
+) -> str:
+    return _workspace_managed_format(
+        policy.draft_prompt_template,
+        _workspace_managed_template_values(
+            prompt=prompt,
+            suggested_skills=suggested_skills,
+        ),
     )
 
 
-def _orchestrator_has_configured_llm(*, tenant_id: str, actor: str) -> bool:
-    from routers.admin import _resolved_llm_for_playground
+def _workspace_managed_has_configured_llm(*, tenant_id: str, actor: str) -> bool:
+    from routers.admin_domains.playground_chat import _resolved_llm_for_playground
 
     llm = _resolved_llm_for_playground(
-        chat_id="admin-orchestrator-draft",
+        chat_id="admin-managed-workspace-draft",
         tenant_id=tenant_id,
         actor_email=actor,
     )
     return any(str(llm.get(key) or "").strip() for key in ("provider", "model", "base_url"))
 
 
-def _validated_orchestrator_draft_or_fallback(
+def _validated_workspace_managed_draft_or_fallback(
     *,
     raw_response: str,
     fallback: dict[str, Any],
@@ -565,26 +643,27 @@ def _validated_orchestrator_draft_or_fallback(
     if not parsed:
         return fallback
     try:
-        return OrchestratorDraftPayloadBody.model_validate(parsed).model_dump()
+        return WorkspaceManagedDraftPayloadBody.model_validate(parsed).model_dump()
     except Exception:
         return fallback
 
 
-async def _orchestrator_model_draft_or_fallback(
+async def _workspace_managed_model_draft_or_fallback(
     *,
     actor: str,
     tenant_id: str,
     prompt: str,
     fallback: dict[str, Any],
     suggested_skills: list[dict[str, Any]],
+    policy: WorkspaceManagedDraftPolicy,
 ) -> dict[str, Any]:
     from core.models import ChatRequest
     from duckclaw.channels import GatewayDeliveryContext
     import main as gateway_main
 
-    session_id = f"admin-orchestrator-draft-{uuid.uuid4().hex}"
+    session_id = f"admin-managed-workspace-draft-{uuid.uuid4().hex}"
     chat = ChatRequest(
-        message=_orchestrator_draft_prompt(prompt, suggested_skills),
+        message=_workspace_managed_draft_prompt(prompt, suggested_skills, policy),
         chat_id=session_id,
         user_id=actor or "admin-ui",
         username=actor or "admin-ui",
@@ -595,17 +674,22 @@ async def _orchestrator_model_draft_or_fallback(
     try:
         result = await gateway_main._invoke_chat(
             chat,
-            "platform-orchestrator",
+            "default",
             session_id=session_id,
             tenant_id=tenant_id,
             redis_client=None,
             delivery_context=GatewayDeliveryContext.trusted_admin_console(),
         )
     except Exception:
+        values = _workspace_managed_template_values(
+            prompt=prompt,
+            suggested_skills=suggested_skills,
+            project_name=str(fallback.get("project", {}).get("name") or ""),
+        )
         next_fallback = dict(fallback)
         next_fallback["shared_context"] = (
             f"{fallback.get('shared_context') or ''}\n\n"
-            "> Nota: no se pudo invocar el modelo configurado; se usó análisis local estructurado."
+            f"{_workspace_managed_format(policy.fallback.model_error_note_template, values)}"
         ).strip()
         return next_fallback
     raw = ""
@@ -613,10 +697,10 @@ async def _orchestrator_model_draft_or_fallback(
         raw = str(result.get("response") or result.get("reply") or "")
     else:
         raw = str(result or "")
-    return _validated_orchestrator_draft_or_fallback(raw_response=raw, fallback=fallback)
+    return _validated_workspace_managed_draft_or_fallback(raw_response=raw, fallback=fallback)
 
 
-def _orchestrator_skill_suggestions(db: Any, *, actor_email: str, prompt: str) -> list[dict[str, Any]]:
+def _workspace_managed_skill_suggestions(db: Any, *, actor_email: str, prompt: str) -> list[dict[str, Any]]:
     from duckclaw.admin_user_profiles import ensure_profile_for_user
     from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema
 
@@ -1536,35 +1620,46 @@ async def detach_workspace_project_agent(
     return {"ok": ok}
 
 
+# Compatibility alias: public clients still call /workspace/orchestrator/*.
 @router.post("/workspace/orchestrator/draft", dependencies=[Depends(_require_admin_key)])
-async def workspace_orchestrator_draft(
-    body: OrchestratorDraftBody,
+async def workspace_managed_draft_compat_alias(
+    body: WorkspaceManagedDraftBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_identity import open_gateway_db
-    from duckclaw.admin_worker_catalog import ensure_platform_orchestrator_for_actor
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
 
     prompt = body.prompt.strip()
     tenant_id = "default"
     with open_gateway_db(read_only=False) as db:
-        orchestrator = ensure_platform_orchestrator_for_actor(db, actor_email=actor)
-        tenant_id = str(orchestrator.get("tenant_id") or "default").strip() or "default"
-        suggested_skills = _orchestrator_skill_suggestions(db, actor_email=actor, prompt=prompt)
-    fallback = _orchestrator_fallback_draft(prompt=prompt, suggested_skills=suggested_skills)
-    if not _orchestrator_has_configured_llm(tenant_id=tenant_id, actor=actor):
+        profile = ensure_profile_for_user(db, email=actor)
+        tenant_id = str(profile.get("tenant_id") or "default").strip() or "default"
+        suggested_skills = _workspace_managed_skill_suggestions(db, actor_email=actor, prompt=prompt)
+        try:
+            policy = _workspace_managed_draft_policy(db)
+        except (FileNotFoundError, RuntimeError) as exc:
+            raise _workspace_policy_error(exc) from exc
+    fallback = _workspace_managed_fallback_draft(
+        prompt=prompt,
+        suggested_skills=suggested_skills,
+        policy=policy,
+    )
+    if not _workspace_managed_has_configured_llm(tenant_id=tenant_id, actor=actor):
         return fallback
-    return await _orchestrator_model_draft_or_fallback(
+    return await _workspace_managed_model_draft_or_fallback(
         actor=actor,
         tenant_id=tenant_id,
         prompt=prompt,
         fallback=fallback,
         suggested_skills=suggested_skills,
+        policy=policy,
     )
 
 
+# Compatibility alias: public clients still call /workspace/orchestrator/*.
 @router.post("/workspace/orchestrator/confirm", dependencies=[Depends(_require_admin_key)])
-async def workspace_orchestrator_confirm(
-    body: OrchestratorConfirmBody,
+async def workspace_managed_draft_confirm_compat_alias(
+    body: WorkspaceManagedDraftConfirmBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_identity import open_gateway_db
@@ -1572,7 +1667,6 @@ async def workspace_orchestrator_confirm(
         add_worker_context,
         add_worker_version,
         create_worker,
-        ensure_platform_orchestrator_for_actor,
         get_visible_worker_for_actor,
     )
     from duckclaw.admin_workspace import (
@@ -1584,8 +1678,11 @@ async def workspace_orchestrator_confirm(
     draft = body.draft
     created_workers: list[dict[str, Any]] = []
     with open_gateway_db(read_only=False) as db:
-        ensure_platform_orchestrator_for_actor(db, actor_email=actor)
         ensure_admin_workspace_schema(db)
+        try:
+            policy = _workspace_managed_draft_policy(db)
+        except (FileNotFoundError, RuntimeError) as exc:
+            raise _workspace_policy_error(exc) from exc
         db.execute("BEGIN TRANSACTION")
         try:
             project = create_workspace_project(
@@ -1605,8 +1702,8 @@ async def workspace_orchestrator_confirm(
                     owner_email=actor,
                     worker_id=worker_body.worker_id,
                     display_name=worker_body.display_name,
-                    source_kind="orchestrator_draft",
-                    source_template_id="platform-orchestrator",
+                    source_kind=policy.confirm.source_kind,
+                    source_template_id="default",
                     visibility="private",
                 )
                 if existing is None:
@@ -1624,13 +1721,13 @@ async def workspace_orchestrator_confirm(
                             "system_prompt.md": worker_body.system_prompt,
                             "soul.md": draft.shared_context,
                         },
-                        change_note="Creado desde Platform Orchestrator",
+                        change_note=policy.confirm.change_note,
                     )
                 if draft.shared_context.strip():
                     add_worker_context(
                         db,
                         worker_uid=worker["worker_uid"],
-                        title="Contexto compartido",
+                        title=policy.confirm.context_title,
                         content_md=draft.shared_context,
                         sort_order=0,
                     )
@@ -1647,7 +1744,7 @@ async def workspace_orchestrator_confirm(
             db.execute("ROLLBACK")
             raise
     _admin_audit(
-        "workspace.orchestrator.confirm",
+        "workspace.managed_draft.confirm",
         str(project.get("project_id")),
         str(project.get("name")),
         actor=actor,

@@ -6,10 +6,9 @@ import json
 from typing import Any
 
 
-def looks_like_finanz_local_cuentas_json(text: str) -> bool:
+def looks_like_tabular_account_rows_json(text: str) -> bool:
     """
-    True si el texto es un JSON array de filas tipo ``finance_worker.cuentas``
-    (id, name, balance, currency, updated_at).
+    True si el texto es un JSON array de filas tipo cuenta tabular.
     """
     s = (text or "").strip()
     if not s.startswith("["):

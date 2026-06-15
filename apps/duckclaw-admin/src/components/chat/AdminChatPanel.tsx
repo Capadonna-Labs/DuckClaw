@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import Link from 'next/link';
 import {
   Bot,
@@ -12,11 +12,7 @@ import {
 } from 'lucide-react';
 import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
 import { useVoiceNoteRecorder } from '@/components/chat/useVoiceNoteRecorder';
-import { ChatViewTabBar, type ChatViewTab } from '@/components/chat/ChatViewTabBar';
-import {
-  ConversationManagePanel,
-  type ConversationManagePanelProps,
-} from '@/components/chat/ConversationManagePanel';
+import type { ConversationManagePanelProps } from '@/components/chat/ConversationManagePanel';
 import { useAuthStore } from '@/store/authStore';
 import { ChatBubble, ThinkingBubble } from '@/components/chat/ChatBubble';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
@@ -49,7 +45,7 @@ export type AdminChatPanelProps = {
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
   headerActions?: React.ReactNode;
-  /** Pestaña «Conversación» (selector, renombrar, nueva/eliminar). */
+  /** Compatibilidad: los contenedores pueden resolver gestión de conversaciones fuera del panel base. */
   conversationManage?: Pick<
     ConversationManagePanelProps,
     'tenantId' | 'section' | 'refreshToken' | 'onSelect' | 'onCreateNew'
@@ -77,15 +73,8 @@ export function AdminChatPanel({
   conversationTitle,
   onRenameConversation,
   headerActions,
-  conversationManage,
   className = '',
 }: AdminChatPanelProps) {
-  const [viewTab, setViewTab] = useState<ChatViewTab>('chat');
-  const showConversationTab = Boolean(conversationManage && chatId && onRenameConversation);
-
-  useEffect(() => {
-    setViewTab('chat');
-  }, [chatId]);
   const { usuario } = useAuthStore();
   const internalChat = useAdminChat({
     chatId,
@@ -317,7 +306,7 @@ export function AdminChatPanel({
         </header>
       )}
 
-      {config?.team_hint && viewTab === 'chat' && (
+      {config?.team_hint && (
         <p
           className={`text-[10px] px-3 py-1.5 border-b shrink-0 ${
             config.authorized === false
@@ -334,24 +323,6 @@ export function AdminChatPanel({
         </p>
       )}
 
-      {showConversationTab ? (
-        <ChatViewTabBar active={viewTab} onChange={setViewTab} />
-      ) : null}
-
-      {showConversationTab && viewTab === 'conversation' && conversationManage ? (
-        <ConversationManagePanel
-          tenantId={conversationManage.tenantId}
-          section={conversationManage.section}
-          activeSessionId={chatId}
-          conversationTitle={conversationTitle ?? null}
-          refreshToken={conversationManage.refreshToken}
-          onSelect={conversationManage.onSelect}
-          onCreateNew={conversationManage.onCreateNew}
-          onRename={onRenameConversation ?? (async () => {})}
-          onAfterChange={() => setViewTab('chat')}
-        />
-      ) : (
-        <>
       <div className="relative flex-1 min-h-0 min-w-0 flex flex-col w-full">
         <div
           ref={scrollRef}
@@ -533,8 +504,6 @@ export function AdminChatPanel({
           </p>
         )}
       </footer>
-        </>
-      )}
     </section>
   );
 }

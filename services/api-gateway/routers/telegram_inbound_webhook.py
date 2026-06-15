@@ -30,7 +30,6 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Request, status
 from starlette.requests import ClientDisconnect
 
-from core.config import settings
 from core.context_injection_delta import (
     build_context_injection_delta,
     context_injection_queue_key,
@@ -101,16 +100,6 @@ def _context_time_anchor_block(
         "directive_kind": directive_kind,
     }
     return block, meta
-from core.war_rooms import (
-    hit_rate_limit,
-    is_war_room_tenant,
-    normalize_telegram_bot_username,
-    war_room_evaluate_mention_gate,
-    war_room_tenant_for_chat,
-    wr_append_audit,
-    wr_has_member,
-    wr_members_count,
-)
 from duckclaw.integrations.telegram import (
     TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
     TelegramBotApiAsyncClient,
@@ -491,17 +480,6 @@ def schedule_telegram_context_summary_background(
     asyncio.create_task(_bg_summarize_task())
 
 
-def _telegram_entities_for_message(msg: dict[str, Any]) -> list[dict[str, Any]]:
-    """Fotos/documentos usan caption_entities; texto plano usa entities."""
-    if (msg.get("caption") or "").strip():
-        raw = msg.get("caption_entities")
-    else:
-        raw = msg.get("entities")
-    if isinstance(raw, list):
-        return [x for x in raw if isinstance(x, dict)]
-    return []
-
-
 def _telegram_webhook_default_worker_id() -> str:
     from duckclaw.forge.team_env import default_worker_id_from_env
     from duckclaw.integrations.telegram.telegram_agent_token import pm2_app_to_worker_map_from_env
@@ -584,7 +562,7 @@ def _resolve_dynamic_worker_aliases() -> set[str]:
     return set(aliases)
 
 
-async def _wr_vlm_collect_album_items(
+async def _telegram_vlm_collect_album_items(
     redis_client: Any,
     *,
     tenant_id: str,
@@ -702,7 +680,7 @@ async def _ingest_telegram_visual_enrich_text(
         out: dict[str, Any] | None = None
         use_album = bool(mgid and redis_client is not None)
         if use_album:
-            album_items = await _wr_vlm_collect_album_items(
+            album_items = await _telegram_vlm_collect_album_items(
                 redis_client,
                 tenant_id=tenant_id,
                 media_group_id=mgid,
@@ -1030,10 +1008,8 @@ def build_telegram_inbound_webhook_router(
 
         text = _normalize_inbound_telegram_text_for_commands(msg.get("text") or msg.get("caption") or "")
         telegram_raw_caption = text
-        tg_entities = _telegram_entities_for_message(msg)
         visual, visual_from_parent_reply = _extract_visual_payload_with_reply(msg)
         has_visual = bool(visual.get("file_id"))
-        is_slash_command = text.startswith("/")
         from_user = msg.get("from") if isinstance(msg.get("from"), dict) else {}
         user_id_raw = from_user.get("id")
         user_id = str(user_id_raw if user_id_raw is not None else chat_id)
@@ -1044,11 +1020,10 @@ def build_telegram_inbound_webhook_router(
             or "Usuario"
         )
         chat_type = str(chat.get("type") or "private")
-        tenant_id = war_room_tenant_for_chat(chat_type, chat_id, tenant_id)
 
 
         # DM / chat privado: foto+caption edición → ComfyUI (sin VLM) o VLM para análisis.
-        if has_visual and not is_war_room_tenant(tenant_id):
+        if has_visual and chat_type.strip().lower() == "private":
             token_v = (reply_token or "").strip() or (
                 resolve_effective_telegram_bot_token() or ""
             ).strip()
@@ -1099,314 +1074,6 @@ def build_telegram_inbound_webhook_router(
                     "No hay bloque [VLM_CONTEXT]. Pide una descripción breve del contenido. "
                     "No afirmes que no puedes procesar imágenes: aquí falló la ingesta VLM, no el rol del asistente."
                 )
-
-        # War Rooms: grupos/supergrupos usan tenant soberano wr_<group_id>.
-        if is_war_room_tenant(tenant_id):
-            from core.gateway_acl_db import get_war_room_acl_duckdb
-
-            db = get_war_room_acl_duckdb()
-            sender_is_owner = bool(
-                str(user_id or "").strip()
-                and str(user_id).strip()
-                == str(os.environ.get("DUCKCLAW_OWNER_ID") or os.environ.get("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
-            )
-            sender_is_member = wr_has_member(db, tenant_id, user_id)
-            group_has_members = wr_members_count(db, tenant_id) > 0
-            bootstrap_mode = not group_has_members
-
-            if not bootstrap_mode and not sender_is_member and not sender_is_owner:
-                event = "UNAUTHORIZED_COMMAND_ATTEMPT" if is_slash_command else "UNAUTHORIZED_MEMBER"
-                _log.info("war_room_filter tag=unauthorized_member tenant_id=%s user_id=%s", tenant_id, user_id)
-                wr_append_audit(
-                    db,
-                    tenant_id=tenant_id,
-                    sender_id=user_id,
-                    target_agent=None,
-                    event_type=event,
-                    payload=(text or f"chat_id={chat_id}")[:1000],
-                )
-                return {"ok": "true"}
-            if bootstrap_mode:
-                wr_append_audit(
-                    db,
-                    tenant_id=tenant_id,
-                    sender_id=user_id,
-                    target_agent=None,
-                    event_type="BOOTSTRAP_MODE",
-                    payload="wr_members vacío: zero-trust y mention-gate relajados temporalmente",
-                )
-
-            # Mention gate ANTES del rate limit: los drops no consumen cupo anti-spam.
-            current_bot_username = normalize_telegram_bot_username(settings.TELEGRAM_BOT_USERNAME)
-            if not current_bot_username:
-                _log.warning(
-                    "war_room_gate: TELEGRAM_BOT_USERNAME vacío en settings; las menciones solo "
-                    "coincidirán con texto literal @user o 'duckclaw' (configure .env)."
-                )
-            wr_gate = war_room_evaluate_mention_gate(
-                combined_text=text,
-                entities=tg_entities,
-                has_visual_media=has_visual,
-                current_bot_username=settings.TELEGRAM_BOT_USERNAME,
-                bootstrap_mode=bootstrap_mode,
-            )
-            if not wr_gate.allowed:
-                _log.info(
-                    "war_room_gate decision=%s tenant_id=%s user_id=%s chat_id=%s has_visual=%s text_preview=%s",
-                    wr_gate.decision,
-                    tenant_id,
-                    user_id,
-                    chat_id,
-                    has_visual,
-                    (text or "")[:120],
-                )
-                wr_append_audit(
-                    db,
-                    tenant_id=tenant_id,
-                    sender_id=user_id,
-                    target_agent=None,
-                    event_type="DROP_NO_MENTION",
-                    payload=(
-                        f"decision={wr_gate.decision};visual={has_visual}:{(visual.get('mime_type') or '')}"[:1000]
-                    ),
-                )
-                return {"ok": "true"}
-            _log.info(
-                "war_room_gate decision=%s tenant_id=%s user_id=%s chat_id=%s has_visual=%s bot_user=%s",
-                wr_gate.decision,
-                tenant_id,
-                user_id,
-                chat_id,
-                has_visual,
-                current_bot_username or "(unset)",
-            )
-            wr_append_audit(
-                db,
-                tenant_id=tenant_id,
-                sender_id=user_id,
-                target_agent=None,
-                event_type=wr_gate.decision,
-                payload=(text or "")[:1000],
-            )
-
-            # Fly commands no cuentan para anti-spam (deben seguir operativos bajo carga).
-            if not is_slash_command:
-                is_allowed, notify_cooldown, ttl = await hit_rate_limit(
-                    redis_client,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    cooldown_seconds=300,
-                )
-                if not is_allowed:
-                    if notify_cooldown:
-                        _log.info(
-                            "war_room_filter tag=rate_limited_notified tenant_id=%s user_id=%s",
-                            tenant_id,
-                            user_id,
-                        )
-                        token_rl = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
-                        if token_rl:
-                            try:
-                                client_rl = TelegramBotApiAsyncClient(token_rl)
-                                await client_rl.send_message(
-                                    chat_id=chat_id,
-                                    text=f"Cooldown activo. Intenta de nuevo en {max(1, int(ttl))} segundos.",
-                                    parse_mode=None,
-                                )
-                            except Exception as send_exc:  # noqa: BLE001
-                                _log.warning("telegram webhook cooldown notify falló: %s", send_exc)
-                        wr_append_audit(
-                            db,
-                            tenant_id=tenant_id,
-                            sender_id=user_id,
-                            target_agent=None,
-                            event_type="RATE_LIMIT_NOTIFIED",
-                            payload=(text or "")[:1000],
-                        )
-                    else:
-                        _log.info(
-                            "war_room_filter tag=rate_limited_silenced tenant_id=%s user_id=%s",
-                            tenant_id,
-                            user_id,
-                        )
-                        wr_append_audit(
-                            db,
-                            tenant_id=tenant_id,
-                            sender_id=user_id,
-                            target_agent=None,
-                            event_type="RATE_LIMIT_SILENCED",
-                            payload=(text or "")[:1000],
-                        )
-                    return {"ok": "true"}
-
-            if has_visual:
-                if visual_from_parent_reply:
-                    _log.info(
-                        "war_room_filter tag=visual_from_reply tenant_id=%s user_id=%s",
-                        tenant_id,
-                        user_id,
-                    )
-                mime_type = (visual.get("mime_type") or "").strip().lower()
-                token_v = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
-                mgid_wr = (visual.get("media_group_id") or "").strip()
-                if should_route_comfyui_edit(
-                    has_visual=True,
-                    caption=telegram_raw_caption,
-                    media_group_id=mgid_wr,
-                ):
-                    if token_v:
-                        try:
-                            text = await ingest_comfyui_edit_inbound(
-                                bot_token=token_v,
-                                file_id=(visual.get("file_id") or "").strip(),
-                                caption=telegram_raw_caption,
-                                tenant_id=tenant_id,
-                                mime_type=(mime_type or "image/jpeg"),
-                            )
-                            wr_append_audit(
-                                db,
-                                tenant_id=tenant_id,
-                                sender_id=user_id,
-                                target_agent=None,
-                                event_type="COMFYUI_EDIT_INBOUND",
-                                payload=(telegram_raw_caption or "")[:1000],
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            _log.warning("comfyui inbound WR failed: %s", exc)
-                            text = (
-                                "[COMFYUI_EDIT_FAILED] No se pudo preparar la foto para edición. "
-                                f"Detalle: {exc}"
-                            )
-                    else:
-                        _log.warning("war_room comfy edit sin token de bot")
-                elif mime_type and mime_type not in _VISUAL_ALLOWED_MIME:
-                    wr_append_audit(
-                        db,
-                        tenant_id=tenant_id,
-                        sender_id=user_id,
-                        target_agent=None,
-                        event_type="VLM_MIME_REJECTED",
-                        payload=(mime_type or "unknown")[:128],
-                    )
-                    return {"ok": "true"}
-                mgid = mgid_wr
-                if token_v:
-                    try:
-                        _log.info(
-                            "war_room inbound tag=VLM_PAYLOAD_RECEIVED tenant_id=%s user_id=%s "
-                            "file_id_prefix=%s caption_len=%s from_reply=%s mgid=%s",
-                            tenant_id,
-                            user_id,
-                            str(visual.get("file_id") or "")[:16],
-                            len(text or ""),
-                            visual_from_parent_reply,
-                            mgid or "-",
-                        )
-                        wr_append_audit(
-                            db,
-                            tenant_id=tenant_id,
-                            sender_id=user_id,
-                            target_agent=None,
-                            event_type="VLM_PAYLOAD_RECEIVED",
-                            payload=(visual.get("mime_type") or "image/jpeg")[:128],
-                        )
-                        out: dict[str, Any] | None = None
-                        use_album = bool(mgid and redis_client is not None)
-                        if use_album:
-                            album_items = await _wr_vlm_collect_album_items(
-                                redis_client,
-                                tenant_id=tenant_id,
-                                media_group_id=mgid,
-                                file_id=(visual.get("file_id") or "").strip(),
-                                mime_type=mime_type or "image/jpeg",
-                                caption=text,
-                            )
-                            if album_items is None:
-                                return {"ok": "true"}
-                            if not album_items:
-                                return {"ok": "true"}
-                            cap_merged = _merge_album_captions_for_vlm(album_items, text)
-                            if len(album_items) == 1:
-                                one = album_items[0]
-                                out = await process_visual_payload(
-                                    bot_token=token_v,
-                                    file_id=one["file_id"],
-                                    caption=cap_merged,
-                                    mime_type=one["mime"],
-                                    media_group_id=mgid,
-                                )
-                            else:
-                                pairs = [(it["file_id"], it["mime"]) for it in album_items]
-                                out = await process_visual_album_batch(
-                                    bot_token=token_v,
-                                    items=pairs,
-                                    caption=cap_merged,
-                                    media_group_id=mgid,
-                                )
-                        else:
-                            out = await process_visual_payload(
-                                bot_token=token_v,
-                                file_id=(visual.get("file_id") or "").strip(),
-                                caption=text,
-                                mime_type=(mime_type or "image/jpeg"),
-                                media_group_id=mgid,
-                            )
-                        if out and out.get("vlm_summary"):
-                            await vlm_post_inference_cooldown()
-                            text = (
-                                f"Usuario dice: {text or '(sin caption)'}\n"
-                                f"Contexto visual adjunto: {out['vlm_summary']}\n"
-                                f"[VLM_CONTEXT image_hash={out.get('image_hash','')} confidence={out.get('confidence_score',0.0)}]"
-                            ).strip()
-                            await push_vlm_state_delta_redis(
-                                redis_client,
-                                tenant_id=tenant_id,
-                                image_hash=str(out.get("image_hash") or ""),
-                                vlm_summary=str(out["vlm_summary"]),
-                                confidence_score=float(out.get("confidence_score", 0.0)),
-                            )
-                            wr_append_audit(
-                                db,
-                                tenant_id=tenant_id,
-                                sender_id=user_id,
-                                target_agent=None,
-                                event_type="VLM_CONTEXT_EXTRACTED",
-                                payload=str(out.get("image_hash") or "")[:256],
-                            )
-                            _log.info(
-                                "vlm tag=extracted tenant_id=%s album=%s count=%s hash_prefix=%s",
-                                tenant_id,
-                                bool(mgid),
-                                int(out.get("image_count", 1)),
-                                str(out.get("image_hash") or "")[:12],
-                            )
-                    except VlmIngestAllFailed as v_exc:
-                        _log.warning(
-                            "VLM ingest falló: %s",
-                            vlm_exception_for_log(v_exc.cause),
-                        )
-                        wr_append_audit(
-                            db,
-                            tenant_id=tenant_id,
-                            sender_id=user_id,
-                            target_agent=None,
-                            event_type="VLM_INGEST_FAILED",
-                            payload=vlm_exception_for_log(v_exc.cause)[:500],
-                        )
-                        if v_exc.gemini_503:
-                            await _notify_telegram_gemini_vlm_503(
-                                bot_token=token_v, chat_id=chat_id
-                            )
-                    except Exception as exc:  # noqa: BLE001
-                        _log.warning("VLM ingest falló: %s", vlm_exception_for_log(exc))
-                        wr_append_audit(
-                            db,
-                            tenant_id=tenant_id,
-                            sender_id=user_id,
-                            target_agent=None,
-                            event_type="VLM_INGEST_FAILED",
-                            payload=vlm_exception_for_log(exc)[:500],
-                        )
 
         is_ctx_add, ctx_body = _resolve_context_add_body(
             raw_caption=telegram_raw_caption,

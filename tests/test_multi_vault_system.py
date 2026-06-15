@@ -66,7 +66,7 @@ def test_vault_command_flow(tmp_path, monkeypatch):
     db = _DummyDB()
     out = handle_command(db, "chat1", "/vault", requester_id="u1", tenant_id="default", vault_user_id="u1")
     assert out and "Bóveda activa" in out
-    out = handle_command(db, "chat1", "/vault new trabajo", requester_id="u1", tenant_id="default", vault_user_id="u1")
+    out = handle_command(db, "chat1", "/vault new proyecto", requester_id="u1", tenant_id="default", vault_user_id="u1")
     assert out and "Bóveda creada" in out
     rows = list_vaults("u1")
     target = [r for r in rows if r["vault_id"] != "default"][0]["vault_id"]
@@ -80,28 +80,28 @@ def test_scoped_resolve_ignores_finanzdb_on_disk(tmp_path, monkeypatch):
     user = TELEGRAM_TEST_USER_ID
     private_dir = tmp_path / "db" / "private" / user
     private_dir.mkdir(parents=True, exist_ok=True)
-    (private_dir / "finanzdb1.duckdb").write_bytes(b"x" * 200_000)
-    active_id, active_path = resolve_active_vault(user, scope_id="trabajo")
+    (private_dir / "vault1.duckdb").write_bytes(b"x" * 200_000)
+    active_id, active_path = resolve_active_vault(user, scope_id="proyecto")
     assert active_id == "default"
     assert active_path.endswith("default.duckdb")
 
 
 def test_scoped_initial_vault_from_env(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID", "job_hunter")
+    monkeypatch.setenv("DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID", "custom_scope")
     user = TELEGRAM_TEST_USER_ID
     private_dir = tmp_path / "db" / "private" / user
     private_dir.mkdir(parents=True, exist_ok=True)
-    (private_dir / "finanzdb1.duckdb").write_bytes(b"x" * 200_000)
-    active_id, active_path = resolve_active_vault(user, scope_id="trabajo")
-    assert active_id == "job_hunter"
-    assert "job_hunter" in active_path
+    (private_dir / "vault1.duckdb").write_bytes(b"x" * 200_000)
+    active_id, active_path = resolve_active_vault(user, scope_id="proyecto")
+    assert active_id == "custom_scope"
+    assert "custom_scope" in active_path
 
 
 def test_vault_scope_id_for_tenant_slug():
     assert vault_scope_id_for_tenant("default") == ""
     assert vault_scope_id_for_tenant("") == ""
-    assert vault_scope_id_for_tenant("Trabajo") == "trabajo"
+    assert vault_scope_id_for_tenant("Proyecto") == "proyecto"
 
 
 def test_read_only_skips_agent_config_ddl_rw_persists_chat_state(tmp_path) -> None:
@@ -121,8 +121,8 @@ def test_read_only_skips_agent_config_ddl_rw_persists_chat_state(tmp_path) -> No
 
     rw = DuckClaw(str(p), read_only=False)
     _ensure_agent_config(rw)
-    set_chat_state(rw, "chat1", "team_templates", '["Job-Hunter"]')
-    assert get_chat_state(rw, "chat1", "team_templates") == '["Job-Hunter"]'
+    set_chat_state(rw, "chat1", "team_templates", '["Template-A"]')
+    assert get_chat_state(rw, "chat1", "team_templates") == '["Template-A"]'
     rw.close()
 
 
@@ -152,7 +152,7 @@ def test_vault_command_scoped_tenant(tmp_path, monkeypatch):
     private_dir = tmp_path / "db" / "private" / "u1"
     private_dir.mkdir(parents=True, exist_ok=True)
     (private_dir / "finanzdb1.duckdb").write_bytes(b"x" * 200_000)
-    out = handle_command(db, "chat1", "/vault", requester_id="u1", tenant_id="Trabajo", vault_user_id="u1")
+    out = handle_command(db, "chat1", "/vault", requester_id="u1", tenant_id="Proyecto", vault_user_id="u1")
     assert out and "default" in out
     assert "finanzdb1" not in out
 

@@ -1,11 +1,13 @@
 """Tests Admin Access API (console users, login, shared grants)."""
 from __future__ import annotations
 
+import ast
 import base64
 import hashlib
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import duckdb
 import pytest
@@ -22,6 +24,15 @@ from duckclaw.admin_console_users import (
     verify_password,
 )
 from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
+
+ACCESS_MANAGEMENT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "services"
+    / "api-gateway"
+    / "routers"
+    / "admin_domains"
+    / "access_management.py"
+)
 
 
 class _Adapter:
@@ -241,13 +252,64 @@ def test_console_users_crud(gateway_admin_client: TestClient, gateway_db: Path) 
     assert r4.status_code == 200
 
 
-def test_shared_grants(gateway_admin_client: TestClient, gateway_db: Path) -> None:
+def _admin_access_function_node(name: str) -> ast.AsyncFunctionDef:
+    tree = ast.parse(ACCESS_MANAGEMENT_PATH.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"{name} not found in access_management.py")
+
+
+def _called_function_names(node: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Call):
+            continue
+        if isinstance(child.func, ast.Name):
+            names.add(child.func.id)
+        elif isinstance(child.func, ast.Attribute):
+            names.add(child.func.attr)
+    return names
+
+
+def test_admin_shared_grant_mutations_use_typed_db_writer_commands() -> None:
+    mutators = {
+        "post_shared_grant": {
+            "command": "UpsertSharedDbGrantCommand",
+            "forbidden_direct_helper": "upsert_shared_grant",
+        },
+        "delete_shared_grant": {
+            "command": "DeleteSharedDbGrantCommand",
+            "forbidden_direct_helper": "delete_shared_grant",
+        },
+    }
+    source = ACCESS_MANAGEMENT_PATH.read_text(encoding="utf-8")
+    for function_name, expected in mutators.items():
+        node = _admin_access_function_node(function_name)
+        segment = ast.get_source_segment(source, node) or ""
+        calls = _called_function_names(node)
+
+        assert "read_only=False" not in segment
+        assert "DuckClaw" not in calls
+        assert expected["forbidden_direct_helper"] not in calls
+        assert "_enqueue_shared_grant_command" in calls
+        assert expected["command"] in calls
+
+
+def test_shared_grants(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
+    monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
     headers = {"X-Admin-Key": "test-admin-key"}
-    r = gateway_admin_client.post(
-        "/api/v1/admin/access/shared-grants",
-        headers=headers,
-        json={"tenant_id": "default", "user_id": "12345", "resource_key": "default"},
-    )
+    with patch("duckclaw.db_write_queue.spawn_inline_writes_enabled", return_value=True):
+        r = gateway_admin_client.post(
+            "/api/v1/admin/access/shared-grants",
+            headers=headers,
+            json={"tenant_id": "default", "user_id": "12345", "resource_key": "default"},
+        )
     assert r.status_code == 200
 
     r2 = gateway_admin_client.get(
@@ -258,10 +320,11 @@ def test_shared_grants(gateway_admin_client: TestClient, gateway_db: Path) -> No
     grants = r2.json().get("grants") or []
     assert any(g["user_id"] == "12345" and g["resource_key"] == "default" for g in grants)
 
-    r3 = gateway_admin_client.delete(
-        "/api/v1/admin/access/shared-grants?tenant_id=default&user_id=12345&resource_key=default",
-        headers=headers,
-    )
+    with patch("duckclaw.db_write_queue.spawn_inline_writes_enabled", return_value=True):
+        r3 = gateway_admin_client.delete(
+            "/api/v1/admin/access/shared-grants?tenant_id=default&user_id=12345&resource_key=default",
+            headers=headers,
+        )
     assert r3.status_code == 200
 
 

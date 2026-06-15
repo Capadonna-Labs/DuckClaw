@@ -86,6 +86,20 @@ def _admin_audit(
     admin_router._admin_audit(action, resource, detail, actor=actor, meta=meta)
 
 
+def _enqueue_shared_grant_command(command: Any) -> str:
+    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
+    try:
+        result = poll_task_status_sync(task_id, timeout_sec=0.5, interval_sec=0.05)
+    except Exception:
+        result = None
+    if result and result.status == "failed":
+        raise RuntimeError(result.detail or "db-writer rejected shared grant command")
+    return task_id
+
+
 def _list_whitelist_users_merged(db: Any, *, tenant_id: str) -> list[dict[str, str]]:
     from duckclaw.graphs.on_the_fly_commands import (
         _dedupe_authorized_users_by_user_id,
@@ -298,9 +312,9 @@ async def post_shared_grant(
     body: SharedGrantBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
-    from duckclaw.shared_db_grants import upsert_shared_grant, validate_resource_key
+    from duckclaw.shared_db_grants import validate_resource_key
+    from duckclaw.write_commands import UpsertSharedDbGrantCommand
 
     tid = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
     uid = (body.user_id or "").strip()
@@ -312,13 +326,19 @@ async def post_shared_grant(
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
         raise _problem(404, "Gateway DuckDB no encontrada", gw)
-    rw = DuckClaw(gw, read_only=False, engine="python")
     try:
-        upsert_shared_grant(rw, tenant_id=tid, user_id=uid, resource_key=rk)
-    finally:
-        rw.close()
+        task_id = _enqueue_shared_grant_command(
+            UpsertSharedDbGrantCommand(
+                tenant_id=tid,
+                actor_email=actor,
+                user_id=uid,
+                resource_key=rk,
+            )
+        )
+    except RuntimeError as exc:
+        raise _problem(503, "DB-writer rechazó shared grant", str(exc)) from exc
     _admin_audit("access.shared.grant", f"tenant:{tid}", f"{uid}:{rk}", actor=actor)
-    return {"ok": True, "tenant_id": tid, "user_id": uid, "resource_key": rk, "db_path": gw}
+    return {"ok": True, "tenant_id": tid, "user_id": uid, "resource_key": rk, "db_path": gw, "task_id": task_id}
 
 
 @router.delete("/access/shared-grants", dependencies=[Depends(require_admin_key)])
@@ -328,25 +348,33 @@ async def delete_shared_grant(
     resource_key: str = Query(...),
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
-    from duckclaw.shared_db_grants import delete_shared_grant
+    from duckclaw.shared_db_grants import validate_resource_key
+    from duckclaw.write_commands import DeleteSharedDbGrantCommand
 
     tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
     uid = (user_id or "").strip()
     rk = (resource_key or "").strip().lower()
     if not uid or not rk:
         raise _problem(400, "user_id y resource_key requeridos", "")
+    if not validate_resource_key(rk):
+        raise _problem(400, "resource_key inválido", rk)
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
         raise _problem(404, "Gateway DuckDB no encontrada", gw)
-    rw = DuckClaw(gw, read_only=False, engine="python")
     try:
-        delete_shared_grant(rw, tenant_id=tid, user_id=uid, resource_key=rk)
-    finally:
-        rw.close()
+        task_id = _enqueue_shared_grant_command(
+            DeleteSharedDbGrantCommand(
+                tenant_id=tid,
+                actor_email=actor,
+                user_id=uid,
+                resource_key=rk,
+            )
+        )
+    except RuntimeError as exc:
+        raise _problem(503, "DB-writer rechazó shared grant", str(exc)) from exc
     _admin_audit("access.shared.revoke", f"tenant:{tid}", f"{uid}:{rk}", actor=actor)
-    return {"ok": True, "tenant_id": tid, "user_id": uid, "resource_key": rk, "db_path": gw}
+    return {"ok": True, "tenant_id": tid, "user_id": uid, "resource_key": rk, "db_path": gw, "task_id": task_id}
 
 
 @router.get("/telegram/whitelist", dependencies=[Depends(require_admin_key)])

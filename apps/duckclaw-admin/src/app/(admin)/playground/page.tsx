@@ -69,7 +69,7 @@ export default function PlaygroundPage() {
       activeProject && projectWorkerIds.length > 0
         ? (config?.workers ?? []).filter((worker) => {
             const id = workerOptionId(worker);
-            return projectWorkerIds.includes(id) || workerOptionId(worker) === 'platform-orchestrator';
+            return projectWorkerIds.includes(id);
           })
         : (config?.workers ?? []),
     [activeProject, config?.workers, projectWorkerIds]
@@ -79,7 +79,7 @@ export default function PlaygroundPage() {
     (candidate: string) => {
       if (!activeProject || projectWorkerIds.length === 0) return true;
       const id = candidate.trim();
-      return projectWorkerIds.includes(id) || id === 'platform-orchestrator';
+      return projectWorkerIds.includes(id);
     },
     [activeProject, projectWorkerIds]
   );

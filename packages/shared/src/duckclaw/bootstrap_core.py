@@ -1,10 +1,4 @@
-"""
-DDL idempotente del núcleo DuckClaw (perfil genérico / Spawn).
-
-Spec: docs/specs/features/platform/SPAWN_GENERIC_DEPLOY.md
-Sin esquemas de dominio (quant_core, finance_worker, run_schema forge).
-Las migraciones versionadas están en duckclaw.schema_migrations.
-"""
+"""DDL idempotente del núcleo DuckClaw (perfil genérico / Spawn)."""
 
 from __future__ import annotations
 
@@ -148,12 +142,14 @@ def bootstrap_core_schema(con: Any, *, seed_admin: bool = True) -> None:
     )
 
 
-def core_domain_schemas_present(con: Any) -> list[str]:
-    """Nombres de esquemas de dominio que no deben existir en perfil spawn."""
+def core_unexpected_schemas_present(con: Any, schema_names: tuple[str, ...]) -> list[str]:
+    """Nombres de esquemas no esperados presentes en una conexión."""
+    names = tuple(str(name).strip() for name in schema_names if str(name).strip())
+    if not names:
+        return []
+    placeholders = ", ".join("?" for _ in names)
     rows = con.execute(
-        """
-        SELECT schema_name FROM information_schema.schemata
-        WHERE schema_name IN ('quant_core', 'finance_worker')
-        """
+        f"SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ({placeholders})",
+        list(names),
     ).fetchall()
     return [str(r[0]) for r in rows]

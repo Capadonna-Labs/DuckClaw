@@ -9,7 +9,7 @@ from duckclaw.integrations.telegram import telegram_agent_token as m
 
 def test_telegram_agent_token_env_name() -> None:
     assert m.telegram_agent_token_env_name("bi_analyst") == "TELEGRAM_BI_ANALYST_TOKEN"
-    assert m.telegram_agent_token_env_name("finanz") == "TELEGRAM_FINANZ_TOKEN"
+    assert m.telegram_agent_token_env_name("worker_a") == "TELEGRAM_WORKER_A_TOKEN"
 
 
 def test_resolve_prefers_standard_over_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,10 +24,10 @@ def test_resolve_legacy_bi(monkeypatch: pytest.MonkeyPatch) -> None:
     assert m.resolve_telegram_token_for_worker_id("bi_analyst") == "legacy-bi"
 
 
-def test_resolve_finanz_fallback_bot_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TELEGRAM_FINANZ_TOKEN", raising=False)
+def test_resolve_unknown_worker_does_not_use_generic_bot_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TELEGRAM_WORKER_A_TOKEN", raising=False)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "only-generic")
-    assert m.resolve_telegram_token_for_worker_id("finanz") == "only-generic"
+    assert m.resolve_telegram_token_for_worker_id("worker_a") == ""
 
 
 def test_resolve_flat_env_bi_analyst_alias() -> None:
@@ -36,21 +36,21 @@ def test_resolve_flat_env_bi_analyst_alias() -> None:
 
 
 def test_pm2_env_dict_prefers_worker_token_over_generic_bot_token() -> None:
-    """Evita que JobHunter-Gateway use TELEGRAM_BOT_TOKEN de Finanz del bloque PM2 fusionado."""
+    """Evita que un gateway dedicado use TELEGRAM_BOT_TOKEN de otro bloque PM2 fusionado."""
     env = {
-        "TELEGRAM_BOT_TOKEN": "finanz-bot-token",
-        "TELEGRAM_JOB_HUNTER_TOKEN": "job-hunter-bot-token",
+        "TELEGRAM_BOT_TOKEN": "generic-bot-token",
+        "TELEGRAM_RESEARCH_WORKER_TOKEN": "research-worker-bot-token",
     }
-    assert m.telegram_token_from_pm2_env_dict(env, "Job-Hunter") == "job-hunter-bot-token"
+    assert m.telegram_token_from_pm2_env_dict(env, "research-worker") == "research-worker-bot-token"
 
 
-def test_pm2_env_dict_finanz_still_falls_back_to_generic_bot_token() -> None:
-    env = {"TELEGRAM_BOT_TOKEN": "only-finanz"}
-    assert m.telegram_token_from_pm2_env_dict(env, "finanz") == "only-finanz"
+def test_pm2_env_dict_falls_back_to_generic_bot_token() -> None:
+    env = {"TELEGRAM_BOT_TOKEN": "only-generic"}
+    assert m.telegram_token_from_pm2_env_dict(env, "worker_a") == "only-generic"
 
 
-def test_telegram_worker_ids_match_quant_folder_vs_manifest_id() -> None:
-    """Rutas compactas usan Quant-Trader; el manifest usa quant_trader."""
-    assert m.telegram_worker_ids_match_for_compact_route("Quant-Trader", "quant_trader")
-    assert m.telegram_worker_ids_match_for_compact_route("quant_trader", "Quant-Trader")
-    assert not m.telegram_worker_ids_match_for_compact_route("finanz", "Quant-Trader")
+def test_telegram_worker_ids_match_folder_vs_manifest_id() -> None:
+    """Rutas compactas toleran guiones, underscores y case."""
+    assert m.telegram_worker_ids_match_for_compact_route("Worker-A", "worker_a")
+    assert m.telegram_worker_ids_match_for_compact_route("worker_a", "Worker-A")
+    assert not m.telegram_worker_ids_match_for_compact_route("worker_b", "Worker-A")

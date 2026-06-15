@@ -14,7 +14,7 @@ class ManagerAgentState(TypedDict, total=False):
     - messages: historial de mensajes del grafo (opcional, para compatibilidad con LangGraph).
     - chat_id: identificador del chat / sesión (tenant_id en task_audit_log).
     - tenant_id: identificador lógico del tenant (para whitelist y aislamiento de workers).
-    - assigned_worker_id: worker al que se delegó la tarea (finanz, support, etc.).
+    - assigned_worker_id: worker al que se delegó la tarea.
     - incoming: mensaje original del usuario.
     - input: mismo texto que incoming cuando aplica (LangSmith / vista previa columna Input).
     - history: historial condensado de conversación (lista de mensajes o turnos).
@@ -62,7 +62,7 @@ class ManagerAgentState(TypedDict, total=False):
     # Token Bot API del webhook que originó el turno (multiplex); heartbeats en hilos no heredan ContextVar.
     outbound_telegram_bot_token: Optional[str]
 
-    # Worker de la ruta HTTP (p. ej. /api/v1/agent/Quant-Trader/chat). Usado para anclar SYSTEM_EVENT de /crons --delta.
+    # Worker de la ruta HTTP. Usado para anclar SYSTEM_EVENT de /crons --delta.
     entry_worker_id: Optional[str]
 
     coordinator_worker_id: Optional[str]

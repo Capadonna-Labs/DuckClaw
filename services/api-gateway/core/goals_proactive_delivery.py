@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from duckclaw.forge.homeostasis.goals_alignment import normalize_notify_channel
+from duckclaw.homeostasis.goals_alignment import normalize_notify_channel
 
 
 def resolve_notify_channel(payload: Any, *, chat_state_channel: str = "") -> str:

@@ -38,14 +38,14 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     assert "listWorkspaceProjects" in service
     assert "assignWorkspaceProjectAgent" in service
     assert "deleteWorkspaceProject" in service
-    assert "createOrchestratorDraft" in service
-    assert "confirmOrchestratorDraft" in service
+    assert "createManagedWorkspaceDraft" in service
+    assert "confirmManagedWorkspaceDraft" in service
     assert "/workspace/orchestrator/draft" in service
     assert "createOrchestratorDraft" not in page
     assert "confirmOrchestratorDraft" not in page
     assert "orchestratorPrompt" not in page
     assert "textarea" not in page
-    assert "worker=platform-orchestrator" in table
+    assert "worker=platform" + "-orchestrator" not in table
     assert "project=${encodeURIComponent(project.project_id)}" in table
     assert "Se eliminará definitivamente de la tabla de proyectos" in page
     assert 'window.confirm(\n      `Eliminar definitivamente "${project.name}"?' not in page
@@ -177,7 +177,7 @@ def test_template_editor_explains_db_context_storage() -> None:
 
 def test_playground_project_selection_forces_project_worker() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
-    router = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    router = Path("services/api-gateway/routers/admin_domains/playground_chat.py").read_text(encoding="utf-8")
     provider = Path("packages/agents/src/duckclaw/forge/rag/context_provider.py").read_text(encoding="utf-8")
 
     assert "firstProjectWorkerId" in page
@@ -191,11 +191,11 @@ def test_playground_project_selection_forces_project_worker() -> None:
     assert "No confundas la base de conocimiento RAG con la bóveda DuckDB" in provider
 
 
-def test_projects_catalog_and_orchestrator_wizard_are_separate_routes() -> None:
+def test_projects_catalog_and_managed_workspace_draft_are_separate_routes() -> None:
     projects_page = Path("apps/duckclaw-admin/src/app/(admin)/projects/page.tsx").read_text(encoding="utf-8")
     wizard_page = Path("apps/duckclaw-admin/src/app/(admin)/projects/orchestrator/page.tsx").read_text(encoding="utf-8")
     wizard_component = Path(
-        "apps/duckclaw-admin/src/components/projects/ProjectOrchestratorWizard.tsx"
+        "apps/duckclaw-admin/src/components/projects/ProjectManagedWorkspaceDraftWizard.tsx"
     ).read_text(encoding="utf-8")
 
     assert 'href="/projects/orchestrator"' in projects_page
@@ -205,16 +205,60 @@ def test_projects_catalog_and_orchestrator_wizard_are_separate_routes() -> None:
     assert "createOrchestratorDraft" not in projects_page
     assert "confirmOrchestratorDraft" not in projects_page
     assert "orchestratorPrompt" not in projects_page
-    assert "ProjectOrchestratorWizard" in wizard_page
-    assert "createOrchestratorDraft" in wizard_component
-    assert "confirmOrchestratorDraft" in wizard_component
+    assert "ProjectManagedWorkspaceDraftWizard" in wizard_page
+    assert "createManagedWorkspaceDraft" in wizard_component
+    assert "confirmManagedWorkspaceDraft" in wizard_component
     assert "questionAnswers" in wizard_component
-    assert "Análisis del Orchestrator" in wizard_component
+    assert "Análisis del borrador administrado" in wizard_component
     assert "htmlFor={answerId}" in wizard_component
-    assert "orchestrator-question-${index}" in wizard_component
+    assert "managed-draft-question-${index}" in wizard_component
     assert "Respuesta opcional" in wizard_component
     assert "Continuar sin responder" in wizard_component
     assert "Para incorporarlas al borrador, ajusta el objetivo" in wizard_component
+
+
+def test_managed_workspace_draft_copy_and_symbols_avoid_orchestrator_product_naming() -> None:
+    """The legacy API path may say orchestrator; product/internal naming should not."""
+
+    targets = [
+        Path("apps/duckclaw-admin/src/app/(admin)/overview/page.tsx"),
+        Path("apps/duckclaw-admin/src/app/(admin)/templates/page.tsx"),
+        Path("apps/duckclaw-admin/src/app/(admin)/projects/orchestrator/page.tsx"),
+        Path("apps/duckclaw-admin/src/components/projects/ProjectManagedWorkspaceDraftWizard.tsx"),
+        Path("apps/duckclaw-admin/src/components/projects/ProjectsTable.tsx"),
+        Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts"),
+        Path("apps/duckclaw-admin/src/app/api/admin/forge-projects/route.ts"),
+        Path("apps/duckclaw-admin/src/services/adminService.ts"),
+        Path("services/api-gateway/routers/admin.py"),
+        Path("services/api-gateway/routers/admin_db_first.py"),
+    ]
+    forbidden = (
+        "Platform Orchestrator",
+        "Crear con Orchestrator",
+        "con el Orchestrator",
+        "el Orchestrator",
+        "El Orchestrator",
+        "Análisis del Orchestrator",
+        "Analizar con Orchestrator",
+        "ProjectOrchestratorWizard",
+        "createOrchestratorDraft",
+        "confirmOrchestratorDraft",
+        "OrchestratorDraft",
+        "OrchestratorConfirm",
+        "_orchestrator_",
+        "admin-orchestrator-draft",
+        "workspace.orchestrator.confirm",
+    )
+
+    leaks = [
+        f"{path}:{marker}"
+        for path in targets
+        if path.exists()
+        for marker in forbidden
+        if marker in path.read_text(encoding="utf-8")
+    ]
+
+    assert leaks == []
 
 
 def test_legacy_forge_projects_are_not_operational_in_admin_ui() -> None:
@@ -276,16 +320,16 @@ def test_topbar_can_restart_gateway_without_gateway_proxy() -> None:
 
 
 def test_manager_preserves_rag_blocks_for_worker_task() -> None:
-    manager = Path("packages/agents/src/duckclaw/graphs/manager_graph.py").read_text(encoding="utf-8")
+    manager = Path("packages/agents/src/duckclaw/manager/graph.py").read_text(encoding="utf-8")
     context_blocks = Path("packages/agents/src/duckclaw/forge/rag/context_blocks.py").read_text(encoding="utf-8")
 
     assert "from duckclaw.forge.rag.context_blocks import" in manager
-    assert "_preserve_context_blocks_for_worker" in manager
-    assert "_strip_tagged_blocks" in manager
+    assert "preserve_context_blocks_for_worker" in manager
+    assert "strip_tagged_blocks" in context_blocks
     assert "explicit_storage_request=explicit_duckdb_schema_request" in manager
     assert 'extract_tagged_block(incoming, "RAG_SOURCE_INVENTORY")' in context_blocks
     assert 'extract_tagged_block(incoming, "RAG_CONTEXT")' in context_blocks
     assert "Responde al usuario usando el contexto RAG disponible." in context_blocks
-    assert "planned_task_for_worker = _preserve_context_blocks_for_worker(incoming, planned_task)" in manager
+    assert "planned_task_for_worker = preserve_context_blocks_for_worker(" in manager
     assert '"input": planned_task_for_worker' in manager
     assert '"incoming": planned_task_for_worker' in manager

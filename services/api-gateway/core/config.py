@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # Configuración de Seguridad (valores por defecto para desarrollo/local; en producción definir en .env)
     JWT_SECRET: str = "dev-secret-change-in-production"
 
-    # Username del bot para este gateway (menciones War Room, sin @). Acepta TELEGRAM_BOT_USERNAME o DUCKCLAW_TELEGRAM_BOT_USERNAME en .env.
+    # Username del bot para este gateway (sin @). Acepta TELEGRAM_BOT_USERNAME o DUCKCLAW_TELEGRAM_BOT_USERNAME en .env.
     TELEGRAM_BOT_USERNAME: str = Field(
         default="",
         validation_alias=AliasChoices("TELEGRAM_BOT_USERNAME", "DUCKCLAW_TELEGRAM_BOT_USERNAME"),

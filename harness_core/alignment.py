@@ -77,7 +77,7 @@ def assess_manifest_alignment(
     goals_dicts = [g.model_dump() for g in manifest.goals]
     if goals_dicts and db is not None and chat_id is not None:
         try:
-            from duckclaw.forge.homeostasis.goals_alignment import assess_goals_list_alignment
+            from duckclaw.homeostasis.goals_alignment import assess_goals_list_alignment
 
             report = assess_goals_list_alignment(
                 db, chat_id, goals_dicts, worker_id=worker_id

@@ -20,9 +20,9 @@ from routers import telegram_inbound_webhook as _tg_wh
 from routers.telegram_inbound_webhook import (
     _extract_visual_payload,
     _extract_visual_payload_with_reply,
-    _wr_vlm_collect_album_items,
+    _telegram_vlm_collect_album_items,
 )
-from duckclaw.egress.quant_price_validator import (
+from duckclaw.egress.evidence_validator import (
     VISUAL_EVIDENCE_RETRY_REASON,
     enforce_visual_evidence_rule,
     visual_evidence_retry_system_message,
@@ -83,6 +83,14 @@ class _FakeRedisLists:
     async def lpush(self, key: str, value: str) -> int:
         self.lpush_calls.append((key, value))
         return 1
+
+
+class _FakeRuntimePolicy:
+    def __init__(self, *capabilities: str) -> None:
+        self._capabilities = set(capabilities)
+
+    def has_capability(self, capability: str) -> bool:
+        return capability in self._capabilities
 
 
 def test_extract_visual_payload_photo_prefers_largest() -> None:
@@ -160,9 +168,9 @@ def test_visual_evidence_rule_relaxed_when_no_tracked_ticker_in_reply() -> None:
             return '[{"t": "AAPL"}]'
 
     class _FakeSpec:
-        worker_id = "finanz"
-        logical_worker_id = "finanz"
-        quant_config = {"enabled": True}
+        worker_id = "market-worker"
+        logical_worker_id = "market-worker"
+        runtime_policy = _FakeRuntimePolicy("market_analysis")
 
     reply, reason = enforce_visual_evidence_rule(
         incoming="Usuario dice: x\n[VLM_CONTEXT image_hash=abc confidence=0.8]",
@@ -181,9 +189,9 @@ def test_visual_evidence_rule_blocks_known_ticker_price_without_tools() -> None:
             return '[{"t": "AAPL"}]'
 
     class _FakeSpec:
-        worker_id = "finanz"
-        logical_worker_id = "finanz"
-        quant_config = {"enabled": True}
+        worker_id = "market-worker"
+        logical_worker_id = "market-worker"
+        runtime_policy = _FakeRuntimePolicy("market_analysis")
 
     reply, reason = enforce_visual_evidence_rule(
         incoming="Usuario dice: x\n[VLM_CONTEXT image_hash=abc confidence=0.8]",
@@ -207,9 +215,9 @@ def test_visual_evidence_rule_accepts_verify_visual_claim_numeric() -> None:
             return '[{"t": "AAPL"}]'
 
     class _FakeSpec:
-        worker_id = "finanz"
-        logical_worker_id = "finanz"
-        quant_config = {"enabled": True}
+        worker_id = "market-worker"
+        logical_worker_id = "market-worker"
+        runtime_policy = _FakeRuntimePolicy("market_analysis")
 
     reply, reason = enforce_visual_evidence_rule(
         incoming="Usuario dice: x\n[VLM_CONTEXT image_hash=abc confidence=0.8]",
@@ -561,7 +569,7 @@ def test_push_vlm_state_delta_redis_payload_shape(monkeypatch: pytest.MonkeyPatc
     async def _run() -> None:
         await vlm_mod.push_vlm_state_delta_redis(
             fake,
-            tenant_id="wr_-1001",
+            tenant_id="tenant_visual",
             image_hash="abc",
             vlm_summary="VIX 24",
             confidence_score=0.91,
@@ -573,18 +581,18 @@ def test_push_vlm_state_delta_redis_payload_shape(monkeypatch: pytest.MonkeyPatc
     assert qkey == "q:test:vlm"
     body = json.loads(raw)
     assert body["delta_type"] == "VLM_CONTEXT_EXTRACTED"
-    assert body["tenant_id"] == "wr_-1001"
+    assert body["tenant_id"] == "tenant_visual"
     assert body["mutation"]["image_hash"] == "abc"
     assert body["mutation"]["confidence_score"] == 0.91
 
 
-def test_wr_vlm_collect_album_single_message() -> None:
+def test_telegram_vlm_collect_album_single_message() -> None:
     r = _FakeRedisLists()
 
     async def _run() -> None:
-        x = await _wr_vlm_collect_album_items(
+        x = await _telegram_vlm_collect_album_items(
             r,
-            tenant_id="wr_-9",
+            tenant_id="tenant-9",
             media_group_id="album-1",
             file_id="f1",
             mime_type="image/png",
@@ -595,7 +603,7 @@ def test_wr_vlm_collect_album_single_message() -> None:
     asyncio.run(_run())
 
 
-def test_wr_vlm_collect_album_parallel_one_leader_merges(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_telegram_vlm_collect_album_parallel_one_leader_merges(monkeypatch: pytest.MonkeyPatch) -> None:
     _real_asyncio_sleep = asyncio.sleep
 
     async def _yield_sleep(_t: float = 0.0) -> None:
@@ -603,11 +611,11 @@ def test_wr_vlm_collect_album_parallel_one_leader_merges(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(_tg_wh.asyncio, "sleep", _yield_sleep)
     r = _FakeRedisLists()
-    tenant = "wr_z"
+    tenant = "tenant-z"
     mg = "g1"
 
     async def _one(fid: str, cap: str) -> list[dict[str, str]] | None:
-        return await _wr_vlm_collect_album_items(
+        return await _telegram_vlm_collect_album_items(
             r,
             tenant_id=tenant,
             media_group_id=mg,
@@ -627,7 +635,7 @@ def test_wr_vlm_collect_album_parallel_one_leader_merges(monkeypatch: pytest.Mon
     asyncio.run(_run())
 
 
-def test_wr_vlm_collect_album_caps_at_three_unique(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_telegram_vlm_collect_album_caps_at_three_unique(monkeypatch: pytest.MonkeyPatch) -> None:
     _real_asyncio_sleep = asyncio.sleep
 
     async def _yield_sleep(_t: float = 0.0) -> None:
@@ -635,11 +643,11 @@ def test_wr_vlm_collect_album_caps_at_three_unique(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(_tg_wh.asyncio, "sleep", _yield_sleep)
     r = _FakeRedisLists()
-    tenant = "wr_cap"
+    tenant = "tenant-cap"
     mg = "g2"
 
     async def _one(fid: str) -> list[dict[str, str]] | None:
-        return await _wr_vlm_collect_album_items(
+        return await _telegram_vlm_collect_album_items(
             r,
             tenant_id=tenant,
             media_group_id=mg,

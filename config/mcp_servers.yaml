@@ -1,6 +1,6 @@
 # MCP stdio servers for DuckClaw (paths relative to repo root).
 # GitHub MCP no se declara aquí: el gateway lo levanta vía Docker desde
-# ``packages/agents/src/duckclaw/forge/skills/github_bridge.py`` (stdio → ``docker run``),
+# ``duckclaw.github.mcp_bridge`` (stdio → ``docker run``),
 # usando ``GITHUB_TOKEN`` / ``GITHUB_TOOLSETS`` / ``GITHUB_READ_ONLY`` según el worker.
 #
 # Telegram: packages/mcp/telegram (duckclaw-telegram-mcp). El gateway arranca el hijo con el mismo

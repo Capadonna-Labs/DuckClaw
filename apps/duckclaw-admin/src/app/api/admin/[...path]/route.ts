@@ -305,7 +305,7 @@ async function proxy(req: NextRequest, segments: string[]) {
     return NextResponse.json(
       {
         detail:
-          'El Gateway no expone Platform Orchestrator todavía. Reinicia DuckClaw-Gateway con PM2 para cargar las rutas DB-first nuevas.',
+          'El Gateway no expone el flujo administrado de workspace todavía. Reinicia DuckClaw-Gateway con PM2 para cargar las rutas DB-first nuevas.',
         code: 'gateway_stale',
       },
       { status: 503 }

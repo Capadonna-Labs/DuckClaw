@@ -12,7 +12,8 @@ def test_playground_ui_can_scope_chat_to_db_first_project() -> None:
     assert 'title="Proyecto"' in page
     assert "projectId" in page
     assert "selectableWorkers" in page
-    assert "workerOptionId(worker) === 'platform-orchestrator'" in page
+    assert "return projectWorkerIds.includes(id);" in page
+    assert "platform" + "-orchestrator" not in page
     assert "Agente guía" in page
     assert "project_id: projectId || undefined" in hook
     assert "project_id?: string" in service

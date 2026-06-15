@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import random
-import re
 import time
 import uuid
 from pathlib import Path
@@ -29,7 +28,7 @@ from duckclaw import DuckClaw
 from duckclaw.duckdb_read_compat import duckclaw_open_for_read_scan
 from duckclaw.db_write_queue import enqueue_duckdb_write_sync
 from duckclaw.forge.homeostasis import BeliefRegistry, HomeostasisManager
-from duckclaw.gateway_db import get_gateway_db_path, iter_goals_ticker_duckdb_paths, resolve_env_duckdb_path
+from duckclaw.gateway_db import get_gateway_db_path, iter_goals_ticker_duckdb_paths
 from duckclaw.runtime.scheduling.cron_wall_schedule import wall_once_expired, wall_schedule_should_fire
 from duckclaw.graphs.on_the_fly_commands import (
     _GOALS_CRON_WALL_KEY,
@@ -43,7 +42,6 @@ from duckclaw.graphs.on_the_fly_commands import (
     _GOALS_PROACTIVE_LAST_FIRE_KEY,
     _GOALS_PROACTIVE_TENANT_KEY,
     build_goals_proactive_system_event_message,
-    build_trading_tick_system_event_message,
     chat_id_from_goals_cron_wall_key,
     chat_id_from_goals_delta_config_key,
     chat_id_from_meditate_delta_config_key,
@@ -68,7 +66,7 @@ GOALS_TICKER_POLL_SECONDS = int(os.getenv("GOALS_TICKER_POLL_SECONDS", "45"))
 MEDITATE_DEFAULT_DELTA_SECONDS = int(os.getenv("MEDITATE_DELTA_SECONDS", "14400"))
 GITHUB_MCP_HEALTH_SECONDS = float(os.getenv("DUCKCLAW_GITHUB_MCP_HEALTH_SECONDS", "300"))
 _GITHUB_PAT_401_AUDIT_COOLDOWN_KEY = "duckclaw:heartbeat:github_pat_401_audit_v1"
-# POST a /api/v1/agent/chat para el tick de /crons: turnos Quant (varias tools + sandbox) suelen >120s
+# POST a /api/v1/agent/chat para jobs proactivos que pueden ejecutar varias tools.
 _GOALS_PROACTIVE_HTTP_TIMEOUT = float(os.environ.get("DUCKCLAW_GOALS_PROACTIVE_HTTP_TIMEOUT", "300"))
 TAILSCALE_AUTH_KEY = os.getenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
 
@@ -152,54 +150,6 @@ def _goals_proactive_db_open_error_is_expected(exc: BaseException) -> bool:
     return False
 
 
-def _resolve_trading_session_vault_path(session_uid: str, candidate_paths: List[str]) -> str | None:
-    """
-    Encuentra el .duckdb donde vive quant_core.trading_sessions (ACTIVE) para este session_uid.
-    El ticker goals puede leer agent_config en finanzdb pero la sesión vive en quant_traderdb1.duckdb;
-    el POST al gateway debe usar esa bóveda o evaluate_cfd_state y OHLCV ven vacíos.
-    """
-    uid = (session_uid or "").strip()
-    for p in candidate_paths:
-        try:
-            with DuckClaw(p, read_only=True) as dbr:
-                raw = dbr.query(
-                    "SELECT session_uid, status FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-                )
-                rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        except Exception:
-            continue
-        if not rows or not isinstance(rows[0], dict):
-            continue
-        row = rows[0]
-        if str(row.get("status") or "").strip().upper() != "ACTIVE":
-            continue
-        row_uid = str(row.get("session_uid") or "").strip()
-        if uid and row_uid and uid != row_uid:
-            continue
-        return str(Path(p).expanduser().resolve())
-    return None
-
-
-def _resolve_quant_trader_vault_path(candidate_paths: List[str]) -> str | None:
-    """
-    Misma bóveda que el webhook multiplex Quant-Trader (quant_traderdb1.duckdb).
-    Sin esto, el POST interno cae en dedicated gateway (p. ej. finanzdb) y quant_core.* queda vacío.
-    """
-    raw = (os.getenv("DUCKCLAW_HEARTBEAT_TARGET_DB_PATH") or "").strip()
-    if raw:
-        try:
-            return str(Path(resolve_env_duckdb_path(raw)).expanduser().resolve())
-        except Exception:
-            pass
-    for p in candidate_paths:
-        if "quant_trader" in Path(p).name.lower():
-            try:
-                return str(Path(p).expanduser().resolve())
-            except Exception:
-                continue
-    return None
-
-
 def _agent_chat_url_for_worker(gateway_url: str, worker_id: str) -> str:
     base = gateway_url.rstrip("/").rsplit("/", 1)[0]
     return f"{base}/{quote(worker_id, safe='')}/chat?deliver_outbound=1"
@@ -237,7 +187,7 @@ async def _evaluate_homeostasis() -> List[Dict[str, Any]]:
     Recorre workers con homeostasis_config y evalúa sus beliefs.
 
     Devuelve una lista de dicts con:
-    - tenant_id: normalmente el schema/worker_id (ej. finance_worker/finanz)
+    - tenant_id: normalmente el schema/worker_id configurado en DB
     - belief_key
     - observed_value (target como proxy cuando no hay observación externa)
     - admin_chat_id: chat al que notificar (por ahora, configurado vía env)
@@ -304,7 +254,6 @@ async def _run_goals_proactive_tick() -> None:
             now=now,
             headers=headers,
             scan_paths_n=len(scan_paths),
-            all_scan_paths=scan_paths,
             redis_client=r_client,
         )
 
@@ -315,7 +264,6 @@ async def _run_goals_proactive_tick_one_db(
     now: float,
     headers: Dict[str, str],
     scan_paths_n: int,
-    all_scan_paths: List[str],
     redis_client: redis.Redis | None = None,
 ) -> None:
     try:
@@ -385,13 +333,9 @@ async def _run_goals_proactive_tick_one_db(
                     meta_pre = {}
             tenant_id = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
             worker_id = (get_chat_state(db, chat_id, "worker_id") or "").strip()
-            if (not worker_id or worker_id.lower() == "manager") and tenant_id.lower() == "cuantitativo":
-                worker_id = "Quant-Trader"
             _wid_pre = (worker_id or "").strip()
-            _is_qt = _wid_pre == "Quant-Trader" or _wid_pre.lower() in ("quant-trader", "quant_trader")
-            _ts_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "trading_session"
             _gw_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "goals_wall"
-            allow_empty_goals = bool(not goals and ((_ts_trigger and _is_qt) or _gw_trigger))
+            allow_empty_goals = bool(not goals and _gw_trigger)
             if not goals and not allow_empty_goals:
                 logger.info(
                     "goals_proactive: chat=%s sin goals; limpiando delta",
@@ -463,137 +407,45 @@ async def _run_goals_proactive_tick_one_db(
                 continue
             notify_channel = ""
             message = ""
-            if str(meta.get("trigger") or "").strip().lower() == "trading_session":
-                session_uid = str(meta.get("session_uid") or "").strip()
-                tickers: list[str] = []
-                mode = "paper"
-                signal_threshold = "GAS"
-                objective = "maximize_pnl"
-                if session_uid:
-                    try:
-                        sess_db_path = (
-                            _resolve_trading_session_vault_path(session_uid, all_scan_paths) or db_path
-                        )
-                        _db_same = str(Path(sess_db_path).resolve()) == str(
-                            Path(getattr(db, "_path", "") or db_path).resolve()
-                        )
-                        if _db_same:
-                            raw_sess = db.query(
-                                "SELECT mode, tickers, session_goal, session_uid, status "
-                                "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-                            )
-                        else:
-                            with DuckClaw(sess_db_path, read_only=True) as sess_conn:
-                                raw_sess = sess_conn.query(
-                                    "SELECT mode, tickers, session_goal, session_uid, status "
-                                    "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-                                )
-                        sess_rows = json.loads(raw_sess) if isinstance(raw_sess, str) else (raw_sess or [])
-                        if sess_rows and isinstance(sess_rows[0], dict):
-                            sess_row = sess_rows[0]
-                            if str(sess_row.get("status") or "").strip().upper() != "ACTIVE":
-                                message = "[SYSTEM_EVENT: No hay sesión activa. Tick cancelado.]"
-                            else:
-                                mode = str(sess_row.get("mode") or "paper").strip().lower() or "paper"
-                                tickers_csv = str(sess_row.get("tickers") or "").strip()
-                                if tickers_csv:
-                                    tickers = [x.strip().upper() for x in tickers_csv.split(",") if x.strip()]
-                                goal_raw = sess_row.get("session_goal")
-                                try:
-                                    gobj = (
-                                        goal_raw
-                                        if isinstance(goal_raw, dict)
-                                        else json.loads(str(goal_raw or "{}"))
-                                    )
-                                except Exception:
-                                    gobj = {}
-                                if isinstance(gobj, dict):
-                                    signal_threshold = str(gobj.get("signal_threshold") or "GAS").strip().upper() or "GAS"
-                                    objective = str(gobj.get("objective") or "maximize_pnl").strip().lower() or "maximize_pnl"
-                                session_uid = str(sess_row.get("session_uid") or session_uid).strip()
-                                message = build_trading_tick_system_event_message(
-                                    session_uid=session_uid,
-                                    tickers=tickers,
-                                    mode=mode,
-                                    signal_threshold=signal_threshold,
-                                    objective=objective,
-                                )
-                        else:
-                            message = "[SYSTEM_EVENT: No hay sesión activa. Tick cancelado.]"
-                    except Exception:
-                        message = "[SYSTEM_EVENT: No se pudo resolver la sesión activa. Tick cancelado.]"
-                else:
-                    message = "[SYSTEM_EVENT: No hay session_uid en goals_delta_meta. Tick cancelado.]"
-            else:
-                from duckclaw.forge.homeostasis.goals_alignment import (
-                    assess_goals_alignment,
-                    build_alignment_nudge_system_event,
-                    normalize_notify_channel,
-                    normalize_proactive_mode,
-                )
+            from duckclaw.forge.homeostasis.goals_alignment import (
+                assess_goals_alignment,
+                build_alignment_nudge_system_event,
+                normalize_notify_channel,
+                normalize_proactive_mode,
+            )
 
-                trading_obj: str | None = None
-                if _is_qt:
-                    _qpath = _resolve_quant_trader_vault_path(all_scan_paths)
-                    if _qpath:
-                        try:
-                            with DuckClaw(_qpath, read_only=True) as _qdb:
-                                raw_sg = _qdb.query(
-                                    "SELECT session_goal FROM quant_core.trading_sessions "
-                                    "WHERE id = 'active' LIMIT 1"
-                                )
-                            srows = (
-                                json.loads(raw_sg) if isinstance(raw_sg, str) else (raw_sg or [])
-                            )
-                            if srows and isinstance(srows[0], dict):
-                                sgr = srows[0].get("session_goal")
-                                if isinstance(sgr, str):
-                                    sgr = json.loads(sgr)
-                                if isinstance(sgr, dict):
-                                    o = str(sgr.get("objective") or "").strip().lower()
-                                    if o in (
-                                        "maximize_pnl",
-                                        "rebalance_hrp",
-                                        "overnight_gap_squeeze",
-                                    ):
-                                        trading_obj = o
-                        except Exception:
-                            trading_obj = None
-                if "mode" in meta and str(meta.get("mode") or "").strip():
-                    proactive_mode = normalize_proactive_mode(str(meta.get("mode")))
-                else:
-                    # Schedules legacy (pre GOALS_ALIGNMENT) y tests sin meta.mode: tick periódico.
-                    proactive_mode = "always"
-                report = assess_goals_alignment(db, chat_id, worker_id=_wid_pre)
-                notify_channel = normalize_notify_channel(
-                    get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)
+            if "mode" in meta and str(meta.get("mode") or "").strip():
+                proactive_mode = normalize_proactive_mode(str(meta.get("mode")))
+            else:
+                # Schedules legacy (pre GOALS_ALIGNMENT) y tests sin meta.mode: tick periódico.
+                proactive_mode = "always"
+            report = assess_goals_alignment(db, chat_id, worker_id=_wid_pre)
+            notify_channel = normalize_notify_channel(
+                get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)
+            )
+            if proactive_mode == "on_misalignment" and report.aligned:
+                logger.debug(
+                    "goals_proactive: alineado; omitiendo tick chat=%s mode=%s",
+                    chat_id,
+                    proactive_mode,
                 )
-                if proactive_mode == "on_misalignment" and report.aligned:
+                continue
+            if not report.aligned:
+                if not await check_alignment_nudge_cooldown(
+                    redis_client, tenant_id or "default", str(chat_id), delta_s
+                ):
                     logger.debug(
-                        "goals_proactive: alineado; omitiendo tick chat=%s mode=%s",
+                        "goals_proactive: cooldown alineación chat=%s",
                         chat_id,
-                        proactive_mode,
                     )
                     continue
-                if not report.aligned:
-                    if not await check_alignment_nudge_cooldown(
-                        redis_client, tenant_id or "default", str(chat_id), delta_s
-                    ):
-                        logger.debug(
-                            "goals_proactive: cooldown alineación chat=%s",
-                            chat_id,
-                        )
-                        continue
-                    message = build_alignment_nudge_system_event(
-                        report,
-                        trading_session_objective=trading_obj,
-                        chat_id=str(chat_id),
-                        epoch=now,
-                    )
-                else:
-                    message = build_goals_proactive_system_event_message(
-                        goals, trading_session_objective=trading_obj
-                    )
+                message = build_alignment_nudge_system_event(
+                    report,
+                    chat_id=str(chat_id),
+                    epoch=now,
+                )
+            else:
+                message = build_goals_proactive_system_event_message(goals)
 
             if not notify_channel:
                 from duckclaw.forge.homeostasis.goals_alignment import normalize_notify_channel
@@ -602,13 +454,6 @@ async def _run_goals_proactive_tick_one_db(
                     get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)
                 )
 
-        _wid = (worker_id or "").strip()
-        vault_for_gateway = str(Path(db_path).expanduser().resolve())
-        _qt_vault: str | None = None
-        if _wid == "Quant-Trader" or _wid.lower() in ("quant-trader", "quant_trader"):
-            _qt_vault = _resolve_quant_trader_vault_path(all_scan_paths)
-            if _qt_vault:
-                vault_for_gateway = _qt_vault
         payload = {
             "message": message,
             "chat_id": str(chat_id),
@@ -620,8 +465,6 @@ async def _run_goals_proactive_tick_one_db(
             "skip_session_lock": True,
             "notify_channel": notify_channel,
         }
-        if _qt_vault:
-            payload["vault_db_path"] = _qt_vault
         url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
         _crons_debug_log(
             "heartbeat/main.py:_run_goals_proactive_tick_one_db",
@@ -658,13 +501,6 @@ async def _run_goals_proactive_tick_one_db(
                 {"chat_id": str(chat_id), "status_code": resp.status_code},
                 hypothesis_id="C",
             )
-            _resp_text = ""
-            try:
-                _payload = resp.json() if (resp.text or "").strip().startswith("{") else {}
-                if isinstance(_payload, dict):
-                    _resp_text = str(_payload.get("response") or "").strip()
-            except Exception:
-                _resp_text = ""
             await _enqueue_chat_state_write(
                 db_path=db_path,
                 chat_id=chat_id,
@@ -672,74 +508,6 @@ async def _run_goals_proactive_tick_one_db(
                 key=_GOALS_PROACTIVE_LAST_FIRE_KEY,
                 value=str(now),
             )
-            try:
-                if _resp_text:
-                    _m_curr = re.search(
-                        r"(?:PnL no realizado=\$|PnL no realizado total \(snapshot\):\s*\$)"
-                        r"([\-0-9,]+(?:\.[0-9]+)?)",
-                        _resp_text,
-                    )
-                    _m_prev = re.search(r"PnL anterior=\$([\-0-9,]+(?:\.[0-9]+)?)", _resp_text)
-                    _m_pct = re.search(r"Cambio vs anterior=([+\-]?[0-9]+(?:\.[0-9]+)?)%", _resp_text)
-                    _curr_txt = _m_curr.group(1).replace(",", "") if _m_curr else ""
-                    _prev_txt = _m_prev.group(1).replace(",", "") if _m_prev else ""
-                    _pct_txt = _m_pct.group(1) if _m_pct else ""
-                    if _curr_txt:
-                        await _enqueue_chat_state_write(
-                            db_path=db_path,
-                            chat_id=chat_id,
-                            tenant_id=tenant_id or "default",
-                            key="trading_session_last_pnl",
-                            value=_curr_txt,
-                        )
-                    await _enqueue_chat_state_write(
-                        db_path=db_path,
-                        chat_id=chat_id,
-                        tenant_id=tenant_id or "default",
-                        key="trading_session_prev_pnl",
-                        value=_prev_txt,
-                    )
-                    await _enqueue_chat_state_write(
-                        db_path=db_path,
-                        chat_id=chat_id,
-                        tenant_id=tenant_id or "default",
-                        key="trading_session_pct_change",
-                        value=_pct_txt,
-                    )
-            except Exception as _exc:
-                logger.debug(
-                    "goals_proactive: persist PnL chat_state chat=%s: %s",
-                    chat_id,
-                    _exc,
-                )
-            try:
-                if '"type":"TRADING_TICK"' in message or '"type": "TRADING_TICK"' in message:
-                    start = message.find("{")
-                    end = message.rfind("}")
-                    payload_ev = json.loads(message[start : end + 1]) if start >= 0 and end > start else {}
-                    if isinstance(payload_ev, dict):
-                        uid = str(payload_ev.get("session_uid") or "").strip()
-                        tickers = payload_ev.get("tickers") if isinstance(payload_ev.get("tickers"), list) else []
-                        await asyncio.to_thread(
-                            enqueue_duckdb_write_sync,
-                            db_path=db_path,
-                            query=(
-                                "INSERT INTO quant_core.session_ticks "
-                                "(id, session_uid, tick_number, tickers_processed, signals_proposed, cfd_summary, outcome) "
-                                "VALUES (gen_random_uuid(), ?, COALESCE((SELECT MAX(tick_number)+1 FROM quant_core.session_ticks WHERE session_uid=?), 1), ?, 0, ?, ?)"
-                            ),
-                            params=[
-                                uid,
-                                uid,
-                                [str(t).strip().upper() for t in tickers if str(t).strip()],
-                                json.dumps({"source": "heartbeat"}, ensure_ascii=False),
-                                "ALIGNED",
-                            ],
-                            user_id=str(chat_id),
-                            tenant_id=str(tenant_id or "default"),
-                        )
-            except Exception:
-                pass
             logger.info(
                 "goals_proactive: tick OK chat=%s worker=%s",
                 chat_id,
@@ -808,13 +576,8 @@ async def _run_goals_proactive_tick_one_db(
                     meta_pre = {}
             tenant_id = (get_chat_state(db, chat_id_w, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
             worker_id = (get_chat_state(db, chat_id_w, "worker_id") or "").strip()
-            if (not worker_id or worker_id.lower() == "manager") and tenant_id.lower() == "cuantitativo":
-                worker_id = "Quant-Trader"
-            _wid_pre = (worker_id or "").strip()
-            _is_qt = _wid_pre == "Quant-Trader" or _wid_pre.lower() in ("quant-trader", "quant_trader")
-            _ts_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "trading_session"
             _gw_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "goals_wall"
-            allow_empty_goals = bool(not goals and ((_ts_trigger and _is_qt) or _gw_trigger))
+            allow_empty_goals = bool(not goals and _gw_trigger)
             if not goals and not allow_empty_goals:
                 logger.info("goals_proactive: chat=%s sin goals; limpiando wall", chat_id_w)
                 try:
@@ -861,107 +624,9 @@ async def _run_goals_proactive_tick_one_db(
                         meta = maybe_meta
                 except Exception:
                     meta = {}
-            if str(meta.get("trigger") or "").strip().lower() == "trading_session":
-                session_uid = str(meta.get("session_uid") or "").strip()
-                tickers: list[str] = []
-                mode = "paper"
-                signal_threshold = "GAS"
-                objective = "maximize_pnl"
-                if session_uid:
-                    try:
-                        sess_db_path = (
-                            _resolve_trading_session_vault_path(session_uid, all_scan_paths) or db_path
-                        )
-                        _db_same = str(Path(sess_db_path).resolve()) == str(
-                            Path(getattr(db, "_path", "") or db_path).resolve()
-                        )
-                        if _db_same:
-                            raw_sess = db.query(
-                                "SELECT mode, tickers, session_goal, session_uid, status "
-                                "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-                            )
-                        else:
-                            with DuckClaw(sess_db_path, read_only=True) as sess_conn:
-                                raw_sess = sess_conn.query(
-                                    "SELECT mode, tickers, session_goal, session_uid, status "
-                                    "FROM quant_core.trading_sessions WHERE id = 'active' LIMIT 1"
-                                )
-                        sess_rows = json.loads(raw_sess) if isinstance(raw_sess, str) else (raw_sess or [])
-                        if sess_rows and isinstance(sess_rows[0], dict):
-                            sess_row = sess_rows[0]
-                            if str(sess_row.get("status") or "").strip().upper() != "ACTIVE":
-                                message = "[SYSTEM_EVENT: No hay sesión activa. Tick cancelado.]"
-                            else:
-                                mode = str(sess_row.get("mode") or "paper").strip().lower() or "paper"
-                                tickers_csv = str(sess_row.get("tickers") or "").strip()
-                                if tickers_csv:
-                                    tickers = [x.strip().upper() for x in tickers_csv.split(",") if x.strip()]
-                                goal_raw = sess_row.get("session_goal")
-                                try:
-                                    gobj = (
-                                        goal_raw
-                                        if isinstance(goal_raw, dict)
-                                        else json.loads(str(goal_raw or "{}"))
-                                    )
-                                except Exception:
-                                    gobj = {}
-                                if isinstance(gobj, dict):
-                                    signal_threshold = str(gobj.get("signal_threshold") or "GAS").strip().upper() or "GAS"
-                                    objective = str(gobj.get("objective") or "maximize_pnl").strip().lower() or "maximize_pnl"
-                                session_uid = str(sess_row.get("session_uid") or session_uid).strip()
-                                message = build_trading_tick_system_event_message(
-                                    session_uid=session_uid,
-                                    tickers=tickers,
-                                    mode=mode,
-                                    signal_threshold=signal_threshold,
-                                    objective=objective,
-                                )
-                        else:
-                            message = "[SYSTEM_EVENT: No hay sesión activa. Tick cancelado.]"
-                    except Exception:
-                        message = "[SYSTEM_EVENT: No se pudo resolver la sesión activa. Tick cancelado.]"
-                else:
-                    message = "[SYSTEM_EVENT: No hay session_uid en goals_delta_meta. Tick cancelado.]"
-            else:
-                trading_obj: str | None = None
-                if _is_qt:
-                    _qpath = _resolve_quant_trader_vault_path(all_scan_paths)
-                    if _qpath:
-                        try:
-                            with DuckClaw(_qpath, read_only=True) as _qdb:
-                                raw_sg = _qdb.query(
-                                    "SELECT session_goal FROM quant_core.trading_sessions "
-                                    "WHERE id = 'active' LIMIT 1"
-                                )
-                            srows = (
-                                json.loads(raw_sg) if isinstance(raw_sg, str) else (raw_sg or [])
-                            )
-                            if srows and isinstance(srows[0], dict):
-                                sgr = srows[0].get("session_goal")
-                                if isinstance(sgr, str):
-                                    sgr = json.loads(sgr)
-                                if isinstance(sgr, dict):
-                                    o = str(sgr.get("objective") or "").strip().lower()
-                                    if o in (
-                                        "maximize_pnl",
-                                        "rebalance_hrp",
-                                        "overnight_gap_squeeze",
-                                    ):
-                                        trading_obj = o
-                        except Exception:
-                            trading_obj = None
-                message = build_goals_proactive_system_event_message(
-                    goals, trading_session_objective=trading_obj
-                )
+            message = build_goals_proactive_system_event_message(goals)
 
         chat_id = chat_id_w
-        _wid = (worker_id or "").strip()
-        vault_for_gateway = str(Path(db_path).expanduser().resolve())
-        _qt_vault: str | None = None
-        if _wid == "Quant-Trader" or _wid.lower() in ("quant-trader", "quant_trader"):
-            _qt_vault = _resolve_quant_trader_vault_path(all_scan_paths)
-            if _qt_vault:
-                vault_for_gateway = _qt_vault
         payload = {
             "message": message,
             "chat_id": str(chat_id),
@@ -972,8 +637,6 @@ async def _run_goals_proactive_tick_one_db(
             "is_system_prompt": True,
             "skip_session_lock": True,
         }
-        if _qt_vault:
-            payload["vault_db_path"] = _qt_vault
         url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
         try:
             async with httpx.AsyncClient() as client:
@@ -994,13 +657,6 @@ async def _run_goals_proactive_tick_one_db(
             continue
 
         if 200 <= resp.status_code < 300:
-            _resp_text = ""
-            try:
-                _payload = resp.json() if (resp.text or "").strip().startswith("{") else {}
-                if isinstance(_payload, dict):
-                    _resp_text = str(_payload.get("response") or "").strip()
-            except Exception:
-                _resp_text = ""
             await _enqueue_chat_state_write(
                 db_path=db_path,
                 chat_id=chat_id,
@@ -1019,74 +675,6 @@ async def _run_goals_proactive_tick_one_db(
                     )
                 except Exception as _oce:
                     logger.debug("goals_proactive_wall: limpiar once chat=%s: %s", chat_id, _oce)
-            try:
-                if _resp_text:
-                    _m_curr = re.search(
-                        r"(?:PnL no realizado=\$|PnL no realizado total \(snapshot\):\s*\$)"
-                        r"([\-0-9,]+(?:\.[0-9]+)?)",
-                        _resp_text,
-                    )
-                    _m_prev = re.search(r"PnL anterior=\$([\-0-9,]+(?:\.[0-9]+)?)", _resp_text)
-                    _m_pct = re.search(r"Cambio vs anterior=([+\-]?[0-9]+(?:\.[0-9]+)?)%", _resp_text)
-                    _curr_txt = _m_curr.group(1).replace(",", "") if _m_curr else ""
-                    _prev_txt = _m_prev.group(1).replace(",", "") if _m_prev else ""
-                    _pct_txt = _m_pct.group(1) if _m_pct else ""
-                    if _curr_txt:
-                        await _enqueue_chat_state_write(
-                            db_path=db_path,
-                            chat_id=chat_id,
-                            tenant_id=tenant_id or "default",
-                            key="trading_session_last_pnl",
-                            value=_curr_txt,
-                        )
-                    await _enqueue_chat_state_write(
-                        db_path=db_path,
-                        chat_id=chat_id,
-                        tenant_id=tenant_id or "default",
-                        key="trading_session_prev_pnl",
-                        value=_prev_txt,
-                    )
-                    await _enqueue_chat_state_write(
-                        db_path=db_path,
-                        chat_id=chat_id,
-                        tenant_id=tenant_id or "default",
-                        key="trading_session_pct_change",
-                        value=_pct_txt,
-                    )
-            except Exception as _exc:
-                logger.debug(
-                    "goals_proactive_wall: persist PnL chat_state chat=%s: %s",
-                    chat_id,
-                    _exc,
-                )
-            try:
-                if '"type":"TRADING_TICK"' in message or '"type": "TRADING_TICK"' in message:
-                    start = message.find("{")
-                    end = message.rfind("}")
-                    payload_ev = json.loads(message[start : end + 1]) if start >= 0 and end > start else {}
-                    if isinstance(payload_ev, dict):
-                        uid = str(payload_ev.get("session_uid") or "").strip()
-                        tickers = payload_ev.get("tickers") if isinstance(payload_ev.get("tickers"), list) else []
-                        await asyncio.to_thread(
-                            enqueue_duckdb_write_sync,
-                            db_path=db_path,
-                            query=(
-                                "INSERT INTO quant_core.session_ticks "
-                                "(id, session_uid, tick_number, tickers_processed, signals_proposed, cfd_summary, outcome) "
-                                "VALUES (gen_random_uuid(), ?, COALESCE((SELECT MAX(tick_number)+1 FROM quant_core.session_ticks WHERE session_uid=?), 1), ?, 0, ?, ?)"
-                            ),
-                            params=[
-                                uid,
-                                uid,
-                                [str(t).strip().upper() for t in tickers if str(t).strip()],
-                                json.dumps({"source": "heartbeat_wall"}, ensure_ascii=False),
-                                "ALIGNED",
-                            ],
-                            user_id=str(chat_id),
-                            tenant_id=str(tenant_id or "default"),
-                        )
-            except Exception:
-                pass
             logger.info(
                 "goals_proactive_wall: tick OK chat=%s worker=%s",
                 chat_id,
@@ -1383,7 +971,7 @@ async def run_heartbeat() -> None:
                         async with httpx.AsyncClient() as client:
                             await client.post(
                                 GATEWAY_URL,
-                                params={"tenant_id": tenant_id, "worker_id": "finanz"},
+                                params={"tenant_id": tenant_id},
                                 json=payload,
                                 headers=headers,
                                 timeout=30,

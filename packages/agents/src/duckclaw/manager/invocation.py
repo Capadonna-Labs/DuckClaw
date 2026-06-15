@@ -1,4 +1,4 @@
 """Manager invocation compatibility facade."""
 
-from duckclaw.graphs.manager_graph import *  # noqa: F403
+from duckclaw.manager.graph import *  # noqa: F403
 

@@ -15,30 +15,6 @@ from duckclaw.admin_user_profiles import ensure_profile_for_user
 from duckclaw.shared_db_grants import _query_all_dicts, _sql_lit
 
 _WORKER_ID_RE = re.compile(r"[^a-zA-Z0-9_-]+")
-PLATFORM_ORCHESTRATOR_WORKER_ID = "platform-orchestrator"
-PLATFORM_ORCHESTRATOR_DISPLAY_NAME = "Platform Orchestrator"
-PLATFORM_ORCHESTRATOR_SOURCE_KIND = "system_seed"
-
-_PLATFORM_ORCHESTRATOR_SYSTEM_PROMPT = """# Platform Orchestrator
-
-Eres el orquestador de plataforma personal del usuario autenticado.
-
-Tu trabajo es acompañar al usuario en la creación de proyectos, workers, contexto compartido y selección de skills. Antes de proponer cambios, entrevista al usuario sobre:
-
-- objetivo de negocio o técnico;
-- dominio y restricciones;
-- datos disponibles;
-- resultado esperado;
-- workers necesarios;
-- skills existentes o faltantes.
-
-Nunca crees ni modifiques recursos sin confirmación explícita. Prefiere contratos DB-first y no escribas en carpetas legacy. No inventes secretos ni API keys; si falta un secreto, indícalo como configuración pendiente.
-"""
-
-_PLATFORM_ORCHESTRATOR_OVERVIEW = """# Platform Orchestrator
-
-Worker DB-first siempre disponible para guiar creación de proyectos, agentes, contexto compartido y skills.
-"""
 
 _ADMIN_WORKER_CATALOG_DDL = """
 CREATE TABLE IF NOT EXISTS main.admin_worker_catalog (
@@ -582,65 +558,6 @@ def get_latest_worker_version(db: Any, *, worker_uid: str) -> dict[str, Any] | N
         except json.JSONDecodeError:
             out[key.replace("_json", "")] = {}
     return out
-
-
-def ensure_platform_orchestrator_for_actor(db: Any, *, actor_email: str) -> dict[str, Any]:
-    """Ensure the per-user DB-first platform orchestrator exists and is active."""
-    ensure_admin_worker_catalog_schema(db)
-    actor = (actor_email or "").strip().lower()
-    if "@" not in actor:
-        raise ValueError("actor_email requerido")
-    profile = ensure_profile_for_user(db, email=actor)
-    worker = get_worker_by_tenant_worker_id(
-        db,
-        tenant_id=profile["tenant_id"],
-        worker_id=PLATFORM_ORCHESTRATOR_WORKER_ID,
-    )
-    if worker:
-        db.execute(
-            f"""
-            UPDATE main.admin_worker_catalog
-            SET active = true,
-                status = 'active',
-                display_name = '{_sql_lit(PLATFORM_ORCHESTRATOR_DISPLAY_NAME, 256)}',
-                source_kind = '{PLATFORM_ORCHESTRATOR_SOURCE_KIND}',
-                source_template_id = '{PLATFORM_ORCHESTRATOR_WORKER_ID}',
-                visibility = 'private',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE worker_uid = '{_sql_lit(worker["worker_uid"], 64)}'
-            """
-        )
-        worker = get_worker_by_uid(db, worker["worker_uid"]) or worker
-    else:
-        worker = create_worker(
-            db,
-            owner_email=profile["email"],
-            worker_id=PLATFORM_ORCHESTRATOR_WORKER_ID,
-            display_name=PLATFORM_ORCHESTRATOR_DISPLAY_NAME,
-            source_kind=PLATFORM_ORCHESTRATOR_SOURCE_KIND,
-            source_template_id=PLATFORM_ORCHESTRATOR_WORKER_ID,
-            visibility="private",
-        )
-
-    latest = get_latest_worker_version(db, worker_uid=worker["worker_uid"])
-    if latest is None:
-        add_worker_version(
-            db,
-            worker_uid=worker["worker_uid"],
-            created_by=profile["email"],
-            manifest_snapshot={
-                "id": PLATFORM_ORCHESTRATOR_WORKER_ID,
-                "name": PLATFORM_ORCHESTRATOR_DISPLAY_NAME,
-                "description": "Guía DB-first para crear proyectos, workers, contexto compartido y skills.",
-                "source_kind": PLATFORM_ORCHESTRATOR_SOURCE_KIND,
-            },
-            files_snapshot={
-                "system_prompt.md": _PLATFORM_ORCHESTRATOR_SYSTEM_PROMPT,
-                "WORKER_OVERVIEW.md": _PLATFORM_ORCHESTRATOR_OVERVIEW,
-            },
-            change_note="Seed inicial Platform Orchestrator",
-        )
-    return worker
 
 
 def get_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id: str) -> dict[str, str] | None:

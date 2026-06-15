@@ -116,9 +116,9 @@ def test_run_goals_proactive_skips_when_aligned_on_misalignment(
             "chat_50_goals",
             json.dumps(goals),
             "chat_50_worker_id",
-            "Quant-Trader",
+            "BI-Analyst",
             "chat_50_goals_proactive_tenant_id",
-            "Cuantitativo",
+            "analytics",
             "chat_50_goals_delta_meta",
             json.dumps({"trigger": "goals_cli", "mode": "on_misalignment", "jitter_ratio": 0}),
         ],
@@ -151,13 +151,13 @@ def test_run_goals_proactive_skips_when_aligned_on_misalignment(
     assert len(posts) == 0
 
 
-def test_build_goals_proactive_system_event_includes_overnight_mission() -> None:
+def test_build_goals_proactive_system_event_is_generic() -> None:
     msg = build_goals_proactive_system_event_message(
-        [{"belief_key": "overnight_squeeze", "title": "Overnight Gap Squeeze (cierre + gap)"}],
-        trading_session_objective="overnight_gap_squeeze",
+        [{"belief_key": "latency_budget", "title": "Latency budget"}],
     )
     assert "[SYSTEM_EVENT:" in msg
-    assert "MISIÓN: OVERNIGHT GAP SQUEEZE" in msg
+    assert "Revisión periódica de /crons" in msg
+    assert "Latency budget" in msg
     assert GOALS_PROACTIVE_REVIEW_PHRASE_CRONS in msg
     assert GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY not in msg
     legacy = msg.replace(GOALS_PROACTIVE_REVIEW_PHRASE_CRONS, GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY)
@@ -187,9 +187,9 @@ def test_run_goals_proactive_tick_posts_system_event(tmp_path: Path, monkeypatch
             "chat_99_goals",
             json.dumps([{"belief_key": "k", "title": "Test goal"}]),
             "chat_99_worker_id",
-            "Quant-Trader",
+            "BI-Analyst",
             "chat_99_goals_proactive_tenant_id",
-            "Cuantitativo",
+            "analytics",
             "chat_99_goals_proactive_last_fire_epoch",
             "",
         ],
@@ -223,10 +223,10 @@ def test_run_goals_proactive_tick_posts_system_event(tmp_path: Path, monkeypatch
     kw = posts[0]["kwargs"]
     assert kw["json"]["is_system_prompt"] is True
     assert kw["json"]["skip_session_lock"] is True
-    assert kw["json"]["tenant_id"] == "Cuantitativo"
+    assert kw["json"]["tenant_id"] == "analytics"
     assert "SYSTEM_EVENT" in kw["json"]["message"]
     url = posts[0]["args"][0]
-    assert "Quant-Trader" in url
+    assert "BI-Analyst" in url
     assert "/chat" in url
     assert posts[0]["kwargs"]["json"].get("vault_db_path") in (None, db_path)
 
@@ -290,13 +290,13 @@ def test_run_goals_proactive_skips_manager_worker(tmp_path: Path, monkeypatch: A
 def test_run_goals_proactive_finds_delta_in_sibling_vault_duckdb(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """Fly /crons escribe en la bóveda (p. ej. quant_traderdb1.duckdb); el ticker debe verla aunque el hub sea otro .duckdb."""
+    """El scheduler debe leer config en bóvedas hermanas aunque el hub principal sea otro .duckdb."""
     import duckdb
 
     priv = tmp_path / "private" / "u1"
     priv.mkdir(parents=True)
-    hub = str(priv / "finanzdb1.duckdb")
-    vault = str(priv / "quant_traderdb1.duckdb")
+    hub = str(priv / "hubdb1.duckdb")
+    vault = str(priv / "projectdb1.duckdb")
 
     con = duckdb.connect(hub)
     con.execute(
@@ -328,9 +328,9 @@ def test_run_goals_proactive_finds_delta_in_sibling_vault_duckdb(
             "chat_77_goals",
             json.dumps([{"belief_key": "k", "title": "Vault goal"}]),
             "chat_77_worker_id",
-            "Quant-Trader",
+                "BI-Analyst",
             "chat_77_goals_proactive_tenant_id",
-            "Cuantitativo",
+                "analytics",
             "chat_77_goals_proactive_last_fire_epoch",
             "",
         ],
@@ -362,8 +362,8 @@ def test_run_goals_proactive_finds_delta_in_sibling_vault_duckdb(
     asyncio.run(heartbeat._run_goals_proactive_tick())
 
     assert len(posts) == 1
-    vault_resolved = str(Path(vault).resolve())
-    assert posts[0]["kwargs"]["json"].get("vault_db_path") == vault_resolved
+    assert "BI-Analyst" in posts[0]["args"][0]
+    assert "vault_db_path" not in posts[0]["kwargs"]["json"]
     con2 = duckdb.connect(vault, read_only=True)
     row = con2.execute(
         "SELECT value FROM agent_config WHERE key = 'chat_77_goals_proactive_last_fire_epoch'"
@@ -372,13 +372,13 @@ def test_run_goals_proactive_finds_delta_in_sibling_vault_duckdb(
     assert row and float(row[0]) > 0
 
 
-def test_run_goals_proactive_cuantitativo_tenant_defaults_quant_worker(
+def test_run_goals_proactive_manager_worker_is_not_domain_defaulted(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """Multiplex: worker_id en bóveda puede quedar en manager; tenant Cuantitativo enruta a Quant-Trader."""
+    """Heartbeat base no debe convertir tenant_id a worker vertical por nombre."""
     import duckdb
 
-    db_path = str(tmp_path / "vaultq.duckdb")
+    db_path = str(tmp_path / "vault_generic.duckdb")
     con = duckdb.connect(db_path)
     con.execute(
         """
@@ -399,7 +399,7 @@ def test_run_goals_proactive_cuantitativo_tenant_defaults_quant_worker(
             "chat_5_worker_id",
             "manager",
             "chat_5_goals_proactive_tenant_id",
-            "Cuantitativo",
+                "analytics",
             "chat_5_goals_proactive_last_fire_epoch",
             "",
         ],
@@ -429,16 +429,15 @@ def test_run_goals_proactive_cuantitativo_tenant_defaults_quant_worker(
 
     asyncio.run(heartbeat._run_goals_proactive_tick())
 
-    assert len(posts) == 1
-    assert "Quant-Trader" in posts[0]["args"][0]
+    assert posts == []
 
 
-def test_run_goals_proactive_trading_session_event_payload(
+def test_run_goals_proactive_ignores_unknown_meta_trigger_and_uses_goals(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     import duckdb
 
-    db_path = str(tmp_path / "vault_trading_tick.duckdb")
+    db_path = str(tmp_path / "vault_custom_meta.duckdb")
     con = duckdb.connect(db_path)
     con.execute(
         """
@@ -450,45 +449,20 @@ def test_run_goals_proactive_trading_session_event_payload(
         """
     )
     con.execute(
-        """
-        CREATE SCHEMA IF NOT EXISTS quant_core;
-        CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
-          id VARCHAR PRIMARY KEY,
-          mode VARCHAR NOT NULL,
-          tickers VARCHAR NOT NULL DEFAULT '',
-          session_uid VARCHAR,
-          session_goal JSON,
-          status VARCHAR NOT NULL DEFAULT 'ACTIVE',
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    con.execute(
-        "INSERT INTO quant_core.trading_sessions (id, mode, tickers, session_uid, session_goal, status) VALUES (?, ?, ?, ?, CAST(? AS JSON), ?)",
-        [
-            "active",
-            "paper",
-            "NVDA,SPY",
-            "uid-123",
-            json.dumps({"signal_threshold": "GAS"}),
-            "ACTIVE",
-        ],
-    )
-    con.execute(
         "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)",
         [
             "chat_88_goals_delta_seconds",
             "1",
             "chat_88_goals",
-            json.dumps([{"belief_key": "k", "title": "session goal"}]),
+            json.dumps([{"belief_key": "k", "title": "scheduled goal"}]),
             "chat_88_worker_id",
-            "Quant-Trader",
+            "BI-Analyst",
             "chat_88_goals_proactive_tenant_id",
-            "Cuantitativo",
+            "analytics",
             "chat_88_goals_proactive_last_fire_epoch",
             "",
             "chat_88_goals_delta_meta",
-            json.dumps({"trigger": "trading_session", "session_uid": "uid-123"}),
+            json.dumps({"trigger": "custom_workflow", "context_id": "ctx-123"}),
         ],
     )
     con.close()
@@ -518,17 +492,18 @@ def test_run_goals_proactive_trading_session_event_payload(
 
     assert len(posts) == 1
     msg = posts[0]["kwargs"]["json"]["message"]
-    assert "TRADING_TICK" in msg
-    assert "uid-123" in msg
+    assert "Revisión periódica de /crons" in msg
+    assert "scheduled goal" in msg
+    assert "ctx-123" not in msg
 
 
-def test_run_goals_proactive_trading_session_empty_manager_goals_still_ticks(
+def test_run_goals_proactive_goals_wall_empty_manager_goals_still_ticks(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """Sin filas en chat_goals el ticker no debe borrar el delta si trigger=trading_session y worker=Quant."""
+    """El trigger transversal goals_wall puede disparar aunque no haya goals persistidas."""
     import duckdb
 
-    db_path = str(tmp_path / "vault_trading_tick_empty_goals.duckdb")
+    db_path = str(tmp_path / "vault_goals_wall_empty_goals.duckdb")
     con = duckdb.connect(db_path)
     con.execute(
         """
@@ -538,31 +513,6 @@ def test_run_goals_proactive_trading_session_empty_manager_goals_still_ticks(
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
-    )
-    con.execute(
-        """
-        CREATE SCHEMA IF NOT EXISTS quant_core;
-        CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
-          id VARCHAR PRIMARY KEY,
-          mode VARCHAR NOT NULL,
-          tickers VARCHAR NOT NULL DEFAULT '',
-          session_uid VARCHAR,
-          session_goal JSON,
-          status VARCHAR NOT NULL DEFAULT 'ACTIVE',
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    con.execute(
-        "INSERT INTO quant_core.trading_sessions (id, mode, tickers, session_uid, session_goal, status) VALUES (?, ?, ?, ?, CAST(? AS JSON), ?)",
-        [
-            "active",
-            "paper",
-            "NVDA,SPY",
-            "uid-999",
-            json.dumps({"signal_threshold": "GAS"}),
-            "ACTIVE",
-        ],
     )
     con.execute(
         "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)",
@@ -572,13 +522,13 @@ def test_run_goals_proactive_trading_session_empty_manager_goals_still_ticks(
             "chat_77_goals",
             json.dumps([]),
             "chat_77_worker_id",
-            "Quant-Trader",
+            "BI-Analyst",
             "chat_77_goals_proactive_tenant_id",
-            "Cuantitativo",
+            "analytics",
             "chat_77_goals_proactive_last_fire_epoch",
             "",
             "chat_77_goals_delta_meta",
-            json.dumps({"trigger": "trading_session", "session_uid": "uid-999"}),
+            json.dumps({"trigger": "goals_wall"}),
         ],
     )
     con.close()
@@ -608,8 +558,7 @@ def test_run_goals_proactive_trading_session_empty_manager_goals_still_ticks(
 
     assert len(posts) == 1
     msg = posts[0]["kwargs"]["json"]["message"]
-    assert "TRADING_TICK" in msg
-    assert "uid-999" in msg
+    assert "Revisión periódica de /crons" in msg
 
     con2 = duckdb.connect(db_path)
     row = con2.execute(
@@ -622,7 +571,7 @@ def test_run_goals_proactive_trading_session_empty_manager_goals_still_ticks(
 def test_execute_goals_delta_cli_forces_goals_cli_meta_and_cooldown_now(
     tmp_path: Path,
 ) -> None:
-    """Explicit `/crons --delta` must not inherit trading_session meta (avoids full TRADING_TICK on poll)."""
+    """Explicit `/crons --delta` must overwrite stale custom meta before the next poll."""
     import duckdb
 
     from duckclaw import DuckClaw
@@ -639,39 +588,14 @@ def test_execute_goals_delta_cli_forces_goals_cli_meta_and_cooldown_now(
         """
     )
     con.execute(
-        """
-        CREATE SCHEMA IF NOT EXISTS quant_core;
-        CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
-          id VARCHAR PRIMARY KEY,
-          mode VARCHAR NOT NULL,
-          tickers VARCHAR NOT NULL DEFAULT '',
-          session_uid VARCHAR,
-          session_goal JSON,
-          status VARCHAR NOT NULL DEFAULT 'ACTIVE',
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    con.execute(
-        "INSERT INTO quant_core.trading_sessions (id, mode, tickers, session_uid, session_goal, status) VALUES (?, ?, ?, ?, CAST(? AS JSON), ?)",
-        [
-            "active",
-            "paper",
-            "SPY",
-            "uid-abc",
-            json.dumps({"objective": "overnight_gap_squeeze", "signal_threshold": "GAS"}),
-            "ACTIVE",
-        ],
-    )
-    con.execute(
         "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?)",
         [
             "chat_51_worker_id",
-            "Quant-Trader",
+            "BI-Analyst",
             "chat_51_goals",
             json.dumps([{"belief_key": "k", "title": "G"}]),
             "chat_51_goals_delta_meta",
-            json.dumps({"trigger": "trading_session", "session_uid": "uid-abc"}),
+            json.dumps({"trigger": "custom_workflow", "context_id": "ctx-abc"}),
             "chat_51_goals_proactive_last_fire_epoch",
             "",
         ],
@@ -679,7 +603,7 @@ def test_execute_goals_delta_cli_forces_goals_cli_meta_and_cooldown_now(
     con.close()
 
     with DuckClaw(db_path, read_only=False) as db:
-        out = execute_goals(db, 51, "--delta 1h", tenant_id="Cuantitativo")
+        out = execute_goals(db, 51, "--delta 1h", tenant_id="analytics")
     assert "Revisión proactiva" in (out or "")
 
     with DuckClaw(db_path, read_only=True) as db:
@@ -693,15 +617,15 @@ def test_execute_goals_delta_cli_forces_goals_cli_meta_and_cooldown_now(
 def test_clear_goals_delta_off_clears_schedule_on_hub_and_sibling_vault(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """/crons --delta off debe poner goals_delta_seconds=0 en hub y bóveda; si no, el ticker sigue en bucle."""
+    """/crons --delta off debe poner goals_delta_seconds=0 en hub y bóveda."""
     import duckdb
 
     from duckclaw import DuckClaw
 
     priv = tmp_path / "private" / "u1"
     priv.mkdir(parents=True)
-    hub = str(priv / "finanzdb1.duckdb")
-    vault = str(priv / "quant_traderdb1.duckdb")
+    hub = str(priv / "hubdb1.duckdb")
+    vault = str(priv / "projectdb1.duckdb")
 
     def _bootstrap(p: str) -> None:
         c = duckdb.connect(p)
@@ -720,7 +644,7 @@ def test_clear_goals_delta_off_clears_schedule_on_hub_and_sibling_vault(
             "INSERT INTO agent_config (key, value) VALUES (?, ?)",
             [
                 ("chat_42_goals_delta_seconds", "120"),
-                ("chat_42_goals_proactive_tenant_id", "Cuantitativo"),
+                ("chat_42_goals_proactive_tenant_id", "analytics"),
             ],
         )
         c.close()
@@ -754,19 +678,19 @@ def test_iter_goals_delta_clear_paths_scoped_excludes_other_private_vaults(
     u_b = root / "222"
     u_a.mkdir(parents=True)
     u_b.mkdir(parents=True)
-    hub_a = u_a / "finanzdb1.duckdb"
-    quant_a = u_a / "quant_traderdb1.duckdb"
-    other_b = u_b / "finanzdb1.duckdb"
+    hub_a = u_a / "hubdb1.duckdb"
+    project_a = u_a / "projectdb1.duckdb"
+    other_b = u_b / "hubdb1.duckdb"
     hub_a.touch()
-    quant_a.touch()
+    project_a.touch()
     other_b.touch()
 
     monkeypatch.delenv("DUCKCLAW_GOALS_TICKER_DB_PATH", raising=False)
     monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: str(hub_a))
 
-    paths = {str(Path(p).resolve()) for p in iter_goals_delta_clear_duckdb_paths(primary_fly_db_path=str(quant_a))}
+    paths = {str(Path(p).resolve()) for p in iter_goals_delta_clear_duckdb_paths(primary_fly_db_path=str(project_a))}
     assert str(hub_a.resolve()) in paths
-    assert str(quant_a.resolve()) in paths
+    assert str(project_a.resolve()) in paths
     assert str(other_b.resolve()) not in paths
 
 
@@ -866,12 +790,12 @@ def test_crons_list_platform_summary_respects_env(tmp_path: Path, monkeypatch: A
     assert "API Gateway puede ejecutar" not in (out or "")
 
 
-def test_crons_list_trading_session_meta_note(tmp_path: Path) -> None:
+def test_crons_list_custom_meta_note_does_not_leak_internal_context(tmp_path: Path) -> None:
     import duckdb
 
     from duckclaw import DuckClaw
 
-    db_path = str(tmp_path / "crons_list_session_meta.duckdb")
+    db_path = str(tmp_path / "crons_list_custom_meta.duckdb")
     con = duckdb.connect(db_path)
     con.execute(
         """
@@ -882,29 +806,26 @@ def test_crons_list_trading_session_meta_note(tmp_path: Path) -> None:
         )
         """
     )
-    meta = json.dumps({"trigger": "trading_session", "session_uid": "uid-test-1"}, ensure_ascii=False)
+    meta = json.dumps({"trigger": "custom_workflow", "context_id": "ctx-test-1"}, ensure_ascii=False)
     con.execute(
         "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?)",
-        ["chat_9_worker_id", "Quant-Trader", "chat_9_goals", "[]", "chat_9_goals_delta_meta", meta],
+        ["chat_9_worker_id", "BI-Analyst", "chat_9_goals", "[]", "chat_9_goals_delta_meta", meta],
     )
     con.close()
 
     with DuckClaw(db_path, read_only=False) as db:
         out = execute_goals(db, 9, "")
-    assert "Revisión proactiva (TRADING_TICK)" in (out or "")
-    assert "goals_delta_seconds=0" in (out or "")
-    assert "session_uid=uid-test-1" in (out or "")
-    assert "schedule_quant_trading_proactive_ticks" in (out or "")
-    assert "/trading-session" in (out or "")
+    assert "context_id" not in (out or "")
+    assert "ctx-test-1" not in (out or "")
 
 
-def test_crons_list_trading_session_meta_with_delta_300(tmp_path: Path) -> None:
-    """Listado /crons con intervalo 5 min + meta trading_session: intervalo, cron-id delta y UID."""
+def test_crons_list_custom_meta_with_delta_300(tmp_path: Path) -> None:
+    """Listado /crons con intervalo 5 min no filtra contexto interno."""
     import duckdb
 
     from duckclaw import DuckClaw
 
-    db_path = str(tmp_path / "crons_list_session_delta300.duckdb")
+    db_path = str(tmp_path / "crons_list_custom_delta300.duckdb")
     con = duckdb.connect(db_path)
     con.execute(
         """
@@ -916,17 +837,17 @@ def test_crons_list_trading_session_meta_with_delta_300(tmp_path: Path) -> None:
         """
     )
     meta = json.dumps(
-        {"trigger": "trading_session", "session_uid": "qt-sess-a1"},
+        {"trigger": "custom_workflow", "context_id": "ctx-a1"},
         ensure_ascii=False,
     )
-    long_uid = "11111111-2222-3333-4444-555555555555"
-    meta_long = json.dumps({"trigger": "trading_session", "session_uid": long_uid}, ensure_ascii=False)
+    long_context_id = "11111111-2222-3333-4444-555555555555"
+    meta_long = json.dumps({"trigger": "custom_workflow", "context_id": long_context_id}, ensure_ascii=False)
     con.execute(
         "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?), "
         "(?, ?), (?, ?), (?, ?), (?, ?)",
         [
             "chat_12_worker_id",
-            "Quant-Trader",
+            "BI-Analyst",
             "chat_12_goals",
             "[]",
             "chat_12_goals_delta_seconds",
@@ -934,7 +855,7 @@ def test_crons_list_trading_session_meta_with_delta_300(tmp_path: Path) -> None:
             "chat_12_goals_delta_meta",
             meta,
             "chat_13_worker_id",
-            "Quant-Trader",
+            "BI-Analyst",
             "chat_13_goals",
             "[]",
             "chat_13_goals_delta_seconds",
@@ -948,9 +869,8 @@ def test_crons_list_trading_session_meta_with_delta_300(tmp_path: Path) -> None:
     with DuckClaw(db_path, read_only=False) as db:
         out12 = execute_goals(db, 12, "")
         out13 = execute_goals(db, 13, "")
-    assert "Revisión proactiva (TRADING_TICK)" in (out12 or "")
+    assert "Revisión proactiva" in (out12 or "")
     assert "5 min" in (out12 or "")
     assert "cron-id delta" in (out12 or "")
-    assert "session_uid=qt-sess-a1" in (out12 or "")
-    assert "11111111…" in (out13 or "")
-    assert long_uid not in (out13 or "")
+    assert "context_id" not in (out12 or "")
+    assert long_context_id not in (out13 or "")

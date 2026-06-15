@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, CheckCircle2, Database, Sparkles } from 'lucide-react';
 import { adminService } from '@/services/adminService';
-import type { OrchestratorDraft } from '@/services/adminService';
+import type { ManagedWorkspaceDraft } from '@/services/adminService';
 
 type WizardStep = 1 | 2 | 3 | 4;
 
@@ -19,11 +19,11 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-export function ProjectOrchestratorWizard() {
+export function ProjectManagedWorkspaceDraftWizard() {
   const router = useRouter();
   const [step, setStep] = useState<WizardStep>(1);
   const [prompt, setPrompt] = useState('');
-  const [draft, setDraft] = useState<OrchestratorDraft | null>(null);
+  const [draft, setDraft] = useState<ManagedWorkspaceDraft | null>(null);
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +42,7 @@ export function ProjectOrchestratorWizard() {
     setBusy(true);
     setError(null);
     try {
-      const nextDraft = await adminService.createOrchestratorDraft({ prompt: prompt.trim() });
+      const nextDraft = await adminService.createManagedWorkspaceDraft({ prompt: prompt.trim() });
       setDraft(nextDraft);
       setQuestionAnswers({});
       setStep(2);
@@ -58,7 +58,7 @@ export function ProjectOrchestratorWizard() {
     setBusy(true);
     setError(null);
     try {
-      await adminService.confirmOrchestratorDraft(draft);
+      await adminService.confirmManagedWorkspaceDraft(draft);
       router.push('/projects');
     } catch (e) {
       setError(errorMessage(e, 'No se pudo confirmar el borrador'));
@@ -131,7 +131,7 @@ export function ProjectOrchestratorWizard() {
                 Describe el objetivo del proyecto
               </h3>
               <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-                Incluye resultado esperado, datos disponibles y el tipo de ayuda que debe coordinar el Orchestrator.
+                Incluye resultado esperado, datos disponibles y el tipo de ayuda que debe preparar el flujo administrado.
               </p>
             </div>
             <label
@@ -158,7 +158,7 @@ export function ProjectOrchestratorWizard() {
                 onClick={() => void generateDraft()}
                 className="rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900 disabled:opacity-50"
               >
-                {busy ? 'Analizando...' : 'Analizar con Orchestrator'}
+                {busy ? 'Analizando...' : 'Analizar borrador administrado'}
               </button>
             </div>
           </div>
@@ -169,14 +169,14 @@ export function ProjectOrchestratorWizard() {
             <div>
               <h3 className="text-xl font-black text-gov-gray-900 dark:text-dark-text">Preguntas faltantes</h3>
               <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-                Revisa lo que el Orchestrator aun necesita antes de validar el borrador.
+                Revisa lo que falta antes de validar el borrador administrado.
               </p>
             </div>
             <div className="grid gap-2">
               {draft.questions.length > 0 ? (
                 draft.questions.map((question, index) => {
                   const answerKey = `${index}:${question}`;
-                  const answerId = `orchestrator-question-${index}`;
+                  const answerId = `managed-draft-question-${index}`;
                   return (
                     <div
                       key={answerKey}
@@ -245,13 +245,13 @@ export function ProjectOrchestratorWizard() {
             <div>
               <h3 className="text-xl font-black text-gov-gray-900 dark:text-dark-text">Borrador revisable</h3>
               <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-                Análisis del Orchestrator: confirma proyecto, workers, skills sugeridas y contexto compartido antes
-                de escribir en DB.
+                Análisis del borrador administrado: confirma proyecto, workers, skills sugeridas y contexto compartido
+                antes de escribir en DB.
               </p>
             </div>
             <div className="rounded-2xl border border-gov-cyan-200 bg-gov-cyan-50 p-4 dark:border-dark-border dark:bg-dark-bg">
               <p className="text-xs font-black uppercase tracking-wide text-gov-blue-700 dark:text-dark-cyan">
-                Análisis del Orchestrator
+                Análisis del borrador administrado
               </p>
               <p className="mt-2 text-sm text-gov-blue-900 dark:text-dark-text">
                 El borrador resume el objetivo, separa contexto operativo y propone workers antes de guardar datos.

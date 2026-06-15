@@ -4,6 +4,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 
+export { looksLikeMarkdown } from './chatMarkdownDetection';
+
 const SUBAGENT_INSTANCE_LINE = /^[A-Za-z0-9][A-Za-z0-9_.-]*\s+\d+\s*$/;
 const CAVEMAN_BOLD_HEADER = /^\s*\*\*[A-Za-z0-9][A-Za-z0-9_.-]*(?:\s+\d+)?\s*·[^*]+\*\*\s*$/i;
 const CAVEMAN_PLAIN_HEADER = /^[A-Za-z0-9][A-Za-z0-9_.-]*(?:\s+\d+)?\s*·.*\bCOT\b/i;
@@ -60,25 +62,6 @@ export function splitPlaygroundWorkerSuffix(text: string): { body: string; worke
   const m = text.match(/^([\s\S]*)(\s*\(worker:\s*[^)]+\))\s*$/);
   if (!m) return { body: text, workerNote: null };
   return { body: m[1].trimEnd(), workerNote: m[2].trim() };
-}
-
-const MARKDOWN_SIGNALS: RegExp[] = [
-  /^#{1,6}\s/m,
-  /^\s*[-*+]\s+/m,
-  /^\s*\d+\.\s+/m,
-  /```/,
-  /^\s*>/m,
-  /\*\*[^*\n]+\*\*/,
-  /\[[^\]]+\]\([^)]+\)/,
-  /^\|[^|\n]+\|/m,
-  /^---+\s*$/m,
-];
-
-/** Heurística conservadora: solo formatear si hay señales claras de Markdown. */
-export function looksLikeMarkdown(text: string): boolean {
-  const trimmed = (text || '').trim();
-  if (!trimmed) return false;
-  return MARKDOWN_SIGNALS.some((pattern) => pattern.test(trimmed));
 }
 
 type MarkdownVariant = 'assistant' | 'user';

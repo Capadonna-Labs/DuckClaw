@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { looksLikeMarkdown } from '@/components/chat/ChatMarkdown';
+import { looksLikeMarkdown } from './chatMarkdownDetection';
 
 describe('looksLikeMarkdown', () => {
   it('detecta encabezados y listas', () => {

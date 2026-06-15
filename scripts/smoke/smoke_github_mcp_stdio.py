@@ -54,7 +54,7 @@ def main() -> int:
         return 2
 
     async def _run() -> int:
-        from duckclaw.forge.skills.github_bridge import compose_github_stdio_server_params
+        from duckclaw.github.mcp_bridge import compose_github_stdio_server_params
         from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_list_tools
 
         params = compose_github_stdio_server_params(token, read_only=True)

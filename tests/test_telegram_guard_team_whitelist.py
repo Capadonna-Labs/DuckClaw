@@ -18,8 +18,11 @@ def _graph_get_db_points_at_fixture_db(monkeypatch: pytest.MonkeyPatch, db: Duck
 
 
 @pytest.fixture
-def db(tmp_path: Path) -> DuckClaw:
-    path = str(tmp_path / "gateway_guard_test.duckdb")
+def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DuckClaw:
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
+    monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
+    monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
+    path = str(tmp_path / "db" / "private" / "1" / "gateway_guard_test.duckdb")
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     d = DuckClaw(path)
     # Asegurar tabla whitelist (main schema)
@@ -65,13 +68,13 @@ def test_team_list_deduplicates_same_user_multiple_tenant_rows(db) -> None:
     d = db
     d.execute(
         "INSERT INTO main.authorized_users (tenant_id, user_id, username, role) "
-        "VALUES ('Trabajo', '9', 'usuario', 'admin')"
+        "VALUES ('TenantA', '9', 'usuario', 'admin')"
     )
     d.execute(
         "INSERT INTO main.authorized_users (tenant_id, user_id, username, role) "
-        "VALUES ('trabajo', '9', 'usuario', 'user')"
+        "VALUES ('tenanta', '9', 'usuario', 'user')"
     )
-    reply = handle_command(d, "chat_1", "/team", requester_id="9", tenant_id="Trabajo")
+    reply = handle_command(d, "chat_1", "/team", requester_id="9", tenant_id="TenantA")
     assert reply is not None
     bullet_lines = [ln for ln in reply.splitlines() if ln.strip().startswith("- ")]
     assert len(bullet_lines) == 1
@@ -138,115 +141,35 @@ def test_team_whitelist_add_admin_allows_insert(db) -> None:
     assert parsed and parsed[0]["user_id"] == "3"
 
 
-def test_register_wr_member_requires_wr_admin(db) -> None:
+def test_wr_prefixed_tenant_uses_generic_team_whitelist(db) -> None:
     d = db
-    # bootstrap admin for wr tenant
-    d.execute("CREATE SCHEMA IF NOT EXISTS war_room_core")
     d.execute(
         """
-        CREATE TABLE IF NOT EXISTS war_room_core.wr_members (
-            tenant_id VARCHAR,
-            user_id VARCHAR,
-            username VARCHAR,
-            clearance_level VARCHAR,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (tenant_id, user_id)
-        )
-        """
-    )
-    d.execute(
-        """
-        INSERT INTO war_room_core.wr_members (tenant_id, user_id, username, clearance_level)
+        INSERT INTO main.authorized_users (tenant_id, user_id, username, role)
         VALUES ('wr_-1001', '1', 'admin', 'admin')
-        ON CONFLICT (tenant_id, user_id) DO UPDATE SET clearance_level='admin'
+        ON CONFLICT (tenant_id, user_id) DO UPDATE SET username=EXCLUDED.username, role=EXCLUDED.role
         """
     )
-
-    denied = handle_command(
-        d,
-        "chat_1",
-        "/register_wr_member 77 operator maria",
-        requester_id="2",
-        tenant_id="wr_-1001",
-    )
-    assert denied is not None
-    assert "Acceso denegado" in denied
 
     ok = handle_command(
         d,
         "chat_1",
-        "/register_wr_member 77 operator maria",
+        "/team --add 77 maria",
         requester_id="1",
         tenant_id="wr_-1001",
     )
     assert ok is not None
-    assert "registrado" in ok.lower()
+    assert "Añadido" in ok
+    assert "wr_-1001" in ok
 
 
-def test_execute_signal_wr_requires_admin(db, monkeypatch: pytest.MonkeyPatch) -> None:
-    d = db
-    d.execute("CREATE SCHEMA IF NOT EXISTS war_room_core")
-    d.execute(
-        """
-        CREATE TABLE IF NOT EXISTS war_room_core.wr_members (
-            tenant_id VARCHAR,
-            user_id VARCHAR,
-            username VARCHAR,
-            clearance_level VARCHAR,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (tenant_id, user_id)
-        )
-        """
-    )
-    d.execute(
-        """
-        INSERT INTO war_room_core.wr_members (tenant_id, user_id, username, clearance_level)
-        VALUES ('wr_-1001', '1', 'admin', 'admin')
-        ON CONFLICT (tenant_id, user_id) DO UPDATE SET clearance_level='admin'
-        """
-    )
-    d.execute("CREATE SCHEMA IF NOT EXISTS finance_worker")
-    d.execute(
-        """
-        CREATE TABLE IF NOT EXISTS finance_worker.trade_signals (
-            signal_id VARCHAR PRIMARY KEY,
-            status VARCHAR
-        )
-        """
-    )
-    d.execute(
-        """
-        INSERT INTO finance_worker.trade_signals (signal_id, status)
-        VALUES ('123e4567-e89b-12d3-a456-426614174000', 'AWAITING_HITL')
-        ON CONFLICT (signal_id) DO UPDATE SET status = EXCLUDED.status
-        """
-    )
-
-    monkeypatch.setattr("duckclaw.graphs.graph_server.get_db", lambda: d)
-    _hitl = type("Hitl", (), {"grant_execute_order": staticmethod(lambda *_a, **_k: None)})()
-    monkeypatch.setattr(
-        "duckclaw.capadonna_plugin.load_capadonna_lib",
-        lambda name: _hitl if name == "quant_hitl" else None,
-    )
-    signal_id = "123e4567-e89b-12d3-a456-426614174000"
-
-    denied = handle_command(
-        d,
-        "chat_2",
-        f"/execute-signal {signal_id}",
-        requester_id="2",
-        tenant_id="wr_-1001",
-    )
-    assert denied is not None
-    assert "requiere clearance admin" in denied.lower()
-
-    allowed = handle_command(
-        d,
-        "chat_2",
-        f"/execute_signal {signal_id}",
+def test_removed_wr_member_command_is_not_handled(db) -> None:
+    reply = handle_command(
+        db,
+        "chat_1",
+        "/register_wr_member 77 operator maria",
         requester_id="1",
         tenant_id="wr_-1001",
     )
-    assert allowed is not None
-    assert "confirmación registrada" in allowed.lower()
+    assert reply is None
 

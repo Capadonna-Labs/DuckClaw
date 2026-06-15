@@ -25,7 +25,7 @@ export function toolHeartbeatInvocationKey(m: ChatMsg): string | null {
 export function parseToolNameFromHeartbeatText(text: string): string | null {
   const raw = (text || '').trim();
   if (!raw) return null;
-  const using = raw.match(/\u{1F504}\s*Usando:\s*(.+?)(?:\s*·|$)/u);
+  const using = raw.match(/\uD83D\uDD04\s*Usando:\s*(.+?)(?:\s*·|$)/);
   if (using) return using[1].trim();
   const plain = raw.match(/Usando:\s*(.+?)(?:\s*·|$)/);
   if (plain) return plain[1].trim();

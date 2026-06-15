@@ -65,14 +65,9 @@ def _tts_timeout() -> float:
 
 
 _TTS_TEXT_MAX_LEN = 3000
-_BUILTIN_VOICE_MAP: dict[str, str] = {
-    "quant-trader": "finanz_alert",
-    "quant_trader": "finanz_alert",
-    "Quant-Trader": "finanz_alert",
-    "finanz": "finanz_alert",
-}
-_QUANT_HEADER_RE = re.compile(
-    r"^(?:quant[- ]?trader|Quant-Trader)\s+\d+\s*[·•]\s*[^\n]*(?:\n|$)",
+_BUILTIN_VOICE_MAP: dict[str, str] = {}
+_WORKER_INSTANCE_HEADER_RE = re.compile(
+    r"^[\w.-]+\s+\d+\s*[·•]\s*[^\n]*(?:\n|$)",
     re.IGNORECASE | re.MULTILINE,
 )
 _HRULE_RE = re.compile(r"^---+\s*$", re.MULTILINE)
@@ -117,9 +112,9 @@ def tts_snippet_for_reply(text: str) -> str:
     t = (text or "").strip()
     if not t:
         return ""
-    t = _QUANT_HEADER_RE.sub("", t, count=1)
+    t = _WORKER_INSTANCE_HEADER_RE.sub("", t, count=1)
     t = _HRULE_RE.sub("", t)
-    t = re.sub(r"^(?:quant[- ]?trader)\s+\d+\s*\n", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"^[\w.-]+\s+\d+\s*\n", "", t, flags=re.IGNORECASE)
     return t.strip()
 
 
@@ -170,7 +165,7 @@ def resolve_voice_id_for_worker(worker_id: str) -> str:
     """Map worker_id → pre-approved voice_id via DUCKCLAW_TTS_VOICE_MAP JSON."""
     import json
 
-    default = "leila_assistant"
+    default = (os.environ.get("DUCKCLAW_TTS_DEFAULT_VOICE_ID") or "default").strip() or "default"
     wid = (worker_id or "").strip()
     raw = (os.environ.get("DUCKCLAW_TTS_VOICE_MAP") or "").strip()
     mapping: dict[str, Any] = dict(_BUILTIN_VOICE_MAP)

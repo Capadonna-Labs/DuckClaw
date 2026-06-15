@@ -1,1 +1,1 @@
-"""GitHub integration workflows."""
+"""Generic GitHub capabilities."""

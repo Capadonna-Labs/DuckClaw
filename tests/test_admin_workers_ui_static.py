@@ -15,7 +15,7 @@ def test_workers_ui_uses_generic_catalog_import_and_no_folder_delete_language() 
 
     assert "importTemplatesToCatalog" in service
     assert "/templates/import" in service
-    assert "Crear con Orchestrator" in page
+    assert "Crear borrador administrado" in page
     assert "catálogo DB-first" in page
     assert "Desactivar del catálogo" in page
     assert "Eliminar definitivo" in page
@@ -57,7 +57,7 @@ def test_workers_ui_does_not_offer_deactivation_for_default_template() -> None:
     assert "canWrite && isCatalogManaged && !isProtectedWorker" in page
     assert "{!isInactive && (" in page
     assert "agent.source === 'catalog'" in page
-    assert "agent.id === 'platform-orchestrator'" in page
+    assert "agent.id === 'default'" in page
 
 
 def test_worker_detail_ui_marks_catalog_workers_read_only() -> None:

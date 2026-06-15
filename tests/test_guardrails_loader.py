@@ -1,6 +1,9 @@
-"""Smoke: guardrails referenciados en factory y manager existen en disco."""
+"""Smoke: guardrails Markdown vigentes siguen disponibles en disco."""
 
 from __future__ import annotations
+
+import re
+from pathlib import Path
 
 import pytest
 
@@ -20,21 +23,11 @@ _REQUIRED = [
     ("errors", "llm_failure_deepseek"),
     ("errors", "llm_failure_openai"),
     ("errors", "llm_failure_generic"),
-    ("manager_tasks", "finanz_tool_pressure"),
-    ("manager_tasks", "quant_hrp_affirm_planned"),
-    ("manager_tasks", "quant_hrp_affirm_task_confirm"),
-    ("manager_tasks", "quant_hrp_affirm_task_flow"),
-    ("manager_tasks", "quant_operational_fly_command"),
     ("manager_tasks", "bi_analyst_capabilities_question"),
-    ("manager_tasks", "job_opportunity_tracking"),
-    ("manager_tasks", "job_application_tracking"),
-    ("manager_tasks", "job_income_injection"),
     ("manager_tasks", "duckdb_name_query"),
     ("manager_tasks", "table_content_named"),
     ("manager_tasks", "table_content_generic"),
     ("manager_tasks", "list_database_tables"),
-    ("manager_tasks", "job_track_synthesis_finanz"),
-    ("manager_tasks", "job_income_synthesis_finanz"),
     ("planner_tasks", "summarize_new_context_title"),
     ("planner_tasks", "summarize_stored_context_title"),
     ("resilience", "replan_task_suffix"),
@@ -50,6 +43,25 @@ _REQUIRED = [
     ("fly_commands", "workers_list_hint"),
 ]
 
+_REMOVED_MANAGER_TASK_MARKDOWN = {
+    "job_application_tracking",
+    "job_income_injection",
+    "job_income_synthesis_finanz",
+    "job_opportunity_tracking",
+    "job_track_synthesis_finanz",
+    "quant_generic_affirm_planned",
+    "quant_generic_affirm_task_flow",
+    "quant_hrp_affirm_planned",
+    "quant_hrp_affirm_task_confirm",
+    "quant_hrp_affirm_task_flow",
+    "quant_operational_fly_command",
+}
+
+_RUNTIME_MANAGER_TASK_FILES = [
+    Path("packages/agents/src/duckclaw/graphs/manager_graph.py"),
+    Path("packages/agents/src/duckclaw/manager/fast_plans.py"),
+]
+
 
 @pytest.mark.parametrize("parts", _REQUIRED, ids=lambda p: "/".join(p))
 def test_guardrail_files_exist(parts: tuple[str, str]) -> None:
@@ -57,14 +69,23 @@ def test_guardrail_files_exist(parts: tuple[str, str]) -> None:
     assert len(text) > 20, f"guardrail vacío: {parts}"
 
 
+def test_removed_manager_task_markdown_is_not_loaded_by_runtime() -> None:
+    for path in _RUNTIME_MANAGER_TASK_FILES:
+        text = path.read_text(encoding="utf-8")
+        offenders = [
+            name
+            for name in _REMOVED_MANAGER_TASK_MARKDOWN
+            if re.search(
+                rf"(?:load_guardrail|format_guardrail)\(\s*[\"']manager_tasks[\"']\s*,\s*[\"']{name}[\"']",
+                text,
+            )
+        ]
+        assert offenders == [], f"{path} still references removed manager task Markdown: {offenders}"
+
+
 def test_format_guardrail_table_name() -> None:
     out = format_guardrail("manager_tasks", "table_content_named", table_name="finance_worker.cuentas")
     assert "finance_worker.cuentas" in out
-
-
-def test_format_guardrail_job_tracking_context() -> None:
-    out = format_guardrail("manager_tasks", "job_opportunity_tracking", context="https://example.com/job")
-    assert "https://example.com/job" in out
 
 
 def test_summarize_new_context_task_list() -> None:

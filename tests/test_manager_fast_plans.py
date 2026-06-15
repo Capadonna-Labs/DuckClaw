@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 
 def _seed_prompt_policy(con, policy_type: str, policy_name: str, content: str) -> None:
@@ -21,14 +22,38 @@ def _seed_prompt_policy(con, policy_type: str, policy_name: str, content: str) -
     )
 
 
-def test_manager_graph_delegates_selected_fast_plans_to_manager_module() -> None:
+def _seed_worker_fast_plan_capability(con, worker_id: str, policy: dict[str, object]) -> None:
+    worker_uid = f"uid-{worker_id}"
+    con.execute(
+        """
+        INSERT INTO main.admin_worker_catalog
+          (worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, source_template_id, active)
+        VALUES (?, 'default', 'owner@example.com', ?, ?, 'runtime', 'default', true)
+        """,
+        [worker_uid, worker_id, worker_id],
+    )
+    con.execute(
+        """
+        INSERT INTO main.admin_capabilities
+          (capability_id, name, kind, provider, description, active)
+        VALUES ('cap-fast-plan', 'fast_plan', 'planning', 'duckdb', 'DB-first fast plan', true)
+        """,
+    )
+    con.execute(
+        """
+        INSERT INTO main.admin_worker_capabilities
+          (worker_uid, capability_id, permission, policy_json, enabled)
+        VALUES (?, 'cap-fast-plan', 'use', ?, true)
+        """,
+        [worker_uid, json.dumps(policy)],
+    )
+
+
+def test_manager_graph_delegates_capability_fast_plan_to_manager_module() -> None:
     from duckclaw.graphs import manager_graph
     from duckclaw.manager import fast_plans
 
-    assert manager_graph._manager_visual_generation_intent is fast_plans._manager_visual_generation_intent
-    assert manager_graph._manager_video_generation_intent is fast_plans._manager_video_generation_intent
-    assert manager_graph._try_visual_generation_fast_plan is fast_plans._try_visual_generation_fast_plan
-    assert manager_graph._try_quant_url_research_fast_plan is fast_plans._try_quant_url_research_fast_plan
+    assert manager_graph._try_capability_fast_plan is fast_plans._try_capability_fast_plan
 
 
 def test_manager_graph_delegates_fast_replies_to_manager_module() -> None:
@@ -93,31 +118,91 @@ def test_manager_graph_capabilities_shortcut_uses_prompt_policy_resolver_db_firs
     assert out["reply"] == "DB graph capability for custom-worker"
 
 
-def test_visual_generation_fast_plan_uses_fal_image_provider(monkeypatch) -> None:
-    from duckclaw.manager.fast_plans import _try_visual_generation_fast_plan
+def test_capability_fast_plan_returns_none_without_db_policy() -> None:
+    import duckdb
 
-    monkeypatch.setattr(
-        "duckclaw.forge.skills.visual_provider.resolve_visual_provider",
-        lambda db, chat_id: "fal",
+    from duckclaw.manager.fast_plans import _try_capability_fast_plan
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+
+    assert (
+        _try_capability_fast_plan(
+            "prioriza esta solicitud",
+            ["plain-worker"],
+            db=con,
+            tenant_id="default",
+        )
+        is None
     )
 
-    plan = _try_visual_generation_fast_plan(
-        "Genera una imagen de un pato robot",
-        ["Quant-Trader"],
-        db=object(),
-        chat_id="chat-1",
+
+def test_capability_fast_plan_uses_db_first_worker_capability_policy() -> None:
+    import duckdb
+
+    from duckclaw.manager.fast_plans import _try_capability_fast_plan
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+    _seed_worker_fast_plan_capability(
+        con,
+        "policy-worker",
+        {
+            "intent_regex": r"\bprioriza\b",
+            "title": "Plan rápido transversal",
+            "tasks": [
+                "Ejecutar la capability configurada.",
+                "No repetir acciones ya confirmadas en este turno.",
+            ],
+            "planned_template": "Solicitud original:\n{incoming}",
+        },
     )
 
-    assert plan is not None
-    title, tasks, planned, worker = plan
-    assert title == "Generar imagen elite (Fal.ai Flux)"
-    assert "generate_flux_image" in tasks[0]
-    assert planned == "Genera una imagen de un pato robot"
-    assert worker == "Quant-Trader"
+    plan = _try_capability_fast_plan(
+        "prioriza esta solicitud",
+        ["policy-worker"],
+        db=con,
+        tenant_id="default",
+    )
+
+    assert plan == (
+        "Plan rápido transversal",
+        [
+            "Ejecutar la capability configurada.",
+            "No repetir acciones ya confirmadas en este turno.",
+        ],
+        "Solicitud original:\nprioriza esta solicitud",
+        "policy-worker",
+    )
 
 
-def test_fast_plans_exports_video_generation_intent_helper() -> None:
-    from duckclaw.manager.fast_plans import _manager_video_generation_intent
+def test_capability_fast_plan_ignores_non_matching_policy() -> None:
+    import duckdb
 
-    assert _manager_video_generation_intent("Crea un video corto de un pato robot")
-    assert not _manager_video_generation_intent("Genera una imagen de un pato robot")
+    from duckclaw.manager.fast_plans import _try_capability_fast_plan
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+    _seed_worker_fast_plan_capability(
+        con,
+        "policy-worker",
+        {
+            "intent_regex": r"\bprioriza\b",
+            "title": "Plan rápido transversal",
+            "tasks": ["Ejecutar la capability configurada."],
+            "planned_template": "{incoming}",
+        },
+    )
+
+    assert (
+        _try_capability_fast_plan(
+            "solo conversa conmigo",
+            ["policy-worker"],
+            db=con,
+            tenant_id="default",
+        )
+        is None
+    )

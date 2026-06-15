@@ -4,8 +4,8 @@ Consulta ``main.authorized_users`` en una DuckDB (depuración del flujo /team).
 
 Ejemplos::
 
-  uv run python scripts/check_authorized_users.py --db db/private/USER/finanzdb1.duckdb
-  uv run python scripts/check_authorized_users.py --tenant Finanzas
+  uv run python scripts/check_authorized_users.py --db db/private/USER/duckclaw.duckdb
+  uv run python scripts/check_authorized_users.py --tenant default
 
 Si omites ``--db``, se usa ``get_gateway_db_path()`` (requiere ``DUCKCLAW_REPO_ROOT`` / env multiplex).
 """

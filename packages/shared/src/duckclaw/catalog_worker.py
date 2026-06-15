@@ -3,7 +3,7 @@
 Usage::
 
     from duckclaw.catalog_worker import load_manifest_from_catalog
-    spec = load_manifest_from_catalog(db, "finanz", tenant_id="default")
+    spec = load_manifest_from_catalog(db, "worker_id", tenant_id="default")
 """
 from __future__ import annotations
 

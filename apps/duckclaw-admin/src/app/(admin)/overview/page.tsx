@@ -126,7 +126,7 @@ function UserHomeActions() {
       <HomeAction
         href="/projects"
         icon={PlusCircle}
-        title="Crear con Orchestrator"
+        title="Crear borrador administrado"
         description="Proyectos y agentes DB-first con borrador revisable."
       />
       <HomeAction

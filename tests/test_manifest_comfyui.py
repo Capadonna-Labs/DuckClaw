@@ -7,7 +7,7 @@ from duckclaw.workers.manifest import load_manifest
 
 def test_load_manifest_default_has_comfyui_config(catalog_db) -> None:
     spec = load_manifest("default", db=catalog_db, tenant_id="default")
-    cfg = getattr(spec, "comfyui_config", None)
+    cfg = spec.skill_configs.get("comfyui")
     assert isinstance(cfg, dict)
     assert cfg.get("enabled") is True
     assert cfg.get("template") == "comfy_default"

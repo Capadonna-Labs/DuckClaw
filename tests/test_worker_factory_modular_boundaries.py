@@ -393,6 +393,47 @@ def test_factory_delegates_tool_invocation_policy() -> None:
     assert "decide_market_data_tool_invocation" not in names
 
 
+def test_factory_delegates_configured_skill_tool_registration() -> None:
+    registry = importlib.import_module("duckclaw.workers.skill_tool_registry")
+    from duckclaw.workers import factory
+
+    assert factory._register_pre_llm_skill_tools is registry.register_pre_llm_skill_tools
+    assert factory._register_post_llm_skill_tools is registry.register_post_llm_skill_tools
+    assert factory._read_visual_artifact_image_as_b64 is registry.read_visual_artifact_image_as_b64
+    assert (
+        factory._register_pre_llm_skill_tools.__module__
+        == "duckclaw.workers.skill_tool_registry"
+    )
+    assert (
+        factory._register_post_llm_skill_tools.__module__
+        == "duckclaw.workers.skill_tool_registry"
+    )
+    assert (
+        factory._read_visual_artifact_image_as_b64.__module__
+        == "duckclaw.workers.skill_tool_registry"
+    )
+
+    source = _factory_source()
+    forbidden_bridge_imports = {
+        "duckclaw.forge.skills.google_trends_bridge",
+        "duckclaw.forge.skills.reddit_bridge",
+        "duckclaw.forge.skills.research_bridge",
+        "duckclaw.forge.skills.openweather_bridge",
+        "duckclaw.forge.skills.tailscale_bridge",
+        "duckclaw.forge.skills.fmp_bridge",
+        "duckclaw.forge.skills.comfyui_bridge",
+        "register_google_trends_skill",
+        "register_reddit_skill",
+        "register_research_skill",
+        "register_openweather_skill",
+        "register_tailscale_skill",
+        "register_fmp_skill",
+        "register_comfyui_skill",
+    }
+    leaked = sorted(marker for marker in forbidden_bridge_imports if marker in source)
+    assert leaked == []
+
+
 def test_factory_deprecated_debug_probe_removed() -> None:
     source = _factory_source()
     assert "_ibkr_cancel_debug_log" not in source

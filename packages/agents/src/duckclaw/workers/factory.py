@@ -98,6 +98,11 @@ from duckclaw.workers.tool_invocation_policy import (
     decide_db_first_tool_invocation as _decide_db_first_tool_invocation,
     decide_market_data_tool_invocation as _decide_market_data_tool_invocation,
 )
+from duckclaw.workers.skill_tool_registry import (
+    read_visual_artifact_image_as_b64 as _read_visual_artifact_image_as_b64,
+    register_post_llm_skill_tools as _register_post_llm_skill_tools,
+    register_pre_llm_skill_tools as _register_pre_llm_skill_tools,
+)
 
 from duckclaw.workers.identity import load_worker_runtime_policy
 from duckclaw.workers.db_intent_policy import (
@@ -978,7 +983,6 @@ class WorkerFactory:
             tool_surface="full",
         )
 
-
 def build_worker_graph(
     worker_id: str,
     db_path: Optional[str],
@@ -1091,29 +1095,12 @@ def build_worker_graph(
     except Exception:
         pass
     tools = _build_worker_tools(db, spec)
-    _hint_low = (incoming_hint or "").strip().lower()
-    _register_trends = tool_surface == "full"
-    # Reddit MCP (npx cold start ~2–3 min): solo cuando el turno lo necesita, no en cada full.
-    _register_reddit = bool(getattr(spec, "reddit_config", None)) and (
-        tool_surface == "context_synthesis"
-        or (tool_surface == "url_research" and "reddit.com" in _hint_low)
-        or (tool_surface == "full" and "reddit.com" in _hint_low)
+    _register_pre_llm_skill_tools(
+        tools,
+        spec,
+        tool_surface=tool_surface,
+        incoming_hint=incoming_hint or "",
     )
-    if _register_trends and getattr(spec, "google_trends_config", None) is not None:
-        try:
-            from duckclaw.forge.skills.google_trends_bridge import register_google_trends_skill
-
-            register_google_trends_skill(tools, spec.google_trends_config)
-        except Exception:
-            pass
-    # Reddit: SUMMARIZE_NEW_CONTEXT con URL /r/.../s/...; url_research solo si dominio reddit.com.
-    if _register_reddit and getattr(spec, "reddit_config", None):
-        try:
-            from duckclaw.forge.skills.reddit_bridge import register_reddit_skill
-
-            register_reddit_skill(tools, spec.reddit_config)
-        except Exception:
-            pass
     tools_by_name = {t.name: t for t in tools}
 
     # Inferencia Elástica (Hardware-Aware): si el manifest tiene inference y no se pasó provider/model/base_url explícito, detectar hardware
@@ -1166,48 +1153,8 @@ def build_worker_graph(
     if llm is not None and _cp_early.get("enabled"):
         llm_summary = _build_summary_llm(llm, provider=provider, model=model, base_url=base_url)
 
-    if getattr(spec, "research_config", None):
-        try:
-            from duckclaw.forge.skills.research_bridge import register_research_skill
-            register_research_skill(tools, spec.research_config, llm=llm)
-            tools_by_name = {t.name: t for t in tools}
-        except Exception:
-            pass
-
-    if getattr(spec, "openweather_config", None) is not None:
-        try:
-            from duckclaw.forge.skills.openweather_bridge import register_openweather_skill
-
-            register_openweather_skill(tools, spec.openweather_config, getattr(spec, "research_config", None))
-            tools_by_name = {t.name: t for t in tools}
-        except Exception:
-            pass
-
-    if getattr(spec, "tailscale_config", None):
-        try:
-            from duckclaw.forge.skills.tailscale_bridge import register_tailscale_skill
-            register_tailscale_skill(tools, spec.tailscale_config)
-            tools_by_name = {t.name: t for t in tools}
-        except Exception:
-            pass
-
-    if getattr(spec, "fmp_config", None) is not None:
-        try:
-            from duckclaw.forge.skills.fmp_bridge import register_fmp_skill
-
-            register_fmp_skill(tools, spec.fmp_config)
-            tools_by_name = {t.name: t for t in tools}
-        except Exception:
-            pass
-
-    if getattr(spec, "comfyui_config", None) is not None:
-        try:
-            from duckclaw.forge.skills.comfyui_bridge import register_comfyui_skill
-
-            register_comfyui_skill(tools, spec.comfyui_config, duckclaw_db=db)
-            tools_by_name = {t.name: t for t in tools}
-        except Exception:
-            _log.debug("comfyui skills registration skipped", exc_info=True)
+    _register_post_llm_skill_tools(tools, spec, db=db, llm=llm)
+    tools_by_name = {t.name: t for t in tools}
 
     if getattr(spec, "homeostasis_config", None):
         try:
@@ -2651,14 +2598,11 @@ def build_worker_graph(
                                     if isinstance(fb, str) and len(fb) > 32:
                                         sandbox_b64 = fb
                                     elif payload.get("artifacts"):
-                                        from duckclaw.forge.skills.comfyui_bridge import (
-                                            read_artifact_image_as_b64,
-                                        )
                                         arts = payload.get("artifacts")
                                         if isinstance(arts, list) and arts:
                                             first = str(arts[0] or "").strip()
                                             if first:
-                                                b64_art = read_artifact_image_as_b64(
+                                                b64_art = _read_visual_artifact_image_as_b64(
                                                     first,
                                                     _tenant_ctx,
                                                 )

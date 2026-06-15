@@ -18,23 +18,12 @@ from dataclasses import dataclass
 
 from duckclaw.gateway_db import resolve_env_duckdb_path
 
-# Rutas .env antiguas (bot:token:/api/v1/telegram/sufijo sin :worker:tenant)
-_LEGACY_BOT_DEFAULT_WORKER: dict[str, str] = {
-    "finanz": "finanz",
-    "siata": "siata_analyst",
-    "jobhunter": "job_hunter",
-    "quanttrader": "quant_trader",
-}
-
-
 def _legacy_default_tenant_id() -> str:
     return (os.environ.get("DUCKCLAW_TELEGRAM_LEGACY_DEFAULT_TENANT") or "default").strip() or "default"
 
 
 def _infer_legacy_worker_id(bot_name: str) -> str:
     key = (bot_name or "").strip().lower()
-    if key in _LEGACY_BOT_DEFAULT_WORKER:
-        return _LEGACY_BOT_DEFAULT_WORKER[key]
     return key.replace("-", "_")
 
 
@@ -176,7 +165,7 @@ def compact_route_to_path_binding(route: TelegramCompactWebhookRoute) -> Telegra
 
 
 def fastapi_relative_path(webhook_path: str, *, api_prefix: str = "/api/v1/telegram") -> str:
-    """Sufijo para APIRouter(prefix=api_prefix): ``'/finanz'`` desde ``'/api/v1/telegram/finanz'``."""
+    """Sufijo para APIRouter(prefix=api_prefix) desde una ruta de webhook completa."""
     p = (webhook_path or "").strip().rstrip("/")
     pre = api_prefix.rstrip("/")
     if not p.startswith(pre + "/") and p != pre:

@@ -1,4 +1,4 @@
-"""Regresión: mutaciones whitelist usan motor Python al abrir hub aparte del fly_db."""
+"""Regresiones DB-first para mutaciones whitelist y auditoría."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def _bootstrap_duckdb(path: Path) -> None:
         con.close()
 
 
-def test_authorized_users_rw_opens_hub_with_python_engine_when_vault_differs(
+def test_authorized_users_rw_connection_shim_does_not_open_hub_rw_when_vault_differs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
@@ -52,10 +52,8 @@ def test_authorized_users_rw_opens_hub_with_python_engine_when_vault_differs(
     with patch("duckclaw.DuckClaw", wraps=DuckClaw) as spy:
         mut_db, mut_close = _authorized_users_rw_connection(fly_db)
         try:
-            spy.assert_called()
-            _kwargs = spy.call_args[1]
-            assert _kwargs.get("read_only") is False
-            assert _kwargs.get("engine") == "python"
+            spy.assert_not_called()
+            assert isinstance(mut_db, GatewayDbEphemeralReadonly)
         finally:
             mut_close()
             fly_db.close()

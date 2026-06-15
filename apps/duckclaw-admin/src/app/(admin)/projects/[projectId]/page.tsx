@@ -93,11 +93,11 @@ export default function ProjectDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
-              href={`/playground?worker=platform-orchestrator&project=${encodeURIComponent(project.project_id)}`}
+              href={`/playground?project=${encodeURIComponent(project.project_id)}`}
               className="inline-flex items-center gap-2 rounded-xl border border-gov-blue-200 px-4 py-2 text-sm font-black text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
             >
               <PlayCircle size={16} />
-              Guiar con Orchestrator
+              Abrir playground
             </Link>
             {firstAgent && (
               <Link

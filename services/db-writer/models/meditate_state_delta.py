@@ -15,7 +15,7 @@ MeditateDeltaType = Literal[
 
 
 class PurgeStaleTasksMutation(BaseModel):
-    source_table: str = "quant_core.trade_signals"
+    source_table: str = "main.task_audit_log"
     task_ids: list[str] = Field(default_factory=list)
 
 

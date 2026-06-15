@@ -4,12 +4,12 @@ Identificación de subagentes (manager → worker).
 - **Slot activo** (``acquire_subagent_slot``): sorted set en Redis con tokens en curso;
   el rank (1..n) es la etiqueta de UI/log: **subagent_slot_rank** entre ejecuciones
   **simultáneas** del mismo worker en el mismo ámbito. **No** es un índice de réplica PM2
-  ni «Finanz 1 vs Finanz 2» como workers distintos: ``finanz 2`` solo indica que, al
+  ni «Worker 1 vs Worker 2» como workers distintos: ``worker 2`` solo indica que, al
   hacer ``ZADD``, este token quedó en segunda posición en el ZSET (p. ej. otra ejecución
-  ``finanz`` del mismo chat aún no registró ``release``, o un token huérfano tras un fallo
+  otro token del mismo chat aún no registró ``release``, o un token huérfano tras un fallo
   antes del ``finally``).
 
-  **Comparar números entre workers no es significativo:** ``Job-Hunter 1`` y ``finanz 2``
+  **Comparar números entre workers no es significativo:** ``Worker-A 1`` y ``Worker-B 2``
   usan claves Redis distintas (el ``worker_id`` forma parte de la clave); cada uno cuenta
   solo sus propias ejecuciones concurrentes.
 

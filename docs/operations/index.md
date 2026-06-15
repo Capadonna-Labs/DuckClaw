@@ -1,6 +1,6 @@
 # Operaciones
 
-Runbooks en español/inglés mixto. **Normativa:** [`../../specs/`](../../specs/).
+Runbooks en español/inglés mixto. **Normativa:** [`../specs/`](../specs/).
 
 ## Acceso rápido
 
@@ -19,11 +19,11 @@ Runbooks en español/inglés mixto. **Normativa:** [`../../specs/`](../../specs/
 ## Principios
 
 - Solo **db-writer** escribe DuckDB en producción.
-- Cambios de comportamiento: leer `specs/` primero.
+- Cambios de comportamiento: leer `docs/specs/` primero.
 - Usar `uv run` desde la raíz del monorepo.
 
 ## Arquitectura y API
 
-- [Singleton Writer](../architecture/singleton_writer.md) · [Tri-cameral](../architecture/tri_cameral_memory.md)
+- [DB-first Core Refactor](../specs/features/platform/DB_FIRST_CORE_REFACTOR.md) · [Singleton Writer](../architecture/singleton_writer.md) · [Tri-cameral](../architecture/tri_cameral_memory.md)
 - [API Gateway](../api/api_gateway.md) · [DB Writer](../api/db_writer.md)
-- [Índice specs](../specs/index.md)
+- [Specs plataforma](../specs/features/platform/)

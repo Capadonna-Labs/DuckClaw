@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 
-from duckclaw.egress.market_worker_tool_repair import reply_is_get_current_time_json_only as _reply_is_get_current_time_json_only
+from duckclaw.egress.tool_response_repair import reply_is_get_current_time_json_only as _reply_is_get_current_time_json_only
 from duckclaw.finance.runtime_policy import (
     finanz_user_requests_ohlcv_ingest as _finanz_user_requests_ohlcv_ingest,
     is_finanz_local_accounts_query as _is_finanz_local_accounts_query,

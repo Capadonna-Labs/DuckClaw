@@ -20,20 +20,22 @@ def _templates_dir(templates_root: Path | None = None) -> Path:
     return WORKERS_TEMPLATES_DIR
 
 
+def _filesystem_template_ids(root: Path) -> list[str]:
+    """Filesystem bootstrap is intentionally limited to the default worker."""
+    default_dir = root / "default"
+    if root.is_dir() and default_dir.is_dir() and (default_dir / "manifest.yaml").is_file():
+        return ["default"]
+    return []
+
+
 def list_template_ids(
     templates_root: Path | None = None,
     db: Any | None = None,
     tenant_id: str = "default",
 ) -> list[str]:
-    """Ids canónicos = filesystem templates + DB catalog (if db provided)."""
+    """Ids canónicos = default filesystem template + DB catalog (if db provided)."""
     root = _templates_dir(templates_root)
-    fs_ids: list[str] = []
-    if root.is_dir():
-        fs_ids = sorted(
-            d.name
-            for d in root.iterdir()
-            if d.is_dir() and (d / "manifest.yaml").is_file()
-        )
+    fs_ids = _filesystem_template_ids(root)
 
     cat_ids: list[str] = []
     if db is not None:

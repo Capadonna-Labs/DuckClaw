@@ -32,7 +32,7 @@ def run_async(coro: Any) -> Any:
         return pool.submit(asyncio.run, coro).result()
 
 
-_run_async_from_sync = run_async  # compat github_bridge
+_run_async_from_sync = run_async  # compat legacy MCP callers
 
 
 def infer_repo_root() -> Path:

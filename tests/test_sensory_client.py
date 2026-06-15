@@ -34,22 +34,26 @@ def test_sensory_enabled():
 
 
 def test_resolve_voice_id_default():
-    assert resolve_voice_id_for_worker("unknown") == "leila_assistant"
+    assert resolve_voice_id_for_worker("unknown") == "default"
 
 
-def test_resolve_voice_id_quant_trader_builtin():
-    assert resolve_voice_id_for_worker("quant-trader") == "finanz_alert"
+def test_resolve_voice_id_configured_worker(monkeypatch):
+    monkeypatch.setenv(
+        "DUCKCLAW_TTS_VOICE_MAP",
+        json.dumps({"researcher": "narrator_main"}),
+    )
+    assert resolve_voice_id_for_worker("researcher") == "narrator_main"
 
 
-def test_tts_snippet_strips_quant_header():
+def test_tts_snippet_strips_worker_instance_header():
     raw = (
-        "quant-trader 1 · **MAR 18:05 COT** · Post-mercado\n"
+        "researcher 1 · **MAR 18:05 COT** · Seguimiento\n"
         "---\n"
         "## Guerra USA-Irán\n"
         "Conflicto activo desde febrero."
     )
     out = tts_snippet_for_reply(raw)
-    assert "quant-trader" not in out.lower()
+    assert "researcher" not in out.lower()
     assert "Conflicto activo" in out
     assert "---" not in out
 
@@ -57,10 +61,10 @@ def test_tts_snippet_strips_quant_header():
 def test_resolve_voice_id_map(monkeypatch):
     monkeypatch.setenv(
         "DUCKCLAW_TTS_VOICE_MAP",
-        json.dumps({"finanz": "finanz_alert", "default": "campus_legal_main"}),
+        json.dumps({"worker_a": "voice_a", "default": "voice_default"}),
     )
-    assert resolve_voice_id_for_worker("finanz") == "finanz_alert"
-    assert resolve_voice_id_for_worker("other") == "campus_legal_main"
+    assert resolve_voice_id_for_worker("worker_a") == "voice_a"
+    assert resolve_voice_id_for_worker("other") == "voice_default"
 
 
 def _fake_client(post_json: dict, *, status: int = 200):
@@ -111,7 +115,7 @@ def test_synthesize_403():
 
     async def _run():
         with patch.object(sensory_mod.httpx, "AsyncClient", return_value=FakeClient()):
-            await synthesize_text("hola", "leila_assistant")
+            await synthesize_text("hola", "voice_default")
 
     with pytest.raises(SensoryForbidden):
         asyncio.run(_run())

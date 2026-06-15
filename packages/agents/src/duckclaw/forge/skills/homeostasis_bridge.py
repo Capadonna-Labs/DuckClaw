@@ -18,7 +18,7 @@ def register_goals_alignment_skill(
 ) -> None:
     """Registra assess_crons_alignment (objetivos /crons vs contexto observable)."""
     try:
-        from duckclaw.forge.homeostasis.goals_alignment import assess_goals_alignment
+        from duckclaw.homeostasis.goals_alignment import assess_goals_alignment
         from duckclaw.forge.skills.goals_tool_context import (
             get_goals_tool_chat_id,
             get_goals_tool_db_path,
@@ -109,7 +109,7 @@ def register_homeostasis_skill(
     if not config or not isinstance(config, dict):
         return
     try:
-        from duckclaw.forge.homeostasis import BeliefRegistry, HomeostasisManager
+        from duckclaw.homeostasis import BeliefRegistry, HomeostasisManager
 
         registry = BeliefRegistry.from_config(config)
         schema = spec.schema_name

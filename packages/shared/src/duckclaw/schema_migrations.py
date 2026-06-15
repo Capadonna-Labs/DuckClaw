@@ -869,6 +869,46 @@ _M017_WORKER_RUNTIME_POLICIES = [
     """,
 ]
 
+_M018_AUTHORIZED_USERS = [
+    """
+    CREATE TABLE IF NOT EXISTS main.authorized_users (
+        tenant_id VARCHAR,
+        user_id VARCHAR,
+        username VARCHAR,
+        role VARCHAR DEFAULT 'user',
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (tenant_id, user_id)
+    )
+    """,
+]
+
+_M019_MANAGED_WORKSPACE_DRAFT_POLICY = [
+    """
+    INSERT INTO main.prompt_policy_registry
+      (policy_id, policy_type, policy_name, version, status, content, checksum, metadata_json, active)
+    SELECT
+      'ppol_admin_workspace_managed_draft_v1',
+      'manager_task',
+      'admin_workspace_managed_draft',
+      1,
+      'active',
+      content,
+      sha256(content),
+      '{"seed":"schema_migration_019","scope":"admin_workspace"}',
+      true
+    FROM (
+      SELECT '{"draft_prompt_template":"Responde SOLO JSON válido, sin markdown, sin texto extra.\\nNo inventes secretos. No escribas en DB. Solo prepara un borrador revisable.\\nSchema exacto:\\n{{\\"project\\":{{\\"name\\":\\"string\\",\\"description\\":\\"string\\"}},\\"workers\\":[{{\\"worker_id\\":\\"string\\",\\"display_name\\":\\"string\\",\\"role\\":\\"member\\",\\"system_prompt\\":\\"string\\"}}],\\"shared_context\\":\\"markdown string\\",\\"suggested_skills\\":[{{\\"name\\":\\"string\\",\\"reason\\":\\"string\\",\\"available\\":true}}],\\"questions\\":[\\"string\\"]}}\\nSkills detectadas o sugeridas: {suggested_skills_json}\\nObjetivo del usuario:\\n{prompt}","fallback":{"project_name_template":"{title}","project_description_template":"Proyecto orientado a convertir el objetivo {goal} en un flujo DB-first con contexto, workers sugeridos y pasos de validación antes de ejecutar cambios.","worker_id_template":"{slug}-agent","worker_display_name_template":"Asistente {project_name}","worker_role":"member","system_prompt_template":"Actúa como asistente especializado del proyecto {project_name}. Usa el contexto compartido, convierte objetivos en pasos verificables y pregunta antes de asumir datos faltantes.","shared_context_template":"# Análisis del proyecto\\n\\n## Lectura del objetivo\\n{prompt}\\n\\n## Supuestos iniciales\\n- El proyecto debe operar con configuración DB-first.\\n- El usuario revisará el borrador antes de persistir cambios.\\n- Los workers sugeridos deben pedir datos faltantes antes de actuar.","model_error_note_template":"> Nota: no se pudo invocar el modelo configurado; se usó análisis local estructurado.","questions":["¿Qué fuentes de datos debe usar este proyecto?","¿Qué resultado concreto esperas del worker principal?","¿Hay restricciones de tono, seguridad o aprobación humana?"]},"confirm":{"source_kind":"managed_draft","context_title":"Contexto compartido","change_note":"Creado desde flujo administrado DB-first"}}' AS content
+    )
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM main.prompt_policy_registry
+      WHERE policy_type = 'manager_task'
+        AND policy_name = 'admin_workspace_managed_draft'
+        AND version = 1
+    )
+    """,
+]
+
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "initial_core", _M001_INITIAL_CORE),
     (2, "worker_versions", _M002_WORKER_VERSIONS),
@@ -887,4 +927,6 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (15, "knowledge", _M015_KNOWLEDGE),
     (16, "prompt_policies", _M016_PROMPT_POLICIES),
     (17, "worker_runtime_policies", _M017_WORKER_RUNTIME_POLICIES),
+    (18, "authorized_users", _M018_AUTHORIZED_USERS),
+    (19, "managed_workspace_draft_policy", _M019_MANAGED_WORKSPACE_DRAFT_POLICY),
 ]

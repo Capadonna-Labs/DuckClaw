@@ -791,7 +791,7 @@ def materialize(
         updates["DUCKCLAW_AXIS_DB_PATH"] = primary_rel
     if _dw.startswith("axis"):
         updates["DUCKCLAW_AXIS_DB_PATH"] = primary_rel
-    # Gateways no-Finanz con tenant propio: bóveda inicial por slug de worker (p. ej. job_hunter).
+    # Gateways no-Finanz con tenant propio: bóveda inicial por slug de worker.
     if _dw and _dw != "finanz":
         updates["DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID"] = (draft.default_worker_id or "").strip()
     else:

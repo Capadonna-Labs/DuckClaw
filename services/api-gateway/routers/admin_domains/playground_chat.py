@@ -584,6 +584,21 @@ def _llm_keys_configured(env_keys: list[str]) -> bool:
     return len(env_keys) == 0
 
 
+async def _playground_voice_status() -> dict[str, bool]:
+    from core import sensory_client
+
+    configured = sensory_client.sensory_enabled()
+    tts_loaded = False
+    if configured:
+        health = await sensory_client.sensory_health()
+        tts_loaded = bool((health or {}).get("tts_loaded"))
+    return {
+        "configured": configured,
+        "available": configured and tts_loaded,
+        "tts_loaded": tts_loaded,
+    }
+
+
 def _duckdb_paths_same(a: str, b: str) -> bool:
     try:
         return Path(a).resolve() == Path(b).resolve()
@@ -816,6 +831,7 @@ async def playground_config(
         runtime_default_vault=runtime_defaults.get("default_vault_db_path"),
     )
     vault_options = _playground_vault_options_for_team(team_ctx)
+    voice = await _playground_voice_status()
     return {
         "llm": llm,
         "catalog": catalog,
@@ -834,6 +850,7 @@ async def playground_config(
         "vault": vault,
         "vault_options": vault_options,
         "selected_worker_id": selected_worker_id or default_wid,
+        "voice": voice,
         "chat_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_hint": "POST con stream=true o Accept: text/event-stream",
@@ -1100,7 +1117,7 @@ async def playground_chat(
     try:
         with open_gateway_db(read_only=True) as db:
             profile = ensure_profile_for_user(db, email=actor)
-            if get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
+            if wid == "default" or get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
                 catalog_allowed = True
                 try:
                     wid, project_id = resolve_playground_worker_for_project(
@@ -1326,7 +1343,7 @@ async def playground_voice(
     try:
         with open_gateway_db(read_only=True) as db:
             profile = ensure_profile_for_user(db, email=actor)
-            if get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
+            if wid == "default" or get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
                 catalog_allowed = True
                 try:
                     wid, project_id = resolve_playground_worker_for_project(

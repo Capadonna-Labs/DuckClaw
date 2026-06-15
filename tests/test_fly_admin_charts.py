@@ -100,11 +100,3 @@ def test_admin_visual_fields_single_chart_no_list() -> None:
     out = _admin_visual_fields_from_invoke_result("admin-conv-abc", result, "default")
     assert out.get("figure_base64") == "only-one"
     assert "fly_charts_b64" not in out
-
-
-def test_trading_session_state_chat_id_uses_vault_not_admin_conv() -> None:
-    from duckclaw.graphs.on_the_fly_commands import _trading_session_state_chat_id
-
-    admin = "admin-conv-53ef9f0b34864d149b3414180625ae02"
-    assert _trading_session_state_chat_id(admin, "1726618406") == 1726618406
-    assert _trading_session_state_chat_id(admin, None) == admin

@@ -13,7 +13,6 @@ from duckclaw.admin_worker_catalog import (
     add_catalog_worker_context,
     deactivate_visible_worker_for_actor,
     deactivate_worker_context,
-    ensure_platform_orchestrator_for_actor,
     get_latest_worker_version,
     get_visible_worker_for_actor,
     list_visible_workers_for_actor,
@@ -159,7 +158,6 @@ def list_templates_payload(
     include_inactive: bool = False,
 ) -> list[dict[str, Any]]:
     actor_email = effective_actor_email(actor_email)
-    ensure_platform_orchestrator_for_actor(db, actor_email=actor_email)
     items: list[dict[str, Any]] = []
     for row in list_visible_workers_for_actor(
         db,
@@ -221,7 +219,6 @@ def catalog_template_detail(db: Any, *, actor_email: str, worker_id: str) -> dic
 
 def playground_workers_for_actor(db: Any, *, actor_email: str) -> list[dict[str, str]]:
     actor_email = effective_actor_email(actor_email)
-    ensure_platform_orchestrator_for_actor(db, actor_email=actor_email)
     seen: set[str] = set()
     workers: list[dict[str, str]] = []
     for row in list_visible_workers_for_actor(db, actor_email=actor_email):
@@ -243,6 +240,8 @@ def worker_allowed_for_actor(db: Any, *, actor_email: str, worker_id: str) -> bo
     wid = (worker_id or "").strip()
     if not wid:
         return False
+    if wid == "default":
+        return True
     return bool(get_visible_worker_for_actor(db, actor_email=actor_email, worker_id=wid))
 
 
@@ -261,13 +260,6 @@ def resolve_playground_worker_for_project(
         if not worker_allowed_for_actor(db, actor_email=actor_email, worker_id=wid):
             raise PermissionError(f"Worker no asignado al catálogo: {wid}")
         return wid, ""
-    if wid == "platform-orchestrator":
-        project = get_project_context_for_actor(db, project_id=pid, actor_email=actor_email)
-        if not project:
-            raise PermissionError(f"Proyecto no visible: {pid}")
-        if not worker_allowed_for_actor(db, actor_email=actor_email, worker_id=wid):
-            raise PermissionError(f"Worker no asignado al catálogo: {wid}")
-        return wid, pid
     agents = list_project_agents(db, project_id=pid, actor_email=actor_email)
     if not agents:
         raise PermissionError(f"Proyecto no visible: {pid}")

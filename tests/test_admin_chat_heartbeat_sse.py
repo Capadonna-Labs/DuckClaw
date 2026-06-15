@@ -19,8 +19,8 @@ def test_sse_heartbeat_payload() -> None:
 
 
 def test_sse_heartbeat_worker_and_slot() -> None:
-    raw = sse_heartbeat("Paso actual", kind="status", worker_id="finanz", swarm_slot=2)
-    assert '"worker_id": "finanz"' in raw
+    raw = sse_heartbeat("Paso actual", kind="status", worker_id="BI-Analyst", swarm_slot=2)
+    assert '"worker_id": "BI-Analyst"' in raw
     assert '"swarm_slot": 2' in raw
 
 
@@ -28,10 +28,10 @@ def test_parse_admin_heartbeat_payload_worker_fields() -> None:
     from core.admin_chat_heartbeat import parse_admin_heartbeat_payload
 
     parsed = parse_admin_heartbeat_payload(
-        '{"text":"ok","kind":"tool","worker_id":"Quant-Trader","swarm_slot":3}'
+        '{"text":"ok","kind":"tool","worker_id":"BI-Analyst","swarm_slot":3}'
     )
     assert parsed is not None
-    assert parsed["worker_id"] == "Quant-Trader"
+    assert parsed["worker_id"] == "BI-Analyst"
     assert parsed["swarm_slot"] == 3
 
 

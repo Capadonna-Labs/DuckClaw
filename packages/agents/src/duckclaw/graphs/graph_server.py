@@ -401,7 +401,7 @@ def _invoke_ephemeral_gateway_graph(
     tripleta en lugar del cache global basado solo en env. Con ``vault_db_path`` distinto
     del hub, gana el override del hub (consola admin); el vault solo si el hub no tiene llm_*.
     """
-    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+    from duckclaw.manager.graph import clear_worker_graph_cache
     from duckclaw.integrations.llm_providers import build_llm
 
     _ensure_llm_config()
@@ -557,7 +557,7 @@ async def invoke(req: InvokeRequest):
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
-    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+    from duckclaw.manager.graph import clear_worker_graph_cache
 
     graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
     # Enriquecer el estado con identidad (username/chat_type) para general_graph.
@@ -615,7 +615,7 @@ async def stream(req: InvokeRequest):
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
-    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+    from duckclaw.manager.graph import clear_worker_graph_cache
 
     graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
 
@@ -734,7 +734,7 @@ async def _ainvoke(
     out: dict[str, Any] = {"reply": reply, "messages": messages}
     if usage:
         out["usage_tokens"] = usage
-    # Manager → subagente: propagar para logs/auditoría en el API Gateway (evita [finanz] cuando el worker real es otro).
+    # Manager -> subagente: propagar para logs/auditoria en el API Gateway.
     for _k in (
         "assigned_worker_id",
         "plan_title",
@@ -805,7 +805,7 @@ async def ainvoke_manager_ephemeral(
     Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
     Uso recomendado desde services/api-gateway en lugar de retener un grafo global.
     """
-    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+    from duckclaw.manager.graph import clear_worker_graph_cache
 
     _ensure_llm_config()
     graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, chat_id, vault_db_path)

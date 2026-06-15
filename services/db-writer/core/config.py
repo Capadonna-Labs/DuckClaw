@@ -18,14 +18,6 @@ class Settings(BaseSettings):
             "DUCKCLAW_CONTEXT_STATE_DELTA_QUEUE",
         ),
     )
-    # Debe coincidir con `quant_state_delta_queue_key()` en packages/agents/.../quant_state_delta.py
-    QUANT_STATE_DELTA_QUEUE_NAME: str = Field(
-        default="duckclaw:state_delta:quant",
-        validation_alias=AliasChoices(
-            "QUANT_STATE_DELTA_QUEUE_NAME",
-            "DUCKCLAW_QUANT_STATE_DELTA_QUEUE",
-        ),
-    )
     VISUAL_STATE_DELTA_QUEUE_NAME: str = Field(
         default="duckclaw:state_delta:visual",
         validation_alias=AliasChoices(

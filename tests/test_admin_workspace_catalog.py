@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import duckdb
@@ -95,44 +97,31 @@ def test_worker_catalog_enforces_tenant_scoped_unique_worker_ids(gateway_db: Pat
         con.close()
 
 
-def test_platform_orchestrator_is_seeded_per_actor_and_versioned(gateway_db: Path) -> None:
-    from duckclaw.admin_worker_catalog import (
-        ensure_platform_orchestrator_for_actor,
-        get_latest_worker_version,
-    )
+def test_worker_catalog_does_not_seed_non_default_platform_worker(gateway_db: Path) -> None:
+    from duckclaw.admin_worker_catalog import list_visible_workers_for_actor
 
     con = duckdb.connect(str(gateway_db))
     try:
         adapter = _Adapter(con)
-        alice = ensure_platform_orchestrator_for_actor(adapter, actor_email="alice@test.local")
-        alice_again = ensure_platform_orchestrator_for_actor(adapter, actor_email="alice@test.local")
-        bob = ensure_platform_orchestrator_for_actor(adapter, actor_email="bob@test.local")
-        latest = get_latest_worker_version(adapter, worker_uid=alice["worker_uid"])
+        visible = list_visible_workers_for_actor(adapter, actor_email="alice@test.local")
+        catalog_count = con.execute("SELECT COUNT(*) FROM main.admin_worker_catalog").fetchone()[0]
     finally:
         con.close()
 
-    assert alice["worker_id"] == "platform-orchestrator"
-    assert alice["display_name"] == "Platform Orchestrator"
-    assert alice["source_kind"] == "system_seed"
-    assert alice["visibility"] == "private"
-    assert alice["worker_uid"] == alice_again["worker_uid"]
-    assert bob["worker_uid"] != alice["worker_uid"]
-    assert latest is not None
-    assert latest["manifest_snapshot"]["id"] == "platform-orchestrator"
-    assert "system_prompt.md" in latest["files_snapshot"]
+    assert [worker["worker_id"] for worker in visible] == ["default"]
+    assert catalog_count == 0
 
 
-def test_gateway_templates_auto_seed_platform_orchestrator(gateway_admin_client) -> None:
+def test_gateway_templates_do_not_auto_seed_platform_worker(gateway_admin_client) -> None:
     response = gateway_admin_client.get(
         "/api/v1/admin/templates",
         headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     templates = {item["id"]: item for item in response.json()["templates"]}
-    assert templates["platform-orchestrator"]["source"] == "catalog"
-    assert templates["platform-orchestrator"]["visibility"] == "private"
-    assert templates["platform-orchestrator"]["active"] is True
+    assert "default" in templates
+    assert "platform" + "-orchestrator" not in templates
 
 
 def test_orchestrator_draft_suggests_available_skills_without_creating_project(
@@ -164,7 +153,7 @@ def test_orchestrator_draft_suggests_available_skills_without_creating_project(
         json={"prompt": "Crear un proyecto para consultar tickets y responder casos de soporte"},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     body = response.json()
     assert body["project"]["name"]
     assert body["project"]["description"] != "Crear un proyecto para consultar tickets y responder casos de soporte"
@@ -173,7 +162,7 @@ def test_orchestrator_draft_suggests_available_skills_without_creating_project(
     assert body["workers"][0]["display_name"] != body["project"]["name"]
     assert "Asistente" in body["workers"][0]["display_name"]
     assert "Lectura del objetivo" in body["shared_context"]
-    assert "Análisis del Orchestrator" in body["shared_context"]
+    assert "Análisis del proyecto" in body["shared_context"]
     assert any(skill["name"] == "ticket_lookup" and skill["available"] for skill in body["suggested_skills"])
 
     con = duckdb.connect(str(gateway_db))
@@ -215,7 +204,7 @@ def test_orchestrator_draft_uses_configured_model_when_available(
                   "system_prompt": "Guía al usuario con ejercicios FastAPI y revisión paso a paso."
                 }
               ],
-              "shared_context": "# Análisis del Orchestrator\\n\\n## Lectura del objetivo\\nAprender FastAPI.",
+              "shared_context": "# Análisis del proyecto\\n\\n## Lectura del objetivo\\nAprender FastAPI.",
               "suggested_skills": [
                 {"name": "fastapi_testing", "reason": "Pruebas de endpoints", "available": false}
               ],
@@ -235,9 +224,9 @@ def test_orchestrator_draft_uses_configured_model_when_available(
 
     assert response.status_code == 200
     body = response.json()
-    assert captured["worker_id"] == "platform-orchestrator"
+    assert captured["worker_id"] == "default"
     assert "Responde SOLO JSON válido" in captured["message"]
-    assert captured["session_id"].startswith("admin-orchestrator-draft-")
+    assert captured["session_id"].startswith("admin-managed-workspace-draft-")
     assert body["project"]["name"] == "Proyecto Ejemplo"
     assert body["workers"][0]["display_name"] == "Asistente Ejemplo"
     assert body["questions"] == ["¿Qué nivel tienes en Python?"]
@@ -247,6 +236,82 @@ def test_orchestrator_draft_uses_configured_model_when_available(
         assert con.execute("SELECT COUNT(*) FROM main.admin_projects").fetchone()[0] == 0
     finally:
         con.close()
+
+
+def test_orchestrator_draft_uses_db_first_prompt_policy_for_prompt_and_naming(
+    gateway_db: Path,
+    gateway_admin_client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import main as gateway_main
+
+    policy = {
+        "draft_prompt_template": (
+            "POLICY_JSON_ONLY skills={suggested_skills_json}\n"
+            "POLICY_OBJECTIVE={prompt}"
+        ),
+        "fallback": {
+            "project_name_template": "Policy Project {title}",
+            "project_description_template": "Policy description for {goal}",
+            "worker_id_template": "policy-{slug}-agent",
+            "worker_display_name_template": "Policy Worker {project_name}",
+            "worker_role": "member",
+            "system_prompt_template": "Policy system prompt for {project_name}: {goal}",
+            "shared_context_template": "# Policy Context\n\nGoal: {prompt}",
+            "model_error_note_template": "> Policy model fallback note.",
+            "questions": ["Policy question?"],
+        },
+        "confirm": {
+            "source_kind": "managed_draft",
+            "context_title": "Policy Context Title",
+            "change_note": "Created from DB-first managed draft",
+        },
+    }
+    content = json.dumps(policy, ensure_ascii=False)
+    checksum = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        con.execute(
+            """
+            INSERT INTO main.prompt_policy_registry
+              (policy_id, policy_type, policy_name, version, status, content, checksum, active)
+            VALUES (?, 'manager_task', 'admin_workspace_managed_draft', 2, 'active', ?, ?, true)
+            """,
+            ["test_admin_workspace_managed_draft_v2", content, checksum],
+        )
+    finally:
+        con.close()
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_MODEL", "gpt-test")
+    monkeypatch.setenv("LLM_BASE_URL", "http://llm.local/v1")
+    captured: dict[str, str] = {}
+
+    async def _fake_invoke(chat, worker_id, **kwargs):
+        captured["worker_id"] = worker_id
+        captured["message"] = chat.message
+        return {"response": "not json", "assigned_worker_id": worker_id}
+
+    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+
+    response = gateway_admin_client.post(
+        "/api/v1/admin/workspace/orchestrator/draft",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
+        json={"prompt": "Crear una academia de FastAPI para el equipo interno"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert captured["worker_id"] == "default"
+    assert "POLICY_JSON_ONLY" in captured["message"]
+    assert "Platform Orchestrator" not in captured["message"]
+    assert body["project"]["name"].startswith("Policy Project")
+    assert body["workers"][0]["worker_id"].startswith("policy-")
+    assert body["workers"][0]["display_name"].startswith("Policy Worker")
+    assert body["workers"][0]["system_prompt"].startswith("Policy system prompt")
+    assert body["shared_context"].startswith("# Policy Context")
+    assert body["questions"] == ["Policy question?"]
 
 
 def test_orchestrator_draft_does_not_hardcode_fake_skill_suggestions(
@@ -898,7 +963,7 @@ def test_gateway_templates_can_hard_delete_catalog_worker_relations(
     }
 
 
-def test_gateway_templates_hard_delete_keeps_protected_workers(
+def test_gateway_templates_hard_delete_keeps_default_protected(
     gateway_admin_client,
 ) -> None:
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
@@ -907,13 +972,8 @@ def test_gateway_templates_hard_delete_keeps_protected_workers(
         "/api/v1/admin/templates/default/hard-delete",
         headers=headers,
     )
-    orchestrator_response = gateway_admin_client.delete(
-        "/api/v1/admin/templates/platform-orchestrator/hard-delete",
-        headers=headers,
-    )
 
     assert default_response.status_code == 403
-    assert orchestrator_response.status_code == 403
 
 
 def test_get_visible_worker_for_actor_accepts_boolean_active_rows(gateway_db: Path) -> None:
@@ -1214,19 +1274,19 @@ def test_playground_config_and_chat_support_db_first_project_scope(
     assert "Scope para Playground" in captured["message"]
     assert "hola" in captured["message"]
 
-    orchestrator_chat = gateway_admin_client.post(
+    default_project_chat = gateway_admin_client.post(
         "/api/v1/admin/playground/chat",
         headers=headers,
         json={
             "project_id": project["project_id"],
-            "worker_id": "platform-orchestrator",
+            "worker_id": "default",
             "message": "guíame",
             "chat_id": "project-orchestrator-playground",
         },
     )
-    assert orchestrator_chat.status_code == 200
-    assert orchestrator_chat.json()["project_id"] == project["project_id"]
-    assert orchestrator_chat.json()["worker_id"] == "platform-orchestrator"
+    assert default_project_chat.status_code == 200
+    assert default_project_chat.json()["project_id"] == project["project_id"]
+    assert default_project_chat.json()["worker_id"] == "axis-radar"
     assert "[PROJECT_CONTEXT]" in captured["message"]
     assert "Operación AXIS" in captured["message"]
     assert "AXIS Radar" not in captured["message"]

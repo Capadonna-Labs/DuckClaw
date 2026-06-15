@@ -88,15 +88,12 @@ def resolve_telegram_token_from_flat_env(env_flat: dict[str, str], worker_id: st
         t = flat.get(leg, "").strip()
         if t:
             return t
-    if wid.lower() == "finanz":
-        return flat.get("TELEGRAM_BOT_TOKEN", "").strip()
     return ""
 
 
 def resolve_telegram_token_for_worker_id(worker_id: str) -> str:
     """
-    Resuelve token: ``TELEGRAM_<ID>_TOKEN`` → aliases legados por worker → para ``finanz``,
-    ``TELEGRAM_BOT_TOKEN`` si no hubo valor previo.
+    Resuelve token: ``TELEGRAM_<ID>_TOKEN`` → aliases legados por worker.
     """
     return resolve_telegram_token_from_flat_env(dict(os.environ), worker_id)
 

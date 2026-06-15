@@ -25,11 +25,6 @@ except ImportError:
     handle_meditate_state_delta_message = None
 
 try:
-    from quant_state_delta_handler import handle_quant_state_delta_message
-except ImportError:
-    handle_quant_state_delta_message = None
-
-try:
     from reports_state_delta_handler import handle_reports_state_delta_message
 except ImportError:
     handle_reports_state_delta_message = None
@@ -120,7 +115,7 @@ async def _handle_typed_command(
 
     tenant_id = str(payload.get("tenant_id") or "default")
     target_db_path = str(payload.get("db_path") or settings.DUCKDB_PATH)
-    user_id = str(payload.get("user_id") or "default")
+    user_id = str(payload.get("db_write_user_id") or payload.get("user_id") or "default")
 
     try:
         user_id = _validate_target_db_path(
@@ -348,22 +343,6 @@ async def _context_injection_loop(redis_client: redis.Redis) -> None:
                 logger.exception("CONTEXT_INJECTION handler no capturó excepción: %s", exc)
 
 
-async def _quant_state_delta_loop(redis_client: redis.Redis) -> None:
-    if handle_quant_state_delta_message is None:
-        logger.warning("QUANT_STATE_DELTA handler no disponible; omitiendo loop")
-        return
-    q = str(settings.QUANT_STATE_DELTA_QUEUE_NAME).strip()
-    logger.info("Escuchando cola QUANT_STATE_DELTA (MANDATE_UPSERT, TRADE_SIGNAL_*): %s", q)
-    while True:
-        result = await redis_client.brpop(q, timeout=0)
-        if result:
-            _, message = result
-            try:
-                await handle_quant_state_delta_message(redis_client, message)
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("QUANT_STATE_DELTA handler no capturó excepción: %s", exc)
-
-
 async def _visual_state_delta_loop(redis_client: redis.Redis) -> None:
     if handle_visual_state_delta_message is None:
         logger.warning("VISUAL_STATE_DELTA handler no disponible; omitiendo loop")
@@ -413,13 +392,12 @@ async def _reports_state_delta_loop(redis_client: redis.Redis) -> None:
 
 
 async def process_queue():
-    """Consume cola SQL, CONTEXT_INJECTION, QUANT, VISUAL y MEDITATE StateDelta en paralelo."""
+    """Consume cola SQL y colas transversales StateDelta en paralelo."""
     redis_client = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
     try:
         await asyncio.gather(
             _sql_queue_loop(redis_client),
             _context_injection_loop(redis_client),
-            _quant_state_delta_loop(redis_client),
             _visual_state_delta_loop(redis_client),
             _meditate_state_delta_loop(redis_client),
             _reports_state_delta_loop(redis_client),

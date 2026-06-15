@@ -1,8 +1,8 @@
 """
-DuckDB para autorización en el API Gateway (Telegram Guard, war rooms, grants).
+DuckDB para autorización en el API Gateway (Telegram Guard y grants).
 
 Si el grafo no puede abrir la misma DuckDB en modo exclusivo (otro proceso tiene el lock),
-se usa una conexión de solo lectura a la misma ruta para que whitelist y miembros WR sigan funcionando.
+se usa una conexión de solo lectura a la misma ruta para que la whitelist siga funcionando.
 """
 
 from __future__ import annotations
@@ -23,8 +23,6 @@ class ReadOnlyGatewayAclDb:
     """Subconjunto de la API DuckClaw: ``query`` con conexiones temporarias; ``execute`` sin efecto."""
 
     __slots__ = ("_path", "_read_only")
-
-    _war_room_acl_readonly: bool = True
 
     def __init__(self, path: str) -> None:
         self._path = path
@@ -70,12 +68,3 @@ def get_gateway_acl_duckdb() -> tuple[Any, bool]:
     except Exception as exc:
         _log.warning("get_db no disponible; ACL DuckDB solo lectura: %s", exc)
         return ReadOnlyGatewayAclDb(get_gateway_db_path()), True
-
-
-def get_war_room_acl_duckdb() -> Any:
-    """
-    Conexión lógica para ``war_room_core`` (miembros / conteos).
-
-    El gateway no mantiene un DuckClaw persistente al archivo; siempre lectura efímera sobre la ruta canónica.
-    """
-    return ReadOnlyGatewayAclDb(get_gateway_db_path())

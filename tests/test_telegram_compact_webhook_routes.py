@@ -54,12 +54,12 @@ def test_parse_compact_extended_format() -> None:
 
 
 def test_parse_legacy_path_infers_worker_tenant() -> None:
-    raw = "finanz:tok123:/api/v1/telegram/finanz,jobhunter:tok456:/api/v1/telegram/jobhunter"
+    raw = "botone:tok123:/api/v1/telegram/botone,worker-two:tok456:/api/v1/telegram/worker-two"
     routes = parse_compact_telegram_webhook_routes(raw)
     assert len(routes) == 2
-    assert routes[0].worker_id == "finanz"
+    assert routes[0].worker_id == "botone"
     assert routes[0].tenant_id == "default"
-    assert routes[1].worker_id == "job_hunter"
+    assert routes[1].worker_id == "worker_two"
 
 
 def test_parse_rejects_duplicate_path() -> None:

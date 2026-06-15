@@ -42,7 +42,7 @@ router.include_router(visual_assets_router)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _EDITABLE_SUFFIXES = frozenset({".yaml", ".yml", ".md", ".sql", ".py", ".txt", ".json"})
-_PROTECTED_TEMPLATE_IDS = frozenset({"entry_router", "manager_router", "platform-orchestrator"})
+_PROTECTED_TEMPLATE_IDS = frozenset({"entry_router", "manager_router"})
 _CATALOG_STARTER_SKIP = frozenset({"entry_router", "manager_router", "industries"})
 _ENV_ALLOW_PREFIXES = ("TELEGRAM_", "DUCKDB_", "DUCKCLAW_", "LANGCHAIN_", "OPENAI_", "GROQ_", "DEEPSEEK_")
 _ENV_ALLOW_EXACT = frozenset({"LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "REDIS_URL"})
@@ -1035,7 +1035,7 @@ async def _create_template_impl(
     raise _problem(
         410,
         "Creación filesystem de templates retirada",
-        "Usa Platform Orchestrator o importa templates existentes al catálogo DB-first.",
+        "Usa el flujo administrado de workspace o importa templates existentes al catálogo DB-first.",
     )
 
 
@@ -1656,7 +1656,7 @@ async def catalog_mcp() -> dict[str, Any]:
         },
         "stdio_servers": stdio_servers,
         "official_reference": official_reference,
-        "github_note": "GitHub MCP vía forge/skills/github_bridge.py (Docker)",
+        "github_note": "GitHub MCP vía duckclaw.github.mcp_bridge (Docker)",
     }
 
 
@@ -1818,7 +1818,7 @@ async def list_forge_projects() -> dict[str, Any]:
     raise _problem(
         410,
         "Forge Projects legacy retirado",
-        "Usa /workspace/projects y Platform Orchestrator DB-first.",
+        "Usa /workspace/projects y el flujo administrado de workspace DB-first.",
     )
 
 
@@ -1844,7 +1844,7 @@ async def create_forge_project(
     raise _problem(
         410,
         "Forge Projects legacy retirado",
-        "Crea proyectos desde /workspace/projects o Platform Orchestrator.",
+        "Crea proyectos desde /workspace/projects o el flujo administrado de workspace.",
     )
 
 

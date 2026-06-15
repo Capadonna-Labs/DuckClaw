@@ -101,6 +101,42 @@ class UpsertRuntimeSettingCommand(WriteCommand):
 
 
 # ---------------------------------------------------------------------------
+# Team access commands
+# ---------------------------------------------------------------------------
+
+class UpsertAuthorizedUserCommand(WriteCommand):
+    """Create or update a Telegram Guard authorized user."""
+
+    command_type: Literal["upsert_authorized_user"] = "upsert_authorized_user"
+    user_id: str
+    username: str = "Usuario"
+    role: Literal["admin", "user"] = "user"
+
+
+class DeleteAuthorizedUserCommand(WriteCommand):
+    """Remove a Telegram Guard authorized user from a tenant whitelist."""
+
+    command_type: Literal["delete_authorized_user"] = "delete_authorized_user"
+    user_id: str
+
+
+class UpsertSharedDbGrantCommand(WriteCommand):
+    """Grant a Telegram user access to a shared DuckDB resource key."""
+
+    command_type: Literal["upsert_shared_db_grant"] = "upsert_shared_db_grant"
+    user_id: str
+    resource_key: str
+
+
+class DeleteSharedDbGrantCommand(WriteCommand):
+    """Revoke a Telegram user's shared DuckDB resource key."""
+
+    command_type: Literal["delete_shared_db_grant"] = "delete_shared_db_grant"
+    user_id: str
+    resource_key: str
+
+
+# ---------------------------------------------------------------------------
 # Kanban commands
 # ---------------------------------------------------------------------------
 

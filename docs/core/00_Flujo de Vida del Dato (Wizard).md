@@ -238,13 +238,13 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 2. `tools.admin_sql(db, query)`:
   - Si es SELECT/WITH/SHOW/DESCRIBE → `db.query(q)` directo.
   - Si es INSERT/UPDATE/DELETE/CREATE:
-    - Si `DUCKCLAW_WRITE_QUEUE_URL` está definido → `enqueue_write(sql)` → Redis LPUSH.
+    - Si `DUCKCLAW_WRITE_QUEUE_URL` está definido → `duckclaw.db_write_queue.enqueue_write(sql)` → Redis LPUSH.
     - Si no → `db.execute(q)` directo.
 3. Respuesta al LLM: `{"status": "ok", "queued": true}` o resultado de la query.
 
 ### 3.4 Consumidor de la cola (DB Writer)
 
-1. `singleton_writer.run_consumer()` en bucle:
+1. `services/db-writer/main.py` consume en bucle; para compatibilidad local, el helper vive en `duckclaw.db_write_queue.run_consumer()`.
 2. `BRPOP duckdb_write_queue` (bloqueante).
 3. Parsea JSON: `{"sql": "...", "db_path": "..."}`.
 4. `db.execute(sql)` sobre la DuckDB indicada.
@@ -283,15 +283,16 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 | Función                                   | Scripts                                                                                |
 | ----------------------------------------- | -------------------------------------------------------------------------------------- |
 | **API Gateway (microservicio unificado)** | `services/api-gateway/main.py`                                                         |
-| **Encolar escrituras**                    | `packages/agents/src/duckclaw/forge/homeostasis/singleton_writer.py` (`enqueue_write`) |
-| **Consumir cola (forge)**                 | `python -m duckclaw.forge.homeostasis.singleton_writer --consume`                     |
-| **Consumir cola (api-gateway)**           | `services/db-writer/main.py`                                                           |
+| **Encolar escrituras**                    | `packages/shared/src/duckclaw/db_write_queue.py` (`enqueue_write`)                     |
+| **Consumir cola**                         | `services/db-writer/main.py`                                                           |
 | **admin_sql**                           | `packages/agents/src/duckclaw/graphs/tools.py`                                         |
 | **Crear schema**                          | `packages/agents/src/duckclaw/workers/loader.py` (`run_schema`)                        |
 | **Schema Finanz**                         | `packages/agents/src/duckclaw/forge/templates/finanz/schema.sql`                                  |
 | **Ruta DB**                               | `services/db-writer/core/config.py` (`DUCKDB_PATH`)                                   |
 | **Sincronizar VPS**                       | `packages/shared/scripts/sync_telegram_duckdb.sh`                                      |
 | **Tests pipeline**                        | `tests/run_singleton_writer_pipeline.py`                                               |
+
+Owner canónico del contrato singleton writer: `duckclaw.db_write_queue`, según `docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`. La fachada Forge queda solo como compatibilidad externa temporal.
 
 ---
 

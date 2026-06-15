@@ -289,9 +289,9 @@ def test_handle_command_heartbeat_on_requires_redis(
 def test_admin_heartbeat_kind_tool_before_plan_title() -> None:
     from duckclaw.graphs.chat_heartbeat import _admin_heartbeat_kind
 
-    tool_text = "Quant-Trader 4 — 🔄 Paso actual: llamo a read_sql…"
+    tool_text = "BI-Analyst 4 — 🔄 Paso actual: llamo a read_sql…"
     assert _admin_heartbeat_kind(tool_text, log_plan_title="Resumen macro") == "tool"
-    assert _admin_heartbeat_kind("📖 finanz 1 — Acabo de recibir", log_plan_title="Plan A") == "plan"
+    assert _admin_heartbeat_kind("📖 BI-Analyst 1 — Acabo de recibir", log_plan_title="Plan A") == "plan"
     assert _admin_heartbeat_kind("solo status", log_plan_title=None) == "status"
 
 
@@ -315,9 +315,9 @@ def test_normalize_telegram_chat_id_does_not_strip_admin_conv_uuid() -> None:
 def test_parse_instance_label() -> None:
     from duckclaw.graphs.chat_heartbeat import parse_instance_label
 
-    assert parse_instance_label("finanz 1") == ("finanz", 1)
+    assert parse_instance_label("BI-Analyst 1") == ("BI-Analyst", 1)
     assert parse_instance_label("BI-Analyst 2") == ("BI-Analyst", 2)
-    assert parse_instance_label("Quant-Trader") == ("Quant-Trader", 1)
+    assert parse_instance_label("Ops-Worker") == ("Ops-Worker", 1)
     assert parse_instance_label("") == ("", 1)
 
 
@@ -383,11 +383,11 @@ def test_publish_admin_chat_heartbeat_includes_worker_and_slot(monkeypatch: pyte
 
     from duckclaw.graphs.chat_heartbeat import publish_admin_chat_heartbeat
 
-    publish_admin_chat_heartbeat("admin-playground", "tool run", kind="tool", instance_label="finanz 2")
+    publish_admin_chat_heartbeat("admin-playground", "tool run", kind="tool", instance_label="BI-Analyst 2")
     time.sleep(0.08)
     assert len(payloads) == 1
     data = __import__("json").loads(payloads[0])
-    assert data["worker_id"] == "finanz"
+    assert data["worker_id"] == "BI-Analyst"
     assert data["swarm_slot"] == 2
     assert data["kind"] == "tool"
 

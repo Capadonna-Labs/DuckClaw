@@ -74,14 +74,21 @@ def _apply_purge_stale(con: duckdb.DuckDBPyConnection, delta: MeditateStateDelta
     m = delta.purge_mutation()
     if not m.task_ids:
         return
-    table = (m.source_table or "quant_core.trade_signals").strip()
+    table = (m.source_table or "main.task_audit_log").strip()
     if "." not in table or not table.replace(".", "").replace("_", "").isalnum():
         raise ValueError(f"invalid source_table: {table}")
-    id_col = "signal_id" if "trade_signals" in table else "id"
+    cols = {
+        str(row[1])
+        for row in con.execute(f"PRAGMA table_info('{table}')").fetchall()
+    }
+    if "status" not in cols:
+        raise ValueError(f"source_table without status column: {table}")
+    id_col = "task_id" if "task_id" in cols else "id"
+    updated_clause = ", updated_at = CURRENT_TIMESTAMP" if "updated_at" in cols else ""
     for tid in m.task_ids[:200]:
         esc = str(tid).replace("'", "''")
         con.execute(
-            f"UPDATE {table} SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP "
+            f"UPDATE {table} SET status = 'CANCELLED'{updated_clause} "
             f"WHERE CAST({id_col} AS VARCHAR) = '{esc}'"
         )
 

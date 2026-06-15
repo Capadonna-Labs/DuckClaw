@@ -7,13 +7,13 @@ import json
 import duckclaw
 import pytest
 
-from duckclaw.forge.homeostasis import (
+from duckclaw.homeostasis import (
     BeliefRegistry,
     compute_surprise,
     load_beliefs_from_config,
     SurpriseCalculator,
 )
-from duckclaw.forge.homeostasis.surprise import SurpriseResult
+from duckclaw.homeostasis.surprise import SurpriseResult
 
 
 def test_compute_surprise_no_anomaly() -> None:
@@ -134,7 +134,7 @@ def test_homeostasis_manager_maintain() -> None:
         )
     """)
     config = {"beliefs": [{"key": "presupuesto", "target": 5000.0, "threshold": 500.0}], "actions": []}
-    from duckclaw.forge.homeostasis import HomeostasisManager
+    from duckclaw.homeostasis import HomeostasisManager
 
     reg = BeliefRegistry.from_config(config)
     mgr = HomeostasisManager(db=db, schema="test_worker", registry=reg)
@@ -160,7 +160,7 @@ def test_homeostasis_manager_restore() -> None:
         "beliefs": [{"key": "presupuesto", "target": 5000.0, "threshold": 500.0}],
         "actions": [{"trigger": "presupuesto_breach", "skill": "get_summary", "message": "Desviación."}],
     }
-    from duckclaw.forge.homeostasis import HomeostasisManager
+    from duckclaw.homeostasis import HomeostasisManager
 
     reg = BeliefRegistry.from_config(config)
     mgr = HomeostasisManager(db=db, schema="test_worker2", registry=reg)
@@ -187,7 +187,7 @@ def test_homeostasis_manager_ceiling_restore() -> None:
         "beliefs": [{"key": "max_portfolio_drawdown_pct", "target": 0.05, "threshold": 0.01, "comparison": "ceiling"}],
         "actions": [{"trigger": "max_portfolio_drawdown_pct_breach", "skill": "x", "message": "DD alto."}],
     }
-    from duckclaw.forge.homeostasis import HomeostasisManager
+    from duckclaw.homeostasis import HomeostasisManager
 
     reg = BeliefRegistry.from_config(config)
     mgr = HomeostasisManager(db=db, schema="test_worker_ceiling", registry=reg)
@@ -208,7 +208,7 @@ def test_homeostasis_manager_unknown_belief() -> None:
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    from duckclaw.forge.homeostasis import HomeostasisManager
+    from duckclaw.homeostasis import HomeostasisManager
 
     reg = BeliefRegistry.from_config({"beliefs": [], "actions": []})
     mgr = HomeostasisManager(db=db, schema="test_worker3", registry=reg)

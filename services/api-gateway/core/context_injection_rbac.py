@@ -1,4 +1,4 @@
-"""RBAC para /context --add: admin en authorized_users o war room."""
+"""RBAC para /context --add: owner o admin en authorized_users."""
 
 from __future__ import annotations
 
@@ -7,8 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from core.gateway_acl_db import ReadOnlyGatewayAclDb, get_gateway_acl_duckdb, get_war_room_acl_duckdb
-from core.war_rooms import is_war_room_tenant, wr_lookup_member_clearance
+from core.gateway_acl_db import ReadOnlyGatewayAclDb, get_gateway_acl_duckdb
 
 def _owner_bypass(user_id: str) -> bool:
     owner = (os.getenv("DUCKCLAW_OWNER_ID") or os.getenv("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
@@ -47,10 +46,6 @@ def user_may_context_inject(
     if _owner_bypass(uid):
         return True
     tid = str(tenant_id or "default").strip() or "default"
-
-    if is_war_room_tenant(tid):
-        wr_db = get_war_room_acl_duckdb()
-        return wr_lookup_member_clearance(wr_db, tid, uid).strip().lower() == "admin"
 
     forced = (telegram_guard_acl_db_path or "").strip()
     if forced:

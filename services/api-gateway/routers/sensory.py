@@ -8,7 +8,7 @@ playground y clientes HTTP sin acoplar Telegram en esta fase.
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,8 +27,6 @@ _log = logging.getLogger("duckclaw.gateway.sensory")
 
 router = APIRouter(prefix="/api/v1/sensory", tags=["sensory"])
 
-VoiceId = Literal["campus_legal_main", "leila_assistant", "finanz_alert", "quant_trader_brief"]
-
 
 class STTRequest(BaseModel):
     audio_base64: str = Field(..., description="Audio base64 (OGG/WAV/MP3)")
@@ -45,7 +43,7 @@ class TTSRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(..., max_length=3000)
-    voice_id: VoiceId
+    voice_id: str = Field(..., min_length=1, max_length=64)
     speed: float = Field(1.0, ge=0.5, le=2.0)
 
 

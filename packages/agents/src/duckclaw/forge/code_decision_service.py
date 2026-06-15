@@ -14,7 +14,7 @@ import os
 import re
 from typing import Any
 
-from duckclaw.forge.skills.github_bridge import (
+from duckclaw.github.mcp_bridge import (
     compose_github_stdio_server_params,
     github_runtime_owner_repo,
     reject_protected_branch_mutation,

@@ -24,7 +24,7 @@ export function ProjectsTable({
       <div className="rounded-2xl border border-dashed border-gov-blue-200 bg-white p-8 text-center dark:border-dark-border dark:bg-dark-surface">
         <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Aún no hay proyectos</h2>
         <p className="mx-auto mt-2 max-w-md text-sm text-gov-gray-500 dark:text-dark-muted">
-          Crea el primer proyecto con el Orchestrator para guardar contexto DB-first y agentes asignados.
+          Crea el primer proyecto con un borrador administrado para guardar contexto DB-first y agentes asignados.
         </p>
         <Link
           href="/projects/orchestrator"
@@ -82,10 +82,10 @@ export function ProjectsTable({
                   </Link>
                   {project.status !== 'inactive' && (
                     <Link
-                      href={`/playground?worker=platform-orchestrator&project=${encodeURIComponent(project.project_id)}`}
+                      href={`/playground?project=${encodeURIComponent(project.project_id)}`}
                       className="rounded-full border border-gov-blue-200 px-3 py-1 text-[11px] font-black text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
                     >
-                      Guiar
+                      Playground
                     </Link>
                   )}
                   {canWrite && (

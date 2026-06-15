@@ -109,35 +109,6 @@ class _ExecuteAdapter:
         return self._con.execute(sql)
 
 
-def _ensure_war_room_schema_sql(con: duckdb.DuckDBPyConnection) -> None:
-    con.execute("CREATE SCHEMA IF NOT EXISTS war_room_core;")
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS war_room_core.wr_members (
-            tenant_id VARCHAR,
-            user_id VARCHAR,
-            username VARCHAR,
-            clearance_level VARCHAR,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (tenant_id, user_id)
-        );
-        """
-    )
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS war_room_core.wr_audit_log (
-            event_id VARCHAR PRIMARY KEY,
-            tenant_id VARCHAR,
-            sender_id VARCHAR,
-            target_agent VARCHAR,
-            event_type VARCHAR,
-            payload TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-    )
-
-
 def _ensure_authorized_users(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(
         """
@@ -191,97 +162,6 @@ def _ensure_fly_runtime_tables(con: duckdb.DuckDBPyConnection) -> None:
             cost_usd DOUBLE NOT NULL DEFAULT 0,
             model VARCHAR,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-    )
-    con.execute("CREATE SCHEMA IF NOT EXISTS quant_core;")
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS quant_core.trading_sessions (
-            id VARCHAR PRIMARY KEY,
-            mode VARCHAR NOT NULL,
-            tickers VARCHAR NOT NULL DEFAULT '',
-            session_uid VARCHAR,
-            status VARCHAR NOT NULL DEFAULT 'ACTIVE',
-            anchor_equity DOUBLE,
-            peak_equity DOUBLE,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-    )
-    con.execute("ALTER TABLE quant_core.trading_sessions ADD COLUMN IF NOT EXISTS session_goal JSON;")
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS quant_core.trade_signals (
-            signal_id UUID PRIMARY KEY,
-            ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            ticker VARCHAR,
-            strategy_name VARCHAR,
-            action VARCHAR,
-            confidence_score DOUBLE,
-            target_price DOUBLE,
-            stop_loss DOUBLE,
-            session_uid VARCHAR,
-            rationale TEXT,
-            status VARCHAR DEFAULT 'PENDING_HITL',
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-    )
-    con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS session_uid VARCHAR;")
-    con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS rationale TEXT;")
-    con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'PENDING_HITL';")
-    con.execute("ALTER TABLE quant_core.trade_signals ADD COLUMN IF NOT EXISTS order_qty DOUBLE;")
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS quant_core.session_ticks (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            session_uid VARCHAR NOT NULL,
-            tick_number INTEGER NOT NULL,
-            fired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            tickers_processed VARCHAR[],
-            signals_proposed INTEGER DEFAULT 0,
-            cfd_summary JSON,
-            outcome VARCHAR
-        );
-        """
-    )
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS quant_core.hrp_mandates (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            ticker VARCHAR(20) NOT NULL,
-            hrp_weight DOUBLE NOT NULL,
-            hrp_weight_capped DOUBLE NOT NULL,
-            lookback_days INTEGER NOT NULL,
-            n_observations INTEGER NOT NULL,
-            computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            valid_until TIMESTAMP NOT NULL,
-            shrinkage_method VARCHAR(50) DEFAULT 'ledoit_wolf'
-        );
-        """
-    )
-    try:
-        con.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_hrp_mandates_ticker_day "
-            "ON quant_core.hrp_mandates (ticker, date_trunc('day', computed_at));"
-        )
-    except Exception:
-        pass
-    con.execute("ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_executed BOOLEAN DEFAULT FALSE;")
-    con.execute("ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_notional DECIMAL(15,2);")
-    con.execute("ALTER TABLE quant_core.session_ticks ADD COLUMN IF NOT EXISTS moc_n_orders INTEGER;")
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS quant_core.intraday_moc_accum (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          session_uid VARCHAR NOT NULL,
-          ticker VARCHAR NOT NULL,
-          trading_date DATE NOT NULL,
-          payload JSON NOT NULL DEFAULT '{}',
-          finalized_at TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE(session_uid, ticker, trading_date)
         );
         """
     )
@@ -350,7 +230,6 @@ def bootstrap_file(path: Path, templates_root: Path, extensions: list[str]) -> N
             gp = (_REPO_ROOT / gp).resolve()
         if path.resolve() == gp.resolve():
             seed_admin_console_users_if_empty(adapter)
-        _ensure_war_room_schema_sql(con)
         _ensure_fly_runtime_tables(con)
         for manifest in sorted(templates_root.glob("*/manifest.yaml")):
             wid = manifest.parent.name

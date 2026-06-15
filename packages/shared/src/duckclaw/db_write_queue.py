@@ -1,7 +1,7 @@
 """
 Cola singleton de escrituras DuckDB (Redis) y confirmación por task_id.
 
-Usado por admin_sql (poll), db-writer (SET task_status), y war rooms en modo RO.
+Usado por admin_sql (poll), db-writer (SET task_status) y fallbacks de escritura controlados.
 En perfil Spawn sin db-writer, ``enqueue_duckdb_write_sync`` aplica SQL en proceso.
 """
 
@@ -10,8 +10,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Literal
 
 import duckdb
@@ -24,6 +26,9 @@ _log = logging.getLogger(__name__)
 TASK_STATUS_KEY_PREFIX = "task_status:"
 TASK_STATUS_TTL_SEC = 60
 DEFAULT_WRITE_QUEUE_NAME = "duckdb_write_queue"
+LEGACY_WRITE_QUEUE_URL_ENV = "DUCKCLAW_WRITE_QUEUE_URL"
+LEGACY_DB_PATH_ENV = "DUCKCLAW_DB_PATH"
+_WRITE_SQL_PREFIXES = ("INSERT", "UPDATE", "DELETE", "CREATE", "REPLACE", "ALTER", "DROP", "TRUNCATE")
 
 
 class DbWriteTaskStatus(BaseModel):
@@ -46,6 +51,128 @@ def task_status_redis_key(task_id: str) -> str:
 def _is_duckdb_lock_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
     return "lock" in msg or "conflicting" in msg or "different configuration" in msg
+
+
+def _is_write_sql(sql: str) -> bool:
+    """Return True for SQL statements that must go through the singleton writer."""
+    statement = (sql or "").strip().upper()
+    return any(statement.startswith(prefix) for prefix in _WRITE_SQL_PREFIXES)
+
+
+def _legacy_default_db_path(db_path: str | None) -> str:
+    target = str(db_path or "").strip()
+    if target:
+        return target
+
+    legacy_env = (os.environ.get(LEGACY_DB_PATH_ENV) or "").strip()
+    if legacy_env:
+        from duckclaw.gateway_db import resolve_env_duckdb_path
+
+        return resolve_env_duckdb_path(legacy_env)
+
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    return get_gateway_db_path()
+
+
+def enqueue_write(sql: str, db_path: str | None = None) -> bool:
+    """Compatibility adapter for legacy raw SQL callers.
+
+    The canonical queue payload is still produced by ``enqueue_duckdb_write_sync``;
+    this wrapper only preserves the old bool-returning API.
+    """
+    query = (sql or "").strip()
+    if not query or not _is_write_sql(query):
+        return False
+
+    try:
+        enqueue_duckdb_write_sync(
+            db_path=_legacy_default_db_path(db_path),
+            query=query,
+            params=[],
+            user_id="default",
+            tenant_id="default",
+            queue_name=DEFAULT_WRITE_QUEUE_NAME,
+            redis_url=(os.environ.get(LEGACY_WRITE_QUEUE_URL_ENV) or "").strip() or None,
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("legacy singleton enqueue skipped: %s", exc)
+        return False
+
+
+def execute_write_direct(db: Any, sql: str) -> None:
+    """Execute SQL directly inside a singleton writer consumer process."""
+    db.execute(sql)
+
+
+class WriteQueueBridge:
+    """Legacy ``db.execute`` wrapper that routes writes through ``db_write_queue``."""
+
+    def __init__(self, db: Any, db_path: str | None = None):
+        self._db = db
+        self._db_path = db_path
+
+    def execute(self, sql: str) -> None:
+        if not _is_write_sql(sql):
+            self._db.execute(sql)
+            return
+        if enqueue_write(sql, self._db_path):
+            return
+        if spawn_inline_writes_enabled():
+            self._db.execute(sql)
+            return
+        raise RuntimeError("DuckDB writes must be enqueued through duckclaw.db_write_queue")
+
+    def query(self, sql: str) -> Any:
+        return self._db.query(sql)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._db, name)
+
+
+def run_consumer(db_path: str | None = None, poll_interval: float = 0.5) -> None:
+    """Legacy CLI consumer kept for import compatibility.
+
+    Production deployments should run ``services/db-writer/main.py``; this helper
+    remains a singleton consumer for old ``python -m`` invocations.
+    """
+    queue_url = (os.environ.get(LEGACY_WRITE_QUEUE_URL_ENV) or "").strip() or redis_url_from_env()
+    path = _legacy_default_db_path(db_path)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+    from duckclaw import DuckClaw
+
+    db = DuckClaw(path)
+    try:
+        import redis
+    except ImportError:
+        print("redis no instalado. pip install redis", file=sys.stderr)
+        sys.exit(1)
+
+    client = redis.from_url(queue_url)
+    print(f"DuckClaw-DB-Writer iniciado. DB: {path}", flush=True)
+    while True:
+        try:
+            item = client.brpop(DEFAULT_WRITE_QUEUE_NAME, timeout=int(poll_interval))
+            if not item:
+                time.sleep(0.01)
+                continue
+            _, raw = item
+            data = json.loads(raw)
+            query = str(data.get("query") or data.get("sql") or "").strip()
+            params = data.get("params") or []
+            if query:
+                if params:
+                    db.execute(query, params)
+                else:
+                    execute_write_direct(db, query)
+                print(f"OK: {query[:80]}...", flush=True)
+        except json.JSONDecodeError:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            print(f"Error: {exc}", file=sys.stderr)
+        time.sleep(0.01)
 
 
 def _connect_duckdb_writable_with_retry(
@@ -187,6 +314,7 @@ def enqueue_duckdb_write_sync(
     tenant_id: str = "default",
     task_id: str | None = None,
     queue_name: str = DEFAULT_WRITE_QUEUE_NAME,
+    redis_url: str | None = None,
 ) -> str:
     """LPUSH del payload JSON, o apply inline en perfil Spawn. Devuelve task_id."""
     if spawn_inline_writes_enabled():
@@ -216,7 +344,7 @@ def enqueue_duckdb_write_sync(
         "query": query,
         "params": list(params or []),
     }
-    r = redis.from_url(redis_url_from_env(), decode_responses=True)
+    r = redis.from_url(redis_url or redis_url_from_env(), decode_responses=True)
     r.lpush(queue_name, json.dumps(payload))
     return tid
 
@@ -239,14 +367,19 @@ def enqueue_typed_command(
     import json as _json
 
     enriched = _json.loads(payload_raw)
+    producer_user_id = str(user_id or "default")
     enriched["db_path"] = str(db_path or "")
-    enriched["user_id"] = str(user_id or "default")
+    if str(enriched.get("user_id") or "").strip():
+        enriched["db_write_user_id"] = producer_user_id
+    else:
+        enriched["user_id"] = producer_user_id
+        enriched["db_write_user_id"] = producer_user_id
     enriched["tenant_id"] = enriched.get("tenant_id") or str(command.tenant_id or "default")
     payload = _json.dumps(enriched, ensure_ascii=False)
 
     if spawn_inline_writes_enabled():
         _validate_write_target(
-            user_id=str(user_id or "default"),
+            user_id=str(enriched.get("db_write_user_id") or enriched.get("user_id") or "default"),
             target_db_path=str(db_path or ""),
             tenant_id=str(enriched["tenant_id"]),
         )

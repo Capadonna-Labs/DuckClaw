@@ -265,7 +265,7 @@ def append_conversation_trace(
                 messages = _lc_messages_to_chatml(messages)
             else:
                 messages = list(messages)
-            # Siempre usar el prompt del worker (/prompt o default del template, ej. finanz/system_prompt.md) como system en la traza
+            # Siempre usar el prompt del worker (/prompt o default del template) como system en la traza.
             if messages and (messages[0].get("role") or "").lower() == "system":
                 sys_for_trace = (system_prompt or "").strip()[:8192]
                 if sys_for_trace:

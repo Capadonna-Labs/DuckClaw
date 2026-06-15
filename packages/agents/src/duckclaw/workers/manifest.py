@@ -22,6 +22,20 @@ _SKILL_DICT_RESERVED_KEYS = frozenset(
         "comfyui",
     }
 )
+_DEFAULT_FILESYSTEM_WORKER_ID = "default"
+
+
+def _is_default_filesystem_worker(worker_id: str) -> bool:
+    return (worker_id or "").strip().lower() == _DEFAULT_FILESYSTEM_WORKER_ID
+
+
+def _reject_non_default_filesystem_worker(worker_id: str) -> None:
+    if _is_default_filesystem_worker(worker_id):
+        return
+    raise FileNotFoundError(
+        "Only the default filesystem worker may be loaded from layout; "
+        f"extra workers must come from the DB catalog: {worker_id}"
+    )
 
 
 def _find_templates_root() -> Path:
@@ -43,6 +57,7 @@ def _find_templates_root() -> Path:
 
 def get_worker_dir(worker_id: str, templates_root: Optional[Path] = None) -> Path:
     """Return worker dir: ``forge/templates/<worker_id>/`` (o legacy ``templates/workers/<id>/``)."""
+    _reject_non_default_filesystem_worker(worker_id)
     if templates_root is not None:
         path = templates_root / "templates" / "workers" / worker_id.strip()
     else:
@@ -70,7 +85,8 @@ def load_manifest(
 
             return load_manifest_from_catalog(db, worker_id, tenant_id)
         except Exception:
-            pass
+            if not _is_default_filesystem_worker(worker_id):
+                raise
 
     worker_dir = get_worker_dir(worker_id, templates_root)
     manifest_path = worker_dir / "manifest.yaml"

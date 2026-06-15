@@ -503,9 +503,7 @@ def _resolve_heartbeat_outbound_bot_token(
 ) -> str:
     """
     Token Bot API para DM de heartbeat: explícito, TELEGRAM_<worker>_TOKEN,
-    DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES compacto, o —solo finanz / sin worker—
-    ``effective_telegram_bot_token_outbound()`` (evita enviar con el bot Finanz
-    cuando el turno es de Quant u otro worker multiplex).
+    DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES compacto, o token global si no hay worker.
     """
     explicit = (outbound_bot_token or "").strip()
     if explicit:
@@ -514,7 +512,7 @@ def _resolve_heartbeat_outbound_bot_token(
     if not wid:
         return effective_telegram_bot_token_outbound()
     cw = canonical_manifest_worker_id(wid)
-    if not cw or cw.lower() == "finanz":
+    if not cw:
         return effective_telegram_bot_token_outbound()
     t = (resolve_telegram_token_for_worker_id(wid) or "").strip()
     if t:

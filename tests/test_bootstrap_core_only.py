@@ -34,9 +34,9 @@ def test_bootstrap_core_schema_creates_tables_no_domain_schemas(tmp_path: Path, 
             "WHERE table_schema = 'main' AND table_name = 'semantic_memory'"
         ).fetchone()[0] == 1
 
-        from duckclaw.bootstrap_core import core_domain_schemas_present
+        from duckclaw.bootstrap_core import core_unexpected_schemas_present
 
-        assert core_domain_schemas_present(con) == []
+        assert core_unexpected_schemas_present(con, ("quant_core", "finance_worker")) == []
     finally:
         con.close()
 
@@ -70,9 +70,9 @@ def test_bootstrap_dbs_core_only_cli(tmp_path: Path, monkeypatch) -> None:
 
     con = duckdb.connect(str(db_path), read_only=True)
     try:
-        from duckclaw.bootstrap_core import core_domain_schemas_present
+        from duckclaw.bootstrap_core import core_unexpected_schemas_present
 
-        assert core_domain_schemas_present(con) == []
+        assert core_unexpected_schemas_present(con, ("quant_core", "finance_worker")) == []
     finally:
         con.close()
         db_path.unlink(missing_ok=True)

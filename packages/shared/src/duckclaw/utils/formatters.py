@@ -72,7 +72,7 @@ def _reddit_selftext_for_llm(text: str) -> str:
 
 
 def _strip_leading_worker_label(s: str) -> str:
-    """Quita prefijos tipo `finanz 2` antes del JSON."""
+    """Quita prefijos tipo `worker 2` antes del JSON."""
     t = (s or "").strip()
     if not t:
         return t

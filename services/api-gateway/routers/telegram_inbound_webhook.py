@@ -49,10 +49,21 @@ from core.vlm_ingest import (
     vlm_post_inference_cooldown,
 )
 from duckclaw.gateway_db import resolve_env_duckdb_path
-try:
-    from duckclaw.forge.skills.moc_execution_window import parse_moc_execution_window_bounds
-except ImportError:
-    parse_moc_execution_window_bounds = None
+
+
+def _parse_context_operation_window_bounds() -> tuple[int, int, str] | None:
+    raw = (os.environ.get("DUCKCLAW_CONTEXT_OPERATION_WINDOW") or "").strip()
+    if not raw or "-" not in raw:
+        return None
+    start_raw, _, end_raw = raw.partition("-")
+    try:
+        start_h, start_m = [int(part) for part in start_raw.strip().split(":", 1)]
+        end_h, end_m = [int(part) for part in end_raw.strip().split(":", 1)]
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= start_h <= 23 and 0 <= end_h <= 23 and 0 <= start_m <= 59 and 0 <= end_m <= 59):
+        return None
+    return start_h * 3600 + start_m * 60, end_h * 3600 + end_m * 60, raw
 
 
 def _context_time_anchor_block(
@@ -75,28 +86,34 @@ def _context_time_anchor_block(
         dt = datetime.now(timezone.utc)
     dow_es = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
     label_dow = dow_es[dt.weekday()]
-    if parse_moc_execution_window_bounds is not None:
-        start_s, end_s, win_s = parse_moc_execution_window_bounds()
-    else:
-        start_s, end_s, win_s = 0, 0, "N/A"
+    operation_window = _parse_context_operation_window_bounds()
     cur_s = dt.hour * 3600 + dt.minute * 60 + int(dt.second)
     is_weekend = dt.weekday() >= 5
-    inside_moc = (not is_weekend) and (start_s <= cur_s <= end_s)
+    inside_operation_window = False
+    window_line = "- Ventana operativa gateway: no configurada.\n"
+    win_s = ""
+    if operation_window is not None:
+        start_s, end_s, win_s = operation_window
+        inside_operation_window = (not is_weekend) and (start_s <= cur_s <= end_s)
+        window_line = (
+            "- Ventana operativa gateway "
+            f"(lun-vie, inclusiva; env `DUCKCLAW_CONTEXT_OPERATION_WINDOW`): `{win_s}` COT\n"
+        )
     local_iso = f"{dt.date().isoformat()} {dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}"
     block = (
-        "**[CONTEXT_ANCLA_TIEMPO — Obligatorio para texto MOC / pre‑cierre; no contradecir]**\n"
+        "**[CONTEXT_ANCLA_TIEMPO — Obligatorio para texto sensible al reloj; no contradecir]**\n"
         f"- Reloj servidor **America/Bogota (COT)**: {label_dow} {local_iso}\n"
-        f"- Ventana MOC gateway (lun–vie, inclusiva; env `DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW`): `{win_s}` COT\n"
-        f"- `dentro_de_ventana_moc`: **{'Sí' if inside_moc else 'No'}**"
+        f"{window_line}"
+        f"- `dentro_de_ventana_operativa`: **{'Sí' if inside_operation_window else 'No'}**"
         + (" (`fin_semana=Sí`, ventana irrelevante ese día)." if is_weekend else ".")
-        + "\n- Si sintetizas mención de ventana MOC: usar **dentro/próximo/fuera** coherente con `dentro_de_ventana_moc` "
-        "(no digas «próxima» si está en **Sí**)."
+        + "\n- Si sintetizas una ventana horaria configurada: usar **dentro/próximo/fuera** "
+        "coherente con `dentro_de_ventana_operativa`."
     )
     meta = {
         "local_iso": local_iso,
-        "dentro_de_ventana_moc": inside_moc,
+        "dentro_de_ventana_operativa": inside_operation_window,
         "fin_de_semana": is_weekend,
-        "window_cot": win_s,
+        "operation_window_cot": win_s,
         "directive_kind": directive_kind,
     }
     return block, meta

@@ -376,7 +376,7 @@ class WorkerSpec:
         "worker_id", "logical_worker_id", "name", "schema_name", "llm_required", "temperature",
         "topology", "skills_list", "allowed_tables", "read_only", "worker_dir",
         "github_config", "reddit_config", "google_trends_config", "research_config", "tailscale_config", "sft_config",
-        "ibkr_config", "openweather_config", "fmp_config", "comfyui_config", "fal_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config", "crm_config",
+        "ibkr_config", "openweather_config", "fmp_config", "comfyui_config", "fal_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config",
         "forge_shared_db_path_env", "forge_apply_schema_to_shared", "forge_vault_binding",
         "context_pruning_config",
         "duckdb_extensions",

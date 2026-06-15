@@ -246,7 +246,7 @@ def test_fetch_semantic_memory_snapshot_ephemeral_after_stale_reuse(tmp_path: Pa
     assert "registro" in out
 
 
-def test_context_time_anchor_moc_inside_friday_1456_default_window(
+def test_context_time_anchor_operation_window_inside_friday_1456(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sys.path.insert(0, str(_REPO / "services" / "api-gateway"))
@@ -256,13 +256,13 @@ def test_context_time_anchor_moc_inside_friday_1456_default_window(
 
     from routers.telegram_inbound_webhook import _context_time_anchor_block  # noqa: PLC0415
 
-    monkeypatch.delenv("DUCKCLAW_QUANT_AUTO_EXECUTE_MOC_WINDOW", raising=False)
+    monkeypatch.setenv("DUCKCLAW_CONTEXT_OPERATION_WINDOW", "14:40-15:00")
     ts = datetime(2026, 5, 1, 14, 56, 0, tzinfo=ZoneInfo("America/Bogota"))
     _b, meta = _context_time_anchor_block(now_cot=ts, directive_kind="test")
-    assert meta["dentro_de_ventana_moc"] is True
+    assert meta["dentro_de_ventana_operativa"] is True
 
 
-def test_context_time_anchor_moc_inside_friday_1443() -> None:
+def test_context_time_anchor_operation_window_inside_friday_1443(monkeypatch: pytest.MonkeyPatch) -> None:
     sys.path.insert(0, str(_REPO / "services" / "api-gateway"))
     from datetime import datetime  # noqa: PLC0415
 
@@ -270,9 +270,10 @@ def test_context_time_anchor_moc_inside_friday_1443() -> None:
 
     from routers.telegram_inbound_webhook import _context_time_anchor_block  # noqa: PLC0415
 
+    monkeypatch.setenv("DUCKCLAW_CONTEXT_OPERATION_WINDOW", "14:40-15:00")
     ts = datetime(2026, 5, 1, 14, 43, tzinfo=ZoneInfo("America/Bogota"))
     block, meta = _context_time_anchor_block(now_cot=ts, directive_kind="test")
-    assert meta["dentro_de_ventana_moc"] is True
+    assert meta["dentro_de_ventana_operativa"] is True
     assert meta["fin_de_semana"] is False
     assert "CONTEXT_ANCLA_TIEMPO" in block
     assert "Sí" in block
@@ -288,7 +289,7 @@ def test_context_time_anchor_outside_before_window() -> None:
 
     ts = datetime(2026, 5, 1, 14, 12, tzinfo=ZoneInfo("America/Bogota"))
     _b, meta = _context_time_anchor_block(now_cot=ts, directive_kind="test")
-    assert meta["dentro_de_ventana_moc"] is False
+    assert meta["dentro_de_ventana_operativa"] is False
 
 
 def test_summarize_new_context_directive_embeds_anchor_block() -> None:
@@ -298,5 +299,5 @@ def test_summarize_new_context_directive_embeds_anchor_block() -> None:
     out = _summarize_new_context_directive("payload line")
     assert out.startswith("[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]")
     assert "CONTEXT_ANCLA_TIEMPO" in out
-    assert "dentro_de_ventana_moc" in out
+    assert "dentro_de_ventana_operativa" in out
     assert "payload line" in out

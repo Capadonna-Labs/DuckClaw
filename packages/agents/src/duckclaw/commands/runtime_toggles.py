@@ -66,6 +66,7 @@ def _set_runtime_toggle_state(
             key_suffix,
             value,
             tenant_id=tenant_id,
+            value_kind="boolean",
             updated_by="runtime-toggle",
         )
         return True, ""

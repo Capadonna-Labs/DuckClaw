@@ -7,9 +7,18 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
-from duckclaw.commands.chat_state import _get_global_config, _set_global_config, get_chat_state, set_chat_state
+from duckclaw.commands.chat_state import _get_global_config, get_chat_state
+from duckclaw.prompt_policies import PromptPolicyResolver
+from duckclaw.runtime_session_settings import (
+    RUNTIME_SESSION_DOMAIN,
+    resolve_session_runtime_setting,
+    runtime_session_actor,
+    upsert_session_runtime_setting,
+)
+from duckclaw.write_commands import UpsertPromptPolicyCommand, UpsertRuntimeSettingCommand
 
 PromptTemplateIdsProvider = Callable[[], Sequence[str]]
 SystemPromptFallbackProvider = Callable[[str], str]
@@ -68,22 +77,95 @@ def _system_prompt_fallback(worker_id: str) -> str:
     return ""
 
 
+def _system_prompt_policy_name(worker_id: Optional[str]) -> str:
+    return (worker_id or "default").strip().lower() or "default"
+
+
+def _ensure_prompt_policy_schema(db: Any) -> None:
+    if bool(getattr(db, "_read_only", False)):
+        return
+    try:
+        from duckclaw.schema_migrations import run_pending_migrations
+
+        run_pending_migrations(db)
+    except Exception:
+        pass
+
+
+def _set_system_prompt_policy(
+    db: Any,
+    worker_id: str,
+    content: str,
+    *,
+    actor_email: str = "system",
+) -> tuple[bool, str]:
+    policy_name = _system_prompt_policy_name(worker_id)
+    command = UpsertPromptPolicyCommand(
+        tenant_id="default",
+        actor_email=actor_email,
+        policy_type="system_prompt",
+        policy_name=policy_name,
+        version=1,
+        status="active",
+        content=content,
+        metadata={"owner": "duckclaw.commands.model_setup"},
+    )
+    if not bool(getattr(db, "_read_only", False)):
+        _ensure_prompt_policy_schema(db)
+        try:
+            from duckclaw.write_command_handlers import dispatch_command
+
+            target = getattr(db, "_con", None) or getattr(db, "_native", None) or db
+            dispatch_command(target, command.model_dump())
+            return True, ""
+        except Exception as exc:
+            return False, str(exc)[:500]
+
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        return False, "Ruta de bóveda no resuelta"
+    try:
+        target_db_path = str(Path(raw_path).expanduser().resolve())
+    except OSError:
+        target_db_path = raw_path
+
+    try:
+        from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+    except Exception as exc:
+        return False, f"cola DuckDB no disponible: {exc}"
+
+    released_ro, resume = _release_ro_handle_for_writer(db)
+    try:
+        task_id = enqueue_typed_command(
+            command,
+            db_path=target_db_path,
+            user_id=actor_email,
+        )
+        status = poll_task_status_sync(task_id, timeout_sec=30.0)
+        if status is None:
+            return False, "timeout esperando db-writer"
+        if status.status != "success":
+            return False, (status.detail or "db-writer failed")[:500]
+        return True, ""
+    finally:
+        if released_ro and callable(resume):
+            try:
+                resume()
+            except Exception:
+                pass
+
+
 def get_effective_system_prompt(db: Any, worker_id: Optional[str] = None) -> str:
     """
-    Return the effective system prompt for a worker.
-
-    Worker-specific values come from ``agent_config`` overrides first. Runtime
-    fallback, when needed, is injected by the graph facade and remains limited
-    to the allowed default worker.
+    Return the DB-first effective system prompt for a worker.
     """
-    wid = (worker_id or "").strip()
-    if wid:
-        override = _get_global_config(db, f"system_prompt_{wid}")
-        if override:
-            return override
-        return _system_prompt_fallback(wid)
-    current = _get_global_config(db, "system_prompt")
-    return current if current else ""
+    policy_name = _system_prompt_policy_name(worker_id)
+    try:
+        return PromptPolicyResolver(db=db).load("system_prompt", policy_name)
+    except FileNotFoundError:
+        return _system_prompt_fallback(policy_name)
+    except Exception:
+        return _system_prompt_fallback(policy_name)
 
 
 _PROVIDERS = ("mlx", "ollama", "openai", "anthropic", "deepseek", "groq", "gemini", "openrouter", "or")
@@ -111,6 +193,76 @@ _DEFAULT_BASE_URL_BY_PROVIDER = {
 }
 
 
+def _release_ro_handle_for_writer(db: Any) -> tuple[bool, Any]:
+    release = getattr(db, "release_file_handle_for_external_writer", None)
+    suspend = getattr(db, "suspend_readonly_file_handle", None)
+    resume = getattr(db, "resume_readonly_file_handle", None)
+    if callable(release):
+        release()
+        return bool(callable(resume)), resume
+    if callable(suspend) and callable(resume):
+        suspend()
+        return True, resume
+    return False, resume
+
+
+def _llm_runtime_value(db: Any, chat_id: Any, key: str) -> str:
+    return resolve_session_runtime_setting(db, chat_id, key)
+
+
+def _set_llm_runtime_value(db: Any, chat_id: Any, key: str, value: str) -> tuple[bool, str]:
+    if not bool(getattr(db, "_read_only", False)):
+        upsert_session_runtime_setting(
+            db,
+            chat_id,
+            key,
+            value,
+            updated_by="model-setup",
+        )
+        return True, ""
+
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        return False, "Ruta de bóveda no resuelta"
+    try:
+        target_db_path = str(Path(raw_path).expanduser().resolve())
+    except OSError:
+        target_db_path = raw_path
+
+    command = UpsertRuntimeSettingCommand(
+        tenant_id="default",
+        actor_email=runtime_session_actor(chat_id),
+        domain=RUNTIME_SESSION_DOMAIN,
+        key=key,
+        value=str(value)[:8192],
+        value_kind="string",
+    )
+    try:
+        from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+    except Exception as exc:
+        return False, f"cola DuckDB no disponible: {exc}"
+
+    released_ro, resume = _release_ro_handle_for_writer(db)
+    try:
+        task_id = enqueue_typed_command(
+            command,
+            db_path=target_db_path,
+            user_id=str(chat_id or "default").strip() or "default",
+        )
+        status = poll_task_status_sync(task_id, timeout_sec=30.0)
+        if status is None:
+            return False, "timeout esperando db-writer"
+        if status.status != "success":
+            return False, (status.detail or "db-writer failed")[:500]
+        return True, ""
+    finally:
+        if released_ro and callable(resume):
+            try:
+                resume()
+            except Exception:
+                pass
+
+
 def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str, str]:
     """Return provider/model/base_url effective for UI display."""
     from duckclaw.integrations.llm_providers import (
@@ -119,15 +271,15 @@ def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str,
     )
 
     _ensure_duckclaw_llm_env_from_legacy_llm_vars()
-    p_chat = (get_chat_state(db, chat_id, "llm_provider") or "").strip()
+    p_chat = (_llm_runtime_value(db, chat_id, "llm_provider") or "").strip()
     p_global = (_get_global_config(db, "llm_provider") or "").strip()
     p_env = (os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx") or "").strip()
     p = (p_chat or p_global or p_env).strip().lower()
-    m_chat = (get_chat_state(db, chat_id, "llm_model") or "").strip()
+    m_chat = (_llm_runtime_value(db, chat_id, "llm_model") or "").strip()
     m_global = (_get_global_config(db, "llm_model") or "").strip()
     m_env = (os.environ.get("DUCKCLAW_LLM_MODEL", "") or "").strip()
     m = (m_chat or m_global or m_env).strip()
-    u_chat = (get_chat_state(db, chat_id, "llm_base_url") or "").strip()
+    u_chat = (_llm_runtime_value(db, chat_id, "llm_base_url") or "").strip()
     u_global = (_get_global_config(db, "llm_base_url") or "").strip()
     u_env = (os.environ.get("DUCKCLAW_LLM_BASE_URL", "") or "").strip()
     u = (u_chat or u_global or u_env).strip()
@@ -165,7 +317,7 @@ def chat_has_llm_chat_state_override(db: Any, chat_id: Any) -> bool:
     if not cid:
         return False
     for key in ("llm_provider", "llm_model", "llm_base_url"):
-        if (get_chat_state(db, cid, key) or "").strip():
+        if (_llm_runtime_value(db, cid, key) or "").strip():
             return True
     return False
 
@@ -188,14 +340,14 @@ def _apply_provider_defaults(db: Any, chat_id: Any, provider: str) -> None:
     if provider == "mlx":
         from duckclaw.integrations.llm_providers import mlx_openai_compatible_base_url
 
-        set_chat_state(db, chat_id, "llm_base_url", mlx_openai_compatible_base_url())
+        _set_llm_runtime_value(db, chat_id, "llm_base_url", mlx_openai_compatible_base_url())
         mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
-        set_chat_state(db, chat_id, "llm_model", mid)
+        _set_llm_runtime_value(db, chat_id, "llm_model", mid)
         return
     default_model = _DEFAULT_MODEL_BY_PROVIDER.get(provider, "")
-    set_chat_state(db, chat_id, "llm_model", default_model)
+    _set_llm_runtime_value(db, chat_id, "llm_model", default_model)
     default_url = _DEFAULT_BASE_URL_BY_PROVIDER.get(provider, "")
-    set_chat_state(db, chat_id, "llm_base_url", default_url if default_url else "")
+    _set_llm_runtime_value(db, chat_id, "llm_base_url", default_url if default_url else "")
 
 
 def execute_model(db: Any, chat_id: Any, args: str) -> str:
@@ -225,7 +377,9 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
             pv = v.lower()
             if pv in ("or", "router"):
                 pv = "openrouter"
-            set_chat_state(db, chat_id, "llm_provider", pv)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_provider", pv)
+            if not ok:
+                return f"No se pudo guardar: {err}"
             _apply_provider_defaults(db, chat_id, pv)
             _debug_log_model_config(
                 hypothesis_id="H_write_apply",
@@ -239,9 +393,13 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
                 },
             )
         elif k == "model":
-            set_chat_state(db, chat_id, "llm_model", v)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_model", v)
+            if not ok:
+                return f"No se pudo guardar: {err}"
         elif k == "base_url":
-            set_chat_state(db, chat_id, "llm_base_url", v)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_base_url", v)
+            if not ok:
+                return f"No se pudo guardar: {err}"
     _p, _m, _u = _effective_llm_triplet_for_chat_ui(db, chat_id)
     _debug_log_model_config(
         hypothesis_id="H_write_apply",
@@ -356,7 +514,14 @@ def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
     if worker_id not in all_templates:
         return f"Template '{worker_id}' no encontrado. Disponibles (usa /roles): {', '.join(all_templates)}"
     if new_prompt:
-        _set_global_config(db, f"system_prompt_{worker_id}", new_prompt)
+        ok, err = _set_system_prompt_policy(
+            db,
+            worker_id,
+            new_prompt,
+            actor_email=f"chat:{str(chat_id or 'default').strip() or 'default'}",
+        )
+        if not ok:
+            return f"No se pudo guardar: {err}"
         preview = new_prompt[:200] + "..." if len(new_prompt) > 200 else new_prompt
         return f"✅ System prompt de {worker_id} actualizado.\nVista previa: {preview}"
     current = get_effective_system_prompt(db, worker_id)
@@ -369,10 +534,10 @@ def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
 def execute_setup(db: Any, chat_id: Any, args: str) -> str:
     """/setup [key=value | key=value]: Telegram-compatible config command."""
     if not args or not args.strip():
-        p = get_chat_state(db, chat_id, "llm_provider") or _get_global_config(db, "llm_provider")
-        m = get_chat_state(db, chat_id, "llm_model") or _get_global_config(db, "llm_model")
+        p = _llm_runtime_value(db, chat_id, "llm_provider") or _get_global_config(db, "llm_provider")
+        m = _llm_runtime_value(db, chat_id, "llm_model") or _get_global_config(db, "llm_model")
         wid = get_chat_state(db, chat_id, "worker_id")
-        prompt = _get_global_config(db, "system_prompt") or ""
+        prompt = get_effective_system_prompt(db, "default") or ""
         return (
             f"Config actual:\n- llm_provider: {p or '—'}\n- llm_model: {m or '—'}\n"
             f"- worker_id: {wid or '—'}\n- system_prompt: {prompt[:80]}...\n\n"
@@ -387,14 +552,30 @@ def execute_setup(db: Any, chat_id: Any, args: str) -> str:
         if k in ("llm_provider", "provider"):
             if v and v.lower() not in _PROVIDERS:
                 return f"Provider desconocido: {v}. Válidos: {', '.join(_PROVIDERS)}"
-            set_chat_state(db, chat_id, "llm_provider", v)
-            _apply_provider_defaults(db, chat_id, v.lower())
+            provider = v.lower()
+            if provider in ("or", "router"):
+                provider = "openrouter"
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_provider", provider)
+            if not ok:
+                return f"No se pudo guardar: {err}"
+            _apply_provider_defaults(db, chat_id, provider)
         elif k in ("llm_model", "model"):
-            set_chat_state(db, chat_id, "llm_model", v)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_model", v)
+            if not ok:
+                return f"No se pudo guardar: {err}"
         elif k in ("llm_base_url", "base_url"):
-            set_chat_state(db, chat_id, "llm_base_url", v)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_base_url", v)
+            if not ok:
+                return f"No se pudo guardar: {err}"
         elif k in ("system_prompt", "prompt"):
-            _set_global_config(db, "system_prompt", v)
+            ok, err = _set_system_prompt_policy(
+                db,
+                "default",
+                v,
+                actor_email=f"chat:{str(chat_id or 'default').strip() or 'default'}",
+            )
+            if not ok:
+                return f"No se pudo guardar: {err}"
     return "✅ Config actualizado."
 
 

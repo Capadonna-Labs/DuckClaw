@@ -512,7 +512,7 @@ def _resolved_llm_for_playground(
 ) -> dict[str, str]:
     from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
-    from duckclaw.graphs.on_the_fly_commands import get_chat_state
+    from duckclaw.runtime_session_settings import resolve_session_runtime_setting
 
     env = _resolved_llm_env()
     cid = (chat_id or "").strip()
@@ -533,9 +533,33 @@ def _resolved_llm_for_playground(
     except Exception:
         return {**env, "scope": "env_bootstrap", "db_lock_error": True}
     try:
-        chat_provider = (get_chat_state(db, cid, "llm_provider") or "").strip()
-        chat_model = (get_chat_state(db, cid, "llm_model") or "").strip()
-        chat_base_url = (get_chat_state(db, cid, "llm_base_url") or "").strip()
+        chat_provider = (
+            resolve_session_runtime_setting(
+                db,
+                cid,
+                "llm_provider",
+                tenant_id=tenant_id,
+            )
+            or ""
+        ).strip()
+        chat_model = (
+            resolve_session_runtime_setting(
+                db,
+                cid,
+                "llm_model",
+                tenant_id=tenant_id,
+            )
+            or ""
+        ).strip()
+        chat_base_url = (
+            resolve_session_runtime_setting(
+                db,
+                cid,
+                "llm_base_url",
+                tenant_id=tenant_id,
+            )
+            or ""
+        ).strip()
     except Exception:
         chat_provider = chat_model = chat_base_url = ""
     finally:

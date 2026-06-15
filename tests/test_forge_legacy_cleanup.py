@@ -220,7 +220,6 @@ DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/graphs/chat_heartbeat.py": "pending generic multiplex cleanup",
     "packages/agents/src/duckclaw/graphs/dreamer_job.py": "pending domain-specific dreamer extraction",
     "packages/agents/src/duckclaw/graphs/router.py": "pending retail intent language cleanup",
-    "packages/agents/src/duckclaw/graphs/sandbox.py": "pending sandbox prompt cleanup",
     "packages/agents/src/duckclaw/quant/__init__.py": "pending domain package removal after factory cut",
     "packages/agents/src/duckclaw/quant/runtime_policy.py": "pending domain package removal after factory cut",
     "packages/agents/src/duckclaw/workers/field_reflection.py": "pending field reflection naming cleanup",
@@ -345,6 +344,18 @@ HOMEOSTASIS_DOC_VERTICAL_MARKERS_RE = re.compile(
     r"|trading_session_[a-z0-9_]+"
     r"|trade[_ -]?signal"
     r"|pnl"
+    r")(?![a-z0-9])"
+)
+SANDBOX_VERTICAL_MARKERS_RE = re.compile(
+    r"(?i)(?<![a-z0-9])("
+    r"mql5"
+    r"|ml4t"
+    r"|pypfopt"
+    r"|pyportfolioopt"
+    r"|quant"
+    r"|finanz"
+    r"|trading"
+    r"|broker"
     r")(?![a-z0-9])"
 )
 REMOVED_DOMAIN_WORKER_ID_SHIMS = frozenset(
@@ -607,6 +618,17 @@ def test_on_the_fly_command_graph_has_no_quant_finance_trading_residue() -> None
     offenders = [
         f"{match.start()}: {match.group(0)}"
         for match in ON_THE_FLY_VERTICAL_MARKERS_RE.finditer(text)
+    ]
+
+    assert offenders == []
+
+
+def test_sandbox_graph_has_no_domain_specific_runtime_guidance() -> None:
+    sandbox_path = REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "graphs" / "sandbox.py"
+    text = sandbox_path.read_text(encoding="utf-8", errors="ignore")
+    offenders = [
+        f"{match.start()}: {match.group(0)}"
+        for match in SANDBOX_VERTICAL_MARKERS_RE.finditer(text)
     ]
 
     assert offenders == []

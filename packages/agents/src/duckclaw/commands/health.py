@@ -15,10 +15,10 @@ class HeartbeatAdapter(Protocol):
 
     def is_admin_ui_chat_session(self, chat_id: str) -> bool: ...
 
-    def is_chat_heartbeat_enabled(self, tenant_id: str, chat_id: str) -> bool: ...
+    def is_chat_heartbeat_enabled(self, db: Any, tenant_id: str, chat_id: str) -> bool: ...
 
     def set_chat_heartbeat_enabled(
-        self, tenant_id: str, chat_id: str, on: bool
+        self, db: Any, tenant_id: str, chat_id: str, on: bool
     ) -> tuple[bool, str]: ...
 
 
@@ -33,39 +33,36 @@ def configure_heartbeat_adapter(adapter: HeartbeatAdapter | None) -> None:
 
 def execute_heartbeat(db: Any, chat_id: Any, on_off: str, *, tenant_id: Any = None) -> str:
     """/heartbeat on|off — DM proactivos mientras el agente usa herramientas."""
-    del db
     adapter = _heartbeat_adapter
     tid = str(tenant_id or "default").strip() or "default"
     cid = str(chat_id if chat_id is not None else "unknown").strip() or "unknown"
     v = (on_off or "").strip().lower()
 
-    if adapter is None or not adapter.heartbeat_redis_configured():
-        return (
-            "Heartbeat requiere Redis (REDIS_URL o DUCKCLAW_REDIS_URL). Sin eso no se puede guardar el estado."
-        )
+    if adapter is None:
+        return "Heartbeat no está configurado."
     if v in ("on", "1", "true", "sí", "si"):
-        if adapter.is_chat_heartbeat_enabled(tid, cid):
+        if adapter.is_chat_heartbeat_enabled(db, tid, cid):
             return "✅ Heartbeat ya estaba activado."
-        ok, err = adapter.set_chat_heartbeat_enabled(tid, cid, True)
+        ok, err = adapter.set_chat_heartbeat_enabled(db, tid, cid, True)
         if not ok:
             return f"No se pudo activar heartbeat: {err}"
         if adapter.is_admin_ui_chat_session(cid):
             return "✅ Heartbeat activado. Verás plan y herramientas en este chat mientras ejecuto la tarea."
         if not adapter.heartbeat_outbound_configured():
             return (
-                "Heartbeat activado en Redis, pero falta TELEGRAM_BOT_TOKEN (recomendado) o un webhook "
+                "Heartbeat activado en DB, pero falta TELEGRAM_BOT_TOKEN (recomendado) o un webhook "
                 "(TELEGRAM_BOT_TOKEN o DUCKCLAW_HEARTBEAT_WEBHOOK_URL); no se enviarán DMs."
             )
         return "✅ Heartbeat activado. Te avisaré por DM mientras uso herramientas."
     if v in ("off", "0", "false"):
-        if not adapter.is_chat_heartbeat_enabled(tid, cid):
+        if not adapter.is_chat_heartbeat_enabled(db, tid, cid):
             return "Heartbeat ya estaba desactivado."
-        ok, err = adapter.set_chat_heartbeat_enabled(tid, cid, False)
+        ok, err = adapter.set_chat_heartbeat_enabled(db, tid, cid, False)
         if not ok:
             return f"No se pudo desactivar heartbeat: {err}"
         return "✅ Heartbeat desactivado."
 
-    st = "on" if adapter.is_chat_heartbeat_enabled(tid, cid) else "off"
+    st = "on" if adapter.is_chat_heartbeat_enabled(db, tid, cid) else "off"
     return f"Heartbeat: {st}\nUso: /heartbeat on | /heartbeat off"
 
 

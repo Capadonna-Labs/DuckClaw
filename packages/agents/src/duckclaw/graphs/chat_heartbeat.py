@@ -13,12 +13,24 @@ import logging
 import os
 import re
 import threading
-from typing import Any
 import time
+from pathlib import Path
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib import request as urllib_request
 
-from duckclaw.guardrails.loader import load_guardrail_kv
+from duckclaw.heartbeat_runtime_settings import (
+    HEARTBEAT_RUNTIME_DOMAIN,
+    HEARTBEAT_RUNTIME_KEY,
+    resolve_heartbeat_runtime_state,
+    upsert_heartbeat_runtime_state,
+)
+from duckclaw.graphs.tool_catalog import (
+    ADMIN_HEARTBEAT_SQL_TOOL_NAMES,
+    heartbeat_message_for_tool_name,
+)
+from duckclaw.runtime_session_settings import runtime_session_actor
+from duckclaw.write_commands import UpsertRuntimeSettingCommand
 from duckclaw.integrations.telegram import effective_telegram_bot_token_outbound
 from duckclaw.integrations.telegram.telegram_agent_token import (
     canonical_manifest_worker_id,
@@ -31,11 +43,28 @@ _log = logging.getLogger(__name__)
 
 _HEARTBEAT_KEY_PREFIX = "duckclaw:heartbeat:"
 _HEARTBEAT_TTL_SECONDS = 7 * 24 * 3600
+_heartbeat_runtime_db_provider: Callable[[], Any] | None = None
 
 # SQL tools: omit query/result preview in admin SSE heartbeats on "done" phase.
-ADMIN_SQL_TOOL_NAMES: frozenset[str] = frozenset(
-    {"read_sql", "admin_sql", "inspect_schema", "get_schema_info"}
-)
+ADMIN_SQL_TOOL_NAMES = ADMIN_HEARTBEAT_SQL_TOOL_NAMES
+
+
+def configure_heartbeat_runtime_db_provider(provider: Callable[[], Any] | None) -> None:
+    """Inject a DB provider for runtime callers that cannot pass a handle."""
+    global _heartbeat_runtime_db_provider
+    _heartbeat_runtime_db_provider = provider
+
+
+def _heartbeat_runtime_db(db: Any = None) -> Any:
+    if db is not None:
+        return db
+    provider = _heartbeat_runtime_db_provider
+    if provider is None:
+        return None
+    try:
+        return provider()
+    except Exception:
+        return None
 
 
 def normalize_telegram_chat_id_for_outbound(chat_id: str | None) -> str:
@@ -112,7 +141,7 @@ def heartbeat_redis_key(tenant_id: str, chat_id: str) -> str:
 def heartbeat_chat_alias_key(chat_id: str) -> str:
     """
     Clave solo por chat_id (sin tenant). Evita que el flag quede inactivo si el fly command
-    guardó con tenant efectivo del gateway (p. ej. SIATA) y un nodo del grafo lee otro tenant.
+    guardó con un tenant efectivo del gateway y un nodo del grafo lee otro tenant.
     """
     cid = str(chat_id or "").strip() or "unknown"
     return f"{_HEARTBEAT_KEY_PREFIX}chat:{cid}"
@@ -143,6 +172,105 @@ def _heartbeat_read_keys(tenant_id: str, chat_id: str) -> list[str]:
     return out
 
 
+def _release_ro_handle_for_writer(db: Any) -> tuple[bool, Any]:
+    release = getattr(db, "release_file_handle_for_external_writer", None)
+    suspend = getattr(db, "suspend_readonly_file_handle", None)
+    resume = getattr(db, "resume_readonly_file_handle", None)
+    if callable(release):
+        release()
+        return bool(callable(resume)), resume
+    if callable(suspend) and callable(resume):
+        suspend()
+        return True, resume
+    return False, resume
+
+
+def _legacy_redis_heartbeat_enabled(tenant_id: str, chat_id: str) -> bool:
+    url = _redis_url()
+    if not url:
+        return False
+    try:
+        import redis as redis_sync  # noqa: PLC0415
+
+        client = redis_sync.Redis.from_url(url, decode_responses=True)
+        for key in _all_redis_keys_for_heartbeat_lookup(tenant_id, chat_id):
+            v = (client.get(key) or "").strip().lower()
+            if v == "on":
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _set_legacy_redis_heartbeat_enabled(tenant_id: str, chat_id: str, on: bool) -> tuple[bool, str]:
+    url = _redis_url()
+    if not url:
+        return False, "REDIS_URL (o DUCKCLAW_REDIS_URL) no está configurado."
+    try:
+        import redis as redis_sync  # noqa: PLC0415
+
+        client = redis_sync.Redis.from_url(url, decode_responses=True)
+        val = "on" if on else "off"
+        seen_keys: set[str] = set()
+        for cid in heartbeat_chat_id_variants(chat_id):
+            for key in _heartbeat_storage_keys(tenant_id, cid):
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    client.setex(key, _HEARTBEAT_TTL_SECONDS, val)
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)[:500]
+
+
+def _set_heartbeat_runtime_state_via_writer(
+    db: Any,
+    *,
+    tenant_id: str,
+    chat_id: str,
+    on: bool,
+) -> tuple[bool, str]:
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        return False, "Ruta de bóveda no resuelta"
+    try:
+        target_db_path = str(Path(raw_path).expanduser().resolve())
+    except OSError:
+        target_db_path = raw_path
+    try:
+        from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+    except Exception as exc:
+        return False, f"cola DuckDB no disponible: {exc}"
+
+    released_ro, resume = _release_ro_handle_for_writer(db)
+    try:
+        for cid in heartbeat_chat_id_variants(chat_id):
+            command = UpsertRuntimeSettingCommand(
+                tenant_id=str(tenant_id or "default").strip() or "default",
+                actor_email=runtime_session_actor(cid),
+                domain=HEARTBEAT_RUNTIME_DOMAIN,
+                key=HEARTBEAT_RUNTIME_KEY,
+                value="on" if on else "off",
+                value_kind="boolean",
+            )
+            task_id = enqueue_typed_command(
+                command,
+                db_path=target_db_path,
+                user_id=str(chat_id or "default").strip() or "default",
+            )
+            status = poll_task_status_sync(task_id, timeout_sec=30.0)
+            if status is None:
+                return False, "timeout esperando db-writer"
+            if status.status != "success":
+                return False, (status.detail or "db-writer failed")[:500]
+        return True, ""
+    finally:
+        if released_ro and callable(resume):
+            try:
+                resume()
+            except Exception:
+                pass
+
+
 def admin_heartbeat_channel(chat_id: str) -> str:
     """Canal Redis pub/sub para heartbeats en consola admin (SSE)."""
     cid = str(chat_id or "").strip() or "unknown"
@@ -151,7 +279,7 @@ def admin_heartbeat_channel(chat_id: str) -> str:
 
 def parse_instance_label(label: str | None) -> tuple[str, int]:
     """
-    Parsea etiqueta de instancia swarm (p. ej. ``finanz 1``, ``BI-Analyst 2``).
+    Parsea etiqueta de instancia swarm (p. ej. ``worker-alpha 2``).
     Devuelve (worker_id, swarm_slot); slot mínimo 1.
     """
     raw = (label or "").strip()
@@ -314,39 +442,45 @@ def is_admin_ui_chat_session(chat_id: str | None) -> bool:
     return "admin-conv-" in cid
 
 
-def is_chat_heartbeat_enabled(tenant_id: str, chat_id: str) -> bool:
-    url = _redis_url()
-    if not url:
-        return False
+def is_chat_heartbeat_enabled(tenant_id: str, chat_id: str, *, db: Any = None) -> bool:
+    runtime_db = _heartbeat_runtime_db(db)
+    for cid in heartbeat_chat_id_variants(chat_id):
+        resolved = resolve_heartbeat_runtime_state(
+            runtime_db,
+            tenant_id=str(tenant_id or "default").strip() or "default",
+            chat_id=cid,
+        )
+        if resolved is not None:
+            return resolved
+    return _legacy_redis_heartbeat_enabled(tenant_id, chat_id)
+
+
+def set_chat_heartbeat_enabled(
+    tenant_id: str,
+    chat_id: str,
+    on: bool,
+    *,
+    db: Any = None,
+) -> tuple[bool, str]:
+    """Persist on/off in DB-first runtime settings; Redis remains legacy fallback."""
+    if db is None:
+        return _set_legacy_redis_heartbeat_enabled(tenant_id, chat_id, on)
+    if bool(getattr(db, "_read_only", False)):
+        return _set_heartbeat_runtime_state_via_writer(
+            db,
+            tenant_id=tenant_id,
+            chat_id=chat_id,
+            on=on,
+        )
     try:
-        import redis as redis_sync  # noqa: PLC0415
-
-        client = redis_sync.Redis.from_url(url, decode_responses=True)
-        for key in _all_redis_keys_for_heartbeat_lookup(tenant_id, chat_id):
-            v = (client.get(key) or "").strip().lower()
-            if v == "on":
-                return True
-        return False
-    except Exception:
-        return False
-
-
-def set_chat_heartbeat_enabled(tenant_id: str, chat_id: str, on: bool) -> tuple[bool, str]:
-    """Persiste on|off en Redis con TTL 7 días (todas las variantes de chat_id + alias por tenant)."""
-    url = _redis_url()
-    if not url:
-        return False, "REDIS_URL (o DUCKCLAW_REDIS_URL) no está configurado."
-    try:
-        import redis as redis_sync  # noqa: PLC0415
-
-        client = redis_sync.Redis.from_url(url, decode_responses=True)
-        val = "on" if on else "off"
-        seen_keys: set[str] = set()
         for cid in heartbeat_chat_id_variants(chat_id):
-            for key in _heartbeat_storage_keys(tenant_id, cid):
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    client.setex(key, _HEARTBEAT_TTL_SECONDS, val)
+            upsert_heartbeat_runtime_state(
+                db,
+                tenant_id=tenant_id,
+                chat_id=cid,
+                enabled=on,
+                updated_by="heartbeat",
+            )
         return True, ""
     except Exception as exc:
         return False, str(exc)[:500]
@@ -387,7 +521,7 @@ def format_delegation_heartbeat_message(
     Primer DM de heartbeat al delegar: storytelling corto + plan (tasks del manager).
     Texto plano (válido para Telegram sin Markdown).
 
-    ``subagent_header`` (p. ej. ``BI-Analyst 1``) va en la misma línea intro para no
+    ``subagent_header`` (p. ej. ``worker-alpha 1``) va en la misma línea intro para no
     duplicar encabezados sueltos en el chat.
     """
     title = (plan_title or "").strip()
@@ -428,12 +562,7 @@ def format_delegation_heartbeat_message(
 
 
 def heartbeat_message_for_tool(name: str) -> str:
-    n = (name or "").strip()
-    mapping = load_guardrail_kv("heartbeat", "tool_steps")
-    if n in mapping:
-        return mapping[n]
-    default = mapping.get("__default__", "🔄 Paso actual: llamo a la herramienta {tool_name}…")
-    return default.format(tool_name=n)
+    return heartbeat_message_for_tool_name(name)
 
 
 def format_heartbeat_elapsed(elapsed_sec: float | None) -> str:
@@ -479,7 +608,7 @@ def format_tool_heartbeat(
     elapsed_sec: float | None = None,
 ) -> str:
     """
-    Antepone ``BI-Analyst 1`` y opcionalmente el título del plan del manager
+    Antepone ``worker-alpha 1`` y opcionalmente el título del plan del manager
     a los DMs de progreso por herramienta. ``elapsed_sec`` = segundos desde el
     inicio del turno del subagente (``subagent_turn_started_monotonic``).
     """
@@ -640,11 +769,11 @@ def schedule_chat_heartbeat_dm(
     Si el heartbeat está activo para el chat, encola un POST al webhook (hilo daemon).
     No espera red; no lanza al llamante.
 
-    ``log_worker_id`` (p. ej. ``BI-Analyst 1``) y ``log_username`` alimentan ``set_log_context``
+    ``log_worker_id`` (p. ej. ``worker-alpha 1``) y ``log_username`` alimentan ``set_log_context``
     en ese hilo para que las líneas «chat heartbeat» en PM2 identifiquen al subagente.
     ``log_plan_title`` se añade a la línea de log del envío nativo (título del plan del manager).
     ``outbound_bot_token``: token explícito (p. ej. webhook multiplex); los hilos no heredan ContextVar.
-    ``routing_worker_id``: id de plantilla (p. ej. ``Quant-Trader``) para resolver token desde
+    ``routing_worker_id``: id de plantilla (p. ej. ``worker-alpha``) para resolver token desde
     ``TELEGRAM_*_TOKEN`` o ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` cuando no hay ContextVar.
     """
     hb_on = is_chat_heartbeat_enabled(tenant_id, chat_id)

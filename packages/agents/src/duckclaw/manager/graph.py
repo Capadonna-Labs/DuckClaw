@@ -975,12 +975,12 @@ def build_manager_graph(
             override_worker = _ov_orch
             planned = _inject_orch
             planned_final = _inject_orch
-        elif _visual_fast:
-            if _ov_vis and _ov_vis in (available_plan or []):
-                assigned = _ov_vis
-            override_worker = _ov_vis
-            planned = _inject_vis
-            planned_final = _inject_vis
+        elif _capability_fast:
+            if _ov_fast and _ov_fast in (available_plan or []):
+                assigned = _ov_fast
+            override_worker = _ov_fast
+            planned = _inject_fast
+            planned_final = _inject_fast
         else:
             planned, override_worker = _plan_task(
                 incoming,
@@ -992,7 +992,7 @@ def build_manager_graph(
         _max_plan = int(state.get("plan_max_attempts") or _initial_replan_state()["plan_max_attempts"])
         planned_final = _planned_task_with_replan_suffix(planned_final, _pa_plan, _max_plan)
 
-        if coordinator_id and delegation_pool and not _orch_affirm and not _visual_fast:
+        if coordinator_id and delegation_pool and not _orch_affirm and not _capability_fast:
             assigned = _resolve_orchestrator_delegate(
                 incoming,
                 delegation_pool,
@@ -1335,8 +1335,6 @@ def build_manager_graph(
                     ),
                     incoming_hint=_combined,
                     open_vault_read_only=_summarize_vault_ro,
-                    chat_id=str(chat_id or ""),
-                    config_db=_cfg_db,
                 )
             worker_graph = _worker_graph_cache[worker_cache_key]
             set_log_context(

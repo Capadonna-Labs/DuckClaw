@@ -165,6 +165,44 @@ def test_rag_manager_upload_contract_and_navigation() -> None:
     assert 'href={`/knowledge?project=${encodeURIComponent(project.project_id)}`}' in project_detail
 
 
+def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> None:
+    nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
+    sidebar = Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(encoding="utf-8")
+    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    page_path = Path("apps/duckclaw-admin/src/app/(admin)/policies/page.tsx")
+    router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    migrations = Path("packages/shared/src/duckclaw/schema_migrations.py").read_text(encoding="utf-8")
+
+    assert page_path.exists()
+    page = page_path.read_text(encoding="utf-8")
+    assert "{ href: '/policies', label: 'Prompt policies'" in nav
+    assert "'/policies': ClipboardList" in sidebar
+    assert "PromptPolicy" in service
+    assert "listPromptPolicies:" in service
+    assert "upsertPromptPolicy:" in service
+    assert "deactivatePromptPolicy:" in service
+    assert "`/prompt-policies${promptPoliciesQueryString(params)}`" in service
+    assert "'/prompt-policies'" in service
+    assert "method: 'DELETE'" in service
+    assert "?version=${encodeURIComponent(String(version))}" in service
+    assert "@router.get(\"/prompt-policies\"" in router
+    assert "@router.put(\"/prompt-policies\"" in router
+    assert "@router.delete(\"/prompt-policies/{policy_type}/{policy_name}\"" in router
+    assert "DeactivatePromptPolicyCommand" in router
+    assert "MANAGED_DRAFT_POLICY_TYPE = 'manager_task'" in page
+    assert "MANAGED_DRAFT_POLICY_NAME = 'admin_workspace_managed_draft'" in page
+    assert "JSON.parse(content)" in page
+    assert "Guardar nueva versión" in page
+    assert "adminService.upsertPromptPolicy" in page
+    assert "adminService.deactivatePromptPolicy" in page
+    assert "Desactivar versión" in page
+    assert "No se borrará físicamente" in page
+    assert "Esta acción desactiva solo la versión" in page
+    assert "disabled={!canWrite" in page
+    assert "_M020" not in migrations
+    assert "_M021" not in migrations
+
+
 def test_template_editor_explains_db_context_storage() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/templates/[workerId]/page.tsx").read_text(encoding="utf-8")
 

@@ -1,0 +1,102 @@
+"""Turn-level tool surface policy for workers.
+
+These helpers are framework-level gates for tools that should not be exposed to
+the LLM on every turn, even when the worker can execute them.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable
+import re
+from typing import Any
+
+STORAGE_IDENTITY_TOOL_NAMES = frozenset({"get_db_path"})
+PRIVILEGED_MUTATION_TOOL_NAMES = frozenset({"admin_sql"})
+SANDBOX_TOOL_NAMES = frozenset(
+    {
+        "run_sandbox",
+        "run_browser_sandbox",
+        "get_browser_session_url",
+    }
+)
+STORAGE_IDENTITY_REQUEST = re.compile(
+    r"\b("
+    r"get_db_path|"
+    r"(nombre|ruta|path|archivo)\s+(de\s+)?(la\s+)?(db|duckdb|base\s+de\s+datos)|"
+    r"(qu[eé]|cu[aá]l)\s+(db|duckdb|base\s+de\s+datos)\s+(usas|usa|est[aá]s\s+usando|est[aá]\s+usando)|"
+    r"(db|duckdb|base\s+de\s+datos)\s+(en\s+uso|actual|activa)"
+    r")\b",
+    re.IGNORECASE,
+)
+SANDBOX_INTENT_REQUEST = re.compile(
+    r"\b("
+    r"run_sandbox|run_browser_sandbox|sandbox|"
+    r"python|bash|script|c[oó]digo|programa|ejecuta|ejecutar|corre|correr|"
+    r"navegador|browser|playwright|selenium|abre\s+https?://|"
+    r"gr[aá]fica|grafica|gr[aá]fico|grafico|diagrama|plot|matplotlib|seaborn|plotly"
+    r")\b|https?://",
+    re.IGNORECASE,
+)
+
+
+def explicit_storage_identity_request(text: str | None) -> bool:
+    """Return True when the user asks which DuckDB/storage file is active."""
+
+    return bool(STORAGE_IDENTITY_REQUEST.search(text or ""))
+
+
+def should_hide_storage_identity_tools(
+    incoming: str | None,
+    intent_text: str | None,
+    *,
+    explicit_storage_request: Callable[[str], bool],
+) -> bool:
+    """Hide storage identity tools unless the turn explicitly asks for storage identity."""
+
+    text = intent_text or incoming or ""
+    if explicit_storage_identity_request(text):
+        return False
+    if explicit_storage_request(text):
+        return False
+    return True
+
+
+def without_tools_named(tools: Iterable[Any], excluded_names: set[str]) -> list[Any]:
+    """Return tools excluding names in ``excluded_names``."""
+
+    excluded = {name.strip() for name in excluded_names if name and name.strip()}
+    return [
+        tool
+        for tool in tools
+        if str(getattr(tool, "name", "") or "").strip() not in excluded
+    ]
+
+
+def without_storage_identity_tools(tools: Iterable[Any]) -> list[Any]:
+    """Hide tools that reveal the active storage identity/path."""
+
+    return without_tools_named(tools, set(STORAGE_IDENTITY_TOOL_NAMES))
+
+
+def without_privileged_mutation_tools(tools: Iterable[Any]) -> list[Any]:
+    """Hide privileged mutation tools from automatic LLM tool choice."""
+
+    return without_tools_named(tools, set(PRIVILEGED_MUTATION_TOOL_NAMES))
+
+
+def explicit_sandbox_intent(text: str | None) -> bool:
+    """Return True when the user asks for code, browser, plotting, or sandbox execution."""
+
+    return bool(SANDBOX_INTENT_REQUEST.search(text or ""))
+
+
+def should_hide_sandbox_tools(incoming: str | None, intent_text: str | None) -> bool:
+    """Hide sandbox/browser tools unless the turn explicitly asks for execution."""
+
+    return not explicit_sandbox_intent(intent_text or incoming or "")
+
+
+def without_sandbox_tools(tools: Iterable[Any]) -> list[Any]:
+    """Hide sandbox/browser execution tools from automatic LLM tool choice."""
+
+    return without_tools_named(tools, set(SANDBOX_TOOL_NAMES))

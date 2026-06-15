@@ -51,7 +51,17 @@ from duckclaw.workers.discovery import list_workers
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills
 from duckclaw.forge.rag.prompt_policy import rag_turn_system_prompt
-from duckclaw.forge.rag.tool_policy import should_prioritize_rag_over_storage_tools, without_storage_tools
+from duckclaw.forge.rag.tool_policy import (
+    should_prioritize_rag_over_storage_tools,
+    without_storage_tools,
+)
+from duckclaw.workers.tool_surface_policy import (
+    should_hide_sandbox_tools,
+    should_hide_storage_identity_tools,
+    without_privileged_mutation_tools,
+    without_sandbox_tools,
+    without_storage_identity_tools,
+)
 from duckclaw.workers.runtime_policy_helpers import (
     worker_has_runtime_capability as _worker_has_runtime_capability,
     worker_runtime_capability_flag as _worker_runtime_capability_flag,
@@ -2160,19 +2170,28 @@ def build_worker_graph(
             elif force_run_sandbox:
                 _frs = llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
                 _invoked_llm = _frs or llm_with_tools
-            if _reddit_share_mcp_exhausted and _invoked_llm is llm_with_tools:
-                _bind_base_ex = _tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind
-                _nr_ex = [
-                    t
-                    for t in _bind_base_ex
-                    if not str(getattr(t, "name", "") or "").startswith("reddit_")
-                ]
-                _invoked_llm = _bind_tools(llm, _nr_ex)
-            if _rag_turn_without_db_intent and forced_name == "auto":
-                _bind_base_rag = _tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind
-                _rag_tools = without_storage_tools(_bind_base_rag)
-                if len(_rag_tools) < len(_bind_base_rag):
-                    _invoked_llm = _bind_tools(llm, _rag_tools)
+            if forced_name == "auto":
+                _bind_base_identity = _tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind
+                _auto_tools = list(_bind_base_identity)
+                _auto_tools = without_privileged_mutation_tools(_auto_tools)
+                if should_hide_sandbox_tools(incoming, _intent_incoming):
+                    _auto_tools = without_sandbox_tools(_auto_tools)
+                if should_hide_storage_identity_tools(
+                    incoming,
+                    _intent_incoming,
+                    explicit_storage_request=explicit_duckdb_schema_request,
+                ):
+                    _auto_tools = without_storage_identity_tools(_auto_tools)
+                if _reddit_share_mcp_exhausted:
+                    _auto_tools = [
+                        t
+                        for t in _auto_tools
+                        if not str(getattr(t, "name", "") or "").startswith("reddit_")
+                    ]
+                if _rag_turn_without_db_intent:
+                    _auto_tools = without_storage_tools(_auto_tools)
+                if len(_auto_tools) < len(_bind_base_identity):
+                    _invoked_llm = _bind_tools(llm, _auto_tools)
             _llm_invoke_exc: BaseException | None = None
             try:
                 _raise_if_chat_cancelled_from_state(state)

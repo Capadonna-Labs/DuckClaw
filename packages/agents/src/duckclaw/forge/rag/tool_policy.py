@@ -1,7 +1,7 @@
 """RAG-aware tool policy.
 
 This module is intentionally small and pure: it decides whether a turn grounded
-with RAG context should hide storage-oriented tools such as ``get_db_path``.
+with RAG context should hide storage-oriented tools.
 """
 
 from __future__ import annotations

@@ -204,7 +204,7 @@ def test_orchestrator_draft_uses_configured_model_when_available(
                   "system_prompt": "Guía al usuario con ejercicios FastAPI y revisión paso a paso."
                 }
               ],
-              "shared_context": "# Análisis del proyecto\\n\\n## Lectura del objetivo\\nAprender FastAPI.",
+              "shared_context": "Análisis del proyecto\\n\\nLectura del objetivo\\nAprender FastAPI.",
               "suggested_skills": [
                 {"name": "fastapi_testing", "reason": "Pruebas de endpoints", "available": false}
               ],
@@ -257,8 +257,8 @@ def test_orchestrator_draft_uses_db_first_prompt_policy_for_prompt_and_naming(
             "worker_display_name_template": "Policy Worker {project_name}",
             "worker_role": "member",
             "system_prompt_template": "Policy system prompt for {project_name}: {goal}",
-            "shared_context_template": "# Policy Context\n\nGoal: {prompt}",
-            "model_error_note_template": "> Policy model fallback note.",
+            "shared_context_template": "Policy Context\n\nGoal: {prompt}",
+            "model_error_note_template": "Policy model fallback note.",
             "questions": ["Policy question?"],
         },
         "confirm": {
@@ -310,7 +310,7 @@ def test_orchestrator_draft_uses_db_first_prompt_policy_for_prompt_and_naming(
     assert body["workers"][0]["worker_id"].startswith("policy-")
     assert body["workers"][0]["display_name"].startswith("Policy Worker")
     assert body["workers"][0]["system_prompt"].startswith("Policy system prompt")
-    assert body["shared_context"].startswith("# Policy Context")
+    assert body["shared_context"].startswith("Policy Context")
     assert body["questions"] == ["Policy question?"]
 
 

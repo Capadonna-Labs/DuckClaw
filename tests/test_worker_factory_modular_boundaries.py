@@ -393,6 +393,23 @@ def test_factory_delegates_tool_invocation_policy() -> None:
     assert "decide_market_data_tool_invocation" not in names
 
 
+def test_tool_invocation_policy_has_no_vertical_runtime_imports() -> None:
+    source = Path("packages/agents/src/duckclaw/workers/tool_invocation_policy.py").read_text(
+        encoding="utf-8"
+    )
+    forbidden = {
+        "duckclaw.finance.runtime_policy",
+        "finanz",
+        "finance_ledger",
+        "quant_trading",
+        "ibkr",
+        "ib_gateway",
+        "fetch_ib_gateway_ohlcv",
+    }
+    leaked = sorted(marker for marker in forbidden if marker in source.lower())
+    assert leaked == []
+
+
 def test_factory_delegates_configured_skill_tool_registration() -> None:
     registry = importlib.import_module("duckclaw.workers.skill_tool_registry")
     from duckclaw.workers import factory

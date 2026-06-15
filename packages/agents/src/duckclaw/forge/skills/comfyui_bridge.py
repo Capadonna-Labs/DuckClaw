@@ -709,6 +709,20 @@ def _state_delta_base() -> dict[str, str]:
     }
 
 
+def configure_visual_generation_context(*, tenant_id: str, user_id: str) -> None:
+    """Best-effort context bridge for visual generation state deltas."""
+    try:
+        from duckclaw.capadonna_plugin import load_capadonna_lib
+
+        context = load_capadonna_lib("quant_tool_context")
+        if context is None:
+            return
+        context.set_quant_tool_tenant_id((tenant_id or "default").strip() or "default")
+        context.set_quant_tool_user_id((user_id or "default").strip() or "default")
+    except Exception:
+        return
+
+
 def _error_json(message: str) -> str:
     return json.dumps({"ok": False, "error": message}, ensure_ascii=False)
 

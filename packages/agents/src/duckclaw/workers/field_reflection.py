@@ -7,7 +7,7 @@ import json
 import re
 from typing import Any, Optional
 
-def finanz_field_reflection_enabled(spec: Any) -> bool:
+def field_reflection_enabled(spec: Any) -> bool:
     """True cuando la capability DB ``field_reflection`` está activa para el worker."""
     runtime_policy = getattr(spec, "runtime_policy", None)
     has_db_capability = bool(

@@ -2,7 +2,7 @@
 Entry point for a hired worker process (PM2).
 
 Usage:
-  python -m duckclaw.workers.run_worker finanz --instance FinanzBot
+  python -m duckclaw.workers.run_worker default --instance WorkerBot
   (env: DUCKCLAW_WORKER_ID, DUCKCLAW_WORKER_INSTANCE, DUCKDB_PATH / multiplex, etc.)
 
 Starts a minimal HTTP server that invokes the worker graph on POST /invoke.
@@ -38,7 +38,7 @@ _load_env()
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("worker_id", nargs="?", default="", help="Worker template id (e.g. finanz)")
+    parser.add_argument("worker_id", nargs="?", default="", help="Worker template id (e.g. default)")
     parser.add_argument("--instance", default="", help="Instance name (PM2 app name)")
     parser.add_argument("--port", type=int, default=0, help="Port (default from WORKER_PORT or 8124)")
     args = parser.parse_args()

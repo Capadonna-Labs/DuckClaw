@@ -2111,7 +2111,7 @@ def admin_list_code_decisions(
     limit: int = Query(default=20, ge=1, le=100),
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    """Lista decisiones de código del vault Quant Trader."""
+    """Lista decisiones de código pendientes en el vault."""
     try:
         con, resolved, _scope = _duckdb_readonly_session(vault_path, actor=actor)
     except FileNotFoundError as exc:
@@ -2120,10 +2120,19 @@ def admin_list_code_decisions(
         raise _problem(403, "Vault no autorizado", str(exc)) from exc
     try:
         st = (status or "").strip() or "PENDING_HITL"
+        table_exists = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = 'main' AND table_name = 'code_decisions'
+            """
+        ).fetchone()[0]
+        if not table_exists:
+            return {"vault_path": resolved, "items": [], "status_filter": st}
         rows = con.execute(
             """
             SELECT id, repo, file_path, branch_name, decision_type, title, status, created_at, pr_url
-            FROM quant_core.code_decisions
+            FROM main.code_decisions
             WHERE status = ?
             ORDER BY created_at DESC
             LIMIT ?
@@ -2142,7 +2151,7 @@ def admin_list_uncertainty_events(
     limit: int = Query(default=20, ge=1, le=100),
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    """Lista eventos de incertidumbre epistémica del vault Quant."""
+    """Lista eventos de incertidumbre epistémica del vault."""
     try:
         con, resolved, _scope = _duckdb_readonly_session(vault_path, actor=actor)
     except FileNotFoundError as exc:
@@ -2151,11 +2160,20 @@ def admin_list_uncertainty_events(
         raise _problem(403, "Vault no autorizado", str(exc)) from exc
     try:
         st = (status or "").strip() or "PENDING_HITL"
+        table_exists = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = 'main' AND table_name = 'agent_uncertainty_log'
+            """
+        ).fetchone()[0]
+        if not table_exists:
+            return {"vault_path": resolved, "items": [], "status_filter": st}
         rows = con.execute(
             """
             SELECT id, session_uid, worker_id, trigger_context, confidence_score,
                    description, proposed_questions, status, created_at
-            FROM quant_core.agent_uncertainty_log
+            FROM main.agent_uncertainty_log
             WHERE status = ?
             ORDER BY created_at DESC
             LIMIT ?

@@ -70,6 +70,7 @@ from duckclaw.workers.provider_input_budget import (
     apply_groq_message_budget as _apply_groq_message_budget,
     apply_mlx_message_budget as _apply_mlx_message_budget,
     apply_provider_input_budget as _apply_provider_input_budget,
+    configure_provider_budget_runtime_db_provider as _configure_provider_budget_runtime_db_provider,
     estimate_tokens_from_messages as _estimate_tokens_from_messages,
     groq_max_estimated_input_tokens as _groq_max_estimated_input_tokens,
     groq_tool_message_max_chars as _groq_tool_message_max_chars,
@@ -1085,6 +1086,10 @@ def build_worker_graph(
     prompt_policies = PromptPolicyResolver(db=db)
 
     system_prompt = load_system_prompt(spec)
+    try:
+        _configure_provider_budget_runtime_db_provider(lambda: db)
+    except Exception:
+        pass
     tools = _build_worker_tools(db, spec)
     _hint_low = (incoming_hint or "").strip().lower()
     _register_trends = tool_surface == "full"

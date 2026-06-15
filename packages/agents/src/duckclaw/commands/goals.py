@@ -37,9 +37,39 @@ def _get_goals_registry_fallback_first() -> Optional[Any]:
     return None
 
 
-def _get_goals_registry_for_chat(db: Any, chat_id: Any) -> Optional[Any]:
-    """Return no implicit registry until a typed DB-first owner exists."""
-    return _get_goals_registry_fallback_first()
+def _get_goals_registry_for_chat(
+    db: Any,
+    chat_id: Any,
+    *,
+    tenant_id: str = "default",
+    worker_id: str = "",
+) -> Optional[Any]:
+    """Return DB-first quality signals as a homeostasis belief registry."""
+    from duckclaw.homeostasis.belief_registry import Belief, BeliefRegistry
+    from duckclaw.worker_quality_signals import list_worker_quality_signals
+
+    wid = (worker_id or get_chat_state(db, chat_id, "worker_id") or "").strip()
+    if not wid:
+        return _get_goals_registry_fallback_first()
+    signals = list_worker_quality_signals(
+        db,
+        tenant_id=str(tenant_id or "default").strip() or "default",
+        worker_id=wid,
+    )
+    if not signals:
+        return _get_goals_registry_fallback_first()
+    return BeliefRegistry(
+        beliefs=[
+            Belief(
+                key=signal.key,
+                target=float(signal.target),
+                threshold=float(signal.threshold),
+                comparison=signal.comparison,
+            )
+            for signal in signals
+        ],
+        actions={},
+    )
 
 
 def get_manager_goals(db: Any, chat_id: Any) -> list:
@@ -172,7 +202,7 @@ def _format_homeostasis_manifest_listing(
     lines = ["Manifiesto homeostasis", ""]
     reg = registry if registry is not None else _get_goals_registry_for_chat(db, chat_id)
     key_to_belief = {b.key.strip(): b for b in (reg.beliefs if reg else [])}
-    lines.append("Metas de dominio:")
+    lines.append("Metas / señales de calidad:")
     if not manifest.goals:
         lines.append("- (ninguna). Añade con /goals <objetivo>")
     else:
@@ -217,7 +247,7 @@ def execute_homeostasis_goals(
     from harness_core.targets import load_homeostasis_manifest, set_infra_field
 
     tid = str(tenant_id or "default").strip() or "default"
-    registry = _get_goals_registry_for_chat(db, chat_id)
+    registry = _get_goals_registry_for_chat(db, chat_id, tenant_id=tid)
     raw = (args or "").strip()
     toks = raw.split()
     manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id)

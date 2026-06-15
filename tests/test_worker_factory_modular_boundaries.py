@@ -107,6 +107,10 @@ def test_provider_input_budget_owns_helpers_with_factory_facade() -> None:
     assert factory._normalized_context_pruning is budget.normalized_context_pruning
     assert factory._estimate_tokens_from_messages is budget.estimate_tokens_from_messages
     assert factory._apply_provider_input_budget is budget.apply_provider_input_budget
+    assert (
+        factory._configure_provider_budget_runtime_db_provider
+        is budget.configure_provider_budget_runtime_db_provider
+    )
     assert factory._split_for_pruning is budget.split_for_pruning
     assert factory._trim_messages_to_estimated_cap is budget.trim_messages_to_estimated_cap
     assert factory._apply_provider_input_budget.__module__ == "duckclaw.workers.provider_input_budget"

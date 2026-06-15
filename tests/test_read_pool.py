@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from duckclaw.workers.identity import WorkerCapability, WorkerRuntimePolicy
 from duckclaw.workers.manifest import WorkerSpec
 from duckclaw.workers.read_pool import (
     build_attach_statements,
@@ -28,6 +29,26 @@ def _minimal_spec() -> WorkerSpec:
         read_only=True,
         worker_dir=Path("."),
     )
+
+
+def _spec_with_runtime_capability(capability_name: str) -> WorkerSpec:
+    spec = _minimal_spec()
+    capability = WorkerCapability(
+        capability_id=f"cap_{capability_name}",
+        name=capability_name,
+        kind="runtime_policy",
+        provider="duckclaw",
+        permission="use",
+        config={},
+        policy={},
+        quota={},
+    )
+    spec.runtime_policy = WorkerRuntimePolicy(
+        worker_id=spec.worker_id,
+        identity=None,
+        capabilities=(capability,),
+    )
+    return spec
 
 
 def test_should_parallelize_rules() -> None:
@@ -62,6 +83,28 @@ def test_validate_read_sql_empty() -> None:
 def test_validate_read_sql_blocks_write() -> None:
     err = validate_worker_read_sql(_minimal_spec(), "DELETE FROM x")
     assert err is not None
+
+
+def test_read_pool_has_no_bi_analyst_worker_special_case() -> None:
+    source = Path("packages/agents/src/duckclaw/workers/read_pool.py").read_text(encoding="utf-8")
+
+    assert "bi_analyst" not in source
+
+
+def test_validate_read_sql_blocks_unbounded_select_star_via_runtime_capability() -> None:
+    err = validate_worker_read_sql(
+        _spec_with_runtime_capability("bounded_select_star_read"),
+        "SELECT * FROM events",
+    )
+
+    assert err is not None
+    assert "select *" in err.lower()
+
+
+def test_validate_read_sql_allows_unbounded_select_star_without_runtime_capability() -> None:
+    err = validate_worker_read_sql(_minimal_spec(), "SELECT * FROM events")
+
+    assert err is None
 
 
 @pytest.mark.skipif(

@@ -33,6 +33,24 @@ def test_goals_command_ownership_lives_outside_graphs() -> None:
     assert "from duckclaw.graphs" not in source
 
 
+def test_goals_registry_does_not_fallback_to_filesystem_manifests() -> None:
+    goals = importlib.import_module(CANONICAL_MODULE)
+    source = inspect.getsource(goals)
+
+    forbidden = {
+        "duckclaw.workers.manifest",
+        "duckclaw.workers.factory",
+        "load_manifest",
+        "list_workers",
+        "templates/workers",
+        "homeostasis_config",
+        "forge_context",
+    }
+    leaked = sorted(marker for marker in forbidden if marker in source)
+
+    assert leaked == []
+
+
 def test_on_the_fly_goals_imports_remain_compatible() -> None:
     goals = importlib.import_module(CANONICAL_MODULE)
 

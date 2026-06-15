@@ -47,15 +47,44 @@ from duckclaw.egress.tool_response_repair import (
 )
 from duckclaw.workers import read_pool
 from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
+from duckclaw.workers.discovery import list_workers
 from duckclaw.workers.manifest import WorkerSpec, load_manifest
 from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt, load_skills
 from duckclaw.forge.rag.prompt_policy import rag_turn_system_prompt
 from duckclaw.forge.rag.tool_policy import should_prioritize_rag_over_storage_tools, without_storage_tools
 from duckclaw.workers.runtime_policy_helpers import (
     worker_has_runtime_capability as _worker_has_runtime_capability,
+    worker_runtime_capability_flag as _worker_runtime_capability_flag,
     worker_runtime_capability_policy as _worker_runtime_capability_policy,
     worker_runtime_policy as _worker_runtime_policy,
     worker_use_heuristic_first_tool as _worker_use_heuristic_first_tool,
+)
+from duckclaw.workers.visual_evidence_policy import (
+    visual_evidence_max_retries as _visual_evidence_max_retries,
+)
+from duckclaw.workers.tool_output_truncation import (
+    compact_run_sandbox_tool_content_for_llm as _compact_run_sandbox_tool_content_for_llm,
+    truncate_tool_messages_for_llm as _truncate_tool_messages,
+)
+from duckclaw.workers.provider_input_budget import (
+    apply_groq_message_budget as _apply_groq_message_budget,
+    apply_mlx_message_budget as _apply_mlx_message_budget,
+    apply_provider_input_budget as _apply_provider_input_budget,
+    estimate_tokens_from_messages as _estimate_tokens_from_messages,
+    groq_max_estimated_input_tokens as _groq_max_estimated_input_tokens,
+    groq_tool_message_max_chars as _groq_tool_message_max_chars,
+    mlx_max_estimated_input_tokens as _mlx_max_estimated_input_tokens,
+    mlx_tool_message_max_chars as _mlx_tool_message_max_chars,
+    normalized_context_pruning as _normalized_context_pruning,
+    split_for_pruning as _split_for_pruning,
+    trim_messages_to_estimated_cap as _trim_messages_to_estimated_cap,
+)
+from duckclaw.workers.context_monitor import (
+    build_context_monitor_node as _build_context_monitor_node,
+    build_summary_llm as _build_summary_llm,
+    compose_context_summary_prompt as _compose_context_summary_prompt,
+    llm_fold_conversation_summary as _llm_fold_conversation_summary,
+    serialize_messages_for_summary as _serialize_messages_for_summary,
 )
 from duckclaw.workers.tool_invocation_policy import (
     decide_current_time_tool_invocation as _decide_current_time_tool_invocation,
@@ -164,16 +193,6 @@ def _worker_log_label(worker_id: str) -> str:
 def _duckclaw_env_truthy(name: str) -> bool:
     v = (os.environ.get(name) or "").strip().lower()
     return v in ("1", "true", "yes", "on")
-
-
-def _visual_evidence_max_retries() -> int:
-    """Reintentos en grafo tras Regla de Evidencia Única (default 1)."""
-    raw = (os.environ.get("DUCKCLAW_VISUAL_EVIDENCE_MAX_RETRIES") or "1").strip()
-    try:
-        n = int(raw)
-    except ValueError:
-        n = 1
-    return max(0, n)
 
 
 
@@ -346,164 +365,6 @@ def _identity_fields(state: dict) -> dict:
         "username": (state.get("username") or "").strip(),
         "vault_db_path": state.get("vault_db_path") or "",
     }
-
-
-def _normalized_context_pruning(spec: WorkerSpec) -> dict:
-    raw = getattr(spec, "context_pruning_config", None)
-    if not isinstance(raw, dict) or not raw.get("enabled"):
-        return {}
-    return {
-        "enabled": True,
-        "max_messages": max(2, int(raw.get("max_messages", 10))),
-        "max_estimated_tokens": max(500, int(raw.get("max_estimated_tokens", 4000))),
-        "keep_last_messages": max(1, int(raw.get("keep_last_messages", 3))),
-        "tool_content_max_chars": max(500, int(raw.get("tool_content_max_chars", 8000))),
-        "sandbox_heartbeat": bool(raw.get("sandbox_heartbeat", True)),
-    }
-
-
-def _compose_bi_system_prompt(base: str, analytical_summary: str) -> str:
-    b = (base or "").strip()
-    s = (analytical_summary or "").strip()
-    if not s:
-        return b
-    return b + "\n\n## Resumen analítico del hilo\n" + s
-
-
-def _estimate_tokens_from_messages(messages: list) -> int:
-    total = 0
-    for m in messages or []:
-        c = getattr(m, "content", None) or ""
-        if isinstance(c, str):
-            total += len(c)
-        elif isinstance(c, list):
-            for part in c:
-                if isinstance(part, dict) and part.get("type") == "text":
-                    total += len(str(part.get("text", "")))
-    return max(0, total // 4)
-
-
-def _groq_max_estimated_input_tokens() -> int:
-    """
-    Tope estimado (chars/4) para el contenido serializado de mensajes hacia Groq.
-    El límite efectivo del tier free/on_demand (~12k TPM por petición) incluye esquemas de tools;
-    este tope debe quedar por debajo para no disparar 413.
-    """
-    raw = (os.environ.get("DUCKCLAW_GROQ_MAX_INPUT_TOKENS") or "").strip()
-    if raw:
-        try:
-            return max(1500, min(int(raw), 11500))
-        except ValueError:
-            pass
-    return 5000
-
-
-def _groq_tool_message_max_chars() -> int:
-    raw = (os.environ.get("DUCKCLAW_GROQ_TOOL_MESSAGE_MAX_CHARS") or "").strip()
-    if raw:
-        try:
-            return max(400, min(int(raw), 100_000))
-        except ValueError:
-            pass
-    return 3500
-
-
-def _trim_messages_to_estimated_cap(
-    messages: list[Any],
-    *,
-    cap: int,
-    tool_cap: int,
-    note_brand: str,
-) -> list[Any]:
-    """Recorta historial + tool output para no exceder ``cap`` tokens estimados (chars/4)."""
-    from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
-
-    msgs = _truncate_tool_messages(list(messages), tool_cap)
-
-    while len(msgs) > 2 and _estimate_tokens_from_messages(msgs) > cap:
-        if isinstance(msgs[0], SystemMessage):
-            if len(msgs) < 3:
-                break
-            victim = msgs.pop(1)
-            if isinstance(victim, AIMessage) and getattr(victim, "tool_calls", None):
-                while len(msgs) > 1 and isinstance(msgs[1], ToolMessage):
-                    msgs.pop(1)
-        else:
-            msgs.pop(0)
-
-    if msgs and isinstance(msgs[0], SystemMessage) and _estimate_tokens_from_messages(msgs) > cap:
-        sys0 = msgs[0]
-        c_raw = getattr(sys0, "content", "") or ""
-        c = c_raw if isinstance(c_raw, str) else str(c_raw)
-        if c:
-            over_tok = _estimate_tokens_from_messages(msgs) - cap
-            cut = min(len(c), over_tok * 4 + 400)
-            tail = c[:-cut] if cut < len(c) else c[: max(3000, len(c) // 2)]
-            note = (
-                f"\n\n[{note_brand}: system prompt truncado por límite de contexto; "
-                "prioriza reglas críticas y herramientas.]"
-            )
-            msgs = [SystemMessage(content=tail + note)] + list(msgs[1:])
-
-    return msgs
-
-
-def _apply_groq_message_budget(messages: list[Any], *, provider: str) -> list[Any]:
-    """Recorta mensajes LangChain antes de invoke cuando el proveedor es Groq (evita 413 TPM)."""
-    if (provider or "").strip().lower() != "groq" or not messages:
-        return messages
-    return _trim_messages_to_estimated_cap(
-        messages,
-        cap=_groq_max_estimated_input_tokens(),
-        tool_cap=_groq_tool_message_max_chars(),
-        note_brand="GROQ",
-    )
-
-
-def _mlx_max_estimated_input_tokens() -> int:
-    """
-    Tope estimado para MLX local (Metal VRAM). Prompts muy largos pueden tumbar mlx_lm con OOM;
-    ver logs [METAL] Insufficient Memory.
-    """
-    raw = (os.environ.get("DUCKCLAW_MLX_MAX_INPUT_TOKENS") or "").strip()
-    if raw:
-        try:
-            return max(2000, min(int(raw), 12000))
-        except ValueError:
-            pass
-    return 7000
-
-
-def _mlx_tool_message_max_chars() -> int:
-    raw = (os.environ.get("DUCKCLAW_MLX_TOOL_MESSAGE_MAX_CHARS") or "").strip()
-    if raw:
-        try:
-            return max(400, min(int(raw), 80_000))
-        except ValueError:
-            pass
-    return 5000
-
-
-def _apply_mlx_message_budget(messages: list[Any], *, provider: str) -> list[Any]:
-    if (provider or "").strip().lower() not in ("mlx", "iotcorelabs") or not messages:
-        return messages
-    return _trim_messages_to_estimated_cap(
-        messages,
-        cap=_mlx_max_estimated_input_tokens(),
-        tool_cap=_mlx_tool_message_max_chars(),
-        note_brand="MLX",
-    )
-
-
-def _apply_provider_input_budget(messages: list[Any], *, provider: str) -> list[Any]:
-    """Recorte de contexto por proveedor (Groq TPM / MLX VRAM)."""
-    pl = (provider or "").strip().lower()
-    m = messages
-    if pl == "groq":
-        m = _apply_groq_message_budget(m, provider=provider)
-    elif pl in ("mlx", "iotcorelabs"):
-        m = _apply_mlx_message_budget(m, provider=provider)
-    return m
 
 
 def _groq_tools_without_reddit_for_bind(tools: list[Any]) -> list[Any]:
@@ -887,145 +748,6 @@ def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -
     if pl in ("mlx", "iotcorelabs"):
         return mlx_hint
     return load_guardrail("errors", "llm_failure_generic").format(detail=detail)
-
-
-def _compact_run_sandbox_tool_content_for_llm(content: str, max_chars: int) -> str:
-    """
-    El JSON de run_sandbox incluye figure_base64 (cientos de KB). Para el LLM se omite ese campo
-    y se acorta el resto; el PNG real vive en state['sandbox_photo_base64'] (tools_node).
-    """
-    c = content or ""
-    s = c.strip()
-    if not s.startswith("{"):
-        return c if len(c) <= max_chars else c[:max_chars] + "\n…[truncado por tamaño]"
-    try:
-        data = json.loads(s)
-    except json.JSONDecodeError:
-        return c if len(c) <= max_chars else c[:max_chars] + "\n…[truncado por tamaño]"
-    if not isinstance(data, dict):
-        return c[:max_chars] + "\n…[truncado por tamaño]"
-    if data.get("figure_base64"):
-        # Quitar del JSON para el LLM; el PNG real sigue en state['sandbox_photo_base64'] (tools_node).
-        data.pop("figure_base64", None)
-    for key in ("output", "stdout", "stderr"):
-        if key in data and isinstance(data[key], str) and len(data[key]) > 4000:
-            data[key] = data[key][:4000] + "…[truncado]"
-    compact = json.dumps(data, ensure_ascii=False)
-    if len(compact) <= max_chars:
-        return compact
-    return compact[:max_chars] + "\n…[truncado por tamaño]"
-
-
-def _truncate_tool_messages(messages: list, max_chars: int) -> list:
-    from langchain_core.messages import ToolMessage
-    from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
-
-    out = []
-    for m in messages or []:
-        if isinstance(m, ToolMessage) and max_chars > 0:
-            c = m.content
-            if not isinstance(c, str):
-                out.append(m)
-                continue
-            name = getattr(m, "name", "") or ""
-            orig_c = c
-            if name.startswith("reddit_"):
-                c = format_reddit_mcp_reply_if_applicable(c)
-            if name in ("run_sandbox", "run_browser_sandbox"):
-                compacted = _compact_run_sandbox_tool_content_for_llm(c, max_chars)
-                out.append(
-                    ToolMessage(
-                        content=compacted,
-                        tool_call_id=m.tool_call_id,
-                        name=name,
-                    )
-                )
-            elif len(c) > max_chars:
-                out.append(
-                    ToolMessage(
-                        content=c[:max_chars] + "\n…[truncado por tamaño]",
-                        tool_call_id=m.tool_call_id,
-                        name=name,
-                    )
-                )
-            elif c != orig_c:
-                out.append(
-                    ToolMessage(
-                        content=c,
-                        tool_call_id=m.tool_call_id,
-                        name=name,
-                    )
-                )
-            else:
-                out.append(m)
-        else:
-            out.append(m)
-    return out
-
-
-def _serialize_messages_for_summary(messages: list) -> str:
-    lines: list[str] = []
-    for m in messages or []:
-        c = getattr(m, "content", None) or ""
-        if not isinstance(c, str):
-            c = str(c)
-        c = c[:6000]
-        name = type(m).__name__
-        if name == "HumanMessage":
-            lines.append("user: " + c)
-        elif name == "AIMessage":
-            lines.append("assistant: " + c)
-        elif name == "ToolMessage":
-            tn = getattr(m, "name", "") or "tool"
-            lines.append(f"tool_{tn}: " + c[:4000])
-    return "\n".join(lines)
-
-
-def _split_for_pruning(non_system: list, keep_last: int) -> tuple[list, list]:
-    """Divide non-system messages en cabeza (a resumir) y cola estable (preserva ToolMessage tras AI)."""
-    from langchain_core.messages import AIMessage, ToolMessage
-
-    if keep_last < 1:
-        keep_last = 1
-    if len(non_system) <= keep_last:
-        return [], non_system[:]
-    s = len(non_system) - keep_last
-    while s > 0 and isinstance(non_system[s], ToolMessage):
-        s -= 1
-    tail = non_system[s:]
-    if tail and isinstance(tail[-1], AIMessage):
-        last_ai = tail[-1]
-        if getattr(last_ai, "tool_calls", None):
-            e = len(non_system)
-            t_end = s + len(tail)
-            while t_end < e and isinstance(non_system[t_end], ToolMessage):
-                t_end += 1
-            tail = non_system[s:t_end]
-    head = non_system[:s]
-    return head, tail
-
-
-def _llm_fold_conversation_summary(llm: Any, head_msgs: list, prior: str) -> str:
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    blob = _serialize_messages_for_summary(head_msgs)
-    sys = (
-        "Eres un asistente de compresión de contexto para un analista BI. "
-        "Produce un resumen analítico breve en español: consultas y decisiones, hallazgos numéricos, errores. "
-        "Sin saludos. Máximo ~800 palabras."
-    )
-    human = (
-        "Resumen previo del hilo (puede estar vacío):\n"
-        + (prior or "")
-        + "\n\n---\nTranscript a compactar:\n"
-        + blob
-    )
-    try:
-        r = llm.invoke([SystemMessage(content=sys), HumanMessage(content=human)])
-        return (str(getattr(r, "content", None) or "") or "").strip()[:12000]
-    except Exception as exc:
-        _log.warning("context pruning summary LLM failed: %s", exc)
-        return ((prior or "").strip() + "\n[Error al generar resumen; contexto truncado.]").strip()
 
 
 def _sandbox_heartbeat_allowed(spec: WorkerSpec) -> bool:
@@ -1649,22 +1371,10 @@ def build_worker_graph(
         except Exception as _fb_exc:
             _log.debug("LLM fallback skipped: %s", _fb_exc)
 
-    _logical_id_early = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
     _cp_early = _normalized_context_pruning(spec)
     llm_summary: Any = None
-    if llm is not None and _cp_early.get("enabled") and _logical_id_early == "bi_analyst":
-        from duckclaw.integrations.llm_providers import build_llm as _build_llm_sum
-
-        sp = (os.getenv("DUCKCLAW_SUMMARY_LLM_PROVIDER") or "").strip() or provider
-        sm = (os.getenv("DUCKCLAW_SUMMARY_LLM_MODEL") or "").strip() or model
-        su = (os.getenv("DUCKCLAW_SUMMARY_LLM_BASE_URL") or "").strip() or base_url
-        try:
-            if (sp or "").lower() != "none_llm":
-                llm_summary = _build_llm_sum(sp, sm, su)
-        except Exception as exc:
-            _log.warning("summary LLM build failed, using primary: %s", exc)
-        if llm_summary is None:
-            llm_summary = llm
+    if llm is not None and _cp_early.get("enabled"):
+        llm_summary = _build_summary_llm(llm, provider=provider, model=model, base_url=base_url)
 
     if getattr(spec, "research_config", None):
         try:
@@ -1769,25 +1479,18 @@ def build_worker_graph(
     # Cierre de dominio = última instrucción al modelo (domain_closure.md del worker).
     effective_prompt = append_domain_closure_block(effective_prompt, spec)
     _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
-    if _lid == "bi_analyst":
-        _nm = (getattr(spec, "name", None) or "Analista BI").strip()
-        effective_prompt = (
-            f"Identidad activa (prioritaria sobre mensajes previos del hilo): eres **{_nm}**. "
-            "No digas que eres «Agente de Investigación Activa» ni otro rol de investigación web; "
-            "el historial puede mezclar conversaciones antiguas.\n\n"
-            + effective_prompt
-        )
-
     _cp = _normalized_context_pruning(spec)
-    use_cm = bool(_cp.get("enabled") and _lid == "bi_analyst")
+    use_cm = bool(_cp.get("enabled"))
     _schema_digest = ""
-    if _lid == "bi_analyst" and _cp.get("enabled"):
-        at = ", ".join(spec.allowed_tables) if spec.allowed_tables else "(ninguna lista explícita)"
+    if _cp.get("enabled"):
+        schema_name = (str(getattr(spec, "schema_name", None) or "")).strip()
+        allowed_tables = list(getattr(spec, "allowed_tables", None) or [])
+        at = ", ".join(str(table) for table in allowed_tables) if allowed_tables else "(ninguna lista explícita)"
         _schema_digest = (
-            f"\n\n## Contexto de esquema\nEsquema analítico `{spec.schema_name}`; tablas permitidas: {at}. "
-            "Para tipos y DDL exactos, ejecuta `get_schema_info` al inicio del análisis.\n"
+            f"\n\nContexto de datos:\nEsquema configurado: {schema_name or '(no especificado)'}; "
+            f"tablas permitidas: {at}. Para tipos y DDL exactos, usa get_schema_info si está disponible.\n"
         )
-    _bi_prompt_base: str | None = (effective_prompt + _schema_digest) if (_lid == "bi_analyst" and _cp.get("enabled")) else None
+    _context_prompt_base: str | None = (effective_prompt + _schema_digest) if _cp.get("enabled") else None
 
     def prepare_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         cfg = config or {}
@@ -1805,8 +1508,11 @@ def build_worker_graph(
                     break
         if not isinstance(incoming, str):
             incoming = str(incoming or "").strip()
-        if _bi_prompt_base is not None:
-            prompt = _compose_bi_system_prompt(_bi_prompt_base, (state.get("analytical_summary") or "").strip())
+        if _context_prompt_base is not None:
+            prompt = _compose_context_summary_prompt(
+                _context_prompt_base,
+                (state.get("analytical_summary") or state.get("context_summary") or "").strip(),
+            )
         else:
             prompt = effective_prompt
         messages = [SystemMessage(content=prompt)]
@@ -1835,48 +1541,12 @@ def build_worker_graph(
         out.update(_identity_fields(state))
         return out
 
-    def context_monitor_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
-        if not _cp.get("enabled") or _lid != "bi_analyst":
-            return state
-        msgs = list(state.get("messages") or [])
-        msgs = _truncate_tool_messages(msgs, _cp["tool_content_max_chars"])
-        est = _estimate_tokens_from_messages(msgs)
-        n = len(msgs)
-        need = n > _cp["max_messages"] or est > _cp["max_estimated_tokens"]
-        if not need:
-            out = {**state, "messages": msgs}
-            out.update(_identity_fields(state))
-            return out
-        if not msgs or not isinstance(msgs[0], SystemMessage):
-            out = {**state, "messages": msgs}
-            out.update(_identity_fields(state))
-            return out
-        rest = msgs[1:]
-        head, tail = _split_for_pruning(rest, _cp["keep_last_messages"])
-        prior = (state.get("analytical_summary") or "").strip()
-        if need and not head:
-            trimmed = list(rest)
-            sys0 = msgs[0]
-            while len(trimmed) > 1 and _estimate_tokens_from_messages([sys0] + trimmed) > _cp["max_estimated_tokens"]:
-                trimmed = trimmed[1:]
-            base = _bi_prompt_base or effective_prompt
-            sys_content = _compose_bi_system_prompt(base, prior)
-            new_msgs = [SystemMessage(content=sys_content)] + trimmed
-            out = {**state, "messages": new_msgs, "analytical_summary": prior}
-            out.update(_identity_fields(state))
-            return out
-        new_summary = prior
-        if head:
-            if llm_summary is not None:
-                new_summary = _llm_fold_conversation_summary(llm_summary, head, prior)
-            else:
-                new_summary = ((prior + "\n") if prior else "").strip() + "[Contexto anterior truncado.]"
-        base = _bi_prompt_base or effective_prompt
-        sys_content = _compose_bi_system_prompt(base, new_summary)
-        new_msgs = [SystemMessage(content=sys_content)] + tail
-        out = {**state, "messages": new_msgs, "analytical_summary": new_summary}
-        out.update(_identity_fields(state))
-        return out
+    context_monitor_node = _build_context_monitor_node(
+        pruning_config=_cp,
+        prompt_base=_context_prompt_base or effective_prompt,
+        llm_summary=llm_summary,
+        identity_fields=_identity_fields,
+    ) if use_cm else None
 
     def _sandbox_enabled_for_state(state: dict) -> bool:
         """Sandbox flag per chat/session (defaults OFF; ON for admin UI si no hay override)."""
@@ -3143,7 +2813,6 @@ def build_worker_graph(
                         _schedule_tool_heartbeat(name)
                         if (
                             name == "run_sandbox"
-                            and _lid == "bi_analyst"
                             and _sandbox_heartbeat_allowed(spec)
                         ):
                             from duckclaw.graphs.chat_heartbeat import is_chat_heartbeat_enabled
@@ -3657,42 +3326,3 @@ def build_worker_graph(
     compiled._worker_spec = spec
     compiled._worker_db = db
     return compiled
-
-
-def list_workers(
-    templates_root: Optional[Path] = None,
-    db: Any | None = None,
-    tenant_id: str = "default",
-) -> list[str]:
-    """Return worker_id for each template (filesystem + DB catalog if available)."""
-    fs_ids: list[str] = []
-    if templates_root is not None:
-        workers_dir = templates_root / "templates" / "workers"
-    else:
-        try:
-            from duckclaw.forge import WORKERS_TEMPLATES_DIR
-            workers_dir = WORKERS_TEMPLATES_DIR
-        except ImportError:
-            root = Path(__file__).resolve().parent.parent.parent.parent
-            workers_dir = root / "templates" / "workers"
-    if workers_dir.is_dir():
-        default_dir = workers_dir / "default"
-        if default_dir.is_dir() and (default_dir / "manifest.yaml").is_file():
-            fs_ids = ["default"]
-
-    cat_ids: list[str] = []
-    if db is not None:
-        try:
-            from duckclaw.catalog_worker import list_catalog_template_ids
-
-            cat_ids = list_catalog_template_ids(db, tenant_id)
-        except Exception as exc:
-            _log.warning("list_workers catalog fallback failed: %s", exc)
-
-    seen: set[str] = set()
-    merged: list[str] = []
-    for wid in fs_ids + cat_ids:
-        if wid not in seen:
-            seen.add(wid)
-            merged.append(wid)
-    return merged

@@ -8,16 +8,11 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
-import logging
 import os
 from pathlib import Path
 import re
 import shutil
-import subprocess
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from typing import Any, Optional, Tuple
 from duckclaw.commands.chat_state import (
     _AGENT_CONFIG_TABLE as _AGENT_CONFIG_TABLE,
@@ -29,6 +24,10 @@ from duckclaw.commands.chat_state import (
     _skip_runtime_ddl as _skip_runtime_ddl,
     get_chat_state as get_chat_state,
     set_chat_state as set_chat_state,
+)
+from duckclaw.commands.audit import (
+    execute_audit as execute_audit,
+    save_last_audit as save_last_audit,
 )
 from duckclaw.commands.crons import (
     CRON_SCHEDULE_ID_DELTA as CRON_SCHEDULE_ID_DELTA,
@@ -78,6 +77,53 @@ from duckclaw.commands.goals import (
     execute_homeostasis_goals as execute_homeostasis_goals,
     get_manager_goals as get_manager_goals,
     set_manager_goals as set_manager_goals,
+)
+from duckclaw.commands.history import (
+    _TASK_AUDIT_TABLE as _TASK_AUDIT_TABLE,
+    _ensure_task_audit_log as _ensure_task_audit_log,
+    _infer_user_id_for_audit_queue as _infer_user_id_for_audit_queue,
+    _is_complex_task as _is_complex_task,
+    _is_simple_greeting as _is_simple_greeting,
+    append_task_audit as append_task_audit,
+    execute_history as execute_history,
+    get_history_limit_for_chat as get_history_limit_for_chat,
+)
+from duckclaw.commands.health import (
+    configure_heartbeat_adapter as _configure_heartbeat_adapter,
+    execute_health as execute_health,
+    execute_heartbeat as execute_heartbeat,
+)
+from duckclaw.commands.model_setup import (
+    _DEFAULT_BASE_URL_BY_PROVIDER as _DEFAULT_BASE_URL_BY_PROVIDER,
+    _DEFAULT_MODEL_BY_PROVIDER as _DEFAULT_MODEL_BY_PROVIDER,
+    _PROVIDERS as _PROVIDERS,
+    _debug_log_model_config as _debug_log_model_config,
+    _effective_llm_triplet_for_chat_ui as _effective_llm_triplet_for_chat_ui,
+    _execute_setup as _execute_setup,
+    _gemini_models_list_from_api as _gemini_models_list_from_api,
+    _parse_pipe_kv_args as _parse_pipe_kv_args,
+    chat_has_llm_chat_state_override as chat_has_llm_chat_state_override,
+    configure_prompt_system_fallback_provider as _configure_prompt_system_fallback_provider,
+    configure_prompt_template_ids_provider as _configure_prompt_template_ids_provider,
+    execute_model as execute_model,
+    execute_models as execute_models,
+    execute_prompt as execute_prompt,
+    execute_setup as execute_setup,
+    get_effective_system_prompt as get_effective_system_prompt,
+    resolve_llm_triplet_for_chat_invocation as resolve_llm_triplet_for_chat_invocation,
+)
+from duckclaw.commands.runtime_toggles import (
+    configure_sandbox_session_cleanup as configure_sandbox_session_cleanup,
+    execute_internet_toggle as execute_internet_toggle,
+    execute_sandbox_toggle as execute_sandbox_toggle,
+)
+from duckclaw.commands.sensors import (
+    _browser_sandbox_sensor_lines as _browser_sandbox_sensor_lines,
+    _capadonna_lake_status_lines as _capadonna_lake_status_lines,
+    _sensor_line_bullet as _sensor_line_bullet,
+    _ssh_reach_icon as _ssh_reach_icon,
+    configure_browser_sandbox_sensor_lines_provider as _configure_browser_sandbox_sensor_lines_provider,
+    execute_sensors as execute_sensors,
 )
 from duckclaw.commands.team_templates import (
     _canonicalize_team_template_ids as _canonicalize_team_template_ids,
@@ -142,6 +188,113 @@ def _team_access_acl_db_provider() -> Any:
 _configure_team_access_acl_db_provider(_team_access_acl_db_provider)
 
 
+class _GraphHeartbeatAdapter:
+    def heartbeat_redis_configured(self) -> bool:
+        from duckclaw.graphs.chat_heartbeat import heartbeat_redis_configured
+
+        return heartbeat_redis_configured()
+
+    def heartbeat_outbound_configured(self) -> bool:
+        from duckclaw.graphs.chat_heartbeat import heartbeat_outbound_configured
+
+        return heartbeat_outbound_configured()
+
+    def is_admin_ui_chat_session(self, chat_id: str) -> bool:
+        from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+        return is_admin_ui_chat_session(chat_id)
+
+    def is_chat_heartbeat_enabled(self, tenant_id: str, chat_id: str) -> bool:
+        from duckclaw.graphs.chat_heartbeat import is_chat_heartbeat_enabled
+
+        return is_chat_heartbeat_enabled(tenant_id, chat_id)
+
+    def set_chat_heartbeat_enabled(
+        self, tenant_id: str, chat_id: str, on: bool
+    ) -> tuple[bool, str]:
+        from duckclaw.graphs.chat_heartbeat import set_chat_heartbeat_enabled
+
+        return set_chat_heartbeat_enabled(tenant_id, chat_id, on)
+
+
+_configure_heartbeat_adapter(_GraphHeartbeatAdapter())
+
+
+def _sandbox_session_cleanup(chat_id: str) -> None:
+    """Adapter graph-local for runtime toggle sandbox cleanup."""
+    from duckclaw.graphs.sandbox import cleanup_sandbox_session_for_chat
+
+    cleanup_sandbox_session_for_chat(chat_id)
+
+
+configure_sandbox_session_cleanup(_sandbox_session_cleanup)
+
+
+def _prompt_template_ids_provider() -> list[str]:
+    """Adapter graph-local for legacy /prompt worker validation."""
+    from duckclaw.workers.factory import list_workers
+
+    return list_workers()
+
+
+def _prompt_system_fallback_provider(worker_id: str) -> str:
+    """Load only the default worker prompt fallback from the filesystem layout."""
+    wid = (worker_id or "").strip()
+    if wid != "default":
+        return ""
+    try:
+        from duckclaw.workers.manifest import load_manifest
+        from duckclaw.workers.loader import load_system_prompt
+
+        spec = load_manifest(wid)
+        return (load_system_prompt(spec) or "").strip()
+    except Exception:
+        return ""
+
+
+_configure_prompt_template_ids_provider(_prompt_template_ids_provider)
+_configure_prompt_system_fallback_provider(_prompt_system_fallback_provider)
+_configure_goals_llm_triplet_resolver(_effective_llm_triplet_for_chat_ui)
+
+
+def _browser_sandbox_sensor_lines_provider() -> list[str]:
+    """Adapter graph-local for browser sandbox diagnostics used by /sensors."""
+    lines: list[str] = [
+        "🌐 Browser sandbox · Playwright (`run_browser_sandbox`)",
+    ]
+    try:
+        from duckclaw.graphs.sandbox import _browser_image_name, _docker_available
+    except Exception as exc:
+        lines.append(_sensor_line_bullet("❌", f"Sandbox no importable — {exc!s}"[:120]))
+        return lines
+
+    if not _docker_available():
+        lines.append(_sensor_line_bullet("❌", "Docker no responde — run_browser_sandbox no arrancará"))
+        return lines
+
+    lines.append(_sensor_line_bullet("✅", "Docker ping OK"))
+    img = _browser_image_name()
+    env_override = bool((os.environ.get("STRIX_BROWSER_IMAGE") or "").strip())
+    label = f"{img}" + (" · STRIX_BROWSER_IMAGE" if env_override else "")
+    try:
+        import docker  # noqa: PLC0415
+
+        client = docker.from_env()
+        client.images.get(img)
+        lines.append(_sensor_line_bullet("✅", f"Imagen local · {label}"[:140]))
+    except Exception:
+        lines.append(
+            _sensor_line_bullet(
+                "⚠️",
+                f"Imagen no encontrada localmente · {label} — build/pull antes del primer uso",
+            )[:200]
+        )
+    return lines
+
+
+_configure_browser_sandbox_sensor_lines_provider(_browser_sandbox_sensor_lines_provider)
+
+
 # Termostato infra meditate (/meditate --delta); independiente de /crons --delta
 _MEDITATE_DELTA_SECONDS_KEY = "meditate_delta_seconds"
 _MEDITATE_LAST_FIRE_KEY = "meditate_last_fire_epoch"
@@ -152,18 +305,6 @@ MEDITATE_DELTA_MAX_SECONDS = 7 * 24 * 3600
 
 # Cola FIFO de PNG base64 por chat: api-gateway hace pop_all y sendPhoto en orden.
 _FLY_OUTBOUND_CHART_B64: dict[str, list[str]] = {}
-
-
-def _debug_log_model_config(
-    *,
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    run_id: str = "gemini_cfg_debug_v1",
-) -> None:
-    """Reserved for optional NDJSON debug (no-op)."""
-    del hypothesis_id, location, message, data, run_id
 
 
 _FLY_OUTBOUND_CHART_NAMES: dict[str, list[str]] = {}
@@ -809,213 +950,6 @@ def execute_comfyui_provider(db: Any, chat_id: Any, args: str) -> str:
     return "Uso: /comfyui --provider local|fal"
 
 
-def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
-    """/sandbox on|off: habilita/deshabilita ejecución de código para este chat (por `agent_config`)."""
-    v = (on_off or "").strip().lower()
-
-    def _parse(v_: str) -> Optional[bool]:
-        vv = (v_ or "").strip().lower()
-        if vv in ("on", "1", "true", "sí", "si"):
-            return True
-        if vv in ("off", "0", "false"):
-            return False
-        return None
-
-    parsed = _parse(v)
-    if parsed is True:
-        set_chat_state(db, chat_id, "sandbox_enabled", "true")
-        db_path = getattr(db, "_path", None) or getattr(db, "path", None) or "(unknown_db_path)"
-        # Warning para asegurar que aparezca en logs de pm2.
-        import logging
-        logging.getLogger(__name__).warning(
-            "[sandbox-toggle] db_path=%r chat_id=%r sandbox_enabled=%r",
-            db_path,
-            chat_id,
-            "true",
-        )
-        return "Entendido. He habilitado mis capacidades de ejecución de código para esta sesión."
-    if parsed is False:
-        set_chat_state(db, chat_id, "sandbox_enabled", "false")
-        db_path = getattr(db, "_path", None) or getattr(db, "path", None) or "(unknown_db_path)"
-        import logging
-        logging.getLogger(__name__).warning(
-            "[sandbox-toggle] db_path=%r chat_id=%r sandbox_enabled=%r",
-            db_path,
-            chat_id,
-            "false",
-        )
-        return "Entendido. He desactivado mis capacidades de ejecución de código para esta sesión."
-
-    # Sin args válidos: mostrar estado actual.
-    current = _parse(get_chat_state(db, chat_id, "sandbox_enabled"))
-    status = "habilitado" if current is True else "desactivado"  # default OFF
-    return f"Uso: /sandbox on|off\nEstado actual: {status}."
-
-
-def execute_internet_toggle(
-    db: Any,
-    chat_id: Any,
-    on_off: str,
-    *,
-    worker_id: str = "",
-    tenant_id: str = "default",
-) -> str:
-    """/internet on|off: red del sandbox Strix por chat (solo si el worker permite red en YAML)."""
-    from duckclaw.forge.schema import resolve_sandbox_network_policy
-
-    v = (on_off or "").strip().lower()
-    wid = (worker_id or "").strip()
-    if not wid:
-        try:
-            team = get_effective_team_templates(db, chat_id, str(tenant_id or "default").strip() or "default", None)
-            wid = (team[0] if team else "").strip()
-        except Exception:
-            wid = ""
-    if not wid:
-        wid = "default"
-
-    _, meta = resolve_sandbox_network_policy(
-        wid, get_chat_state(db, chat_id, "sandbox_network_enabled")
-    )
-    if not meta.get("toggle_available"):
-        return (
-            f"Este worker («{wid}») tiene red sandbox denegada en security_policy.yaml. "
-            "No se puede activar internet desde el chat. Usa tavily_search o un worker con browser_sandbox "
-            "habilitado por capability/policy."
-        )
-
-    def _parse(v_: str) -> bool | None:
-        vv = (v_ or "").strip().lower()
-        if vv in ("on", "1", "true", "sí", "si"):
-            return True
-        if vv in ("off", "0", "false"):
-            return False
-        return None
-
-    parsed = _parse(v)
-    if parsed is True:
-        ok, err = set_chat_state_via_vault(db, chat_id, "sandbox_network_enabled", "true", tenant_id=tenant_id)
-        if not ok:
-            return f"No se pudo guardar: {err}"
-        try:
-            from duckclaw.graphs.sandbox import cleanup_sandbox_session_for_chat
-
-            cleanup_sandbox_session_for_chat(str(chat_id))
-        except Exception:
-            pass
-        return (
-            "Internet en sandbox activado para esta sesión. "
-            "El próximo run_sandbox/run_browser_sandbox usará red bridge."
-        )
-    if parsed is False:
-        ok, err = set_chat_state_via_vault(db, chat_id, "sandbox_network_enabled", "false", tenant_id=tenant_id)
-        if not ok:
-            return f"No se pudo guardar: {err}"
-        try:
-            from duckclaw.graphs.sandbox import cleanup_sandbox_session_for_chat
-
-            cleanup_sandbox_session_for_chat(str(chat_id))
-        except Exception:
-            pass
-        return "Internet en sandbox desactivado (network_mode=none) para esta sesión."
-
-    eff = meta.get("effective") or "deny"
-    return f"Uso: /internet on|off\nRed sandbox efectiva: {eff} (worker {wid})."
-
-
-def execute_heartbeat(db: Any, chat_id: Any, on_off: str, *, tenant_id: Any = None) -> str:
-    """/heartbeat on|off — DM proactivos (Bot API nativa o webhook) mientras el agente usa herramientas."""
-    from duckclaw.graphs.chat_heartbeat import (
-        heartbeat_outbound_configured,
-        heartbeat_redis_configured,
-        is_admin_ui_chat_session,
-        is_chat_heartbeat_enabled,
-        set_chat_heartbeat_enabled,
-    )
-
-    tid = str(tenant_id or "default").strip() or "default"
-    cid = str(chat_id if chat_id is not None else "unknown").strip() or "unknown"
-    v = (on_off or "").strip().lower()
-
-    if not heartbeat_redis_configured():
-        return (
-            "Heartbeat requiere Redis (REDIS_URL o DUCKCLAW_REDIS_URL). Sin eso no se puede guardar el estado."
-        
-
-        )
-    if v in ("on", "1", "true", "sí", "si"):
-        if is_chat_heartbeat_enabled(tid, cid):
-            return "✅ Heartbeat ya estaba activado."
-        ok, err = set_chat_heartbeat_enabled(tid, cid, True)
-        if not ok:
-            return f"No se pudo activar heartbeat: {err}"
-        if is_admin_ui_chat_session(cid):
-            return "✅ Heartbeat activado. Verás plan y herramientas en este chat mientras ejecuto la tarea."
-        if not heartbeat_outbound_configured():
-            return (
-                "Heartbeat activado en Redis, pero falta TELEGRAM_BOT_TOKEN (recomendado) o un webhook "
-                "(TELEGRAM_BOT_TOKEN o DUCKCLAW_HEARTBEAT_WEBHOOK_URL); no se enviarán DMs."
-            )
-        return "✅ Heartbeat activado. Te avisaré por DM mientras uso herramientas."
-    if v in ("off", "0", "false"):
-        if not is_chat_heartbeat_enabled(tid, cid):
-            return "Heartbeat ya estaba desactivado."
-        ok, err = set_chat_heartbeat_enabled(tid, cid, False)
-        if not ok:
-            return f"No se pudo desactivar heartbeat: {err}"
-        return "✅ Heartbeat desactivado."
-
-    st = "on" if is_chat_heartbeat_enabled(tid, cid) else "off"
-    return f"Heartbeat: {st}\nUso: /heartbeat on | /heartbeat off"
-
-
-def execute_audit(db: Any, chat_id: Any) -> str:
-    """/audit: evidencia de la última ejecución (SQL, latencia, run_id)."""
-    raw = get_chat_state(db, chat_id, "last_audit")
-    if not raw:
-        return "No hay evidencia de última ejecución. Envía un mensaje y vuelve a usar /audit."
-    try:
-        data = json.loads(raw)
-        sql = data.get("sql") or "(no registrado)"
-        latency_ms = data.get("latency_ms") or "—"
-        tokens = data.get("tokens") or "—"
-        run_id = data.get("run_id") or "—"
-        return (
-            f"📋 Última ejecución\nSQL: {str(sql)[:300]}\nLatencia: {latency_ms} ms\nTokens: {tokens}\nLangSmith run_id: {run_id}"
-        
-        )
-    except Exception:
-        return "Datos de auditoría no válidos."
-
-
-def execute_health(db: Any) -> str:
-    """/health: estado de infraestructura (MLX, DuckDB, latencia)."""
-    lines = []
-    # DuckDB
-    try:
-        db.query("SELECT 1")
-        lines.append("✅ DuckDB: conectado")
-    except Exception as e:
-        lines.append(f"❌ DuckDB: {e}")
-    # MLX / inference
-    base_url = os.environ.get("DUCKCLAW_LLM_BASE_URL", "").strip() or "http://127.0.0.1:8080"
-    if base_url:
-        base = base_url.rstrip("/")
-        if base.endswith("/v1"):
-            base = base[:-3]
-        url = base + "/health"
-        try:
-            import urllib.request
-            t0 = time.perf_counter()
-            req = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                elapsed = int((time.perf_counter() - t0) * 1000)
-                lines.append(f"✅ Inferencia ({url[:40]}...): {elapsed} ms")
-        except Exception as e:
-            lines.append(f"⚠️ Inferencia: {e}")
-    return "\n".join(lines) or "Sin comprobaciones."
-
-
 def execute_approve_reject(db: Any, chat_id: Any, approved: bool) -> str:
     """/approve o /reject: HITL (grafo en interrupt). Sin interrupt implementado: mensaje informativo."""
     return "No hay operación pendiente de aprobación. (El grafo no está en estado interrupt en esta versión.)"
@@ -1047,315 +981,6 @@ def execute_tasks(db: Any, chat_id: Any) -> str:
     return f"{icon} {status}{elapsed_s}{worker_s}\n" + task_preview
 
 
-def get_effective_system_prompt(db: Any, worker_id: Optional[str] = None) -> str:
-    """
-    Devuelve el system prompt efectivo para un worker:
-    - Si worker_id está definido: 1) override system_prompt_<worker_id>, 2) soul.md + system_prompt.md del template (ver load_system_prompt). No usa global.
-    - Si worker_id vacío: global system_prompt o "".
-    """
-    wid = (worker_id or "").strip()
-    if wid:
-        override = _get_global_config(db, f"system_prompt_{wid}")
-        if override:
-            return override
-        try:
-            from duckclaw.workers.manifest import load_manifest
-            from duckclaw.workers.loader import load_system_prompt
-            spec = load_manifest(wid)
-            return (load_system_prompt(spec) or "").strip()
-        except Exception:
-            pass
-        return ""
-    current = _get_global_config(db, "system_prompt")
-    return current if current else ""
-
-
-_PROVIDERS = ("mlx", "ollama", "openai", "anthropic", "deepseek", "groq", "gemini", "openrouter", "or")
-
-# Modelo por defecto al cambiar provider (evita "Model Not Exist" al pasar de MLX a cloud)
-_DEFAULT_MODEL_BY_PROVIDER = {
-    "deepseek": "deepseek-chat",
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-3-5-haiku-20241022",
-    "groq": "llama-3.3-70b-versatile",
-    "gemini": "gemini-2.0-flash",
-    "openrouter": "deepseek/deepseek-v4-flash",
-    "mlx": "",  # usa MLX_MODEL_ID o /v1/models
-    "ollama": "llama3.2",
-}
-
-# Base URL por defecto al cambiar provider (evita mezclar host global PM2 con otro proveedor).
-_DEFAULT_BASE_URL_BY_PROVIDER = {
-    "deepseek": "https://api.deepseek.com/v1",
-    "groq": "https://api.groq.com/openai/v1",
-    "openrouter": "https://openrouter.ai/api/v1",
-    "openai": "",
-    "anthropic": "",
-    "gemini": "",
-    "mlx": "",
-    "ollama": "http://127.0.0.1:11434",
-}
-
-
-def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str, str]:
-    """provider/model/base_url efectivos (chat > global agent_config > env), con MLX forzado a host local."""
-    from duckclaw.integrations.llm_providers import (
-        _ensure_duckclaw_llm_env_from_legacy_llm_vars,
-        mlx_openai_compatible_base_url,
-    )
-
-    _ensure_duckclaw_llm_env_from_legacy_llm_vars()
-    p_chat = (get_chat_state(db, chat_id, "llm_provider") or "").strip()
-    p_global = (_get_global_config(db, "llm_provider") or "").strip()
-    p_env = (os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx") or "").strip()
-    p = (p_chat or p_global or p_env).strip().lower()
-    m_chat = (get_chat_state(db, chat_id, "llm_model") or "").strip()
-    m_global = (_get_global_config(db, "llm_model") or "").strip()
-    m_env = (os.environ.get("DUCKCLAW_LLM_MODEL", "") or "").strip()
-    m = (m_chat or m_global or m_env).strip()
-    u_chat = (get_chat_state(db, chat_id, "llm_base_url") or "").strip()
-    u_global = (_get_global_config(db, "llm_base_url") or "").strip()
-    u_env = (os.environ.get("DUCKCLAW_LLM_BASE_URL", "") or "").strip()
-    u = (u_chat or u_global or u_env).strip()
-    if p == "mlx":
-        ul = u.lower()
-        if (not u) or "groq.com" in ul or "deepseek.com" in ul:
-            u = mlx_openai_compatible_base_url()
-        if not m:
-            m = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
-    _debug_log_model_config(
-        hypothesis_id="H_sources_priority",
-        location="on_the_fly_commands._effective_llm_triplet_for_chat_ui",
-        message="effective_triplet_computed",
-        data={
-            "chat_id": str(chat_id),
-            "provider": p,
-            "model": m[:80],
-            "base_url": u[:120],
-            "src_provider": "chat" if p_chat else ("global" if p_global else "env"),
-            "src_model": "chat" if m_chat else ("global" if m_global else "env"),
-            "src_base_url": "chat" if u_chat else ("global" if u_global else "env"),
-            "chat_provider": p_chat[:60],
-            "chat_base_url": u_chat[:120],
-            "global_provider": p_global[:60],
-            "global_base_url": u_global[:120],
-            "env_provider": p_env[:60],
-            "env_base_url": u_env[:120],
-        },
-    )
-    return (p, m, u)
-
-
-_configure_goals_llm_triplet_resolver(_effective_llm_triplet_for_chat_ui)
-
-
-def chat_has_llm_chat_state_override(db: Any, chat_id: Any) -> bool:
-    cid = str(chat_id or "").strip()
-    if not cid:
-        return False
-    for key in ("llm_provider", "llm_model", "llm_base_url"):
-        if (get_chat_state(db, cid, key) or "").strip():
-            return True
-    return False
-
-
-def resolve_llm_triplet_for_chat_invocation(db: Any, chat_id: Any) -> tuple[str, str, str] | None:
-    """Si el chat tiene llm_* en agent_config, devuelve tripleta para build_llm; si no, None (usar cache env del gateway)."""
-    has_override = chat_has_llm_chat_state_override(db, chat_id)
-    _debug_log_model_config(
-        hypothesis_id="H_override_gate",
-        location="on_the_fly_commands.resolve_llm_triplet_for_chat_invocation",
-        message="chat_override_gate",
-        data={"chat_id": str(chat_id), "has_override": bool(has_override)},
-    )
-    if not has_override:
-        return None
-    return _effective_llm_triplet_for_chat_ui(db, chat_id)
-
-
-def execute_model(db: Any, chat_id: Any, args: str) -> str:
-    """/model [provider=mlx] [model=...] [base_url=...]: cambia proveedor/modelo LLM en caliente. Sin args muestra el actual."""
-    _debug_log_model_config(
-        hypothesis_id="H_write_apply",
-        location="on_the_fly_commands.execute_model",
-        message="execute_model_entry",
-        data={"chat_id": str(chat_id), "args": (args or "")[:180]},
-    )
-    if not args or not args.strip():
-        provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id)
-        provider = provider or "—"
-        model = model or "—"
-        u_show = base_url or "—"
-        base_url = u_show[:50] + "…" if len(u_show) > 50 else u_show
-        return f"Modelo actual:\n- provider: {provider}\n- model: {model}\n- base_url: {base_url}\n\nUso: /model provider=mlx | /model provider=deepseek | /model provider=openrouter | /model provider=or model=google/gemini-2.5-pro | /model model=Slayer-8B"
-    for part in args.split("|"):
-        part = part.strip()
-        if "=" in part:
-            k, _, v = part.partition("=")
-            k, v = k.strip().lower(), v.strip()
-            if k == "provider":
-                if v and v.lower() not in _PROVIDERS:
-                    return f"Provider desconocido: {v}. Válidos: {', '.join(_PROVIDERS)}"
-                pv = v.lower()
-                if pv in ("or", "router"):
-                    pv = "openrouter"
-                set_chat_state(db, chat_id, "llm_provider", pv)
-                # Al cambiar provider, resetear model al default para evitar "Model Not Exist"
-                # (ej. Slayer-8B-v1.1 no existe en DeepSeak)
-                if pv == "mlx":
-                    from duckclaw.integrations.llm_providers import mlx_openai_compatible_base_url
-
-                    set_chat_state(db, chat_id, "llm_base_url", mlx_openai_compatible_base_url())
-                    mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
-                    set_chat_state(db, chat_id, "llm_model", mid)
-                else:
-                    default_model = _DEFAULT_MODEL_BY_PROVIDER.get(pv, "")
-                    set_chat_state(db, chat_id, "llm_model", default_model)
-                    default_url = _DEFAULT_BASE_URL_BY_PROVIDER.get(pv, "")
-                    if default_url:
-                        set_chat_state(db, chat_id, "llm_base_url", default_url)
-                    else:
-                        set_chat_state(db, chat_id, "llm_base_url", "")
-                _debug_log_model_config(
-                    hypothesis_id="H_write_apply",
-                    location="on_the_fly_commands.execute_model",
-                    message="provider_written",
-                    data={
-                        "chat_id": str(chat_id),
-                        "provider_arg": pv,
-                        "default_model": (_DEFAULT_MODEL_BY_PROVIDER.get(pv, "") or "")[:80],
-                        "default_base_url": (_DEFAULT_BASE_URL_BY_PROVIDER.get(pv, "") or "")[:120],
-                    },
-                )
-            elif k == "model":
-                set_chat_state(db, chat_id, "llm_model", v)
-            elif k == "base_url":
-                set_chat_state(db, chat_id, "llm_base_url", v)
-    _p, _m, _u = _effective_llm_triplet_for_chat_ui(db, chat_id)
-    _debug_log_model_config(
-        hypothesis_id="H_write_apply",
-        location="on_the_fly_commands.execute_model",
-        message="execute_model_exit",
-        data={"chat_id": str(chat_id), "provider": _p, "model": _m[:80], "base_url": _u[:120]},
-    )
-    return "✅ Modelo actualizado. Los próximos mensajes usarán esta config."
-
-
-def _parse_pipe_kv_args(args: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for part in (args or "").split("|"):
-        p = part.strip()
-        if "=" not in p:
-            continue
-        k, _, v = p.partition("=")
-        k = k.strip().lower()
-        v = v.strip()
-        if k:
-            out[k] = v
-    return out
-
-
-def _gemini_models_list_from_api(api_key: str) -> tuple[list[str], str | None]:
-    url = "https://generativelanguage.googleapis.com/v1beta/models"
-    req = urllib.request.Request(
-        f"{url}?key={urllib.parse.quote(api_key)}",
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            status = getattr(resp, "status", 200)
-            body = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        return [], f"Gemini API HTTP {e.code}: {(detail or '').strip()[:220] or 'sin detalle'}"
-    except Exception as e:
-        return [], f"No pude consultar Gemini models: {e}"
-    if status < 200 or status >= 300:
-        return [], f"Gemini API devolvió HTTP {status}."
-    try:
-        payload = json.loads(body or "{}")
-    except json.JSONDecodeError:
-        return [], "Gemini API devolvió una respuesta no-JSON."
-    models = payload.get("models")
-    if not isinstance(models, list):
-        return [], "Gemini API no devolvió la lista de modelos."
-    usable: list[str] = []
-    for row in models:
-        if not isinstance(row, dict):
-            continue
-        raw_name = str(row.get("name") or "").strip()
-        if not raw_name:
-            continue
-        methods = row.get("supportedGenerationMethods") or []
-        if isinstance(methods, list) and methods:
-            method_names = {str(m).strip() for m in methods if str(m).strip()}
-            if "generateContent" not in method_names:
-                continue
-        short_name = raw_name.split("/")[-1]
-        if short_name:
-            usable.append(short_name)
-    dedup = sorted(set(usable))
-    if "gemini-2.0-flash" in dedup:
-        dedup = ["gemini-2.0-flash"] + [m for m in dedup if m != "gemini-2.0-flash"]
-    return dedup, None
-
-
-def execute_models(db: Any, chat_id: Any, args: str) -> str:
-    """/models provider=gemini: lista modelos disponibles del proveedor."""
-    kv = _parse_pipe_kv_args(args)
-    provider = (kv.get("provider") or "").strip().lower()
-    if not provider:
-        provider = (_effective_llm_triplet_for_chat_ui(db, chat_id)[0] or "").strip().lower()
-    if not provider:
-        return "Uso: /models provider=gemini"
-    if provider != "gemini":
-        return "Por ahora /models soporta solo provider=gemini."
-    key = ((os.environ.get("GOOGLE_API_KEY") or "").strip() or (os.environ.get("GEMINI_API_KEY") or "").strip())
-    if not key:
-        return "Falta GOOGLE_API_KEY (o GEMINI_API_KEY) para listar modelos de Gemini."
-    models, err = _gemini_models_list_from_api(key)
-    if err:
-        return f"No se pudo listar modelos Gemini. {err}"
-    if not models:
-        return "Gemini no devolvió modelos utilizables para generateContent."
-    preview = "\n".join(f"- {m}" for m in models[:30])
-    more = "" if len(models) <= 30 else f"\n... y {len(models) - 30} más."
-    hint = "\nSugerencia: /model provider=gemini | model=gemini-2.0-flash"
-    return f"Modelos Gemini disponibles ({len(models)}):\n{preview}{more}{hint}"
-
-
-def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
-    """/prompt <worker_id> [--change <nuevo prompt>]: ver o cambiar el system prompt del template. worker_id debe ser uno de /roles."""
-    from duckclaw.workers.factory import list_workers
-    all_templates = list_workers()
-    raw = (args or "").strip()
-    if not raw:
-        return "Uso: /prompt <worker_id> [--change <texto>]. Ver templates: /roles"
-    if raw.startswith("--"):
-        return "Indica un worker_id (ej. research_worker). Ver templates: /roles"
-    change_marker = " --change "
-    idx = raw.lower().find(change_marker)
-    if idx >= 0:
-        worker_id = raw[:idx].strip().lower()
-        new_prompt = raw[idx + len(change_marker):].strip()
-    else:
-        worker_id = raw.split()[0].strip().lower() if raw.split() else ""
-        new_prompt = ""
-    if not worker_id:
-        return "Uso: /prompt <worker_id> [--change <texto>]. Ver templates: /roles"
-    if worker_id not in all_templates:
-        return f"Template '{worker_id}' no encontrado. Disponibles (usa /roles): {', '.join(all_templates)}"
-    if new_prompt:
-        _set_global_config(db, f"system_prompt_{worker_id}", new_prompt)
-        preview = new_prompt[:200] + "..." if len(new_prompt) > 200 else new_prompt
-        return f"✅ System prompt de {worker_id} actualizado.\nVista previa: {preview}"
-    current = get_effective_system_prompt(db, worker_id)
-    if not current:
-        return f"System prompt de {worker_id}: (vacío o por defecto del template).\nPara cambiar: /prompt {worker_id} --change <texto>"
-    preview = current[:400] + "..." if len(current) > 400 else current
-    return f"System prompt de {worker_id}:\n{preview}\n\nPara cambiar: /prompt {worker_id} --change <texto>"
-
-
 def execute_help(db: Any, chat_id: Any) -> str:
     """/help: lista los fly commands disponibles."""
     entries = list(load_guardrail_pipe_table("fly_commands", "help_entries"))
@@ -1369,152 +994,6 @@ def _fly_reply_preview(s: str, max_len: int = 120) -> str:
     if len(t) > max_len:
         return t[:max_len] + "..."
     return t
-
-
-def _ssh_reach_icon(reach: str) -> str:
-    r = (reach or "").lower()
-    if "alcanzable" in r and "ok" in r:
-        return "✅"
-    if "no probado" in r or "falta config" in r:
-        return "⚠️"
-    return "❌"
-
-
-def _capadonna_lake_status_lines(*, compact: bool) -> list[str]:
-    """Líneas de diagnóstico de conectividad SSH/Tailscale para /lake y /sensors."""
-    host = (os.environ.get("CAPADONNA_SSH_HOST") or "").strip()
-    user = (os.environ.get("CAPADONNA_SSH_USER") or "capadonna").strip()
-    idp = (os.environ.get("CAPADONNA_SSH_IDENTITY_FILE") or "").strip()
-    reach = "no probado (falta config)"
-    if host:
-        ssh_args: list[str] = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
-        if idp:
-            ssh_args.extend(["-i", idp])
-        ssh_args.extend([f"{user}@{host}", "true"])
-        try:
-            proc = subprocess.run(ssh_args, capture_output=True, text=True, timeout=20)
-            if proc.returncode == 0:
-                reach = "alcanzable (ssh true OK)"
-            else:
-                err = (proc.stderr or proc.stdout or "").strip()[:200]
-                reach = f"fallo rc={proc.returncode}" + (f" — {err}" if err else "")
-        except FileNotFoundError:
-            reach = "ssh no encontrado en PATH"
-        except subprocess.TimeoutExpired:
-            reach = "timeout 20s"
-        except Exception as exc:
-            reach = str(exc)[:120]
-    if compact:
-        return [
-            "🌊 Lake de datos · SSH / Tailscale",
-            f"   {'✅' if host else '⚠️'} Host configurado: {'sí' if host else 'no'}",
-            f"   {_ssh_reach_icon(reach)} Alcance SSH (rápido): {reach}",
-        ]
-    return [
-        "Lake de datos (SSH)",
-        f"- CAPADONNA_SSH_HOST: {'sí' if host else 'no'}",
-        f"- CAPADONNA_SSH_USER: {user}",
-        f"- Clave SSH (-i): {idp or '(no definida / ssh-agent)'}",
-        f"- Alcance SSH rápido: {reach}",
-    ]
-
-
-def _sensor_line_bullet(icon: str, text: str) -> str:
-    """Una línea de detalle bajo un bloque /sensors (icono + texto)."""
-    t = (text or "").strip()
-    return f"   {icon} {t}" if t else f"   {icon}"
-
-
-def _browser_sandbox_sensor_lines() -> list[str]:
-    """Líneas compactas para /sensors: Docker e imagen browser sandbox."""
-    lines: list[str] = [
-        "🌐 Browser sandbox · Playwright (`run_browser_sandbox`)",
-    ]
-    try:
-        from duckclaw.graphs.sandbox import _browser_image_name, _docker_available
-    except Exception as exc:
-        lines.append(_sensor_line_bullet("❌", f"Sandbox no importable — {exc!s}"[:120]))
-        return lines
-
-    if not _docker_available():
-        lines.append(_sensor_line_bullet("❌", "Docker no responde — run_browser_sandbox no arrancará"))
-        return lines
-
-    lines.append(_sensor_line_bullet("✅", "Docker ping OK"))
-    img = _browser_image_name()
-    env_override = bool((os.environ.get("STRIX_BROWSER_IMAGE") or "").strip())
-    label = f"{img}" + (" · STRIX_BROWSER_IMAGE" if env_override else "")
-    try:
-        import docker  # noqa: PLC0415
-
-        client = docker.from_env()
-        client.images.get(img)
-        lines.append(_sensor_line_bullet("✅", f"Imagen local · {label}"[:140]))
-    except Exception:
-        lines.append(
-            _sensor_line_bullet(
-                "⚠️",
-                f"Imagen no encontrada localmente · {label} — build/pull antes del primer uso",
-            )[:200]
-        )
-    return lines
-
-
-def execute_sensors(db: Any) -> str:
-    """/sensors: resumen DuckDB, conectividad, research y browser sandbox."""
-    blocks: list[str] = ["📡 Sensores de plataforma", "═══════════════════════", ""]
-
-    try:
-        db.query("SELECT 1")
-        blocks.append("🦆 DuckDB local")
-        blocks.append(_sensor_line_bullet("✅", "Conectado · SELECT 1 OK"))
-    except Exception as exc:
-        blocks.append("🦆 DuckDB local")
-        blocks.append(_sensor_line_bullet("❌", f"Error — {str(exc)[:100]}"))
-
-    blocks.append("")
-    try:
-        blocks.extend(_capadonna_lake_status_lines(compact=True))
-    except Exception as exc:
-        blocks.append("🌊 Lake de datos")
-        blocks.append(_sensor_line_bullet("❌", f"Error — {str(exc)[:100]}"))
-
-    blocks.append("")
-    try:
-        from duckclaw.forge.skills.research_bridge import _tavily_available
-    except Exception:
-        _tavily_available = lambda: False  # type: ignore[misc, assignment]
-
-    tav_pkg = False
-    try:
-        import tavily  # noqa: F401
-
-        tav_pkg = True
-    except ImportError:
-        pass
-    tav_key = bool((os.environ.get("TAVILY_API_KEY") or "").strip())
-    tav_ready = bool(_tavily_available())
-    blocks.append("🔎 Tavily (research)")
-    if tav_ready and tav_pkg and tav_key:
-        blocks.append(_sensor_line_bullet("✅", "Listo · paquete · TAVILY_API_KEY · bridge"))
-    elif not tav_pkg and not tav_key:
-        blocks.append(_sensor_line_bullet("⚠️", "Sin paquete tavily ni clave"))
-    else:
-        blocks.append(
-            _sensor_line_bullet(
-                "⚠️",
-                f"Parcial · paquete={'sí' if tav_pkg else 'no'} · clave={'sí' if tav_key else 'no'} · bridge={'sí' if tav_ready else 'no'}",
-            )
-        )
-
-    blocks.append("")
-    try:
-        blocks.extend(_browser_sandbox_sensor_lines())
-    except Exception as exc:
-        blocks.append("🌐 Browser sandbox · Playwright (`run_browser_sandbox`)")
-        blocks.append(_sensor_line_bullet("❌", f"Error — {str(exc)[:100]}"))
-
-    return "\n".join(blocks)
 
 
 def execute_lake_status() -> str:
@@ -1698,7 +1177,13 @@ def _dispatch_fly_command(
     if name in ("sandbox", "sandox"):
         return execute_sandbox_toggle(db, chat_id, args)
     if name in ("internet", "red", "network"):
-        return execute_internet_toggle(db, chat_id, args, tenant_id=tenant_id)
+        return execute_internet_toggle(
+            db,
+            chat_id,
+            args,
+            worker_id=entry_worker_id or "",
+            tenant_id=tenant_id,
+        )
     if name == "heartbeat":
         return execute_heartbeat(db, chat_id, args, tenant_id=tenant_id)
     if name == "audit":
@@ -1819,198 +1304,9 @@ def handle_command(
         return out
 
 
-def _execute_setup(db: Any, chat_id: Any, args: str) -> str:
-    """/setup [key=value | key=value]: formato compatible con Telegram. Sin args muestra config."""
-    if not args or not args.strip():
-        p = get_chat_state(db, chat_id, "llm_provider") or _get_global_config(db, "llm_provider")
-        m = get_chat_state(db, chat_id, "llm_model") or _get_global_config(db, "llm_model")
-        wid = get_chat_state(db, chat_id, "worker_id")
-        prompt = _get_global_config(db, "system_prompt") or ""
-        return (
-            f"Config actual:\n- llm_provider: {p or '—'}\n- llm_model: {m or '—'}\n"
-            f"- worker_id: {wid or '—'}\n- system_prompt: {prompt[:80]}...\n\n"
-            "Para cambiar: /setup llm_provider=deepseek | /setup system_prompt=..."
-        
-        )
-    for part in args.split("|"):
-        part = part.strip()
-        if "=" in part:
-            k, _, v = part.partition("=")
-            k, v = k.strip().lower(), v.strip()
-            if k in ("llm_provider", "provider"):
-                if v and v.lower() not in _PROVIDERS:
-                    return f"Provider desconocido: {v}. Válidos: {', '.join(_PROVIDERS)}"
-                set_chat_state(db, chat_id, "llm_provider", v)
-                if v.lower() == "mlx":
-                    from duckclaw.integrations.llm_providers import mlx_openai_compatible_base_url
-
-                    set_chat_state(db, chat_id, "llm_base_url", mlx_openai_compatible_base_url())
-                    mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
-                    set_chat_state(db, chat_id, "llm_model", mid)
-                else:
-                    default_model = _DEFAULT_MODEL_BY_PROVIDER.get(v.lower(), "")
-                    set_chat_state(db, chat_id, "llm_model", default_model)
-                    default_url = _DEFAULT_BASE_URL_BY_PROVIDER.get(v.lower(), "")
-                    if default_url:
-                        set_chat_state(db, chat_id, "llm_base_url", default_url)
-                    else:
-                        set_chat_state(db, chat_id, "llm_base_url", "")
-            elif k in ("llm_model", "model"):
-                set_chat_state(db, chat_id, "llm_model", v)
-            elif k in ("llm_base_url", "base_url"):
-                set_chat_state(db, chat_id, "llm_base_url", v)
-            elif k in ("system_prompt", "prompt"):
-                _set_global_config(db, "system_prompt", v)
-    return "✅ Config actualizado."
-
-
-def get_history_limit_for_chat(db: Any, chat_id: Any, default: int = 10) -> int:
-    """Devuelve el límite de historial según use_rag del chat (para /context off = menos contexto)."""
-    use_rag = get_chat_state(db, chat_id, "use_rag")
-    if use_rag == "false":
-        return 3
-    return default
-
-
 def get_worker_id_for_chat(db: Any, chat_id: Any) -> str:
     """Devuelve el worker_id asignado a este chat. Por defecto: manager (orquesta y delega a templates)."""
     return get_chat_state(db, chat_id, "worker_id") or _DEFAULT_WORKER
-
-
-def save_last_audit(db: Any, chat_id: Any, latency_ms: int, sql: str = "", run_id: str = "", tokens: Any = None) -> None:
-    """Guarda datos de la última ejecución para /audit."""
-    data = {"latency_ms": latency_ms, "sql": sql or "", "run_id": run_id or "", "tokens": tokens or ""}
-    set_chat_state(db, chat_id, "last_audit", json.dumps(data))
-
-
-_TASK_AUDIT_TABLE = "task_audit_log"
-
-
-def _ensure_task_audit_log(db: Any) -> None:
-    """Crea task_audit_log y aplica migraciones suaves (plan_title)."""
-    if _skip_runtime_ddl(db):
-        return
-    db.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {_TASK_AUDIT_TABLE} (
-            task_id VARCHAR PRIMARY KEY,
-            tenant_id VARCHAR NOT NULL,
-            worker_id VARCHAR,
-            query_prefix VARCHAR,
-            status VARCHAR NOT NULL,
-            duration_ms INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            plan_title VARCHAR
-        )
-        """
-    )
-    # Migración suave: añadir plan_title si la tabla existe sin esta columna (bases antiguas)
-    try:
-        info = db.query(f"PRAGMA table_info({_TASK_AUDIT_TABLE})")
-        rows = json.loads(info) if isinstance(info, str) else (info or [])
-        cols = {str(r.get("name") or "") for r in rows if isinstance(r, dict)}
-        if "plan_title" not in cols:
-            db.execute(f"ALTER TABLE {_TASK_AUDIT_TABLE} ADD COLUMN plan_title VARCHAR")
-    except Exception:
-        # No romper si PRAGMA/ALTER falla; la feature seguirá funcionando sin plan_title persistente.
-        pass
-
-
-def _infer_user_id_for_audit_queue(db_path: str) -> str:
-    """Alineado con validate_user_db_path: slug bajo db/private/{user}/."""
-    from pathlib import Path
-
-    parts = Path(db_path).expanduser().resolve().parts
-    if "private" in parts:
-        i = parts.index("private")
-        if i + 1 < len(parts):
-            return str(parts[i + 1])
-    return "default"
-
-
-def append_task_audit(
-    db: Any,
-    tenant_id: Any,
-    worker_id: str,
-    query_prefix: str,
-    status: str,
-    duration_ms: int,
-    plan_title: Optional[str] = None,
-) -> None:
-    """Append a task to task_audit_log for /history. plan_title es el identificador semántico para auditoría y /history."""
-    import uuid
-
-    _ensure_task_audit_log(db)
-    task_id = f"TASK-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
-    tenant_s = str(tenant_id).replace("'", "''")[:128]
-    worker_s = (worker_id or "").replace("'", "''")[:64]
-    prefix_s = (query_prefix or "")[:256].replace("'", "''")
-    status_s = (status or "SUCCESS").upper().replace("'", "''")[:32]
-    status_allowed = ("SUCCESS", "FAILED", "PROACTIVE_MESSAGE_SENT", "SECURITY_VIOLATION_ATTEMPT")
-    status_s = "SUCCESS" if status_s not in status_allowed else status_s
-    plan_title_s = (plan_title or "")[:256].replace("'", "''") if plan_title else ""
-    sql = (
-        f"""
-        INSERT INTO {_TASK_AUDIT_TABLE} (task_id, tenant_id, worker_id, query_prefix, status, duration_ms, plan_title)
-        VALUES ('{task_id}', '{tenant_s}', '{worker_s}', '{prefix_s}', '{status_s}', {int(duration_ms)}, '{plan_title_s}')
-        """
-    )
-    if _skip_runtime_ddl(db):
-        try:
-            from pathlib import Path
-
-            from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
-
-            raw_path = str(getattr(db, "_path", "") or "").strip()
-            if not raw_path or raw_path == ":memory:":
-                return
-            resolved = str(Path(raw_path).expanduser().resolve())
-            uid = _infer_user_id_for_audit_queue(resolved)
-            # El manager RO mantiene ``duckdb.connect`` al vault: db-writer no puede tomar RW
-            # hasta suspender el handle (mismo patrón que ``admin_sql`` para workers RO).
-            released_ro = False
-            try:
-                release = getattr(db, "release_file_handle_for_external_writer", None)
-                susp = getattr(db, "suspend_readonly_file_handle", None)
-                resu = getattr(db, "resume_readonly_file_handle", None)
-                if callable(release):
-                    release()
-                    released_ro = bool(callable(resu))
-                elif callable(susp) and callable(resu):
-                    susp()
-                    released_ro = True
-                write_tid = enqueue_duckdb_write_sync(
-                    db_path=resolved,
-                    query=sql.strip(),
-                    user_id=uid,
-                    tenant_id=str(tenant_id or "default").strip() or "default",
-                )
-                poll_task_status_sync(write_tid, timeout_sec=15.0)
-            finally:
-                if released_ro:
-                    try:
-                        resu2 = getattr(db, "resume_readonly_file_handle", None)
-                        if callable(resu2):
-                            resu2()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        return
-    db.execute(sql)
-
-
-def _is_simple_greeting(prefix: str) -> bool:
-    """True si el mensaje es un saludo corto (hola, hi, etc.) sin tarea real."""
-    p = (prefix or "").strip().lower()[:50]
-    if len(p) > 35:
-        return False
-    greetings = (
-        "hola", "hi", "hey", "hello", "buenas", "qué tal", "que tal",
-        "buenos días", "buenos dias", "buenas tardes", "buenas noches",
-        "ola", "saludos", "ciao", "adios", "chao",
-    )
-    return p in greetings or p.rstrip("!?.") in greetings
 
 
 _CAPABILITIES_SMALLTALK = re.compile(
@@ -2066,146 +1362,3 @@ def _is_capabilities_smalltalk(text: str) -> bool:
     ):
         return False
     return bool(_CAPABILITIES_SMALLTALK.match(raw) or _CAPABILITIES_EXAMPLE_SMALLTALK.match(raw))
-
-
-def _is_complex_task(row: dict) -> bool:
-    """True si la tarea usó herramientas (tool use) o no es un saludo simple."""
-    prefix = (row.get("query_prefix") or "").strip()
-    if _is_simple_greeting(prefix):
-        return False
-    try:
-        dur_ms = int(row.get("duration_ms") or 0)
-    except (TypeError, ValueError):
-        dur_ms = 0
-    return dur_ms >= 1500 or len(prefix) > 20
-
-
-def execute_history(db: Any, chat_id: Any, args: str) -> str:
-    """/history [n]: historial de tareas complejas (tool use). Saludos simples (hola) se muestran como máximo uno."""
-    tenant_s = str(chat_id).replace("'", "''")[:128]
-    try:
-        n = int((args or "5").strip())
-        n = max(1, min(n, 20))
-    except ValueError:
-        n = 5
-    _ensure_task_audit_log(db)
-    try:
-        r = db.query(
-            f"""
-            SELECT task_id, query_prefix, status, duration_ms, created_at, worker_id, plan_title
-            FROM {_TASK_AUDIT_TABLE}
-            WHERE tenant_id = '{tenant_s}'
-            ORDER BY created_at DESC
-            LIMIT 100
-            """
-        )
-        rows = json.loads(r) if isinstance(r, str) else (r or [])
-    except Exception as e:
-        return f"Error al cargar historial: {e}."
-
-    if not rows:
-        return "📋 Sin tareas registradas."
-
-    # Filtrar: tareas complejas con título de plan + como máximo 1 saludo simple
-    complex_rows = []
-    one_greeting = None
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        plan_title_raw = (row.get("plan_title") or "").strip()
-        if _is_complex_task(row) and plan_title_raw:
-            complex_rows.append(row)
-        elif one_greeting is None and _is_simple_greeting(row.get("query_prefix") or ""):
-            one_greeting = row
-    filtered = complex_rows[:n]
-    if one_greeting is not None and len(filtered) < n:
-        filtered.append(one_greeting)
-
-    if not filtered:
-        return "📋 Sin tareas complejas."
-
-    # Evitar duplicados: si hay varias filas con mismo worker/status/duración y
-    # solo algunas tienen plan_title explícito, preferir las que sí lo tienen.
-    deduped = []
-    for idx, row in enumerate(filtered):
-        if not isinstance(row, dict):
-            continue
-        raw_plan = (row.get("plan_title") or "").strip()
-        if not raw_plan:
-            wid = (row.get("worker_id") or "").strip()
-            status = (row.get("status") or "UNKNOWN").upper()
-            try:
-                dur_ms = int(row.get("duration_ms") or 0)
-            except (TypeError, ValueError):
-                dur_ms = 0
-            has_better = False
-            for j, other in enumerate(filtered):
-                if j == idx or not isinstance(other, dict):
-                    continue
-                other_plan = (other.get("plan_title") or "").strip()
-                if not other_plan:
-                    continue
-                wid2 = (other.get("worker_id") or "").strip()
-                status2 = (other.get("status") or "UNKNOWN").upper()
-                try:
-                    dur2 = int(other.get("duration_ms") or 0)
-                except (TypeError, ValueError):
-                    dur2 = 0
-                if wid2 == wid and status2 == status and dur2 == dur_ms:
-                    has_better = True
-                    break
-            if has_better:
-                continue
-        deduped.append(row)
-
-    if not deduped:
-        return "📋 Sin tareas complejas."
-
-    lines = [f"📋 Últimas {len(deduped)}"]
-    for i, row in enumerate(deduped, 1):
-        if not isinstance(row, dict):
-            continue
-        prefix = (row.get("query_prefix") or "").strip()[:80]
-        # Título del plan (guardado por el Manager): se muestra después del subagente
-        plan_title = (row.get("plan_title") or "").strip()
-        if not plan_title:
-            # Fallback retrocompatible: derivar un pseudo-título desde query_prefix
-            if prefix:
-                words = prefix.split()
-                plan_title = " ".join(words[:5])
-            else:
-                plan_title = "Interacción del Usuario"
-        status = (row.get("status") or "UNKNOWN").upper()
-        wid = (row.get("worker_id") or "").strip()
-        try:
-            dur_ms = int(row.get("duration_ms") or 0)
-        except (TypeError, ValueError):
-            dur_ms = 0
-        dur_s = f"{dur_ms / 1000:.1f}s"
-        # Formato: número. [subagente] Título del plan · ⏱️ duración
-        worker_part = f"[{wid}] " if wid else ""
-        title_part = plan_title if plan_title else ""
-        lines.append(f"{i}. {worker_part}{title_part} · ⏱️ {dur_s}")
-
-    success_rows = [r for r in filtered if isinstance(r, dict) and (r.get("status") or "").upper() == "SUCCESS"]
-    def _dur(r):
-        try:
-            return int(r.get("duration_ms") or 0)
-        except (TypeError, ValueError):
-            return 0
-    avg_ms = sum(_dur(r) for r in success_rows) / len(success_rows) if success_rows else 0
-    try:
-        r24 = db.query(
-            f"""
-            SELECT COUNT(*) as cnt FROM {_TASK_AUDIT_TABLE}
-            WHERE tenant_id = '{tenant_s}' AND status = 'FAILED'
-            AND created_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
-            """
-        )
-        rows24 = json.loads(r24) if isinstance(r24, str) else (r24 or [])
-        failed_24h = rows24[0].get("cnt", 0) if rows24 else 0
-    except Exception:
-        failed_24h = 0
-    lines.append(f"— avg {avg_ms/1000:.1f}s · fallidas 24h: {failed_24h}")
-
-    return "\n".join(lines)

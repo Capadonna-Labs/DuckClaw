@@ -59,32 +59,22 @@ def test_list_vault_options_for_user_scoped(tmp_path: Path, monkeypatch: pytest.
     assert private_ids == {"a", "b"}
 
 
-def test_load_manifest_parses_vault_binding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from duckclaw.forge import WORKERS_TEMPLATES_DIR
-    from duckclaw.workers.manifest import load_manifest
+def test_build_spec_parses_vault_binding(tmp_path: Path) -> None:
+    from duckclaw.workers.manifest import build_spec_from_manifest
 
-    worker_dir = Path(WORKERS_TEMPLATES_DIR) / "_test_vault_bind"
-    if worker_dir.is_dir():
-        import shutil
-
-        shutil.rmtree(worker_dir)
-    worker_dir.mkdir(parents=True)
-    (worker_dir / "manifest.yaml").write_text(
-        """
-name: Test
-id: test_vault
-schema_name: main
-forge_context:
-  vault_binding:
-    scope: private
-    vault_id: finanzdb1
-""".strip(),
-        encoding="utf-8",
+    spec = build_spec_from_manifest(
+        {
+            "name": "Test",
+            "id": "test_vault",
+            "schema_name": "main",
+            "forge_context": {
+                "vault_binding": {
+                    "scope": "private",
+                    "vault_id": "private_vault_1",
+                }
+            },
+        },
+        "_test_vault_bind",
+        tmp_path,
     )
-    try:
-        spec = load_manifest("_test_vault_bind")
-        assert spec.forge_vault_binding == {"scope": "private", "vault_id": "finanzdb1"}
-    finally:
-        import shutil
-
-        shutil.rmtree(worker_dir, ignore_errors=True)
+    assert spec.forge_vault_binding == {"scope": "private", "vault_id": "private_vault_1"}

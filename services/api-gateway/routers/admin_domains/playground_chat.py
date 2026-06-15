@@ -533,33 +533,28 @@ def _resolved_llm_for_playground(
     except Exception:
         return {**env, "scope": "env_bootstrap", "db_lock_error": True}
     try:
-        chat_provider = (
-            resolve_session_runtime_setting(
-                db,
-                cid,
-                "llm_provider",
-                tenant_id=tenant_id,
-            )
-            or ""
-        ).strip()
-        chat_model = (
-            resolve_session_runtime_setting(
-                db,
-                cid,
-                "llm_model",
-                tenant_id=tenant_id,
-            )
-            or ""
-        ).strip()
-        chat_base_url = (
-            resolve_session_runtime_setting(
-                db,
-                cid,
-                "llm_base_url",
-                tenant_id=tenant_id,
-            )
-            or ""
-        ).strip()
+        tenant_candidates = [str(tenant_id or "default").strip() or "default"]
+        if "default" not in tenant_candidates:
+            tenant_candidates.append("default")
+
+        def _chat_setting(key: str) -> str:
+            for candidate in tenant_candidates:
+                value = (
+                    resolve_session_runtime_setting(
+                        db,
+                        cid,
+                        key,
+                        tenant_id=candidate,
+                    )
+                    or ""
+                ).strip()
+                if value:
+                    return value
+            return ""
+
+        chat_provider = _chat_setting("llm_provider")
+        chat_model = _chat_setting("llm_model")
+        chat_base_url = _chat_setting("llm_base_url")
     except Exception:
         chat_provider = chat_model = chat_base_url = ""
     finally:
@@ -1163,21 +1158,36 @@ async def playground_chat(
     msg = (body.message or "").strip()
     if not msg and not body.images:
         raise _problem(400, "message o images requeridos", "")
+    eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")
     if body.images:
-        from core.vlm_ingest import enrich_message_with_admin_images
+        from core.comfyui_inbound import ingest_admin_visual_edit_inbound, should_route_comfyui_edit
+        from core.vlm_ingest import decode_admin_image_b64, enrich_message_with_admin_images
 
-        try:
-            msg = await enrich_message_with_admin_images(
-                msg,
-                [img.model_dump() for img in body.images],
-            )
-        except ValueError as exc:
-            raise _problem(400, str(exc), "images") from exc
-        except Exception as exc:
-            raise _problem(502, "Error procesando imagen (VLM)", str(exc)) from exc
+        if should_route_comfyui_edit(has_visual=True, caption=msg):
+            first_image = body.images[0]
+            try:
+                msg = ingest_admin_visual_edit_inbound(
+                    image_bytes=decode_admin_image_b64(first_image.data_base64),
+                    caption=msg,
+                    tenant_id=eff_tenant,
+                    mime_type=first_image.mime_type,
+                )
+            except ValueError as exc:
+                raise _problem(400, str(exc), "images") from exc
+            except Exception as exc:
+                raise _problem(502, "Error preparando imagen para edición", str(exc)) from exc
+        else:
+            try:
+                msg = await enrich_message_with_admin_images(
+                    msg,
+                    [img.model_dump() for img in body.images],
+                )
+            except ValueError as exc:
+                raise _problem(400, str(exc), "images") from exc
+            except Exception as exc:
+                raise _problem(502, "Error procesando imagen (VLM)", str(exc)) from exc
     if not msg:
         raise _problem(400, "message vacío tras VLM", body.message)
-    eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")
     team_ctx = _playground_team_context(
         telegram_user_id=profile.get("telegram_user_id") or body.telegram_user_id,
         tenant_id=eff_tenant,

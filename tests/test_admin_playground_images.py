@@ -77,8 +77,14 @@ def test_playground_chat_with_images_routes_edit_inbound(
         return "[COMFYUI_EDIT source_image_path=/tmp/x.jpg]\nedit"
 
     from core import comfyui_inbound as ci
+    from core import vlm_ingest as vlm
 
     monkeypatch.setattr(ci, "ingest_admin_visual_edit_inbound", _fake_ingest)
+
+    async def _fake_enrich(_message: str, _images):
+        raise AssertionError("Comfy edit route should bypass VLM enrichment")
+
+    monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _fake_enrich)
 
     import main as gateway_main
     import routers.admin as admin_router
@@ -96,6 +102,7 @@ def test_playground_chat_with_images_routes_edit_inbound(
         lambda **_: _mock_playground_team(workers=["default"]),
     )
     monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+    monkeypatch.setenv("DUCKCLAW_COMFYUI_INBOUND_EDIT", "1")
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1")
 
     r = admin_client.post(

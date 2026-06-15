@@ -47,6 +47,7 @@ def upsert_session_runtime_setting(
     value: str,
     *,
     tenant_id: str = "default",
+    value_kind: str = "string",
     updated_by: str = "system",
 ) -> None:
     """Persist one per-chat runtime setting in the DB-first control plane."""
@@ -59,7 +60,7 @@ def upsert_session_runtime_setting(
         domain=RUNTIME_SESSION_DOMAIN,
         key=key,
         value_text=str(value)[:8192],
-        value_kind="boolean",
+        value_kind=value_kind,
         updated_by=updated_by,
     )
 

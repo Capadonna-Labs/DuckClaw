@@ -7,7 +7,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from duckclaw.graphs.on_the_fly_commands import set_chat_state
+from duckclaw.admin_runtime_settings import upsert_runtime_setting
 
 
 def _init_db(path: Path) -> None:
@@ -15,6 +15,22 @@ def _init_db(path: Path) -> None:
     con = duckdb.connect(str(path), read_only=False)
     con.execute("SELECT 1")
     con.close()
+
+
+def _set_llm_triplet(db, chat_id: str, provider: str, model: str, base_url: str) -> None:
+    for key, value in {
+        "llm_provider": provider,
+        "llm_model": model,
+        "llm_base_url": base_url,
+    }.items():
+        upsert_runtime_setting(
+            db,
+            tenant_id="default",
+            actor_email=f"chat:{chat_id}",
+            domain="runtime.session",
+            key=key,
+            value_text=value,
+        )
 
 
 def test_hub_llm_override_wins_over_vault_separate(tmp_path: Path) -> None:
@@ -30,13 +46,14 @@ def test_hub_llm_override_wins_over_vault_separate(tmp_path: Path) -> None:
     hub_db = DuckClaw(str(hub), read_only=False, engine="python")
     vault_db = DuckClaw(str(vault), read_only=False, engine="python")
     try:
-        set_chat_state(hub_db, chat_id, "llm_provider", "deepseek")
-        set_chat_state(hub_db, chat_id, "llm_model", "deepseek-chat")
-        set_chat_state(hub_db, chat_id, "llm_base_url", "https://api.deepseek.com/v1")
-
-        set_chat_state(vault_db, chat_id, "llm_provider", "openrouter")
-        set_chat_state(vault_db, chat_id, "llm_model", "anthropic/claude-sonnet-4-5")
-        set_chat_state(vault_db, chat_id, "llm_base_url", "https://openrouter.ai/api/v1")
+        _set_llm_triplet(hub_db, chat_id, "deepseek", "deepseek-chat", "https://api.deepseek.com/v1")
+        _set_llm_triplet(
+            vault_db,
+            chat_id,
+            "openrouter",
+            "anthropic/claude-sonnet-4-5",
+            "https://openrouter.ai/api/v1",
+        )
     finally:
         hub_db.close()
         vault_db.close()
@@ -70,9 +87,13 @@ def test_vault_llm_used_when_hub_has_no_chat_override(tmp_path: Path) -> None:
 
     vault_db = DuckClaw(str(vault), read_only=False, engine="python")
     try:
-        set_chat_state(vault_db, chat_id, "llm_provider", "groq")
-        set_chat_state(vault_db, chat_id, "llm_model", "llama-3.3-70b-versatile")
-        set_chat_state(vault_db, chat_id, "llm_base_url", "https://api.groq.com/openai/v1")
+        _set_llm_triplet(
+            vault_db,
+            chat_id,
+            "groq",
+            "llama-3.3-70b-versatile",
+            "https://api.groq.com/openai/v1",
+        )
     finally:
         vault_db.close()
 

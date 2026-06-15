@@ -224,6 +224,12 @@ try:
     configure_heartbeat_runtime_db_provider(get_db)
 except Exception:
     pass
+try:
+    from duckclaw.workers.provider_input_budget import configure_provider_budget_runtime_db_provider
+
+    configure_provider_budget_runtime_db_provider(get_db)
+except Exception:
+    pass
 
 
 def _sandbox_session_cleanup(chat_id: str) -> None:

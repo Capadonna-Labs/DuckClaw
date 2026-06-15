@@ -1,15 +1,31 @@
 from __future__ import annotations
 
+import duckdb
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from duckclaw.workers.provider_input_budget import (
     apply_provider_input_budget,
+    configure_provider_budget_runtime_db_provider,
     estimate_tokens_from_messages,
+    groq_max_estimated_input_tokens,
+    groq_tool_message_max_chars,
+    mlx_max_estimated_input_tokens,
+    mlx_tool_message_max_chars,
     normalized_context_pruning,
     split_for_pruning,
 )
+
+
+class _DuckDbAdapter:
+    def __init__(self, con: duckdb.DuckDBPyConnection) -> None:
+        self._con = con
+
+    def execute(self, sql: str, params=None):
+        if params is not None:
+            return self._con.execute(sql, params)
+        return self._con.execute(sql)
 
 
 def test_normalized_context_pruning_clamps_config_values() -> None:
@@ -57,6 +73,75 @@ def test_provider_input_budget_uses_tool_truncation_and_preserves_recent_context
     tool_messages = [message for message in out if isinstance(message, ToolMessage)]
     assert tool_messages
     assert str(tool_messages[0].content).endswith("\n…[truncado por tamaño]")
+
+
+def test_provider_budget_runtime_settings_override_legacy_env(monkeypatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_GROQ_MAX_INPUT_TOKENS", "9000")
+    monkeypatch.setenv("DUCKCLAW_GROQ_TOOL_MESSAGE_MAX_CHARS", "9000")
+    monkeypatch.setenv("DUCKCLAW_MLX_MAX_INPUT_TOKENS", "9000")
+    monkeypatch.setenv("DUCKCLAW_MLX_TOOL_MESSAGE_MAX_CHARS", "9000")
+
+    from duckclaw.admin_runtime_settings import upsert_runtime_setting
+
+    con = duckdb.connect(":memory:")
+    try:
+        db = _DuckDbAdapter(con)
+        upsert_runtime_setting(
+            db,
+            tenant_id="global",
+            actor_email="",
+            domain="runtime.provider_budget",
+            key="groq.max_input_tokens",
+            value_text="1800",
+            value_kind="integer",
+            updated_by="test",
+        )
+        upsert_runtime_setting(
+            db,
+            tenant_id="global",
+            actor_email="",
+            domain="runtime.provider_budget",
+            key="groq.tool_message_max_chars",
+            value_text="450",
+            value_kind="integer",
+            updated_by="test",
+        )
+        upsert_runtime_setting(
+            db,
+            tenant_id="global",
+            actor_email="",
+            domain="runtime.provider_budget",
+            key="mlx.max_input_tokens",
+            value_text="2600",
+            value_kind="integer",
+            updated_by="test",
+        )
+        upsert_runtime_setting(
+            db,
+            tenant_id="global",
+            actor_email="",
+            domain="runtime.provider_budget",
+            key="mlx.tool_message_max_chars",
+            value_text="650",
+            value_kind="integer",
+            updated_by="test",
+        )
+        configure_provider_budget_runtime_db_provider(lambda: db)
+
+        assert groq_max_estimated_input_tokens() == 1800
+        assert groq_tool_message_max_chars() == 450
+        assert mlx_max_estimated_input_tokens() == 2600
+        assert mlx_tool_message_max_chars() == 650
+    finally:
+        configure_provider_budget_runtime_db_provider(None)
+        con.close()
+
+
+def test_provider_budget_uses_legacy_env_only_without_runtime_setting(monkeypatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_GROQ_MAX_INPUT_TOKENS", "1700")
+    configure_provider_budget_runtime_db_provider(None)
+
+    assert groq_max_estimated_input_tokens() == 1700
 
 
 def test_split_for_pruning_keeps_ai_tool_call_with_following_tool_result() -> None:

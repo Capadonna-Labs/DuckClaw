@@ -1,9 +1,68 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Callable
 
 from duckclaw.workers.tool_output_truncation import truncate_tool_messages_for_llm
+
+PROVIDER_BUDGET_RUNTIME_DOMAIN = "runtime.provider_budget"
+_provider_budget_runtime_db_provider: Callable[[], Any] | None = None
+
+
+def configure_provider_budget_runtime_db_provider(provider: Callable[[], Any] | None) -> None:
+    """Inject DB provider for runtime provider-budget policy lookup."""
+
+    global _provider_budget_runtime_db_provider
+    _provider_budget_runtime_db_provider = provider
+
+
+def _provider_budget_runtime_db(db: Any = None) -> Any:
+    if db is not None:
+        return db
+    provider = _provider_budget_runtime_db_provider
+    if provider is None:
+        return None
+    try:
+        return provider()
+    except Exception:
+        return None
+
+
+def _runtime_budget_int(
+    key: str,
+    *,
+    env_key: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+    db: Any = None,
+) -> int:
+    runtime_db = _provider_budget_runtime_db(db)
+    if runtime_db is not None:
+        try:
+            from duckclaw.admin_runtime_settings import resolve_runtime_setting
+
+            resolved = resolve_runtime_setting(
+                runtime_db,
+                tenant_id="global",
+                actor_email="",
+                domain=PROVIDER_BUDGET_RUNTIME_DOMAIN,
+                key=key,
+                default="",
+            )
+            raw_db = str(resolved.get("value") or "").strip()
+            if raw_db:
+                return max(minimum, min(int(raw_db), maximum))
+        except Exception:
+            pass
+
+    raw = (os.environ.get(env_key) or "").strip()
+    if raw:
+        try:
+            return max(minimum, min(int(raw), maximum))
+        except ValueError:
+            pass
+    return default
 
 
 def normalized_context_pruning(spec: Any) -> dict[str, Any]:
@@ -33,30 +92,32 @@ def estimate_tokens_from_messages(messages: list[Any]) -> int:
     return max(0, total // 4)
 
 
-def groq_max_estimated_input_tokens() -> int:
+def groq_max_estimated_input_tokens(*, db: Any = None) -> int:
     """
     Estimated chars/4 cap for serialized messages sent to Groq.
 
     Groq's on-demand tiers count tool schemas too, so this cap stays below
     the advertised request limit to avoid 413 responses.
     """
-    raw = (os.environ.get("DUCKCLAW_GROQ_MAX_INPUT_TOKENS") or "").strip()
-    if raw:
-        try:
-            return max(1500, min(int(raw), 11500))
-        except ValueError:
-            pass
-    return 5000
+    return _runtime_budget_int(
+        "groq.max_input_tokens",
+        env_key="DUCKCLAW_GROQ_MAX_INPUT_TOKENS",
+        default=5000,
+        minimum=1500,
+        maximum=11500,
+        db=db,
+    )
 
 
-def groq_tool_message_max_chars() -> int:
-    raw = (os.environ.get("DUCKCLAW_GROQ_TOOL_MESSAGE_MAX_CHARS") or "").strip()
-    if raw:
-        try:
-            return max(400, min(int(raw), 100_000))
-        except ValueError:
-            pass
-    return 3500
+def groq_tool_message_max_chars(*, db: Any = None) -> int:
+    return _runtime_budget_int(
+        "groq.tool_message_max_chars",
+        env_key="DUCKCLAW_GROQ_TOOL_MESSAGE_MAX_CHARS",
+        default=3500,
+        minimum=400,
+        maximum=100_000,
+        db=db,
+    )
 
 
 def trim_messages_to_estimated_cap(
@@ -111,30 +172,32 @@ def apply_groq_message_budget(messages: list[Any], *, provider: str) -> list[Any
     )
 
 
-def mlx_max_estimated_input_tokens() -> int:
+def mlx_max_estimated_input_tokens(*, db: Any = None) -> int:
     """
     Estimated input cap for local MLX/Metal VRAM.
 
     Very large prompts can OOM mlx_lm; logs usually mention insufficient
     Metal memory.
     """
-    raw = (os.environ.get("DUCKCLAW_MLX_MAX_INPUT_TOKENS") or "").strip()
-    if raw:
-        try:
-            return max(2000, min(int(raw), 12000))
-        except ValueError:
-            pass
-    return 7000
+    return _runtime_budget_int(
+        "mlx.max_input_tokens",
+        env_key="DUCKCLAW_MLX_MAX_INPUT_TOKENS",
+        default=7000,
+        minimum=2000,
+        maximum=12000,
+        db=db,
+    )
 
 
-def mlx_tool_message_max_chars() -> int:
-    raw = (os.environ.get("DUCKCLAW_MLX_TOOL_MESSAGE_MAX_CHARS") or "").strip()
-    if raw:
-        try:
-            return max(400, min(int(raw), 80_000))
-        except ValueError:
-            pass
-    return 5000
+def mlx_tool_message_max_chars(*, db: Any = None) -> int:
+    return _runtime_budget_int(
+        "mlx.tool_message_max_chars",
+        env_key="DUCKCLAW_MLX_TOOL_MESSAGE_MAX_CHARS",
+        default=5000,
+        minimum=400,
+        maximum=80_000,
+        db=db,
+    )
 
 
 def apply_mlx_message_budget(messages: list[Any], *, provider: str) -> list[Any]:
@@ -186,6 +249,7 @@ __all__ = [
     "apply_groq_message_budget",
     "apply_mlx_message_budget",
     "apply_provider_input_budget",
+    "configure_provider_budget_runtime_db_provider",
     "estimate_tokens_from_messages",
     "groq_max_estimated_input_tokens",
     "groq_tool_message_max_chars",

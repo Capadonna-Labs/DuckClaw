@@ -49,6 +49,7 @@ def test_goals_registry_does_not_fallback_to_filesystem_manifests() -> None:
     leaked = sorted(marker for marker in forbidden if marker in source)
 
     assert leaked == []
+    assert "duckclaw.worker_quality_signals" in source
 
 
 def test_on_the_fly_goals_imports_remain_compatible() -> None:

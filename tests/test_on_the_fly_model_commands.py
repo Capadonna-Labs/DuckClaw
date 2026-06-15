@@ -41,7 +41,7 @@ def test_execute_models_gemini_lists_models(monkeypatch) -> None:
             )
 
     monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
-    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.urllib.request.urlopen", lambda *_a, **_k: _Resp())
+    monkeypatch.setattr("duckclaw.commands.model_setup.urllib.request.urlopen", lambda *_a, **_k: _Resp())
     db = duckclaw.DuckClaw(":memory:")
     out = execute_models(db, "chat1", "provider=gemini")
     assert "Modelos Gemini disponibles (2)" in out

@@ -33,41 +33,12 @@ def _normalize_belief_key(key: str) -> str:
 
 
 def _get_goals_registry_fallback_first() -> Optional[Any]:
-    """Primer template con homeostasis (orden del FS); solo como fallback."""
-    try:
-        from duckclaw.forge.homeostasis.belief_registry import BeliefRegistry
-        from duckclaw.workers.factory import list_workers
-        from duckclaw.workers.manifest import load_manifest
-
-        for wid in list_workers():
-            try:
-                spec = load_manifest(wid)
-                config = getattr(spec, "homeostasis_config", None) or {}
-                registry = BeliefRegistry.from_config(config)
-                if registry.beliefs:
-                    return registry
-            except Exception:
-                continue
-    except Exception:
-        pass
+    """Compatibility hook: goals registry must not fallback to filesystem manifests."""
     return None
 
 
 def _get_goals_registry_for_chat(db: Any, chat_id: Any) -> Optional[Any]:
-    """Registro homeostasis del worker activo del chat; fallback al primer template con YAML."""
-    from duckclaw.forge.homeostasis.belief_registry import BeliefRegistry
-    from duckclaw.workers.manifest import load_manifest
-
-    wid = (get_chat_state(db, chat_id, "worker_id") or "").strip()
-    if wid and wid.lower() != "manager":
-        try:
-            spec = load_manifest(wid)
-            config = getattr(spec, "homeostasis_config", None) or {}
-            registry = BeliefRegistry.from_config(config)
-            if registry.beliefs:
-                return registry
-        except Exception:
-            pass
+    """Return no implicit registry until a typed DB-first owner exists."""
     return _get_goals_registry_fallback_first()
 
 
@@ -196,7 +167,7 @@ def _format_homeostasis_manifest_listing(
     *,
     registry: Any = None,
 ) -> str:
-    from duckclaw.forge.homeostasis.surprise import compute_surprise
+    from duckclaw.homeostasis.surprise import compute_surprise
 
     lines = ["Manifiesto homeostasis", ""]
     reg = registry if registry is not None else _get_goals_registry_for_chat(db, chat_id)

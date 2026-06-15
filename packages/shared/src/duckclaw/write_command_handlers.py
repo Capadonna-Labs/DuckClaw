@@ -43,11 +43,13 @@ def dispatch_command(conn: Any, payload: dict) -> None:
     handlers = {
         "upsert_worker": _apply_upsert_worker,
         "deactivate_worker": _apply_deactivate_worker,
+        "upsert_worker_capability": _apply_upsert_worker_capability,
         "create_project": _apply_create_project,
         "add_project_member": _apply_add_project_member,
         "assign_agent_to_project": _apply_assign_agent_to_project,
         "upsert_runtime_setting": _apply_upsert_runtime_setting,
         "upsert_agent_config_entries": _apply_upsert_agent_config_entries,
+        "append_task_audit": _apply_append_task_audit,
         "upsert_console_user": _apply_upsert_console_user,
         "deactivate_console_user": _apply_deactivate_console_user,
         "upsert_authorized_user": _apply_upsert_authorized_user,
@@ -177,6 +179,110 @@ def _apply_deactivate_worker(conn: Any, payload: dict) -> None:
         "WHERE worker_id = ? AND tenant_id = ?",
         [worker_id, tenant_id],
     )
+
+
+def _stable_capability_id(name: str) -> str:
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()
+    return f"cap_{digest[:24]}"
+
+
+def _normalize_capability_token(raw: Any, *, field: str, max_len: int = 128) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        raise ValueError(f"{field} required")
+    if len(value) > max_len:
+        raise ValueError(f"{field} too long")
+    return value
+
+
+def _json_payload(raw: Any, *, max_len: int = 8192) -> str:
+    value = json.dumps(raw if isinstance(raw, dict) else {}, ensure_ascii=False, default=str)
+    if len(value) > max_len:
+        raise ValueError("JSON payload too large")
+    return value
+
+
+def _apply_upsert_worker_capability(conn: Any, payload: dict) -> None:
+    tenant_id = str(payload.get("tenant_id") or "default").strip() or "default"
+    worker_id = _normalize_capability_token(payload.get("worker_id"), field="worker_id")
+    capability_name = _normalize_capability_token(payload.get("capability_name"), field="capability_name")
+    kind = _normalize_capability_token(payload.get("kind") or "runtime_policy", field="kind", max_len=64)
+    provider = _normalize_capability_token(payload.get("provider") or "duckclaw", field="provider")
+    permission = _normalize_capability_token(payload.get("permission") or "use", field="permission", max_len=32)
+    description = str(payload.get("description") or "").strip()[:1024]
+    risk_level = str(payload.get("risk_level") or "low").strip()[:32] or "low"
+    requires_secret = bool(payload.get("requires_secret", False))
+    requires_network = bool(payload.get("requires_network", False))
+    schema_json = _json_payload(payload.get("capability_schema") or payload.get("schema"))
+    config_json = _json_payload(payload.get("config"))
+    policy_json = _json_payload(payload.get("policy"))
+
+    worker_uid = _resolve_worker_uid(conn, worker_id, tenant_id)
+    if not worker_uid:
+        raise ValueError(f"Worker not found: {worker_id}")
+
+    existing_capability = conn.execute(
+        "SELECT capability_id FROM main.admin_capabilities WHERE name = ?",
+        [capability_name],
+    ).fetchone()
+    capability_id = str(existing_capability[0]) if existing_capability else _stable_capability_id(capability_name)
+    if existing_capability:
+        conn.execute(
+            "UPDATE main.admin_capabilities "
+            "SET kind = ?, provider = ?, description = ?, schema_json = ?, "
+            "risk_level = ?, requires_secret = ?, requires_network = ?, active = true, "
+            "updated_at = CURRENT_TIMESTAMP "
+            "WHERE capability_id = ?",
+            [
+                kind,
+                provider,
+                description,
+                schema_json,
+                risk_level,
+                requires_secret,
+                requires_network,
+                capability_id,
+            ],
+        )
+    else:
+        conn.execute(
+            "INSERT INTO main.admin_capabilities "
+            "(capability_id, name, kind, provider, description, schema_json, "
+            "risk_level, requires_secret, requires_network, active) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true)",
+            [
+                capability_id,
+                capability_name,
+                kind,
+                provider,
+                description,
+                schema_json,
+                risk_level,
+                requires_secret,
+                requires_network,
+            ],
+        )
+
+    existing_grant = conn.execute(
+        "SELECT capability_id FROM main.admin_worker_capabilities "
+        "WHERE worker_uid = ? AND capability_id = ?",
+        [worker_uid, capability_id],
+    ).fetchone()
+    if existing_grant:
+        conn.execute(
+            "UPDATE main.admin_worker_capabilities "
+            "SET permission = ?, config_json = ?, policy_json = ?, enabled = true, "
+            "updated_at = CURRENT_TIMESTAMP "
+            "WHERE worker_uid = ? AND capability_id = ?",
+            [permission, config_json, policy_json, worker_uid, capability_id],
+        )
+    else:
+        conn.execute(
+            "INSERT INTO main.admin_worker_capabilities "
+            "(worker_uid, capability_id, permission, config_json, policy_json, enabled) "
+            "VALUES (?, ?, ?, ?, ?, true)",
+            [worker_uid, capability_id, permission, config_json, policy_json],
+        )
 
 
 def _apply_create_project(conn: Any, payload: dict) -> None:
@@ -364,6 +470,56 @@ def _apply_upsert_agent_config_entries(conn: Any, payload: dict) -> None:
             """,
             [key, value],
         )
+
+
+_TASK_AUDIT_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS main.task_audit_log (
+    task_id VARCHAR PRIMARY KEY,
+    tenant_id VARCHAR NOT NULL,
+    worker_id VARCHAR,
+    query_prefix VARCHAR,
+    status VARCHAR NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    plan_title VARCHAR
+)
+"""
+
+
+def _ensure_task_audit_log_table(conn: Any) -> None:
+    conn.execute(_TASK_AUDIT_TABLE_DDL)
+    try:
+        conn.execute("ALTER TABLE main.task_audit_log ADD COLUMN plan_title VARCHAR")
+    except Exception:
+        pass
+
+
+def _normalize_task_audit_status(raw: Any) -> str:
+    status = str(raw or "SUCCESS").strip().upper()
+    allowed = {"SUCCESS", "FAILED", "PROACTIVE_MESSAGE_SENT", "SECURITY_VIOLATION_ATTEMPT"}
+    return status if status in allowed else "SUCCESS"
+
+
+def _apply_append_task_audit(conn: Any, payload: dict) -> None:
+    _ensure_task_audit_log_table(conn)
+    audit_task_id = str(payload.get("audit_task_id") or payload.get("task_id") or "").strip()
+    if not audit_task_id:
+        raise ValueError("audit_task_id required")
+    tenant_id = str(payload.get("tenant_id") or "default").strip()[:128] or "default"
+    worker_id = str(payload.get("worker_id") or "").strip()[:64]
+    query_prefix = str(payload.get("query_prefix") or "")[:256]
+    status = _normalize_task_audit_status(payload.get("status"))
+    duration_ms = max(0, int(payload.get("duration_ms") or 0))
+    plan_title = str(payload.get("plan_title") or "")[:256]
+    conn.execute(
+        """
+        INSERT INTO main.task_audit_log
+        (task_id, tenant_id, worker_id, query_prefix, status, duration_ms, plan_title)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (task_id) DO NOTHING
+        """,
+        [audit_task_id, tenant_id, worker_id, query_prefix, status, duration_ms, plan_title],
+    )
 
 
 def _apply_upsert_console_user(conn: Any, payload: dict) -> None:

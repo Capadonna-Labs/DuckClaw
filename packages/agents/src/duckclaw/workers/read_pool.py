@@ -232,12 +232,15 @@ def validate_worker_read_sql(spec: WorkerSpec, query: str) -> Optional[str]:
     err = _enforce_allowed_tables_error(spec, upper)
     if err:
         return err
-    _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
-    if _lid == "bi_analyst" and re.search(r"\bSELECT\s+\*", upper) and "LIMIT" not in upper:
+    if (
+        _worker_has_runtime_capability(spec, "bounded_select_star_read")
+        and re.search(r"\bSELECT\s+\*", upper)
+        and "LIMIT" not in upper
+    ):
         return json.dumps(
             {
                 "error": (
-                    "SELECT * sin LIMIT no está permitido para tablas analíticas. "
+                    "SELECT * sin LIMIT no está permitido por la policy de lectura acotada. "
                     "Usa columnas explícitas, agregaciones o añade LIMIT."
                 )
             }

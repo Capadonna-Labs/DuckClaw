@@ -57,6 +57,23 @@ class TestWriteCommands:
         assert raw["command_type"] == "upsert_worker"
         assert raw["worker_id"] == "test-w"
 
+    def test_upsert_worker_capability_command_roundtrip(self) -> None:
+        from duckclaw.write_commands import UpsertWorkerCapabilityCommand
+
+        cmd = UpsertWorkerCapabilityCommand(
+            worker_id="analytics-reader",
+            capability_name="bounded_select_star_read",
+            actor_email="test@d.local",
+            policy={"reason": "protect unbounded table reads"},
+        )
+        raw = json.loads(cmd.to_redis_payload())
+
+        assert raw["command_type"] == "upsert_worker_capability"
+        assert raw["worker_id"] == "analytics-reader"
+        assert raw["capability_name"] == "bounded_select_star_read"
+        assert raw["kind"] == "runtime_policy"
+        assert raw["policy"] == {"reason": "protect unbounded table reads"}
+
     def test_create_project_command_roundtrip(self) -> None:
         from duckclaw.write_commands import CreateProjectCommand
 
@@ -930,6 +947,48 @@ class TestCommandHandlers:
         ).fetchall()
         assert len(rows) >= 1
         assert rows[0][0] == "system_prompt"
+
+    def test_upsert_worker_capability_applies_and_is_idempotent(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import (
+            _apply_upsert_worker,
+            _apply_upsert_worker_capability,
+        )
+
+        con = db_with_migrations
+        _apply_upsert_worker(con, {
+            "worker_id": "analytics-reader",
+            "display_name": "Analytics Reader",
+            "tenant_id": "default",
+        })
+
+        payload = {
+            "worker_id": "analytics-reader",
+            "tenant_id": "default",
+            "capability_name": "bounded_select_star_read",
+            "kind": "runtime_policy",
+            "provider": "duckclaw",
+            "permission": "use",
+            "policy": {"reason": "protect unbounded table reads"},
+        }
+        _apply_upsert_worker_capability(con, payload)
+        _apply_upsert_worker_capability(con, payload)
+
+        rows = con.execute(
+            """
+            SELECT c.name, c.kind, wc.permission, wc.policy_json
+            FROM main.admin_worker_capabilities wc
+            JOIN main.admin_capabilities c ON c.capability_id = wc.capability_id
+            JOIN main.admin_worker_catalog w ON w.worker_uid = wc.worker_uid
+            WHERE w.worker_id = 'analytics-reader'
+              AND c.name = 'bounded_select_star_read'
+            """
+        ).fetchall()
+
+        assert len(rows) == 1
+        assert rows[0][0] == "bounded_select_star_read"
+        assert rows[0][1] == "runtime_policy"
+        assert rows[0][2] == "use"
+        assert json.loads(rows[0][3]) == {"reason": "protect unbounded table reads"}
 
     def test_create_project_assigns_agents(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import (

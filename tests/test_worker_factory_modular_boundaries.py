@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import importlib
 from pathlib import Path
 
 import pytest
@@ -60,6 +61,101 @@ def test_factory_list_workers_exposes_only_default_from_filesystem_layout(tmp_pa
     _write_worker_manifest(workers_root, "axis-coder")
 
     assert list_workers(legacy_root) == ["default"]
+
+
+def test_worker_discovery_owns_list_workers_with_factory_facade() -> None:
+    discovery = importlib.import_module("duckclaw.workers.discovery")
+    from duckclaw.workers import factory
+
+    assert factory.list_workers is discovery.list_workers
+    assert factory.list_workers.__module__ == "duckclaw.workers.discovery"
+    assert "list_workers" not in _factory_function_names()
+
+
+def test_visual_evidence_policy_owns_retry_limit_with_factory_facade() -> None:
+    policy = importlib.import_module("duckclaw.workers.visual_evidence_policy")
+    from duckclaw.workers import factory
+
+    assert factory._visual_evidence_max_retries is policy.visual_evidence_max_retries
+    assert factory._visual_evidence_max_retries.__module__ == "duckclaw.workers.visual_evidence_policy"
+    assert "_visual_evidence_max_retries" not in _factory_function_names()
+
+
+def test_tool_output_truncation_owns_helpers_with_factory_facade() -> None:
+    truncation = importlib.import_module("duckclaw.workers.tool_output_truncation")
+    from duckclaw.workers import factory
+
+    assert factory._truncate_tool_messages is truncation.truncate_tool_messages_for_llm
+    assert (
+        factory._compact_run_sandbox_tool_content_for_llm
+        is truncation.compact_run_sandbox_tool_content_for_llm
+    )
+    assert factory._truncate_tool_messages.__module__ == "duckclaw.workers.tool_output_truncation"
+    assert (
+        factory._compact_run_sandbox_tool_content_for_llm.__module__
+        == "duckclaw.workers.tool_output_truncation"
+    )
+    names = _factory_function_names()
+    assert "_truncate_tool_messages" not in names
+    assert "_compact_run_sandbox_tool_content_for_llm" not in names
+
+
+def test_provider_input_budget_owns_helpers_with_factory_facade() -> None:
+    budget = importlib.import_module("duckclaw.workers.provider_input_budget")
+    from duckclaw.workers import factory
+
+    assert factory._normalized_context_pruning is budget.normalized_context_pruning
+    assert factory._estimate_tokens_from_messages is budget.estimate_tokens_from_messages
+    assert factory._apply_provider_input_budget is budget.apply_provider_input_budget
+    assert factory._split_for_pruning is budget.split_for_pruning
+    assert factory._trim_messages_to_estimated_cap is budget.trim_messages_to_estimated_cap
+    assert factory._apply_provider_input_budget.__module__ == "duckclaw.workers.provider_input_budget"
+    assert factory._split_for_pruning.__module__ == "duckclaw.workers.provider_input_budget"
+    names = _factory_function_names()
+    assert "_normalized_context_pruning" not in names
+    assert "_estimate_tokens_from_messages" not in names
+    assert "_groq_max_estimated_input_tokens" not in names
+    assert "_groq_tool_message_max_chars" not in names
+    assert "_trim_messages_to_estimated_cap" not in names
+    assert "_apply_groq_message_budget" not in names
+    assert "_mlx_max_estimated_input_tokens" not in names
+    assert "_mlx_tool_message_max_chars" not in names
+    assert "_apply_mlx_message_budget" not in names
+    assert "_apply_provider_input_budget" not in names
+    assert "_split_for_pruning" not in names
+
+
+def test_context_monitor_owns_summary_helpers_with_factory_facade() -> None:
+    monitor = importlib.import_module("duckclaw.workers.context_monitor")
+    from duckclaw.workers import factory
+
+    assert factory._serialize_messages_for_summary is monitor.serialize_messages_for_summary
+    assert factory._llm_fold_conversation_summary is monitor.llm_fold_conversation_summary
+    assert factory._compose_context_summary_prompt is monitor.compose_context_summary_prompt
+    assert factory._build_context_monitor_node is monitor.build_context_monitor_node
+    assert factory._build_summary_llm is monitor.build_summary_llm
+    assert factory._llm_fold_conversation_summary.__module__ == "duckclaw.workers.context_monitor"
+    assert factory._build_context_monitor_node.__module__ == "duckclaw.workers.context_monitor"
+    names = _factory_function_names()
+    assert "_serialize_messages_for_summary" not in names
+    assert "_llm_fold_conversation_summary" not in names
+    assert "_compose_bi_system_prompt" not in names
+    assert "context_monitor_node" not in names
+
+
+def test_factory_context_monitor_has_no_bi_specific_compression_policy() -> None:
+    source = _factory_source()
+    forbidden = {
+        "_compose_bi_system_prompt",
+        "analista BI",
+        "Analista BI",
+        "Resumen analítico",
+        '== "bi_analyst"',
+        '!= "bi_analyst"',
+    }
+    leaked = sorted(marker for marker in forbidden if marker in source)
+
+    assert leaked == []
 
 
 def test_core_admin_runtime_does_not_hardcode_non_default_platform_worker() -> None:

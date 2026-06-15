@@ -52,6 +52,24 @@ class DeactivateWorkerCommand(WriteCommand):
     worker_id: str
 
 
+class UpsertWorkerCapabilityCommand(WriteCommand):
+    """Register and grant one DB-first capability to an existing catalog worker."""
+
+    command_type: Literal["upsert_worker_capability"] = "upsert_worker_capability"
+    worker_id: str
+    capability_name: str
+    kind: str = "runtime_policy"
+    provider: str = "duckclaw"
+    permission: str = "use"
+    description: str = ""
+    risk_level: str = "low"
+    requires_secret: bool = False
+    requires_network: bool = False
+    capability_schema: dict[str, Any] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
+    policy: dict[str, Any] = Field(default_factory=dict)
+
+
 # ---------------------------------------------------------------------------
 # Project commands
 # ---------------------------------------------------------------------------
@@ -105,6 +123,18 @@ class UpsertAgentConfigEntriesCommand(WriteCommand):
 
     command_type: Literal["upsert_agent_config_entries"] = "upsert_agent_config_entries"
     entries: dict[str, str]
+
+
+class AppendTaskAuditCommand(WriteCommand):
+    """Append one row to the transversal task audit log used by /history."""
+
+    command_type: Literal["append_task_audit"] = "append_task_audit"
+    audit_task_id: str = Field(default_factory=lambda: f"TASK-{uuid.uuid4().hex[:16]}")
+    worker_id: str = ""
+    query_prefix: str = ""
+    status: Literal["SUCCESS", "FAILED", "PROACTIVE_MESSAGE_SENT", "SECURITY_VIOLATION_ATTEMPT"] = "SUCCESS"
+    duration_ms: int = 0
+    plan_title: str = ""
 
 
 # ---------------------------------------------------------------------------

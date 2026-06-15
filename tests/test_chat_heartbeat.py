@@ -6,9 +6,20 @@ import sys
 import time
 import types
 
+import duckdb
 import pytest
 
 from env_ids import DEFAULT_TEST_TELEGRAM_USER_ID
+
+
+class _DuckDbAdapter:
+    def __init__(self, con: duckdb.DuckDBPyConnection) -> None:
+        self._con = con
+
+    def execute(self, sql: str, params=None):
+        if params is not None:
+            return self._con.execute(sql, params)
+        return self._con.execute(sql)
 
 
 def test_heartbeat_redis_key_format() -> None:
@@ -57,7 +68,7 @@ def test_is_chat_heartbeat_enabled_matches_numeric_key_for_display_chat_id(
 
     from duckclaw.graphs.chat_heartbeat import is_chat_heartbeat_enabled
 
-    assert is_chat_heartbeat_enabled("SIATA", f"@Usuario ({TELEGRAM_TEST_USER_ID})") is True
+    assert is_chat_heartbeat_enabled("tenant_a", f"@Usuario ({TELEGRAM_TEST_USER_ID})") is True
 
 
 def test_format_delegation_heartbeat_message_includes_title_and_tasks() -> None:
@@ -82,9 +93,9 @@ def test_format_delegation_heartbeat_message_subagent_header_in_opener() -> None
     msg = format_delegation_heartbeat_message(
         "Saludo",
         ["Uno"],
-        subagent_header="BI-Analyst 1",
+        subagent_header="worker-alpha 1",
     )
-    assert msg.startswith("📖 BI-Analyst 1 — Acabo de recibir")
+    assert msg.startswith("📖 worker-alpha 1 — Acabo de recibir")
     assert "Saludo" in msg
 
 
@@ -103,11 +114,11 @@ def test_format_tool_heartbeat_prefix() -> None:
     raw = heartbeat_message_for_tool("read_sql")
     assert format_tool_heartbeat(None, raw) == raw
     assert format_tool_heartbeat("", raw) == raw
-    combined = format_tool_heartbeat("BI-Analyst 2", raw)
-    assert combined.startswith("BI-Analyst 2 — ")
+    combined = format_tool_heartbeat("worker-alpha 2", raw)
+    assert combined.startswith("worker-alpha 2 — ")
     assert raw in combined
-    with_plan = format_tool_heartbeat("BI-Analyst 1", raw, plan_title="Scatter de ventas")
-    assert with_plan.startswith("BI-Analyst 1 — ")
+    with_plan = format_tool_heartbeat("worker-alpha 1", raw, plan_title="Scatter de ventas")
+    assert with_plan.startswith("worker-alpha 1 — ")
     assert "📋 Scatter de ventas" not in with_plan
     assert raw in with_plan
     with_elapsed = format_tool_heartbeat("W", raw, elapsed_sec=12.345)
@@ -133,13 +144,111 @@ def test_heartbeat_message_for_tool_mapping() -> None:
     assert "sql" in heartbeat_message_for_tool("admin_sql").lower()
     assert "sandbox" in heartbeat_message_for_tool("run_sandbox").lower()
     assert "inspect_schema" in heartbeat_message_for_tool("inspect_schema").lower()
-    r = heartbeat_message_for_tool("scrape_siata_radar_realtime").lower()
-    assert "radar" in r and "scrape_siata_radar_realtime" in r
     assert "custom_xyz" in heartbeat_message_for_tool("custom_xyz")
     assert "🔄" in heartbeat_message_for_tool("other_tool")
 
 
-def test_set_and_read_heartbeat_redis(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_set_and_read_heartbeat_state_is_db_first_without_redis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("DUCKCLAW_REDIS_URL", raising=False)
+
+    from duckclaw.admin_runtime_settings import resolve_runtime_setting
+    from duckclaw.graphs.chat_heartbeat import (
+        HEARTBEAT_RUNTIME_DOMAIN,
+        HEARTBEAT_RUNTIME_KEY,
+        is_chat_heartbeat_enabled,
+        set_chat_heartbeat_enabled,
+    )
+    from duckclaw.runtime_session_settings import runtime_session_actor
+
+    con = duckdb.connect(":memory:")
+    try:
+        db = _DuckDbAdapter(con)
+        ok, err = set_chat_heartbeat_enabled("tenant_a", "999", True, db=db)
+        assert ok and not err
+        assert is_chat_heartbeat_enabled("tenant_a", "999", db=db) is True
+
+        resolved = resolve_runtime_setting(
+            db,
+            tenant_id="tenant_a",
+            actor_email=runtime_session_actor("999"),
+            domain=HEARTBEAT_RUNTIME_DOMAIN,
+            key=HEARTBEAT_RUNTIME_KEY,
+        )
+        assert resolved["value"] == "on"
+
+        ok2, err2 = set_chat_heartbeat_enabled("tenant_a", "999", False, db=db)
+        assert ok2 and not err2
+        assert is_chat_heartbeat_enabled("tenant_a", "999", db=db) is False
+    finally:
+        con.close()
+
+
+def test_heartbeat_db_state_wins_over_legacy_redis_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    store: dict[str, str] = {"duckclaw:heartbeat:tenant_a:999": "on"}
+
+    class FakeClient:
+        def setex(self, key: str, _ttl: int, value: str) -> None:
+            store[key] = value
+
+        def get(self, key: str) -> str | None:
+            return store.get(key)
+
+    class FakeRedis:
+        @staticmethod
+        def from_url(_url: str, **_kwargs: object) -> FakeClient:
+            return FakeClient()
+
+    fake_redis_mod = types.ModuleType("redis")
+    fake_redis_mod.Redis = FakeRedis  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "redis", fake_redis_mod)
+
+    from duckclaw.graphs.chat_heartbeat import (
+        is_chat_heartbeat_enabled,
+        set_chat_heartbeat_enabled,
+    )
+
+    con = duckdb.connect(":memory:")
+    try:
+        db = _DuckDbAdapter(con)
+        ok, err = set_chat_heartbeat_enabled("tenant_a", "999", False, db=db)
+        assert ok and not err
+        assert is_chat_heartbeat_enabled("tenant_a", "999", db=db) is False
+        assert store["duckclaw:heartbeat:tenant_a:999"] == "on"
+    finally:
+        con.close()
+
+
+def test_heartbeat_db_provider_supports_runtime_callers_without_db(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("DUCKCLAW_REDIS_URL", raising=False)
+
+    from duckclaw.graphs.chat_heartbeat import (
+        configure_heartbeat_runtime_db_provider,
+        is_chat_heartbeat_enabled,
+        set_chat_heartbeat_enabled,
+    )
+
+    con = duckdb.connect(":memory:")
+    try:
+        db = _DuckDbAdapter(con)
+        ok, err = set_chat_heartbeat_enabled("tenant_a", "999", True, db=db)
+        assert ok and not err
+        configure_heartbeat_runtime_db_provider(lambda: db)
+        assert is_chat_heartbeat_enabled("tenant_a", "999") is True
+    finally:
+        configure_heartbeat_runtime_db_provider(None)
+        con.close()
+
+
+def test_set_heartbeat_without_db_keeps_legacy_redis_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     store: dict[str, str] = {}
 
@@ -170,21 +279,16 @@ def test_set_and_read_heartbeat_redis(monkeypatch: pytest.MonkeyPatch) -> None:
     ok, err = set_chat_heartbeat_enabled(tid, cid, True)
     assert ok and not err
     assert store.get(key) == "on"
-    alias_k = f"duckclaw:heartbeat:chat:{cid}"
-    assert store.get(alias_k) == "on"
     assert is_chat_heartbeat_enabled(tid, cid) is True
-    ok2, err2 = set_chat_heartbeat_enabled(tid, cid, False)
-    assert ok2 and not err2
-    assert is_chat_heartbeat_enabled(tid, cid) is False
 
 
 def test_is_chat_heartbeat_enabled_finds_gateway_tenant_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Si solo existe la clave antigua SIATA:chat, el grafo con tenant 'default' debe verla."""
+    """Si solo existe la clave antigua del gateway, el grafo con tenant 'default' debe verla."""
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
-    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "SIATA")
-    store: dict[str, str] = {"duckclaw:heartbeat:SIATA:999": "on"}
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "tenant_gateway")
+    store: dict[str, str] = {"duckclaw:heartbeat:tenant_gateway:999": "on"}
 
     class FakeClient:
         def get(self, key: str) -> str | None:
@@ -267,31 +371,29 @@ def test_post_outbound_sync_prefers_explicit_bot_token(monkeypatch: pytest.Monke
     assert captured.get("bot_token") == "explicit_jh_token"
 
 
-def test_handle_command_heartbeat_on_requires_redis(
+def test_handle_command_heartbeat_on_uses_db_without_redis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("REDIS_URL", raising=False)
     monkeypatch.delenv("DUCKCLAW_REDIS_URL", raising=False)
     from duckclaw.graphs.on_the_fly_commands import handle_command
 
-    class _Db:
-        def execute(self, *_a: object, **_k: object) -> None:
-            pass
-
-        def query(self, *_a: object, **_k: object) -> list:
-            return []
-
-    out = handle_command(_Db(), "1", "/heartbeat on", tenant_id="default")
+    con = duckdb.connect(":memory:")
+    try:
+        out = handle_command(_DuckDbAdapter(con), "1", "/heartbeat on", tenant_id="default")
+    finally:
+        con.close()
     assert out is not None
-    assert "redis" in (out or "").lower()
+    assert "activado" in (out or "").lower()
+    assert "redis" not in (out or "").lower()
 
 
 def test_admin_heartbeat_kind_tool_before_plan_title() -> None:
     from duckclaw.graphs.chat_heartbeat import _admin_heartbeat_kind
 
-    tool_text = "BI-Analyst 4 — 🔄 Paso actual: llamo a read_sql…"
+    tool_text = "worker-alpha 4 — 🔄 Paso actual: llamo a read_sql…"
     assert _admin_heartbeat_kind(tool_text, log_plan_title="Resumen macro") == "tool"
-    assert _admin_heartbeat_kind("📖 BI-Analyst 1 — Acabo de recibir", log_plan_title="Plan A") == "plan"
+    assert _admin_heartbeat_kind("📖 worker-alpha 1 — Acabo de recibir", log_plan_title="Plan A") == "plan"
     assert _admin_heartbeat_kind("solo status", log_plan_title=None) == "status"
 
 
@@ -315,8 +417,8 @@ def test_normalize_telegram_chat_id_does_not_strip_admin_conv_uuid() -> None:
 def test_parse_instance_label() -> None:
     from duckclaw.graphs.chat_heartbeat import parse_instance_label
 
-    assert parse_instance_label("BI-Analyst 1") == ("BI-Analyst", 1)
-    assert parse_instance_label("BI-Analyst 2") == ("BI-Analyst", 2)
+    assert parse_instance_label("worker-alpha 1") == ("worker-alpha", 1)
+    assert parse_instance_label("worker-alpha 2") == ("worker-alpha", 2)
     assert parse_instance_label("Ops-Worker") == ("Ops-Worker", 1)
     assert parse_instance_label("") == ("", 1)
 
@@ -383,11 +485,11 @@ def test_publish_admin_chat_heartbeat_includes_worker_and_slot(monkeypatch: pyte
 
     from duckclaw.graphs.chat_heartbeat import publish_admin_chat_heartbeat
 
-    publish_admin_chat_heartbeat("admin-playground", "tool run", kind="tool", instance_label="BI-Analyst 2")
+    publish_admin_chat_heartbeat("admin-playground", "tool run", kind="tool", instance_label="worker-alpha 2")
     time.sleep(0.08)
     assert len(payloads) == 1
     data = __import__("json").loads(payloads[0])
-    assert data["worker_id"] == "BI-Analyst"
+    assert data["worker_id"] == "worker-alpha"
     assert data["swarm_slot"] == 2
     assert data["kind"] == "tool"
 

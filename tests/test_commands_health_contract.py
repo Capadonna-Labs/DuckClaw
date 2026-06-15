@@ -81,9 +81,9 @@ def test_execute_heartbeat_uses_configured_adapter_without_graph_imports() -> No
     finally:
         health.configure_heartbeat_adapter(None)
 
-    assert "Heartbeat activado en Redis" in enabled
+    assert "Heartbeat activado en DB" in enabled
     assert status == "Heartbeat: on\nUso: /heartbeat on | /heartbeat off"
-    assert adapter.set_calls == [("tenant-1", "chat-1", True)]
+    assert adapter.set_calls == [(None, "tenant-1", "chat-1", True)]
 
 
 def test_on_the_fly_health_imports_remain_compatible() -> None:
@@ -112,7 +112,7 @@ class _HeartbeatAdapterProbe:
         self._enabled = False
         self._redis_configured = redis_configured
         self._outbound_configured = outbound_configured
-        self.set_calls: list[tuple[str, str, bool]] = []
+        self.set_calls: list[tuple[Any, str, str, bool]] = []
 
     def heartbeat_redis_configured(self) -> bool:
         return self._redis_configured
@@ -124,13 +124,13 @@ class _HeartbeatAdapterProbe:
         del chat_id
         return False
 
-    def is_chat_heartbeat_enabled(self, tenant_id: str, chat_id: str) -> bool:
-        del tenant_id, chat_id
+    def is_chat_heartbeat_enabled(self, db: Any, tenant_id: str, chat_id: str) -> bool:
+        del db, tenant_id, chat_id
         return self._enabled
 
     def set_chat_heartbeat_enabled(
-        self, tenant_id: str, chat_id: str, on: bool
+        self, db: Any, tenant_id: str, chat_id: str, on: bool
     ) -> tuple[bool, str]:
-        self.set_calls.append((tenant_id, chat_id, on))
+        self.set_calls.append((db, tenant_id, chat_id, on))
         self._enabled = on
         return True, ""

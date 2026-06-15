@@ -217,7 +217,6 @@ DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/forge/skills/visual_state_delta.py": "pending shared writer utility extraction",
     "packages/agents/src/duckclaw/forge/team_env.py": "pending legacy env example cleanup",
     "packages/agents/src/duckclaw/graphs/agent_resilience.py": "pending generic tool-pressure policy",
-    "packages/agents/src/duckclaw/graphs/chat_heartbeat.py": "pending generic multiplex cleanup",
     "packages/agents/src/duckclaw/graphs/dreamer_job.py": "pending domain-specific dreamer extraction",
     "packages/agents/src/duckclaw/graphs/router.py": "pending retail intent language cleanup",
     "packages/agents/src/duckclaw/quant/__init__.py": "pending domain package removal after factory cut",

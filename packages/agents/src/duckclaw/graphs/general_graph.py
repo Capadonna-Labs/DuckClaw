@@ -10,7 +10,10 @@ from typing import Any
 _log = logging.getLogger(__name__)
 
 from duckclaw.graphs.tools import read_sql, admin_sql, inspect_schema, manage_memory, get_db_path
-from duckclaw.guardrails.loader import load_guardrail
+from duckclaw.graphs.tool_catalog import (
+    DEFAULT_GENERAL_SYSTEM_PROMPT,
+    default_general_tool_names,
+)
 
 
 _DB_INTENT_RE = re.compile(
@@ -35,11 +38,6 @@ def _needs_db_tool(incoming: str) -> bool:
 
 def _needs_sandbox_tool(incoming: str) -> bool:
     return bool(_SANDBOX_INTENT_RE.search(incoming or ""))
-
-
-_DEFAULT_SYSTEM_PROMPT = load_guardrail("system_prompts", "general_default")
-
-_DEFAULT_TOOLS = ["read_sql", "admin_sql", "inspect_schema", "manage_memory", "get_db_path", "run_sandbox"]
 
 
 def _format_incoming_with_identity(state: dict) -> str:
@@ -76,11 +74,10 @@ def build_general_graph(
     from langchain_core.tools import StructuredTool
     from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
-    prompt = (system_prompt or _DEFAULT_SYSTEM_PROMPT).strip()
+    prompt = (system_prompt or DEFAULT_GENERAL_SYSTEM_PROMPT).strip()
     if prompt and "estilo" not in prompt.lower() and "conciso" not in prompt.lower():
         prompt += "\n\nEstilo: respuestas concisas, 1-2 emojis como máximo, sin relleno ni listas largas innecesarias."
-    tool_names = tools_spec if tools_spec is not None else _DEFAULT_TOOLS
-    tool_names_set = frozenset(str(t).strip() for t in tool_names if t is not None and str(t).strip())
+    tool_names_set = default_general_tool_names(tools_spec)
 
     tools: list[Any] = []
     if "read_sql" in tool_names_set:

@@ -204,20 +204,26 @@ class _GraphHeartbeatAdapter:
 
         return is_admin_ui_chat_session(chat_id)
 
-    def is_chat_heartbeat_enabled(self, tenant_id: str, chat_id: str) -> bool:
+    def is_chat_heartbeat_enabled(self, db: Any, tenant_id: str, chat_id: str) -> bool:
         from duckclaw.graphs.chat_heartbeat import is_chat_heartbeat_enabled
 
-        return is_chat_heartbeat_enabled(tenant_id, chat_id)
+        return is_chat_heartbeat_enabled(tenant_id, chat_id, db=db)
 
     def set_chat_heartbeat_enabled(
-        self, tenant_id: str, chat_id: str, on: bool
+        self, db: Any, tenant_id: str, chat_id: str, on: bool
     ) -> tuple[bool, str]:
         from duckclaw.graphs.chat_heartbeat import set_chat_heartbeat_enabled
 
-        return set_chat_heartbeat_enabled(tenant_id, chat_id, on)
+        return set_chat_heartbeat_enabled(tenant_id, chat_id, on, db=db)
 
 
 _configure_heartbeat_adapter(_GraphHeartbeatAdapter())
+try:
+    from duckclaw.graphs.chat_heartbeat import configure_heartbeat_runtime_db_provider
+
+    configure_heartbeat_runtime_db_provider(get_db)
+except Exception:
+    pass
 
 
 def _sandbox_session_cleanup(chat_id: str) -> None:

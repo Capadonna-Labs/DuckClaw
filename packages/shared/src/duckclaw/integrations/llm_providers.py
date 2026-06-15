@@ -588,7 +588,7 @@ def _strip_eot(text: str) -> str:
 
 # Prefijos que algunos modelos locales (p. ej. MLX/Slayer) repiten al imitar trazas HTTP/OpenAI.
 _LEADING_ERROR_CODE_LINE = re.compile(r"^\s*Error\s+code:\s*\d+.*$", re.IGNORECASE)
-# Líneas tipo ``### read_sql`` / ``### get_ibkr_portfolio`` (marcadores internos de salida de tools).
+# Líneas tipo ``### read_sql`` / ``### custom_tool`` (marcadores internos de salida de tools).
 _TOOL_SECTION_HEADER_LINE = re.compile(r"^###\s+([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\s*$")
 
 

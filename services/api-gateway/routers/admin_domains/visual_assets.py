@@ -225,14 +225,16 @@ async def comfyui_generate(
     body: ComfyuiGenerateBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from duckclaw.capadonna_plugin import load_capadonna_lib
-    from duckclaw.forge.skills.comfyui_bridge import _generate_visual_asset_impl
+    from duckclaw.forge.skills.comfyui_bridge import (
+        _generate_visual_asset_impl,
+        configure_visual_generation_context,
+    )
 
     tenant_id = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
-    quant_tool_context = load_capadonna_lib("quant_tool_context")
-    if quant_tool_context is not None:
-        quant_tool_context.set_quant_tool_tenant_id(tenant_id)
-        quant_tool_context.set_quant_tool_user_id((actor or "admin-ui").strip() or "admin-ui")
+    configure_visual_generation_context(
+        tenant_id=tenant_id,
+        user_id=(actor or "admin-ui").strip() or "admin-ui",
+    )
 
     runtime = _comfyui_runtime_settings()
     cfg = {

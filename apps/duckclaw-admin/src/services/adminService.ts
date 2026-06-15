@@ -59,6 +59,29 @@ export interface ManagedWorkspaceDraft {
   questions: string[];
 }
 
+export interface PromptPolicy {
+  policy_id: string;
+  policy_type: string;
+  policy_name: string;
+  version: number;
+  status: string;
+  content: string;
+  checksum: string;
+  metadata?: Record<string, unknown>;
+  active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PromptPolicyUpsertInput {
+  policy_type: string;
+  policy_name: string;
+  version: number;
+  status?: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface WorkspaceProjectSummary {
   project_id: string;
   tenant_id: string;
@@ -342,12 +365,63 @@ function workspaceProjectsQueryString(params?: WorkspaceProjectsQuery): string {
   return suffix ? `?${suffix}` : '';
 }
 
+function promptPoliciesQueryString(params?: {
+  policy_type?: string;
+  policy_name?: string;
+  include_inactive?: boolean;
+}): string {
+  const qs = new URLSearchParams();
+  if (params?.policy_type) qs.set('policy_type', params.policy_type);
+  if (params?.policy_name) qs.set('policy_name', params.policy_name);
+  if (params?.include_inactive) qs.set('include_inactive', 'true');
+  const suffix = qs.toString();
+  return suffix ? `?${suffix}` : '';
+}
+
 function listWorkspaceProjectsPage(params?: WorkspaceProjectsQuery) {
   return adminFetch<WorkspaceProjectsPage>(`/workspace/projects${workspaceProjectsQueryString(params)}`);
 }
 
 export const adminService = {
   health: () => adminFetch<AdminHealth>('/health'),
+
+  listPromptPolicies: (params?: {
+    policy_type?: string;
+    policy_name?: string;
+    include_inactive?: boolean;
+  }) =>
+    adminFetch<{ policies: PromptPolicy[] }>(`/prompt-policies${promptPoliciesQueryString(params)}`).then(
+      (r) => r.policies
+    ),
+
+  upsertPromptPolicy: (body: PromptPolicyUpsertInput) =>
+    adminFetch<{
+      ok: boolean;
+      task_id: string;
+      policy: {
+        policy_id: string;
+        policy_type: string;
+        policy_name: string;
+        version: number;
+        status: string;
+        active: boolean;
+      };
+    }>('/prompt-policies', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deactivatePromptPolicy: (policyType: string, policyName: string, version: number) =>
+    adminFetch<{
+      ok: boolean;
+      task_id: string;
+      policy_type: string;
+      policy_name: string;
+      version: number;
+    }>(
+      `/prompt-policies/${encodeURIComponent(policyType)}/${encodeURIComponent(policyName)}?version=${encodeURIComponent(String(version))}`,
+      { method: 'DELETE' }
+    ),
 
   getOverviewMetrics: (params?: OverviewMetricsParams) => {
     const qs = new URLSearchParams();

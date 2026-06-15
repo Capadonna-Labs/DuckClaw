@@ -43,6 +43,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/templates': Bot,
   '/projects': FolderPlus,
   '/knowledge': Database,
+  '/policies': ClipboardList,
   '/skills': Blocks,
   '/mcp': Cable,
   '/playground': MessageCircle,

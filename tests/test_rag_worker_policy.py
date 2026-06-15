@@ -10,6 +10,13 @@ from duckclaw.forge.rag.tool_policy import (
     should_prioritize_rag_over_storage_tools,
     without_storage_tools,
 )
+from duckclaw.workers.tool_surface_policy import (
+    should_hide_sandbox_tools,
+    should_hide_storage_identity_tools,
+    without_sandbox_tools,
+    without_privileged_mutation_tools,
+    without_storage_identity_tools,
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,75 @@ def test_explicit_storage_intent_keeps_storage_tools_available() -> None:
         "que tablas tengo?",
         explicit_storage_request=lambda text: "tablas" in text.lower(),
     )
+
+
+def test_plain_greeting_hides_storage_identity_tools_from_auto_bind() -> None:
+    tools = [
+        ToolStub("read_sql"),
+        ToolStub("inspect_schema"),
+        ToolStub("get_db_path"),
+        ToolStub("search_knowledge"),
+    ]
+
+    assert should_hide_storage_identity_tools(
+        "hola",
+        "hola",
+        explicit_storage_request=lambda text: "duckdb" in text.lower(),
+    )
+    assert [tool.name for tool in without_storage_identity_tools(tools)] == [
+        "read_sql",
+        "inspect_schema",
+        "search_knowledge",
+    ]
+
+
+def test_explicit_db_identity_request_keeps_get_db_path_available() -> None:
+    assert not should_hide_storage_identity_tools(
+        "qué base de datos estás usando?",
+        "qué base de datos estás usando?",
+        explicit_storage_request=lambda text: "duckdb" in text.lower(),
+    )
+    assert not should_hide_storage_identity_tools(
+        "cuál es la ruta del duckdb?",
+        "cuál es la ruta del duckdb?",
+        explicit_storage_request=lambda text: "duckdb" in text.lower(),
+    )
+
+
+def test_auto_bind_hides_privileged_mutation_tools() -> None:
+    tools = [
+        ToolStub("read_sql"),
+        ToolStub("admin_sql"),
+        ToolStub("inspect_schema"),
+        ToolStub("search_knowledge"),
+    ]
+
+    assert [tool.name for tool in without_privileged_mutation_tools(tools)] == [
+        "read_sql",
+        "inspect_schema",
+        "search_knowledge",
+    ]
+
+
+def test_plain_greeting_hides_sandbox_tools_from_auto_bind() -> None:
+    tools = [
+        ToolStub("read_sql"),
+        ToolStub("run_sandbox"),
+        ToolStub("run_browser_sandbox"),
+        ToolStub("get_browser_session_url"),
+        ToolStub("search_knowledge"),
+    ]
+
+    assert should_hide_sandbox_tools("hola", "hola")
+    assert [tool.name for tool in without_sandbox_tools(tools)] == [
+        "read_sql",
+        "search_knowledge",
+    ]
+
+
+def test_explicit_execution_or_browser_intent_keeps_sandbox_tools_available() -> None:
+    assert not should_hide_sandbox_tools("ejecuta este código python", "ejecuta este código python")
+    assert not should_hide_sandbox_tools("abre https://example.com en el navegador", "abre https://example.com")
 
 
 def test_rag_turn_prompt_avoids_storage_and_operational_menus() -> None:
@@ -115,11 +191,25 @@ def test_factory_uses_extracted_rag_policy_for_get_db_path() -> None:
 
     assert "from duckclaw.forge.rag.tool_policy import" in factory
     assert "from duckclaw.forge.rag.prompt_policy import" in factory
+    assert "from duckclaw.workers.tool_surface_policy import" in factory
     assert "should_prioritize_rag_over_storage_tools(" in factory
-    assert "without_storage_tools(_bind_base_rag)" in factory
+    assert "should_hide_storage_identity_tools(" in factory
+    assert "_auto_tools = without_storage_identity_tools(_auto_tools)" in factory
+    assert "_auto_tools = without_privileged_mutation_tools(_auto_tools)" in factory
+    assert "_auto_tools = without_sandbox_tools(_auto_tools)" in factory
+    assert "_auto_tools = without_storage_tools(_auto_tools)" in factory
     assert "rag_turn_system_prompt(prompt_policies, _lid)" in factory
 
 
 def test_rag_tool_policy_lives_in_rag_package_not_workers() -> None:
     assert Path("packages/agents/src/duckclaw/forge/rag/tool_policy.py").exists()
     assert not Path("packages/agents/src/duckclaw/workers/rag_policy.py").exists()
+
+
+def test_storage_identity_policy_lives_in_worker_tool_surface_owner() -> None:
+    rag_policy = Path("packages/agents/src/duckclaw/forge/rag/tool_policy.py").read_text(encoding="utf-8")
+    worker_policy_path = Path("packages/agents/src/duckclaw/workers/tool_surface_policy.py")
+
+    assert worker_policy_path.exists()
+    assert "STORAGE_IDENTITY_TOOL_NAMES" not in rag_policy
+    assert "should_hide_storage_identity_tools" not in rag_policy

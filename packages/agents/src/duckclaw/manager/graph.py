@@ -1284,7 +1284,14 @@ def build_manager_graph(
                     _vault_lock_obj = _vault_invoke_locks[_vk]
                 _vault_lock_obj.acquire()
             _cfg_db = _agent_config_db_for_vault(db, vault_db_path or None)
-            raw_sb = get_chat_state(_cfg_db, chat_id, "sandbox_enabled")
+            from duckclaw.runtime_session_settings import resolve_session_runtime_setting
+
+            raw_sb = resolve_session_runtime_setting(
+                _cfg_db,
+                chat_id,
+                "sandbox_enabled",
+                tenant_id=tenant_id,
+            )
             sb_on = (raw_sb or "").strip().lower() in ("true", "1", "on", "sí", "si")
             db_display = vault_db_path or db_path or "(unknown)"
             if _will_suspend_ro:

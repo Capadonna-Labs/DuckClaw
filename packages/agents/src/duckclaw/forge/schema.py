@@ -128,9 +128,9 @@ def resolve_sandbox_network_policy(
     worker_dir: Path | None = None,
 ) -> tuple[SecurityPolicy, dict[str, Any]]:
     """
-    Política efectiva de red: YAML del worker + override opcional por chat.
+    Política efectiva de red: YAML del worker + override DB-first opcional por chat.
 
-  chat_network: valor de agent_config ``sandbox_network_enabled`` (true/false/vacío).
+  chat_network: valor runtime ``runtime.session.sandbox_network_enabled`` (true/false/vacío).
   Si el YAML tiene ``deny``, el override no puede habilitar bridge (Zero-Trust).
     """
     base = load_security_policy(worker_id, worker_dir=worker_dir)
@@ -161,15 +161,21 @@ def resolve_security_policy_for_chat(
     db: Any,
     chat_id: Any,
     *,
+    tenant_id: str = "default",
     worker_dir: Path | None = None,
 ) -> tuple[SecurityPolicy, dict[str, Any]]:
-    """Carga política del worker y aplica ``sandbox_network_enabled`` del chat si procede."""
+    """Carga política del worker y aplica runtime DB-first del chat si procede."""
     raw = ""
     if db is not None and chat_id is not None:
         try:
-            from duckclaw.graphs.on_the_fly_commands import get_chat_state
+            from duckclaw.runtime_session_settings import resolve_session_runtime_setting
 
-            raw = get_chat_state(db, chat_id, "sandbox_network_enabled")
+            raw = resolve_session_runtime_setting(
+                db,
+                chat_id,
+                "sandbox_network_enabled",
+                tenant_id=str(tenant_id or "default").strip() or "default",
+            )
         except Exception:
             raw = ""
     return resolve_sandbox_network_policy(worker_id, raw or None, worker_dir=worker_dir)

@@ -86,6 +86,12 @@ from duckclaw.workers.context_monitor import (
     llm_fold_conversation_summary as _llm_fold_conversation_summary,
     serialize_messages_for_summary as _serialize_messages_for_summary,
 )
+from duckclaw.workers.tool_binding import (
+    filter_tools_for_sandbox,
+    groq_tools_without_reddit_for_bind as _groq_tools_without_reddit_for_bind,
+    tool_called_since as _tool_called_since,
+    tool_choice_function as _tool_choice_function,
+)
 from duckclaw.workers.tool_invocation_policy import (
     decide_current_time_tool_invocation as _decide_current_time_tool_invocation,
     decide_db_first_tool_invocation as _decide_db_first_tool_invocation,
@@ -120,33 +126,6 @@ def _raise_if_chat_cancelled_from_state(state: dict) -> None:
         raise_if_chat_cancelled(cid)
 
 
-
-
-    # endregion
-
-
-
-# Debe coincidir con duckclaw.graphs.manager_graph._LONE_HTTP_URL_ONLY_LINE.
-
-
-
-# Preguntas por filas/contenido (no catálogo). Incluye «hay algo en la tabla X» (evita confundir con listar tablas).
-
-
-
-
-
-
-
-
-
-
-# Preguntas sobre DB/tablas/esquema son siempre tarea concreta (evitar "¿Cuál es mi tarea?")
-
-# read_sql sobre read_json_auto sin LIMIT puede devolver megabytes y saturar el contexto del LLM.
-
-# run_sandbox puede volcar cientos de KB; sin context_monitor el ToolMessage iría entero al LLM.
-
 # Tarea explícita del manager (plan): nunca tratar como "sin tarea"
 def _worker_log_label(worker_id: str) -> str:
     """Etiqueta corta solo para texto de log (no sustituye el id real del estado)."""
@@ -154,147 +133,13 @@ def _worker_log_label(worker_id: str) -> str:
     return w or "worker"
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _duckclaw_env_truthy(name: str) -> bool:
     v = (os.environ.get(name) or "").strip().lower()
     return v in ("1", "true", "yes", "on")
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _spec_logical_worker_id(spec: Any) -> str:
     return (getattr(spec, "logical_worker_id", None) or getattr(spec, "worker_id", "") or "").strip()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def _last_human_message_index(messages: list[Any]) -> int:
@@ -304,17 +149,6 @@ def _last_human_message_index(messages: list[Any]) -> int:
         if isinstance(messages[idx], HumanMessage):
             return idx
     return -1
-
-
-def _tool_called_since(messages: list[Any], last_human_idx: int, tool_name: str) -> bool:
-    from langchain_core.messages import ToolMessage
-
-    if not tool_name:
-        return False
-    for msg in (messages or [])[max(0, last_human_idx + 1) :]:
-        if isinstance(msg, ToolMessage) and (getattr(msg, "name", "") or "") == tool_name:
-            return True
-    return False
 
 
 def _parse_comfyui_edit_inbound(incoming: str) -> dict[str, str] | None:
@@ -343,20 +177,6 @@ def _parse_comfyui_edit_inbound(incoming: str) -> dict[str, str] | None:
 _TASK_AWARENESS_PROMPT = load_guardrail("prompts", "task_awareness_default")
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _identity_fields(state: dict) -> dict:
     return {
         "chat_id": state.get("chat_id") or state.get("session_id"),
@@ -365,15 +185,6 @@ def _identity_fields(state: dict) -> dict:
         "username": (state.get("username") or "").strip(),
         "vault_db_path": state.get("vault_db_path") or "",
     }
-
-
-def _groq_tools_without_reddit_for_bind(tools: list[Any]) -> list[Any]:
-    """
-    Groq tier on_demand (~12k TPM por petición) cuenta mensajes + **definiciones de tools**.
-    El MCP de Reddit registra muchas herramientas; en rutas genéricas (p. ej. presupuestos) no hacen falta
-    y empujan el request por encima del límite. Las rutas forzadas Reddit siguen ligando el set completo.
-    """
-    return [t for t in (tools or []) if not str(getattr(t, "name", None) or "").startswith("reddit_")]
 
 
 _REDDIT_SHARE_PATH_RE = re.compile(r"reddit\.com/r/[\w_]+/s/[a-zA-Z0-9]+", re.IGNORECASE)
@@ -690,10 +501,6 @@ def _latest_human_index_with_vlm_visual_markers(messages: list[Any]) -> Optional
     return None
 
 
-
-
-
-
 def _visual_asset_calls_since_last_human(messages: list[Any]) -> int:
     """Cuántas veces se invocó generate_visual_asset desde el último HumanMessage."""
     from langchain_core.messages import HumanMessage, ToolMessage
@@ -705,14 +512,6 @@ def _visual_asset_calls_since_last_human(messages: list[Any]) -> int:
         if isinstance(msg, ToolMessage) and (getattr(msg, "name", "") or "") == "generate_visual_asset":
             count += 1
     return count
-
-
-
-
-
-
-
-
 
 
 def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -> str:
@@ -1144,20 +943,6 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
     return tools
 
 
-def filter_tools_for_sandbox(tools: list[Any], enabled: bool) -> list[Any]:
-    """
-    Helper (unit-testable): si sandbox está OFF, elimina `run_sandbox`, `run_browser_sandbox` y `get_browser_session_url`.
-    """
-    if enabled:
-        return list(tools)
-    deny = {
-        "run_sandbox",
-        "run_browser_sandbox",
-        "get_browser_session_url",
-    }
-    return [t for t in tools if getattr(t, "name", "") not in deny]
-
-
 class WorkerFactory:
     """Factory for Virtual Workers (template-based LangGraph agents)."""
 
@@ -1551,10 +1336,16 @@ def build_worker_graph(
     def _sandbox_enabled_for_state(state: dict) -> bool:
         """Sandbox flag per chat/session (defaults OFF; ON for admin UI si no hay override)."""
         from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
-        from duckclaw.graphs.on_the_fly_commands import get_chat_state
+        from duckclaw.runtime_session_settings import resolve_session_runtime_setting
 
         chat_id = state.get("chat_id") or state.get("session_id") or "default"
-        raw = get_chat_state(db, chat_id, "sandbox_enabled")
+        tenant_id = str(state.get("tenant_id") or "default").strip() or "default"
+        raw = resolve_session_runtime_setting(
+            db,
+            chat_id,
+            "sandbox_enabled",
+            tenant_id=tenant_id,
+        )
         v = (raw or "").strip().lower()
         if not v and is_admin_ui_chat_session(str(chat_id)):
             return True
@@ -1597,10 +1388,10 @@ def build_worker_graph(
         has_read_sql = "read_sql" in tools_by_name
         has_admin_sql = "admin_sql" in tools_by_name
         has_run_sandbox = "run_sandbox" in tools_by_name
-        tool_choice_inspect_schema = {"type": "function", "function": {"name": "inspect_schema"}}
-        tool_choice_read_sql = {"type": "function", "function": {"name": "read_sql"}}
-        tool_choice_admin_sql = {"type": "function", "function": {"name": "admin_sql"}}
-        tool_choice_run_sandbox = {"type": "function", "function": {"name": "run_sandbox"}}
+        tool_choice_inspect_schema = _tool_choice_function("inspect_schema")
+        tool_choice_read_sql = _tool_choice_function("read_sql")
+        tool_choice_admin_sql = _tool_choice_function("admin_sql")
+        tool_choice_run_sandbox = _tool_choice_function("run_sandbox")
 
         llm_force_schema_on = _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_inspect_schema)
         llm_force_schema_off = _bind_tools(
@@ -1628,7 +1419,7 @@ def build_worker_graph(
         )
 
         has_tavily = "tavily_search" in tools_by_name
-        tool_choice_tavily = {"type": "function", "function": {"name": "tavily_search"}}
+        tool_choice_tavily = _tool_choice_function("tavily_search")
         llm_force_tavily_on = (
             _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_tavily) if has_tavily else None
         )
@@ -1637,10 +1428,7 @@ def build_worker_graph(
         )
 
         has_generate_visual = "generate_visual_asset" in tools_by_name
-        tool_choice_generate_visual = {
-            "type": "function",
-            "function": {"name": "generate_visual_asset"},
-        }
+        tool_choice_generate_visual = _tool_choice_function("generate_visual_asset")
         llm_force_generate_visual_on = (
             _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_generate_visual)
             if has_generate_visual
@@ -1653,7 +1441,7 @@ def build_worker_graph(
         )
 
         has_fetch_market = "fetch_market_data" in tools_by_name
-        tool_choice_fetch_market = {"type": "function", "function": {"name": "fetch_market_data"}}
+        tool_choice_fetch_market = _tool_choice_function("fetch_market_data")
         llm_force_fetch_market_on = (
             _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_fetch_market)
             if has_fetch_market
@@ -1668,26 +1456,23 @@ def build_worker_graph(
         _reddit_tool_names = sorted(k for k in tools_by_name if (k or "").startswith("reddit_"))
         has_reddit_tools = bool(_reddit_tool_names)
 
-        def _reddit_tool_choice_dict(tool_nm: str) -> dict[str, Any]:
-            return {"type": "function", "function": {"name": tool_nm}}
-
         llm_force_reddit_post_on = (
-            _bind_tools(llm, tools, tool_choice=_reddit_tool_choice_dict("reddit_get_post"))
+            _bind_tools(llm, tools, tool_choice=_tool_choice_function("reddit_get_post"))
             if "reddit_get_post" in tools_by_name
             else None
         )
         llm_force_reddit_post_off = (
-            _bind_tools(llm, tools_sandbox_off, tool_choice=_reddit_tool_choice_dict("reddit_get_post"))
+            _bind_tools(llm, tools_sandbox_off, tool_choice=_tool_choice_function("reddit_get_post"))
             if "reddit_get_post" in tools_by_name_sandbox_off
             else None
         )
         llm_force_reddit_search_on = (
-            _bind_tools(llm, tools, tool_choice=_reddit_tool_choice_dict("reddit_search_reddit"))
+            _bind_tools(llm, tools, tool_choice=_tool_choice_function("reddit_search_reddit"))
             if "reddit_search_reddit" in tools_by_name
             else None
         )
         llm_force_reddit_search_off = (
-            _bind_tools(llm, tools_sandbox_off, tool_choice=_reddit_tool_choice_dict("reddit_search_reddit"))
+            _bind_tools(llm, tools_sandbox_off, tool_choice=_tool_choice_function("reddit_search_reddit"))
             if "reddit_search_reddit" in tools_by_name_sandbox_off
             else None
         )
@@ -1695,12 +1480,12 @@ def build_worker_graph(
         if has_reddit_tools and not llm_force_reddit_post_on and not llm_force_reddit_search_on:
             _reddit_fallback_nm = _reddit_tool_names[0]
         llm_force_reddit_fallback_on = (
-            _bind_tools(llm, tools, tool_choice=_reddit_tool_choice_dict(_reddit_fallback_nm))
+            _bind_tools(llm, tools, tool_choice=_tool_choice_function(_reddit_fallback_nm))
             if _reddit_fallback_nm and _reddit_fallback_nm in tools_by_name
             else None
         )
         llm_force_reddit_fallback_off = (
-            _bind_tools(llm, tools_sandbox_off, tool_choice=_reddit_tool_choice_dict(_reddit_fallback_nm))
+            _bind_tools(llm, tools_sandbox_off, tool_choice=_tool_choice_function(_reddit_fallback_nm))
             if _reddit_fallback_nm and _reddit_fallback_nm in tools_by_name_sandbox_off
             else None
         )

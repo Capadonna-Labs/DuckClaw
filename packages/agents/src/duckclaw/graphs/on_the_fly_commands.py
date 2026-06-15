@@ -1175,7 +1175,7 @@ def _dispatch_fly_command(
     if name == "comfyui":
         return execute_comfyui_provider(db, chat_id, args)
     if name in ("sandbox", "sandox"):
-        return execute_sandbox_toggle(db, chat_id, args)
+        return execute_sandbox_toggle(db, chat_id, args, tenant_id=tenant_id)
     if name in ("internet", "red", "network"):
         return execute_internet_toggle(
             db,

@@ -143,6 +143,28 @@ def test_context_monitor_owns_summary_helpers_with_factory_facade() -> None:
     assert "context_monitor_node" not in names
 
 
+def test_tool_binding_owns_tool_surface_helpers_with_factory_facade() -> None:
+    binding = importlib.import_module("duckclaw.workers.tool_binding")
+    from duckclaw.workers import factory
+
+    assert factory.filter_tools_for_sandbox is binding.filter_tools_for_sandbox
+    assert factory._groq_tools_without_reddit_for_bind is binding.groq_tools_without_reddit_for_bind
+    assert factory._tool_choice_function is binding.tool_choice_function
+    assert factory._tool_called_since is binding.tool_called_since
+    assert factory.filter_tools_for_sandbox.__module__ == "duckclaw.workers.tool_binding"
+    assert (
+        factory._groq_tools_without_reddit_for_bind.__module__
+        == "duckclaw.workers.tool_binding"
+    )
+    assert factory._tool_choice_function.__module__ == "duckclaw.workers.tool_binding"
+    assert factory._tool_called_since.__module__ == "duckclaw.workers.tool_binding"
+    names = _factory_function_names()
+    assert "filter_tools_for_sandbox" not in names
+    assert "_groq_tools_without_reddit_for_bind" not in names
+    assert "_tool_called_since" not in names
+    assert "_reddit_tool_choice_dict" not in names
+
+
 def test_factory_context_monitor_has_no_bi_specific_compression_policy() -> None:
     source = _factory_source()
     forbidden = {

@@ -451,6 +451,28 @@ def test_factory_delegates_configured_skill_tool_registration() -> None:
     assert leaked == []
 
 
+def test_skill_tool_registry_has_no_per_skill_registration_branches() -> None:
+    path = Path("packages/agents/src/duckclaw/workers/skill_tool_registry.py")
+    source = path.read_text(encoding="utf-8")
+    names = {
+        node.name
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    assert "SkillToolRegistrar" in source
+    assert "DEFAULT_SKILL_TOOL_REGISTRY" in source
+    forbidden_functions = {
+        "_register_google_trends",
+        "_register_reddit",
+        "_register_research",
+        "_register_openweather",
+        "_register_tailscale",
+        "_register_comfyui",
+    }
+    assert names.isdisjoint(forbidden_functions)
+
+
 def test_factory_deprecated_debug_probe_removed() -> None:
     source = _factory_source()
     assert "_ibkr_cancel_debug_log" not in source

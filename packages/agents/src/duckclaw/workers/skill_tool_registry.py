@@ -6,12 +6,77 @@ module owns the mapping from configured skill names to their lazy registrars.
 
 from __future__ import annotations
 
+import importlib
 import logging
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from duckclaw.workers.manifest import WorkerSpec
 
 _log = logging.getLogger(__name__)
+
+SkillToolPhase = Literal["pre_llm", "post_llm"]
+
+
+@dataclass(frozen=True)
+class SkillToolRegistrar:
+    """Declarative binding from a configured skill to a lazy tool registrar."""
+
+    skill_name: str
+    phase: SkillToolPhase
+    registrar_path: str
+    surfaces: tuple[str, ...] = ()
+    hint_surfaces: tuple[str, ...] = ()
+    hint_contains: tuple[str, ...] = ()
+    empty_config_registers: bool = True
+    positional_context: tuple[str, ...] = ()
+    keyword_context: dict[str, str] = field(default_factory=dict)
+
+
+DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
+    SkillToolRegistrar(
+        skill_name="google_trends",
+        phase="pre_llm",
+        registrar_path="duckclaw.forge.skills.google_trends_bridge:register_google_trends_skill",
+        surfaces=("full",),
+    ),
+    SkillToolRegistrar(
+        skill_name="reddit",
+        phase="pre_llm",
+        registrar_path="duckclaw.forge.skills.reddit_bridge:register_reddit_skill",
+        surfaces=("context_synthesis",),
+        hint_surfaces=("url_research", "full"),
+        hint_contains=("reddit.com",),
+        empty_config_registers=False,
+    ),
+    SkillToolRegistrar(
+        skill_name="research",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.research_bridge:register_research_skill",
+        empty_config_registers=False,
+        keyword_context={"llm": "llm"},
+    ),
+    SkillToolRegistrar(
+        skill_name="openweather",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.openweather_bridge:register_openweather_skill",
+        positional_context=("research_config",),
+    ),
+    SkillToolRegistrar(
+        skill_name="tailscale",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.tailscale_bridge:register_tailscale_skill",
+        empty_config_registers=False,
+    ),
+    SkillToolRegistrar(
+        skill_name="comfyui",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.comfyui_bridge:register_comfyui_skill",
+        keyword_context={"duckclaw_db": "db"},
+    ),
+)
+
+VISUAL_ARTIFACT_READER_PATH = "duckclaw.forge.skills.comfyui_bridge:read_artifact_image_as_b64"
 
 
 def worker_skill_config(spec: WorkerSpec, skill_name: str) -> dict[str, Any] | None:
@@ -31,8 +96,14 @@ def register_pre_llm_skill_tools(
     incoming_hint: str,
 ) -> None:
     """Register configured skill tools that do not need the built LLM."""
-    _register_google_trends(tools, spec, tool_surface=tool_surface)
-    _register_reddit(tools, spec, tool_surface=tool_surface, incoming_hint=incoming_hint)
+    _register_configured_skill_tools(
+        tools,
+        spec,
+        phase="pre_llm",
+        tool_surface=tool_surface,
+        incoming_hint=incoming_hint,
+        context={},
+    )
 
 
 def register_post_llm_skill_tools(
@@ -43,107 +114,91 @@ def register_post_llm_skill_tools(
     llm: Any,
 ) -> None:
     """Register configured skill tools that may depend on db or llm handles."""
-    research_config = worker_skill_config(spec, "research")
-    _register_research(tools, research_config, llm=llm)
-    _register_openweather(tools, spec, research_config=research_config)
-    _register_tailscale(tools, spec)
-    _register_comfyui(tools, spec, db=db)
+    _register_configured_skill_tools(
+        tools,
+        spec,
+        phase="post_llm",
+        tool_surface="",
+        incoming_hint="",
+        context={
+            "db": db,
+            "llm": llm,
+            "research_config": worker_skill_config(spec, "research"),
+        },
+    )
 
 
 def read_visual_artifact_image_as_b64(artifact_path: str, tenant_id: str) -> str:
     """Read a generated visual artifact without coupling factory to a bridge module."""
     try:
-        from duckclaw.forge.skills.comfyui_bridge import read_artifact_image_as_b64
-
-        return str(read_artifact_image_as_b64(artifact_path, tenant_id) or "")
+        reader = _load_callable(VISUAL_ARTIFACT_READER_PATH)
+        return str(reader(artifact_path, tenant_id) or "")
     except Exception:
         _log.debug("visual artifact read skipped", exc_info=True)
         return ""
 
 
-def _register_google_trends(tools: list[Any], spec: WorkerSpec, *, tool_surface: str) -> None:
-    config = worker_skill_config(spec, "google_trends")
-    if tool_surface != "full" or config is None:
-        return
-    try:
-        from duckclaw.forge.skills.google_trends_bridge import register_google_trends_skill
-
-        register_google_trends_skill(tools, config)
-    except Exception:
-        _log.debug("google_trends skill registration skipped", exc_info=True)
-
-
-def _register_reddit(
+def _register_configured_skill_tools(
     tools: list[Any],
     spec: WorkerSpec,
+    *,
+    phase: SkillToolPhase,
+    tool_surface: str,
+    incoming_hint: str,
+    context: dict[str, Any],
+) -> None:
+    for descriptor in DEFAULT_SKILL_TOOL_REGISTRY:
+        if descriptor.phase != phase:
+            continue
+        if not _descriptor_is_active(descriptor, tool_surface=tool_surface, incoming_hint=incoming_hint):
+            continue
+        config = worker_skill_config(spec, descriptor.skill_name)
+        if config is None:
+            continue
+        if not config and not descriptor.empty_config_registers:
+            continue
+        _invoke_registrar(tools, descriptor, config, context)
+
+
+def _descriptor_is_active(
+    descriptor: SkillToolRegistrar,
     *,
     tool_surface: str,
     incoming_hint: str,
-) -> None:
-    config = worker_skill_config(spec, "reddit")
+) -> bool:
+    surface = str(tool_surface or "").strip()
+    if surface and surface in descriptor.surfaces:
+        return True
     hint = str(incoming_hint or "").strip().lower()
-    should_register = bool(config) and (
-        tool_surface == "context_synthesis"
-        or (tool_surface == "url_research" and "reddit.com" in hint)
-        or (tool_surface == "full" and "reddit.com" in hint)
-    )
-    if not should_register:
-        return
-    try:
-        from duckclaw.forge.skills.reddit_bridge import register_reddit_skill
-
-        register_reddit_skill(tools, config)
-    except Exception:
-        _log.debug("reddit skill registration skipped", exc_info=True)
+    if surface in descriptor.hint_surfaces and any(item.lower() in hint for item in descriptor.hint_contains):
+        return True
+    return not descriptor.surfaces and not descriptor.hint_surfaces
 
 
-def _register_research(tools: list[Any], config: dict[str, Any] | None, *, llm: Any) -> None:
-    if not config:
-        return
-    try:
-        from duckclaw.forge.skills.research_bridge import register_research_skill
-
-        register_research_skill(tools, config, llm=llm)
-    except Exception:
-        _log.debug("research skill registration skipped", exc_info=True)
-
-
-def _register_openweather(
+def _invoke_registrar(
     tools: list[Any],
-    spec: WorkerSpec,
-    *,
-    research_config: dict[str, Any] | None,
+    descriptor: SkillToolRegistrar,
+    config: dict[str, Any],
+    context: dict[str, Any],
 ) -> None:
-    config = worker_skill_config(spec, "openweather")
-    if config is None:
-        return
     try:
-        from duckclaw.forge.skills.openweather_bridge import register_openweather_skill
-
-        register_openweather_skill(tools, config, research_config)
+        registrar = _load_callable(descriptor.registrar_path)
+        positional_args = [context.get(name) for name in descriptor.positional_context]
+        keyword_args = {
+            kwarg_name: context.get(context_name)
+            for kwarg_name, context_name in descriptor.keyword_context.items()
+        }
+        registrar(tools, config, *positional_args, **keyword_args)
     except Exception:
-        _log.debug("openweather skill registration skipped", exc_info=True)
+        _log.debug("%s skill registration skipped", descriptor.skill_name, exc_info=True)
 
 
-def _register_tailscale(tools: list[Any], spec: WorkerSpec) -> None:
-    config = worker_skill_config(spec, "tailscale")
-    if not config:
-        return
-    try:
-        from duckclaw.forge.skills.tailscale_bridge import register_tailscale_skill
-
-        register_tailscale_skill(tools, config)
-    except Exception:
-        _log.debug("tailscale skill registration skipped", exc_info=True)
-
-
-def _register_comfyui(tools: list[Any], spec: WorkerSpec, *, db: Any) -> None:
-    config = worker_skill_config(spec, "comfyui")
-    if config is None:
-        return
-    try:
-        from duckclaw.forge.skills.comfyui_bridge import register_comfyui_skill
-
-        register_comfyui_skill(tools, config, duckclaw_db=db)
-    except Exception:
-        _log.debug("comfyui skill registration skipped", exc_info=True)
+def _load_callable(path: str) -> Any:
+    module_name, _, attr_name = str(path or "").partition(":")
+    if not module_name or not attr_name:
+        raise ValueError(f"Invalid callable path: {path!r}")
+    module = importlib.import_module(module_name)
+    target = getattr(module, attr_name)
+    if not callable(target):
+        raise TypeError(f"Configured registrar is not callable: {path!r}")
+    return target

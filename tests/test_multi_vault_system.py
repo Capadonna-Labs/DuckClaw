@@ -145,6 +145,48 @@ def test_vault_fly_uses_session_duckdb_path_over_gateway_env(tmp_path, monkeypat
     assert "Tenant: SIATA" in out
 
 
+def test_vault_default_tenant_label_uses_db_first_runtime_setting(
+    gateway_db,
+    tmp_path,
+    monkeypatch,
+):
+    import duckdb
+
+    from duckclaw.write_command_handlers import _apply_upsert_runtime_setting
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
+    monkeypatch.setenv("DUCKCLAW_GATEWAY_DB_PATH", str(gateway_db))
+    monkeypatch.delenv("DUCKCLAW_GATEWAY_TENANT_ID", raising=False)
+    monkeypatch.delenv("DUCKCLAW_TELEGRAM_DEFAULT_TENANT", raising=False)
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        _apply_upsert_runtime_setting(
+            con,
+            {
+                "domain": "gateway",
+                "key": "default_tenant_id",
+                "value": "tenant-from-db",
+                "tenant_id": "global",
+                "actor_email": "",
+            },
+        )
+    finally:
+        con.close()
+
+    out = handle_command(
+        _DummyDB(),
+        "chat1",
+        "/vault",
+        requester_id="u1",
+        tenant_id="default",
+        vault_user_id="u1",
+    )
+
+    assert out and "Tenant: tenant-from-db" in out
+
+
 def test_vault_command_scoped_tenant(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID", raising=False)

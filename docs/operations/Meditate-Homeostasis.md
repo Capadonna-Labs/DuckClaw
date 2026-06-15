@@ -12,7 +12,7 @@ Persistido en `harness_core.homeostasis_targets.targets_json` por tenant:
 {
   "infra": { "error_rate_pct": 2.0, "stale_tasks_count": 0, ... },
   "goals": [
-    { "belief_key": "max_portfolio_drawdown_pct", "target_value": 0.05, "threshold": 0.01, "title": "DD máximo" }
+    { "belief_key": "latency_ms", "target_value": 250.0, "threshold": 25.0, "title": "Latency budget" }
   ]
 }
 ```
@@ -32,12 +32,12 @@ Escritura vía cola `UPSERT_HOMEOSTASIS_MANIFEST` (db-writer).
 
 Cuando infra y metas están OK, meditate deja de mostrar un `noop` opaco y emite un mensaje explícito, p. ej.:
 
-> Contexto alineado con las metas homeostasis. Metas: Max drawdown ≤ 5% (obs: 1.2% ✓), … Infra: sin tareas stale, …
+> Contexto alineado con las metas homeostasis. Metas: Latency budget target=250 (obs: 200 ✓), … Infra: sin tareas stale, …
 
 Visible en:
 
 - Respuesta fly `/meditate --delta …` (primer ciclo y resumen)
-- Heartbeat admin `[meditate]` (ticker proactivo)
+- Heartbeat admin `[meditate]` (scheduler proactivo)
 - Campo `alignment_message` en el resultado del ciclo
 
 ## Programación meditate
@@ -45,7 +45,7 @@ Visible en:
 | Mecanismo | Descripción |
 |-----------|-------------|
 | `/meditate --delta 4h` | Intervalo en `agent_config` (`meditate_delta_seconds`) |
-| `/meditate --delta off` | Desactiva el ticker |
+| `/meditate --delta off` | Desactiva el scheduler |
 | Tool `configure_meditate_homeostasis` | El agente activa (`10min`, `4h`) o desactiva (`off`) |
 | Tool `get_meditate_homeostasis_status` | Schedule + snapshot del manifiesto |
 | Tool `manage_homeostasis_goals` | Espejo de `/goals` (list/add/remove/set_infra) |
@@ -84,7 +84,7 @@ Tras merge:
 pm2 restart DuckClaw-Gateway DuckClaw-DB-Writer DuckClaw-Heartbeat
 ```
 
-Migración one-shot por vault tenant (ej. QT Expert 1):
+Migración one-shot por vault tenant:
 
 ```
 /goals --migrate
@@ -94,5 +94,5 @@ Verificar: `harness_core.homeostasis_targets` con `goals` poblado; `/meditate --
 
 ## Relación con Homeostasis-Heartbeat.md
 
-- **Dominio + metas**: manifiesto `/goals`, alineación en `/crons --delta` ticker (lee manifiesto).
+- **Dominio + metas**: manifiesto `/goals`, alineación en `/crons --delta` scheduler (lee manifiesto).
 - **Infra (meditate)**: telemetría y DML acotado sin turno de chat.

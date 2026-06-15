@@ -100,6 +100,36 @@ class UpsertRuntimeSettingCommand(WriteCommand):
     secret: bool = False
 
 
+class UpsertAgentConfigEntriesCommand(WriteCommand):
+    """Upsert legacy agent_config entries through the singleton writer."""
+
+    command_type: Literal["upsert_agent_config_entries"] = "upsert_agent_config_entries"
+    entries: dict[str, str]
+
+
+# ---------------------------------------------------------------------------
+# Admin console user commands
+# ---------------------------------------------------------------------------
+
+class UpsertConsoleUserCommand(WriteCommand):
+    """Create or update an admin console user."""
+
+    command_type: Literal["upsert_console_user"] = "upsert_console_user"
+    email: str
+    nombre: str = ""
+    rol: Literal["admin", "user", "viewer"] = "user"
+    password: str | None = None
+    initials: str = ""
+    active: bool = True
+
+
+class DeactivateConsoleUserCommand(WriteCommand):
+    """Deactivate an admin console user."""
+
+    command_type: Literal["deactivate_console_user"] = "deactivate_console_user"
+    email: str
+
+
 # ---------------------------------------------------------------------------
 # Team access commands
 # ---------------------------------------------------------------------------

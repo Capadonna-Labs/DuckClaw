@@ -71,10 +71,10 @@ def test_execute_homeostasis_goals_add_and_rm(
     store = HomeostasisManifest(
         goals=[
             DomainGoal(
-                belief_key="session_pnl",
-                target_value=100.0,
-                threshold=10.0,
-                title="PnL sesión",
+                belief_key="completion_rate_pct",
+                target_value=95.0,
+                threshold=2.0,
+                title="Completion rate",
             )
         ]
     )
@@ -89,7 +89,7 @@ def test_execute_homeostasis_goals_add_and_rm(
         "harness_core.targets.load_homeostasis_manifest",
         lambda *_a, **_k: store,
     )
-    out_rm = execute_homeostasis_goals(db, "9", "--rm session_pnl", tenant_id="t1")
+    out_rm = execute_homeostasis_goals(db, "9", "--rm completion_rate_pct", tenant_id="t1")
     assert "eliminada" in out_rm.lower()
     assert store.goals == []
 
@@ -103,10 +103,10 @@ def test_execute_homeostasis_goals_migrate(
         "7",
         [
             {
-                "belief_key": "max_portfolio_drawdown_pct",
-                "target_value": 0.05,
-                "threshold": 0.01,
-                "title": "DD",
+                "belief_key": "latency_ms",
+                "target_value": 250.0,
+                "threshold": 25.0,
+                "title": "Latency budget",
             }
         ],
     )
@@ -119,4 +119,4 @@ def test_execute_homeostasis_goals_migrate(
     monkeypatch.setattr("harness_core.targets.save_homeostasis_manifest", _fake_save)
     out = execute_homeostasis_goals(db, "7", "--migrate", tenant_id="t1")
     assert "Migradas" in out
-    assert captured["manifest"].goals[0].belief_key == "max_portfolio_drawdown_pct"
+    assert captured["manifest"].goals[0].belief_key == "latency_ms"

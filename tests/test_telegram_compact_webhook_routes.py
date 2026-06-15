@@ -62,6 +62,40 @@ def test_parse_legacy_path_infers_worker_tenant() -> None:
     assert routes[1].worker_id == "worker_two"
 
 
+def test_parse_legacy_path_uses_db_first_default_tenant(
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckdb
+
+    from duckclaw.write_command_handlers import _apply_upsert_runtime_setting
+
+    monkeypatch.delenv("DUCKCLAW_GATEWAY_TENANT_ID", raising=False)
+    monkeypatch.delenv("DUCKCLAW_TELEGRAM_DEFAULT_TENANT", raising=False)
+    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "BI-Analyst-Gateway")
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        _apply_upsert_runtime_setting(
+            con,
+            {
+                "domain": "gateway",
+                "key": "default_tenant_id",
+                "value": "tenant-from-db",
+                "tenant_id": "global",
+                "actor_email": "",
+            },
+        )
+    finally:
+        con.close()
+
+    routes = parse_compact_telegram_webhook_routes("botone:tok123:/api/v1/telegram/botone")
+
+    assert len(routes) == 1
+    assert routes[0].worker_id == "botone"
+    assert routes[0].tenant_id == "tenant-from-db"
+
+
 def test_parse_rejects_duplicate_path() -> None:
     raw = (
         "a:1:/api/v1/telegram/x:W1:T1,"

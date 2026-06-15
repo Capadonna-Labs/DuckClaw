@@ -16,7 +16,7 @@ El microservicio `services/heartbeat` se despierta de forma periódica, evalúa 
    - `chat_id`: `admin_chat_id` del tenant
    - `is_system_prompt`: `true`
 5. El Gateway pasa `is_system_prompt` al grafo (campo `state["is_system_prompt"] = True`).
-6. El agente homeostático (por ejemplo `finanz`) interpreta el evento y, si corresponde, llama a la herramienta `send_proactive_message(chat_id, message)`.
+6. El agente asignado al tenant interpreta el evento y, si corresponde, llama a la herramienta `send_proactive_message(chat_id, message)`.
 7. `send_proactive_message` hace `POST` al endpoint outbound del gateway (`DUCKCLAW_HEARTBEAT_WEBHOOK_URL`) con `{chat_id, text}` y cabecera `X-DuckClaw-Secret`.
 8. El gateway envía el mensaje proactivo al usuario vía **Bot API nativa** (Telegram).
 
@@ -24,8 +24,8 @@ El microservicio `services/heartbeat` se despierta de forma periódica, evalúa 
 
 El helper `_evaluate_homeostasis()` en `services/heartbeat/main.py` devuelve una lista de anomalías, donde cada item tiene al menos:
 
-- `tenant_id`: identificador lógico del tenant/worker (por ejemplo, el schema Finance: `finance_worker`).
-- `belief_key`: la creencia que está fuera de rango (ej. `presupuesto_mensual`).
+- `tenant_id`: identificador lógico del tenant o worker (por ejemplo, `analytics_worker`).
+- `belief_key`: la creencia que está fuera de rango (ej. `completion_rate_pct` o `latency_ms`).
 - `observed_value`: último valor observado (o proxy inicial).
 - `admin_chat_id`: chat donde se debe notificar (configurable vía `DUCKCLAW_ADMIN_CHAT_ID` o, en el futuro, tabla de configuración).
 

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
-VoiceId = Literal["campus_legal_main", "leila_assistant", "finanz_alert", "quant_trader_brief"]
+VoiceId: TypeAlias = str
 
 _FORBIDDEN_TTS_REFERENCE_FIELDS = frozenset(
     {
@@ -38,6 +38,9 @@ class TTSRequest(BaseModel):
     text: str = Field(..., max_length=3000, description="Texto a sintetizar")
     voice_id: VoiceId = Field(
         ...,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$",
         description="ID del vector de voz pre-aprobado (Identity Lock)",
     )
     speed: float = Field(1.0, ge=0.5, le=2.0)

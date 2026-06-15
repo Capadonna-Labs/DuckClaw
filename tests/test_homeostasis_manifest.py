@@ -53,17 +53,17 @@ def test_parse_manifest_wrapper_json() -> None:
         "infra": {"error_rate_pct": 1.5},
         "goals": [
             {
-                "belief_key": "max_portfolio_drawdown_pct",
-                "target_value": 0.05,
-                "threshold": 0.01,
-                "title": "DD",
+                "belief_key": "latency_ms",
+                "target_value": 250.0,
+                "threshold": 25.0,
+                "title": "Latency budget",
             }
         ],
     }
     manifest = _parse_targets_json(wrapped)
     assert manifest.infra.error_rate_pct == 1.5
     assert len(manifest.goals) == 1
-    assert manifest.goals[0].belief_key == "max_portfolio_drawdown_pct"
+    assert manifest.goals[0].belief_key == "latency_ms"
 
 
 def test_load_homeostasis_targets_compat(tmp_path: Path) -> None:
@@ -122,13 +122,13 @@ def test_load_manifest_migrate_legacy_goals_from_agent_config(tmp_path: Path) ->
         "42",
         [
             {
-                "belief_key": "session_pnl",
-                "target_value": 100.0,
-                "threshold": 10.0,
-                "title": "PnL",
+                "belief_key": "completion_rate_pct",
+                "target_value": 95.0,
+                "threshold": 2.0,
+                "title": "Completion rate",
             }
         ],
     )
     manifest = load_homeostasis_manifest(db, "t1", chat_id="42", migrate_legacy=True)
     assert len(manifest.goals) == 1
-    assert manifest.goals[0].belief_key == "session_pnl"
+    assert manifest.goals[0].belief_key == "completion_rate_pct"

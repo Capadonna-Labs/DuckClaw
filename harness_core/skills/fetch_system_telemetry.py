@@ -137,15 +137,16 @@ def _stale_tasks(
             continue
         status_col = "status" if _column_exists(db, q, "status") else None
         updated_col = "updated_at" if _column_exists(db, q, "updated_at") else None
-        if not status_col or not updated_col:
+        timestamp_col = updated_col or ("created_at" if _column_exists(db, q, "created_at") else None)
+        if not status_col or not timestamp_col:
             continue
-        id_col = "signal_id" if _column_exists(db, q, "signal_id") else "id"
+        id_col = "task_id" if _column_exists(db, q, "task_id") else "id"
         if not _column_exists(db, q, id_col):
             continue
         sql = (
             f"SELECT CAST({id_col} AS VARCHAR) AS rid FROM {q} "
             f"WHERE {status_col} IN ('PENDING', 'ACTIVE', 'PENDING_HITL') "
-            f"AND {updated_col} < TIMESTAMP '{cutoff_s}' LIMIT 200"
+            f"AND {timestamp_col} < TIMESTAMP '{cutoff_s}' LIMIT 200"
         )
         try:
             raw = db.query(sql)

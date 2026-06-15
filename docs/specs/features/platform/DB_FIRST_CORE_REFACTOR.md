@@ -53,12 +53,18 @@ Si un futuro corte necesita comportamiento especifico de una vertical, debe mode
 - `duckclaw.commands.chat_state` extrae estado chat-scoped antes mezclado en `on_the_fly_commands.py`.
 - `duckclaw.commands.team_templates` extrae equipo de chat/tenant y mantiene compatibilidad con imports legacy.
 - `duckclaw.commands.team_access` extrae whitelist generica de Telegram Guard y usa comandos tipados para mutaciones de usuarios autorizados y shared grants.
+- `duckclaw.commands.vaults` extrae `/vault` y sus helpers de sesion/gateway/template-bound vaults; `on_the_fly_commands.py` queda como fachada de compatibilidad y dispatcher.
+- `duckclaw.commands.crons` extrae `/crons`, parseo/listado de intervalos `--delta`, horarios `--timestamp`, ids `--rm` y el mensaje SYSTEM_EVENT proactivo generico; `on_the_fly_commands.py` queda como fachada de compatibilidad y dispatcher.
+- `duckclaw.commands.crons` ya no abre bóvedas hermanas con DuckDB read-write directo para limpiar schedules. Las limpiezas remotas de `agent_config` se encolan como `UpsertAgentConfigEntriesCommand` y las aplica el DB-writer/inline writer transaccional.
+- `duckclaw.commands.goals` extrae `/goals`, helpers legacy de `agent_config` goals, listado/persistencia del manifiesto homeostasis y normalizacion de belief keys; `on_the_fly_commands.py` queda como fachada de compatibilidad y dispatcher mediante callbacks explicitos para resolver LLM/vault user sin ciclos.
 - `packages/agents/src/duckclaw/graphs/on_the_fly_commands.py` ya no debe exponer alias `Trabajo -> Job Hunter`, mensajes de red sandbox que recomienden `Job-Hunter`, ni textos laborales como default de comandos transversales.
-- `packages/agents/src/duckclaw/graphs/on_the_fly_commands.py` ya no conserva ramas, prompts ni comandos core de Quant/Finanz/Finance/IBKR/Trader. `/sensors` y `/lake` quedaron como diagnosticos genericos; `/crons` emite eventos proactivos genericos; comandos verticales de sesion, senales y broker ya no son propiedad del core command graph.
+- `packages/agents/src/duckclaw/graphs/on_the_fly_commands.py` ya no conserva ramas, prompts ni comandos core de Quant/Finanz/Finance/IBKR/Trader. `/sensors` y `/lake` quedaron como diagnosticos genericos; `/crons` delega en `duckclaw.commands.crons`; comandos verticales de sesion, senales y broker ya no son propiedad del core command graph.
 - `duckclaw.write_commands` define comandos Pydantic idempotentes para workers, proyectos, runtime settings, team access, shared grants, Kanban, knowledge/RAG y prompt policies.
 - `duckclaw.write_command_handlers` despacha esos comandos dentro de una transaccion administrada por el caller.
-- `services/api-gateway/routers/admin_domains/access_management.py` ya no escribe shared grants directamente; `/access/shared-grants` delega en `UpsertSharedDbGrantCommand` y `DeleteSharedDbGrantCommand` via DB-writer tipado.
+- `services/api-gateway/routers/admin_domains/access_management.py` ya no escribe access mutators directamente; console users, Telegram whitelist y shared grants delegan en comandos tipados via DB-writer.
 - `services/db-writer/main.py` ya no carga un loop de `quant_state_delta`; mantiene loops transversales/contextuales como context injection, visual, meditate y reports.
+- `duckclaw.forge.team_env.default_tenant_id_from_env` ya no infiere tenants desde nombres PM2 ni rutas DuckDB y queda como compatibilidad env-only.
+- El owner DB-first canonico del tenant default administrado es `main.admin_runtime_settings` con `tenant_id='global'`, `actor_email=''`, `domain='gateway'`, `key='default_tenant_id'`. Gateway, Telegram inbound, Telegram compact routes legacy y `/vault` resuelven con `duckclaw.forge.team_env.default_tenant_id_from_runtime`: env explicito administrado (`DUCKCLAW_GATEWAY_TENANT_ID` / `DUCKCLAW_TELEGRAM_DEFAULT_TENANT`) → lookup read-only del setting global → fallback seguro `default`. La configuracion debe persistirse via runtime settings/comando tipado; no por escritura directa desde gateway ni por heuristicas de proceso/path.
 
 ### Heartbeat
 
@@ -73,6 +79,9 @@ Si un futuro corte necesita comportamiento especifico de una vertical, debe mode
 - `duckclaw.db_write_queue` es ahora el owner canonico del singleton writer/cola DuckDB, incluyendo los adaptadores legacy `enqueue_write`, `execute_write_direct`, `WriteQueueBridge` y `run_consumer`. `duckclaw.forge.homeostasis.singleton_writer` queda como fachada legacy temporal sin logica propia.
 - El nudging proactivo de desalineacion ya no agrega contexto Quant ni recomendaciones por objetivo vertical. Si una vertical necesita enriquecer observaciones, debe hacerlo como capability/policy DB-first o extension fuera del core antes de persistir `observed_value`.
 - `tests/test_forge_legacy_cleanup.py::test_homeostasis_goals_alignment_has_no_quant_finance_trading_residue` protege que el owner canonico `duckclaw.homeostasis.goals_alignment` no reintroduzca marcadores Quant/Trader/Finance/IBKR/broker/trading.
+- Los fixtures positivos de goals/homeostasis/meditate usan metricas genericas como `latency_ms`, `completion_rate_pct` y `error_rate_pct`; los ejemplos PnL/drawdown/trading quedan fuera del core o como guardrails negativos explicitos.
+- `tests/test_forge_legacy_cleanup.py::test_on_the_fly_command_graph_has_no_quant_finance_trading_residue` ahora cubre tambien `pnl` y `drawdown` para evitar que copy/runtime transversal de `/goals` o `/crons` vuelva a usar ejemplos financieros.
+- `docs/operations/Homeostasis-Heartbeat.md` y `Meditate-Homeostasis.md` usan ejemplos transversales de tenant/worker y metricas genericas; `tests/test_forge_legacy_cleanup.py::test_homeostasis_operation_docs_use_generic_metrics` evita reintroducir Finanz/Finance/PNL/drawdown/trading como ejemplos positivos.
 - `tests/test_package_reorg_contracts.py::test_homeostasis_goals_alignment_implementation_is_owned_by_homeostasis_package` protege que los imports legacy deleguen al owner canonico y que `__module__` no vuelva a `duckclaw.forge.homeostasis`.
 - `tests/test_package_reorg_contracts.py::test_homeostasis_runtime_implementations_are_owned_by_homeostasis_package` protege que `surprise`, `belief_registry` y `manager` deleguen desde Forge hacia `duckclaw.homeostasis`.
 - `tests/test_forge_legacy_cleanup.py::test_canonical_homeostasis_package_does_not_depend_on_forge_homeostasis` protege que el paquete canonico `duckclaw.homeostasis` no importe de vuelta desde Forge.
@@ -104,6 +113,18 @@ Si un futuro corte necesita comportamiento especifico de una vertical, debe mode
 - Las instrucciones, fallback local, naming de borrador y metadatos de confirmacion del flujo administrado se resuelven desde `main.prompt_policy_registry` con la policy activa `manager_task/admin_workspace_managed_draft`, sembrada por migracion. Si la policy falta o es invalida, el endpoint debe fallar como configuracion administrable faltante; no debe reconstruir un prompt o identidad de dominio en Python.
 - Playground ya no admite un worker especial para guiar proyectos. Con `project_id`, `default` se resuelve al primer agente asignado al proyecto; cualquier worker no-default debe venir del catalogo DB y pertenecer al proyecto.
 - La config de Playground expone estado de voz como `voice.configured`, `voice.available` y `voice.tts_loaded`; la disponibilidad depende de `DUCKCLAW_SENSORY_BASE_URL` y health de Sensory TTS.
+
+### Sensory TTS
+
+- `integrations/sensory-node` ya no hardcodea voces Leila/Finanz/Quant Trader como defaults en el modelo Pydantic, el manifiesto versionado ni los scripts operativos principales de preparacion/regeneracion.
+- `TTSRequest.voice_id` valida un slug generico; la aprobacion runtime sigue en el manifiesto cargado por `TTSEngine.has_voice`, no en una allowlist Python de dominios.
+- `integrations/sensory-node/voices/manifest.json` queda intencionalmente vacio en core. Las voces se agregan por flujo offline administrado y no deben commitearse como defaults verticales.
+
+### Meditate Harness
+
+- `harness_core.states.meditate_state` y `harness_core.skills.emit_correction_delta` ya no usan fuentes stale de dominio como default. El default transversal para `PURGE_STALE_TASKS` es `main.task_audit_log`, alineado con `services/db-writer/models/meditate_state_delta.py`.
+- `harness_core.skills.fetch_system_telemetry` trata `task_audit_log` como fuente DB-first de tareas stale usando `task_id` y `created_at` cuando no existe `updated_at`, sin crear migraciones nuevas ni rutas write directas.
+- `tests/test_forge_legacy_cleanup.py::test_meditate_harness_uses_transversal_stale_task_source_table` protege que el harness de meditate no vuelva a depender de tablas Quant como default.
 
 ## Patrones Nuevos A Usar
 
@@ -152,11 +173,19 @@ Ejecutar o actualizar estos tests cuando un corte toque el area correspondiente:
 - `tests/test_commands_chat_state_contract.py`: protege ownership de `duckclaw.commands.chat_state`.
 - `tests/test_commands_team_templates_contract.py`: protege ownership de `duckclaw.commands.team_templates`.
 - `tests/test_commands_team_access_contract.py`: protege ownership de whitelist, comandos typed DB-writer y ausencia de War Room en team access.
+- `tests/test_commands_vaults_contract.py`: protege ownership de `/vault` y evita que sus helpers vuelvan a `graphs/on_the_fly_commands.py`.
+- `tests/test_commands_crons_contract.py`: protege ownership de `/crons`, helpers de schedule proactivo y compatibilidad de imports legacy desde `graphs/on_the_fly_commands.py`.
+- `tests/test_commands_goals_contract.py`: protege ownership de `/goals`, helpers del manifiesto homeostasis y compatibilidad de imports legacy desde `graphs/on_the_fly_commands.py`.
+- `tests/test_api_gateway.py` y `tests/test_forge_legacy_cleanup.py::test_team_env_does_not_infer_tenant_from_vertical_process_or_path_names`: protegen que el tenant default del gateway no vuelva a inferirse desde PM2/rutas ni desde nombres verticales en `team_env.py`.
+- `tests/test_telegram_compact_webhook_routes.py::test_parse_legacy_path_uses_db_first_default_tenant` y `tests/test_multi_vault_system.py::test_vault_default_tenant_label_uses_db_first_runtime_setting`: protegen que Telegram compact legacy y `/vault` usen el owner DB-first de tenant default.
 - `tests/test_tool_response_repair.py`: protege repair transversal y ausencia de marcadores verticales en `tool_response_repair.py`.
 - `tests/test_answer_evidence_validator.py`: protege auditoria transversal de evidencia/citas.
 - `tests/test_write_commands.py`: protege serializacion y handlers de comandos tipados.
 - `tests/test_admin_router.py`: cubre contrato de Playground, incluyendo estado de voz.
+- `integrations/sensory-node/tests/test_models.py`: protege que Sensory no vuelva a hardcodear voces Leila/Finanz/Quant Trader como defaults versionados y que `voice_id` sea manifiesto-owned en vez de una allowlist Python vertical.
 - `tests/test_forge_legacy_cleanup.py::test_labor_vertical_residues_are_absent_from_core_config_and_telegram_tests`: prohibe residuos Job Hunter/laborales en `on_the_fly_commands.py`, `sandbox.py`, `.env.example`, `config/` y tests Telegram/PM2 que deben usar workers genericos.
+- `tests/test_forge_legacy_cleanup.py::test_meditate_harness_uses_transversal_stale_task_source_table`: prohibe que `meditate_state.py` o `emit_correction_delta.py` vuelvan a usar fuentes stale Quant como default.
+- `tests/test_forge_legacy_cleanup.py::test_homeostasis_operation_docs_use_generic_metrics`: prohibe que las docs operativas de Homeostasis usen ejemplos financieros/verticales como runtime positivo.
 
 Comandos sugeridos por corte:
 
@@ -182,8 +211,8 @@ Estos residuos existen en el repo actual y no deben confundirse con patrones a c
 - `packages/agents/src/duckclaw/finance/*` y `packages/agents/src/duckclaw/quant/*`: paquetes verticales pendientes de remover o sacar del core despues del corte de factory.
 - `services/db-writer/quant_state_delta_handler.py` y `services/db-writer/models/quant_state_delta.py`: handlers/DTOs verticales residuales; el loop no esta activo en `services/db-writer/main.py`, pero los archivos siguen presentes.
 - `services/api-gateway/routers/admin.py` y `services/api-gateway/routers/admin_domains/visual_assets.py`: estan en allowlists por diagnosticos/admin context pendientes de genericizar.
-- `services/api-gateway/routers/admin_domains/access_management.py`: Admin shared grants ya delega en comandos tipados/DB-writer. El modulo conserva otros mutadores admin directos pendientes de migrar por cortes dedicados.
-- `scripts/deployment/regen_voices_mac.py` y tests de Sensory pueden nombrar voces como Leila o Finanz por fixtures/operaciones, pero no son defaults core de agente.
+- `services/api-gateway/routers/admin_domains/access_management.py`: los mutadores admin de access management delegan en comandos tipados/DB-writer y el modulo salio de la allowlist de conexiones DuckDB read-write directas.
+- `scripts/deployment/patch_tts_production_env.py`, `scripts/deployment/test_sensory_tts.py`, `scripts/deployment/test_tts_duration_remote.py`, `scripts/deployment/debug_tts_mac.py` e `integrations/sensory-node/scripts/check_tts_amplitude.py`: smoke/debug/patch scripts de TTS aun nombran voces legacy. No deben copiarse como defaults; el siguiente corte Sensory debe moverlos a ids genericos o resolver voz desde `DUCKCLAW_TTS_VOICE_MAP`/manifest.
 - `packages/duckops/duckops/sovereign/materialize.py`: contiene comentarios/operaciones con nombres legacy; no es runtime manager core.
 
 Las allowlists vivas estan declaradas en `tests/test_forge_legacy_cleanup.py`. Si un futuro subagente agrega una excepcion, debe agregar tambien una razon explicita y preferiblemente una tarea de follow-up para retirarla.
@@ -203,10 +232,12 @@ Las allowlists vivas estan declaradas en `tests/test_forge_legacy_cleanup.py`. S
 ## Pendientes Recomendados
 
 - Extraer `workers/factory.py` a una superficie de tools/capabilities configurables por DB.
-- Reducir `on_the_fly_commands.py` a una fachada mas delgada que delegue en `duckclaw.commands.*` para `/crons`, `/goals`, `/vault`, `/sensors` y auditoria generica.
+- Reducir `on_the_fly_commands.py` a una fachada mas delgada que delegue en `duckclaw.commands.*` para `/sensors` y auditoria generica.
 - Extender el barrido de residuos laborales fuera del scope de `on_the_fly`/`sandbox`/Telegram, separando menciones negativas de specs/tests contra ejemplos runtime.
 - Sacar `finance/*` y `quant/*` hacia extensiones verticales o policies DB-first.
 - Seguir adelgazando `duckclaw.forge.homeostasis`: `goals_alignment`, `surprise`, `belief_registry`, `manager` y `singleton_writer` ya delegan a owners canonicos. Queda pendiente reemplazar imports legacy restantes en `graphs/tools.py` cuando ese archivo entre en scope, sin tocar `on_the_fly_commands.py`, `workers/factory.py` ni heartbeat fuera de cortes dedicados.
-- Migrar mutadores admin restantes de `access_management.py` hacia comandos tipados cuando el flujo requiera singleton writer estricto.
+- Revisar imports legacy restantes de harness/homeostasis fuera de este corte; los ejemplos runtime positivos ya quedan en metricas genericas.
+- Seguir retirando allowlists de mutadores admin directos en routers vecinos cuando cada flujo tenga comando tipado y guardrail focal.
 - Reemplazar comentarios, fixtures y scripts de ops que usen nombres verticales como defaults implicitos.
+- Extender la UI/admin runtime settings para exponer `gateway.default_tenant_id` de forma explicita si se necesita gestionarlo desde pantalla; el contrato runtime ya queda definido por `main.admin_runtime_settings` y lectura read-only desde Gateway/Telegram/comandos.
 - Mantener tests guardrail cerca del contrato. Cada cleanup que cierre un residuo debe retirar o estrechar su allowlist.

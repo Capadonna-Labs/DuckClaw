@@ -25,8 +25,9 @@ MeditateRunStatus = Literal[
     "failed",
 ]
 
+DEFAULT_STALE_TASK_SOURCE_TABLE = "main.task_audit_log"
 DEFAULT_STALE_TASK_SOURCES: tuple[str, ...] = (
-    "quant_core.trade_signals",
+    DEFAULT_STALE_TASK_SOURCE_TABLE,
 )
 
 

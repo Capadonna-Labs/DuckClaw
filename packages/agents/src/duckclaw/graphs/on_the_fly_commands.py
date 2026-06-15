@@ -30,6 +30,55 @@ from duckclaw.commands.chat_state import (
     get_chat_state as get_chat_state,
     set_chat_state as set_chat_state,
 )
+from duckclaw.commands.crons import (
+    CRON_SCHEDULE_ID_DELTA as CRON_SCHEDULE_ID_DELTA,
+    CRON_SCHEDULE_ID_WALL as CRON_SCHEDULE_ID_WALL,
+    GOALS_DELTA_MAX_SECONDS as GOALS_DELTA_MAX_SECONDS,
+    GOALS_DELTA_MIN_SECONDS as GOALS_DELTA_MIN_SECONDS,
+    _GOALS_CRON_WALL_KEY as _GOALS_CRON_WALL_KEY,
+    _GOALS_DELTA_ANCHOR_LEGACY_KEY as _GOALS_DELTA_ANCHOR_LEGACY_KEY,
+    _GOALS_DELTA_META_KEY as _GOALS_DELTA_META_KEY,
+    _GOALS_DELTA_SECONDS_KEY as _GOALS_DELTA_SECONDS_KEY,
+    _GOALS_PROACTIVE_ANCHOR_KEY as _GOALS_PROACTIVE_ANCHOR_KEY,
+    _GOALS_PROACTIVE_LAST_FIRE_KEY as _GOALS_PROACTIVE_LAST_FIRE_KEY,
+    _GOALS_PROACTIVE_NOTIFY_KEY as _GOALS_PROACTIVE_NOTIFY_KEY,
+    _GOALS_PROACTIVE_TENANT_KEY as _GOALS_PROACTIVE_TENANT_KEY,
+    _apply_interval_only_clear as _apply_interval_only_clear,
+    _crons_debug_log as _crons_debug_log,
+    _crons_goals_delta_listing_section as _crons_goals_delta_listing_section,
+    _crons_goals_delta_meta_dict as _crons_goals_delta_meta_dict,
+    _extract_crons_delta_options as _extract_crons_delta_options,
+    _goals_cron_wall_listing_note as _goals_cron_wall_listing_note,
+    _goals_proactive_interval_countdown_parts as _goals_proactive_interval_countdown_parts,
+    _normalize_cron_rm_id as _normalize_cron_rm_id,
+    _short_session_uid_for_crons as _short_session_uid_for_crons,
+    build_goals_proactive_system_event_message as build_goals_proactive_system_event_message,
+    chat_id_from_goals_cron_wall_key as chat_id_from_goals_cron_wall_key,
+    chat_id_from_goals_delta_config_key as chat_id_from_goals_delta_config_key,
+    clear_goals_cron_wall_storage as clear_goals_cron_wall_storage,
+    clear_goals_proactive_schedule as clear_goals_proactive_schedule,
+    clear_interval_schedule_only as clear_interval_schedule_only,
+    execute_crons_schedule as execute_crons_schedule,
+    execute_goals as execute_goals,
+    format_goals_countdown_human as format_goals_countdown_human,
+    format_goals_delta_interval_human as format_goals_delta_interval_human,
+    format_platform_cron_summary as format_platform_cron_summary,
+    parse_goals_delta_arg as parse_goals_delta_arg,
+)
+from duckclaw.commands.goals import (
+    _format_homeostasis_manifest_listing as _format_homeostasis_manifest_listing,
+    _get_goals_registry_fallback_first as _get_goals_registry_fallback_first,
+    _get_goals_registry_for_chat as _get_goals_registry_for_chat,
+    _goal_title as _goal_title,
+    _natural_language_goal_to_params as _natural_language_goal_to_params,
+    _normalize_belief_key as _normalize_belief_key,
+    _persist_homeostasis_manifest_db as _persist_homeostasis_manifest_db,
+    configure_goals_llm_triplet_resolver as _configure_goals_llm_triplet_resolver,
+    configure_goals_vault_user_id_resolver as _configure_goals_vault_user_id_resolver,
+    execute_homeostasis_goals as execute_homeostasis_goals,
+    get_manager_goals as get_manager_goals,
+    set_manager_goals as set_manager_goals,
+)
 from duckclaw.commands.team_templates import (
     _canonicalize_team_template_ids as _canonicalize_team_template_ids,
     _resolve_template_id as _resolve_template_id,
@@ -69,31 +118,20 @@ from duckclaw.commands.team_access import (
     configure_team_access_acl_db_provider as _configure_team_access_acl_db_provider,
     execute_team_whitelist as execute_team_whitelist,
 )
-from duckclaw.vaults import (
-    create_vault as _vault_create,
-    list_vaults as _vault_list,
-    remove_vault as _vault_remove,
-    resolve_active_vault as _vault_resolve_active,
-    switch_vault as _vault_switch,
-    validate_user_db_path,
-    vault_scope_id_for_tenant,
+from duckclaw.commands.vaults import (
+    _dedicated_gateway_db_path_for_vault as _dedicated_gateway_db_path_for_vault,
+    _dedicated_gateway_vault_label as _dedicated_gateway_vault_label,
+    _effective_vault_tenant_label as _effective_vault_tenant_label,
+    _fly_vault_label_for_tenant as _fly_vault_label_for_tenant,
+    _format_vault_size_mb as _format_vault_size_mb,
+    _session_duckdb_path_for_fly as _session_duckdb_path_for_fly,
+    _template_bound_vault_path as _template_bound_vault_path,
+    execute_vault as execute_vault,
 )
 
 from duckclaw.guardrails.loader import format_guardrail, load_guardrail, load_guardrail_pipe_table
-from duckclaw.runtime.scheduling.cron_wall_schedule import (
-    format_cron_wall_human,
-    parse_cron_wall_tokens,
-)
-from duckclaw.graphs.proactive_review_markers import (
-    GOALS_PROACTIVE_REVIEW_PHRASE_CRONS,
-    GOALS_PROACTIVE_REVIEW_PHRASE_LEGACY,
-    proactive_review_event_phrase_in_text,
-)
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_fly, structured_log_context
 from duckclaw.utils.telegram_markdown_v2 import TELEGRAM_MARKDOWN_V2_SPECIAL
-
-_CRONS_DEBUG_LOG = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log"
-
 
 def _team_access_acl_db_provider() -> Any:
     from duckclaw.graphs.graph_server import get_db
@@ -104,47 +142,6 @@ def _team_access_acl_db_provider() -> Any:
 _configure_team_access_acl_db_provider(_team_access_acl_db_provider)
 
 
-def _crons_debug_log(
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    *,
-    hypothesis_id: str = "crons",
-) -> None:
-    # #region agent log
-    try:
-        with open(_CRONS_DEBUG_LOG, "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "fd1dbb",
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000),
-                        "hypothesisId": hypothesis_id,
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
-
-
-# Revisión proactiva /crons --delta (agent_config; claves internas goals_* sin cambiar)
-_GOALS_DELTA_SECONDS_KEY = "goals_delta_seconds"
-_GOALS_PROACTIVE_LAST_FIRE_KEY = "goals_proactive_last_fire_epoch"
-_GOALS_PROACTIVE_ANCHOR_KEY = "goals_proactive_schedule_anchor_epoch"
-_GOALS_PROACTIVE_TENANT_KEY = "goals_proactive_tenant_id"
-_GOALS_DELTA_ANCHOR_LEGACY_KEY = "goals_delta_anchor"
-_GOALS_DELTA_META_KEY = "goals_delta_meta"
-_GOALS_PROACTIVE_NOTIFY_KEY = "goals_proactive_notify_channel"
-_GOALS_CRON_WALL_KEY = "goals_cron_wall"
-GOALS_DELTA_MIN_SECONDS = 60
-GOALS_DELTA_MAX_SECONDS = 7 * 24 * 3600
-
 # Termostato infra meditate (/meditate --delta); independiente de /crons --delta
 _MEDITATE_DELTA_SECONDS_KEY = "meditate_delta_seconds"
 _MEDITATE_LAST_FIRE_KEY = "meditate_last_fire_epoch"
@@ -153,21 +150,7 @@ _MEDITATE_WORKER_KEY = "meditate_worker_id"
 MEDITATE_DELTA_MIN_SECONDS = 60
 MEDITATE_DELTA_MAX_SECONDS = 7 * 24 * 3600
 
-# IDs mostrados en /crons para quitar un schedule con /crons --rm <cron-id>
-CRON_SCHEDULE_ID_DELTA = "delta"
-CRON_SCHEDULE_ID_WALL = "wall"
-
-
-def _normalize_cron_rm_id(token: str) -> Optional[str]:
-    """``delta`` / ``interval`` → intervalo; ``wall`` / ``timestamp`` → reloj."""
-    t = (token or "").strip().lower()
-    if t in (CRON_SCHEDULE_ID_DELTA, "interval"):
-        return CRON_SCHEDULE_ID_DELTA
-    if t in (CRON_SCHEDULE_ID_WALL, "timestamp"):
-        return CRON_SCHEDULE_ID_WALL
-    return None
-
-# Cola FIFO de PNG base64 por chat: api-gateway hace pop_all y sendPhoto en orden (p. ej. PnL + torta).
+# Cola FIFO de PNG base64 por chat: api-gateway hace pop_all y sendPhoto en orden.
 _FLY_OUTBOUND_CHART_B64: dict[str, list[str]] = {}
 
 
@@ -224,238 +207,6 @@ def pop_fly_outbound_chart_b64(session_id: Any) -> str | None:
     if not q:
         del _FLY_OUTBOUND_CHART_B64[k]
     return first
-
-
-def _extract_crons_delta_options(toks: list[str]) -> tuple[list[str], dict[str, Any], Optional[str]]:
-    """
-    Parsea tokens tras ``--delta``: duración + flags ``--notify``, ``--mode``, ``--jitter``.
-    ``toks[0]`` debe ser ``--delta``.
-    """
-    dur_parts: list[str] = []
-    opts: dict[str, Any] = {}
-    i = 1
-    while i < len(toks):
-        t = toks[i]
-        if t == "--notify":
-            if i + 1 >= len(toks):
-                return [], {}, "Falta valor tras --notify (admin, telegram o both)."
-            opts["notify"] = toks[i + 1]
-            i += 2
-            continue
-        if t == "--mode":
-            if i + 1 >= len(toks):
-                return [], {}, "Falta valor tras --mode (always u on_misalignment)."
-            opts["mode"] = toks[i + 1]
-            i += 2
-            continue
-        if t == "--jitter":
-            if i + 1 >= len(toks):
-                return [], {}, "Falta valor tras --jitter (ej. 20% o 0.15)."
-            opts["jitter"] = toks[i + 1]
-            i += 2
-            continue
-        if t.startswith("--"):
-            return [], {}, f"Flag desconocida: {t}"
-        dur_parts.append(t)
-        i += 1
-    return dur_parts, opts, None
-
-
-def parse_goals_delta_arg(fragment: str) -> tuple[Optional[int], Optional[str]]:
-    """
-    Convierte texto tras --delta en segundos. (0, None) = desactivar.
-    (None, err) = error. Requiere mínimo GOALS_DELTA_MIN_SECONDS si > 0.
-    """
-    s = (fragment or "").strip().lower()
-    if not s:
-        return None, "Falta valor tras --delta (ej. 20min, 1h, off)."
-    if s in ("off", "0", "false", "no", "disable"):
-        return 0, None
-    collapsed = re.sub(r"\s+", "", s)
-    m = re.match(r"^(\d+(?:\.\d+)?)([a-z]*)$", collapsed, re.I)
-    if not m:
-        return None, f"No reconozco el intervalo `{fragment}`. Usa ej. 20min, 1h, 45s o off."
-    val = float(m.group(1))
-    unit = (m.group(2) or "m").lower()
-    if unit in ("", "m", "min", "mins", "minute", "minutes"):
-        secs = int(val * 60)
-    elif unit in ("h", "hr", "hrs", "hour", "hours"):
-        secs = int(val * 3600)
-    elif unit in ("s", "sec", "secs", "second", "seconds"):
-        secs = int(val)
-    else:
-        return None, f"Unidad no válida en `{fragment}`."
-    if secs <= 0:
-        return None, "El intervalo debe ser positivo (o usa off)."
-    if secs < GOALS_DELTA_MIN_SECONDS:
-        return None, f"El mínimo es {GOALS_DELTA_MIN_SECONDS}s (~1 min)."
-    if secs > GOALS_DELTA_MAX_SECONDS:
-        return None, "El máximo es 7 días."
-    return secs, None
-
-
-def format_goals_delta_interval_human(seconds: int) -> str:
-    if seconds < 60:
-        return f"{seconds}s"
-    if seconds % 3600 == 0 and seconds >= 3600:
-        return f"{seconds // 3600}h"
-    if seconds % 60 == 0:
-        return f"{seconds // 60} min"
-    return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
-
-
-def format_goals_countdown_human(seconds: int) -> str:
-    """Texto breve para tiempo restante hasta el próximo tick programado."""
-    s = max(0, int(seconds))
-    if s <= 0:
-        return "menos de 1 s"
-    if s >= 3600:
-        h, r = divmod(s, 3600)
-        m, _ = divmod(r, 60)
-        return f"{h}h {m}m" if m else f"{h}h"
-    if s >= 60:
-        m, sec = divmod(s, 60)
-        return f"{m} min {sec}s" if sec else f"{m} min"
-    return f"{s}s"
-
-
-def _goals_proactive_interval_countdown_parts(
-    db: Any, chat_id: Any, ds_list: int
-) -> tuple[str, str, str]:
-    """interval_h, countdown_part, last_bit para mensajes de revisión proactiva."""
-    last_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY) or "").strip()
-    anchor_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY) or "").strip()
-    now = time.time()
-    last_f: Optional[float] = None
-    if last_raw:
-        try:
-            last_f = float(last_raw)
-        except (TypeError, ValueError):
-            last_f = None
-    anchor_f: Optional[float] = None
-    if anchor_raw:
-        try:
-            anchor_f = float(anchor_raw)
-        except (TypeError, ValueError):
-            anchor_f = None
-    interval_h = format_goals_delta_interval_human(ds_list)
-    if last_f and last_f > 0:
-        remaining = max(0, int(last_f + float(ds_list) - now + 0.999))
-        countdown_part = f" · próximo en ~{format_goals_countdown_human(remaining)}"
-    elif anchor_f and anchor_f > 0:
-        remaining = max(0, int(anchor_f + float(ds_list) - now + 0.999))
-        countdown_part = f" · próximo en ~{format_goals_countdown_human(remaining)}"
-    else:
-        countdown_part = (
-            f" · próximo en hasta ~{format_goals_countdown_human(max(0, int(ds_list)))} "
-            "(aprox.; vuelve a ejecutar /crons --delta para anclar la hora)"
-        )
-    last_bit = ""
-    if last_f and last_f > 0:
-        try:
-            from datetime import datetime, timezone
-
-            last_bit = (
-                f" · último tick UTC ~{datetime.fromtimestamp(last_f, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')}"
-            )
-        except Exception:
-            pass
-
-    return interval_h, countdown_part, last_bit
-
-
-def format_platform_cron_summary() -> str:
-    """Resumen de crons de infraestructura (heartbeat / gateway). Sin nombres de variables en el texto principal."""
-    def _int_env(name: str, default: str) -> int:
-        try:
-            return max(1, int((os.getenv(name) or default).strip() or default))
-        except (TypeError, ValueError):
-            return max(1, int(default))
-
-    legacy_poll_env = "GOALS_" + "TIC" + "KER_POLL_SECONDS"
-    poll_s = _int_env("GOALS_POLL_SECONDS", os.getenv(legacy_poll_env, "45"))
-    hb_s = _int_env("HEARTBEAT_INTERVAL_SECONDS", "3600")
-    legacy_embed_env = "DUCKCLAW_EMBED_GOALS_" + "TIC" + "KER"
-    embed_raw = (
-        os.getenv("DUCKCLAW_EMBED_GOALS_SCHEDULER")
-        or os.getenv(legacy_embed_env)
-        or "true"
-    ).strip().lower()
-    embed_on = embed_raw in ("1", "true", "yes", "on")
-    lines = [
-        "Del bot (infraestructura)",
-        f"· Escaneo de bases para tus revisiones programadas: cada ~{poll_s} s.",
-        f"· Homeostasis global (daemon): cada ~{hb_s} s.",
-    ]
-    if embed_on:
-        lines.append("· El API Gateway puede ejecutar el mismo escaneo embebido (si está activo en esta instalación).")
-    lines.append("(Intervalos ajustables por operador en el host.)")
-    return "\n".join(lines)
-
-
-def _short_session_uid_for_crons(uid: str) -> str:
-    u = (uid or "").strip()
-    if len(u) <= 12:
-        return u if u else "(sin session_uid en meta)"
-    return u[:8] + "…"
-
-
-def _crons_goals_delta_meta_dict(db: Any, chat_id: Any) -> Optional[dict[str, Any]]:
-    raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
-    if not raw:
-        return None
-    try:
-        meta = json.loads(raw)
-    except Exception:
-        return None
-    return meta if isinstance(meta, dict) else None
-
-
-def _crons_goals_delta_listing_section(db: Any, chat_id: Any) -> str:
-    """Bloque de intervalo delta en el listado /crons."""
-    try:
-        ds_list = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
-    except ValueError:
-        ds_list = 0
-    if ds_list <= 0:
-        return ""
-
-    interval_h, countdown_part, last_bit = _goals_proactive_interval_countdown_parts(db, chat_id, ds_list)
-    notify_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY) or "").strip()
-    meta = _crons_goals_delta_meta_dict(db, chat_id)
-    mode_raw = str((meta or {}).get("mode") or "").strip()
-    jitter_raw = (meta or {}).get("jitter_ratio")
-    notify_line = f" · canal: {notify_raw}" if notify_raw else ""
-    mode_line = f" · modo: {mode_raw}" if mode_raw else ""
-    jitter_line = ""
-    if jitter_raw is not None:
-        try:
-            jr = float(jitter_raw)
-            jitter_line = f" · jitter: {int(jr * 100)}%"
-        except (TypeError, ValueError):
-            pass
-    line = (
-        f"- Intervalo (cron-id {CRON_SCHEDULE_ID_DELTA}): cada ~{interval_h}{countdown_part}"
-        f"{last_bit}{notify_line}{mode_line}{jitter_line} "
-        f"(/crons --delta off o /crons --rm {CRON_SCHEDULE_ID_DELTA})."
-    )
-    return "\n\nRevisión proactiva\n" + line
-
-
-def chat_id_from_goals_delta_config_key(key: str) -> Optional[str]:
-    """Extrae chat_id desde fila agent_config con sufijo _goals_delta_seconds."""
-    suf = f"_{_GOALS_DELTA_SECONDS_KEY}"
-    if not key.startswith(_PREFIX) or not key.endswith(suf):
-        return None
-    return key[len(_PREFIX) : -len(suf)] or None
-
-
-def chat_id_from_goals_cron_wall_key(key: str) -> Optional[str]:
-    """Extrae chat_id desde fila agent_config con sufijo _goals_cron_wall."""
-    suf = f"_{_GOALS_CRON_WALL_KEY}"
-    if not key.startswith(_PREFIX) or not key.endswith(suf):
-        return None
-    return key[len(_PREFIX) : -len(suf)] or None
 
 
 def parse_meditate_delta_arg(fragment: str) -> tuple[Optional[int], Optional[str]]:
@@ -725,6 +476,9 @@ def _resolve_meditate_vault_user_id(
     return inferred if inferred != "default" else str(vault_user_id or chat_id or tid or "default")
 
 
+_configure_goals_vault_user_id_resolver(_resolve_meditate_vault_user_id)
+
+
 def invoke_meditate_cycle_for_chat(
     db: Any,
     chat_id: Any,
@@ -862,221 +616,6 @@ def execute_meditate(
     )
 
 
-def _apply_interval_only_clear(conn: Any, chat_id: Any) -> None:
-    """Quita solo programación por intervalo (--delta); no toca ``goals_cron_wall`` ni last_fire."""
-    set_chat_state(conn, chat_id, _GOALS_DELTA_SECONDS_KEY, "0")
-    set_chat_state(conn, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, "")
-    set_chat_state(conn, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
-    try:
-        raw_m = (get_chat_state(conn, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
-        if not raw_m:
-            return
-        m = json.loads(raw_m)
-        if isinstance(m, dict) and str(m.get("trigger") or "").lower() == "goals_cli":
-            set_chat_state(conn, chat_id, _GOALS_DELTA_META_KEY, "")
-    except Exception:
-        pass
-    set_chat_state(conn, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY, "")
-
-
-def clear_interval_schedule_only(db: Any, chat_id: Any) -> None:
-    """``/crons --delta off``: intervalo y meta goals_cli; conserva horario de reloj y tenant."""
-    _apply_interval_only_clear(db, chat_id)
-
-    primary_resolved = ""
-    try:
-        raw_p = str(getattr(db, "_path", "") or "").strip()
-        if raw_p:
-            primary_resolved = str(Path(raw_p).expanduser().resolve())
-    except Exception:
-        primary_resolved = str(getattr(db, "_path", "") or "").strip()
-
-    from duckclaw import DuckClaw as _DuckClaw
-    from duckclaw.db_write_queue import enqueue_duckdb_write_sync
-    from duckclaw.gateway_db import iter_goals_delta_clear_duckdb_paths
-
-    _upsert_q = (
-        "INSERT INTO agent_config (key, value) VALUES (?, ?) "
-        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-    )
-
-    def _enqueue_interval_clear_remote(_db_path: str) -> None:
-        for _sk, _sv in (
-            (_GOALS_DELTA_SECONDS_KEY, "0"),
-            (_GOALS_PROACTIVE_ANCHOR_KEY, ""),
-            (_GOALS_DELTA_ANCHOR_LEGACY_KEY, ""),
-        ):
-            _ck = _chat_key(chat_id, _sk)
-            enqueue_duckdb_write_sync(
-                db_path=str(Path(_db_path).expanduser().resolve()),
-                query=_upsert_q,
-                params=[_ck, str(_sv)[:16384]],
-                user_id=str(chat_id),
-                tenant_id="default",
-            )
-
-    for _p in iter_goals_delta_clear_duckdb_paths(primary_fly_db_path=primary_resolved):
-        _rp = ""
-        try:
-            _rp = str(Path(_p).expanduser().resolve())
-        except OSError:
-            _rp = str(_p)
-        if primary_resolved and _rp == primary_resolved:
-            continue
-        try:
-            with _DuckClaw(_p, read_only=False, engine="python") as _d2:
-                _apply_interval_only_clear(_d2)
-        except Exception:
-            try:
-                _enqueue_interval_clear_remote(_p)
-            except Exception:
-                continue
-
-
-def _goals_cron_wall_listing_note(db: Any, chat_id: Any) -> str:
-    raw = (get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY) or "").strip()
-    if not raw:
-        return ""
-    try:
-        spec = json.loads(raw)
-    except Exception:
-        return ""
-    if not isinstance(spec, dict):
-        return ""
-    return (
-        "\n"
-        + format_cron_wall_human(spec)
-        + f" · cron-id: {CRON_SCHEDULE_ID_WALL} (/crons --rm {CRON_SCHEDULE_ID_WALL})"
-    )
-
-
-def clear_goals_cron_wall_storage(db: Any, chat_id: Any) -> None:
-    """Borra horario de reloj en esta conexión y bóvedas hermanas (misma lógica que clear delta)."""
-    set_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY, "")
-
-    primary_resolved = ""
-    try:
-        raw_p = str(getattr(db, "_path", "") or "").strip()
-        if raw_p:
-            primary_resolved = str(Path(raw_p).expanduser().resolve())
-    except Exception:
-        primary_resolved = str(getattr(db, "_path", "") or "").strip()
-
-    from duckclaw import DuckClaw as _DuckClaw
-    from duckclaw.db_write_queue import enqueue_duckdb_write_sync
-    from duckclaw.gateway_db import iter_goals_delta_clear_duckdb_paths
-
-    _upsert_q = (
-        "INSERT INTO agent_config (key, value) VALUES (?, ?) "
-        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-    )
-
-    def _enqueue_wall_clear_remote(_db_path: str) -> None:
-        _ck = _chat_key(chat_id, _GOALS_CRON_WALL_KEY)
-        enqueue_duckdb_write_sync(
-            db_path=str(Path(_db_path).expanduser().resolve()),
-            query=_upsert_q,
-            params=[_ck, ""],
-            user_id=str(chat_id),
-            tenant_id="default",
-        )
-
-    for _p in iter_goals_delta_clear_duckdb_paths(primary_fly_db_path=primary_resolved):
-        _rp = ""
-        try:
-            _rp = str(Path(_p).expanduser().resolve())
-        except OSError:
-            _rp = str(_p)
-        if primary_resolved and _rp == primary_resolved:
-            continue
-        try:
-            with _DuckClaw(_p, read_only=False, engine="python") as _d2:
-                set_chat_state(_d2, chat_id, _GOALS_CRON_WALL_KEY, "")
-        except Exception:
-            try:
-                _enqueue_wall_clear_remote(_p)
-            except Exception:
-                continue
-
-
-def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
-    """
-    Apaga el programador ``/crons --delta`` en el hub y en las bóvedas del **mismo** usuario que
-    ``db._path`` (``.../private/<uid>/*.duckdb``), más el hub vía ``get_gateway_db_path``. El
-    heartbeat puede seguir escaneando más archivos para *descubrir* ticks; abrir en RW todas las
-    DuckDB del árbol ``private`` al hacer ``off`` competía por bloqueos con db-writer.
-    """
-
-    def _apply_clear(conn: Any) -> None:
-        set_chat_state(conn, chat_id, _GOALS_DELTA_SECONDS_KEY, "0")
-        set_chat_state(conn, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
-        set_chat_state(conn, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, "")
-        set_chat_state(conn, chat_id, _GOALS_PROACTIVE_TENANT_KEY, "")
-        set_chat_state(conn, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
-        set_chat_state(conn, chat_id, _GOALS_DELTA_META_KEY, "")
-        set_chat_state(conn, chat_id, _GOALS_CRON_WALL_KEY, "")
-
-    _apply_clear(db)
-
-    primary_resolved = ""
-    try:
-        raw_p = str(getattr(db, "_path", "") or "").strip()
-        if raw_p:
-            primary_resolved = str(Path(raw_p).expanduser().resolve())
-    except Exception:
-        primary_resolved = str(getattr(db, "_path", "") or "").strip()
-
-    paths_touched: list[str] = []
-    if primary_resolved:
-        paths_touched.append(primary_resolved)
-
-    from duckclaw import DuckClaw as _DuckClaw
-    from duckclaw.db_write_queue import enqueue_duckdb_write_sync
-    from duckclaw.gateway_db import iter_goals_delta_clear_duckdb_paths
-
-    _upsert_q = (
-        "INSERT INTO agent_config (key, value) VALUES (?, ?) "
-        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-    )
-
-    def _enqueue_clear_remote(_db_path: str) -> None:
-        for _sk, _sv in (
-            (_GOALS_DELTA_SECONDS_KEY, "0"),
-            (_GOALS_PROACTIVE_LAST_FIRE_KEY, ""),
-            (_GOALS_PROACTIVE_ANCHOR_KEY, ""),
-            (_GOALS_PROACTIVE_TENANT_KEY, ""),
-            (_GOALS_DELTA_ANCHOR_LEGACY_KEY, ""),
-            (_GOALS_DELTA_META_KEY, ""),
-            (_GOALS_CRON_WALL_KEY, ""),
-        ):
-            _ck = _chat_key(chat_id, _sk)
-            enqueue_duckdb_write_sync(
-                db_path=str(Path(_db_path).expanduser().resolve()),
-                query=_upsert_q,
-                params=[_ck, str(_sv)[:16384]],
-                user_id=str(chat_id),
-                tenant_id="default",
-            )
-
-    for _p in iter_goals_delta_clear_duckdb_paths(primary_fly_db_path=primary_resolved):
-        _rp = ""
-        try:
-            _rp = str(Path(_p).expanduser().resolve())
-        except OSError:
-            _rp = str(_p)
-        if primary_resolved and _rp == primary_resolved:
-            continue
-        try:
-            with _DuckClaw(_p, read_only=False, engine="python") as _d2:
-                _apply_clear(_d2)
-            paths_touched.append(_rp or _p)
-        except Exception:
-            try:
-                _enqueue_clear_remote(_p)
-                paths_touched.append(f"enqueued:{_rp or _p}")
-            except Exception:
-                continue
-
 def unescape_telegram_markdown_v2_layers(text: str, max_layers: int = 4) -> str:
     """
     Quita hasta ``max_layers`` capas de escape estilo MarkdownV2 (mismo juego de
@@ -1120,214 +659,6 @@ def parse_command(text: str) -> Tuple[str, str]:
     return name, args
 
 
-def _dedicated_gateway_db_path_for_vault() -> str | None:
-    """
-    Misma regla que el API Gateway: api_gateways_pm2.json + claves multiplex / DUCKDB_PATH
-    (evita /vault y fly mostrando gatewaydb1 del registry en gateways dedicados).
-    """
-    from duckclaw.pm2_gateway_db import dedicated_gateway_db_path_resolved
-
-    return dedicated_gateway_db_path_resolved()
-
-
-def _session_duckdb_path_for_fly(db: Any) -> str | None:
-    """Ruta del ``DuckClaw``/sesión que abrió el gateway para el turno (multiplex por bot)."""
-    p = getattr(db, "_path", None)
-    if p is None:
-        return None
-    s = str(p).strip()
-    if not s or s == ":memory:":
-        return None
-    try:
-        from pathlib import Path as _P
-
-        return str(_P(s).expanduser().resolve())
-    except Exception:
-        return None
-
-
-def _fly_vault_label_for_tenant(tenant_id: Any) -> str:
-    tid = str(tenant_id or "").strip()
-    if not tid or tid.lower() == "default":
-        return _dedicated_gateway_vault_label()
-    pretty = {
-        "SIATA": "SIATA Analyst",
-    }
-    return pretty.get(tid, tid)
-
-
-def _dedicated_gateway_vault_label() -> str:
-    proc = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
-    matched = (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip()
-    pretty = {
-        "BI-Analyst-Gateway": "BI Analyst",
-        "SIATA-Gateway": "SIATA Analyst",
-    }
-    for key in (proc, matched):
-        if key in pretty:
-            return pretty[key]
-    fallback = proc or matched
-    if fallback:
-        return fallback.replace("-Gateway", "").replace("-", " ").strip() or "este gateway"
-    return "este gateway"
-
-
-def _format_vault_size_mb(size_bytes: int | float) -> str:
-    """Tamaño para mensajes /vault (1 MB = 1024² bytes, dos decimales)."""
-    try:
-        b = max(0, int(size_bytes))
-    except (TypeError, ValueError):
-        b = 0
-    mb = b / (1024 * 1024)
-    return f"{mb:.2f} MB"
-
-
-def _template_bound_vault_path(worker_id: str | None, vault_user_id: Any) -> str | None:
-    """Ruta absoluta si la plantilla declara ``forge_context.vault_binding``."""
-    wid = (worker_id or "").strip()
-    if not wid or wid.lower() in ("manager", "default", "entry_router", "manager_router"):
-        return None
-    try:
-        from duckclaw.vaults import resolve_template_vault_path
-        from duckclaw.workers.manifest import load_manifest
-
-        spec = load_manifest(wid)
-        return resolve_template_vault_path(spec.forge_vault_binding, vault_user_id)
-    except Exception:
-        return None
-
-
-def execute_vault(
-    args: str,
-    *,
-    vault_user_id: Any,
-    tenant_id: Any = None,
-    db: Any | None = None,
-    entry_worker_id: str | None = None,
-    chat_id: Any | None = None,
-) -> str:
-    user_id = (str(vault_user_id or "").strip() or "default")
-    vault_scope = vault_scope_id_for_tenant(tenant_id)
-    raw = (args or "").strip()
-    session_db_path = _session_duckdb_path_for_fly(db) if db is not None else None
-    template_db: str | None = None
-    template_worker = ""
-    if not session_db_path:
-        wid = (entry_worker_id or "").strip()
-        if not wid and db is not None and chat_id is not None:
-            wid = (get_worker_id_for_chat(db, chat_id) or "").strip()
-        template_db = _template_bound_vault_path(wid, user_id)
-        if template_db:
-            template_worker = wid
-    fixed_db = session_db_path or template_db or _dedicated_gateway_db_path_for_vault()
-    if fixed_db:
-        from pathlib import Path as _P
-
-        fp = _P(fixed_db).expanduser().resolve()
-        if session_db_path:
-            label = _fly_vault_label_for_tenant(tenant_id)
-        elif template_db:
-            label = f"plantilla {template_worker}" if template_worker else "plantilla"
-        else:
-            label = _dedicated_gateway_vault_label()
-        if not raw:
-            size = 0
-            try:
-                size = fp.stat().st_size if fp.exists() else 0
-            except Exception:
-                pass
-            tid_req = str(tenant_id or "").strip()
-            if tid_req and tid_req.lower() != "default":
-                gtid = tid_req
-            else:
-                gtid = (os.environ.get("DUCKCLAW_GATEWAY_TENANT_ID") or "").strip()
-            extra = f"\nTenant: {gtid}" if gtid else ""
-            return (
-                f"🗄 BD de este gateway ({label}): {fp.name}\n"
-                f"Ruta: {fp}\nTamaño: {_format_vault_size_mb(size)}{extra}"
-            )
-        tokens = raw.split()
-        cmd = (tokens[0] or "").strip().lower()
-        if cmd.startswith("--"):
-            cmd = cmd[2:]
-        if cmd in ("list", "new", "use", "rm"):
-            hint = (
-                "Los comandos /vault list|new|use|rm son del registry multi-bóveda; "
-                "aquí no aplican. Usa /vault sin argumentos para ver la ruta."
-            )
-            if template_db:
-                hint = (
-                    "La bóveda está fijada en manifest.yaml (forge_context.vault_binding). "
-                    "Cámbiala en Plantillas → Bóveda DuckDB. " + hint
-                )
-            return f"En este contexto ({label}) solo aplica la BD anterior. {hint}"
-        return (
-            f"Usa /vault sin argumentos para ver la BD de {label}. "
-            "Comandos adicionales del registry no aplican en este gateway."
-        )
-    if not raw:
-        active_id, active_path = _vault_resolve_active(user_id, vault_scope)
-        size = 0
-        try:
-            from pathlib import Path as _P
-            p = _P(active_path)
-            size = p.stat().st_size if p.exists() else 0
-        except Exception:
-            pass
-        return (
-            f"🗄 Bóveda activa: {active_id}\nRuta: {active_path}\nTamaño: {_format_vault_size_mb(size)}\n\n"
-            "Comandos: /vault list | /vault --list | /vault new <name> | /vault --new <name> | "
-            "/vault use <id> | /vault --use <id> | /vault rm <id> | /vault --rm <id>"
-        
-        )
-    tokens = raw.split()
-    cmd = (tokens[0] or "").strip().lower()
-    # Compatibilidad: permitir flags estilo --list/--use/--new/--rm
-    if cmd.startswith("--"):
-        cmd = cmd[2:]
-    if cmd == "list":
-        rows = _vault_list(user_id, vault_scope)
-        if not rows:
-            return "No hay bóvedas."
-        lines = []
-        for r in rows:
-            mark = "✅" if r.get("is_active") else "•"
-            sz = int(r.get("size_bytes", 0) or 0)
-            lines.append(
-                f"{mark} {r.get('vault_id')} ({r.get('vault_name')}) - {_format_vault_size_mb(sz)}"
-            )
-        return "🗄 Bóvedas:\n" + "\n".join(lines)
-    if cmd == "new":
-        name = " ".join(tokens[1:]).strip()
-        if not name:
-            return "Uso: /vault new <name> | /vault --new <name>"
-        created = _vault_create(user_id, name, vault_scope)
-        return f"✅ Bóveda creada: {created.get('vault_id')} ({created.get('vault_name')})"
-    if cmd == "use":
-        vid = " ".join(tokens[1:]).strip()
-        if not vid:
-            return "Uso: /vault use <vault_id> | /vault --use <vault_id>"
-        ok = _vault_switch(user_id, vid, vault_scope)
-        if not ok:
-            return f"No existe la bóveda '{vid}'. Usa /vault list."
-        active_id, _ = _vault_resolve_active(user_id, vault_scope)
-        return f"✅ Bóveda activa actual: {active_id}"
-    if cmd == "rm":
-        vid = " ".join(tokens[1:]).strip()
-        if not vid:
-            return "Uso: /vault rm <vault_id> | /vault --rm <vault_id>"
-        ok = _vault_remove(user_id, vid, vault_scope)
-        if not ok:
-            return f"No existe la bóveda '{vid}'."
-        active_id, _ = _vault_resolve_active(user_id, vault_scope)
-        return f"🗑 Bóveda eliminada: {vid}. Activa actual: {active_id}"
-    return (
-        "Uso: /vault | /vault list | /vault --list | /vault new <name> | /vault --new <name> | "
-        "/vault use <vault_id> | /vault --use <vault_id> | /vault rm <vault_id> | /vault --rm <vault_id>"
-    
-
-
-    )
 def execute_roles(db: Any, chat_id: Any) -> str:
     """/roles: lista todos los trabajadores virtuales (templates) disponibles. El manager solo delegará a los que estén en /workers."""
     from duckclaw.workers.factory import list_workers
@@ -1690,557 +1021,6 @@ def execute_approve_reject(db: Any, chat_id: Any, approved: bool) -> str:
     return "No hay operación pendiente de aprobación. (El grafo no está en estado interrupt en esta versión.)"
 
 
-def _normalize_belief_key(key: str) -> str:
-    """Normaliza key para DB: alfanumérico y guión bajo."""
-    return "".join(c if c.isalnum() or c == "_" else "_" for c in (key or "").strip())
-
-
-def _get_goals_registry_fallback_first() -> Optional[Any]:
-    """Primer template con homeostasis (orden del FS); solo como fallback."""
-    try:
-        from duckclaw.workers.factory import list_workers
-        from duckclaw.workers.manifest import load_manifest
-        from duckclaw.forge.homeostasis.belief_registry import BeliefRegistry
-
-        for wid in list_workers():
-            try:
-                spec = load_manifest(wid)
-                config = getattr(spec, "homeostasis_config", None) or {}
-                registry = BeliefRegistry.from_config(config)
-                if registry.beliefs:
-                    return registry
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return None
-
-
-def _get_goals_registry_for_chat(db: Any, chat_id: Any) -> Optional[Any]:
-    """Registro homeostasis del worker activo del chat; fallback al primer template con YAML."""
-    from duckclaw.forge.homeostasis.belief_registry import BeliefRegistry
-    from duckclaw.workers.manifest import load_manifest
-
-    wid = (get_chat_state(db, chat_id, "worker_id") or "").strip()
-    if wid and wid.lower() != "manager":
-        try:
-            spec = load_manifest(wid)
-            config = getattr(spec, "homeostasis_config", None) or {}
-            registry = BeliefRegistry.from_config(config)
-            if registry.beliefs:
-                return registry
-        except Exception:
-            pass
-    return _get_goals_registry_fallback_first()
-
-
-def get_manager_goals(db: Any, chat_id: Any) -> list:
-    """Goals del chat guardados por el manager. Por defecto vacío."""
-    raw = get_chat_state(db, chat_id, "goals")
-    if not raw:
-        return []
-    try:
-        out = json.loads(raw)
-        return out if isinstance(out, list) else []
-    except Exception:
-        return []
-
-
-def set_manager_goals(db: Any, chat_id: Any, goals: list) -> None:
-    """Guarda la lista de goals del chat (manager). Cada item: belief_key, target_value, threshold, observed_value opcional, title (resumen)."""
-    set_chat_state(db, chat_id, "goals", json.dumps(goals))
-
-
-def _goal_title(goal: dict, fallback_key: str) -> str:
-    """Título resumen del goal para listar en /crons."""
-    t = (goal.get("title") or "").strip()
-    if t:
-        return t[:80] + ("…" if len((goal.get("title") or "").strip()) > 80 else "")
-    return (goal.get("belief_key") or fallback_key or "").strip()
-
-
-def build_goals_proactive_system_event_message(goals: list, **_ignored: Any) -> str:
-    titles: list[str] = []
-    for goal in goals:
-        if not isinstance(goal, dict):
-            continue
-        key = (goal.get("belief_key") or "").strip()
-        titles.append(_goal_title(goal, key))
-    summary = "; ".join(titles[:12]) if titles else "(sin títulos)"
-    return (
-        "[SYSTEM_EVENT: Revisión periódica de /crons. Objetivos: "
-        f"{summary}. Evalúa con herramientas si hace falta qué tan alineado está el "
-        "contexto actual con cumplir cada meta. Responde al usuario con un breve "
-        "análisis o propuesta concreta.]"
-    )
-
-
-def _natural_language_goal_to_params(db: Any, chat_id: Any, text: str) -> Optional[dict]:
-    """Convierte un objetivo en lenguaje natural a parámetros homeostasis (belief_key, target_value, threshold, title). Usa LLM del manager."""
-    text = (text or "").strip()[:500]
-    if not text:
-        return None
-    try:
-        from langchain_core.messages import HumanMessage
-        provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id)
-        from duckclaw.integrations.llm_providers import build_llm
-        llm = build_llm(provider, model, base_url, prefer_env_provider=False)
-        if llm is None:
-            return None
-        prompt = (
-            "Convierte este objetivo en lenguaje natural a parámetros para homeostasis (Active Inference). "
-            "Responde ÚNICAMENTE un JSON válido con estas claves: belief_key (slug en snake_case, inglés o español), "
-            "target_value (número; 0 si el objetivo es minimizar o cualitativo), threshold (número >= 0, tolerancia), "
-            "title (resumen corto en español, máx 60 caracteres). Sin explicación, solo el JSON.\n\nObjetivo: "
-        ) + text
-        resp = llm.invoke([HumanMessage(content=prompt)])
-        content = (getattr(resp, "content", None) or "").strip()
-        if not content:
-            return None
-        # Extraer JSON si viene envuelto en ```json ... ```
-        if "```" in content:
-            start = content.find("{")
-            end = content.rfind("}") + 1
-            if start >= 0 and end > start:
-                content = content[start:end]
-        data = json.loads(content)
-        if not isinstance(data, dict):
-            return None
-        key = (data.get("belief_key") or "").strip() or _normalize_belief_key(text)
-        key = _normalize_belief_key(key) or "objetivo"
-        target = float(data.get("target_value", 0))
-        thresh = max(0.0, float(data.get("threshold", 0)))
-        title = (data.get("title") or text)[:120].strip()
-        return {"belief_key": key, "target_value": target, "threshold": thresh, "title": title}
-    except Exception:
-        return None
-
-
-def _persist_homeostasis_manifest_db(
-    db: Any,
-    chat_id: Any,
-    tenant_id: str,
-    manifest: Any,
-    *,
-    vault_user_id: Any = None,
-) -> tuple[bool, str]:
-    from pathlib import Path
-
-    from harness_core.targets import save_homeostasis_manifest
-
-    vault = str(Path(getattr(db, "_path", "") or "").expanduser().resolve())
-    if not vault:
-        return False, "vault_db_path missing"
-    uid = _resolve_meditate_vault_user_id(
-        db, vault_user_id=vault_user_id, chat_id=chat_id, tenant_id=tenant_id
-    )
-    ok = save_homeostasis_manifest(
-        tenant_id=tenant_id,
-        user_id=uid,
-        target_db_path=vault,
-        manifest=manifest,
-    )
-    return (True, "") if ok else (False, "cola meditate/homeostasis no disponible")
-
-
-def _format_homeostasis_manifest_listing(
-    db: Any,
-    chat_id: Any,
-    manifest: Any,
-    *,
-    registry: Any = None,
-) -> str:
-    from duckclaw.forge.homeostasis.surprise import compute_surprise
-
-    lines = ["Manifiesto homeostasis", ""]
-    reg = registry if registry is not None else _get_goals_registry_for_chat(db, chat_id)
-    key_to_belief = {b.key.strip(): b for b in (reg.beliefs if reg else [])}
-    lines.append("Metas de dominio:")
-    if not manifest.goals:
-        lines.append("- (ninguna). Añade con /goals <objetivo>")
-    else:
-        for g in manifest.goals:
-            key = (g.belief_key or "").strip()
-            b = key_to_belief.get(key)
-            target = float(g.target_value)
-            thresh = float(g.threshold)
-            if b is not None:
-                target = float(b.target) if b.target is not None else target
-                thresh = float(b.threshold) if b.threshold is not None else thresh
-            observed = g.observed_value
-            title = _goal_title(g.model_dump(), key)
-            comp = getattr(b, "comparison", "symmetric") if b is not None else "symmetric"
-            if key == "max_portfolio_drawdown_pct":
-                comp = "ceiling"
-            if observed is not None and (target != 0 or thresh != 0):
-                res = compute_surprise(float(observed), target, thresh, comparison=comp)
-                st = "⚠️" if res.is_anomaly else "✓"
-                lines.append(f"- {title}: target={target} (obs: {observed}) {st}")
-            else:
-                lines.append(f"- {title}: target={target}, thresh={thresh} (sin dato)")
-    infra = manifest.infra
-    lines.append("")
-    lines.append("Umbrales infra (contraste /meditate):")
-    lines.append(f"- error_rate_pct ≤ {infra.error_rate_pct}")
-    lines.append(f"- stale_tasks_count ≤ {infra.stale_tasks_count}")
-    lines.append(f"- memory_fragmentation_index ≤ {infra.memory_fragmentation_index}")
-    lines.append(f"- avg_latency_ms ≤ {infra.avg_latency_ms}")
-    lines.append(f"- db_lock_events ≤ {infra.db_lock_events}")
-    return "\n".join(lines)
-
-
-def execute_homeostasis_goals(
-    db: Any,
-    chat_id: Any,
-    args: str,
-    *,
-    tenant_id: Any = None,
-    vault_user_id: Any = None,
-) -> str:
-    """/goals — CRUD del manifiesto homeostasis (metas + umbrales infra) contrastado por /meditate."""
-    from harness_core.states.meditate_state import DomainGoal, HomeostasisManifest
-    from harness_core.targets import load_homeostasis_manifest, set_infra_field
-
-    tid = str(tenant_id or "default").strip() or "default"
-    registry = _get_goals_registry_for_chat(db, chat_id)
-    raw = (args or "").strip()
-    toks = raw.split()
-    manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id)
-
-    if toks and toks[0] == "--migrate":
-        manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id, migrate_legacy=False)
-        legacy = get_manager_goals(db, chat_id)
-        if not legacy:
-            return "No hay metas legacy en agent_config para migrar."
-        if manifest.goals:
-            return f"El manifiesto ya tiene {len(manifest.goals)} meta(s). Usa /goals --reset antes de migrar."
-        goals = [
-            DomainGoal(
-                belief_key=str(g.get("belief_key") or ""),
-                target_value=float(g.get("target_value") or 0),
-                threshold=float(g.get("threshold") or 0),
-                title=str(g.get("title") or g.get("belief_key") or ""),
-                observed_value=(
-                    float(g["observed_value"]) if g.get("observed_value") is not None else None
-                ),
-            )
-            for g in legacy
-            if isinstance(g, dict) and (g.get("belief_key") or "").strip()
-        ]
-        manifest = manifest.model_copy(update={"goals": goals})
-        ok, err = _persist_homeostasis_manifest_db(
-            db, chat_id, tid, manifest, vault_user_id=vault_user_id
-        )
-        if not ok:
-            return f"Migración falló: {err}"
-        return f"✅ Migradas {len(goals)} meta(s) desde agent_config al manifiesto homeostasis."
-
-    if toks and toks[0] == "--reset":
-        manifest = HomeostasisManifest()
-        ok, err = _persist_homeostasis_manifest_db(
-            db, chat_id, tid, manifest, vault_user_id=vault_user_id
-        )
-        if not ok:
-            return f"No se pudo resetear: {err}"
-        return "✅ Manifiesto homeostasis restaurado a defaults. Añade metas con /goals <objetivo>."
-
-    if toks and toks[0] == "--rm" and len(toks) >= 2:
-        key_rm = _normalize_belief_key(" ".join(toks[1:]))
-        new_goals = [g for g in manifest.goals if (g.belief_key or "").strip() != key_rm]
-        if len(new_goals) == len(manifest.goals):
-            return f"No encontré meta `{key_rm}` en el manifiesto."
-        manifest = manifest.model_copy(update={"goals": new_goals})
-        ok, err = _persist_homeostasis_manifest_db(
-            db, chat_id, tid, manifest, vault_user_id=vault_user_id
-        )
-        if not ok:
-            return f"No se pudo guardar: {err}"
-        return f"✅ Meta `{key_rm}` eliminada del manifiesto."
-
-    if toks and toks[0] == "--set" and len(toks) >= 3:
-        field = toks[1].strip()
-        try:
-            val: Any = float(toks[2])
-            if field == "stale_tasks_count" or field == "db_lock_events":
-                val = int(val)
-            manifest = set_infra_field(manifest, field, val)
-        except ValueError as exc:
-            return str(exc)
-        ok, err = _persist_homeostasis_manifest_db(
-            db, chat_id, tid, manifest, vault_user_id=vault_user_id
-        )
-        if not ok:
-            return f"No se pudo guardar: {err}"
-        return f"✅ Umbral infra `{field}` = {val}"
-
-    if raw and not raw.startswith("--"):
-        key_norm = _normalize_belief_key(raw)
-        belief = None
-        if registry:
-            belief = registry.get_belief(raw.strip())
-            if not belief:
-                for b in registry.beliefs:
-                    if _normalize_belief_key(b.key) == key_norm:
-                        belief = b
-                        break
-        if belief:
-            new_goal = DomainGoal(
-                belief_key=belief.key,
-                target_value=float(belief.target),
-                threshold=float(belief.threshold),
-                title=belief.key,
-            )
-        else:
-            params = _natural_language_goal_to_params(db, chat_id, raw)
-            if params:
-                new_goal = DomainGoal(
-                    belief_key=params["belief_key"],
-                    target_value=float(params["target_value"]),
-                    threshold=float(params["threshold"]),
-                    title=str(params.get("title") or params["belief_key"]),
-                )
-            else:
-                new_goal = DomainGoal(
-                    belief_key=key_norm or "objetivo",
-                    target_value=0.0,
-                    threshold=0.0,
-                    title=raw[:120].strip(),
-                )
-        goals = [g for g in manifest.goals if (g.belief_key or "").strip() != new_goal.belief_key]
-        goals.append(new_goal)
-        manifest = manifest.model_copy(update={"goals": goals})
-        ok, err = _persist_homeostasis_manifest_db(
-            db, chat_id, tid, manifest, vault_user_id=vault_user_id
-        )
-        if not ok:
-            return f"No se pudo guardar manifiesto: {err}"
-        title_display = new_goal.title or new_goal.belief_key
-        return f"✅ Meta homeostasis añadida: {title_display}"
-
-    return (
-        _format_homeostasis_manifest_listing(db, chat_id, manifest, registry=registry)
-        + "\n\nUso: /goals <objetivo> · /goals --set error_rate_pct 2 · /goals --rm <key> · "
-        "/goals --migrate · /goals --reset"
-    )
-
-
-def execute_crons_schedule(
-    db: Any,
-    chat_id: Any,
-    args: str,
-    *,
-    tenant_id: Any = None,
-    vault_user_id: Any = None,
-) -> str:
-    """/crons [--delta …] [--timestamp …] [--rm …] — solo programación proactiva (metas en /goals)."""
-    _ = vault_user_id
-    from harness_core.targets import load_homeostasis_manifest
-
-    tid = str(tenant_id or "default").strip() or "default"
-    manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id)
-    goals_count = len(manifest.goals)
-
-    raw = (args or "").strip()
-    toks = raw.split()
-    _crons_debug_log(
-        "on_the_fly_commands.py:execute_crons_schedule",
-        "execute_crons_entry",
-        {
-            "args_preview": raw[:120],
-            "chat_id": str(chat_id),
-            "tenant_id": tid,
-            "goals_count": goals_count,
-        },
-        hypothesis_id="A",
-    )
-
-    if toks and toks[0] == "--delta":
-        if len(toks) < 2:
-            return (
-                "Uso: /crons --delta 20min [--notify admin|telegram|both] "
-                "[--mode always|on_misalignment] [--jitter 20%] · /crons --delta off\n"
-                "El programador (heartbeat o embebido en el gateway) escanea el hub y las bóvedas "
-                f"en db/private/*/*.duckdb. Intervalo permitido: {GOALS_DELTA_MIN_SECONDS}s … 7d."
-            )
-        dur_parts, sched_opts, opt_err = _extract_crons_delta_options(toks)
-        if opt_err:
-            return opt_err
-        dur_str = "".join(dur_parts)
-        secs, err = parse_goals_delta_arg(dur_str)
-        if err:
-            return err
-        if secs == 0:
-            clear_interval_schedule_only(db, chat_id)
-            return "Intervalo de revisión desactivado (/crons --delta off). Horario de reloj (--timestamp) no se modifica."
-        clear_goals_cron_wall_storage(db, chat_id)
-        set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, str(secs))
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, tid)
-        from duckclaw.forge.homeostasis.goals_alignment import (
-            normalize_jitter_ratio,
-            normalize_notify_channel,
-            normalize_proactive_mode,
-        )
-
-        notify_ch = normalize_notify_channel(str(sched_opts.get("notify") or ""))
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY, notify_ch)
-        mode = normalize_proactive_mode(str(sched_opts.get("mode") or ""))
-        jitter_ratio = normalize_jitter_ratio(sched_opts.get("jitter"))
-        # Cooldown starts now so the first tick waits ~secs (not the next 45s gateway poll).
-        _fire_anchor = str(time.time())
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, _fire_anchor)
-        _anchor_now = _fire_anchor
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, _anchor_now)
-        set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, _anchor_now)
-        meta_obj: dict[str, Any] = {
-            "trigger": "goals_cli",
-            "mode": mode,
-            "jitter_ratio": jitter_ratio,
-        }
-        set_chat_state(
-            db,
-            chat_id,
-            _GOALS_DELTA_META_KEY,
-            json.dumps(meta_obj, ensure_ascii=False),
-        )
-        human = format_goals_delta_interval_human(secs)
-        _crons_debug_log(
-            "on_the_fly_commands.py:execute_goals",
-            "delta_schedule_persisted",
-            {
-                "secs": secs,
-                "chat_id": str(chat_id),
-                "trigger": "goals_cli",
-                "mode": mode,
-                "notify": notify_ch,
-            },
-            hypothesis_id="A",
-        )
-        goals_note = (
-            f"Metas homeostasis cargadas: {goals_count}. Define o edita con /goals."
-            if goals_count
-            else "Sin metas en manifiesto: usa /goals <objetivo> antes del programador proactivo."
-        )
-        return (
-            f"Revisión proactiva cada ~{human} (modo {mode}, canal {notify_ch}, jitter ~{int(jitter_ratio * 100)}%). "
-            "El programador disparará SYSTEM_EVENT ante desalineación con el manifiesto /goals, "
-            f"o en cada intervalo si modo=always. {goals_note} /crons --delta off para cancelar."
-        )
-
-    if toks and toks[0] == "--timestamp":
-        rest = toks[1:]
-        if not rest:
-            return (
-                "Uso: /crons --timestamp once 2026-05-12T14:45 · "
-                "/crons --timestamp every 14:45 [weekdays|lun mar …] · /crons --timestamp off\n"
-                "Zona: America/Bogota por defecto (env DUCKCLAW_CRONS_WALL_TZ). "
-                "Exclusivo con /crons --delta: al activar uno se desactiva el otro."
-            )
-        if rest[0].lower() == "off":
-            clear_goals_cron_wall_storage(db, chat_id)
-            return "Horario de reloj desactivado (/crons --timestamp off)."
-        spec, terr = parse_cron_wall_tokens(rest)
-        if terr or not spec:
-            return terr or "No se pudo interpretar --timestamp."
-        clear_interval_schedule_only(db, chat_id)
-        set_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY, json.dumps(spec, ensure_ascii=False))
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, tid)
-        mraw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
-        try:
-            if not mraw:
-                set_chat_state(
-                    db,
-                    chat_id,
-                    _GOALS_DELTA_META_KEY,
-                    json.dumps({"trigger": "goals_wall"}, ensure_ascii=False),
-                )
-            else:
-                mobj = json.loads(mraw)
-                if not isinstance(mobj, dict) or str(mobj.get("trigger") or "").lower() != "goals_wall":
-                    set_chat_state(
-                        db,
-                        chat_id,
-                        _GOALS_DELTA_META_KEY,
-                        json.dumps({"trigger": "goals_wall"}, ensure_ascii=False),
-                    )
-        except Exception:
-            set_chat_state(
-                db,
-                chat_id,
-                _GOALS_DELTA_META_KEY,
-                json.dumps({"trigger": "goals_wall"}, ensure_ascii=False),
-            )
-        return (
-            f"Programación por reloj guardada. {format_cron_wall_human(spec)} "
-            "Usa /crons para listar. /crons --timestamp off para cancelar."
-        )
-
-    if toks and toks[0] == "--rm":
-        if len(toks) < 2:
-            return (
-                "Uso: /crons --rm delta · /crons --rm wall\n"
-                "Equivale a /crons --delta off (intervalo) o /crons --timestamp off (reloj). "
-                "Los cron-id salen en /crons junto a cada programación (alias: interval, timestamp)."
-            )
-        cid = _normalize_cron_rm_id(toks[1])
-        if cid is None:
-            return (
-                f"Cron-id desconocido `{toks[1]}`. Usa `{CRON_SCHEDULE_ID_DELTA}` (intervalo) o "
-                f"`{CRON_SCHEDULE_ID_WALL}` (horario de reloj); alias: interval, timestamp."
-            )
-        if cid == CRON_SCHEDULE_ID_DELTA:
-            try:
-                ds_rm = int((get_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY) or "0").strip() or "0")
-            except ValueError:
-                ds_rm = 0
-            if ds_rm <= 0:
-                return (
-                    f"No hay revisión por intervalo activa (cron-id `{CRON_SCHEDULE_ID_DELTA}`). "
-                    "Ejecuta /crons para ver el listado."
-                )
-            clear_interval_schedule_only(db, chat_id)
-            return (
-                "Programación por intervalo eliminada (/crons --rm "
-                f"{CRON_SCHEDULE_ID_DELTA}). Horario de reloj (--timestamp) no se modifica."
-            )
-        raw_wm = (get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY) or "").strip()
-        if not raw_wm:
-            return (
-                f"No hay horario de reloj activo (cron-id `{CRON_SCHEDULE_ID_WALL}`). "
-                "Ejecuta /crons para ver el listado."
-            )
-        clear_goals_cron_wall_storage(db, chat_id)
-        return (
-            f"Horario de reloj eliminado (/crons --rm {CRON_SCHEDULE_ID_WALL}). "
-            "El intervalo (/crons --delta) no se modifica."
-        )
-
-    if raw and not raw.startswith("--"):
-        return (
-            "Las metas homeostasis se gestionan con /goals (no con /crons).\n"
-            "Ej.: /goals max drawdown 5% · /goals para listar.\n"
-            "/crons solo programa revisiones: --delta, --timestamp, --rm."
-        )
-
-    platform = format_platform_cron_summary()
-    proactive_section = _crons_goals_delta_listing_section(db, chat_id)
-    wall_note = _goals_cron_wall_listing_note(db, chat_id)
-    goals_hint = (
-        f"Metas homeostasis: {goals_count} en manifiesto (/goals para ver o editar)."
-        if goals_count
-        else "Sin metas en manifiesto. Usa /goals <objetivo>."
-    )
-    user_body = (
-        "Tus crons (programación)\n\n"
-        f"{goals_hint}\n"
-        f"{proactive_section}{wall_note}"
-    )
-    return f"{user_body}\n\n{platform}"
-
-
-# Backward compat: tests and imports that still reference execute_goals.
-execute_goals = execute_crons_schedule
-
-
 def execute_tasks(db: Any, chat_id: Any) -> str:
     """/tasks: estado del ActivityManager (Redis): IDLE, BUSY, subagente, tarea actual, tiempo en ejecución."""
     from duckclaw.graphs.activity import get_activity
@@ -2364,6 +1144,9 @@ def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str,
         },
     )
     return (p, m, u)
+
+
+_configure_goals_llm_triplet_resolver(_effective_llm_triplet_for_chat_ui)
 
 
 def chat_has_llm_chat_state_override(db: Any, chat_id: Any) -> bool:
@@ -2898,6 +1681,7 @@ def _dispatch_fly_command(
             db=db,
             entry_worker_id=entry_worker_id,
             chat_id=chat_id,
+            worker_id_resolver=get_worker_id_for_chat,
         )
     if name == "workers":
         return execute_team(

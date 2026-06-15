@@ -1,18 +1,1 @@
-{
-  "campus_legal_main": {
-    "file": "campus_legal_main.safetensors",
-    "ref_text": ""
-  },
-  "leila_assistant": {
-    "file": "leila_assistant.safetensors",
-    "ref_text": ""
-  },
-  "finanz_alert": {
-    "file": "finanz_alert.safetensors",
-    "ref_text": ""
-  },
-  "quant_trader_brief": {
-    "file": "quant_trader_brief.safetensors",
-    "ref_text": ""
-  }
-}
+{}

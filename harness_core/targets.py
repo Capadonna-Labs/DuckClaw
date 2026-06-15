@@ -56,7 +56,7 @@ def _query_manifest_row(db: Any, tenant_id: str) -> HomeostasisManifest:
 
 def _legacy_goals_from_chat(db: Any, chat_id: Any) -> list[DomainGoal]:
     try:
-        from duckclaw.graphs.on_the_fly_commands import get_manager_goals
+        from duckclaw.commands.goals import get_manager_goals
 
         raw_goals = get_manager_goals(db, chat_id)
         out: list[DomainGoal] = []
@@ -123,7 +123,7 @@ def get_manifest_goals_for_chat(
     *,
     tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Goals from homeostasis manifest (single source for /crons ticker and /meditate)."""
+    """Goals from homeostasis manifest (single source for /crons scheduler and /meditate)."""
     tid = (tenant_id or "").strip()
     if not tid:
         try:

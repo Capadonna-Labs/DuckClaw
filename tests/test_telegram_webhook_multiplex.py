@@ -69,6 +69,32 @@ def test_multiplex_route_picks_worker_and_token_env(monkeypatch: pytest.MonkeyPa
     assert out.forced_vault_db_path is None
 
 
+def test_multiplex_route_without_tenant_uses_resolved_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    routes = [
+        {
+            "secret": "default-header",
+            "worker_id": "default",
+            "bot_token_env": "TELEGRAM_DEFAULT_TOKEN",
+        }
+    ]
+    monkeypatch.setenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES", json.dumps(routes))
+    monkeypatch.setenv("TELEGRAM_DEFAULT_TOKEN", "token-default")
+    m._cached_bindings = None
+    m._cached_bindings_error = None
+
+    out = m.telegram_webhook_resolve_dispatch(
+        "default-header",
+        default_worker_id="default",
+        default_tenant_id="tenant-from-db",
+        default_bot_token="tok-fallback",
+    )
+
+    assert isinstance(out, m.TelegramWebhookResolvedDispatch)
+    assert out.tenant_id == "tenant-from-db"
+
+
 def test_multiplex_vault_db_env_resolves_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

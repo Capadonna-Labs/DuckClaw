@@ -19,7 +19,12 @@ from dataclasses import dataclass
 from duckclaw.gateway_db import resolve_env_duckdb_path
 
 def _legacy_default_tenant_id() -> str:
-    return (os.environ.get("DUCKCLAW_TELEGRAM_LEGACY_DEFAULT_TENANT") or "default").strip() or "default"
+    try:
+        from duckclaw.forge.team_env import default_tenant_id_from_runtime
+
+        return (default_tenant_id_from_runtime() or "default").strip() or "default"
+    except Exception:
+        return "default"
 
 
 def _infer_legacy_worker_id(bot_name: str) -> str:

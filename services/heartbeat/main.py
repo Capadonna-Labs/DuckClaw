@@ -30,6 +30,7 @@ from duckclaw.db_write_queue import enqueue_duckdb_write_sync
 from duckclaw.forge.homeostasis import BeliefRegistry, HomeostasisManager
 from duckclaw.gateway_db import get_gateway_db_path, iter_goals_ticker_duckdb_paths
 from duckclaw.runtime.scheduling.cron_wall_schedule import wall_once_expired, wall_schedule_should_fire
+from duckclaw.commands.goals import get_manager_goals
 from duckclaw.graphs.on_the_fly_commands import (
     _GOALS_CRON_WALL_KEY,
     _GOALS_DELTA_META_KEY,
@@ -46,7 +47,6 @@ from duckclaw.graphs.on_the_fly_commands import (
     chat_id_from_goals_delta_config_key,
     chat_id_from_meditate_delta_config_key,
     get_chat_state,
-    get_manager_goals,
 )
 from harness_core.targets import get_manifest_goals_for_chat
 from duckclaw.workers.factory import list_workers

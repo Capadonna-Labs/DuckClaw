@@ -8,6 +8,8 @@ import os
 import uuid
 from typing import Any
 
+from harness_core.states.meditate_state import DEFAULT_STALE_TASK_SOURCE_TABLE
+
 _log = logging.getLogger(__name__)
 
 DEFAULT_MEDITATE_STATE_DELTA_QUEUE = "duckclaw:state_delta:meditate"
@@ -98,7 +100,7 @@ def emit_purge_stale_tasks(
     user_id: str,
     target_db_path: str,
     task_ids: list[str],
-    source_table: str = "quant_core.trade_signals",
+    source_table: str = DEFAULT_STALE_TASK_SOURCE_TABLE,
 ) -> bool:
     if not task_ids:
         return True

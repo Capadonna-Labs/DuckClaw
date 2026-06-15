@@ -1,4 +1,4 @@
-"""Equipo y defaults del gateway solo desde variables de entorno (PM2 / .env al arranque).
+"""Equipo y defaults administrados del gateway.
 
 No lee ``forge/projects/*.yaml`` ni listas de plantillas en el repositorio.
 """
@@ -6,11 +6,24 @@ No lee ``forge/projects/*.yaml`` ni listas de plantillas en el repositorio.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
+
+_DEFAULT_TENANT_ID = "default"
+_DEFAULT_TENANT_SETTING_DOMAIN = "gateway"
+_DEFAULT_TENANT_SETTING_KEY = "default_tenant_id"
 
 
 def _split_csv(raw: str) -> list[str]:
     return [p.strip() for p in (raw or "").split(",") if p.strip()]
+
+
+def _explicit_default_tenant_id_from_env() -> str:
+    for key in ("DUCKCLAW_GATEWAY_TENANT_ID", "DUCKCLAW_TELEGRAM_DEFAULT_TENANT"):
+        v = (os.environ.get(key) or "").strip()
+        if v:
+            return v
+    return ""
 
 
 def team_members_from_env() -> list[str]:
@@ -77,23 +90,48 @@ def default_tenant_id_from_env() -> str:
     """
     Tenant por defecto del gateway cuando el cliente envía ``default``.
 
-    Orden: env explícito → heurística PM2 (p. ej. BI-Analyst-Gateway) → ruta DuckDB
-    (``bi_analyst``, ``leiladb``, …) → ``default``.
+    Orden: env explícito administrado → ``default``. La identidad de tenant no se
+    infiere desde nombres de proceso, rutas de base de datos ni layouts locales.
     """
-    for key in ("DUCKCLAW_GATEWAY_TENANT_ID", "DUCKCLAW_TELEGRAM_DEFAULT_TENANT"):
-        v = (os.environ.get(key) or "").strip()
-        if v:
-            return v
-    pm2 = (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip()
-    if pm2 == "BI-Analyst-Gateway":
-        return "BI-Analyst"
-    dbp = (
-        os.environ.get("DUCKDB_PATH")
-        or os.environ.get("DUCKCLAW_DB_PATH")
-        or ""
-    ).lower()
-    if "bi_analyst" in dbp:
-        return "BI-Analyst"
-    if "siatadb" in dbp:
-        return "SIATA"
-    return "default"
+    return _explicit_default_tenant_id_from_env() or _DEFAULT_TENANT_ID
+
+
+def _default_tenant_id_from_runtime_settings() -> str:
+    try:
+        from duckclaw import DuckClaw
+        from duckclaw.admin_runtime_settings import resolve_runtime_setting
+        from duckclaw.gateway_db import get_gateway_db_path
+
+        db_path = (get_gateway_db_path() or "").strip()
+        if not db_path or not Path(db_path).is_file():
+            return ""
+        db = DuckClaw(db_path, read_only=True, engine="python")
+        try:
+            resolved = resolve_runtime_setting(
+                db,
+                tenant_id="global",
+                actor_email="",
+                domain=_DEFAULT_TENANT_SETTING_DOMAIN,
+                key=_DEFAULT_TENANT_SETTING_KEY,
+                default="",
+            )
+        finally:
+            db.close()
+    except Exception:
+        return ""
+    return str(resolved.get("value") or "").strip()
+
+
+def default_tenant_id_from_runtime() -> str:
+    """
+    Tenant default administrado para gateway/Telegram.
+
+    Orden: env explícito administrado → ``admin_runtime_settings`` global
+    (``gateway.default_tenant_id``) → fallback seguro ``default``. Nunca infiere
+    desde PM2, rutas DuckDB ni layouts locales, y solo abre el hub en read-only.
+    """
+    return (
+        _explicit_default_tenant_id_from_env()
+        or _default_tenant_id_from_runtime_settings()
+        or _DEFAULT_TENANT_ID
+    )

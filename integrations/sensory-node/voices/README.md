@@ -6,11 +6,12 @@ Run on Mac mini:
 
 ```bash
 uv run --project integrations/sensory-node python integrations/sensory-node/scripts/prepare_voice.py \
-  --voice-id leila_assistant \
+  --voice-id tenant_voice_alpha \
   --ref-audio /path/to/ref.wav \
   --ref-text "Transcripción exacta del clip de 5 segundos."
 ```
 
-Optional `quant_trader_brief` for Quant-Trader TTS (place `refs/quant_trader_brief.wav` then run `regen_voices_mac.py`).
+`manifest.json` is intentionally empty in core. Add voice profiles through this offline
+admin flow; do not commit production voice tensors or domain-specific defaults.
 
 Do **not** commit PII or production voice tensors to git.

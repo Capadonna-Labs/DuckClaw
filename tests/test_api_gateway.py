@@ -271,24 +271,56 @@ def test_forget_command_via_api_succeeds(
     assert "✅" in data["response"] or "Historial borrado" in data["response"]
 
 
-def test_effective_tenant_bi_analyst_from_pm2(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_effective_tenant_ignores_pm2_process_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DUCKCLAW_GATEWAY_TENANT_ID", raising=False)
+    monkeypatch.delenv("DUCKCLAW_TELEGRAM_DEFAULT_TENANT", raising=False)
     monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "BI-Analyst-Gateway")
-    assert gateway_main._effective_tenant_id(None) == "BI-Analyst"
+    assert gateway_main._effective_tenant_id(None) == "default"
 
 
-def test_effective_tenant_bi_analyst_from_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_effective_tenant_ignores_duckdb_path_name(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_multiplex_db_env(monkeypatch)
     monkeypatch.delenv("DUCKCLAW_GATEWAY_TENANT_ID", raising=False)
+    monkeypatch.delenv("DUCKCLAW_TELEGRAM_DEFAULT_TENANT", raising=False)
     monkeypatch.delenv("DUCKCLAW_PM2_PROCESS_NAME", raising=False)
     monkeypatch.setenv("DUCKDB_PATH", "/data/bi_analyst.duckdb")
-    assert gateway_main._effective_tenant_id(None) == "BI-Analyst"
+    assert gateway_main._effective_tenant_id(None) == "default"
 
 
-def test_effective_tenant_env_overrides_bi_pm2(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_effective_tenant_uses_explicit_gateway_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DUCKCLAW_GATEWAY_TENANT_ID", "acme-corp")
     monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "BI-Analyst-Gateway")
     assert gateway_main._effective_tenant_id(None) == "acme-corp"
+
+
+def test_effective_tenant_uses_db_first_runtime_setting(
+    monkeypatch: pytest.MonkeyPatch,
+    gateway_db: Path,
+) -> None:
+    import duckdb
+
+    from duckclaw.write_command_handlers import _apply_upsert_runtime_setting
+
+    monkeypatch.delenv("DUCKCLAW_GATEWAY_TENANT_ID", raising=False)
+    monkeypatch.delenv("DUCKCLAW_TELEGRAM_DEFAULT_TENANT", raising=False)
+    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "BI-Analyst-Gateway")
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        _apply_upsert_runtime_setting(
+            con,
+            {
+                "domain": "gateway",
+                "key": "default_tenant_id",
+                "value": "tenant-from-db",
+                "tenant_id": "global",
+                "actor_email": "",
+            },
+        )
+    finally:
+        con.close()
+
+    assert gateway_main._effective_tenant_id(None) == "tenant-from-db"
 
 
 def test_split_plain_text_for_telegram_reply() -> None:

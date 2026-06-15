@@ -86,11 +86,11 @@ def test_assess_goals_alignment_anomaly(tmp_path: Path) -> None:
         chat_id,
         [
             {
-                "belief_key": "max_portfolio_drawdown_pct",
-                "target_value": 0.1,
-                "threshold": 0.01,
-                "observed_value": 0.15,
-                "title": "DD máximo",
+                "belief_key": "latency_ms",
+                "target_value": 250.0,
+                "threshold": 25.0,
+                "observed_value": 400.0,
+                "title": "Latency budget",
             }
         ],
     )

@@ -493,9 +493,9 @@ def _telegram_webhook_default_worker_id() -> str:
 
 
 def _telegram_webhook_default_tenant_id() -> str:
-    from duckclaw.forge.team_env import default_tenant_id_from_env
+    from duckclaw.forge.team_env import default_tenant_id_from_runtime
 
-    return default_tenant_id_from_env()
+    return default_tenant_id_from_runtime()
 
 
 def _telegram_webhook_parallel_processing_enabled() -> bool:

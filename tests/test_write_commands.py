@@ -78,6 +78,23 @@ class TestWriteCommands:
         assert raw["command_type"] == "upsert_runtime_setting"
         assert raw["domain"] == "telegram"
 
+    def test_upsert_agent_config_entries_command_roundtrip(self) -> None:
+        from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
+
+        cmd = UpsertAgentConfigEntriesCommand(
+            tenant_id="tenant-a",
+            actor_email="system",
+            entries={
+                "chat_42_goals_delta_seconds": "0",
+                "chat_42_goals_proactive_anchor_epoch": "",
+            },
+        )
+
+        raw = json.loads(cmd.to_redis_payload())
+
+        assert raw["command_type"] == "upsert_agent_config_entries"
+        assert raw["entries"]["chat_42_goals_delta_seconds"] == "0"
+
     def test_kanban_commands_roundtrip(self) -> None:
         from duckclaw.write_commands import DeleteKanbanCardCommand, UpsertKanbanCardCommand
 
@@ -206,6 +223,32 @@ class TestWriteCommands:
         assert raw_delete["command_type"] == "delete_authorized_user"
         assert raw_delete["tenant_id"] == "Finanzas"
         assert raw_delete["user_id"] == "3"
+
+    def test_console_user_commands_roundtrip(self) -> None:
+        from duckclaw.write_commands import DeactivateConsoleUserCommand, UpsertConsoleUserCommand
+
+        upsert = UpsertConsoleUserCommand(
+            actor_email="admin@test.local",
+            email="viewer@test.local",
+            nombre="Viewer",
+            rol="user",
+            password="viewpass",
+            initials="VW",
+            active=True,
+        )
+        raw_upsert = json.loads(upsert.to_redis_payload())
+        assert raw_upsert["command_type"] == "upsert_console_user"
+        assert raw_upsert["email"] == "viewer@test.local"
+        assert raw_upsert["rol"] == "user"
+        assert raw_upsert["password"] == "viewpass"
+
+        deactivate = DeactivateConsoleUserCommand(
+            actor_email="admin@test.local",
+            email="viewer@test.local",
+        )
+        raw_deactivate = json.loads(deactivate.to_redis_payload())
+        assert raw_deactivate["command_type"] == "deactivate_console_user"
+        assert raw_deactivate["email"] == "viewer@test.local"
 
     def test_shared_access_commands_roundtrip_without_war_room_core(self) -> None:
         from duckclaw.write_commands import (
@@ -352,6 +395,51 @@ class TestCommandHandlers:
         assert rows[0][1] == "dark"
         assert rows[1][0] == "bob@d.local"
         assert rows[1][1] == "light"
+
+    def test_console_user_commands_apply_and_deactivate(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        dispatch_command(con, {
+            "command_type": "upsert_console_user",
+            "actor_email": "admin@test.local",
+            "email": "ops@test.local",
+            "nombre": "Ops",
+            "rol": "user",
+            "password": "ops-pass-123",
+            "initials": "OP",
+            "active": True,
+        })
+        row = con.execute(
+            "SELECT email, nombre, rol, active FROM main.admin_console_users "
+            "WHERE email = 'ops@test.local'"
+        ).fetchone()
+        assert row == ("ops@test.local", "Ops", "user", True)
+
+        dispatch_command(con, {
+            "command_type": "upsert_console_user",
+            "actor_email": "admin@test.local",
+            "email": "ops@test.local",
+            "nombre": "Ops Renamed",
+            "rol": "admin",
+            "initials": "OR",
+            "active": True,
+        })
+        updated = con.execute(
+            "SELECT nombre, rol, initials, active FROM main.admin_console_users "
+            "WHERE email = 'ops@test.local'"
+        ).fetchone()
+        assert updated == ("Ops Renamed", "admin", "OR", True)
+
+        dispatch_command(con, {
+            "command_type": "deactivate_console_user",
+            "actor_email": "admin@test.local",
+            "email": "ops@test.local",
+        })
+        active = con.execute(
+            "SELECT active FROM main.admin_console_users WHERE email = 'ops@test.local'"
+        ).fetchone()
+        assert active == (False,)
 
     def test_upsert_kanban_card_inserts_updates_and_records_events(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import _apply_upsert_kanban_card
@@ -507,6 +595,40 @@ class TestCommandHandlers:
             "SELECT DISTINCT active FROM main.admin_knowledge_chunks WHERE source_id = 'ksrc-handler'"
         ).fetchall()
         assert chunk_active == [(False,)]
+
+    def test_agent_config_entries_handler_upserts_idempotently(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        con.execute(
+            "CREATE TABLE agent_config ("
+            "key VARCHAR PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        )
+        dispatch_command(con, {
+            "command_type": "upsert_agent_config_entries",
+            "entries": {
+                "chat_42_goals_delta_seconds": "120",
+                "chat_42_goals_cron_wall": '{"kind":"daily"}',
+            },
+        })
+        dispatch_command(con, {
+            "command_type": "upsert_agent_config_entries",
+            "entries": {
+                "chat_42_goals_delta_seconds": "0",
+                "chat_42_goals_cron_wall": "",
+            },
+        })
+
+        rows = con.execute(
+            "SELECT key, value FROM agent_config "
+            "WHERE key IN ('chat_42_goals_delta_seconds', 'chat_42_goals_cron_wall') "
+            "ORDER BY key"
+        ).fetchall()
+
+        assert rows == [
+            ("chat_42_goals_cron_wall", ""),
+            ("chat_42_goals_delta_seconds", "0"),
+        ]
 
     def test_prompt_policy_handler_upserts_updates_and_deactivates(self, db_with_migrations) -> None:
         from duckclaw.prompt_policies import PromptPolicyResolver

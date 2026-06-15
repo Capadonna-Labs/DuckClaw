@@ -46,7 +46,7 @@ def test_resolve_meditate_vault_user_id_private_folder(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory,
 ) -> None:
     monkeypatch.setenv("CAPADONNA_DRILLER_ROOT", str(tmp_path))
-    vault = tmp_path / "db" / "private" / "1726618406" / "quant_traderdb1.duckdb"
+    vault = tmp_path / "db" / "private" / "1726618406" / "analyticsdb1.duckdb"
     vault.parent.mkdir(parents=True)
     vault.touch()
     db = MagicMock()
@@ -76,16 +76,16 @@ def test_execute_meditate_schedule_requires_worker() -> None:
 
 def test_execute_meditate_schedule_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _FakeDb()
-    set_chat_state(db, "5", "worker_id", "Quant-Trader")
+    set_chat_state(db, "5", "worker_id", "analytics-worker")
     monkeypatch.setattr(
         "duckclaw.graphs.on_the_fly_commands.invoke_meditate_cycle_for_chat",
         lambda *_a, **_k: {"status": "completed"},
     )
-    msg = execute_meditate(db, "5", "--delta 4h", tenant_id="cuantitativo")
+    msg = execute_meditate(db, "5", "--delta 4h", tenant_id="analytics")
     assert "4h" in msg
     assert "Primer ciclo:" in msg
     assert get_chat_state(db, "5", "meditate_delta_seconds") == "14400"
-    assert get_chat_state(db, "5", "meditate_tenant_id") == "cuantitativo"
+    assert get_chat_state(db, "5", "meditate_tenant_id") == "analytics"
     assert float(get_chat_state(db, "5", "meditate_last_fire_epoch") or "0") > 0
     clear_meditate_schedule(db, "5")
     assert get_chat_state(db, "5", "meditate_delta_seconds") == "0"
@@ -97,12 +97,12 @@ def test_format_meditate_cycle_summary_alignment_message() -> None:
         "dispatched_actions": [{"action_type": "noop", "executed": True}],
         "alignment_message": (
             "Contexto alineado con las metas homeostasis. "
-            "Metas: DD target=0.05 (obs: 0.01) ✓. Infra: sin desvíos infra."
+            "Metas: Latency budget target=250 (obs: 200) ✓. Infra: sin desvíos infra."
         ),
     }
     summary = _format_meditate_cycle_summary(cycle)
     assert "Contexto alineado" in summary
-    assert "DD target=0.05" in summary
+    assert "Latency budget target=250" in summary
 
 
 def test_meditate_self_passes_through_to_llm() -> None:

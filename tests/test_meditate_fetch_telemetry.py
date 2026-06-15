@@ -40,20 +40,16 @@ def _seed_db(path: Path) -> None:
         """
     )
     con.execute(
-        """
-        CREATE SCHEMA quant_core;
-        CREATE TABLE quant_core.trade_signals (
-            signal_id VARCHAR PRIMARY KEY,
-            status VARCHAR,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    con.execute(
         "INSERT INTO task_audit_log VALUES ('t1','default','w','q','SUCCESS',100,now(),'')"
     )
     con.execute(
         "INSERT INTO task_audit_log VALUES ('t2','default','w','q','FAILED',200,now(),'')"
+    )
+    con.execute(
+        """
+        INSERT INTO task_audit_log
+        VALUES ('stale-1','default','w','q','PENDING',0,CURRENT_TIMESTAMP - INTERVAL '25 hours','')
+        """
     )
     con.execute("INSERT INTO main.semantic_memory VALUES ('m1','a','PENDING',now(),now())")
     con.execute("INSERT INTO main.semantic_memory VALUES ('m2','b','OK',now(),now())")
@@ -71,6 +67,8 @@ def test_fetch_system_telemetry_audit_and_memory(tmp_path: Path) -> None:
     )
     assert metrics.error_rate_pct == 50.0
     assert metrics.avg_latency_ms == 150.0
+    assert metrics.stale_tasks_count == 1
+    assert stale_ids == ["stale-1"]
     assert 0.0 <= metrics.memory_fragmentation_index <= 1.0
     assert locks == 0
     assert isinstance(stale_ids, list)

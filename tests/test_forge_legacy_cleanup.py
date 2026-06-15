@@ -138,12 +138,10 @@ DB_FIRST_DDL_ALLOWLIST = frozenset(DB_FIRST_DDL_ALLOWLIST_REASONS)
 
 DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/graphs/graph_server.py": "legacy graph command handler awaiting DB-writer migration",
-    "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py": "authorized chat command mutations",
     "packages/agents/src/duckclaw/forge/code_decision_service.py": "authorized code decision control-plane mutations",
     "services/api-gateway/main.py": "authorized command-plane bridge",
     "services/api-gateway/routers/admin.py": "authorized admin control-plane mutations",
     "services/api-gateway/routers/admin_db_first.py": "authorized DB-first admin mutators",
-    "services/api-gateway/routers/admin_domains/access_management.py": "authorized admin access mutators",
     "services/api-gateway/routers/admin_domains/duckdb_explorer.py": "authorized admin DuckDB maintenance mutators",
     "services/api-gateway/routers/admin_domains/playground_chat.py": "authorized admin playground conversation mutators",
     "services/db-writer/context_injection_handler.py": "DB-writer context mutations",
@@ -173,6 +171,14 @@ REMOVED_TENANT_DOMAIN_SCHEMA_MARKERS = frozenset(
         '"quant_core"',
         '"war_room"',
         '"war_room_core"',
+    }
+)
+REMOVED_TEAM_ENV_TENANT_INFERENCE_MARKERS = frozenset(
+    {
+        "BI-Analyst",
+        "SIATA",
+        "bi_analyst",
+        "siatadb",
     }
 )
 REMOVED_GATEWAY_WAR_ROOM_MARKERS = frozenset(
@@ -246,6 +252,8 @@ ON_THE_FLY_VERTICAL_MARKERS_RE = re.compile(
     r"|ibkr"
     r"|trader"
     r"|broker"
+    r"|drawdown"
+    r"|pnl"
     r"|trading[_ -]?session"
     r"|propose_trade_signal"
     r"|get_ibkr_portfolio"
@@ -262,6 +270,7 @@ HEARTBEAT_VERTICAL_MARKERS_RE = re.compile(
     r"|ibkr"
     r"|trader"
     r"|broker"
+    r"|drawdown"
     r"|trading[_ -]?session"
     r"|trading_session_[a-z0-9_]+"
     r"|trade[_ -]?signal"
@@ -283,6 +292,14 @@ HOMEOSTASIS_GOALS_ALIGNMENT = (
 )
 HOMEOSTASIS_CANONICAL_ROOT = (
     REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "homeostasis"
+)
+HOMEOSTASIS_OPERATION_DOCS = (
+    REPO_ROOT / "docs" / "operations" / "Homeostasis-Heartbeat.md",
+    REPO_ROOT / "docs" / "operations" / "Meditate-Homeostasis.md",
+)
+MEDITATE_HARNESS_SOURCE_TABLE_FILES = (
+    REPO_ROOT / "harness_core" / "states" / "meditate_state.py",
+    REPO_ROOT / "harness_core" / "skills" / "emit_correction_delta.py",
 )
 LEGACY_SINGLETON_WRITER = (
     FORGE_ROOT / "homeostasis" / "singleton_writer.py"
@@ -307,10 +324,26 @@ HOMEOSTASIS_VERTICAL_MARKERS_RE = re.compile(
     r"|ibkr"
     r"|trader"
     r"|broker"
+    r"|drawdown"
     r"|trading[_ -]?session"
     r"|trading_session_[a-z0-9_]+"
     r"|trade[_ -]?signal"
     r"|tickers?"
+    r"|pnl"
+    r")(?![a-z0-9])"
+)
+HOMEOSTASIS_DOC_VERTICAL_MARKERS_RE = re.compile(
+    r"(?i)(?<![a-z0-9])("
+    r"quant(?:[_-]?(?:trader|core|trading|market|cfd|hrp|moc|auto|state))?"
+    r"|finanz(?:as)?"
+    r"|finance(?:_worker|_ledger)?"
+    r"|ibkr"
+    r"|trader"
+    r"|broker"
+    r"|drawdown"
+    r"|trading[_ -]?session"
+    r"|trading_session_[a-z0-9_]+"
+    r"|trade[_ -]?signal"
     r"|pnl"
     r")(?![a-z0-9])"
 )
@@ -599,6 +632,26 @@ def test_homeostasis_goals_alignment_has_no_quant_finance_trading_residue() -> N
     assert offenders == []
 
 
+def test_meditate_harness_uses_transversal_stale_task_source_table() -> None:
+    offenders: list[str] = []
+    for path in MEDITATE_HARNESS_SOURCE_TABLE_FILES:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "quant_core.trade_signals" in text:
+            offenders.append(f"{_rel(path)}: quant_core.trade_signals")
+
+    assert offenders == []
+
+
+def test_homeostasis_operation_docs_use_generic_metrics() -> None:
+    offenders: list[str] = []
+    for path in HOMEOSTASIS_OPERATION_DOCS:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for match in HOMEOSTASIS_DOC_VERTICAL_MARKERS_RE.finditer(text):
+            offenders.append(f"{_rel(path)}:{match.start()}: {match.group(0)}")
+
+    assert offenders == []
+
+
 def test_canonical_homeostasis_package_does_not_depend_on_forge_homeostasis() -> None:
     offenders: list[str] = []
     for path in HOMEOSTASIS_CANONICAL_ROOT.rglob("*.py"):
@@ -689,6 +742,15 @@ def test_cleanup_default_tenant_tool_does_not_hardcode_domain_schemas() -> None:
     text = cleanup_path.read_text(encoding="utf-8")
 
     offenders = sorted(marker for marker in REMOVED_TENANT_DOMAIN_SCHEMA_MARKERS if marker in text)
+
+    assert offenders == []
+
+
+def test_team_env_does_not_infer_tenant_from_vertical_process_or_path_names() -> None:
+    team_env_path = FORGE_ROOT / "team_env.py"
+    text = team_env_path.read_text(encoding="utf-8")
+
+    offenders = sorted(marker for marker in REMOVED_TEAM_ENV_TENANT_INFERENCE_MARKERS if marker in text)
 
     assert offenders == []
 

@@ -61,7 +61,7 @@ def register_goals_alignment_skill(
             cid = get_goals_tool_chat_id()
             if not cid:
                 return json.dumps({"status": "error", "error": "chat_id no disponible"}, ensure_ascii=False)
-            from duckclaw.graphs.on_the_fly_commands import execute_homeostasis_goals
+            from duckclaw.commands.goals import execute_homeostasis_goals
 
             msg = execute_homeostasis_goals(
                 _tool_db(),
@@ -77,7 +77,7 @@ def register_goals_alignment_skill(
                 name="assess_crons_alignment",
                 description=(
                     "Evalúa alineación entre el manifiesto /goals y datos observables "
-                    "(PnL, drawdown, etc.). Devuelve JSON con aligned, items y desvíos."
+                    "genéricos. Devuelve JSON con aligned, items y desvíos."
                 ),
             )
         )
@@ -87,7 +87,7 @@ def register_goals_alignment_skill(
                 name="manage_homeostasis_goals",
                 description=(
                     "Lista, añade o edita metas homeostasis y umbrales infra (fuente de /meditate). "
-                    "command='' lista; 'max drawdown 5%' añade; '--rm belief_key'; '--set error_rate_pct 2'."
+                    "command='' lista; 'latency below 250ms' añade; '--rm belief_key'; '--set error_rate_pct 2'."
                 ),
             )
         )

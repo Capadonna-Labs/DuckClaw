@@ -184,9 +184,12 @@ def telegram_webhook_resolve_dispatch(
                     fv = _resolve_vault_db_path_for_multiplex(
                         os.environ.get(b.vault_db_env) or ""
                     )
+                tenant_id = b.tenant_id
+                if tenant_id.strip().lower() == "default":
+                    tenant_id = (default_tenant_id or "").strip() or "default"
                 return TelegramWebhookResolvedDispatch(
                     worker_id=b.worker_id,
-                    tenant_id=b.tenant_id,
+                    tenant_id=tenant_id,
                     bot_token=tok,
                     forced_vault_db_path=fv,
                 )

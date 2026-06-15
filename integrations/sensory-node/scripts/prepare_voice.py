@@ -4,7 +4,7 @@ Offline admin tool: encode a 5s reference clip into an immutable voice tensor.
 
 Usage (Mac mini only):
   uv run --project integrations/sensory-node python integrations/sensory-node/scripts/prepare_voice.py \\
-    --voice-id leila_assistant --ref-audio ref.wav --ref-text "transcripción del clip"
+    --voice-id tenant_voice_alpha --ref-audio ref.wav --ref-text "transcripción del clip"
 """
 
 from __future__ import annotations
@@ -12,13 +12,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 VOICES_DIR = Path(__file__).resolve().parents[1] / "voices"
-ALLOWED = frozenset(
-    {"campus_legal_main", "leila_assistant", "finanz_alert", "quant_trader_brief"}
-)
+_VOICE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _DEFAULT_AUDIO_TOKENIZER = "mlx-community/OmniVoice-4bit"
 
 
@@ -34,9 +33,18 @@ def _audio_tokenizer_path() -> str:
     return snapshot_download(model_id)
 
 
+def _parse_voice_id(raw: str) -> str:
+    voice_id = (raw or "").strip()
+    if not _VOICE_ID_PATTERN.fullmatch(voice_id):
+        raise argparse.ArgumentTypeError(
+            "voice-id must be a lowercase slug: letters, numbers, underscore or hyphen"
+        )
+    return voice_id
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare pre-approved OmniVoice ref tensor")
-    parser.add_argument("--voice-id", required=True, choices=sorted(ALLOWED))
+    parser.add_argument("--voice-id", required=True, type=_parse_voice_id)
     parser.add_argument("--ref-audio", required=True, type=Path)
     parser.add_argument("--ref-text", required=True)
     args = parser.parse_args()

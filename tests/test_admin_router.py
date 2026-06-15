@@ -673,6 +673,7 @@ def test_telegram_whitelist_resolves_gateway_tenant(
     ids = [u["user_id"] for u in data.get("users") or []]
     assert DEFAULT_TEST_TELEGRAM_USER_ID_ALT in ids
 
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     r2 = admin_client.post(
         "/api/v1/admin/telegram/whitelist",
         headers={"X-Admin-Key": "test-admin-key"},

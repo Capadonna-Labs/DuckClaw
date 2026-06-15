@@ -114,7 +114,7 @@ def refresh_goal_observations(db: Any, chat_id: Any, worker_id: str) -> list[dic
     Normaliza observed_value ya persistido en goals sin LLM.
     Devuelve la lista de goals (mutada en memoria y persistida si hubo cambios).
     """
-    from duckclaw.graphs.on_the_fly_commands import get_manager_goals, set_manager_goals
+    from duckclaw.commands.goals import get_manager_goals, set_manager_goals
 
     goals = get_manager_goals(db, chat_id)
     if not goals:
@@ -171,7 +171,7 @@ def assess_goals_list_alignment(
     *,
     worker_id: str = "",
 ) -> AlignmentReport:
-    from duckclaw.graphs.on_the_fly_commands import _get_goals_registry_for_chat
+    from duckclaw.commands.goals import _get_goals_registry_for_chat
 
     goals = refresh_goals_list_observations(db, chat_id, worker_id, goals)
     registry = _get_goals_registry_for_chat(db, chat_id)

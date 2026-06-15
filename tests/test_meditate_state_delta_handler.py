@@ -96,16 +96,16 @@ def test_upsert_homeostasis_manifest(tmp_path: Path, monkeypatch) -> None:
         "infra": {"error_rate_pct": 2.0},
         "goals": [
             {
-                "belief_key": "session_pnl",
-                "target_value": 50.0,
-                "threshold": 5.0,
-                "title": "PnL",
+                "belief_key": "completion_rate_pct",
+                "target_value": 95.0,
+                "threshold": 2.0,
+                "title": "Completion rate",
             }
         ],
     }
     payload = {
         "delta_type": "UPSERT_HOMEOSTASIS_MANIFEST",
-        "tenant_id": "cuantitativo",
+        "tenant_id": "analytics",
         "user_id": "default",
         "target_db_path": str(db_path),
         "mutation": {"manifest": manifest},
@@ -113,10 +113,10 @@ def test_upsert_homeostasis_manifest(tmp_path: Path, monkeypatch) -> None:
     _sync_handle_meditate_state_delta(json.dumps(payload))
     con2 = duckdb.connect(str(db_path))
     row = con2.execute(
-        "SELECT targets_json FROM harness_core.homeostasis_targets WHERE tenant_id = 'cuantitativo'"
+        "SELECT targets_json FROM harness_core.homeostasis_targets WHERE tenant_id = 'analytics'"
     ).fetchone()
     con2.close()
     assert row is not None
     stored = json.loads(row[0]) if isinstance(row[0], str) else row[0]
     assert stored["infra"]["error_rate_pct"] == 2.0
-    assert stored["goals"][0]["belief_key"] == "session_pnl"
+    assert stored["goals"][0]["belief_key"] == "completion_rate_pct"

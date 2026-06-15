@@ -47,6 +47,9 @@ def dispatch_command(conn: Any, payload: dict) -> None:
         "add_project_member": _apply_add_project_member,
         "assign_agent_to_project": _apply_assign_agent_to_project,
         "upsert_runtime_setting": _apply_upsert_runtime_setting,
+        "upsert_agent_config_entries": _apply_upsert_agent_config_entries,
+        "upsert_console_user": _apply_upsert_console_user,
+        "deactivate_console_user": _apply_deactivate_console_user,
         "upsert_authorized_user": _apply_upsert_authorized_user,
         "delete_authorized_user": _apply_delete_authorized_user,
         "upsert_shared_db_grant": _apply_upsert_shared_db_grant,
@@ -339,6 +342,53 @@ def _apply_upsert_runtime_setting(conn: Any, payload: dict) -> None:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [setting_id, tenant_id, actor, domain, key, value, value_kind, secret],
         )
+
+
+def _apply_upsert_agent_config_entries(conn: Any, payload: dict) -> None:
+    entries = payload.get("entries") or {}
+    if not isinstance(entries, dict) or not entries:
+        raise ValueError("entries required")
+
+    for raw_key, raw_value in entries.items():
+        key = str(raw_key or "").strip()[:128]
+        if not key:
+            raise ValueError("agent_config entry key required")
+        value = str(raw_value or "")[:16384]
+        conn.execute(
+            """
+            INSERT INTO agent_config (key, value)
+            VALUES (?, ?)
+            ON CONFLICT (key) DO UPDATE SET
+              value = EXCLUDED.value,
+              updated_at = now()
+            """,
+            [key, value],
+        )
+
+
+def _apply_upsert_console_user(conn: Any, payload: dict) -> None:
+    from duckclaw.admin_console_users import upsert_console_user
+
+    upsert_console_user(
+        conn,
+        email=str(payload.get("email") or ""),
+        nombre=str(payload.get("nombre") or ""),
+        rol=str(payload.get("rol") or "user"),
+        password=payload.get("password"),
+        initials=str(payload.get("initials") or ""),
+        active=bool(payload.get("active", True)),
+    )
+
+
+def _apply_deactivate_console_user(conn: Any, payload: dict) -> None:
+    from duckclaw.admin_console_users import deactivate_console_user
+
+    email = str(payload.get("email") or "").strip()
+    if not email:
+        raise ValueError("email required")
+    ok = deactivate_console_user(conn, email=email)
+    if not ok:
+        raise ValueError(f"Console user not found: {email}")
 
 
 def _kanban_tags_json(raw: Any) -> str:

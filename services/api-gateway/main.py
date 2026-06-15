@@ -60,7 +60,7 @@ from duckclaw.integrations.telegram.telegram_agent_token import (
     telegram_token_from_pm2_env_dict,
     telegram_worker_ids_match_for_compact_route,
 )
-from duckclaw.forge.team_env import default_tenant_id_from_env, default_worker_id_from_env
+from duckclaw.forge.team_env import default_tenant_id_from_runtime, default_worker_id_from_env
 from duckclaw.gateway_db import (
     GATEWAY_DB_ENV_KEYS,
     get_gateway_db_path,
@@ -1277,12 +1277,12 @@ def _effective_tenant_id(request_tenant: str | None) -> str:
     ``default``, ese valor **gana**: debe coincidir con el GET ``/history`` y el POST ``/chat``
     (misma clave ``duckclaw:gateway:chat_hist:{tenant}:{session}``).
 
-    Si solo llega ``default`` u omisión, aplica ``DUCKCLAW_GATEWAY_TENANT_ID`` o ``default``.
+    Si solo llega ``default`` u omisión, aplica env explícito, runtime settings DB-first o ``default``.
     """
     rt = (request_tenant or "").strip()
     if rt and rt.lower() != "default":
         return rt
-    return default_tenant_id_from_env()
+    return default_tenant_id_from_runtime()
 
 
 @app.post("/api/v1/agent/chat")

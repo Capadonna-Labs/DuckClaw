@@ -224,31 +224,34 @@ def test_console_users_crud(gateway_admin_client: TestClient, gateway_db: Path) 
     users = r.json().get("users") or []
     assert any(u["email"] == "admin@test.local" for u in users)
 
-    r2 = gateway_admin_client.post(
-        "/api/v1/admin/console-users",
-        headers=headers,
-        json={
-            "email": "viewer@test.local",
-            "nombre": "Viewer",
-            "rol": "viewer",
-            "password": "viewpass",
-            "initials": "VW",
-        },
-    )
+    with patch("duckclaw.db_write_queue.spawn_inline_writes_enabled", return_value=True):
+        r2 = gateway_admin_client.post(
+            "/api/v1/admin/console-users",
+            headers=headers,
+            json={
+                "email": "viewer@test.local",
+                "nombre": "Viewer",
+                "rol": "viewer",
+                "password": "viewpass",
+                "initials": "VW",
+            },
+        )
     assert r2.status_code == 200
 
-    r3 = gateway_admin_client.patch(
-        "/api/v1/admin/console-users?email=viewer@test.local",
-        headers=headers,
-        json={"nombre": "Viewer Updated"},
-    )
+    with patch("duckclaw.db_write_queue.spawn_inline_writes_enabled", return_value=True):
+        r3 = gateway_admin_client.patch(
+            "/api/v1/admin/console-users?email=viewer@test.local",
+            headers=headers,
+            json={"nombre": "Viewer Updated"},
+        )
     assert r3.status_code == 200
     assert r3.json()["user"]["nombre"] == "Viewer Updated"
 
-    r4 = gateway_admin_client.delete(
-        "/api/v1/admin/console-users?email=viewer@test.local",
-        headers=headers,
-    )
+    with patch("duckclaw.db_write_queue.spawn_inline_writes_enabled", return_value=True):
+        r4 = gateway_admin_client.delete(
+            "/api/v1/admin/console-users?email=viewer@test.local",
+            headers=headers,
+        )
     assert r4.status_code == 200
 
 
@@ -272,8 +275,20 @@ def _called_function_names(node: ast.AST) -> set[str]:
     return names
 
 
-def test_admin_shared_grant_mutations_use_typed_db_writer_commands() -> None:
+def test_admin_access_mutations_use_typed_db_writer_commands() -> None:
     mutators = {
+        "create_admin_console_user": {
+            "command": "UpsertConsoleUserCommand",
+            "forbidden_direct_helper": "upsert_console_user",
+        },
+        "patch_admin_console_user": {
+            "command": "UpsertConsoleUserCommand",
+            "forbidden_direct_helper": "upsert_console_user",
+        },
+        "delete_admin_console_user": {
+            "command": "DeactivateConsoleUserCommand",
+            "forbidden_direct_helper": "deactivate_console_user",
+        },
         "post_shared_grant": {
             "command": "UpsertSharedDbGrantCommand",
             "forbidden_direct_helper": "upsert_shared_grant",
@@ -281,6 +296,14 @@ def test_admin_shared_grant_mutations_use_typed_db_writer_commands() -> None:
         "delete_shared_grant": {
             "command": "DeleteSharedDbGrantCommand",
             "forbidden_direct_helper": "delete_shared_grant",
+        },
+        "post_telegram_whitelist": {
+            "command": "UpsertAuthorizedUserCommand",
+            "forbidden_direct_helper": "_upsert_authorized_user",
+        },
+        "delete_telegram_whitelist": {
+            "command": "DeleteAuthorizedUserCommand",
+            "forbidden_direct_helper": "_delete_authorized_user",
         },
     }
     source = ACCESS_MANAGEMENT_PATH.read_text(encoding="utf-8")
@@ -292,7 +315,7 @@ def test_admin_shared_grant_mutations_use_typed_db_writer_commands() -> None:
         assert "read_only=False" not in segment
         assert "DuckClaw" not in calls
         assert expected["forbidden_direct_helper"] not in calls
-        assert "_enqueue_shared_grant_command" in calls
+        assert "_enqueue_access_command" in calls
         assert expected["command"] in calls
 
 

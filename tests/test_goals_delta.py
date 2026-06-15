@@ -617,7 +617,7 @@ def test_execute_goals_delta_cli_forces_goals_cli_meta_and_cooldown_now(
 def test_clear_goals_delta_off_clears_schedule_on_hub_and_sibling_vault(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """/crons --delta off debe poner goals_delta_seconds=0 en hub y bóveda."""
+    """/crons --delta off clears the active DB and queues sibling-vault clears."""
     import duckdb
 
     from duckclaw import DuckClaw
@@ -654,17 +654,34 @@ def test_clear_goals_delta_off_clears_schedule_on_hub_and_sibling_vault(
 
     monkeypatch.delenv("DUCKCLAW_GOALS_TICKER_DB_PATH", raising=False)
     monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: hub)
+    enqueued: list[tuple[str, Any, dict[str, Any]]] = []
+
+    def _capture_remote_clear(db_path: str, chat_id: Any, entries: dict[str, Any]) -> None:
+        enqueued.append((str(Path(db_path).resolve()), chat_id, entries))
+
+    monkeypatch.setattr(
+        "duckclaw.commands.crons._enqueue_agent_config_entries_remote",
+        _capture_remote_clear,
+    )
 
     with DuckClaw(vault, read_only=False, engine="python") as dbv:
         clear_goals_proactive_schedule(dbv, 42)
 
-    for p in (hub, vault):
-        con = duckdb.connect(p, read_only=True)
-        row = con.execute(
-            "SELECT value FROM agent_config WHERE key = 'chat_42_goals_delta_seconds' LIMIT 1"
-        ).fetchone()
-        con.close()
-        assert row is not None and int(str(row[0]).strip() or "0") == 0
+    con = duckdb.connect(vault, read_only=True)
+    row = con.execute(
+        "SELECT value FROM agent_config WHERE key = 'chat_42_goals_delta_seconds' LIMIT 1"
+    ).fetchone()
+    con.close()
+
+    assert row is not None and int(str(row[0]).strip() or "0") == 0
+    assert enqueued
+    assert str(Path(hub).resolve()) in {path for path, _chat_id, _entries in enqueued}
+    assert all(chat_id == 42 for _path, chat_id, _entries in enqueued)
+    assert any(
+        entries.get("goals_delta_seconds") == "0"
+        and entries.get("goals_cron_wall") == ""
+        for _path, _chat_id, entries in enqueued
+    )
 
 
 def test_iter_goals_delta_clear_paths_scoped_excludes_other_private_vaults(

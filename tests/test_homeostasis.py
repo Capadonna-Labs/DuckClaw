@@ -34,7 +34,7 @@ def test_compute_surprise_anomaly() -> None:
 
 
 def test_compute_surprise_ceiling_maintain() -> None:
-    """ceiling: DD bajo el techo + banda -> no anomalía."""
+    """ceiling: observed bajo el techo + banda -> no anomalía."""
     r = compute_surprise(observed=0.04, target=0.05, threshold=0.01, comparison="ceiling")
     assert r.is_anomaly is False
     assert r.delta == pytest.approx(0.0)
@@ -75,7 +75,7 @@ def test_load_beliefs_from_config_empty() -> None:
 def test_load_beliefs_ceiling_comparison() -> None:
     """YAML puede declarar comparison: ceiling."""
     config = {
-        "beliefs": [{"key": "max_portfolio_drawdown_pct", "target": 0.05, "threshold": 0.005, "comparison": "ceiling"}],
+        "beliefs": [{"key": "latency_ms", "target": 250.0, "threshold": 25.0, "comparison": "ceiling"}],
         "actions": [],
     }
     beliefs, _ = load_beliefs_from_config(config)
@@ -88,7 +88,7 @@ def test_load_beliefs_from_config_valid() -> None:
     config = {
         "beliefs": [
             {"key": "test_coverage", "target": 0.90, "threshold": 0.05},
-            {"key": "presupuesto", "target": 5000.0, "threshold": 500.0},
+            {"key": "latency_ms", "target": 5000.0, "threshold": 500.0},
         ],
         "actions": [
             {"trigger": "test_coverage_drop", "skill": "github_create_issue", "message": "Cobertura baja."},
@@ -133,14 +133,14 @@ def test_homeostasis_manager_maintain() -> None:
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    config = {"beliefs": [{"key": "presupuesto", "target": 5000.0, "threshold": 500.0}], "actions": []}
+    config = {"beliefs": [{"key": "completion_rate_pct", "target": 95.0, "threshold": 2.0}], "actions": []}
     from duckclaw.homeostasis import HomeostasisManager
 
     reg = BeliefRegistry.from_config(config)
     mgr = HomeostasisManager(db=db, schema="test_worker", registry=reg)
-    plan = mgr.check("presupuesto", 4800.0, auto_update=True)
+    plan = mgr.check("completion_rate_pct", 94.0, auto_update=True)
     assert plan["action"] == "maintain"
-    assert "presupuesto" in plan["belief_key"]
+    assert "completion_rate_pct" in plan["belief_key"]
 
 
 def test_homeostasis_manager_restore() -> None:
@@ -157,21 +157,21 @@ def test_homeostasis_manager_restore() -> None:
         )
     """)
     config = {
-        "beliefs": [{"key": "presupuesto", "target": 5000.0, "threshold": 500.0}],
-        "actions": [{"trigger": "presupuesto_breach", "skill": "get_summary", "message": "Desviación."}],
+        "beliefs": [{"key": "completion_rate_pct", "target": 95.0, "threshold": 2.0}],
+        "actions": [{"trigger": "completion_rate_pct_drop", "skill": "get_summary", "message": "Desviación."}],
     }
     from duckclaw.homeostasis import HomeostasisManager
 
     reg = BeliefRegistry.from_config(config)
     mgr = HomeostasisManager(db=db, schema="test_worker2", registry=reg)
-    plan = mgr.check("presupuesto", 3000.0, auto_update=True)
+    plan = mgr.check("completion_rate_pct", 80.0, auto_update=True)
     assert plan["action"] == "restore"
     assert plan["skill_to_invoke"] == "get_summary"
     assert "Desviación" in plan["message"]
 
 
 def test_homeostasis_manager_ceiling_restore() -> None:
-    """HomeostasisManager con belief ceiling dispara restore cuando DD supera techo."""
+    """HomeostasisManager con belief ceiling dispara restore cuando una métrica supera techo."""
     db = duckclaw.DuckClaw(":memory:")
     db.execute("CREATE SCHEMA IF NOT EXISTS test_worker_ceiling")
     db.execute("""
@@ -184,14 +184,14 @@ def test_homeostasis_manager_ceiling_restore() -> None:
         )
     """)
     config = {
-        "beliefs": [{"key": "max_portfolio_drawdown_pct", "target": 0.05, "threshold": 0.01, "comparison": "ceiling"}],
-        "actions": [{"trigger": "max_portfolio_drawdown_pct_breach", "skill": "x", "message": "DD alto."}],
+        "beliefs": [{"key": "latency_ms", "target": 250.0, "threshold": 25.0, "comparison": "ceiling"}],
+        "actions": [{"trigger": "latency_ms_breach", "skill": "x", "message": "Latencia alta."}],
     }
     from duckclaw.homeostasis import HomeostasisManager
 
     reg = BeliefRegistry.from_config(config)
     mgr = HomeostasisManager(db=db, schema="test_worker_ceiling", registry=reg)
-    plan = mgr.check("max_portfolio_drawdown_pct", 0.08, auto_update=True)
+    plan = mgr.check("latency_ms", 400.0, auto_update=True)
     assert plan["action"] == "restore"
 
 
@@ -233,9 +233,9 @@ def test_register_homeostasis_skill_with_config() -> None:
     from duckclaw.forge.skills.homeostasis_bridge import register_homeostasis_skill
 
     db = duckclaw.DuckClaw(":memory:")
-    db.execute("CREATE SCHEMA IF NOT EXISTS finance_worker")
+    db.execute("CREATE SCHEMA IF NOT EXISTS analytics_worker")
     db.execute("""
-        CREATE TABLE IF NOT EXISTS finance_worker.agent_beliefs (
+        CREATE TABLE IF NOT EXISTS analytics_worker.agent_beliefs (
             belief_key VARCHAR PRIMARY KEY,
             target_value REAL NOT NULL,
             observed_value REAL,
@@ -245,10 +245,10 @@ def test_register_homeostasis_skill_with_config() -> None:
     """)
     spec = type("Spec", (), {
         "homeostasis_config": {
-            "beliefs": [{"key": "presupuesto", "target": 5000.0, "threshold": 500.0}],
+            "beliefs": [{"key": "completion_rate_pct", "target": 95.0, "threshold": 2.0}],
             "actions": [],
         },
-        "schema_name": "finance_worker",
+        "schema_name": "analytics_worker",
     })()
     tools = []
     register_homeostasis_skill(tools, spec, db)
@@ -259,7 +259,7 @@ def test_register_homeostasis_skill_with_config() -> None:
         "manage_homeostasis_goals",
     }
     hc = next(t for t in tools if t.name == "homeostasis_check")
-    result = hc.invoke({"belief_key": "presupuesto", "observed_value": 4800.0})
+    result = hc.invoke({"belief_key": "completion_rate_pct", "observed_value": 94.0})
     plan = json.loads(result)
     assert plan["action"] == "maintain"
 

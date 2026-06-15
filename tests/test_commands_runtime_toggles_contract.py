@@ -23,6 +23,7 @@ def test_runtime_toggle_command_ownership_lives_outside_graphs() -> None:
         exported = getattr(on_the_fly_commands, name)
         assert exported.__module__ == CANONICAL_MODULE
         assert exported is getattr(runtime_toggles, name)
+    assert runtime_toggles.set_runtime_toggle_state.__module__ == CANONICAL_MODULE
 
     source = inspect.getsource(runtime_toggles)
     assert "duckclaw.graphs.on_the_fly_commands" not in source
@@ -52,17 +53,44 @@ def test_runtime_toggles_module_has_no_vertical_defaults() -> None:
     assert leaked == []
 
 
-def test_sandbox_toggle_state_remains_chat_scoped_agent_config() -> None:
+def test_sandbox_toggle_state_is_chat_scoped_runtime_setting() -> None:
     runtime_toggles = importlib.import_module(CANONICAL_MODULE)
+    from duckclaw.admin_runtime_settings import resolve_runtime_setting
+
     db = duckclaw.DuckClaw(":memory:")
 
     enabled = runtime_toggles.execute_sandbox_toggle(db, "chat1", "on")
     status = runtime_toggles.execute_sandbox_toggle(db, "chat1", "")
     disabled = runtime_toggles.execute_sandbox_toggle(db, "chat1", "off")
+    resolved = resolve_runtime_setting(
+        db,
+        tenant_id="default",
+        actor_email="chat:chat1",
+        domain="runtime.session",
+        key="sandbox_enabled",
+    )
 
     assert "habilitado" in enabled
     assert "Estado actual: habilitado" in status
     assert "desactivado" in disabled
+    assert resolved["source"] == "db"
+    assert resolved["value"] == "false"
+
+
+def test_runtime_toggles_do_not_write_sandbox_flags_to_agent_config() -> None:
+    runtime_toggles = importlib.import_module(CANONICAL_MODULE)
+    source = inspect.getsource(runtime_toggles)
+
+    forbidden = {
+        "UpsertAgentConfigEntriesCommand",
+        'set_chat_state(db, chat_id, "sandbox_enabled"',
+        'set_chat_state(db, chat_id, "sandbox_network_enabled"',
+        'get_chat_state(db, chat_id, "sandbox_enabled"',
+        'get_chat_state(db, chat_id, "sandbox_network_enabled"',
+    }
+    leaked = sorted(marker for marker in forbidden if marker in source)
+
+    assert leaked == []
 
 
 def test_internet_toggle_uses_explicit_cleanup_callback(monkeypatch: Any) -> None:
@@ -95,6 +123,18 @@ def test_internet_toggle_uses_explicit_cleanup_callback(monkeypatch: Any) -> Non
     assert "activado" in enabled
     assert "desactivado" in disabled
     assert cleanup_calls == ["chat1", "chat1"]
+
+    from duckclaw.admin_runtime_settings import resolve_runtime_setting
+
+    resolved = resolve_runtime_setting(
+        db,
+        tenant_id="default",
+        actor_email="chat:chat1",
+        domain="runtime.session",
+        key="sandbox_network_enabled",
+    )
+    assert resolved["source"] == "db"
+    assert resolved["value"] == "false"
 
 
 def test_internet_network_aliases_remain_dispatcher_compatible(monkeypatch: Any) -> None:

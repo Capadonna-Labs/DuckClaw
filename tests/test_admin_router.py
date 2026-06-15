@@ -1047,7 +1047,7 @@ def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pyt
         calls.append((key, val))
         return True, ""
 
-    def _fake_get(db, chat_id, key):
+    def _fake_get(db, chat_id, key, tenant_id="default"):
         return ""
 
     monkeypatch.setattr(
@@ -1057,8 +1057,8 @@ def test_admin_sandbox_network_toggle(admin_client: TestClient, monkeypatch: pyt
             {"toggle_available": True, "yaml_default": "allow", "effective": "allow"},
         ),
     )
-    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.set_chat_state_via_vault", _fake_set)
-    monkeypatch.setattr("duckclaw.graphs.on_the_fly_commands.get_chat_state", _fake_get)
+    monkeypatch.setattr("duckclaw.commands.runtime_toggles.set_runtime_toggle_state", _fake_set)
+    monkeypatch.setattr("duckclaw.runtime_session_settings.resolve_session_runtime_setting", _fake_get)
     monkeypatch.setattr(
         sandbox_mod,
         "_sandbox_chat_policy_payload",

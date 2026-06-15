@@ -56,14 +56,24 @@ def _sandbox_chat_policy_payload(
     tenant_id: str,
 ) -> dict[str, Any]:
     from duckclaw.forge.schema import resolve_sandbox_network_policy
-    from duckclaw.graphs.on_the_fly_commands import get_chat_state
+    from duckclaw.runtime_session_settings import resolve_session_runtime_setting
     from duckclaw.workers.manifest import load_manifest
     from routers import admin as admin_router
 
     db = admin_router._open_playground_vault_db(vault_path, read_only=True)
     try:
-        raw_net = get_chat_state(db, chat_id, "sandbox_network_enabled")
-        raw_sb = get_chat_state(db, chat_id, "sandbox_enabled")
+        raw_net = resolve_session_runtime_setting(
+            db,
+            chat_id,
+            "sandbox_network_enabled",
+            tenant_id=tenant_id,
+        )
+        raw_sb = resolve_session_runtime_setting(
+            db,
+            chat_id,
+            "sandbox_enabled",
+            tenant_id=tenant_id,
+        )
     finally:
         db.close()
 
@@ -120,8 +130,9 @@ async def admin_sandbox_chat_policy(
 async def admin_sandbox_network_toggle(body: SandboxNetworkBody) -> dict[str, Any]:
     """Activa/desactiva internet en sandbox para un chat (respeta security_policy.yaml)."""
     from duckclaw.forge.schema import resolve_sandbox_network_policy
-    from duckclaw.graphs.on_the_fly_commands import get_chat_state, set_chat_state_via_vault
     from duckclaw.graphs.sandbox import cleanup_sandbox_session_for_chat
+    from duckclaw.runtime_session_settings import resolve_session_runtime_setting
+    from duckclaw.commands.runtime_toggles import set_runtime_toggle_state
     from routers import admin as admin_router
 
     team_ctx = admin_router._playground_team_context(tenant_id=body.tenant_id, chat_id=body.chat_id)
@@ -138,7 +149,13 @@ async def admin_sandbox_network_toggle(body: SandboxNetworkBody) -> dict[str, An
 
     db = admin_router._open_playground_vault_db(vault_path, read_only=True)
     try:
-        raw_prev = get_chat_state(db, chat_raw, "sandbox_network_enabled")
+        tid = str(team_ctx.get("tenant_id") or "default").strip() or "default"
+        raw_prev = resolve_session_runtime_setting(
+            db,
+            chat_raw,
+            "sandbox_network_enabled",
+            tenant_id=tid,
+        )
         _, meta = resolve_sandbox_network_policy(wid, raw_prev or None)
         if not meta.get("toggle_available"):
             raise _problem(
@@ -147,16 +164,15 @@ async def admin_sandbox_network_toggle(body: SandboxNetworkBody) -> dict[str, An
                 f"«{wid}» tiene network.default=deny en security_policy.yaml. "
                 "Elige un worker con red habilitada en su política o ajusta el manifest.",
             )
-        tid = str(team_ctx.get("tenant_id") or "default").strip() or "default"
         val = "true" if body.enabled else "false"
-        ok, err = set_chat_state_via_vault(
+        ok, err = set_runtime_toggle_state(
             db, chat_raw, "sandbox_network_enabled", val, tenant_id=tid
         )
     finally:
         db.close()
 
     if not ok:
-        raise _problem(500, "No se pudo persistir", err or "set_chat_state_via_vault failed")
+        raise _problem(500, "No se pudo persistir", err or "set_runtime_toggle_state failed")
 
     cleanup_sandbox_session_for_chat(chat_raw)
     policy = _sandbox_chat_policy_payload(
@@ -240,6 +256,7 @@ async def admin_sandbox_novnc_prepare(body: NovncPrepareBody) -> dict[str, Any]:
             session_id,
             db=policy_db,
             chat_id=chat_raw,
+            tenant_id=str(team_ctx.get("tenant_id") or "default").strip() or "default",
         )
     finally:
         if policy_db is not None:

@@ -6,15 +6,15 @@ import logging
 from pathlib import Path
 from typing import Any, Callable
 
-from duckclaw.commands.chat_state import (
-    _chat_key,
-    _skip_runtime_ddl,
-    get_chat_state,
-    set_chat_state,
-)
 from duckclaw.commands.team_templates import get_team_templates, get_tenant_team_templates
 from duckclaw.forge.schema import resolve_sandbox_network_policy
-from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
+from duckclaw.runtime_session_settings import (
+    RUNTIME_SESSION_DOMAIN,
+    resolve_session_runtime_setting,
+    runtime_session_actor,
+    upsert_session_runtime_setting,
+)
+from duckclaw.write_commands import UpsertRuntimeSettingCommand
 
 SandboxSessionCleanup = Callable[[str], None]
 
@@ -58,9 +58,16 @@ def _set_runtime_toggle_state(
     *,
     tenant_id: str = "default",
 ) -> tuple[bool, str]:
-    """Persist chat-scoped toggle state directly or through the typed DB-writer queue."""
-    if not _skip_runtime_ddl(db):
-        set_chat_state(db, chat_id, key_suffix, value)
+    """Persist chat-scoped runtime toggle directly or through the typed DB-writer queue."""
+    if not bool(getattr(db, "_read_only", False)):
+        upsert_session_runtime_setting(
+            db,
+            chat_id,
+            key_suffix,
+            value,
+            tenant_id=tenant_id,
+            updated_by="runtime-toggle",
+        )
         return True, ""
 
     raw_path = str(getattr(db, "_path", "") or "").strip()
@@ -72,10 +79,13 @@ def _set_runtime_toggle_state(
     except OSError:
         target_db_path = raw_path
 
-    command = UpsertAgentConfigEntriesCommand(
+    command = UpsertRuntimeSettingCommand(
         tenant_id=str(tenant_id or "default").strip() or "default",
-        actor_email="system",
-        entries={_chat_key(chat_id, key_suffix): str(value)[:16384]},
+        actor_email=runtime_session_actor(chat_id),
+        domain=RUNTIME_SESSION_DOMAIN,
+        key=key_suffix,
+        value=str(value)[:8192],
+        value_kind="boolean",
     )
 
     try:
@@ -102,6 +112,39 @@ def _set_runtime_toggle_state(
                 resume()
             except Exception:
                 pass
+
+
+def _get_runtime_toggle_state(
+    db: Any,
+    chat_id: Any,
+    key_suffix: str,
+    *,
+    tenant_id: str = "default",
+) -> str:
+    return resolve_session_runtime_setting(
+        db,
+        chat_id,
+        key_suffix,
+        tenant_id=tenant_id,
+    )
+
+
+def set_runtime_toggle_state(
+    db: Any,
+    chat_id: Any,
+    key_suffix: str,
+    value: str,
+    *,
+    tenant_id: str = "default",
+) -> tuple[bool, str]:
+    """Persist a chat-scoped runtime toggle through the DB-first owner."""
+    return _set_runtime_toggle_state(
+        db,
+        chat_id,
+        key_suffix,
+        value,
+        tenant_id=tenant_id,
+    )
 
 
 def _resolve_worker_id_for_network_toggle(
@@ -134,11 +177,26 @@ def _cleanup_sandbox_session(chat_id: Any) -> None:
         pass
 
 
-def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
+def execute_sandbox_toggle(
+    db: Any,
+    chat_id: Any,
+    on_off: str,
+    *,
+    tenant_id: str = "default",
+) -> str:
     """/sandbox on|off: habilita/deshabilita ejecución de código para este chat."""
+    tid = str(tenant_id or "default").strip() or "default"
     parsed = _parse_toggle_bool(on_off)
     if parsed is True:
-        set_chat_state(db, chat_id, "sandbox_enabled", "true")
+        ok, err = _set_runtime_toggle_state(
+            db,
+            chat_id,
+            "sandbox_enabled",
+            "true",
+            tenant_id=tid,
+        )
+        if not ok:
+            return f"No se pudo guardar: {err}"
         db_path = getattr(db, "_path", None) or getattr(db, "path", None) or "(unknown_db_path)"
         _log.warning(
             "[sandbox-toggle] db_path=%r chat_id=%r sandbox_enabled=%r",
@@ -148,7 +206,15 @@ def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
         )
         return "Entendido. He habilitado mis capacidades de ejecución de código para esta sesión."
     if parsed is False:
-        set_chat_state(db, chat_id, "sandbox_enabled", "false")
+        ok, err = _set_runtime_toggle_state(
+            db,
+            chat_id,
+            "sandbox_enabled",
+            "false",
+            tenant_id=tid,
+        )
+        if not ok:
+            return f"No se pudo guardar: {err}"
         db_path = getattr(db, "_path", None) or getattr(db, "path", None) or "(unknown_db_path)"
         _log.warning(
             "[sandbox-toggle] db_path=%r chat_id=%r sandbox_enabled=%r",
@@ -158,7 +224,9 @@ def execute_sandbox_toggle(db: Any, chat_id: Any, on_off: str) -> str:
         )
         return "Entendido. He desactivado mis capacidades de ejecución de código para esta sesión."
 
-    current = _parse_toggle_bool(get_chat_state(db, chat_id, "sandbox_enabled"))
+    current = _parse_toggle_bool(
+        _get_runtime_toggle_state(db, chat_id, "sandbox_enabled", tenant_id=tid)
+    )
     status = "habilitado" if current is True else "desactivado"
     return f"Uso: /sandbox on|off\nEstado actual: {status}."
 
@@ -176,7 +244,13 @@ def execute_internet_toggle(
     wid = _resolve_worker_id_for_network_toggle(db, chat_id, worker_id, tid)
 
     _, meta = resolve_sandbox_network_policy(
-        wid, get_chat_state(db, chat_id, "sandbox_network_enabled")
+        wid,
+        _get_runtime_toggle_state(
+            db,
+            chat_id,
+            "sandbox_network_enabled",
+            tenant_id=tid,
+        ),
     )
     if not meta.get("toggle_available"):
         return (

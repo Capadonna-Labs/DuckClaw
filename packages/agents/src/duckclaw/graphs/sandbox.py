@@ -1468,6 +1468,7 @@ def ensure_browser_novnc_session(
     *,
     db: Any = None,
     chat_id: str | None = None,
+    tenant_id: str = "default",
 ) -> str | None:
     """Levanta o reutiliza el contenedor browser y registra noVNC (mismos pasos que ``execute`` antes de ``exec_run``).
 
@@ -1489,7 +1490,12 @@ def ensure_browser_novnc_session(
     manager = _get_manager()
     policy_meta: dict[str, Any] = {}
     if chat_id and db is not None:
-        policy, policy_meta = resolve_security_policy_for_chat(wid, db, chat_id)
+        policy, policy_meta = resolve_security_policy_for_chat(
+            wid,
+            db,
+            chat_id,
+            tenant_id=tenant_id,
+        )
     else:
         policy = load_security_policy(wid)
     secret_env = _load_allowed_secrets(policy)

@@ -41,10 +41,9 @@ _log = logging.getLogger(__name__)
 # Cabecera inyectada antes del código del usuario (Strix / run_sandbox).
 # Telegram sendPhoto rechaza PNG con transparencia o procesamiento raro (IMAGE_PROCESS_FAILED):
 # fondo blanco opaco + dpi moderado en savefig y rcParams por defecto.
-_SANDBOX_PYTHON_HEADER = """# Available: pandas, numpy, matplotlib, mplfinance, seaborn, scipy, duckdb, pyarrow,
-# PyPortfolioOpt (import pypfopt), ML4T diagnostic/backtest imports (ej. ml4t.diagnostic, ml4t.backtest).
-# Ingestión de mercado: usar datos del HOST (fetch_*/read_sql inyectados) o /workspace/data/* RO —
-# política Quant default sin red; NO ml4t-data remoto dentro del sandbox.
+_SANDBOX_PYTHON_HEADER = """# Available: pandas, numpy, matplotlib, seaborn, scipy, duckdb, pyarrow.
+# Data access: use host-provided tool results or /workspace/data/* read-only mounts.
+# Network access follows the worker security policy; do not assume outbound internet.
 # Gráficos en /workspace/output/*.png — compatible con Telegram sendPhoto:
 #   plt.savefig('/workspace/output/mi_chart.png', dpi=100, facecolor='white', edgecolor='none', bbox_inches='tight')
 try:
@@ -71,7 +70,7 @@ except Exception:
 _DEFAULT_IMAGE = "duckclaw/sandbox:latest"
 # Imagen browser (Strix Browser Sandbox); STRIX_BROWSER_IMAGE
 _DEFAULT_BROWSER_IMAGE = "duckclaw/browser-env:latest"
-# Límites de texto devuelto al LLM en run_browser_sandbox (evitar reventar contexto; MQL5 puede ser largo).
+# Límites de texto devuelto al LLM en run_browser_sandbox para evitar reventar contexto.
 _BROWSER_SANDBOX_STDOUT_TAIL = 4000
 _BROWSER_SANDBOX_STDERR_TAIL = 1500
 _FALLBACK_IMAGE = "python:3.12-slim"
@@ -163,7 +162,7 @@ def _debug_log_sandbox_docker_run_failure(
     del exc, resolved_image, container_name, run_kw
 
 
-def _debug_log_pypfopt_import_probe(
+def _debug_log_optional_dependency_probe(
     container: Any,
     *,
     session_id: str,
@@ -284,11 +283,11 @@ class StrixSandboxManager:
     Spec: sección 4 y 6 de Sandbox_de_Ejecucion_Libre_Basado_en_Strix.md
     - network_mode=none (Zero exfiltration)
     - --cap-drop=ALL
-    - mem_limit=768m (default DuckClaw; ML4T + Playwright headroom)
+    - mem_limit=768m (default DuckClaw; Python + Playwright headroom)
     - Montaje de datos en modo read-only; output en read-write
     """
 
-    _pypfopt_import_probe_sessions: set[str] = set()
+    _optional_dependency_probe_sessions: set[str] = set()
 
     def __init__(
         self,
@@ -527,9 +526,9 @@ class StrixSandboxManager:
             stderr = (raw_stderr or b"").decode("utf-8", errors="replace").strip()
             timed_out = False
             if language == "python" and not image_override:
-                if session_id not in StrixSandboxManager._pypfopt_import_probe_sessions:
-                    StrixSandboxManager._pypfopt_import_probe_sessions.add(session_id)
-                    _debug_log_pypfopt_import_probe(
+                if session_id not in StrixSandboxManager._optional_dependency_probe_sessions:
+                    StrixSandboxManager._optional_dependency_probe_sessions.add(session_id)
+                    _debug_log_optional_dependency_probe(
                         container,
                         session_id=session_id,
                         resolved_image=self._session_image.get(session_id),
@@ -1632,7 +1631,7 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "vnc_url",
             "note",
         )
-        # compact_keys incluye stdout_tail/stderr_tail para el contrato con el LLM (MQL5, diagnósticos).
+        # compact_keys incluye stdout_tail/stderr_tail para el contrato con el LLM y diagnósticos.
         return json.dumps({k: out[k] for k in compact_keys if k in out}, ensure_ascii=False)
 
     return StructuredTool.from_function(
@@ -1640,7 +1639,7 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
         name="run_browser_sandbox",
         description=(
             "Ejecuta código Python (o bash) en el Strix **browser** sandbox: Chromium vía **Playwright** "
-            "(import: playwright.async_api), Xvfb y red según security_policy.yaml del worker. "
+            "(import: playwright.async_api), Xvfb y red según la security policy efectiva del worker. "
             "No uses el paquete Python `browser_use` en código generado (API inestable). "
             "**Estándar de sigilo (recomendado en scripts generados):** "
             "usar contexto persistente para cookies/sesión: "
@@ -1649,11 +1648,10 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "(``headless=False`` pinta en Xvfb :99 y se ve en noVNC; el motor puede forzar headed si el script aún pone headless=True salvo "
             "DUCKCLAW_BROWSER_PLAYWRIGHT_HEADLESS=1). "
             "Si no usas contexto persistente, crea browser.new_context con user_agent realista (no el default de Playwright), viewport ~1920x1080, "
-            "extra_http_headers con Accept-Language (es-ES,en-US,…); si la URL es mql5.com, Referer https://www.mql5.com/ ; "
+            "extra_http_headers con Accept-Language apropiado para el sitio; "
             "page.add_init_script para ocultar navigator.webdriver; "
-            "Navegación: en **mql5.com** sigue la plantilla `finanz/snippets/mql5_playwright_stealth.py`: "
-            "wait_until='networkidle', luego wait_for_timeout(5000) para hidratación SPA, y código vía "
-            "`pre, code, .b-code-block, textarea.mql4`. En otros sitios (p. ej. muchos trackers) suele ir mejor "
+            "Navegación: para sitios SPA, usa wait_until='networkidle' y un wait_for_timeout corto si hay hidratación; "
+            "para contenido estático suele ir mejor "
             "domcontentloaded + wait_for_selector acotado. "
             "**Contrato de salida:** imprime JSON o texto útil a stdout; la tool devuelve stdout_tail/stderr_tail para el agente. "
             "Para extracción tabular, escribe un Parquet bajo `/workspace/output/` y resume stdout sin volcar HTML masivo. "

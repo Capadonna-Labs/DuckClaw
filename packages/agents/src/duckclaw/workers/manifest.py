@@ -6,22 +6,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 import os
-
-# Claves de skills compuestas en manifest (no usar `name` + estas a la vez en el mismo dict).
-_SKILL_DICT_RESERVED_KEYS = frozenset(
-    {
-        "github",
-        "reddit",
-        "google_trends",
-        "research",
-        "tailscale",
-        "ibkr",
-        "quant",
-        "openweather",
-        "fmp",
-        "comfyui",
-    }
-)
 _DEFAULT_FILESYSTEM_WORKER_ID = "default"
 
 
@@ -107,6 +91,48 @@ def load_manifest(
     return build_spec_from_manifest(data, worker_id, worker_dir)
 
 
+def _normalize_skill_name(raw: Any) -> str:
+    return str(raw or "").strip().lower().replace("-", "_")
+
+
+def _parse_skill_bindings(skills_list: list[Any]) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    """Parse manifest skill declarations without knowing vendor/domain names."""
+    skill_names: list[str] = []
+    skill_configs: dict[str, dict[str, Any]] = {}
+
+    def _add_skill(name: Any, config: Any = None) -> None:
+        normalized = _normalize_skill_name(name)
+        if not normalized:
+            return
+        if normalized not in skill_names:
+            skill_names.append(normalized)
+        if config is not None and normalized not in skill_configs:
+            skill_configs[normalized] = dict(config) if isinstance(config, dict) else {}
+
+    for item in skills_list:
+        if isinstance(item, str):
+            _add_skill(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        raw_name = item.get("name")
+        if isinstance(raw_name, str):
+            raw_config = item.get("config")
+            if raw_config is None:
+                raw_config = {
+                    str(k): v
+                    for k, v in item.items()
+                    if str(k) not in {"name", "id"}
+                }
+            _add_skill(raw_name, raw_config)
+            continue
+        if len(item) == 1:
+            name, config = next(iter(item.items()))
+            _add_skill(name, config)
+
+    return skill_names, skill_configs
+
+
 def build_spec_from_manifest(
     data: dict,
     worker_id: str,
@@ -126,71 +152,7 @@ def build_spec_from_manifest(
     skills_list = data.get("skills") or []
     if isinstance(skills_list, str):
         skills_list = [s.strip() for s in skills_list.split(",") if s.strip()]
-    # skills: strings (nombres) o dicts (ej. {github: {...}}, {reddit: {...}}, {research: {...}}, ...)
-    skills_names = [s for s in skills_list if isinstance(s, str)]
-    for s in skills_list:
-        if isinstance(s, dict) and not (set(s.keys()) & _SKILL_DICT_RESERVED_KEYS):
-            raw_nm = s.get("name")
-            if isinstance(raw_nm, str):
-                nm = raw_nm.strip()
-                if nm and nm not in skills_names:
-                    skills_names.append(nm)
-    github_config = None
-    reddit_config = None
-    google_trends_config = None
-    research_config = None
-    tailscale_config = None
-    ibkr_config = None
-    openweather_config = None
-    fmp_config = None
-    comfyui_config = None
-    fal_config = None
-    for s in skills_list:
-        if isinstance(s, dict):
-            if "github" in s and github_config is None:
-                github_config = s["github"] if isinstance(s.get("github"), dict) else {}
-            if "reddit" in s and reddit_config is None:
-                reddit_config = s["reddit"] if isinstance(s.get("reddit"), dict) else {}
-            if "google_trends" in s and google_trends_config is None:
-                google_trends_config = s["google_trends"] if isinstance(s.get("google_trends"), dict) else {}
-            if "research" in s and research_config is None:
-                research_config = s["research"] if isinstance(s.get("research"), dict) else {}
-            if "tailscale" in s and tailscale_config is None:
-                tailscale_config = s["tailscale"] if isinstance(s.get("tailscale"), dict) else {}
-            if "ibkr" in s and ibkr_config is None:
-                ibkr_config = s["ibkr"] if isinstance(s.get("ibkr"), dict) else {}
-            if "openweather" in s and openweather_config is None:
-                openweather_config = s["openweather"] if isinstance(s.get("openweather"), dict) else {}
-            if "fmp" in s and fmp_config is None:
-                fmp_config = s["fmp"] if isinstance(s.get("fmp"), dict) else {}
-            if "comfyui" in s and comfyui_config is None:
-                comfyui_config = s["comfyui"] if isinstance(s.get("comfyui"), dict) else {}
-            if "fal" in s and fal_config is None:
-                fal_config = s["fal"] if isinstance(s.get("fal"), dict) else {}
-    if github_config is None and isinstance(data.get("github"), dict):
-        github_config = data["github"]
-    if reddit_config is None and isinstance(data.get("reddit"), dict):
-        reddit_config = data["reddit"]
-    if google_trends_config is None and isinstance(data.get("google_trends"), dict):
-        google_trends_config = data["google_trends"]
-    if research_config is None and isinstance(data.get("research"), dict):
-        research_config = data["research"]
-    if tailscale_config is None and isinstance(data.get("tailscale"), dict):
-        tailscale_config = data["tailscale"]
-    if ibkr_config is None and isinstance(data.get("ibkr"), dict):
-        ibkr_config = data["ibkr"]
-    if openweather_config is None and isinstance(data.get("openweather"), dict):
-        openweather_config = data["openweather"]
-    quant_config = None
-    for s in skills_list:
-        if isinstance(s, dict) and "quant" in s and quant_config is None:
-            quant_config = s["quant"] if isinstance(s.get("quant"), dict) else {}
-    if quant_config is None and isinstance(data.get("quant"), dict):
-        quant_config = data["quant"]
-    if comfyui_config is None and isinstance(data.get("comfyui"), dict):
-        comfyui_config = data["comfyui"]
-    if fal_config is None and isinstance(data.get("fal"), dict):
-        fal_config = data["fal"]
+    skills_names, skill_configs = _parse_skill_bindings(skills_list)
     risk_level = str(data.get("risk_level") or "conservative").strip().lower()
     if risk_level not in ("aggressive", "conservative"):
         risk_level = "conservative"
@@ -294,17 +256,7 @@ def build_spec_from_manifest(
         allowed_tables=allowed_tables,
         read_only=read_only,
         worker_dir=worker_dir,
-        github_config=github_config,
-        reddit_config=reddit_config,
-        google_trends_config=google_trends_config,
-        research_config=research_config,
-        tailscale_config=tailscale_config,
-        ibkr_config=ibkr_config,
-        openweather_config=openweather_config,
-        fmp_config=fmp_config,
-        comfyui_config=comfyui_config,
-        fal_config=fal_config,
-        quant_config=quant_config,
+        skill_configs=skill_configs,
         risk_level=risk_level,
         inference_config=inference_config,
         homeostasis_config=homeostasis_config,
@@ -375,8 +327,8 @@ class WorkerSpec:
     __slots__ = (
         "worker_id", "logical_worker_id", "name", "schema_name", "llm_required", "temperature",
         "topology", "skills_list", "allowed_tables", "read_only", "worker_dir",
-        "github_config", "reddit_config", "google_trends_config", "research_config", "tailscale_config", "sft_config",
-        "ibkr_config", "openweather_config", "fmp_config", "comfyui_config", "fal_config", "quant_config", "risk_level", "inference_config", "homeostasis_config", "context_guard_config",
+        "skill_configs",
+        "risk_level", "inference_config", "homeostasis_config", "context_guard_config",
         "forge_shared_db_path_env", "forge_apply_schema_to_shared", "forge_vault_binding",
         "context_pruning_config",
         "duckdb_extensions",
@@ -403,17 +355,7 @@ class WorkerSpec:
         allowed_tables: list,
         read_only: bool,
         worker_dir: Path,
-        github_config: Optional[dict] = None,
-        reddit_config: Optional[dict] = None,
-        google_trends_config: Optional[dict] = None,
-        research_config: Optional[dict] = None,
-        tailscale_config: Optional[dict] = None,
-        ibkr_config: Optional[dict] = None,
-        openweather_config: Optional[dict] = None,
-        fmp_config: Optional[dict] = None,
-        comfyui_config: Optional[dict] = None,
-        fal_config: Optional[dict] = None,
-        quant_config: Optional[dict] = None,
+        skill_configs: Optional[dict[str, dict[str, Any]]] = None,
         risk_level: str = "conservative",
         inference_config: Optional[dict] = None,
         homeostasis_config: Optional[dict] = None,
@@ -443,17 +385,11 @@ class WorkerSpec:
         self.allowed_tables = allowed_tables
         self.read_only = read_only
         self.worker_dir = worker_dir
-        self.github_config = github_config
-        self.reddit_config = reddit_config
-        self.google_trends_config = google_trends_config
-        self.research_config = research_config
-        self.tailscale_config = tailscale_config
-        self.ibkr_config = ibkr_config
-        self.openweather_config = openweather_config
-        self.fmp_config = fmp_config
-        self.comfyui_config = comfyui_config
-        self.fal_config = fal_config
-        self.quant_config = quant_config
+        self.skill_configs = {
+            _normalize_skill_name(name): dict(config)
+            for name, config in (skill_configs or {}).items()
+            if _normalize_skill_name(name)
+        }
         self.risk_level = risk_level if risk_level in ("aggressive", "conservative") else "conservative"
         self.inference_config = inference_config
         self.homeostasis_config = homeostasis_config
